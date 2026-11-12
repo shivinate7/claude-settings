@@ -739,9 +739,9 @@ ROLE_LINES = {
     "confirm-solo-then-coordinator": role_call("g1", SOLO_A_TAGS, parent=None) + HAT_CALL
                                      + own_tag_call("t1", "cs-build:coordinator") + role_call("g2", COORD_A_TAGS, parent=None),
     "confirm-solo-then-lane": role_call("g1", SOLO_A_TAGS, parent=None) + HAT_CALL
-                              + own_tag_call("t1", "cs-build:lane") + role_call("g2", LANE_A_TAGS),
+                              + own_tag_call("t1", "cs-build:lane") + role_call("g2", LANE_A_TAGS, parent=None),
     "confirm-solo-then-triage": role_call("g1", SOLO_A_TAGS, parent=None) + HAT_CALL
-                                + own_tag_call("t1", "cs-build:triage") + role_call("g2", TRIAGE_A_TAGS),
+                                + own_tag_call("t1", "cs-build:triage") + role_call("g2", TRIAGE_A_TAGS, parent=None),
     # roadmap-one-writer reads these too: a triage record, its tag set after, a title, another session, and
     # the newest own record in either order.
     "triage": role_call("g1", TRIAGE_TAGS),
@@ -1000,7 +1000,7 @@ for _name in ("confirm-solo", "confirm-runner", "confirm-solo-then-other-tags"):
 # One role per agent (decision session-tiers): a subagent of a solo session, a builder or a reviewer, records no hat. The session's
 # own record allows it, so only the agent id on the payload refuses it.
 for _form in (MERGE_SHIM, "python3 merge/merge.py"):
-    role_refuse("merge-role-proof: a subagent of a solo session is refused the hat, " + _form, _form + " --role batch-runner",
+    role_refuse("a subagent of a solo session is refused the hat, " + _form, _form + " --role batch-runner",
                 role_path("solo"), agent_id=SUBAGENT_ID, agent_type="builder")
 # Nothing the guard cannot read as an own record allows.
 role_refuse("no get_session record in the transcript is refused", MERGE_SHIM + " --role batch-runner",
