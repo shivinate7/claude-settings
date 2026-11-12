@@ -165,6 +165,16 @@ class Launch(unittest.TestCase):
         named = [line for line in err.splitlines() if "stable" in line]
         self.assertEqual(len(named), 1, "want one warning line naming stable, got %r" % err)
 
+    def test_ref_main_runs_origin_main_not_stable_and_warns_nothing(self):
+        # CLAUDE_SETTINGS_REF=main, the recovery, runs origin's main with no WARN, even while origin's stable sits behind it.
+        v1 = self.head(self.work)  # setUp pushed stable at v1
+        self.release("v2", stable=False)  # main moves on to v2; stable stays at v1
+        self.assertEqual(sh(self.bare, "git", "rev-parse", "refs/heads/stable"), v1, "FIXTURE stable is not v1")
+        self.assertNotEqual(self.head(self.work), v1, "FIXTURE main is not past stable")
+        rc, out, err = self.merge(CLAUDE_SETTINGS_REF="main")
+        self.assertEqual((rc, out.strip()), (0, "RAN v2"), err)
+        self.assertNotIn("WARN", err)
+
     def test_dirty_checkout_untouched(self):
         self.release("v2")
         before = self.head(self.co)
