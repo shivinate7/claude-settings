@@ -1248,26 +1248,33 @@ class LaneLint(LaneFixture):
         self.assertEqual(rc, 0, text)
         self.assert_one_mutation_test_run(head)
 
-    def test_mutation_test_shallow_untouched_lane_passes_with_the_fallback_line(self):  # the lane has no merge base with main
+    def test_mutation_test_shallow_untouched_lane_stops_as_unknown_and_runs_no_lint(self):  # the lane has no merge base with main
+        """merge-tree refuses the unrelated history, so the clash check reads unknown: an unknown stop before the lint, never a PASS
+        (merge.py's rule for a merge-tree that cannot read). Neither the lint nor the mutation test run starts."""
         body, script = real_mutate_job()
         self.use_ci_job(PASSING, 0)
         self.push_main({script: mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0)), WORKFLOW_REL: workflow_of(body)})
         self.push_orphan_lane({"hooks/guard.py": "GUARD = 1\n"})
         rc, text = self.timed_lint(437, "--lane-lint", "7")
-        self.assertEqual(rc, 0, "the lint stopped on a lane with no merge base, though its diff holds no mutation test file: " + text)
-        self.assertEqual(len(fallback_lines(text)), 1, "the lint did not print one line that says it fell back to a two-dot diff: " + text)
-        self.assertEqual(len(self.lint_calls()), 1, "the lint did not run once on the untouched lane: " + text)
+        self.assertEqual(rc, 1, "the lint passed a lane with no merge base, whose history merge-tree cannot read: " + text)
+        self.assertEqual(pass_lines(text), [], "the lint printed a PASS line for a lane with no merge base: " + text)
+        self.assertRegex(text, r"is unknown, not a pass", "the stop for a lane with no merge base does not say unknown: " + text)
+        self.assertEqual(self.lint_calls(), [], "the lint ran on a lane with no merge base: " + text)
         self.assertEqual(self.mutation_test_calls(), [], "the mutation test run started on a lane whose diff holds no mutation test file: " + text)
 
-    def test_mutation_test_shallow_touched_lane_starts_the_run(self):  # the lane has no merge base with main and changes the mutate command's script
+    def test_mutation_test_shallow_touched_lane_stops_as_unknown_and_starts_no_mutation_run(self):  # the lane has no merge base with main and changes the mutate command's script
+        """The touched lane stops as unknown at the same clash check, so the mutation test run never starts on unreadable history."""
         body, script = real_mutate_job()
         self.use_ci_job(PASSING, 0)
         clean = mutate_script(self.mutate_log, out=mutate_report(694, 694, 0, 0))
         self.push_main({script: clean, WORKFLOW_REL: workflow_of(body)})
-        head = self.push_orphan_lane({script: clean + "# lane edit\n"})
+        self.push_orphan_lane({script: clean + "# lane edit\n"})
         rc, text = self.timed_lint(437, "--lane-lint", "7")
-        self.assertEqual(rc, 0, "the lint stopped on a touched lane with no merge base: " + text)
-        self.assert_one_mutation_test_run(head)
+        self.assertEqual(rc, 1, "the lint passed a touched lane with no merge base, whose history merge-tree cannot read: " + text)
+        self.assertEqual(pass_lines(text), [], "the lint printed a PASS line for a touched lane with no merge base: " + text)
+        self.assertRegex(text, r"is unknown, not a pass", "the stop for a touched lane with no merge base does not say unknown: " + text)
+        self.assertEqual(self.lint_calls(), [], "the lint ran on a touched lane with no merge base: " + text)
+        self.assertEqual(self.mutation_test_calls(), [], "the mutation test run started on a lane with no merge base, whose history was unreadable: " + text)
 
     def test_mutation_test_run_one_second_under_the_cap_passes(self):  # the cap edge: the cap comes from checks.yml, the run ends a second under it
         body, script = real_mutate_job()
