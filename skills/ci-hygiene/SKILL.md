@@ -126,24 +126,30 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    GitHub's merge queue needs an organization-owned repo. A personal repo batches by hand or through
    the merge tool.
    **After a batch merges, route the PRs that now conflict with main.** In the same turn as the merge
-   report, the batch runner runs `merge --release-check N...` on each handed-in lane PR. A PR whose line
-   FAILs on `clean merge` conflicts with the new main. The runner names it to its lane and picks nothing
-   per PR, so no coordinator pick is needed. Each named lane does these acts in its own checkout:
+   report, the batch runner runs `merge --release-check N... --lint N@<live head>:PASS` on the handed-in
+   lane PRs. Without the lint verdicts, every line FAILs on the lint. A line that says `not clean (merge
+   conflict)` names a PR that conflicts with the new main. A line that says `unknown` is not a conflict.
+   The runner names each conflicting PR to its lane and picks nothing per PR, so no coordinator pick is
+   needed. Each named lane does these acts in its own checkout:
    1. Merge main into the lane branch once: `git fetch origin main`, then `git merge origin/main`.
       Resolve the conflicted paths only. Never rebase, never force-push, never edit a path git merged
       without conflict. Push the merge. A review log can only name a head that is live.
    2. Spawn a fresh fix verifier on Sonnet. Its brief opens `Fix check`, and gives the reviewed head (the
       Head of the PR's newest review log), the conflicted paths as the named finding, and that log's
-      `Guard or check:` value. It reads only `git diff origin/main...<merge head>`, the resolved hunks.
-   3. Post the log: `merge <pr> --review-record --head <merge head> --kind K --guard G`, then the earlier
-      `--round` lines copied in, then `--fix-check <reviewed head>:reviewer:sonnet:<PASS|FAIL>`.
-      The tool refuses a chain it cannot prove (record `pr-review-record`, the fix check order).
+      `Guard or check:` value. It reads `git show --cc <merge head>`, which prints only the resolved
+      hunks. `git diff origin/main...<merge head>` also holds the lane's own diff.
+   3. Print the log with `merge <pr> --review-record --head <merge head> --kind K --guard G`, then the
+      earlier `--round` lines, and `--net-value` and `--grant` when the earlier log has them, copied in,
+      then `--fix-check <reviewed head>:reviewer:sonnet:<PASS|FAIL>`. The tool posts nothing: post the
+      printed text as a PR comment. The tool refuses a chain it cannot prove (record
+      `pr-review-record`, the fix verifier order).
    4. Run `merge --lane-lint <pr>` at the merge head. Then hand in again.
    A PASS ends review only where the log allows it. A change with `Guard or check: yes` still owes
-   round 3 and its net-value test. A merge with no conflict needs none of this: the log stays valid
-   (record `pr-review-record`, clean merge survival). A refused chain means that the lane gets the full
-   review of its new head. Two examples: a second fix check on a head whose first fix check is open, and
-   a merge whose second parent is not on main. The lane never works around the refusal. A FAIL starts a
+   round 3 and its net-value test. A PR that merges clean needs no fix verifier and no new log: the log
+   stays valid (record `pr-review-record`, clean merge survival). It still needs step 4, because the
+   lint verdict names an exact head. A refused chain means that the lane gets the full review of its
+   new head. Two examples: a second fix verifier on a head whose first fix verifier is open, and a
+   merge whose second parent is not on main. The lane never works around the refusal. A FAIL starts a
    new lane at round 1.
    Batch across sessions too (`git-integration-branch-merge`).
 9. **Wait without loops.** Wait for the CI-wake notice that follows `gh pr ready`. A push starts no
