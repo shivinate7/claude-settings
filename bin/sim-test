@@ -19,7 +19,7 @@
 # list that fails exits 1 with no boot.
 # Lock: one Mac lock, held only while a run picks and boots its device, and the slot's lease after that: the folder
 # ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-test.lock with the holder's pid in a file named pid. One atomic mkdir
-# takes it before any simctl call (owner, 2026-11-02 14:23 CST, two Duos together). It is freed once the
+# takes it before any simctl call (owner ruling: two Duos together; decision sim-lease-tool). It is freed once the
 # device is up and the lease is held, the reuse path and a hold too, and the lease then guards the slot until the shutdown
 # and the give. It is also removed on every exit, INT and TERM too, if this run still holds it, but only while its pid file
 # names this run. A live holder: one stderr line names its pid, the lock is
@@ -33,14 +33,14 @@
 # `sim-lease take --device <role> --udid --pid $$` (bin/sim-lease, beside this script). That is the one Mac-wide queue
 # and load limit for phone simulators. A refusal exits 1 with no boot and no xcodebuild. A no-op take (prints none: CI,
 # or not macOS) boots and runs nothing, prints one stderr line saying no lease, and exits 1. A reuse runs
-# `sim-lease take --device <role> --reuse <UDID> --pid $$` (owner, 2026-11-07 12:31 CST, page item 336): the lease of the slot
+# `sim-lease take --device <role> --reuse <UDID> --pid $$` (owner pick, page item 336): the lease of the slot
 # that boots that UDID, or slot `other` for a UDID outside SLOT_UDID, so `sim-lease status` names the user of every booted
 # phone. It skips the load bars, waits in queue order while another live pid holds that slot, and exits 1 at SIM_LEASE_WAIT
 # with no xcodebuild. A no-op take on a reuse runs on with no lease. The lease is given back after the shutdown and before
 # the lock, if still held, is freed, on every exit, INT and TERM too. A live holder renews its lease: every SIM_TEST_RENEW
 # seconds (default 60; text that is not whole seconds, or 0, counts as the default; it must stay below SIM_LEASE_MAX,
 # or a live run's lease expires) the watch loop runs `sim-lease renew --pid $$`, while the child or the hold runs, so SIM_LEASE_MAX counts the silence since the last renew and a lease never
-# expires under a live run (coordinator pick, 2026-11-07). A renew that exits 1 means the lease is lost: one stderr line, once, and the run goes on. Any other failed renew is ignored. The take runs in the background and
+# expires under a live run (coordinator pick). A renew that exits 1 means the lease is lost: one stderr line, once, and the run goes on. Any other failed renew is ignored. The take runs in the background and
 # this tool waits on it, so INT and TERM act at once. After the grant of an own-boot take it reads the booted list again, under
 # the lock, and reruns the reuse, cross-role and cap checks before the boot: a simulator a dead holder left booted is
 # reused or refused. A reused device of the slot just granted keeps that lease; one of another slot gets the lease given back and the `--reuse` lease of its own slot. When the grant came from the queueing `--reuse` take and the re-scan finds that Duo shut down, the run gives that lease back and takes an own-boot lease under the load bars before any `simctl boot`, and boots the UDID that take grants. A boot that fails shuts nothing down; a TERM during the boot still
@@ -71,7 +71,7 @@
 # line says the fold was not checked, and the run goes on. It never uninstalls and never erases. Cost: one simctl ui read
 # per run, and one more call when it sets; a Duo run adds one hinge get, and one hinge close when the fold is not closed.
 # It adds `-collect-test-diagnostics never` unless the caller sets that flag: a failed test then starts no simctl diagnose.
-# Run limit (coordinator pick, 2026-11-07; 1800 s is unmeasured): an xcodebuild child still running after SIM_TEST_MAX_RUN
+# Run limit (coordinator pick; 1800 s is unmeasured): an xcodebuild child still running after SIM_TEST_MAX_RUN
 # seconds (default 1800; text that is not whole seconds counts as the default) is stopped. The run exits 124 and cleans up as
 # a hold does: it shuts down only what it booted, gives the lease, frees the lock. A hold has its own limit, --for.
 # The exit code is otherwise xcodebuild's.
