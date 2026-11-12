@@ -67,11 +67,18 @@
                                                                      prints, read as if no batch froze a lane, and the run exits 1.
                             reopen: OWNER/NAME #N (replacer #R dropped)               N is closed with a `Replaced by #R` or `Carried by #R` line
                             reopen: OWNER/NAME #N (replacer #R no longer names it)    in a comment, and R is closed unmerged. A Replaced note also reopens
-                                                                     N when R is open and its body lost `Replaces #N`; a Carried note reopens only
-                                                                     when its carrier is closed unmerged. A closed R with its own note extends the
-                                                                     chain: only the last link reopens (one PR per chain per wake; a loop reopens each member), and a chain that
-                                                                     ends at an open PR naming its link reopens none. A link that any open PR
-                                                                     still names with `Replaces #N` reopens none (the next wake would close it).
+                            reopen: OWNER/NAME #N (an open batch freezes it at its head)
+                                                                     N when R is open and its body lost `Replaces #N`. A closed R with its own note
+                                                                     extends the chain: only the last link counts (one PR per chain per wake; a loop
+                                                                     reopens each member). A Carried link with R open reopens none. A link that any
+                                                                     open PR names with `Replaces #N` reopens none, whatever R is (the next wake would
+                                                                     close it). The exception is a link that an open batch freezes at its current
+                                                                     head, as no wake closes it again: with R open it reopens with the third reason,
+                                                                     Replaced or Carried, even when R names it; with R closed unmerged, as dropped.
+                                                                     Limits: a merged R reopens nothing, frozen or not, and only the last link is
+                                                                     checked, so in #4 -> #6 -> open #7 a frozen #4 reopens nothing. The freeze is
+                                                                     read only when a done PR, a `Replaces` claim or a closing note exists. An
+                                                                     unread or unreadable freeze reopens no link.
                           A `Replaces #N` or note line counts only at the start of a line (spaces allowed), outside a fenced code block (closed by
                           the same character, a run at least as long as the opener) and not in a `>` quote. A PR on a close line is left off the batch line. Reads added: the same comment list and compares as above, so none
                           for the close lines; the reopen lines read pulls/N once for each closed PR with such a note, and pulls/R when R is not open,
@@ -4235,8 +4242,9 @@ def reopen_lines(h, pulls, notes, frozen=None):
     `Replaces #link` (`no longer names it`). An open tail that names its link, a Carried link with an open tail, and a merged tail reopen nothing.
     A link that any open pull request names with `Replaces #link` reopens nothing either: the next wake would close it again (replaced_closes).
     A link that an open batch freezes at the head it has now (`frozen`, frozen_lanes) is the exception: replaced_closes skips it, so it would not close
-    again, and it reopens whatever names it, even with an open tail that names it (`its open batch freezes it at its head`). `frozen` is {} when the
-    freeze was not read or could not be, so a named link then stays closed. One more read field only: the head of the closed link, from its pull_read.
+    again. With an open tail it reopens, Replaced or Carried, even when the tail names it (`an open batch freezes it at its head`); with a closed
+    unmerged tail it reopens as `replacer #R dropped`. A frozen link with a merged tail reopens nothing, and only the last link is checked: in a chain
+    #4 -> #6 -> open #7, a frozen #4 reopens nothing. `frozen` is {} when the freeze was not read or could not be, so a named link then stays closed. One more read field only: the head of the closed link, from its pull_read.
     Cost: one pull_state read per distinct number, memoized, so a replacer shared by many candidates is read once; none for an open R.
     A failed read raises Stop. `notes` holds only comments updated since the oldest open pull request was created, so an older note is never read."""
     open_by = {d["number"]: d for d in pulls}
@@ -4338,14 +4346,15 @@ def reviewed_block(h):
     (frozen_lanes), as its batch holds it, and no open pull request closes such a lane as replaced (replaced_closes), a batch or not: the close would
     stall that batch. A lane that two open batches list at two heads is held at each of them; a lane that moved off every head a batch lists is
     closed or carried as before, and one that no open batch lists, or whose batch closed or merged, is too. The freeze is read once, before the
-    replaced close, only when a done pull request or a `Replaces` claim exists, and reads no new data, only the bodies already read for the batch line. The close lines read nothing more. The reopen lines
+    replaced close, only when a done pull request, a `Replaces` claim or a closing note exists, as the close and reopen lines are its only readers. It
+    reads no new data, only the bodies already read for the batch line. The close lines read nothing more. The reopen lines
     read pulls/N once for each closed pull request with a closing note, and pulls/R once when its replacer R is not open (reopen_lines)."""
     lines, done, pulls, notes = reviewed_read(h)
     out, ok, tail = [f"repo {h.repo}:", *lines], True, []
     if not pulls:
         return out + [REOPEN_UNCHECKED], ok
     frozen, freeze_stop = {}, False
-    if done or any(claim_lines(d.get("body"), REPLACES) for d in pulls):  # nothing else reads the freeze: an unreadable batch with neither is no news
+    if done or notes or any(claim_lines(d.get("body"), REPLACES) for d in pulls):  # nothing else reads the freeze: an unreadable batch with none is no news
         try:
             frozen = frozen_lanes(pulls)
         except Stop as e:  # only the close lines are unknown: the batch line is still read, as if no open batch froze a lane
