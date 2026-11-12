@@ -515,8 +515,8 @@ def strip_placeholders(text: str) -> str:
 # A citation reads `D-nnn, title`. The mandate's rule: cite an entry by id
 # plus a short gloss, never a bare id. A tool such as `harness/decision-
 # refs.mjs` writes that gloss FROM the target entry's own title. The author
-# types one token. The gloss grows it to six words or more. --stats counts
-# words in authored prose, and must not count text nobody typed.
+# types one token. The gloss grows it to six words or more. Gloss text the
+# tool inserts is not linted by any rule and not counted by --stats.
 #
 # `harness/decision-refs.mjs`'s `glossSpanPattern` solved this for its own
 # checker. It pairs each id with the title of the entry THAT id names, read
@@ -680,7 +680,7 @@ def find_decisions_dir(config: dict) -> Optional[str]:
 
 def _degloss_for_mode(text: str) -> str:
     """Strip a collapsed citation-and-gloss span before a MODE heuristic reads
-    the text, so a generated title cannot pick a section's word budget.
+    the text, so a generated title cannot make a section procedural.
 
     `PROCEDURAL_HEADINGS` and `IMPERATIVE_STARTERS`, below, read raw heading
     or list-item text for a trigger word. A gloss inserts the target entry's
@@ -1017,8 +1017,8 @@ def _python_prose_paragraphs(text: str) -> List[Paragraph]:
     """Pull comments and docstrings out of Python source, as prose paragraphs.
 
     Consecutive-line comments join into one paragraph, the way a Markdown
-    paragraph joins lines, so a sentence spanning several comment lines is
-    still one sentence for the length rule. Unparsable source yields comments
+    paragraph joins lines, so a phrase or sentence across comment lines is
+    read whole. Unparsable source yields comments
     from as much of the file as `tokenize` managed, and no docstrings.
     """
     paragraphs: List[Paragraph] = []
@@ -2035,7 +2035,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--enable", default="", help="comma-separated rule codes to run alone")
     parser.add_argument("--exclude", default="", help="comma-separated glob patterns to skip")
     parser.add_argument("--decisions-dir", default=None,
-                        help="folder of D-nnn decision records, for gloss collapse in --stats "
+                        help="folder of D-nnn decision records, for gloss collapse: gloss text the tool "
+                             "inserts is not linted by any rule and not counted by --stats "
                              "(default: the decisions folder of lint/layout.json; pass '' to turn "
                              "the collapse off)")
     parser.add_argument("--config-from", default=None, metavar="PATH",
