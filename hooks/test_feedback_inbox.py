@@ -3462,10 +3462,11 @@ def case_repeat_model_error_fails_open_and_is_not_retried():
 
 def case_repeat_old_inboxes_bind_by_sidecar_and_capture_writes_it_once():
     """An older inbox is a candidate only with a sidecar that names this repo. Capture writes this
-    session's sidecar once, inside a repo, and never outside one."""
+    session's sidecar once, inside a repo, and never outside one. The two captures are stamped 36 minutes apart
+    (LOCAL_TIME_NOW), so the earlier message stays a candidate of the later item."""
     root = repeat_repo("repeat-binding")
     cfg, sid = new_cfg(), "repeat-binding"
-    env = git_counter(cfg)
+    env = dict(git_counter(cfg), LOCAL_TIME_NOW=EARLY_NOW)
     write_old_inbox(cfg, OLD_A_SID, OLD_A_TEXT, sidecar=os.path.realpath(root))
     write_old_inbox(cfg, OLD_B_SID, OLD_B_TEXT)
     start = len(git_lines(env))
@@ -3475,7 +3476,7 @@ def case_repeat_old_inboxes_bind_by_sidecar_and_capture_writes_it_once():
     check("binding: capture starts at most one git process", len(git_lines(env)) - start <= 1,
           git_lines(env, start))
     mid = snapshot(cfg)
-    capture(cfg, sid, MSG_TWO, cwd=root)
+    capture(cfg, sid, MSG_TWO, cwd=root, extra_env={"LOCAL_TIME_NOW": LATE_NOW})
     check("binding: a second capture leaves the sidecar as it was",
           sidecar_rel(sid) not in written_between(mid, snapshot(cfg)), sorted(written_between(mid, snapshot(cfg))))
     add_item(cfg, sid)
@@ -3484,8 +3485,9 @@ def case_repeat_old_inboxes_bind_by_sidecar_and_capture_writes_it_once():
     check("binding: the old inbox with a sidecar for this repo is a candidate",
           "OLD-A" in prompt and "inbox:" + OLD_A_SID[:8] + "@" in prompt, prompt[-300:])
     check("binding: the old inbox with no sidecar is not a candidate", "OLD-B" not in prompt, "OLD-B found")
-    check("binding: this session's earlier message is a candidate",
-          MSG_ONE.split("\n")[0] in prompt and "inbox:" + sid[:8] + "@" in prompt, prompt[-300:])
+    own_ref = "inbox:%s@%s" % (sid[:8], EARLY_HEADER[:16])  # the 10:04 message of this session, by its own ref
+    check("binding: this session's earlier message is a candidate by its own ref",
+          own_ref in candidate_refs(prompt), candidate_refs(prompt))
     cfg_plain = new_cfg()
     plain = plain_folder(os.path.dirname(cfg_plain))
     check("binding: the plain folder is outside any git repo", not in_a_repo(plain), plain)
@@ -3828,8 +3830,9 @@ def case_repeat_repo_item_is_never_judged_as_a_repeat():
 NEW_SID = "c3d4e5f6-0a1b-4c2d"
 EARLY_HEADER = "2026-10-13 10:04 CDT (UTC-05:00)"
 LATE_HEADER = "2026-10-13 10:40 CDT (UTC-05:00)"
-# The 10:04 and 10:40 messages are 36 minutes apart, outside the 30-minute window in which a same-inbox
+# The same two minutes as LOCAL_TIME_NOW. They are 36 minutes apart, outside the 30-minute window in which a same-inbox
 # candidate is dropped, so the earlier message stays a candidate of the later one.
+EARLY_NOW, LATE_NOW = "2026-10-13T10:04:00-05:00", "2026-10-13T10:40:00-05:00"
 EARLY_REF = "inbox:%s@%s" % (NEW_SID[:8], EARLY_HEADER[:16])  # the candidate ref of the 10:04 message
 MARK_EARLY = " repeats " + EARLY_REF
 
@@ -4116,6 +4119,25 @@ def case_repeat_only_near_blocks_left_makes_no_model_call():
           inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID))
     check("only near: the second item gets no mark", inbox_line(cfg, NEW_SID, "fb-1020-1") == near_line,
           inbox_line(cfg, NEW_SID, "fb-1020-1"))
+
+
+def case_repeat_stamp_that_is_not_text_reads_as_no_time():
+    """stamp_time fails open: a stamp that is not text, None or a number, reads as no time, as a stamp with no offset
+    does. Such a stamp in a block does not stop near_refs: a block with no time is near no block."""
+    guard = guard_module()
+    for label, stamp in (("None", None), ("5", 5)):
+        try:
+            got = guard.stamp_time(stamp)
+        except Exception as e:  # recorded as the value, so the failure is an assert and not a crash
+            got = "raises %s" % type(e).__name__
+        check("non-text stamp: stamp_time(%s) is None" % label, got is None, got)
+    blocks = [{"stamp": "2026-10-13 10:04 CDT (UTC-05:00)"}, {"stamp": None}]
+    for n in (0, 1):
+        try:
+            got = guard.near_refs(blocks, ["inbox:x@a", "inbox:x@b"], n)
+        except Exception as e:
+            got = "raises %s" % type(e).__name__
+        check("non-text stamp: near_refs of block %d returns no refs beside a None stamp" % n, got == set(), got)
 
 
 def case_repeat_other_session_one_minute_away_stays_a_candidate():
@@ -4947,6 +4969,7 @@ CASES = (
     case_repeat_mixed_offsets_inside_thirty_real_minutes_is_not_a_candidate,
     case_repeat_mixed_offsets_beyond_thirty_real_minutes_stays_a_candidate,
     case_repeat_only_near_blocks_left_makes_no_model_call,
+    case_repeat_stamp_that_is_not_text_reads_as_no_time,
     case_repeat_other_session_one_minute_away_stays_a_candidate,
     case_repeat_today_false_pairs_are_not_marked,
     case_repeat_prompt_says_a_follow_up_on_the_same_topic_is_not_a_repeat,
