@@ -37,16 +37,19 @@ stdin, scans the session transcript for background shells, and prints ONE JSON l
   completed notice or a TaskStop result closes it, as for a shell. A missing transcript is listed
   as unknown, once.
 - When guard_stream cannot be imported, --stop still lists each stale job, with no note.
+- The busy check (a job whose process tree burns CPU is not listed) shares one deadline, BUSY_BUDGET:
+  a stalled lsof or ps cannot hold the Stop past the hook timeout, and a busy holder that lsof names
+  in time still spares its job.
 - Any error prints nothing and exits 0.
 
 Seams: STALL_WATCH_NOW (epoch seconds, the clock), STALL_WATCH_OUTPUT_BASE (a folder that
 replaces the folder of each transcript output path and keeps its file name), STALL_WATCH_QUIET
 (the age in seconds). STALL_WATCH_MODULE picks the module under test, as in test_stall_watch.py.
 
-No posix check: this mode must run on Windows. These cases use no sh, ps or lsof, except S21a: it
-starts a shell job and skips off posix, so Windows runs the rest. Every case that expects silence
-also runs a control that must list a stale job, so a mode that is absent or silent everywhere
-cannot pass it.
+No posix check: this mode must run on Windows. These cases use no sh, ps or lsof, except S21a and
+S21c to S21e: they start a shell job, or put a stub sh, ps or lsof first on PATH, and skip off posix,
+so Windows runs the rest. Every case that expects silence also runs a control that must list a stale
+job, so a mode that is absent or silent everywhere cannot pass it.
 """
 
 import atexit
@@ -57,6 +60,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -70,6 +74,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
 MODULE = os.environ.get("STALL_WATCH_MODULE") or os.path.join(HERE, "stall_watch.py")
+SETTINGS = os.path.join(HERE, "..", "settings.json")
 PY = sys.executable
 SCRATCH = _test_temp.run_folder()
 atexit.register(shutil.rmtree, SCRATCH, ignore_errors=True)
@@ -278,16 +283,19 @@ def output_file(base, job_id, idle):
 
 
 def run_stop(transcript_path, base=None, stop_hook_active=False, quiet=None, stdin=None, nt=False,
-             module=None, now=None):
+             module=None, now=None, path_first=None):
     """Run the Stop mode the way the Stop hook does. Return (rc, stdout, stderr). module, when
     given, is the script run in place of MODULE. now, when given, is the clock of this Stop (epoch
-    seconds), so a case can run an earlier Stop than the others."""
+    seconds), so a case can run an earlier Stop than the others. path_first, when given, is a folder put
+    first on PATH, so a stub of lsof or ps in it runs in place of the tool."""
     mod = module or MODULE
     if not os.path.isfile(mod):
         raise Fail(f"{mod} is missing")
     env = {k: v for k, v in os.environ.items() if not k.startswith("STALL_WATCH_")}
     if module is not None:
         env.pop("PYTHONPATH", None)  # a copy must not import its siblings from another checkout
+    if path_first is not None:
+        env["PATH"] = path_first + os.pathsep + env.get("PATH", "")
     env["STALL_WATCH_NOW"] = str(NOW if now is None else now)
     if base is not None:
         env["STALL_WATCH_OUTPUT_BASE"] = base
@@ -533,20 +541,26 @@ def quiet_env_sets_the_age():
     return problems
 
 
-@case
-def settings_has_one_stop_row_for_stop_mode():
-    """S10. settings.json: exactly one Stop row runs stall_watch.py --stop, with timeout 10"""
-    path = os.path.join(HERE, "..", "settings.json")
-    try:
-        with open(path, encoding="utf-8") as f:
-            cfg = json.load(f)
-    except (OSError, ValueError) as e:
-        return [f"cannot read {path}: {e}"]
+def stop_watch_rows():
+    """The settings.json Stop rows that run stall_watch.py --stop. Raises OSError or ValueError when the file
+    cannot be read."""
+    with open(SETTINGS, encoding="utf-8") as f:
+        cfg = json.load(f)
     rows = []
     for entry in cfg.get("hooks", {}).get("Stop", []):
         for h in entry.get("hooks", []):
             if re.search(r"stall_watch\.py.*--stop\b", h.get("command", "")):
                 rows.append(h)
+    return rows
+
+
+@case
+def settings_has_one_stop_row_for_stop_mode():
+    """S10. settings.json: exactly one Stop row runs stall_watch.py --stop, with timeout 10"""
+    try:
+        rows = stop_watch_rows()
+    except (OSError, ValueError) as e:
+        return [f"cannot read {SETTINGS}: {e}"]
     problems = expect(len(rows) == 1, f"{len(rows)} Stop rows run stall_watch.py --stop, want 1")
     problems += expect(all(h.get("timeout") == 10 for h in rows),
                        f"timeout is {[h.get('timeout') for h in rows]}, want 10")
@@ -1440,13 +1454,19 @@ def agent_long_call():
     return [assistant_text("checking the build"), call("toolu_long", "sleep 900")]
 
 
+def load_module(name="stall_watch_under_test"):
+    """The module under test (MODULE), loaded in this process."""
+    spec = importlib.util.spec_from_file_location(name, MODULE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def stop_in_process(transcript_path):
     """Run the Stop check in this process at NOW, with the default quiet age and no output base. Return
     (rc, stdout, the paths os.stat was called with, the paths open was called with). The wrappers count
     every path the check stats or opens, so a case counts the calls that name one agent."""
-    spec = importlib.util.spec_from_file_location("stall_watch_in_process", MODULE)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    mod = load_module("stall_watch_in_process")
     stats, opens = [], []
     real_stat, real_os_open, real_open, real_io_open = os.stat, os.open, builtins.open, io.open
 
@@ -1756,6 +1776,44 @@ def end_job(proc, r):
     os.close(r)
 
 
+def stub_tool(folder, name, body, log):
+    """An executable sh stub `name` in folder. Before its body it appends its name to log, so a case can
+    tell the stub was reached. run_stop(path_first=folder) puts folder first on PATH."""
+    path = os.path.join(folder, name)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("#!/bin/sh\necho %s >> %s\n%s\n" % (name, shlex.quote(log), body))
+    os.chmod(path, 0o755)
+    return path
+
+
+def stub_calls(log):
+    """The names of the stubs that ran, in the order they were reached. [] when none ran."""
+    try:
+        with open(log, encoding="utf-8") as f:
+            return f.read().split()
+    except OSError:
+        return []
+
+
+BUDGET_SLACK = 1.5  # seconds a Stop may run past BUSY_BUDGET: a python start and the transcript scan
+
+
+def stop_in_budget(elapsed, mod):
+    """Problems when a Stop run took elapsed seconds: over the Stop hook timeout in settings.json, or, when mod
+    has a BUSY_BUDGET, over BUSY_BUDGET plus BUDGET_SLACK. The budget is read from the module under test. The
+    cases time each run with time.monotonic: a time bound is the property under test."""
+    rows = stop_watch_rows()
+    if len(rows) != 1:
+        return [f"{len(rows)} Stop rows run stall_watch.py --stop, want 1"]
+    hook = float(rows[0].get("timeout", 0))
+    problems = expect(elapsed < hook, f"Stop took {elapsed:.1f} s, over the {hook:g} s hook timeout")
+    budget = getattr(mod, "BUSY_BUDGET", None)
+    if budget is not None:
+        problems += expect(elapsed < budget + BUDGET_SLACK,
+                           f"Stop took {elapsed:.1f} s, over BUSY_BUDGET {budget:g} s plus {BUDGET_SLACK:g} s")
+    return problems
+
+
 @case
 def busy_job_with_no_output_is_not_listed():
     """S21a. a background `| tail -1` job whose child spins a CPU, with no output and its output file quiet 600 s:
@@ -1801,6 +1859,94 @@ def unresolved_log_is_named_as_not_watched():
     problems += listed_once(msg, "bmenv600")
     problems += expect(any("not watched" in line and "build.log" in line for line in msg.splitlines()),
                        f"the job's log build.log is not named as not watched: {msg!r}")
+    return problems
+
+
+@case
+def stalled_lsof_does_not_hang_stop():
+    """S21c. a lsof that never answers (a stub that sleeps 30 s) does not hang Stop: a quiet job is still listed
+    once, the stub was reached, and the Stop ends inside BUSY_BUDGET plus slack and inside the hook timeout"""
+    if os.name != "posix" or not shutil.which("sh"):
+        raise Skip("needs sh for the lsof stub, which this host lacks")
+    base, bindir = new_dir(), new_dir()
+    log = os.path.join(bindir, "calls.log")
+    output_file(base, "bstalllsof600", 600)
+    stub_tool(bindir, "lsof", "exec sleep 30", log)
+    recs = moved("bstalllsof600")
+    start = time.monotonic()
+    rc, out, err = run_stop(transcript(recs), base, path_first=bindir)
+    elapsed = time.monotonic() - start
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    calls = stub_calls(log)
+    if "lsof" not in calls:  # the scope first: a stub that PATH never reached proves nothing
+        return problems + [f"the lsof stub was not reached (stubs that ran: {calls})"]
+    problems += listed_once(msg, "bstalllsof600")
+    problems += stop_in_budget(elapsed, load_module())
+    return problems
+
+
+@case
+def stalled_ps_after_slow_lsof_keeps_stop_in_budget():
+    """S21d. lsof names a quiet job's output file after 3 s, then ps never answers: the busy check shares one
+    deadline, so the Stop ends inside BUSY_BUDGET plus slack and the job is still listed once. A module with no
+    BUSY_BUDGET fails here, and so does a Stop that runs past the hook timeout"""
+    if os.name != "posix" or not shutil.which("sh"):
+        raise Skip("needs sh for the lsof and ps stubs, which this host lacks")
+    base, bindir = new_dir(), new_dir()
+    log = os.path.join(bindir, "calls.log")
+    path = output_file(base, "bdeadline600", 600)
+    holder = "printf 'p4242424\\nf1\\nn%s\\n' " + shlex.quote(os.path.realpath(path))
+    stub_tool(bindir, "lsof", "sleep 3\n" + holder, log)
+    stub_tool(bindir, "ps", "exec sleep 30", log)
+    recs = moved("bdeadline600")
+    start = time.monotonic()
+    rc, out, err = run_stop(transcript(recs), base, path_first=bindir)
+    elapsed = time.monotonic() - start
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    calls = stub_calls(log)
+    if "lsof" not in calls or "ps" not in calls:  # the scope first: both stubs must be reached
+        return problems + [f"the lsof or ps stub was not reached (stubs that ran: {calls})"]
+    mod = load_module()
+    problems += expect(hasattr(mod, "BUSY_BUDGET"),
+                       "stall_watch.py has no BUSY_BUDGET: the busy check has no shared deadline")
+    problems += listed_once(msg, "bdeadline600")
+    problems += stop_in_budget(elapsed, mod)
+    return problems
+
+
+@case
+def fast_lsof_busy_holder_still_spares_job():
+    """S21e. the control for S21d: a fast lsof that names a process as the holder of a job's output file, and a ps
+    whose child of that process gains CPU time between the two reads, spares the job, through the same stubs. A
+    quiet job that no holder names is still listed. The CPU time is the stub's: a real spin's whole-second tick
+    depends on the machine's load, so S21a holds the real spin"""
+    if os.name != "posix" or not shutil.which("sh"):
+        raise Skip("needs sh for the lsof and ps stubs, which this host lacks")
+    base, bindir = new_dir(), new_dir()
+    log = os.path.join(bindir, "calls.log")
+    busy_path = output_file(base, "bfastbusy600", 600)
+    output_file(base, "bfastquiet600", 600)
+    count = shlex.quote(os.path.join(bindir, "ps.count"))
+    # ps rows are pid, ppid, state, CPU time. The first read shows child 4001 at 0 s, the second at 1 s.
+    ps_body = ("n=$(cat " + count + " 2>/dev/null || echo 0)\n"
+               "echo $((n + 1)) > " + count + "\n"
+               "if [ \"$n\" -eq 0 ]; then printf '4000 1 S 00:00\\n4001 4000 S 00:00\\n';"
+               " else printf '4000 1 S 00:00\\n4001 4000 S 00:01\\n'; fi")
+    holder = "printf 'p4000\\nf1\\nn%s\\n' " + shlex.quote(os.path.realpath(busy_path))
+    stub_tool(bindir, "lsof", holder, log)
+    stub_tool(bindir, "ps", ps_body, log)
+    recs = log_job("bfastbusy600", "sleep 600") + moved("bfastquiet600")
+    rc, out, err = run_stop(transcript(recs), base, path_first=bindir)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    calls = stub_calls(log)
+    if "lsof" not in calls or "ps" not in calls:  # the scope first: without both stubs, the spare proves nothing
+        return problems + [f"the lsof or ps stub was not reached (stubs that ran: {calls})"]
+    problems += expect("bfastbusy600" not in msg,
+                       f"a job whose holder's child gains CPU time is listed: {msg!r}")
+    problems += listed_once(msg, "bfastquiet600")
     return problems
 
 
