@@ -739,6 +739,48 @@ for _label, _check in (
          long_line_bound_check)):
     LOG_CHECKS_EXTRA.append((_label, _check))
     FIXTURELESS_CHECKS.add(_check)  # it loads the guard and builds no fixture
+# brief-write-quoted-span-cost: each write verb is tested against every backtick span on its line (the `quoted` test in
+# _brief_write_orders), so the tests grow with the square of the line. The count is the generator steps guard.py takes
+# while it reads a line of repeats of "write `a` ". A bound on the ratio of two lengths is a count, never a clock.
+QUOTED_LINE = "write `a` "
+
+
+def quoted_span_steps(guard, line):
+    """The generator steps guard.py takes while _brief_write_orders reads `line`."""
+    guard_file = guard._brief_write_orders.__code__.co_filename
+    steps = [0]
+
+    def count(frame, event, arg):
+        if event == "call" and frame.f_code.co_name == "<genexpr>" and frame.f_code.co_filename == guard_file:
+            steps[0] += 1
+
+    sys.setprofile(count)
+    try:
+        guard._brief_write_orders(line)
+    finally:
+        sys.setprofile(None)
+    return steps[0]
+
+
+def quoted_span_growth_check():
+    """Doubling the repeats of a quoted span less than triples the generator steps that read the line."""
+    guard = _load_guard_module()
+    half = quoted_span_steps(guard, QUOTED_LINE * 400)
+    full = quoted_span_steps(guard, QUOTED_LINE * 800)
+    if not half:
+        return False, "the reader took no generator step on a 4 KB line of quoted spans, so there is no count to bound"
+    if full > 2.5 * half:
+        return False, ("the reader took %d generator steps on an 8 KB line of quoted spans and %d on a 4 KB one: its span "
+                       "tests grow faster than the line" % (full, half))
+    return True, ("the reader took %d generator steps on an 8 KB line and %d on a 4 KB one: its span tests grow with the line"
+                  % (full, half))
+
+
+LOG_CHECKS_EXTRA.append(("brief-write-needs-writer: brief-write-quoted-span-cost: the reader's span tests grow with the line",
+                         quoted_span_growth_check))
+FIXTURELESS_CHECKS.add(quoted_span_growth_check)  # it loads the guard and builds no fixture
+add("brief-write-needs-writer: brief-write-quoted-span-cost: Explore brief of 4 KB repeats of a quoted span is allowed",
+    "allow", tool="Agent", prompt=QUOTED_LINE * 400, subagent_type="Explore")
 # brief-write-tool-negator: a negator before "the Write tool" passes, and a test named for the tool passes. A use of the
 # tool to save a file still refuses.
 add("brief-write-needs-writer: brief-write-tool-negator: Explore brief that says you may not use the Write tool is allowed",
@@ -780,12 +822,14 @@ add("brief-write-needs-writer: brief-write-comma-prohibit control: Explore brief
     prompt="Do not skip the spec, write the findings to docs/audit.md.", subagent_type="Explore")
 
 
-# A write order whose destination sits past the reach after its verb is still an order. The reach is the characters
-# after a write verb that its object and destination may span (BRIEF_WRITE_REACH). Eight repeats of this sentence put
-# " to docs/review.md." beyond it, with no clause break before the destination. The control is the same repeats with
-# no destination, so it passes for lack of a destination, not for the repeats.
+# A write order whose destination sits past its first verb is still an order when a later verb's reach holds it. The
+# reach is the characters after a write verb that its object and destination may span (BRIEF_WRITE_REACH, 800). Eight
+# repeats of this sentence put " to docs/review.md." 536 characters after the first verb and 67 after the last, with no
+# clause break before the destination. The control is the same repeats with no destination, so it passes for lack of a
+# destination, not for the repeats.
 WRITE_REACH_SENTENCE = "Write a report that lists each finding seen while reading the code"
-add("brief-write-needs-writer: a write order whose destination sits past the 300-char reach is denied", "deny",
+add("brief-write-needs-writer: a write order whose destination is 536 chars past its first verb and 67 past its last is denied",
+    "deny",
     WRITE_BRIEF, tool="Agent", prompt=" ".join([WRITE_REACH_SENTENCE] * 8) + " to docs/review.md.",
     subagent_type="Explore")
 add("brief-write-needs-writer: the same eight repeats with no destination is allowed", "allow",
@@ -811,6 +855,62 @@ add("brief-write-needs-writer: Workflow Explore agent that runs the write tool t
 add("brief-write-needs-writer: Workflow Explore agent that says do not, under any circumstances, write to a path is allowed",
     "allow", tool="Workflow",
     script=_step_flow(json.dumps("Do not, under any circumstances, write to docs/audit.md."), "agentType: 'Explore'"))
+
+
+# ---- Markup, comparisons and quoted text in prose (decision brief-write-needs-writer, the prose redirect). A `>` that
+# closes a tag, a comparison whose right side holds a slash, and text in quotes name no file to write.
+add("brief-write-needs-writer: prose markup: Explore brief with <Button variant=\"primary\">Save</Button> is allowed",
+    "allow", tool="Agent", prompt='Check <Button variant="primary">Save</Button> reads well.', subagent_type="Explore")
+add("brief-write-needs-writer: prose markup: Explore brief with <a href=\"https://x.io/a\">Docs</a> is allowed",
+    "allow", tool="Agent", prompt='<a href="https://x.io/a">Docs</a>', subagent_type="Explore")
+add("brief-write-needs-writer: prose comparison: Explore brief with if latency > budget/2 is allowed", "allow",
+    tool="Agent", prompt="Check that if latency > budget/2 holds.", subagent_type="Explore")
+add("brief-write-needs-writer: prose redirect control: Explore brief with cat v > audit.md is denied", "deny",
+    WRITE_BRIEF, tool="Agent", prompt="cat v > audit.md", subagent_type="Explore")
+# A quote mark that pairs with no other is text, and a real redirect after it still refuses. A second apostrophe after
+# the redirect must not pair with the first and hide it. A comment opener inside quotes opens nothing.
+add("brief-write-needs-writer: lone quote: Explore brief with <p>Don't</p> then a prose redirect is denied", "deny",
+    WRITE_BRIEF, tool="Agent", prompt="Check <p>Don't</p>. Then run cat v > audit.md", subagent_type="Explore")
+add("brief-write-needs-writer: lone quote: Explore brief with a prose redirect between two apostrophes is denied", "deny",
+    WRITE_BRIEF, tool="Agent", prompt="Check <p>Don't</p>. Then run cat v > audit.md, and it's done.",
+    subagent_type="Explore")
+add("brief-write-needs-writer: comment opener in quotes: Explore brief with a // in quotes then a prose redirect is denied",
+    "deny", WRITE_BRIEF, tool="Agent", prompt='Say "a // b" then run cat v > audit.md', subagent_type="Explore")
+add("brief-write-needs-writer: comment opener in quotes: Explore brief with a /* in quotes then a prose redirect is denied",
+    "deny", WRITE_BRIEF, tool="Agent", prompt='Say "a /* b" then run cat v > audit.md', subagent_type="Explore")
+# A receiver's attribute after a comparison is no file: `size > self.log` passes (decision brief-write-needs-writer).
+# Each receiver below is read as an attribute, so a reader that drops one of them refuses its comparison.
+add("brief-write-needs-writer: receiver attribute: Explore brief with size > self.log in prose is allowed", "allow",
+    tool="Agent", prompt="Check that size > self.log holds.", subagent_type="Explore")
+add("brief-write-needs-writer: receiver attribute: Explore brief with size > this.count in prose is allowed", "allow",
+    tool="Agent", prompt="Check that size > this.count holds.", subagent_type="Explore")
+add("brief-write-needs-writer: receiver attribute: Explore brief with size > this.log in prose is allowed", "allow",
+    tool="Agent", prompt="Check that size > this.log holds.", subagent_type="Explore")
+add("brief-write-needs-writer: receiver attribute: Explore brief with size > cls.log in prose is allowed", "allow",
+    tool="Agent", prompt="Check that size > cls.log holds.", subagent_type="Explore")
+# The reach is 800 characters after a write verb (BRIEF_WRITE_REACH). A destination whose path ends inside it is read, and
+# one whose first word starts past it is not, with no clause mark between them (decision brief-write-needs-writer, Limits).
+# The mark after the destination makes a reach that searched past 800 for a clause end read it, so it is the kill case.
+add("brief-write-needs-writer: reach edge: a destination whose path ends 798 chars after its verb is denied", "deny",
+    WRITE_BRIEF, tool="Agent", prompt="Write " + "zeta " * 157 + "to docs/a.md.", subagent_type="Explore")
+add("brief-write-needs-writer: reach edge: a destination that starts 801 chars after its verb is allowed (documented limit)",
+    "allow", tool="Agent", prompt="Write " + "zeta " * 160 + "to docs/a.md.", subagent_type="Explore")
+# Mutant kills. Each case is green on this code and turns red under one mutant of the reader (a scratch copy with one
+# change, the selector in its name). The allow cases are passes the decision records: a compose verb's "at" with four
+# words before it, or an object after "on", reads as a topic; a tool's results are a noun; a colon needs an output noun
+# before it; a `>` at a line start is a quote mark.
+add("brief-write-needs-writer: at word cap: Explore brief, Write the full review report at docs/review.md, is allowed",
+    "allow", tool="Agent", prompt="Write the full review report at docs/review.md", subagent_type="Explore")
+add("brief-write-needs-writer: at stop words: Explore brief, Write notes on gaps at docs/gaps.md, is allowed",
+    "allow", tool="Agent", prompt="Write notes on gaps at docs/gaps.md", subagent_type="Explore")
+add("brief-write-needs-writer: Write tool noun: Explore brief, Use the Write tool results to read the spec, is allowed",
+    "allow", tool="Agent", prompt="Use the Write tool results to read the spec", subagent_type="Explore")
+add("brief-write-needs-writer: won't negator: Explore brief, You won't use the Write tool to save docs/a.md., is allowed",
+    "allow", tool="Agent", prompt="You won't use the Write tool to save docs/a.md.", subagent_type="Explore")
+add("brief-write-needs-writer: colon noun: Explore brief, Make the change: hooks/guard.py, is allowed",
+    "allow", tool="Agent", prompt="Make the change: hooks/guard.py", subagent_type="Explore")
+add("brief-write-needs-writer: line-start quote: Explore brief, > docs/x.md holds the audit notes., is allowed",
+    "allow", tool="Agent", prompt="> docs/x.md holds the audit notes.", subagent_type="Explore")
 
 
 # ---- A spawn's brief that orders a discard of the working tree (rule brief-destructive-git, rule
@@ -1055,6 +1155,20 @@ add("brief-destructive-git: a prohibition with a comma aside and a span, Never, 
     "allow", tool="Agent", prompt="Never, ever, run `git reset --hard`.", subagent_type="builder", model="sonnet")
 add("brief-destructive-git: a prohibition with a comma aside and no span, Never, ever, run git reset --hard, is allowed",
     "allow", tool="Agent", prompt="Never, ever, run git reset --hard", subagent_type="builder", model="sonnet")
+# An order after a colon starts a new clause, so the prohibition before the colon does not cover it. The colon crossing is
+# the accepted limit recorded as debt brief-discard-colon-window, so this case stays red until that debt is fixed.
+add("brief-destructive-git: colon ends a prohibition: builder brief, do not, at any time, skip it: run a reset, is denied",
+    "deny", BRIEF_DESTRUCTIVE, tool="Agent", prompt="Do not, at any time, skip it: run `git reset --hard`",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: never forget to run: builder brief, never, ever, forget to run a reset, is denied",
+    "deny", BRIEF_DESTRUCTIVE, tool="Agent", prompt="Never, ever, forget to run `git reset --hard`",
+    subagent_type="builder", model="sonnet")
+# A prohibition whose aside is at any time or at all keeps its negator's window (the closed list in decision
+# brief-destructive-git). Each is green on this code and turns red under one mutant that drops the aside from the list.
+add("brief-destructive-git: aside at any time: builder brief, do not, at any time, run a reset, is allowed", "allow",
+    tool="Agent", prompt="Do not, at any time, run `git reset --hard`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: aside at all: builder brief, do not, at all, run a reset, is allowed", "allow",
+    tool="Agent", prompt="Do not, at all, run `git reset --hard`.", subagent_type="builder", model="sonnet")
 
 
 # The owner's override lifts this refusal the way it lifts an Opus spawn's (decision owner-override): a one-act override
