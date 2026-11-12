@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 19:49 CST Nov 11. The owner's list closed at 18:43 CST Nov 10; R21 to R45 came after.
+the history. Last rewrite: 20:00 CST Nov 11. The owner's list closed at 18:43 CST Nov 10; R21 to R45 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -660,7 +660,7 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   cloud lever, is rewritten to match. Home: decision precompact-handoff, rule 1.
 
 - **R36. Agents write little that no one reads.** Owner 12:49 CST Nov 11: "how much should our
-  subagents be allowed to just "type"". 12:52 CST: "im assuming the brief kinda needs to have a line in
+  [agents] be allowed to just "type"". 12:52 CST: "im assuming the brief kinda needs to have a line in
   terms of how much to talk ... keep verbiage to a minimum something like that? or it's mechanized?
   unsure i'm deferring to you". Pick, under that deferral: the line goes in
   each agent role file and the lane start text, which load on their own, never in each brief. Briefs
