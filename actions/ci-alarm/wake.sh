@@ -28,7 +28,7 @@ fail() {
 pr="$(gh api "repos/$REPO/commits/$SHA/pulls" \
   --jq '[.[] | select(.merged_at != null and .base.ref == "main")] | sort_by(.merged_at) | .[0].number // empty')" \
   || fail "CI alarm $KEY: the read of the pull requests for commit ${SHA:0:7} failed, so nobody was woken."
-[ -n "$pr" ] || fail "CI alarm $KEY: commit ${SHA:0:7} has no merged pull request, so there is nobody to wake and no issue is opened. Text: $TEXT"
+[ -n "$pr" ] || fail "CI alarm $KEY: commit ${SHA:0:7} has no pull request merged into main, so there is nobody to wake and no issue is opened. Text: $TEXT"
 
 marker="<!-- main-alarm:$KEY -->"
 # Every page is read: the marker may sit on a late page of a long thread.

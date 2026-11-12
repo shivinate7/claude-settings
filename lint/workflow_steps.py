@@ -10,6 +10,9 @@ import sys
 
 # The Linux jobs that hold the suites of the one old `checks` job, split for wall time. merge/merge.py reads suites from each.
 CHECKS_SUITE_JOBS = ("checks", "checks-merge-install")
+# The start of job_workflow's why when the repo has no workflow file at all: no folder, or no .yml or .yaml in it. merge's lane lint reads it in
+# ci-job's output as the no-CI refusal. A workflow with no `checks` job, or one it cannot read, is an unknown of its own and carries no marker.
+NO_CI_WHY = "no CI: "
 
 
 def job_re(name):
@@ -25,26 +28,31 @@ def job_block(text, name):
 
 def job_workflow(top, job):
     """The one workflow file in `<top>/.github/workflows/` (*.yml, *.yaml) that holds `job`. -> (path, None), or
-    (None, why) when the folder is unreadable or no file, or more than one file, holds it. The file name is the repo's
-    own (checks.yml, check.yml), so the job is the key."""
+    (None, why). The whys that start with NO_CI_WHY are an unreadable folder and a folder with no workflow file. Any other why is an
+    unknown, not a repo with no CI: no file holds the job, a file could not be read (it is named, with the error), or more than one
+    file holds the job. The file name is the repo's own (checks.yml, check.yml), so the job is the key."""
     folder = os.path.join(top, ".github", "workflows")
     try:
         names = sorted(n for n in os.listdir(folder) if n.endswith((".yml", ".yaml")))
     except OSError as e:
-        return None, "cannot read %s: %s" % (folder, e)
-    found = []
+        return None, "%scannot read %s: %s" % (NO_CI_WHY, folder, e)
+    if not names:
+        return None, "%sno workflow file (*.yml, *.yaml) in %s" % (NO_CI_WHY, folder)
+    found, unreadable = [], []
     for n in names:
         try:
             with open(os.path.join(folder, n), encoding="utf-8") as f:
                 if job_block(f.read(), job) is not None:
                     found.append(n)
-        except (OSError, UnicodeError):
-            continue  # a file it cannot read names no job; the job is found in another file, or none
+        except (OSError, UnicodeError) as e:
+            unreadable.append("%s (%s: %s)" % (n, type(e).__name__, e))
     if len(found) == 1:
         return os.path.join(folder, found[0]), None
-    if not found:
-        return None, "no workflow file in %s has a `%s` job" % (folder, job)
-    return None, "more than one workflow file in %s has a `%s` job: %s" % (folder, job, ", ".join(found))
+    if found:
+        return None, "more than one workflow file in %s has a `%s` job: %s" % (folder, job, ", ".join(found))
+    if unreadable:  # the job may be in a file it cannot read: unknown, never "no job"
+        return None, "no readable workflow file in %s has a `%s` job, and these could not be read: %s" % (folder, job, "; ".join(unreadable))
+    return None, "no workflow file in %s has a `%s` job" % (folder, job)
 
 
 def step_blocks(block):

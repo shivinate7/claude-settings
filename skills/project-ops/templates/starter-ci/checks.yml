@@ -1,0 +1,40 @@
+# The starter CI for a repo with no CI (skill project-ops, step "Add the starter CI"). Copy it to .github/workflows/checks.yml.
+# The `checks` job runs three quick checks: each relative markdown link resolves, each Python and shell script parses, each JSON
+# file parses. The all-jobs-passed job is the one check branch protection requires (decision same-check-kinds); add each job
+# you add later to its `needs`. Replace both claude-settings pins (the 40-hex words after `@`) with the current head of
+# shivinate7/claude-settings main before you commit: a tag or a branch can move under the check. Keep ready_for_review in the
+# pull_request types: GitHub's default types omit it, and a red draft marked ready would rerun nothing.
+name: checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - uses: shivinate7/claude-settings/actions/quick-checks@0000000000000000000000000000000000000000 # replace with claude-settings main's head
+
+  # The one check branch protection requires. It runs on a ready pull request only, and always() makes a failed
+  # job in `needs` fail it: without always() GitHub skips it, and a skipped required check reads as green.
+  all-jobs-passed:
+    runs-on: ubuntu-latest
+    needs:
+      - checks
+    if: ${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}
+    timeout-minutes: 5
+    steps:
+      - uses: shivinate7/claude-settings/actions/all-jobs-passed@0000000000000000000000000000000000000000 # replace with claude-settings main's head
+        with:
+          needs: ${{ toJSON(needs) }}
