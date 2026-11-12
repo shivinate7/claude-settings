@@ -211,6 +211,15 @@ class RulingForGuardTests(unittest.TestCase):
         self.assertIsNotNone(got, "no entry returned, though three open entries name the guard")
         self.assertEqual(got["id"], "newest", "returned %r, want the newest open entry" % got["id"])
 
+    def test_the_newest_is_the_later_instant_across_a_clock_change(self):
+        # 01:30 -05:00 is 06:30 UTC; 01:10 -06:00 is 07:10 UTC, so the second is later though its text sorts first
+        entries = [guard_entry("earlier-instant", at=DST_CDT), guard_entry("later-instant", at=DST_CST)]
+        with mock.patch.object(ruled_store, "ENTRIES_LIFT_GUARDS", True):
+            got = ruled_store.ruling_for_guard("guard-apps", entries)
+        self.assertIsNotNone(got, "no entry returned, though two open entries name the guard")
+        self.assertEqual(got["id"], "later-instant",
+                         "returned %r, want the later instant (07:10 UTC, not the text-newest 06:30 UTC)" % got["id"])
+
     def test_the_one_open_entry_that_names_the_guard_is_returned(self):
         with mock.patch.object(ruled_store, "ENTRIES_LIFT_GUARDS", True):
             got = ruled_store.ruling_for_guard("guard-apps", [guard_entry("only")])
@@ -246,6 +255,20 @@ class RulingForGuardTests(unittest.TestCase):
         self.assertEqual(got["id"], "trailing", "returned %r for the trailing-text ref" % got["id"])
         self.assertIsNone(longer, "a ref whose first token is a longer name matched: %r" % longer)
 
+    def test_an_entry_marked_unread_is_ignored(self):
+        unread = fixture.entry("unread-newest", at="2026-11-12T09:00:00-06:00",
+                               supersedes=[{"kind": "guard-rule", "ref": "guard-apps"}],
+                               supersedes_none="unread: triage has not read this entry yet")
+        read = guard_entry("read-older", at="2026-11-10T09:00:00-06:00")
+        with mock.patch.object(ruled_store, "ENTRIES_LIFT_GUARDS", True):
+            control = ruled_store.ruling_for_guard("guard-apps", [read])
+            got = ruled_store.ruling_for_guard("guard-apps", [unread, read])
+        self.assertIsNotNone(control, "control: the read entry alone was not returned")
+        self.assertIsNotNone(got, "no entry returned, though a read entry names the guard")
+        self.assertEqual(got["id"], "read-older",
+                         "returned %r, want the read entry: an entry whose supersedes_none reads unread does not govern"
+                         % got["id"])
+
     def test_only_a_guard_rule_ref_counts_and_another_guard_gives_none(self):
         test_kind = fixture.entry("test-kind", supersedes=[{"kind": "test", "ref": "guard-apps"}])
         with mock.patch.object(ruled_store, "ENTRIES_LIFT_GUARDS", True):
@@ -259,7 +282,8 @@ class GuardRulingLineTests(unittest.TestCase):
     def test_the_line_names_the_id_the_owner_time_and_the_ruling(self):
         entry = fixture.entry("ruled-apps-keep", ruling="Owner: keep the apps' access as is.")
         self.assertEqual(ruled_store.guard_ruling_line(entry),
-                         "ruled by ruled-apps-keep (owner %s): Owner: keep the apps' access as is." % fixture.AT)
+                         "ruled by ruled-apps-keep (owner %s): Owner: keep the apps' access as is." % fixture.AT,
+                         "guard_ruling_line did not print the id, owner time and ruling of the entry")
 
     def test_the_ruling_is_cut_to_one_hundred_characters(self):
         ruling = "a" * 100 + "TAILMARK" + "b" * 40
@@ -366,6 +390,97 @@ class SessionLinesTests(RepoCase):
         }))
         listed = [line.split()[0] for line in entry_lines(ruled_store.session_lines(repo))]
         self.assertEqual(listed, ["cst", "cdt"], "newest first by instant, got %r" % listed)
+
+
+def step_file(slug, status):
+    """The roadmap step file a store ref carries for `slug`, with its status."""
+    return {"roadmap/data/steps/%s.json" % slug: '{"slug": "%s", "status": "%s"}' % (slug, status)}
+
+
+class CheckStoreTests(RepoCase):
+    def store_with(self, name, entries, steps=None):
+        files = fixture.ruling_files(entries)
+        files.update(steps or {})
+        return self.make_repo(name, store=files)
+
+    def test_a_clean_store_has_no_problem(self):
+        repo = self.store_with("clean", {"ok": fixture.entry("ok")})
+        self.assertEqual(ruled_store.check_store(repo), [], "a clean store has a problem")
+
+    def test_every_check_entry_problem_is_listed(self):
+        bad = {"no-zone": fixture.entry("no-zone", at="2026-11-12T14:15:00"),
+               "no-ruling": fixture.entry("no-ruling", ruling=None)}
+        expected = [problem for entry in bad.values() for problem in ruled_store.check_entry(entry)]
+        self.assertEqual(len(expected), 2, "control: want two check_entry problems, got %r" % expected)
+        got = ruled_store.check_store(self.store_with("problems", bad))
+        for problem in expected:
+            self.assertTrue(any(problem in line for line in got),
+                            "check_store did not list the check_entry problem %r: %r" % (problem, got))
+
+    def test_two_open_entries_that_supersede_one_ref_are_flagged(self):
+        repo = self.store_with("twins", {
+            "rule-a": fixture.entry("rule-a", at="2026-11-10T09:00:00-06:00"),
+            "rule-b": fixture.entry("rule-b", at="2026-11-11T09:00:00-06:00"),
+        })
+        want = "entries rule-a and rule-b both supersede lint/test_ruled_store.py::test_case"
+        got = ruled_store.check_store(repo)
+        self.assertTrue(any(want in line for line in got), "check_store did not flag the shared ref: %r" % got)
+
+    def test_refs_match_by_their_first_token(self):
+        repo = self.store_with("tokens", {
+            "rule-a": fixture.entry("rule-a", at="2026-11-10T09:00:00-06:00",
+                                    supersedes=[{"kind": "test",
+                                                 "ref": "lint/test_ruled_store.py::test_case check the flow"}]),
+            "rule-b": fixture.entry("rule-b", at="2026-11-11T09:00:00-06:00"),
+        })
+        got = ruled_store.check_store(repo)
+        self.assertTrue(any("both supersede lint/test_ruled_store.py::test_case" in line and "rule-a" in line
+                            and "rule-b" in line for line in got),
+                        "a ref with trailing text did not match its first token: %r" % got)
+
+    def test_the_same_token_under_another_kind_is_not_flagged(self):
+        repo = self.store_with("kinds", {
+            "rule-a": fixture.entry("rule-a", at="2026-11-10T09:00:00-06:00",
+                                    supersedes=[{"kind": "guard-rule", "ref": "lint/test_ruled_store.py::test_case"}]),
+            "rule-b": fixture.entry("rule-b", at="2026-11-11T09:00:00-06:00"),
+        })
+        flagged = [line for line in ruled_store.check_store(repo) if "both supersede" in line]
+        self.assertEqual(flagged, [], "a guard-rule ref and a test ref were flagged as one: %r" % flagged)
+
+    def test_a_closed_entry_sharing_a_ref_is_not_flagged(self):
+        repo = self.store_with("closed-twin", {
+            "rule-a": fixture.entry("rule-a", at="2026-11-10T09:00:00-06:00"),
+            "rule-b": fixture.entry("rule-b", at="2026-11-11T09:00:00-06:00", status="closed"),
+        })
+        flagged = [line for line in ruled_store.check_store(repo) if "both supersede" in line]
+        self.assertEqual(flagged, [], "a closed entry was counted as a second supersede: %r" % flagged)
+
+    def test_an_open_entry_on_a_done_step_is_flagged(self):
+        repo = self.store_with("done-step", {"stepped": fixture.entry("stepped", step="ruled-store-one-home")},
+                               steps=step_file("ruled-store-one-home", "done"))
+        want = "step ruled-store-one-home is done but entry stepped is still open"
+        got = ruled_store.check_store(repo)
+        self.assertTrue(any(want in line for line in got), "check_store did not flag the open entry: %r" % got)
+
+    def test_a_closed_entry_on_a_done_step_is_not_flagged(self):
+        repo = self.store_with("done-closed", {
+            "stepped": fixture.entry("stepped", step="ruled-store-one-home", status="closed")},
+            steps=step_file("ruled-store-one-home", "done"))
+        flagged = [line for line in ruled_store.check_store(repo) if "is done but entry" in line]
+        self.assertEqual(flagged, [], "a closed entry was flagged against its done step: %r" % flagged)
+
+    def test_a_missing_step_file_is_no_problem(self):
+        repo = self.store_with("no-step", {"stepped": fixture.entry("stepped", step="no-such-step")})
+        self.assertEqual(ruled_store.check_store(repo), [], "an entry whose step file is missing was reported")
+
+    def test_check_cli_refuses_an_open_entry_on_a_done_step(self):
+        repo = self.store_with("cli-step", {"stepped": fixture.entry("stepped", step="ruled-store-one-home")},
+                               steps=step_file("ruled-store-one-home", "done"))
+        proc = subprocess.run([sys.executable, MODULE, "check", repo], capture_output=True, text=True, timeout=60)
+        self.assertEqual(proc.returncode, 1, "check exited %d on an open entry whose step is done, want 1: %s"
+                         % (proc.returncode, proc.stderr))
+        self.assertIn("step ruled-store-one-home is done but entry stepped is still open", proc.stdout + proc.stderr,
+                      "check did not name the open entry on a done step")
 
 
 class CostAndCliTests(RepoCase):
