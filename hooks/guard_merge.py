@@ -1178,8 +1178,8 @@ def role_proof_hit(stripped: str, transcript: str, cwd: str = "") -> str:
                 if roster_batch_runner(cwd, own_id):
                     continue
                 if transcript:
-                    tags, _, parent = own_session.own_session_read(transcript, own_id)
-                    if tags is not None and (ROLE_TAG_PREFIX + role in tags or (LANE_TAG in tags and parent is None)):
+                    tags, tagged_after, parent = own_session.own_session_read(transcript, own_id)
+                    if tags is not None and not tagged_after and (ROLE_TAG_PREFIX + role in tags or (LANE_TAG in tags and parent is None)):
                         continue
         except Exception:
             pass

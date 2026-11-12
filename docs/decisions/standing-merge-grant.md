@@ -30,7 +30,7 @@ Owner pick, 2026-10-30 15:06 CDT (waiting item `merge-grant-claude-md-line`, opt
 - Absent key, or no `stamp.json`: the grant holds. That keeps the behaviour from before the switch. A merge tool older than the switch never meets an unknown field in a repo that leaves the key out.
 - `false`: in any session, local or cloud, the merge tool refuses `merge <pr> --confirm` for the coordinator and the batch runner. The coordinator never merges (owner, 2026-11-01 21:34 CST). The batch runner holds no grant of its own, so it reads the same switch. The refusal names no key and no file, so a session does not learn to turn the grant back on.
 - A value that is not `true` or `false` stops the merge tool as a broken config.
-- The switch reads the same on a local session as on a cloud one (owner, 2026-11-10 14:36 CST, G11). Only a preview is unchanged by `false`.
+- The switch reads the same on a local session as on a cloud one (owner, 2026-11-10 14:36 CST, G11). Only a preview is unchanged by `false`. A run with no session id in any `CLAUDE_CODE*` variable is an owner at a terminal: the switch, the role check and the lane lint do not apply to it, so the owner can still merge the pull request that turns the switch back on (decisions `building-port-keeps-behaviour` and `guard-guards-mistakes-only`; `owner_hand_run` in `merge/merge.py`). A run with a session id and no recorded role stays refused.
 - The owner withdraws the grant in a repo by setting the switch to `false` on main, or by telling a session to. A withdrawal in chat still binds every session. The switch makes the merge tool enforce it.
 
 The owner's words, 2026-10-29 16:47 CDT, in web chat:

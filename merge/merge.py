@@ -5101,6 +5101,13 @@ def session_record_id():
     from override import session_record_id as one_home  # hooks/, on sys.path from the top of this file
     return one_home()
 
+def owner_hand_run():
+    """True for an owner at a terminal: no session id in any CLAUDE_CODE* variable and not a cloud session. The role check, the standing-grant
+    switch and the lane lint guard a session's confirm; a run no session started has no role to record, so they do not apply to it."""
+    if os.environ.get("CLAUDE_CODE_REMOTE") == "true":
+        return False
+    return not any(k.startswith("CLAUDE_CODE") and "SESSION_ID" in k and v for k, v in os.environ.items())
+
 def role_path():
     return pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")) / "state" / "merge-role.json"
 
@@ -5398,7 +5405,7 @@ def main(argv, host=None, lock=None, hosts=None):
             lines, ok = reviewed_roots(a.root, hosts, a.config)
             say(*lines)
             return 0 if ok else 1
-        if (a.confirm or batch) and not read_merge_role():  # before any host read or lock
+        if (a.confirm or batch) and not owner_hand_run() and not read_merge_role():  # before any host read or lock
             raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)
         if a.confirm and not a.head and read_merge_role() == "batch-runner":  # before the lock, a claim or any write
             raise Stop(BATCH_RUNNER_NEEDS_HEAD)
@@ -5481,14 +5488,14 @@ def main(argv, host=None, lock=None, hosts=None):
                 h.refuse_pinned_mismatch()
             say(*reviewed_lines(h))
             return 0
-        if a.confirm and cfg["merge"].get("standingGrant", True) is False:
+        if a.confirm and not owner_hand_run() and cfg["merge"].get("standingGrant", True) is False:
             raise Stop("The owner's standing merge grant is off for this repo, so ask the owner to merge this PR. " + OFF_CITE)
         ignore = ignore_checks(cfg)
         if not host:
             h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore
             h.refuse_pinned_mismatch()
         checked = None  # the head the lane-lint PASS names; confirm refuses any other
-        if a.confirm and isinstance(h, Host) and not info["draft"]:  # a scripted host that is no Host brings its own reads; a draft is the records step, never a join
+        if a.confirm and not owner_hand_run() and isinstance(h, Host) and not info["draft"]:  # a scripted host that is no Host brings its own reads; a draft is the records step, never a join
             lint_check(h, a.pr, info, root, a.config)
             checked = info["head"]
         if a.confirm:
