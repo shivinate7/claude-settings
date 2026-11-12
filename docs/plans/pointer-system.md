@@ -6,24 +6,24 @@ when a cite no longer matches the code. Each lane below adds one kind of cite.
 
 ## Status
 
-- Built on main: `stale-names-bound` (STALE002, range mode). `value-cites` (STALE008, range mode). Tree mode, opt-in through the ste-lint input
+- Built on main: `stale-names-bound` (STALE002, range mode), `stale-flags` (STALE007, range mode) and `value-cites` (STALE008, range mode). Tree mode, opt-in through the ste-lint input
   `tree-cites`, with the dead-path check (STALE003) and the bad-anchor check (STALE004), per decision
   `stale-cites-whole-tree` (the whole-tree record). The cited-by report, per the Report step of decision
   `stale-cites-at-merge` (the range check record).
-- Planned: `stale-flags` and the route-claim check. The records-only lane for value cites landed with `value-cites`.
+- Planned: the route-claim check. The records-only lane for value cites landed with `value-cites`.
 - New codes start at STALE005, which the route-claim check takes (decision `claims-carry-backing`, the
-  route-row record). `stale-flags` claims the next free code when it is built. `value-cites` took STALE008.
+  route-row record). `stale-flags` is STALE007. `value-cites` took STALE008.
 
 ## Lanes
 
-The planned lane with a slug is `stale-flags`.
-The built lanes are `stale-names-bound`, `value-cites` and `cited-by-report`. The source notes numbered these steps L1
+No planned lane has a slug yet.
+The built lanes are `stale-names-bound`, `stale-flags`, `value-cites` and `cited-by-report`. The source notes numbered these steps L1
 to L4. The slugs replace the numbers.
 
 | Lane | What it checks | Status |
 |---|---|---|
 | `stale-names-bound` | A cited Python name that the pull request removed (STALE002) | Built on main |
-| `stale-flags` | A cited command-line flag that the pull request removed | Planned. Next free code when built. |
+| `stale-flags` | A cited command-line flag that the pull request removed (STALE007) | Built on main |
 | `value-cites` | A cited value that the pull request changed (STALE008) | Built on main |
 | `cited-by-report` | A report of the checks that hold each rule | Built on main (the Report step of decision `stale-cites-at-merge`) |
 | Route-claim check (no slug yet) | A changed line that states a capability by route with no backing (STALE005) | Planned (decision `claims-carry-backing`, the route-row record) |
@@ -43,7 +43,7 @@ to L4. The slugs replace the numbers.
 - Cost: no new process and no new file read. The decision `stale-cites-at-merge` has the full cost line.
 - Known gaps: the `stale-cites-*` notes in `docs/debts/notes.md`.
 
-### stale-flags (planned)
+### stale-flags (built on main)
 
 - Cite: a script path and a `--flag` inside one backticked code span.
 - Flag set: for a `.py` script, the `add_argument` string literals, read with `ast`. For shell, a
@@ -51,7 +51,11 @@ to L4. The slugs replace the numbers.
 - Fires only when the pull request removed the flag from that file.
 - Red cases: a removed `--between` in a cited span fires. No fire for: a kept flag; `git push --force`;
   a flag in another script's span; a shim path (`bin/merge`, whose flags live in `merge/merge.py`).
-- Cost: no new process. Reads touched blobs through the open `cat-file` process.
+- A flag that another touched `.py` file declares as an `add_argument` literal at head, or another touched
+  `.sh` file holds as a whole word, moved there and does not fire.
+- Cost: no new process beyond the one `cat-file`, and no `ls-tree` of the Markdown tree unless a flag was removed. A touched `.py`
+  or `.sh` adds that `cat-file`; the flag reader reads blobs through it. The decision `stale-cites-at-merge`
+  has the full cost line and the named limits.
 
 ### value-cites (built on main)
 
