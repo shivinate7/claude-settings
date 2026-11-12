@@ -2883,7 +2883,7 @@ AGENT_NO_REMOTE_REASON = (
     "that. Finish your own work and put the request in your report so that session can act on it. "
     "(decision lanes-start-as-agents, an agent is not a lane)"
 )
-from shared_names import LANE_TAG, LANE_TITLE_FORM, LANE_TITLE_OPENING, grant_line_holds_words  # noqa: E402  the one home of the lane tag, the lane title form and the Grant reader, shared with guard_merge
+from shared_names import LANE_TAG, LANE_TITLE_EXAMPLE_OPENING, LANE_TITLE_FORM, LANE_TITLE_OPENING, grant_line_holds_words  # noqa: E402  the one home of the lane tag, the lane title form and the Grant reader, shared with guard_merge
 LANE_EFFORT_REASON = (
     "A lane starts with the effort field set to `%s` and the whole brief as its prompt. The prompt's "
     "first non-blank line is `Grant: <the grant>, <time>`, the owner's grant that starts this lane. Set the "
@@ -2904,8 +2904,10 @@ LANE_START_SETTINGS_REASON = (
 # A template: %s is the title form, LANE_TITLE_FORM, so the remedy and the check read one string.
 LANE_TITLE_REASON = (
     "A lane's title opens with `%s`, where the slug is the lane's branch slug, then the task: for example "
-    "`Lane my-step: fix the thing`. The owner's session list shows that title, so it tells him which branch a lane "
-    "runs. Set `title` on create_session (rule lane-title-slug)." % LANE_TITLE_FORM
+    "`%s fix the thing`. The slug is lower-case letters and digits joined by single hyphens, so a branch with an "
+    "underscore or a capital needs those changed in the title. The owner's session list shows that title, so it "
+    "tells him which branch a lane runs. Set `title` on create_session (rule lane-title-slug)."
+    % (LANE_TITLE_FORM, LANE_TITLE_EXAMPLE_OPENING)
 )
 # A repo tag with no origin to compare to: the full form, one owner and one name.
 FULL_REPO_TAG = re.compile(r"[^/\s]+/[^/\s]+")
