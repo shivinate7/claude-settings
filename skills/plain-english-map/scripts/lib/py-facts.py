@@ -8,7 +8,8 @@ A request is {"file", "op", "symbol", "target"}:
   op "uses"    whether `file` imports the tracked file `target`, and whether it refers to `symbol`
   op "loads"   the tracked files `file` loads at runtime: {"imports": [path], "named": [path]}. `imports` leaves out an import under
                `if TYPE_CHECKING:`. `named` holds each tracked file that a string in the code equals, from the file's folder or the root.
-               A docstring or a bare string statement is no code string.
+               A docstring or a bare string statement is no code string. In a file under a `tests/` folder, the literal arguments of a
+               `join` call (`os.path.join`, `posixpath.join`, `path.join` or a bare `join`) also make one string: `os.path.join("src", "x.py")` is `src/x.py`.
 A result is {"ok": true, "value": v} or {"ok": false, "reason": str, "gone": bool}.
 `gone` is true when the file was read and the symbol is not there. Any other failure is unknown, so it has no `gone`.
 The module imports only the standard library and reads files as text, so it runs under `python3 -I`.
@@ -158,12 +159,30 @@ def code_strings(tree):
     return [n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in skip]
 
 
+def literal_joins(tree):
+    """The path that each join call of literal pieces makes. One piece that is no string literal makes no path."""
+    out = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or len(node.args) < 2 or node.keywords:
+            continue
+        callee = dotted_name(node.func)
+        if callee not in ("join", "path.join", "os.path.join", "posixpath.join"):
+            continue
+        if all(isinstance(a, ast.Constant) and isinstance(a.value, str) for a in node.args):
+            out.append(posixpath.join(*[a.value for a in node.args]))
+    return out
+
+
 def named_files(tree, parent, tracked):
-    """The tracked files that a string in the code equals, from the parent's folder or from the root."""
+    """The tracked files that a string in the code equals, from the parent's folder or from the root.
+    In a file under a `tests/` folder, a join of literals counts as one string."""
     found = set(tracked)
     folder = parent.rsplit("/", 1)[0] if "/" in parent else ""
     out = set()
-    for s in code_strings(tree):
+    strings = code_strings(tree)
+    if parent.startswith("tests/") or "/tests/" in parent:
+        strings = strings + literal_joins(tree)
+    for s in strings:
         if not s or "\n" in s or s.startswith("/"):
             continue
         for c in (posixpath.normpath(posixpath.join(folder, s)), posixpath.normpath(s)):

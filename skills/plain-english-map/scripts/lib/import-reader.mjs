@@ -1,7 +1,8 @@
 // The one import reader. It imports only `source-text.mjs`, so
 // `check-invariants.mjs` stays runnable with no install. `map-picture.mjs` re-exports it.
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { blankCommentsAndStrings } from './source-text.mjs';
+import { blankComments, blankCommentsAndStrings } from './source-text.mjs';
 
 const EXTS = ['.ts', '.tsx', '.mjs', '.js'];
 // Found in the blanked text, so an import inside a comment or a string is no import. The quote stays, the specifier does not.
@@ -46,20 +47,60 @@ export const importEntries = (src, { types = true, file } = {}) => {
 
 export const importSpecifiers = (src, opts) => importEntries(src, opts).map((e) => e.spec);
 
-// The tracked file that the specifier `spec` in the file `from` names, or null. A package specifier names none.
-export const resolveSpecifier = (from, spec, tracked) => {
-  if (!spec.startsWith('.')) return null;
-  const base = path.posix.join(path.posix.dirname(from), spec);
+// The tracked file that a path names, as a file, with an extension added, or as a folder's index. Null when none is tracked.
+const findTracked = (base, tracked) => {
   const ext = path.posix.extname(base);
   return [base, ...(TS_FOR[ext] ? [base.slice(0, -ext.length) + TS_FOR[ext]] : []), ...EXTS.map((e) => base + e), ...EXTS.map((e) => `${base}/index${e}`)].find((c) => tracked.has(c)) ?? null;
 };
 
-// The tracked files that a source file imports. A package import and an untracked target are skipped.
-export const importTargets = (from, src, tracked, opts) => {
+// The `paths` of the host's root `tsconfig.json`, as [{ pattern, targets }] with each target joined to `baseUrl` (the root when unset).
+// [] when the file is not tracked, does not parse or maps nothing. Stated limits: no `extends`, and no tsconfig in a sub-folder.
+export const readPathAliases = (root, tracked) => {
+  if (!tracked.has('tsconfig.json')) return [];
+  let cfg;
+  try {
+    // tsconfig.json is JSON with comments and trailing commas. A comment goes first, so a `//` inside a string such as a URL stays.
+    cfg = JSON.parse(blankComments(readFileSync(path.join(root, 'tsconfig.json'), 'utf8'), 'tsconfig.json').replace(/,(\s*[}\]])/g, '$1'));
+  } catch { return []; }
+  const { baseUrl, paths } = cfg?.compilerOptions ?? {};
+  if (paths === null || typeof paths !== 'object') return [];
+  const base = typeof baseUrl === 'string' ? baseUrl : '.';
+  return Object.entries(paths)
+    .filter(([, t]) => Array.isArray(t))
+    .map(([pattern, t]) => ({ pattern, targets: t.filter((x) => typeof x === 'string').map((x) => path.posix.join(base, x)) }));
+};
+
+// The tracked file that a tsconfig `paths` entry maps `spec` to. The entry with the longest prefix wins, as in TypeScript.
+const viaAlias = (spec, tracked, aliases) => {
+  const hits = [];
+  for (const { pattern, targets } of aliases) {
+    const star = pattern.indexOf('*');
+    if (star === -1) { if (pattern === spec) hits.push({ len: pattern.length, fill: '', targets }); continue; }
+    const head = pattern.slice(0, star), tail = pattern.slice(star + 1);
+    if (spec.length >= head.length + tail.length && spec.startsWith(head) && spec.endsWith(tail)) hits.push({ len: head.length, fill: spec.slice(head.length, spec.length - tail.length), targets });
+  }
+  const best = hits.sort((a, b) => b.len - a.len)[0];
+  if (!best) return null;
+  for (const t of best.targets) {
+    const hit = findTracked(path.posix.normalize(t.replace('*', best.fill)), tracked);
+    if (hit) return hit;
+  }
+  return null;
+};
+
+// The tracked file that the specifier `spec` in the file `from` names, or null. A package specifier names none,
+// unless a tsconfig `paths` entry in `aliases` (from `readPathAliases`) maps it.
+export const resolveSpecifier = (from, spec, tracked, aliases = []) => {
+  if (!spec.startsWith('.')) return aliases.length ? viaAlias(spec, tracked, aliases) : null;
+  return findTracked(path.posix.join(path.posix.dirname(from), spec), tracked);
+};
+
+// The tracked files that a source file imports. A package import and an untracked target are skipped. `opts.aliases` adds the tsconfig `paths`.
+export const importTargets = (from, src, tracked, { aliases, ...opts } = {}) => {
   const found = new Set();
   if (!/\.(ts|tsx|mjs|js|cjs)$/.test(from)) return []; // A .py, .sh or .sql file has no JS imports.
   for (const spec of importSpecifiers(src, { file: from, ...opts })) {
-    const hit = resolveSpecifier(from, spec, tracked);
+    const hit = resolveSpecifier(from, spec, tracked, aliases);
     if (hit) found.add(hit);
   }
   return [...found].sort();
