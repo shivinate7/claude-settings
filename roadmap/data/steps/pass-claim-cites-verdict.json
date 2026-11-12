@@ -7,7 +7,7 @@
  "source": "owner 2026-11-10 18:36 CST (R20), via retrospective session",
  "phase": "now",
  "order": -197,
- "updatedAt": "2026-11-12T15:31:34-06:00",
+ "updatedAt": "2026-11-12T16:30:38-06:00",
  "lane": "session_013NEJKzT3Q2wV34EZTGF4mX",
- "note": "Owner page saves 15:26 and 15:28 CST Nov 12: item 598 a, this lane opens its draft PR now."
+ "note": "Owner page saves 15:26 and 15:28 CST Nov 12: item 598 a, this lane opens its draft PR now. Coordinator 16:31 CST Nov 12: #2851 handed to runner 10 at 682b6200b. After merge, a docs-only change files the reviewer's open limits: (1) a bare hyphen reads \"pass-through\" and \"pass and fail paths\" as claims; (2) tests/guard/s42900-pass-claim-send.py lines 4-5 still list CI and build as claim nouns; (3) `verdict` cannot run where ~/.claude/bin is off PATH, as check-tail's remedy. Also after merge: janitor sweep of stray folder .claude/worktrees/agent-adc8e46faf2d2b3c0-red-sections."
 }
