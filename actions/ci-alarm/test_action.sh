@@ -226,6 +226,7 @@ t() { # want label [FAIL glob] [EMPTY glob] [text the issue must name] [jobs rea
   case "$1" in
     green) [ "$shown" = green ] && [ ! -s "$tmp/log" ] && ok=1 ;;
     red) [ "$shown" = red ] && grep -q ISSUE "$tmp/log" && ok=1 ;;
+    alarm) [ "$shown" = alarm ] && grep -q ISSUE "$tmp/log" && ok=1 ;; # a cap end with no red run: the verdict is not red
     raised) [ "$code" = 0 ] && grep -q ISSUE "$tmp/log" && ok=1 ;; # the issue opened; the verdict is not pinned
     unknown) [ "$shown" = unknown ] && [ ! -s "$tmp/log" ] && grep -q '::warning::' <<<"$out"$'\n'"$(cat "$tmp/err")" && ok=1 ;;
   esac
@@ -415,6 +416,18 @@ jobs_of 4740 scope-guard:cancelled:40
 workflow_at 4740 scope-guard:37
 t raised failure-run-with-its-only-red-job-cancelled-at-its-cap-names-the-job "" "" "job scope-guard ran 40 min, cap 37 min, run 4740"
 
+# A cap end with no red run is the alarm, not a red verdict: the verdict word is `alarm`. The control puts the same cap end (in ci)
+# beside a red failure run (in deploy) in one fixture, and the verdict stays `red`, with the cap end still named in the issue.
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/alarm-only-5020 push 5020)"
+jobs_of 5020 scope-guard:cancelled:40
+workflow_at 5020 scope-guard:37
+t alarm cap-end-only-run-prints-the-alarm-verdict "" "" "job scope-guard ran 40 min, cap 37 min, run 5020" "actions/runs/5020/jobs"
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/alarm-beside-red-5030 push 5030)" "$(gh_run deploy failure 2026-01-02 https://runs/red-beside-cap-5031 push 5031)"
+jobs_of 5030 scope-guard:cancelled:40
+jobs_of 5031 checks:failure
+workflow_at 5030 scope-guard:37
+t red red-run-beside-a-cap-end-still-prints-red "" "" "job scope-guard ran 40 min, cap 37 min, run 5030" "actions/runs/5030/jobs actions/runs/5031/jobs"
+
 # A job cancelled at its cap in attempt 1 of a run whose attempt 2 is green: the alarm names it on a "cap end named" line, the
 # verdict is not red, and no issue opens. Attempt 1's jobs come from the attempts endpoint; the latest attempt's jobs do not hold them.
 runs_are "$(gh_run ci success 2026-01-02 https://runs/retry-cap-4750 push 4750 completed 2)"
@@ -551,6 +564,45 @@ runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/scan-unknown push 4723)"
 jobs_of 4723 lint:cancelled:5
 scanner_wf | workflow_file 4723
 t green scanner-a-quoted-timeout-in-a-run-line-is-not-a-cap "" "" "" "actions/runs/4723/jobs"
+# A job's quoted `name:` and quoted `timeout-minutes:` are read without their quotes (value()'s quote branch). The quoted name holds a
+# `#`, which a comment strip would cut. Each case cancels its job at 40 minutes, against a cap of 37: the cap end names that job.
+quoted_name_wf() {
+  cat <<'YML'
+name: ci
+on: push
+jobs:
+  quoted:
+    name: "Quoted #1"
+    runs-on: ubuntu-latest
+    timeout-minutes: 37
+    steps:
+      - run: echo ok
+YML
+}
+quoted_cap_wf() {
+  cat <<'YML'
+name: ci
+on: push
+jobs:
+  scope-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: '37'
+    steps:
+      - run: echo ok
+YML
+}
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/quoted-name-5010 push 5010)"
+jobs_of 5010 "Quoted #1:cancelled:40"
+quoted_name_wf | workflow_file 5010
+t raised job-with-a-quoted-name-is-named-by-its-name "" "" "job Quoted #1 ran 40 min, cap 37 min, run 5010" "actions/runs/5010/jobs"
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/quoted-cap-5011 push 5011)"
+jobs_of 5011 scope-guard:cancelled:40
+quoted_cap_wf | workflow_file 5011
+t raised job-with-a-single-quoted-cap-is-read-as-37 "" "" "job scope-guard ran 40 min, cap 37 min, run 5011" "actions/runs/5011/jobs"
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/quoted-cap-under-5012 push 5012)"
+jobs_of 5012 scope-guard:cancelled:2
+quoted_cap_wf | workflow_file 5012
+t green job-with-a-single-quoted-cap-cancelled-under-its-cap-is-quiet "" "" ""
 
 runs_are "$(gh_run ci success 2026-01-02 u1 schedule 2)" "$(gh_run ci failure 2026-01-01 u0 schedule 1)"
 t green red-schedule-is-cleared-by-a-newer-green-schedule "" "" "" none
