@@ -51,6 +51,7 @@ CORPUS_DIR = ".github/judge-replay/corpus"  # out of hooks/: the installer lands
 SEAM = "hooks/decision_watch.py"
 GUARD = "hooks/guard.py"  # decision_watch imports it
 SHARED_NAMES = "hooks/shared_names.py"  # holds prompt text: the spawn marker and the gh logins
+NOWINDOW = "hooks/_nowindow.py"  # every judge's model call starts in it (decision_watch.run calls _nowindow.run)
 # guard.py loads its guard_<family>.py modules and git_reads.py, as the CI scope reads them (guard_test_* is no family
 # module). A change to one is a change to guard.py, which every judge's scope holds.
 GUARD_FAMILY = re.compile(r"hooks/(guard_(?!test_)[^/]*\.py|git_reads\.py)$")
@@ -334,9 +335,9 @@ RULING_NOT_OK = {"ok": False, "reason": "decisions/replay-case: a listed ruling 
 
 
 def entry(name, adapter, own, answers, extra=()):
-    """One JUDGES row. The scope is the seam, the two modules every judge reads (decision_watch imports guard; shared_names
-    holds prompt text), the judge's own files, any module its prompt or model comes from, and its corpus. `answers` are the model answers, in the judge's own shape, that its adapter reads as allow and as deny."""
-    scope = [SEAM, GUARD, SHARED_NAMES, *own, *extra, corpus_path(name)]
+    """One JUDGES row. The scope is the seam, the modules every judge reads (decision_watch imports guard; shared_names
+    holds prompt text; decision_watch.run starts the call in _nowindow), the judge's own files, any module its prompt or model comes from, and its corpus. `answers` are the model answers, in the judge's own shape, that its adapter reads as allow and as deny."""
+    scope = [SEAM, GUARD, SHARED_NAMES, NOWINDOW, *own, *extra, corpus_path(name)]
     return {"corpus": corpus_path(name), "scope": list(dict.fromkeys(scope)), "adapter": adapter, "answers": answers}
 
 
@@ -408,7 +409,8 @@ def settle(answers, runs):
         count = answers.count(got)
         if count * 2 > runs:
             return got, "%d/%d" % (count, runs)
-    return "unknown", "%d/%d" % (max(answers.count(a) for a in set(answers)), runs)
+    # a model error is no answer: it never counts toward an agreement, so the numerator holds answered runs only
+    return "unknown", "%d/%d" % (max(answers.count("allow"), answers.count("deny")), runs)
 
 
 def replay(name, runs=1):

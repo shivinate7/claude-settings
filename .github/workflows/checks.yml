@@ -1453,15 +1453,16 @@ jobs:
   # The model judges' replay (decision judge-replay-corpus, owner item 279 pick b, 2026-11-06 12:43 CST). Each judge has a corpus of known
   # allow and deny cases (.github/judge-replay/corpus/<name>.json). On a pull request that touches a judge's scope (its module, hooks/decision_watch.py,
   # a module its prompt or model comes from, its corpus, or the runner), the job replays that judge's corpus through its real entry function:
-  # one model call per case. The scope flag judge_replay is set by .github/scripts/ci-scope.sh from `hooks/judge_replay.py --paths`. The
+  # three model calls per case (--runs 3, a case's verdict is the majority of its answered runs). The scope flag judge_replay is set by .github/scripts/ci-scope.sh from `hooks/judge_replay.py --paths`. The
   # job always runs, so all-jobs-passed reads it; its steps carry the scope condition, and skip on a push or schedule and on a pull request from
   # a fork, which has no secret. The model token is the repo secret CLAUDE_CODE_OAUTH_TOKEN, written to the file decision_watch._hook_token
-  # reads. With no secret the sign-in probe fails, and the job is red (decision ci-unknown-is-red). Cap (ci-job-caps): provisional, from one
-  # local run of every corpus (58 cases, one run each, 201 s) plus about 2 min for the install; the first CI run on a pull request that touches a judge replaces it.
+  # reads. With no secret the sign-in probe fails, and the job is red (decision ci-unknown-is-red). Cap (ci-job-caps): 75, the interim stopgap
+  # (owner 12:11 CST Nov 10), so the cap never ends the job before a red step. Cost, unmeasured in CI: one local run of every corpus took 201 s at one run
+  # per case (58 calls); three runs make 174 calls, about 10 min, plus about 2 min for the install. The first CI run on a pull request that touches a judge replaces it.
   judge-replay:
     runs-on: ubuntu-latest
     needs: scope
-    timeout-minutes: 15 # provisional
+    timeout-minutes: 75 # interim stopgap, owner 12:11 CST Nov 10
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ (needs.scope.outputs.judge_replay == 'true' || github.event_name != 'pull_request') && (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && github.event.pull_request.head.repo.fork != true }}
@@ -1501,11 +1502,11 @@ jobs:
         if: ${{ (needs.scope.outputs.judge_replay == 'true' || github.event_name != 'pull_request') && github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork != true }}
         env:
           BASE_REF: ${{ github.base_ref }}
-        run: python3 hooks/judge_replay.py --changed "origin/$BASE_REF"
+        run: python3 hooks/judge_replay.py --changed "origin/$BASE_REF" --runs 3
 
       - name: Replay every judge
         if: ${{ (needs.scope.outputs.judge_replay == 'true' || github.event_name != 'pull_request') && github.event_name == 'workflow_dispatch' }}
-        run: python3 hooks/judge_replay.py --all
+        run: python3 hooks/judge_replay.py --all --runs 3
 
   # The guard fixture suite on Windows, split off checks-windows by cut F. On pull_request it runs only the cases
   # tagged windows (the slice step below), whole, in this job. Push, schedule and
