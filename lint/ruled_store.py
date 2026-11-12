@@ -3,7 +3,7 @@
 
     python3 lint/ruled_store.py --session-line REPO   the lines the session-start hook prints, or nothing
     python3 lint/ruled_store.py list REPO             every open entry in full
-    python3 lint/ruled_store.py check REPO            exit 1 when an entry lacks a required key or a zoned `at`
+    python3 lint/ruled_store.py check REPO            exit 1 on a store problem (check_store)
 
 The store is the folder roadmap/rulings on origin/roadmap of REPO, one JSON file per ruling. An entry holds `id`,
 `at` (ISO 8601 with a zone), `ruling`, `source`, `status` ("open" or "closed"), `supersedes` (a list of
@@ -22,7 +22,12 @@ a follow-up step wires it into the shared guard core.
 
 Cost: this module keeps no process and no timer and writes no file. ruled_entries starts two read-only git processes
 (one ls-tree, one cat-file --batch). open_entries starts one more cat-file --batch, and only when an open entry
-names `lands_in`. A missing ref, a missing folder or a failed git start gives [], never an error.
+names `lands_in`. check_store adds one more cat-file --batch, only when an open entry names a `step`. A missing ref, a
+missing folder or a failed git start gives [], never an error.
+
+An unchecked entry (`supersedes_none` starts with "unread": triage has not read what it supersedes) informs a session
+and is marked "(unchecked, not law)" in the past-ruling search. It never governs a guard: ruling_for_guard and
+lifted_guards skip it, even when it lists a guard ref.
 """
 import json
 import os
@@ -36,6 +41,8 @@ ENTRIES_LIFT_GUARDS = True  # an open entry governs the guard rules it names
 STORE_REF = "origin/roadmap"
 MAIN_REF = "origin/main"
 STORE_DIR = "roadmap/rulings/"
+STEP_DIR = "roadmap/data/steps/"  # one JSON file per roadmap step on STORE_REF; its `status` is "done" once landed
+STEP_SLUG = re.compile(r"^[\w.-]+$")
 REQUIRED = ("id", "at", "ruling", "source")
 SESSION_ENTRIES = 5  # entry lines after the header; with the header and the command line, at most 7 of the 8 allowed
 RULING_CUT = 100
@@ -171,7 +178,7 @@ def lifted_guards(entries):
         return []
     lifted = []
     for entry in entries:
-        if entry.get("status") == "closed":
+        if entry.get("status") == "closed" or is_unchecked(entry):
             continue
         for item in _supersedes(entry):
             ref = item.get("ref")
@@ -188,10 +195,10 @@ def _guard_name(ref):
 
 def ruling_for_guard(guard_rule, entries):
     """The newest open entry whose `supersedes` names `guard_rule` (kind "guard-rule", first token of the ref), or None.
-    None while ENTRIES_LIFT_GUARDS is False. A closed entry in `entries` is ignored."""
+    None while ENTRIES_LIFT_GUARDS is False. A closed or unchecked entry in `entries` is ignored."""
     if not ENTRIES_LIFT_GUARDS:
         return None
-    named = [e for e in entries if e.get("status") != "closed"
+    named = [e for e in entries if e.get("status") != "closed" and not is_unchecked(e)
              and any(i.get("kind") == "guard-rule" and _guard_name(i.get("ref")) == guard_rule
                      for i in _supersedes(e))]
     return max(named, key=entry_instant) if named else None
@@ -225,9 +232,11 @@ def check_entry(entry):
     return problems
 
 
-def _unread(entry):
+def is_unchecked(entry):
+    """True when triage has not read what the entry supersedes: its `supersedes_none` starts with "unread". Such an
+    entry informs a session and never governs a guard, even if it lists a guard ref."""
     reason = entry.get("supersedes_none")
-    return not _supersedes(entry) and isinstance(reason, str) and reason.strip().lower().startswith("unread")
+    return isinstance(reason, str) and reason.strip().lower().startswith("unread")
 
 
 def supersedes_text(entry, cut=None):
@@ -235,7 +244,7 @@ def supersedes_text(entry, cut=None):
     triage has not read, when it lists none."""
     refs = [str(item.get("ref", "")) for item in _supersedes(entry)]
     if not refs:
-        return "unread" if _unread(entry) else "none"
+        return "unread" if is_unchecked(entry) else "none"
     if cut:
         refs = [r if len(r) <= cut else r[:cut] + "..." for r in refs]
     return "; ".join(refs)
@@ -254,7 +263,7 @@ def session_lines(repo_dir):
         if not opened:
             return []
         newest = sorted(opened, key=entry_instant, reverse=True)
-        unread = sum(1 for e in opened if _unread(e))
+        unread = sum(1 for e in opened if is_unchecked(e))
         lines = ["rulings not on main: %d open (%d with no supersedes read yet), newest first" % (len(opened), unread)]
         for entry in newest[:SESSION_ENTRIES]:
             lines.append("  %s %s: %s | supersedes %s" % (entry.get("id", "?"), entry.get("at", "?"), _one_line(entry),
@@ -276,13 +285,48 @@ def _list(repo_dir):
     return 0
 
 
+def _joined(ids):
+    return ids[0] if len(ids) == 1 else ", ".join(ids[:-1]) + " and " + ids[-1]
+
+
+def check_store(repo_dir):
+    """One problem line per defect in the store: each check_entry problem (prefixed by the entry's id); two or more open
+    entries that supersede one ref of one kind (the ref's first token); an open entry whose `step` file on origin/roadmap
+    says "done". A step file that is missing or unreadable is no problem. [] when the store is clean or absent."""
+    entries = ruled_entries(repo_dir)
+    problems = ["%s: %s" % (e.get("id", "?"), p) for e in entries for p in check_entry(e)]
+    opened = open_entries(entries, repo_dir)
+    shared = {}
+    for entry in opened:
+        for item in _supersedes(entry):
+            # A main-sentence ref quotes a sentence, so its first token (often a file name) names nothing alone.
+            ref = item.get("ref")
+            name = _norm(ref) if item.get("kind") == "main-sentence" and isinstance(ref, str) else _guard_name(ref)
+            if name:
+                ids = shared.setdefault((item.get("kind"), name), [])
+                if entry.get("id") not in ids:
+                    ids.append(entry.get("id", "?"))
+    for (_kind, name), ids in shared.items():
+        if len(ids) > 1:
+            problems.append("entries %s both supersede %s" % (_joined(ids), name))
+    stepped = [e for e in opened if isinstance(e.get("step"), str) and STEP_SLUG.match(e["step"])]
+    specs = ["%s:%s%s.json" % (STORE_REF, STEP_DIR, e["step"]) for e in stepped]
+    blobs = _batch_blobs(repo_dir, specs)
+    for entry, spec in zip(stepped, specs):
+        try:
+            done = json.loads(blobs[spec].decode("utf-8")).get("status") == "done"
+        except (KeyError, ValueError, AttributeError):
+            continue
+        if done:
+            problems.append("step %s is done but entry %s is still open" % (entry["step"], entry.get("id", "?")))
+    return problems
+
+
 def _check(repo_dir):
-    bad = 0
-    for entry in ruled_entries(repo_dir):
-        for problem in check_entry(entry):
-            print("%s: %s" % (entry.get("id", "?"), problem))
-            bad += 1
-    return 1 if bad else 0
+    problems = check_store(repo_dir)
+    for problem in problems:
+        print(problem)
+    return 1 if problems else 0
 
 
 def main(argv):
