@@ -12905,25 +12905,27 @@ class RepoDirFlag(RepoDirRuns, Env):
                 self.assertEqual(rc, 2, "a prefix of a flag was taken as the flag, not refused: " + out)
                 self.assertEqual(seen["hosts"], [], "a prefix of a flag read a pull request")
 
-    def test_the_gh_lock_runs_its_calls_in_the_checkout_it_is_given(self):
-        """Outside the cloud the lock is GitHub's. Its `gh api` calls name the repo by {owner}/{repo}, which gh reads from the directory it
-        runs in, so default_lock(root) must run them in root, or the lock lands in another repo."""
+    def test_the_git_lock_runs_its_calls_in_the_checkout_it_is_given(self):
+        """The lock's git calls name their checkout with `git -C <root>`, so default_lock(root) must run them in root, or the lock
+        lands in another repo. A read that fails in the wrong checkout still made its calls, and the assert names where they ran."""
         lock = merge.default_lock(self.b_co)
-        self.assertIsInstance(lock, merge.GhLock, "fixture: outside the cloud the lock is GitHub's")
+        self.assertIsInstance(lock, merge.GitLock, "default_lock(root) is not a GitLock")
         lock.pause = lambda s: None  # a retry is a no-op: a case never sleeps
         ran = []
         real_sh = merge.sh
 
         def record(args, *rest, **kwargs):
-            if args and args[0] == "gh":
-                ran.append(kwargs.get("cwd"))
-                return 1, '{"message": "Not Found"}'
+            if args and args[0] == "git":
+                ran.append(args[2] if args[1:2] == ["-C"] else kwargs.get("cwd"))  # the checkout a git call works in
             return real_sh(args, *rest, **kwargs)
 
         with unittest.mock.patch.object(merge, "sh", record):
-            lock.read("main")
-        self.assertTrue(ran, "the lock read made no gh call")
-        self.assertEqual(ran, [self.b_co] * len(ran), "the lock's gh calls ran in %r, not the checkout it was given" % (ran,))
+            try:
+                lock.read("main")
+            except merge.Stop:
+                pass
+        self.assertTrue(ran, "the lock read made no git call")
+        self.assertEqual(ran, [self.b_co] * len(ran), "the lock's git calls ran in %r, not the checkout it was given" % (ran,))
 
 
 class BatchRunnerHead(CloudSession):
