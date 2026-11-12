@@ -888,13 +888,11 @@ REFUSAL_UNCITED_EXEMPT = {
 
 
 def cite_homes(root=rule_audit.ROOT):
-    """-> (decision slugs, rule anchors), read from the repo as it is now."""
+    """-> (decision slugs, rule anchors), read from the repo as it is now. The anchors are read from every
+    RULE_FILES entry, the one list of rule files, so an anchor that moves to a skill is still a home."""
     decisions_dir = os.path.join(root, "docs", "decisions")
     decisions = {name[:-3] for name in os.listdir(decisions_dir) if name.endswith(".md")}
-    anchors = set(rule_audit.claude_md_anchors(rule_audit.read(os.path.join(root, "CLAUDE.md"))))
-    for path in glob.glob(os.path.join(root, "output-styles", "*.md")):
-        anchors.update(rule_audit.claude_md_anchors(rule_audit.read(path)))
-    return decisions, anchors
+    return decisions, set(rule_audit.claude_md_anchors(rule_audit.rule_text(root)))
 
 
 def cites(text, homes):
