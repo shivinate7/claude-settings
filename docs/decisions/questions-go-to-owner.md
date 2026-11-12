@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner, 2026-10-26: a session with a question brings it to the owner. Rule `questions-go-to-owner` (name the wait; keep working on what the answer does not touch) holds the wording.
+Owner, 2026-10-26: a session with a question brings it to the owner. Rule `questions-go-to-owner` (name the wait; keep working on what does not depend on the answer) holds the wording.
 
 - **Take a pick that can be undone** (roadmap step c102, take undoable picks; 2026-10-27). A question whose pick rule `parallelism-keep-going` lets the session take with no question is not asked. The session takes the pick and names it under Done. That rule holds the exceptions: a pick that cannot be undone, a change to the owner's goal, work in another repo, and a wait for the owner's grant that another rule makes. Incident: a mailaudit report asked "link the waiting page now with a folder move, or later"; later changed nothing and could be undone. The Stop reply judge (`hooks/reply_judge.py`) notes such an Input Needed item and never blocks (decision `reply-judge-samples-never-refuses`).
 - **A picture in each option** (owner, 2026-10-27 12:10 CDT): "Some of your questions on your artifact need pictures. You should in general put a mockup image inside each option card on the waiting page first. No links to folders." A decision whose options differ in how something looks carries one mockup per option, shown inside that option's card, before it is added. Every option carries one, and the page warns on an option without one (owner, 2026-10-27 23:40 CDT). A tap on the picture opens the viewer (owner, 2026-10-27 12:13 CDT). A link to a folder or another artifact does not count. Skill `waiting-page` ("Add a design") holds the format.

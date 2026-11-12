@@ -319,7 +319,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
      open: choosing another option is the only way out. A `multi` item stands with its list `pick`: the owner's ticks replace it. A question that touches a rule starts blank.
 3. Once the item exists, name it in the reply in one line, with the page URL for an open item only
    (a closed item is one line on the page, with no card to open). Open no question box (`questions-go-to-owner`).
-4. Keep going on work the answer does not gate (rule `questions-go-to-owner`).
+4. Keep going on work that does not depend on the answer (rule `questions-go-to-owner`).
 
 ## Read the answers
 
