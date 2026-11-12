@@ -690,7 +690,7 @@ class RecordSlugsTests(unittest.TestCase):
 
     def test_ratchet_equal_count_passes(self):
         # One edit drops a Fix and another adds one. The count stays at one, so the branch passes. The edited line keeps
-        # its Seen field: a base line with a Seen field keeps one (lane ruling 1, 2026-11-07 15:58 CST).
+        # its Seen field: a base line with a Seen field keeps one (decision notes-sightings-expiry).
         self.put(DEBT_NOTES, NOTES_HEAD + OLD_NOTE + KEPT_NOTE)
         self.commit_base()
         self.put(DEBT_NOTES, NOTES_HEAD + "- old-note: an old gap. Fix: already fixed on main 1a2b3c4\n"
@@ -951,7 +951,7 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertFalse(self.failed_about(out, FIXED_DEBT), out)
 
     def test_an_edit_that_drops_a_seen_field_is_red(self):
-        # Decision notes-sightings-expiry (lane ruling 2026-11-07 15:58 CST): a note whose base line had a Seen field keeps
+        # Decision notes-sightings-expiry: a note whose base line had a Seen field keeps
         # one. An edit that drops it is red, whatever the date was.
         self.put(DEBT_NOTES, NOTES_HEAD + "- kept-note: a gap. Seen: %s x1. Fix: none — owner decides. Until: 2026-11-20\n"
                  % day(-1))
@@ -1083,7 +1083,7 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertNotIn("notes.md", out, out)
 
     def test_debt_flow_reads_unknown_for_a_start_that_is_no_commit(self):
-        # Review round 2, finding A (verification-report-unknown-reads): a START that does not resolve to a commit is UNKNOWN
+        # Rule verification-report-unknown-reads: a START that does not resolve to a commit is UNKNOWN
         # and exits non-zero. It is not a root commit, so it must not read the empty tree and count every debt as opened.
         self.put(DEBT_NOTES, NOTES_HEAD)
         self.commit_base()
@@ -1095,7 +1095,7 @@ class RecordSlugsTests(unittest.TestCase):
         self.assertNotIn("debts opened", out, out)
 
     def test_debt_flow_counts_a_debt_added_in_the_start_commit(self):
-        # Decision notes-sightings-expiry (lane ruling 2026-11-07 15:58 CST): the window includes the START commit's own
+        # Decision notes-sightings-expiry: the window includes the START commit's own
         # additions, so a debt that START adds and the end still holds is opened.
         self.put("debts/early-debt.md", DEBT_NO_FIX)  # added in START itself
         self.put(DEBT_NOTES, NOTES_HEAD)
