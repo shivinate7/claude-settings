@@ -4656,6 +4656,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)
 
+    # 7a. A shell write of an owner answer on the waiting page (rule answers-session-write).
+    matched = answers_shell_hit(raw, cwd)
+    if matched:
+        refuse(tool, "deny", "answers-session-write", ANSWERS_REASON, matched)
+
     # 7b. A project config edit: allowed (Decision 7), and noted in the log only.
     matched = project_config_shell_hit(stripped, cwd)
     if matched:
@@ -4703,6 +4708,55 @@ def data_tool_hit(tool_input, cwd="", session_id=None):
     """(rule, matched) for the first write of a waiting item that a rule refuses, else ("", ""). The write
     filter and the page check live in hooks/question_form.py, which hooks/call_judge.py also reads."""
     return data_tool_judge(tool_input, cwd, session_id)[0]
+
+
+# Rule `answers-session-write` (decision answers-session-write; pick 2 of waiting-page-one-store). An answer on
+# the waiting page is the owner's word. Claude has written one by mistake in normal work, and the page reads it as
+# the owner's grant. The rule judges three tools: ArtifactData (hooks/question_form.py answers_write_hit), Write and
+# Edit, and the shell (a redirect, `tee`, `cp`, `mv`, `rm`, `sed -i` by `shell_write_hit`, and a git add or commit that
+# names the path by `answers_git_hit`). The path test is question_form.is_answers_path. A read, and a mention in a quote,
+# a heredoc body or a comment, are no write. Cost: no process; a shell command that holds no "answers" is not read further.
+# Known gaps: a `git add` of the whole waiting folder (the export copy needs it), and a write by an interpreter that
+# builds the path out of pieces.
+ANSWERS_REASON = ("this call would write an answer on the waiting page. An answer is the owner's own word, so a session "
+                  "that writes one forges a grant he never gave. Reading the answers is free. To ask him something, write "
+                  "a waiting item and let him answer on the page. (decision answers-session-write, a session never "
+                  "writes an owner answer)")
+GIT_VALUE_OPTIONS = ("-m", "-F", "-C", "-c", "--message", "--file", "--author", "--date", "--reuse-message", "--reedit-message")
+
+
+def _answers_word(word, cwd):
+    """shell_write_hit's predicate: True for a word that names a path in the answers folder."""
+    if not isinstance(word, str) or _layout_module().WAITING_ANSWERS not in word:
+        return False
+    import question_form
+    return question_form.is_answers_path(word, cwd)
+
+
+def answers_git_hit(raw, cwd):
+    """The answers path that a `git add`, `commit`, `stage`, `rm` or `mv` in the command names, else ''.
+    A commit message, or another option's value, is no path.
+    A whole-folder add that names no answers path is not read (known gap above)."""
+    for segment in split_segments(strip_heredoc_bodies(raw)):
+        for subcommand, args in git_calls(segment):
+            if subcommand not in ("add", "commit", "stage", "rm", "mv"):
+                continue
+            skip = False
+            for arg in args:
+                if skip:
+                    skip = False
+                elif arg in GIT_VALUE_OPTIONS:
+                    skip = True
+                elif not arg.startswith("-") and _answers_word(arg, cwd):
+                    return arg
+    return ""
+
+
+def answers_shell_hit(raw, cwd):
+    """The answers path the shell command writes, else ''."""
+    if not isinstance(raw, str) or _layout_module().WAITING_ANSWERS not in raw:
+        return ""   # the one cheap read: a command that never says "answers" writes none
+    return shell_write_hit(raw, cwd, _answers_word) or answers_git_hit(raw, cwd)
 
 
 # ------------------------------------------------------------------ a waiting page behind main is not published
@@ -6245,9 +6299,11 @@ def judge(payload) -> None:
 
     if tool == DATA_TOOL:
         import override  # the writer's record id (cse_<x> read as session_<x>); the payload's id is a local UUID
+        import question_form
+        forged = question_form.answers_write_hit(tool_input)
+        if forged:
+            refuse(tool, "deny", "answers-session-write", ANSWERS_REASON, forged)
         (rule, matched), item_writes = data_tool_judge(tool_input, cwd, override.remote_session_id())
-        if rule:
-            import question_form
         # One literal refuse() per rule: lint/rule_audit.py reads only string-literal rule ids.
         if rule == "port-question":
             refuse(tool, "deny", "port-question", question_form.PAGE_REASONS["port-question"], matched)
@@ -6359,6 +6415,10 @@ def judge(payload) -> None:
         # 7. A frozen path. Only a writing tool reaches here, so a frozen path stays readable.
         if is_frozen(target, cwd):
             refuse(tool, "deny", "frozen-path", FROZEN_REASON, target)
+
+        # 7a0. A write into the waiting page's answers folder (rule answers-session-write).
+        if _answers_word(target, cwd):
+            refuse(tool, "deny", "answers-session-write", ANSWERS_REASON, target)
 
         # 7a. A write that leaves a session handoff without a required section (rule handoff-sections).
         # Not in never_lifted: the owner may mean the write.
