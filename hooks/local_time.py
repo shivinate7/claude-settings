@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""UserPromptSubmit, SubagentStart and PostToolUse hook: tell the session the time in US Central (America/Chicago). On UserPromptSubmit it also saves each owner message to the session's feedback inbox. After an ArtifactData read of `answers` it saves a waiting-page note to the same inbox.
+"""UserPromptSubmit, SubagentStart and PostToolUse hook: tell the session the time in US Central (America/Chicago). On UserPromptSubmit it also saves each owner message to the session's feedback log. After an ArtifactData read of `answers` it saves a waiting-page note to the same inbox.
 
 Modes:
 - UserPromptSubmit: Tells the session the time in US Central, and saves the owner's message to the
-  session's inbox file (decision owner-feedback-inbox).
+  session's feedback log (decision owner-feedback-inbox).
   A prompt whose first word is `override` also grants a one-act owner override, and the rest is the
   reason, logged to guard.log. `override <n>[m|h]` and `override off` mean that only as the whole prompt.
   A plain typed ask that holds the word `override` may grant one too, after a model call
@@ -18,7 +18,7 @@ Plain stdout is context for UserPromptSubmit. SubagentStart takes context only a
 The US rule is coded here, not read from zoneinfo: Windows Python often has no tz database.
 Advisory, fail-open: any error prints one stderr line and exits 0.
 
-This hook is also the owner feedback inbox's capture (decision owner-feedback-inbox). Every
+This hook is also the owner feedback log's capture (decision owner-feedback-inbox). Every
 UserPromptSubmit prompt is appended verbatim to <config dir>/handoffs/<session_id>.inbox.md, with its
 Central time, in a backtick fence longer than any backtick run in the text. No word opens or closes
 capture. A notice or an agent hand-back (a prompt that starts with a shared_names.MACHINE_TAGS
@@ -155,7 +155,7 @@ def _session_base(session_id):
 
 def report_marker_path(session_id):
     """The file report_guard.py writes when it blocks for a missing report, or None. Same folder
-    as the inbox files."""
+    as the feedback logs."""
     base = _session_base(session_id)
     return None if base is None else base + ".report-block"
 

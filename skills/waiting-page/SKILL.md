@@ -263,7 +263,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
   asks a yes/no. It passes only when the same turn sent the question to the writer or wrote a page item.
   The box counts only in a repo with no page. A repo with no page is not blocked, and a systemMessage says so. Gap: no Stop, no check.
 - A chat answer: send the answer, with its time, to the writer. The owner's answer closes the item.
-  Jot `- <id> [page] -> page:<n>` under the owner's message in the inbox; the feedback guard
+  Jot `- <id> [page] -> page:<n>` under the owner's message in the feedback log; the feedback guard
   (`hooks/feedback_guard.py`) blocks until the transcript shows that send. The writer puts the item's
   `n` in every items write, set or update, so the guard can match it.
   - Not written yet: the writer writes the item closed (`status: "closed"` and `closed` set to now), with the answer and its
@@ -366,7 +366,7 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
 - A session that acts on an answer it did not route checks it first. Make the fetch folder with `python3 ~/.claude/skills/waiting-page/page_grant.py --new-fetch <scratch dir>`; it prints `fetch <dir>`. Fetch `answers/<id>` and `items/<id>` with `ArtifactData get` and `out_dir` set to that `<dir>`. Then run `python3 ~/.claude/skills/waiting-page/page_grant.py --root <repo> --page-url <url> --item <id> --fetched <dir> --pick <key>`. `--root` is a checkout of the page's repo, the one whose extras register the page (in a cloud session, `/home/user/claude-settings`). `--pick` is required and must equal the page's choice. The checker counts only a folder `--new-fetch` made, checked once, holding only those two files, none older than its stamp: an absent doc saves no file, so a reused folder could hold a withdrawn answer. A check uses the folder up as its first step, so every verdict uses it up: a retry fetches again into a new folder. The `counted` line is `counted item=<id> n=<n> choice=<key> at=<time> label=<label> [note=<json>]`. `label=` is the picked option's label as one JSON string, a JSON list for a multi item, or `null` for an overturn. Act only on `counted`, and only on the act that label names. A settings change counts only when the label names `settings.json` and the entry by its exact title or key, one entry per grant. Quote its page, item id, n, choice, `at` and label. Decision relayed-grant-read-from-page holds the relay rules.
 - A withdrawn answer is no answer. Read `answers/<id>` again just before you route it. If it is gone,
   the owner withdrew it: the item is still open, and nothing is ruled. That re-read also saves the
-  answer's note to your feedback inbox (`local_time.py --page-note`), so jot it like a chat message.
+  answer's note to your feedback log (`local_time.py --page-note`), so jot it like a chat message.
 - `choice: "none"` asks for new options, unless its note gives a clear direction. It never picks an option.
   With a clear direction (see "A decision answer is clear only when"), it is a clear answer: the note becomes
   a roadmap step (a todo record where there is no roadmap), routed by the busy-lane rule in "Route and close". The owner is not asked again. Otherwise treat it as step 3 of
@@ -475,7 +475,7 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
 
 A parked answer (`answers/park.<id>`, or an item's answer with `act: "park"` under `answers/<item id>`): the writer waits 10 seconds after its `at`, as for an item's answer, so it never routes an act inside the Undo window.
 Then it reads the answer again (`ArtifactData get`). If it is gone, the owner undid or withdrew it: leave the entry, and rule nothing.
-A re-read of `answers/park.<id>` saves nothing to the inbox, because the hook skips a document with `parked: true`. An item's park answer has no `parked` key, so the hook saves its note when it has one. Then the writer finds the entry in `meta/page.parked` by `id`.
+A re-read of `answers/park.<id>` saves nothing to the feedback log, because the hook skips a document with `parked: true`. An item's park answer has no `parked` key, so the hook saves its note when it has one. Then the writer finds the entry in `meta/page.parked` by `id`.
 A chat word on a parked line takes the same branch. That word is the Copy text (`Unpark "<ref>"` or `Drop "<ref>"`).
 A Copy word `<n> park (<note>)` parks the open item numbered `<n>`, with that note, by the park answer branch below.
 The writer finds the entry by its `ref`, or by its `id` when the word names it. Nothing is in `answers/`, so it skips the wait, the re-read and the answer delete.

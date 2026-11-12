@@ -17,7 +17,7 @@
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V] [--grant "#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT"]
-                          print the review record for the head SHA that was reviewed. It refuses a Kind or Guard that the diff contradicts. Stops (exit 1) when the PR's live head is another
+                          print the review log for the head SHA that was reviewed. It refuses a Kind or Guard that the diff contradicts. Stops (exit 1) when the PR's live head is another
                           sha. Posts nothing: the lane posts it as a PR comment. --fix-check adds the optional `Fix check:` line after
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
                           unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
@@ -29,7 +29,7 @@
                           Any commit with one parent ends the walk as stale. `merge --reviewed` proves it
                           (live_review_state). A read or a merge-tree that cannot run, such as a commit the checkout lacks after one fetch, keeps
                           the record stale and the line says unknown; the fix verifier then refuses. Any other difference keeps today's rules.
-  merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
+  merge --reviewed        one line per open PR that has a review log comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record.
   merge --reviewed --root DIR [--root DIR ...]
                           the same list for each repo checkout DIR, in the order given, one block each: `repo OWNER/NAME:`, that repo's lines,
@@ -246,11 +246,11 @@ UNKNOWN_CITE = "(rule verification-report-unknown-reads, a read that could not r
 # The two role cites name no tier: a lane must not learn which tier may claim a merge.
 ROLE_CITE = "(decision session-tiers, a session's tier decides whether it may merge)"
 LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a head that passes `merge --lane-lint`)"
-# The paths a review record's `--guard no` refuses: the rule dirs, then the tool and the hooks, as folder prefixes. GUARD_FILES match a whole path.
+# The paths a review log's `--guard no` refuses: the rule dirs, then the tool and the hooks, as folder prefixes. GUARD_FILES match a whole path.
 # It reads RULE_DIRS, never a copy.
 GUARD_PATHS = stale_cites.RULE_DIRS + ("merge/", "githooks/")
 GUARD_FILES = ("settings.json",)
-REVIEW_CITE = "(decision pr-review-record, a review record names the head it reviewed and only an open pull request takes one)"
+REVIEW_CITE = "(decision pr-review-record, a review log names the head it reviewed and only an open pull request takes one)"
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
 REPO_CITE = "(decision merge-confirm-repo, -C names the checkout a merge acts in, so a -C that names no folder stops the merge)"
 
@@ -1114,7 +1114,7 @@ class Host:
 
     def issue_comments(self, since):
         """-> (records, lints): one list read of the repo's issue comments updated since `since`. The number comes from the comment's issue_url.
-        records is {PR number: [(body, created_at, updated_at) of each review record comment, oldest first]}: a body counts only when the review record
+        records is {PR number: [(body, created_at, updated_at) of each review log comment, oldest first]}: a body counts only when the review log
         marker is its whole first line. A timestamp the read did not give is None.
         lints is {PR number: [lane-lint comment bodies, oldest first]}: the lint marker is the whole first line and the author is the repo's owner.
         A failed read is a Stop. The one home of the comment read: review_records, review_comments and the lane-lint check each take their part."""
@@ -1129,7 +1129,7 @@ class Host:
         return records, lints
 
     def review_records(self, since):
-        """-> {PR number: [(body, created_at, updated_at) of each review record comment, oldest first]}: the records half of issue_comments."""
+        """-> {PR number: [(body, created_at, updated_at) of each review log comment, oldest first]}: the records half of issue_comments."""
         return self.issue_comments(since)[0]
 
     def post_comment(self, n, body):
@@ -1139,7 +1139,7 @@ class Host:
             raise Stop(f"posting the comment on #{n} failed {LANE_LINT_CITE}: {out}")
 
     def review_comments(self, since):
-        """-> {PR number: [review record bodies, oldest first]}: review_records without the timestamps."""
+        """-> {PR number: [review log bodies, oldest first]}: review_records without the timestamps."""
         return {n: [row[0] for row in rows] for n, rows in self.review_records(since).items()}
 
     def pr_files(self, n, changed):
@@ -3780,7 +3780,7 @@ def default_lock(root):
     POST git/commits and git/refs, PATCH and DELETE git/refs; measured c53) and passes a push to refs/heads. Elsewhere GhLock, as before."""
     return GitLock(root) if os.environ.get("CLAUDE_CODE_REMOTE") == "true" else GhLock(cwd=root)
 
-# The review record: a comment on the pull request (decision pr-review-record). This is the one home of its form.
+# The review log: a comment on the pull request (decision pr-review-record). This is the one home of its form.
 REVIEW_MARKER = "<!-- review-record -->"
 
 # The lane-lint comment (decision lanes-run-no-full-ci-job): `merge --lane-lint <pr>` posts it on a PASS, and `--reviewed` and the join read it. The one home of its form.
@@ -4035,7 +4035,7 @@ def live_review_state(h, rec, live, main):
 
 def lint_check(h, n, info, root, cfgrel):
     """The batch runner's join needs a lane-lint PASS at the live head (decision lanes-run-no-full-ci-job): read from the repo's comment list, the one read the
-    review record uses. No PASS that names the live head, a FAIL, an unreadable result, or a failed read is a Stop that names `merge --lane-lint <n>`; a failed read
+    review log uses. No PASS that names the live head, a FAIL, an unreadable result, or a failed read is a Stop that names `merge --lane-lint <n>`; a failed read
     is `lane lint unknown`, never a pass. It runs before the lock, so nothing is claimed, pushed or merged. The caller passes info["head"] to confirm as
     linted_head, so a head pushed after this read is refused there. A PASS for an earlier head also counts when every commit since is a claim (claim_only):
     the join's own claim push, resumed, moves the head by exactly that."""
@@ -4292,7 +4292,7 @@ def release_check(root, h, numbers, lints, root_why=None):
     """-> (lines, ok) of `merge --release-check`: one line per number in `numbers`, in order: `#N PASS`, or `#N FAIL: ` and the reasons joined by
     `; `; a PASS whose lint is UNKNOWN-AT-CAP reads `#N PASS (lint unknown at cap)`. A check that cannot run is a reason (`unknown (...)`), and every
     number gets a line, so a missing line cannot read as a pass. `lints` maps a number to the (sha, verdict) of the lint the caller reports. The checks:
-    the pull request is open; its newest review record is done at the live head
+    the pull request is open; its newest review log is done at the live head
     (live_review_state, as `--reviewed` reads it); that record is unedited (created_at equals updated_at); the lint ran on the live head and its verdict is PASS or UNKNOWN-AT-CAP;
     the merge with the base tip is clean; and a base that is not the default branch is the head of a pull request in the call that passes.
     `root_why` says why the checkout root could not be read; then no check runs, and each number's one reason is that unknown.
@@ -4327,7 +4327,7 @@ def release_check(root, h, numbers, lints, root_why=None):
         if not records_why:
             rows = records.get(n)
             if not rows:
-                out.append("no review record")
+                out.append("no review log")
             else:
                 body, created, updated = rows[-1]  # only the newest record counts
                 rec = parse_review(body)
@@ -4336,9 +4336,9 @@ def release_check(root, h, numbers, lints, root_why=None):
                 if state != "done":
                     out.append(why)
                 if created is None or updated is None:
-                    out.append(unknown_reason("the newest review record gave no timestamps"))
+                    out.append(unknown_reason("the newest review log gave no timestamps"))
                 elif created != updated:
-                    out.append("the newest review record was edited after it was posted")
+                    out.append("the newest review log was edited after it was posted")
         if lints.get(n) is None:
             out.append("no lint verdict was given")
         elif lints[n][0] != i["head"]:
@@ -5010,7 +5010,7 @@ def write_merge_role(tier):
     if not sid:
         raise Stop("--role needs CLAUDE_CODE_REMOTE_SESSION_ID, and it is not set. " + ROLE_CITE)
     if tier not in MERGE_ROLES:
-        raise Stop("this session's tier may not record a merge role. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)  # names no valid tier: a lane must not learn which to claim
+        raise Stop("this session's tier may not record a merge role. Run `merge --lane-lint <pr>` first. Then post the review log on the pull request; the batch runner finds it. " + ROLE_CITE)  # names no valid tier: a lane must not learn which to claim
     path = role_path()
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")  # replace, so a reader never sees half a file
     try:
@@ -5025,7 +5025,7 @@ def write_merge_role(tier):
 def guard_hits(paths):
     """-> the sorted paths that start with a GUARD_PATHS entry or equal a GUARD_FILES entry, less each test path: a test file alone is no
     guard change (decision hold-unsafe-after-round-3). hooks/guard.py is_test_rel is the one home of what a test path is."""
-    import guard as hook_guard  # here, not at the top: it loads the whole guard set, and only the review record needs it
+    import guard as hook_guard  # here, not at the top: it loads the whole guard set, and only the review log needs it
     return sorted(p for p in paths if (p.startswith(GUARD_PATHS) or p in GUARD_FILES) and not hook_guard.is_test_rel(p))
 
 def is_doc(path):
@@ -5100,11 +5100,11 @@ def build_parser():
     p.add_argument("--config", default=".github/stamp.json")
     p.add_argument("--idle-lanes", action="store_true", help="list the lanes to archive from the roadmap's live file; takes no lock, merges and posts nothing")
     p.add_argument("--live", default=None, metavar="FILE", help="with --idle-lanes: the publisher's live-work file")
-    p.add_argument("--reviewed", action="store_true", help="list the open pull requests with their review record state and live CI")
+    p.add_argument("--reviewed", action="store_true", help="list open pull requests with their review log state and live CI")
     p.add_argument("--root", action="append", default=[], metavar="DIR", help="with --reviewed: a repo checkout to list, in place of the working directory's; repeat it for each repo")
-    p.add_argument("--release-check", nargs="+", action="extend", type=pr_arg, metavar="N", help="one line per pull request: PASS, or FAIL and the reasons (open, review record done at the live head and unedited, lint verdict, clean merge, stack); a missing line is a FAIL; takes no lock, merges nothing")
+    p.add_argument("--release-check", nargs="+", action="extend", type=pr_arg, metavar="N", help="one line per pull request: PASS, or FAIL and the reasons (open, review log done at the live head and unedited, lint verdict, clean merge, stack); a missing line is a FAIL; takes no lock, merges nothing")
     p.add_argument("--lint", action="append", type=lint_arg, default=[], metavar="N@SHA:VERDICT", help="with --release-check: the lint verdict of pull request N on head SHA (full lowercase 40-hex; PASS, FAIL or UNKNOWN-AT-CAP); a SHA that is not the live head FAILs, and a number with none FAILs")
-    p.add_argument("--review-record", action="store_true", help="print the review record for the pull request's live head (posts nothing)")
+    p.add_argument("--review-record", action="store_true", help="print the review log for the pull request's live head (posts nothing)")
     p.add_argument("--head", type=head_arg, metavar="SHA", help="with --review-record: the 40-hex head the review read; the live head must equal it. With --confirm: the 40-hex head a relayed yes named; a moved head is refused before anything is claimed")
     p.add_argument("--kind", choices=REVIEW_KINDS, help="with --review-record: the kind of change")
     p.add_argument("--guard", choices=REVIEW_GUARDS, help="with --review-record: whether the change touches a guard or check")
@@ -5278,7 +5278,7 @@ def main(argv, host=None, lock=None, hosts=None):
             say(*lines)
             return 0 if ok else 1
         if (a.confirm or batch) and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():  # before any host read or lock
-            raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)
+            raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first. Then post the review log on the pull request; the batch runner finds it. " + ROLE_CITE)
         if a.confirm and not a.head and read_merge_role() == "batch-runner":  # before the lock, a claim or any write
             raise Stop(BATCH_RUNNER_NEEDS_HEAD)
         c, root = sh(["git", "rev-parse", "--show-toplevel"], cwd=a.repo_dir)
@@ -5310,10 +5310,10 @@ def main(argv, host=None, lock=None, hosts=None):
             files = h.pr_files(a.pr, info["changed_files"])
             hits = guard_hits([p for p, _, _ in files])
             if a.guard == "no" and hits:
-                raise Stop("Guard or check: the diff changes " + ", ".join(hits) + ", so --guard no is false. Write the record with --guard yes. " + REVIEW_CITE)
+                raise Stop("Guard or check: the diff changes " + ", ".join(hits) + ", so --guard no is false. Write the review log with --guard yes. " + REVIEW_CITE)
             misfits = kind_misfits(a.kind, files)
             if misfits:
-                raise Stop(f"Kind: the diff breaks --kind {a.kind} at " + ", ".join(misfits) + ". Write the record with the kind the diff has. " + REVIEW_CITE)
+                raise Stop(f"Kind: the diff breaks --kind {a.kind} at " + ", ".join(misfits) + ". Write the review log with the kind the diff has. " + REVIEW_CITE)
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed
                 earlier = [parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
                 last = earlier[-1] if earlier else None

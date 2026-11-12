@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""At Stop, blocks once when the owner's feedback inbox needs the session: a message of a burst with no item lines, a bad item line, a ruling or task whose home is not a tracked file of its kind, a page item with no send to the page writer, a repo item with no send naming the repo, or an open standing item whose id is missing from the handoff. It also marks a new item that repeats older feedback or work, which one model call judges.
+"""At Stop, blocks once when the owner's feedback log needs the session: a message of a burst with no item lines, a bad item line, a ruling or task whose home is not a tracked file of its kind, a page item with no send to the page writer, a repo item with no send naming the repo, or an open standing item whose id is missing from the handoff. It also marks a new item that repeats older feedback or work, which one model call judges.
 It also blocks a chat answer to a page item with no send to the page writer, a grant word with no home, and a closed note with no home.
 
 Reads <config dir>/handoffs/<session_id>.inbox.md, which local_time.py writes for every owner message,
@@ -10,7 +10,7 @@ Only a burst's messages need items: a lone short message never triggers the guar
 were bursts. Each Stop updates it, even with stop_hook_active, so a message is classed once, in the
 turn it arrived. A missing or damaged state file counts every saved message as this turn's. It blocks
 a turn end in these cases:
-  - a burst's message has no item lines under it. The reason gives the inbox file's absolute path, the
+  - a burst's message has no item lines under it. The reason gives the feedback log's absolute path, the
     message's heading line and its line number, and an example item. Items added in any later turn
     count, because each Stop reads the whole file;
   - an item line is not `- <id> [<kind>] -> <home>`, kind one of ruling, task, question, note, standing, page, repo
@@ -108,7 +108,7 @@ a turn end in these cases:
     so a silent pass would drop feedback. This stays advisory, per decision guard-hooks-fail-closed:
     `stop_hook_active` true exits with no output, so the block costs one turn at most;
   - waiting-export-check (export_check, roadmap step waiting-export-check; runs before the inbox read, so it
-    needs no inbox file). It blocks a stop of the page writer's session when the whole transcript holds a
+    needs no feedback log). It blocks a stop of the page writer's session when the whole transcript holds a
     non-sidechain ArtifactData set, update, batch or delete of an exported collection (layout
     WAITING_COLLECTIONS, by `collection` or a `doc_id` or `path` prefix) to the waiting page
     (layout.is_waiting_page_url) whose tool_result is no error, and the newest such write is newer than the
@@ -199,6 +199,7 @@ CLOSED_TOKEN = re.compile(r"(?<!\S)\[closed\](?!\S)")
 # A grant's [ruling] home may also be one of these root files, when git tracks it on some branch.
 GRANT_ROOT_HOMES = ("settings.json", ".claude/CLAUDE.md")
 READ_VERBS = ("get", "list", "query")  # the ArtifactData reads whose result holds the documents
+FEEDBACK_LOG_SLUG = "owner-feedback-inbox"  # the record slug keeps its old spelling (glossary row feedback log)
 HEADING_PREFIX = local_time.HEADING_PREFIX  # the heading and stamp the writer emits
 HEADER = re.compile(re.escape(HEADING_PREFIX) + local_time.STAMP_PATTERN + "$")
 STAMP_HHMM = re.compile(local_time.STAMP_PATTERN)
@@ -1383,7 +1384,7 @@ def export_check(cwd, transcript_path, session_id):
 def main():
     try:
         hook = json.load(sys.stdin)
-        try:  # before the inbox read, so a session with no inbox file is checked too
+        try:  # before the inbox read, so a session with no feedback log is checked too
             ex_reason, ex_note = export_check(hook.get("cwd"), hook.get("transcript_path"), hook.get("session_id"))
         except Exception as e:  # advisory: a crash passes, and says so
             ex_reason, ex_note = None, FAIL_OPEN_EXPORT % (" ".join(str(e).split()) or type(e).__name__)
@@ -1429,7 +1430,7 @@ def inbox_stop(hook):
             msg = " ".join(flags + ([note] if note else []))
             return {"systemMessage": msg} if msg else {}
         if blocks is None:
-            reasons = found = ["the inbox file %s cannot be read" % os.path.basename(inbox)]
+            reasons = found = ["the feedback log %s cannot be read" % os.path.basename(inbox)]
         else:
             try:
                 with open(precompact_handoff.handoff_path(hook["session_id"]), encoding="utf-8",
@@ -1452,9 +1453,9 @@ def inbox_stop(hook):
             if notes:
                 out["systemMessage"] = " ".join(notes)
         if reasons:
-            out.update(decision="block", reason="Feedback inbox (decision owner-feedback-inbox): "
+            out.update(decision="block", reason="Feedback log (decision %s): " % FEEDBACK_LOG_SLUG
                        + "; ".join(r.rstrip(".") for r in reasons)
-                       + (". The check reads the inbox file at each Stop, so items added in any later turn count,"
+                       + (". The check reads the feedback log at each Stop, so items added in any later turn count,"
                           " and no new heading is needed. Send each page ruling to the page writer, each repo item's"
                           " message to that repo's triage session, and put open standing ids in the handoff."
                           if found else "."))
