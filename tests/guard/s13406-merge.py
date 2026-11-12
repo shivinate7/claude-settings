@@ -561,7 +561,7 @@ def role_tag_call(tool_id, session=ROLE_OWN, add=("cs-build:coordinator",)):
 # no parent_session_id, no cs-build:<role> tag, and sources that name the repo it may merge in. It records batch-runner, the existing role word.
 CS_SOURCES = [{"git_repository": {"url": "https://github.com/" + ARCH_REPO_SETTINGS}}]
 OTHER_SOURCES = [{"git_repository": {"url": "https://github.com/shivinate7/mailaudit"}}]
-OWNER_LANE_ASK = "A lane the owner started merges its own PR; any other session asks a batch runner"
+from shared_names import OWNER_LANE_ASK  # the one home of the sentence every merge refusal carries (hooks/shared_names.py)
 
 
 def lone_call(tool_id, tags, sources=CS_SOURCES, session=ROLE_OWN):

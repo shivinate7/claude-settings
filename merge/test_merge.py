@@ -27,6 +27,7 @@ from workflow_steps import job_block  # noqa: E402  the one workflow reader (lin
 import stale_cites  # noqa: E402  the guard's rule dirs, one home (lint/stale_cites.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "hooks"))  # append: no hook module shadows one this suite imports
 import guard as hook_guard  # noqa: E402  is_test_rel, the one home of what a test path is (hooks/guard.py)
+from shared_names import OWNER_LANE_ASK  # noqa: E402  the one home of the sentence every merge refusal carries (hooks/shared_names.py)
 CITE_HOMES = audit.cite_homes()  # read live from the repo when this run starts
 
 def printed(out, marker):
@@ -12935,8 +12936,7 @@ class BatchBrake(Env):
 ROLE_SESSION = "cse_role_check_test"
 OLD_PARSER_ERRORS = ("unrecognized arguments", "invalid int value")  # what merge.py's parser says to `--role` before the writer exists
 # The remedy a session without a merge role reads (G2 and G10, owner 2026-11-10 14:23 and 14:33 CST): a lane the owner started merges
-# its own PR, and any other session asks a batch runner. The guard's refusals carry the same sentence (tests/guard/s13406-merge.py).
-OWNER_LANE_ASK = "A lane the owner started merges its own PR; any other session asks a batch runner"
+# its own PR, and any other session asks a batch runner. OWNER_LANE_ASK is imported above, from its one home (hooks/shared_names.py).
 
 class CloudSession(Env):
     """The cloud-session fixture, one home for MergeRoleCheck and StandingGrantSwitch: a run's config dir, a made-up session id, and
