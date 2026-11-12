@@ -26,11 +26,17 @@ Protected by the `commit-trailer-model` cases in guard test section 42900, red b
 
 ## Limits
 
-- The call's own commit text is read only from a `git commit` the shell runs directly in the call: a commit inside `bash -c`, a message file the call writes first, a message file that cannot be read (rule `cite-by-id` refuses it first), `git commit -C`/`-c` (text from another commit) and a commit message built by a command substitution are not read. A commit made in one call and pushed in a later one is judged by the unpushed-commit read.
+- The call's own commit text is read only from a `git commit` the shell runs directly in the call: a commit inside `bash -c`, a message file the call writes first, a message file that cannot be read (rule `cite-by-id` refuses it first), and `git commit -C`/`-c` (text from another commit) are not read. A message from `$(printf ...)` or `$(cat file)` is not read, but `$(cat <<'EOF' ...)` is. A commit made in one call and pushed in a later one is judged by the unpushed-commit read.
+- A commit and push chained in one call passes when the message is not read: a `--trailer` value, text piped into `-F -`, or a `$VAR` set earlier in the call. The escape needs commit and push in one call, since a later push is judged by the unpushed-commit read. Held as note `trailer-check-chained-message-unread`.
+- A chained `git commit --amend -m ... && git push` is refused while the unpushed commit it replaces has the wrong model, because the log read judges the commit the amend replaces. The refusal's remedy says to amend, so an agent that chains once is refused twice and splits the call. Held as note `trailer-check-chained-amend-refused`.
+- `git push -fn`, a dry run, is read as a real push, because `read_verb` matches only the exact token `-n`. Held as note `trailer-check-push-fn-dry-run-read`.
 - Every unpushed commit in the push is judged against the pushing agent's model. Held as note `trailer-check-judges-other-agents-commits`.
 - A Co-Authored-By line that git's own parse does not read as a trailer is not judged. That GitHub also ignores such a line is unmeasured. Held as note `trailer-check-git-parse-layout`.
 - `git push --all`, `--branches`, `--mirror` and `--tags` with no refspec skip the check, because `push_refspecs` names no range for them. Held as note `trailer-check-push-all-mirror-tags`.
 - A push that deletes one ref and sends another, such as `git push origin :old HEAD:lane-x`, skips the check for the other ref too. Held as note `trailer-check-mixed-delete-push`.
+- A family word inside a person's or product's name, such as `Haiku Studios`, is read as a model and refused from another family's agent. Held as note `trailer-check-name-word-in-person`.
+- `Claude Sonnet 1M` reads as version 1, so it is refused from a Sonnet 5.5 agent. Held as note `trailer-check-1m-read-as-version`.
+- A push inside an assignment or backticks, such as `out=$(git push ...)`, is not read as a push, so its trailers are not judged. Held as note `trailer-check-assigned-push-unread`.
 
 Kind: process
 Home: hooks/guard_trailer.py
