@@ -1,6 +1,6 @@
 ---
 name: roadmap
-description: Use when a session builds a repo's roadmap block, or the user says "build the roadmap", "roadmap page" or "update the status tab". Bakes the steps on the repo's record branch and the record homes in the checkout into the roadmap block of the repo's one page, and prints the upkeep list for triage.
+description: Use when a session builds a repo's roadmap block, or the user says "build the roadmap" or "update the status tab". Bakes the steps on the repo's record branch and the record homes in the checkout into the roadmap block of the repo's one page, and prints the upkeep list for triage.
 ---
 
 A repo has one page: the waiting page. Its Status tab shows the repo's plan from its homes. This
