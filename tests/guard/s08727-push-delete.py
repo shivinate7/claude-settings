@@ -234,6 +234,36 @@ push_case("interpreter control: python3 print of git push --force as text, allow
           form=r'''python3 -c "print('git push --force')"''')
 push_case("interpreter control: bash -c echo hi, allows", "", "allow", form="bash -c 'echo hi'")
 
+# A GIT ACT RUN FROM A PYTHON BODY IN A FORM THE READER MISSES. `-W ignore` and `-I` sit before `-c` and
+# change no verdict. A string argument with shell=True, a bare `run` name and os.popen each run a shell
+# string. The controls run `ls`, or a git status list, which allow.
+push_case("interpreter: python3 -W ignore subprocess.run list forces main, asks", "", "ask",
+          form=r'''python3 -W ignore -c "import subprocess; subprocess.run(['git','push','--force','origin','main'])"''')
+push_case("interpreter: python -c subprocess.run list forces main, asks", "", "ask",
+          form=r'''python -c "import subprocess; subprocess.run(['git','push','--force','origin','main'])"''')
+push_case("interpreter: python3 -I subprocess.run list forces main, asks", "", "ask",
+          form=r'''python3 -I -c "import subprocess; subprocess.run(['git','push','--force','origin','main'])"''')
+push_case("interpreter: python3 subprocess.run string with shell=True forces main, asks", "", "ask",
+          form=r'''python3 -c "import subprocess; subprocess.run('git push --force origin main', shell=True)"''')
+push_case("interpreter: python3 bare run imported from subprocess forces main, asks", "", "ask",
+          form=r'''python3 -c "from subprocess import run; run(['git','push','--force','origin','main'])"''')
+push_case("interpreter: python3 os.popen string forces main, asks", "", "ask",
+          form=r'''python3 -c "import os; os.popen('git push --force origin main')"''')
+push_case("interpreter control: python3 subprocess.run shell string ls, allows", "", "allow",
+          form=r'''python3 -c "import subprocess; subprocess.run('ls', shell=True)"''')
+push_case("interpreter control: python3 subprocess.run list git status, allows", "", "allow",
+          form=r'''python3 -c "import subprocess; subprocess.run(['git','status'])"''')
+
+# A GIT WORD FOLDED FROM ABOUT 1200 `+` OPERANDS, chained with `rm -rf /`. The reader folds operands
+# recursively, and such a body must not reach RecursionError, where the guard fails open. The chained call
+# must deny, and the `rm -rf /` part must deny alone. The body is built here, not written as a literal.
+FOLD_GIT_OPERANDS = ["'git'"] + ["''"] * 1199
+FOLDED_PUSH_BODY = ("import subprocess; subprocess.run([" + "+".join(FOLD_GIT_OPERANDS)
+                    + ",'push','--force','origin','main'])")
+sh("interpreter: a 1200-operand folded git word forces main, chained with rm -rf /, denies",
+   'python3 -c "' + FOLDED_PUSH_BODY + '" && rm -rf /', "deny", "destructive-delete", cwd=PUSHFEAT)
+sh("interpreter control: rm -rf / alone, denies", "rm -rf /", "deny", "destructive-delete", cwd=PUSHFEAT)
+
 # FALSE ALARMS: a guard that cries wolf is spent.
 # Re-pointed from allow by ruling 207 a: a non-forced push of main asks.
 push_case("a non-forced push of main asks, on main", "origin main", "ask", cwd=PUSHMAIN, rule=PUSH_MAIN_RULE)
