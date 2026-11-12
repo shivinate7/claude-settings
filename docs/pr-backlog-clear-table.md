@@ -373,18 +373,18 @@ Lane pr-backlog-clear, read 12:47 CST Nov 12. Acts for claude-settings come from
 
 ## q_max (11 open)
 
-Review state unread: this session has no access to q_max (add_repo not attached). Acts are from titles only.
+Verdicts read by batch runner 11 from q_max main and each PR head, 12:52 CST. Nothing is closed yet.
 
 | PR | Title | Next act | Owner |
 |---|---|---|---|
-| #1164 | CI pin move | read its review record, then batch or fix lane | child-repo batch runner (no ledger read: q_max not attached) |
-| #1163 | Batch fix-1 | merge when CI is green, or close if its lanes already merged | child-repo batch runner |
-| #1162 | Past Rates 1440 re-point | read its review record, then batch or fix lane | child-repo batch runner |
-| #1161 | Batch ci-1 (11 h idle) | merge when CI is green, or close if its lanes already merged | child-repo batch runner |
-| #1160 | CI batch-* heads | read its review record, then batch or fix lane | child-repo batch runner |
-| #1159 | Prose wave redo of #970 | read its review record, then batch or fix lane | child-repo batch runner |
-| #1158 | Batch prose-1 | merge when CI is green, or close if its lanes already merged | child-repo batch runner |
-| #1157 | Docs: four prose-judge lines | read its review record, then batch or fix lane | child-repo batch runner |
-| #1156 | dependabot setup-python | merge in a batch, or close | child-repo batch runner |
-| #1155 | dependabot zizmor | merge in a batch, or close | child-repo batch runner |
-| #1011 | Batch: ci-hygiene (#1008), 10 days idle | owner question: close or revive (step lists it unclassed) | coordinator |
+| #1164 | CI pin move | keep: a check change, batches alone after #1163 merges | child-repo batch runner |
+| #1163 | Batch fix-1 | keep: green, lane-lint PASS; held for claude-settings lane retire-missing-deps-unknown (merge tool false red); then merge | child-repo batch runner |
+| #1162 | Past Rates 1440 re-point | close as replaced by #1163 when #1163 merges (lane inside it) | child-repo batch runner |
+| #1161 | Batch ci-1 | close as replaced by #1163 when #1163 merges (all commits inside it) | child-repo batch runner |
+| #1160 | CI batch-* heads | close as replaced by #1163 when #1163 merges (lane inside it) | child-repo batch runner |
+| #1159 | Prose wave redo of #970 | fix by its lane: rebase after #1163, conflicts with #1157 in CLAUDE.md | lane |
+| #1158 | Batch prose-1 | close as replaced by the prose-1 rebuild (from #1157, on new main after #1163); it was a false green | child-repo batch runner |
+| #1157 | Docs: four prose-judge lines | keep: the lane for the prose-1 rebuild | lane |
+| #1156 | dependabot setup-python 6.0.0 to 7.1.0 | merge in a batch after #1164 (check change, one line in checks.yml, not on main) | child-repo batch runner |
+| #1155 | dependabot zizmor 0.8.0 to 0.8.1 | merge in a batch after #1164 (check change, one line in checks.yml, not on main) | child-repo batch runner |
+| #1011 | Batch: ci-hygiene (#1008) | close #1011 after a new narrow lane from main takes the two parts not on main (stamp.yml timeout 3 to 5 min; ci-done red-run PR comment); its diff cannot merge as is. Revive is an owner or coordinator call, a check change that batches alone | coordinator |
