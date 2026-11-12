@@ -4597,13 +4597,16 @@ QUESTION_ANSWER = 'The user answered: "Which way should the cap go?"="Option B".
 QUESTION_AT = "2026-01-15T18:04:00+00:00"  # 12:04 CST: the clock the hook reads through LOCAL_TIME_NOW
 
 
-def question_hook(cfg, sid, response, tool="AskUserQuestion", starts=None, cwd=None):
+def question_hook(cfg, sid, response, tool="AskUserQuestion", starts=None, cwd=None, questions=None):
     """Runs the capture as PostToolUse fires after a tool call. The payload alone says what the call was: the
     owner's words come back as the question box's result, not as a prompt. `starts` (a log path) runs it through
-    the probe, which logs each process start it makes. `cwd` is the payload's folder, the config folder by default."""
+    the probe, which logs each process start it makes. `cwd` is the payload's folder, the config folder by default.
+    `questions` is the box's tool_input.questions, one question by default."""
+    if questions is None:
+        questions = [{"question": "Which way should the cap go?",
+                      "options": [{"label": "Option A"}, {"label": "Option B"}]}]
     raw = payload({"hook_event_name": "PostToolUse", "session_id": sid, "tool_name": tool,
-                   "tool_input": {"questions": [{"question": "Which way should the cap go?",
-                                                  "options": [{"label": "Option A"}, {"label": "Option B"}]}]},
+                   "tool_input": {"questions": questions},
                    "tool_response": response, "cwd": cwd or cfg})
     if starts is None:
         return run(LT_PATH, raw, cfg, extra_env={"LOCAL_TIME_NOW": QUESTION_AT})
@@ -4736,6 +4739,98 @@ def case_block_refusal_remedy_names_closed_beside_the_handoff():
     check("block remedy: the refusal carries its remedy sentence", remedy != "", reason)
     check("block remedy: the remedy names the handoff", "handoff" in remedy, remedy)
     check("block remedy: the remedy names [closed] as a way out, beside the handoff", "[closed]" in remedy, remedy)
+
+
+# --------------------------------------------------------------------------- round 2 review: box shapes, a lone CR
+
+SHIP_QUESTION = "Ship the cap change?"
+MULTI_QUESTION = 'Do I have approval to merge "PR 1", "PR 2" now?'
+LONE_CR_TEXT = "\r".join(["Approved: merge PR 12 now", "one", "two", "three", "four", "five", "six"])  # six lone CRs
+
+
+def box_questions(*texts):
+    """The question box's tool_input.questions: one entry per question text, two options each."""
+    return [{"question": t, "options": [{"label": "Yes"}, {"label": "No"}]} for t in texts]
+
+
+def saved_text(cfg, sid):
+    """The text of the one block the box saved, or an empty string when none or several were saved."""
+    blocks = read_blocks(read_or_empty(inbox_of(cfg, sid)))
+    return (blocks[0]["text"] or "") if len(blocks) == 1 else ""
+
+
+def case_multi_question_box_saves_only_the_answers():
+    """Two questions. The second's text holds `", "` and quoted words. Only the answers are saved, so a ruling jotted
+    under the box, to a tracked settings.json, is refused. Saved with the question's words, the box would read as an
+    approval to merge and pass the ruling as granted."""
+    repo = make_repo("qbox-multi", tracked=("settings.json", "decisions/a-ruling.md"))
+    cfg, sid = new_cfg(), "qbox-multi"
+    response = 'The user answered: "%s"="No", "%s"="No". Continue.' % (SHIP_QUESTION, MULTI_QUESTION)
+    p = question_hook(cfg, sid, response, cwd=repo, questions=box_questions(SHIP_QUESTION, MULTI_QUESTION))
+    check("question multi: the hook exits 0", p.code == 0, p.desc())
+    blocks = read_blocks(read_or_empty(inbox_of(cfg, sid)))
+    check("question multi: the answers are saved as one block", len(blocks) == 1, blocks)
+    text = saved_text(cfg, sid)
+    check("question multi: the saved block holds both answers", text.count("No") == 2, text)
+    check("question multi: no words of the second question are saved",
+          "approval" not in text and "PR 1" not in text, text)
+    add_item(cfg, sid, "- fb-0959-1 [ruling] -> settings.json")
+    expect_block("question multi: a ruling to settings.json under the answers is refused, not granted",
+                 guard(cfg, sid, cwd=repo), named=("fb-0959-1",))
+
+
+def case_one_question_answer_keeps_its_quote_marks_whole():
+    """A one-question box whose answer holds `", "` and `"="`. The answer is saved whole: a cut at either mark keeps a
+    fragment of it, and a fragment is not what the owner said. The answer with `", "` alone is the control, saved whole
+    already."""
+    cfg, sid = new_cfg(), "qbox-quotes"
+    answer = 'Merge "PR 1", "PR 2" and keep "a"="b"'
+    p = question_hook(cfg, sid, 'The user answered: "%s"="%s". Continue.' % (SHIP_QUESTION, answer),
+                      questions=box_questions(SHIP_QUESTION))
+    check("question quotes: the hook exits 0", p.code == 0, p.desc())
+    check("question quotes: an answer with `\", \"` and `\"=\"` is saved whole", saved_text(cfg, sid) == answer,
+          saved_text(cfg, sid))
+    cfg2, sid2 = new_cfg(), "qbox-comma"
+    question_hook(cfg2, sid2, 'The user answered: "%s"="Merge "PR 1", "PR 2"". Continue.' % SHIP_QUESTION,
+                  questions=box_questions(SHIP_QUESTION))
+    check("question quotes control: an answer with `\", \"` alone is saved whole",
+          saved_text(cfg2, sid2) == 'Merge "PR 1", "PR 2"', saved_text(cfg2, sid2))
+
+
+def case_box_answer_in_a_dict_is_saved_and_notes_stay_in_the_string():
+    """Two result shapes. A dict of answers keyed by question is saved as the answer alone. A string with a trailing
+    `user notes:` keeps the owner's notes in the saved text, not only the answer."""
+    cfg, sid = new_cfg(), "qbox-dict"
+    p = question_hook(cfg, sid, {"answers": {SHIP_QUESTION: "Option B"}}, questions=box_questions(SHIP_QUESTION))
+    check("question dict: the hook exits 0", p.code == 0, p.desc())
+    check("question dict: the answer is saved", "Option B" in saved_text(cfg, sid), saved_text(cfg, sid))
+    check("question dict: the question is not saved", SHIP_QUESTION not in saved_text(cfg, sid), saved_text(cfg, sid))
+    cfg2, sid2 = new_cfg(), "qbox-notes"
+    question_hook(cfg2, sid2, 'The user answered: "%s"="Yes". user notes: only merge after the check passes.'
+                  % SHIP_QUESTION, questions=box_questions(SHIP_QUESTION))
+    check("question notes: the answer is saved", "Yes" in saved_text(cfg2, sid2), saved_text(cfg2, sid2))
+    check("question notes: the owner's notes are saved with the answer",
+          "only merge after the check passes" in saved_text(cfg2, sid2), saved_text(cfg2, sid2))
+
+
+def case_lone_cr_in_a_grant_block_keeps_the_refused_ruling_open():
+    """A grant block whose text holds six lone CRs, a granted ruling under it, and a plain block's refused ruling to
+    the same path below. The Stop reads the inbox with universal newlines, which split at each CR, so the granted line
+    sits six lines lower in its read than in the close's. The Stop's proof for the granted line is keyed by that lower
+    index. The plain block's text is one line longer, so the refused line lands on that same index in the close's
+    read. The refused ruling must stay open, and its line must not change."""
+    repo = make_repo("lone-cr", tracked=("settings.json", "decisions/a-ruling.md"))
+    cfg, sid = new_cfg(), "lone-cr"
+    granted = "- fb-0960-1 [ruling] -> settings.json"
+    refused = "- fb-0960-2 [ruling] -> settings.json"
+    write_file(inbox_of(cfg, sid), render_block(LONE_CR_TEXT, items=(granted,))
+               + render_block("a settings note,\nno grant", header=LATER_HEADER, items=(refused,)))
+    p = guard(cfg, sid, cwd=repo)
+    check("lone CR: the granted ruling, whose home main holds, closes",
+          inbox_line(cfg, sid, "fb-0960-1") == granted + CLOSED, inbox_line(cfg, sid, "fb-0960-1"))
+    check("lone CR: the refused ruling keeps its line, unclosed",
+          inbox_line(cfg, sid, "fb-0960-2") == refused, inbox_line(cfg, sid, "fb-0960-2"))
+    expect_block("lone CR: the refused ruling still blocks", p, named=("fb-0960-2",), unnamed=("fb-0960-1",))
 
 
 CASES = (
@@ -4950,6 +5045,10 @@ CASES = (
     case_close_rewrite_keeps_a_block_appended_after_the_reads,
     case_same_id_on_two_lines_settles_each_line_alone,
     case_block_refusal_remedy_names_closed_beside_the_handoff,
+    case_multi_question_box_saves_only_the_answers,
+    case_one_question_answer_keeps_its_quote_marks_whole,
+    case_box_answer_in_a_dict_is_saved_and_notes_stay_in_the_string,
+    case_lone_cr_in_a_grant_block_keeps_the_refused_ruling_open,
 )
 
 
