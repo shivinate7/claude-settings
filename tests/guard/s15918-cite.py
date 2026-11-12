@@ -48,6 +48,13 @@ for _name, _command in (
        "cite-by-id", carries="could not be read", cwd=NOGIT, config=MERGECFG)
 sh("cite-by-id: a PowerShell commit denies too", VCS + ' commit -m "cites ' + CITE + '"', "deny",
    "cite-by-id", tool="PowerShell", cwd=NOGIT, config=MERGECFG)
+# A closed heredoc, then a `cd` into the folder that holds the message file. A relative -F name is read from
+# where the commit runs, so the `cd` decides which file is read. From NOGIT, where msg_bad.txt is not, the read
+# is unknown and the citation is never seen.
+sh("cite-by-id: a closed heredoc, then cd to a message file that cites a record, denies on the citation",
+   "cat > notes.md <<'EOF'\nx\nEOF\ncd " + slash(ROOT) + " && " + VCS + " commit -F msg_bad.txt",
+   "deny", "cite-by-id", carries="cites a record by its path", lacks="could not be read",
+   cwd=NOGIT, config=MERGECFG)
 for _name, _command in (
     ("a code path", VCS + ' commit -m "guard: fix hooks/guard.py"'),
     ("a code path in bold", VCS + ' commit -m "guard: fix **hooks/guard.py**"'),
