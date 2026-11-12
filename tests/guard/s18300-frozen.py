@@ -1,13 +1,13 @@
 # section 18300
 FAMILY = "frozen"
 #
-# The sed operand reader. The frozen-path rule reads `sed -i` by a text match (`writes_to`), so a
-# flag cluster, a flag after its operands, a `w` command and some wrappers miss a write to a frozen
-# file. Each RED case is a real miss on main. Each CONTROL is green on main and pins what a fix
-# must keep: the forms main already refuses, and the false alarms it already avoids.
+# The sed operand reader. The frozen-path rule must refuse a write to a frozen file whatever flags,
+# wrapper, `w` command or pipe feed the `sed` takes, and must allow a sed that only names the file
+# as text or reads it. Each CONTROL pins a form the rule refuses or allows, and the cost of a long
+# command.
 #
 # Failure classes, one per group: flag-cluster, flag-suffix, flag-long, flag-after-operand,
-# w-command, wrapper, script-as-target, script-file, scanner-strings, cost-budget.
+# w-command, wrapper, pipe-feed, false-alarm, script-as-target, script-file, scanner-strings, cost-budget.
 
 H_PAD = " ".join("word%d" % i for i in range(6000))
 
@@ -47,6 +47,14 @@ sh("sed-operand w-command control: sed -n p reads a frozen hook and is allowed",
 sh("sed-operand w-command control: sed with no -i reads a frozen hook and is allowed",
    "sed 's/a/b/' " + CFG_HOOK, "allow", cwd=NOGIT)
 
+# --- false-alarm: a frozen path in a script's text, where the text starts with w, is no write (class: false-alarm) ---
+sh("sed-operand false-alarm: a frozen hook in an s replacement that starts with w, with no -i, is allowed",
+   "sed 's/x/w " + CFG_HOOK + "/' other.txt", "allow", cwd=NOGIT)
+sh("sed-operand false-alarm: a frozen hook in an a text that starts with w, with no -i, is allowed",
+   "sed '$a w " + CFG_HOOK + "' other.txt", "allow", cwd=NOGIT)
+sh("sed-operand false-alarm: a frozen hook in an i text that starts with w, with -n and no -i, is allowed",
+   "sed -n '1i w " + CFG_HOOK + "' other.txt", "allow", cwd=NOGIT)
+
 # --- wrapper: a shell, sudo, xargs or find that runs sed (class: wrapper) ---
 sh("sed-operand wrapper control: sudo sed -i onto a frozen hook stays refused",
    "sudo sed -i 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
@@ -68,6 +76,12 @@ sh("sed-operand wrapper: a frozen hook piped to xargs sed -i is refused",
    "printf '%s\\n' " + CFG_HOOK + " | xargs sed -i 's/a/b/'", "deny", "frozen-path", cwd=NOGIT)
 add("sed-operand wrapper: find -exec sed -i in the frozen hooks folder is refused", "deny", "frozen-path",
     tool="Bash", cwd=DUP_HOOKS_CWD, command="find . -name guard.py -exec sed -i 's/a/b/' {} +")
+
+# --- pipe-feed: xargs sed -i takes its files from the list a grep prints, so a grep that names a frozen path feeds a write (class: pipe-feed) ---
+sh("sed-operand pipe-feed: grep -l naming a frozen hook, piped to xargs sed -i, is refused",
+   "grep -l guard " + CFG_HOOK + " | xargs sed -i 's/a/b/g'", "deny", "frozen-path", cwd=NOGIT)
+sh("sed-operand pipe-feed: grep -rl naming the frozen hooks folder, piped to xargs sed -i, is refused",
+   "grep -rl guard " + slash(os.path.join(CFG, "hooks")) + " | xargs sed -i 's/a/b/g'", "deny", "frozen-path", cwd=NOGIT)
 
 # --- script-as-target: a frozen path inside a sed script is text, not a write target (class: script-as-target) ---
 sh("sed-operand script-as-target: a frozen path in a script with no -i is text and is allowed",
