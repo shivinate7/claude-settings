@@ -1,7 +1,7 @@
 """The clause parser the cannot-claim check reads: sentences, clauses and the lexicons of their grammar.
 
 `lint/report_guard.py` imports this module, so the check has one copy of its sentence and clause boundaries and one home
-for each word list (NEGATORS, ADVERBS, CONDITIONALS, REASON_LINKS, DETERMINERS, CANT_FORMS, COULD_NOT_FORMS, CANNOT_FORMS, CHECK_WORDS,
+for each word list (NEGATORS, ADVERBS, CONDITIONALS, REASON_LINKS, SUBORDINATORS, RELATIVES, DETERMINERS, CANT_FORMS, COULD_NOT_FORMS, CANNOT_FORMS, CHECK_WORDS,
 STATE_VERBS, OUTAGE_NOUNS, OUTAGE_VERBS, BACK_PATTERN, STATUS_PATTERN, SPEECH_VERBS, CALL_SUBJECTS) and for the words that
 name the writer (WRITER_BEFORE_RE, FROM_HERE_RE and the lead-ins and subject words that own_subject reads). The module reads text and
 a mask only: no file, no process. Its cost is one regex pass over a sentence and one over each clause, so the work grows
@@ -9,12 +9,13 @@ in step with the text.
 
 sentences(text, mask) -> [(start, end)]: the spans tile the text and each keeps its terminator. `mask` holds one bool per
 character, True inside a code span or a quote: the parser reads those characters as blanks and reads no quote itself.
-clauses(sentence, mask) -> [Clause]: a clause ends at ; : ! ? a dash, a comma, or a but or because, and the word that
-opens it (and, but, or, so, yet, then, because) is its `join`. `lead` and `term` are the separators before and after it;
+clauses(sentence, mask) -> [Clause]: a clause ends at ; : ! ? a dash, a period, a comma, or a but or because, and the word that
+opens it (and, but, or, so, yet, then, because) is its `join`. A period ends a clause when whitespace or the end follows it, and also in
+"main.The" (a lowercase letter, the period, a capital and a lowercase letter); a dot inside a token ends none. `lead` and `term` are the separators before and after it;
 `lead_at` and `lead_end` are where the separator before it starts and ends; `hard_end` is where the nearest hard stop (. ; : ! ? a dash) at or
 after its start sits, and `sent_end` the nearest of . ; : ! ? (a dot inside a token counts); all are offsets into the
 sentence. A clause's other fields are read from its words alone. The helpers below the clauses (conditional,
-veil, negated_near, own_subject, past, opens_with, opens_with_joiner, strip_adverbs, reasons, reasons_before, is_reason,
+veil, negated_near, own_subject, past, opens_with, opens_with_joiner, lead_opens_clause, strip_adverbs, reasons, reasons_before, is_reason,
 check_word_counts, form_pattern, unopen) read the grammar of the cannot-claim check from the same lexicons.
 """
 import bisect
@@ -32,6 +33,7 @@ REASON_LINKS = ("because",)
 DETERMINERS = ("a", "an", "the", "this", "that", "these", "those", "its", "their", "his", "her", "our", "my", "your")
 JOINERS = ("and", "but", "or", "so", "yet", "then")
 SUBORDINATORS = ("since", "as", "while", "although", "though")  # open a clause whose subject follows
+RELATIVES = ("which",)  # open a clause whose subject is the noun before them
 PREPOSITIONS = ("for", "of", "in", "on", "to", "from", "with", "about", "against", "at", "by", "per")
 _BE_NT_FORMS = ("isn't", "aren't", "wasn't", "weren't")  # every be-form with n't
 VERBS = ("is", "are", "was", "were", "has", "have", "had", "does", "do", "did", "can", "cannot") + _BE_NT_FORMS + (
@@ -123,9 +125,13 @@ def _lemma(word):
 
 
 _WORD = re.compile(r"\w+(?:['’]\w+)*(?:-\w+)*")
-_BOUND = re.compile(r"(\s-{1,2}\s)|([;:!?—–]|\.(?!\w))|(,)|\b(but|because)\b", re.I)
+# A period ends a clause when whitespace or the end follows it, or when a capital then a lowercase letter follows a lowercase
+# letter ("main.The"). A dot inside a token (report_guard.py, v1.2, api.github.com) ends none.
+# The capitals are case-sensitive inside the case-folded patterns that read it.
+_PERIOD = r"\.(?!\w)|(?-i:(?<=[a-z])\.(?=[A-Z][a-z]))"
+_BOUND = re.compile(r"(\s-{1,2}\s)|([;:!?—–]|%s)|(,)|\b(but|because)\b" % _PERIOD, re.I)
 _STOP_ANY = re.compile(r"[.;:!?]")
-_REASON_STOP = re.compile(r"[;:!?]|\.(?!\w)")  # a dot inside a token (package.json) ends no reason
+_REASON_STOP = re.compile(r"[;:!?]|%s" % _PERIOD)  # a dot inside a token (package.json) ends no reason
 _OPEN_ADJ = re.compile(r"\b((?:%s)\s+(?:\w+ly\s+)*)open\b" % "|".join(STATE_VERBS + DETERMINERS), re.I)
 _SENTENCE_GAP = re.compile(r"(?<=[.!?])\s+")
 
@@ -269,6 +275,26 @@ def opens_with_joiner(text):
     """True when the first word of `text` is a joiner (JOINERS): and, but, or, so, yet, then."""
     hit = _FIRST_WORD.match(text)
     return bool(hit) and hit.group(1).lower() in JOINERS
+
+
+def _group_word(word):
+    """True when `word` opens a verb group: a modal, a form of be, have or do, a negator, or a participle."""
+    return (word in _MODALS or word in _BE or word in _HAVE or word in _DO or word in NEGATORS or word == "to"
+            or word.endswith("n't") or _is_participle(word))
+
+
+def lead_opens_clause(lead, after):
+    """True when the lead-in word `lead` (JOINERS, REASON_LINKS, SUBORDINATORS or RELATIVES) opens a clause of its own, `after`
+    being the text of its clause that follows it. Two lead-ins double as other words, so the words after them decide.
+    "yet" is an adverb in a verb group ("not yet confirmed", "have yet to", "not yet been shown"): the word after it, past
+    any adverb, opens a verb group. "as" is a preposition when no verb follows it ("confirmed as pre-existing"), and
+    opens a clause ("as it is pre-existing") when one does. Every other lead-in opens a clause."""
+    nxt = words(strip_adverbs(after))[:1]
+    if lead.lower() == "yet":
+        return not (nxt and _group_word(nxt[0]))
+    if lead.lower() == "as":
+        return any(_group_word(w) and w != "to" for w in words(after))
+    return True
 
 
 def strip_adverbs(text):

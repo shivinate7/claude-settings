@@ -732,7 +732,8 @@ def answered_problem(text):
 
 
 # pre-existing-needs-main-run: a reply sentence that makes a pre-existing claim must name a run on the base
-# branch's tip on the same line. The base is main, master or origin/<branch>. A run is "on <base> at <sha>",
+# branch on the same line. The base is main, master or origin/<branch>, and the check takes any hash after it, not only the
+# base's tip. A run is "on <base> at <sha>",
 # "on <base> at commit <sha>", "on <base> (<sha>)", "<base>@<sha>", or a CI run URL on a line that says
 # "on <base>". A bare base name is no run. A claim is one of three forms, in a sentence that holds a failure word:
 # - "pre-existing" that describes the failure: next comes a failure noun, a preposition or no word, or before it
@@ -761,18 +762,20 @@ BASE_WORD_RE = re.compile(r"\b%s\b|\bbefore\s+(?:this|the|my)\s+change\b" % BASE
 FAIL_REF_RE = re.compile(r"\b(?:on|at)\s+(?:%s|%s)" % (BASE_REF, SHA_WORD), re.I)
 TOO_RE = re.compile(r"\b(?:too|also|as\s+well)\b", re.I)
 # _clause.clauses cuts a sentence at a stop, a comma, but and because. The lead-in words of _clause (joiners, reason links,
-# subordinators) and "which" cut each of those again. "as" is no lead-in in "as well", the word TOO_RE reads.
+# subordinators, relatives) cut each of those again, where _clause.lead_opens_clause says the word opens a clause: "yet" and
+# "as" double as other words, and "as" is no lead-in in "as well", the words TOO_RE reads.
 _AS = "as"
 PRE_LEAD_RE = re.compile(
     r"\b(?:%s)\b|\b%s\b(?!\s+well\b)" % (
-        "|".join(w for w in _clause.JOINERS + _clause.REASON_LINKS + _clause.SUBORDINATORS + ("which",) if w != _AS), _AS), re.I)
+        "|".join(w for w in _clause.JOINERS + _clause.REASON_LINKS + _clause.SUBORDINATORS + _clause.RELATIVES
+                 if w != _AS), _AS), re.I)
 MAIN_RUN_RE = re.compile(
     r"\bon\s+{b}\s+(?:at\s+(?:commit\s+)?{s}|\(\s*{s}\s*\))|\b{b}@{s}".format(b=BASE_REF, s=SHA_WORD), re.I)
 MAIN_RUN_URL_RE = re.compile(r"https?://\S*/actions/runs/\d+\S*", re.I)
 ON_BASE_RE = re.compile(r"\bon\s+%s\b" % BASE_REF, re.I)
 PRE_EXISTING_REASON = (
     "Pre-existing guard (rule pre-existing-needs-main-run): each line below calls a failure pre-existing, or "
-    "says it fails on a commit or on main too, and names no run on the base branch's tip. Run it there and say so "
+    "says it fails on a commit or on main too, and names no run on the base branch. Run it there and say so "
     "on the same line (\"on main at <sha>\", or a CI run URL on main; master or origin/<branch> may be the base), "
     "or say the failure comes from this change. A bare \"on origin/main\" is no run. Lines: ")
 
@@ -783,10 +786,20 @@ def _pre_existing_describes_failure(clause, m):
                 or PRE_DESCRIBES_BEFORE_RE.search(clause[:m.start()]))
 
 
+def _cut_at_leads(clause):
+    """The pieces of `clause`, cut at each lead-in word (PRE_LEAD_RE) that opens a clause (_clause.lead_opens_clause)."""
+    begin = 0
+    for m in PRE_LEAD_RE.finditer(clause):
+        if _clause.lead_opens_clause(m.group(), clause[m.end():]):
+            yield clause[begin:m.start()]
+            begin = m.end()
+    yield clause[begin:]
+
+
 def _pre_clauses(plain):
-    """The clauses of `plain` in order: the parser's clauses, each cut again at a lead-in word (PRE_LEAD_RE)."""
+    """The clauses of `plain` in order: the parser's clauses, each cut again at a lead-in word (_cut_at_leads)."""
     for c in _clause.clauses(plain, [False] * len(plain)):
-        yield from PRE_LEAD_RE.split(plain[c.start:c.end])
+        yield from _cut_at_leads(plain[c.start:c.end])
 
 
 def _unnegated(clause, pos):
