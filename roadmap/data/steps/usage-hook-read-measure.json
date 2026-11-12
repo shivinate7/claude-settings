@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "The usage brake (step usage-brake) waits on this: main reads rateLimits only in the desktop status line mod, desktop surface only; cloud and terminal hooks are unmeasured (docs/decisions/usage-brake.md, Before any build).",
  "source": "coordinator 07:57 CST Nov 12, from lane fan-prose-unmapped-6",
- "note": "Code measure. Put on lane fan-code-check-cost-pins by triage 07:58 CST Nov 12.",
- "updatedAt": "2026-11-12T07:58:00-06:00"
+ "note": "Code measure. Put on lane fan-code-check-cost-pins by triage 07:58 CST Nov 12. Lane 07:59 CST Nov 12: measures the cloud surface only; the desktop and terminal surfaces need a session on the owner's computer (needs-owner-computer for that part). Reads docs/decisions/usage-brake.md from PR #2663.",
+ "updatedAt": "$T"
 }
