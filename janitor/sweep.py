@@ -316,15 +316,23 @@ def _short_branch_ref(ref: str) -> str:
 
 def _lock_written_ms(path: str):
     """The write time of worktree PATH's lock file (`<git-dir>/locked`) in epoch ms, or None on any
-    read failure. The git dir is the `gitdir:` line of the tree's own `.git` file. That file is read
-    rather than asking git (`_admin_dir`): this runs once per locked entry of every listing, and a
-    git call per tree is the cost that made a sweep outrun its time."""
+    read failure. The admin dir is the `gitdir:` line of the tree's `.git` file, read rather than
+    asked of git (`_admin_dir`): this runs once per locked entry of every listing, and a git call per
+    tree is the cost that made a sweep outrun its time. That line is only a pointer, so the admin
+    dir's own back-pointer (its `gitdir` file) must name this tree's `.git`: a pointer at another
+    tree's admin dir would otherwise lend that tree's lock time. Any mismatch is None."""
     try:
-        with open(os.path.join(path, ".git"), encoding="utf-8") as handle:
+        own_git = os.path.join(path, ".git")
+        with open(own_git, encoding="utf-8") as handle:
             first = handle.readline().strip()
         if not first.startswith("gitdir:"):
             return None
         admin = os.path.join(path, first[len("gitdir:"):].strip())  # a relative one starts at PATH
+        with open(os.path.join(admin, "gitdir"), encoding="utf-8") as handle:
+            back = handle.readline().strip()
+        named = os.path.normcase(os.path.realpath(os.path.join(admin, back)))
+        if not back or named != os.path.normcase(os.path.realpath(own_git)):
+            return None
         return os.stat(os.path.join(admin, "locked")).st_mtime_ns // 1000000
     except Exception:
         return None
@@ -471,19 +479,45 @@ def _ticks_lock_stale(pid: int, ticks: int):
         return None
 
 
-def stale_agent_lock_verdict(reason: str, locked_at_ms=None):
+def _no_start_holder_is_foreign_linux(pid: int, worktree):
+    """Linux, a no-start lock whose holder PID is alive: True only when /proc proves the pid is not
+    the agent's host: its cwd (`/proc/PID/cwd`, resolved) is outside WORKTREE and no element of its
+    argv (`/proc/PID/cmdline`) holds `claude` or `agent`, in any case. A cwd inside the tree, any such
+    argv, no WORKTREE, or any read or parse failure is False: the holder is kept."""
+    if not worktree:
+        return False
+    try:
+        cwd = os.path.normcase(os.path.realpath(os.readlink("/proc/%d/cwd" % pid)))
+        tree = os.path.normcase(os.path.realpath(worktree))
+        if cwd == tree or cwd.startswith(tree.rstrip(os.sep) + os.sep):
+            return False
+        with open("/proc/%d/cmdline" % pid, "rb") as handle:
+            raw = handle.read()
+        argv = [part.decode("utf-8", "replace").lower() for part in raw.split(b"\0") if part]
+        if not argv:
+            return False
+        return not any("claude" in part or "agent" in part for part in argv)
+    except Exception:
+        return False
+
+
+def stale_agent_lock_verdict(reason: str, locked_at_ms=None, worktree=None):
     """True when REASON is a claude agent lock that may go. Three forms: the Agent tool's own
     lock `claude agent agent-<id> (pid N start <date>)`, the harness's live form
     `claude agent agent-<id> (pid N start <ticks>)` (S is clock ticks since boot; Linux only,
     `_ticks_lock_stale`), and `claude agent agent-<id> (pid N)` with no start time. N is the HOST
     claude process, not the agent.
     A lock goes when N is dead; with a start time, also when N is alive with another start time (pid
-    reuse). With no start time, the lock file's write time stands in: LOCKED_AT_MS (epoch ms, the
-    mtime of `<git-dir>/locked`, `_lock_written_ms`). A true holder started before it wrote its lock,
-    so a live N that started more than SESSION_LIVE_TOLERANCE_MS after that write is a reused pid.
-    With LOCKED_AT_MS None (unreadable) a live no-start holder keeps its lock. The date and ticks
-    forms never read it. False when the holder still runs, or the reason is any other lock. None
-    when the start time or the process read could not tell. Only True lets a lock go."""
+    reuse). A live N with no start time is judged by platform, since no clock-free start is on the lock:
+    Windows reads the lock file's write time LOCKED_AT_MS (epoch ms, the mtime of `<git-dir>/locked`,
+    `_lock_written_ms`): a true holder started before it wrote its lock, so a live N that started more
+    than SESSION_LIVE_TOLERANCE_MS after that write is a reused pid, and an unreadable write time keeps.
+    Linux ignores LOCKED_AT_MS and reads /proc (`_no_start_holder_is_foreign_linux`): the holder is a
+    reused pid only when its cwd is outside WORKTREE (the tree's path) and its argv names no `claude`
+    or `agent`; any other result, or no WORKTREE, keeps. Mac (darwin) and any other platform keep a live
+    no-start holder: no route is measured there. The date and ticks forms never read either argument.
+    False when the holder still runs, or the reason is any other lock. None when the start time or the
+    process read could not tell. Only True lets a lock go."""
     found = AGENT_LOCK_RE.match(reason or "")
     if not found:
         return False
@@ -502,20 +536,24 @@ def stale_agent_lock_verdict(reason: str, locked_at_ms=None):
         return None
     if actual is None:
         return True
-    if locked_ms is None:  # no start time: the lock file's write time is the only reuse check
-        if locked_at_ms is None:
-            return False
-        return actual - locked_at_ms > git_reads.SESSION_LIVE_TOLERANCE_MS
+    if locked_ms is None:  # no start time: the platform decides what proves a reused pid
+        if sys.platform.startswith("win"):
+            if locked_at_ms is None:
+                return False
+            return actual - locked_at_ms > git_reads.SESSION_LIVE_TOLERANCE_MS
+        if sys.platform.startswith("linux"):
+            return _no_start_holder_is_foreign_linux(pid, worktree)
+        return False
     return abs(actual - locked_ms) > git_reads.SESSION_LIVE_TOLERANCE_MS
 
 
-def finish_gated_lock_verdict(reason: str, finished: bool, locked_at_ms=None):
+def finish_gated_lock_verdict(reason: str, finished: bool, locked_at_ms=None, worktree=None):
     """`stale_agent_lock_verdict`, except that a live-form lock (start S in clock ticks) whose host
     is gone reads as held unless FINISHED, the proof that the agent finished (`agent_finished`). A
     dead host names no process to rule out, so a shell the agent left may still be in its tree.
     The date-form lock and the lock with no start time keep their own verdict. LOCKED_AT_MS is the
-    lock file's write time (`stale_agent_lock_verdict`)."""
-    stale = stale_agent_lock_verdict(reason, locked_at_ms)
+    lock file's write time and WORKTREE the tree's path (`stale_agent_lock_verdict`)."""
+    stale = stale_agent_lock_verdict(reason, locked_at_ms, worktree)
     if stale is True and not finished:
         found = AGENT_LOCK_RE.match(reason or "")
         if found and (found.group(2) or "").isdigit():
@@ -538,17 +576,18 @@ def _parent_pid(pid: int):
         return None
 
 
-def own_agent_lock_verdict(reason: str, locked_at_ms=None):
+def own_agent_lock_verdict(reason: str, locked_at_ms=None, worktree=None):
     """True when REASON is an Agent-tool lock whose live holder is this process or one of its
     ancestors (the calling session's own Claude process). False for any other reason, or a holder
     outside the ancestry. None when a pid read could not tell. A holder that is a reused pid
-    (`stale_agent_lock_verdict` with LOCKED_AT_MS, the lock file's write time) is not the owner. The
+    (`stale_agent_lock_verdict` with LOCKED_AT_MS, the lock file's write time, and WORKTREE, the
+    tree's path) is not the owner. The
     caller still owns the clean, merged, idle, session and process checks: this reads the holder
     only."""
     found = AGENT_LOCK_RE.match(reason or "")
     if not found:
         return False
-    alive = stale_agent_lock_verdict(reason, locked_at_ms)
+    alive = stale_agent_lock_verdict(reason, locked_at_ms, worktree)
     if alive is not False:
         return None if alive is None else False
     holder = int(found.group(1))
@@ -939,7 +978,8 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
     host_lock, host_holder = False, None
     if finished_host_lock and entry.get("locked_reason") is not None:
         host_holder = entry["locked_reason"]
-        host_lock = own_agent_lock_verdict(host_holder, entry.get("locked_at_ms")) is True
+        host_lock = own_agent_lock_verdict(host_holder, entry.get("locked_at_ms"),
+                                           entry["path"]) is True
         if host_lock:
             entry = dict(entry, locked_reason=None)
     if "idle" in entry:  # a pass's sort read it before any status ran: one read per tree
@@ -959,9 +999,10 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
     if entry.get("locked_reason") is not None:
         holder = entry.get("locked_reason") or "locked"
         written = entry.get("locked_at_ms")
-        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock, written)
+        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock, written, entry["path"])
         if stale_agent_lock is not True:
-            own_lock = (own_lock_rule and own_agent_lock_verdict(holder, written) is True
+            own_lock = (own_lock_rule
+                        and own_agent_lock_verdict(holder, written, entry["path"]) is True
                         and (not fast or batch is not None)
                         and _own_lock_ready(where, path, batch, lock_idle))
             if not own_lock:
@@ -2604,7 +2645,7 @@ def _restore_cut_short(where: str, entry: dict):
     locked = git_reads.worktree_locked(where, path)
     if locked is None or (locked and finish_gated_lock_verdict(
             entry.get("locked_reason") or "", bool(entry.get("finished")),
-            entry.get("locked_at_ms")) is not True):
+            entry.get("locked_at_ms"), path) is not True):
         return
     if git_reads.worktree_live_session(path) is not False:
         return
@@ -2633,8 +2674,8 @@ def _lock_unlockable(root: str, path: str, decision: dict):
         decision.pop("unlock", None)  # nobody holds a lock now: nothing to take off
         return True
     if (reason is not _LOCK_UNREADABLE and reason == decision.get("lock_reason")
-            and (stale_agent_lock_verdict(reason, written) is True
-                 or own_agent_lock_verdict(reason, written) is True)):
+            and (stale_agent_lock_verdict(reason, written, path) is True
+                 or own_agent_lock_verdict(reason, written, path) is True)):
         return True
     decision.pop("unlock", None)
     decision["action"] = "keep"
