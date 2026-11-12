@@ -1506,7 +1506,7 @@ def cross_repo_hit(op, data, page_repo, session_id=None):
 STOPS_RULE = "stops-named-in-holds"
 STOPS_REASON = ("`stops` lists what the owner's answer stops: one string per lane (\"lane fix-proxy\"), PR (\"PR #1201\") or "
                 "step (\"step merge-queue\"), each once. `holds` names every entry in words, and `stops` needs `holds`. "
-                "An update that sets `stops` carries `holds` too. (waiting-page SKILL.md, `stops`)")
+                "An update that sets `stops` carries `holds` too. (decision question-form, `stops` and `holds` say one thing)")
 _STOPS_PR = re.compile(r"PR\s*#?\s*(\d+)", re.IGNORECASE)
 
 
