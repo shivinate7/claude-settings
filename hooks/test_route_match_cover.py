@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Cases for the cite cover in hooks/route_match.py, judged through the guard surface: a page task's route cite must
 name a row whose pattern covers the task's act. Each case is one waiting-page task write judged by guard.data_tool_hit
-(test_question_form.guard_hit), on the local surface that its rows file pins. The rule is the coordinator pick of
-decision claims-carry-backing, 2026-11-07 15:12 CST.
+(test_question_form.guard_hit), on the surface its rows file pins (local, or cloud for the draft cases). The rule is
+decision claims-carry-backing (part v), which refuses a cite of the row of another act.
 
 Run it from the repository root:
 
@@ -16,6 +16,7 @@ Two of the cases also state the exact output of a helper in hooks/route_match.py
 piece list of act_texts, and the row order of rows_covering. Those lines run after the guard part of their case, and a
 helper that is missing fails them by name, as hooks/test_guard.py cloud_name_check does.
 """
+import contextlib
 import os
 import re
 import sys
@@ -49,6 +50,10 @@ def shells(mac_text):
 REPRO = shells(REPRO_LINES)
 PR_READY = "^gh pr ready\\b"
 MCP_PR = "^mcp__github__update_pull_request$"
+DRAFT_ROW = "pr-draft-gh-cli-cloud"  # the cloud row that refuses a return to draft; its pattern is copied here as PR_READY is
+DRAFT_PAT = "^gh pr ready\\b.*--undo"
+DRAFT_ACT = "gh pr ready 12 --undo"
+LINE_DRAFT = "Why yours: the cloud refuses returning the pull request to draft"
 FULL_SIZE_ROWS = 400  # the size of a full rows file: the same bound as test_refusal_note_route's n10 case
 
 
@@ -65,6 +70,24 @@ def task(context, command=None):
     return qf.task_item(STEPS, context=context, **over)
 
 
+def draft_row():
+    """The cloud row of the draft cases: one row, the id and pattern the fixture constants name."""
+    return row(DRAFT_ROW, DRAFT_PAT, "refused", surface="cloud")
+
+
+def mac_after_login(act):
+    """A task's command with the gh login first, as the gh cases above, so only the act decides the cover."""
+    return shells("gh auth switch -u shivinate7\n" + act)
+
+
+@contextlib.contextmanager
+def cloud_rows(path):
+    """The rows seam at `path`, on the cloud surface: qf.local_rows with the cloud marker set for the block."""
+    with qf.local_rows(path):
+        os.environ[qf.hook_base.CLOUD_ENV] = "true"
+        yield
+
+
 class RouteCover(unittest.TestCase):
     def helper(self, name):
         """The named helper of hooks/route_match.py. A missing one fails the case with its name and its cause."""
@@ -73,20 +96,20 @@ class RouteCover(unittest.TestCase):
             self.fail("route_match has no %s: a helper the cover reads is missing" % name)
         return fn
 
-    def judge(self, rows, context, command=None):
-        """The guard's verdict on one waiting-page task write, with `rows` as its rows file, on the local surface."""
+    def judge(self, rows, context, command=None, surface="local"):
+        """The guard's verdict on one waiting-page task write, with `rows` as its rows file, on `surface`."""
         path = qf.rows_at(self._testMethodName + ".json", rows)
-        with qf.local_rows(path):
-            self.assertEqual(route_match.surface(), "local",
-                             "scope: the surface is not local, so the cite is judged on the wrong rows")
+        with (cloud_rows(path) if surface == "cloud" else qf.local_rows(path)):
+            self.assertEqual(route_match.surface(), surface,
+                             "scope: the surface is not %s, so the cite is judged on the wrong rows" % surface)
             return qf.guard_hit("set", qf.entry_of(task(context, command)))
 
-    def assertPasses(self, rows, context, command, message):
-        hit = self.judge(rows, context, command)
+    def assertPasses(self, rows, context, command, message, surface="local"):
+        hit = self.judge(rows, context, command, surface)
         self.assertEqual(hit, PASS, "%s: the guard gave %r" % (message, hit))
 
-    def assertRefused(self, rows, context, command, message):
-        hit = self.judge(rows, context, command)
+    def assertRefused(self, rows, context, command, message, surface="local"):
+        hit = self.judge(rows, context, command, surface)
         self.assertEqual(hit[0], WHY_RULE, "%s: the guard gave %r" % (message, hit))
 
     def rows_on_local(self, rows):
@@ -305,6 +328,72 @@ class RouteCover(unittest.TestCase):
                           "act_texts does not split a line at ||, so the row for gh pr ready does not cover its act")
         self.assertRefused([row("unsplit-row", "^false \\|\\|", "asks")], LINE + cite("unsplit-row") + ".", cmd,
                            "act_texts does not split a line at ||, so a row for the unsplit line covers it")
+
+    def test_the_plain_draft_act_is_covered_by_the_cloud_draft_row(self):
+        """Green control: the cloud draft row covers its own act, so the cloud fixture judges a cite as the local one does."""
+        self.assertPasses([draft_row()], LINE_DRAFT + cite(DRAFT_ROW) + ".", mac_after_login(DRAFT_ACT),
+                          "the cloud draft row does not cover its own act", surface="cloud")
+
+    def test_a_merge_citing_the_draft_row_stays_refused(self):
+        """Green control: a gh command that is not the draft act stays refused on a cite of the draft row."""
+        self.assertRefused([draft_row()], LINE_DRAFT + cite(DRAFT_ROW) + ".", mac_after_login("gh pr merge 12 --undo"),
+                           "a merge citing the draft row is not refused", surface="cloud")
+
+    def test_a_backslash_newline_between_the_command_and_its_flag_is_covered(self):
+        """Form 1: a line continuation between `gh pr ready 12` and `--undo`. Each line is split on its own, so no piece
+        holds the whole act. The same continuation on a merge is the control, refused."""
+        rows = [draft_row()]
+        cite_line = LINE_DRAFT + cite(DRAFT_ROW) + "."
+        self.assertIsNotNone(re.search(DRAFT_PAT, DRAFT_ACT), "scope: the draft pattern does not match the plain act")
+        self.assertRefused(rows, cite_line, mac_after_login("gh pr merge 12 \\\n  --undo"),
+                           "control: a continuation on a merge citing the draft row is not refused", surface="cloud")
+        self.assertPasses(rows, cite_line, mac_after_login("gh pr ready 12 \\\n  --undo"),
+                          "a backslash-newline between the command and its flag is not joined, so the draft row does not cover the act",
+                          surface="cloud")
+
+    def test_a_timeout_wrapper_before_the_command_is_covered(self):
+        """Form 2: `timeout 60` before `gh pr ready`. The prefix strip drops only env and NAME=value, so the piece starts with timeout."""
+        rows = [draft_row()]
+        cite_line = LINE_DRAFT + cite(DRAFT_ROW) + "."
+        self.assertIsNotNone(re.search(DRAFT_PAT, DRAFT_ACT), "scope: the draft pattern does not match the plain act")
+        self.assertRefused(rows, cite_line, mac_after_login("timeout 60 gh pr merge 12 --undo"),
+                           "control: a timeout wrapper on a merge citing the draft row is not refused", surface="cloud")
+        self.assertPasses(rows, cite_line, mac_after_login("timeout 60 gh pr ready 12 --undo"),
+                          "a timeout wrapper before the command is not stripped, so the draft row does not cover the act",
+                          surface="cloud")
+
+    def test_a_nohup_wrapper_before_the_command_is_covered(self):
+        """Form 2: `nohup` before `gh pr ready`, as the timeout case, with the prefix strip dropping nothing but env and NAME=value."""
+        rows = [draft_row()]
+        cite_line = LINE_DRAFT + cite(DRAFT_ROW) + "."
+        self.assertIsNotNone(re.search(DRAFT_PAT, DRAFT_ACT), "scope: the draft pattern does not match the plain act")
+        self.assertRefused(rows, cite_line, mac_after_login("nohup gh pr merge 12 --undo"),
+                           "control: a nohup wrapper on a merge citing the draft row is not refused", surface="cloud")
+        self.assertPasses(rows, cite_line, mac_after_login("nohup gh pr ready 12 --undo"),
+                          "a nohup wrapper before the command is not stripped, so the draft row does not cover the act",
+                          surface="cloud")
+
+    def test_a_semicolon_in_a_quoted_flag_value_is_covered(self):
+        """Form 3: a `;` inside a quoted flag value splits the act, so `--undo` falls into a piece after the quote."""
+        rows = [draft_row()]
+        cite_line = LINE_DRAFT + cite(DRAFT_ROW) + "."
+        self.assertIsNotNone(re.search(DRAFT_PAT, DRAFT_ACT), "scope: the draft pattern does not match the plain act")
+        self.assertRefused(rows, cite_line, mac_after_login('gh pr merge 12 --repo "acme/web;x" --undo'),
+                           "control: a quoted semicolon on a merge citing the draft row is not refused", surface="cloud")
+        self.assertPasses(rows, cite_line, mac_after_login('gh pr ready 12 --repo "acme/web;x" --undo'),
+                          "a semicolon inside a quoted flag value splits the act, so the draft row does not cover it",
+                          surface="cloud")
+
+    def test_a_global_flag_between_gh_and_the_subcommand_is_covered(self):
+        """Form 4: a global flag, `-R acme/web`, between `gh` and the subcommand. The `^gh pr ready` anchor misses it."""
+        rows = [draft_row()]
+        cite_line = LINE_DRAFT + cite(DRAFT_ROW) + "."
+        self.assertIsNotNone(re.search(DRAFT_PAT, DRAFT_ACT), "scope: the draft pattern does not match the plain act")
+        self.assertRefused(rows, cite_line, mac_after_login("gh -R acme/web pr merge 12 --undo"),
+                           "control: a global flag on a merge citing the draft row is not refused", surface="cloud")
+        self.assertPasses(rows, cite_line, mac_after_login("gh -R acme/web pr ready 12 --undo"),
+                          "a global flag between gh and the subcommand is not skipped, so the draft row does not cover the act",
+                          surface="cloud")
 
 
 if __name__ == "__main__":
