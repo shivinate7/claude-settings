@@ -25,7 +25,6 @@ It moved here from shivinate7/advisor on Oct 26 (owner, step c51), with that rep
 
 Lane briefs name these ids. Triage rewrites a line when a role changes hands.
 
-- Coordinator: "Claude settings coordinator handoff", session_013NEJL2hB1pLZPDpzas7VgB, since 2026-11-03 15:32 CST.
-- Triage: "cs triage: claude-settings (6)", session_013NEJL42Sv3tJkjpzY7bExj, since 2026-11-03 15:38 CST.
-- Batch runner: "claude-settings batch runner 8", session_013NEJL2vsmyKzJm8jUDt6za, since 2026-11-03 15:38 CST.
-- Batch runner, child repos: "batch runner 9 (child repos)", session_013NEJKymmzw37seAr3Qq5nv, since 2026-11-03 15:39 CST.
+- Coordinator: "Claude settings coordinator onboarding", session_013NEJL1gw6EdrSyvHkTUEx6, since 2026-11-11 22:38 CST.
+- Triage: "cs triage: claude-settings (7)", session_013NEJKzCzoWhfP8FMCPtQU6, since 2026-11-11 22:38 CST.
+- Batch runner: "claude-settings batch runner 10", session_013NEJL2f1YCYsvLdpFqtWP3, since 2026-11-11 22:38 CST.
