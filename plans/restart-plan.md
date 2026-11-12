@@ -1,8 +1,9 @@
 # Restart plan: how claude-settings lands work after the freeze
 
-Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
-coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 20:03 CST Nov 11. The owner's list closed at 18:43 CST Nov 10; R21 to R45 came after.
+Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ). Sessions since the
+respawn of 22:38 CST Nov 11: coordinator session_013NEJL1gw6EdrSyvHkTUEx6, triage
+session_013NEJKzCzoWhfP8FMCPtQU6, batch runner session_013NEJL2f1YCYsvLdpFqtWP3. Rewritten in place each
+time a point settles; git keeps the history. Last rewrite: 22:44 CST Nov 11. The owner's list closed at 18:43 CST Nov 10; R21 to R45 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
