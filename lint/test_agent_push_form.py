@@ -12,6 +12,7 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROLE_FILES = ("builder", "test-author", "designer", "record-writer")
 PUSH_FORM = "git push origin HEAD:<branch>"
+PUSH_TO = "Push to:"  # the brief line that names the one branch an agent may push to (brief-names-push-target)
 OWN_BRANCH_WORDING = "commit your work to your own branch and push it"
 
 
@@ -27,6 +28,13 @@ class PushForm(unittest.TestCase):
             with self.subTest(role=role):
                 self.assertTrue(PUSH_FORM in self.role_text(role),
                                 "%s.md lacks the form %s" % (role, PUSH_FORM))
+
+    def test_each_role_names_the_push_to_line(self):
+        # A role file that says how to push must say where the brief names the target (brief-names-push-target).
+        for role in ROLE_FILES:
+            with self.subTest(role=role):
+                self.assertTrue(PUSH_TO in self.role_text(role),
+                                "%s.md lacks the %s line" % (role, PUSH_TO))
 
     def test_no_role_still_pushes_its_own_branch(self):
         for role in ROLE_FILES:
