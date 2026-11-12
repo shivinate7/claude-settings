@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""PreToolUse judge for an Agent spawn, an AskUserQuestion call and an ArtifactData write of a
-waiting-page item. One command hook replaces the settings.json `prompt` hook on Agent and the `agent`
+"""PreToolUse judge for an Agent spawn, an AskUserQuestion call, an ArtifactData write of a
+waiting-page item and a coordinator's `mcp__claude-code-remote__send_message` that states a pick. One command hook replaces the settings.json `prompt` hook on Agent and the `agent`
 hook on AskUserQuestion. A prompt hook sees only the call's JSON. An agent hook reads files with tools and
 returns ok. Neither has a command field, so neither runs guard_core.refuse, the one home of the owner
 override (decision owner-override).
@@ -47,7 +47,8 @@ Neither is a code refusal with the remedy, no model call.
 Otherwise one Sonnet call (PICK_JUDGE, the question_form.past_rulings candidates and the cited plan R-number text from
 docs/plans) refuses a pick the cited text contradicts or does not say. Any other sender or text exits at once, with no
 model call. A page item is unreadable by the hook, and the prompt says so. A model error allows, with one stderr line.
-Cost: a send with no pick or hold word, or from no coordinator, starts no process and makes no model call. A pick with
+Cost: the matcher starts this script on every send_message (37 ms measured); a send with no pick or hold word, or from no
+coordinator, starts no process beyond the hook's own start and makes no model call. A pick with
 a cite or a no-ruling statement: one git process (question_form.past_rulings) and one Sonnet call, PAST_RULING_TIMEOUT s.
 A pick with neither: one git process (a listed record's slug may still be the cite), no model call. Nothing is
 written but the guard.log line of a refusal.
@@ -441,8 +442,7 @@ def is_coordinator(payload):
         return False
     import own_session
     try:
-        tags, tagged_after = own_session.own_session_read(transcript, own_id)[:2]
-        calls = own_session.own_tag_calls_after(transcript, own_id) if tagged_after else []
+        tags, tagged_after, calls = own_session.own_session_tags_calls(transcript, own_id)
     except (OSError, ValueError, TypeError) as exc:
         print("call judge failed open: the sender's own record was not read: %s" % " ".join(str(exc).split()),
               file=sys.stderr)

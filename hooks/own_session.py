@@ -71,10 +71,12 @@ def own_session_read(transcript, own_id, created=False):
     return _scan(transcript, own_id, created)[:3]
 
 
-def own_tag_calls_after(transcript, own_id):
-    """The inputs of the set_session_tags calls that follow the newest own record (the ones that make own_session_read's
-    tagged_after True), oldest first. An input that is no dict is passed as {}. Raises as own_session_read does."""
-    return _scan(transcript, own_id, False)[4]
+def own_session_tags_calls(transcript, own_id):
+    """(tags, tagged_after, tag_calls) from one pass: own_session_read's tags and tagged_after, and the inputs of the
+    set_session_tags calls that follow the newest own record (the calls that make tagged_after True, oldest first; an
+    input that is no dict is {}), [] when none follow. Raises as own_session_read does."""
+    tags, tagged_after, _parent, _ccr, calls = _scan(transcript, own_id, False)
+    return tags, tagged_after, calls if tagged_after else []
 
 
 def own_session_ccr(transcript, own_id):

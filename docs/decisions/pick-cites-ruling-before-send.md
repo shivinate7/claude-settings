@@ -25,9 +25,18 @@ Only the fixture cases in `hooks/test_call_judge.py` stand for these three. No c
 
 The harm: a lane builds to the wrong pick, the work is redone, and the owner is asked the same thing twice.
 
-Cost, per pick message: one `call_judge.py` process and one Sonnet call (60 s cap), plus one git process (`question_form.past_rulings`). A send with no pick or hold word, or from a session that is no coordinator, starts no process and makes no model call. A pick with no cite makes no model call. Nothing is written but the `guard.log` line of a refusal. `hooks/test_call_judge.py` (section "a coordinator's pick") counts the calls.
+Cost, per pick message: one `call_judge.py` process and one Sonnet call (60 s cap), plus one git process (`question_form.past_rulings`). The matcher starts `call_judge.py` on every `send_message` (37 ms measured); a send with no pick or hold word, or from a session that is no coordinator, starts no process beyond the hook's own start and makes no model call. A pick with no cite makes no model call. Nothing is written but the `guard.log` line of a refusal. `hooks/test_call_judge.py` (section "a coordinator's pick") counts the calls.
 
-Known limit: the judge reads the cited text, not the whole plan or the waiting page. A page item cite is unread, so the pick it backs passes on the cite alone. A plan R-number that no file of `docs/plans` holds as a `- **R<n>.` bullet is reported to the judge as not searched, never as clear.
+Known limit:
+
+- The judge reads the cited text, not the whole plan or the waiting page. A page item cite is unread, so the pick it backs passes on the cite alone. A plan R-number that no file of `docs/plans` holds as a `- **R<n>.` bullet is reported to the judge as not searched, never as clear.
+- A pick in other words passes untouched: "Decision:", "going with", "my call is", "chose", "is on hold", "hold on merging".
+- A plan ruling such as `G12` is no cite (`PICK_PLAN_REF` takes `R` only). A pick that cites only it is refused until it carries a `no ruling found:` line.
+- A hyphen word after `step`, `decision` or `debt` counts as a cite. The judge can then only say "not searched".
+- "I'll pick a port", a pick word in a code span, and `held` in a brief are statements to the matcher. Each is refused until the message carries a `no ruling found:` line.
+- With no `get_session` record of the own session at all, a self-tag add reads as no coordinator. Session start prescribes `get_session` first.
+- A refusal that names a ruling the prompt did not show is not checked (no `ruling_cite`).
+- How often it fires is unmeasured. Read the `pick-judge` lines in `guard.log` after a week.
 
 Kind: process
 Home: rule:questions-go-to-owner
