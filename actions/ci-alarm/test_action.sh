@@ -434,6 +434,71 @@ jobs_of 4752 scope-guard:success
 workflow_at 4752 scope-guard:37
 named green green-run-with-no-cap-end-in-any-attempt-stays-silent "!cap end named"
 
+# A re-run in flight is the group's newest run: its status is in_progress or queued and its attempt is above 1. The group is
+# UNKNOWN (main's judged rule, merge/merge.py base_state), so the alarm reads unknown with a warning and writes no issue. It never
+# reads green, and never falls back to an older run. A first attempt still in progress waits its turn, so the older run is judged (1d).
+# count_is <label> <pattern> <count>: the reads in the call log of the last t case that contain <pattern>.
+count_is() {
+  local got
+  got="$(grep -cF -- "$2" "$tmp/reads")"
+  if [ "$got" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1: $got reads of $2, want $3"; bad=1; fi
+}
+runs_are "$(gh_run ci failure 2026-01-01 https://runs/rerun-red-4901 push 4901)" "$(gh_run ci null 2026-01-02 https://runs/rerun-4902 push 4902 in_progress 2)"
+jobs_of 4901 checks:failure
+t unknown rerun-in-flight-hides-an-older-red-run-as-unknown-not-red "" "" ""
+runs_are "$(gh_run ci cancelled 2026-01-01 https://runs/rerun-cap-4910 push 4910)" "$(gh_run ci null 2026-01-02 https://runs/rerun-queued-4911 push 4911 queued 2)"
+jobs_of 4910 scope-guard:cancelled:40
+workflow_at 4910 scope-guard:37
+t unknown rerun-queued-hides-an-older-cap-end-as-unknown-not-red "" "" ""
+runs_are "$(gh_run ci success 2026-01-01 https://runs/rerun-green-4920 push 4920)" "$(gh_run ci null 2026-01-02 https://runs/rerun-4921 push 4921 in_progress 2)"
+jobs_of 4920 checks:success
+t unknown rerun-in-flight-is-not-green-from-an-older-green-run "" "" ""
+runs_are "$(gh_run ci failure 2026-01-01 https://runs/first-red-4930 push 4930)" "$(gh_run ci null 2026-01-02 https://runs/first-attempt-4931 push 4931 in_progress 1)"
+jobs_of 4930 checks:failure
+t red first-attempt-in-flight-waits-its-turn-and-the-older-red-run-is-judged "" "" ""
+
+# A cancelled newest run (attempt 2) names a job cancelled at its cap in attempt 1: the alarm reads every attempt, not only the
+# newest. The newest attempt shows the job short, so only the earlier attempt holds the cap end. Each earlier attempt is read once.
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cancel-retry-4940 push 4940 completed 2)"
+attempt_jobs_of 4940 1 scope-guard:cancelled:40 checks:success:5
+jobs_of 4940 scope-guard:cancelled:2 checks:success:5
+workflow_at 4940 scope-guard:37 checks
+t raised cancelled-rerun-names-a-cap-end-in-attempt-1 "" "" "job scope-guard ran 40 min, cap 37 min, run 4940" "actions/runs/4940/jobs"
+count_is cancelled-rerun-reads-attempt-1-jobs-once "actions/runs/4940/attempts/1/jobs" 1
+# Controls: attempt 1 cancelled under its cap stays quiet.
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cancel-retry-under-4941 push 4941 completed 2)"
+attempt_jobs_of 4941 1 scope-guard:cancelled:2
+jobs_of 4941 scope-guard:cancelled:2
+workflow_at 4941 scope-guard:37
+t green cancelled-rerun-with-attempt-1-cancelled-under-its-cap-is-quiet "" "" ""
+# Attempt 1 unread is unknown, never green. Attempt 1 with no jobs is unknown too: no cap end can be read from it (the no-jobs rule).
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cancel-retry-unread-4942 push 4942 completed 2)"
+attempt_jobs_of 4942 1 scope-guard:cancelled:40
+jobs_of 4942 scope-guard:cancelled:2
+workflow_at 4942 scope-guard:37
+t unknown cancelled-rerun-with-attempt-1-unread-is-unknown-not-green "api *attempts/1/jobs*" "" ""
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cancel-retry-empty-4943 push 4943 completed 2)"
+attempt_jobs_of 4943 1
+jobs_of 4943 scope-guard:cancelled:2
+workflow_at 4943 scope-guard:37
+t unknown cancelled-rerun-with-attempt-1-without-jobs-is-unknown-not-green "" "" ""
+
+# A cap end in a failed run that a newer green run of the other group clears. The clear drops the run; its cap end must still be
+# named. action.yml's description says a job cancelled at its cap raises the alarm "in a cancelled run and in a failure run".
+runs_are "$(gh_run ci success 2026-01-02 https://runs/cleared-cap-green-4951 schedule 4951)" "$(gh_run ci failure 2026-01-01 https://runs/cleared-cap-red-4950 push 4950)"
+jobs_of 4950 checks:failure scope-guard:cancelled:40
+jobs_of 4951 checks:success scope-guard:success
+workflow_at 4950 checks scope-guard:37
+workflow_at 4951 checks scope-guard:37
+t raised failure-run-cleared-by-a-newer-green-still-names-its-cap-end "" "" "job scope-guard ran 40 min, cap 37 min, run 4950" "actions/runs/4950/jobs actions/runs/4951/jobs"
+# Control: the same clear with the cap end under its cap is quiet.
+runs_are "$(gh_run ci success 2026-01-02 https://runs/cleared-under-green-4953 schedule 4953)" "$(gh_run ci failure 2026-01-01 https://runs/cleared-under-red-4952 push 4952)"
+jobs_of 4952 checks:failure scope-guard:cancelled:2
+jobs_of 4953 checks:success scope-guard:success
+workflow_at 4952 checks scope-guard:37
+workflow_at 4953 checks scope-guard:37
+t green failure-run-cleared-by-a-newer-green-with-its-cap-end-under-the-cap-is-quiet "" "" ""
+
 # The cancelled-path cost sentence in action.yml: the one that starts "Cost of that check", in the first paragraph of the description.
 # Scope first: the sentence must be found. Then it may not claim that no process starts or no file is written, must say
 # "no long-lived process", and must count its reads: one jobs read per judged run (failed or cancelled), the workflow read
