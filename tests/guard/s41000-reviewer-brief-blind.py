@@ -306,6 +306,21 @@ rbb_unread_refuse("reviewer-brief-blind: refused: a Workflow agent() reviewer wi
                   RBB_REPORT_VAR + _step_flow("`Replaces: reviewer-3f9c\nRe-check the floor fix in hooks/guard.py.\nReview ${builderReport}`",
                                               "agentType: 'reviewer'"))
 
+# A template hole anywhere in the brief disables the Replaces: marker, so the literal report under it is read and refused with
+# the report reason, whether the hole sits in the name or in the body.
+def rbb_report_refuse(name, script):
+    """A Workflow reviewer call with a literal report is denied under reviewer-brief-blind, with the report reason."""
+    add(name, "deny", RBB, tool="Workflow", script=script, carries=RBB_REPORT_SENTENCE, lacks=RBB_LITERAL_REMEDY)
+
+
+rbb_report_refuse("reviewer-brief-blind: refused: a Workflow agent() reviewer, literal Replaces: and report, interpolated body",
+                  _step_flow("`Replaces: reviewer-3f9c\nRe-check the floor fix in hooks/guard.py.\nDone: the floor fix is in.\n"
+                             "Deviations: none.\nReview ${x}`", "agentType: 'reviewer', model: 'haiku'"))
+rbb_report_refuse("reviewer-brief-blind: refused: a Workflow agent() reviewer whose Replaces: name is interpolated, "
+                  "with a literal report",
+                  _step_flow("`Replaces: ${x}\nRe-check the floor fix in hooks/guard.py.\nDone: the floor fix is in.\n"
+                             "Deviations: none.`", "agentType: 'reviewer', model: 'haiku'"))
+
 # The owner override lifts the refusal, as it lifts the role-model refusal (role_override_lift_check copied here).
 RBB_SPAWN ={"prompt": "Check the floor fix.\nDone: BUILT c204a1f.\nDeviations: none.", "subagent_type": "reviewer",
              "model": "haiku"}
