@@ -12,8 +12,7 @@ This extends the ask reply (ask-reply-back-notes) to item cards. It is one home:
 Settled by the brief (not options here): an item reply is a new `asks/<id>` record `{id, text, at, item}`, with no `re`.
 The writer routes it to the item's `owner`, or takes it when that session has ended. The session answers on that ask record
 (`reply`, `answered`), never on the item's `reply`. While its item is on the page, the record shows only on the item's card. It is not in the Asks list, it does not count in the ask pill,
-and it makes no "Re: an ask not on this page" row. The writer holds the item's close for at most 7 days while a reply waits. After that the item is
-gone, and the reply is its own Asks row, marked "Re: an item no longer on this page". Mark read works on that row, as on any ask row. A new answer marks the card "New reply"
+and it makes no "Re: an ask not on this page" row. The session that closes the item holds the close for at most 7 days while a reply waits (effect unmeasured). After that the item closes, and the closed line keeps the reply. A new answer marks the card "New reply"
 and opens a sunk card, as `replied` does today. Item 11 asks what "gone" means while the closed item is still a line.
 
 No. 41 in the card states is answered with its filing pending ("Filing pending, sent"). Main draws a filed answer as one line
@@ -147,8 +146,8 @@ No. 41 in the card states is answered with its filing pending ("Filing pending, 
   - Ctrl+Enter in the box and the answer bar ignore the item reply.
 - SKILL.md "The database", `asks/<id>`: it says asks are "never an item". Add `item`: written once at Send, never with `re`.
 - SKILL.md "Route an ask": an ask with `item` goes to that item's `owner`, or the writer takes it. It is answered with steps 1 and 2.
-- SKILL.md "Route and close": a writer never closes an item while one of its reply records has no `reply`. The close hold lasts at most 7 days. Until then
-  the reply stays on its item's card. After that, a reply whose item is gone is its own Asks row. Owner grant: yes.
+- SKILL.md "Route and close": the session that closes an item holds the close while one of its reply records has no `reply`, for at most 7 days (effect unmeasured).
+  The closed line keeps the reply. The hold only delays the close. Owner grant: yes.
 
 ## 11. A reply on an item that is now a line. Owner grant: yes
 
@@ -195,6 +194,7 @@ His reply then shows nowhere, and the line has no Reply. That is item 278's own 
     - Fold words with four parts wrap to two lines at 390.
     - The widened home `.thread .reply + .myreply` spaces siblings with a margin, against ux-gap-on-parent (guidance). It is main's rule, kept as is.
     - The owed card holds two text boxes (item 1).
+    - The hold's stated reason (keep the reply on its card) no longer holds after the "On its line" pick: the closed line keeps the reply. The hold only delays the close. Owner to decide whether to drop it.
 - impeccable critique, Nov 12 (single-context again: no agent tool). The detector found nothing in the static markup.
   - Open, outside this folder: main's opened line heads the item's reply "Reply from <owner>" with no time (`lineEl`), while a
     reply record's answer carries one. With option "On its line" the two sit together, so the first reads as missing its time.

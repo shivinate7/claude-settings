@@ -459,9 +459,10 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
    you read (`if_version`). If the close conflicts, the owner marked the item read in the meantime: read it again and retry the close. Copy the answer's `choice` or `done`, its `note` and its `at` into the item's `lastAnswer`
    in the same update. Then delete `answers/<id>`, so the answer cannot count for a later item. The page shows a closed
    item as one line, with its home and its reply, until the owner marks it read. The page shows `lastAnswer` as the answer on the opened line, and on an item left open (steps 3, 4 and a busy lane).
-   The session that closes the item holds this close while a record in `asks/` with `item` set to this item has no `reply`: the hold keeps that reply on its item's
-   card, next to what it answers. It holds for at most 7 days from that record's `at` (unmeasured). After that it closes the item, and the page keeps the reply
-   on the closed line. The reply is an Asks row only once the item is no longer on the page.
+   The session that closes the item holds this close while a record in `asks/` with `item` set to this item has no `reply`. The hold only delays the close (effect unmeasured),
+   because the page keeps the reply on the closed line. While the close waits, the session writes `lastAnswer` and deletes `answers/<id>` at once, as it does in
+   step 3. Only `status: "closed"` and `closed` wait. A later turn start then finds no kept answer, so nothing is filed twice. The same session reads the reply record's `at` at
+   each of its turn starts: no timer and no new process. It closes the item once the record has a `reply`, or 7 days after that `at`.
 3. If the answer is `none` with no clear direction, and you write the new `options`, `pick` and `why` from the
    note in this same turn (a `multi` item's new `pick` is a list), set `added` to now. Write `lastAnswer` from
    the answer in the same update, without `choice`, because the new `options` replace the old keys. Then delete
