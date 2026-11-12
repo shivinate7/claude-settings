@@ -1,11 +1,11 @@
 {
   "title": "A lane brief that contradicts an owner-ruled decision is flagged before it is sent",
   "why": "Coordinator incident 22:12 CST Nov 8: its brief for batch-freeze-lane-set(-enforce) asked for the integration PR to go ready at first build, against decision draft-until-reviewed (owner ruling). Two lanes built it (#2367 text, #2378 tool) before a lane's report guard caught it.",
-  "note": "Proposed check: the agent_brief hook, or the send_message brief guard, reads a lane brief against the decisions it names or touches, and flags a contradiction of an owner-ruled decision before the brief is sent. Lane prose-agents started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
+  "note": "Proposed check: the agent_brief hook, or the send_message brief guard, reads a lane brief against the decisions it names or touches, and flags a contradiction of an owner-ruled decision before the brief is sent. Lane prose-agents started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Lane cleared 13:38 CST Nov 12 (retrospective 13:36 CST sweep): its session (\"Lane fan-prose-agents\") is idle and completed with no branch for this step.",
   "phase": "next",
   "owner": "coordinator",
-  "status": "doing",
+  "status": "ready",
   "order": 871,
-  "updatedAt": "2026-11-12T07:29:00-06:00",
-  "lane": "session_013NEJL4Rt4fYfwvrGdu1mx7"
+  "updatedAt": "2026-11-12T13:38:03-06:00",
+  "lane": ""
 }

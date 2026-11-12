@@ -1,14 +1,14 @@
 {
  "id": "batch-order-by-pr-number",
  "title": "The integration branch merges lanes in hand-in order, or ci-hygiene step 8 says PR-number order",
- "status": "doing",
+ "status": "ready",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "session_013NEJKzyf9coT5mUTctthpk",
+ "lane": "",
  "owner": "triage",
  "blockedBy": [],
  "why": "merge/merge.py `build_integration_branch` merges in PR-number order (`sorted(heads.items())`), so skill ci-hygiene step 8's \"a conflict drops the later lane\" reads \"later\" by PR number. Clearest case: #2681, handed in before #2659, merged after it.",
  "source": "batch runner 10, 10:06 CST Nov 12, via coordinator 10:08 CST; case from lane fan-prose-decisions 10:09 CST",
- "note": "Debt, code or record: fix the code or the record. Hit in normal work. Ready, no lane.",
- "updatedAt": "2026-11-12T10:25:00-06:00"
+ "note": "Debt, code or record: fix the code or the record. Hit in normal work. Ready, no lane. Lane cleared 13:38 CST Nov 12 (retrospective 13:36 CST sweep): its session (\"Lane merge-batch-speed\") is idle and completed with no branch for this step.",
+ "updatedAt": "2026-11-12T13:38:03-06:00"
 }

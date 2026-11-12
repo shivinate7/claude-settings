@@ -1,14 +1,14 @@
 {
   "id": "subagent-handback-skipped",
   "title": "Find why background agents end without calling SubagentHandback, and fix the cause",
-  "status": "doing",
+  "status": "ready",
   "repo": "shivinate7/claude-settings",
   "phase": "next",
-  "lane": "session_013NEJL4Rt4fYfwvrGdu1mx7",
+  "lane": "",
   "why": "A report that never arrives costs a resume and can stall a lane.",
-  "note": "Owner feedback 12:57 CST Nov 11 (via the coordinator 13:00 CST), from a tile-windows coordinator session (10:45-12:55 CST): a test-author (77 tool uses, about 22 min) and a design-reviewer (79 tool uses, about 39 min) ended without calling SubagentHandback; the harness said \"ended without delivering a report\". Each sent a full report when asked by SendMessage. Ask: read those two transcripts' last turns (the tile-windows session transcript holds both task notifications; search \"ended without delivering a report\"), find why the call was skipped (long run, a final message with no call, or a context limit), and fix the cause in the agent definitions or a SubagentStop hook. Lane prose-agents started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
+  "note": "Owner feedback 12:57 CST Nov 11 (via the coordinator 13:00 CST), from a tile-windows coordinator session (10:45-12:55 CST): a test-author (77 tool uses, about 22 min) and a design-reviewer (79 tool uses, about 39 min) ended without calling SubagentHandback; the harness said \"ended without delivering a report\". Each sent a full report when asked by SendMessage. Ask: read those two transcripts' last turns (the tile-windows session transcript holds both task notifications; search \"ended without delivering a report\"), find why the call was skipped (long run, a final message with no call, or a context limit), and fix the cause in the agent definitions or a SubagentStop hook. Lane prose-agents started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Lane cleared 13:38 CST Nov 12 (retrospective 13:36 CST sweep): its session (\"Lane fan-prose-agents\") is idle and completed with no branch for this step.",
   "source": "owner feedback 2026-11-11 12:57 CST, via the coordinator 13:00 CST",
   "owner": "triage",
-  "updatedAt": "2026-11-12T07:29:00-06:00",
+  "updatedAt": "2026-11-12T13:38:03-06:00",
   "blockedBy": []
 }
