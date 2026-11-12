@@ -1396,8 +1396,9 @@ class Stale(unittest.TestCase):
         self.assert_page_word(r, "current", 0)
 
     # The 618 sequence: triage closed the item, the close copied the answer into lastAnswer, and answers/<id> stayed. A close keeps
-    # the answer (SKILL.md, "Route and close"), so the kept-answer line never tells the writer to delete it. Only a reword or a
-    # reopen deletes an answer.
+    # the answer (SKILL.md, "Route and close"), so the kept-answer line never tells the writer to delete it. Only a reword or an
+    # overturn deletes an answer; a reopen keeps it. Ruling: triage, 15:01 CST Nov 12 (pick a: page_grant rule 4 stays, lane checks
+    # run before close, park unchanged, kept-answer line stays without delete remedy), recorded at roadmap commit 23559d419.
 
     def test_a_kept_line_on_a_closed_item_with_its_last_answer_never_tells_the_writer_to_delete_the_answer(self):
         current, _ = self.current_and_behind()
@@ -1601,12 +1602,15 @@ def kept_lines(out):
 
 
 DELETE_WORD = re.compile(r"\bdelet\w*", re.I)
-NOT_BEFORE = re.compile(r"\b(?:not|never|no)\b[^.;]{0,30}$", re.I)
+# The one approved negation of a delete in a kept-answer line: "never delete", the wording kept_answer_lines in stale_pages.py
+# prints. Any other word before a delete leaves it an instruction, however near.
+APPROVED_NEVER = re.compile(r"\bnever delete\b", re.I)
 
 
 def delete_instructions(line):
-    """The `delete` words of a kept-answer line that no not, never or no governs, so each one tells the writer to delete."""
-    return [m.group(0) for m in DELETE_WORD.finditer(line) if not NOT_BEFORE.search(line[:m.start()])]
+    """The `delete` words of a kept-answer line outside the approved "never delete", so each one tells the writer to delete."""
+    rest = APPROVED_NEVER.sub(" ", line)
+    return [m.group(0) for m in DELETE_WORD.finditer(rest)]
 
 
 INCIDENT_N, INCIDENT_ID = 356, "round3-fail-holds"  # the incident: a closed decision whose answer was kept
@@ -2153,6 +2157,28 @@ class UnreadStale(FolderCase):
         code, out, _, error = self.run_main("--unread", self.folder)
         self.assert_mode_lines(out, error)
         self.assertEqual((code, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY)]), "main() did not send --unread to its mode: " + out)
+
+
+class DeleteInstructionsWording(unittest.TestCase):
+    """The helper that reads a kept-answer line for a delete. Its one negation is the approved "never delete"; any other word
+    before a delete, however near, leaves it an instruction. The product's own lines are checked by the cases above."""
+
+    APPROVED = ("kept-answer: item 1 (x) is closed and answers/x is kept; the close keeps it on purpose, so never delete it unless "
+                "the item is reopened or reworded (SKILL.md, \"Route and close\")")  # the wording kept_answer_lines prints
+
+    def test_the_approved_never_delete_is_no_instruction(self):
+        self.assertEqual(delete_instructions(self.APPROVED), [], "the approved wording reads as a delete instruction")
+
+    def test_a_delete_after_a_not_with_other_words_between_is_an_instruction(self):
+        line = "kept-answer: item 1 (x) is closed and answers/x is kept; not counted for a grant, so delete it"
+        self.assertEqual(delete_instructions(line), ["delete"], "a delete after a not reads as no instruction")
+
+    def test_a_second_delete_after_the_approved_one_is_an_instruction(self):
+        self.assertEqual(delete_instructions(self.APPROVED + ", so delete it"), ["delete"], "a delete after the approved one reads as none")
+
+    def test_never_deletes_is_not_the_approved_wording(self):
+        line = "kept-answer: item 1 (x) is closed and answers/x is kept; never deletes it"
+        self.assertEqual(delete_instructions(line), ["deletes"], "never deletes reads as the approved never delete")
 
 
 if __name__ == "__main__":
