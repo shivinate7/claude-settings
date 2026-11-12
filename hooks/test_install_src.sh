@@ -4985,6 +4985,47 @@ caseK12() {
   ok "$name"
 }
 
+# ---- caseK13: a mirror that keeps its local commit on main: the record names that commit, the one the files came from ----
+# The clone holds a commit on main that origin lacks, and origin moves on. The refresh fetches origin's tip but keeps the
+# clone at its local commit, so the install's files come from that commit. The record must name the commit the files came
+# from, the clone's HEAD, not origin's newer tip. Scope checks run first, so a red names the record and nothing else.
+caseK13() {
+  name="caseK13: a cloud install whose mirror keeps a local commit on main records the mirror's HEAD, not origin's tip"
+  fx="$work/k13-fx"; h="$work/k13-home"; scratch="$work/k13-scratch"; bin="$work/k13-bin"
+  co="$h/claude-settings"; k13_rec="$h/.claude-cfg/.claude-settings-install.json"
+  mkdir -p "$h" "$scratch"
+  make_github_fixture "$fx"
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  cloud_install "$h" "$scratch" "$bin"
+  if [ $rc -ne 0 ] || [ "$(git -C "$co" config --get claude-settings.cloudMirror 2>/dev/null)" != true ]; then
+    bad "$name" "setup: the first install did not leave a marked clone at $co: $(install_problems)"
+    return
+  fi
+  git -C "$co" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m "local commit origin lacks"
+  k13_local=$(git -C "$co" rev-parse HEAD)
+  advance_github_fixture "$fx" second
+  k13_tip=$(fixture_sha "$fx")
+  cloud_install "$h" "$scratch" "$bin"
+
+  k13_src=$(record_field "$k13_rec" source)
+  k13_sha=$(record_field "$k13_rec" sha)
+  k13_head=$(git -C "$co" rev-parse HEAD 2>/dev/null)
+  if [ $rc -ne 0 ]; then
+    bad "$name" "install.sh exited $rc: $(install_problems)"
+  elif [ "$(realpwd "$k13_src")" != "$(realpwd "$co")" ]; then
+    bad "$name" "scope: the record's source is [$k13_src], not the mirror [$co]"
+  elif [ "$k13_head" != "$k13_local" ]; then
+    bad "$name" "scope: the mirror moved to [$k13_head] off its local commit [$k13_local], so the refresh did not keep it"
+  elif [ "$k13_tip" = "$k13_local" ]; then
+    bad "$name" "scope: origin's tip is the mirror's HEAD, so the record cannot tell them apart"
+  elif [ "$k13_sha" != "$k13_head" ]; then
+    bad "$name" "record sha is [$k13_sha], want the mirror's HEAD [$k13_head], the commit the installed files came from"
+  else
+    ok "$name"
+  fi
+}
+
 # ---- caseL: the merge allow rules come from the source checkout, and the log says what was written ----
 # The log names `merge allow rules`, not `merge --confirm allow rules`: the file holds the role rules as well as the confirm rules.
 # allow_case NAME HAS [SETTINGS]: a session's own checkout at $work/NAME-co with settings.json `{}`. HAS=1 adds this repo's
@@ -6105,6 +6146,7 @@ run caseK9
 run caseK10
 run caseK11
 run caseK12
+run caseK13
 run caseL1
 run caseL2
 run caseL3
