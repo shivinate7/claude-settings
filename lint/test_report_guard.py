@@ -4623,9 +4623,12 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         self.assertIn(tcj.APPS_RULING, calls[0]["prompt"])
 
     def test_absent_sources_allow_with_the_unknown_notice(self):
-        # The send to the writer keeps the question check quiet, so this case tests only the relay's unknown notice.
+        # The send to the writer puts the question on the page, so the reply holds only the page form. This case checks
+        # that the relay allows the question, and that it leaves the unknown notice.
         out, err = self.stop(self.bare, RELAY, answer=tcj.ALLOW, to_writer=True)
-        self.assertEqual(out, {}, out)
+        assert_on_the_page(self, out)
+        self.assertNotIn("past-ruling", self.reason(out), out)
+        self.assertNotIn("Unvetted guard", self.reason(out), out)
         self.assertIn("past-ruling search unknown:", err)
         self.assertEqual(len(self.model_calls()), 1)
 
@@ -4646,13 +4649,15 @@ class PastRulingRelay(SameTurnWriter, unittest.TestCase):
         self.assertEqual(self.model_calls(), [])
 
     def test_model_error_refuses_once_and_an_unvetted_line_passes_without_a_call(self):
-        # Each turn sends to the writer, so the question check stays quiet and only the relay's model error is tested.
+        # Each turn sends to the writer, so the question is on the page and the reply holds the page form. The relay's
+        # model error is tested on top of it: a refusal once, and no refusal when the unvetted notice is in the reply.
         out, _ = self.stop(self.decided, RELAY, model_fail=True, to_writer=True)
         self.assertIn("Unvetted guard", self.reason(out), out)
         self.assertEqual(len(self.model_calls()), 1)
         self.reset_calls()
         out, _ = self.stop(self.decided, RELAY + "\n> " + UNVETTED, model_fail=True, to_writer=True)
-        self.assertEqual(out, {}, out)
+        assert_on_the_page(self, out)
+        self.assertNotIn("Unvetted guard", self.reason(out), out)
         self.assertEqual(len(self.model_calls()), 1)
 
     def test_question_keys_refuse_two_questions_with_the_same_keys(self):
