@@ -214,11 +214,18 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        deny. A SendMessage whose `to` is a string starting `session_`: that is no agent name, and the
                        hand-off could go missing. A missing or non-string `to`, an agent name, @parent and the
                        mcp__claude-code-remote__send_message tool pass. An override lifts it.
-  draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
+  draft-pr             deny. A `gh pr create` without `--draft`, or a `gh api` POST of the pulls route without
+                       draft=true. (draft-until-reviewed)
   gh-write-cloud       deny. In a cloud session, a gh write: `gh pr` create, merge, comment, edit, close, review or
                        ready; `gh issue` create, comment, edit or close; `gh api` with a write method, or with a field
                        or input flag and no method. Judged per segment from the command word. A read, `gh api` with an
                        explicit GET and the merge tool pass. A local session skips it. An override lifts it.
+  auto-merge           deny. The MCP enable_pr_auto_merge tool, in any session: GitHub's auto-merge button is the owner's.
+                       Disabling auto-merge passes.
+  ready-lane           deny. In a session whose own get_session record proves cs-build:lane: marking a pull request
+                       ready (MCP update_pull_request with draft false, the gh ready command, or a gh api PATCH of a
+                       pull request with draft=false). A batch runner, an untagged session and a record that cannot be
+                       read pass. (draft-until-reviewed)
   records-page-ready   deny. Marking a pull request ready (MCP update_pull_request with draft false, or the gh ready
                        command without --undo) while its head's records page is stale, or when that read cannot run, in
                        a repo that uses the merge tool. A base that is not the default branch, a head holding a
@@ -576,7 +583,8 @@ while True:
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
-            undrafted_pr_create, uses_merge_tool, ready_page_hit,
+            undrafted_pr_create, undrafted_api_pr_create, uses_merge_tool, ready_page_hit,
+            AUTO_MERGE_REASON, AUTO_MERGE_TOOL, DRAFT_API_REASON, READY_LANE_REASON, ready_lane_hit,
         )
         _loading = "guard_frozen"
         from guard_frozen import (
@@ -4621,10 +4629,17 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     if matched:
         refuse(tool, "deny", "roadmap-one-writer", RECORD_REASON, matched)
 
-    # 6b. A pull request opened without --draft.
-    for text, _in_message in _substitutions(stripped)[0]:
-        if any(undrafted_pr_create(seg) for seg in split_segments(text) if seg.strip()):
-            refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "gh pr create")
+    # 6b. A pull request opened without --draft, by `gh pr create` or a `gh api` POST of the pulls route.
+    pr_segments = [seg for text, _in_message in _substitutions(stripped)[0] for seg in split_segments(text) if seg.strip()]
+    if any(undrafted_pr_create(seg) for seg in pr_segments):
+        refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "gh pr create")
+    if any(undrafted_api_pr_create(seg) for seg in pr_segments):
+        refuse(tool, "deny", "draft-pr", DRAFT_API_REASON, "gh api pulls create")
+
+    # 6b1. A lane marks a pull request ready (rule ready-lane). One transcript read, only for a call that marks one ready.
+    matched = ready_lane_hit(tool, {}, raw, pr_segments, transcript)
+    if matched:
+        refuse(tool, "deny", "ready-lane", READY_LANE_REASON, matched)
 
     # 6c. A lane commit of the generated records page (decision records-index-at-merge).
     matched = records_page_hit(stripped, cwd)
@@ -6212,6 +6227,16 @@ def judge(payload) -> None:
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
                    "merge tool " + verdict)
+
+    # GitHub's auto-merge button is the owner's: no session enables it, whatever its tier (rule auto-merge).
+    if tool == AUTO_MERGE_TOOL:
+        refuse(tool, "deny", "auto-merge", AUTO_MERGE_REASON, "enable auto-merge")
+
+    # A lane marks a pull request ready through the MCP update tool (rule ready-lane).
+    transcript_path = payload.get("transcript_path")
+    matched = ready_lane_hit(tool, tool_input, "", [], transcript_path if isinstance(transcript_path, str) else "")
+    if matched:
+        refuse(tool, "deny", "ready-lane", READY_LANE_REASON, matched)
 
     # The MCP update tool marks a pull request ready with draft false (rule records-page-ready).
     if tool == "mcp__github__update_pull_request":

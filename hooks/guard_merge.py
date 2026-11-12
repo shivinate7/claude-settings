@@ -296,8 +296,7 @@ PR_CREATE_VALUE_FLAGS = {"-t", "--title", "-b", "--body", "-F", "--body-file", "
                          "-H", "--head", "-l", "--label", "-a", "--assignee", "-m", "--milestone",
                          "-p", "--project", "-r", "--reviewer", "-R", "--repo", "-T", "--template"}
 GH_TRUE = ("1", "t", "T", "TRUE", "true", "True")
-# Named limits (decision draft-until-reviewed): a `gh api` POST to the pulls endpoint and
-# `hub pull-request` open a PR and are not judged here. A short-flag cluster such as `-dt x` is
+# Named limit (decision draft-until-reviewed): `hub pull-request` opens a PR and is not judged here. A short-flag cluster such as `-dt x` is
 # not read as a draft flag, so it is refused (a rare false alarm).
 
 
@@ -325,6 +324,79 @@ def undrafted_pr_create(segment: str) -> bool:
         elif arg.startswith(("--draft=", "-d=")):
             draft = arg.split("=", 1)[1] in GH_TRUE   # gh's ParseBool set; any other value is false
     return not draft
+
+
+# ---- a pull request made or marked ready through `gh api` (rules draft-pr, ready-lane)
+DRAFT_API_REASON = ("draft-pr: open every PR as a draft. Add -F draft=true to the gh api POST of the pulls route. "
+                    "Only the batch's integration PR goes ready; CI skips drafts.")
+GH_API_PULLS_ROUTE = re.compile(r"^/?repos/[^/\s]+/[^/\s]+/pulls(?:/(\d+))?/?(?:\?.*)?$")
+GH_API_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
+
+
+def _gh_api_pulls(args):
+    """("create" or "patch", the draft field's value lowercased or "") for `gh api` arguments that POST to the pulls
+    collection or PATCH one pull request, else None. Reads the method as gh does (the last method flag wins; with none,
+    a field or input flag makes it a POST). The last draft field wins. An --input body is unread, so it sets no draft."""
+    method, endpoint, draft, fielded, index = "", "", "", False, 0
+    while index < len(args):
+        arg = args[index]
+        index += 1
+        value = None
+        if arg in ("-X", "--method"):
+            method = (args[index] if index < len(args) else "").upper()
+            index += 1
+        elif arg.startswith("--method="):
+            method = arg[len("--method="):].upper()
+        elif arg.startswith("-X") and not arg.startswith("--"):
+            method = arg[2:].lstrip("=").upper()
+        elif arg in GH_API_VALUE_FLAGS:
+            index += 1
+        elif arg in ("-h", "--help"):
+            return None
+        elif arg in GH_API_FIELD_FLAGS:
+            value, index, fielded = args[index] if index < len(args) else "", index + 1, True
+        elif arg.startswith(("--field=", "--raw-field=")):
+            value, fielded = arg.split("=", 1)[1], True
+        elif arg.startswith(("-f", "-F")) and not arg.startswith("--"):
+            value, fielded = arg[2:], True
+        elif arg == "--input":
+            index, fielded = index + 1, True
+        elif arg.startswith("--input="):
+            fielded = True
+        elif not arg.startswith("-") and not endpoint:
+            endpoint = arg
+        if value is not None and value.partition("=")[0] == "draft":
+            draft = value.partition("=")[2].lower()
+    route = GH_API_PULLS_ROUTE.match(endpoint)
+    if not route:
+        return None
+    method = method or ("POST" if fielded else "GET")
+    if route.group(1) is None and method == "POST":
+        return "create", draft
+    if route.group(1) is not None and method == "PATCH":
+        return "patch", draft
+    return None
+
+
+def _gh_api_pulls_calls(segment: str):
+    """[(kind, draft)] for the `gh api` pull request calls in the segment, or in a `sh -c` script it holds."""
+    tokens = segment_tokens(segment) or []
+    script = inline_script(tokens) if tokens else ""
+    if script:
+        return [hit for part in split_segments(script) if part.strip() for hit in _gh_api_pulls_calls(part)]
+    rest = gh_call_of(segment)
+    hit = _gh_api_pulls(rest[1:]) if rest and rest[0] == "api" else None
+    return [hit] if hit else []
+
+
+def undrafted_api_pr_create(segment: str) -> bool:
+    """True for a segment that creates a pull request through `gh api` without draft=true (rule draft-pr)."""
+    return any(kind == "create" and draft != "true" for kind, draft in _gh_api_pulls_calls(segment))
+
+
+def api_ready_mark(segment: str) -> bool:
+    """True for a segment that marks a pull request ready through `gh api` PATCH with draft=false (rule ready-lane)."""
+    return any(kind == "patch" and draft == "false" for kind, draft in _gh_api_pulls_calls(segment))
 
 
 # ---- a gh write in a cloud session (rule gh-write-cloud)
@@ -465,6 +537,39 @@ def ready_page_hit(tool: str, tool_input: dict, command: str, where: str):
         if state == "unknown":
             return READY_PAGE_UNKNOWN_REASON % cap_safe(detail, 200), "ready, page read unknown"
     return None
+
+
+# ---- GitHub's auto-merge button (rule auto-merge)
+AUTO_MERGE_TOOL = "mcp__github__enable_pr_auto_merge"
+AUTO_MERGE_REASON = (
+    "auto-merge: the auto-merge button is the owner's, so no session turns it on. "
+    "Remedy: when the owner says to merge, run the merge tool, `merge <pr> --confirm`. "
+    "(rule auto-merge, a merge happens when the owner says so)"
+)
+
+
+# ---- a lane marks a pull request ready (rule ready-lane)
+READY_LANE_REASON = (
+    "ready-lane: a lane's pull request stays a draft. Only the batch's integration PR goes ready, and the batch "
+    "runner marks it. Remedy: leave this pull request a draft and report it to the coordinator; the batch runner "
+    "merges it with the merge tool, `merge <pr> --confirm`. (rule draft-pr, only the integration PR goes ready)"
+)
+
+
+def ready_lane_hit(tool: str, tool_input: dict, command: str, segments, transcript: str) -> str:
+    """The matched call when a session proved cs-build:lane by its own record marks a pull request ready, else "". The
+    marks are update_pull_request with draft false, the gh ready command, and a `gh api` PATCH with draft=false. `segments`
+    are the shell segments of `command`, cut as the draft-pr scan cuts them. The transcript is read only for a call that
+    marks something ready. A record that cannot be read proves nothing, so the call is judged as main judges it."""
+    if tool == READY_PAGE_MCP_TOOL:
+        matched = "update_pull_request draft false" if tool_input.get("draft") is False else ""
+    elif any(api_ready_mark(seg) for seg in segments):
+        matched = "gh api PATCH draft=false"
+    elif ready_page_calls(tool, tool_input, command):
+        matched = "gh pr ready"
+    else:
+        matched = ""
+    return matched if matched and _own_tier_proved(transcript, "lane") else ""
 
 
 # ---- a lane commit of the generated records page (decision records-index-at-merge)
