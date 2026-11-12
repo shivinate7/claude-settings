@@ -334,6 +334,10 @@ take_install_lock
 # mode and a clone with no main branch stay unpinned.
 if [ "$CLOUD" != 1 ] && [ -n "$SRC" ] && [ -e "$SRC/.git" ] && ! is_linked_worktree "$SRC"; then
   if main_commit=$(pin_commit "$SRC") && [ -n "$main_commit" ]; then
+    # The one WARN for the fallback: pin_commit runs inside $(...) several times, so it cannot say this itself.
+    if [ "$(pin_what "$SRC")" = "local main" ] && [ "$REF" != main ]; then
+      log "WARN: $SRC holds no origin/$REF, so the pinned checkout follows local main"
+    fi
     PIN="$SRC-live"
     if [ ! -e "$PIN" ]; then
       err=$(git -C "$SRC" worktree add -q --detach --lock --reason "claude-settings live pin" "$PIN" "$main_commit" 2>&1) \
@@ -432,6 +436,15 @@ if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ "$(git -C
   mirror_refresh "$SRC"
 fi
 
+# Origin has no $REF branch (stable): the rest of the run installs from main, with one WARN line naming $REF.
+# CLAUDE_SETTINGS_REF=main never reaches this, so the recovery path stays silent.
+fall_back_to_main() {
+  log "WARN: origin has no $REF branch, so this install takes main"
+  REF=main
+  RAW="https://raw.githubusercontent.com/${REPO}/main"
+  TARBALL="https://github.com/${REPO}/archive/refs/heads/main.tar.gz"
+}
+
 # clone_mirror DEST: clone $REF depth 1 into a sibling folder, then swap it in at DEST, so a failed clone leaves the old
 # copy. Marks DEST as a mirror this script made. Returns 1 and leaves DEST as it was on any failure, with the reason in
 # CLONE_MIRROR_WHY. The temp name is the same for every DEST, so one find sweeps a killed run's leftovers.
@@ -442,7 +455,11 @@ clone_mirror() {
   # no run still owns it; a newer one may belong to a run in parallel.
   find "$HOME" -maxdepth 1 -name 'claude-settings.clone.*' -mmin +5 -exec rm -rf {} + 2>/dev/null
   rm -rf "$clone_tmp"
-  if cloud_git clone -q --depth 1 --branch "$REF" "https://github.com/$REPO.git" "$clone_tmp" \
+  # An origin with no stable branch is cloned at main, and the rest of the run follows main (fall_back_to_main).
+  if { cloud_git clone -q --depth 1 --branch "$REF" "https://github.com/$REPO.git" "$clone_tmp" \
+       || { [ "$REF" != main ] && rm -rf "$clone_tmp" \
+            && cloud_git clone -q --depth 1 --branch main "https://github.com/$REPO.git" "$clone_tmp" \
+            && fall_back_to_main; }; } \
      && git -C "$clone_tmp" checkout -q -B main \
      && git -C "$clone_tmp" config claude-settings.cloudMirror true \
      && clone_sha=$(git -C "$clone_tmp" rev-parse main) \
@@ -557,7 +574,9 @@ if [ -z "$SRC" ]; then
   SRC="$HOME/claude-settings"
   mkdir -p "$SRC"
   tmp="$SRC/.tarball.tmp.tar.gz"
-  if curl -fsSL "$TARBALL" -o "$tmp" && tar -xzf "$tmp" --strip-components=1 -C "$SRC"; then
+  if { curl -fsSL "$TARBALL" -o "$tmp" \
+       || { [ "$REF" != main ] && fall_back_to_main && curl -fsSL "$TARBALL" -o "$tmp"; }; } \
+     && tar -xzf "$tmp" --strip-components=1 -C "$SRC"; then
     rm -f "$tmp"
   else
     rm -f "$tmp"

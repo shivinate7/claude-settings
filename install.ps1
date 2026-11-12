@@ -128,6 +128,8 @@ try {
 if (-not $IsLinked -and (Test-Path -LiteralPath (Join-Path $RepoDir '.git'))) {
     $MainCommit = Get-PinCommit $RepoDir
     if ($LASTEXITCODE -eq 0 -and $MainCommit) {
+        # The one WARN for the fallback (as install.sh): no origin/$PinRef, so the pin follows local main.
+        if ($PinRef -ne 'main' -and (Get-PinWhat $RepoDir) -eq 'local main') { Log "WARN: $RepoDir holds no origin/$PinRef, so the pinned checkout follows local main" }
         $Pin = (Get-FullDir $RepoDir) + '-live'
         if (-not (Test-Path -LiteralPath $Pin)) {
             $err = & { $ErrorActionPreference = 'Continue'; & git -C $RepoDir worktree add -q --detach --lock --reason 'claude-settings live pin' $Pin $MainCommit 2>&1 }
