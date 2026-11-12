@@ -79,7 +79,7 @@ The review a changed head owes. The first three bullets are the owner's ruling o
 - Coordinator pick. The PR gets one fresh full review at the live head when any of these holds. A clean merge of main adds none.
   - the newest record holds a fix verifier, unless its fix verifier PASSed and the live head is a conflicted merge of main into the fixed head (the fix after a merge of main above);
   - a fix check failed;
-  - a round read an older head than the live one;
+  - a round read an older head than the live one, unless the live head is a conflicted merge of main into that round's head: that takes one fix verifier, with or without a Fix check line in the log (the fix after a merge of main above);
   - the record was made or edited by hand;
   - the head moved after round 3.
 - The fresh review has these parts:
