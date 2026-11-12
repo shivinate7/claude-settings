@@ -1766,6 +1766,32 @@ def case_ruled_store_first_and_carries_supersedes():
           not any(c.startswith("ruled:%s:" % RULED_CLOSED_ID) for c in candidates), str(candidates)[:200])
 
 
+RULED_UNREAD_ID = "ruled-unread"
+
+
+def case_ruled_store_marks_an_unread_entry_unchecked():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled store unread: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("ruled-unread", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+    fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files({
+        RULED_ID: fixture.entry(RULED_ID, at=RULED_AT, ruling=RULED_TEXT, supersedes=RULED_SUPERSEDES),
+        RULED_UNREAD_ID: fixture.entry(RULED_UNREAD_ID, at="2026-11-13T09:00:00-06:00", ruling=RULED_TEXT,
+                                       supersedes=None, supersedes_none="unread: triage has not read the supersedes"),
+    }), tcj.ROOT)
+    with mock.patch.object(guard_pointer, "pointer_checkout", return_value=repo):
+        candidates, _unknown = fn(tcj.APPS_GOAL, repo)
+    unread_line = next((c for c in candidates if c.startswith("ruled:%s:" % RULED_UNREAD_ID)), "")
+    read_line = next((c for c in candidates if c.startswith("ruled:%s:" % RULED_ID)), "")
+    check("ruled store unread: the unread entry is listed", bool(unread_line), str(candidates)[:200])
+    check("ruled store unread: its candidate line is marked (unchecked, not law)",
+          "(unchecked, not law)" in unread_line, unread_line[:200])
+    check("ruled store unread: a read entry's candidate line carries no unchecked mark",
+          bool(read_line) and "(unchecked, not law)" not in read_line, read_line[:200])
+
+
 def case_ruled_store_absent_is_only_unknown():
     import question_form  # the one form check (hooks/question_form.py)
     fn = getattr(question_form, "past_rulings", None)
@@ -2634,6 +2660,7 @@ def main():
                  case_ruled_store_first_and_carries_supersedes, case_ruled_store_absent_is_only_unknown,
                  case_ruled_store_words_filter_leaves_out_an_unrelated_entry,
                  case_ruled_store_caps_matching_entries_at_eight_newest_first,
+                 case_ruled_store_marks_an_unread_entry_unchecked,
                  case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
                  case_task_why_cited_reds, case_task_why_cited_greens,
                  case_press_link_links_not_a_list_on_a_step, case_press_link_links_not_a_list_on_an_option,
