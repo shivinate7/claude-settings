@@ -96,6 +96,25 @@ FILED_REPO = tcj.make_repo("ruling-filed", waiting={"items": FILED_ITEMS, "answe
 TRIGGER_RE = re.compile(r"\bunder (?:the )?(?:owner'?s? )?ruling\b", re.I)
 STAMP_RE = re.compile(r"\b\d{1,2}:\d{2} (?:CST|CDT)\b")
 REMEDY_RE = re.compile(r"owner|waiting page|Input Needed|cite a ruling", re.I)
+# Pick claims the check misses today. Each names a pick and a ruling cue joined by a `;`, or by a word that links the
+# pick to its ruling. `{cite}` is CITE_TEXT, which makes the claim checkable, or "" for the uncited form.
+CITE_TEXT = " on item 284 b (13:08 CST)"
+PICK_FORMS = (
+    ("skipped asking, then the ruling after a semicolon", "Skipped asking; the owner's ruling{cite} covers it"),
+    ("did not ask, then the ruling after a semicolon", "Did not ask; ruling{cite} covers it"),
+    ("chose, then the ruling after a semicolon", "Chose option b; the ruling{cite} names it"),
+    ("took, linked by given", "took option b given the ruling{cite}"),
+    ("took, linked by in line with", "took b in line with the ruling{cite}"),
+    ("took, linked by according to", "took b according to the ruling{cite}"),
+    ("took, linked by based on", "took b based on the ruling{cite}"),
+    ("took, linked by where", "took b where the ruling{cite} puts it"),
+    ("took, linked by which", "took b which the ruling{cite} names"),
+    ("took, linked by when", "took b when the ruling{cite} allowed it"),
+    ("pick, followed by was", "the pick was b under the ruling{cite}"),
+    ("pick, followed by made", "pick made under the ruling{cite}"),
+)
+# A clause after a `;` that names a ruling table names no ruling for a pick, so it stays out of the claim.
+NOT_A_PICK_CLAIM = ("Skipped asking; the ruling table is regenerated", "Did not ask; the ruling table is regenerated")
 
 
 def stop_timeout():
@@ -424,6 +443,56 @@ class RulingSkipTests(RulingSkipFixture):
                 out = self.stop(reply(line), model_fail=True, session_id=sid, active=True)
                 self.assertFalse(refused_by_rule(out), "rewrite %d under the same refuter outage was refused again"
                                  % attempt)
+
+    # A pick claim the check misses must reach the refuter with its cite, or be refused for having none. The control
+    # is a form the check already reads, so it shows the rejecting refuter refuses a claim on this harness.
+
+    def test_r11_a_pick_claim_the_check_misses_reaches_the_refuter_with_its_cite(self):
+        control = "picked b under the ruling%s" % CITE_TEXT
+        with self.subTest(claim="control, a form the check reads today"):
+            out = self.stop(reply("> **Done** OTHER " + control), answer=REJECT)
+            self.assert_refused(out, "the control form, read as a claim, passed the rejecting refuter")
+        for label, form in PICK_FORMS:
+            line = form.format(cite=CITE_TEXT)
+            with self.subTest(claim=label):
+                self.assertTrue(is_pick_claim(line), "%s: the line has no pick word and ruling cue" % label)
+                out = self.stop(reply("> **Done** OTHER " + line), answer=REJECT)
+                self.assert_refused(out, "%s: a pick with a cite the refuter rejects passed unjudged" % label)
+                self.assertEqual(len(self.model_calls()), 1, "%s: the cite did not reach the refuter" % label)
+
+    def test_r11_a_pick_claim_the_check_misses_with_no_cite_is_refused_with_no_model_call(self):
+        for label, form in PICK_FORMS:
+            line = form.format(cite="")
+            with self.subTest(claim=label):
+                self.assertTrue(is_pick_claim(line), "%s: the line has no pick word and ruling cue" % label)
+                out = self.stop(reply("> **Done** OTHER " + line))
+                self.assert_refused(out, "%s: a pick with no cite passed" % label)
+                self.assertEqual(self.model_calls(), [], "%s: the model ran on a pick with no cite" % label)
+
+    def test_r11_a_split_clause_that_names_no_pick_under_a_ruling_passes(self):
+        for line in NOT_A_PICK_CLAIM:
+            with self.subTest(claim=line):
+                self.assertTrue(is_pick_claim(line), "the line has no pick word and ruling cue, so it probes nothing")
+                out = self.stop(reply("> **Done** OTHER " + line))
+                self.assertFalse(refused_by_rule(out), "a split clause with no pick under a ruling was refused")
+                self.assertEqual(self.model_calls(), [], "the model ran on a split clause with no pick under a ruling")
+
+    # The refuter gets its full limit when a question's past-ruling call runs first in the same Stop.
+
+    def test_r12_refuter_gets_its_full_limit_when_a_question_shares_the_stop_with_a_cite(self):
+        self.stop(pick_and_question(), answer=tcj.ALLOW, repo=RULING_REPO)
+        refuter = [c for c in self.model_calls() if "Done item:" in c["prompt"]]
+        self.assertEqual(len(refuter), 1, "the cited claim reached the refuter %d times, not once" % len(refuter))
+        self.assertEqual(refuter[0].get("timeout"), report_guard.RULING_REFUTER_TIMEOUT,
+                         "the refuter got %s s, not its %s s limit" % (refuter[0].get("timeout"),
+                                                                       report_guard.RULING_REFUTER_TIMEOUT))
+
+    # A rewrite is not a pass: a refuter that rejects the cite refuses the rewrite too.
+
+    def test_r13_a_rewrite_still_refuses_a_claim_the_refuter_rejects(self):
+        out = self.stop(reply(done(cite(ITEM_REF))), answer=REJECT, active=True)
+        self.assert_refused(out, "a rewrite passed a claim the refuter rejected")
+        self.assertEqual(len(self.model_calls()), 1, "the rewrite did not ask the refuter once")
 
 
 class SpentDeadlineTests(unittest.TestCase):
