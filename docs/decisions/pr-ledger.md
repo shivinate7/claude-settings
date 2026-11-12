@@ -73,7 +73,7 @@ The first match wins, in this order. A held or unparseable record matches no rec
 
 The ledger reads no pull request's CI state. A batch line is a done record for the live head. `merge --lane-lint` checks the join, and the integration PR's CI run checks the merge. Its CI-side reads are main's runs, judged per workflow, for the main-red hold.
 
-Each next act has an age limit, in one constant, `PR_STATE_AGE_HOURS` in merge/merge.py. Lane round 2 to 4, fix check and fresh full review are 72 h, set from the record-to-record row of "The round-age measure" below (the coordinator's 72 h picks of 12:01 CST Nov 12 stand). That row does not split fix check from fresh full review. Batch is 24 h, from the last-record-to-merge row. Lane round 1 (72 h, aged from the PR's last update), batch run (24 h, aged from its label) and lane lint (72 h, lane pick 12:13 CST Nov 12) are unmeasured. `waits on` has no limit: a hold goes red when it has no page item or debt. Blocked on #N has no limit of its own and is red while #N is red. A next act over its limit is red. Red only prints (a flag on the `--reviewed` line); the join, the lane lint and the merge never read it, so no limit cuts work off (owner, 12:54 CST Nov 12, item 595 note: a stored number is fine when it does not cut work off).
+Each next act has an age limit, in one constant, `PR_STATE_AGE_HOURS` in merge/merge.py. Lane round 2 to 4, fix check and fresh full review are 72 h, set from the record-to-record row of "The round-age measure" below (the coordinator's 72 h picks of 12:01 CST Nov 12 stand). That row does not split fix check from fresh full review. Batch is 24 h, from the last-record-to-merge row. Lane round 1 (72 h, aged from the PR's last update), batch run (24 h, aged from its label) and lane lint (72 h, lane pick 12:13 CST Nov 12) are unmeasured. `waits on` has no limit: a hold goes red when it has no page item or debt. Blocked on #N has no limit of its own and is red while #N is red. A next act over its limit is red. Red only prints (a flag on the `--reviewed` line); the join, the lane lint and the merge never read it, so today no limit cuts work off. Parts 3b and 4 will read red to hold triage, never a lane or a merge, and reopen this question when they land (owner, 12:54 CST Nov 12, item 595 note: a stored number is fine when it does not cut work off).
 
 ## The round-age measure
 
@@ -81,7 +81,7 @@ Measured 13:10 CST Nov 12, by REST (`gh api repos/shivinate7/claude-settings/...
 
 | Age | Samples | Median | 90th | Max | Over the limit |
 | --- | --- | --- | --- | --- | --- |
-| PR opened to first record (no limit reads it) | 393 | 0.2 h | 2.1 h | 122.0 h | 2 |
+| PR opened to first record (no limit reads it) | 393 | 0.2 h | 2.1 h | 122.0 h | n/a |
 | One record to the next (limit 72 h) | 709 | 0.6 h | 10.8 h | 56.8 h | 0 |
 | Last record to merge (limit 24 h) | 47 | 7.8 h | 12.6 h | 22.3 h | 0 |
 
