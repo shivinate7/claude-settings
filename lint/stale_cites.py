@@ -78,7 +78,8 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             A line marked `<!-- ste-disable-line STALE010 -->` is left out.
 A cite path led by `..`, `~` or `/` (`outside_repo`) names a path outside the repo, which no read asks git for: it is
 no path cite for STALE010, and one unknown line for a STALE005 backing. A STALE008 value cite led by `..` or `~` gives
-one unknown line; one led by `/` is read as a repo path, so a wrong value it quotes is flagged (`outside_repo` `absolute`).
+one unknown line; one led by `/` is read as a repo path and flagged when that path is absent, and the cited value is
+not compared (`outside_repo` `absolute`).
 A line left in place, for a name the range did not remove, never fires. A moved or reworded line is an added
 line, which STALE010 judges. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
