@@ -808,11 +808,13 @@ class LaneUndo(unittest.TestCase):
         self.assertEqual(self.lane(), [a, b])
         assert_finding(self, r.verdict(), "app.txt", b, a)
 
-    def main_run(self):
-        """main() on the lane's repo, as the CLI runs it. -> (exit code, printed lines)."""
+    def main_run(self, *extra, ci=False):
+        """main() on the lane's repo, as the CLI runs it, with the flags in `extra` and env CI set when `ci`. -> (exit code, printed lines)."""
         with unittest.mock.patch.dict(os.environ), contextlib.redirect_stdout(io.StringIO()) as out:
             os.environ.pop("CI", None)
-            code = C.main(["--repo", self.r.dir, "--upstream", "origin/main", "--head", "HEAD"])
+            if ci:
+                os.environ["CI"] = "1"
+            code = C.main(["--repo", self.r.dir, "--upstream", "origin/main", "--head", "HEAD", *extra])
         return code, out.getvalue().splitlines()
 
     def assert_report_only(self, lines, path, undo, earlier):
@@ -1275,6 +1277,37 @@ class LaneUndo(unittest.TestCase):
         code, lines = self.main_run()
         self.assertFalse([x for x in lines if "lane undo" in x], "a lane undo line is printed for an excused drop: %r" % lines)
         self.assertEqual(code, 0, "an excused lane drop exits %d: %r" % (code, lines))
+
+    def test_a_range_that_ends_unknown_with_only_a_lane_undo_finding_exits_by_the_unknown_rule(self):
+        """An octopus merge in the range ends the read UNKNOWN, and the lane undo finding is the only finding the UNKNOWN
+        carries. The finding is printed report-only, and the exit follows the UNKNOWN rule alone: 0 locally, 1 with --strict
+        or env CI."""
+        r = self.r
+        a, b = self.drop_app_lines()
+        r.sh("checkout", "-q", "-b", "x", "origin/main")
+        xc = r.commit("X: add a file", x_txt="x\n")
+        r.sh("checkout", "-q", "-b", "y", "origin/main")
+        yc = r.commit("Y: add a file", y_txt="y\n")
+        r.sh("checkout", "-q", "lane")
+        r.sh("merge", "-q", "--no-edit", "x", "y")
+        m = r.sh("rev-parse", "HEAD")
+        self.assertEqual(len(r.sh("rev-list", "--parents", "-n", "1", m).split()), 4, "scope: M is an octopus merge of three parents")
+        self.assertEqual(sorted(self.lane()), sorted([a, b, xc, yc, m]))  # scope: the lane is A, B, the side commits and M
+        self.assertEqual(self.lane()[-1], m)  # scope: M is the last lane commit
+        code, lines = self.main_run()
+        self.assertTrue(any("UNKNOWN" in x for x in lines), "premise: the read ends UNKNOWN: %r" % lines)
+        self.assertFalse([x for x in lines if "FAIL" in x and "lane undo" not in x],
+                         "premise: the UNKNOWN carries a finding other than the lane undo one: %r" % lines)
+        with self.subTest("the lane undo finding is printed and marked report-only"):
+            self.assert_report_only(lines, "app.txt", b, a)
+        with self.subTest("exit 0 locally"):
+            self.assertEqual(code, 0, "an UNKNOWN that carries only a lane undo finding exits %d locally: %r" % (code, lines))
+        with self.subTest("exit 1 with --strict"):
+            strict, _ = self.main_run("--strict")
+            self.assertEqual(strict, 1, "--strict did not exit 1 on the UNKNOWN")
+        with self.subTest("exit 1 with env CI"):
+            ci, _ = self.main_run(ci=True)
+            self.assertEqual(ci, 1, "env CI did not exit 1 on the UNKNOWN")
 
 
 class IntegrationBase(unittest.TestCase):
