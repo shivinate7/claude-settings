@@ -288,7 +288,8 @@ class RulingSkipTests(RulingSkipFixture):
                 self.assertIsNone(STAMP_RE.search(reason), "%s: the refusal names a stamp, which would pass a cite" % label)
                 self.assertRegex(reason, REMEDY_RE, "%s: the refusal names no remedy" % label)
 
-    # Round 1 review: a filed ruling, false alarms, bypasses, one deadline, and the byte cap.
+    # A filed ruling resolves from its last answer. A pick claim with no cite is refused; a Done item with no pick is not.
+    # Model calls share one Stop deadline, and a long record is cut at 6000 bytes so the prompt stays bounded.
 
     def test_r1_filed_ruling_resolves_from_its_last_answer(self):
         # The page's Route-and-close deletes the answer file and keeps lastAnswer on the item.
@@ -351,7 +352,8 @@ class RulingSkipTests(RulingSkipFixture):
                 self.assertEqual(len(calls), 1, "%s: the record was not judged: %d calls" % (label, len(calls)))
                 self.assertNotIn(mark, calls[0]["prompt"], "%s: the bullet past byte 6000 went into the prompt" % label)
 
-    # Round 3: the item's title reaches the prompt, and a Done item that names a word but makes no pick claims nothing.
+    # The refuter judges a cite against the item's title, so the title must reach its prompt.
+    # A Done item that uses a ruling word without a pick claims nothing.
 
     def test_r6_item_title_reaches_the_refuter_prompt(self):
         self.stop(reply(done(cite(ITEM_REF))), answer=CONFIRM, repo=RULING_REPO)
