@@ -174,7 +174,9 @@ case1() {
 
   # Simulate `curl ... | bash -s -- --cloud`: bash reads the script off its own stdin
   # (BASH_SOURCE[0] is then "-", never a real file), exactly like the piped install.
+  # The checkout sits under /tmp, so the temp skip is off for this run (see the tempskip cases).
   out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+        CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" \
         bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 
@@ -268,8 +270,9 @@ origin_case() {
 
   # Same reason as case2: keep this container's real /home/user checkout out of the
   # rejection cases, so a wrongly-permissive origin match can't be masked by the search.
+  # The temp skip is off too: the checkout sits under /tmp, and the accepted rows need it to be picked.
   out=$(cd "$co" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
-        CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
+        CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
         bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 
@@ -321,7 +324,7 @@ case7() {
   # always includes $HOME itself, this just avoids also scanning the container's real
   # /home/user and /root (which would pass anyway, but would not prove this case's point).
   out=$(cd "$notacheckout" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
-        GIT_CEILING_DIRECTORIES="$notacheckout" CLAUDE_SETTINGS_SEARCH_ROOTS="$h" \
+        GIT_CEILING_DIRECTORIES="$notacheckout" CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" CLAUDE_SETTINGS_SEARCH_ROOTS="$h" \
         bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 
@@ -401,7 +404,7 @@ pointer_case1() {
   # CLAUDE_SETTINGS_SEARCH_ROOTS=$h only scans one level under $h ("Developer"), which
   # is not itself a git toplevel, so the bounded scan cannot find $co on its own here.
   out=$(cd "$elsewhere" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
-        GIT_CEILING_DIRECTORIES="$elsewhere" CLAUDE_SETTINGS_SEARCH_ROOTS="$h" \
+        GIT_CEILING_DIRECTORIES="$elsewhere" CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" CLAUDE_SETTINGS_SEARCH_ROOTS="$h" \
         bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 
@@ -511,6 +514,7 @@ pointer_case5() {
   # No seed_pointer call: $cfg does not exist yet, same as a first-ever install.
 
   out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+        CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" \
         bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 
@@ -539,7 +543,7 @@ pointer_case6() {
   stub_bin="$work/pointer6-bin"; make_curl_stub "$stub_bin"
 
   out=$(cd "$elsewhere" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
-        GIT_CEILING_DIRECTORIES="$elsewhere" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
+        GIT_CEILING_DIRECTORIES="$elsewhere" CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
         bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 
@@ -1842,12 +1846,13 @@ cloud_settings1() {
 contains() { case "$1" in *"$2"*) return 0 ;; esac; return 1; }
 # True when $1 holds the text $2, and then the text $3 after it.
 in_order() { case "$1" in *"$2"*"$3"*) return 0 ;; esac; return 1; }
-# hk_envrun CHECKOUT [NAME=VALUE...]: one piped cloud install of CHECKOUT under `env -i` with exactly the given
-# assignments, as the setup script runs it. Sets rc, out (stdout only) and err (stderr only).
+# hk_envrun CHECKOUT [NAME=VALUE...]: one piped cloud install of CHECKOUT under `env -i` with the given
+# assignments, as the setup script runs it. The temp skip is off (the checkout sits under /tmp) unless a given
+# assignment sets it. Sets rc, out (stdout only) and err (stderr only).
 hk_envrun() {
   hk_co=$1; shift
   hk_so=$(mktemp "$work/hk-out.XXXXXX"); hk_se=$(mktemp "$work/hk-err.XXXXXX")
-  ( cd "$hk_co" && env -i "$@" bash -s -- --cloud < "$INSTALL_SH" > "$hk_so" 2> "$hk_se" ); rc=$?
+  ( cd "$hk_co" && env -i CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" "$@" bash -s -- --cloud < "$INSTALL_SH" > "$hk_so" 2> "$hk_se" ); rc=$?
   out=$(cat "$hk_so"); err=$(cat "$hk_se")
 }
 # hookfix_checkout DIR [SETTINGS]: a checkout whose settings.json is the file SETTINGS, or else four entries:
@@ -3907,7 +3912,7 @@ pinmove_run() {
   elsewhere="$work/$1-elsewhere"; mkdir -p "$elsewhere"
   stub_bin="$work/$1-bin"; make_curl_stub "$stub_bin"
   pm_out=$(cd "$elsewhere" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
-        GIT_CEILING_DIRECTORIES="$elsewhere" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
+        GIT_CEILING_DIRECTORIES="$elsewhere" CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
         bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   pm_rc=$?
   pm_head_after=$(git -C "$pm_pin" rev-parse HEAD 2>/dev/null)
@@ -4180,7 +4185,7 @@ mergepin5() {
   h=$(new_home); write_redirect "$h" "$lp_bare"
   stub_bin="$work/mergepin5-bin"; make_curl_stub "$stub_bin"
   out=$(cd "$cwd_co" && env -i PATH="$stub_bin:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
-        GIT_CEILING_DIRECTORIES="$work" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
+        GIT_CEILING_DIRECTORIES="$work" CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
         bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
   src=$(pinmove_source "$out")
@@ -4411,11 +4416,14 @@ new_home() { d=$(mktemp -d "$work/home.XXXXXX"); d=$(realpwd "$d"); default_home
 # The entries a run left under a fake HOME, not counting its default .gitconfig.
 home_entries() { find "$1" -mindepth 1 ! -path "$1/.gitconfig" 2>/dev/null; }
 # One cloud install, piped as the setup script runs it: HOME $1, a cwd $2 that is no checkout, the curl
-# stub folder $3, and the ref $4 (empty means main). Sets rc and out.
+# stub folder $3, and the ref $4 (empty means main). Arguments past the fourth are VAR=VALUE pairs for this
+# run; they come last, so they win over the defaults. Sets rc and out.
 cloud_install() {
-  out=$(cd "$2" && env -i PATH="$3:$PATH" HOME="$1" CLAUDE_CONFIG_DIR="$1/.claude-cfg" \
-        CLAUDE_SETTINGS_REF="${4:-}" GIT_CEILING_DIRECTORIES="$2" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
-        bash -s -- --cloud < "$INSTALL_SH" 2>&1)
+  ci_home="$1"; ci_cwd="$2"; ci_bin="$3"; ci_ref="${4:-}"
+  [ $# -gt 4 ] && shift 4 || shift $#
+  out=$(cd "$ci_cwd" && env -i PATH="$ci_bin:$PATH" HOME="$ci_home" CLAUDE_CONFIG_DIR="$ci_home/.claude-cfg" \
+        CLAUDE_SETTINGS_REF="$ci_ref" GIT_CEILING_DIRECTORIES="$ci_cwd" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
+        "$@" bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 }
 # The WARN, ERROR and fatal lines of the last install: a failure message names the problem, not the whole log.
@@ -4777,6 +4785,7 @@ allow_case() {
 # One piped cloud install from inside $co, with HOME $h. Sets rc and out.
 allow_install() {
   out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$h/.claude-cfg" \
+        CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" \
         CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 }
@@ -4901,10 +4910,12 @@ move_fixture() {
 move_install() {
   if [ "${1:-}" = file ]; then
     out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$h/.claude-cfg" \
+          CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" \
           CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" GIT_CEILING_DIRECTORIES="$work" \
           bash "$co/install.sh" --cloud 2>&1)
   else
     out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$h/.claude-cfg" \
+          CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" \
           CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" GIT_CEILING_DIRECTORIES="$work" \
           bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   fi
