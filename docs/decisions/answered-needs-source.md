@@ -20,3 +20,5 @@ Known limit: a negator anywhere earlier in the clause exempts the word, so "Q2 w
 
 Kind: process
 Home: lint/report_guard.py
+
+One message per Stop (plan R32 part 2, half 1). A turn with no human message, such as a lane's, runs the relay checks (past-ruling, option keys) and this check on its first Stop. One reply gets every failing check in one block. Cost per Stop: a reply that asks, or any earlier text of the turn that asks, runs the past-ruling check, at most once per Stop. That check makes one git read, one `claude -p` call, and one temp folder with a credential copy that the call writes (`hooks/decision_watch.py`, `invoke_model`). A blocked asking turn runs that call twice, on the first Stop and on the retry. A turn that asks nothing starts nothing. No other process start is added. Proof: `lint/test_report_guard_one_message.py`.

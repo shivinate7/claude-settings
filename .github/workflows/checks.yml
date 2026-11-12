@@ -254,6 +254,9 @@ jobs:
       - name: Stop-hook question route suite
         run: python3 lint/test_report_guard_route.py
 
+      - name: Stop-hook one message suite
+        run: python3 lint/test_report_guard_one_message.py
+
       - name: Stop-hook stamped copy suite
         run: python3 lint/test_report_guard_stamped.py
 
