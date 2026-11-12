@@ -1708,6 +1708,39 @@ test("pending cite: with both steps applied, --claim passes and rewrites a file 
     assert.equal(read(root, BLOCK).split("\n")[2], "See D-002, p here.", "the scanned block was not rewritten");
   }));
 
+// The printed glob is the file's own path. A folder glob would also scan a second file in that
+// folder, and the scan then refuses any cite in it that names no record.
+test("pending cite: --claim prints the scanGlobs fix as the file's own path, not its folder", () =>
+  withTempDir((root) => {
+    pendingCiteRepo(root, SCAN_MD, { [BLOCK]: BLOCK_TEXT });
+
+    const r = runStamp(root, ".github/stamp.json", "claim");
+    const out = outputOf(r);
+    assert.notEqual(r.status, 0, `--claim exited 0 with an unscanned pending cite:\n${out}`);
+    assert.match(out, /plugins\/_shared\/fidelity\.block:3/, `--claim named no file and line:\n${out}`);
+    const fix = CITE_FIX.exec(out);
+    assert.ok(fix, `--claim printed no fix of the form add "<glob>" to cite.scanGlobs in .github/stamp.json:\n${out}`);
+    assert.equal(fix[1], BLOCK, `--claim printed "${fix[1]}" as the fix, not the file's own path:\n${out}`);
+  }));
+
+test("pending cite: the printed scanGlobs fix lets --claim pass, though the folder holds a second file with a plain cite to no record", () =>
+  withTempDir((root) => {
+    const other = "plugins/_shared/other.block";
+    pendingCiteRepo(root, SCAN_MD, { [BLOCK]: BLOCK_TEXT, [other]: "Write [[slug]] to cite a record.\n" });
+    assert.equal(read(root, other).includes("[[slug]]"), true, "scope: the second file must hold a plain cite to no record");
+
+    const r = runStamp(root, ".github/stamp.json", "claim");
+    const out = outputOf(r);
+    assert.notEqual(r.status, 0, `--claim exited 0 with an unscanned pending cite:\n${out}`);
+    assert.equal(out.includes(other), false, `scope: before any fix, --claim must refuse only the block, but it named ${other}:\n${out}`);
+    const fix = CITE_FIX.exec(out);
+    assert.ok(fix, `--claim printed no fix of the form add "<glob>" to cite.scanGlobs in .github/stamp.json:\n${out}`);
+    writeStampConfig(root, { scanGlobs: ["**/*.md", fix[1]], excludeGlobs: [] });
+    commit(root, "scan what the refusal names, as the refusal says");
+    const fixed = runStamp(root, ".github/stamp.json", "claim");
+    assert.equal(fixed.status, 0, `the printed fix made --claim refuse the second file:\n${outputOf(fixed)}`);
+  }));
+
 // The cite scanner reads text, so the cases that break a naive scanner go in: a comment opener
 // inside a string, a multi-line template literal, and a lone quote in prose. Each cite sits outside
 // scanGlobs and must still refuse at its own line. The refusal reads a cite as the rewrite does, so
