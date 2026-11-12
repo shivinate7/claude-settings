@@ -15,7 +15,8 @@ The runner, as the builder writes it. This file is its interface.
   carries its recorded verdict: its expect, and its agreement from a recorded run.
 - The page judge has no corpus file while step judge-replay-page-cases is pending. Its row runs zero cases and reads
   "no cases yet" with the pending step. Only a judge that PENDING_STEPS names may run zero cases. Any other judge whose
-  corpus file is missing, or holds [], exits 1, and a detail line names the judge and its file.
+  corpus file is missing, holds [], or does not parse as a list of cases exits 1, and a detail line names the judge and
+  its file.
 - touched(paths): the sorted names whose scope holds a path, whose corpus is a path, or, for hooks/judge_replay.py, all.
 - replay(name, runs=1): one row per case, {"id", "expect", "got", "verdict"}. got is allow, deny or unknown. Each model
   call goes through decision_watch.invoke_model, looked up at call time, so this file replaces it. Every judge makes one
@@ -100,6 +101,10 @@ TOUCH = (
     (["hooks/guard.py"], "all"),
     (["hooks/_nowindow.py"], "all"),  # every judge's model call starts in it (decision_watch.run calls _nowindow.run)
     (["hooks/call_judge.py"], list(FEEDS_CALL_JUDGE)),  # the page judge's module, with the judges it feeds
+    (["hooks/guard_pointer.py"], "all"),  # a guard family module: guard.py loads it, so every judge's scope holds it
+    (["hooks/git_reads.py"], "all"),  # the other guard family file that guard.py loads
+    ([".github/judge-replay/package.json"], "all"),  # the claude CLI pin: a change to it replays every judge
+    ([".github/judge-replay/package-lock.json"], "all"),
 )
 NO_AUTH = (None, "no auth")
 # lint/test_ci_scope.py pins the CI scope's judge_replay flag, so it names the runner by that flag. It wires nothing.
@@ -1086,6 +1091,118 @@ def case_changed_page_judge_file_runs_no_page_cases():
     check_pending_block(label, text)
 
 
+FIRST_REF = "inbox:replay00@2026-11-01 10:00"  # the first older message of the feedback corpus's cases
+SECOND_REF = "inbox:replay00@2026-11-01 10:01"  # the second older message, a candidate in every feedback case
+HELPER_TOUCH = (
+    ("hooks/route_match.py", ("reply_judge",)),  # reply_judge's prompt carries the route rows route_match reads
+    ("lint/report_guard.py", ("reply_judge", "report_guard.past_ruling")),  # the route block reads its hand-off lines
+    ("lint/_transcript.py", ("decision_watch",)),  # decision_watch's chat text starts after the record is_last_human picks
+)
+MALFORMED_CORPORA = (
+    ("not JSON", "[{\"id\": \"x\", "),
+    ("a JSON object, not a list", json.dumps({"cases": []})),
+    ("a list of a non-object", json.dumps([1])),
+    ("a case with no expect", json.dumps([{"id": "x"}])),
+)
+
+
+def case_feedback_hit_on_any_candidate_reads_deny():
+    """feedback_guard: a repeat is a hit on any candidate, not only on the older message the case names. The controls run
+    first: a hit on the first older message reads deny on every row, and an empty list reads every allow row allow. Then
+    a hit on the second older message must read deny on every row, since each feedback case has that candidate."""
+    label = "feedback_guard: a hit on any candidate"
+    if need_runner(label) is None:
+        return
+    cases, problem = load_corpus("feedback_guard")
+    if cases is None:
+        check(label, False, problem)
+        return
+
+    def rows_under(answer):
+        with faked_model((answer, None)):
+            return judge_replay.replay("feedback_guard")
+
+    def hit(ref):
+        return {"repeats": [{"id": "fb-9-1", "ref": ref}]}
+
+    first = rows_under(hit(FIRST_REF))
+    misses = [r["id"] for r in first if r["got"] != "deny"]
+    check("%s: control: a hit on the first older message reads deny on every row" % label, not misses,
+          "read allow: %s" % ", ".join(misses))
+    empty = rows_under({"repeats": []})
+    misses = [r["id"] for r in empty if r["expect"] == "allow" and r["got"] != "allow"]
+    check("%s: control: an empty repeats list reads every allow row allow" % label, not misses,
+          "read deny: %s" % ", ".join(misses))
+    second = rows_under(hit(SECOND_REF))
+    unknown = [r["id"] for r in second if r["got"] == "unknown"]
+    check("%s: scope: the second older message's ref is a candidate, so no row reads unknown" % label, not unknown,
+          "read unknown: %s" % ", ".join(unknown))
+    misses = [r["id"] for r in second if r["got"] != "deny"]
+    check("%s: a hit on the second older message reads deny on every row" % label, not misses,
+          "read allow: %s" % ", ".join(misses))
+
+
+def case_opus_scope_fail_open_answer_reads_no_verdict():
+    """call_judge.opus_scope returns None both for a refusal ({"ok": false}) and for a fail-open answer ({"ok": true} with
+    no roles), so the adapter must read the model's answer to tell them apart. The controls run first: a refusal reads deny
+    on every row and a role list reads allow on every row. Then the fail-open answer: no row may read a verdict."""
+    label = "call_judge.opus_scope: a fail-open answer"
+    if need_runner(label) is None:
+        return
+    cases, problem = load_corpus("call_judge.opus_scope")
+    if cases is None:
+        check(label, False, problem)
+        return
+
+    def rows_under(answer):
+        with faked_model((answer, None)) as calls:
+            rows = judge_replay.replay("call_judge.opus_scope")
+        return rows, calls
+
+    refused, _ = rows_under({"ok": False})
+    misses = [r["id"] for r in refused if r["got"] != "deny"]
+    check("%s: control: a refusal reads deny on every row" % label, not misses, "read allow: %s" % ", ".join(misses))
+    granted, _ = rows_under({"ok": True, "roles": ["reviewer"]})
+    misses = [r["id"] for r in granted if r["got"] != "allow"]
+    check("%s: control: a role list reads allow on every row" % label, not misses, "read deny: %s" % ", ".join(misses))
+    failed_open, calls = rows_under({"ok": True})
+    check("%s: scope: one model call per case" % label, len(calls) == len(cases),
+          "%d calls for %d cases" % (len(calls), len(cases)))
+    verdicts = ["%s read %s" % (r["id"], r["verdict"]) for r in failed_open if r["verdict"] != "UNKNOWN"]
+    check("%s: reads UNKNOWN on every row, not a verdict" % label, not verdicts, "; ".join(verdicts))
+
+
+def case_scope_helpers_touch_the_judges_they_feed():
+    """A module that a judge's prompt comes from touches that judge: the scope rule of the judge replay decision, which
+    names any module its prompt or model comes from. A subset check, since the rule requires each judge named here and
+    does not forbid others."""
+    label = "touched: a module a judge's prompt comes from"
+    if need_runner(label) is None:
+        return
+    for path, judges in HELPER_TOUCH:
+        got = judge_replay.touched([path])
+        missing = [name for name in judges if name not in got]
+        check("%s: %s names %s" % (label, path, ", ".join(judges)), not missing,
+              "touched gave %s, missing %s" % (", ".join(got) or "none", ", ".join(missing)))
+
+
+def case_malformed_corpus_exits_1_and_names_judge_and_path():
+    """A corpus that does not parse, or parses to the wrong shape, exits 1 with one detail line that names the judge and its
+    file, and makes no model call. The control: a well-formed file of one case reads that case and exits 0 with CI unset."""
+    label = "--judge prose_judge, a malformed corpus"
+    if need_runner(label) is None:
+        return
+    with runner_repo({"prose_judge": json.dumps([CONTROL_CASE])}):
+        code, text, _, error = runner_output(["--judge", "prose_judge"])
+    check("%s: control: a well-formed file reads its one case" % label,
+          error is None and "prose_judge (1 cases," in text, error or text[-200:])
+    check("%s: control: exits 0 with CI unset" % label, code == 0, "exit %r" % (code,))
+    for tag, text in MALFORMED_CORPORA:
+        with runner_repo({"prose_judge": text}):
+            runs = {"prose_judge": runner_output(["--judge", "prose_judge"])}
+        check_judges_without_corpus("%s (%s)" % (label, tag), runs)
+
+
 CASES = (case_seam_control, case_corpora, case_corpus_not_under_hooks, case_scopes, case_touched, case_no_auth_rows,
          case_cli_exit_follows_ci, case_cli_changed_head, case_runner_named_nowhere_else,
          case_feedback_bad_entry_reads_unknown, case_feedback_clean_answer_reads_no_unknown,
@@ -1099,7 +1216,9 @@ CASES = (case_seam_control, case_corpora, case_corpus_not_under_hooks, case_scop
          case_judge_other_than_page_with_empty_corpus_fails_the_run,
          case_pending_judge_missing_or_empty_corpus_reads_no_cases,
          case_pending_judge_with_cases_runs_its_rows, case_pending_exemption_follows_the_pending_table,
-         case_changed_page_judge_file_runs_no_page_cases)
+         case_changed_page_judge_file_runs_no_page_cases,
+         case_feedback_hit_on_any_candidate_reads_deny, case_opus_scope_fail_open_answer_reads_no_verdict,
+         case_scope_helpers_touch_the_judges_they_feed, case_malformed_corpus_exits_1_and_names_judge_and_path)
 
 
 def main():
