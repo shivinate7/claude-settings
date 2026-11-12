@@ -2179,3 +2179,6 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
+- one-term-name-spans-punctuation: a multi-word retired name matches across a comma or sentence end, 5 of 225 multi-word hits in docs were false (lint/ste_lint.py _WORD_JOIN) Fix: none — rare and harmless. Until: 2026-11-26
+- one-term-platform-scan-quadratic: the identifier scan before a hit is quadratic on one unbroken word run, 20k characters took 2.3 s (lint/ste_lint.py one_term_findings) Fix: none — rare and harmless. Until: 2026-11-26
+- one-term-tests-read-live-glossary: the STE022 cases read live GLOSSARY.md rows, and a GLOSSARY.md-only PR runs no suite, so a row edit goes red on the next code PR (lint/test_ste_one_term.py) Fix: none — rare and harmless. Until: 2026-11-26
