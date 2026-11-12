@@ -105,7 +105,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    as replaced cannot carry another. Each close comment starts a line. It reads `Replaced by #R;
    reopens if #R is dropped`, or `Carried by #R; reopens if #R is dropped`. A `reopen` line fires
    when R closes unmerged. For a Replaced note, it also fires when R is open and no longer names N.
-   A Carried note reopens only when R closes unmerged. Only such a note reopens a PR: a PR closed by hand, with no note, stays closed.
+   A Carried note reopens only when R closes unmerged. A closed PR that an open batch freezes at its current head also reopens, whoever names it or carries it: it would not close again. Only such a note reopens a PR: a PR closed by hand, with no note, stays closed.
    Each closed PR keeps its branch.
    Reopen reads repeat each wake while a close note is in the comment window. A closed candidate
    gets at most two reads. A replacer's state is read once.

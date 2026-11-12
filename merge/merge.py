@@ -4208,9 +4208,9 @@ def frozen_lanes(pulls):
                 frozen.setdefault(n, set()).add(sha)
     return frozen
 
-def pull_state(h, n):
-    """-> open, closed or merged for pull request n, or None when n names no pull request (an issue: HTTP 404). One read, pulls/<n>.
-    Any other failed read is a Stop."""
+def pull_read(h, n):
+    """-> (state, head sha) of pull request n, state open, closed or merged; None when n names no pull request (an issue: HTTP 404). One read,
+    pulls/<n>. Any other failed read is a Stop."""
     c, out = h.api(f"pulls/{n}")
     if c and not is_net(c, out) and re.search(r"\bHTTP 404\b", out):
         return None
@@ -4218,26 +4218,40 @@ def pull_state(h, n):
         if c:
             raise ValueError(out)
         d = json.loads(out)
-        return "merged" if d.get("merged") else d["state"]
+        return ("merged" if d.get("merged") else d["state"]), (d.get("head") or {}).get("sha")
     except (ValueError, KeyError, TypeError) as e:
         raise Stop(f"cannot read pull request {h.repo} #{n}: {e} {UNKNOWN_CITE}")
 
-def reopen_lines(h, pulls, notes):
+def pull_state(h, n):
+    """-> open, closed or merged for pull request n, or None when n names no pull request: see pull_read. One read."""
+    r = pull_read(h, n)
+    return r and r[0]
+
+def reopen_lines(h, pulls, notes, frozen=None):
     """-> the `reopen:` lines for the closing notes `notes` ({N: (kind, R)}), ascending by N. A note counts only for an N that is not open and reads
     closed and unmerged (pull_state). The chain from N follows each closed R's own note (a link) until it reaches an open pull request, one with no
     note, one that is merged or not a pull request, or a link already seen. Only the last link reopens, so a wake reopens one pull request per chain,
     the one nearest the tail: with a tail closed unmerged, `replacer #R dropped`; with an open tail, a Replaced link whose tail's body no longer holds
     `Replaces #link` (`no longer names it`). An open tail that names its link, a Carried link with an open tail, and a merged tail reopen nothing.
     A link that any open pull request names with `Replaces #link` reopens nothing either: the next wake would close it again (replaced_closes).
+    A link that an open batch freezes at the head it has now (`frozen`, frozen_lanes) is the exception: replaced_closes skips it, so it would not close
+    again, and it reopens whatever names it, even with an open tail that names it (`its open batch freezes it at its head`). `frozen` is {} when the
+    freeze was not read or could not be, so a named link then stays closed. One more read field only: the head of the closed link, from its pull_read.
     Cost: one pull_state read per distinct number, memoized, so a replacer shared by many candidates is read once; none for an open R.
     A failed read raises Stop. `notes` holds only comments updated since the oldest open pull request was created, so an older note is never read."""
     open_by = {d["number"]: d for d in pulls}
     seen = {}
 
-    def state(x):
+    def read(x):
         if x not in seen:
-            seen[x] = pull_state(h, x)
+            seen[x] = pull_read(h, x)
         return seen[x]
+
+    def state(x):
+        return (read(x) or (None,))[0]
+
+    def frozen_now(x):  # an open batch lists x at the head x has now
+        return bool(read(x)) and read(x)[1] in (frozen or {}).get(x, ())
 
     named = {int(m.group(1)) for d in pulls for m in claim_lines(d.get("body"), REPLACES)}  # a PR an open one still names would close again
     last = {}  # {link: tail}: a link that reopens is named once, however many candidates reach it
@@ -4251,10 +4265,13 @@ def reopen_lines(h, pulls, notes):
         last[path[-1]] = tail
     out = []
     for link, tail in sorted(last.items()):
-        if link in named:
+        held = frozen_now(link)
+        if link in named and not held:
             continue
         if tail in open_by:
-            if notes[link][0] == "Replaced" and link not in {int(m.group(1)) for m in claim_lines(open_by[tail].get("body"), REPLACES)}:
+            if held:
+                out.append(f"{REOPEN}{h.repo} #{link} (an open batch freezes it at its head)")
+            elif notes[link][0] == "Replaced" and link not in {int(m.group(1)) for m in claim_lines(open_by[tail].get("body"), REPLACES)}:
                 out.append(f"{REOPEN}{h.repo} #{link} (replacer #{tail} no longer names it)")
         elif state(tail) == "closed":
             out.append(f"{REOPEN}{h.repo} #{link} (replacer #{tail} dropped)")
@@ -4308,7 +4325,7 @@ def reviewed_block(h):
     running (Host.ready_busy, checked first, so it reads no compare). `open batch now` when no ready pull request on that base has CI running, else `build next batch on the running head`.
     No pull request left, no batch line. With no open pull request the block ends with REOPEN_UNCHECKED and reads nothing more. The tool posts and closes nothing: the batch runner closes each pull request on a close line.
     A Stop in a read for the batch line keeps the reviewed lines, prints `batch line unknown (reason)` in place of the batch line, and ok is False;
-    a Stop in the compares that decide a carried close also prints `close as carried unknown (reason)`. A malformed frozen block in an open batch
+    a Stop in the compares that decide a carried close also prints `close as carried unknown (reason)` and no carried line, but keeps each replaced close line. A malformed frozen block in an open batch
     body prints only `close as carried unknown (reason)` and no close line, replaced or carried, and ok is False: the batch line is still read, as if
     no open batch froze a lane, and `carried` still keeps each lane it names off that line. (A done lane B held only by a frozen done lane A can
     then join the batch line on that wake; ok False flags it.) A Stop in a reopen read prints
@@ -4321,16 +4338,18 @@ def reviewed_block(h):
     (frozen_lanes), as its batch holds it, and no open pull request closes such a lane as replaced (replaced_closes), a batch or not: the close would
     stall that batch. A lane that two open batches list at two heads is held at each of them; a lane that moved off every head a batch lists is
     closed or carried as before, and one that no open batch lists, or whose batch closed or merged, is too. The freeze is read once, before the
-    replaced close, and reads no new data, only the bodies already read for the batch line. The close lines read nothing more. The reopen lines
+    replaced close, only when a done pull request or a `Replaces` claim exists, and reads no new data, only the bodies already read for the batch line. The close lines read nothing more. The reopen lines
     read pulls/N once for each closed pull request with a closing note, and pulls/R once when its replacer R is not open (reopen_lines)."""
     lines, done, pulls, notes = reviewed_read(h)
     out, ok, tail = [f"repo {h.repo}:", *lines], True, []
     if not pulls:
         return out + [REOPEN_UNCHECKED], ok
-    try:
-        frozen = frozen_lanes(pulls)
-    except Stop as e:  # only the close lines are unknown: the batch line is still read, as if no open batch froze a lane
-        frozen, tail, ok = {}, [f"{CLOSE_CARRIED_UNKNOWN}({' '.join(str(e).split())})"], False
+    frozen, freeze_stop = {}, False
+    if done or any(claim_lines(d.get("body"), REPLACES) for d in pulls):  # nothing else reads the freeze: an unreadable batch with neither is no news
+        try:
+            frozen = frozen_lanes(pulls)
+        except Stop as e:  # only the close lines are unknown: the batch line is still read, as if no open batch froze a lane
+            frozen, freeze_stop, tail, ok = {}, True, [f"{CLOSE_CARRIED_UNKNOWN}({' '.join(str(e).split())})"], False
     replaced = replaced_closes(pulls, frozen)
     nums = sorted(n for n, base in done if base == h.base and n not in replaced)
     carried, batch, held = {}, [], {}
@@ -4356,13 +4375,13 @@ def reviewed_block(h):
             except Stop as e:
                 batch, ok = [f"{REVIEW_BATCH_UNKNOWN}({' '.join(str(e).split())})"], False
     try:
-        reopen = reopen_lines(h, pulls, notes)
+        reopen = reopen_lines(h, pulls, notes, frozen)
     except Stop as e:
         reopen, ok = [f"{REOPEN_UNKNOWN}({' '.join(str(e).split())})"], False
-    closes = []
-    if not tail:  # with a close unknown, no close line prints; `replaced` and `carried` still keep each lane they name off the batch line
-        closes = [f"{CLOSE_REPLACED}{h.repo} #{n} by #{r}" for n, r in sorted(replaced.items())]
-        closes += [f"{CLOSE_CARRIED}{h.repo} #{n} by #{b}" for n, b in sorted(carried.items())]
+    # `replaced` and `carried` keep each lane they name off the batch line whatever prints. A freeze Stop leaves both close kinds unknown. A failed
+    # carried compare leaves only the carried kind unknown, so a replaced close, which reads no compare, still prints.
+    closes = [] if freeze_stop else [f"{CLOSE_REPLACED}{h.repo} #{n} by #{r}" for n, r in sorted(replaced.items())]
+    closes += [] if tail else [f"{CLOSE_CARRIED}{h.repo} #{n} by #{b}" for n, b in sorted(carried.items())]
     return out + batch + closes + tail + reopen, ok
 
 LOG_PREFIX = re.compile(r"^﻿?(?:\d{4}-\d\d-\d\dT[\d:.]+Z\s+)?(?:\x1b\[[0-9;]*m)*")  # a log line's timestamp and colour codes, before its text
