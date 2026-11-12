@@ -1390,7 +1390,8 @@ def _folder_root(root: str, cwd: str) -> str:
 _NAME_EXCLUDE = "\x05"   # marks an excluded glob in the tuple `_name_filters` returns
 _PATH_EXCLUDE = "\x06"   # marks a `find -not -path` glob: matched against the path find prints
 _SPEC_EXCLUDE = "\x07"   # marks a git exclusion pathspec: matched against the path under the git folder
-_EXCLUDES = (_NAME_EXCLUDE, _PATH_EXCLUDE, _SPEC_EXCLUDE)
+_DEPTH_LIMIT = "\x08"   # marks a `find -maxdepth N`: the deepest level a file may sit at, the walked folder being level 0
+_EXCLUDES = (_NAME_EXCLUDE, _PATH_EXCLUDE, _SPEC_EXCLUDE, _DEPTH_LIMIT)   # marks that are not wanted name globs
 
 
 def _name_passes(name: str, filters, rel=None, top=None) -> bool:
@@ -1399,12 +1400,15 @@ def _name_passes(name: str, filters, rel=None, top=None) -> bool:
     --include` and `--exclude` read. `rel` is the file's path under the walked folder. A `-not -path`
     glob drops a file whose path as find prints it (`top/rel`) matches it; a git exclusion pathspec drops
     `rel` when it is that path, under it, or matches it as a glob. With no `rel` or `top` to read, an
-    exclusion drops nothing, which keeps the guard strict."""
+    exclusion drops nothing, which keeps the guard strict. A `find -maxdepth N` drops a file whose `rel`
+    holds N or more folders, since find does not descend past level N."""
     wanted = [glob for glob in filters if not glob.startswith(_EXCLUDES)]
     if wanted and not any(fnmatch.fnmatchcase(name, glob) for glob in wanted):
         return False
     for glob in filters:
         mark, value = glob[:1], glob[1:]
+        if mark == _DEPTH_LIMIT and rel is not None and rel.count("/") + 1 > int(value):
+            return False
         if mark == _NAME_EXCLUDE and fnmatch.fnmatchcase(name, value):
             return False
         if mark == _PATH_EXCLUDE and rel is not None and top is not None and fnmatch.fnmatchcase(
@@ -1419,7 +1423,8 @@ def _name_passes(name: str, filters, rel=None, top=None) -> bool:
 def _name_filters(words) -> tuple:
     """The file-name globs that limit what a `find`, `grep` or git listing segment reads: the values of
     `-name` or `--include`, and the excluded ones, each marked: `-not -name`, `! -name` or `--exclude`
-    (`_NAME_EXCLUDE`), `-not -path` or `! -path` (`_PATH_EXCLUDE`), and a git listing's exclusion pathspecs
+    (`_NAME_EXCLUDE`), `-not -path` or `! -path` (`_PATH_EXCLUDE`), a `find`'s `-maxdepth N` with a whole-number
+    N (`_DEPTH_LIMIT`; the largest when it is given twice, so the walk is never cut short), and a git listing's exclusion pathspecs
     when it has no other pathspec (`_SPEC_EXCLUDE`, `_excluded_pathspec`), so a walk of its folder roots
     counts only the files it reaches (`_name_passes`). () when there is none, and for a `find` that holds
     `-o`, a group, or a `-not` or `!` that does not lead straight into `-name VALUE` or `-path VALUE`,
@@ -1437,10 +1442,13 @@ def _name_filters(words) -> tuple:
     values = []
     if name == "find":
         at = 0
+        depths = []
         while at < len(args):
             word = args[at]
             if word in _FIND_EXEC:
                 break
+            if word == "-maxdepth" and at + 1 < len(args) and re.fullmatch(r"\d+", _unquoted(args[at + 1])):
+                depths.append(int(_unquoted(args[at + 1])))
             if word in ("-o", "-or", "(", "\\("):
                 return ()
             if word in ("-not", "!", "\\!"):
@@ -1453,6 +1461,8 @@ def _name_filters(words) -> tuple:
             if word == "-name" and at + 1 < len(args):
                 values.append(("", args[at + 1]))
             at += 1
+        if depths:
+            values.append((_DEPTH_LIMIT, str(max(depths))))
     elif name in _GREP_COMMANDS and name != "rg":
         for at, word in enumerate(args):
             if word == "--":
