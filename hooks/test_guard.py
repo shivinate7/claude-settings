@@ -21,6 +21,9 @@ GUARD_SHARD=<i>/<n> or GUARD_SHARD=<i>-<n> runs every n-th selected case, starti
 every case, so CI can split the suite across jobs and drop none. A malformed value stops the run
 before a case runs.
 
+GUARD_SECTION_DIR=<folder> reads the section files from that folder instead of tests/guard/. A folder with no
+section file, or with two that share a `# section <n>` number, stops the run before any case.
+
 Each case drives the guard as Claude Code drives it: one JSON object on stdin, and the decision read
 back off stdout. An empty stdout is an allow. Anything else is parsed for permissionDecision.
 
@@ -156,6 +159,7 @@ FAMILIES = {
     "load-brake": "the machine-load brake: busy and full on start calls, full on an agent's or a lane session's shell or file write (a lane session's own record tags cs-build:lane), the reader seam, no child process, no per-call read, no CPU read or wait, the cloud skip (CLAUDE_CODE_REMOTE=true reads nothing), the neutral load every other family's lane call meets",
     "agent-remote-tools": "an agent's call to an outward claude-code-remote tool is refused; the session's own call, an agent_type with no agent_id, and the read tools keep their verdict",
     "workflow-args": "a Workflow call whose args is, or holds as an array or object value, a placeholder (an all-caps word with an underscore, or __X__) is refused, naming it and the fix; an absent, empty or real args passes, and so does a short all-caps word or a sentence with an env var name",
+    "sections": "the section files: a set the loader refuses (no section file, two files with one number, a log check appended after the LOG_CHECKS_EXTRA join) stops a run before any case",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
@@ -446,18 +450,124 @@ SECTION_DIR = os.path.join(HERE, "..", "tests", "guard")
 
 
 def load_sections(section_dir):
-    """Run each section file of section_dir here, in n order."""
+    """Run each section file of section_dir here, in n order. No file, or two files with one n, stops the run."""
     found = []
-    for name in sorted(os.listdir(section_dir)):
+    for name in (sorted(os.listdir(section_dir)) if os.path.isdir(section_dir) else []):
+        if not name.endswith(".py"):
+            continue
+        path = os.path.join(section_dir, name)
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        head = re.match(r"# section (\d+)\n", text)
+        if not head:
+            sys.exit("fixture setup failed: %s has no `# section <n>` first line" % path)
+        found.append((int(head.group(1)), path, text))
+    if not found:
+        sys.exit("fixture setup failed: no section file in %s, so the run would hold no case" % section_dir)
+    numbers = [n for n, _, _ in found]
+    for n in sorted(set(numbers)):
+        if numbers.count(n) > 1:
+            sys.exit("fixture setup failed: section number %d is on %d section files" % (n, numbers.count(n)))
+    for _, path, text in sorted(found):
+        exec(compile(text, path, "exec"), globals())
+
+
+load_sections(os.environ.get("GUARD_SECTION_DIR") or SECTION_DIR)
+# A log check appended to LOG_CHECKS_EXTRA after its join is in no run. Refuse that, rather than drop it.
+UNJOINED = [label for label, check in LOG_CHECKS_EXTRA if (label, check) not in LOG_CHECKS]
+if UNJOINED:
+    sys.exit("fixture setup failed: %d log check(s) were appended to LOG_CHECKS_EXTRA after its join and "
+             "never run, first: %s" % (len(UNJOINED), UNJOINED[0]))
+
+# A section set the loader refuses must stop a run before any case. A refusal that reads as a pass would hide
+# every case the set holds, so each check below runs a child run of this runner on such a set and reads the stop.
+# The child runs the family that builds no fixture, so each check costs one import. The checks join LOG_CHECKS
+# directly: LOG_CHECKS_EXTRA has joined already, and an append to it here would be the loss this check refuses.
+NO_SYMLINK = "a symlink needs a privilege this Windows run does not hold, so this check does not run here"
+EMPTY_SECTIONS_LABEL = "sections: a run with no section file stops before any case"
+DUPLICATE_SECTIONS_LABEL = "sections: two section files with one number stop the run before any case"
+LATE_APPEND_LABEL = "sections: a log check appended after the join stops the run before any case"
+
+
+def section_child_run(folder):
+    """This runner, in a child process, on the section files of `folder`, under the family that builds no fixture.
+    -> (rc, output), rc None when it does not end in 300 s. The child leads its own process group: a sleep that
+    its import starts (OWNED) would hold a pipe open, so the output goes to a file, and the group ends with the child."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("GUARD_", "MUTATE_ONLY"))}
+    env.update(GUARD_FAMILY="load-brake", GUARD_SECTION_DIR=folder)
+    posix = os.name != "nt"
+    log = os.path.join(folder, "child-output.txt")
+    with open(log, "w", encoding="utf-8") as out:
+        child = subprocess.Popen([sys.executable, os.path.join(HERE, "test_guard.py")], env=env, stdout=out,
+                                 stderr=subprocess.STDOUT, **({"start_new_session": True} if posix else {}))
+        try:
+            rc = child.wait(timeout=300)
+        except subprocess.TimeoutExpired:
+            rc = None
+            child.kill()
+        finally:
+            if posix:
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except OSError:
+                    pass  # the group has already ended
+    with open(log, encoding="utf-8", errors="replace") as f:
+        return rc, f.read()
+
+
+def section_refusal_check(build, want):
+    """A check: the child run on the folder that `build` fills must stop nonzero, and its output must hold `want`."""
+    def check():
+        folder = tempfile.mkdtemp(dir=ROOT)
+        build(folder)
+        rc, out = section_child_run(folder)
+        if rc is None:
+            return False, "the run did not end within 300 s on a section set it must refuse"
+        if rc == 0:
+            return False, "the run passed with rc 0 on a section set it must refuse"
+        if want not in out:
+            return False, "the run stopped, but not on the refusal: %s" % ((out.strip().splitlines() or [""])[-1][:100])
+        return True, "the run stops before any case, rc %d" % rc
+    return check
+
+
+def build_empty(folder):
+    """A folder with no section file in it."""
+
+
+def build_two_with_one_number(folder):
+    """Every real section file, linked in, and one more file that claims the number of the first section."""
+    for name in os.listdir(SECTION_DIR):
         if name.endswith(".py"):
-            with open(os.path.join(section_dir, name), encoding="utf-8") as f:
-                text = f.read()
-            found.append((int(re.match(r"# section (\d+)\n", text).group(1)), name, text))
-    for _, name, text in sorted(found):
-        exec(compile(text, os.path.join(section_dir, name), "exec"), globals())
+            os.symlink(os.path.join(SECTION_DIR, name), os.path.join(folder, name))
+    with open(os.path.join(folder, "s00442-second.py"), "w", encoding="utf-8") as f:
+        f.write("# section 442\n")
 
 
-load_sections(SECTION_DIR)
+def build_late_append(folder):
+    """Every real section file, linked in, and one more that appends to LOG_CHECKS_EXTRA after the join."""
+    for name in os.listdir(SECTION_DIR):
+        if name.endswith(".py"):
+            os.symlink(os.path.join(SECTION_DIR, name), os.path.join(folder, name))
+    with open(os.path.join(folder, "s99999-late.py"), "w", encoding="utf-8") as f:
+        f.write('# section 99999\nLOG_CHECKS_EXTRA.append(("sections: a late append", lambda: (True, "")))\n')
+
+
+for _label, _check in (
+        (EMPTY_SECTIONS_LABEL, section_refusal_check(build_empty, "no section file in")),
+        (DUPLICATE_SECTIONS_LABEL, section_refusal_check(build_two_with_one_number,
+                                                         "section number 442 is on 2 section files")),
+):
+    LOG_FAMILY[_label] = "sections"
+    LOG_CHECKS = LOG_CHECKS + ((_label, _check),)
+    FIXTURELESS_CHECKS.add(_check)
+if os.name != "nt":
+    _late_check = section_refusal_check(build_late_append, "were appended to LOG_CHECKS_EXTRA after its join")
+    LOG_FAMILY[LATE_APPEND_LABEL] = "sections"
+    LOG_CHECKS = LOG_CHECKS + ((LATE_APPEND_LABEL, _late_check),)
+    FIXTURELESS_CHECKS.add(_late_check)
+else:
+    skip_case(LATE_APPEND_LABEL, NO_SYMLINK)
 
 # The SKIP rows join last, so a skip_case anywhere above, the simulator one too, prints its row.
 LOG_CHECKS = LOG_CHECKS + tuple(SKIP_ROWS)
