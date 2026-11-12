@@ -1233,6 +1233,23 @@ for _name, _command in (
 ):
     sh("bare-check: " + _name + " is no bare run, so it is allowed", _command, "allow", cwd=NOGIT)
 
+# Scanner forms: a bare run after a lone apostrophe, a # inside quotes, or a multi-line quote is still bare. A roster
+# name inside quotes, or verdict around the run, is no bare run.
+for _name, _command in (
+    ("after a lone apostrophe", "echo don't; merge --lane-lint 7"),
+    ("after a # inside quotes", 'echo "a # b"; merge --lane-lint 7'),
+    ("after a multi-line quote", 'echo "first line\nsecond line"\nmerge --lane-lint 7'),
+    ("before a # comment that holds an apostrophe", "merge --lane-lint 7 # don't"),
+):
+    sh("bare-check: bare run " + _name + " is refused", _command, "deny", BARE_CHECK, cwd=NOGIT,
+       carries=BARE_REMEDY)
+for _name, _command in (
+    ("a roster name in echo's quotes after a lone apostrophe", "echo don't; echo merge --lane-lint 7"),
+    ("a verdict run with a # comment that holds an apostrophe", "verdict merge --lane-lint 7 # don't"),
+    ("a roster name after a quoted #", 'echo "a # b" merge --lane-lint 7'),
+):
+    sh("bare-check: " + _name + " is no bare run, so it is allowed", _command, "allow", cwd=NOGIT)
+
 # Control: a background ci-job with no pipe is not a bare-check run (the rule covers the foreground, the
 # brief's roster). Its background end needs the until note, which TAIL_BG_UNTIL gives.
 add("bare-check: ci-job checks --lint backgrounded with an until note, no pipe, is allowed", "allow",
