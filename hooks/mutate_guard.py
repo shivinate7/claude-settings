@@ -3029,6 +3029,16 @@ MUTATIONS = [
      '    if tool in SHELL_COMMAND_TOOLS and isinstance(command, str) and "updatedAt" in command:\n',
      '    if tool in SHELL_TOOLS and isinstance(command, str) and "updatedAt" in command:\n',
      "guard", "message-time-matches-clock: a Monitor call with updatedAt 14:30 at -06:00 is refused"),
+    # ---- Monitor's watch gate: waiter_verdict's watch_only path decides a Monitor call's `gh run watch` (refused)
+    # and its `gh pr checks --watch` (allowed). Each required case is in tests/guard/s06590-stream.py.
+    ("monitor: the watch-only gate returns any watcher, so a Monitor gh pr checks --watch is refused",
+     '    if watch_only:\n        return run_watch\n',
+     '    if watch_only:\n        return watcher\n',
+     "guard", "ci-wait: Monitor runs gh pr checks 1 --watch, allowed as a background watch is"),
+    ("monitor: the watch-only gate returns nothing, so a Monitor gh run watch is let through",
+     '    if watch_only:\n        return run_watch\n',
+     '    if watch_only:\n        return ""\n',
+     "guard", "ci-wait: Monitor runs gh run watch 123, refused as its Bash twin is"),
     ("mockup-home: the refuse arm is dropped, so a design whose file sits under the machine home is allowed",
      "            if unhomed:",
      "            if False:",
