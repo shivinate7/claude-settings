@@ -2045,12 +2045,21 @@ def _blank_times(tool, tool_input, cwd):
                     if why := _bad_time(value):
                         yield "updatedAt " + json.dumps(value), why
             for edit in edits:
-                # A key-less edit that replaces a whole instant lands its new text as the time. A time fragment such as
-                # `T20:24:00Z` is not judged here, as _written_texts judges no fragment in a step edit either.
-                old, new = edit.get("old_string"), edit.get("new_string")
-                if isinstance(old, str) and isinstance(new, str) and _ISO_ANY.fullmatch(old.strip()) \
-                        and not _TIME_FRAGMENT.fullmatch(new.strip()) and (why := _bad_time(new)):
+                # A key-less edit that replaces a whole instant, date and time, lands its new text as the time. Each
+                # text may hold one pair of surrounding double quotes. A time fragment such as `T20:24:00Z` is not
+                # judged here, as _written_texts judges no fragment in a step edit either.
+                old, new = (_unquoted(edit.get(k)) for k in ("old_string", "new_string"))
+                if old and "T" in old and new is not None and _ISO_ANY.fullmatch(old) \
+                        and not _TIME_FRAGMENT.fullmatch(new) and (why := _bad_time(new)):
                     yield "time " + json.dumps(new), why
+
+
+def _unquoted(text):
+    """A string text without its outer spaces and one pair of surrounding double quotes, or None for a non-string."""
+    if not isinstance(text, str):
+        return None
+    text = text.strip()
+    return text[1:-1] if len(text) >= 2 and text[0] == text[-1] == '"' else text
 
 
 def _updated_at_values(text):
