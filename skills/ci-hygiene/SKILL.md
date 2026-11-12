@@ -135,7 +135,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    2. Spawn a fresh reviewer on a brief that opens `Fix check` (Sonnet). It reads only
       `git diff origin/main...<head>`, which holds the resolved hunks, and confirms the lane's own diff
       is unchanged.
-   3. Post the verdict before the push: `merge <pr> --review-record --fix-check <head>:reviewer:sonnet:<PASS|FAIL>`.
+   3. Post the verdict before the push: `merge <pr> --review-record --head <merge head> --kind K --guard G
+      --fix-check <reviewed head>:reviewer:sonnet:<PASS|FAIL>`. The reviewed head is the one the prior record names.
       The tool chains the line to the PR's newest earlier record (record `pr-review-record`, the
       fix check order).
    A merge with no conflict needs none of this: the record stays valid (record `pr-review-record`, clean
