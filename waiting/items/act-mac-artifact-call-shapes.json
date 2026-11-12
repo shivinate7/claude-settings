@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-12T19:59:00Z",
+  "context": "Goal: the guards for artifact tools also fire when a Mac session writes your page.\nProblem (goal): the guard finds your page only by the page link in the call, and nobody knows whether a Mac page write or publish carries that link, so the lane needs two real calls from your Mac.\nBased on (read): the guard reads the link from the call's url field (hooks/question_form.py, waiting_page_root); the Mac call shapes recorded on Nov 8 name no url.\nDeparts from: main \u2014 adds guarding for Mac artifact calls, which today go unchecked.\nWhy yours: cloud sessions have no Mac artifact tools and cannot reach a Mac session (measured 2026-11-12, the lane found no such tool in its session and no reachable Mac session).",
+  "home": "step artifact-guard-matcher-names (artifact guards fire on every tool name)",
+  "id": "act-mac-artifact-call-shapes",
+  "kind": "task",
+  "n": 626,
+  "options": [
+    {
+      "gain": "The Mac guards are built on real call shapes.",
+      "how": "In a Claude session on your Mac, ask it to show the raw input of one page database write and one file publish it makes, and say whether the server accepts a path with a leading slash, a capital letter, or a file path inside an operation, and whether a batch with one bad operation writes nothing. Paste the answer into the lane's session.",
+      "key": "a",
+      "label": "Paste the two calls",
+      "links": [
+        {
+          "label": "Artifact guard lane",
+          "url": "https://claude.ai/code/session_013NEJL3MTsrgkbccEjnK2Lf"
+        }
+      ],
+      "lose": "A few minutes on your Mac."
+    },
+    {
+      "gain": "No Mac work.",
+      "how": "The lane builds the rest; Mac calls with no page link stay unguarded.",
+      "key": "b",
+      "label": "Skip it",
+      "lose": "A Mac session can still write your page without the checks."
+    }
+  ],
+  "owner": "lane artifact-guard-matcher-names (session_013NEJL3MTsrgkbccEjnK2Lf), via coordinator",
+  "ref": "coordinator 13:57 CST Nov 12",
+  "repo": "shivinate7/claude-settings",
+  "short": "Paste two Mac artifact calls",
+  "status": "open",
+  "title": "Paste one Mac page-write call and one Mac publish call for the artifact guards",
+  "why": "Only a Mac session has these tools, and none is reachable from the cloud."
+}

@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-12T15:41:00Z",
+  "context": "Goal: the fastest outcomes: each lane merges on its own once reviewed and green.\nProblem (rule): the decision draft-until-reviewed says \"Lane PRs stay drafts. Only one integration PR per batch goes ready.\" Per-lane merges cannot work under it, so it must change, and it records your rule.\nBased on (ruling): merge-flow-after-anthropic (the per-lane merge build step) reads your Nov 11 13:43 CST choice, that a lane merges on its own green checks and main's CI runs after the merge, as also lifting the drafts rule in the same merge as the switch, once one lane PR's CI minutes are measured. That reading was made without asking you, and the coordinator withdrew it at 09:41 CST Nov 12, so it comes back to you.\nBased on (read): the repo is public, so CI runs bill no minutes; how many runs can go at once is not measured.\nDeparts from: main keeps lane PRs as drafts and runs CI once per batch \u2014 a lane PR goes ready after its review and runs its own CI.\nMeanwhile: nothing builds it; lane PRs stay drafts.",
+  "home": "step merge-flow-after-anthropic",
+  "id": "r42-lane-ready",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T15:44:00Z",
+    "choice": "a",
+    "note": "Chat, 09:44 CST Nov 12, in the retrospective's session: \"i'm fine with lanes moving a pr from draft to ready to run CI -- it's just it needed to be judgement based\". Read as: once, after the last review and lane lint, never per push; a PR that will not merge never goes ready. Record: plans/owner-rulings-2026-11-12.md."
+  },
+  "n": 544,
+  "options": [
+    {
+      "gain": "Each lane runs its own CI and merges without waiting for a batch.",
+      "how": "The draft-until-reviewed decision is rewritten in the same merge as the switch: a lane PR turns ready once its review passes, and its own CI run is its merge check.",
+      "key": "a",
+      "label": "A lane PR goes ready after its review (Recommended)",
+      "lose": "More CI runs; how many can run at once is not measured."
+    },
+    {
+      "gain": "One CI run per batch.",
+      "how": "Lane PRs stay drafts and one integration PR per batch goes ready, as the decision says now.",
+      "key": "b",
+      "label": "Keep drafts and batch",
+      "lose": "Per-lane merges cannot happen."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "ref": "decision draft-until-reviewed; step merge-flow-after-anthropic; docs/plans/r42-part2-design.md at commit 402613631; restart-plan R42 item 2",
+  "repo": "shivinate7/claude-settings",
+  "short": "Per-lane merges: lane PRs go ready",
+  "status": "closed",
+  "title": "With per-lane merges, does a lane's pull request go ready (and run its own CI) once it is reviewed?",
+  "why": "Recommended: a. Per-lane merges need it, and CI minutes cost nothing on a public repo."
+}

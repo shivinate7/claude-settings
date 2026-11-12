@@ -1,0 +1,27 @@
+{
+  "added": "2026-11-12T16:21:00Z",
+  "context": "Goal: the shared pointer checkout holds no stray edits.\nProblem (rule): a stray uncommitted edit to hooks/override.py sits in the pointer checkout, and only your typed `override` lets the lane revert it.\nBased on (read): lane override-docstring-later-line, relayed by the coordinator at 10:16 CST Nov 12.\nWhy yours: only an override typed by you in that session lifts a guard refusal, and no other session can type it there (measured 2026-11-12, the lane's revert of hooks/override.py refused by a guard, coordinator relay 10:16 CST).\nMeanwhile: the edit stays; nothing else waits on it.",
+  "home": "lane override-docstring-later-line",
+  "id": "override-py-stray-edit",
+  "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-12T17:59:44.968Z",
+    "done": true,
+    "note": ""
+  },
+  "links": [
+    {
+      "label": "Lane override-docstring-later-line",
+      "url": "https://claude.ai/code/session_013NEJL3CReswfrnssPb2YxY"
+    }
+  ],
+  "n": 551,
+  "owner": "lane override-docstring-later-line (session_013NEJL3CReswfrnssPb2YxY)",
+  "ref": "hooks/override.py",
+  "reply": "Marked done 12:00 CST. The lane checks that the stray edit to hooks/override.py is gone.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Let a lane revert a stray override.py edit",
+  "status": "closed",
+  "title": "Type `override` in lane override-docstring-later-line so it can revert a stray edit to hooks/override.py",
+  "why": "Only your typed override lets a session undo that edit."
+}

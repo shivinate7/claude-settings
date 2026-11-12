@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-12T18:05:00Z",
+  "context": "Goal: a red batch is dropped and fixed at once, so main merges sooner.\nProblem (goal): a batch run with one red job stays open until its slowest jobs end, and no one is woken; batch 104 went red at 11:55 CST while the macOS and Windows jobs ran on.\nBased on (ruling): R4, your 14:56 CST Nov 10 words \"yes D is approved\": batch CI runs lint first and cancels the rest when lint goes red.\nBased on (measured): batch 104's run (GitHub Actions run 43270332555): the checks job failed at 11:55 CST, and two jobs were still running at 12:02 CST; batch runner 10 found it at 11:57 CST only by reading.\nDeparts from: R4, where only a red lint cancels the run \u2014 the run cancels on a red in any required job.\nMeanwhile: the lint-only step from R4 goes ahead; nothing waits on this.",
+  "home": "step lane-lint-once-fail-fast",
+  "id": "red-job-cancels-run",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T18:14:00Z",
+    "choice": "c",
+    "note": "ah ok C is good go for it (chat, 12:14 CST, relayed by the retrospective)"
+  },
+  "n": 559,
+  "options": [
+    {
+      "gain": "Fewest CI minutes.",
+      "how": "The first red required job cancels the rest; the run ends red and the red-run comment wakes the batch runner.",
+      "key": "a",
+      "label": "Any red job cancels the run",
+      "lose": "About half of red runs hide a second bad lane, each costing an extra full run."
+    },
+    {
+      "gain": "No change.",
+      "how": "Keep R4 as it is: only a red lint cancels the run.",
+      "key": "b",
+      "label": "Lint only, as ruled",
+      "lose": "A red outside lint still waits for the slowest job."
+    },
+    {
+      "gain": "Acts at the first red and still sees every bad lane in one run.",
+      "how": "Each required job that fails posts the red-run notice as it fails, so the batch runner starts the drop and fix at once; the other jobs run on and name any second bad lane; the new head's run replaces the old one. R4's lint-first cancel stays.",
+      "key": "c",
+      "label": "Wake at first red, no cancel (Recommended)",
+      "lose": "The old run's jobs use CI minutes until the new run replaces it."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "pick": "c",
+  "ref": "step lane-lint-once-fail-fast; ruling R4",
+  "reply": "Closed with your 12:14 CST chat pick c: each failing required job wakes the batch runner as it fails, and the rest run on. Filed as step red-job-wakes-runner for a lane.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Any red job cancels the batch run?",
+  "status": "closed",
+  "title": "Should the first red required job cancel the rest of a batch CI run, not only a red lint?",
+  "why": "Batch 104 sat red for minutes with no wake."
+}

@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-12T18:16:00Z",
+  "context": "Goal: the work goes on now, and you can overrule any coordinator pick.\nProblem (goal): the coordinator took this undoable pick on Nov 12, 12:12 CST without asking you; it stands unless you choose b.\nBased on (notes): coordinator message, 12:12 to 12:16 CST Nov 12.\nDeparts from: main has no such pick on record \u2014 the work it governs follows this pick.",
+  "home": "PR #2827",
+  "id": "pick-2827-exit-wording",
+  "kind": "decision",
+  "n": 582,
+  "options": [
+    {
+      "gain": "One failure code is simpler to read and to test.",
+      "how": "In PR #2827 the page check fails with the words \"on a current page\" and no separate exit code; the save at the start of a wake stays as it is.",
+      "key": "a",
+      "label": "Keep the pick (Recommended)",
+      "links": [
+        {
+          "label": "PR #2827",
+          "url": "https://github.com/shivinate7/claude-settings/pull/2827"
+        }
+      ],
+      "lose": "The other route is not taken unless you choose b."
+    },
+    {
+      "gain": "The other route, if you prefer it.",
+      "how": "A separate exit code for this failure.",
+      "key": "b",
+      "label": "Overrule it",
+      "links": [
+        {
+          "label": "PR #2827",
+          "url": "https://github.com/shivinate7/claude-settings/pull/2827"
+        }
+      ],
+      "lose": "The governed work is redone or waits for the change."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "pick": "a",
+  "ref": "coordinator pick, Nov 12, 12:12 CST",
+  "reply": "Closed 12:57 CST: the retrospective audited every coordinator pick (your 12:36 ask) and found this one sound. It stays in force; say so in the thread to overrule it.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Page check exit wording and the wake-start save",
+  "stands": true,
+  "status": "closed",
+  "title": "Page check exit wording and the wake-start save",
+  "why": "A coordinator pick you could not see before."
+}

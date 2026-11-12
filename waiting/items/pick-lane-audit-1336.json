@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-12T19:40:00Z",
+  "context": "Goal: no two lanes do the same work, and each lane is a fair size (your 13:27 CST ask for deduplication and balanced workloads).\nProblem (goal): the coordinator took these undoable picks on Nov 12, 13:36-13:43 CST without asking you; they stand unless you choose b.\nBased on (measured): the coordinator's size and duplicate audit of the 44 lanes started today.\nDeparts from: main has no such picks on record \u2014 the lanes they govern follow these picks.",
+  "home": "the roadmap steps each pick names (record branch)",
+  "id": "pick-lane-audit-1336",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T19:49:01Z",
+    "choice": "a",
+    "note": "accepted pick"
+  },
+  "n": 617,
+  "options": [
+    {
+      "gain": "Fewer lanes doing the same work, and smaller changes that review faster.",
+      "how": "Close two lanes whose work already exists: the merge-claim timeout fix (already merged) and the push refusal during a batch run (covered by draft PR #2463). Fold the worktree role pins lane into the lane refusing mixed merges, and the roadmap push hint into the batch merge guard. The batch split-and-pipeline lane keeps running, cut to building the next batch on the running one, at the top of the express list; its split-and-rebuild half moves to the dropped-batch queue lane. The batch freeze lane keeps only the express lane and cancel; the review fix-check lane drops its rule text; the coordinator board ships as three PRs. A fresh lane rebuilds PR #2463 on today's main, first in the next list. Undo: reopen any closed step or restart a stopped lane.",
+      "key": "a",
+      "label": "Keep the picks (Recommended)",
+      "links": [
+        {
+          "label": "PR #2463",
+          "url": "https://github.com/shivinate7/claude-settings/pull/2463"
+        }
+      ],
+      "lose": "A stopped lane's partial work waits for its new home."
+    },
+    {
+      "gain": "No lane loses work in a hand-over.",
+      "how": "Each lane keeps its scope as started; the coordinator reverses the closes and folds.",
+      "key": "b",
+      "label": "Overrule them",
+      "lose": "Duplicate lanes and large changes stay."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "pick": "a",
+  "ref": "coordinator picks, Nov 12, 13:36 and 13:37 CST",
+  "reply": "Filed 13:50 CST; the picks stand.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Lane audit picks: close, fold, split",
+  "stands": true,
+  "status": "closed",
+  "title": "Lane audit: two closes, two folds, four splits, one fresh rebuild",
+  "why": "Coordinator picks you could not see before."
+}

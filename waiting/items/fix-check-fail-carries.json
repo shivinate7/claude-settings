@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-12T20:08:00Z",
+  "context": "Goal: a small fix to a review finding merges without a full review round it does not need.\nProblem (rule): on PR #2892 a fix check failed on record wording only, and the rule sent it back to a new lane at round 1.\nBased on (read): rule roles-review-cap-three, \"A FAIL or a wider diff starts a new lane at round 1\"; decision docs-only-prs-skip-review makes that round 1 check two things only.\nDeparts from: main starts a new lane at round 1 on any fix-check FAIL \u2014 b lets a second fix check carry when the diff is records and notes only.",
+  "home": "rule roles-review-cap-three (review cap of three rounds)",
+  "id": "fix-check-fail-carries",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T20:13:00Z",
+    "choice": "b",
+    "note": "is it even a good idea to give purely wording edits the full round checks"
+  },
+  "n": 633,
+  "options": [
+    {
+      "gain": "One rule, no variant to keep.",
+      "how": "No change; a records-only round 1 already checks two things only.",
+      "key": "a",
+      "label": "Keep it: a FAIL starts round 1 (Recommended)",
+      "lose": "A wording fix still takes a fresh round-1 review."
+    },
+    {
+      "gain": "No full round for wording.",
+      "how": "The rule and the merge tool accept a second fix check when the diff touches records and notes only. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "key": "b",
+      "label": "A second fix check carries for records only",
+      "lose": "A rule variant the merge tool must read and someone keeps.",
+      "widens": true
+    }
+  ],
+  "owner": "batch runner 10 (session_013NEJL2f1YCYsvLdpFqtWP3)",
+  "ref": "runner 10 on #2892 (lane base-hash-on-base), via coordinator 14:07 CST Nov 12",
+  "reply": "Closed 14:14 CST: a records-only FAIL gets a second fix check; rule roles-review-cap-three changes in a lane. Runner 10 and the coordinator told.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Wording FAIL: round 1 or 2nd fix check",
+  "status": "closed",
+  "title": "A wording-only FAIL from a fix check: new round 1, or a second fix check",
+  "why": "The rule says a FAIL starts round 1; only you change a rule."
+}

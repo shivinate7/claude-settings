@@ -1,0 +1,48 @@
+{
+  "added": "2026-11-12T07:11:00Z",
+  "checked_with": "session_013NEJL1gw6EdrSyvHkTUEx6",
+  "context": "Goal: q_max batch pull requests run real CI again, so the waiting prose batch (#1158) and the batches behind it can merge.\nProblem (rule): #1161 passes every job, but q_max main's browser test run is red (shards 1 and 6), so the merge tool needs its red-main flag, and the safety check refused that flag for batch runner 11; only your typed override lifts it.\nBased on (ruling): q_max decision D-705, merging over a red browser run on main (your 2026-11-07 13:13 CST ruling), lets the batch runner merge over a red browser test run on q_max main.\nBased on (read): lane qmax-browser-main-red (session_013NEJL2zMs2Fq9xf6bf2LbG) started 01:09 CST to fix that red run.\nDeparts from: main \u2014 the merge tool refuses a merge onto red main; this one merge goes through with its red-main flag, under D-705.\nMeanwhile: batch runner 11 holds every q_max merge.\nRe-checked 11:43 CST Nov 12: the lane fixing q_max main's red browser test handed in q_max #1162 (the fix for that red test, per your 10:27 CST ruling on the 1440 bar) at 11:35 CST; its browser run is green on every shard. Once it merges, q_max main should go green and this override is no longer needed. You may wait for it instead of answering.",
+  "home": "qmax-ci-batch-heads",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T17:59:44.968Z",
+    "choice": "a",
+    "note": ""
+  },
+  "links": [
+    {
+      "label": "Batch runner 11 session",
+      "url": "https://claude.ai/code/session_013NEJKzRugXqBZrZ8xwXmW7"
+    },
+    {
+      "label": "q_max #1161",
+      "url": "https://github.com/shivinate7/q_max/pull/1161"
+    }
+  ],
+  "n": 539,
+  "options": [
+    {
+      "gain": "The CI fix lands now, and #1158 and the batches behind it can merge tonight.",
+      "how": "Open the batch runner 11 session (link above) and type `override`; it merges #1161 once.",
+      "key": "a",
+      "label": "Type override in batch runner 11 for this one merge",
+      "lose": "One merge lands while q_max main's browser tests are red."
+    },
+    {
+      "gain": "No merge onto red main.",
+      "how": "Nothing now; batch runner 11 merges once lane qmax-browser-main-red turns main green.",
+      "key": "b",
+      "label": "Wait for the browser fix lane",
+      "lose": "Every q_max merge waits for that lane."
+    }
+  ],
+  "owner": "batch runner 11 (child repos) (session_013NEJKzRugXqBZrZ8xwXmW7)",
+  "pick": "a",
+  "ref": "step qmax-ci-batch-heads; q_max #1161 (batch ci-1, head 13d3b6dc0); q_max main browser run 42449067365",
+  "reply": "Recorded 12:00 CST: batch runner 11 merges q_max #1161 once with the red-main flag, on your typed override in that session.",
+  "repo": "shivinate7/q_max",
+  "short": "q_max CI fix over red main",
+  "status": "closed",
+  "title": "Merge the q_max CI fix (#1161) while q_max main's browser tests are red?",
+  "why": "Your D-705 ruling already allows a merge over a red browser run, and the fix unblocks every q_max batch."
+}

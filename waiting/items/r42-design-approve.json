@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-12T15:39:00Z",
+  "context": "Goal: the fastest outcomes: each lane merges alone, main is tested after the merge, and sessions install from a `stable` branch that moves only when main is green.\nProblem (rule): the design retires batching, which three of your rulings set, and the plan says the design comes back to you; the coordinator closed its questions alone last night and should not have.\nBased on (ruling): your pick A on the merge-speed part of the restart plan (13:43 CST Nov 11), which set the direction only.\nBased on (read): a refuter (a reviewer that tries to break a plan) read the design and judged it HOLDS WITH CHANGES.\nDeparts from: main batches lane changes and sessions install from main \u2014 adds a `stable` branch, a revert of a red merge, and merges one lane at a time.\nMeanwhile: nothing builds it; the batch runner keeps its name. On your answer the coordinator gives the build step a lane.",
+  "home": "step merge-flow-after-anthropic",
+  "id": "r42-design-approve",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T15:48:00Z",
+    "choice": "a",
+    "note": "Chat, 09:48 CST Nov 12, in the retrospective's session: \"r42 -- yea that's correct yes?\" Yes to the design with the refuter's six changes and the Q1-Q4 picks. Record: plans/owner-rulings-2026-11-12.md on the roadmap branch. The lane started 09:49 CST."
+  },
+  "n": 543,
+  "options": [
+    {
+      "gain": "Merges stop waiting on batches of about 30 changes.",
+      "how": "Build in this order: the stable branch, then installers that read it, then the revert of a red merge, then remove the batch brake.",
+      "key": "a",
+      "label": "Yes, with the refuter's changes (Recommended)",
+      "lose": "About 6 build steps land before any speed shows."
+    },
+    {
+      "gain": "No change to how merges work for now.",
+      "how": "The design stays a draft and batching goes on as today.",
+      "key": "b",
+      "label": "Not yet",
+      "lose": "Merges keep waiting on batches."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "ref": "docs/plans/r42-part2-design.md at commit 402613631 on branch claude/ecstatic-euler-capib9; restart-plan R42 item 2; step merge-flow-after-anthropic",
+  "repo": "shivinate7/claude-settings",
+  "short": "Per-lane merges: approve the design",
+  "status": "closed",
+  "title": "Do you approve the design that lets each lane merge on its own, with sessions installing from a branch that moves only on green?",
+  "why": "Recommended: a. It follows your direction pick, and the refuter's changes are in."
+}

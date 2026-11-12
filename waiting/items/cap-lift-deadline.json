@@ -1,0 +1,44 @@
+{
+  "added": "2026-11-12T18:52:00Z",
+  "context": "Goal: no fixed 24-hour limit on how long a lift of the spending cap may last.\nProblem (money): a write that only sets the lift's end time in the local settings file never asks you today, so without the 24-hour limit Claude could set a far-off end time you never see.\nBased on (ruling): R12, no arbitrary fixed lengths.\nDeparts from: main undoes an end time more than 24 hours ahead \u2014 the write asks you and shows its end time.",
+  "home": "lane fixed-number-limits-census",
+  "id": "cap-lift-deadline",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T18:54:35.937Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 602,
+  "options": [
+    {
+      "gain": "You see and approve every end time, with no made-up limit.",
+      "how": "Setting the end time joins the ask you already get for a cap lift, and the ask shows the end in Central time; any length is allowed once you say yes.",
+      "key": "a",
+      "label": "Ask you, any length (Recommended)",
+      "lose": "One more yes from you when a lift's end time is set."
+    },
+    {
+      "gain": "Nothing changes now.",
+      "how": "Keep the 24-hour limit until the R12 grant route is built.",
+      "key": "b",
+      "label": "Keep 24 hours for now",
+      "lose": "The fixed number stays a while longer."
+    },
+    {
+      "gain": "A hard ceiling on any lift.",
+      "how": "Keep the 24-hour limit for good, as your ruling.",
+      "key": "c",
+      "label": "Keep 24 hours as your ruling",
+      "lose": "A fixed number stays, against R12."
+    }
+  ],
+  "owner": "lane fixed-number-limits-census (session_013NEJL2yZF4msU7yNVTgeiC)",
+  "ref": "coordinator 12:51 CST Nov 12, from lane fixed-number-limits-census",
+  "reply": "Filed: setting a cap lift's end time joins the ask you already get, shows the end in Central time, any length. Lane fixed-number-limits-census builds it.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Cap-lift end time: ask, not 24 h",
+  "status": "closed",
+  "title": "A spending-cap lift's end time asks you instead of a 24-hour limit",
+  "why": "It touches spending, so it needs your word."
+}

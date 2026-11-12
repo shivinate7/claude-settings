@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-12T05:35:00Z",
+  "context": "Goal: give this kept debt note a true Fix line, so it stops showing as unchecked.\nProblem (rule): no check reads a debt's Decision line in docs/debts, and what \"a debt names its finding\" means is your call.\nBased on (measured): the lane re-checked every kept note (reverify-keep.tsv, sorted Nov 7) and marked this one as yours to decide.\nBased on (ruling): build a guard or check only against a mistake Claude has made or is likely to make (rule building-guard-needs-incident, guards need an incident); none is recorded for this note.\nDeparts from: main \u2014 adds a Fix line to note debt-decision-link-unchecked; today it has none.\nMeanwhile: the lane keeps rebuilding the notes pull requests and does not wait.",
+  "home": "notes-keep-reverify",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "reverify-keep.tsv on branch claude/notes-keep-reverify",
+      "url": "https://github.com/shivinate7/claude-settings/blob/claude/notes-keep-reverify/docs/plans/notes-sort/reverify-keep.tsv"
+    }
+  ],
+  "n": 531,
+  "options": [
+    {
+      "gain": "Debts always point somewhere real.",
+      "how": "A lint fails when a debt names a decision that does not exist.",
+      "key": "a",
+      "label": "Add a check that each Decision line resolves",
+      "lose": "A new check to keep."
+    },
+    {
+      "gain": "No new check.",
+      "how": "The note gets \"Fix: none\" and an Until date.",
+      "key": "b",
+      "label": "Leave it, with a date to look again",
+      "lose": "A broken Decision line goes unseen."
+    }
+  ],
+  "owner": "lane notes-keep-reverify (session_013NEJKzimwz9GDpxMtjZrqi)",
+  "pick": "b",
+  "ref": "step notes-keep-reverify; reverify-keep.tsv on branch claude/notes-keep-reverify",
+  "reply": "Closed by triage 11:38 CST Nov 12, staleness pass: covered by your item 365 answer (pick b, Nov 7), the same ruling as item 530. Draft PR #2757 adds the debt Decision-link check.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Check debt Decision lines?",
+  "status": "closed",
+  "title": "Check that each debt's Decision line points to a real decision?",
+  "why": "No incident is recorded, and a guard needs one."
+}

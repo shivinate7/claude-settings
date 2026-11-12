@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-12T18:53:00Z",
+  "context": "Goal: the work goes on now, and you can overrule any coordinator pick.\nProblem (goal): the coordinator took this undoable pick on Nov 12, 12:51 CST without asking you; it stands unless you choose b.\nBased on (notes): no ruling found; the coordinator searched the PR backlog step and the decisions for stale batch PRs.\nDeparts from: main has no such pick on record \u2014 q_max's 12 old PRs get a verdict each.",
+  "home": "step pr-backlog-clear",
+  "id": "pick-qmax-backlog-read",
+  "kind": "decision",
+  "n": 604,
+  "options": [
+    {
+      "gain": "Each old q_max PR is judged from its content, not its title.",
+      "how": "Batch runner 11, which can read q_max, reads q_max PR #1011 and the 11 other old q_max PRs and sends a verdict on each. #1011 closes if all its changes are already on q_max main; otherwise it is revived as a lane. Undo: reopen.",
+      "key": "a",
+      "label": "Keep the pick (Recommended)",
+      "lose": "The other route is not taken unless you choose b."
+    },
+    {
+      "gain": "Nothing closes without you.",
+      "how": "Leave the old q_max PRs open until you look at them.",
+      "key": "b",
+      "label": "Overrule it",
+      "lose": "The old PRs keep cluttering the list."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "pick": "a",
+  "ref": "coordinator pick, Nov 12, 12:51 CST",
+  "reply": "Runner 11's verdict (12:53 CST): q_max PR #1011 is revived as lane qmax-1011-carry for its two missing parts; the other 10 q_max PRs stay open.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Runner 11 judges q_max's old PRs",
+  "stands": true,
+  "status": "open",
+  "title": "Batch runner 11 reads q_max's old PRs and gives a verdict on each",
+  "why": "A coordinator pick you could not see before."
+}

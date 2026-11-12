@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-12T20:18:00Z",
+  "context": "Goal: a false \"pre-existing, on main at <hash>\" claim never passes the report check.\nProblem (risk): a line \"on origin/<the PR's own branch> at <PR head>\" passes, because the head is on that branch, so a lane can name its own branch as the base.\nBased on (read): lint/report_guard.py `_check_run_hash`; a test pins the pass; note pe-own-branch-base-passes in docs/debts/notes.md calls it harmless, unmeasured.\nDeparts from: main passes the PR's own branch as a base \u2014 b refuses it.",
+  "home": "step base-hash-on-base (a pre-existing claim names a hash on the base)",
+  "id": "report-base-own-branch",
+  "kind": "decision",
+  "n": 637,
+  "options": [
+    {
+      "gain": "No new false alarms; #2892 merges now.",
+      "how": "The pass stays a filed note until a real incident.",
+      "key": "a",
+      "label": "Keep it as a note (Recommended)",
+      "links": [
+        {
+          "label": "PR #2892",
+          "url": "https://github.com/shivinate7/claude-settings/pull/2892"
+        }
+      ],
+      "lose": "A lane's own branch name clears a false claim."
+    },
+    {
+      "gain": "Closes the hole.",
+      "how": "The check refuses a base ref that is the PR's own branch.",
+      "key": "b",
+      "label": "Refuse the PR's own branch",
+      "lose": "One more build and review round on #2892; a wrong guess at \"own branch\" could refuse a true claim."
+    }
+  ],
+  "owner": "lane base-hash-on-base (session_013NEJKyrMqGGt4eRzJmrKwn)",
+  "ref": "lane base-hash-on-base, PR #2892, 14:14 CST Nov 12",
+  "repo": "shivinate7/claude-settings",
+  "short": "Own branch as base: note or refuse",
+  "status": "open",
+  "title": "A report naming its own branch as the base for a pre-existing claim",
+  "why": "Closing it widens what the report check refuses."
+}

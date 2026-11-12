@@ -1,0 +1,42 @@
+{
+  "added": "2026-11-12T17:10:00Z",
+  "context": "Goal: a fix round never undoes work the lane already landed (your ask fb-1041-1, Nov 2 10:41 CST).\nProblem (rule): the fix needs one new sentence in rule roles-brief-contents (what a spawner's brief to an agent must hold) in CLAUDE.md, and a CLAUDE.md rule takes your wording.\nBased on (read): lane fan-prose-unmapped-3 checked old #1099 (an older no-undo PR that #2734 replaces) against main and #2734 at 11:08 CST Nov 12; the builder.md and brief.md prose ship on #2734, and this sentence is the part left.\nDeparts from: main \u2014 adds a Keep: line to every round 2 and 3 brief, naming the lane's earlier commits to keep.\nMeanwhile: the lane ships the builder.md and brief.md prose and does not wait.",
+  "home": "no-undo-brief-rule-sentence",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T17:15:00Z",
+    "choice": "a",
+    "note": "Taken by triage, 11:15 CST Nov 12: a reversible wording edit, so no owner pick is needed (rule parallelism-keep-going). No record says a root CLAUDE.md rule edit takes the owner's wording; only .claude/CLAUDE.md is owner-only. Decision claude-md-change-is-flagged shows you the change at merge."
+  },
+  "links": [
+    {
+      "label": "#2734",
+      "url": "https://github.com/shivinate7/claude-settings/pull/2734"
+    }
+  ],
+  "n": 553,
+  "options": [
+    {
+      "gain": "A builder on a later round sees which commits stay, so it does not undo them.",
+      "how": "The brief rule (what a brief must hold) gains: \"A round 2 or 3 brief names the lane's earlier commits to keep.\"",
+      "key": "a",
+      "label": "Add the sentence",
+      "lose": "One more line in each round 2 and 3 brief."
+    },
+    {
+      "gain": "CLAUDE.md stays shorter.",
+      "how": "Only the builder.md and brief.md prose on #2734 carry it.",
+      "key": "b",
+      "label": "Leave the rule as is",
+      "lose": "A spawner that writes its own brief may still leave out the commits to keep."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "pick": "a",
+  "ref": "step no-undo-brief-rule-sentence; lane fan-prose-unmapped-3 audit 11:08 CST Nov 12; #2734",
+  "repo": "shivinate7/claude-settings",
+  "short": "Round 2 and 3 briefs name commits to keep?",
+  "status": "closed",
+  "title": "Should a round 2 or 3 brief name the lane's earlier commits to keep?",
+  "why": "A brief is where the builder reads what to keep, and the rule governs every spawner's brief, not only the template."
+}

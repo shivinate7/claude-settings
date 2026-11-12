@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-12T18:14:00Z",
+  "context": "Goal: a challenge to one of your past rulings reaches you only when it carries real evidence.\nProblem (rule): your restart-plan ruling R39 refuses a re-ask that brings no new fact, so a re-ask with a new fact passes; the lane built it stricter, so a new fact alone is refused unless the challenge has all four parts.\nBased on (read): restart-plan R39, items 1 and 4 (refuse a re-ask with no new fact).\nBased on (read): the four parts come from rule outcomes-stale-decision-protocol: the record and its sentence, a measure or \"unmeasured\", the outcome the ruling protected, and a proposed fix.\nDeparts from: R39, where a re-ask with a new fact passes \u2014 the build refuses it unless all four parts are present.\nMeanwhile: the merge of the lane's branch waits on this item.",
+  "holds": "merge of lane ruling-challenge-passes",
+  "home": "step ruling-challenge-passes",
+  "id": "ruling-challenge-four-parts",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T18:54:35.937Z",
+    "choice": "b",
+    "note": "isn't all four parts overkill "
+  },
+  "n": 579,
+  "options": [
+    {
+      "gain": "Fewer half-made challenges reach you, and the bar matches your rule for stale decisions.",
+      "how": "A challenge passes only with all four parts, new fact or not.",
+      "key": "a",
+      "label": "Keep the four-part bar",
+      "lose": "A real new fact without the other three parts is refused until the session writes them."
+    },
+    {
+      "gain": "Matches R39 exactly, and a session can bring you a new fact without writing the full four-part case.",
+      "how": "The guard lets a re-ask through when it names a new fact.",
+      "key": "b",
+      "label": "R39 as written: a new fact alone passes (Recommended)",
+      "lose": "Thin challenges with one fact and no proposed fix reach you."
+    }
+  ],
+  "owner": "coordinator (lane ruling-challenge-passes, session_013NEJL24eof56PM2RAz6pr5)",
+  "ref": "restart-plan R39; step ruling-challenge-passes",
+  "reply": "Filed: b. Yes, four parts was overkill; a challenge to a past ruling passes on a new fact alone. Lane ruling-challenge-passes builds b and its merge is no longer held.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Past-ruling challenge: four parts or a new fact?",
+  "status": "closed",
+  "title": "Must a challenge to a past ruling carry all four parts, even when it brings a new fact?",
+  "why": "Recommended: b. Your doubt that four parts is overkill holds; R39 already stops re-asks with no new fact."
+}

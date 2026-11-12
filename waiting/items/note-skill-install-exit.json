@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-12T05:35:00Z",
+  "context": "Goal: give this kept debt note a true Fix line, so it stops showing as unchecked.\nProblem (risk): install.ps1 (near line 821) exits 0 when a skill install fails, so a broken install looks fine; only your PC shows whether it copies skills or links them.\nBased on (measured): the lane re-checked every kept note (reverify-keep.tsv, sorted Nov 7) and marked this one as yours to decide.\nDeparts from: main \u2014 adds a Fix line to note install-skill-fail-exits-0; today it has none.\nMeanwhile: the lane keeps rebuilding the notes pull requests and does not wait.",
+  "home": "notes-keep-reverify",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "reverify-keep.tsv on branch claude/notes-keep-reverify",
+      "url": "https://github.com/shivinate7/claude-settings/blob/claude/notes-keep-reverify/docs/plans/notes-sort/reverify-keep.tsv"
+    }
+  ],
+  "n": 529,
+  "options": [
+    {
+      "gain": "A failed install shows as failed.",
+      "how": "A small fix in install.ps1.",
+      "key": "a",
+      "label": "Make a failed skill install exit non-zero",
+      "lose": "A small change to the installer."
+    },
+    {
+      "gain": "No change now.",
+      "how": "The note gets \"Fix: none\" and an Until date.",
+      "key": "b",
+      "label": "Leave it, with a date to look again",
+      "lose": "A failed install can still look fine."
+    }
+  ],
+  "owner": "lane notes-keep-reverify (session_013NEJKzimwz9GDpxMtjZrqi)",
+  "pick": "a",
+  "ref": "step notes-keep-reverify; reverify-keep.tsv on branch claude/notes-keep-reverify",
+  "reply": "Closed by triage 11:38 CST Nov 12, staleness pass: you already answered this as item 368 (pick a, Nov 7), and step install-skill-fail-exit is done on main (#1537): install.ps1 now keeps failed skills and reports them.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Failed skill install exits 0",
+  "status": "closed",
+  "title": "A failed skill install still reports success: fix it?",
+  "why": "It is a small fix, and a silent failed install is a real gap."
+}

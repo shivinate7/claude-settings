@@ -1,0 +1,42 @@
+{
+  "added": "2026-11-12T05:37:00Z",
+  "context": "Goal: keep the global CLAUDE.md small, with each rule loading where it must act.\nProblem (rule): the audit moves one Tokens rule into a skill, and nothing moves without your sign-off.\nBased on (ruling): your 12:38 and 12:40 CST Nov 11 words on moving sections, \"it would need my sign off\".\nBased on (measured): the plan's word counts, and its load test: a rule that stops an act must load before that act.\nDeparts from: main \u2014 read-the-map-first (12 words) moves to skill plain-english-map (the code map in docs/map).\nMeanwhile: nothing moves before your answer, and the moves also wait on the split of the guard test file into one file per rule.",
+  "home": "global-claude-md-scope-audit",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "Audit plan (claude-md-scope-audit.md)",
+      "url": "https://github.com/shivinate7/claude-settings/blob/claude-md-scope-audit/docs/plans/claude-md-scope-audit.md"
+    },
+    {
+      "label": "Draft PR #2616 (CLAUDE.md scope audit)",
+      "url": "https://github.com/shivinate7/claude-settings/pull/2616"
+    }
+  ],
+  "n": 537,
+  "options": [
+    {
+      "gain": "12 words leave the global file.",
+      "how": "The lane moves the text as the plan proposes.",
+      "key": "a",
+      "label": "Accept the move",
+      "lose": "The rule loads only in repos with a map, and only when that skill fires."
+    },
+    {
+      "gain": "The rule loads in every session, before any act.",
+      "how": "Nothing moves.",
+      "key": "b",
+      "label": "Keep it global",
+      "lose": "No words leave the global file."
+    }
+  ],
+  "owner": "lane global-claude-md-scope-audit (session_013NEJKzRnzW9oYuFZAxseXz)",
+  "pick": "a",
+  "ref": "step global-claude-md-scope-audit; plan docs/plans/claude-md-scope-audit.md",
+  "reply": "Closed by triage 11:42 CST Nov 12, staleness pass: you already ruled this on Oct 28 13:26 CDT (waiting page item 23, pick b, in the map step c146): read-the-map-first lives in the map skill's description plus one anchored sentence in CLAUDE.md. Nothing has changed since, so it stays.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Tokens: move read-the-map-first?",
+  "status": "closed",
+  "title": "Where read-the-map-first lives",
+  "why": "The lane's pick: the rule matters only in repos that have a map."
+}

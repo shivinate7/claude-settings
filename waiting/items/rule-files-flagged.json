@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-12T18:46:00Z",
+  "context": "Goal: after the CLAUDE.md moves you accepted today, a change to a moved rule is still flagged for review by the merge tool.\nProblem (rule): your Oct 16 decision (claude-md-change-is-flagged, which files a change to gets flagged at merge) flags only CLAUDE.md, .claude/CLAUDE.md and the output-styles files, and says skills are not flagged; the moves put rules into skills and .claude/rules, so those rules lose the flag unless the list grows.\nBased on (ruling): your Oct 16 decision, its file-list sentence and its \"skills are not flagged\" line.\nBased on (read): merge/merge.py line 314 flags only the old list today; how often a flag in a skill file would be a false alarm is unmeasured.\nDeparts from: main flags only the old file list \u2014 the flag also covers each file the rule audit's list of rule-bearing files names, and the decision stops saying skills are never flagged.",
+  "home": "decision claude-md-change-is-flagged",
+  "id": "rule-files-flagged",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T18:54:35.937Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 597,
+  "options": [
+    {
+      "gain": "A moved rule still gets a reviewer round when it changes.",
+      "how": "The merge tool flags a change to any file the rule audit lists as holding rules (lint/rule_audit.py, its RULE_FILES list), plus the old list; the decision is rewritten in place to say so. Other skills and agents stay unflagged.",
+      "key": "a",
+      "label": "Flag the rule-bearing files (Recommended)",
+      "lose": "Any edit in those files, even a wording fix, owes a reviewer round."
+    },
+    {
+      "gain": "No new flags.",
+      "how": "Keep the Oct 16 decision as is and undo the lane's change to the merge tool.",
+      "key": "b",
+      "label": "Keep today's list",
+      "lose": "A rule moved into a skill can change with no review flag."
+    }
+  ],
+  "owner": "lane global-claude-md-scope-audit (session_013NEJKzRnzW9oYuFZAxseXz)",
+  "ref": "lane global-claude-md-scope-audit, 12:45 CST Nov 12",
+  "reply": "Filed: the merge tool flags every rule-bearing file the rule audit lists, plus the old list, and the Oct 16 decision is rewritten in place to say so. Lane global-claude-md-scope-audit builds it.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Moved rules keep their review flag",
+  "status": "closed",
+  "title": "Rules moved out of CLAUDE.md keep their review flag at merge",
+  "why": "Your own Oct 16 decision says skills are never flagged; only you can change it. Meanwhile the draft PR holds the merge tool change and leaves the decision untouched."
+}

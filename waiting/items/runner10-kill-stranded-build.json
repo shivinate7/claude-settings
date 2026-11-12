@@ -1,0 +1,26 @@
+{
+  "added": "2026-11-12T16:21:00Z",
+  "context": "Goal: batch 104 builds on the shorter PR list left after the stale-draft close.\nProblem (rule): batch runner 10 cannot stop its own stranded build (pid 27483), because the kill guard reads it as another session's process; only your typed `override` lets it.\nBased on (read): batch runner 10, relayed by the coordinator at 10:16 CST Nov 12; the guard fix is step kill-own-stranded-job.\nWhy yours: only an override typed by you in that session lifts a guard refusal, and no other session can type it there (measured 2026-11-12, batch runner 10's kill of pid 27483 refused by hooks/guard_kill.py, coordinator relay 10:12 CST).\nMeanwhile: the old build runs on; batch 104 is not restarted. Optional.",
+  "home": "step kill-own-stranded-job",
+  "id": "runner10-kill-stranded-build",
+  "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-12T16:27:00Z",
+    "done": false,
+    "note": "Overtaken: the old batch 104 build ended on its own at 10:24 CST and batch runner 10 restarted it at 10:25 CST (retrospective, 10:27 CST). No override needed."
+  },
+  "links": [
+    {
+      "label": "Batch runner 10",
+      "url": "https://claude.ai/code/session_013NEJL2f1YCYsvLdpFqtWP3"
+    }
+  ],
+  "n": 552,
+  "owner": "batch runner 10 (session_013NEJL2f1YCYsvLdpFqtWP3)",
+  "ref": "step kill-own-stranded-job; step stall-watch-ends-quiet-jobs",
+  "repo": "shivinate7/claude-settings",
+  "short": "Optional: let runner 10 restart batch 104",
+  "status": "closed",
+  "title": "Optional: type `override` in batch runner 10 so it can stop its stranded build and restart batch 104",
+  "why": "The restart builds batch 104 on the shorter PR list."
+}

@@ -1,0 +1,56 @@
+{
+  "added": "2026-11-12T16:26:00Z",
+  "checked_with": "session_013NEJL1gw6EdrSyvHkTUEx6",
+  "context": "Goal: q_max main's browser run goes green, so merges stop needing a red-main override.\nProblem (rule): the browser check EPI2B-3 enforces your D-649 rule that nothing folds at 1440 px wide on Past Rates, but your D-832 two tabs now push Clear Filters and Price Date under the Filters pill at 1440 px; only you can say which ruling wins.\nBased on (ruling): q_max D-649, owner 2026-10-06 (docs/decisions/frame-bar-one-row.md: \"At 1440x900 with the sidebar shut, nothing folds\"); q_max D-832, owner 2026-11-07 13:12 CST (by-year and by-city as bar tabs, about 140 px).\nBased on (measured): 2026-10-14, 61 px spare at 1440 px; q_max main run 43176881227 at 32d4373 red twice on EPI2B-3 alone.\nDeparts from: q_max main (D-649: nothing folds at 1440x900, sidebar shut, on Past Rates) \u2014 Clear Filters and Price Date may fold under the Filters pill at 1440x900.\nMeanwhile: lane qmax-browser-main-red waits; batch runner 11's q_max pull request #1161 stays blocked.",
+  "home": "step qmax-browser-main-red",
+  "id": "qmax-d649-past-rates",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T16:27:00Z",
+    "choice": "a",
+    "note": "Chat, 10:27 CST Nov 12, in the coordinator's session: option a as a stopgap, and mark it as a debt too: D-649 as a whole is a stale screen-layout lock he does not want. Lane qmax-browser-main-red builds a and files the debt in q_max's debt store. Record: plans/owner-rulings-2026-11-12.md."
+  },
+  "links": [
+    {
+      "label": "Lane qmax-browser-main-red",
+      "url": "https://claude.ai/code/session_013NEJL2zMs2Fq9xf6bf2LbG"
+    }
+  ],
+  "n": 550,
+  "options": [
+    {
+      "gain": "q_max main goes green fast; the check still guards every other screen at 1440 px.",
+      "how": "The lane re-points the EPI2B-3 check's 1440 px branch for Past Rates only, red then green, and rewrites the D-649 line.",
+      "key": "a",
+      "label": "Let two controls fold on Past Rates at 1440 px (Recommended)",
+      "links": [
+        {
+          "label": "Lane session",
+          "url": "https://claude.ai/code/session_013NEJL2zMs2Fq9xf6bf2LbG"
+        }
+      ],
+      "lose": "Clear Filters and Price Date hide under the Filters pill at 1440 px on Past Rates."
+    },
+    {
+      "gain": "Nothing folds at 1440 px.",
+      "how": "A designer and a design reviewer lane first (a shorter tab label or a different fold order), then a builder.",
+      "key": "b",
+      "label": "Keep D-649 and change the screen",
+      "links": [
+        {
+          "label": "Lane session",
+          "url": "https://claude.ai/code/session_013NEJL2zMs2Fq9xf6bf2LbG"
+        }
+      ],
+      "lose": "A screen design change; q_max main stays red meanwhile."
+    }
+  ],
+  "owner": "lane qmax-browser-main-red (session_013NEJL2zMs2Fq9xf6bf2LbG)",
+  "pick": "a",
+  "ref": "q_max decisions D-649 and D-832; q_max pull request #1161; check EPI2B-3; step qmax-browser-main-red",
+  "repo": "shivinate7/q_max",
+  "short": "q_max Past Rates: fold two controls at 1440 px?",
+  "status": "closed",
+  "title": "q_max Past Rates at 1440 px: let Clear Filters and Price Date fold under the Filters pill (change D-649), or change the screen so nothing folds?",
+  "why": "Recommended by the lane: a. Main goes green now, and the fold check still guards every other screen."
+}

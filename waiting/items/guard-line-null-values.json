@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-12T20:01:00Z",
+  "context": "Goal: a report's guard line names a real PR, commit, step or debt, so a habit is never taken for a guard (your Nov 8, 11:27 CST ruling).\nProblem (rule): the new check refuses every guard line with no reference, even an honest \"Guard: none needed, docs only\" on a report that admits no mistake, so either reports drop such lines or the check grows exceptions.\nBased on (read): decision mistake-means-missing-guard (a mistake means a guard is missing: the report names the PR, commit, step or debt that would have stopped it) and rule verification-cry-wolf-guard-is-spent (a guard that cries wolf is spent).\nDeparts from: main passes any guard line \u2014 the check refuses a guard line with no reference.\nNothing is wrong with a: it is the recommended pick. The lane first leaned to c; c is shown only because it widens the check, and is not recommended.",
+  "home": "step habit-is-not-a-guard (a report's guard line names a real guard)",
+  "id": "guard-line-null-values",
+  "kind": "decision",
+  "n": 628,
+  "options": [
+    {
+      "gain": "No new allow list; the report changes to fit the check.",
+      "how": "As built; a report with no guard to name leaves the line out, or names a step.",
+      "key": "a",
+      "label": "Refuse every guard line with no reference (Recommended)",
+      "links": [
+        {
+          "label": "PR #2881",
+          "url": "https://github.com/shivinate7/claude-settings/pull/2881"
+        }
+      ],
+      "lose": "A report with no guard to name must omit the line."
+    },
+    {
+      "gain": "No false alarms.",
+      "how": "The check reads a guard line only when the report admits a mistake.",
+      "key": "b",
+      "label": "Refuse only after an admitted mistake",
+      "lose": "A habit line on a clean report passes."
+    },
+    {
+      "gain": "An honest \"none\" passes.",
+      "how": "\"Guard: none\", \"n/a\" and \"not needed\" pass; any other guard line with no reference is refused. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "key": "c",
+      "label": "Allow the empty answers",
+      "lose": "A word list the check accepts and someone keeps.",
+      "widens": true
+    }
+  ],
+  "owner": "lane habit-is-not-a-guard (session_013NEJL4HbEaurThYorsKFGD)",
+  "ref": "lane habit-is-not-a-guard, draft PR #2881, Nov 12, 14:00 and 14:03 CST",
+  "reply": "Reworded 14:14 CST: a is the recommended pick; c is not better.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Guard line: always needs a ref",
+  "status": "open",
+  "title": "A guard line with no reference is refused; a report with nothing to name drops the line",
+  "why": "The check's reach on clean reports is wider than your ruling said."
+}

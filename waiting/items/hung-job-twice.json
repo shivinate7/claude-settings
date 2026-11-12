@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-12T17:50:00Z",
+  "context": "Goal: a hung CI job never turns a good change red, and a broken change never merges.\nProblem (risk): read word for word, your time-limits ruling would let a change merge when a job hangs twice and its tests never run.\nBased on (read): today the one required check, all-jobs-passed (it passes only when every CI job passed), goes red when a job is cut at its time limit, so a hang blocks the merge.\nBased on (ruling): your time-limits ruling, Nov 10 14:09 to 14:24 CST (restart plan R3 part 2; step time-limits-end-hangs-only): stop on silence; a stop reads \"stopped, no output for N min\", never red and never a merge refusal; retry once, then report to you.\nDeparts from: on main a job cut at its time limit turns all-jobs-passed red as a failure \u2014 it reads \"hung\" and is retried once; this question sets what a second hang does.\nMeanwhile: the time-limits lane keeps building its first part; nothing else waits on this.",
+  "home": "step time-limits-end-hangs-only",
+  "id": "hung-job-twice",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T17:51:00Z",
+    "choice": "a",
+    "note": "Owner picked a in the coordinator's chat, 11:51 CST Nov 12 (\"this\"): retry once; a second hang turns all-jobs-passed red, labelled \"hung\". Home: decision time-limits-end-hangs-only, written by that lane."
+  },
+  "n": 557,
+  "options": [
+    {
+      "gain": "No change merges with tests that never ran; a single hang never blocks.",
+      "how": "A hung job is retried once. If the retry also hangs, all-jobs-passed goes red with the word \"hung\" (not \"failed\"), and a report names the job.",
+      "key": "a",
+      "label": "A second hang blocks the merge, marked hung",
+      "lose": "Two hangs in a row still block a merge, against the letter of \"never a merge refusal\"."
+    },
+    {
+      "gain": "Your ruling as written: a hang never blocks.",
+      "how": "After its retry, a still-hung job passes all-jobs-passed, and a report names the job.",
+      "key": "b",
+      "label": "A second hang passes and is reported",
+      "lose": "A change can merge with one job's tests never run."
+    }
+  ],
+  "owner": "coordinator (lane time-limits-end-hangs-only, session_013NEJL1Lr7RHEZ96mkhKnnJ)",
+  "pick": "a",
+  "ref": "step time-limits-end-hangs-only; restart plan R3",
+  "reply": "Recorded on step time-limits-end-hangs-only; the lane writes it into its decision.",
+  "repo": "shivinate7/claude-settings",
+  "short": "CI: a job that hangs twice",
+  "status": "closed",
+  "title": "When a CI job hangs, is retried, and hangs again, should the merge still be blocked?",
+  "why": "Recommended: a. It keeps the outcome your ruling protects (a hang never blocks a good change by itself) without letting a change merge untested."
+}

@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-12T18:16:00Z",
+  "context": "Goal: the work goes on now, and you can overrule any coordinator pick.\nProblem (goal): the coordinator took this undoable pick on Nov 12, 11:38 CST without asking you; it stands unless you choose b.\nBased on (notes): coordinator message, 12:12 to 12:16 CST Nov 12.\nDeparts from: main has no such pick on record \u2014 the work it governs follows this pick.",
+  "home": "PR #2825",
+  "id": "pick-roadmap-status-names",
+  "kind": "decision",
+  "n": 583,
+  "options": [
+    {
+      "gain": "Steps with those statuses stop being shown as unknown.",
+      "how": "The roadmap build learns three more step statuses: blocked, queued and folded. Blocked and folded steps are counted but not listed in the two status rows; queued is listed like todo.",
+      "key": "a",
+      "label": "Keep the pick (Recommended)",
+      "links": [
+        {
+          "label": "PR #2825",
+          "url": "https://github.com/shivinate7/claude-settings/pull/2825"
+        }
+      ],
+      "lose": "The other route is not taken unless you choose b."
+    },
+    {
+      "gain": "The other route, if you prefer it.",
+      "how": "Keep the build's current list of statuses.",
+      "key": "b",
+      "label": "Overrule it",
+      "links": [
+        {
+          "label": "PR #2825",
+          "url": "https://github.com/shivinate7/claude-settings/pull/2825"
+        }
+      ],
+      "lose": "The governed work is redone or waits for the change."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "pick": "a",
+  "ref": "coordinator pick, Nov 12, 11:38 CST",
+  "reply": "Kept in part 13:19 CST after the retrospective's audit: the three new statuses stay, but a blocked step whose blocker list is empty, or names a finished step, is now listed instead of only counted, so a stuck step is never hidden.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Roadmap build: three more step statuses it knows",
+  "stands": true,
+  "status": "closed",
+  "title": "Roadmap build: three more step statuses it knows",
+  "why": "A coordinator pick you could not see before."
+}

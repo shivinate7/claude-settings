@@ -1,10 +1,11 @@
 {
   "added": "2026-11-05T14:20:00Z",
+  "closed": "2026-11-12T04:56:00Z",
   "command": {
     "mac": "cd /tmp\ngit clone --filter=blob:none https://github.com/shivinate7/degen.git degen-428\ncd /tmp/degen-428\ngit checkout --detach 1dd63cc8892d02b228aa0ab3d9d745d2f2962cf2\nmake native-build && echo \"native-check: pass 1dd63cc8892d02b228aa0ab3d9d745d2f2962cf2 $(date +%F)\""
   },
   "context": "Goal: degen #428 (degen main's red fix) merges.\nProblem (rule): your note said to skip the check and just merge. The merge tool refused at 09:07 CST: native-record is red because #428's body has no native-check pass line, and \"no override lifts this refusal\" (rule git-never-merge-failing-ci). Batch runner 9 will not write a pass line for a run that did not happen.\nBased on (measured): every other job on head 1dd63cc8 is green; native-record and all-jobs-passed fail only on the missing line (runner 9, 09:07 CST).\nDeparts from: main's rule never to merge failing CI \u2014 a keeps it; b merges one PR with native-record red.",
-  "home": "degen rule tests-once-per-batch (native-check record line)",
+  "home": "replaced: degen #428 closed unmerged 2026-11-06 15:22 CST; work from its lane #427 is on degen main (commit b976382dc)",
   "id": "degen-428-native-run",
   "kind": "decision",
   "lane": null,
@@ -47,12 +48,12 @@
       "lose": "Goes against your rule never to merge failing CI; native code ships with no full Swift run on this head."
     }
   ],
-  "owner": "batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv)",
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6); degen's own batch runner is not named yet",
   "rank": 1,
   "ref": "degen #428 (degen main's red fix), head 1dd63cc8; your pick 241 a (UI tests stay split out)",
-  "reply": "Waits on you: merge degen #428 on your Mac (no session holds it; triage audit 14:45 CST).",
+  "reply": "Closed as replaced (triage 22:56 CST Nov 11). #428 was closed without merging on Nov 6, and its head is not on degen main. Work from lane #427 is on degen main (commit b976382dc), as batch runner 11 checked. Nothing is left to merge, so there is nothing for you to do.",
   "short": "degen #428: Mac run or your merge",
-  "status": "open",
+  "status": "closed",
   "title": "Degen #428 cannot merge without the Mac run. Run it, or merge it yourself?",
   "why": "Recommended: a. It keeps your never-merge-red rule and ships a real native run."
 }

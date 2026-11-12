@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-12T20:18:00Z",
+  "context": "Goal: a message wakes an idle session on any machine.\nProblem (rule): the only portable route is a waiting process, and rule outcomes-mechanize-rules forbids long-lived processes and timers.\nBased on (read): mail is read only at turn start (hooks/mail.py); the cloud routes (PR alerts, a webhook) do not exist in local Claude Code; your 14:14 CST answer: \"keep mail only ... the doorbell was supposed to be via a whole other route that's translatable anywhere\".\nDeparts from: main, where an idle session never wakes \u2014 adds one waiting process per idle session, or a cloud-only bell.",
+  "home": "step mailbox-doorbell (a message wakes an idle session anywhere)",
+  "id": "doorbell-route",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T20:17:00Z",
+    "choice": "a",
+    "note": "Owner 14:17 CST in retrospective chat: \"I'm okay with A for Q1\" (R57, plan 79eb441). Note: ruling 3.15 (Nov 11, 13:22 CST) already allows a timer that costs less than it saves, so no exception is needed."
+  },
+  "n": 641,
+  "options": [
+    {
+      "gain": "Portable: git and Claude Code only.",
+      "how": "A background mail-wait exits when mail lands, which wakes the session the same way everywhere; the rule gains a stated exception.",
+      "key": "a",
+      "label": "A mail-wait process (Recommended)",
+      "lose": "One sleeping process per idle session, plus a cheap git read every so often (interval unmeasured)."
+    },
+    {
+      "gain": "No exception to the rule.",
+      "how": "Only cloud sessions get a bell.",
+      "key": "b",
+      "label": "Cloud-only doorbell for now",
+      "lose": "Not portable; local sessions never wake."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "ref": "retrospective 14:15 CST Nov 12",
+  "reply": "Closed 14:22 CST: step mail-doorbell-wait, lane running.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Doorbell: mail-wait or cloud only",
+  "status": "closed",
+  "title": "A mail-wait process wakes an idle session on any machine",
+  "why": "It needs an exception to your rule against waiting processes."
+}

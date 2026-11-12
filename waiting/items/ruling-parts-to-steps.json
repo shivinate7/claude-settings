@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-12T17:32:00Z",
+  "context": "Goal: every part of every ruling lands as a step, and nothing is silently partial.\nProblem (rule): a ruling's parts reach the roadmap only through triage's reading of the plan, and no check compares them; the one-store part of your R28 ruling (page data in one store) dropped.\nBased on (measured): 47 plan rulings each have at least one step, yet R28's one-store part had none until step page-data-one-store today (record branch commit 87d1e99b0).\nBased on (read): the feedback log's check proves only that a step file exists for an item.\nDeparts from: a plan ruling on main cites no step ids \u2014 each numbered part names its step id, a check compares them, and the re-rank agent reads the plan against the roadmap.\nMeanwhile: nothing waits on this; pick either or both.",
+  "home": "decision session-tiers (the triage role)",
+  "id": "ruling-parts-to-steps",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T17:31:00Z",
+    "choice": [
+      "a",
+      "b"
+    ],
+    "note": "Owner picked both in chat, 11:31 CST Nov 12, relayed by the retrospective 11:32 CST: \"probably both is fine -- and note that the id's probably need good tagging right slugs or whatever or that won't matter here?\" Filed as step ruling-parts-cite-steps (plan cites step:<slug>; an opaque id such as c55 carries a short gloss)."
+  },
+  "multi": true,
+  "n": 555,
+  "options": [
+    {
+      "gain": "A dropped part shows at once, by a check, not by memory.",
+      "how": "Each numbered part of a plan ruling names its step id. A check on the plan, at each push, flags a part with no step or a step that no longer exists; triage files the missing.",
+      "key": "a",
+      "label": "Step id per part, checked",
+      "lose": "One id per part to write; a small check to build."
+    },
+    {
+      "gain": "No new check; it rides a step already queued.",
+      "how": "At each batch merge the agent from step queue-score-plus-agent (your pick d at 11:24 CST) reads the plan's rulings against the steps and files what is missing.",
+      "key": "b",
+      "label": "The re-rank agent reads plan against roadmap",
+      "lose": "A model's reading, so a part can still slip."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "pick": [
+    "a",
+    "b"
+  ],
+  "ref": "step page-data-one-store; step queue-score-plus-agent; ruling R28",
+  "reply": "Tracked as roadmap step ruling-parts-cite-steps, home decision session-tiers.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Ruling parts: no silent drops",
+  "status": "closed",
+  "title": "How should every part of a ruling be sure to land as a roadmap step?",
+  "why": "Recommended: both. a catches a drop by check; b catches what a check cannot read, such as a part worded loosely."
+}

@@ -1,0 +1,46 @@
+{
+  "added": "2026-11-12T05:35:00Z",
+  "context": "Goal: give this kept debt note a true Fix line, so it stops showing as unchecked.\nProblem (risk): a merge made with the GitHub button skips the record rebuild in merge/merge.py, so the page can show stale records, and the fix changes who may write to main.\nBased on (measured): the lane re-checked every kept note (reverify-keep.tsv, sorted Nov 7) and marked this one as yours to decide.\nDeparts from: main \u2014 adds a Fix line to note merge-by-button-stale-page; today it has none.\nMeanwhile: the lane keeps rebuilding the notes pull requests and does not wait.",
+  "home": "notes-keep-reverify",
+  "kind": "decision",
+  "links": [
+    {
+      "label": "reverify-keep.tsv on branch claude/notes-keep-reverify",
+      "url": "https://github.com/shivinate7/claude-settings/blob/claude/notes-keep-reverify/docs/plans/notes-sort/reverify-keep.tsv"
+    }
+  ],
+  "n": 528,
+  "options": [
+    {
+      "gain": "The page is always right.",
+      "how": "After a button merge, a bot pushes the rebuilt records to main.",
+      "key": "a",
+      "label": "A bot rebuilds after a button merge",
+      "lose": "A bot writes to main."
+    },
+    {
+      "gain": "No extra act.",
+      "how": "The merge check skips the record rebuild when the button merged.",
+      "key": "b",
+      "label": "Waive the record check for button merges",
+      "lose": "A stale page can slip through. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    },
+    {
+      "gain": "One merge path.",
+      "how": "Merges go only through the merge tool.",
+      "key": "c",
+      "label": "Ban the button",
+      "lose": "The GitHub button stops working for you."
+    }
+  ],
+  "owner": "lane notes-keep-reverify (session_013NEJKzimwz9GDpxMtjZrqi)",
+  "pick": "a",
+  "ref": "step notes-keep-reverify; reverify-keep.tsv on branch claude/notes-keep-reverify",
+  "reply": "Closed by triage 11:38 CST Nov 12, staleness pass: you already answered this as item 369 (button-merge-stale-page, pick a, Nov 7): a hook refuses auto-merge for Claude, and the merge button stays yours. Step auto-merge-refused builds it.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Button merge leaves page stale",
+  "status": "closed",
+  "title": "A merge pressed in GitHub leaves the page stale: how should it be fixed?",
+  "why": "The page stays right with no new act from you."
+}

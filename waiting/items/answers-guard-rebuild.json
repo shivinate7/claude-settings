@@ -1,0 +1,39 @@
+{
+  "added": "2026-11-12T20:11:00Z",
+  "context": "Goal: a session never writes your saved page answer by mistake, and recovery still works.\nProblem (rule): guards stop Claude's mistakes, not malice, and need an incident; this one has none, and it refuses the rebuild that restores your own answers after a loss.\nBased on (read): decision waiting-page-one-store, pick 2 (\"Claude writing an answer by mistake is a likely error\", unmeasured); the lane read no session that wrote an answer on the live page; rule verification-recovery-independent-of-state (a recovery must not depend on the state it recovers).\nDeparts from: main has no answer guard \u2014 adds one, narrow or whole.",
+  "home": "step answers-session-write-guard (a session cannot forge your page answers)",
+  "id": "answers-guard-rebuild",
+  "kind": "decision",
+  "n": 636,
+  "options": [
+    {
+      "gain": "The likely slip is stopped; the rebuild works without you.",
+      "how": "The guard refuses a session's set, update or str_replace of an answer on the page; the shell, git and other routes and the rebuild are not refused until an incident names them.",
+      "key": "a",
+      "label": "Keep it for page writes only (Recommended)",
+      "lose": "The other routes stay open."
+    },
+    {
+      "gain": "Widest cover.",
+      "how": "Every route is refused, the rebuild included; the rebuild needs your override.",
+      "key": "b",
+      "label": "Keep it as built",
+      "lose": "Recovery waits on your override on the day it is needed."
+    },
+    {
+      "gain": "Nothing to keep.",
+      "how": "The waiting-page skill's sentence is the only rule.",
+      "key": "c",
+      "label": "Drop the guard",
+      "lose": "Nothing stops a slip."
+    }
+  ],
+  "owner": "lane answers-session-write-guard (session_013NEJL2bk5JjA6fXmQ5SooN)",
+  "ref": "lane answers-session-write-guard, head 53e065d31, via coordinator 14:11 CST Nov 12",
+  "reply": "Reworded 14:18 CST on your question: no incident is on record; option a keeps only the likely slip.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Answer guard: how much to keep",
+  "status": "open",
+  "title": "How much of the answer guard to keep, with no incident on record",
+  "why": "No session has forged an answer; the guard rests on a premise."
+}

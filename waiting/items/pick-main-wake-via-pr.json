@@ -1,0 +1,51 @@
+{
+  "added": "2026-11-12T19:12:00Z",
+  "context": "Goal: the work goes on now, and you can overrule any coordinator pick.\nProblem (goal): the coordinator took this undoable pick on Nov 12, 13:12 CST without asking you; it stands unless you choose b.\nBased on (ruling): your ruling R53 (13:07 CST: CI and merge alarms wake the batch runner, no GitHub issue) and rule git-main-only-by-pr (main moves only by pull request), cited by the coordinator.\nDeparts from: main has no such pick on record \u2014 the work it governs follows this pick.",
+  "home": "PR #2745; step main-push-wakes-runner",
+  "id": "pick-main-wake-via-pr",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T19:26:31.863Z",
+    "choice": "a",
+    "note": "accepted pick"
+  },
+  "n": 611,
+  "options": [
+    {
+      "gain": "An alarm on main reaches the batch runner through the pull request that made that commit, with no new channel to build.",
+      "how": "The cap alarm on main posts a comment on the merged pull request behind the run's commit; the comment carries the run id, so a run already alarmed is skipped. A commit with no pull request ends the alarm job red with the reason in its summary. The batch runner stays subscribed to a merged pull request until main's run on it ends. Undo: revert the commit.",
+      "key": "a",
+      "label": "Keep the pick (Recommended)",
+      "links": [
+        {
+          "label": "PR #2745",
+          "url": "https://github.com/shivinate7/claude-settings/pull/2745"
+        }
+      ],
+      "lose": "A commit pushed to main without a pull request alarms only as a red job, not a wake."
+    },
+    {
+      "gain": "Every main run can wake the runner, pull request or not.",
+      "how": "Build a separate wake channel for main runs that does not depend on a pull request.",
+      "key": "b",
+      "label": "Overrule it",
+      "links": [
+        {
+          "label": "PR #2745",
+          "url": "https://github.com/shivinate7/claude-settings/pull/2745"
+        }
+      ],
+      "lose": "A new channel to build and keep, and the cap alarm waits for it."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "pick": "a",
+  "ref": "coordinator pick, Nov 12, 13:12 CST",
+  "reply": "Filed: the pick stands. A CI alarm on main wakes the batch runner through a comment on the merged pull request behind it.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Main alarm wakes via the merged PR",
+  "stands": true,
+  "status": "closed",
+  "title": "A CI alarm on main wakes the batch runner through the merged pull request behind it",
+  "why": "A coordinator pick you could not see before."
+}

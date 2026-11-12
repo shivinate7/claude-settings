@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-12T16:17:00Z",
+  "context": "Goal: a note stays while it is still being met, and expires when nobody meets it.\nProblem (goal): PR #2785 (a note's sightings carry a date, and an old note expires) bumps Seen only on a repeat sighting. A note edited today keeps its old Seen date, so it can expire soon after someone worked on it.\nBased on (ruling): owner item 358, the sightings ruling, which the PR adds to CLAUDE.md.\nDeparts from: main \u2014 adds a Seen date and an expiry window to notes; this question sets whether an edit refreshes Seen.\nMeanwhile: corrected 11:40 CST Nov 12: #2785 (the pull request that adds Seen dates and expiry to notes) was closed at 10:26 CST, because it clashed with other record-check pull requests still in flight. Its branch is kept and reopens once those land. Your answer applies at that reopen; option b means the branch as built.",
+  "home": "step notes-sightings-expiry",
+  "id": "note-edit-refreshes-seen",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T17:59:44.968Z",
+    "choice": "b",
+    "note": "who argued for option A? it does not sound better so trying to understand if i am naive or not"
+  },
+  "n": 547,
+  "options": [
+    {
+      "gain": "A note someone just edited never expires right after.",
+      "how": "The record-slug check and the sweep treat any change to a note's line as a sighting and set Seen to that day.",
+      "key": "a",
+      "label": "An edit refreshes Seen",
+      "lose": "A cleanup edit (a reword, a moved path) keeps a dead note alive for another window."
+    },
+    {
+      "gain": "A note lives only while someone meets its problem again, so dead notes expire.",
+      "how": "Keep the rule as the notes pull request built it: only a new sighting of the problem sets Seen.",
+      "key": "b",
+      "label": "Only a repeat sighting refreshes Seen (Recommended)",
+      "lose": "A note edited today can expire soon after, unless someone records a new sighting."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "b",
+  "ref": "PR #2785; step notes-sightings-expiry; owner item 358",
+  "reply": "Triage marked a as recommended when it wrote this item; no one else argued for it. Your doubt is right: most edits are cleanups (a reword, a moved path), not a new meeting with the problem, so a would keep dead notes alive. Triage took b at 12:05 CST, since your note points there: only a repeat sighting refreshes Seen, as the notes pull request built it. To change it, answer again here.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Notes: does an edit refresh Seen",
+  "status": "closed",
+  "title": "When someone edits a note that carries a Seen date, does the edit count as a new sighting?",
+  "why": "Recommended: b. Most edits are cleanups, not a new meeting with the problem, so refreshing Seen on an edit would keep dead notes alive."
+}

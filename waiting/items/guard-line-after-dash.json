@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-12T20:01:00Z",
+  "context": "Goal: a report's guard line names a real PR, commit, step or debt, so a habit is never taken for a guard (your Nov 8, 11:27 CST ruling).\nProblem (rule): today's check is hardcoded: it reads only a line that starts with \"Guard:\", so the 11:26 CST incident's form, \"The builders broke X \u2014 Guard: future briefs run the check\", passes.\nBased on (read): lint/report_guard.py reads a sentence-start label by pattern; the lane's 14:16 CST options; no cost below is measured.\nDeparts from: main reads only a guard label that starts a line \u2014 each option reads more.",
+  "home": "step habit-is-not-a-guard (a report's guard line names a real guard)",
+  "id": "guard-line-after-dash",
+  "kind": "decision",
+  "n": 629,
+  "options": [
+    {
+      "gain": "Closes the incident's form; same cost as today, no model call.",
+      "how": "The check also reads \"Missing guard:\", \"(Guard: ...)\" and a label after a dash, comma or \"and\". A paraphrase with no word \"guard\" still passes; a judge comes later only if one slips through.",
+      "key": "a",
+      "label": "More label forms (Recommended)",
+      "links": [
+        {
+          "label": "PR #2881",
+          "url": "https://github.com/shivinate7/claude-settings/pull/2881"
+        }
+      ],
+      "lose": "Still a word list; a paraphrase passes."
+    },
+    {
+      "gain": "No label forms to keep.",
+      "how": "Any sentence holding \"guard\", in any section, must name a PR, commit, step or debt.",
+      "key": "b",
+      "label": "Any sentence with the word guard",
+      "lose": "False alarms on ordinary lines such as \"the push guard refused it\"; a paraphrase still passes."
+    },
+    {
+      "gain": "Catches a paraphrase; no word list.",
+      "how": "A model reads each landed report and flags a line that claims a prevention with no reference.",
+      "key": "c",
+      "label": "A judge reads meaning",
+      "lose": "A model call on every report; results can differ run to run, so it cannot be proven red on a fixed case."
+    }
+  ],
+  "owner": "lane habit-is-not-a-guard (session_013NEJL4HbEaurThYorsKFGD)",
+  "ref": "lane habit-is-not-a-guard, draft PR #2881, Nov 12, 14:00 CST",
+  "reply": "Reworded 14:18 CST with the lane's options.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Guard line: labels, word, or judge",
+  "status": "open",
+  "title": "How the check finds a guard line in a report",
+  "why": "A test pins the form your incident used as passing."
+}

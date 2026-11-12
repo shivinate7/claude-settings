@@ -1,0 +1,54 @@
+{
+  "added": "2026-11-12T18:10:00Z",
+  "context": "Goal: the work goes on now, and you can overrule any coordinator pick.\nProblem (goal): the coordinator took this undoable pick on Nov 12, 11:56 CST without asking you; it stands unless you choose b.\nBased on (notes): coordinator 12:10 CST Nov 12, from its list of today's picks.\nDeparts from: main has no such pick on record \u2014 the work it governs follows this pick.",
+  "home": "q_max #1163 and #1161",
+  "id": "pick-qmax-1163-alone",
+  "kind": "decision",
+  "n": 570,
+  "options": [
+    {
+      "gain": "One merge instead of two over the same red base.",
+      "how": "q_max #1163 merges alone carrying #1161; #1161 closes as replaced.",
+      "key": "a",
+      "label": "Keep the pick (Recommended)",
+      "links": [
+        {
+          "label": "q_max PR #1161",
+          "url": "https://github.com/shivinate7/q_max/pull/1161"
+        },
+        {
+          "label": "q_max PR #1163",
+          "url": "https://github.com/shivinate7/q_max/pull/1163"
+        }
+      ],
+      "lose": "The other route is not taken unless you choose b."
+    },
+    {
+      "gain": "The other route, if you prefer it.",
+      "how": "Merge #1161 on its own first.",
+      "key": "b",
+      "label": "Overrule it",
+      "links": [
+        {
+          "label": "q_max PR #1161",
+          "url": "https://github.com/shivinate7/q_max/pull/1161"
+        },
+        {
+          "label": "q_max PR #1163",
+          "url": "https://github.com/shivinate7/q_max/pull/1163"
+        }
+      ],
+      "lose": "The governed work is redone or waits for the change."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "pick": "a",
+  "ref": "coordinator pick, Nov 12, 11:56 CST",
+  "reply": "Reversed 13:19 CST after the retrospective's audit: it went against your item 539 a. q_max #1161 merges alone under the red-main flag, and #1163 needs its own override; #1161 is not closed as replaced.",
+  "repo": "shivinate7/claude-settings",
+  "short": "q_max #1163 merges alone, carrying #1161",
+  "stands": true,
+  "status": "closed",
+  "title": "q_max #1163 merges alone, carrying #1161",
+  "why": "A coordinator pick you could not see before."
+}

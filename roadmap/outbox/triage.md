@@ -917,3 +917,5 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - record-before-fix-push 14:26 CST Nov 12: Lane started 14:25 CST Nov 12 (coordinator): reuses #1962, covers the shapes review-record-fix-check-reads misses.
 - guard-false-alarm-cull 14:26 CST Nov 12: Fix lane 14:25 CST Nov 12: branch cull-narration-hex-id-fix, head 4bb865643, 3 red tests on 2cb3ad856; builder running.
 - Batch 106 (coordinator 14:25 CST Nov 12): runner 10 has a coordinator waiver for the --ready lint only; the unknown is the ci-done-comment action #2860 adds, which main's bin/ci-job cannot run.
+- Waiting copy exported 14:28 CST Nov 12 (170 files changed; last export was d95b542eb on Nov 11), asked by lane cull-narration-hex-id-fix.
+- Batch 104 #2814 (coordinator 14:26 CST Nov 12): runner 10 merges it at c63629c18 (green), then rebuilds batch 106 on the new main.

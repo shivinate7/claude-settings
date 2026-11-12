@@ -1,0 +1,44 @@
+{
+  "added": "2026-11-12T20:05:00Z",
+  "context": "Goal: remove false alarms from a guard without opening a hole.\nProblem (rule): the round-3 reviewer found the change less safe than main, so it is held, and only you restart a held change.\nBased on (measured): round 3 found 3 history-citation shapes newly let through and 0 closed; about 73 of 91 synthetic false alarms removed; live false-alarm cost measured at 0.\nDeparts from: main holds the change on branch cull-narration-hex-id (head 2cb3ad856) with no work \u2014 b restarts it, c merges it.",
+  "home": "step guard-false-alarm-cull (cull guards that cry wolf)",
+  "id": "held-cull-family-11",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T20:13:00Z",
+    "choice": "b",
+    "note": ""
+  },
+  "n": 630,
+  "options": [
+    {
+      "gain": "No hole opens; live false alarms already cost nothing.",
+      "how": "The branch is archived; one note line records the three shapes.",
+      "key": "a",
+      "label": "Drop it, keep a note (Recommended)",
+      "lose": "The 73 synthetic false alarms stay."
+    },
+    {
+      "gain": "False alarms go and the three holes close.",
+      "how": "One fix lane pins the three missing shapes; review starts again at round 1.",
+      "key": "b",
+      "label": "Restart in one fix lane",
+      "lose": "One more review cycle for a cost measured at 0."
+    },
+    {
+      "gain": "False alarms go now.",
+      "how": "The change merges; each open shape becomes a debt record.",
+      "key": "c",
+      "label": "Merge as is, three debts",
+      "lose": "Three citation shapes pass that main refuses."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "ref": "lane guard-false-alarm-cull, via coordinator Nov 12, 14:03 CST",
+  "reply": "Closed 14:14 CST: one fix lane pins the three shapes, review from round 1; coordinator told.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Held guard fix 11: drop or restart",
+  "status": "closed",
+  "title": "Drop the held change that removes false alarms on history citations, or restart it",
+  "why": "Only you restart a change held after its third review round."
+}

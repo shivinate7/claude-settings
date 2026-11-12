@@ -1,0 +1,27 @@
+{
+  "added": "2026-11-12T17:55:00Z",
+  "context": "Goal: the page keeps one store of its data, in git, with no copy step and no lag (your ruling R28).\nWhy yours: adding a connector needs your claude.ai login, and no session tool adds one (measured 2026-11-12, ListConnectors at 12:03 and 12:08 CST lists no GitHub connector for this account).\nWhat you already have: the GitHub integration is connected (you said so at 12:07 CST, and cloud sessions use it to reach repos). That integration is not a connector, and a page can only call connectors.\nSteps: open https://claude.ai/settings/connectors, look in the directory for a GitHub connector, add it, sign in, and give it the shivinate7/claude-settings repository. Then press Done here. If the directory has no GitHub connector, say so here instead.\nWhat happens next: a probe lane measures whether a page can write git through it (from your phone too, with or without a prompt per write, and how often writes fail). If there is no such connector, the probe tests your own small site that holds a token, or a page that asks Claude to write git for it.",
+  "home": "step page-git-connector-probe",
+  "id": "git-connector-add",
+  "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-12T18:10:00Z",
+    "done": true,
+    "note": "Custom connectors are not allowed -- so we can do route B"
+  },
+  "links": [
+    {
+      "label": "claude.ai connectors",
+      "url": "https://claude.ai/settings/connectors"
+    }
+  ],
+  "n": 558,
+  "owner": "coordinator (lane page-data-one-store)",
+  "ref": "decision waiting-page-one-store; step page-git-connector-probe; step page-data-one-store",
+  "reply": "Closed with your 12:10 CST ruling, relayed by the coordinator: no connector; the page moves to route B, your own small site that holds a token. The page-data lane rewrites decision waiting-page-one-store to route B and sends new steps.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Add a GitHub connector (not the integration)",
+  "status": "closed",
+  "title": "Add a GitHub connector from the claude.ai connector directory, so the page can store its data in git",
+  "why": "The probe step waits on this connector; it is the first of nine steps toward one store for page data."
+}

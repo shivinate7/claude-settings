@@ -1,0 +1,50 @@
+{
+  "added": "2026-11-12T19:40:00Z",
+  "context": "Goal: the merge tool's batch flow runs without permission prompts.\nProblem (rule): your Nov pick allows only --batch-build, --batch-drop and --ready, but the red-run steps also use --blame --run, --on and --base, which the allow entry does not cover, so the auto-mode check may refuse them.\nBased on (ruling): your Nov pick to allow only the merge tool's --batch-build, --batch-drop and --ready flags without a prompt.\nDeparts from: main has no entry for these flags \u2014 this change allows the three you picked.",
+  "home": "PR #2882 (batch freeze enforced)",
+  "id": "batch-redrun-flags",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T19:40:00Z",
+    "choice": "b",
+    "note": "Owner in coordinator chat, 13:40 CST Nov 12, relayed 13:40 CST: \"b: also allow --blame --run, --on and --base. This widens past your pick.\""
+  },
+  "n": 619,
+  "options": [
+    {
+      "gain": "Stays inside your word.",
+      "how": "The allow entry names --batch-build, --batch-drop and --ready only.",
+      "key": "a",
+      "label": "Keep three flags (Recommended)",
+      "links": [
+        {
+          "label": "PR #2882",
+          "url": "https://github.com/shivinate7/claude-settings/pull/2882"
+        }
+      ],
+      "lose": "The red-run steps may still prompt."
+    },
+    {
+      "gain": "No prompts in the red-run steps.",
+      "how": "The entry also allows --blame --run, --on and --base. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "key": "b",
+      "label": "Also allow the red-run flags",
+      "links": [
+        {
+          "label": "PR #2882",
+          "url": "https://github.com/shivinate7/claude-settings/pull/2882"
+        }
+      ],
+      "lose": "Widens past your Nov pick of three flags.",
+      "widens": true
+    }
+  ],
+  "owner": "lane batch-freeze-lane-set-enforce (session_013NEJL2YMSgMt9QbTnAKiN8)",
+  "ref": "lane batch-freeze-lane-set-enforce, PR #2882, via coordinator Nov 12, 13:38 and 13:39 CST",
+  "reply": "Filed 13:44 CST in plans/owner-rulings-2026-11-12.md: supersedes your earlier picks on these merge-tool allow entries, for these three flags only. The settings edit needs your typed yes in the lane (item 620).",
+  "repo": "shivinate7/claude-settings",
+  "short": "Red-run merge flags: allow or not",
+  "status": "closed",
+  "title": "Allow the red-run merge flags too, or keep the three you picked",
+  "why": "Your Nov pick named three flags only."
+}

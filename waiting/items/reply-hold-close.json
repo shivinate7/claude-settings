@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-12T15:36:00Z",
+  "context": "Goal: you can reply to Claude's reply on a page question, and your reply is never lost.\nProblem (rule): the reply-back design needs your yes on four parts (which cards get a Reply button, where your reply line and its Undo sit, keeping an item open up to 7 days after Claude replies so you can answer it, and your reply showing on the closed item's line), and the effect of the 7 days is not measured.\nBased on (ruling): Nov 6 12:58 CST, you asked for a way to reply back on a page question, since you had to edit your old answer to answer back.\nDeparts from: main closes an item as soon as Claude replies \u2014 the change keeps it open up to 7 days after Claude's reply, in case you answer it.\nMeanwhile: the pull request that adds reply-back to the page (PR #2778) merges as reviewed; the 7 days only change on your answer.",
+  "home": "PR #2778; step item-reply-back",
+  "id": "reply-hold-close",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T17:59:44.968Z",
+    "choice": "none",
+    "note": "you're not correctly defining my reply is waiting correctly here it doesn't sound too right no?"
+  },
+  "n": 542,
+  "options": [
+    {
+      "gain": "You can answer Claude's reply for a week before the item closes.",
+      "how": "PR #2778 stays as built: Reply buttons and the reply line as drawn; after Claude replies, the item stays open up to 7 days in case you answer, then closes; your reply shows on the closed item's line.",
+      "key": "a",
+      "label": "Yes to all four parts (Recommended)",
+      "lose": "An item you have nothing more to say on stays on the page up to 7 days after Claude's reply."
+    },
+    {
+      "gain": "Items close as soon as Claude replies.",
+      "how": "A builder removes the 7-day wait from PR #2778, and the change is reviewed again. Reply buttons stay, and your reply still shows on the closed item's line.",
+      "key": "b",
+      "label": "Yes to the Reply buttons, the reply line and the closed line; drop the 7 days",
+      "lose": "To answer Claude's reply you reopen a closed item; one more builder change and review."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "ref": "PR #2778 (adds reply-back to page questions); design notes docs/design/item-reply-back-notes.md; lane fan-prose-unmapped-2",
+  "reply": "You are right; the wording was wrong (12:00 CST). What PR #2778 builds: after you answer and Claude replies on the card, the item stays open up to 7 days so you can answer Claude's reply, then closes. Nothing of yours is pending; the item waits for a reply you may or may not send. Pick a or b on that reading, or say what you meant instead.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Hold a close while your reply waits",
+  "status": "open",
+  "title": "Should a page question you answered stay open up to 7 days so you can reply to Claude's reply?",
+  "why": "Recommended: a. It is what the reviewed change already does, and it keeps your replies visible."
+}

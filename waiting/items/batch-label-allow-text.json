@@ -1,0 +1,50 @@
+{
+  "added": "2026-11-12T19:40:00Z",
+  "context": "Goal: the batch label gets set without hand work.\nProblem (rule): your auto-mode entry \"Merge Tool Read Checks\" says a lane check PASS writes one comment, but this change makes a PASS also add a label, so either the tool changes or your text widens.\nBased on (read): the merge tool's lane check and its label call (merge/merge.py, lane_lint and Host.add_label); the guard still allows the call.\nDeparts from: main \u2014 the allow text names one comment; this change writes a comment and a label.",
+  "home": "PR #2871 (merge tool sets the batch label)",
+  "id": "batch-label-allow-text",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T19:49:01Z",
+    "choice": "b",
+    "note": ""
+  },
+  "n": 618,
+  "options": [
+    {
+      "gain": "Your allow text stays as you wrote it.",
+      "how": "The lane takes the label write out of the lane check and sets it from a call your settings already allow, or reports back that none exists.",
+      "key": "a",
+      "label": "Keep your text; move the label (Recommended)",
+      "links": [
+        {
+          "label": "PR #2871",
+          "url": "https://github.com/shivinate7/claude-settings/pull/2871"
+        }
+      ],
+      "lose": "More work in the lane; it may come back with no allowed route."
+    },
+    {
+      "gain": "The label lands with the check, with no extra call.",
+      "how": "The lane edits the entry to say a PASS with --integration also adds one label. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "key": "b",
+      "label": "Widen the text to name the label",
+      "links": [
+        {
+          "label": "PR #2871",
+          "url": "https://github.com/shivinate7/claude-settings/pull/2871"
+        }
+      ],
+      "lose": "Your allow text covers one more write.",
+      "widens": true
+    }
+  ],
+  "owner": "lane batch-label-setter (session_013NEJKz9DMAhnNimZfuBt2L)",
+  "ref": "lane batch-label-setter, PR #2871, Nov 12, 13:37 CST",
+  "reply": "Reopened 13:54 CST: your 13:49 CST b is filed, but I removed the saved answer when I closed the item, and the lane's settings edit reads only that saved answer. Please save b again; nothing else changes.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Batch label: keep or widen allow text",
+  "status": "open",
+  "title": "Set the batch label without widening your auto-mode allow text",
+  "why": "The allow text in the settings file is your own text."
+}

@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-12T05:37:00Z",
+  "context": "Goal: keep the global CLAUDE.md small, with each rule loading where it must act.\nProblem (rule): the audit moves three Verification rules out of the global CLAUDE.md, and nothing moves without your sign-off.\nBased on (ruling): your 12:38 and 12:40 CST Nov 11 words on moving sections, \"it would need my sign off\".\nBased on (measured): the plan's word counts, and its load test: a rule that stops an act must load before that act.\nDeparts from: main \u2014 the screen verdict (25 words) moves to skill design-review (screen reviews), trust-a-guard (13) to .claude/rules/hooks.md, and the checked reader for numbers (14) to skill fresh-prose (rules for docs and records).\nMeanwhile: nothing moves before your answer; the guard test file split this waited on is done (merged 07:16 CST Nov 12).\nRe-checked 11:39 CST Nov 12: the quoted text is unchanged. Corrections: the target rule file for hooks loads only for files under hooks/, while the planned rule file for guard building loads for hooks/ and lint/, so the two plans disagree on where guard rules load; and \"no check confirms these\" is overstated: the rule-to-check table (lint/rule_mechanisms.json) has rows for all three. The real cost is that the rule audit reads rule marks only from CLAUDE.md and the reply style.",
+  "home": "global-claude-md-scope-audit",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T17:59:44.968Z",
+    "choice": "a",
+    "note": ""
+  },
+  "links": [
+    {
+      "label": "Audit plan (claude-md-scope-audit.md)",
+      "url": "https://github.com/shivinate7/claude-settings/blob/claude-md-scope-audit/docs/plans/claude-md-scope-audit.md"
+    },
+    {
+      "label": "Draft PR #2616 (CLAUDE.md scope audit)",
+      "url": "https://github.com/shivinate7/claude-settings/pull/2616"
+    }
+  ],
+  "n": 536,
+  "options": [
+    {
+      "gain": "About 52 words leave the global file.",
+      "how": "The lane moves the text as the plan proposes.",
+      "key": "a",
+      "label": "Accept the moves",
+      "lose": "No automatic check confirms these three rules still exist until a later step adds one."
+    },
+    {
+      "gain": "The rule loads in every session, before any act.",
+      "how": "Nothing moves.",
+      "key": "b",
+      "label": "Keep it global",
+      "lose": "No words leave the global file."
+    }
+  ],
+  "owner": "lane global-claude-md-scope-audit (session_013NEJKzRnzW9oYuFZAxseXz)",
+  "pick": "a",
+  "ref": "step global-claude-md-scope-audit; plan docs/plans/claude-md-scope-audit.md",
+  "reply": "Recorded 12:00 CST: the moves are accepted. Sent to lane global-claude-md-scope-audit.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Verification: move three rules?",
+  "status": "closed",
+  "title": "Where three Verification rules of CLAUDE.md live",
+  "why": "The lane's pick: each rule acts only where its new home already loads."
+}

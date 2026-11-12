@@ -4,6 +4,11 @@
   "home": "step-matching pass for the 281 open PRs that cite no step",
   "id": "sort281-round3-stack",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T18:00:53.111Z",
+    "choice": "none",
+    "note": "is this still a real open question?"
+  },
   "n": 501,
   "options": [
     {
@@ -21,11 +26,12 @@
       "lose": "A lane spends time on a change your earlier pick put aside, and the merge clashes with another open PR that rewrites the same round-3 rules."
     }
   ],
-  "owner": "triage (session_013NEJL42Sv3tJkjpzY7bExj)",
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "ref": "triage 15:56 CST Nov 10",
+  "reply": "No (12:04 CST). Your ruling R9 (Nov 10 15:44 CST: \"i never wanted round 3 if it passed earlier\") already rules out a merge-time refusal for a missing round 3, which is all these three add. Triage closes #1773, #1939 and #1994 with a note citing R9; each branch is kept, so any of them can reopen.",
   "repo": "shivinate7/claude-settings",
   "short": "Close the round-3 merge stack?",
-  "status": "open",
+  "status": "closed",
   "title": "Close #1773, #1939 and #1994, the merge-tool round-3 stack that main already covers?",
   "why": "Of the 31 doubtful PRs, this is the only bundle whose change main already covers; the rest still look wanted and need main merged in."
 }

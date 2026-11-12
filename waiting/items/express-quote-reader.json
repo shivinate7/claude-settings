@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-12T19:54:00Z",
+  "context": "Goal: a PR whose quotes of you match your feedback word for word skips the ruling-record review round.\nProblem (rule): your feedback log is a file per session outside git, so the merge tool and CI cannot read it, and part 2 needs you to pick who checks the match.\nBased on (read): decision owner-feedback-inbox (one feedback file per session, outside git) and plan R18 point 5 (the sending session checks a relayed grant against its own log).\nDeparts from: main \u2014 adds a quote check the merge tool has no reader for today.",
+  "home": "step express-pass-owner-quotes (a PR quoting you word for word skips a review round)",
+  "id": "express-quote-reader",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T20:13:00Z",
+    "choice": "b",
+    "note": "for now at least"
+  },
+  "n": 624,
+  "options": [
+    {
+      "gain": "A real match against the log, with no new form the merge tool trusts.",
+      "how": "Part 2 waits for step feedback-log-tends-itself (a tracked, repo-wide feedback log), then the merge tool reads it; until then the express pass skips nothing.",
+      "key": "a",
+      "label": "Wait for the shared log (Recommended)",
+      "lose": "The express pass skips nothing until then."
+    },
+    {
+      "gain": "Buildable now.",
+      "how": "The sending session checks the quotes against its own feedback file and writes a stamp line the merge tool trusts. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "key": "b",
+      "label": "Session stamps the match",
+      "lose": "The merge tool trusts a session's word, not a read of the log.",
+      "widens": true
+    }
+  ],
+  "owner": "lane express-pass-owner-quotes (session_013NEJKygJbMN4tsZrzb9rkH)",
+  "ref": "lane express-pass-owner-quotes, Nov 12, 13:53 and 13:54 CST",
+  "reply": "Closed 14:14 CST: part 2 uses the session stamp for now; lane express-pass-owner-quotes told.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Quote match: wait for shared log",
+  "status": "closed",
+  "title": "Wait for the shared feedback log before a quote match skips a review round",
+  "why": "The merge tool cannot read the feedback log the plan names."
+}

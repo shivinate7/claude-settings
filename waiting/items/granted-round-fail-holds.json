@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-12T19:56:00Z",
+  "context": "Goal: a change that fails review after every round you allowed stops instead of looping.\nProblem (rule): when you grant a fourth review round and that round fails, nothing says what happens next.\nBased on (read): rule roles-review-cap-three: \"A held change is parked. It gets no fix lane and no more work until the owner decides.\"\nDeparts from: main \u2014 a failed granted round leaves the change open, so a fix lane starts without you; option a parks it for you.",
+  "home": "step review-fix-check-round (fix checks name their round)",
+  "id": "granted-round-fail-holds",
+  "kind": "decision",
+  "n": 625,
+  "options": [
+    {
+      "gain": "No change loops past the rounds you granted without your word.",
+      "how": "Held means parked: no fix lane starts and nobody works on it until you pick drop, restart or merge, as after round 3.",
+      "key": "a",
+      "label": "Hold it (Recommended)",
+      "lose": "The change waits for you."
+    },
+    {
+      "gain": "No wait on you.",
+      "how": "Open means a fix lane starts at once without asking you, and review goes on to a fifth round.",
+      "key": "b",
+      "label": "Keep it open",
+      "lose": "A change can keep looping past every round you granted."
+    }
+  ],
+  "owner": "lane review-fix-check-round (session_013NEJL14ysfQUFFZcFfWrpP)",
+  "ref": "lane review-fix-check-round, Nov 12, 13:56 CST",
+  "reply": "Reworded 14:14 CST: held = parked until you decide; open = a fix lane starts without you.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Failed granted round: hold or not",
+  "status": "open",
+  "title": "Hold a change whose extra review round, granted by you, fails",
+  "why": "No ruling covers a failed round you granted beyond three."
+}

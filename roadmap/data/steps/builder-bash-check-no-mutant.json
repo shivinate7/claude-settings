@@ -1,0 +1,14 @@
+{
+ "id": "builder-bash-check-no-mutant",
+ "title": "Four mutation anchors for the new PostToolUse check from lane builder-bash-test-write",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Debt builder-bash-check-no-mutant (coordinator 14:27 CST Nov 12): the new check has no mutation anchors.",
+ "source": "coordinator 14:27 CST Nov 12",
+ "note": "Starts after lane builder-bash-test-write's branch batches.",
+ "updatedAt": "2026-11-12T14:28:37-06:00"
+}

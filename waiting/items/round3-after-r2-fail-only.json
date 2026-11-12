@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-12T19:25:00Z",
+  "context": "Goal: review rounds catch real defects at a cost worth paying.\nProblem (rule): your Nov 8 ruling gives every guard or check change a third review round and the net-value test, but on 992 measured PRs a third round after a passing second round failed only 4.3% of the time (29 of 675) and never found a change that made things less safe, so only you can say whether that round is worth its cost.\nBased on (measured): review records from Oct 26 to Nov 11 (992 PRs, 3,096 reviewed heads), lane review-rounds-rework, draft PR #2874; all 9 changes that made things less safe came after a failed second round.\nBased on (ruling): your Nov 8 pick that a guard or check change still gets round 3 after a fix check passes.\nDeparts from: main gives every guard or check change round 3 \u2014 the change gives it round 3 only after a failed second round.\nMeanwhile: the lane builds your Nov 7 picks (Sonnet first round for guard and check changes; findings labelled by weight), which also start counting how many findings were real.",
+  "home": "step review-rounds-rework; PR #2874 (record docs/decisions/review-rounds-measure.md)",
+  "id": "round3-after-r2-fail-only",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T19:26:31.863Z",
+    "choice": "b",
+    "note": "message retrospecitve -- this was long since already established"
+  },
+  "n": 613,
+  "options": [
+    {
+      "gain": "You decide on real finding counts, not on pass and fail rates alone; nothing is lost meanwhile.",
+      "how": "Keep round 3 for every guard or check change now; ask again once the new findings counts give one measured sample.",
+      "key": "a",
+      "label": "Wait for the findings count (Recommended)",
+      "lose": "About 675 more Sonnet reviews' worth of cost until the measure comes in."
+    },
+    {
+      "gain": "One fewer review on roughly 675 guard or check changes, so they merge sooner and cost less.",
+      "how": "A guard or check change gets round 3 and the net-value test only after its second round fails.",
+      "key": "b",
+      "label": "Round 3 only after a failed round 2, now",
+      "lose": "The 29 defects round 3 caught after a passing round 2 would have merged."
+    }
+  ],
+  "owner": "lane review-rounds-rework (session_013NEJL1VU2ZKfNGkQ1nUmUA)",
+  "ref": "lane review-rounds-rework, 13:23 CST Nov 12",
+  "reply": "You're right, and I'm sorry for the noise: your Nov 10 ruling already settled this (\"yeah i never wanted round 3 if it passed earlier\"). I posted it from your older Nov 8 pick without reading the newer one. Withdrawn; the retrospective is told. Step rounds-rules-one-record builds your Nov 10 ruling.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Round 3 only after a failed round 2?",
+  "status": "closed",
+  "title": "Should a guard change get a third review round only when its second round failed?",
+  "why": "It changes your Nov 8 ruling, so it needs your word. Meanwhile the lane's pull request stays a draft."
+}

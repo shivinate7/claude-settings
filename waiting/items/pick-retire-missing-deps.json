@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-12T18:48:00Z",
+  "context": "Goal: the work goes on now, and you can overrule any coordinator pick.\nProblem (goal): the coordinator took this undoable pick on Nov 12, 12:51 CST without asking you; it stands unless you choose b.\nBased on (ruling): rule building-fix-cause-not-symptom (fix the cause, not the symptom) and decision debt-close-runs-retire (closing a debt runs its retire test), cited by the coordinator.\nDeparts from: main has no such pick on record \u2014 a claude-settings lane fixes the debt-close test run before q_max PR #1163 merges.",
+  "home": "step retire-missing-deps-unknown",
+  "id": "pick-retire-missing-deps",
+  "kind": "decision",
+  "n": 600,
+  "options": [
+    {
+      "gain": "The debt closes for the right reason, and later debt closes do not hit the same refusal.",
+      "how": "The merge tool refused q_max PR #1163's debt close because its retire test ran in a scratch copy with no installed packages, though CI was green and 34 tests pass locally. A claude-settings lane fixes that test run (lint/check_debt_retire.py), then batch runner 11 runs the merge again.",
+      "key": "a",
+      "label": "Keep the pick (Recommended)",
+      "links": [
+        {
+          "label": "q_max PR #1163",
+          "url": "https://github.com/shivinate7/q_max/pull/1163"
+        }
+      ],
+      "lose": "The other route is not taken unless you choose b."
+    },
+    {
+      "gain": "The PR merges sooner.",
+      "how": "The q_max lane drops the debt close from PR #1163 and the PR merges without it.",
+      "key": "b",
+      "label": "Overrule it",
+      "links": [
+        {
+          "label": "q_max PR #1163",
+          "url": "https://github.com/shivinate7/q_max/pull/1163"
+        }
+      ],
+      "lose": "The debt stays open, and the next debt close hits the same refusal."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "pick": "a",
+  "ref": "coordinator pick, Nov 12, 12:51 CST (its clock)",
+  "repo": "shivinate7/claude-settings",
+  "short": "Fix debt-close test run for q_max #1163",
+  "stands": true,
+  "status": "open",
+  "title": "Fix the debt-close test run so q_max #1163 can close its debt",
+  "why": "A coordinator pick you could not see before."
+}

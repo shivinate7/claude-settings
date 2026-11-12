@@ -6,11 +6,12 @@
   "id": "paused-guard-steps-where",
   "kind": "task",
   "n": 468,
-  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
   "ref": "owner message 20:25 CST Nov 9; nearest steps agent-served-model-check, octopus-merge-push-refused, scratchpad-file-ownership",
+  "reply": "Closed by triage 11:42 CST Nov 12, staleness pass: found them. The 7 paused guard steps are on branch roadmap-guards-degen (Degen's queued guard steps, filed Nov 8 21:43 CST). Each says its incident is unknown; only the name survived a stopped session's notes. They stay paused. Under your rule that a guard needs an incident, none is built unless you name one.",
   "repo": "shivinate7/claude-settings",
   "short": "Where are the 7 paused steps?",
-  "status": "open",
+  "status": "closed",
   "steps": [
     "Reply on this item with where you saw them: another repo's roadmap, a page tab, or a report. A link or the repo name is enough.",
     "Done when you have replied."

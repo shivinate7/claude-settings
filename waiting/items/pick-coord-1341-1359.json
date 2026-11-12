@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-12T20:00:00Z",
+  "context": "Goal: the work goes on now, and you can overrule any coordinator pick.\nProblem (goal): the coordinator took these undoable picks on Nov 12, 13:41-13:59 CST without asking you; they stand unless you choose b.\nBased on (read): the coordinator's messages to triage at 13:41, 13:44, 13:46 and 13:59 CST.\nDeparts from: main has no such picks on record \u2014 the lanes they govern follow these picks.",
+  "home": "the roadmap steps each pick names (record branch)",
+  "id": "pick-coord-1341-1359",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T20:13:00Z",
+    "choice": "a",
+    "note": "accepted pick"
+  },
+  "n": 627,
+  "options": [
+    {
+      "gain": "Lanes keep moving without waiting on you.",
+      "how": "The copy-check lane ships as one PR, not four, since its reviews ran on the whole. The mail guard fix waits for the wake test (now done, so it is ready). A new step fixes the reviewer model table to run round 1 on Sonnet for guard changes, as you ruled on Nov 10. The narrow-screen page fix stacks on open PR #2347. A new express lane makes fix-check review records readable after two unreadable ones. Eleven more lanes started from triage's sized lists. Undo: the coordinator reverses any one.",
+      "key": "a",
+      "label": "Keep the picks (Recommended)",
+      "links": [
+        {
+          "label": "PR #2347",
+          "url": "https://github.com/shivinate7/claude-settings/pull/2347"
+        }
+      ],
+      "lose": "A pick you would have made differently runs until you overrule it."
+    },
+    {
+      "gain": "Your choice instead of the coordinator's.",
+      "how": "Say which pick to reverse in the note; the coordinator reverses it.",
+      "key": "b",
+      "label": "Overrule them",
+      "lose": "The lanes those picks govern pause."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "pick": "a",
+  "ref": "coordinator picks, Nov 12, 13:41-13:59 CST",
+  "reply": "Closed 14:14 CST: picks kept.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Coordinator picks 13:41-13:59",
+  "stands": true,
+  "status": "closed",
+  "title": "Six coordinator picks: one-PR copy check, blocked mail guard, round-1 Sonnet fix, page fix base, express review records, lane starts",
+  "why": "Coordinator picks you could not see before."
+}

@@ -1,0 +1,32 @@
+{
+  "added": "2026-11-12T20:11:00Z",
+  "context": "Goal: no session can forge your saved answer on the waiting page.\nProblem (rule): the guard refuses set, update and str_replace on an answer, but lets a session delete one, which the decision's words do not allow.\nBased on (read): skill waiting-page, \"Route and close\", deletes each routed answer; a delete writes no false answer.\nDeparts from: main has no answer guard \u2014 adds one that refuses writes to answers, with or without deletes.",
+  "home": "step answers-session-write-guard (a session cannot forge your page answers)",
+  "id": "answers-guard-allows-delete",
+  "kind": "decision",
+  "n": 635,
+  "options": [
+    {
+      "gain": "Routing and reopening keep working; no forged answer can be written.",
+      "how": "The guard refuses set, update and str_replace on answers; a delete passes. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "key": "a",
+      "label": "Allow a delete",
+      "lose": "A stray delete of your answer is not stopped; you would save it again.",
+      "widens": true
+    },
+    {
+      "gain": "Your saved answer can never vanish by a session's act.",
+      "how": "Every session write to answers is refused, a delete included; the page writer types override to route or reopen.",
+      "key": "b",
+      "label": "Refuse a delete too (Recommended)",
+      "lose": "Each route or reopen needs an override."
+    }
+  ],
+  "owner": "lane answers-session-write-guard (session_013NEJL2bk5JjA6fXmQ5SooN)",
+  "ref": "lane answers-session-write-guard, head 53e065d31, via coordinator 14:11 CST Nov 12",
+  "repo": "shivinate7/claude-settings",
+  "short": "Answer guard: allow delete?",
+  "status": "open",
+  "title": "The answer guard lets a session delete a saved answer, or refuses that too",
+  "why": "The decision text says the guard refuses every session write to answers; a delete is a write."
+}

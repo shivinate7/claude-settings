@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-12T18:48:00Z",
+  "context": "Goal: stop the glossary check failing a backticked decision id.\nProblem (rule): the check that each workflow thing keeps its one glossary name (lint/check_glossary.py) flags 7 of 359 backticked record ids, such as `owner-feedback-inbox` (\"uses 'inbox'; the glossary name is 'mailbox'\"); it reads names without regard to sense on purpose, and a test holds that.\nBased on (read): the lane's test that shows the check failing on a cited record name, on its own branch.\nDeparts from: main flags a record's own name in a cite \u2014 a lets every such cite pass, b marks each of the 7 records to pass.",
+  "home": "lane guard-false-alarm-cull, family 10",
+  "id": "glossary-cite-stays",
+  "kind": "decision",
+  "n": 599,
+  "options": [
+    {
+      "gain": "All 7 clear, with no renames.",
+      "how": "The check passes a backticked id of any record the repo holds. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "key": "a",
+      "label": "Pass any cited record",
+      "lose": "An old glossary word can hide inside an old record's cite.",
+      "widens": true
+    },
+    {
+      "gain": "The check stays as strict as today for every other name.",
+      "how": "Each of the 7 records gets a mark in its glossary row saying its name stays; the check keeps reading names without regard to sense.",
+      "key": "b",
+      "label": "Mark each record (Recommended)",
+      "lose": "Each of the 7 needs a mark, and a new one later needs one too."
+    }
+  ],
+  "owner": "lane guard-false-alarm-cull (session_013NEJL1y8fceJxUrwF8GxWY)",
+  "ref": "coordinator 12:51 CST Nov 12 (its clock), from lane guard-false-alarm-cull",
+  "reply": "Settled by your Oct 27 ruling (decision uniform-over-variants: a shared tool never grows a second accepted form): b. The 7 records each get a mark in their glossary row; the check stays as strict for every other name. No answer needed from you.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Glossary check vs cited record names",
+  "status": "closed",
+  "title": "The glossary check stops failing a cited record's own name",
+  "why": "It changes what a shared check accepts; the lane runs its other families meanwhile."
+}

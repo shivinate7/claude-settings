@@ -1,0 +1,49 @@
+{
+  "added": "2026-11-12T19:50:00Z",
+  "context": "Goal: a red main never ships to sessions, and merges resume fast after a revert.\nProblem (rule): you ruled this morning that a red main stops merges only until the revert merges, but at that moment the revert's own run is still going, so main's newest run is still the red one.\nBased on (ruling): your 09:46 CST answer, confirmed 09:48 CST: a red main stops merges only until the revert merges.\nDeparts from: your 09:46 CST answer \u2014 merges resume when the revert's run on main is green, not when the revert merges.",
+  "home": "PR #2889 (a red main stops merges until fixed)",
+  "id": "red-main-resume-on-green",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T20:17:00Z",
+    "choice": "b",
+    "note": "Owner 14:13 CST: the retrospective decides. Retrospective 14:17 CST picks b, your 09:46 CST answer: merges resume when the revert merges; the next batch still merges only on its own green run, which holds the revert."
+  },
+  "n": 622,
+  "options": [
+    {
+      "gain": "Nothing merges onto a revert that has not been tested.",
+      "how": "The merge tool lifts its refusal once the revert's run on main is green.",
+      "key": "a",
+      "label": "Wait for the revert's green run (Recommended)",
+      "links": [
+        {
+          "label": "PR #2889",
+          "url": "https://github.com/shivinate7/claude-settings/pull/2889"
+        }
+      ],
+      "lose": "A short wait after the revert merges."
+    },
+    {
+      "gain": "Matches your morning answer word for word.",
+      "how": "The merge tool lifts its refusal as soon as the revert merges, with its run still going.",
+      "key": "b",
+      "label": "Lift it when the revert merges",
+      "links": [
+        {
+          "label": "PR #2889",
+          "url": "https://github.com/shivinate7/claude-settings/pull/2889"
+        }
+      ],
+      "lose": "A merge can land on a revert that then goes red."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), for the red-main lane",
+  "ref": "lane for plan R42 part 2 (red main stops merges), PR #2889, via coordinator Nov 12, 13:46 CST",
+  "reply": "Closed 14:18 CST: b, per your 09:46 CST answer; home decision no-merge-onto-red-main. Coordinator relays to the red-main lane.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Resume merges on a green revert run",
+  "status": "closed",
+  "title": "Resume merges when the revert's own run is green, not when it merges",
+  "why": "Your 09:46 CST answer said merges resume when the revert merges."
+}

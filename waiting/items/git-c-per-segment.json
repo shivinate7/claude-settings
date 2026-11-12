@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-12T19:50:00Z",
+  "context": "Goal: close a guard hole where a harmless git command in one folder lets a branch switch in another folder through.\nProblem (rule): the guard reads only the first folder a command line names, and its code comment says you ruled that on Nov 10, but no record holds the ruling, so changing it needs your word.\nBased on (read): the comment in the guard's folder reader (hooks/guard_core.py, commit dac648673, Nov 10).\nDeparts from: main \u2014 the first named folder wins; the fix reads each command's own folder.",
+  "home": "step notes-fix-reverify-small (re-check small fixes from review notes)",
+  "id": "git-c-per-segment",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T20:13:00Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 621,
+  "options": [
+    {
+      "gain": "A branch switch in another folder is judged on its own folder.",
+      "how": "The guard judges each command on the line by the folder that command names.",
+      "key": "a",
+      "label": "Read each command's folder (Recommended)",
+      "lose": "Reverses the reading the code comment says you ruled."
+    },
+    {
+      "gain": "No change.",
+      "how": "The guard keeps reading only the first folder named.",
+      "key": "b",
+      "label": "Keep the first folder",
+      "lose": "The hole stays."
+    }
+  ],
+  "owner": "lane notes-fix-reverify-small (session_013NEJKzkcpx9EGjr8ctAJbs)",
+  "ref": "lane notes-fix-reverify-small, Nov 12, 13:43 CST",
+  "reply": "Closed 14:14 CST; lane notes-fix-reverify-small told.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Guard reads each git folder",
+  "status": "closed",
+  "title": "Let the guard read each command's own folder, not only the first one named",
+  "why": "A code comment says you ruled the current reading; no record holds that ruling."
+}

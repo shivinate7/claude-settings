@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-12T18:53:00Z",
+  "context": "Goal: the work goes on now, and you can overrule any coordinator pick.\nProblem (goal): the coordinator took this undoable pick on Nov 12, 12:51 CST without asking you; it stands unless you choose b.\nBased on (ruling): rules building-never-drop-item-silently (never drop an item without saying so) and shared-trees-archive-then-delete (save a branch to an archive copy before deleting it), cited by the coordinator.\nDeparts from: main has no such pick on record \u2014 19 old claude-settings PRs are checked one by one before any closes.",
+  "home": "step pr-backlog-clear",
+  "id": "pick-old-prs-diff-close",
+  "kind": "decision",
+  "n": 605,
+  "options": [
+    {
+      "gain": "No change is lost, and every old PR that is fully covered goes away.",
+      "how": "The PR backlog lane compares each of the 19 old claude-settings PRs with main and with the PR that replaced it. It closes one only when every change is elsewhere, after saving its branch as an archive copy; the rest stay open with their missing files listed. Undo: reopen.",
+      "key": "a",
+      "label": "Keep the pick (Recommended)",
+      "lose": "The other route is not taken unless you choose b."
+    },
+    {
+      "gain": "Nothing closes without you.",
+      "how": "Leave all 19 open until you look at them.",
+      "key": "b",
+      "label": "Overrule it",
+      "lose": "19 old PRs keep cluttering the list."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "pick": "a",
+  "ref": "coordinator pick, Nov 12, 12:51 CST",
+  "repo": "shivinate7/claude-settings",
+  "short": "Old PRs close only when nothing is lost",
+  "stands": true,
+  "status": "open",
+  "title": "An old PR closes only when every change it holds is already elsewhere",
+  "why": "A coordinator pick you could not see before."
+}

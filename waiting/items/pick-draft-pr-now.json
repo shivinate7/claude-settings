@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-12T18:47:00Z",
+  "context": "Goal: the work goes on now, and you can overrule any coordinator pick.\nProblem (goal): the coordinator took this undoable pick on Nov 12, 12:45 CST without asking you; it stands unless you choose b.\nBased on (ruling): decisions draft-until-reviewed (a PR stays a draft until its review passes) and pr-review-record (each review round posts its record on the PR), cited by the coordinator.\nDeparts from: main has no such pick on record \u2014 two lanes open their draft PRs now.",
+  "home": "lanes pass-claim-cites-verdict and owner-override-one-route",
+  "id": "pick-draft-pr-now",
+  "kind": "decision",
+  "n": 598,
+  "options": [
+    {
+      "gain": "You can open either PR now and read each review as it lands.",
+      "how": "Lane pass-claim-cites-verdict (a report's pass claim must cite the check's verdict) and lane owner-override-one-route (your typed override goes through one route) open their draft PRs now, so each review record posts on the PR before the next push. Undo: close the draft.",
+      "key": "a",
+      "label": "Keep the pick (Recommended)",
+      "lose": "The other route is not taken unless you choose b."
+    },
+    {
+      "gain": "Fewer open drafts in your PR list.",
+      "how": "Each of the two lanes opens its draft PR only after its first review passes.",
+      "key": "b",
+      "label": "Overrule it",
+      "lose": "You cannot read a review on GitHub until its PR opens."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "pick": "a",
+  "ref": "coordinator pick, Nov 12, 12:45 CST",
+  "repo": "shivinate7/claude-settings",
+  "short": "Two lanes open draft PRs now",
+  "stands": true,
+  "status": "open",
+  "title": "Two lanes open their draft PRs now, so each review record posts before the next push",
+  "why": "A coordinator pick you could not see before."
+}

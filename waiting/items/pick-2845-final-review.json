@@ -1,0 +1,51 @@
+{
+  "added": "2026-11-12T18:40:00Z",
+  "context": "Goal: the work goes on now, and you can overrule any coordinator pick.\nProblem (goal): the coordinator took this undoable pick on Nov 12 without asking you; it stands unless you choose b.\nBased on (ruling): rule roles-review-cap-three (at most three review rounds; a small fix to a finding gets one check), cited by the coordinator; the lane picked this route itself.\nDeparts from: main has no such pick on record \u2014 PR #2845 merges after this one review.",
+  "home": "PR #2845",
+  "id": "pick-2845-final-review",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T19:26:31.863Z",
+    "choice": "none",
+    "note": "is this still relevant?"
+  },
+  "n": 594,
+  "options": [
+    {
+      "gain": "One check at the head that merges, with no extra round.",
+      "how": "One fresh reviewer on the Sonnet model reads PR #2845 at its final commit before it merges.",
+      "key": "a",
+      "label": "Keep the pick (Recommended)",
+      "links": [
+        {
+          "label": "PR #2845",
+          "url": "https://github.com/shivinate7/claude-settings/pull/2845"
+        }
+      ],
+      "lose": "The other route is not taken unless you choose b."
+    },
+    {
+      "gain": "It merges sooner.",
+      "how": "PR #2845 merges on its passing checks, with no further review.",
+      "key": "b",
+      "label": "Overrule it",
+      "links": [
+        {
+          "label": "PR #2845",
+          "url": "https://github.com/shivinate7/claude-settings/pull/2845"
+        }
+      ],
+      "lose": "No reviewer reads the final commit."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "pick": "a",
+  "ref": "coordinator pick, Nov 12, 12:50 CST (its clock)",
+  "reply": "No, it's moot (checked 13:29 CST). PR #2845 already passed its third review round, and the only commit after that adds lines to the notes file, which merges on passing checks with no review. No extra review is run; #2845 merges once the batch label step stacked on it lands.",
+  "repo": "shivinate7/claude-settings",
+  "short": "PR #2845: one fresh review at final head",
+  "stands": true,
+  "status": "closed",
+  "title": "PR #2845 gets one fresh review at its final head",
+  "why": "A coordinator pick you could not see before."
+}

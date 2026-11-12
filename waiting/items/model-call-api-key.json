@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-12T14:16:00Z",
+  "context": "Goal: model calls from hooks work on every account and device, or ask once for setup (your words, 11:43 CST Nov 6).\nProblem (rule): you said \"An API key is an option, not the first route\", but a standing decision keeps the API key out of the hook judge's process, so an account with only an API key gets a setup-token message and never a working judge.\nBased on (ruling): your Nov 6 11:43 CST words on model-call setup, quoted above.\nBased on (read): only code keeps ANTHROPIC_API_KEY out of the judge's process: the allow list and its comment in hooks/decision_watch.py. Corrected 11:40 CST Nov 12: no decision record says so. The nearest record, decision mods-no-cli-key-headless (how mods run with no command-line key), names a stored API token as the fallback if the mod route fails, which leans toward b.\nDeparts from: main's setup message for an account with only an API key \u2014 a rewrites it to name `claude setup-token` and say the key route is not offered for hook judges; b instead passes the key to the judge when no token exists.\nMeanwhile: the lane rebuilding the model-call setup check builds option a.",
+  "home": "step model-call-auth-check",
+  "id": "model-call-api-key",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T17:59:44.968Z",
+    "choice": "b",
+    "note": "we can make it a network secret and/or store the key somewhere that keeps it hidden but still callable im open to ideas if you're worried about key safety"
+  },
+  "n": 541,
+  "options": [
+    {
+      "gain": "The standing decision holds, and no hook's child process ever sees the API key.",
+      "how": "The setup message tells the account to run `claude setup-token` and says the API key route is not offered for hook judges.",
+      "key": "a",
+      "label": "Keep the key out; the message says so (Recommended)",
+      "lose": "An account with only an API key has no working hook judge."
+    },
+    {
+      "gain": "Accounts with only an API key get a working hook judge.",
+      "how": "The judge's process gets ANTHROPIC_API_KEY only when no setup-token file exists.",
+      "key": "b",
+      "label": "Pass the key only when no token exists",
+      "lose": "A hook's child process can see the API key, which reverses the standing decision for the judge."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "pick": "a",
+  "ref": "step model-call-auth-check; decision mods-no-cli-key-headless; hooks/decision_watch.py JUDGE_ENV_ALLOWLIST; lane fan-prose-unmapped-3 (session_013NEJL1CWKBkSQYFqekzCnf)",
+  "reply": "Recorded 12:00 CST: the judge gets the API key when no setup token exists. The lane was building a, so the coordinator re-points it to b. Key storage: the lane proposes a hidden store (environment secret in the cloud, the system keychain on your computers) and brings it back if it needs a pick.",
+  "repo": "shivinate7/claude-settings",
+  "short": "API key for hook judges",
+  "status": "closed",
+  "title": "Should a hook's model judge use an API key when the account has no setup token?",
+  "why": "Recommended: a. It keeps the API key away from hook processes, and the lane is already building it."
+}

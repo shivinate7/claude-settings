@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-12T18:44:00Z",
+  "context": "Goal: idle lanes archive fast without losing unmerged work.\nProblem (rule): the guard that stops a lane's branch being dropped unsaved accepts it as saved only when an archive copy under the lane's own branch names exists; a copy under another archive name with the exact same last commit is refused, a false alarm the coordinator hit.\nBased on (read): hooks/own_session.py lines 105-130 and hooks/guard_merge.py line 1636; the own-names limit came from the Nov 9 scope reading, to bound the comparisons the guard runs.\nBased on (ruling): the Oct 30 grant lets a branch go when its last commit is on any archive branch (step cloud-branch-delete); it covers deleting a branch, not this guard.\nDeparts from: main accepts only the lane's own archive names \u2014 a accepts any archive copy whose last commit is the exact same.",
+  "home": "lane archive-flow (session_013NEJKzCV3NzW5wxzNQ6fWU)",
+  "id": "archive-any-same-sha",
+  "kind": "decision",
+  "n": 596,
+  "options": [
+    {
+      "gain": "No false refusal; an exact match needs no comparisons, so the Nov 9 bound still holds.",
+      "how": "The guard lists every archive branch once and accepts the lane's branch as saved when any of them ends on exactly the same commit. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "key": "a",
+      "label": "Accept any copy with the same commit",
+      "lose": "The guard accepts more than today, and reads the list of all archive branches once per check.",
+      "widens": true
+    },
+    {
+      "gain": "The guard accepts nothing new.",
+      "how": "Keep accepting only an archive copy under the lane's own branch names; a session that archived under another name pushes one more copy under the lane's own name.",
+      "key": "b",
+      "label": "Own names only (Recommended)",
+      "lose": "The false refusal stays until a session re-archives under the lane's own name."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "ref": "coordinator 12:44 CST Nov 12, from lane archive-flow",
+  "reply": "Settled by your Oct 27 ruling (decision uniform-over-variants: a shared tool never grows a second accepted form): b. The archive guard keeps accepting only the lane's own archive names; a session that archived under another name pushes one more copy under the lane's own name. No answer needed from you.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Archive guard: any copy with same commit?",
+  "status": "closed",
+  "title": "Should the archive guard accept any archive copy with the same last commit?",
+  "why": "It changes what a safety guard accepts, so it needs your word; the lane builds only the wording change meanwhile."
+}

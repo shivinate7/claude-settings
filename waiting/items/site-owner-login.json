@@ -1,0 +1,39 @@
+{
+  "added": "2026-11-12T18:38:00Z",
+  "context": "Goal: the waiting page saves your answers to git, through a small site on your Cloudflare account.\nProblem (rule): the site holds the GitHub token, and anyone who finds its address could call it, so it must know the caller is you; any credential the page keeps goes against the ruling that a token never goes in a page (prose-tending-contract, 11:55 CST), which you doubted at 12:30 CST.\nBased on (read): measured 12:35 CST: a claude.ai page cannot call any outside site (its content rules block every outside host), so the page moves off claude.ai and the site serves the page itself, from one address.\nBased on (read): Cloudflare's free tier allows 100,000 requests a day and never sleeps (docs read by the site probe).\nDeparts from: main \u2014 adds a site on your Cloudflare account that serves the page and writes your answers to git.",
+  "home": "step waiting-site-build",
+  "id": "site-owner-login",
+  "kind": "decision",
+  "n": 592,
+  "options": [
+    {
+      "gain": "No secret in the page; one email code per device.",
+      "how": "A Cloudflare Access gate in front of the site: you log in once per device with a code sent to your email, and the browser keeps the login. Because the site serves the page itself, the login travels with each save.",
+      "key": "a",
+      "label": "Cloudflare login (Recommended)",
+      "lose": "One login step on each new device."
+    },
+    {
+      "gain": "Works on any device with no login step.",
+      "how": "Each device keeps a passcode that lets the page write only your answers.",
+      "key": "b",
+      "label": "Device passcode",
+      "lose": "A secret sits in the page, against the no-token-in-page ruling."
+    },
+    {
+      "gain": "The simplest build.",
+      "how": "The site accepts any well-formed answer file, with no check on who sent it.",
+      "key": "c",
+      "label": "No credential",
+      "lose": "Anyone with the address could forge an answer."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "ref": "coordinator 12:34 and 12:38 CST Nov 12, from lane waiting-site-probe",
+  "reply": "Moot: you picked a on No. 593, so no site gets built. It comes back only if route B is revived.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Only if 593 b: site login",
+  "status": "closed",
+  "title": "Only if you pick git on your own site (No. 593 b): how the site knows it is you",
+  "why": "Answer No. 593 first; this matters only if you pick b there."
+}

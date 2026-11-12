@@ -1,0 +1,7 @@
+{
+  "at": "2026-11-12T17:59:44.968Z",
+  "choice": "b",
+  "item": "model-call-api-key",
+  "n": 541,
+  "note": "we can make it a network secret and/or store the key somewhere that keeps it hidden but still callable im open to ideas if you're worried about key safety"
+}

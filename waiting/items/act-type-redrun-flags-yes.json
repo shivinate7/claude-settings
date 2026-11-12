@@ -1,0 +1,44 @@
+{
+  "added": "2026-11-12T19:43:00Z",
+  "context": "Goal: the red-run merge flags run without prompts, as you picked at 13:40 CST.\nProblem (rule): the auto-mode check refuses a session's edit to your settings file on a relayed pick, so the lane needs your own typed words.\nBased on (ruling): your 13:40 CST pick in coordinator chat to also allow --blame --run, --on and --base, knowing it widens your earlier pick.\nDeparts from: main allows none of these three flags \u2014 adds them to the Batch Build and Drop entry.\nWhy yours: a relayed pick does not pass the auto-mode check on a settings edit (measured 2026-11-12, the lane's settings commit was refused at 13:42 CST as self-modification).",
+  "home": "PR #2882 (batch freeze enforced); the widening rides its own small PR",
+  "id": "act-type-redrun-flags-yes",
+  "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-12T20:13:00Z",
+    "choice": "done",
+    "note": "Owner marked done on the page, 14:13 CST."
+  },
+  "n": 620,
+  "options": [
+    {
+      "gain": "The red-run steps stop prompting.",
+      "how": "Open the lane's session and type: yes: allow --blame --run, --on and --base in the Batch Build and Drop entry. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "key": "a",
+      "label": "Type the yes",
+      "links": [
+        {
+          "label": "Batch freeze lane",
+          "url": "https://claude.ai/code/session_013NEJL2YMSgMt9QbTnAKiN8"
+        }
+      ],
+      "lose": "The allow entry covers three more flags.",
+      "widens": true
+    },
+    {
+      "gain": "The allow entry stays narrow.",
+      "how": "The entry stays at three flags; PR #2882 merges as it is.",
+      "key": "b",
+      "label": "Skip it",
+      "lose": "The red-run steps keep prompting."
+    }
+  ],
+  "owner": "lane batch-freeze-lane-set-enforce (session_013NEJL2YMSgMt9QbTnAKiN8)",
+  "ref": "coordinator 13:42 CST Nov 12",
+  "reply": "Closed 14:14 CST; lane batch-freeze-lane-set-enforce told.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Type yes in the batch freeze lane",
+  "status": "closed",
+  "title": "Type your yes in the batch freeze lane so it may edit your settings",
+  "why": "The auto-mode check refused the settings edit on a relayed pick; only your typed word counts."
+}

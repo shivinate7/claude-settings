@@ -1,0 +1,51 @@
+{
+  "added": "2026-11-12T19:21:00Z",
+  "context": "Goal: the work goes on now, and you can overrule any coordinator pick.\nProblem (goal): the coordinator took this undoable pick on Nov 12, 13:18 CST without asking you; it stands unless you choose b.\nBased on (ruling): your Nov 11 token-audit ruling, whose cuts include end-of-turn checks that send their asks in one message so sessions waste fewer turns, cited by the coordinator.\nDeparts from: main's refusal names the line it wants but gives no text \u2014 the refusal also carries a draft of that line.",
+  "home": "PR #2864 (stop checks send one message); decision guard-remedy-not-to-owner (a Stop refusal opens with one plain line for you, and its steps live in the record)",
+  "id": "pick-refusal-drafts-line",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T19:26:31.863Z",
+    "choice": "a",
+    "note": "accepted pick"
+  },
+  "n": 612,
+  "options": [
+    {
+      "gain": "A session fixes a refused report in one try, with fewer wasted turns.",
+      "how": "When the report check refuses for a missing \"Recovered:\" or \"Handoff gave:\" line, its message carries a draft of that line for the session to check and use. Undo: revert the decision edit and the draft.",
+      "key": "a",
+      "label": "Keep the pick (Recommended)",
+      "links": [
+        {
+          "label": "PR #2864",
+          "url": "https://github.com/shivinate7/claude-settings/pull/2864"
+        }
+      ],
+      "lose": "A session may paste the draft without checking it."
+    },
+    {
+      "gain": "Every such line is written fresh by the session.",
+      "how": "The refusal names the missing line and gives no draft.",
+      "key": "b",
+      "label": "Overrule it",
+      "links": [
+        {
+          "label": "PR #2864",
+          "url": "https://github.com/shivinate7/claude-settings/pull/2864"
+        }
+      ],
+      "lose": "An extra refused turn each time the line is missing."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "pick": "a",
+  "ref": "coordinator pick, Nov 12, 13:18 CST",
+  "reply": "Filed: the pick stands. A report refusal carries a draft of the line it asks for (PR #2864).",
+  "repo": "shivinate7/claude-settings",
+  "short": "Refusal carries a draft of its line",
+  "stands": true,
+  "status": "closed",
+  "title": "A report refusal carries a draft of the line it asks for",
+  "why": "A coordinator pick you could not see before."
+}

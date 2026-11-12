@@ -1,0 +1,43 @@
+{
+  "added": "2026-11-12T05:35:00Z",
+  "context": "Goal: give this kept debt note a true Fix line, so it stops showing as unchecked.\nProblem (rule): you ruled that a judgment rule may not refuse, so lint/rule_mechanisms.json lists no check for \"one term per meaning\"; a warn-only check is your call.\nBased on (measured): the lane re-checked every kept note (reverify-keep.tsv, sorted Nov 7) and marked this one as yours to decide.\nBased on (ruling): build a guard or check only against a mistake Claude has made or is likely to make (rule building-guard-needs-incident, guards need an incident); none is recorded for this note.\nDeparts from: the debt note one-term-per-meaning-unchecked (no check yet that each term keeps one meaning) on the shared main branch reads \"Fix: none \u2014 owner decides. Until: 2026-11-21\" \u2014 it gets a real Fix: a warn-only check (a), or a stated reason to leave it (b). Re-checked 11:38 CST Nov 12: still open; no past ruling covers it, and decision plain-prose-lint (the plain-prose lint only warns where it cannot judge meaning) allows a warn-only check.\nMeanwhile: the lane keeps rebuilding the notes pull requests and does not wait.",
+  "home": "notes-keep-reverify",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T17:59:44.968Z",
+    "choice": "a",
+    "note": ""
+  },
+  "links": [
+    {
+      "label": "reverify-keep.tsv on branch claude/notes-keep-reverify",
+      "url": "https://github.com/shivinate7/claude-settings/blob/claude/notes-keep-reverify/docs/plans/notes-sort/reverify-keep.tsv"
+    }
+  ],
+  "n": 533,
+  "options": [
+    {
+      "gain": "Mixed terms get flagged.",
+      "how": "A lint warns, never refuses, when a text uses two terms for one thing.",
+      "key": "a",
+      "label": "Add a warn-only check",
+      "lose": "Warnings that may be scrolled past."
+    },
+    {
+      "gain": "No new warnings.",
+      "how": "The note gets \"Fix: none\" and an Until date.",
+      "key": "b",
+      "label": "Leave it, with a date to look again",
+      "lose": "Mixed terms go unflagged."
+    }
+  ],
+  "owner": "lane notes-keep-reverify (session_013NEJKzimwz9GDpxMtjZrqi)",
+  "pick": "b",
+  "ref": "step notes-keep-reverify; reverify-keep.tsv on branch claude/notes-keep-reverify",
+  "reply": "Recorded 12:00 CST: a warn-only lint for two terms used for one thing. Sent to lane notes-keep-reverify, which sets the note's Fix line.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Warn on one term per meaning?",
+  "status": "closed",
+  "title": "Add a warn-only check for one term per meaning?",
+  "why": "A warning nobody must act on gets scrolled past, and no incident is recorded."
+}

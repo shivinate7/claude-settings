@@ -1,0 +1,44 @@
+{
+  "added": "2026-11-12T20:18:00Z",
+  "context": "Goal: batches merge faster.\nProblem (rule): draft runs of the tests a lane touches take the macOS runners the batch needs; skipping them narrows your Nov 8 ruling.\nBased on (ruling): your Nov 8, 06:08 CST pick (step windows-tests-for-touched-files): a draft-only CI job runs just the test files a lane touches, on Windows and on macOS where a macOS job exists.\nBased on (measured): batch 103's run 43234925158 waited 26.4 min for macOS while 50 draft runs ran, 13:30-14:40 UTC.\nDeparts from: your Nov 8 pick, where drafts always run macOS \u2014 drafts skip it while a batch runs, or always.",
+  "home": "step ci-macos-queue (batches stop waiting for macOS)",
+  "id": "ci-draft-macos-skip",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T20:19:00Z",
+    "choice": "a",
+    "note": "Owner 14:19 CST in retrospective chat, with his pick e on the MacBook item (R58, plan 0a36899): a draft's macOS job skips while a batch run is in progress."
+  },
+  "n": 639,
+  "options": [
+    {
+      "gain": "The batch run ends sooner (about 40 min, not 55; estimate).",
+      "how": "A draft run skips macOS while a batch's CI is running.",
+      "key": "a",
+      "label": "Skip while a batch runs (Recommended)",
+      "lose": "A macOS-only failure in a draft pushed then shows at the next batch."
+    },
+    {
+      "gain": "Simplest.",
+      "how": "Draft runs skip macOS always.",
+      "key": "b",
+      "label": "Drafts never run macOS",
+      "lose": "Every macOS-only failure first shows in a batch, so more drops."
+    },
+    {
+      "gain": "No change.",
+      "how": "No change.",
+      "key": "c",
+      "label": "Keep as is",
+      "lose": "Batches keep waiting up to 26 min."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "ref": "retrospective 14:13 and 14:16 CST Nov 12 (CI audit)",
+  "reply": "Closed 14:22 CST: step ci-batch-mac-runner, lane started.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Drafts skip macOS during a batch",
+  "status": "closed",
+  "title": "Draft runs skip macOS while a batch's CI runs",
+  "why": "It narrows your Nov 8 ruling that every draft runs its touched tests on Windows and macOS."
+}

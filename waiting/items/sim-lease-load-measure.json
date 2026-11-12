@@ -1,0 +1,38 @@
+{
+  "added": "2026-11-12T17:28:00Z",
+  "context": "Goal: a simulator lease refuses only when the machine is truly busy.\nProblem (rule): two of your rulings clash on how to read machine load. The simulator lease tool refuses on the load average; the load brake decision says never to use the load average.\nBased on (read): bin/sim-lease lines 49-51 set MAX_5MIN=100.0, MAX_1MIN=60.0, SLOT2_5MIN=60.0; it refuses at line 180 (5-min load 100 or more, or 1-min load 60 or more) and line 189 (a second slot needs 5-min load under 60); decision sim-lease-tool (the simulator lease tool), owner-ruled.\nBased on (ruling): decision machine-load-brake (when the machine is too loaded to start work), line 21: \"Never the load average (107 on 15 cores while `top` showed half idle).\"\nDeparts from: bin/sim-lease refuses on the load average \u2014 it refuses on the load brake's measure (memory in use and free disk; it reads no CPU, per your 2026-10-25 ruling).\nMeanwhile: lane fixed-number-limits-census (the count of fixed limits) keeps working; nothing waits on this.",
+  "home": "decision machine-load-brake",
+  "id": "sim-lease-load-measure",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T17:59:44.968Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 554,
+  "options": [
+    {
+      "gain": "One home for machine load; no refusal on a half-idle machine.",
+      "how": "bin/sim-lease calls the load brake's measure and drops its three load-average numbers.",
+      "key": "a",
+      "label": "The simulator lease reads the load brake's one measure (Recommended)",
+      "lose": "The three simulator lease numbers you set go away."
+    },
+    {
+      "gain": "No change to a tool that works.",
+      "how": "The decision machine-load-brake names the simulator lease as a ruled exception.",
+      "key": "b",
+      "label": "Keep the load average for the simulator lease",
+      "lose": "Two measures of load, one already shown wrong (107 while half idle)."
+    }
+  ],
+  "owner": "coordinator",
+  "pick": "a",
+  "ref": "decision sim-lease-tool; decision machine-load-brake; lane fixed-number-limits-census",
+  "reply": "Recorded 12:00 CST: the simulator lease reads the load brake's measure and drops its load-average numbers. Filed as a step for a lane.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Sim lease: which load measure",
+  "status": "closed",
+  "title": "Should the simulator lease read the load brake's measure of a busy machine, instead of the load average?",
+  "why": "Recommended: a. Your load brake ruling already found the load average wrong on this machine, and one measure keeps one home."
+}

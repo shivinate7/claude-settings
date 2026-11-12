@@ -1,0 +1,44 @@
+{
+  "added": "2026-11-12T18:52:00Z",
+  "context": "Goal: end the arbitrary lengths on your typed override and on an Opus ask (your ruling R12).\nProblem (rule): a one-act override ends after 10 minutes and a plain Opus ask after 2 hours; both numbers were lane or coordinator picks, never your words.\nBased on (ruling): R12, your words \"opus 4h etc also feels super arbitrary\".\nDeparts from: main ends them at 10 minutes and 2 hours \u2014 they end on use, on an off command, or at your next typed message.",
+  "home": "lane owner-override-one-route (your typed override goes through one route)",
+  "id": "override-opus-lengths",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T18:54:35.937Z",
+    "choice": "a",
+    "note": ""
+  },
+  "n": 601,
+  "options": [
+    {
+      "gain": "No made-up minutes; each lasts as long as you meant.",
+      "how": "A one-act override ends when it is used, when you type `override off`, or at your next typed message; an Opus ask with no length lasts until the session ends or you type `opus off`.",
+      "key": "a",
+      "label": "End on use or your word (Recommended)",
+      "lose": "An Opus ask you forget about runs to the session's end."
+    },
+    {
+      "gain": "The simplest rule, and nothing outlives your next word.",
+      "how": "A one-act override and an Opus ask both end at your next typed message.",
+      "key": "b",
+      "label": "Both end at your next message",
+      "lose": "A long Opus job needs the ask again after each message you type."
+    },
+    {
+      "gain": "Nothing changes.",
+      "how": "Keep both numbers, now as your ruling.",
+      "key": "c",
+      "label": "Keep 10 minutes and 2 hours",
+      "lose": "Fixed numbers stay, against R12."
+    }
+  ],
+  "owner": "lane fixed-number-limits-census (session_013NEJL2yZF4msU7yNVTgeiC)",
+  "ref": "coordinator 12:51 CST Nov 12, from lane fixed-number-limits-census",
+  "reply": "Filed: a one-act override ends when used, on `override off`, or at your next typed message; an Opus ask with no length lasts until the session ends or `opus off`. Lane owner-override-one-route builds it.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Override and Opus: when they end",
+  "status": "closed",
+  "title": "When your override and an Opus ask end, with no fixed minutes",
+  "why": "Your R12 ruling asks for no arbitrary lengths; these two need your word on what ends them."
+}

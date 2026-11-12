@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-12T19:33:00Z",
+  "context": "Goal: remove a false alarm in the guard tests without opening a hole.\nProblem (rule): the fix uses Python names that do not exist on Python 3.9, so on 3.9 the guard lets a script write into the guard tests that main refuses, and only you can restart a held change.\nBased on (measured): the round-3 reviewer ran 21 cases on the change and on main, simulating Python 3.9, and found the change less safe than main.\nDeparts from: main holds the change with no work \u2014 option a restarts it in one fix lane.",
+  "home": "step guard-false-alarm-cull (cull guards that cry wolf)",
+  "id": "held-cull-family-8b",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T19:31:00Z",
+    "choice": "a",
+    "note": "Owner in coordinator chat, 13:31 CST Nov 12, relayed 13:32 CST: one fix lane, review starting over at round 1, makes the new code safe on 3.9 and adds a 3.9 test case."
+  },
+  "n": 615,
+  "options": [
+    {
+      "gain": "The false alarm goes, and the 3.9 hole is closed.",
+      "how": "One fix lane starts again at review round 1: it guards the three new Python names so 3.9 skips them, and adds a 3.9 test case.",
+      "key": "a",
+      "label": "Restart it in one fix lane (Recommended)",
+      "lose": "One more review cycle."
+    },
+    {
+      "gain": "Nothing new to review.",
+      "how": "The held part is dropped; the lane keeps its other fixes.",
+      "key": "b",
+      "label": "Drop this fix",
+      "lose": "The false alarm stays."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "ref": "lane guard-false-alarm-cull, via coordinator Nov 12, 13:30 CST",
+  "reply": "Filed 13:35 CST in plans/owner-rulings-2026-11-12.md on the record branch; lane guard-false-alarm-cull runs the fix.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Held guard fix: restart or drop",
+  "status": "closed",
+  "title": "Restart the held fix for one guard false alarm, or drop it",
+  "why": "Only you restart a change held after its third review round."
+}

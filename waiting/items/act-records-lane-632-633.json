@@ -1,0 +1,43 @@
+{
+  "added": "2026-11-12T20:18:00Z",
+  "context": "Goal: your answers 632 (branch-delete grant covers every repo you are logged in to) and 633 (a wording-only FAIL gets a second fix check) land in their homes.\nProblem (rule): the coordinator's records lane was refused at create as self-modification, since it changes your standing grant and a review rule.\nBased on (ruling): your 14:13 CST page save of 632 a and 633 b.\nDeparts from: main's grant names no repo and the rule sends any FAIL to round 1 \u2014 the lane writes both answers.\nWhy yours: a coordinator spawn of a lane that edits your rules is refused by the auto-mode check (measured 2026-11-12, refused 14:17 CST).",
+  "home": ".claude/CLAUDE.md standing grant; rule roles-review-cap-three (steps cloud-branch-delete, fix-check-records-carry)",
+  "id": "act-records-lane-632-633",
+  "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-12T20:20:00Z",
+    "choice": "a",
+    "note": "Owner typed the yes in the coordinator's session, 14:20 CST; lane grant-scope-fixcheck-carry started."
+  },
+  "n": 638,
+  "options": [
+    {
+      "gain": "Both answers land in their homes.",
+      "how": "Open the coordinator's session and type: yes: start the records lane for items 632 and 633",
+      "key": "a",
+      "label": "Type the yes",
+      "links": [
+        {
+          "label": "Coordinator",
+          "url": "https://claude.ai/code/session_013NEJL1gw6EdrSyvHkTUEx6"
+        }
+      ],
+      "lose": "None beyond the edits you already chose."
+    },
+    {
+      "gain": "No rule file changes.",
+      "how": "The answers stay on the page and in the record branch only.",
+      "key": "b",
+      "label": "Leave it",
+      "lose": "Sessions keep reading the old grant and rule."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "ref": "coordinator 14:17 CST Nov 12",
+  "reply": "Closed 14:22 CST: records lane running.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Allow the 632/633 records lane",
+  "status": "closed",
+  "title": "Let the records lane for your answers 632 and 633 start",
+  "why": "The auto-mode check refused the lane as self-modification."
+}

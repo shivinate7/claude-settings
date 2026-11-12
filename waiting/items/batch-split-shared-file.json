@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-12T20:08:00Z",
+  "context": "Goal: one red test drops only the lanes that broke it, so the rest of the batch merges green.\nProblem (risk): many lanes touch test_merge.py, so a split that drops by touched file can drop most of a batch on one red.\nBased on (read): the lane's round-1 findings on the split work (archive/merge-batch-split-and-pipeline-2, head ee4da8508).\nDeparts from: main has no batch split \u2014 adds one that drops lanes by touched file, or by a per-job hit map.",
+  "home": "step two-drop-leaves-queue (a drop leaves the rest of the queue)",
+  "id": "batch-split-shared-file",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T20:10:00Z",
+    "choice": "a",
+    "note": "Settled by a past ruling, not asked: decision batch-freeze-lane-set (owner Nov 8, 20:24 and 20:31 CST) says a red run drops the one lane that blame names, and its dependents. A drop by shared file departs from it; the split maps each red to the blamed lane."
+  },
+  "n": 634,
+  "options": [
+    {
+      "gain": "One red drops only the lanes that caused it.",
+      "how": "The split maps each failing job to the lanes whose changes it ran, and drops only those.",
+      "key": "a",
+      "label": "Build the per-job hit map first (Recommended)",
+      "lose": "More work before the split ships."
+    },
+    {
+      "gain": "The split ships sooner.",
+      "how": "The split drops by touched file now; the hit map follows as a debt.",
+      "key": "b",
+      "label": "Ship the file split, hit map as a debt",
+      "lose": "One red in test_merge.py can drop most of a batch."
+    }
+  ],
+  "owner": "lane merge-batch-split-and-pipeline (session_013NEJL3fiyt8tFcp1gd64g9)",
+  "ref": "lane merge-batch-split-and-pipeline, via coordinator 14:07 CST Nov 12",
+  "reply": "Closed 14:10 CST by triage: the past ruling settles it; the lane builds the per-job map.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Batch split: map reds to lanes",
+  "status": "closed",
+  "title": "A red batch split drops lanes by shared file, or by the failing job",
+  "why": "The split changes what the merge tool drops; that is your call."
+}

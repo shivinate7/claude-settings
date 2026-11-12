@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-12T20:05:00Z",
+  "context": "Goal: a session on your computer deletes a spent branch when a coordinator asks, without a new ask each time.\nProblem (rule): your Oct 30 standing grant lets a session on your computer delete a branch whose last commit is on the default branch or an archive branch, but it names no repo.\nBased on (read): .claude/CLAUDE.md, standing grant \"Acts the cloud refuses\" (owner Oct 30, 16:20 CDT; Cockpit item 219 a).\nDeparts from: main names no repo for the delete \u2014 the grant names its repos.",
+  "home": ".claude/CLAUDE.md standing grant \"Acts the cloud refuses\"",
+  "id": "grant-branch-delete-scope",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T20:13:00Z",
+    "choice": "a",
+    "note": "any shivinate7, ssemwal-cdc, any repo that i'm github logged in to really"
+  },
+  "n": 632,
+  "options": [
+    {
+      "gain": "Spent branches in every repo go without a new ask.",
+      "how": "The grant line gains: in any shivinate7 repo, when that repo's coordinator asks.",
+      "key": "a",
+      "label": "Any shivinate7 repo (Recommended)",
+      "lose": "A delete may happen in a repo you did not name."
+    },
+    {
+      "gain": "Each delete stays in the repo that asked.",
+      "how": "The grant line gains: only in the repo of the coordinator that asks.",
+      "key": "b",
+      "label": "Only the asking coordinator's repo",
+      "lose": "A cross-repo cleanup needs your word."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "ref": "coordinator 14:02 and 14:03 CST Nov 12",
+  "reply": "Closed 14:14 CST: the grant covers every repo your GitHub logins reach (shivinate7, ssemwal-cdc). The CLAUDE.md grant line changes in a lane; coordinator told.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Branch-delete grant: which repos",
+  "status": "closed",
+  "title": "Which repos your Oct 30 branch-delete grant covers",
+  "why": "The grant names no repo, and only you can widen or narrow it."
+}

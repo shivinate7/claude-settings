@@ -1,0 +1,44 @@
+{
+  "added": "2026-11-12T18:42:00Z",
+  "context": "Goal: no fixed day count in the check that fails CI when a script settings.json called recently is deleted, since a session on an older settings.json would call a missing hook.\nProblem (rule): without the window the check names four scripts deleted long ago, and a test asserts three of them stay deleted, so your no-fixed-numbers ruling and that test cannot both hold.\nBased on (ruling): R37, no hard fixed numbers.\nBased on (read): decision guard-hooks-fail-closed (a guard whose script is missing refuses the call) calls the 14 days unmeasured.\nDeparts from: main's 14-day window in the missing-hook check \u2014 the window is tied to real installs, or dropped for four empty stubs.",
+  "home": "lane fixed-number-limits-census, row L3",
+  "id": "hook-stub-window",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T18:54:35.937Z",
+    "choice": "none",
+    "note": "you're taking my ruling no hard fixed numbers too broadly and seriously... "
+  },
+  "n": 595,
+  "options": [
+    {
+      "gain": "Tied to what sessions really run.",
+      "how": "The check covers scripts named in settings.json at the newest release or in the last few merged PRs.",
+      "key": "a",
+      "label": "Window from real installs",
+      "lose": "It still needs a count of releases or PRs."
+    },
+    {
+      "gain": "No fixed number, and an old settings file never calls a missing hook.",
+      "how": "Restore the four long-deleted scripts (two hooks, two lint scripts) as files that do nothing, and re-point the test that says they stay deleted.",
+      "key": "b",
+      "label": "Bring back four empty stubs (Recommended)",
+      "lose": "Four do-nothing files return to the repo."
+    },
+    {
+      "gain": "Nothing changes.",
+      "how": "Keep the 14-day window as a number you ruled. The lane holds this meanwhile.",
+      "key": "c",
+      "label": "Keep 14 days",
+      "lose": "A fixed number stays, against your no-fixed-numbers ruling."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "ref": "coordinator 12:53 CST Nov 12 (its clock), from lane fixed-number-limits-census (session_013NEJL2yZF4msU7yNVTgeiC)",
+  "reply": "Read as: the 14-day window stays as it is, and the lane drops this row from its census with no change. Your no-fixed-numbers ruling is noted as aimed at limits that cut work off, not at windows like this. If you meant something else, say so in the thread and I reopen it.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Missing-hook check: 14 days or stubs",
+  "status": "closed",
+  "title": "The missing-hook check keeps a 14-day window, or the old scripts come back as empty stubs",
+  "why": "The lane holds this one row out of its PR until you pick; the rest goes on."
+}

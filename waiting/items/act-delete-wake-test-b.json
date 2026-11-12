@@ -1,0 +1,44 @@
+{
+  "added": "2026-11-12T19:54:00Z",
+  "checked_with": "session_013NEJL1gw6EdrSyvHkTUEx6",
+  "context": "Goal: the wake test leaves nothing behind.\nProblem (cannot undo): the lane's test branch is left in the session-mailbox repo; your Windows session was asked first and you press only if it does not reply.\nBased on (measured): the lane's delete push got HTTP 403 at 13:51 CST; the coordinator sent the delete to your Windows session through the git mailbox at 13:55 CST.\nDeparts from: main \u2014 adds nothing; removes one leftover test branch.\nWhy yours: only if your Windows session does not reply; no cloud session can delete it (measured 2026-11-12, push --delete got 403).",
+  "home": "step mailbox-wake-routes (measure which routes wake a session)",
+  "id": "act-delete-wake-test-b",
+  "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-12T20:06:00Z",
+    "choice": "a",
+    "note": "Owner approved in chat; the Windows helper deleted wake-test-b (mail 9be4cafe77cc); archive/wake-test-b at 21f8b899b. Coordinator 14:06 CST."
+  },
+  "n": 623,
+  "options": [
+    {
+      "gain": "No leftover test branch.",
+      "how": "Open the branches page and press the bin icon on wake-test-b (commit 21f8b899b).",
+      "key": "a",
+      "label": "Delete it",
+      "links": [
+        {
+          "label": "session-mailbox branches",
+          "url": "https://github.com/shivinate7/session-mailbox/branches"
+        }
+      ],
+      "lose": "One press."
+    },
+    {
+      "gain": "No press.",
+      "how": "The branch stays.",
+      "key": "b",
+      "label": "Leave it",
+      "lose": "A stale test branch stays in the repo."
+    }
+  ],
+  "owner": "lane mailbox-wake-routes (session_013NEJL21DBeCP6t6antUAEN), via coordinator",
+  "ref": "coordinator 13:52 and 13:53 CST Nov 12",
+  "reply": "Closed 14:08 CST: the branch is gone; archive/wake-test-b keeps it.",
+  "repo": "shivinate7/session-mailbox",
+  "short": "Delete branch wake-test-b",
+  "status": "closed",
+  "title": "Delete the test branch wake-test-b in the session-mailbox repo",
+  "why": "The lane made it for a wake test and could not delete it."
+}

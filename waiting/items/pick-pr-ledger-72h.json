@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-12T18:10:00Z",
+  "context": "Goal: the work goes on now, and you can overrule any coordinator pick.\nProblem (goal): the coordinator took this undoable pick on Nov 12, 12:01 CST without asking you; it stands unless you choose b.\nBased on (notes): coordinator 12:10 CST Nov 12, from its list of today's picks.\nDeparts from: main has no such pick on record \u2014 the work it governs follows this pick.",
+  "home": "PR ledger",
+  "id": "pick-pr-ledger-72h",
+  "kind": "decision",
+  "n": 572,
+  "options": [
+    {
+      "gain": "A stalled review shows up after three days instead of never.",
+      "how": "The PR ledger gives a fix check, a fresh full review and a lane's round 2 or later a 72 h limit (unmeasured). A record marked done whose lane check never passed belongs to its lane, not to the batch runner.",
+      "key": "a",
+      "label": "Keep the pick (Recommended)",
+      "lose": "The other route is not taken unless you choose b."
+    },
+    {
+      "gain": "The other route, if you prefer it.",
+      "how": "No time limit in the ledger.",
+      "key": "b",
+      "label": "Overrule it",
+      "lose": "The governed work is redone or waits for the change."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "pick": "a",
+  "ref": "coordinator pick, Nov 12, 12:01 CST",
+  "reply": "Closed 13:19 CST: the retrospective's audit found the pick sound for now, but the 72 hours were a guess. Step pr-ledger-round-ages measures how old review rounds really get and replaces the 72 hours with that measure.",
+  "repo": "shivinate7/claude-settings",
+  "short": "PR ledger: a 72 h limit for fix checks and later rounds",
+  "stands": true,
+  "status": "closed",
+  "title": "PR ledger: a 72 h limit for fix checks and later rounds",
+  "why": "A coordinator pick you could not see before."
+}

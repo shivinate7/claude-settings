@@ -1,0 +1,45 @@
+{
+  "added": "2026-11-12T19:33:00Z",
+  "context": "Goal: triage's page writes stop skipping the item checks, and you can overrule any pick.\nProblem (goal): triage took this undoable pick on Nov 12, 13:33 CST without asking you; it stands unless you choose b.\nBased on (read): the lane brief says keep the change narrow; an older full fix (PR #1533, 23 files) was closed unmerged this morning.\nDeparts from: main \u2014 adds a fallback so the item checks find triage's page.",
+  "home": "step page-checks-reach-triage (triage page writes pass the item checks)",
+  "id": "pick-page-checks-narrow",
+  "kind": "decision",
+  "n": 616,
+  "options": [
+    {
+      "gain": "Small change, no clash with the lane reworking page answers.",
+      "how": "The lane sends its one-function fix and test (branch page-checks-reach-triage-narrow) to review. Undo: drop that branch.",
+      "key": "a",
+      "label": "Keep the narrow fix (Recommended)",
+      "links": [
+        {
+          "label": "PR #1533",
+          "url": "https://github.com/shivinate7/claude-settings/pull/1533"
+        }
+      ],
+      "lose": "Covers this repo's page only; one related gap stays open and the old full fix is dropped."
+    },
+    {
+      "gain": "The full fix, which already passed review once, covering the related gap too.",
+      "how": "Reopen PR #1533's branch, bring it up to date with main, and review it again.",
+      "key": "b",
+      "label": "Overrule: revive the full fix",
+      "links": [
+        {
+          "label": "PR #1533",
+          "url": "https://github.com/shivinate7/claude-settings/pull/1533"
+        }
+      ],
+      "lose": "23 files, and it clashes with the lane reworking page answers."
+    }
+  ],
+  "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
+  "pick": "a",
+  "ref": "triage pick, Nov 12, 13:33 CST",
+  "repo": "shivinate7/claude-settings",
+  "short": "Narrow fix for triage page checks",
+  "stands": true,
+  "status": "open",
+  "title": "Triage's page writes get the item checks through the narrow fix",
+  "why": "A triage pick you could not see before."
+}

@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-12T18:10:00Z",
+  "context": "Goal: the work goes on now, and you can overrule any coordinator pick.\nProblem (goal): the coordinator took this undoable pick on Nov 12 without asking you; it stands unless you choose b.\nBased on (notes): coordinator 12:10 CST Nov 12, from its list of today's picks.\nDeparts from: main has no such pick on record \u2014 the work it governs follows this pick.",
+  "home": "step ci-wait-cap-55",
+  "id": "pick-ci-wait-cache",
+  "kind": "decision",
+  "n": 568,
+  "options": [
+    {
+      "gain": "One constant with a date is cheap and shows when it goes stale.",
+      "how": "The cap on how long a session waits for CI is kept as one constant with the date it was measured, instead of being read live on each wait.",
+      "key": "a",
+      "label": "Keep the pick (Recommended)",
+      "lose": "The other route is not taken unless you choose b."
+    },
+    {
+      "gain": "The other route, if you prefer it.",
+      "how": "Read the cap live on each wait.",
+      "key": "b",
+      "label": "Overrule it",
+      "lose": "The governed work is redone or waits for the change."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "pick": "a",
+  "ref": "coordinator pick, Nov 12",
+  "reply": "Closed 12:57 CST: the retrospective audit found this pick repeats a ruling already on record (plan R32, part 3); nothing to decide.",
+  "repo": "shivinate7/claude-settings",
+  "short": "CI wait cap: a dated cache constant",
+  "stands": true,
+  "status": "closed",
+  "title": "CI wait cap: a dated cache constant",
+  "why": "A coordinator pick you could not see before."
+}

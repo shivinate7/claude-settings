@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-12T18:10:00Z",
+  "context": "Goal: the work goes on now, and you can overrule any coordinator pick.\nProblem (goal): the coordinator took this undoable pick on Nov 12, 11:54 CST without asking you; it stands unless you choose b.\nBased on (notes): coordinator 12:10 CST Nov 12, from its list of today's picks.\nDeparts from: main has no such pick on record \u2014 the work it governs follows this pick.",
+  "home": "step answers-session-write-guard",
+  "id": "pick-answers-guard-first",
+  "kind": "decision",
+  "n": 578,
+  "options": [
+    {
+      "gain": "It needs nothing else, so it can start now.",
+      "how": "Step answers-session-write-guard starts first, as the only page-data step not blocked.",
+      "key": "a",
+      "label": "Keep the pick (Recommended)",
+      "lose": "The other route is not taken unless you choose b."
+    },
+    {
+      "gain": "The other route, if you prefer it.",
+      "how": "Wait and start the steps in order.",
+      "key": "b",
+      "label": "Overrule it",
+      "lose": "The governed work is redone or waits for the change."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "pick": "a",
+  "ref": "coordinator pick, Nov 12, 11:54 CST",
+  "reply": "Closed 13:19 CST: the retrospective's audit found this pick sound. Under route C the three page steps it waited on (cloud export miss, backup-only copy, answer lag read) are unblocked and running in lane waiting-route-c. Say so in the thread to overrule it.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Page data: start with the answers write guard",
+  "stands": true,
+  "status": "closed",
+  "title": "Page data: start with the answers write guard",
+  "why": "A coordinator pick you could not see before."
+}

@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-12T20:18:00Z",
+  "context": "Goal: batches never wait for a macOS runner.\nProblem (risk): your MacBook adds macOS capacity, but it would run code from a public repo.\nBased on (measured): batch 103 waited 26.4 min for macOS; GitHub Free allows 5 macOS jobs at once (GitHub Actions limits page). Degen's CLAUDE.md lists the runner degen-mac as opt-in until it has a green run.\nDeparts from: main runs only on GitHub-hosted runners \u2014 your Mac takes the batch macOS jobs.",
+  "home": "step ci-macos-queue (batches stop waiting for macOS)",
+  "id": "ci-mac-runner",
+  "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T20:19:00Z",
+    "choice": "a",
+    "note": "Owner 14:19 CST: \"agreed on e, my mac isn't available all the time but imjust saying it shd be available rn and it can help\". Runner label claude-settings-mac; GitHub macOS fallback; never a fork PR (R58)."
+  },
+  "n": 640,
+  "options": [
+    {
+      "gain": "Batches get their own macOS machine.",
+      "how": "Your Mac runs batch macOS jobs only, never a fork PR, with GitHub macOS as the fallback when it is offline; drafts follow your pick on the draft item. Say in the note which repo your MacBook runner is registered to.",
+      "key": "a",
+      "label": "Mac runs batch jobs only (Recommended)",
+      "lose": "Setup work; your Mac is busy during batch runs and runs this repo's code."
+    },
+    {
+      "gain": "Nothing runs on your Mac.",
+      "how": "Only the draft change, and a request to GitHub Support for more macOS slots.",
+      "key": "b",
+      "label": "Ask GitHub for more slots",
+      "lose": "Depends on GitHub; batches still share 5 slots with degen."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "ref": "retrospective 14:18 CST Nov 12",
+  "reply": "Closed 14:22 CST: lane ci-batch-mac-runner started.",
+  "repo": "shivinate7/claude-settings",
+  "short": "MacBook as batch macOS runner",
+  "status": "closed",
+  "title": "Your MacBook runs batch macOS jobs, beside the draft change",
+  "why": "It runs this repo's code on your own Mac."
+}

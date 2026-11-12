@@ -1,7 +1,7 @@
 {
   "added": "2026-11-10T08:43:00Z",
   "checked_with": "session_013NEJL2hB1pLZPDpzas7VgB",
-  "context": "Goal: git writes never run in the wrong checkout after a cd that fails.\nProblem (rule): a test on main expects a git commit after a failed cd to be allowed in a clean repo, and the new guard in #2099 refuses it, so only one can hold.\nBased on (measured): a batch runner's git writes ran in the main clone after its batch folder vanished, because bash runs the commands in the start folder when the cd fails.\nBased on (read): main's allow case was written for another guard's reason, a clean edit, not for this one.\nDeparts from: main's test expects allow \u2014 c refuses only a cd into a folder that is missing at check time.\nMeanwhile: #2099 and the two PRs on it are not released until you answer. You asked for a better option on Nov 10, 09:06 CST, so option c is new.",
+  "context": "Goal: git writes never run in the wrong checkout after a cd that fails, and the PR that refuses them (#2099) and the PR built on top of it (#2144) land on main.\nProblem (rule): one of main's guard test cases (a cd into a missing folder, then add -A and commit) expects allow, and #2099 refuses it, so the merge tool says \"Needs a ruling\".\nBased on (measured): a batch runner's git writes ran in the main clone after its batch folder vanished, because bash runs the commands in the start folder when the cd fails.\nBased on (read): main's allow case was written for another guard's reason, a clean edit, not for this one.\nDeparts from: main's test expects allow \u2014 c refuses only a cd into a folder that is missing at check time.\nMeanwhile: the session now carrying these PRs (the hand-off notes lane, 07:38 CST Nov 12) writes its tests on them and leaves that one case as main has it. Its proposal matches c.",
   "home": "PR #2099 (git writes after a failed cd)",
   "id": "failed-cd-git-write-test",
   "kind": "decision",
@@ -30,9 +30,9 @@
       "lose": "Main's one test case is re-pointed, and a folder removed between the check and the run still slips."
     }
   ],
-  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
   "pick": "c",
-  "ref": "PR #2099; main's test from commit 94f68f2fa; #2144 and #2191 sit on #2099",
+  "ref": "PR #2099; main's test from commit 94f68f2fa, tests/guard/s17500-conflict-markers.py:311; #2144 sits on #2099; lane fan-prose-handoffs (session_013NEJL2x8vsS7agCiTdu1LU), step notes-fix-large-3",
   "reply": "Reopened 09:10 CST Nov 10 with option c, at your request for a better option.",
   "repo": "shivinate7/claude-settings",
   "short": "Git writes after a failed cd",

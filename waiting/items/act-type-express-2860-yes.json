@@ -1,0 +1,43 @@
+{
+  "added": "2026-11-12T20:05:00Z",
+  "context": "Goal: PR #2860 (review records the fix check writes) merges by the express flow you set in R55.\nProblem (rule): the auto-mode check refused runner 10's express build and the cancel of PR #2814's run at 13:24 CST as interfering with workloads, so the runner needs your own typed words.\nBased on (ruling): R55, your express merge flow, which cancels a running batch for an express PR.\nDeparts from: main waits for PR #2814's run \u2014 the runner cancels it and builds #2860 first.\nWhy yours: a relayed pick does not pass the auto-mode check on a run cancel (measured 2026-11-12, runner 10 refused at 13:24 CST).",
+  "home": "owner rulings R55 (express merge flow), plans/owner-rulings-2026-11-12.md",
+  "id": "act-type-express-2860-yes",
+  "kind": "task",
+  "lastAnswer": {
+    "at": "2026-11-12T20:04:00Z",
+    "choice": "a",
+    "note": "Owner typed the yes in runner 10's session at 14:04 CST; batch 106 is building (coordinator 14:09 CST)."
+  },
+  "n": 631,
+  "options": [
+    {
+      "gain": "PR #2860 merges ahead of the batch.",
+      "how": "Open runner 10's session and type: yes: build the express batch for #2860 and cancel #2814's run under R55",
+      "key": "a",
+      "label": "Type the yes",
+      "links": [
+        {
+          "label": "Batch runner 10",
+          "url": "https://claude.ai/code/session_013NEJL2f1YCYsvLdpFqtWP3"
+        }
+      ],
+      "lose": "PR #2814's run restarts later."
+    },
+    {
+      "gain": "PR #2814's run finishes.",
+      "how": "PR #2860 waits for the next ordinary batch.",
+      "key": "b",
+      "label": "Skip it",
+      "lose": "The express flow does not run for #2860."
+    }
+  ],
+  "owner": "batch runner 10 (session_013NEJL2f1YCYsvLdpFqtWP3)",
+  "ref": "coordinator 14:03 CST Nov 12",
+  "reply": "Closed 14:11 CST: batch 106 is building.",
+  "repo": "shivinate7/claude-settings",
+  "short": "Type yes in runner 10 for #2860",
+  "status": "closed",
+  "title": "Type your yes in batch runner 10 so it builds the express batch for #2860",
+  "why": "The auto-mode check refused the build; only your typed word counts."
+}
