@@ -69,14 +69,16 @@ change touched. It is opt-in (the ste-lint input `tree-cites`). It needs no base
 
 Output: `path:line: CODE message`, then `stale-cites: PASS` or `stale-cites: FAIL`. Exit 0 pass, 1 findings,
 2 a read that could not run (a base that names nothing in a full clone, an unreadable .ste-lint-exclude), except
-a gap in the history (a shallow clone, a base with no merge base with the head, or the first parent of a root commit, spelled `HEAD~1`, `HEAD^1`, `@~1` or `<head sha>~01`).
-With env CI unset that gap prints `stale-cites: unknown, ...` naming fetch-depth 0 and exits 0. With env CI set
+a gap in the history (a shallow clone, or a base with no merge base with the head) and the first push.
+With env CI unset a gap prints `stale-cites: unknown, ...` naming fetch-depth 0 and exits 0. With env CI set
 the check first fetches the base through lint/git_fetch.py (unshallowing a shallow clone, then asking for the
 base's sha when it is still out) and reads once more. It is red, a final `stale-cites: UNKNOWN` line naming the
 cause and the base's sha with exit 1, when the fetch fails or the base still shares no history with the head
 (owner item 276 a, decisions ci-unknown-is-red and stale-cites-at-merge). A repo that pins the ste-lint action
 and checks out shallow is red at its pin move until it checks out with fetch-depth 0, or its origin can be
-fetched. A first push, whose base is the first parent of a root commit, has no history to fetch: red under CI too.
+fetched. A first push, whose base is the first parent of a root commit (spelled `HEAD~1`, `HEAD^1`, `@~1` or
+`<head sha>~01`), has no base and no fetch can make one: under CI it prints `stale-cites: no base, ...` and
+exits 0 (lane call, 2026-11-12 08:29 CST); with CI unset it is the gap above.
 Other unknown lines print `stale-cites: unknown, ...` and exit 0, or
 1 with a final `stale-cites: UNKNOWN` line when env CI is set and nothing else failed (decision ci-unknown-is-red).
 Those lines are: a touched .py that does not parse at base or head, a malformed rule_mechanisms.json, and a report
@@ -190,6 +192,11 @@ class BaseUnknown(Unknown):
     """The base of the range does not resolve, as in a shallow clone. Not a finding."""
 
 
+class NoBase(Unknown):
+    """The base is the first parent of a root commit (a first push): the range is empty by construction, so there is
+    nothing to check and no fetch can supply a base. Not red under CI (decision stale-cites-at-merge)."""
+
+
 def resolves(rev):
     """True when `rev` names a commit. Also run after a read failed, to tell a missing head (a read that could not
     run) from a missing base (a shallow clone)."""
@@ -201,21 +208,17 @@ def resolves(rev):
 FIRST_PARENT_SUFFIX = re.compile(r"\A(.+?)[~^](?:0*1)?\Z")
 
 
-def cut_base(base, head):
-    """True when a base that does not resolve is a gap in the history, not a name that points at nothing: the clone is
-    shallow (its base sha is cut away), or `base` is the first parent of `head` and `head` is a root commit, which a
-    first push to the default branch reads by design. `base` is the first parent of `head` when it is a stem plus a
-    first-parent suffix (`~`, `^`, `~1`, `^1`, `~01`) and the stem names the head's own commit: `HEAD~1`, `@~1` and
-    `<sha>^` count, `<another root>^1` does not. A rev-list or rev-parse that exits non-zero is no root: the range
-    is unknown. Run only after a read failed.
-    The extra git starts are an upper bound: `a...b` four (head, base twice, shallow), `a..b` three. A base with a
-    first-parent suffix adds a `rev-list`: `a...b` five, `a..b` four. The root form `HEAD~1..HEAD` five (those three
-    plus `rev-list` and a `rev-parse` of the stem); its three-dot form six."""
-    if resolves(base):
-        return False
-    shallow = _nowindow.run(["git", "rev-parse", "--is-shallow-repository"], capture_output=True)
-    if shallow.stdout.strip() == b"true":
-        return True
+def is_shallow():
+    done = _nowindow.run(["git", "rev-parse", "--is-shallow-repository"], capture_output=True)
+    return done.stdout.strip() == b"true"
+
+
+def root_first_parent(base, head):
+    """True when `base` is the first parent of `head` and `head` is a root commit, which a first push to the default
+    branch reads by design. `base` is the first parent of `head` when it is a stem plus a first-parent suffix (`~`,
+    `^`, `~1`, `^1`, `~01`) and the stem names the head's own commit: `HEAD~1`, `@~1` and `<sha>^` count,
+    `<another root>^1` does not. A rev-list or rev-parse that exits non-zero is no root: the range is unknown. In a
+    shallow clone a cut-away parent also looks like a root, so callers ask only after `is_shallow` is false."""
     suffixed = FIRST_PARENT_SUFFIX.match(base)
     if not suffixed:
         return False
@@ -228,13 +231,29 @@ def cut_base(base, head):
     return stem.returncode == 0 and stem.stdout.split() == shas  # the stem must be the head's own commit
 
 
-def fetch_history(base, failure):
+def cut_base(base, head):
+    """True when a base that does not resolve is a gap in the history, not a name that points at nothing: the clone is
+    shallow (its base sha is cut away), or `base` is the first parent of `head` and `head` is a root commit
+    (`root_first_parent`). Run only after a read failed.
+    The extra git starts are an upper bound: `a...b` four (head, base twice, shallow), `a..b` three. A base with a
+    first-parent suffix adds a `rev-list`: `a...b` five, `a..b` four. The root form `HEAD~1..HEAD` five (those three
+    plus `rev-list` and a `rev-parse` of the stem); its three-dot form six."""
+    if resolves(base):
+        return False
+    return is_shallow() or root_first_parent(base, head)
+
+
+def fetch_history(base, failure, head=None):
     """Under env CI only: one fetch that completes a shallow history (lint/git_fetch.py, the one home code_check also
     uses; decision ci-unknown-is-red). Returns None when the fetch ran and the read should be tried once more, else the
     Unknown to raise: `failure` unchanged with CI unset (the local rule: unknown, exit 0), or `failure` with the
-    fetch's own failure and the base's sha appended. A base the first fetch left out is asked for by its sha."""
+    fetch's own failure and the base's sha appended. A base the first fetch left out is asked for by its sha. A base
+    that is the first parent of a root `head` (a first push) in a full clone is no gap a fetch can close: it returns
+    NoBase with no fetch. A shallow clone fetches first, since its head only looks like a root until it is unshallowed."""
     if not os.environ.get("CI"):
         return failure
+    if head and not resolves(base) and not is_shallow() and root_first_parent(base, head):
+        return NoBase("the base %s is the first parent of the root commit %s" % (base, head))
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     try:
         import git_fetch
@@ -246,6 +265,8 @@ def fetch_history(base, failure):
     if ok and not resolves(base) and re.fullmatch(r"[0-9a-f]{40}", base):
         ok, message = git_fetch.fetch(top, [base], timeout=FETCH_SECONDS)
     if ok:
+        if head and not resolves(base) and not is_shallow() and root_first_parent(base, head):
+            return NoBase("the base %s is the first parent of the root commit %s" % (base, head))
         return None
     sha = _nowindow.run(["git", "rev-parse", "--verify", "--quiet", base + "^{commit}"], capture_output=True)
     named = sha.stdout.decode().strip() or base
@@ -342,10 +363,12 @@ def parse_range(text):
             except Unknown as exc:
                 failure = exc
             if attempt == 0:
-                failure = fetch_history(left, failure)
+                failure = fetch_history(left, failure, right)
                 if failure is None:
                     continue
             break
+        if isinstance(failure, NoBase):
+            raise failure
         if resolves(right) and history_gap(left, right):
             raise BaseUnknown(str(failure))  # the head is there and the history is not: a shallow clone or an orphan base
         raise failure
@@ -401,9 +424,11 @@ def read_diff(diff_args, head=None, base=None):
         except Unknown as exc:
             failure = exc
         if attempt == 0:
-            failure = fetch_history(base or (diff_args[0] if diff_args else ""), failure)
+            failure = fetch_history(base or (diff_args[0] if diff_args else ""), failure, head)
             if failure is None:
                 continue
+        if isinstance(failure, NoBase):
+            raise failure
         if head is None or (resolves(head) and (base is None or cut_base(base, head))):
             raise BaseUnknown(str(failure))  # the head is there and the history is not: a shallow clone
         raise failure
@@ -1643,6 +1668,10 @@ def main(argv):
         root = git("rev-parse", "--show-toplevel").decode().strip()
         os.chdir(root)
         found, unknowns, lines = scan(args.range) if args.range else (*scan_tree(args.tree), [])
+    except NoBase as exc:  # only under CI (fetch_history): a first push has no base to check, and that is clear
+        print("stale-cites: no base, %s; a first push has no earlier commit, so the range is empty. Nothing to check."
+              % exc)
+        return 0
     except BaseUnknown as exc:
         if os.environ.get("CI"):  # the fetch in fetch_history ran or failed: a base still unread is red (decision ci-unknown-is-red)
             print("stale-cites: UNKNOWN, the base of %s does not resolve after a fetch (%s). Check out with "
