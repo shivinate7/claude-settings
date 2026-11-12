@@ -3792,6 +3792,137 @@ test("reply to an item, case 11: once the item's reply has its answer, the fold 
   assert.equal(show, "Show your note, the replies and your reply", "the fold words of No. " + IRP_ANS.n + " are " + JSON.stringify(show));
 });
 
+// ---------------------------------------------------------------- reply to an item on its line (step item-reply-back, notes section 11)
+// An item that is one line (a routed open item, or a closed item on the page) keeps his reply and the answer to it in its thread, and ends
+// the thread with Reply, then Mark read. A line read at load comes back to unread when an answer to his reply is later than its Mark read.
+// While his reply waits, Mark read is off, so a read line never hides a waiting reply. The Asks row "Re: an item no longer on this page"
+// is only for a reply whose item has left the store.
+const IRP_BACK = "Option C joins the rail guard review.";
+// Answered and filed with his reply, so it is one line in Answered. Its filing (APR_FILED) and answer (answerOf) come from routedOver().
+const IRP_ROUTED = mk("irp-routed", 4, { added: at(8), reply: "Filed with the rail guard review." });
+const IRP_ROUTED_REC = { id: "ask-irp-rt", text: IRP_TEXT, at: "2026-10-29T08:00:00Z", item: IRP_ROUTED.id, owner: "lane tier-fold", answered: "2026-10-29T09:00:00Z", reply: IRP_BACK };
+// A closed item on the page is its line, with its filing. Each case below adds its own mark or reply.
+const IRP_CLOSED = { status: "closed", closed: "2026-11-09T15:00:00Z", home: "step:ask-phase-out", reply: "Filed as step ask-phase-out." };
+// Marked read at 11-09 16:00. Its answer to his reply comes after that.
+const IRP_CL_READ = mk("irp-cl-read", 5, { ...IRP_CLOSED, dismissed: "2026-11-09T16:00:00Z" });
+const IRP_CL_READ_REC = { id: "ask-irp-cl-read", text: IRP_TEXT, at: "2026-11-09T17:00:00Z", item: IRP_CL_READ.id, owner: "lane tier-fold", answered: "2026-11-10T08:00:00Z", reply: IRP_BACK };
+// The same line, with its answer before the Mark read: the line stays read.
+const IRP_CL_EARLY_REC = { ...IRP_CL_READ_REC, id: "ask-irp-cl-early", at: "2026-11-09T10:00:00Z", answered: "2026-11-09T12:00:00Z" };
+// Unread, with his reply waiting.
+const IRP_CL_WAIT = mk("irp-cl-wait", 6, IRP_CLOSED);
+const IRP_CL_WAIT_REC = { id: "ask-irp-cl-wait", text: IRP_TEXT, at: "2026-11-10T08:00:00Z", item: IRP_CL_WAIT.id, owner: "lane tier-fold" };
+// Marked read at load, with his reply waiting: the line comes back to Answered.
+const IRP_CL_READ_WAIT = mk("irp-cl-rw", 7, { ...IRP_CLOSED, dismissed: "2026-11-09T16:00:00Z" });
+const IRP_CL_READ_WAIT_REC = { id: "ask-irp-cl-rw", text: IRP_TEXT, at: "2026-11-10T08:00:00Z", item: IRP_CL_READ_WAIT.id, owner: "lane tier-fold" };
+// On the page as its line, with his reply waiting.
+const IRP_CL_ON = mk("irp-cl-on", 8, IRP_CLOSED);
+const IRP_CL_ON_REC = { id: "ask-irp-cl-on", text: IRP_TEXT, at: "2026-11-10T08:00:00Z", item: IRP_CL_ON.id, owner: "lane tier-fold" };
+// Its item's reply has a time, which the opened line shows in its header.
+const IRP_CL_TIME = mk("irp-cl-time", 9, { ...IRP_CLOSED, replied: "2026-11-09T14:00:00Z" });
+// Opens the page with the open card first (open() waits for it), then the items given, and the records given as stored asks.
+const irpOpen = (t, items, asks = {}, over = {}) => open(t, { items: [IRP_OWED, ...items], dbExtra: { asks }, storage: VISIT, ...over });
+// The routed item's answer and filing. APR_FILED is read when a case runs, not when this file loads.
+const routedOver = () => ({ answers: answerOf(IRP_ROUTED), receipts: { [IRP_ROUTED.id]: APR_FILED } });
+
+test("reply to an item, case 12: a routed item's line shows his reply in its thread, and the session's answer after it", async (t) => {
+  const page = await irpOpen(t, [IRP_ROUTED], { [IRP_ROUTED_REC.id]: IRP_ROUTED_REC }, routedOver()); if (!page) return;
+  await mustHave(page, `#tier-answered #line-${IRP_ROUTED.n}`, `routed line of No. ${IRP_ROUTED.n} in Answered`);
+  await page.click(`#lrow-${IRP_ROUTED.id}`);
+  const line = `#line-${IRP_ROUTED.n}`;
+  await mustHave(page, `${line} .myreply`, `his reply in the line of No. ${IRP_ROUTED.n}`);
+  const text = await page.locator(line).innerText();
+  assert.ok(text.includes(IRP_TEXT), `the line of No. ${IRP_ROUTED.n} does not show his reply`);
+  assert.ok(text.includes(IRP_BACK), `the line of No. ${IRP_ROUTED.n} does not show the session's answer`);
+  assert.ok(text.indexOf(IRP_BACK) > text.indexOf(IRP_TEXT), `the answer is not after his reply in the line of No. ${IRP_ROUTED.n}`);
+});
+
+test("reply to an item, case 13: a routed item's line ends its thread with Reply, then Mark read", async (t) => {
+  const page = await irpOpen(t, [IRP_ROUTED], { [IRP_ROUTED_REC.id]: IRP_ROUTED_REC }, routedOver()); if (!page) return;
+  await mustHave(page, `#tier-answered #line-${IRP_ROUTED.n}`, `routed line of No. ${IRP_ROUTED.n} in Answered`);
+  await page.click(`#lrow-${IRP_ROUTED.id}`);
+  await mustHave(page, `#line-${IRP_ROUTED.n} ${rplSel("reply-", irpKey(IRP_ROUTED))}`, `Reply on the line of No. ${IRP_ROUTED.n}`);
+  const end = await page.evaluate(([n, rid]) => {
+    const reply = document.getElementById(rid), line = document.getElementById("line-" + n);
+    const mark = line ? [...line.querySelectorAll("button")].find((b) => /^Mark read: /.test(b.getAttribute("aria-label") || "")) : null;
+    const thread = reply ? reply.closest(".replyend") : null;
+    return {
+      mark: !!mark,
+      sameEnd: !!thread && !!mark && mark.closest(".replyend") === thread,
+      after: !!reply && !!mark && !!(reply.compareDocumentPosition(mark) & Node.DOCUMENT_POSITION_FOLLOWING),
+    };
+  }, [IRP_ROUTED.n, "reply-" + irpKey(IRP_ROUTED)]);
+  assert.equal(end.mark, true, `the line of No. ${IRP_ROUTED.n} has no Mark read`);
+  assert.equal(end.sameEnd, true, `Reply and Mark read are not in one thread end on No. ${IRP_ROUTED.n}`);
+  assert.equal(end.after, true, `Mark read does not come after Reply on No. ${IRP_ROUTED.n}`);
+});
+
+test("reply to an item, case 14, control: a routed item's reply stays out of the Asks list and gets no row of its own", async (t) => {
+  const plain = { id: "ask-irp-plain-r", text: "A plain question still waiting", at: "2026-10-31T08:00:00Z" };
+  const page = await irpOpen(t, [IRP_ROUTED], { [IRP_ROUTED_REC.id]: IRP_ROUTED_REC, [plain.id]: plain }, routedOver()); if (!page) return;
+  await mustHave(page, `#tier-answered #line-${IRP_ROUTED.n}`, `routed line of No. ${IRP_ROUTED.n} in Answered`);
+  // The plain ask's row shows the Asks list is drawn, so an absent record is the rule and not a list still loading.
+  await mustHave(page, `#row-${plain.id}`, "row of the plain ask, so the Asks list is drawn");
+  assert.equal(await page.locator("#askList").getByText(IRP_TEXT).count(), 0, "the Asks list shows the routed item's reply");
+  assert.equal(await page.locator(`#row-${IRP_ROUTED_REC.id}`).count(), 0, "the routed item's reply has a row of its own in the Asks list");
+});
+
+test("reply to an item, case 15: an answer to his reply that comes after the closed line's Mark read brings the line back to unread", async (t) => {
+  const page = await irpOpen(t, [IRP_CL_READ], { [IRP_CL_READ_REC.id]: IRP_CL_READ_REC }); if (!page) return;
+  const line = `#tier-answered #line-${IRP_CL_READ.n}`;
+  await mustHave(page, line, `line of No. ${IRP_CL_READ.n} in Answered, unread again after its answer`);
+  assert.equal(await page.locator(line).getByRole("button", { name: new RegExp(`^Mark read: No\\. ${IRP_CL_READ.n},`) }).count(), 1, `the line of No. ${IRP_CL_READ.n} has no Mark read, so it is still read`);
+});
+
+test("reply to an item, case 16, control: an answer that came before the closed line's Mark read leaves the line read, behind Show read items", async (t) => {
+  const page = await irpOpen(t, [IRP_CL_READ], { [IRP_CL_EARLY_REC.id]: IRP_CL_EARLY_REC }); if (!page) return;
+  await mustHave(page, "#readItems", "Show read items fold that holds the read line");
+  assert.equal(await page.locator(`#tier-answered #line-${IRP_CL_READ.n}`).count(), 0, `the read line of No. ${IRP_CL_READ.n} is in Answered`);
+});
+
+test("reply to an item, case 17: a closed line whose reply waits has no Mark read on its row, and its opened Mark read is off with the reason", async (t) => {
+  const page = await irpOpen(t, [IRP_CL_WAIT], { [IRP_CL_WAIT_REC.id]: IRP_CL_WAIT_REC }); if (!page) return;
+  const n = IRP_CL_WAIT.n, markBtn = (scope) => scope.getByRole("button", { name: new RegExp(`^Mark read: No\\. ${n},`) });
+  await mustHave(page, `#tier-answered #line-${n}`, `line of No. ${n} in Answered`);
+  assert.equal(await markBtn(page.locator(`#tier-answered #line-${n}`)).count(), 0, `Mark read is on the folded line of No. ${n} while its reply waits`);
+  await page.click(`#lrow-${IRP_CL_WAIT.id}`);
+  const opened = page.locator(`#line-${n}`);
+  assert.equal(await markBtn(opened).count(), 1, `the opened line of No. ${n} has no Mark read to be off`);
+  assert.equal(await markBtn(opened).getAttribute("aria-disabled"), "true", `Mark read on the opened line of No. ${n} is on while its reply waits`);
+  const why = await page.evaluate(() => ASK_DIS_OFF);
+  assert.ok((await opened.innerText()).includes(why), `the opened line of No. ${n} does not say why Mark read is off`);
+});
+
+test("reply to an item, case 18: a closed line read at load comes back to Answered while his reply waits, so a read line never hides a waiting reply", async (t) => {
+  const page = await irpOpen(t, [IRP_CL_READ_WAIT], { [IRP_CL_READ_WAIT_REC.id]: IRP_CL_READ_WAIT_REC }); if (!page) return;
+  await mustHave(page, `#tier-answered #line-${IRP_CL_READ_WAIT.n}`, `line of No. ${IRP_CL_READ_WAIT.n} in Answered, back while his reply waits`);
+});
+
+test("reply to an item, case 19: a reply to a closed item whose line is on the page has no Asks row and no 'no longer on this page' line", async (t) => {
+  const plain = { id: "ask-irp-plain-c", text: "A plain question still waiting", at: "2026-10-31T08:00:00Z" };
+  const page = await irpOpen(t, [IRP_CL_ON], { [IRP_CL_ON_REC.id]: IRP_CL_ON_REC, [plain.id]: plain }); if (!page) return;
+  await mustHave(page, `#tier-answered #line-${IRP_CL_ON.n}`, `line of No. ${IRP_CL_ON.n} on the page`);
+  await mustHave(page, `#row-${plain.id}`, "row of the plain ask, so the Asks list is drawn");
+  assert.equal(await page.locator(`#row-${IRP_CL_ON_REC.id}`).count(), 0, `the Asks list has a row for his reply to No. ${IRP_CL_ON.n}, whose line is on the page`);
+  assert.equal(await page.getByText("Re: an item no longer on this page").count(), 0, `a row says No. ${IRP_CL_ON.n} is no longer on this page, while its line is`);
+});
+
+test("reply to an item, case 20: the opened line heads his item's reply 'Reply from <owner>, <time>', as an answer in a thread does", async (t) => {
+  const page = await irpOpen(t, [IRP_CL_TIME]); if (!page) return;
+  await mustHave(page, `#tier-answered #line-${IRP_CL_TIME.n}`, `line of No. ${IRP_CL_TIME.n} in Answered`);
+  await page.click(`#lrow-${IRP_CL_TIME.id}`);
+  const head = ((await page.locator(`#line-${IRP_CL_TIME.n} .thread p.lhead`).first().textContent()) || "").trim();
+  const when = await page.evaluate((iso) => fmt(iso), IRP_CL_TIME.replied);
+  assert.equal(head, `Reply from ${IRP_CL_TIME.owner}, ${when}`, `the opened line of No. ${IRP_CL_TIME.n} heads its reply "${head}", with no time`);
+});
+
+test("reply to an item, case 21: the Asks row of a reply whose item has left the store heads it 'Your reply', not 'You asked'", async (t) => {
+  const gone = { id: "ask-irp-gone-head", text: IRP_TEXT, at: "2026-10-30T08:00:00Z", item: "closed-item-x", owner: "test thread" };
+  const page = await irpOpen(t, [], { [gone.id]: gone }); if (!page) return;
+  await mustHave(page, `#row-${gone.id}`, "row of the reply whose item has left the store");
+  const head = ((await page.locator(`#row-${gone.id} .ahead .aby`).first().textContent()) || "").trim();
+  assert.match(head, /^Your reply\b/, `the row of the reply to a gone item heads it "${head}", not "Your reply"`);
+});
+
 // ---------------------------------------------------------------- Mark read on an answered ask (step ask-dismiss)
 // Contract: docs/design/ask-dismiss-notes.md, sections 1-8; the mockup is docs/design/ask-dismiss.html.
 // Mark read writes `dismissed` (an ISO time) on the thread's root ask, with update. Mark unread writes `dismissed: null`. Nothing is deleted.
