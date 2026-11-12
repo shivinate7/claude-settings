@@ -4807,6 +4807,8 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", co
     check names (`Blamed:`): a ready batch whose head is that head is left as it is, and any other head is linted again,
     ready or not. `on` and `base` default to the block's.
     Returns 0, or 1 when a batch stacked on a rebuilt one could not be rebuilt."""
+    if ready and unknown_ok:
+        raise Stop("--lint-unknown-ok has nothing to lift on --ready: the batch head runs no lane lint (owner ruling R4, 14:56 CST Nov 10), and a ready check that reads unknown is refused with no flag. Nothing was pushed or edited. " + FREEZE_CITE)
     branch = integration_branch(name)
     found = None
     if ready:
