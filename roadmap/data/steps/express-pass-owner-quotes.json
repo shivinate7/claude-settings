@@ -5,8 +5,8 @@
   "order": 1026,
   "owner": "triage",
   "why": "Owner 15:22 CST Nov 10 (R7, relayed by the retrospective session): \"this is very key yes\".",
-  "note": "Rewrite decision docs-only-prs-skip-review in place (item 205 b): an exact-quote match against the feedback log skips the docs-only review round. Its first user is the restart plan's own PR. Lane prose-unmapped-2 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Lane cleared 13:38 CST Nov 12 (retrospective 13:36 CST sweep): its session (\"Lane fan-prose-unmapped-2\") is idle and completed with no branch for this step. Lane started 13:49 CST Nov 12. Lane 13:53 CST Nov 12: part 1 is draft #2900 (runner 10); part 2 waits on owner item 624 (who checks the quote match: session stamp, recommended, or wait for feedback-log-tends-itself). Departs from the brief: the change goes in kind_misfits/review_state on top of #2727, not in is_doc, which every doc test shares.",
-  "updatedAt": "2026-11-12T13:55:11-06:00",
+  "note": "Rewrite decision docs-only-prs-skip-review in place (item 205 b): an exact-quote match against the feedback log skips the docs-only review round. Its first user is the restart plan's own PR. Lane prose-unmapped-2 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Lane cleared 13:38 CST Nov 12 (retrospective 13:36 CST sweep): its session (\"Lane fan-prose-unmapped-2\") is idle and completed with no branch for this step. Lane started 13:49 CST Nov 12. Lane 13:53 CST Nov 12: part 1 is draft #2900 (runner 10); part 2 waits on owner item 624 (who checks the quote match: session stamp, recommended, or wait for feedback-log-tends-itself). Departs from the brief: the change goes in kind_misfits/review_state on top of #2727, not in is_doc, which every doc test shares. Owner page save 14:13 CST Nov 12: item 624 b, \"for now at least\": part 2 uses the sending session's stamp line; the shared log stays a later move.",
+  "updatedAt": "2026-11-12T14:16:31-06:00",
   "lane": "session_013NEJKygJbMN4tsZrzb9rkH",
   "blockedBy": []
 }

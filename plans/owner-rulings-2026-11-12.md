@@ -63,3 +63,4 @@ Relayed by the retrospective.
 - 13:49 CST, page save: 618 b (widen the "Merge Tool Read Checks" allow text to name the batch label write); 617 a (accepted pick, lane audit).
 - R56, asked 13:46 CST, "go" 13:52 CST (via retrospective, plan a853c38): targeted nudge to silent lanes others wait on (blockedBy target or R55 express), once per R54 read, no broadcast. Home: decision session-tiers; step coordinator-session-board.
 - 14:05 CST (via retrospective, plan fbc11be): CI wall-time fixes join R55 express beside the merge-flow steps. Home: decision no-merge-during-batch-ci.
+- 14:13 CST page save: 620 done; 621 a; 624 b ("for now at least"); 627 a; 630 b; 632 a, widened: any repo his GitHub logins reach (shivinate7, ssemwal-cdc); 633 b (records-only fix-check FAIL carries; home rule roles-review-cap-three, step fix-check-records-carry). None of these: 622 (retrospective decides), 625, 628, 629, 636 (reworded or back to lanes).

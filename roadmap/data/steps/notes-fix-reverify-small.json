@@ -5,8 +5,8 @@
   "order": 1.2,
   "owner": "coordinator",
   "why": "Coordinator, 14:23 CST Nov 7: notes-keep-reverify re-checked 146 rows. 18 to fix, 18 to delete, 110 to keep (86 rare and harmless, 18 for the owner to decide, 6 that need the Mac).",
-  "note": "Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-notes-fix-reverify-small]). Lane 13:43 CST Nov 12: (1) git -C first-wins vs per-segment: owner page item 621 (the code comment cites a Nov 10 ruling no record holds). (2) Refusing node --env-file with -e/-p/--eval/--print: settled by decision env-file-stays-unread (\"a runner prints nothing\"); the narrowing enforces that sentence, so no page item.",
+  "note": "Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-notes-fix-reverify-small]). Lane 13:43 CST Nov 12: (1) git -C first-wins vs per-segment: owner page item 621 (the code comment cites a Nov 10 ruling no record holds). (2) Refusing node --env-file with -e/-p/--eval/--print: settled by decision env-file-stays-unread (\"a runner prints nothing\"); the narrowing enforces that sentence, so no page item. Owner page save 14:13 CST Nov 12: item 621 a, the guard judges each command by the folder it names.",
   "lane": "session_013NEJKzkcpx9EGjr8ctAJbs",
-  "updatedAt": "2026-11-12T13:50:47-06:00",
+  "updatedAt": "2026-11-12T14:16:31-06:00",
   "paused": false
 }

@@ -1,0 +1,14 @@
+{
+ "id": "fix-check-records-carry",
+ "title": "A fix-check FAIL on a records-only diff carries to a second fix check, not a new round 1",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner page save 14:13 CST Nov 12, item 633 b (\"is it even a good idea to give purely wording edits the full round checks\"); runner 10 on #2892.",
+ "source": "owner 14:13 CST Nov 12 (page item 633)",
+ "note": "Change rule roles-review-cap-three (\"A FAIL or a wider diff starts a new lane at round 1\") so a FAIL on a diff of records and notes only gets a second fix check; the merge tool reads it. Red first on #2892's sequence. Kin: fix-check-chain, decision docs-only-prs-skip-review.",
+ "updatedAt": "2026-11-12T14:16:31-06:00"
+}
