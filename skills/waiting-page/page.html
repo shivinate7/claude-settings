@@ -1227,7 +1227,7 @@ const foldOpen = (it) => (it.id in state.unfold ? !!state.unfold[it.id] : newRep
 // A group is seen only while every member is in the frozen set, so a member that arrives after load makes the whole group new.
 const isSeen = (it) => !!state.seen && mates(it).every((x) => state.seen.has(x.id));
 // feed.receipts only records that the receipts arrived (a test waits on it); no freeze reads it. feed.meta and feed.metaFailed (the meta read failed) tell the
-// repo split that "this repo" is settled: until one is true the tiers draw flat, so no head is drawn and then lost.
+// repo split that "this repo" is settled: until one is true the list and the rail draw their loading state (holdingForMeta), so no card moves when the meta lands.
 const feed = { items: false, answers: false, receipts: false, meta: false, metaFailed: false, all: [] };
 const metaSettled = () => feed.meta || feed.metaFailed;
 function freezeSeen() {
@@ -1278,8 +1278,8 @@ const isOwnRepo = (r) => {
   if (own) return l === own || (!l.includes("/") && l === name);
   return !!name && nameOfRepo(l) === name;
 };
-// "" is this repo; any other repo is its `owner/name` as written. Until the meta settles no repo is known as other, so every item reads "" and the tiers draw flat.
-// A failed meta read leaves state.meta null, so only an item with no `repo` is this repo's (the identity.name path finds no name).
+// "" is this repo; any other repo is its `owner/name` as written. Until the meta settles no repo is known as other, so a caller outside the list and rail (the New reply mark) sees one flat group.
+// A failed meta read leaves state.meta null, and identity lives only there, so there is no name to match: an item with no `repo` is this repo's and no head is drawn for it alone.
 const repoKey = (it) => { const r = K(it).repo; return !metaSettled() || typeof r !== "string" || !r.trim() || isOwnRepo(r) ? "" : r.trim(); };
 // A group sits once, under the repo of its member that stops the most, this repo on a tie, then A to Z.
 function groupRepo(it) {
@@ -2205,8 +2205,13 @@ function answeredEl(items, place, lines, read) {
 }
 // The closed lines that show in the Answered section: not read at load. The rail's Answered row reads the same list, so its count is the section's.
 const shownLines = () => state.lines.filter((it) => !itemAway(it));
+// Items are in but the meta has neither arrived nor failed: the page cannot say which repo is this one, so it draws no tier, card or head until it can
+// (no card moves when the meta lands). The rail waits the same way.
+const holdingForMeta = () => state.items.length > 0 && !metaSettled();
 function renderList() {
-  const list = $("list"), by = sorted(), want = [];
+  const list = $("list");
+  if (holdingForMeta()) { reconcile(list, [h("div", { class: "empty" }, "Loading the items waiting on you…")]); return; }
+  const by = sorted(), want = [];
   // As renderAskList does: a focused element that a rebuild or a move drops gets its focus back by id (a Mark read press, and the Marked read line after it). Read first: the section builders move nodes while `want` is built.
   const a0 = document.activeElement, focusId = a0 && a0.id && list.contains(a0) ? a0.id : "";
   if (!state.items.length) {
@@ -2306,6 +2311,7 @@ function jump(id) { const el = $(id); if (el) el.scrollIntoView({ behavior: "smo
 // The wide rail chip shows `short` when it is a text of 24 characters or fewer, else the title (cut with an ellipsis by the chip).
 const shortOf = (it) => typeof it.short === "string" && it.short.trim() && it.short.trim().length <= 24 ? it.short.trim() : it.title;
 function renderRail() {
+  if (holdingForMeta()) { $("rail").hidden = true; $("rail").replaceChildren(); return; }
   const rail = $("rail"), by = sorted(), active = document.activeElement, focusId = active && rail.contains(active) ? active.id : "";
   const total = state.items.length, sent = state.items.filter(isAnswered).length, ready = staged().filter((i) => !isRuling(i) && !i.park).length;
   rail.hidden = !total && !state.rulings.length;
