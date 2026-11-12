@@ -126,7 +126,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    GitHub's merge queue needs an organization-owned repo. A personal repo batches by hand or through
    the merge tool.
    **After a batch merges, route the PRs that now conflict with main.** In the same turn as the merge
-   report, the batch runner runs `merge --release-check N... --lint N@<live head>:PASS` on the handed-in
+   report, the batch runner runs `merge --release-check N... --lint N@<live head>:PASS` (the full 40-hex head) on the handed-in
    lane PRs. Without the lint verdicts, every line FAILs on the lint. A line that says `not clean (merge
    conflict)` names a PR that conflicts with the new main. A line that says `unknown` does not say there is a conflict.
    The runner names each conflicting PR to its lane and picks nothing per PR, so no coordinator pick is
@@ -147,7 +147,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    4. Run `merge --lane-lint <pr>` at the merge head. Then hand in again.
    A PASS ends review only where the log allows it. A change with `Guard or check: yes` still owes
    round 3 and its net-value test. A PR that merges clean needs no fix verifier and no new log: the log
-   stays valid (record `pr-review-record`, clean merge survival). It still needs step 4, because the
+   stays valid (record `pr-review-record`, clean merge survival). It still needs item 4 of this list, because the
    lint verdict names an exact head. A refused chain means that the lane gets the full review of its
    new head. Two examples: a second fix verifier on a head whose first fix verifier is open, and a
    merge whose second parent is not on main. The lane never works around the refusal. A FAIL starts a
