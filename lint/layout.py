@@ -344,12 +344,13 @@ GIT_SHOW_TIMEOUT = 10  # seconds one `git show` may run
 
 
 def _default_branch_extras(root):
-    """The extras file of `root` as read from the repo's default branch, (dict, "<ref>:<path>"), else None. For a
-    checkout that holds no extras file of its own, such as a worktree on the record branch. It reads origin/HEAD's
+    """The extras file of `root` as read from the repo's default branch, (dict, "<ref>:<path>"), else None. Its
+    callers are `waiting_page`, for a checkout that holds no extras file of its own (a worktree on the record
+    branch), and `default_branch_artifact_ids`, on every read of the registry. It reads origin/HEAD's
     branch, else origin/main, from the ref alone: no checkout moves and no fetch runs. None for no extras path, no
     such ref, a git error or a timeout, and for a file that does not parse.
-    Cost: at most two `git show` processes per call (the second only when origin/HEAD does not resolve), and
-    only when the checkout holds no extras file. No file is written."""
+    Cost: at most two `git show` processes per call (the second only when origin/HEAD does not resolve). No file
+    is written."""
     where = layout().get("extras")
     if not where:
         return None
@@ -362,6 +363,20 @@ def _default_branch_extras(root):
         except (OSError, ValueError, subprocess.SubprocessError, LayoutError, ImportError):
             continue
     return None
+
+
+def default_branch_artifact_ids(root):
+    """The ids in the registry of the extras file on the repo's default branch, a set, else None. For a push judged
+    from a checkout whose own registry is older than the branch's, or that holds none. It lists ids only and leaves
+    the rest of each entry unchecked, so one entry that fails `artifacts` hides no other page. None when that file
+    cannot be read or lists no id, so a caller keeps the checkout's own file. Cost and reads: `_default_branch_extras`."""
+    held = _default_branch_extras(root)
+    if held is None:
+        return None
+    found = held[0].get(ARTIFACTS)
+    if not isinstance(found, list):
+        return None
+    return {item["id"] for item in found if isinstance(item, dict) and isinstance(item.get("id"), str)} or None
 
 
 def _page_in(root, keys, where):

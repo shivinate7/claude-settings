@@ -160,6 +160,7 @@ FAMILIES = {
     "agent-remote-tools": "an agent's call to an outward claude-code-remote tool is refused; the session's own call, an agent_type with no agent_id, and the read tools keep their verdict",
     "workflow-args": "a Workflow call whose args is, or holds as an array or object value, a placeholder (an all-caps word with an underscore, or __X__) is refused, naming it and the fix; an absent, empty or real args passes, and so does a short all-caps word or a sentence with an env var name",
     "sections": "the section files: a set the loader refuses (no section file, two files with one number, a log check appended after the LOG_CHECKS_EXTRA join) stops a run before any case",
+    "roadmap-artifact-cites": "roadmap-one-writer's pushed-head check (decision waiting-data-in-repo): a triage push that sends a bare claude.ai artifact link in a roadmap step is refused; a cite, a dry run, another branch, a lane's push and an unreadable head keep their verdict",
     "misc": "anything outside a tagged section",
 }
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
@@ -577,6 +578,16 @@ LOG_CHECKS = LOG_CHECKS + tuple(SKIP_ROWS)
 # each one its rule's family instead, so GUARD_FAMILY=<rule> runs its log checks too. A prefix that
 # matches no label, or more than one, stops the run: a typo must not leave a log check untagged.
 LOG_RULE_FAMILY = (
+    ("roadmap-artifact-cites: a head the guard cannot read", "roadmap-artifact-cites"),
+    ("roadmap-artifact-cites: a readable clean head", "roadmap-artifact-cites"),
+    ("roadmap-artifact-cites: a push to another branch", "roadmap-artifact-cites"),
+    ("roadmap-artifact-cites: a head with no registry file", "roadmap-artifact-cites"),
+    ("roadmap-artifact-cites: a push of every branch", "roadmap-artifact-cites"),
+    ("roadmap-artifact-cites: a mirror push", "roadmap-artifact-cites"),
+    ("roadmap-artifact-cites: a $FEAT source is noted unknown and never denied", "roadmap-artifact-cites"),
+    ("roadmap-artifact-cites: a $FEAT source from a clean head", "roadmap-artifact-cites"),
+    ("roadmap-artifact-cites: a $(cmd) source", "roadmap-artifact-cites"),
+    ("roadmap-artifact-cites: a feat* glob source", "roadmap-artifact-cites"),
     ("log: one line per refusal", "frozen"),
     ("log: the refused file is named", "frozen"),
     ("log: a project config edit", "frozen"),

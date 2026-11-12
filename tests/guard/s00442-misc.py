@@ -413,6 +413,17 @@ PUSH_ALL_AGENT_LACKS = ("push origin agent-", "HEAD:agent-", "push origin claude
 # and its extras file names that branch as the record branch, so `roadmap` is not its record.
 RECROADMAP = os.path.join(ROOT, "recroadmap")
 RECFORK = os.path.join(ROOT, "recfork")
+# roadmap-artifact-cites fixture. ARTREC has one branch per roadmap step shape (see _artcite_build_branches). Its
+# `roadmap` holds the bare-link step, its origin/roadmap the cites-only one, and HEAD sits on the bare-link branch.
+ARTREC = os.path.join(ROOT, "artrec")
+# Two linked worktrees of ARTREC, made by _artcite_build_branches. ARTCLEAN sits on the cites-only branch, a clean head
+# with the registry. ARTNOREG is detached at the base commit, before the registry, so it holds no registry file: the
+# checkout a worktree on the record branch is.
+ARTCLEAN = os.path.join(ROOT, "artclean")
+ARTNOREG = os.path.join(ROOT, "artnoreg")
+# ARTOLD is its own repository, a checkout behind origin's default branch: its registry is older than origin's. Its own
+# origin/main is built by _artcite_build_older_checkout, so ARTREC's origin/main (no registry) is left as it is.
+ARTOLD = os.path.join(ROOT, "artold")
 
 # WTMAIN is the primary checkout of its own small repository. Every linked worktree below is a
 # real one, because the rule reads `git worktree list --porcelain` and `git status --porcelain`
@@ -2176,6 +2187,14 @@ def _build_push():
             sys.exit("fixture setup failed in build_fixtures: %r needs main equal to origin/main and local branches "
                      "%s, got %s" % (where, want, heads))
     _break_branch_listing(PUSHALLBROKEN)
+    # roadmap-artifact-cites: the same remote shape as RECROADMAP (origin/main, origin/HEAD, no upstream). The
+    # branches are built and read back by _artcite_build_branches, which exits the build on any wrong step.
+    make_repo(ARTREC, {"base.txt": "base\n"})
+    run_vcs(ARTREC, "remote", "add", "origin", PUSHREMOTE)
+    run_vcs(ARTREC, "update-ref", "refs/remotes/origin/main", "HEAD")
+    run_vcs(ARTREC, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    _artcite_build_branches()
+    _artcite_build_older_checkout()
 
 
 def _build_worktrees():
@@ -2483,7 +2502,7 @@ lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDET
               PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK, PUSHOWNREF,
               PUSHLOCAL, PUSHLOCALSTRAY, PUSHLOCALMAIN, PUSHSSH, PUSHNOREMOTE,
               PUSHAGENT, PUSHAGENTWT, PUSHAGENTBARE, PUSHAGENTNOTES, PUSHAGENTMYABC, PUSHAGENTMYHEX,
-              PUSHAGENTSHORT, PUSHAGENTEIGHT, PUSHAGENTCFG,
+              PUSHAGENTSHORT, PUSHAGENTEIGHT, PUSHAGENTCFG, ARTREC, ARTCLEAN, ARTNOREG, ARTOLD,
               PUSHAHEAD, PUSHAHEADLANE, PUSHAHEADDET, PUSHAHEADAGENT, PUSHNOTRACK, PUSHBEHIND,
               PUSHMASTERAHEAD, PUSHNOMAIN, PUSHLOCALAHEAD,
               PUSHALLNOAGENT, PUSHALLAGENT, PUSHALLAGENTWT, PUSHALLAGENTCLAUDE, PUSHALLAGENTAHEAD, PUSHALLBROKEN],

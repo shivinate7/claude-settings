@@ -616,6 +616,13 @@ def push_destinations(args, cwd: str, overrides=None):
     return _DESTINATIONS[key]
 
 
+def push_sends_every_ref(args):
+    """True for `--all`, `--branches` and `--mirror`: a push that sends each local branch, the record branch among them,
+    with no refspec to name it."""
+    _force, mirror, every, *_rest = _push_parse(args)
+    return mirror or every
+
+
 def _colon_delete(delete, plain):
     """True for a push that deletes: a delete flag, or a refspec with no source (`:ref`)."""
     return delete or any(spec.startswith(":") for spec in plain)
