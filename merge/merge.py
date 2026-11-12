@@ -3127,7 +3127,12 @@ def review_record_step(host, n, info):
         return [f"Review record: note, no review record on #{n} yet. Write one after the review (`merge {n} --review-record`)."], []
     rec, why = newest_record_read(rows, n)
     if rec is None:
-        return [], [f"Review record FAIL: the newest record-shaped comment on #{n} does not parse ({why}). Post a corrected record as a new comment; the newest one decides."]
+        old = re.search(rf"^Head: ({REVIEW_SHA})$", "\n".join(rows[-1][0].splitlines()[:3]), re.M | re.ASCII)  # a record the lane posted for an earlier head
+        if old and old.group(1) != info["head"]:  # a corrected comment would still name that head, so the fix is a new review of the live one
+            how = f"It names {old.group(1)[:9]}, not the live head {info['head'][:9]}. Review the live head in a new round, then post a new record for it (`merge {n} --review-record`)."
+        else:
+            how = "Post a corrected record as a new comment; the newest one decides."
+        return [], [f"Review record FAIL: the newest record-shaped comment on #{n} does not parse ({why}). {how}"]
     if rec["head"] != info["head"]:
         return [f"Review record: note, the newest record (comment {rows[-1][3]}) is for head {rec['head'][:9]}, not {info['head'][:9]}."], []
     return [f"Review record: ok, the newest record (comment {rows[-1][3]}) parses and names {info['head'][:9]}."], []
@@ -3934,7 +3939,7 @@ def review_parse(text):
         return None, (stop + 1 + next(i for i, l in enumerate(after) if l.strip()), True)
     return {"n": int(n), "head": head, "kind": kind, "guard": guard, "rounds": rounds, "net": net.group(1), "fix": fix, "grant": grant}, None
 
-REVIEW_RULE_STEP = "Put free text below a `---` line that follows the CI line. Text between the CI line and the end of the comment, with no `---` line first, makes the record bad."  # the one remedy sentence for a record with text after its CI line
+REVIEW_RULE_STEP = "Put free text below a `---` line that follows the CI line. Text between the CI line and the end of the comment, with no `---` line first, makes the record bad."  # the remedy sentence the merge tool prints for a record with text after its CI line (lint/report_guard.py words the same rule itself)
 
 def record_fields_only(body):
     """True when `body` has no review marker line but opens with the record's PR line and a Head line of a 40-hex sha: a record whose marker line was cut
@@ -3947,7 +3952,7 @@ def review_fault(text, bad):
     number, after_ci = bad
     lines = text.splitlines()
     shown = plain_text(" ".join(lines[number - 1].split()))[:100] if 0 < number <= len(lines) else ""
-    return f"line {number}: {shown}" + (f". {REVIEW_RULE_STEP}" if after_ci else "")
+    return f"line {number}: {shown}" + ((" " if shown.endswith(".") else ". ") + REVIEW_RULE_STEP if after_ci else "")
 
 def newest_record_read(rows, n):
     """-> (rec, why) of the newest of `rows`, the (body, created, updated, id) rows issue_comments gives for pull request n. rec is its parse, or None when
@@ -5379,7 +5384,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 raise Stop(f"Kind: the diff breaks --kind {a.kind} at " + ", ".join(misfits) + ". Write the record with the kind the diff has. " + REVIEW_CITE)
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed
                 earlier = h.review_records(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])
-                last, bad = review_parse(earlier[-1][0]) if earlier else (None, None)
+                last, why = newest_record_read(earlier, a.pr)  # the same read as the lane lint and --reviewed: a record for another PR is no base
                 if not last or last["head"] != a.fix_check[0]:
                     ok = False
                 elif not last["fix"]:
@@ -5407,7 +5412,7 @@ def main(argv, host=None, lock=None, hosts=None):
                             return 2
                 if not ok:
                     print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review log on this pull request, and that log must have no Fix check line. One exception, a fix after a merge of main: the log reads done with a PASS Fix check line, and the pull request head is a merge of the base into that Head with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A clean merge of main needs no fix verifier. " + REVIEW_CITE
-                          + (f" That log does not parse: comment {earlier[-1][3]}, {review_fault(earlier[-1][0], bad)}" if bad else ""), file=sys.stderr)
+                          + (f" That log does not parse: {why}" if why else ""), file=sys.stderr)
                     return 2
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant).rstrip("\n"), "---")  # the footer rule: a note goes below it
             print("merge: nothing was posted. Post the lines above as a comment on the pull request. " + REVIEW_RULE_STEP, file=sys.stderr)
