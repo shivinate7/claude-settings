@@ -11,6 +11,7 @@ script from that tree. The diff cases also make a temp git repo and set refs/rem
 the base the script diffs against. RECORD_SLUGS_UNDER_TEST overrides the module path.
 """
 import contextlib
+import datetime
 import importlib.util
 import io
 import os
@@ -68,9 +69,11 @@ VALID_LINES = (  # every form that passes: a step, both dashes, and each reason 
     "- rare-note: a gap. Fix: none — rare and harmless. Until: 2026-11-20\n",
 )
 NEW_DEBT = "debts/new-debt.md"  # a new debt file with no Fix line
+OLD_DEBT = "debts/old-debt.md"  # a debt file the base holds; a case edits it in place
 FIXED_DEBT = "debts/fixed-debt.md"  # a new debt file with a valid Fix line, beside NEW_DEBT in the same diff
 DEBT_NO_FIX = "# New debt\n\nWhat. A gap with no fix named.\n"
 PINNED_TODAY = "2026-11-07"  # the date the suite pins: the check reads FIXED_TODAY, so no case reads the clock
+PINNED_DATE = datetime.date.fromisoformat(PINNED_TODAY)  # the same date, for the cases that call a function directly
 KEPT_NOTE = "- kept-note: a gap. Fix: already fixed on main 1a2b3c4\n"  # a bullet with a new-grammar Fix
 THIRD_NOTE = "- third-note: a gap. Fix: already fixed on main 1a2b3c4\n"
 
@@ -106,10 +109,10 @@ class RecordSlugsTests(unittest.TestCase):
         with open(path, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
 
-    def lint(self, *args):
+    def lint(self, *args, fixed_today=PINNED_TODAY):
         env = dict(os.environ)
         env.pop("CI", None)  # CI turns an unknown diff into red; these cases run locally
-        env["FIXED_TODAY"] = PINNED_TODAY  # the check's date comes from here, never from the clock
+        env["FIXED_TODAY"] = fixed_today  # the check's date comes from here, never from the clock
         cmd = [sys.executable, os.path.join(self.tree, "lint", "check_record_slugs.py"), *args]
         r = subprocess.run(cmd, cwd=self.tree, env=env, capture_output=True, text=True,
                            encoding="utf-8", errors="replace")
@@ -198,6 +201,22 @@ class RecordSlugsTests(unittest.TestCase):
     def head_sha(self):
         return subprocess.run(["git", "-C", self.tree, "rev-parse", "--short=7", "HEAD"], check=True,
                               capture_output=True, text=True).stdout.strip()
+
+    def commit_names(self):
+        """The paths HEAD's commit adds or changes, sorted: the scope a case checks before it calls the module."""
+        out = subprocess.run(["git", "-C", self.tree, "show", "--name-only", "--format=", "HEAD"], check=True,
+                             capture_output=True, text=True).stdout
+        return sorted(line for line in out.splitlines() if line)
+
+    def load(self):
+        """The check's module, imported from this case's tree. The import binds this tree's `layout`, not one an
+        earlier case left in sys.modules, so each case reads its own folders."""
+        spec = importlib.util.spec_from_file_location("record_slugs_probe",
+                                                      os.path.join(self.tree, "lint", "check_record_slugs.py"))
+        module = importlib.util.module_from_spec(spec)
+        with mock.patch.dict(sys.modules):
+            spec.loader.exec_module(module)
+        return module
 
     def failed_about(self, out, *needles):
         """True when a FAIL line of the check names one of `needles`."""
@@ -760,6 +779,93 @@ class RecordSlugsTests(unittest.TestCase):
         self.main_moves_to(DEBT_NOTES, NOTES_HEAD + OLD_NOTE
                            + "- second-note: a gap. Fix: already fixed on main %s\n" % merge_base)
         self.assert_passes()
+
+    # The functions the roadmap's upkeep list, report_guard.py and the check's own run read. Each case below holds
+    # one branch of one of them, read directly, so the branch's own result is what the case asserts.
+
+    def test_commit_fixes_reads_a_new_note_line_and_a_new_debt_file(self):
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        self.put(DEBT_NOTES, NOTES_HEAD + NEW_VALID_NONE)
+        self.put(NEW_DEBT, "# New debt\n\nWhat. A gap with a fix named.\n\nFix: step:alpha-beta\n")
+        self.commit_change()
+        self.assertEqual(self.commit_names(), sorted([DEBT_NOTES, NEW_DEBT]))  # scope: the commit adds these two
+        entries = self.load().commit_fixes(self.tree, self.head_sha())
+        self.assertIsInstance(entries, list, "commit_fixes returned %r, not a list" % (entries,))
+        self.assertCountEqual(entries, [
+            (DEBT_NOTES, "new-note", [("none", "owner decides")]),
+            (NEW_DEBT, NEW_DEBT, [("step", "alpha-beta")]),
+        ])
+
+    def test_commit_fixes_skips_a_debt_file_the_commit_only_edits(self):
+        self.put(OLD_DEBT, "# Old debt\n\nWhat. A gap.\n")
+        self.commit_base()
+        self.put(OLD_DEBT, "# Old debt\n\nWhat. A gap.\n\nFix: none — owner decides\n")
+        self.commit_change()
+        self.assertEqual(self.commit_names(), [OLD_DEBT])  # scope: the commit edits one old debt file
+        entries = self.load().commit_fixes(self.tree, self.head_sha())
+        self.assertIsInstance(entries, list, "commit_fixes returned %r, not a list" % (entries,))
+        self.assertEqual(entries, [], "commit_fixes read the Fix line of a debt file the commit did not create")
+
+    def test_expired_notes_lists_only_none_bullets_past_their_until(self):
+        # Five lines: one expired none bullet, and four that are not: a none bullet dated after today, a step bullet
+        # with an old date, a line that is not a bullet, and a none bullet with no date.
+        self.put(DEBT_NOTES,
+                 "- past-none: a gap. Fix: none — owner decides. Until: 2026-11-01\n"
+                 "- future-none: a gap. Fix: none — owner decides. Until: 2026-11-20\n"
+                 "- old-step: a gap. Fix: step:alpha-beta. Until: 2026-11-01\n"
+                 "Prose line, not a bullet: a gap. Fix: none — owner decides. Until: 2026-11-01\n"
+                 "- undated-none: a gap. Fix: none — owner decides\n")
+        self.assertTrue(os.path.isfile(os.path.join(self.tree, *DEBT_NOTES.split("/"))))  # scope: the notes file exists
+        rows = self.load().expired_notes(self.tree, PINNED_DATE)
+        self.assertIsInstance(rows, list, "expired_notes returned %r, not a list" % (rows,))
+        self.assertEqual(rows, [(DEBT_NOTES, "past-none", datetime.date(2026, 11, 1))])
+
+    def test_expired_notes_with_no_notes_file_lists_nothing_and_reads_no_file(self):
+        self.put(DEBT_README, "# Debts\n\nOne debt per file.\n")  # the folder exists, its notes file does not
+        self.assertFalse(os.path.exists(os.path.join(self.tree, *DEBT_NOTES.split("/"))))  # scope: no notes file
+        try:
+            rows = self.load().expired_notes(self.tree, PINNED_DATE)
+        except OSError as err:
+            self.fail("expired_notes opened a notes file that is not there: %s" % err)
+        self.assertEqual(rows, [])
+
+    def test_ratchet_is_not_read_when_the_branch_leaves_the_notes_file_alone(self):
+        self.put(DEBT_NOTES, NOTES_HEAD + NEW_NO_FIX)  # a bullet with no Fix at HEAD: it would count if read
+        self.put(PLAIN_DEBT, PLAIN_TEXT)
+        self.commit_base()
+        self.put(PLAIN_DEBT, "# Stale link\n\nA plain debt, reworded.\n")
+        self.commit_change()
+        moved = [("M", PLAIN_DEBT, PLAIN_DEBT)]
+        touched = [path for _status, old, new in moved for path in (old, new)]
+        self.assertNotIn(DEBT_NOTES, touched)  # scope: the branch touches no notes file
+        self.assertIsNone(self.load().notes_ratchet(self.tree, [], moved))
+
+    def test_until_problem_returns_an_empty_string_for_a_line_that_passes(self):
+        # The docstring says a passing line gives ''. A step Fix needs no date; a none line dated today passes.
+        module = self.load()
+        self.assertEqual(module.until_problem("- step-note: a gap. Fix: step:alpha-beta\n", PINNED_DATE), "")
+        self.assertEqual(module.until_problem("- owner-note: a gap. Fix: none — owner decides. Until: 2026-11-07\n",
+                                              PINNED_DATE), "")
+
+    def test_a_fixed_today_that_is_not_a_date_is_red_with_its_named_cause(self):
+        self.add_note(NEW_VALID_NONE)
+        rc, out = self.lint(fixed_today="not-a-date")
+        self.assertEqual(rc, 1, out)
+        self.assertNotIn("Traceback", out)
+        self.assertIn("FIXED_TODAY is not an ISO date", out)
+
+    def test_an_already_fixed_check_prints_only_its_own_lines(self):
+        # git prints a sha for each rev-parse of the Fix. Every line the check prints must carry its own prefix.
+        self.put(DEBT_NOTES, NOTES_HEAD)
+        self.commit_base()
+        sha = self.base_sha()[:7]
+        self.put(DEBT_NOTES, NOTES_HEAD + "- fixed-note: a gap. Fix: already fixed on main %s\n" % sha)
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 0, out)
+        for line in out.splitlines():
+            self.assertTrue(line.startswith("check_record_slugs:"), "a line the check did not print: %r" % line)
 
 
 class ImportTests(unittest.TestCase):
