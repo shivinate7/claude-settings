@@ -395,6 +395,61 @@ class RouteCover(unittest.TestCase):
                           "a global flag between gh and the subcommand is not skipped, so the draft row does not cover the act",
                           surface="cloud")
 
+    def test_a_lone_apostrophe_before_the_draft_act_is_covered(self):
+        """Form 5: a lone apostrophe leaves the quote open, so the line splits at every operator (the fallback of _split_line)."""
+        rows = [draft_row()]
+        cite_line = LINE_DRAFT + cite(DRAFT_ROW) + "."
+        self.assertIsNotNone(re.search(DRAFT_PAT, DRAFT_ACT), "scope: the draft pattern does not match the plain act")
+        self.assertRefused(rows, cite_line, mac_after_login("echo don't; gh pr merge 12 --undo"),
+                           "control: a merge after a lone apostrophe citing the draft row is not refused", surface="cloud")
+        self.assertPasses(rows, cite_line, mac_after_login("echo don't; gh pr ready 12 --undo"),
+                          "a lone apostrophe is not split at the operator, so the draft row does not cover the act",
+                          surface="cloud")
+
+    def test_a_timeout_signal_option_before_the_draft_act_is_covered(self):
+        """Form 6: `timeout --signal=KILL 5` before the command. _TIMEOUT_OPTS takes the option, so the prefix strip drops it."""
+        rows = [draft_row()]
+        cite_line = LINE_DRAFT + cite(DRAFT_ROW) + "."
+        self.assertIsNotNone(re.search(DRAFT_PAT, DRAFT_ACT), "scope: the draft pattern does not match the plain act")
+        self.assertRefused(rows, cite_line, mac_after_login("timeout --signal=KILL 5 gh pr merge 12 --undo"),
+                           "control: a timeout signal option on a merge citing the draft row is not refused", surface="cloud")
+        self.assertPasses(rows, cite_line, mac_after_login("timeout --signal=KILL 5 gh pr ready 12 --undo"),
+                          "a timeout signal option before the command is not stripped, so the draft row does not cover the act",
+                          surface="cloud")
+
+    def test_a_timeout_s_option_before_the_draft_act_is_covered(self):
+        """Form 7: `timeout -s KILL 5` before the command, the short signal option that _TIMEOUT_OPTS also takes."""
+        rows = [draft_row()]
+        cite_line = LINE_DRAFT + cite(DRAFT_ROW) + "."
+        self.assertIsNotNone(re.search(DRAFT_PAT, DRAFT_ACT), "scope: the draft pattern does not match the plain act")
+        self.assertRefused(rows, cite_line, mac_after_login("timeout -s KILL 5 gh pr merge 12 --undo"),
+                           "control: a timeout -s option on a merge citing the draft row is not refused", surface="cloud")
+        self.assertPasses(rows, cite_line, mac_after_login("timeout -s KILL 5 gh pr ready 12 --undo"),
+                          "a timeout -s option before the command is not stripped, so the draft row does not cover the act",
+                          surface="cloud")
+
+    def test_a_gh_repo_flag_with_equals_before_the_draft_act_is_covered(self):
+        """Form 8: `gh --repo=o/r` between gh and the subcommand. _GH_REPO_FLAG drops the flag, its `=` form included."""
+        rows = [draft_row()]
+        cite_line = LINE_DRAFT + cite(DRAFT_ROW) + "."
+        self.assertIsNotNone(re.search(DRAFT_PAT, DRAFT_ACT), "scope: the draft pattern does not match the plain act")
+        self.assertRefused(rows, cite_line, mac_after_login("gh --repo=o/r pr merge 12 --undo"),
+                           "control: a gh --repo flag on a merge citing the draft row is not refused", surface="cloud")
+        self.assertPasses(rows, cite_line, mac_after_login("gh --repo=o/r pr ready 12 --undo"),
+                          "a gh --repo=o/r flag between gh and the subcommand is not skipped, so the draft row does not cover the act",
+                          surface="cloud")
+
+    def test_a_hash_inside_a_quoted_string_before_the_draft_act_is_covered(self):
+        """Form 9: a `#` inside a quoted string is text, not a comment, so the `;` after the string still splits the act."""
+        rows = [draft_row()]
+        cite_line = LINE_DRAFT + cite(DRAFT_ROW) + "."
+        self.assertIsNotNone(re.search(DRAFT_PAT, DRAFT_ACT), "scope: the draft pattern does not match the plain act")
+        self.assertRefused(rows, cite_line, mac_after_login('echo "# keep"; gh pr merge 12 --undo'),
+                           "control: a merge after a quoted # citing the draft row is not refused", surface="cloud")
+        self.assertPasses(rows, cite_line, mac_after_login('echo "# keep"; gh pr ready 12 --undo'),
+                          "a # inside a quoted string is read as a comment, so the draft row does not cover the act",
+                          surface="cloud")
+
 
 if __name__ == "__main__":
     unittest.main()
