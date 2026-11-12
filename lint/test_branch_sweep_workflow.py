@@ -15,6 +15,8 @@ It prints `clean` when the workflow passes, else one line per finding: `<rule>: 
   concurrency  a concurrency block is set at the top level
   condition    a job-level if: limits the job to main
   argv         --open-head takes its value as --open-head=VALUE, so a value that starts with - is not an option
+  tip          each DELETE call has a gh api read of its branch's tip earlier in the same loop, with no comment
+               or quote around the read; a DELETE in a comment is no call
 pin, checkout and timeout are ci-hygiene rules (skills/ci-hygiene, steps 7 to 9).
 
 GitHub does not evaluate an expression in a YAML comment. It does evaluate one in a quoted value, a plain value, or a
@@ -83,10 +85,16 @@ jobs:
           python3 actions/branch-sweep/sweep.py --repo . --default "$DEFAULT_BRANCH" "${args[@]}" > "$RUNNER_TEMP/verdicts.txt"
           while read -r verb name reason; do
             if [ "$verb" = delete ]; then
+              tip=$(gh api "repos/$REPO/git/ref/heads/$name" --jq .object.sha)
               gh api -X DELETE "repos/$REPO/git/refs/heads/$name"
             fi
           done < "$RUNNER_TEMP/verdicts.txt"
 """
+
+
+TIP_LINE = '              tip=$(gh api "repos/$REPO/git/ref/heads/$name" --jq .object.sha)\n'
+DELETE_LINE = '              gh api -X DELETE "repos/$REPO/git/refs/heads/$name"\n'
+LOOP_LINE = '          while read -r verb name reason; do\n'
 
 
 def variant(old, new):
@@ -214,6 +222,45 @@ class Workflow(unittest.TestCase):
     def test_split_open_head_argument_is_flagged(self):
         text = variant('args+=(--open-head="$head")', 'args+=(--open-head "$head")')
         self.assertFinding(text, "argv", "--open-head with a separate value: a head named -x reads as an option")
+
+    def test_delete_without_a_tip_read_is_flagged(self):
+        self.assertFinding(variant(TIP_LINE, ""), "tip", "a DELETE with no tip read before it in its loop")
+
+    def test_tip_read_after_the_delete_is_flagged(self):
+        text = variant(TIP_LINE + DELETE_LINE, DELETE_LINE + TIP_LINE)
+        self.assertFinding(text, "tip", "the tip is read after the DELETE, so the DELETE ran unchecked")
+
+    def test_tip_read_outside_the_loop_is_flagged(self):
+        text = variant(TIP_LINE, "").replace(LOOP_LINE, TIP_LINE + LOOP_LINE)
+        self.assertFinding(text, "tip", "the tip is read before the loop, not in it, so the DELETE in the loop has none")
+
+    def test_commented_out_tip_read_is_flagged(self):
+        self.assertFinding(variant(TIP_LINE, "              # " + TIP_LINE.lstrip()), "tip",
+                           "a commented-out tip read does not run, so the DELETE has no read before it")
+
+    def test_tip_read_only_in_an_echo_string_is_flagged(self):
+        text = variant(TIP_LINE, '              echo "gh api repos/$REPO/git/ref/heads/$name"\n')
+        self.assertFinding(text, "tip", "a read named inside an echo string is text, not a call")
+
+    def test_delete_after_a_hash_inside_quotes_is_flagged(self):
+        text = variant(TIP_LINE + DELETE_LINE,
+                       '              echo "# not a comment"; gh api -X DELETE "repos/$REPO/git/refs/heads/$name"\n')
+        self.assertFinding(text, "tip", "a # inside quotes does not hide the DELETE after it in the same line")
+
+    def test_delete_after_a_lone_quote_is_flagged(self):
+        text = variant(TIP_LINE + DELETE_LINE,
+                       "              echo don't; gh api -X DELETE \"repos/$REPO/git/refs/heads/$name\"\n")
+        self.assertFinding(text, "tip", "a lone quote in text does not hide the DELETE after it in the same line")
+
+    def test_delete_on_a_line_after_an_open_quote_is_flagged(self):
+        text = variant(TIP_LINE + DELETE_LINE,
+                       '              msg="a # opens a quote\n' + DELETE_LINE + '              end"\n')
+        self.assertFinding(text, "tip", "a quote left open on one line does not skip the DELETE on the next")
+
+    def test_commented_out_delete_is_clean(self):
+        text = variant(TIP_LINE + DELETE_LINE,
+                       '              # gh api -X DELETE "repos/$REPO/git/refs/heads/$name"\n              echo "$name"\n')
+        self.assertClean(text, "a DELETE in a shell comment is no call, so it is no finding")
 
 
 def tearDownModule():

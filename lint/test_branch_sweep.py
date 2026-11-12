@@ -15,7 +15,10 @@ prints no delete line.
 
 The DeleteStep cases run the open-PR read step, then the delete step, from .github/workflows/branch-sweep.yml, each under
 bash -eo pipefail as GitHub runs `shell: bash`. A fake gh serves the open pull requests through the workflow's own --jq
-filter (jq) and refuses or accepts each DELETE.
+filter (jq) and refuses or accepts each DELETE. Before each DELETE the workflow reads the branch's tip with
+`gh api repos/REPO/git/ref/heads/NAME` (singular: the plural git/refs/heads/ GET can return a list). The fake answers
+that read from a map of branch to sha, or to an "HTTP <status>" refusal, and the sha is the checkout's tip unless a
+case moves it. Any other gh call the fake does not know fails loudly.
 Run: python3 lint/test_branch_sweep.py
 """
 import json
@@ -40,31 +43,55 @@ ENV = _test_git.apply(dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_
                            GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t"))
 RUN_FOLDER = _test_temp.run_folder()
 
+REPO_PATH = "repos/owner/repo"  # the REPO the run env names
+
 # Stands in for gh: logs each call. A pulls call prints FAKE_GH_PULLS through the --jq filter the call names.
-# A DELETE is refused with the HTTP status named in FAKE_GH_REFUSE.
+# A DELETE is refused with the HTTP status named in FAKE_GH_REFUSE. A tip read (GET git/ref/heads/NAME) answers from
+# FAKE_GH_TIPS, a JSON map of branch to sha, or to "HTTP <status>" for a refusal. Any other call fails loudly.
 FAKE_GH = """#!/bin/sh
 printf '%s\\n' "$*" >> "$FAKE_GH_LOG"
+jq_filter() {
+  filter=""
+  take=""
+  for arg in "$@"; do
+    if [ -n "$take" ]; then
+      filter="$arg"
+      take=""
+    elif [ "$arg" = "--jq" ] || [ "$arg" = "-q" ]; then
+      take=1
+    fi
+  done
+  printf '%s' "$filter"
+}
 case "$*" in
   *"/pulls?"*)
-    filter=""
-    take=""
-    for arg in "$@"; do
-      if [ -n "$take" ]; then
-        filter="$arg"
-        take=""
-      elif [ "$arg" = "--jq" ]; then
-        take=1
-      fi
-    done
-    jq -r "$filter" < "$FAKE_GH_PULLS"
+    jq -r "$(jq_filter "$@")" < "$FAKE_GH_PULLS"
     exit $? ;;
   *DELETE*)
     if [ -n "$FAKE_GH_REFUSE" ]; then
       echo "gh: refused (HTTP $FAKE_GH_REFUSE)" >&2
       exit 1
-    fi ;;
+    fi
+    exit 0 ;;
+  *"/git/ref/heads/"*)
+    ref="${*#*/git/ref/heads/}"
+    ref="${ref%% *}"
+    value=$(jq -r --arg n "$ref" '.[$n] // "HTTP 500"' "$FAKE_GH_TIPS")
+    case "$value" in
+      "HTTP "*)
+        echo "gh: refused ($value)" >&2
+        exit 1 ;;
+    esac
+    filter=$(jq_filter "$@")
+    if [ -n "$filter" ]; then
+      printf '{"object":{"sha":"%s"}}\\n' "$value" | jq -r "$filter"
+    else
+      printf '{"object":{"sha":"%s"}}\\n' "$value"
+    fi
+    exit $? ;;
 esac
-exit 0
+echo "fake gh: unhandled call: $*" >&2
+exit 1
 """
 
 
@@ -128,6 +155,36 @@ def read_text(path):
         return ""
     with open(path, encoding="utf-8") as f:
         return f.read()
+
+
+def delete_calls(log):
+    """The gh calls of a run that are DELETEs."""
+    return [line for line in log if "DELETE" in line]
+
+
+def call_on_ref(line, name, delete):
+    """True when a gh call line is the DELETE (delete True) or the tip read (delete False) of one branch."""
+    path = "%s/git/%s/heads/%s" % (REPO_PATH, "refs" if delete else "ref", name)
+    return ("DELETE" in line) == delete and path in line.split()
+
+
+def ref_call_index(log, name, delete):
+    """Index in the gh log of a branch's DELETE or tip read, or -1 when no call made it."""
+    for i, line in enumerate(log):
+        if call_on_ref(line, name, delete):
+            return i
+    return -1
+
+
+def annotations(done, *prefixes):
+    """The annotation lines a step printed that start with one of the prefixes, such as ::warning::."""
+    return [line for line in (done.stdout + done.stderr).splitlines() if line.startswith(prefixes)]
+
+
+def log_lines_naming(done, verdict_text, name):
+    """The lines a step printed past its verdict echo that name a branch."""
+    echoed = set(verdict_text.splitlines())
+    return [line for line in (done.stdout + done.stderr).splitlines() if name in line and line not in echoed]
 
 
 class Verdicts(unittest.TestCase):
@@ -295,9 +352,11 @@ class DeleteStep(unittest.TestCase):
                 return text
         self.fail("the workflow has no run: block that holds %s" % " and ".join(markers))
 
-    def run_step(self, merged, open_prs, refuse=None):
-        """(CompletedProcess of the delete step, DELETE calls, verdict text) of one run of both steps. The open-PR
-        read runs first, as the workflow runs it, on pull requests that are (head, base) pairs in open_prs."""
+    def run_workflow(self, merged, open_prs, refuse=None, tip_reads=None):
+        """(CompletedProcess of the delete step, every gh call in order, verdict text) of one run of both steps. The
+        open-PR read runs first, as the workflow runs it, on pull requests that are (head, base) pairs in open_prs.
+        tip_reads maps a merged branch to what its tip read answers: "moved" (a commit pushed after the checkout) or
+        "HTTP <status>". A merged branch with no entry answers with its checkout tip."""
         self.assertIsNotNone(shutil.which("jq"), "jq is not on PATH, so the open-PR read step cannot run")
         repo = Repo(self)
         m1 = repo.commit("main 1")
@@ -316,9 +375,18 @@ class DeleteStep(unittest.TestCase):
         pulls = os.path.join(runner, "pulls.json")
         with open(pulls, "w", encoding="utf-8") as f:
             json.dump([{"head": {"ref": head}, "base": {"ref": base}} for head, base in open_prs], f)
+        tips = {}
+        for name in merged:
+            tips[name] = git(repo.root, "rev-parse", "refs/remotes/origin/" + name)
+        for name, outcome in (tip_reads or {}).items():
+            tips[name] = repo.commit("pushed after the checkout", parent=tips[name]) if outcome == "moved" else outcome
+        tips_path = os.path.join(runner, "tips.json")
+        with open(tips_path, "w", encoding="utf-8") as f:
+            json.dump(tips, f)
         log = os.path.join(runner, "gh.log")
         env = dict(ENV, GH_TOKEN="t", REPO="owner/repo", DEFAULT_BRANCH="main", RUNNER_TEMP=runner,
-                   FAKE_GH_LOG=log, FAKE_GH_PULLS=pulls, PATH=bin_dir + os.pathsep + ENV["PATH"])
+                   FAKE_GH_LOG=log, FAKE_GH_PULLS=pulls, FAKE_GH_TIPS=tips_path,
+                   PATH=bin_dir + os.pathsep + ENV["PATH"])
         if refuse:
             env["FAKE_GH_REFUSE"] = refuse
         steps = []
@@ -333,8 +401,21 @@ class DeleteStep(unittest.TestCase):
                          % (read.returncode, read.stderr.strip()))
         done = subprocess.run(["bash", "--noprofile", "--norc", "-eo", "pipefail", steps[1]], cwd=repo.root,
                               capture_output=True, text=True, env=env)
-        calls = [line for line in read_text(log).splitlines() if "DELETE" in line]
-        return done, calls, read_text(os.path.join(runner, "verdicts.txt"))
+        return done, read_text(log).splitlines(), read_text(os.path.join(runner, "verdicts.txt"))
+
+    def run_step(self, merged, open_prs, refuse=None):
+        """(CompletedProcess of the delete step, DELETE calls, verdict text) of one run of both steps."""
+        done, log, verdict_text = self.run_workflow(merged, open_prs, refuse=refuse)
+        return done, delete_calls(log), verdict_text
+
+    def assert_tip_read_just_before_each_delete(self, log, names):
+        """The gh call right before each branch's DELETE is that branch's tip read. A read made earlier, with other
+        calls between it and the DELETE, lets the branch move in between, which is the race the read closes."""
+        for name in names:
+            delete = ref_call_index(log, name, delete=True)
+            self.assertGreater(delete, 0, "%s: no DELETE call for it" % name)
+            self.assertTrue(call_on_ref(log[delete - 1], name, delete=False),
+                            "%s: the gh call before its DELETE is not its tip read: %s" % (name, log[delete - 1]))
 
     def test_delete_loop_makes_every_delete_when_nothing_refuses(self):
         done, calls, verdict_text = self.run_step(["feature/a", "feature/b", "feature/c"], [])
@@ -408,6 +489,94 @@ class DeleteStep(unittest.TestCase):
         self.assertTrue(any("heads/feature/a" in call for call in calls),
                         "scope: the loop made no delete call for feature/a")
         self.assertFalse(any("heads/-x" in call for call in calls), "the open head -x was deleted")
+
+    def test_matching_tip_is_read_just_before_its_delete(self):
+        names = ["feature/a", "feature/b", "feature/c"]
+        done, log, verdict_text = self.run_workflow(names, [])
+        self.assertEqual(deletes(verdict_text), names, "scope: the sweep named other deletes")
+        self.assertEqual(deleted(delete_calls(log)), names, "a tip that matches the checkout: a DELETE did not run")
+        self.assertEqual(done.returncode, 0, "a tip that matches the checkout: the step exited %d" % done.returncode)
+        self.assert_tip_read_just_before_each_delete(log, names)
+
+    def test_branch_whose_tip_moved_is_not_deleted(self):
+        names = ["feature/a", "feature/b", "feature/c"]
+        done, log, verdict_text = self.run_workflow(names, [], tip_reads={"feature/b": "moved"})
+        self.assertEqual(deletes(verdict_text), names, "scope: the sweep named other deletes")
+        self.assertNotIn("feature/b", deleted(delete_calls(log)), "feature/b: its tip moved after the checkout, yet its DELETE ran")
+        self.assertIn("feature/a", deleted(delete_calls(log)), "feature/a: its tip matched, yet its DELETE did not run")
+        self.assertIn("feature/c", deleted(delete_calls(log)), "feature/c: not processed after feature/b moved")
+        self.assertEqual(done.returncode, 0, "a moved tip: the step exited %d, want 0 (a red main trips the brake)"
+                         % done.returncode)
+        self.assertEqual(annotations(done, "::error::"), [], "a moved tip: the step printed an ::error:: line")
+        self.assertTrue(log_lines_naming(done, verdict_text, "feature/b"),
+                        "a moved tip: the step printed no log line naming feature/b")
+
+    def test_tip_already_gone_is_done_without_a_delete(self):
+        names = ["feature/a", "feature/b", "feature/c"]
+        for status in ("404", "422"):
+            with self.subTest(status=status):
+                done, log, verdict_text = self.run_workflow(names, [], tip_reads={"feature/b": "HTTP " + status})
+                self.assertEqual(deletes(verdict_text), names, "scope: the sweep named other deletes")
+                self.assertIn("feature/a", deleted(delete_calls(log)), "feature/a: its DELETE did not run")
+                self.assertNotIn("feature/b", deleted(delete_calls(log)),
+                                 "a tip read that says HTTP %s: the DELETE ran anyway" % status)
+                self.assertIn("feature/c", deleted(delete_calls(log)), "feature/c: not processed after feature/b")
+                self.assertEqual(done.returncode, 0, "a tip read that says HTTP %s: the step exited %d, want 0"
+                                 % (status, done.returncode))
+                self.assertEqual(annotations(done, "::warning::", "::error::"), [],
+                                 "a tip read that says HTTP %s: the step printed an annotation" % status)
+
+    def test_tip_refusal_stops_the_loop(self):
+        names = ["feature/a", "feature/b", "feature/c"]
+        for status in ("403", "429"):
+            with self.subTest(status=status):
+                done, log, verdict_text = self.run_workflow(names, [], tip_reads={"feature/b": "HTTP " + status})
+                self.assertEqual(deletes(verdict_text), names, "scope: the sweep named other deletes")
+                self.assertEqual(deleted(delete_calls(log)), ["feature/a"],
+                                 "a tip read refused with HTTP %s: the DELETE calls were not feature/a alone, so the loop "
+                                 "did not stop at the refusal" % status)
+                self.assertEqual(done.returncode, 0, "a tip read refused with HTTP %s: the step exited %d, want 0"
+                                 % (status, done.returncode))
+                self.assertTrue(annotations(done, "::warning::"),
+                                "a tip read refused with HTTP %s: the step printed no ::warning:: line" % status)
+                self.assertEqual(annotations(done, "::error::"), [],
+                                 "a tip read refused with HTTP %s: the step printed an ::error:: line" % status)
+
+    def test_refusal_after_a_failed_tip_read_exits_nonzero(self):
+        names = ["feature/a", "feature/b", "feature/c"]
+        done, log, verdict_text = self.run_workflow(names, [],
+                                                    tip_reads={"feature/b": "HTTP 500", "feature/c": "HTTP 403"})
+        self.assertEqual(deletes(verdict_text), names, "scope: the sweep named other deletes")
+        self.assertEqual(deleted(delete_calls(log)), ["feature/a"],
+                         "a tip read failed with HTTP 500, then one refused with HTTP 403: the DELETE calls were not "
+                         "feature/a alone")
+        self.assertNotEqual(done.returncode, 0, "the HTTP 500 on feature/b then the HTTP 403 on feature/c: the step "
+                            "exited 0, want nonzero from the earlier failure")
+
+    def test_other_tip_read_failure_skips_that_branch(self):
+        names = ["feature/a", "feature/b", "feature/c"]
+        done, log, verdict_text = self.run_workflow(names, [], tip_reads={"feature/b": "HTTP 500"})
+        self.assertEqual(deletes(verdict_text), names, "scope: the sweep named other deletes")
+        self.assertNotIn("feature/b", deleted(delete_calls(log)), "a tip read that failed with HTTP 500: the DELETE ran")
+        self.assertIn("feature/c", deleted(delete_calls(log)), "feature/c: not processed after the failed read of feature/b")
+        self.assertNotEqual(done.returncode, 0, "a tip read that failed with HTTP 500: the step exited 0, want nonzero")
+
+    def test_full_size_sweep_skips_only_the_moved_branch(self):
+        names = ["feature/lane-%02d" % i for i in range(60)]  # about one run's worth of lanes
+        moved = "feature/lane-30"
+        done, log, verdict_text = self.run_workflow(names, [], tip_reads={moved: "moved"})
+        self.assertEqual(deletes(verdict_text), names, "scope: the sweep named other deletes")
+        self.assertNotIn(moved, deleted(delete_calls(log)), "%s: its tip moved after the checkout, yet its DELETE ran" % moved)
+        others = [name for name in names if name != moved]
+        self.assertEqual(deleted(delete_calls(log)), others, "the other 59 branches were not all deleted")
+        self.assertEqual(done.returncode, 0, "a moved tip in a full-size sweep: the step exited %d" % done.returncode)
+        self.assert_tip_read_just_before_each_delete(log, others)
+
+    def test_no_delete_verdict_makes_no_tip_read(self):
+        done, log, verdict_text = self.run_workflow([], [])
+        self.assertEqual(deletes(verdict_text), [], "scope: the sweep named a delete")
+        self.assertEqual([line for line in log if "/git/ref" in line], [], "no delete verdict, yet the step read a tip")
+        self.assertEqual(done.returncode, 0, "no delete verdict: the step exited %d" % done.returncode)
 
 
 def tearDownModule():
