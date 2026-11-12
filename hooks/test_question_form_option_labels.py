@@ -24,7 +24,7 @@ Three parts, one file:
      (widens_pick_hit, rule uniform-pick) also refuses a `recommended` that names a widening option. The page draws
      `recommended` (its itemFields block lists it).
   3. The page's own copy of the star and the answer label is tested in skills/waiting-page/tests/page.test.mjs.
-     page_grant.py's ignoring of the answer `label` is tested in skills/waiting-page/test_page_grant_label.py.
+     page_grant.py reads the answer `label` only when the answer has no `optionId`; skills/waiting-page/test_page_grant_label.py tests it.
 
 Red on the round-2 base: the cases of part 1e and the re-pointed fn: case fail on an assert about the verdict.
 Part 1f's cases fail while the check allows, with no note, a write the chat refutes. The fn: cases need
