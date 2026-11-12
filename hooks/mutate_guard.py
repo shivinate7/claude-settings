@@ -1639,12 +1639,12 @@ MUTATIONS = [
      '    try:\n        literal = _literal_resolved(path, cwd)\n'
      '        resolved = _resolved(path, cwd)\n'
      '        literal_root = os.path.normcase(os.path.normpath(guard_core.config_dir()))\n'
-     '        resolved_root = os.path.normcase(os.path.realpath(guard_core.config_dir()))\n'
+     '        resolved_root = os.path.normcase(guard_core.real_config_dir())\n'
      '    except Exception:\n        return False',
      '    try:\n        raise Exception("mutant")\n        literal = _literal_resolved(path, cwd)\n'
      '        resolved = _resolved(path, cwd)\n'
      '        literal_root = os.path.normcase(os.path.normpath(guard_core.config_dir()))\n'
-     '        resolved_root = os.path.normcase(os.path.realpath(guard_core.config_dir()))\n'
+     '        resolved_root = os.path.normcase(guard_core.real_config_dir())\n'
      '    except Exception:\n        return False',
      "guard", "frozen: Write of the global CLAUDE.md"),
     ("fail-open: is_project_config's resolve is forced to raise, so no edit is ever noted",
