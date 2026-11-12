@@ -382,13 +382,15 @@ ENV_MAX_DEPTH = 64
 ENV_DEPTH_REASON = "substitutions are nested too deep for the guard to read"
 
 
-def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: bool = False):
+def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: bool = False,
+                   mark: str = "x"):
     """Return ([(text, in a message)], too_deep). The last text is the command itself.
 
     One pass, no recursion. Each command substitution `$(...)`, backtick pair or process
     substitution `<(...)` `>(...)` met OUTSIDE single quotes is its own text, and its place in the
-    text around it is `x`. Every text is then judged as a command of its own, at any depth. The
-    work is linear: a text holds only its own characters and one `x` per child.
+    text around it is `mark` (`x` unless a caller passes a mark that no command word can be). Every
+    text is then judged as a command of its own, at any depth. The work is linear: a text holds only
+    its own characters and one mark per child.
 
     ponytail: a backtick body is read again by a recursive call. A nested backtick needs a
     backslash per level, so honest input never nests them, and past ENV_MAX_DEPTH it is refused.
@@ -452,18 +454,18 @@ def _substitutions(cmd: str, depth: int = 0, powershell: bool = False, heredoc: 
             j = i + 1
             while j < n and cmd[j] != "`":
                 j += 2 if cmd[j] == "\\" else 1
-            inner, deep = _substitutions(cmd[i + 1:j].replace("\\`", "`"), depth + 1)
+            inner, deep = _substitutions(cmd[i + 1:j].replace("\\`", "`"), depth + 1, mark=mark)
             if deep:
                 return [], True
             done.extend(inner)
-            pieces.append("`x`")
+            pieces.append("`" + mark + "`")
             i = j + 1
             continue
         elif cmd[i:i + 2] == "$(" or (quote == "" and cmd[i:i + 2] in ("<(", ">(")):
             if len(stack) + depth > ENV_MAX_DEPTH:
                 return [], True
             message = quote == '"' and frame[4]
-            pieces.append("x")
+            pieces.append(mark)
             stack.append([[], "", 0, message, False])
             i += 2
             continue
@@ -1146,6 +1148,11 @@ def _wrapper_name(word: str) -> str:
     return re.sub(r"\.(cmd|exe|bat|py)$", "", word)
 
 
+# Stands in for a newline inside a quoted string while `_quoted_words` splits on whitespace. No other
+# mark in the guard modules reads this byte (NUL is the space stand-in, \x02 and \x03 belong to guard_frozen).
+_NEWLINE_MARK = "\1"
+
+
 def _quoted_words(segment: str, keep_newlines=False):
     """Split a segment into words the way the shell does: a quoted string with a space is ONE word.
     A newline inside a quote reads as a space, or stays a newline with `keep_newlines`, for a caller that
@@ -1171,14 +1178,15 @@ def _quoted_words(segment: str, keep_newlines=False):
                 j += 2 if char == '"' and segment[j] == "\\" else 1
             if j < n:
                 flush()
-                chunks.append(re.sub(r"\s", lambda m: "\1" if keep_newlines and m.group() == "\n" else "\0",
-                                     segment[i:j + 1]))
+                chunks.append(re.sub(
+                    r"\s", lambda m: _NEWLINE_MARK if keep_newlines and m.group() == "\n" else "\0",
+                    segment[i:j + 1]))
                 i = j + 1
                 continue
         plain.append(char)
         i += 1
     flush()
-    return [w.replace("\0", " ").replace("\1", "\n") for w in "".join(chunks).split()]
+    return [w.replace("\0", " ").replace(_NEWLINE_MARK, "\n") for w in "".join(chunks).split()]
 
 
 def _is_redirect(word: str) -> bool:

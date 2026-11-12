@@ -537,7 +537,7 @@ while True:
             AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
-            clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
+            checkout_root_by_stat as _checkout_root_by_stat, clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
             inner_commands, interpreter_bodies, nested_script, norm, python_runs_body,
             _segment_cd_target, _strip_heredoc_bodies_unconditionally, _RUNNER,
             path_is_inside, primary_checkout, record, refuse, resolve_command,
@@ -2426,12 +2426,14 @@ def builder_test_path(path: str, cwd: str) -> bool:
 
 def builder_shell_test_hit(raw: str, stripped: str, cwd: str, tool) -> str:
     """The test path a builder's shell command writes, else ''. Two readings: the plain forms (a
-    redirect, `tee`, `sed -i`, `cp`, a heredoc header) on the heredoc-stripped command, and the
-    python or node script a heredoc body, `-c` / `-e` or a script file run by name holds, on the raw
+    redirect, `tee`, `sed -i`, `cp`, a heredoc header) on the heredoc-stripped command, with the paths
+    that `find`, `xargs`, a `for` list and a substitution feed to a writer read too (`read_fed`), and
+    the python or node script a heredoc body, `-c` / `-e` or a script file run by name holds, on the raw
     command (this is the one caller that reads script files). `tool` is the
     call's tool: it sets which shell's rules read the text."""
     POWERSHELL_CALL[0] = tool == "PowerShell"
-    return (_shell_write_hit(stripped, cwd, builder_test_path, follow_cd=True, command_position=True)
+    return (_shell_write_hit(stripped, cwd, builder_test_path, follow_cd=True, command_position=True,
+                             read_fed=True)
             or interpreter_write_hit(raw, cwd, builder_test_path, script_files=True))
 
 
@@ -5414,7 +5416,7 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # A shell command with none of these can write no named file, so it spends no git read here. A
 # redirect onto a stream (`2>&1`) or the null device writes no checkout, so it is dropped first.
 SHELL_QUIET_REDIRECT = re.compile(r"\d*>>?[ \t]*(?:&[0-9-]|/dev/null\b)")
-SHELL_WRITE_HINT = re.compile(r">|" + MUTATING_COMMAND + r"|\bsed\b")
+SHELL_WRITE_HINT = re.compile(r">|" + MUTATING_COMMAND + r"|\bg?sed\b")
 
 
 def _owning_checkout(path: str, roots) -> str:
@@ -5422,19 +5424,6 @@ def _owning_checkout(path: str, roots) -> str:
     primary's `.claude/worktrees/` is deeper than the primary, so it owns its own files."""
     owners = [root for root in roots if path_is_inside(path, root) is True]
     return max(owners, key=len) if owners else ""
-
-
-def _checkout_root_by_stat(folder: str) -> str:
-    """The nearest folder at or above `folder` that holds a `.git` entry (a folder, or a linked
-    worktree's file), found by stat alone, else ''. No git is spawned."""
-    while folder:
-        if os.path.exists(os.path.join(folder, ".git")):
-            return folder
-        parent = os.path.dirname(folder)
-        if parent == folder:
-            return ""
-        folder = parent
-    return ""
 
 
 def _git_common_dir(root: str) -> str:
@@ -5994,22 +5983,26 @@ def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
             command = str(tool_input.get("command", "") or "")
             if SCRATCHPAD_WORD not in command and SCRATCHPAD_WORD not in cwd:
                 return agent, session, files, removed
-            command, found = strip_heredoc_bodies(command), {}
+            command, found, by_word = strip_heredoc_bodies(command), {}, {}
 
             def in_scratchpad(word, at, verb):
                 full = shell_abs(word, at)
                 if full and SCRATCHPAD_WORD in full and full not in files and under_session_scratchpad(full, session):
-                    found[word] = (full, verb in SCRATCHPAD_REMOVERS)
+                    found[full], by_word[word] = verb in SCRATCHPAD_REMOVERS, full
                     return True
                 return False
 
             for _ in range(SCRATCHPAD_WRITE_PASSES):   # the reader names one hit a pass: exclude each as it is listed
                 hit = _shell_write_hit(command, cwd, in_scratchpad, follow_cd=True, predicate_command=True)
-                if not hit:
+                # With follow_cd the reader names the hit as a path from `cwd`, not as the word the predicate saw.
+                full = shell_abs(hit, cwd) if hit else ""
+                if full not in found:
+                    full = by_word.get(hit, "")
+                if full not in found:
                     break
-                files.append(found[hit][0])
-                if found[hit][1]:
-                    removed.add(found[hit][0])
+                files.append(full)
+                if found[full]:
+                    removed.add(full)
     except Exception:
         pass   # a file that cannot be read is not judged and not recorded, never a failed call
     return agent, session, files, removed

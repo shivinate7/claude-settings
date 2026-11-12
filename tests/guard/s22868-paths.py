@@ -1,5 +1,33 @@
 # section 22868
 FAMILY = "paths"
+
+
+def builder_matched_log_case():
+    """A builder's shell refusal logs the test path it matched, also after a `cd` into tests.
+
+    The printed reason is generic on purpose (BUILDER_TEST_REASON), so the log is the one place a
+    person reads which path fired. A refusal after `cd tests && ...` logs its test path too, as the
+    control refusal does.
+    """
+    materialize(DOTROOT)
+    for label, command, want in (
+            ("control", "find tests -name '*.py' | xargs sed -i s/a/b/", "tests"),
+            ("cd-tests", "cd tests && find . -name '*.py' | xargs sed -i s/a/b/", "tests/test_a.py")):
+        body = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": DOTROOT,
+                "agent_id": "bld1", "agent_type": "builder"}
+        decision, reason, rows = pd_run("builder-matched-" + label, body)
+        if decision != "deny":
+            return False, "%s: want deny, got %s: %s" % (label, decision, reason[:160])
+        logged = [row[4] for row in rows if len(row) == 6 and row[3] == "builder-test-edit"]
+        if not logged:
+            return False, "%s: guard.log holds no builder-test-edit row" % label
+        if logged[0] != want:
+            return False, "%s: the logged matched field is %r, want %r" % (label, logged[0], want)
+    return True, "the refusal logs tests for the control and tests/test_a.py after a cd"
+
+
+LOG_CHECKS_EXTRA.append(("log: a builder's shell refusal logs the test path it matched, after a cd too",
+                         builder_matched_log_case))
 # ---- the test-author, inverted: only tests and test config may change
 AUTHOR_GREEN = [
     ("new-test", _put("tests/test_new.py", "pass\n")),
