@@ -15,6 +15,9 @@ Three parts, one file:
      line the check cannot read (A, em dash, text; **A** text; a cite with no colon) is checked or noted. A page
      letter the chat question never writes is refused. A curly apostrophe or an em dash folds equal to its plain
      form. A payload with no transcript_path logs one noted line.
+  1f. Round 3 (review of round 2): a cite with no colon whose id has no digit and no hyphen, and the chat option forms
+     "Option A: x", "A x", "a)x" and "**a**) x", are not read. A write the chat refutes must be checked or noted, never
+     a silent allow. Each red case fails on the carry head with an allow and zero noted lines; each control is green.
   2. The `recommended` field. The page stars `recommended`, falling back to `pick`. The widening guard
      (widens_pick_hit, rule uniform-pick) also refuses a `recommended` that names a widening option. The page draws
      `recommended` (its itemFields block lists it).
@@ -538,6 +541,83 @@ def case_wire_empty_transcript_path_is_noted():
     no_transcript_noted("empty-path", "", "an empty transcript_path")
 
 
+# ------------------------------------------------------------------ 1f. round 3: cites and forms the check did not read
+
+# Two gaps in the round-2 check. A chat text it does not read is allowed with no note, so a write the chat refutes passes:
+#  - a cite with no colon counts only when its id holds a digit or a hyphen (PAGE_ITEM_CITE), so "Page item merge",
+#    with the one-word id "merge", is not a cite;
+#  - a chat option line counts only in the forms CHAT_OPTION_LINE reads, so "Option A: Blue", "A Blue", "a)Blue" and
+#    "**a**) Blue" are not option lines.
+# A red case is a write the chat refutes. It must be checked (a deny naming the rule) or noted (one line). A silent
+# allow is the fault. A control is green on the carry head and stays green: it shows the fixture reaches the check, or
+# that the page's own text in an unread form is allowed.
+ONE_WORD_ITEM = "merge"  # an id with no digit and no hyphen
+FORM_OPTION_WORD = "Option A: {}"
+FORM_BARE_LETTER = "A {}"
+FORM_NO_SPACE = "a){}"
+FORM_BOLD_PAREN = "**a**) {}"
+
+
+def case_wire_one_word_colonless_cite_is_checked_or_noted():
+    """Finding 1. The cite "Page item merge" has no colon and a one-word id, so PAGE_ITEM_CITE does not read it. The
+    chat's a) Blue is then not compared with the page's "Keep it as is", and the write is allowed with no note. Red on
+    the carry head: an allow with zero noted lines."""
+    transcript = write_transcript("one-word-colonless",
+                                  chat_question(("Page item " + ONE_WORD_ITEM, "a) Blue", CHAT_B), cite=None))
+    wire_checked_or_noted("wire: a cite 'Page item merge' (one-word id, no colon) is checked or noted, not silently skipped",
+                          set_write(ONE_WORD_ITEM), transcript)
+
+
+def case_wire_one_word_colon_cite_is_refused():
+    """Control, green on the carry head. The same one-word id cited with its colon, "Page item: merge", is read, and the
+    chat's a) Blue is refused. So the fixture reaches the check, and the red case above fails on the colon-less cite."""
+    transcript = write_transcript("one-word-colon", chat_question(("a) Blue", CHAT_B), cite=ONE_WORD_ITEM))
+    wire_refuses("control: a cite 'Page item: merge' (one-word id, colon) with a) Blue is refused",
+                 set_write(ONE_WORD_ITEM), transcript)
+
+
+def unread_form_checked_or_noted(slug, line):
+    """The chat question writes option a in an unread form, then the page's b, which the chat matches. The page's a is
+    "Keep it as is", so a read of the form refuses the write."""
+    transcript = write_transcript("form-" + slug, chat_question((line, CHAT_B)))
+    wire_checked_or_noted("wire: a chat line '%s' is checked or noted, not silently skipped" % line,
+                          set_write(ITEM), transcript)
+
+
+def case_wire_option_word_form_is_checked_or_noted():
+    """Finding 2. "Option A: Blue" is the tag LABEL_TAG reads on a page label, so Claude can write it in the chat. The
+    chat check does not read it, so letter a is skipped and the write is allowed with no note. Red on the carry head."""
+    unread_form_checked_or_noted("option-word", FORM_OPTION_WORD.format("Blue"))
+
+
+def case_wire_bare_letter_form_is_checked_or_noted():
+    """Finding 2. "A Blue" is a letter and a space with no mark after it. The chat check does not read it, so the write
+    is allowed with no note. Red on the carry head."""
+    unread_form_checked_or_noted("bare-letter", FORM_BARE_LETTER.format("Blue"))
+
+
+def case_wire_no_space_form_is_checked_or_noted():
+    """Finding 2. "a)Blue" has no space after its mark. The chat check does not read it, so the write is allowed with no
+    note. Red on the carry head."""
+    unread_form_checked_or_noted("no-space", FORM_NO_SPACE.format("Blue"))
+
+
+def case_wire_bold_paren_form_is_checked_or_noted():
+    """Finding 2. "**a**) Blue" closes its bold before the paren. The chat check does not read it, so the write is allowed
+    with no note. Red on the carry head."""
+    unread_form_checked_or_noted("bold-paren", FORM_BOLD_PAREN.format("Blue"))
+
+
+def case_wire_unread_forms_with_the_page_text_are_allowed():
+    """Control, green on the carry head. Each form the check does not read, written with the page's own text for a, is
+    allowed. A check that refused a right answer in one of these forms would be a false alarm."""
+    for slug, template in (("option-word", FORM_OPTION_WORD), ("bare-letter", FORM_BARE_LETTER),
+                           ("no-space", FORM_NO_SPACE), ("bold-paren", FORM_BOLD_PAREN)):
+        line = template.format("Keep it as is")
+        transcript = write_transcript("control-" + slug, chat_question((line, CHAT_B)))
+        wire_allows("control: a chat line '%s' with the page's text is allowed" % line, set_write(ITEM), transcript)
+
+
 # ------------------------------------------------------------------ 2. the recommended field (uniform-pick)
 
 def decision_with(**over):
@@ -617,7 +697,11 @@ CASES = (case_fn_equal_labels_pass, case_fn_case_and_spaces_fold, case_fn_chat_s
          case_wire_unparsed_bold_form_is_checked_or_noted, case_wire_unparsed_cite_is_checked_or_noted,
          case_fn_extra_page_letter_is_refused, case_wire_extra_page_letter_is_refused,
          case_fn_curly_apostrophe_folds_equal, case_fn_em_dash_folds_equal,
-         case_wire_no_transcript_key_is_noted, case_wire_empty_transcript_path_is_noted)
+         case_wire_no_transcript_key_is_noted, case_wire_empty_transcript_path_is_noted,
+         case_wire_one_word_colonless_cite_is_checked_or_noted, case_wire_one_word_colon_cite_is_refused,
+         case_wire_option_word_form_is_checked_or_noted, case_wire_bare_letter_form_is_checked_or_noted,
+         case_wire_no_space_form_is_checked_or_noted, case_wire_bold_paren_form_is_checked_or_noted,
+         case_wire_unread_forms_with_the_page_text_are_allowed)
 FN_CASES = tuple(c for c in CASES if c.__name__.startswith("case_fn_"))
 
 
