@@ -762,7 +762,11 @@ BASE_WORD_RE = re.compile(r"\b%s\b|\bbefore\s+(?:this|the|my)\s+change\b" % BASE
 FAIL_REF_RE = re.compile(r"\b(?:on|at)\s+(?:%s|%s)" % (BASE_REF, SHA_WORD), re.I)
 # A later clause that opens with a pronoun and a verb, then the ref ("..., and it does on <sha> too"), is a ref clause.
 FAIL_REF_CLAUSE_RE = re.compile(
-    r"(?:(?:it|this|that|they|these|those)\s+(?:\w+\s+){0,2}?)?(?:on|at)\s+(?:%s|%s)" % (BASE_REF, SHA_WORD), re.I)
+    r"(?:(?:it|this|that|they|these|those)\s+(?:also\s+)?(?:does|do|did|is|are|was|were|has|have)(?:\s+so|\s+also)?\s+)?"
+    r"(?:on|at)\s+(?:%s|%s)" % (BASE_REF, SHA_WORD), re.I)
+# The claim a failure in the sentence before carries: "It is pre-existing.", with a pronoun for its subject.
+PRIOR_FAIL_RE = re.compile(r"\b(?:fail\w*|red|broken)\b", re.I)
+PRE_PRONOUN_SUBJECT_RE = re.compile(r"\s*(?:it|this|that|they|these|those)\s+(?:is|was|are|were)\s+(?:\w+\s+)?$", re.I)
 TOO_RE = re.compile(r"\b(?:too|also|as\s+well)\b", re.I)
 # _clause.clauses cuts a sentence at a stop, a comma, but and because. The lead-in words of _clause (joiners, reason links,
 # subordinators, relatives) cut each of those again, where _clause.lead_opens_clause says the word opens a clause: "yet" and
@@ -815,14 +819,16 @@ def _claims_pre_existing(sentence, prior_fails=False):
     plain = QUOTED_RE.sub(" ", MISTAKE_URL_RE.sub(" ", sentence))
     if not FAILURE_RE.search(plain) and not prior_fails:
         return False
+    own_fail = bool(FAILURE_RE.search(plain))
     names_base = bool(BASE_WORD_RE.search(plain))
     earlier_fail = False
     for clause in _pre_clauses(plain):
         for m in PRE_EXISTING_RE.finditer(clause):
-            if _pre_existing_describes_failure(clause, m) and _unnegated(clause, m.start()):
+            if (_pre_existing_describes_failure(clause, m) and _unnegated(clause, m.start())
+                    and (own_fail or PRE_PRONOUN_SUBJECT_RE.fullmatch(clause[:m.start()]))):
                 return True
         for m in ALREADY_RE.finditer(clause):
-            if names_base and _unnegated(clause, m.start()):
+            if own_fail and names_base and _unnegated(clause, m.start()):
                 return True
         fail = FAILURE_RE.search(clause)
         if fail:
@@ -839,7 +845,7 @@ def _claims_pre_existing(sentence, prior_fails=False):
 def _names_unnegated_failure(sentence):
     """True when `sentence` holds a failure word that no negator before it in its clause answers."""
     plain = QUOTED_RE.sub(" ", MISTAKE_URL_RE.sub(" ", sentence))
-    return any(_unnegated(c, m.start()) for c in _pre_clauses(plain) for m in FAILURE_RE.finditer(c))
+    return any(_unnegated(c, m.start()) for c in _pre_clauses(plain) for m in PRIOR_FAIL_RE.finditer(c))
 
 
 def _names_main_run(kept):
@@ -859,7 +865,8 @@ def pre_existing_problem(text):
             continue
         if fence:
             continue
-        sentences = [body[a:b] for a, b in _clause.sentences(body, [False] * len(body))
+        blanked = QUOTED_RE.sub(lambda q: " " * len(q.group()), body)
+        sentences = [body[a:b] for a, b in _clause.sentences(blanked, [False] * len(body))
                      if not body[a:b].rstrip("*_)\"' ").endswith("?")]
         prior = [False] + [_names_unnegated_failure(s) for s in sentences[:-1]]
         if not any(_claims_pre_existing(s, p) for s, p in zip(sentences, prior)):

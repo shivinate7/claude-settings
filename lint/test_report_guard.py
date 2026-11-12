@@ -5261,6 +5261,23 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
             with self.subTest(line=line):
                 self.assert_allowed(line)
 
+    def test_pe_green_split_claim_needs_a_failed_pronoun_claim_and_a_plain_failure(self):
+        # Catches: the carry from the sentence before reads any claim form, or "error" as a failure, or a verb other than be or do
+        # in the ref clause, or a quoted sentence cut apart.
+        rows = [
+            "I added error handling. The guard is pre-existing.",
+            "The lint fails here, and it passes on main too.",
+            'The lane wrote "One job failed. It is pre-existing." in its report.',
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_red_yet_that_verb_after_a_negated_clause_is_refused(self):
+        # Catches: "yet that breaks" reads as an adverb plus complementizer, so "did not fail" reaches the claim after it.
+        line = "The change did not fail yet that breaks on 32b5f8b8e too."
+        self.assert_blocked(line, line)
+
     def test_pe_red_yet_that_before_a_bare_noun_is_a_hedge_not_a_claim(self):
         # "that" after "yet" before a bare noun is a complementizer, not a subject.
         rows = [
