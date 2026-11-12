@@ -20756,7 +20756,7 @@ class HandedLaneCheck(RecordsEnv):
         feat = self.head("feat")
         self.host.draft, self.host.body = draft, body
         self.host.pulls = [batch_pull(7, feat, base=base, draft=draft)] + [batch_pull(n, handed_sha(n)) for n in handed]
-        self.host.comments = [record_of(n, handed_sha(n)) for n in handed] + [lint_of(n, handed_sha(n)) for n in handed]  # main's done set also needs the lane-lint PASS at the head
+        self.host.comments = [record_of(n, handed_sha(n)) for n in handed] + [lint_of(n, handed_sha(n)) for n in handed]  # the done set reads a lane-lint PASS at each handed head as well as its record, so the fixture gives both
         self.host.holds = {(handed_sha(n), feat) for n in held}
         return feat
 
