@@ -18268,7 +18268,7 @@ class BatchFreeze(CloudSession):
         self.runs = {}  # run URL -> (conclusion, head sha): the answers the host's one run read gives
         self.host.cited_run = self.read_run  # the real Host.cited_run, scripted per case (as the cases at merge/test_merge.py's cited_run do)
         self.busy = set()  # pull request numbers whose head has CI running, as Host.head_busy answers
-        self.host.head_busy = lambda n, sha: n in self.busy
+        self.host.heads_busy = lambda pairs: {n for n, _sha in pairs if n in self.busy}
 
     def lane(self, n, on=None):
         """Lane PR #n: a branch on origin with one commit of its own, off origin/main (or, with `on`, off lane #on, so its head contains
@@ -19180,10 +19180,42 @@ class BatchFreeze(CloudSession):
         self.record_pushes()
         with self.no_lint_or_ready_check():
             rc, out = self.run_batch("--batch-build", "nightly", "104", "--on-running")
-        self.assertRegex(out, r"more than one|two running|which", "two running batches that stack on nothing common are not refused as ambiguous: %s" % out)
+        self.assertRegex(out, r"more than one batch is running", "two running batches that stack on nothing common are not refused as ambiguous: %s" % out)
         self.assertEqual(rc, 1, "an ambiguous --on-running exited %s, not 1: %s" % (rc, out))
         self.assertIsNone(self.host.batch_pr("batch-nightly"), "an ambiguous --on-running built a batch: %s" % out)
         self.assertEqual(self.pushes(), [], "an ambiguous --on-running pushed: %s" % out)
+
+    def test_on_running_ignores_a_running_draft_and_a_running_batch_on_another_base(self):
+        for n in (101, 102, 104):
+            self.lane(n)
+        x = self.frozen_batch("x", [101], draft=True)
+        y = self.frozen_batch("y", [102])
+        self.host.batch_pulls[y]["base"] = "release"
+        self.busy.update({x, y})
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "104", "--on-running")
+        nightly = self.host.batch_pr("batch-nightly")
+        self.assertIsNotNone(nightly, "--on-running built no batch beside a running draft and a running batch on another base: %s" % out)
+        self.assertIsNone(self.on_line(nightly[0]), "--on-running stacked on a draft or on a batch of another base: %s" % out)
+
+    def test_on_running_does_not_stack_a_batch_on_itself(self):
+        for n in (101, 104):
+            self.lane(n)
+        x = self.frozen_batch("nightly", [104])
+        self.busy.add(x)  # the batch being built again is itself the one running
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "104", "--on-running")
+        self.assertEqual(rc, 0, "the same-set build of the running batch itself exited %s: %s" % (rc, out))
+        self.assertIsNone(self.on_line(x), "--on-running stacked batch-nightly on itself: %s" % out)
+
+    def test_on_running_is_refused_beside_blame(self):
+        for n in (101, 104):
+            self.lane(n)
+        self.frozen_batch("nightly", [101])
+        url = self.scripted_run(7201, "failure", self.head("batch-nightly"))
+        rc, out = self.run_batch("--batch-build", "nightly", "--blame", "101", "--run", url, "--on-running")
+        self.assertRegex(out, r"--on-running", "--blame beside --on-running is not refused by name: %s" % out)
+        self.assertEqual(rc, 2, "--blame beside --on-running exited %s, not 2: %s" % (rc, out))
 
     def test_on_running_does_not_go_with_on(self):
         for n in (101, 104):
