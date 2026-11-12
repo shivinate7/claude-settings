@@ -4752,13 +4752,16 @@ class StopVerdictMixin:
     reply as the last assistant text, with a git commit before it when `landed`. run_guard runs the hook as a
     subprocess. A verdict is the hook's JSON, or None when the reply passes."""
 
-    def hook(self, reply, landed=False, stop_hook_active=False):
+    def hook(self, reply, landed=False, stop_hook_active=False, cwd=None):
         records = [human("ask the owner")]
         if landed:
             records += [tool_use_msg("Bash", {"command": "git commit -m x"}), tool_result_msg()]
         records.append(assistant_text(reply))
         path = write_transcript(records, tempfile.mkdtemp(dir=RUN_FOLDER))
-        return {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": stop_hook_active}
+        payload = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": stop_hook_active}
+        if cwd is not None:  # the payload's cwd, as Claude Code sends it: the checks that read a repo start there
+            payload["cwd"] = cwd
+        return payload
 
     def verdict(self, reply, **kw):
         run = run_guard(REPORT_GUARD, self.hook(reply, **kw))
@@ -5060,7 +5063,66 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
     """The pre-existing verdict, in report_guard.py's Stop hook (rule pre-existing-needs-main-run). A reply line
     that calls a failure pre-existing, or says it also fails on a commit, must name a run on the base branch on
     the same line: "on main at <sha>", "on origin/<branch> at <sha>", or a CI run URL on main. A bare
-    "on origin/main" names no run. A sha on the PR's own head names no run on main, so the failure it shows is the PR's."""
+    "on origin/main" names no run. A sha on the PR's own head names no run on main, so the failure it shows is the PR's.
+    Item 571 (the run's sha must be a commit on the base and not older than the PR's merge base): the fixture below
+    builds that branch shape, and every case reads its verdict from it."""
+
+    # The fixture (one home for this class): a repo with main at A <- B <- C, a branch pr forked at B with commit P,
+    # HEAD on pr, and origin/main at C. Local master and origin/silent-undo-ci-body also sit at C, so their rows name
+    # real refs. The folder is under the run folder (test-temp-standard), and the bare folder has no repo above it.
+
+    @classmethod
+    def setUpClass(cls):
+        cls.root = tempfile.mkdtemp(dir=RUN_FOLDER)
+        cls.repo = os.path.join(cls.root, "repo")
+        os.makedirs(cls.repo)
+        tcj.git(cls.repo, "init", "-q")
+        tcj.git(cls.repo, "symbolic-ref", "HEAD", "refs/heads/main")
+        cls.A = cls.commit("A")
+        cls.B = cls.commit("B")
+        cls.C = cls.commit("C")
+        tcj.git(cls.repo, "checkout", "-q", "-b", "pr", cls.B)
+        cls.P = cls.commit("P")
+        tcj.git(cls.repo, "update-ref", "refs/remotes/origin/main", cls.C)
+        tcj.git(cls.repo, "update-ref", "refs/remotes/origin/silent-undo-ci-body", cls.C)
+        tcj.git(cls.repo, "update-ref", "refs/remotes/origin/pr", cls.P)  # the PR's own branch, as a base (known debt)
+        # Item 571: a mixed-case base. X is a commit on B (the merge base), held only by origin/Release, so a cite of X is
+        # on that base and newer than the merge base. Made from plumbing, so HEAD stays on pr.
+        tree = tcj.git(cls.repo, "rev-parse", cls.B + "^{tree}").stdout.strip()
+        cls.X = tcj.git(cls.repo, "commit-tree", tree, "-p", cls.B, "-m", "X").stdout.strip()
+        tcj.git(cls.repo, "update-ref", "refs/remotes/origin/Release", cls.X)
+        tcj.git(cls.repo, "branch", "master", cls.C)
+        cls.bare = os.path.join(cls.root, "bare")
+        os.makedirs(cls.bare)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.root, ignore_errors=True)
+
+    @classmethod
+    def commit(cls, message):
+        """An empty commit on the fixture's HEAD. Returns its full sha."""
+        tcj.git(cls.repo, "commit", "-q", "--allow-empty", "-m", message)
+        return tcj.git(cls.repo, "rev-parse", "HEAD").stdout.strip()
+
+    @classmethod
+    def ancestor(cls, older, newer):
+        """True when git says `older` is `newer` or one of its ancestors. Exit 1 is an answer here, not an error."""
+        probe = subprocess.run(["git", "-C", cls.repo, "merge-base", "--is-ancestor", older, newer],
+                               capture_output=True, env=tcj.GIT_ENV)
+        return probe.returncode == 0
+
+    def assert_fixture_shape(self):
+        """The branch shape a case reads, asserted before its verdict (P7): a drifted fixture fails here, by name."""
+        self.assertEqual(tcj.git(self.repo, "symbolic-ref", "--short", "HEAD").stdout.strip(), "pr",
+                         "fixture: HEAD is not on pr")
+        self.assertEqual(tcj.git(self.repo, "merge-base", "HEAD", "origin/main").stdout.strip(), self.B,
+                         "fixture: the merge base of pr and origin/main is not B")
+        self.assertTrue(self.ancestor(self.B, self.C), "fixture: B is not on main before C")
+
+    def hook(self, reply, landed=False, stop_hook_active=False, cwd=None):
+        # The fixture repo is the default cwd, so each case reads this branch shape, never the test runner's checkout.
+        return super().hook(reply, landed=landed, stop_hook_active=stop_hook_active, cwd=cwd or self.repo)
 
     # Red: each case below fails until the verdict exists. One test per case, so the red count is the case count.
 
@@ -5101,7 +5163,8 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
 
     def test_pe_red_each_offending_line_is_listed_and_the_cited_one_is_not(self):
         # Catches: only the first offending line is listed, or a line with a main run is listed with the red ones.
-        cited = "The failure is pre-existing: it fails on main at 174b005c1 too."
+        # Item 571: the cited sha is a fixture commit on main, newer than the merge base, so the line names a real run.
+        cited = "The failure is pre-existing: it fails on main at %s too." % self.C
         bad = "fails on 32b5f8b8e too, so it is not from this step"
         out = self.assert_blocked("\n".join([cited, bad]), bad)
         self.assertNotIn(cited, out["reason"])
@@ -5317,16 +5380,18 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
 
     def test_pe_green_brief_control_on_main_at_sha_passes(self):
         # Catches: a line that names a run on main at a sha is refused.
-        self.assert_allowed("fails on main at 174b005c1 too")
+        # Item 571: the sha is a fixture commit on main, newer than the merge base, so the run is real.
+        self.assert_allowed("fails on main at %s too" % self.C)
 
     def test_pe_green_pre_existing_with_a_run_on_main_passes(self):
+        # Item 571: each sha is a fixture commit on main, newer than the merge base.
         rows = [
             # Catches: "on main at <sha>" is not read as a run on main.
-            "The failure is pre-existing: it fails on main at 174b005c1 too.",
+            "The failure is pre-existing: it fails on main at %s too." % self.C,
             # Catches: a CI run URL that says it is on main is not read as a run on main.
             "Pre-existing: https://github.com/shivinate7/claude-settings/actions/runs/123 on main.",
             # Catches: a sha in a code span is not read as the sha.
-            "The failure is pre-existing: it fails on main at `174b005c1` too.",
+            "The failure is pre-existing: it fails on main at `%s` too." % self.C,
         ]
         for line in rows:
             with self.subTest(line=line):
@@ -5370,8 +5435,9 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
 
     def test_pe_green_long_reply_with_one_cited_claim_passes(self):
         # Catches: a long reply trips the check on a line with no claim, or on a claim that cites a run on main.
+        # Item 571: the cited sha is a fixture commit on main, newer than the merge base.
         lines = ["Line %d of the report: the suite ran and is green." % n for n in range(40)]
-        lines.append("The failure is pre-existing: it fails on main at 174b005c1 too.")
+        lines.append("The failure is pre-existing: it fails on main at %s too." % self.C)
         self.assert_allowed("\n".join(lines))
 
 
@@ -5402,13 +5468,14 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
                 self.assert_allowed(line)
 
     def test_pe_green_each_base_with_a_run_passes(self):
+        # Item 571: each sha is the fixture's main tip C, and each ref in these rows is a fixture ref at C.
         rows = [
             # Catches: "on master at <sha>" is refused as no run on main.
-            "The failure is pre-existing on master at 174b005c1.",
+            "The failure is pre-existing on master at %s." % self.C,
             # Catches: "on origin/main at <sha>" with no "on main" word is refused.
-            "pre-existing on origin/main at 174b005c1",
+            "pre-existing on origin/main at %s" % self.C,
             # Catches: "on origin/<branch> at <sha>" is refused as no run on main.
-            "The failure is pre-existing on origin/silent-undo-ci-body at 174b005c1.",
+            "The failure is pre-existing on origin/silent-undo-ci-body at %s." % self.C,
             # Catches: a run URL on a line that says "on main" is refused.
             "already red on main, run https://github.com/o/r/actions/runs/123",
             # Catches: a run URL on a line that says "on master" is refused.
@@ -5435,13 +5502,14 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
                 self.assert_allowed(line)
 
     def test_pe_green_base_named_with_a_sha_passes(self):
+        # Item 571: each sha is a fixture commit on main, newer than the merge base, so each form names a real run.
         rows = [
             # Catches: "on main (<sha>)" is refused as no run on main.
-            "It fails on main (174b005c1) too.",
+            "It fails on main (%s) too." % self.C,
             # Catches: "on main at commit <sha>" is refused as no run on main.
-            "It fails on main at commit 174b005c1 too.",
+            "It fails on main at commit %s too." % self.C,
             # Catches: "main@<sha>" is refused as no run on main.
-            "pre-existing: red on main@174b005c1",
+            "pre-existing: red on main@%s" % self.C,
         ]
         for line in rows:
             with self.subTest(line=line):
@@ -5467,8 +5535,9 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
 
     def test_pe_green_as_before_a_verb_with_a_run_on_main_passes(self):
         # Control: a line that names its run on main passes whether or not "as" opens a clause, and a line with no claim passes.
+        # Item 571: the sha is a fixture commit on main, newer than the merge base.
         rows = [
-            "I did not touch it as the failure seems pre-existing on main at 174b005c1.",
+            "I did not touch it as the failure seems pre-existing on main at %s." % self.C,
             "I did not touch it as the failure seems fixed.",
         ]
         for line in rows:
@@ -5477,9 +5546,10 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
 
     def test_pe_green_glued_period_with_a_run_on_main_passes(self):
         # Control: a line that names its run on main passes whether or not the period cuts a clause.
+        # Item 571: the sha is a fixture commit on main, newer than the merge base.
         rows = [
-            "It did not fail on main.The failure is pre-existing on main at 174b005c1.",
-            "It did not fail on main. The failure is pre-existing on main at 174b005c1.",
+            "It did not fail on main.The failure is pre-existing on main at %s." % self.C,
+            "It did not fail on main. The failure is pre-existing on main at %s." % self.C,
         ]
         for line in rows:
             with self.subTest(line=line):
@@ -5528,6 +5598,201 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
         for line in rows:
             with self.subTest(line=line):
                 self.assert_blocked(line, line)
+
+
+    # Item 571: a run's sha counts only when it is a commit on the base and not older than the merge base. Red: the
+    # incident form, and a main commit older than the merge base. Green: the newest main commit and the merge base in
+    # each run form, origin/main as the base, and the paths that fail open.
+
+    # The four run forms, each with its base and its sha: "on <base> at <sha>", "on <base> at commit <sha>",
+    # "on <base> (<sha>)" and "<base>@<sha>". Each is a claim line's tail.
+    RUN_FORMS = ("it fails on %s at %s.", "it fails on %s at commit %s.", "it fails on %s (%s).", "it is red on %s@%s.")
+
+    def test_pe_red_incident_pr_head_hash_on_main_is_refused(self):
+        # Catches: "on main at <sha>" passes for the PR's own head sha, so the PR's failure reads as pre-existing.
+        # Decision pre-existing-needs-main-run names this form as the one to refuse: a lane cited its own head as main's run.
+        self.assert_fixture_shape()
+        self.assertFalse(self.ancestor(self.P, "origin/main"), "fixture: P is on pr only, not on main")
+        line = "The failure is pre-existing; it fails on main at %s." % self.P
+        self.assert_blocked(line, line)
+
+    def test_pe_red_main_hash_older_than_the_merge_base_is_refused(self):
+        # Catches: "on main at <sha>" passes for a main commit older than the PR's merge base. A is on main, so the
+        # ancestor rule alone passes it; only the merge-base rule refuses it.
+        self.assert_fixture_shape()
+        self.assertTrue(self.ancestor(self.A, "origin/main"), "fixture: A is not on main")
+        self.assertFalse(self.ancestor(self.B, self.A), "fixture: A is not older than the merge base B")
+        line = "The failure is pre-existing; it fails on main at %s." % self.A
+        self.assert_blocked(line, line)
+
+    def test_pe_green_main_hash_newer_than_the_merge_base_passes(self):
+        # Catches: "on main at <sha>" is refused for a main commit newer than the merge base.
+        self.assert_fixture_shape()
+        self.assert_allowed("The failure is pre-existing; it fails on main at %s." % self.C)
+
+    def test_pe_green_merge_base_hash_passes(self):
+        # Catches: "on main at <sha>" is refused for the merge base itself, which is on main and no older than itself.
+        self.assert_fixture_shape()
+        self.assert_allowed("The failure is pre-existing; it fails on main at %s." % self.B)
+
+    def test_pe_green_each_run_form_on_main_with_the_newest_hash_passes(self):
+        # Catches: one of the four run forms with the newest main commit is refused.
+        self.assert_fixture_shape()
+        for form in self.RUN_FORMS:
+            line = "The failure is pre-existing; " + form % ("main", self.C)
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_origin_main_as_the_base_with_the_newest_hash_passes(self):
+        # Catches: "on origin/main at <sha>" is refused for the newest main commit, so origin/main is not read as a base.
+        self.assert_fixture_shape()
+        for form in self.RUN_FORMS:
+            line = "The failure is pre-existing; " + form % ("origin/main", self.C)
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_green_no_repo_under_the_cwd_fails_open(self):
+        # Catches: a cwd with no repo refuses a run the rule cannot check. The rule fails open, so the line passes.
+        probe = subprocess.run(["git", "-C", self.bare, "rev-parse", "--git-dir"], capture_output=True, env=tcj.GIT_ENV)
+        self.assertNotEqual(probe.returncode, 0, "fixture: a repo sits above the bare folder")
+        self.assert_allowed("The failure is pre-existing; it fails on main at %s." % self.P, cwd=self.bare)
+
+    def test_pe_green_unknown_hash_fails_open(self):
+        # Catches: a hash git does not know refuses the line. git fails on it, so the rule fails open and the line passes.
+        self.assert_fixture_shape()
+        unknown = "0123456789abcdef0123456789abcdef01234567"
+        probe = subprocess.run(["git", "-C", self.repo, "cat-file", "-e", unknown], capture_output=True, env=tcj.GIT_ENV)
+        self.assertNotEqual(probe.returncode, 0, "fixture: git knows the hash")
+        self.assert_allowed("The failure is pre-existing; it fails on main at %s." % unknown)
+
+    # Item 571: the rule's git cost, the shallow-clone limit, and the known debt of a PR's own branch as a base.
+
+    # Runs the guard under a wrapper that logs each git process it starts. Every git read the guard makes goes through
+    # subprocess.Popen, so the log holds the git calls of one run.
+    COUNT_GIT_CODE = (
+        "import json, os, runpy, subprocess, sys\n"
+        "real = subprocess.Popen\n"
+        "class Counting(real):\n"
+        "    def __init__(self, args, *rest, **kwargs):\n"
+        "        argv = [str(a) for a in args] if isinstance(args, (list, tuple)) else [str(args)]\n"
+        "        if argv and os.path.basename(argv[0]).lower() in ('git', 'git.exe'):\n"
+        "            with open(os.environ['GIT_COUNT_LOG'], 'a', encoding='utf-8') as f:\n"
+        "                f.write(json.dumps(argv) + '\\n')\n"
+        "        super().__init__(args, *rest, **kwargs)\n"
+        "subprocess.Popen = Counting\n"
+        "sys.argv = sys.argv[1:2]\n"
+        "runpy.run_path(sys.argv[0], run_name='__main__')\n"
+    )
+
+    def git_calls(self, reply, cwd=None):
+        """The git processes one guard run starts for `reply`, as argv lists. The hook is the one the class drives."""
+        hook = self.hook(reply, cwd=cwd)
+        log = os.path.join(tempfile.mkdtemp(dir=RUN_FOLDER), "git.log")
+        env = dict(os.environ, GIT_COUNT_LOG=log)
+        run = subprocess.run([sys.executable, "-c", self.COUNT_GIT_CODE, REPORT_GUARD], input=json.dumps(hook),
+                             capture_output=True, text=True, timeout=30, env=env)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        if not os.path.exists(log):
+            return []
+        with open(log, encoding="utf-8") as f:
+            return [json.loads(line) for line in f if line.strip()]
+
+    def test_pe_pin_git_calls_per_path_are_exact(self):
+        # Catches: the rule's git cost moves off its measured paths. A reply with no run-form hash runs git, and so does a
+        # line that names main with no hash. One hash costs 4 git calls for the newest main commit C, 5 for A (older than the
+        # merge base), 3 for the PR head P (the ancestor test fails, then the shallow probe), and 4 for the merge base B.
+        # A hash repeated on a second line adds none (the per-hash cache). Two distinct hashes cost their sum. Item 571.
+        self.assert_fixture_shape()
+
+        def line(sha):
+            return "The failure is pre-existing; it fails on main at %s." % sha
+
+        none = self.git_calls("The failure is pre-existing.")
+        self.assertEqual(none, [], "a reply with no run-form hash ran git: %d calls" % len(none))
+        on_main = self.git_calls("The failure is pre-existing on main.")
+        self.assertEqual(on_main, [], "a line that names main with no hash ran git: %d calls" % len(on_main))
+        newest = self.git_calls(line(self.C))
+        self.assertEqual(len(newest), 4, "the newest main hash ran %d git calls, not 4" % len(newest))
+        older = self.git_calls(line(self.A))
+        self.assertEqual(len(older), 5, "the main hash older than the merge base ran %d git calls, not 5" % len(older))
+        pr_head = self.git_calls(line(self.P))
+        self.assertEqual(len(pr_head), 3, "the PR-head hash ran %d git calls, not 3" % len(pr_head))
+        base = self.git_calls(line(self.B))
+        self.assertEqual(len(base), 4, "the merge-base hash ran %d git calls, not 4" % len(base))
+        repeat = self.git_calls(line(self.C) + "\n" + line(self.C))
+        self.assertEqual(len(repeat), len(newest), "the same hash on a second line ran %d git calls, not %d"
+                         % (len(repeat), len(newest)))
+        two = self.git_calls("The failure is pre-existing; it fails on main at %s and on main at %s." % (self.A, self.P))
+        self.assertEqual(len(two), 8, "two distinct hashes ran %d git calls, not 8" % len(two))
+
+    def test_pe_pin_run_hash_is_read_by_git(self):
+        # Catches: a run-form hash passes with no git call, so nothing reads whether the sha is on the base. The bound
+        # above is met at zero calls; this lower bound is what makes it a read. Item 571.
+        self.assert_fixture_shape()
+        calls = self.git_calls("The failure is pre-existing; it fails on main at %s." % self.C)
+        self.assertGreaterEqual(len(calls), 1, "one run-form hash ran no git call: the sha was not read")
+
+    def test_pe_green_shallow_clone_fails_open_on_a_pr_head_hash(self):
+        # Catches: the record's 'now refused' claim must name the shallow limit; item 571.
+        # A shallow clone cuts history, so an ancestry exit 1 there proves nothing: the rule fails open, and a PR-head
+        # sha passes. The pass is that named limit, pinned as today's behaviour, not a bypass.
+        clone = os.path.join(self.root, "shallow")
+        subprocess.run(["git", "clone", "-q", "--no-single-branch", "--depth", "2", "file://" + self.repo, clone],
+                       capture_output=True, env=tcj.GIT_ENV, check=True)
+        shallow = subprocess.run(["git", "-C", clone, "rev-parse", "--is-shallow-repository"], capture_output=True,
+                                 text=True, env=tcj.GIT_ENV).stdout.strip()
+        self.assertEqual(shallow, "true", "fixture: the clone is not shallow")
+        cut = subprocess.run(["git", "-C", clone, "merge-base", "--is-ancestor", self.P, "origin/main"],
+                             capture_output=True, env=tcj.GIT_ENV)
+        self.assertNotEqual(cut.returncode, 0, "fixture: P is reachable from origin/main in the clone")
+        self.assert_allowed("The failure is pre-existing; it fails on main at %s." % self.P, cwd=clone)
+
+    def test_pe_green_known_debt_pr_own_branch_as_base_passes(self):
+        # Catches: a sha on the PR's own head passes when the PR's own branch is named as the base. Known debt, pinned as
+        # today's behaviour and not fixed here: the base ref is the PR's own branch, so it always holds the head.
+        self.assert_fixture_shape()
+        self.assertTrue(self.ancestor(self.P, "origin/pr"), "fixture: origin/pr does not hold P")
+        self.assert_allowed("The failure is pre-existing; it fails on origin/pr at %s." % self.P)
+
+    def test_pe_red_url_does_not_outweigh_a_cited_pr_head_hash(self):
+        # Catches: a run URL on a line that also says "on main" passes when the line cites the PR's head sha, because the
+        # URL check returns before the cites are read. When a line cites a run-form hash, the cites decide, and the URL
+        # counts only with no cite. Item 571.
+        self.assert_fixture_shape()
+        url = "https://github.com/o/r/actions/runs/123"
+        line = "The failure is pre-existing; it fails on main at %s (%s)" % (self.P, url)
+        self.assert_blocked(line, line)
+
+    def test_pe_green_url_with_a_cited_main_hash_or_no_hash_passes(self):
+        # Catches: a run URL on a line that cites a commit on main, newer than the merge base, is refused; so is a line
+        # that says "on main" with the URL and no hash. Item 571.
+        self.assert_fixture_shape()
+        url = "https://github.com/o/r/actions/runs/123"
+        rows = [
+            "The failure is pre-existing; it fails on main at %s (%s)" % (self.C, url),
+            "The failure is pre-existing on main, run %s." % url,
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
+
+    def test_pe_red_mixed_case_origin_base_refuses_a_commit_off_it(self):
+        # Catches: the base is lowercased before the git read, so "origin/Release" reads as "origin/release", a ref git
+        # does not have. The read fails open, and a commit the base does not hold passes. Only main and master lowercase;
+        # origin/<branch> is read as written. Item 571.
+        self.assert_fixture_shape()
+        self.assertFalse(self.ancestor(self.P, "origin/Release"), "fixture: P is on origin/Release")
+        line = "The failure is pre-existing; it fails on origin/Release at %s." % self.P
+        self.assert_blocked(line, line)
+
+    def test_pe_green_mixed_case_origin_base_passes_a_commit_on_it(self):
+        # Catches: "on origin/Release at <sha>" is refused for a commit that base holds, newer than the merge base. This is
+        # the control for the case above: the case must keep its case, and a commit on the base still passes. Item 571.
+        self.assert_fixture_shape()
+        self.assertTrue(self.ancestor(self.X, "origin/Release"), "fixture: X is not on origin/Release")
+        self.assertEqual(tcj.git(self.repo, "merge-base", "HEAD", "origin/Release").stdout.strip(), self.B,
+                         "fixture: the merge base with origin/Release is not B")
+        self.assert_allowed("The failure is pre-existing; it fails on origin/Release at %s." % self.X)
 
 
 class PendingRefusalTests(unittest.TestCase):

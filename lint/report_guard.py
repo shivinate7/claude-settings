@@ -732,10 +732,11 @@ def answered_problem(text):
 
 
 # pre-existing-needs-main-run: a reply sentence that makes a pre-existing claim must name a run on the base
-# branch on the same line. The base is main, master or origin/<branch>, and the check takes any hash after it, not only the
-# base's tip. A run is "on <base> at <sha>",
+# branch on the same line. The base is main, master or origin/<branch>. A run is "on <base> at <sha>",
 # "on <base> at commit <sha>", "on <base> (<sha>)", "<base>@<sha>", or a CI run URL on a line that says
-# "on <base>". A bare base name is no run. A claim is one of three forms, in a sentence that holds a failure word:
+# "on <base>". A bare base name is no run. A hash counts only when git says it is a commit on the base
+# (main and master read origin/<name> when that ref exists) and no older than the PR's merge base with it
+# (_run_hash_counts). Any unknown (no cwd, no repo, hash not found, git fails) counts the hash. A claim is one of three forms, in a sentence that holds a failure word:
 # - "pre-existing" that describes the failure: next comes a failure noun, a preposition or no word, or before it
 #   comes is/was/it. "A pre-existing test" or "the pre-existing guard" modifies another noun and is no claim.
 # - "already red" (fails, broken, there, present), in a sentence that names a base or "before this change".
@@ -769,15 +770,17 @@ _YET = "yet"
 PRE_LEAD_RE = re.compile(
     r"\b(?:%s)\b|\b%s\b(?!\s+well\b)|(?<!\bas\s)\b%s\b" % (
         "|".join(w for w in _clause.LEAD_INS if w not in (_AS, _YET)), _AS, _YET), re.I)
+# Groups: (base, sha) for "on <base> at <sha>", (sha) for "on <base> (<sha>)", (base, sha) for "<base>@<sha>".
 MAIN_RUN_RE = re.compile(
-    r"\bon\s+{b}\s+(?:at\s+(?:commit\s+)?{s}|\(\s*{s}\s*\))|\b{b}@{s}".format(b=BASE_REF, s=SHA_WORD), re.I)
+    r"\bon\s+({b})\s+(?:at\s+(?:commit\s+)?({s})|\(\s*({s})\s*\))|\b({b})@({s})".format(b=BASE_REF, s=SHA_WORD), re.I)
 MAIN_RUN_URL_RE = re.compile(r"https?://\S*/actions/runs/\d+\S*", re.I)
 ON_BASE_RE = re.compile(r"\bon\s+%s\b" % BASE_REF, re.I)
 PRE_EXISTING_REASON = (
     "Pre-existing guard (rule pre-existing-needs-main-run): each line below calls a failure pre-existing, or "
     "says it fails on a commit or on main too, and names no run on the base branch. Run it there and say so "
     "on the same line (\"on main at <sha>\", or a CI run URL on main; master or origin/<branch> may be the base), "
-    "or say the failure comes from this change. A bare \"on origin/main\" is no run. Lines: ")
+    "or say the failure comes from this change. The sha must be a commit on the base and no older than the "
+    "PR's merge base with it, so a sha on the PR's own head is no run. A bare \"on origin/main\" is no run. Lines: ")
 
 
 def _pre_existing_describes_failure(clause, m):
@@ -830,15 +833,44 @@ def _claims_pre_existing(sentence):
     return False
 
 
-def _names_main_run(kept):
-    if MAIN_RUN_RE.search(kept):
+def _run_hash_counts(cwd, base, sha, cache):
+    """False only when git shows `sha` is not on `base`, or is older than HEAD's merge base with it. True otherwise,
+    and on any unknown. One answer per distinct (base, sha) in `cache`."""
+    if not cwd:
         return True
+    key = (base.lower() if "/" not in base else base, sha.lower())  # origin/<branch> is a ref name: case counts
+    if key not in cache:
+        cache[key] = _check_run_hash(cwd, key[0], sha)
+    return cache[key]
+
+
+def _check_run_hash(cwd, base, sha):
+    import git_reads
+    ref = base
+    if "/" not in base:  # main and master: the remote's tip when the clone has it, else the local branch
+        remote = git_reads._git(cwd, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/%s^{commit}" % base)
+        if remote is not None and remote.returncode == 0:
+            ref = "origin/" + base
+    if git_reads.branch_is_ancestor(cwd, ref, sha) is False:
+        return False
+    mb = git_reads._git(cwd, "merge-base", "HEAD", ref)
+    if mb is None or mb.returncode != 0 or not mb.stdout.strip():
+        return True
+    return git_reads.branch_is_ancestor(cwd, sha, mb.stdout.strip()) is not False
+
+
+def _names_main_run(kept, cwd=None, cache=None):
+    cache = {} if cache is None else cache
+    cites = [(m.group(1) or m.group(4), m.group(2) or m.group(3) or m.group(5)) for m in MAIN_RUN_RE.finditer(kept)]
+    if cites:  # a cited hash decides; the URL counts only on a line with no cite
+        return any(_run_hash_counts(cwd, base, sha, cache) for base, sha in cites)
     return bool(MAIN_RUN_URL_RE.search(kept) and ON_BASE_RE.search(MAIN_RUN_URL_RE.sub(" ", kept)))
 
 
-def pre_existing_problem(text):
-    """The refusal for reply lines that call a failure pre-existing with no run on main on the line, else ''."""
-    bad, fence = [], ""
+def pre_existing_problem(text, cwd=None):
+    """The refusal for reply lines that call a failure pre-existing with no run on main on the line, else ''.
+    `cwd` is the hook's: the repo whose history says whether a cited hash is on the base."""
+    bad, fence, cache = [], "", {}
     for line in text.splitlines():
         body = QUOTE_PREFIX.sub("", line, count=1).strip()
         marker = body[:3] if body[:3] in ("```", "~~~") else ""
@@ -851,7 +883,7 @@ def pre_existing_problem(text):
                      if not body[a:b].rstrip("*_)\"' ").endswith("?")]
         if not any(_claims_pre_existing(s) for s in sentences):
             continue
-        if _names_main_run(CODE_SPAN.sub(lambda m: m.group(2), body)):
+        if _names_main_run(CODE_SPAN.sub(lambda m: m.group(2), body), cwd, cache):
             continue
         bad.append(body)
     return PRE_EXISTING_REASON + "".join("\n- " + b for b in bad) if bad else ""
@@ -2900,7 +2932,7 @@ def rewrite_problems(hook):
         answered = answered_problem(text)
         if answered:
             reasons.append(answered)
-        pre_existing = pre_existing_problem(text)
+        pre_existing = pre_existing_problem(text, hook.get("cwd"))
         if pre_existing:
             reasons.append(pre_existing)
         recovered = recovered_problem(records, text) if report_shape_ok(text) else ""
@@ -3338,7 +3370,7 @@ def main():
         except Exception:
             pass
         try:
-            relay.append(pre_existing_problem(text))  # same: any turn, joined with any other reason
+            relay.append(pre_existing_problem(text, hook.get("cwd")))  # same: any turn, joined with any other reason
         except Exception:
             pass
     cannot = ""
