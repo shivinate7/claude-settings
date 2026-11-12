@@ -441,15 +441,18 @@ const NON_BMP_CWD = '/x/\u{1F600}y'
 // The script when it looks for the transcript (decision_watch.py): it finds a transcript filed under the session id in any
 // project folder. With none found it prints one UNKNOWN per session. Its mark lives in h.noTranscriptSeen, which the host
 // keeps across a mod reload. A session with no id is never marked, so it is told on every turn.
-function scriptNoTranscript(h) {
+// With explicitRuns, a spawn carrying DW_EXPLICIT=1 (a /dw the owner asked for) is told the UNKNOWN on every miss and
+// writes no mark (the explicit-run marker, decision-watch.test.mjs /dw cases below).
+function scriptNoTranscript(h, { explicitRuns = false } = {}) {
   return (argv, o) => {
     const stdin = JSON.parse(o.stdin || '{}')
     if (!argv.includes('--emit-prompt')) return { exitCode: 2, stdout: '', stderr: 'fake python: unknown argv' }
     if ([...h.files.keys()].some(p => p.endsWith('/' + stdin.session_id + '.jsonl'))) return defaultPython(h, argv, o)
     h.noTranscriptSeen ??= new Set()
     const key = `${o.env.CLAUDE_CONFIG_DIR}|${stdin.session_id}`
-    if (stdin.session_id && h.noTranscriptSeen.has(key)) return { exitCode: 0, stdout: '', stderr: '' }
-    if (stdin.session_id) h.noTranscriptSeen.add(key)
+    const explicit = explicitRuns && o.env.DW_EXPLICIT === '1'
+    if (!explicit && stdin.session_id && h.noTranscriptSeen.has(key)) return { exitCode: 0, stdout: '', stderr: '' }
+    if (!explicit && stdin.session_id) h.noTranscriptSeen.add(key)
     return out({ systemMessage: UNKNOWN + `transcript_path is missing or does not exist (tried: ${stdin.transcript_path}), and no transcript was found under session id ${stdin.session_id || '(none given)'}.` })
   }
 }
@@ -497,6 +500,53 @@ await test('turn.complete no transcript anywhere: one UNKNOWN on the first turn,
   await load(h)
   await turnDone(h, 't3')
   same(h.toasts.length, 1, 'notices after a mod reload of the same session (the seen mark must live outside the mod)')
+})
+
+// ---- /dw after a missed transcript (coordinator pick, 2026-11-12 09:30 CST; owner R41 item 1 covers the background judge
+// only). A /dw the owner asked for shows the UNKNOWN on every miss. The /dw spawn carries DW_EXPLICIT=1, the explicit-run
+// marker the script reads (a guessed contract point until the builder lands it). The background judge keeps its
+// once-per-session mark in its own state folder, so /dw neither consumes nor resets it.
+
+await test('/dw twice in one session, transcript missing: both show the UNKNOWN naming the path, each spawn marked explicit', async () => {
+  const h = await load(host())
+  missingLookup(h)
+  h.py1 = scriptNoTranscript(h, { explicitRuns: true })
+  const markers = []
+  const runDw = async () => {
+    const text = shown(h, await dwRun(h))
+    markers.push(emits(h).map(p => p.opts.env.DW_EXPLICIT))
+    h.procs.length = 0
+    return text
+  }
+  const first = await runDw()
+  const second = await runDw()
+  assert.ok(first.includes(UNKNOWN) && first.includes(TRANSCRIPT), `the first /dw did not show the UNKNOWN naming the path: ${tail(first)}`)
+  assert.ok(second.includes(UNKNOWN) && second.includes(TRANSCRIPT), `the second /dw did not show the UNKNOWN naming the path: ${tail(second)}`)
+  same(markers, [['1'], ['1']], 'the explicit-run marker on each /dw spawn')
+})
+
+await test('/dw after the background judge showed its UNKNOWN: /dw still shows the UNKNOWN', async () => {
+  const h = await load(host())
+  missingLookup(h)
+  h.py1 = scriptNoTranscript(h, { explicitRuns: true })
+  await turnDone(h, 't1')
+  same(h.toasts.length, 1, 'background notices after its first turn')
+  assert.ok(h.toasts[0].startsWith(UNKNOWN), `the background notice is not an UNKNOWN: ${JSON.stringify(h.toasts[0])}`)
+  const text = shown(h, await dwRun(h))
+  assert.ok(text.includes(UNKNOWN) && text.includes(TRANSCRIPT), `the /dw after the background UNKNOWN did not show it: ${tail(text)}`)
+})
+
+await test('a /dw UNKNOWN, then the background judge: the background still shows its own UNKNOWN once', async () => {
+  const h = await load(host())
+  missingLookup(h)
+  h.py1 = scriptNoTranscript(h, { explicitRuns: true })
+  const dwText = shown(h, await dwRun(h))
+  assert.ok(dwText.includes(UNKNOWN), `the /dw did not show the UNKNOWN: ${tail(dwText)}`)
+  await turnDone(h, 't1')
+  same(h.toasts.length, 1, 'background notices after the first turn, following a /dw')
+  assert.ok(h.toasts[0].startsWith(UNKNOWN), `the background notice is not an UNKNOWN: ${JSON.stringify(h.toasts[0])}`)
+  await turnDone(h, 't2')
+  same(h.toasts.length, 1, 'background notices after the second turn of the same session')
 })
 
 await test('turn.complete no session id: the UNKNOWN shows on every turn, the mod keeps no mark for an empty id', async () => {

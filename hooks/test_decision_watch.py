@@ -2176,6 +2176,65 @@ def case_fallback_unknown_without_session_id_shows_every_time():
           second.startswith(dw.UNKNOWN_PREFIX), second)
 
 
+# --------------------------------------------------------------------------- fallback: the explicit /dw
+# A /dw the owner asked for shows the failed-path UNKNOWN on every miss, never the once-per-session mark. The
+# background judge keeps the mark (case_fallback_unknown_shows_once_per_session). The seam is the env var below: the
+# mod's /dw sets it to "1" on each script spawn, and the script reads it in run() (coordinator pick, 2026-11-12 09:30
+# CST; owner R41 item 1 covers the background judge only). Old code ignores the marker, so each case below fails on
+# the once-per-session mark alone, except the control.
+
+EXPLICIT_ENV = "DW_EXPLICIT"
+
+
+def _explicit_env(cfg):
+    return dict(_one_config(cfg), **{EXPLICIT_ENV: "1"})
+
+
+def case_explicit_dw_unknown_on_every_miss():
+    key = "explicit_every_miss"
+    hook, cfg, given = _unfound_hook(key)
+    first, _ = _judge_given(key, hook, given, _explicit_env(cfg))
+    second, _ = _judge_given(key, hook, given, _explicit_env(cfg))
+    check("%s: the first /dw shows the UNKNOWN" % key, first.startswith(dw.UNKNOWN_PREFIX), first)
+    check("%s: the first /dw names the path it tried" % key, given in first, first)
+    check("%s: the second /dw of the same session shows the UNKNOWN" % key,
+          second.startswith(dw.UNKNOWN_PREFIX), second)
+    check("%s: the second /dw names the path it tried" % key, given in second, second)
+
+
+def case_explicit_dw_after_background_unknown_still_shows():
+    key = "explicit_after_background"
+    hook, cfg, given = _unfound_hook(key)
+    background, _ = _judge_given(key, hook, given, _one_config(cfg))
+    check("%s: the background judge shows its UNKNOWN first" % key,
+          background.startswith(dw.UNKNOWN_PREFIX), background)
+    explicit, _ = _judge_given(key, hook, given, _explicit_env(cfg))
+    check("%s: the /dw after the background UNKNOWN still shows the UNKNOWN" % key,
+          explicit.startswith(dw.UNKNOWN_PREFIX), explicit)
+
+
+def case_explicit_dw_leaves_the_background_mark_alone():
+    key = "explicit_keeps_background_mark"
+    hook, cfg, given = _unfound_hook(key)
+    explicit, _ = _judge_given(key, hook, given, _explicit_env(cfg))
+    check("%s: the /dw shows the UNKNOWN" % key, explicit.startswith(dw.UNKNOWN_PREFIX), explicit)
+    background, _ = _judge_given(key, hook, given, _one_config(cfg))
+    check("%s: the background judge after the /dw still shows its UNKNOWN" % key,
+          background.startswith(dw.UNKNOWN_PREFIX), background)
+    again, _ = _judge_given(key, hook, given, _one_config(cfg))
+    check("%s: the next background turn is silent, once per session" % key, again == "", again)
+
+
+def case_explicit_dw_on_a_found_transcript_is_judged():
+    # Control: a transcript that is found is judged as today, with the explicit marker set. Passes on old code.
+    key = "explicit_found_control"
+    hook, cfg, filed = _filed_hook(key)
+    spy = stub(FALLBACK_VERDICT)
+    with _env(**_explicit_env(cfg)):
+        message = dw.run(dict(hook, transcript_path=filed), model_call=spy)
+    _check_judged(key, message, spy)
+
+
 def main():
     case_flag_unapproved()
     case_flag_deleted_protected_file()
@@ -2258,6 +2317,10 @@ def main():
         case_fallback_unknown_names_the_path_tried,
         case_fallback_unknown_shows_once_per_session,
         case_fallback_unknown_without_session_id_shows_every_time,
+        case_explicit_dw_unknown_on_every_miss,
+        case_explicit_dw_after_background_unknown_still_shows,
+        case_explicit_dw_leaves_the_background_mark_alone,
+        case_explicit_dw_on_a_found_transcript_is_judged,
     ):
         run_case(case)
 
