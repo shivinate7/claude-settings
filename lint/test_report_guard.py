@@ -4319,10 +4319,12 @@ class UICopyRoundTwoTests(unittest.TestCase):
         small, large = build(600), build(2400)
         self.assertGreaterEqual(small.count("\n"), 4800)
         self.assertEqual(self.check("a.tsx", small), ["STE011"])
+        self.assertEqual(self.check("a.tsx", large), ["STE011"])
         t_small, t_large = cpu_seconds(small), cpu_seconds(large)
         # Four times the lines take about four times as long. A scan to the end of the file for each
         # generic takes about thirteen times as long. The floor stops a very fast small run from
         # making the ratio noise.
+        # The 8x bound catches a Python-speed scan only: a C-speed scan (str.find) gives about 4.3x and passes.
         ratio = t_large / max(t_small, 0.01)
         self.assertLess(ratio, 8, "4x the lines took %.1fx the time: the check is not linear" % ratio)
 
