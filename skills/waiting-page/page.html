@@ -1226,8 +1226,10 @@ const foldOpen = (it) => (it.id in state.unfold ? !!state.unfold[it.id] : newRep
 // and a Send on the open page re-sorts no tier. A reload works it out again.
 // A group is seen only while every member is in the frozen set, so a member that arrives after load makes the whole group new.
 const isSeen = (it) => !!state.seen && mates(it).every((x) => state.seen.has(x.id));
-// feed.receipts only records that the receipts arrived (a test waits on it); no freeze reads it. feed.meta tells the repo heads that "this repo" is known.
-const feed = { items: false, answers: false, receipts: false, meta: false, all: [] };
+// feed.receipts only records that the receipts arrived (a test waits on it); no freeze reads it. feed.meta and feed.metaFailed (the meta read failed) tell the
+// repo split that "this repo" is settled: until one is true the tiers draw flat, so no head is drawn and then lost.
+const feed = { items: false, answers: false, receipts: false, meta: false, metaFailed: false, all: [] };
+const metaSettled = () => feed.meta || feed.metaFailed;
 function freezeSeen() {
   if (state.seen || !feed.items || !feed.answers) return;
   // The last Send is the newest answer anywhere, a closed item's last answer included.
@@ -1276,8 +1278,9 @@ const isOwnRepo = (r) => {
   if (own) return l === own || (!l.includes("/") && l === name);
   return !!name && nameOfRepo(l) === name;
 };
-// "" is this repo; any other repo is its `owner/name` as written.
-const repoKey = (it) => { const r = K(it).repo; return typeof r !== "string" || !r.trim() || isOwnRepo(r) ? "" : r.trim(); };
+// "" is this repo; any other repo is its `owner/name` as written. Until the meta settles no repo is known as other, so every item reads "" and the tiers draw flat.
+// A failed meta read leaves state.meta null, so only an item with no `repo` is this repo's (the identity.name path finds no name).
+const repoKey = (it) => { const r = K(it).repo; return !metaSettled() || typeof r !== "string" || !r.trim() || isOwnRepo(r) ? "" : r.trim(); };
 // A group sits once, under the repo of its member that stops the most, this repo on a tie, then A to Z.
 function groupRepo(it) {
   const m = mates(it);
@@ -1301,7 +1304,7 @@ const aboutOf = (it) => (it.group && mates(it).length > 1 && repoKey(it) !== gro
 const headed = {};
 function headsOn(k, plan) {
   const on = plan.length > 1 || (plan.length === 1 && plan[0].key !== "");
-  if (on && feed.meta) headed[k] = true;
+  if (on && metaSettled()) headed[k] = true;
   return on || !!headed[k];
 }
 // The line under a tier head that names its key. It says "This repo first" only when the tier holds this repo and another.
@@ -1825,7 +1828,7 @@ function buildCard(it) {
   if (newReply(it)) top.children[0].after(replyMark(it));
   if (it.minutes && !saved) top.append(h("span", {}, minutesText(it.minutes)));
   // A Blocking card shows what its answer stops. A group member shows none: its group head counts the union once.
-  if (T === "holds" && !sunk && !saved && !(it.group && mates(it).length > 1)) { const n = stopsOf(it); if (n.length) top.append(" ", stopsMark(n)); }
+  if (T === "holds" && !sunk && !saved && !(it.group && mates(it).length > 1)) { const n = K(it).stops; if (n.length) top.append(" ", stopsMark(n)); }
   if (it.group) { const m = mates(it).filter((x) => x.id !== it.id); if (m.length) top.append(h("span", { class: "inbundle" }, "goes with No. " + m.map((x) => x.n).join(", No. "))); }
   const about = aboutOf(it);
   if (about) top.append(h("span", { class: "inrepo" }, "about " + about));
@@ -2216,7 +2219,7 @@ function renderList() {
     const m = it.group ? items.filter((x) => x.group === it.group) : [it];
     if (m.length < 2) { done.add(it.id); body.push(entryFor(it)); return; }
     m.forEach((x) => done.add(x.id));
-    const b = bundleEl(it.group, isSunk(it), blocking ? stopsUnion(it, (x) => x) : null); live.add(it.group);
+    const b = bundleEl(it.group, isSunk(it), blocking ? stopsUnion(it, K) : null); live.add(it.group);
     reconcile(b.el, [b.head, ...m.map(entryFor)]);
     body.push(b.el);
   };
@@ -3316,7 +3319,7 @@ render(); renderAsks();
   db.collection("answers").onSnapshot((s) => { state.answers = map(s); feed.answers = true; freezeSeen(); freezeSunk(); render(); }, () => {});
   db.collection("groups").onSnapshot((s) => { state.groups = map(s); render(); }, () => {});
   db.collection("receipts").onSnapshot((s) => { state.receipts = map(s); feed.receipts = true; render(); }, () => {});
-  db.collection("meta").doc("page").onSnapshot((s) => { const was = state.meta; state.meta = s.exists ? s.data() : null; feed.meta = true; keepRouted(was, state.meta); applyIdentity(); render(); renderAsks(); }, () => {});
+  db.collection("meta").doc("page").onSnapshot((s) => { const was = state.meta; state.meta = s.exists ? s.data() : null; feed.meta = true; keepRouted(was, state.meta); applyIdentity(); render(); renderAsks(); }, () => { feed.metaFailed = true; render(); });
   db.collection("asks").onSnapshot((s) => { askState.map = map(s); askState.bad = false; renderAsks(); }, () => { askState.bad = true; renderAsks(); });
 })();
 </script>

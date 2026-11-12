@@ -102,6 +102,10 @@ Picture ids: `#repos-pin`, `#repos-free`, `#repos-az`. Each draws one Blocking t
   - Blocking: "Most stopped work first, then triage's order, then oldest."
   - Upcoming: "Triage's order first, then nearest deadline, then oldest."
   - Whenever: "Triage's order first, then decisions, then oldest."
+  - Pick stands: "Triage's order first, then oldest." It splits into repo sub-groups like the other tiers, and its line
+    starts "This repo first." under the same condition.
+- A group member that is about another repo than its group's shows "about <repo>" in its top row, in plain sight
+  (the design reviewer picked keep). A screen reader hears it in the card's words too.
 - On each Blocking card the key shows in the top row: "stops 4", ink and weight 600 beside the muted "waited".
   Its names go to a screen reader and `title` (the `holds` line says them in words). No colour carries it.
 - Loss: "triage's order" shows in each line. Triage is the page writer (GLOSSARY), so the words are true.
@@ -115,7 +119,7 @@ Picture ids: `#repos-pin`, `#repos-free`, `#repos-az`. Each draws one Blocking t
   - Alternative "Seen divider once per tier" (`#s=seen-once`): new items of every repo, one divider, then the seen
     items of every repo. Gain: one divider per tier. Loss: each repo head shows twice in the tier.
 - Rail (`#s=page`): a tier row keeps its chips in the list's order. With two repos or more, each repo's run of
-  chips starts with its tile and name, and the run wraps as one so a phone row never ends on a lone tile.
+  chips starts with its tile and name. The run wraps as one, so a phone row never ends on a lone tile.
   The name shows at every size: sample-repo and sillage share "S". A chip's screen-reader words add
   "about <repo>" for another repo. Alternative "Rail with no repo marks" (`#s=rail-plain`). Gain: a shorter
   rail. Loss: the rail no longer shows where one repo ends.

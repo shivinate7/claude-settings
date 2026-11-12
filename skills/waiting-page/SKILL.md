@@ -65,8 +65,9 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     A ruling is never in a tier and never counts as open. It keeps `owner`, `n`, `title` and `options`:
     the card names the ruled option from `options`. Write a ruling only on a page that `stale_pages.py` reports
     current (see "Update a repo's pages"). An older page hides closed items, so the ruling would not show.
-  - `stops` (a list of strings, each once) names what the answer stops: `"lane <slug>"`, `"PR #<n>"` or `"step <id>"`. `holds` names each entry in words, and `stops`
-    needs `holds`. The writer refuses a write that breaks either. Blocking sorts by the count; the card shows "stops N". A group counts each entry once across its members.
+  - `stops` (a list of strings, each once) names what the answer stops: `"lane <slug>"`, `"PR #<n>"` or `"step <id>"`. `holds` carries each entry's slug (a stops entry
+    "step merge-queue" needs "step merge-queue" in `holds`), and `stops` needs `holds`. The writer refuses a write that sets `stops` without `holds`, or with a
+    `stops` entry that `holds` does not name. It does not see a later reword of `holds` alone (debt `stops-holds-reword-gap`). Blocking sorts by the count; the card shows "stops N". A group counts each entry once across its members.
     An update that sets `stops` carries `holds` too.
   - `rank` (an integer, lower first) orders items inside a tier. Only the page's writer sets it
     (see "The writer"). It never moves an item to another tier. In Blocking, `rank` follows `stops`. An item with no `rank` follows the
