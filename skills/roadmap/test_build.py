@@ -4507,6 +4507,56 @@ class OutboxRulings(Fixture):
                                  "a decision id is no repo path, so the one line must say unknown, never held:\n" + out)
 
 
+    def test_folder_readme_template_lines_print_nothing(self):
+        # The folder's README.md shows the format in its own [ruling] lines. The template's lines are read here, so the
+        # case follows the template. They miss the format, so judging the README would print unknown: malformed.
+        template = HERE.parent / "project-ops" / "templates" / "record-branch" / "roadmap" / "outbox" / "README.md.tmpl"
+        readme = template.read_text(encoding="utf-8")
+        self.assertIn("[ruling]", readme, "the template must carry [ruling] lines, or this case proves nothing")
+        self.record_rulings("session-readme", [self.ruling("readme-real-step", self.HELD)], steps=["readme-real-step"])
+        before = self.build_output()
+        self.assertEqual(self.verdict_lines(before, "readme-real-step", self.HELD), [["held"]],
+                         "scope: the session's real ruling must read held before the README is compared:\n" + before)
+        self.commit_on("roadmap", {"roadmap/outbox/README.md": readme})
+        after = self.build_output()
+        self.assertEqual(after, before, "the folder's README.md is the format's example, so its [ruling] lines must "
+                                        "print nothing, not unknown: malformed:\n" + after)
+
+    def test_fenced_example_ruling_prints_nothing_and_a_ruling_after_the_fence_is_read(self):
+        # The fence hides a well-formed example line and a malformed one alike. The ruling after the fence is the scope.
+        malformed = '- fence-bad-step [ruling] -> %s: "%s" (owner 2026-11-10 15:22 CST)' % (self.HELD, self.WORDS)
+        self.record_rulings("session-fence", [
+            "```",
+            self.ruling("fence-example-step", self.HELD),
+            malformed,
+            "```",
+            self.ruling("fence-real-step", self.HELD),
+        ], steps=["fence-real-step"])
+        out = self.build_output()
+        self.assertEqual(self.verdict_lines(out, "fence-real-step", self.HELD), [["held"]],
+                         "scope: the ruling after the fence must still read held:\n" + out)
+        self.assertEqual(self.verdict_lines(out, "fence-example-step", self.HELD), [],
+                         "a well-formed example inside a fence printed a verdict line:\n" + out)
+        self.assertNotIn("unknown: malformed", out,
+                         "a malformed example inside a fence printed unknown: malformed:\n" + out)
+
+    def test_whitespace_only_words_are_not_held(self):
+        # The words fold to "", which every text holds, so the empty fold reads held today. The line must not say held:
+        # it must print one line that says not held, or unknown: malformed (that line names no step).
+        self.record_rulings("session-blank", [
+            self.ruling("blank-scope-step", self.HELD),
+            self.ruling("blank-step", self.HELD, words=" "),
+        ], steps=["blank-scope-step", "blank-step"])
+        out = self.build_output()
+        self.assertEqual(self.verdict_lines(out, "blank-scope-step", self.HELD), [["held"]],
+                         "scope: the ruling with words must read held before the blank one is judged:\n" + out)
+        lines = [line for line in out.splitlines() if line.startswith("outbox ruling:") and "blank-scope-step" not in line]
+        self.assertEqual(len(lines), 1, "the whitespace-only ruling must print exactly one line, not nothing:\n" + out)
+        self.assertTrue(lines[0].endswith(": not held") or lines[0].endswith("-> unknown: malformed"),
+                        "whitespace-only words fold to the empty string, which every text holds, so the line must say "
+                        "not held or unknown: malformed, never held: " + lines[0])
+
+
 class SharedTagNames(unittest.TestCase):
     """The roadmap's tag names have one home, hooks/shared_names.py. build reads the very objects, so a
     copied literal cannot drift from the guard's check. Identity, not equality: an equal copy fails."""

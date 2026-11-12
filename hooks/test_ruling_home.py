@@ -716,10 +716,15 @@ def case_resolve_paths_separator_does_not_shift_later_answers():
         ("vt_and_ff_in_path", refs, ["a\x0bq\x0cz", "docs/a.md"]),
         ("u2028_in_path", refs, ["a q", "docs/a.md"]),
         ("u2028_in_ref_name", ["refs/heads/x y"] + refs, ["docs/a.md"]),
+        ("cr_in_path", refs, ["a\rq", "docs/a.md"]),
+        ("lf_in_path", refs, ["a\nq", "docs/a.md"]),
     )
     for label, row_refs, paths in rows:
         got, _ = _resolve_counting_batches(repo, row_refs, paths)
         check("separator %s: docs/a.md gets its alone answer" % label, got.get("docs/a.md") is True, got)
+        for path in paths:
+            if "\n" in path:
+                check("separator %s: a path holding LF reads not resolved" % label, got.get(path) is False, got)
 
 
 def case_resolve_paths_one_answer_per_path_in_order_in_one_batch():
