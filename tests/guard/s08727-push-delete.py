@@ -1014,6 +1014,9 @@ sh("push: agent checkout, HEAD to archive/ of the agent's own branch is silent",
 # name main or master asks. The name is literal: origin/HEAD does not decide it.
 push_case("main, HEAD:main from a feature branch asks", "origin HEAD:main", "ask", rule=PUSH_MAIN_RULE)
 push_case("main, a push of main from a feature branch asks", "origin main", "ask", rule=PUSH_MAIN_RULE)
+# A value-less flag in front of git must not stop the push guard from reading the push: the same push, behind `env -i`.
+push_case("wrapper-flags-crash: env -i in front of a push of main from a feature branch asks", "origin main",
+          "ask", rule=PUSH_MAIN_RULE, word="env -i " + VCS)
 push_case("main, a full ref to refs/heads/main asks", "origin x:refs/heads/main", "ask", rule=PUSH_MAIN_RULE)
 push_case("master, a push to master asks", "origin master", "ask", rule=PUSH_MAIN_RULE)
 push_case("main, a second refspec that reaches main asks", "origin HEAD:push-guard-asks HEAD:main", "ask",
