@@ -5,9 +5,9 @@ Plan: docs/decisions/session-messages.md#build-in-work-order (all)
 
 Status: draft until build step 2 and the 20-message trial run. Q1 to Q4, page item 153 (the mailbox ruling) and page item 308 (the store) are answered.
 The mailbox build is on main: PR #1371 merged 2026-11-08 inside batch-65g (PR #2236). Follow-up PR #2484 merged 2026-11-10 in batch 71.
-Next step: build step 2, the Mac and Windows auth check for `ls-remote`. Step 2 and the 20-message trial
-(step 5) need a Mac session. `MAILBOX_REPO` has no settings.json default until step 2 measures Mac and
-Windows auth. The default needs the owner's typed words. A session sets it in its env until then.
+Next step: the Mac round trip (the owner's check card). Windows round trip passed 2026-11-12 11:52 CST; cloud works.
+`MAILBOX_REPO` has a settings.json `env` default (owner page item 556 a, 2026-11-12 12:04 CST), so every session reads mail
+at turn start. The 20-message trial (step 5) is still open.
 
 ## Ruling
 

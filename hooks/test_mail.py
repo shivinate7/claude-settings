@@ -1430,6 +1430,16 @@ class MailboxOff(MailCase):
                          "MAILBOX_REPO unset: mail read exited %d, not 2: %s" % (read.returncode, combined(read)))
 
 
+class SettingsDefault(unittest.TestCase):
+    """The mailbox store is a default of every session: settings.json `env` names it, so no session sets it by hand."""
+
+    def test_settings_env_names_the_mailbox_store(self):
+        with open(os.path.join(REPO, "settings.json"), encoding="utf-8") as handle:
+            env = json.load(handle).get("env", {})
+        self.assertEqual(env.get("MAILBOX_REPO"), "https://github.com/shivinate7/session-mailbox.git",
+                         "settings.json env has no MAILBOX_REPO default, so a session reads no mail: %r" % env.get("MAILBOX_REPO"))
+
+
 if __name__ == "__main__":
     try:
         program = unittest.main(exit=False)
