@@ -16,10 +16,10 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   to `~/.claude/handoffs/<session_id>.inbox.md`. The file is outside git. A note typed on a
   waiting-page card is captured the same way. A PostToolUse
   hook on `ArtifactData` (`local_time.py --page-note`) acts on a `get` of `answers` only: the routing
-  session's re-read of `answers/<id>`, so an undone or withdrawn answer is never saved. Each answer
-  whose `data.note` is non-empty and not `accepted pick`, and that is not a parked-line act
-  (`parked: true`, whose note is the entry's own text), is appended as one block, stamped with the
-  answer's `at` in Central, with the one-line text `Waiting page note, item <n> (<item>): <note>`.
+  session's re-read of `answers/<id>`, so an undone or withdrawn answer is never saved.
+  Each answer is appended as one block when its `data.note` is non-empty, not `accepted pick`,
+  and not a parked-line act (`parked: true`, whose note is the entry's own text).
+  The block is stamped with the answer's `at` in Central, with the one-line text `Waiting page note, item <n> (<item>): <note>`.
   The label leaves out a missing n or item.
   The label adds no line, so a note is a burst by the Burst bullet's own test. The file `<session_id>.inbox.pagenotes` holds
   one key `<url>|<doc_id>|<at>` per saved note, and a repeat read saves nothing. Cost: one process
@@ -48,7 +48,8 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   the handoff's process-only section, re-read after compaction. Promote it to a ruling to keep it.
   `repo` (feedback about another repo): home `repo:<owner>/<name>`. The session sends the owner's
   message, with its items, to that repo's triage session (tags `cs-build:triage` and
-  `cs-repo:<owner>/<name>`), or to its coordinator when no triage lives. Feedback about the
+  `cs-repo:<owner>/<name>`). Triage always writes the page. In a run with one lane, the lane wears
+  triage's hat (owner, 2026-11-10 14:32 CST, G9, triage always writes the page; 14:33 CST, G10, roles are hats). Feedback about the
   session's own repo keeps the ruling and task homes.
   The page writer rewrites each waiting-page comment wake in claude-settings into the shared template, and never answers it in a thread (owner, 2026-11-10 09:13 CST: every page feedback goes into the shared template mechanically; ruling c164: rewrite the item, never a thread reply). The wake's inbox block needs a `task` item with home `step:<slug>` (a step whose file on the record branch names the template) or a `note` item with home `not-page-form`; the Stop guard's page-form rule (`page-form-to-template`) checks it.
   A message with a grant word (approval, approve, approved, grant, granted, authorize, authorized,

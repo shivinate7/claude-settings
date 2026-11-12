@@ -1730,7 +1730,7 @@ WALK_SUITES = {
     "hooks/guard_stream.py": [],
     "hooks/guard_push_delete.py": ["hooks/test_auto_mode_allow.py"],
     "hooks/guard_branch_worktree.py": ["hooks/test_auto_mode_allow.py"],
-    "hooks/guard_merge.py": ["lint/test_hook_catalog.py", "lint/test_settings_matcher.py"],
+    "hooks/guard_merge.py": ["lint/test_hook_catalog.py", "lint/test_report_guard_review.py", "lint/test_settings_matcher.py"],
     "hooks/guard_mask_script.py": [],
     "hooks/guard_argv.py": [],
 }
@@ -1865,6 +1865,7 @@ class GuardModuleFamilyTests(unittest.TestCase):
         the print."""
         target, suite = "hooks/guard_merge.py", "lint/test_hook_catalog.py"
         self.assertIn(target, guard_table(), "the fixture: %s keeps its GUARD_MODULE_FAMILIES row" % target)
+        self.assertIn(suite, WALK_SUITES[target], "the fixture: WALK_SUITES names %s for %s" % (suite, target))
         tree = ast.parse(show(REPO, "HEAD", suite))
         module_level = [node for node in tree.body if isinstance(node, ast.ImportFrom) and node.module == "guard_merge"]
         self.assertEqual(module_level, [], "the fixture: %s has no module-level import of guard_merge" % suite)
@@ -1874,7 +1875,8 @@ class GuardModuleFamilyTests(unittest.TestCase):
         self.assertTrue(in_def, "the fixture: %s imports guard_merge inside a def" % suite)
         code, out, err = run_cli(["--tests-for", target])
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
-        self.assertEqual(out.splitlines(), sorted(["hooks/test_guard.py::merge", suite, "lint/test_settings_matcher.py"]),
+        expected = {"hooks/test_guard.py::%s" % family for family in guard_table()[target]} | set(WALK_SUITES[target])
+        self.assertEqual(out.splitlines(), sorted(expected),
                          "%s loads guard_merge only inside a def, so the import walk finds it through a function-bound "
                          "load, and the union keeps it beside the merge family line" % suite)
 
