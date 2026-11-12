@@ -1,5 +1,7 @@
 # A push asks for the review log of each report
 
+Decision slug `push-needs-review-log`; rule id and test family `push-needs-review-record` are kept names (GLOSSARY.md, review log row).
+
 ## The ruling
 
 A shell `git push` asks while a reviewer or design-reviewer report has no posted review log. Coordinator, 2026-11-07 14:38 CST and 14:53 CST. Source: the brief. Process-only.
@@ -46,7 +48,7 @@ Dated by: the review log format in `merge/merge.py` (`parse_review`, `REVIEW_VER
 
 ## The cases
 
-The cases are in `tests/guard/s21305-push-needs-review-record.py` (section 21305, family `push-needs-review-record`).
+The cases are in `tests/guard/s21305-push-needs-review-log.py` (section 21305, family `push-needs-review-record`).
 
 | Transcript shows | Outcome |
 |---|---|
@@ -112,7 +114,7 @@ The cost case `a push reads git for a held report only when one is held` pins ze
 - A fork's `head` of the form `owner:branch` is read as `branch`.
 - A Bash review log post whose command does not hold the review log text (a body read from a file) is not a review log.
 - A destination the guard cannot resolve never matches a known head, so that push passes.
-- Any error passes (fail open): a transcript that cannot be read, a merge module that cannot load, or an exception in `review_record_hit` (`except Exception: pass`; note `push-record-scan-error-fails-open`).
+- Any error passes (fail open): a transcript that cannot be read, a merge module that cannot load, or an exception in `review_log_hit` (`except Exception: pass`; note `push-record-scan-error-fails-open`).
 - A round report pushed over without its review log can never be cleared: `merge --review-record --head A` refuses once the head moved. So every later push in that session asks, and the ask text gives no way out. A typed override is the way.
 - Ask scope: any push while a report is pending asks, an unrelated branch too (old ruled behaviour).
 
