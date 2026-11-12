@@ -504,4 +504,47 @@ chained_ask("cap var: a cap write to a settings path held in a shell variable, t
    "F=" + PROJ_SETTINGS + "; python3 -c \"import os; os.system('echo " + CAP_KEY + "=opus >> $F')\"",
    cwd=NOGIT, carries=("agent-model-cap",))
 
+# =========================================================================== the cap-lift deadline ask
+#
+# THE DEADLINE ASKS (owner ruling, page item 602, pick a, 2026-11-12 12:54 CST). A write that sets
+# `_agentCapUntil` alone asks under agent-model-cap, and the ask names the end in US Central on a 24-hour
+# clock with its zone (rule style-time-central-24h). A deadline has no ceiling, so one years ahead asks too.
+# A deadline already passed, or one that does not parse, stays silent, as on main. A model raise still asks.
+# The expected Central text comes from hooks/local_time.py, the one home of the Central clock, so a reason
+# that echoes the UTC reading, or hard-codes CST, reads as wrong.
+import datetime as _dt  # noqa: E402  the instants the Central helper reads (local_time is imported by test_guard)
+
+EXPIRY_KEY = "_agentCapUntil"
+DEADLINE_WINTER = "2099-01-15T03:30:00Z"   # CST: 21:30 on the 14th
+DEADLINE_SUMMER = "2099-07-15T03:30:00Z"   # CDT: 22:30 on the 14th
+DEADLINE_PAST = "2000-01-01T00:00:00Z"
+
+
+def _central_text(text):
+    """The Central reading of a Z-suffixed instant, from the one helper."""
+    instant = _dt.datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=_dt.timezone.utc)
+    return local_time.central_hhmm(instant)
+
+
+WANT_WINTER = _central_text(DEADLINE_WINTER)   # "21:30 CST"
+WANT_SUMMER = _central_text(DEADLINE_SUMMER)   # "22:30 CDT"
+
+add("cap deadline: a Write that sets only the cap-lift end asks under agent-model-cap and names the end in CST",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
+    content=json.dumps({EXPIRY_KEY: DEADLINE_WINTER}), carries=(WANT_WINTER,))
+add("cap deadline: an Edit that moves only the cap-lift end to a summer time asks under agent-model-cap and names the end in CDT",
+    "ask", "agent-model-cap", tool="Edit", cwd=NOGIT, file_path=PROJ_LOCAL,
+    old_string='"%s": "%s"' % (EXPIRY_KEY, DEADLINE_WINTER),
+    new_string='"%s": "%s"' % (EXPIRY_KEY, DEADLINE_SUMMER), carries=(WANT_SUMMER,))
+add("cap deadline: a Write that sets only a cap-lift end already passed stays silent", "allow",
+    tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
+    content=json.dumps({EXPIRY_KEY: DEADLINE_PAST}), silent=True)
+add("cap deadline: a Write that sets an unparseable cap-lift end stays silent", "allow",
+    tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
+    content=json.dumps({EXPIRY_KEY: "next Tuesday"}), silent=True)
+add("cap deadline: a model raise whose end is already passed still asks under agent-model-cap and names the model",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL,
+    content=json.dumps({"env": {CAP_KEY: OPUS, CAP_FORCE: "1"}, EXPIRY_KEY: DEADLINE_PAST}),
+    carries=(CAP_KEY + " = " + OPUS,))
+
 # =========================================================================== 6c. ask alone
