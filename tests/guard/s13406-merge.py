@@ -333,6 +333,9 @@ ROUTE_DENIALS = (
     ("gh api -X PUT, field flag first (-f)", "Bash", "gh api -X PUT -f merge_method=squash repos/y/x/pulls/1/merge", None),
     ("gh api -X PUT, input flag first (--input)", "Bash", "gh api -X PUT --input body.json repos/y/x/pulls/1/merge", None),
     ("gh api -X PUT, the field after the path (-f)", "Bash", "gh api -X PUT repos/y/x/pulls/1/merge -f merge_method=squash", None),
+    ("gh api -XPUT, the method attached to its flag", "Bash", "gh api -XPUT repos/y/x/pulls/1/merge", None),
+    ("gh api --method=PUT, the method after an equals sign", "Bash", "gh api --method=PUT repos/y/x/pulls/1/merge", None),
+    ("gh api -X=PUT, the method after an equals sign on the short flag", "Bash", "gh api -X=PUT repos/y/x/pulls/1/merge", None),
     ("git push origin main", "Bash", VCS + " push origin main", None),
     ("git push origin HEAD:main", "Bash", VCS + " push origin HEAD:main", None),
     ("git push origin <sha>:refs/heads/main", "Bash", VCS + " push origin abc1234:refs/heads/main", None),
@@ -340,6 +343,18 @@ ROUTE_DENIALS = (
 for _label, _tool, _command, _input in ROUTE_DENIALS:
     sh("merge-route: %s is refused while another ready pr's required check is pending" % _label, _command, "deny", "merge-checks",
        carries=ROUTE_CARRIES, lacks=ROUTE_LACKS, cwd=NOGIT, env_path=ROUTE_ON, config=MERGECFG)
+# A raw PUT to a merge endpoint whose pr number, repo or host the reader cannot read. The shell or gh resolves each form to
+# the merge call, so each is denied under merge-checks, as the `$PR` case is. Only the deny and the rule are asserted: once
+# the reader reads a form, the cause may be a busy pr, not unknown.
+ROUTE_UNREAD_DENIALS = (
+    ("a pr number from a command substitution", "gh api -X PUT repos/y/x/pulls/$(echo 1)/merge"),
+    ("a repo with a placeholder owner and a named repo", "gh api -X PUT repos/{owner}/r/pulls/1/merge"),
+    ("a pr number with a default value", "gh api -X PUT repos/y/x/pulls/${PR:-1}/merge"),
+    ("an absolute https URL", "gh api -X PUT https://api.github.com/repos/y/x/pulls/1/merge"),
+)
+for _label, _command in ROUTE_UNREAD_DENIALS:
+    sh("merge-route: unread form: %s is refused" % _label, _command, "deny", "merge-checks",
+       cwd=NOGIT, env_path=ROUTE_ON, config=MERGECFG)
 sh("merge-route: git push origin main with no busy pr on main still asks", VCS + " push origin main", "ask", PUSH_MAIN_RULE,
    cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
 sh("merge-route: git push origin some-branch is allowed while another ready pr's required check is pending",
