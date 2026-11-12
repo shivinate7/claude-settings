@@ -557,6 +557,7 @@ while True:
             checkout_conflict_resolve, clean_deletes_files, names_only_files, one_place, session_id_of, shared_tree_match,
             SESSION_ID_RE, STASH_READ_ACTIONS, in_any_session_scratchpad, stash_action, stash_takes_the_stack, subject_state, under_session_scratchpad,
             scratchpad_clear_writer, scratchpad_folder_writer, scratchpad_record_writer, scratchpad_writer_of,
+            SCRATCHPAD_GLOB_MAGIC, expand_shell_braces,
         )
         _loading = "guard_pointer"
         from guard_pointer import (
@@ -5912,16 +5913,24 @@ REDIRECT_WORD = re.compile(r"(?:\d*[<>]+&?|&>>?)")
 
 
 def scratchpad_copies(command: str, cwd: str):
-    """[(verb, source, destination)] for each `cp` and `mv` of the shell text, as absolute paths: the
+    """[(verb, source, destination, into)] for each `cp` and `mv` of the shell text, as absolute paths: the
     destination of each source (a folder destination takes the source's name), with `-t DIR` read too. A flag
-    is skipped and so is a redirect; a flag's own value is not told (`cp -S .bak`), a rare miss."""
-    found, ends = [], []
+    is skipped and so is a redirect; a flag's own value is not told (`cp -S .bak`), a rare miss. `into` is the
+    folder an `mv` moves its sources into (a folder destination, or the `-t` folder), else ''. It is '' too when
+    the destination word holds a brace list or a glob, which the shell makes into other words, and when any other
+    word of the text names that folder (`rm -rf S/sub && mv x S/sub/`)."""
+    found, ends, names, intos = [], [], {}, {}
     segments = split_segments(command, ends)
     for number, segment in enumerate(segments):
         tokens = segment_tokens(segment)
         if not tokens:
             continue
         where = dir_before_segment(segments, number, cwd, ends)
+        for token in tokens:   # every word that may name a folder, a flag's `=value` too
+            named = token.partition("=")[2] if token.startswith("-") else token
+            named = shell_abs(named, where) if named else None
+            if named:
+                names[os.path.normpath(named)] = names.get(os.path.normpath(named), 0) + 1
         for word, args in scratchpad_command_words(tokens):
             verb = basename(word)
             if verb not in ("cp", "mv"):
@@ -5942,13 +5951,20 @@ def scratchpad_copies(command: str, cwd: str):
                     plain.append(arg)
             dest, sources = (target, plain) if target else ((plain[-1], plain[:-1]) if len(plain) > 1 else ("", []))
             full = shell_abs(dest, where) if dest else ""
+            into = ""
+            if (full and sources and (target or dest.endswith(("/", os.sep)) or os.path.isdir(full))
+                    and expand_shell_braces(dest) == [dest] and not SCRATCHPAD_GLOB_MAGIC.search(dest)):
+                into = full
+                intos[os.path.normpath(full)] = intos.get(os.path.normpath(full), 0) + 1
             for source in sources:
                 source_full = shell_abs(source, where)
                 if not full or not source_full:
                     continue
                 folder = dest.endswith(("/", os.sep)) or os.path.isdir(full)
-                found.append((verb, source_full, os.path.join(full, os.path.basename(source.rstrip("/\\"))) if folder else full))
-    return found
+                found.append((verb, source_full, os.path.join(full, os.path.basename(source.rstrip("/\\"))) if folder else full,
+                              into if verb == "mv" else ""))
+    return [(verb, source, dest, into if into and names.get(os.path.normpath(into)) == intos[os.path.normpath(into)] else "")
+            for verb, source, dest, into in found]
 
 
 def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
@@ -5990,7 +6006,12 @@ def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
                     removed.add(found[hit][0])
             # A `cp` or `mv` destination is a file this call writes. An `mv` is judged as a removal above, and its
             # destination is recorded too: it carries the record of its source.
-            for verb, source, dest in scratchpad_copies(_resolve_vars(command), cwd):
+            for verb, source, dest, into in scratchpad_copies(_resolve_vars(command), cwd):
+                # The folder an `mv` moves into loses nothing, so it is not walked as a removal; its sources are.
+                # It is no written file either: the new entry `dest` is, so the folder takes no record of its own.
+                for listed in [full for full in files if into and os.path.normpath(full) == os.path.normpath(into)]:
+                    files.remove(listed)
+                    removed.discard(listed)
                 if SCRATCHPAD_WORD in dest and under_session_scratchpad(dest, session):
                     if dest not in files:
                         files.append(dest)
