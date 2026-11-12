@@ -64,12 +64,14 @@ def single_job_limit(minutes):
     return limits.get("checks")
 
 
-# Three jobs. lint-a is green at 20 min (limit 30). checks is green at 50 min (limit 75, the largest old limit).
-# lint-b is new and of lint-a's kind, so its estimate is 30 x 1.5 = 45. docs is new with no kind match, so its
-# estimate is 75 x 1.5 = 112.5, rounded up to 113.
-CAPS = {"lint-a": 30, "lint-b": 45, "checks": 75, "docs": 60}
-KINDS = {"lint-a": "lint", "lint-b": "lint", "checks": "test", "docs": "docs"}
-OLD_RUNS = [run(2, job("lint-a", 20), job("checks", 50)), run(1, job("lint-a", 20), job("checks", 50))]
+# Six jobs. lint-a, lint-c and lint-d are green at 20 min (limit 30 each). They are the peers that keep the median
+# floor below the claims: every limit is at least the median of all limits. checks is green at 50 min (limit 75, the
+# largest old limit). lint-b is new and of lint-a's kind, so its estimate is 30 x 1.5 = 45. docs is new with no kind
+# match, so its estimate is 75 x 1.5 = 112.5, rounded up to 113.
+CAPS = {"lint-a": 30, "lint-b": 45, "lint-c": 30, "lint-d": 30, "checks": 75, "docs": 60}
+KINDS = {"lint-a": "lint", "lint-b": "lint", "lint-c": "lint", "lint-d": "lint", "checks": "test", "docs": "docs"}
+OLD_RUNS = [run(2, job("lint-a", 20), job("checks", 50), job("lint-c", 20), job("lint-d", 20)),
+            run(1, job("lint-a", 20), job("checks", 50), job("lint-c", 20), job("lint-d", 20))]
 
 
 def raising_fetch():
