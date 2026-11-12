@@ -46,8 +46,9 @@ carries no such label. The code raises the exception named in each item.
 - Lock unreadable (sweep row `lock-acquire-unreadable`; `Stop`, or `NetStop` on a network error): the ref
   cannot be read, the lock commit cannot be read over the network, or the lock commit or the take cannot be
   made. A non-network fetch failure, or a failed `git log` of the listed sha, re-lists once, then `Stop`.
-  The take push runs once, by design: a network error on it stops the run only when the take did not
-  land. A take that landed with a lost reply proceeds.
+  The take's reads (`listed`, `commit_text` in `merge/merge.py`) retry a network error `NET_RETRIES` times,
+  `NET_PAUSE` apart. The take push runs once, by design: a network error on it stops the run only when the
+  take did not land. A take that landed with a lost reply proceeds.
 - Extend failed (sweep row `lock-extend-failed`; `NetStop`): the lock expired before the wait, the
   extension would pass 6 h, or the push failed.
 - Rate wait unextendable (sweep row `rate-wait-unextendable`; `NetStop`): a GitHub rate-limit wait needs
