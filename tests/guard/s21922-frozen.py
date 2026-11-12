@@ -137,6 +137,66 @@ RESOLVE_CASES = (
 for _label, _command, _want in RESOLVE_CASES:
     LOG_CHECKS_EXTRA.append((_label, resolve_case(_command, _want)))
 
+# The control-byte marks of guard_frozen.py, guard_core.py and guard_env.py are pairwise distinct. A guard
+# module marks words and globs with one-character control-byte strings, and two marks on one byte read as one
+# mark to the other. The case reads each module's own top-level constants from the loaded module, so it copies
+# no value here.
+MARK_CONSTANT_FILES = ("guard_frozen.py", "guard_core.py", "guard_env.py")
+MARK_CONSTANT_NAMES = ("_WORD_MARK", "_GLOB_MARK", "_SEGMENT_GLOB")  # the scan must find each one
+
+
+def _control_byte_constants(file_name):
+    """{name: value} of the one-character control-byte strings that FILE_NAME assigns at its top level.
+
+    The names come from the file's own assignments, so a name imported from another module is not counted.
+    """
+    import importlib.util
+    path = os.path.join(os.path.dirname(GUARD), file_name)
+    with open(path, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read(), path)
+    assigned = {target.id for node in tree.body if isinstance(node, ast.Assign)
+                for target in node.targets if isinstance(target, ast.Name)}
+    spec = importlib.util.spec_from_file_location("mark_constants_" + file_name[:-3], path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    found = {}
+    for name in sorted(assigned):
+        value = getattr(module, name, None)
+        if isinstance(value, str) and len(value) == 1 and (ord(value) < 0x20 or 0x7F <= ord(value) <= 0x9F):
+            found[name] = value
+    return found
+
+
+def frozen_mark_constants_case():
+    """The control-byte mark constants of the three guard modules are pairwise distinct.
+
+    The scope comes first: each named mark must be found, so a rename cannot empty the scan. Then no
+    two marks found may share a byte.
+    """
+    found = {}
+    for file_name in MARK_CONSTANT_FILES:
+        for name, value in _control_byte_constants(file_name).items():
+            found[file_name + ":" + name] = value
+    missing = [name for name in MARK_CONSTANT_NAMES if not any(key.endswith(":" + name) for key in found)]
+    if missing:
+        return False, "the scan found no control-byte mark named %s in %s" % (
+            ", ".join(missing), " or ".join(MARK_CONSTANT_FILES))
+    by_byte = {}
+    for key, value in found.items():
+        by_byte.setdefault(value, []).append(key)
+    shared = ["%s both read %r" % (" and ".join(sorted(keys)), value)
+              for value, keys in sorted(by_byte.items()) if len(keys) > 1]
+    if shared:
+        return False, "two marks share one byte: " + "; ".join(shared)
+    return True, "the %d control-byte mark constants (%s) are pairwise distinct" % (
+        len(found), ", ".join(sorted(found)))
+
+
+FIXTURELESS_CHECKS.add(frozen_mark_constants_case)  # it loads the three modules and builds no fixture
+MARK_CONSTANTS_LABEL = ("frozen: the control-byte mark constants of guard_frozen.py, guard_core.py and "
+                        "guard_env.py are pairwise distinct")
+LOG_CHECKS_EXTRA.append((MARK_CONSTANTS_LABEL, frozen_mark_constants_case))
+
 # ---- merge: gh_call_of reads the pr verb past a repo flag. Its callers (merge_call_of, the draft-PR read,
 # ci_wake and guard.py's title read) take the first two words it returns, so a -R or --repo in front of the verb,
 # or after the group word, hides the verb from each of them. One check per flag form, called on gh_call_of directly.
