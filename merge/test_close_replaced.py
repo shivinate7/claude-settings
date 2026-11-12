@@ -299,6 +299,18 @@ class CloseAsCarried(CloseEnv):
         self.assertIn("close as carried: o/alpha #5 by #9", lines, "control: the done #5 under #9 prints no line:\n" + "\n".join(lines))
         self.assertNotIn("close as carried: o/alpha #6 by #9", lines, "an undone lane under a carrier was closed")
 
+    def test_a_done_pr_whose_head_main_holds_is_not_carried_by_another_open_pr(self):
+        # Probe: #5's head a is on main (compare a...main reads ahead), and open #9 holds a too. #5 is done, so only the carried check could
+        # close it. Control: #6 is done on a head only #9 holds, and closes by #9.
+        a, c, b9 = head_of(5), head_of(6), head_of(9)
+        pulls = [named_pull(5, a), named_pull(6, c), named_pull(9, b9)]
+        comments = [record_of(5, a), record_of(6, c)]
+        compares = {(a, b9): "ahead", (a, "main"): "ahead", (c, b9): "ahead"}
+        host = closed_host("o/alpha", pulls, comments, check_rows={a: green(), c: green()}, compares=compares)
+        lines = kind_lines(block_of(self, self.reviewed(host), "o/alpha"), CARRIED)
+        self.assertIn("close as carried: o/alpha #6 by #9", lines, "control: the done #6 under #9 prints no close line:\n" + "\n".join(lines))
+        self.assertNotIn("close as carried: o/alpha #5 by #9", lines, "#5's head is on main already, yet #5 closes as carried by #9:\n" + "\n".join(lines))
+
     def test_an_unknown_compare_prints_unknown_and_exits_one(self):
         # The compare of #5 with #9 fails. The line says unknown, with a reason, in place of a close line. A close line is never printed.
         host = closed_host("o/alpha", pulls=[named_pull(5, head_of(5), draft=True), named_pull(9, head_of(9))], comments=[record_of(5, head_of(5))],
@@ -422,6 +434,17 @@ class ReopenClosed(CloseEnv):
                               extra_comments=[review_comment(90, 4, "Replaced by #7"), review_comment(91, 7, "Replaced by #9")])
         self.assertEqual(len(lines), 1, "a closed chain tail reopened more than one link on one wake:\n" + "\n".join(lines))
         self.assertIn(lines[0], ["reopen: o/alpha #7 (replacer #9 dropped)", "reopen: o/alpha #4 (replacer #7 dropped)"], "\n".join(lines))
+
+    def test_a_reopen_waits_while_another_open_pr_still_names_the_closed_one(self):
+        # Probe: #5 is closed with the note `Replaced by #9`, and #9 is closed unmerged, so the reopen read would reopen #5. Open #12 says
+        # `Replaces #5`, so a reopened #5 closes again by #12 on the next wake. Control: without #12, the same run reopens #5.
+        closed = [closed_pull(5, head_of(5)), closed_pull(9, head_of(9))]
+        notes = [review_comment(90, 5, "Replaced by #9")]
+        control = kind_lines(self.block_for_alpha(pulls=[named_pull(4, head_of(4))], comments=notes, closed=closed), REOPENED)
+        self.assertEqual(control, ["reopen: o/alpha #5 (replacer #9 dropped)"], "control: the reopen line for #5 is missing without #12:\n" + "\n".join(control))
+        pulls = [named_pull(4, head_of(4)), named_pull(12, head_of(12), body="Replaces #5")]
+        lines = kind_lines(self.block_for_alpha(pulls=pulls, comments=notes, closed=closed), REOPENED)
+        self.assertEqual(lines, [], "#5 reopened while open #12 still names it, so the next wake closes it again:\n" + "\n".join(lines))
 
 
 class ReplacesCycles(CloseEnv):
