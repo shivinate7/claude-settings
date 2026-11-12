@@ -1090,6 +1090,18 @@ WORKTREE_HAND_MADE_REASON = (
 )
 
 
+def hand_made_worktree_reason(payload) -> str:
+    """The one reason for a hand-made worktree. A call with a valid `agent_id` also learns where its own
+    red-run checkout goes, since EnterWorktree may be refused for a subagent; any other call gets
+    `WORKTREE_HAND_MADE_REASON` unchanged. The reason never names a sibling's id or a refused tree."""
+    agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
+    if not isinstance(agent_id, str) or not AGENT_ID.match(agent_id):
+        return WORKTREE_HAND_MADE_REASON
+    return (WORKTREE_HAND_MADE_REASON + " EnterWorktree may be refused for a subagent. A separate checkout "
+            "for your own red run goes in `.claude/worktrees/agent-" + agent_id + "-red`, made with "
+            "`git worktree add --detach <path> <sha>`.")
+
+
 SILENT_WRITE_REDIRECT_REASON = (
     "Rule (Git): command {command} of {total}, the {kind}: a redirect silences this write's own "
     "output (>/dev/null), so neither a refusal nor the line that proves it landed would reach "
@@ -4394,7 +4406,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if segment.strip():
             matched = hand_made_worktree_hit(segments, number, cwd, ends, payload)
             if matched:
-                refuse(tool, "deny", "hand-made-worktree", WORKTREE_HAND_MADE_REASON, matched)
+                refuse(tool, "deny", "hand-made-worktree", hand_made_worktree_reason(payload), matched)
 
     # 1e. The impeccable skill's build and settings-writer commands (design-skills record).
     matched = impeccable_command_hit(raw)
