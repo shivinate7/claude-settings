@@ -1,0 +1,14 @@
+{
+ "id": "undo-scan-drops-lines",
+ "title": "merge.py reverts a dropped line with --no-commit and a drops_line trailer",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Once the silent-undo scan enforces, a lane needs a sanctioned way to drop a line on purpose.",
+ "source": "lane fan-prose-unmapped-3 audit of #1099 against main and #2734, 11:08 CST Nov 12, via coordinator 11:09 CST; goal no-undo-lane-commits (owner fb-1041-1, Nov 2 10:41 CST)",
+ "note": "merge/merge.py `--no-commit` revert with a drops_line trailer. Waits until the silent-undo scan enforces (#2734 is report-only). Note only until then.",
+ "updatedAt": "2026-11-12T11:12:07-06:00"
+}

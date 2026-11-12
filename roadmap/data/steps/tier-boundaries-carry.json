@@ -1,0 +1,14 @@
+{
+ "id": "tier-boundaries-carry",
+ "title": "Carry #919's remaining tier code from branch tier-boundaries-enforced",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Tier code left on a branch is a capability no session can reach.",
+ "source": "lane fan-prose-unmapped-3 audit of #1099 against main and #2734, 11:08 CST Nov 12, via coordinator 11:09 CST; goal no-undo-lane-commits (owner fb-1041-1, Nov 2 10:41 CST)",
+ "note": "Lane report: #919's tier code is unmerged on branch tier-boundaries-enforced: coordinator-scope guard, own-session tags, role readers, about 422 guard lines, two debts, a session-tiers section. Separate feature from silent-undo; needs its own lane and full review rounds. Triage read 11:12 CST Nov 12: step tier-boundaries-enforced is done (#2361, e0b9696ca on main, batch 66), and main has session-tiers text (CLAUDE.md, GLOSSARY.md, debts); the branch (last commit Nov 7, 96cde8034) has 256 commits by patch not on main. First act: diff the branch tree against main and list what is truly missing before building. Ready, no lane.",
+ "updatedAt": "2026-11-12T11:12:07-06:00"
+}
