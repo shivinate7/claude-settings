@@ -988,4 +988,4 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - [lane fan-prose-unmapped-5 via coordinator 16:13 CST Nov 12] Note message-ref-pr-lines-word may be a debt: a refused message gets resent.
 - [lane fan-prose-unmapped-5 via coordinator 16:13 CST Nov 12] A subagent's new-file Write in docs/debts was refused, so #2748's debts stayed as notes; possible false alarm, check which guard refused.
 - [lane fan-prose-unmapped-5 via coordinator 16:13 CST Nov 12] All PRs handed to runner 10: #2661, #2715-#2717, #2726, #2736, #2747, #2748, #2833, #2913; merge order #2748, #2833, #2913.
-- [triage 16:16 CST Nov 12] The earlier line "R22 point 2 wording needs an owner rewrite" is settled: a wording slip, filed as step r22-lane-id-wording (no owner item).
+- [triage 16:14 CST Nov 12] The earlier line "R22 point 2 wording needs an owner rewrite" is settled: a wording slip, filed as step r22-lane-id-wording (no owner item).
