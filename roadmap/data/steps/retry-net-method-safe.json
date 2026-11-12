@@ -1,14 +1,14 @@
 {
  "id": "retry-net-method-safe",
  "title": "retry_net resends only safe methods on a 5xx reply",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
- "lane": "",
+ "lane": "session_013NEJL1ubMb2G2VdQNW823R",
  "owner": "triage",
  "blockedBy": [],
  "why": "Lane merge-net-small-fixes 14:33 CST Nov 12: retry_net resends any method on a 5xx reply; a PUT merge went 4 times.",
  "source": "lane merge-net-small-fixes 14:33 CST Nov 12",
- "note": "Fix in merge/merge.py retry_net: retry GET only (or a PUT/POST only when the call is idempotent by design); read the last -X, not the first. Red first on the 4-times PUT merge.",
- "updatedAt": "2026-11-12T14:35:44-06:00"
+ "note": "Fix in merge/merge.py retry_net: retry GET only (or a PUT/POST only when the call is idempotent by design); read the last -X, not the first. Red first on the 4-times PUT merge. Lane started 14:37 CST Nov 12.",
+ "updatedAt": "2026-11-12T14:40:54-06:00"
 }

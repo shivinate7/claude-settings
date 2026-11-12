@@ -15,7 +15,7 @@
     },
     {
       "gain": "A ruling holds everywhere within one turn, guards included, with no override typing.",
-      "how": "Only triage writes the store, from your quoted words with their time; each lift names one guard rule; the entry closes when main takes the change in. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "how": "Only triage writes the store, from your quoted words with their time; each lift names one guard rule; the entry closes when main takes the change in. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo. Retrospective: possible false alarm; this is the owner's override made lasting, not a per-repo form.",
       "key": "b",
       "label": "Your ruling governs the guard now",
       "lose": "The store becomes a second form the guards accept: a wrong entry lifts a guard until someone notices.",

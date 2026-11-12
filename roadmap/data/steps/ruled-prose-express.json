@@ -1,14 +1,14 @@
 {
  "id": "ruled-prose-express",
  "title": "A ruled prose PR skips the batch queue and runs only the checks that read its files",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
- "lane": "",
+ "lane": "session_013NEJL18BcVaH118GLXrQiv",
  "owner": "triage",
  "blockedBy": [],
  "why": "A prose rewrite of an owner ruling waits hours behind batch CI; main has not moved since 09:09 CST Nov 12.",
  "source": "retrospective 14:31 CST Nov 12 (owner question 14:28 CST)",
- "note": "A PR that only rewrites prose to match a ruled store entry skips the batch queue and runs only the checks that read its files. R55 express lane. Kin: ruled-store-one-home.",
- "updatedAt": "2026-11-12T14:35:44-06:00"
+ "note": "A PR that only rewrites prose to match a ruled store entry skips the batch queue and runs only the checks that read its files. R55 express lane. Kin: ruled-store-one-home. Lane started 14:37 CST Nov 12. Lane 14:39: no R55 express code exists on main or any branch (plan item only); it builds the one home in merge/merge.py, `merge <pr> --confirm --express <ruling-id>`; prose-only means ci-scope.sh turns every flag off on base...head (reused, no checks.yml edit); the batch brake stays (a live batch run refuses: \"batch runner cancels it first (R55)\"). Store path (triage 14:41 CST): roadmap/rulings/<id>.json on branch roadmap, made by lane ruled-store-one-home at 9bf484366; PR body \"Ruling: <id>\".",
+ "updatedAt": "2026-11-12T14:40:54-06:00"
 }

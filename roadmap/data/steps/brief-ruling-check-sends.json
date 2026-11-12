@@ -1,0 +1,14 @@
+{
+ "id": "brief-ruling-check-sends",
+ "title": "The ruling check also reads lane briefs sent by send_message or create_session",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane brief-reads-owner-rulings 14:37 CST Nov 12: change 1 is draft PR #2944; change 2 (the same ruling check for briefs sent by send_message or create_session) needs a model call or a ruling-matching design, and guard_merge.py and guard.py brief checks cannot carry it without touching hunks of PRs #2886, #2676 and #2709.",
+ "source": "lane brief-reads-owner-rulings 14:37 CST Nov 12",
+ "note": "Starts after #2886, #2676 and #2709 merge, and after owner item 644 (whether the pick check also reads briefs and messages to running sessions) is answered: that answer sets this step's scope. Kin: pick-ack-past-ruling.",
+ "updatedAt": "2026-11-12T14:40:54-06:00"
+}
