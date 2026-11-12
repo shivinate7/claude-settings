@@ -6,4 +6,4 @@
 
 **Decision.** `builders-cannot-edit-tests` (a builder never changes a test or test config).
 
-**Retire.** A builder's Edit that resolves one hunk of a version-only package.json conflict is allowed, and a hunk that changes `jest` stays refused. `hooks/test_guard.py` holds both cases.
+**Retire.** Run `hooks/test_manifest_hunk_edit.py`. It must go green. It runs one case in `tests/guard/s21304-diff.py`: "builder-test: Edit that resolves the version hunk of a two-hunk package.json conflict is allowed". That case is red today. A sibling case, where an Edit that resolves the `jest` hunk is refused, stays green. The allow case registers only when `GUARD_HELD_CASES=manifest-hunk-edit-refused` is set. `hooks/test_manifest_hunk_edit.py` sets it and runs `hooks/test_guard.py` for that one case. CI runs `hooks/test_guard.py` without the gate, so CI never sees the case. The retire check runs the file, which sets the gate itself.
