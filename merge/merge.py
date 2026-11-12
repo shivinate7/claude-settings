@@ -54,7 +54,7 @@
                                                                      the batch line, as on main. A PR named replaced holds nothing,
                                                                      so it carries no PR. A done PR whose head the base already holds is
                                                                      not carried (it is off the batch line too, one shared compare).
-                                                                     If a compare fails, the line is
+                                                                     If a compare fails, or an open batch's frozen block cannot be read, the line is
                                                                      `close as carried unknown (REASON)` and the run exits 1.
                             reopen: OWNER/NAME #N (replacer #R dropped)               N is closed with a `Replaced by #R` or `Carried by #R` line
                             reopen: OWNER/NAME #N (replacer #R no longer names it)    in a comment, and R is closed unmerged. A Replaced note also reopens
@@ -4081,7 +4081,7 @@ REVIEW_BATCH_BUILD = "build next batch on the running head: "  # ... and when on
 REVIEW_BATCH_UNKNOWN = "batch line unknown "  # ... and when a read for the batch line stopped: the reason follows, in brackets
 CLOSE_REPLACED = "close as replaced: "  # a block line: an open pull request that an open one names with `Replaces #N`
 CLOSE_CARRIED = "close as carried: "  # ... and an open done one whose head another open pull request on its base holds
-CLOSE_CARRIED_UNKNOWN = "close as carried unknown "  # ... and when the compare that decides it could not run: the reason follows, in brackets
+CLOSE_CARRIED_UNKNOWN = "close as carried unknown "  # ... and when the compare that decides it could not run, or a batch body's frozen block could not be read: the reason follows, in brackets
 REOPEN = "reopen: "  # ... and a closed pull request whose replacer or carrier was dropped
 REOPEN_UNKNOWN = "reopen unknown "  # ... and when a read for a reopen line stopped: the reason follows, in brackets
 REOPEN_UNCHECKED = "reopen not checked (no open pull request)"  # ... and the one line after the empty block: no open pull request fixes no comment window
@@ -4183,10 +4183,15 @@ def carried_closes(h, heads, drafts, base, held):
     return found
 
 def frozen_lanes(pulls):
-    """-> the set of numbers that an open pull request in `pulls` lists as `Lane: #N <head>` in its frozen block (parse_freeze). A closed or merged
-    batch is not in `pulls`, so its lanes are not listed. No read: the bodies come with the pull request list that reviewed_read already holds.
-    A body whose block this tool cannot read is a Stop."""
-    return {n for d in pulls for n in (parse_freeze(d.get("body") or "") or {"lanes": {}})["lanes"]}
+    """-> {PR: frozen head}: each lane that an open batch lists as `Lane: #N <head>` in its frozen block (parse_freeze). Only an open pull request whose
+    head branch starts `batch-` is read: another pull request may only quote a block, so its body freezes nothing, and a body there that this tool
+    cannot read is skipped, as restack does. A closed or merged batch is not in `pulls`, so its lanes are not listed. No read: the bodies come with
+    the pull request list that reviewed_read already holds. A batch body whose block this tool cannot read is a Stop."""
+    frozen = {}
+    for d in pulls:
+        if d["head"]["ref"].startswith(BATCH_PREFIX):
+            frozen.update((parse_freeze(d.get("body") or "") or {"lanes": {}})["lanes"])
+    return frozen
 
 def pull_state(h, n):
     """-> open, closed or merged for pull request n, or None when n names no pull request (an issue: HTTP 404). One read, pulls/<n>.
@@ -4288,14 +4293,15 @@ def reviewed_block(h):
     running (Host.ready_busy, checked first, so it reads no compare). `open batch now` when no ready pull request on that base has CI running, else `build next batch on the running head`.
     No pull request left, no batch line. With no open pull request the block ends with REOPEN_UNCHECKED and reads nothing more. The tool posts and closes nothing: the batch runner closes each pull request on a close line.
     A Stop in a read for the batch line keeps the reviewed lines, prints `batch line unknown (reason)` in place of the batch line, and ok is False;
-    a Stop in the compares that decide a carried close also prints `close as carried unknown (reason)`; a Stop in a reopen read prints
+    a Stop in the compares that decide a carried close, or a malformed frozen block in an open batch body, also prints `close as carried unknown (reason)`; a Stop in a reopen read prints
     `reopen unknown (reason)`; a Stop in reviewed_read raises. Extra cost over reviewed_read: only when a done pull request exists on the base, the
     branch protection read and each ready pull request's check runs, statuses and workflow runs, then at most one compare per done pull request
     and other open pull request on the base, and at most one compare per done pull request against the base, all memoized in `held` and shared
     with the carried close (pr_holds), so a pull request whose head the base holds is on neither line. A done pull request that is ready with CI
     running reads no compare, as on main; two pull requests with one head read no compare between them (an equal-head draft pair reads one
-    `<head>...main`). A done draft that an open pull request's frozen block lists as `Lane: #N <head>` is never carried (frozen_lanes), as its
-    batch holds it; it reads no new data, only the bodies already read for the batch line. The close lines read nothing more. The reopen lines
+    `<head>...main`). A done draft that an open batch (head branch `batch-*`) lists as `Lane: #N <head>` at the head it has now is never carried
+    (frozen_lanes), as its batch holds it; a lane that moved since the freeze is carried as before. A malformed frozen block in a batch body is a
+    source of `close as carried unknown (reason)`, as a failed compare is. It reads no new data, only the bodies already read for the batch line. The close lines read nothing more. The reopen lines
     read pulls/N once for each closed pull request with a closing note, and pulls/R once when its replacer R is not open (reopen_lines)."""
     lines, done, pulls, notes = reviewed_read(h)
     out, ok, tail = [f"repo {h.repo}:", *lines], True, []
@@ -4307,7 +4313,8 @@ def reviewed_block(h):
     if nums:
         heads = {d["number"]: d["head"]["sha"] for d in pulls if d["base"]["ref"] == h.base and d["number"] not in replaced}
         try:
-            drafts = {d["number"] for d in pulls if d.get("draft")} - frozen_lanes(pulls)  # a lane an open batch freezes is held by that batch
+            frozen = frozen_lanes(pulls)  # a lane at the head an open batch froze is held by that batch; one that moved since is carried as before
+            drafts = {d["number"] for d in pulls if d.get("draft") and frozen.get(d["number"]) != d["head"]["sha"]}
             carried = carried_closes(h, heads, [n for n in nums if n in drafts], h.base, held)
         except Stop as e:
             why = " ".join(str(e).split())
