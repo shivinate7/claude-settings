@@ -204,7 +204,7 @@ class Fixture(unittest.TestCase):
 class StepCiteCase(Fixture):
 
     def test_control_fixture_reads_the_steps_from_the_branch(self):
-        """Green on main, which has no check. The layout resolves the plans home, the live steps are on the roadmap
+        """Control: the fixture itself is sound, whatever the check does. The layout resolves the plans home, the live steps are on the roadmap
         branch and not in the working tree, and a plan file is in the working tree."""
         self.assertEqual(layout.path(self.tree, "plans"), PLANS, "the fixture does not resolve the default plans home")
         self.assertTrue(self.git_ok("rev-parse", "--verify", "-q", "refs/heads/roadmap"), "scope: no roadmap branch")
