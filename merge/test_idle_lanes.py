@@ -3,12 +3,13 @@
 
 Run: python3 merge/test_idle_lanes.py
 
-WHAT IT PROVES. The command prints one line per lane to archive, then one `hold (...)` line per lane that can never be
-judged, then one summary line that counts both. A hold line is a lane with no cs-step tag, or an absent step with no Step
-trailer on main; it is never archived. A waiting lane prints no line. A whole-read failure prints one `unknown (` line and
-exits 1. It takes its steps, marks and repo name from the checkout, as the roadmap build does. It stands alone: no other
-flag, and no merge role in a cloud session. A missing --live file exits 1 and prints no summary, so an unread list never
-reads as an empty one.
+WHAT IT PROVES. The command prints one line per lane to archive, then one `hold (...)` line per idle lane that a hold
+reason keeps from archiving now, then one summary line that counts both. A hold line is never archived. Its reasons:
+no cs-step tag; a step off the record branch with no Step trailer on main; or a step still doing under the lane and
+not landed on main. A waiting lane prints no line. A whole-read failure prints one `unknown (` line and exits 1. It
+takes its steps, marks and repo name from the checkout, as the roadmap build does. It stands alone: no other flag, and
+no merge role in a cloud session. A missing --live file exits 1 and prints no summary, so an unread list never reads
+as an empty one.
 
 Each case runs merge.py as a subprocess in a roadmap fixture checkout, the way bin/merge runs it. The fixture is the
 roadmap suite's make_repo (skills/roadmap/test_build.py), imported and not copied.
@@ -38,6 +39,8 @@ SUMMARY_LINE = re.compile(r"^merge: \d+ lanes to archive\b", re.M)
 ZERO_LINE = re.compile(r"^merge: 0 lanes to archive\.", re.M)
 HELD_ONE = "merge: 0 lanes to archive, 1 held. Run get_session on each lane line alone, then archive it; never archive a hold line."
 MIXED = "merge: 1 lanes to archive, 1 held. Run get_session on each lane line alone, then archive it; never archive a hold line."
+# The hold line the CLI prints for a doing step under a lane. It pins the CLI's output on its own, as the summary lines do.
+DOING_HOLD = "hold (step %s still doing under this lane; set the step's status to todo or done; lane %s)"
 
 # Made in setUpModule, not at import, so a helper that imports this file leaks no folder.
 RUN_FOLDER = None
@@ -194,6 +197,23 @@ class IdleLanesCli(unittest.TestCase):
                                         extra_env={"CLAUDE_CODE_REMOTE": "true"})
         self.assertEqual(code, 0, err)
         self.assertEqual(out.splitlines()[-1:], [SUMMARY_ONE], out)
+
+    def test_a_doing_step_under_a_completed_lane_prints_a_hold_line_and_counts_it_held(self):
+        # The control is session_a with nothing under it: it is listed. Then c3 is doing under session_a, whose own step
+        # c1 is done. The lane is held, not listed: its hold line names c3, and the summary counts one held lane and no
+        # lane to archive.
+        self.publish([lane("session_a", "c1")])
+        _, before, _ = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(before.splitlines()[-1:], [SUMMARY_ONE], "scope: session_a is not idle before c3 is doing")
+        step = dict(roadmap.STEP, order=3, status="doing", lane="session_a")
+        (self.repo / "roadmap" / "data" / "steps" / "c3.json").write_text(json.dumps(step), encoding="utf-8")
+        roadmap.git(self.repo, "add", "-A")
+        roadmap.git(self.repo, "commit", "-q", "-m", "step c3")
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(code, 0, err)
+        self.assertRegex(out, r"(?m)^hold \(step c3 ", "a doing step under a completed lane printed no hold line: %r" % out)
+        self.assertEqual(out.splitlines(), [DOING_HOLD % ("c3", "session_a"), HELD_ONE],
+                         "the hold line is not the pinned text: %r" % out)
 
 
 if __name__ == "__main__":
