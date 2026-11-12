@@ -79,6 +79,8 @@ jobs:
     # is 30% of it (range 15.5-22.8, median 19.8, n 27 green runs, runs 42074654512 to 42263498384,
     # 2026-11-05 17:26 to 2026-11-06 17:38 UTC), after the merge and install suites moved to checks-merge-install.
     # Now 75, above the 3600 s suite cap that the janitor sweep mutation test runs under (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go).
+    # The lint family: the hooks/ suites moved to checks-hooks and the rest to checks-rest, because this job took 35.1 min in run 43234925158 (batch 103).
+    # Its remaining steps summed 1008 s in that run (16.8 min; about 17.4 min with setup, projected).
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -123,17 +125,331 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: python3 actions/test_ruling_kind_records_dir.py
 
-      - name: Janitor sweep fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' && needs.scope.outputs.sweep == 'true' }}
-        run: python3 janitor/test_sweep.py
+      - name: Refusal settle fixture suite
+        run: python3 lint/test_report_guard_refusal.py
 
-      - name: Janitor sweep mutation test
-        if: ${{ needs.scope.outputs.sweep == 'true' }}
-        run: python3 janitor/mutate_sweep.py
+      - name: Stop-hook guard fixture suite
+        run: python3 lint/test_report_guard.py
 
-      - name: Reap proof Git Bash one-home suite
+      - name: Stop-hook triage hold suite
+        run: python3 lint/test_report_guard_stalled.py
+
+      - name: Stop-hook question route suite
+        run: python3 lint/test_report_guard_route.py
+
+      - name: Stop-hook stamped copy suite
+        run: python3 lint/test_report_guard_stamped.py
+
+      - name: Stop-hook route row falsifier suite
+        run: python3 lint/test_report_guard_falsifier.py
+
+      - name: Stop-hook hand-off cite suite
+        run: python3 lint/test_report_guard_handoff.py
+
+      - name: Clause parser suite
+        run: python3 lint/test_clause.py
+
+      - name: Stop-hook cannot-claim suite
+        run: python3 lint/test_report_guard_cannot.py
+
+      - name: Stop-hook landing fixture suite
+        run: python3 lint/test_report_guard_landing.py
+
+      - name: Stop-hook owner-safe reason suite
+        run: python3 lint/test_report_guard_remedy.py
+
+      - name: Stop-hook review-record fixture suite
+        run: python3 lint/test_report_guard_review.py
+
+      - name: STE auto-fix fixture suite
         if: ${{ needs.scope.outputs.code == 'true' }}
-        run: python3 janitor/test_prove_agent_end_reap.py
+        run: python3 lint/test_ste_autofix.py
+
+      - name: Ruling census fixture suite
+        run: python3 lint/test_ruling_census.py
+
+      - name: Rule audit fixture suite
+        run: python3 lint/test_rule_audit.py
+
+      - name: Stale prose check fixture suite
+        run: python3 lint/test_stale_cites.py
+
+      - name: Route judge measure fixture suite
+        run: python3 lint/test_prove_route_judge.py
+
+      - name: Guard log report fixture suite
+        run: python3 lint/test_guard_log_report.py
+
+      - name: Verdict runner fixture suite
+        run: python3 lint/test_verdict.py
+
+      - name: Wait-pid helper fixture suite
+        run: python3 lint/test_wait_pid.py
+
+      - name: Wait-until helper fixture suite
+        run: python3 lint/test_wait_until.py
+
+      - name: Now-central helper fixture suite
+        run: python3 lint/test_now_central.py
+
+      - name: sim-lease fixture suite
+        run: python3 lint/test_sim_lease.py
+
+      - name: Fixture copy helper suite
+        run: python3 lint/test_tracked_tree.py
+
+      - name: Test-run signing opt-out fixture suite
+        run: python3 lint/test_test_git.py
+
+      - name: Debt notes union merge fixture suite
+        run: python3 lint/test_notes_union_merge.py
+
+      - name: Job runner fixture suite (bin/ci-job)
+        run: python3 lint/test_ci_job.py
+
+      - name: Rule mechanization audit
+        run: python3 lint/rule_audit.py
+
+      - name: Windows split guard
+        run: python3 lint/test_windows_split.py
+
+      - name: all-jobs-passed needs every pull-request job
+        run: python3 lint/test_all_jobs_passed.py
+
+      - name: Scope detector fixture suite
+        run: python3 lint/test_ci_scope.py
+
+      - name: Touched-test selector fixture suite
+        run: python3 lint/test_touched_tests.py
+
+      - name: rm shim fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 lint/test_rm_shim.py
+
+      - name: Landed-directory check fixture suite
+        run: python3 lint/test_check_landed_dirs.py
+
+      - name: Settings matcher fixture suite
+        run: python3 lint/test_settings_matcher.py
+
+      - name: Hook platform exit fixture suite
+        run: python3 lint/test_hook_platform_exit.py
+
+      - name: Hook stub fixture suite
+        run: python3 lint/test_check_hook_stubs.py
+
+      - name: Hook dup-name fixture suite
+        run: python3 lint/test_check_hook_dup_names.py
+
+      - name: Record slug fixture suite
+        run: python3 lint/test_check_record_slugs.py
+
+      - name: Red-run trailer fixture suite
+        run: python3 lint/test_check_red_run.py
+
+      - name: Plan refuter fixture suite
+        run: python3 lint/test_check_plan_refuter.py
+
+      - name: Copy finder fixture suite
+        run: python3 lint/test_find_copies.py
+
+      - name: Time-pinned finder fixture suite
+        run: python3 lint/test_find_time_pinned.py
+
+      - name: Mod version fixture suite
+        run: python3 lint/test_check_mod_versions.py
+
+      - name: Hook catalog fixture suite
+        run: python3 lint/test_hook_catalog.py
+
+      - name: Hook catalog check
+        run: python3 lint/hook_catalog.py --check
+
+      - name: Hook stub check
+        run: python3 lint/check_hook_stubs.py
+
+      - name: Hook dup-name check
+        run: python3 lint/check_hook_dup_names.py
+
+      - name: Record slug length
+        run: python3 lint/check_record_slugs.py
+
+      # Pull requests only: the range is base..HEAD, and a push has no base. The checkout is full-depth (fetch-depth 0).
+      - name: Red-run trailer
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python3 lint/check_red_run.py --base "origin/$BASE_REF"
+
+      - name: Plan refuter line
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python3 lint/check_plan_refuter.py --base "origin/$BASE_REF"
+
+      - name: Layout fixture suite
+        run: python3 lint/test_layout.py
+
+      - name: Label once fixture suite
+        run: python3 lint/test_label_once.py
+
+      - name: Repo colour fixture suite
+        run: python3 lint/test_repo_colour.py
+
+      - name: Retired repo fixture suite
+        run: python3 lint/test_retired_repos.py
+
+      - name: Artifact cite fixture suite
+        run: python3 lint/test_check_artifact_cites.py
+
+      - name: Artifact cite check
+        run: python3 lint/check_artifact_cites.py --steps list
+
+      - name: Layout readers hold no record path
+        run: python3 lint/check_layout.py
+
+      - name: Shared resource declaration fixture suite
+        run: python3 lint/test_check_shared_resources.py
+
+      - name: Shared resource declaration check
+        run: python3 lint/check_shared_resources.py
+
+      - name: iPhone mockup check fixture suite
+        run: python3 lint/test_check_ios_mockup.py
+
+      - name: Compliance probes fixture suite
+        run: python3 lint/test_compliance_probes.py
+
+      - name: CLAUDE.md size fixture suite
+        run: python3 lint/test_check_claude_md_size.py
+
+      - name: CLAUDE.md size (warns, never fails)
+        run: python3 lint/check_claude_md_size.py
+
+      - name: Glossary fixture suite
+        run: python3 lint/test_check_glossary.py
+
+      - name: Glossary homes and avoided names
+        run: python3 lint/check_glossary.py
+
+      - name: Retired names, one word per meaning
+        run: python3 lint/test_retired_names.py
+      - name: Mod version bump
+        run: python3 lint/check_mod_versions.py
+
+      - name: Ruling kind fixture suite
+        run: python3 lint/test_check_ruling_kind.py
+
+      - name: Ruling kind check
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python3 lint/check_ruling_kind.py --base "origin/$BASE_REF"
+
+      - name: Silent undo fixture suite
+        run: python3 lint/test_check_silent_undo.py
+
+      - name: Debt retire fixture suite
+        run: python3 lint/test_check_debt_retire.py
+
+      - name: Silent undo check
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python3 lint/check_silent_undo.py --upstream "origin/$BASE_REF" --head "$HEAD_SHA" --strict
+
+      - name: Comment narration fixture suite
+        run: python3 lint/test_check_comment_narration.py
+
+      - name: Comment narration check
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python3 lint/check_comment_narration.py --base "origin/$BASE_REF"
+
+      - name: Unknown-read contract fixture suite
+        run: python3 lint/test_check_unknown_reads_contract.py
+
+      - name: Unknown-read contract (guard + session_start)
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        run: python3 lint/check_unknown_reads_contract.py
+
+      - name: Landed-directory manifest agreement
+        run: python3 lint/check_landed_dirs.py
+
+      - name: Agent and skill model floor
+        run: python3 lint/check_agent_models.py
+
+      - name: Agent and skill model floor fixture suite
+        run: python3 lint/test_check_agent_models.py
+
+      - name: Agent push form fixture suite
+        run: python3 lint/test_agent_push_form.py
+
+      - name: Skill model rows check
+        run: python3 lint/check_skill_model_rows.py
+
+      - name: Skill model rows fixture suite
+        run: python3 lint/test_check_skill_model_rows.py
+
+      - name: Python 3.9 floor check
+        run: python3 lint/check_python_floor.py
+
+      - name: Python 3.9 floor fixture suite
+        run: python3 lint/test_check_python_floor.py
+
+      - name: No-window spawn check
+        run: python3 lint/test_no_window_spawn.py
+
+      - name: STE lint
+        uses: $/actions/ste-lint
+        with:
+          scope: ${{ inputs.full_ste_audit && 'all' || 'changed' }}
+          fail: ${{ !inputs.full_ste_audit }}
+
+      - name: STE lint action fixture suite
+        run: python3 actions/ste-lint/test_action.py
+
+      - name: Playwright setup action suite
+        run: python3 actions/playwright-setup/test_action.py
+
+      # Stays in `checks` (a multi-line step: lint/test_ci_job.py RealChecks reads it here). 16 s in run 43234925158.
+      - name: Opt-in CI template fixture suites
+        if: ${{ needs.scope.outputs.code == 'true' }}
+        shell: bash
+        run: |
+          bash actions/all-jobs-passed/test_action.sh
+          bash actions/ci-alarm/test_action.sh
+          python3 actions/ci-alarm/test_clear_rule.py
+          python3 actions/ci-done-comment/test_comment.py
+          bash actions/ruling-kind/test_action.sh
+          bash actions/zizmor/test_action.sh
+          bash actions/silent-undo/test_action.sh
+          python3 actions/readme-links/test_readme_links.py
+          bash githooks/main-ref/test_hook.sh
+          bash githooks/test_pre_commit.sh
+          node --test testing/skip-locally-fail-in-ci.test.mjs
+
+  # The `checks` job split by test family, for wall time: it took 35.1 min over 161 serial steps in run 43234925158 (batch 103),
+  # and no one suite dominated. `checks` keeps every step that `bin/ci-job checks --lint` runs (merge.py's lane lint reads
+  # that job by name), so it stays the lint family. This job holds the hooks/ suites. checks-rest holds the other suites.
+  # lint/test_windows_split.py proves each old step still runs in exactly one of the three, with its `if:`, `shell:` and env.
+  checks-hooks:
+    runs-on: ubuntu-latest
+    needs: scope
+    # provisional 60 (decision ci-job-caps, rule 6) until 5 green runs, then re-cap from the measured slowest / 0.7.
+    # These steps summed 542 s (9.0 min) inside the old `checks` job in run 43234925158; about 9.6 min with setup. Unmeasured as a job of its own.
+    timeout-minutes: 60 # provisional
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.11"
 
       - name: Config watch fixture suite
         run: python3 hooks/test_config_watch.py
@@ -242,112 +558,41 @@ jobs:
       - name: Directory before a segment suite
         run: python3 hooks/test_dir_before_segment.py
 
-      - name: Refusal settle fixture suite
-        run: python3 lint/test_report_guard_refusal.py
-
-      - name: Stop-hook guard fixture suite
-        run: python3 lint/test_report_guard.py
-
-      - name: Stop-hook triage hold suite
-        run: python3 lint/test_report_guard_stalled.py
-
-      - name: Stop-hook question route suite
-        run: python3 lint/test_report_guard_route.py
-
-      - name: Stop-hook stamped copy suite
-        run: python3 lint/test_report_guard_stamped.py
-
-      - name: Stop-hook route row falsifier suite
-        run: python3 lint/test_report_guard_falsifier.py
-
-      - name: Stop-hook hand-off cite suite
-        run: python3 lint/test_report_guard_handoff.py
-
-      - name: Clause parser suite
-        run: python3 lint/test_clause.py
-
-      - name: Stop-hook cannot-claim suite
-        run: python3 lint/test_report_guard_cannot.py
-
-      - name: Stop-hook landing fixture suite
-        run: python3 lint/test_report_guard_landing.py
-
-      - name: Stop-hook owner-safe reason suite
-        run: python3 lint/test_report_guard_remedy.py
-
-      - name: Stop-hook review-record fixture suite
-        run: python3 lint/test_report_guard_review.py
-
-      - name: STE auto-fix fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' }}
-        run: python3 lint/test_ste_autofix.py
-
       - name: Ruling home fixture suite
         run: python3 hooks/test_ruling_home.py
 
       - name: Scratchpad owner fixture suite
         run: python3 hooks/test_scratchpad_owner.py
 
-      - name: Ruling census fixture suite
-        run: python3 lint/test_ruling_census.py
+  # The janitor, mutation, skills, actions-script, PowerShell and mod suites of the old `checks` job. See checks-hooks for why it split.
+  checks-rest:
+    runs-on: ubuntu-latest
+    needs: scope
+    # provisional 60 (decision ci-job-caps, rule 6) until 5 green runs, then re-cap from the measured slowest / 0.7.
+    # These steps summed 520 s (8.7 min) inside the old `checks` job in run 43234925158; about 9.3 min with setup. Unmeasured as a job of its own.
+    # The mod step is the last step, as in every job that runs it (lint/test_windows_split.py MOD_JOBS).
+    timeout-minutes: 60 # provisional
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
-      - name: Rule audit fixture suite
-        run: python3 lint/test_rule_audit.py
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.11"
 
-      - name: Stale prose check fixture suite
-        run: python3 lint/test_stale_cites.py
+      - name: Janitor sweep fixture suite
+        if: ${{ needs.scope.outputs.code == 'true' && needs.scope.outputs.sweep == 'true' }}
+        run: python3 janitor/test_sweep.py
 
-      - name: Route judge measure fixture suite
-        run: python3 lint/test_prove_route_judge.py
+      - name: Janitor sweep mutation test
+        if: ${{ needs.scope.outputs.sweep == 'true' }}
+        run: python3 janitor/mutate_sweep.py
 
-      - name: Guard log report fixture suite
-        run: python3 lint/test_guard_log_report.py
-
-      - name: Verdict runner fixture suite
-        run: python3 lint/test_verdict.py
-
-      - name: Wait-pid helper fixture suite
-        run: python3 lint/test_wait_pid.py
-
-      - name: Wait-until helper fixture suite
-        run: python3 lint/test_wait_until.py
-
-      - name: Now-central helper fixture suite
-        run: python3 lint/test_now_central.py
-
-      - name: sim-lease fixture suite
-        run: python3 lint/test_sim_lease.py
-
-      - name: Fixture copy helper suite
-        run: python3 lint/test_tracked_tree.py
-
-      - name: Test-run signing opt-out fixture suite
-        run: python3 lint/test_test_git.py
-
-      - name: Debt notes union merge fixture suite
-        run: python3 lint/test_notes_union_merge.py
-
-      - name: Job runner fixture suite (bin/ci-job)
-        run: python3 lint/test_ci_job.py
-
-      - name: Rule mechanization audit
-        run: python3 lint/rule_audit.py
-
-      - name: Windows split guard
-        run: python3 lint/test_windows_split.py
-
-      - name: all-jobs-passed needs every pull-request job
-        run: python3 lint/test_all_jobs_passed.py
-
-      - name: Scope detector fixture suite
-        run: python3 lint/test_ci_scope.py
-
-      - name: Touched-test selector fixture suite
-        run: python3 lint/test_touched_tests.py
-
-      - name: rm shim fixture suite
+      - name: Reap proof Git Bash one-home suite
         if: ${{ needs.scope.outputs.code == 'true' }}
-        run: python3 lint/test_rm_shim.py
+        run: python3 janitor/test_prove_agent_end_reap.py
 
       - name: Mutation verdict fixture suite
         run: python3 hooks/test_mutate_shared.py
@@ -371,83 +616,10 @@ jobs:
           [ -d node_modules/typescript ] || npm ci --ignore-scripts --no-audit --no-fund
           python3 hooks/test_mutate_ci.py
 
-      - name: Landed-directory check fixture suite
-        run: python3 lint/test_check_landed_dirs.py
-
-      - name: Settings matcher fixture suite
-        run: python3 lint/test_settings_matcher.py
-
-      - name: Hook platform exit fixture suite
-        run: python3 lint/test_hook_platform_exit.py
-
-      - name: Hook stub fixture suite
-        run: python3 lint/test_check_hook_stubs.py
-
-      - name: Hook dup-name fixture suite
-        run: python3 lint/test_check_hook_dup_names.py
-
-      - name: Record slug fixture suite
-        run: python3 lint/test_check_record_slugs.py
-
-      - name: Red-run trailer fixture suite
-        run: python3 lint/test_check_red_run.py
-
-      - name: Plan refuter fixture suite
-        run: python3 lint/test_check_plan_refuter.py
-
-      - name: Copy finder fixture suite
-        run: python3 lint/test_find_copies.py
-
-      - name: Time-pinned finder fixture suite
-        run: python3 lint/test_find_time_pinned.py
-
-      - name: Mod version fixture suite
-        run: python3 lint/test_check_mod_versions.py
-
-      - name: Hook catalog fixture suite
-        run: python3 lint/test_hook_catalog.py
-
-      - name: Hook catalog check
-        run: python3 lint/hook_catalog.py --check
-
-      - name: Hook stub check
-        run: python3 lint/check_hook_stubs.py
-
-      - name: Hook dup-name check
-        run: python3 lint/check_hook_dup_names.py
-
-      - name: Record slug length
-        run: python3 lint/check_record_slugs.py
-
-      # Pull requests only: the range is base..HEAD, and a push has no base. The checkout is full-depth (fetch-depth 0).
-      - name: Red-run trailer
-        if: ${{ github.event_name == 'pull_request' }}
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: python3 lint/check_red_run.py --base "origin/$BASE_REF"
-
-      - name: Plan refuter line
-        if: ${{ github.event_name == 'pull_request' }}
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: python3 lint/check_plan_refuter.py --base "origin/$BASE_REF"
-
       # No `if:`: ci-scope.sh turns no flag on for a docs/map/*.md path, and a map page changed alone must still be read.
       # The script says why it runs `npm ci` first.
       - name: Map check
         run: bash .github/scripts/map-check.sh
-
-      - name: Layout fixture suite
-        run: python3 lint/test_layout.py
-
-      - name: Label once fixture suite
-        run: python3 lint/test_label_once.py
-
-      - name: Repo colour fixture suite
-        run: python3 lint/test_repo_colour.py
-
-      - name: Retired repo fixture suite
-        run: python3 lint/test_retired_repos.py
 
       - name: Waiting page staleness fixture suite
         run: python3 skills/waiting-page/test_stale_pages.py
@@ -457,121 +629,19 @@ jobs:
 
       - name: Waiting page grant check suite
         run: python3 skills/waiting-page/test_page_grant.py
+
       - name: Waiting page park relay prose suite
         run: python3 skills/waiting-page/test_skill_park_relay.py
-
-      - name: Artifact cite fixture suite
-        run: python3 lint/test_check_artifact_cites.py
-
-      - name: Artifact cite check
-        run: python3 lint/check_artifact_cites.py --steps list
 
       - name: Roadmap builder fixture suite
         run: python3 skills/roadmap/test_build.py
 
-      - name: Layout readers hold no record path
-        run: python3 lint/check_layout.py
-
-      - name: Shared resource declaration fixture suite
-        run: python3 lint/test_check_shared_resources.py
-
-      - name: Shared resource declaration check
-        run: python3 lint/check_shared_resources.py
-
-      - name: iPhone mockup check fixture suite
-        run: python3 lint/test_check_ios_mockup.py
-
-      - name: Compliance probes fixture suite
-        run: python3 lint/test_compliance_probes.py
-
-      - name: CLAUDE.md size fixture suite
-        run: python3 lint/test_check_claude_md_size.py
-
-      - name: CLAUDE.md size (warns, never fails)
-        run: python3 lint/check_claude_md_size.py
-
-      - name: Glossary fixture suite
-        run: python3 lint/test_check_glossary.py
-
-      - name: Glossary homes and avoided names
-        run: python3 lint/check_glossary.py
-
-      - name: Retired names, one word per meaning
-        run: python3 lint/test_retired_names.py
       # No scope condition: the suite reads the skill's .md templates, and a .md-only change must run it too.
       - name: project-ops skill scaffold suite
         run: python3 skills/project-ops/tests/test_scaffold.py
 
       - name: ios-apps skill starter suite
         run: python3 skills/ios-apps/tests/test_new_app.py
-
-      - name: Mod version bump
-        run: python3 lint/check_mod_versions.py
-
-      - name: Ruling kind fixture suite
-        run: python3 lint/test_check_ruling_kind.py
-
-      - name: Ruling kind check
-        if: ${{ github.event_name == 'pull_request' }}
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: python3 lint/check_ruling_kind.py --base "origin/$BASE_REF"
-
-      - name: Silent undo fixture suite
-        run: python3 lint/test_check_silent_undo.py
-
-      - name: Debt retire fixture suite
-        run: python3 lint/test_check_debt_retire.py
-
-      - name: Silent undo check
-        if: ${{ github.event_name == 'pull_request' }}
-        env:
-          BASE_REF: ${{ github.base_ref }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: python3 lint/check_silent_undo.py --upstream "origin/$BASE_REF" --head "$HEAD_SHA" --strict
-
-      - name: Comment narration fixture suite
-        run: python3 lint/test_check_comment_narration.py
-
-      - name: Comment narration check
-        if: ${{ github.event_name == 'pull_request' }}
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: python3 lint/check_comment_narration.py --base "origin/$BASE_REF"
-
-      - name: Unknown-read contract fixture suite
-        run: python3 lint/test_check_unknown_reads_contract.py
-
-      - name: Unknown-read contract (guard + session_start)
-        if: ${{ needs.scope.outputs.code == 'true' }}
-        run: python3 lint/check_unknown_reads_contract.py
-
-      - name: Landed-directory manifest agreement
-        run: python3 lint/check_landed_dirs.py
-
-      - name: Agent and skill model floor
-        run: python3 lint/check_agent_models.py
-
-      - name: Agent and skill model floor fixture suite
-        run: python3 lint/test_check_agent_models.py
-
-      - name: Agent push form fixture suite
-        run: python3 lint/test_agent_push_form.py
-
-      - name: Skill model rows check
-        run: python3 lint/check_skill_model_rows.py
-
-      - name: Skill model rows fixture suite
-        run: python3 lint/test_check_skill_model_rows.py
-
-      - name: Python 3.9 floor check
-        run: python3 lint/check_python_floor.py
-
-      - name: Python 3.9 floor fixture suite
-        run: python3 lint/test_check_python_floor.py
-
-      - name: No-window spawn check
-        run: python3 lint/test_no_window_spawn.py
 
       - name: PowerShell syntax check, install.ps1
         if: ${{ needs.scope.outputs.code == 'true' }}
@@ -585,18 +655,6 @@ jobs:
         if: ${{ needs.scope.outputs.code == 'true' }}
         run: pwsh -NoProfile -File install.test.ps1
 
-      - name: STE lint
-        uses: $/actions/ste-lint
-        with:
-          scope: ${{ inputs.full_ste_audit && 'all' || 'changed' }}
-          fail: ${{ !inputs.full_ste_audit }}
-
-      - name: STE lint action fixture suite
-        run: python3 actions/ste-lint/test_action.py
-
-      - name: Playwright setup action suite
-        run: python3 actions/playwright-setup/test_action.py
-
       # The suite's own watchdog (actions/stamp/suite_watchdog.mjs) ends it at 180 s. A hang reads red,
       # with the hung test named and its process tree killed. A process the suite started and left
       # running reads red too, killed and named; so does a sweep that could not read.
@@ -609,22 +667,6 @@ jobs:
       - name: Record stamp action fixture suite
         shell: bash
         run: bash actions/stamp/test_action.sh
-
-      - name: Opt-in CI template fixture suites
-        if: ${{ needs.scope.outputs.code == 'true' }}
-        shell: bash
-        run: |
-          bash actions/all-jobs-passed/test_action.sh
-          bash actions/ci-alarm/test_action.sh
-          python3 actions/ci-alarm/test_clear_rule.py
-          python3 actions/ci-done-comment/test_comment.py
-          bash actions/ruling-kind/test_action.sh
-          bash actions/zizmor/test_action.sh
-          bash actions/silent-undo/test_action.sh
-          python3 actions/readme-links/test_readme_links.py
-          bash githooks/main-ref/test_hook.sh
-          bash githooks/test_pre_commit.sh
-          node --test testing/skip-locally-fail-in-ci.test.mjs
 
       # Last step, so a red test here skips none of the steps above, and a red step above does not hide
       # a mod test (!cancelled() runs it anyway). The script is the one home of the mod tests and the
@@ -966,6 +1008,7 @@ jobs:
     # checks-macos and checks-macos-b. A push runs the janitor sweep mutation test and a pull request does not:
     # push median 20.5 min, pull request median 18.7 (n 13 each).
     # Now 75, above the 3600 s suite cap that the janitor sweep mutation test runs under (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go).
+    # Run 43234925158 (batch 103, before the 3-shard split): this job took 33.7 min and checks-macos-b 27.8 min. Their steps now spread over three jobs.
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -974,19 +1017,18 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         if: ${{ needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request' }}
         with:
           python-version: "3.11"
 
-      # Own cap, 45 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The step took 1106 s (18.4 min) in run 43197518392, the slowest of 29 completed push runs.
+      # Own cap, 45 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The 2-shard step took 1147 s and 1032 s in run 43234925158 (batch 103); 3 shards project to about 726 s each (unmeasured).
       # hooks/test_guard.py holds the shard switch.
-      - name: Guard fixture suite (shard 1 of 2)
+      - name: Guard fixture suite (shard 1 of 3)
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         timeout-minutes: 45
         env:
-          GUARD_SHARD: 1/2
+          GUARD_SHARD: 1/3
         run: python3 hooks/test_guard.py
 
       - name: Load reader against the OS tools
@@ -997,108 +1039,37 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 lint/test_rm_shim.py
 
-      - name: Hook platform exit fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
-        run: python3 lint/test_hook_platform_exit.py
-
-      # No Guard mutation test here: it runs on the checks job (Linux) only. Accepted risk: a
-      # macOS-only mutation regression is not caught. No mutant is marked macOS-only.
-
-      - name: Janitor sweep fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
-        run: python3 janitor/test_sweep.py
-
       - name: Janitor sweep mutation test
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.sweep == 'true' }}
         run: python3 janitor/mutate_sweep.py
-
-      - name: Config watch fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 hooks/test_config_watch.py
 
       - name: Config watch fast-exit suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_config_watch_fast_exit.py
 
-      - name: Shared names suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 hooks/test_shared_names.py
-
-      - name: Precompact handoff fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 hooks/test_precompact_handoff.py
-
       - name: Claude Code compaction check fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_cc_version_check.py
-
-      - name: Handoff wave-2 fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 hooks/test_handoff_wave2.py
 
       - name: Decision watch fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_decision_watch.py
 
-      - name: Reply judge fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 hooks/test_reply_judge.py
-
-      - name: Prose judge fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 hooks/test_prose_judge.py
-
-      - name: SendMessage state fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 hooks/test_sendmessage_state.py
-
-      - name: Refusal note fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 hooks/test_refusal_note.py
-
       - name: Refusal note agent row suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_refusal_note_agent.py
-
-      - name: Refusal note route row suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 hooks/test_refusal_note_route.py
 
       - name: Call judge fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_call_judge.py
 
-      - name: Question form fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 hooks/test_question_form.py
-
       - name: Question form option-key gap suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_question_form_option_gap.py
 
-      - name: Remove-prompt answer fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 hooks/test_rm_prompt_answer.py
-
       - name: Agent brief fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_agent_brief.py
-
-      - name: Blind brief fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 hooks/test_blind_brief.py
-
-      - name: Local time line fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 hooks/test_local_time.py
-
-      - name: Guard probe helper fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 hooks/test_probe.py
-
-      - name: Simulator boot-record fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 hooks/test_sim_boot_record.py
 
       - name: Guard wrappers fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
@@ -1112,33 +1083,9 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_report_guard_refusal.py
 
-      - name: Stop-hook guard fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 lint/test_report_guard.py
-
-      - name: Stop-hook question route suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 lint/test_report_guard_route.py
-
-      - name: Stop-hook stamped copy suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 lint/test_report_guard_stamped.py
-
-      - name: Stop-hook route row falsifier suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 lint/test_report_guard_falsifier.py
-
-      - name: Stop-hook hand-off cite suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 lint/test_report_guard_handoff.py
-
       - name: Clause parser suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_clause.py
-
-      - name: Stop-hook cannot-claim suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 lint/test_report_guard_cannot.py
 
       - name: Stop-hook landing fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
@@ -1148,48 +1095,33 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_report_guard_remedy.py
 
-      - name: Ruling home fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 hooks/test_ruling_home.py
-
-      - name: Ruling census fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 lint/test_ruling_census.py
-
       - name: Verdict runner fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_verdict.py
-
-      - name: Wait-pid helper fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 lint/test_wait_pid.py
-
-      - name: Wait-until helper fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 lint/test_wait_until.py
 
       - name: Now-central helper fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 lint/test_now_central.py
 
-      - name: Unknown-read contract (guard + session_start)
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
-        run: python3 lint/check_unknown_reads_contract.py
-
-      # The suite's own watchdog (actions/stamp/suite_watchdog.mjs) ends it at 180 s; the slowest normal
-      # run took 102 s (run 42456407663). A hang reads red there, with the hung test named, and its process
-      # tree killed. A process the suite started and left running reads red too, killed and named with its
-      # pid and command line, even on a normal finish; so does a sweep that could not read. Worst case,
-      # with every bounded call counted: 180 s cap + 30 s hard stop + 35 s longest blocking call + 10 s
-      # kills + 2 s output drain = 257 s. The CI step's timeout-minutes (300 s) is the backstop.
-      - name: Record stamp engine fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        timeout-minutes: 5
-        run: node actions/stamp/test_stamp.mjs
-
       - name: Record stamp action fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: bash actions/stamp/test_action.sh
+
+      - name: Feedback inbox fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_feedback_inbox.py
+
+      - name: Waiting export check suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_waiting_export.py
+
+      - name: Daily note fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_daily_note.py
+
+      - name: Janitor triggers fixture suite (SessionEnd hook)
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
+        run: python3 janitor/test_session_end_sweep.py
 
       - name: Mod and map-skill tests
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.mods == 'true' }}
@@ -1197,8 +1129,9 @@ jobs:
         run: bash .github/scripts/mod-tests.sh
 
   # The second half of checks-macos, split off for wall time: that job took 40.6 min in run 41730427997. The guard suite runs
-  # in 2 shards, one per job, and the slow CI steps are shared out between the jobs. Same scope flag, same `if:`
-  # on every CI step as checks-macos. Both jobs start on every pull request (`needs: scope` only); the scope flag gates
+  # in 3 shards, one per job (checks-macos, this job and checks-macos-c), and the slow CI steps are shared out between the
+  # jobs by measured seconds. Same scope flag, same `if:`
+  # on every CI step as checks-macos. All three jobs start on every pull request (`needs: scope` only); the scope flag gates
   # their steps, not the jobs. Cost: a pull request with no macOS-scoped change, such as a docs-only one, starts a
   # second, idle macOS runner that it did not start before. That cost is unmeasured: the window below had no such run.
   checks-macos-b:
@@ -1219,43 +1152,183 @@ jobs:
         with:
           python-version: "3.11"
 
-      # Own cap, 45 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The step took 1168 s (19.5 min) in run 43197518392, the slowest job run.
+      # Own cap, 45 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The 2-shard step took 1147 s and 1032 s in run 43234925158 (batch 103); 3 shards project to about 726 s each (unmeasured).
       # hooks/test_guard.py holds the shard switch.
-      - name: Guard fixture suite (shard 2 of 2)
+      - name: Guard fixture suite (shard 2 of 3)
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         timeout-minutes: 45
         env:
-          GUARD_SHARD: 2/2
+          GUARD_SHARD: 2/3
         run: python3 hooks/test_guard.py
 
-      - name: CI wake-up fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 hooks/test_ci_wake.py
+      - name: Hook platform exit fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
+        run: python3 lint/test_hook_platform_exit.py
 
-      - name: Feedback inbox fixture suite
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 hooks/test_feedback_inbox.py
+      # No Guard mutation test here: it runs on the checks job (Linux) only. Accepted risk: a
+      # macOS-only mutation regression is not caught. No mutant is marked macOS-only.
 
-      - name: Waiting export check suite
+      - name: Shared names suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 hooks/test_waiting_export.py
+        run: python3 hooks/test_shared_names.py
 
-      - name: Daily note fixture suite
+      - name: Precompact handoff fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
-        run: python3 hooks/test_daily_note.py
+        run: python3 hooks/test_precompact_handoff.py
+
+      - name: Handoff wave-2 fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_handoff_wave2.py
+
+      - name: Prose judge fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_prose_judge.py
+
+      - name: Remove-prompt answer fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_rm_prompt_answer.py
+
+      - name: Blind brief fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_blind_brief.py
+
+      - name: Simulator boot-record fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_sim_boot_record.py
+
+      - name: Stop-hook question route suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 lint/test_report_guard_route.py
+
+      - name: Stop-hook hand-off cite suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 lint/test_report_guard_handoff.py
+
+      - name: Ruling home fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_ruling_home.py
+
+      - name: Unknown-read contract (guard + session_start)
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
+        run: python3 lint/check_unknown_reads_contract.py
+
+      # The suite's own watchdog (actions/stamp/suite_watchdog.mjs) ends it at 180 s; the slowest normal
+      # run took 102 s (run 42456407663). A hang reads red there, with the hung test named, and its process
+      # tree killed. A process the suite started and left running reads red too, killed and named with its
+      # pid and command line, even on a normal finish; so does a sweep that could not read. Worst case,
+      # with every bounded call counted: 180 s cap + 30 s hard stop + 35 s longest blocking call + 10 s
+      # kills + 2 s output drain = 257 s. The CI step's timeout-minutes (300 s) is the backstop.
+      - name: Record stamp engine fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        timeout-minutes: 5
+        run: node actions/stamp/test_stamp.mjs
 
       # Windows is not covered: the stall watch is posix only (see the stall-watch decision).
       - name: Stall watch fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_stall_watch.py
 
-      - name: Janitor triggers fixture suite (SessionEnd hook)
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
-        run: python3 janitor/test_session_end_sweep.py
-
       - name: Janitor triggers fixture suite (launchd installer)
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python3 janitor/test_install_launchd.py
+
+  # The third part of the macOS suites. checks-macos and checks-macos-b took 33.7 and 27.8 min in run 43234925158 (batch 103); the guard suite alone
+  # took 19.1 and 17.2 min. It now runs in 3 shards, one per job, and the other suites are shared out by their measured step seconds,
+  # not by family. Same scope flag and same `if:` on every CI step as checks-macos.
+  checks-macos-c:
+    runs-on: macos-latest
+    needs: scope
+    # provisional 60 (decision ci-job-caps, rule 6) until 5 green runs, then re-cap from the measured slowest / 0.7.
+    # The steps of this job summed about 1204 s (20.1 min) in run 43234925158, with setup about 20.7 min; the 3-shard guard time is projected, so unmeasured.
+    timeout-minutes: 60 # provisional
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: ${{ needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request' }}
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        if: ${{ needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request' }}
+        with:
+          python-version: "3.11"
+
+      # Own cap, 45 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The 2-shard step took 1147 s and 1032 s in run 43234925158 (batch 103); 3 shards project to about 726 s each (unmeasured).
+      # hooks/test_guard.py holds the shard switch.
+      - name: Guard fixture suite (shard 3 of 3)
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
+        timeout-minutes: 45
+        env:
+          GUARD_SHARD: 3/3
+        run: python3 hooks/test_guard.py
+
+      - name: Janitor sweep fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
+        run: python3 janitor/test_sweep.py
+
+      - name: Config watch fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_config_watch.py
+
+      - name: Reply judge fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_reply_judge.py
+
+      - name: SendMessage state fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_sendmessage_state.py
+
+      - name: Refusal note fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_refusal_note.py
+
+      - name: Refusal note route row suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_refusal_note_route.py
+
+      - name: Question form fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_question_form.py
+
+      - name: Local time line fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_local_time.py
+
+      - name: Guard probe helper fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_probe.py
+
+      - name: Stop-hook guard fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 lint/test_report_guard.py
+
+      - name: Stop-hook stamped copy suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 lint/test_report_guard_stamped.py
+
+      - name: Stop-hook route row falsifier suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 lint/test_report_guard_falsifier.py
+
+      - name: Stop-hook cannot-claim suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 lint/test_report_guard_cannot.py
+
+      - name: Ruling census fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 lint/test_ruling_census.py
+
+      - name: Wait-pid helper fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 lint/test_wait_pid.py
+
+      - name: Wait-until helper fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 lint/test_wait_until.py
+
+      - name: CI wake-up fixture suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_ci_wake.py
 
       - name: Janitor triggers fixture suite (schtasks installer)
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
@@ -1926,6 +1999,8 @@ jobs:
     needs:
       - scope
       - checks
+      - checks-hooks
+      - checks-rest
       - checks-merge-install
       - checks-guard
       - checks-guard-2
@@ -1935,6 +2010,7 @@ jobs:
       - shell-macos
       - checks-macos
       - checks-macos-b
+      - checks-macos-c
       - checks-windows
       - checks-mutate-guard
       - mutation-report
@@ -1962,6 +2038,8 @@ jobs:
     needs:
       - scope
       - checks
+      - checks-hooks
+      - checks-rest
       - checks-merge-install
       - checks-guard
       - checks-guard-2
@@ -1971,6 +2049,7 @@ jobs:
       - shell-macos
       - checks-macos
       - checks-macos-b
+      - checks-macos-c
       - checks-windows
       - checks-mutate-guard
       - mutation-report
