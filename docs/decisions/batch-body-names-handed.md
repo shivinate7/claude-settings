@@ -39,6 +39,7 @@ The harm: a reviewed lane was lost without a word.
   - `Dropped from #n: #m (macOS CI red)` passes.
   - `Dropped earlier: #n` fails. It has no reason.
 - A late lane is one done after the batch was built. It is not exempt. It goes on `Next batch (late): #n`.
+- Lines from a batch-freeze begin marker through the next end marker, both outside fenced code, are not read as body lines; `--batch-drop` writes its `Dropped: #N` lines there.
 
 ## Verdicts
 
