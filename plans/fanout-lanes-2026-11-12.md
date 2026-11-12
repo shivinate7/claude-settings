@@ -68,6 +68,7 @@ How lanes were cut: steps of one repo and one kind (code or prose) that name the
   - page-checks-reach-triage: The page-item checks run on triage's own page writes (ruling text: "Owner, page comment 13:18")
   - page-filing-check: The feedback guard proves a page item exists, not only that it was sent (ruling text: "Owner grant Nov 2 13:12")
   - parked-line-id-guard: Waiting page: refuse a parked line with no id at write time (ruling text: "Owner, page comment Nov 3 19:26")
+  - handoff-ruling-guard: A guard refuses a ruling kept only in a handoff (ruling text: "coordinator pick 07:57 CST Nov 12; first guard lane, 08:06 CST")
 
 ## code-guard-2
 
@@ -299,6 +300,7 @@ How lanes were cut: steps of one repo and one kind (code or prose) that name the
   - step-names-its-gap: A roadmap commit that stages a step whose gap key matches an open step's is refused (ruling text: "owner item 383 (record-branch-merge), 20:54")
   - stop-push-skips-merged: The Stop hook's unpushed-commits nudge skips a branch whose head is already on origin/main (ruling text: "Owner pick on the waiting page (13:09")
   - time-pinned-tests-go: Tests that pass or fail on clock speed become outcome checks, then CI caps return to measured (ruling text: "Owner, Nov 1 18:44")
+  - prose-judge-call-cap: The merge-time prose judge's call cap leaves no batch with lines unjudged (ruling text: "coordinator 08:06 CST Nov 12, last in the code-merge chain")
 
 ## code-pinned-settings
 
