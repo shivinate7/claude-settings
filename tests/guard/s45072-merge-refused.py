@@ -1,8 +1,9 @@
 # section 45072
 FAMILY = "merge"
 #
-# Three refusals that main does not make yet. Each deny case is red on main, where the call is allowed. Each allow case
-# is a control that main already allows, and it sits beside the refusal it pins. The session fixtures are the role
+# Three refusals that main does not make yet. Each deny case is red on main: the call is allowed, or its reason lacks the
+# remedy the case pins. The one exception is a form main already refuses, which pins that refusal for a fix to keep. Each
+# allow case is a control that main already allows, and it sits beside the refusal it pins. The session fixtures are the role
 # transcripts of section 13406 (role_path, ROLE_ENV), so no record is copied here.
 
 
@@ -23,6 +24,23 @@ for _who, _record in (("a lane", "lane"), ("a batch runner", "runner"), ("a coor
         carries=AUTO_CARRY, lacks=AUTO_LACKS, **AUTO_ARGS)
 add("auto-merge: disable_pr_auto_merge stays allowed", "allow", tool="mcp__github__disable_pr_auto_merge",
     cwd=NOGIT, **AUTO_ARGS)
+# The GraphQL API and the gh CLI reach the same button, so each is refused in the same sessions. The refusal names
+# neither the enable mutation nor `--auto`. Disabling auto-merge stays allowed in both forms.
+AUTO_CLI_LACKS = AUTO_LACKS + ("--auto", "enablePullRequestAutoMerge")
+GQL_ENABLE = "gh api graphql -f query='mutation{enablePullRequestAutoMerge(input:{pullRequestId:\"x\"}){clientMutationId}}'"
+GQL_DISABLE = "gh api graphql -f query='mutation{disablePullRequestAutoMerge(input:{pullRequestId:\"x\"}){clientMutationId}}'"
+GH_AUTO_MERGE = "gh pr merge 5 --auto --squash"
+GREEN_HEAD = dict(env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
+for _who, _record in (("no session record", None), ("a lane", "lane"), ("a batch runner", "runner"),
+                      ("a coordinator", "coordinator"), ("an untagged session", "untagged")):
+    _role = {} if _record is None else dict(transcript=role_path(_record), env=ROLE_ENV)
+    sh("auto-merge: the GraphQL enable mutation in %s is refused" % _who, GQL_ENABLE, "deny", "auto-merge",
+       cwd=NOGIT, carries=AUTO_CARRY, lacks=AUTO_CLI_LACKS, **_role)
+    sh("auto-merge: gh pr merge --auto on a green head in %s is refused" % _who, GH_AUTO_MERGE, "deny",
+       "auto-merge", cwd=NOGIT, carries=AUTO_CARRY, lacks=AUTO_CLI_LACKS, **GREEN_HEAD, **_role)
+sh("auto-merge: the GraphQL disable mutation stays allowed", GQL_DISABLE, "allow", cwd=NOGIT)
+sh("auto-merge: gh pr merge --disable-auto on a green head stays allowed", "gh pr merge 5 --disable-auto", "allow",
+   silent=True, cwd=NOGIT, **GREEN_HEAD)
 
 
 # =========================================================================== draft-pr through gh api
@@ -33,6 +51,8 @@ API_CREATE_CARRY = ("draft", "integration PR")
 for _form, _command in (
     ("an implicit POST", "gh api repos/o/r/pulls -f title=t -f head=h -f base=main"),
     ("a -X POST", "gh api -X POST repos/o/r/pulls -f title=t -f head=h -f base=main"),
+    ("an absolute URL", "gh api https://api.github.com/repos/o/r/pulls -f title=t -f head=h -f base=main"),
+    ("a draft=false field", "gh api repos/o/r/pulls -f title=t -f draft=false"),
 ):
     sh("draft-pr: gh api create with no draft=true is refused, %s" % _form, _command, "deny", "draft-pr",
        cwd=NOGIT, carries=API_CREATE_CARRY, lacks=DRAFT_LACKS)
@@ -42,6 +62,15 @@ sh("draft-pr: gh api -X POST create with -F draft=true is allowed",
    "gh api -X POST repos/o/r/pulls -f title=t -f head=h -f base=main -F draft=true", "allow", cwd=NOGIT)
 sh("draft-pr: gh api GET of the pulls route is allowed", "gh api repos/o/r/pulls", "allow", cwd=NOGIT)
 sh("draft-pr: gh api comment on a pull request is not a create", "gh api repos/o/r/pulls/5/comments -f body=x",
+   "allow", cwd=NOGIT)
+sh("draft-pr: gh api create on an absolute URL with -F draft=true is allowed",
+   "gh api https://api.github.com/repos/o/r/pulls -f title=t -f head=h -f base=main -F draft=true", "allow", cwd=NOGIT)
+# gh api makes a call with fields a POST, so a read with fields reaches the guard as a create. The refusal names -X GET
+# for that read. Its create remedy keeps -F draft=true. A read that names -X GET is no create, so it stays allowed.
+sh("draft-pr: gh api read with fields is refused as a create, and the reason names -X GET",
+   "gh api repos/o/r/pulls -f state=open", "deny", "draft-pr", cwd=NOGIT, carries=API_CREATE_CARRY + ("-X GET",),
+   lacks=DRAFT_LACKS)
+sh("draft-pr: gh api -X GET with fields on the pulls route is allowed", "gh api -X GET repos/o/r/pulls -f state=open",
    "allow", cwd=NOGIT)
 
 
@@ -73,11 +102,18 @@ for _label, _command, _expected in call_shapes("gh api repos/o/r/pulls -f title=
 # ready, so it stays allowed in a lane.
 READY_RULE = "ready-lane"
 READY_CARRY = ("integration PR",)
+# The GraphQL mutation that marks a pull request ready. Its query holds single and double quotes, so the shape controls
+# at the end of this file escape it by hand.
+GQL_READY = "gh api graphql -f query='mutation{markPullRequestReadyForReview(input:{pullRequestId:\"x\"}){clientMutationId}}'"
 READY_MARKS = (
     ("update_pull_request with draft false", "mcp__github__update_pull_request",
      dict(owner="y", repo="x", pullNumber=5, draft=False), None),
     ("gh pr ready 5", "Bash", {}, "gh pr ready 5"),
     ("gh api PATCH with draft=false", "Bash", {}, "gh api -X PATCH repos/o/r/pulls/5 -F draft=false"),
+    ("gh api PATCH on an absolute URL with draft=false", "Bash", {},
+     "gh api -X PATCH https://api.github.com/repos/o/r/pulls/5 -F draft=false"),
+    ("gh api PATCH with an --input body", "Bash", {}, "gh api -X PATCH repos/o/r/pulls/5 --input body.json"),
+    ("gh api graphql markPullRequestReadyForReview", "Bash", {}, GQL_READY),
 )
 
 
@@ -108,6 +144,22 @@ ready_case("ready-lane: update_pull_request with draft true stays allowed in a l
 # A record that cannot be read proves no lane, so the mark is judged as main judges it. `unreadable` is a folder (13406).
 ready_case("ready-lane: a ready mark with an unreadable own record is allowed (fails open)", "allow", "unreadable",
            "mcp__github__update_pull_request", dict(owner="y", repo="x", pullNumber=5, draft=False), None)
+# `--undo` takes a pull request back to draft. It marks nothing ready, so a lane may run it.
+ready_case("ready-lane: gh pr ready 5 --undo stays allowed in a lane session", "allow", "lane", "Bash", {},
+           "gh pr ready 5 --undo")
 for _label, _command, _expected in call_shapes("gh pr ready 5"):
     ready_case("ready-lane: gh pr ready 5 %s is %s" % (_label, "refused in a lane" if _expected == "deny" else "no call"),
                _expected, "lane", "Bash", {}, _command)
+# The GraphQL mark in a shape that holds text, not a call. Its apostrophe shape is left out: the query's quotes break it.
+ready_case("ready-lane: the GraphQL ready mark in a multi-line quoted string is no call", "allow", "lane", "Bash", {},
+           'echo "start\n' + GQL_READY.replace('"', '\\"') + '\nend"')
+ready_case("ready-lane: the GraphQL ready mark in a heredoc body is no call", "allow", "lane", "Bash", {},
+           "cat <<'EOF'\n" + GQL_READY + "\nEOF")
+ready_case("ready-lane: the GraphQL ready mark in a comment is no call", "allow", "lane", "Bash", {},
+           "echo ok # " + GQL_READY)
+# gh pr merge --auto through each call shape, on a green head: a call is refused, and text that holds it is no call.
+for _label, _command, _expected in call_shapes(GH_AUTO_MERGE):
+    _deny = _expected == "deny"
+    sh("auto-merge: gh pr merge --auto %s is %s" % (_label, "refused" if _deny else "no call"), _command, _expected,
+       rule="auto-merge" if _deny else None, cwd=NOGIT, carries=AUTO_CARRY if _deny else (),
+       lacks=AUTO_CLI_LACKS if _deny else (), silent=not _deny, **GREEN_HEAD)
