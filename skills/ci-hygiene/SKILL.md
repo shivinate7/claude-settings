@@ -92,18 +92,21 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    the new run is the re-run. A lone lane is its own integration PR and has no replacer.
    Other lane PRs stay draft. `merge --reviewed --root` lists each close as a line: `close as replaced`,
    `close as carried` or `reopen` (step `close-replaced-at-open`). The batch runner acts on each line.
-   It closes the PR and posts the comment, or it reopens the PR. The close uses the GitHub MCP tool
-   `update_pull_request` (state closed). Where gh writes are allowed (local session), it may use
-   `gh api -X PATCH repos/OWNER/REPO/pulls/N -f state=closed` instead. The merge tool posts and closes nothing.
-   When an integration PR opens with a body line `Replaces #N`, the lane PR it names closes as
+   It closes the PR and posts the comment, or it reopens the PR. In a cloud session, the GitHub MCP
+   tools do each write: `update_pull_request` closes (state closed) or reopens (state open), and
+   `add_issue_comment` posts the note. Where gh writes are allowed (local session), it may use
+   `gh api -X PATCH repos/OWNER/REPO/pulls/N -f state=closed` (or `state=open`) and
+   `gh api -X POST repos/OWNER/REPO/issues/N/comments -f body=...` instead. The merge tool posts and closes nothing.
+   When an integration PR opens with a body line `Replaces #N` (N is the number of the lane PR it replaces), the lane PR it names closes as
    replaced. The replacer and the replaced PR must share a base. A bulleted `- Replaces #N` does not
-   count. The line must start with `Replaces #N`, outside a code fence and a quote. A loop of PRs
+   count. The line counts at a line start, indent allowed, outside a code fence and a `>` quote. A loop of PRs
    that name each other with `Replaces` closes none, of any length. An open PR with a done review record closes as
-   carried when another open PR on the same base holds its head (GitHub compare read). A PR closed
+   carried when another open PR on the same base holds its head (GitHub compare read). With two equal heads, the higher number closes as carried. A PR closed
    as replaced cannot carry another. Each close comment starts a line. It reads `Replaced by #R;
    reopens if #R is dropped`, or `Carried by #R; reopens if #R is dropped`. A `reopen` line fires
    when R closes unmerged. For a Replaced note, it also fires when R is open and no longer names N.
-   A Carried note reopens only when R closes unmerged. Each closed PR keeps its branch.
+   A Carried note reopens only when R closes unmerged. Only such a note reopens a PR: a PR closed by hand, with no note, stays closed.
+   Each closed PR keeps its branch.
    Reopen reads repeat each wake while a close note is in the comment window. A closed candidate
    gets at most two reads. A replacer's state is read once.
    When the integration run is red, read the failing job. Find the lane whose files it touches.
