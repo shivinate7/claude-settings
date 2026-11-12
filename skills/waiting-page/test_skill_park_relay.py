@@ -15,6 +15,14 @@ Reads prose only and runs none of the skill's code. Each case pins one claim:
   8. The items/<id> entry documents `wakes`, and the sentence that names it says the absent value is the owner.
   9. "Read the answers" says the writer messages the sessions in `wakes` and nobody else, and no longer sends the
      answer-unread message to the item's owner.
+  10. The stale sentences that make the owner the reader of its answer are gone from their sections.
+  11. The writer bullet names `wakes`.
+  12. "Chat first" names `wakes`.
+  13. "Add an item" says never name a lane in `wakes`.
+  14. The watch bullet, which holds the inherit step, names `wakes`.
+  15. The sentence that asks for `wakes` to be fixed names the item's `owner`.
+  16. "Read the answers" reads answers by `owner` or `wakes`.
+  17. The wakes field documents `null` as absent, `[]` and other shapes as unknown.
 """
 import os
 import re
@@ -253,13 +261,63 @@ def items_entry(text):
     return text[start:end if end >= 0 else len(text)]
 
 
-def read_answers_section(text):
-    """The "## Read the answers" section: from its heading to the next heading."""
-    start = text.find("\n" + READ_HEADING + "\n")
+def section_under(text, heading):
+    """The section under `heading` (a "## " line): from its heading to the next heading. "" when the heading is missing."""
+    start = text.find("\n" + heading + "\n")
     if start < 0:
         return ""
     end = text.find("\n## ", start + 1)
     return text[start:end if end >= 0 else len(text)]
+
+
+def read_answers_section(text):
+    """The "## Read the answers" section: from its heading to the next heading."""
+    return section_under(text, READ_HEADING)
+
+
+def flat(text):
+    """`text` with each run of white space made one space and case folded, so a phrase matches whatever its line breaks."""
+    return " ".join(text.split()).lower()
+
+
+def block_with(text, phrase):
+    """The flat paragraph or list item that holds `phrase`, or "" when none does."""
+    for block in blocks(text):
+        if phrase.lower() in flat(block):
+            return flat(block)
+    return ""
+
+
+def sentences_with(text, phrase):
+    """The flat sentences of `text` that hold `phrase`, in order."""
+    return [s.lower() for block in blocks(text) for s in sentences(block) if phrase.lower() in s.lower()]
+
+
+def wakes_clause(text):
+    """The `wakes` part of the items/<id> entry, from its field to the `home` field, flat. "" when either is missing."""
+    entry = items_entry(text)
+    at = entry.find("`wakes`")
+    if at < 0:
+        return ""
+    end = entry.find("`home`", at)
+    return flat(entry[at:end if end >= 0 else len(entry)])
+
+
+# Cases 10 to 17: the prose that still makes the owner the reader of its answer, and the wakes wording that replaces it.
+# A stale phrase is scoped to the section it sat in, and that section must exist first, so a moved heading is never read as a
+# cleared sentence.
+STALE_OWNER_READS = (
+    ("## The writer", "It reads its own answer at its wake"),
+    ("## Chat first", "The asking session (`owner`) then files the answer"),
+    ("## Chat first", "The owning session then files the answer"),
+    ("## Read the answers", "Only the owning session reads, routes and closes"),
+    ("## Read the answers", "`owner` is the session that reads the answer"),
+    ("## Read the answers", "asks the session that wrote the item"),
+    ("## Read the answers", "by `owner` and `n`"),
+)
+WRITER_BULLET = "Every other session sends its question to the writer"
+WATCH_BULLET = "A session watches the page first"  # the bullet whose inherit step rewrites or clears `wakes`
+FIX_WAKES = "fix `wakes`"
 
 
 class WakesProse(unittest.TestCase):
@@ -281,6 +339,52 @@ class WakesProse(unittest.TestCase):
         self.assertIn("`wakes`", section, "the Read the answers section does not say the message goes to the sessions in wakes")
         self.assertRegex(section, NOBODY_ELSE, "the Read the answers section does not say the message goes to nobody else")
         self.assertNotIn(OWNER_SEND, section, "the Read the answers section still sends the answer-unread message to the item's owner")
+
+    def test_10_the_stale_owner_reads_sentences_are_gone_from_their_sections(self):
+        for heading, phrase in STALE_OWNER_READS:
+            with self.subTest(phrase=phrase):
+                body = section_under(self.skill, heading)
+                self.assertTrue(body, "SKILL.md has no '%s' section to scan for the stale sentence" % heading)
+                self.assertNotIn(flat(phrase), flat(body), "the stale sentence '%s' is still in %s" % (phrase, heading))
+
+    def test_11_the_writer_bullet_names_wakes(self):
+        bullet = block_with(self.skill, WRITER_BULLET)
+        self.assertTrue(bullet, "SKILL.md has no writer bullet that sends a question to the writer")
+        self.assertIn("`wakes`", bullet, "the writer bullet does not name `wakes`")
+
+    def test_12_the_chat_first_section_names_wakes(self):
+        body = section_under(self.skill, "## Chat first")
+        self.assertTrue(body, "SKILL.md has no 'Chat first' section")
+        self.assertIn("`wakes`", flat(body), "the Chat first section does not name `wakes`")
+
+    def test_13_add_an_item_says_never_name_a_lane_in_wakes(self):
+        body = section_under(self.skill, "## Add an item")
+        self.assertTrue(body, "SKILL.md has no 'Add an item' section")
+        self.assertIn("never name a lane in `wakes`", flat(body), "the Add an item section does not say never name a lane in `wakes`")
+
+    def test_14_the_watch_bullet_that_holds_the_inherit_step_names_wakes(self):
+        bullet = block_with(self.skill, WATCH_BULLET)
+        self.assertTrue(bullet, "SKILL.md has no watch bullet to scan for the inherit step")
+        self.assertIn("`wakes`", bullet, "the inherit step does not rewrite or clear `wakes`")
+
+    def test_15_the_sentence_that_asks_for_wakes_to_be_fixed_names_the_items_owner(self):
+        found = sentences_with(self.skill, FIX_WAKES)
+        self.assertTrue(found, "SKILL.md has no sentence that asks for `wakes` to be fixed")
+        self.assertTrue(any("`owner`" in s for s in found),
+                        "the sentence that asks for `wakes` to be fixed does not name the item's `owner`: %s" % found[0])
+
+    def test_16_read_the_answers_reads_answers_by_owner_or_wakes(self):
+        body = read_answers_section(self.skill)
+        self.assertTrue(body, "SKILL.md has no 'Read the answers' section")
+        self.assertIn("by `owner` or `wakes`", flat(body), "the Read the answers section does not read answers by `owner` or `wakes`")
+
+    def test_17_the_wakes_field_documents_null_as_absent_and_other_shapes_as_unknown(self):
+        clause = wakes_clause(self.skill)
+        self.assertTrue(clause, "the items/<id> entry has no wakes field to scan")
+        for token, cause in (("`null`", "does not say that null is absent"), ("`[]`", "does not name [] as a shape"),
+                             ("unknown", "does not say that other shapes are unknown")):
+            with self.subTest(token=token):
+                self.assertIn(token, clause, "the wakes field %s" % cause)
 
 
 if __name__ == "__main__":
