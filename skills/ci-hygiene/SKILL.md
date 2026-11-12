@@ -125,6 +125,25 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    no line was lost either. Run `lint/check_silent_undo.py` before the merge. First run `git fetch origin <base>`. Then pass `--upstream origin/<base>`, the PR's base branch, `--head <head SHA>`, the PR's head commit, and `--strict`, as CI does. Without `--strict`, a local run exits 0 on UNKNOWN, so a skipped check reads as clean.
    GitHub's merge queue needs an organization-owned repo. A personal repo batches by hand or through
    the merge tool.
+   **After a batch merges, route the PRs that now conflict with main.** The batch runner lists each
+   handed-in lane PR whose head no longer merges clean with the new main, in the same turn as the merge
+   report. It names each one to its lane. It picks nothing per PR, so no coordinator pick is needed.
+   Each listed lane does the same three acts in its own checkout:
+   1. Merge main into the lane branch once: `git fetch origin main`, then `git merge origin/main`.
+      Resolve the conflicted paths only. Never rebase, never force-push, never edit a path git merged
+      without conflict.
+   2. Spawn a fresh reviewer on a brief that opens `Fix check` (Sonnet). It reads only
+      `git diff origin/main...<head>`, which holds the resolved hunks, and confirms the lane's own diff
+      is unchanged.
+   3. Post the verdict before the push: `merge <pr> --review-record --fix-check <head>:reviewer:sonnet:<PASS|FAIL>`.
+      The tool chains the line to the PR's newest earlier record (record `pr-review-record`, the
+      fix check order).
+   A merge with no conflict needs none of this: the record stays valid (record `pr-review-record`, clean
+   merge survival). A refused chain means that the lane gets the full review of its new head. Two examples: a second
+   fix check on an already fixed head, and a merge whose second parent is not on main. The lane never
+   works around the refusal. A FAIL starts a new lane at round 1. After a PASS the lane hands in again. The batch
+   runner puts it in the next batch. Until the merge tool lists conflicting PRs (lane
+   `lane-lint-batch-pr-conflicts` builds that), the runner reads each handed-in PR's `mergeable` field.
    Batch across sessions too (`git-integration-branch-merge`).
 9. **Wait without loops.** Wait for the CI-wake notice that follows `gh pr ready`. A push starts no
    notice. In cloud, mark ready by MCP `update_pull_request` `draft: false` (route
