@@ -1143,6 +1143,58 @@ class LaneUndo(unittest.TestCase):
         self.assertIn(C.TRAILER, found[0], "the finding does not name the trailer that excuses it: %r" % found[0])
         self.assertNotIn("\n", found[0], "the finding is not one line: %r" % found[0])
 
+    def test_a_pure_rename_then_a_drop_of_three_main_lines_is_green(self):
+        """A pure move adds no line, so the three lines B drops were main's, not lines the lane added."""
+        main = "".join("card kept line %d\n" % i for i in range(1, 11))
+        self.main_then_lane("tests/card.txt", main)
+        r = self.r
+        r.sh("mv", "tests/card.txt", "tests/card_renamed.txt")
+        a = r.commit("A: rename the test file, content unchanged")
+        b = r.commit("B: drop three main lines", tests__card_renamed_txt="".join(main.splitlines(True)[3:]))
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertEqual(r.sh("rev-parse", a + ":tests/card_renamed.txt"), r.sh("rev-parse", "origin/main:tests/card.txt"))  # scope: A is a pure move of main's blob
+        self.assertNotIn("card kept line 1", r.sh("show", b + ":tests/card_renamed.txt").splitlines())  # scope: B drops main's first three lines
+        self.assertEqual(r.verdict(), [], "a pure rename makes main's lines count as lane-added, so dropping three of them reads as a lane undo")
+
+    def test_a_rename_that_appends_one_line_to_an_edited_test_file_is_green(self):
+        """B renames the file and appends one line. It drops nothing, so the old path's lines moved and are not put back there."""
+        kept = "card test kept line\n"
+        self.main_then_lane("tests/card.txt", kept)
+        r = self.r
+        a = r.commit("A: add eight test lines", tests__card_txt=kept + self.EIGHT)
+        r.sh("mv", "tests/card.txt", "tests/card_renamed.txt")
+        b = r.commit("B: rename the test file and add one line", tests__card_renamed_txt=kept + self.EIGHT + "card test appended line\n")
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertNotIn("tests/card.txt", r.sh("ls-tree", "-r", "--name-only", b).split())  # scope: B moves the file off the old path
+        self.assertEqual(r.sh("show", b + ":tests/card_renamed.txt").splitlines()[:-1], r.sh("show", a + ":tests/card.txt").splitlines())  # scope: B keeps every line A holds and appends one
+        self.assertEqual(r.verdict(), [], "a rename that appends one line drops nothing, so the old path is not read as put back")
+
+    def test_a_lane_that_deletes_the_eight_lines_it_added_to_a_test_file_is_red(self):
+        """Control for the moved-lines case: the same eight lines taken out of the file, not moved within it, still read as a lane undo."""
+        r = self.r
+        kept = "".join("card kept line %d\n" % i for i in range(1, 21))
+        self.main_then_lane("tests/card.txt", kept)
+        k = kept.splitlines(True)
+        a = r.commit("A: add eight lines inside the kept text", tests__card_txt="".join(k[:10]) + self.EIGHT + "".join(k[10:]))
+        b = r.commit("B: delete the eight lines", tests__card_txt=kept)
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertNotIn("eight test line 1", r.sh("show", b + ":tests/card.txt").splitlines())  # scope: B deletes the eight lines
+        self.assertEqual(r.sh("show", b + ":tests/card.txt").splitlines(), kept.splitlines())  # scope: B holds main's text only
+        assert_finding(self, r.verdict(), "tests/card.txt", b, a)
+
+    def test_a_lane_that_moves_its_eight_test_lines_within_the_file_is_green(self):
+        """A line counts as lost only when it is gone from the whole file. B moves the lane's eight lines to the end of the file, so each one is still there."""
+        r = self.r
+        kept = "".join("card kept line %d\n" % i for i in range(1, 21))
+        self.main_then_lane("tests/card.txt", kept)
+        k = kept.splitlines(True)
+        a = r.commit("A: add eight lines inside the kept text", tests__card_txt="".join(k[:10]) + self.EIGHT + "".join(k[10:]))
+        b = r.commit("B: move the eight lines to the end of the file", tests__card_txt=kept + self.EIGHT)
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertNotEqual(r.sh("show", b + ":tests/card.txt"), r.sh("show", a + ":tests/card.txt"))  # scope: B moves the block, so the text changes
+        self.assertEqual(sorted(r.sh("show", b + ":tests/card.txt").splitlines()), sorted(r.sh("show", a + ":tests/card.txt").splitlines()))  # scope: B only reorders A's lines
+        self.assertEqual(r.verdict(), [], "moving the lane's eight lines within the file reads them as lost, though each is still in the file")
+
 
 class IntegrationBase(unittest.TestCase):
     """This repo merges through integration branches. A PR based on `integ` is checked against
