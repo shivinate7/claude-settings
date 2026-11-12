@@ -2180,3 +2180,8 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
+- claim-revert-gates-untested: the F2 text in `refuse_bad_pr` and the `"does not hold"` gate in confirm have no test; a mutant without the gate stays green. Found in PR 2905, round 3. Decision: roles-findings-are-debts-or-notes.
+- claim-revert-unknown-gate: `refuse_claim_stop` tests for `"UNKNOWN:"`, but a do_claim refusal prints `claim REFUSES:`, so any refusal with a held claim names the revert, even when the base did not move. Found in PR 2905, round 3. Decision: roles-findings-are-debts-or-notes.
+- claim-revert-after-wait: a small base move that takes a claimed number is refused only after the checks wait, with stamp's own text and no revert remedy. Found in PR 2905, round 3. Decision: roles-findings-are-debts-or-notes.
+- draft-stops-test-wide: `assert_draft_stops` in `merge/test_merge.py` now checks at most one new commit, so a stray claim passes in the two callers that have nothing to claim. Found in PR 2905, round 3. Decision: roles-findings-are-debts-or-notes.
+- claim-remedy-second-home: `stale_claim_remedy` repeats the return-to-draft steps of `stale_page_remedy` in `merge/merge.py`. Found in PR 2905, round 3. Decision: roles-findings-are-debts-or-notes.

@@ -10,7 +10,7 @@ on a draft PR is that step, and it never merges. It refuses a head that does not
 `--confirm` does, and a head that carries a claim. It claims the record numbers, rebuilds the page, commits both as one commit, pushes it, and stops: mark
 the PR ready, then run `--confirm` again. The tool sends no GraphQL, so the batch runner marks the PR ready
 by its session's route (route pr-ready-mcp-cloud), after the draft run of the pushed head shows (skill
-ci-hygiene). So the branch is final at ready, and the ready run is the merge run. The step claims no
+ci-hygiene). So the branch is final at ready, and the ready run is the merge run. The step claims the
 record numbers. It takes no merge lock. A PR that turns draft after the first read is the one case: the step runs
 under the lock that confirm already took, and releases it.
 The same two allow rules cover both steps, so no new rule is needed.
