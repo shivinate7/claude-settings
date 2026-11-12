@@ -787,7 +787,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: scope
     # 30 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The newest 29 completed push runs on main, latest attempt of each (run 42522167511 to run 43206612905):
-    # 29 green, slowest 7.9 min (run 42700538152); slowest after the waiting page suite moved out, 7.6 min (run 42770837830), the rest 3.1 min or less.
+    # 29 green, slowest 7.9 min (run 42700538152, before the waiting page suite moved out); 3.1 min or less since run 42826151332.
     # The browser install is the only network step. The stopgap ends with roadmap step time-pinned-tests-go.
     timeout-minutes: 30
     steps:
@@ -980,11 +980,11 @@ jobs:
         with:
           python-version: "3.11"
 
-      # Own cap, kept from the whole suite (slowest 16.62 min before the split). Shard 1 measured slowest 13.23 min,
-      # median 9.33 (n 31 green steps, same window as `checks`). hooks/test_guard.py holds the shard switch.
+      # Own cap, 45 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The step took 1106 s (18.4 min) in run 43197518392, the slowest of 29 completed push runs.
+      # hooks/test_guard.py holds the shard switch.
       - name: Guard fixture suite (shard 1 of 2)
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
-        timeout-minutes: 22
+        timeout-minutes: 45
         env:
           GUARD_SHARD: 1/2
         run: python3 hooks/test_guard.py
