@@ -35,7 +35,7 @@ already-recorded ruling cannot make it cry wolf (item 8;
 `docs/decisions/guard-that-cries-wolf-is-spent.md`): "A guard that goes red when nothing is wrong is
 spent, because the reader learns to scroll past it."
 
-RESOLUTION, ONE GIT PROCESS PER VALUE. `git for-each-ref` lists every `refs/heads` and
+RESOLUTION, ONE GIT PROCESS PER VALUE (`resolve_paths` asks about many values in that one call, for skills/roadmap/build.py's outbox check). `git for-each-ref` lists every `refs/heads` and
 `refs/remotes` ref once per run; each home: value then asks about every ref at once with one
 `git cat-file --batch-check` call fed `<ref>:<path>` lines on stdin, never one process per ref,
 and reads the type back for each: only a `blob` answer resolves, so a directory (`tree`) never
@@ -384,28 +384,40 @@ def _list_refs(cwd):
     return [line for line in run.stdout.splitlines() if line.strip()]
 
 
-def _resolve_value(cwd, refs, git_path):
-    """True when ANY ref's tree holds a blob (never a tree/directory) at `git_path`.
+def resolve_paths(cwd, refs, git_paths):
+    """{git path: True} when ANY ref's tree holds a blob (never a tree/directory) there, else False.
 
-    One `git cat-file --batch-check=%(objecttype)` call answers for every ref at once, fed
-    `<ref>:<path>` lines on stdin, rather than one process per ref (the performance fix this
-    exists for). The custom format prints the bare type (`blob`, `tree`, ...) and nothing else
-    for a found object, so a whole-line `== "blob"` test is exact. Plain `--batch-check`
-    prints `<ref>:<path> missing` for a missing object, echoing the input verbatim -- a value
-    like `nothere blob` would then put `blob` in that ECHOED text, and splitting the line by
-    whitespace and reading field [1] would misread that as a resolved blob. The custom format
-    still echoes `<input> missing` for a miss, so the same value still ends a line in
-    `... missing`, never in the four bare letters `blob` alone; only a real found blob does.
-    A non-zero exit, or an object of any type but `blob` or missing outright, reads as "this
-    value does not resolve" -- never a stand-down: see the module docstring.
+    One `git cat-file --batch-check=%(objecttype)` call answers for every ref and every path at
+    once, fed `<ref>:<path>` lines on stdin in path-major order, rather than one process per ref
+    or per path (the performance fix this exists for). The custom format prints the bare type
+    (`blob`, `tree`, ...) and nothing else for a found object, so a whole-line `== "blob"` test
+    is exact. Plain `--batch-check` prints `<ref>:<path> missing` for a missing object, echoing
+    the input verbatim -- a value like `nothere blob` would then put `blob` in that ECHOED text,
+    and splitting the line by whitespace and reading field [1] would misread that as a resolved
+    blob. The custom format still echoes `<input> missing` for a miss, so the same value still
+    ends a line in `... missing`, never in the four bare letters `blob` alone; only a real found
+    blob does. A non-zero exit, a short answer, or an object of any type but `blob` or missing
+    outright reads as "this path does not resolve" -- never a stand-down: see the module
+    docstring.
     """
-    if not refs:
-        return False
-    stdin_text = "".join("%s:%s\n" % (ref, git_path) for ref in refs)
+    paths = list(dict.fromkeys(git_paths))
+    if not refs or not paths:
+        return {p: False for p in paths}
+    stdin_text = "".join("%s:%s\n" % (ref, p) for p in paths for ref in refs)
     run = _run_git(cwd, ["cat-file", "--batch-check=%(objecttype)"], input_text=stdin_text)
     if run.returncode != 0:
-        return False
-    return any(line.strip() == "blob" for line in run.stdout.splitlines())
+        return {p: False for p in paths}
+    answers = run.stdout.splitlines()
+    found = {}
+    for i, p in enumerate(paths):
+        chunk = answers[i * len(refs):(i + 1) * len(refs)]
+        found[p] = any(line.strip() == "blob" for line in chunk)
+    return found
+
+
+def _resolve_value(cwd, refs, git_path):
+    """True when ANY ref's tree holds a blob at `git_path`: resolve_paths for one path."""
+    return resolve_paths(cwd, refs, [git_path])[git_path]
 
 
 def value_resolves(value, cwd):
