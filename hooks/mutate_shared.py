@@ -33,6 +33,7 @@ import glob
 import hashlib
 import json
 import os
+import pathlib
 import queue
 import random
 import re
@@ -580,10 +581,11 @@ def split_suite(name: str):
     return file, (family or None)
 
 
-def run_suite_file(folder: str, rel: str, timeout: float, argv=None, classify=None, cwd=None):
+def run_suite_file(folder: str, rel: str, timeout: float, argv=None, classify=None, cwd=None, env_extra=None):
     """Run one suite from `folder`. Return (class, seconds). By default the suite is `python3 <rel>`
     read by `classify_run`. A replay passes `argv` (the whole command), `classify` (a function of
-    (code, output, timed_out)) and `cwd` (a folder inside `folder`). The child gets its own process
+    (code, output, timed_out)), `cwd` (a folder inside `folder`) and `env_extra` (variables set over the child's
+    environment). The child gets its own process
     group, killed whole at the timeout. Output goes to a file: a grandchild that holds a pipe open
     would make a pipe read wait for it. `rel` may be `file::family` (see `split_suite`): the child gets
     GUARD_FAMILY=family. Any other suite runs with GUARD_FAMILY removed, since an inherited value would
@@ -595,6 +597,7 @@ def run_suite_file(folder: str, rel: str, timeout: float, argv=None, classify=No
         env["GUARD_FAMILY"] = family
     # No bytecode: a mutant of the same size and second as the clean file would load the clean .pyc.
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env.update(env_extra or {})
     command = argv or [sys.executable, os.path.join(folder, file)]
     started = time.time()
     code, output, timed_out = run_in_group(command, cwd or folder, timeout, env)
@@ -1073,8 +1076,7 @@ def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0
     mutants the budget cut. The stop is cleared on the way out. Without it, a running mutant is let finish."""
     started = time.time()
     row = _replay_row(repo, sha)
-    code_re, tests_re = re.compile(profile["code"]), re.compile(profile["tests"])
-    not_re = re.compile(profile["code_not"]) if profile.get("code_not") else None
+    tests_re = re.compile(profile["tests"])
     base = base or "%s^1" % sha
     try:
         files = _changed_files(repo, base, sha)
@@ -1082,7 +1084,7 @@ def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0
         row["reason"] = "cannot read the diff: %s" % error
         row["no_run_cause"] = row["reason"]
         return row
-    code = sorted(p for p, s in files.items() if s != "D" and code_re.search(p) and not (not_re and not_re.search(p)))
+    code = sorted(p for p, s in files.items() if s != "D" and _is_product(profile, p))
     suites = sorted(p for p, s in files.items() if s != "D" and tests_re.search(p))
     suites = [p for p in suites if _is_suite(repo, sha, profile, p)]
     if not code:
@@ -1482,44 +1484,231 @@ def run_known_defects(repo: str, defects, profile: dict, deps: str, suite_timeou
     text in `file` that the plant replaces with `new`, and `argv` is the catcher suite, read by the classifier `classify`.
     Returns [{id, name, verdict, reason}] with the verdict CAUGHT (the suite prints an assertion on the planted copy), MISS
     (the suite passed, crashed or timed out on it) or UNKNOWN (the anchor is stale or ambiguous, the entry is malformed, the
-    suite is not green on the clean copy, or the install or its link failed). Only an assertion catches, as in a replay. The run
-    is in a checkout of HEAD made like a replay's, so the working tree and the repository are left as found.
+    suite is not green on the clean copy, an install it needs failed, or a link failed). Only an assertion catches, as in a
+    replay. The run is in a checkout of HEAD made like a replay's, so the working tree and the repository are left as found.
     The checkout is prepared as `--changed` prepares its own. For each part of `profile` (the values of a `parts` profile, else
     the profile itself) the install runs under `deps`, a folder the caller removes, and its folder is linked beside the
-    lockfile. Parts with one lockfile and one install share one install and one link; any other install runs once more. When an
-    install or a link fails, every defect reads UNKNOWN and its reason names the install and the cause."""
+    lockfile. Parts with one lockfile and one install share one install and one link; any other install runs once more.
+    A failed install does not stop the later parts. A defect needs a part's install when the part's `code` regex matches the
+    defect's `file` (unless its `code_not` regex matches it too) or its `tests` regex matches an element of the defect's
+    `argv`; the regexes are the profile's own (`REPLAY_PROFILES`, or `--profile-file`). When any part has neither regex, or no
+    part claims the defect, the defect needs every install. A defect that needs a failed install is not run: it
+    reads UNKNOWN and its reason names the install, because a suite whose package is missing can read CAUGHT or MISS for the
+    wrong cause. Any other defect runs as usual. A failed link leaves the checkout unusable, so every defect reads UNKNOWN.
+    The load hook (`_LOAD_HOOKS`) runs only under a failed install. Each catcher run then carries it: it writes a start line
+    when it loads, then the top-level name of each module that fails to resolve, even under a `try/except` (an ESM import, a
+    CommonJS `require()` or a Python import), to a log the run owns. When the clean or the planted run's log names a module,
+    the defect reads UNKNOWN and its reason names the module and each failed install, because a fallback may have caught the
+    plant for the missing package. When a run's log has no start line and its argv can start Python or Node (`_starts_hooked`:
+    a whitespace-split word of an argv element whose last path part is `python`, `python` with digits and dots, or `node`),
+    the defect reads UNKNOWN too: the load hook did not run (an argv that resets PYTHONPATH or NODE_OPTIONS, `-S`, `env -i`,
+    a failed log write). Any other argv, such as `sh -c "grep ..."` or `bash t.sh`, owes no start line. The argv is read as
+    the defect lists it. With every install passing, there is no hook: no log, no PYTHONPATH or NODE_OPTIONS change.
+    Cost: process starts added 0 (the hook loads inside the catcher's own interpreter); files written, the hook files once
+    per replay and one log per catcher run, and none when every install passed, all under the replay's own folder and
+    removed with it; each log read once, after its run. Nothing runs on a timer."""
     if not defects:
         return []
     sha = _git(repo, "rev-parse", "HEAD").strip()
     own = tempfile.mkdtemp(prefix="mutate_defects_")
     dest = os.path.join(own, "w")
     results = []
+    failed = {}  # part name -> the reason its install failed
 
     def all_unknown(reason: str) -> list:
-        return [{"id": str(d.get("id", "?")) if isinstance(d, dict) else "?",
-                 "name": str(d.get("name", "")) if isinstance(d, dict) else "", "verdict": "UNKNOWN", "reason": reason}
-                for d in defects]
+        return [_unrun_defect(d, reason) for d in defects]
 
+    parts = profile["parts"] if "parts" in profile else {None: profile}
     try:
         _make_checkout(repo, sha, dest, set(), {}, None, {})
-        for part in (list(profile["parts"].values()) if "parts" in profile else [profile]):
+        for name, part in parts.items():
             folder, why = _ensure_deps(repo, sha, part, deps)
             if why:
-                return all_unknown("the install of the profile failed: %s" % why)
+                failed[name] = why
+                continue
             try:
                 _link_deps(dest, folder, part)
             except OSError as error:
                 return all_unknown("the install could not be linked into the checkout: %s" % error)
+        if failed:
+            _write_load_hooks(own)
         for defect in defects:
-            results.append(_known_defect(dest, defect, suite_timeout))
+            needed = [name for name in _needed_parts(defect, parts) if name in failed]
+            if needed:
+                results.append(_unrun_defect(defect, _install_failures(needed, failed)))
+            else:
+                results.append(_known_defect(dest, defect, suite_timeout, own, failed))
     finally:
         _drop_checkout(repo, dest)
         shutil.rmtree(own, ignore_errors=True)
     return results
 
 
-def _known_defect(dest: str, defect: dict, suite_timeout: float) -> dict:
-    """One planted defect in checkout `dest`, which is left as it was found."""
+def _install_failures(names, failed: dict) -> str:
+    """One clause for each failed install in `names` (part names, None for a profile without parts): its owner and why."""
+    return "; ".join("the install of %s failed: %s" % ("the profile" if name is None else "part " + name, failed[name])
+                     for name in names)
+
+
+# The load hook of a known-defect catcher run under a failed install: it records the top-level name of each module that
+# fails to resolve, even when the catcher catches the error, in the file named by MUTATE_MISSING_LOG. The first line it
+# writes is MISSING_LOG_START, when it loads: a log without it means the hook never ran in the catcher's interpreter. A
+# write that fails truncates the log, so the run reads as one the hook did not reach, never as clean. Python gets a
+# `sitecustomize.py` on PYTHONPATH; its finder sits last on sys.meta_path, so it is asked only for a name that no other
+# finder found. Node gets the file as `--import` in NODE_OPTIONS, which runs in the main thread: it patches the CommonJS
+# resolver there and registers itself as the resolve hook of the loader thread for ESM. All are written once per replay.
+MISSING_LOG_START = "#start"
+_HOOKED_PROGRAM = re.compile(r"python[0-9.]*|node")  # the programs that load `_LOAD_HOOKS`, as a path's last part
+_LOAD_HOOKS = {
+    "sitecustomize.py": r'''import os
+import sys
+from importlib.abc import MetaPathFinder
+
+LOG = os.environ.get("MUTATE_MISSING_LOG")
+
+
+def note(line):
+    try:
+        with open(LOG, "a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+    except OSError:
+        try:
+            open(LOG, "w", encoding="utf-8").close()
+        except OSError:
+            pass
+
+
+class MissingLogger(MetaPathFinder):
+    def find_spec(self, name, path=None, target=None):
+        # A standard-library name (msvcrt, probed under a try) is no install's to provide; usercustomize is tried by site.
+        if "." not in name and name != "usercustomize" and name not in getattr(sys, "stdlib_module_names", ()):
+            note(name)
+        return None
+
+
+if LOG:
+    note("@START@")
+    sys.meta_path.append(MissingLogger())
+''',
+    "missing_hook.mjs": r'''import { appendFileSync, existsSync, truncateSync } from "node:fs";
+import Module from "node:module";
+import { join } from "node:path";
+import { isMainThread } from "node:worker_threads";
+
+const LOG = process.env.MUTATE_MISSING_LOG;
+
+function note(line) {
+  try {
+    appendFileSync(LOG, line + "\n");
+  } catch {
+    try { truncateSync(LOG, 0); } catch { /* no log left to mark */ }
+  }
+}
+
+// Not a bare specifier: relative, absolute, a URL or drive path (node:, file:, data:, C:), or a #imports name.
+const NOT_BARE = /^(?:\.{1,2}(?:\/|$)|\/|#|[A-Za-z][A-Za-z0-9+.-]*:)/;
+
+function topName(specifier) {
+  const parts = specifier.split("/");
+  return specifier.startsWith("@") ? parts.slice(0, 2).join("/") : parts[0];
+}
+
+// The loader thread runs this file again, as the hooks module; only the main thread patches and registers.
+if (LOG && isMainThread) {
+  note("@START@");
+  // ESM resolves in the loader thread (the resolve hook below); require() resolves here, in the main thread.
+  if (typeof Module.register === "function") Module.register(import.meta.url);
+  const original = Module._resolveFilename;
+  Module._resolveFilename = function (request, parent, ...rest) {
+    try {
+      return original.call(this, request, parent, ...rest);
+    } catch (error) {
+      // A package is not installed when no node_modules folder on the lookup path holds its folder; a package that is
+      // there with a file missing has its folder.
+      if (error && error.code === "MODULE_NOT_FOUND" && typeof request === "string" && !NOT_BARE.test(request)) {
+        const top = topName(request);
+        const folders = Module._resolveLookupPaths(request, parent) || [];
+        if (!folders.some((folder) => existsSync(join(folder, top)))) note(top);
+      }
+      throw error;
+    }
+  };
+}
+
+export async function resolve(specifier, context, nextResolve) {
+  try {
+    return await nextResolve(specifier, context);
+  } catch (error) {
+    // "Cannot find package" is a package that is not installed; a package that is there with a file missing says "Cannot find module".
+    if (LOG && error && error.code === "ERR_MODULE_NOT_FOUND" && !NOT_BARE.test(specifier)
+        && String(error.message).startsWith("Cannot find package")) {
+      note(topName(specifier));
+    }
+    throw error;
+  }
+}
+''',
+}
+
+
+def _write_load_hooks(own: str) -> None:
+    """Write `_LOAD_HOOKS` into the folder `own`/hooks."""
+    folder = os.path.join(own, "hooks")
+    os.makedirs(folder, exist_ok=True)
+    for name, source in _LOAD_HOOKS.items():
+        _write(os.path.join(folder, name), source.replace("@START@", MISSING_LOG_START))
+
+
+def _starts_hooked(argv) -> bool:
+    """True when a whitespace-split word of an element of `argv` names Python or Node (`_HOOKED_PROGRAM`) by its last path
+    part, so the run may load the load hook and owes its start line: `env -i python3 x` and `sh -c "python3 t.py"` do,
+    `sh -c "grep ..."` and `bash t.sh` do not."""
+    return any(_HOOKED_PROGRAM.fullmatch(os.path.basename(word)) for item in argv for word in str(item).split())
+
+
+def _hook_env(own: str, log: str) -> dict:
+    """The variables that load the hooks of `own` into a catcher run and point them at `log`. An existing PYTHONPATH or
+    NODE_OPTIONS keeps its value, after the hook's."""
+    folder = os.path.join(own, "hooks")
+    node = "--import %s" % pathlib.Path(folder, "missing_hook.mjs").as_uri()
+    return {"MUTATE_MISSING_LOG": log,
+            "PYTHONPATH": os.pathsep.join(filter(None, [folder, os.environ.get("PYTHONPATH")])),
+            "NODE_OPTIONS": " ".join(filter(None, [os.environ.get("NODE_OPTIONS"), node]))}
+
+
+def _is_product(part: dict, path: str) -> bool:
+    """True when the profile (or part) `part` reads `path` as product code: its `code` regex matches and its `code_not` does not."""
+    return bool(part.get("code") and re.search(part["code"], path)
+                and not (part.get("code_not") and re.search(part["code_not"], path)))
+
+
+def _needed_parts(defect, parts: dict) -> list:
+    """The names of the parts whose install `defect` needs: the parts that claim it by their `code` regex on its `file` (less
+    `code_not`) or their `tests` regex on an element of its `argv`. No claim, a part with neither regex, or a defect too
+    malformed to read, needs every part: a part with neither regex may be what the defect needs, so no defect can be routed
+    around it."""
+    try:
+        file, argv = str(defect["file"]), [str(item) for item in defect["argv"]]
+    except (KeyError, TypeError):
+        return list(parts)
+    if any(not part.get("code") and not part.get("tests") for part in parts.values()):
+        return list(parts)
+    claimed = [name for name, part in parts.items()
+               if _is_product(part, file) or (part.get("tests") and any(re.search(part["tests"], item) for item in argv))]
+    return claimed or list(parts)
+
+
+def _unrun_defect(defect, reason: str) -> dict:
+    """The UNKNOWN row of a defect that was not run."""
+    isdict = isinstance(defect, dict)
+    return {"id": str(defect.get("id", "?")) if isdict else "?", "name": str(defect.get("name", "")) if isdict else "",
+            "verdict": "UNKNOWN", "reason": reason}
+
+
+def _known_defect(dest: str, defect: dict, suite_timeout: float, own: str, failed: dict) -> dict:
+    """One planted defect in checkout `dest`, which is left as it was found. When an install in `failed` failed, each catcher
+    run is hooked (`_hook_env`), with its log in the folder `own`: a log that names a module reads UNKNOWN, and so does a log
+    with no start line when the argv can start Python or Node (`_starts_hooked`). With `failed` empty no run is hooked."""
     result = {"id": str(defect.get("id", "?")), "name": str(defect.get("name", "")), "verdict": "UNKNOWN", "reason": ""}
     try:
         file, old, new, argv = defect["file"], defect["old"], defect["new"], list(defect["argv"])
@@ -1532,18 +1721,46 @@ def _known_defect(dest: str, defect: dict, suite_timeout: float) -> dict:
     except (StaleMutant, AmbiguousMutant) as error:
         result["reason"] = str(error)
         return result
+
+    owes_start = _starts_hooked(argv)
+
+    def run_hooked():
+        """(the run's class, why its log cannot be trusted or ''), read once from its own log. Only a run under a failed
+        install has a log."""
+        if not failed:
+            return run_suite_file(dest, "", suite_timeout, argv=argv, classify=classify, cwd=dest)[0], ""
+        handle, log = tempfile.mkstemp(prefix="missing_", suffix=".log", dir=own)
+        os.close(handle)
+        kind = run_suite_file(dest, "", suite_timeout, argv=argv, classify=classify, cwd=dest, env_extra=_hook_env(own, log))[0]
+        with open(log, encoding="utf-8", errors="replace") as lines:
+            names = set(line.strip() for line in lines if line.strip())
+        if MISSING_LOG_START not in names and owes_start:
+            return kind, "the load hook did not run in the catcher, so a missing package may have gone unseen: %s" % (
+                _install_failures(failed, failed))
+        names.discard(MISSING_LOG_START)
+        if names:
+            return kind, "the catcher could not resolve %s, which a failed install may provide: %s" % (
+                ", ".join(sorted(names)), _install_failures(failed, failed))
+        return kind, ""
+
     try:
-        control = run_suite_file(dest, "", suite_timeout, argv=argv, classify=classify, cwd=dest)[0]
+        control, doubt = run_hooked()
+        if doubt:
+            result["reason"] = doubt
+            return result
         if control != "pass":
             result["reason"] = "the suite is not green on the clean copy (%s)" % control
             return result
         apply_mutant(dest, old, new, [file])
         try:
-            kind = run_suite_file(dest, "", suite_timeout, argv=argv, classify=classify, cwd=dest)[0]
+            kind, doubt = run_hooked()
         finally:
             _write(path, text)
     except OSError as error:
         result["reason"] = "the suite did not run: %s" % error
+        return result
+    if doubt:
+        result["reason"] = doubt
         return result
     result["verdict"] = "CAUGHT" if kind == "assert" else "MISS"
     if kind != "assert":
