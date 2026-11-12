@@ -2212,6 +2212,73 @@ PAGE_ANS_REPO = put_on_ref(
 PAGE_MISS_REPO = put_on_ref(make_repo("page-answer-miss"), PAGE_REF_FULL,
                             {PAGE_DECOY_ANS_FILE: PAGE_DECOY_ANS_JSON, PAGE_DECOY_ITEM_FILE: PAGE_DECOY_ITEM_JSON})
 
+# Page answers of the cases below, each in its own repo: an answer whose question file is missing or malformed, two answers of
+# item 556 (the later one in the file that sorts first, then in the one that sorts last), a park answer with no `choice` key,
+# and an answer of item 3 that `page item 3d-x` must not reach.
+PAGE_Q_MISS_REPO = put_on_ref(make_repo("page-question-missing"), PAGE_REF_FULL, {PAGE_ANS_FILE: PAGE_ANS_JSON})
+PAGE_Q_BAD_REPO = put_on_ref(make_repo("page-question-malformed"), PAGE_REF_FULL,
+                             {PAGE_ANS_FILE: PAGE_ANS_JSON, PAGE_ITEM_FILE: "{not json\n"})
+TWO_OLD_MARK = "twoold-41c9"
+TWO_OLD_JSON = page_json({"at": "2026-11-10T09:00:00.000Z", "choice": ["b"], "item": "mailbox-sessions", "n": 556,
+                          "note": "first answer, given before the scope change. Marker %s." % TWO_OLD_MARK})
+TWO_FIRST_FILE, TWO_LAST_FILE = "waiting/answers/mailbox-sessions-a.json", "waiting/answers/mailbox-sessions.json"
+TWO_FIRST_REPO = put_on_ref(make_repo("page-answers-later-first"), PAGE_REF_FULL,
+                            {TWO_FIRST_FILE: PAGE_ANS_JSON, TWO_LAST_FILE: TWO_OLD_JSON, PAGE_ITEM_FILE: PAGE_ITEM_JSON})
+TWO_LAST_REPO = put_on_ref(make_repo("page-answers-later-last"), PAGE_REF_FULL,
+                           {TWO_FIRST_FILE: TWO_OLD_JSON, TWO_LAST_FILE: PAGE_ANS_JSON, PAGE_ITEM_FILE: PAGE_ITEM_JSON})
+PARK_MARK = "park-8e21"
+PARK_ANS_FILE, PARK_ITEM_FILE = "waiting/answers/park-item.json", "waiting/items/park-item.json"
+PARK_REPO = put_on_ref(make_repo("page-park"), PAGE_REF_FULL, {
+    PARK_ANS_FILE: page_json({"at": "2026-11-11T12:00:00.000Z", "item": "park-item", "n": 558,
+                              "note": "wait for the owner's next look. Marker %s." % PARK_MARK}),
+    PARK_ITEM_FILE: page_json({"id": "park-item", "kind": "decision", "n": 558, "status": "open",
+                               "title": "A question waiting on the owner."})})
+DIGIT_MARK = "item3-5c1e"
+DIGIT_ANS_FILE, DIGIT_ITEM_FILE = "waiting/answers/item-three.json", "waiting/items/item-three.json"
+DIGIT_REPO = put_on_ref(make_repo("page-digit-boundary", decisions={PAGE_RULING_SLUG: PAGE_RULING}), PAGE_REF_FULL, {
+    DIGIT_ANS_FILE: page_json({"at": "2026-11-11T08:00:00.000Z", "choice": ["a"], "item": "item-three", "n": 3,
+                               "note": "answer of item three. Marker %s." % DIGIT_MARK}),
+    DIGIT_ITEM_FILE: page_json({"id": "item-three", "kind": "decision", "n": 3, "status": "closed",
+                                "title": "A third question."})})
+
+
+def is_json(text):
+    try:
+        json.loads(text)
+    except ValueError:
+        return False
+    return True
+
+
+def line_with(prompt, needle):
+    """The first line of `prompt` that holds `needle`, or "" when none does."""
+    return next((line for line in prompt.splitlines() if needle in line), "")
+
+
+def check_two_answers(repo, later_first, where):
+    """Two answers of item 556 in `repo`. The later one's line says later or current, the older one's line says superseded or
+    is left out, and the older one's line comes first. The same checks run on both file orders, so a build that marks by read
+    order fails on one of them."""
+    names = git(repo, "ls-tree", "--name-only", PAGE_REF, "waiting/answers/").stdout.split()
+    check("pick two answers, %s: origin/roadmap holds two answers of item 556, the later one in the file that sorts %s"
+          % (where, "first" if later_first else "last"),
+          len(names) == 2 and (PAGE_ANS_MARK in git(repo, "show", PAGE_REF + ":" + names[0]).stdout) == later_first, names)
+    r = pick_run("coordinator pick: start on the git mailbox, per page item 556 a.", cwd=repo)
+    prompt = pick_prompt(r)
+    lines = prompt.splitlines()
+    later = line_with(prompt, PAGE_ANS_MARK)
+    older = [line for line in lines if TWO_OLD_MARK in line]
+    old_at = [i for i, line in enumerate(lines) if TWO_OLD_MARK in line]
+    new_at = [i for i, line in enumerate(lines) if PAGE_ANS_MARK in line]
+    check("pick, two answers, %s: one judge call" % where, len(r.calls) == 1, detail(r))
+    check("pick, two answers, %s: the later answer's line reaches the prompt" % where, later != "", detail(r))
+    check("pick, two answers, %s: the later answer's line says later or current" % where,
+          re.search(r"\b(?:later|current|latest)\b", later, re.I) is not None, later[:200])
+    check("pick, two answers, %s: the older answer's line says superseded, or is left out" % where,
+          all(re.search(r"\bsuperseded\b", line, re.I) for line in older), older)
+    check("pick, two answers, %s: the older answer's line comes before the later one's" % where,
+          not old_at or (bool(new_at) and old_at[0] < new_at[0]), detail(r))
+
 
 def case_pick_ref_only_ruling_reaches_the_judge():
     # The scope first: the ref holds the plan, and the checkout holds no plan file.
@@ -2380,6 +2447,77 @@ def case_pick_page_answer_missing_file_is_not_searched():
           detail(r))
 
 
+def case_pick_page_question_missing_is_not_searched():
+    check("pick page question missing fixture: origin/roadmap holds the answer of item 556 and no question file for it",
+          on_ref(PAGE_Q_MISS_REPO, PAGE_REF + ":" + PAGE_ANS_FILE)
+          and not on_ref(PAGE_Q_MISS_REPO, PAGE_REF + ":" + PAGE_ITEM_FILE), PAGE_Q_MISS_REPO)
+    r = pick_run("coordinator pick: start on the git mailbox, per page item 556 a.", cwd=PAGE_Q_MISS_REPO)
+    prompt = pick_prompt(r)
+    check("pick, page item 556 answered and its question missing: one judge call", len(r.calls) == 1, detail(r))
+    check("pick, page item 556 answered and its question missing: the answer line still reaches the prompt",
+          one_line_holds(prompt, PAGE_ANSWER_LABEL, PAGE_ANS_MARK), detail(r))
+    check("pick, page item 556 answered and its question missing: the Not searched line names page item 556 question",
+          any("page item 556 question" in line for line in not_searched_lines(prompt)), detail(r))
+
+
+def case_pick_page_question_malformed_is_not_searched():
+    check("pick page question malformed fixture: origin/roadmap holds the answer and a question file that is not JSON",
+          on_ref(PAGE_Q_BAD_REPO, PAGE_REF + ":" + PAGE_ANS_FILE)
+          and on_ref(PAGE_Q_BAD_REPO, PAGE_REF + ":" + PAGE_ITEM_FILE)
+          and not is_json(git(PAGE_Q_BAD_REPO, "show", PAGE_REF + ":" + PAGE_ITEM_FILE).stdout), PAGE_Q_BAD_REPO)
+    r = pick_run("coordinator pick: start on the git mailbox, per page item 556 a.", cwd=PAGE_Q_BAD_REPO)
+    prompt = pick_prompt(r)
+    check("pick, page item 556 answered and its question malformed: one judge call", len(r.calls) == 1, detail(r))
+    check("pick, page item 556 answered and its question malformed: the answer line still reaches the prompt",
+          one_line_holds(prompt, PAGE_ANSWER_LABEL, PAGE_ANS_MARK), detail(r))
+    check("pick, page item 556 answered and its question malformed: the Not searched line names page item 556 question",
+          any("page item 556 question" in line for line in not_searched_lines(prompt)), detail(r))
+
+
+def case_pick_two_page_answers_later_file_sorts_first():
+    check_two_answers(TWO_FIRST_REPO, True, "later file sorts first")
+
+
+def case_pick_two_page_answers_later_file_sorts_last():
+    check_two_answers(TWO_LAST_REPO, False, "later file sorts last")
+
+
+def case_pick_page_park_answer_has_no_choice_none():
+    check("pick park fixture: origin/roadmap holds the answer of item 558, and it has no choice key",
+          on_ref(PARK_REPO, PAGE_REF + ":" + PARK_ANS_FILE)
+          and "choice" not in json.loads(git(PARK_REPO, "show", PAGE_REF + ":" + PARK_ANS_FILE).stdout), PARK_REPO)
+    r = pick_run("coordinator pick: hold the mailbox default, per page item 558.", cwd=PARK_REPO)
+    prompt = pick_prompt(r)
+    park = line_with(prompt, PARK_MARK)
+    check("pick, park answer of item 558: one judge call", len(r.calls) == 1, detail(r))
+    check("pick, park answer of item 558: its line carries the answer label and its marker",
+          one_line_holds(prompt, "page item 558 answer", PARK_MARK), detail(r))
+    check("pick, park answer of item 558: its line says parked or no choice",
+          "parked" in park.lower() or "no choice" in park.lower(), park[:200])
+    check("pick, park answer of item 558: its line cannot be read as choice None or as none of these",
+          re.search(r"choice\W*none|\bnone\b", park, re.I) is None, park[:200])
+    control = pick_run("coordinator pick: hold the mailbox default, per page item 557.", cwd=PAGE_ANS_REPO)
+    decoy = line_with(pick_prompt(control), PAGE_DECOY_MARK)
+    check("pick, a real none choice (item 557): its line still says choice none", "choice none" in decoy.lower(), decoy[:200])
+
+
+def case_pick_page_item_end_boundary_on_digits():
+    check("pick digit fixture: origin/roadmap holds the answer of item 3, and the decision is in the repo",
+          on_ref(DIGIT_REPO, PAGE_REF + ":" + DIGIT_ANS_FILE)
+          and os.path.exists(os.path.join(DIGIT_REPO, "docs", "decisions", PAGE_RULING_SLUG + ".md")), DIGIT_REPO)
+    r = pick_run("coordinator pick: hold the mailbox default, per decision mailbox-stored-copy and page item 3d-x.",
+                 cwd=DIGIT_REPO)
+    prompt = pick_prompt(r)
+    check("pick, page item 3d-x with a decision cite: one judge call", len(r.calls) == 1, detail(r))
+    check("pick, page item 3d-x with a decision cite: the decision's line reaches the prompt", PAGE_OLD_MARK in prompt,
+          detail(r))
+    check("pick, page item 3d-x is not page item 3: the answer of item 3 does not reach the prompt",
+          DIGIT_MARK not in prompt, detail(r))
+    dot = pick_run("coordinator pick: start on the git mailbox, per page item 556.", cwd=PAGE_ANS_REPO)
+    check("pick, page item 556. (a period after the number): the answer line reaches the prompt",
+          one_line_holds(pick_prompt(dot), PAGE_ANSWER_LABEL, PAGE_ANS_MARK), detail(dot))
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -2424,7 +2562,10 @@ def main():
                  case_pick_judge_prompt_says_how_to_word_the_reason, case_pick_old_ruling_wording_is_absent,
                  case_pick_page_answer_reaches_the_judge, case_pick_later_page_answer_supersedes_the_ruling,
                  case_pick_page_and_plan_reads_cost_at_most_three_git_processes,
-                 case_pick_page_answer_missing_ref_is_not_searched, case_pick_page_answer_missing_file_is_not_searched):
+                 case_pick_page_answer_missing_ref_is_not_searched, case_pick_page_answer_missing_file_is_not_searched,
+                 case_pick_page_question_missing_is_not_searched, case_pick_page_question_malformed_is_not_searched,
+                 case_pick_two_page_answers_later_file_sorts_first, case_pick_two_page_answers_later_file_sorts_last,
+                 case_pick_page_park_answer_has_no_choice_none, case_pick_page_item_end_boundary_on_digits):
         try:
             case()
         except Exception as exc:
