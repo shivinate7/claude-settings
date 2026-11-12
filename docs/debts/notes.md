@@ -2184,3 +2184,10 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
+- silent-fail-lint-misses-colon: SILENT_FAIL in `lint/check_branch_sweep_workflow.py` (line 33) misses `|| :` at line end or before a space, so it lints clean.
+- sweep-422-reads-gone: `.github/workflows/branch-sweep.yml` (line 65) reads HTTP 422 on a delete as "already gone". Unmeasured: whether a ruleset-blocked delete also returns 422.
+- zero-commit-branch-deleted: the sweep deletes a zero-commit branch at the main tip, within the grant. The next push recreates it (`actions/branch-sweep/sweep.py`).
+- sweep-403-429-after-fail-untested: no case in `lint/test_branch_sweep.py` runs an earlier delete failure, then a 403 or 429. The job must exit 1.
+- open-pr-read-needs-public-repo: the open-PR read (`.github/workflows/branch-sweep.yml` line 33) relies on a public repo, since the token has no pull-requests scope. A 403 fails closed but turns the main push red and trips the red-main brake. Source: the workflow comment at line 33; not measured live.
+- stamp-keep-list-ignored: `.github/stamp.json` `merge.keepBranches` (line 10) is a second keep-list the sweep ignores. Its four names (batch-map, map-format-version, map-skill-move, claude-p-fetch-key) are absent as branches today.
+- sweep-tip-moves-no-sha: the tip can move between checkout and delete, and the DELETE has no sha condition (`.github/workflows/branch-sweep.yml` line 62). The 1,000 requests/hour token limit is unmeasured.
