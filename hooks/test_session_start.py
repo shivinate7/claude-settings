@@ -430,6 +430,13 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         self.assertIn("cs-build:batch-runner", role[0])
         self.assertNotIn("coordinator", role[0].lower(), role[0])
 
+    # roles are hats (decision session-tiers, owner 2026-11-10 14:33 CST): a solo session, with no parent_session_id and no cs-build
+    # tag, may record the batch-runner role for its own merge, so the merge role sentence says so. Red on main, where it says "for no other".
+    def test_the_merge_role_sentence_names_a_solo_session_with_no_parent(self):
+        role = [s for s in sentences(hook_tier_line()) if "merge role" in s.lower()]
+        self.assertEqual(len(role), 1, role)
+        self.assertIn("no parent_session_id", role[0], "the merge role sentence does not say a solo session may record the batch-runner role: %r" % role[0])
+
     # decision session-tiers: no sentence of the tier line says a coordinator merges; "never merges" is not a merge
     def test_no_sentence_of_the_tier_line_says_a_coordinator_merges(self):
         told = [s for s in sentences(hook_tier_line()) if self.says_coordinator_merges(s)]
