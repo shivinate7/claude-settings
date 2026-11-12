@@ -474,6 +474,21 @@ def case_uniform_answered_closed_item_passes():
          entry_of(base), (ANSWERED_RULE, None))
 
 
+def case_uniform_answered_all_widening_passes():
+    # No option is left for the ruling to choose, so the rule does not apply; both options widen, no pick.
+    both = [page_option("a", "Allow the second form", widens=True), page_option("b", "Allow a third form", widens=True)]
+    page("a page item whose two options both widen, with no pick, passes", "set", entry_of(answered_item(both)), None)
+    chat("a box whose two options both carry the widening words, with no Recommended, passes",
+         answered_box([("Allow the second form", True), ("Allow a third form", True)]), None)
+
+
+def case_uniform_answered_single_option_passes():
+    # The rule needs two or more options. One plain option is not a choice the ruling has made for the owner.
+    single = [page_option("a", "Keep one form")]
+    page("a page item with one plain option and no widening, with no pick, passes", "set",
+         entry_of(answered_item(single)), None)
+
+
 # ------------------------------------------------------------------ closed items, stood picks, updates
 
 def case_closed_stood_and_updates():
@@ -2619,7 +2634,9 @@ def main():
                  case_form_lines, case_form_placeholders_on_edits,
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_uniform_answered_reds, case_uniform_answered_controls, case_uniform_answered_reasons,
-                 case_uniform_answered_closed_item_passes, case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
+                 case_uniform_answered_closed_item_passes, case_uniform_answered_all_widening_passes,
+                 case_uniform_answered_single_option_passes, case_closed_stood_and_updates, case_str_replace, case_batch,
+                 case_chat_boxes,
                  case_line_order_and_prose, case_chat_press_scan_skips_gain_and_lose, case_session_press_needs_no_link,
                  case_claude_own_merge_needs_no_link,
                  case_chat_reasons_name_a_remedy_and_no_page_field, case_page_reasons_are_one_table,
