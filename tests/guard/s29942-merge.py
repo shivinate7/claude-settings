@@ -99,6 +99,8 @@ repo_case("a single-quoted ) in a $( ) value before --confirm beside -C another 
           f"{MERGE_SHIM} -C '{REPO_B}' $(echo ')') --confirm", REPO_A, TX_A)
 repo_case("a double-quoted ) in a $( ) value before --confirm beside -C another checkout is denied", "deny",
           f'{MERGE_SHIM} -C \'{REPO_B}\' $(echo ")") 5 --confirm', REPO_A, TX_A)
+repo_case("a $( ) with a quoted ) inside double quotes before --confirm beside -C another checkout is denied", "deny",
+          f"""{MERGE_SHIM} -C '{REPO_B}' "$(echo ")")" 5 --confirm""", REPO_A, TX_A)
 repo_case("a quoted ( in a $( ) value before --confirm beside -C another checkout is denied", "deny",
           f"{MERGE_SHIM} -C '{REPO_B}' $(echo '(') 5 --confirm", REPO_A, TX_A)
 repo_case("an unquoted reason with a > file and 2>&1 is allowed", "allow",
