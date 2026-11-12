@@ -1074,11 +1074,12 @@ def conflict_markers_hit(stripped: str, cwd: str):
 # ---- merge --role: the tier is read from this session's own get_session record
 ROLE_TIERS = ("batch-runner",)
 ROLE_TAG_PREFIX = BUILD_TAG
-SOLO_HAT_TIER = ROLE_TIERS[0]  # the one tier a solo session may wear
+HAT_ROLE = ROLE_TIERS[0]  # the batch-runner role, which a lane on its own wears as a hat for its own merge
 ROLE_REASON = (
-    "merge-role-proof: this session's own record does not prove the merge tier it claims. "
-    "If this session is the batch runner, or a solo session with no parent_session_id and no cs-build tag: run get_session (no argument) alone in its own "
-    "turn, then retry. A solo session that then tagged itself coordinator, lane or triage, and a subagent, wears no hat. Any other session, the coordinator too: post the review record on the PR for your branch; the batch runner finds it "
+    "merge-role-proof: this session's own record does not prove the merge role it claims. "
+    "If this session is the batch runner, or a lane on its own with no parent_session_id and no cs-build tag, which wears the batch-runner hat: "
+    "run get_session (no argument) alone in its own turn, then retry. A lane that then tagged itself coordinator, lane or triage wears no hat, "
+    "and an agent never wears it. Any other session, the coordinator too: post the review log on the PR for your branch; the batch runner finds it "
     "(list_sessions, tag cs-build:batch-runner, same cs-repo, names the runner)."
 )
 
@@ -1132,7 +1133,7 @@ def role_proof_hit(stripped: str, transcript: str, agent: bool = False) -> str:
     """Return the matched call when a segment runs the merge tool with a role the own record does not
     prove, else ''. Fails closed inside the clause: any error in the reads is a refusal, because the
     allow rule has no classifier behind it and the guard-wide crash path fails open.
-    `agent` is a call by a subagent: one role per agent, so the solo hat is not its to take."""
+    `agent` is a call by an agent: one role per agent, so the batch-runner hat is not its to take."""
     for segment in split_segments(stripped):
         tier = role_call_of(segment) if segment.strip() else None
         if tier is None:
@@ -1142,51 +1143,52 @@ def role_proof_hit(stripped: str, transcript: str, agent: bool = False) -> str:
             own_id = remote_session_id()
             if own_id and transcript:
                 tags, tagged_after, parent = own_session.own_session_read(transcript, own_id)
-                if tier in ROLE_TIERS and tags is not None:
-                    if ROLE_TAG_PREFIX + tier in tags:
-                        continue
-                    # roles are hats (decision session-tiers): a solo session, the newest own record with no parent and no
-                    # cs-build tag, wears the batch-runner hat for its own merge. A tag call after that record makes it stale.
-                    if tier == SOLO_HAT_TIER and not agent and parent is None and not tagged_after \
-                            and not any(tag.startswith(ROLE_TAG_PREFIX) for tag in tags if isinstance(tag, str)):
-                        continue
+                if tier in ROLE_TIERS and tags is not None and ROLE_TAG_PREFIX + tier in tags:
+                    continue
+                # roles are hats (decision session-tiers): a lane on its own, the newest own record with no parent and no
+                # cs-build tag, wears the batch-runner hat for its own merge. A tag call after that record makes it stale.
+                if tags is not None and not agent and _is_hat_call(segment) and parent is None and not tagged_after \
+                        and not any(isinstance(tag, str) and tag.startswith(ROLE_TAG_PREFIX) for tag in tags):
+                    continue
         except Exception:
             pass
         return "merge role " + tier
     return ""
 
 
-def _is_solo_hat_call(command: str) -> bool:
-    """True when a shell command runs `merge --role <the solo hat's tier>`. The reader is role_call_of, as role_proof_hit uses."""
-    return any(role_call_of(segment) == SOLO_HAT_TIER for segment in split_segments(command) if segment.strip())
+def _is_hat_call(command: str) -> bool:
+    """True when a shell command runs `merge --role <the batch-runner hat's role>`. The reader is role_call_of, as role_proof_hit uses."""
+    return any(role_call_of(segment) == HAT_ROLE for segment in split_segments(command) if segment.strip())
 
 
-def _solo_hat_holds(transcript: str, agent: bool = False) -> bool:
-    """False when a `merge --confirm` has no hat behind it: the caller is a subagent whose session record lacks the batch-runner tag
-    (one role per agent, and the record is shared with its parent), or the session wore the solo hat and its own record then changed:
-    a cs-build tag other than the batch runner's, or a set_session_tags call on itself after the record. True when it never wore the
-    hat (a lane record with no solo grant, a real batch runner) and when no record is readable: merge-confirm-repo refuses that case."""
+def _hat_holds(transcript: str, agent: bool = False) -> bool:
+    """False when a `merge --confirm` has no hat behind it: the caller is an agent whose session record lacks the batch-runner tag
+    (one role per agent, and the record is shared with its parent), or the session wore the batch-runner hat as a lane on its own and
+    its own record then changed: a cs-build tag other than the batch runner's, or a set_session_tags call on itself after the record.
+    True when it never wore the hat (a tagged lane, a real batch runner) and when no record is readable: merge-confirm-repo refuses
+    that case."""
     from override import remote_session_id
     own_id = remote_session_id()
     if not own_id or not transcript:
         return True
     tags, tagged_after = _own_session_read(transcript, own_id)
-    if tags is None or ROLE_TAG_PREFIX + SOLO_HAT_TIER in tags:
+    if tags is None or ROLE_TAG_PREFIX + HAT_ROLE in tags:
         return True
     if agent:
         return False
     if not tagged_after and not any(isinstance(tag, str) and tag.startswith(ROLE_TAG_PREFIX) for tag in tags):
         return True
-    return not own_session.solo_hat_granted(transcript, own_id, _is_solo_hat_call)
+    return not own_session.hat_granted(transcript, own_id, _is_hat_call)
 
 
 def solo_hat_confirm_hit(stripped: str, cwd: str, transcript: str, agent: bool = False) -> str:
-    """Return a short label when a cloud session's `merge --confirm` has no hat behind it (see _solo_hat_holds), else ''. Fails open
+    """Return a short label when a cloud session's `merge --confirm` has no hat behind it (see _hat_holds), else ''. Fails open
     (on_error=False): an error in the reads returns '' and the call goes on to merge-confirm-repo, which judges it. Outside the cloud
-    nothing is judged. Cost: none for a call that is no merge confirm, else one transcript read."""
+    nothing is judged. Cost: none for a call that is no merge confirm. Else one transcript read per confirm (_own_session_read), and a
+    second (hat_granted) when that record shows a cs-build tag or a later tag call, which is the path that can refuse."""
     if not is_cloud():
         return ""
-    return "merge --confirm" if _unproved_confirm(stripped, cwd, transcript, 0, lambda repo: _solo_hat_holds(transcript, agent), False) else ""
+    return "merge --confirm" if _unproved_confirm(stripped, cwd, transcript, 0, lambda repo: _hat_holds(transcript, agent), False) else ""
 
 
 # ---- merge --confirm: the checkout it acts in must be a repo the own record names (rule merge-confirm-repo)
@@ -1272,7 +1274,7 @@ MERGE_NEST_DEPTH = 4  # `bash -c` inside `bash -c` is followed this far; a deepe
 
 def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int, proved, on_error: bool) -> bool:
     """True when a `merge --confirm` in `text` fails `proved(repo)`, where repo is the checkout it acts in: the one reader of where a
-    confirm sits, shared by merge-confirm-repo (the own record names the repo) and merge-role-proof (the solo hat still holds).
+    confirm sits, shared by merge-confirm-repo (the own record names the repo) and merge-role-proof (the batch-runner hat still holds).
     `on_error` is the answer when a read or parse fails: the repo check fails closed (True); the hat check leaves an unreadable command or
     record to the repo check, which refuses it (False). `text` is the command, or a script a
     segment hands on (`bash -c`, `sh -c`, `eval`: inner_commands, the one reader of those wrappers), which runs in the directory its own

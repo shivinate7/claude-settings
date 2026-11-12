@@ -73,9 +73,10 @@ def own_session_read(transcript, own_id, created=False):
     return _scan(transcript, own_id, created)[:3]
 
 
-def solo_hat_granted(transcript, own_id, is_hat_call):
-    """True when the session wore the solo hat: it ran a shell command for which `is_hat_call(command)` holds, and that call returned
-    with no error, while its newest own record had no parent_session_id and no cs-build tag (decision session-tiers, Roles are hats).
+def hat_granted(transcript, own_id, is_hat_call):
+    """True when the session wore the batch-runner hat as a lane on its own: it ran a shell command for which `is_hat_call(command)`
+    holds, and that call returned with no error, while its newest own record had no parent_session_id and no cs-build tag (decision
+    session-tiers, Roles are hats).
     A session that never ran such a call, or ran it as a lane or runner, is False. Raises like own_session_read."""
     return _scan(transcript, own_id, False, is_hat_call)[4]
 
@@ -96,15 +97,15 @@ def own_session_ccr(transcript, own_id):
         return None
 
 
-def _is_solo(tags, parent):
-    """A record of a solo session: no parent and no cs-build tag."""
+def _may_wear_hat(tags, parent):
+    """A record of a lane on its own, which may wear the batch-runner hat: no parent and no cs-build tag."""
     return parent is None and not any(isinstance(t, str) and t.startswith(BUILD_TAG) for t in tags)
 
 
 def _scan(transcript, own_id, created, is_hat_call=None):
-    """(tags, tagged_after, parent, ccr, hat): the one pass over the transcript behind the readers. `hat` is solo_hat_granted's answer."""
+    """(tags, tagged_after, parent, ccr, hat): the one pass over the transcript behind the readers. `hat` is hat_granted's answer."""
     uses, newest, parent, tagged_after, newest_ccr = set(), None, None, False, None
-    solo_calls, hat = {}, False  # tool_use id of a hat call -> whether the own record was solo when it ran
+    hat_calls, hat = {}, False  # tool_use id of a hat call -> whether the own record could wear the hat when it ran
     creates = {}  # tool_use id -> (tags, parent) a create_session call set
     with open(transcript, encoding="utf-8") as handle:
         for line in handle:
@@ -120,8 +121,8 @@ def _scan(transcript, own_id, created, is_hat_call=None):
                 if is_hat_call and block.get("type") == "tool_use" and block.get("name") in ("Bash", "PowerShell"):
                     command = block.get("input", {}).get("command") if isinstance(block.get("input"), dict) else None
                     if isinstance(command, str) and is_hat_call(command):
-                        solo_calls[block.get("id")] = newest is not None and _is_solo(newest, parent)
-                elif solo_calls.get(block.get("tool_use_id")) and block.get("type") == "tool_result":
+                        hat_calls[block.get("id")] = newest is not None and _may_wear_hat(newest, parent)
+                elif hat_calls.get(block.get("tool_use_id")) and block.get("type") == "tool_result":
                     hat = hat or not block.get("is_error")
                 elif block.get("type") == "tool_use" and str(block.get("name", "")).endswith("get_session"):
                     uses.add(block.get("id"))
