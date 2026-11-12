@@ -5967,6 +5967,7 @@ test("a receipt wholly below the screen drops its height without moving the page
   await send(page);
   await page.locator("#item-q0 .receipt").waitFor();
   await page.waitForFunction((h) => document.getElementById("item-q0").getBoundingClientRect().height < h - 1, h0).catch(() => {}); // the card drops once its receipt is off screen, after a short timer
+  assert.ok((await card(page, items[0]).evaluate((e) => e.getBoundingClientRect().height)) < h0 - 1, "the card did not drop its height once its receipt was off screen");
   assert.ok(Math.abs((await railTop()) - at) <= 1, "the page moved when an off-screen receipt shrank");
 });
 
@@ -6048,8 +6049,10 @@ function sweepPage() {
 test("containment sweep: nothing crosses its card, the rail or the Sent bar, nothing is cut without an ellipsis, no sideways scroll", async (t) => {
   const failures = [];
   for (const scheme of ["light", "dark"]) for (const width of SWEEP_WIDTHS) for (const [state, make, act] of STATES) {
-    const page = await open(t, { ...make(), scheme, viewport: { width, height: 900 } }); if (!page) return;
+    const spec = make();
+    const page = await open(t, { ...spec, scheme, viewport: { width, height: 900 } }); if (!page) return;
     if (act) await act(page);
+    if (spec.designData) await fitAll(page, Object.keys(spec.designData)); // a picture's layout is final only after its frame posts its fit
     await frameWait(page, 3); // the state's layout settles in its frames
     for (const b of await page.evaluate(sweepPage)) failures.push(`${state} @${width} ${scheme}: ${b}`);
     await page.close();
