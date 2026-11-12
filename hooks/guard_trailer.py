@@ -19,8 +19,11 @@ from shared_names import MODEL_FAMILIES  # noqa: E402  the one home, shared with
 # `claude-<family>-<major>-<minor>` then an optional suffix such as `[1m]`. A minor of three or more digits is a
 # date (`claude-sonnet-4-20250514`), not a version, so it maps to nothing.
 MODEL_ID = re.compile(r"claude-([a-z]+)-(\d+)-(\d{1,2})(?:\D.*)?\Z", re.S)
-# A trailer value: `Claude`, a family word, an optional `<major>[.<minor>]`, then anything such as the address.
-TRAILER_MODEL = re.compile(r"\s*(?:Claude\s+)?([A-Za-z]+)(?:\s+(\d+)(?:\.(\d+))?)?(?=\s|<|\Z)")
+# A trailer value, in any casing: `Claude`, a family word, an optional `<major>[.<minor>]`, then anything such as
+# the address. A space or a hyphen separates the words, and a hyphen or a dot the version: so `Claude Opus 5.5`,
+# `Claude-Opus-5.5` and the model id form `claude-opus-5-5` all read.
+TRAILER_MODEL = re.compile(
+    r"\s*(?:claude[\s-]+)?([a-z]+)(?:[\s-]+(\d+)(?:[.-](\d{1,2}))?)?(?=[\s<]|\Z)", re.I)
 TAIL_BYTES = 64 * 1024   # the first read of a transcript's end; it doubles until an assistant record shows
 TAIL_MAX = 16 * 1024 * 1024
 SYNTHETIC = "<synthetic>"
@@ -41,10 +44,11 @@ def model_name(model_id):
     return found.group(1), int(found.group(2)), int(found.group(3))
 
 
-def last_model(path):
-    """The `message.model` of the last assistant record in the transcript at `path`, else None. It reads the
-    end of the file, doubling the window until a record shows. An unreadable file, a line that is not JSON and
-    a synthetic record all read as no record."""
+def last_models(path):
+    """The `message.model` and the top-level `requestedModel` (beside `message`; None when absent) of the last
+    assistant record in the transcript at `path`, else None. A turn a fallback served names the served model in
+    one and the agent's own choice in the other. It reads the end of the file, doubling the window until a
+    record shows. An unreadable file, a line that is not JSON and a synthetic record all read as no record."""
     try:
         size = os.path.getsize(path)
         window = TAIL_BYTES
@@ -62,12 +66,24 @@ def last_model(path):
                     except (ValueError, KeyError, TypeError):
                         continue
                     if isinstance(model, str) and model != SYNTHETIC:
-                        return model
+                        return model, record.get("requestedModel")
                 if not start or window >= TAIL_MAX:
                     return None
                 window *= 2
     except OSError:
         return None
+
+
+def own_models(path):
+    """The (family, major, minor) names the agent's last assistant record gives, served model first, else [].
+    A name that maps to nothing is left out."""
+    models = last_models(path) or ()
+    names = []
+    for model_id in models:
+        name = model_name(model_id)
+        if name and name not in names:
+            names.append(name)
+    return names
 
 
 def trailer_differs(value, own):
@@ -104,7 +120,7 @@ def commit_trailer_hit(stripped, cwd, transcript, agent_id):
     unmapped model id and a git error all give None. Cost: one transcript read and one `git log` per push."""
     if not agent_id or not isinstance(transcript, str) or not transcript.endswith(".jsonl"):
         return None
-    own = None   # the agent's (family, major, minor), False when unreadable; read at most once
+    owns = None   # the agent's (family, major, minor) names, [] when unreadable; read at most once
     for segment in split_segments(stripped):
         call = git_call_of(segment) if segment.strip() else None
         if call is None or call[0] != "push":
@@ -121,16 +137,15 @@ def commit_trailer_hit(stripped, cwd, transcript, agent_id):
         values = unpushed_trailers(where, sources)
         if not values:
             continue
-        if own is None:   # only when a push has a trailer to judge
-            path = own_session.agent_transcript_path(transcript, agent_id)
-            own = model_name(last_model(path)) or False
-        if not own:
+        if owns is None:   # only when a push has a trailer to judge
+            owns = own_models(own_session.agent_transcript_path(transcript, agent_id))
+        if not owns:
             return None
         for value in values:
-            if trailer_differs(value, own):
+            if all(trailer_differs(value, own) for own in owns):   # a trailer naming either model passes
                 line = "Co-Authored-By: " + value
                 return line, TRAILER_REASON.format(
-                    line=line, own="%s %d.%d" % (own[0].capitalize(), own[1], own[2]))
+                    line=line, own=" or ".join("%s %d.%d" % (o[0].capitalize(), o[1], o[2]) for o in owns))
     return None
 
 
