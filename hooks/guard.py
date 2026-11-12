@@ -5025,14 +5025,49 @@ def impeccable_shell_hit(segment: str) -> str:
 _HERE_STRING = re.compile(r"@(['\"])[ \t]*\r?\n(.*?)\r?\n\1@", re.S)
 # What runs a here-string, by the command word around it. Before it: `iex` or `Invoke-Expression` takes it as
 # its argument (a `(` may open it), or `[scriptblock]::Create(` builds a block from it. After it, the closing
-# parens of such a call, then a pipe into iex, Invoke-Expression, or pwsh or powershell that reads stdin (only
-# switch words and a lone `-`, so `-File x` is no run). A here-string held in a variable or fed to
-# Set-Content is data and matches neither.
+# parens of such a call, then a pipe into iex, Invoke-Expression, or a pwsh that reads stdin. A here-string
+# given to Set-Content, or held in a variable that no word on its own line runs, matches neither: a later line
+# that runs the variable (`$b = @"..."@` then `iex $b`) is not read.
+# The before side keeps its own word list. `nested_script` (guard_core.py) answers a different question: it
+# returns the text that follows a word, and the text here is the here-string cut out of the command, so it
+# cannot say whether the word is there. After a pipe it has no argument to return either.
 _HERE_RUN_BEFORE = re.compile(r"(?:(?:^|[\s;&|(){}])(?:iex|Invoke-Expression)[ \t]+(?:-Command[ \t]+)?\(?"
                               r"|\[scriptblock\]::Create\()[ \t]*\Z", re.I).search
-_HERE_RUN_AFTER = re.compile(r"[ \t)]*\|[ \t]*(?:(?:iex|Invoke-Expression)\b"
-                             r"|(?:[^\s|;&]*[/\\])?(?:pwsh|powershell)(?:\.exe)?(?:[ \t]+-[\w-]+)*(?:[ \t]+-)?"
-                             r"[ \t]*(?:$|[;&|)]))", re.I | re.M).match
+_HERE_PIPE_AFTER = re.compile(r"[ \t)]*\|[ \t]*([^\n]*)").match
+# A pwsh switch that takes the next word as its value, by the name without its dash. `-ExecutionPolicy` may be
+# cut to any prefix of two letters or more.
+_PWSH_VALUE_SWITCHES = {"ep", "workingdirectory", "wd", "configurationname", "config", "inputformat",
+                        "outputformat", "version", "windowstyle", "w", "custompipename", "settingsfile"}
+
+
+def _pwsh_reads_stdin(tokens) -> bool:
+    """True when the pwsh or powershell launch TOKENS reads its commands from stdin: a lone `-`, `-Command -`,
+    or no command at all. A positional word, `-Command x`, `-File x` and `-EncodedCommand x` run something else."""
+    args = iter(tokens[1:])
+    for token in args:
+        name = token.lstrip("-").lower()
+        if token == "-":
+            return True
+        if not token.startswith("-"):
+            return False
+        if name in _PWSH_VALUE_SWITCHES or (len(name) > 1 and "executionpolicy".startswith(name)):
+            next(args, None)
+        elif re.fullmatch(r"c(?:ommand)?", name):
+            return next(args, None) == "-"
+        elif re.match(r"[fe]", name):   # -File, -EncodedCommand and their short forms
+            return False
+    return True
+
+
+def _here_string_is_run(found) -> bool:
+    """True when the command word around the here-string FOUND runs its body, whatever the body holds."""
+    if _HERE_RUN_BEFORE(found.string[:found.start()]):
+        return True
+    piped = _HERE_PIPE_AFTER(found.string, found.end())
+    parts = split_segments(piped.group(1)) if piped else []
+    tokens = segment_tokens(parts[0]) if parts else []
+    word = re.sub(r"\.exe$", "", basename(tokens[0]).lower()) if tokens else ""
+    return word in ("iex", "invoke-expression") or (word in ("pwsh", "powershell") and _pwsh_reads_stdin(tokens))
 
 
 # A local copy of `_substitutions`' backtick-span rule (guard_env.py), which is a scan loop with no regex to
@@ -5046,13 +5081,13 @@ def shell_run_texts(raw: str) -> list:
     reads stays whole; an unquoted heredoc body or an expandable here-string joins as the `$(...)` and
     backticks it runs. A quoted body that an interpreter runs joins as its backtick spans alone, since perl,
     ruby and node run those as a shell; a body that only python runs adds nothing, since a python span is no
-    shell. A here-string that iex, Invoke-Expression, pwsh or a scriptblock runs (`_HERE_RUN_BEFORE`,
-    `_HERE_RUN_AFTER`) joins as its lines. The limits: a quoted body that no shell runs is not read as shell
-    lines, and a here-string held as data is allowed."""
+    shell. A here-string that iex, Invoke-Expression, pwsh or a scriptblock runs (`_here_string_is_run`)
+    joins as its lines. The limits: a quoted body that no shell runs is not read as shell lines, and a
+    here-string held in a variable is not read, even when a later line runs the variable."""
     texts = []
     if POWERSHELL_CALL[0] and "@" in raw:
         def cut(found):
-            if _HERE_RUN_BEFORE(found.string[:found.start()]) or _HERE_RUN_AFTER(found.string, found.end()):
+            if _here_string_is_run(found):
                 texts.extend(found.group(2).split("\n"))   # a shell runs it: each line is a shell line
             if found.group(1) == '"':
                 texts.extend(t for t, _ in _substitutions(found.group(2), powershell=True,
