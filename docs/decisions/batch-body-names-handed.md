@@ -27,7 +27,7 @@ The harm: a reviewed lane was lost without a word.
 
 ## The rule
 
-- A handed lane is an open lane PR on the integration PR's base. Its newest review record reads done. The base does not hold its head yet.
+- A handed lane is an open lane PR on the integration PR's base. Its newest review log reads done. The base does not hold its head yet.
 - Every batch is checked, lone lanes included. A lone lane is its own integration PR, so its body is checked for handed lanes like any batch's.
 - Each handed lane is either merged or held. Merged: it is on `Lanes:`, and the integration head holds its head. Held: it is on a left-out line with a reason.
 
@@ -58,18 +58,27 @@ Departs from: the batch bodies so far, which took a left-out line with no reason
 ## Where it runs
 
 - `merge/merge.py` runs the check on three paths:
-  - The draft step: `merge <pr> --confirm` on a draft PR. It runs first, before the records page rebuild, the push and the ready mark.
-  - `merge <pr> --confirm` on a ready PR. It runs before the lock is taken.
-  - The preview: `merge <pr>` with no `--confirm`. It prints BLOCKED when the check refuses.
-- A refusal pushes nothing and merges nothing. A draft stays a draft.
-- It reads with the merge tool's own review-record read (`reviewed_read`) and head compare (`holds_head`). It adds no second reader.
+  - The draft step: `merge <pr> --confirm` on a draft PR. It runs first, before the records page rebuild, the push and the ready mark. It takes no lock. A PR that turns draft after the lock is taken runs it under that lock.
+  - `merge <pr> --confirm` on a ready PR. `handed_check` runs before the lock is taken. `handed_local` runs after it, under the lock, before any claim or push to the branch.
+  - The preview: `merge <pr>` with no `--confirm`. It takes no lock. It prints BLOCKED when the check refuses.
+- A refusal pushes no branch and merges nothing. A draft stays a draft.
+- A refusal from `handed_local` on a ready PR still takes and frees the merge lock: one push and one delete of its ref on origin.
+- `handed_check` reads with the merge tool's own review-log read (`reviewed_read`) and head compare (`holds_head`). `handed_local` reads with git only. Neither adds a second review reader.
 
 ## Cost
 
-- Per run with a `Lanes:` line: each preview, each draft step and each ready `--confirm`. The review-record read costs 2 list reads, and 3 gh calls per ready PR with a record.
+Counts per run. Each preview, draft step and ready `--confirm` runs the gh half, with or without a `Lanes:` line.
+
+- gh half (`handed_check`): `reviewed_read` makes 2 list reads, and 3 gh calls per ready PR with a review log.
 - Each compare is one `gh api` call. Against the base: one per open PR on the base that reads done, other than the integration PR. Against the integration head: one per handed PR, and one per Lanes-named open PR not in the batch. A handed PR named on `Lanes:` but not in the head is compared twice.
-- A body with no `Lanes:` line: one `git log` in the worktree, then two `git` processes per lane tip not on the base. No gh call.
-- No long-lived process, no file and no timer.
+- git half (`handed_local`): runs only when the body has no `Lanes:` line that names a PR. No gh call.
+  - 1 `git log` (`read_lanes`), then 1 `git merge-base --is-ancestor` per distinct merged-in parent in `base..head`.
+  - Per lane tip (a merged-in parent not on the base): 1 `git rev-parse --is-shallow-repository`, since its ancestry read exited 1.
+  - On a base that is not the default branch, and only when a lane tip is found: 1 `git fetch` of the default branch. Then 1 ancestry read per lane tip against it, plus the probe for each that exits 1.
+  - A ready `--confirm` and a preview run `refuse_dropped_lane`'s `read_lanes` first. The git half repeats that read.
+  - The fetch updates `refs/remotes/origin/<default>` and may add objects to the clone. Ancestry reads write nothing.
+- Draft step on a non-default base with no ready checks opens one worktree. Per run: 2 `git fetch` (base, head), 1 `git rev-parse`, 1 `git worktree add`, then `git worktree unlock`, `git worktree remove --force` and `git worktree prune`. That is 7 git processes. It writes one checkout in a temp folder, with its admin files, and removes all of it.
+- No long-lived process and no timer. No log file.
 
 ## Status
 
