@@ -1229,6 +1229,10 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
     def fetch_starts(starts):
         return [start for start in starts if start.split()[0] == "fetch"]
 
+    @staticmethod
+    def ls_remote_starts(starts):
+        return [start for start in starts if start.split()[0] == "ls-remote"]
+
     def assert_one_origin_main_fetch(self, starts, branch=None):
         """Exactly one git fetch: quiet and untagged, origin first among its names, and refspecs for origin/main alone,
         plus one for `branch` when origin/HEAD names another branch. It never prunes and names no wildcard. Flag order
@@ -1312,11 +1316,19 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
 
     def test_an_origin_head_on_another_branch_adds_that_branch_to_the_same_fetch(self):
         vcs(self.primary, "push", "-q", "origin", "HEAD:refs/heads/trunk")
+        # The refresh reads origin's default with ls-remote, so origin's own HEAD must name trunk too.
+        vcs(self.origin_repo, "symbolic-ref", "HEAD", "refs/heads/trunk")
         vcs(self.primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+        self.assertEqual(vcs(self.origin_repo, "symbolic-ref", "--short", "HEAD").stdout.strip(), "trunk",
+                         "scope: origin's HEAD does not name trunk")
         self.assertEqual(vcs(self.primary, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").stdout.strip(),
                          "origin/trunk", "scope: origin/HEAD does not name origin/trunk")
         _, starts = self.run_traced()
+        self.assertEqual(len(self.ls_remote_starts(starts)), 1, "want one ls-remote, got %r" % starts)
         self.assert_one_origin_main_fetch(starts, branch="trunk")
+        order = [start.split()[0] for start in starts]
+        self.assertLess(order.index("ls-remote"), order.index("fetch"),
+                        "the fetch ran before the ls-remote that reads origin's default: %r" % starts)
 
     def test_a_remote_with_no_main_refreshes_its_default_branch_and_reads_its_grants(self):
         # origin's default branch is master and origin has no main: the refresh must ask only for master.
@@ -1375,7 +1387,7 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         self.assert_one_differ_line(self.run_checked(), "CLAUDE.md", "origin/main", fresh)
 
     def test_an_unreachable_origin_with_trunk_as_default_prints_one_did_not_run_line(self):
-        # Control for the retry rule: every attempt fails, so exactly one line prints, not one per attempt or check.
+        # Control: the refresh fails once, and its one line prints once, not once per check that reads freshness.
         vcs(self.primary, "push", "-q", "origin", "HEAD:refs/heads/trunk")
         vcs(self.primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
         vcs(self.primary, "checkout", "-q", "-b", "trunk")
@@ -1471,9 +1483,14 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         return stale
 
     def test_a_failed_fetch_is_one_refresh_attempt(self):
+        # The one attempt is the ls-remote that reads origin's default. Once it fails, no fetch starts.
         self.stage_a_lane_grant_against_a_missing_origin()
-        _, starts = self.run_traced()
-        self.assertEqual(len(self.fetch_starts(starts)), 1, "want one refresh attempt, got %r" % starts)
+        lines, starts = self.run_traced()
+        self.assertEqual(len(self.ls_remote_starts(starts)), 1,
+                         "want one refresh attempt, an ls-remote, got %r" % starts)
+        self.assertEqual(self.fetch_starts(starts), [], "a fetch ran after the ls-remote failed: %r" % starts)
+        refresh = [line for line in lines if REFRESH_FAILED.match(line)]
+        self.assertEqual(len(refresh), 1, "want one did-not-run line, got %r" % lines)
 
     def test_a_failed_fetch_prints_one_refresh_line_and_marks_the_grant_line_unrefreshed(self):
         stale = self.stage_a_lane_grant_against_a_missing_origin()
