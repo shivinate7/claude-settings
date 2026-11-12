@@ -237,6 +237,30 @@ sh("two-worktrees: branch of a held name with no force is git's own refusal, not
    VCS + " branch x HEAD", "allow", cwd=TWACT)
 sh("two-worktrees: the branch -f form inside an echo's quotes is text, not a move",
    "echo 'git branch -f x HEAD'", "allow", cwd=TWACT)
+# THE EXCLUDED FORMS, PINNED ALLOWED. `update-ref -d`, `update-ref --stdin`, and the branch delete, move and list
+# modes are other acts, and this rule does not read them. A form that takes a name names the held x, so its row can
+# go red when that form is read as a hold. `--stdin` also names the held ref: a bare `--stdin` returns before any ref
+# is read, so only a ref after it tells this row apart from a rule that reads the ref.
+sh("two-worktrees: update-ref -d of a held branch's ref is a delete, another act, and is allowed",
+   VCS + " update-ref -d refs/heads/x", "allow", cwd=TWACT)
+sh("two-worktrees: update-ref --stdin naming a held branch's ref reads stdin, another act, and is allowed",
+   VCS + " update-ref --stdin refs/heads/x", "allow", cwd=TWACT)
+sh("two-worktrees: branch -fD of a held branch, a forced delete, is another act, and is allowed",
+   VCS + " branch -fD x", "allow", cwd=TWACT)
+sh("two-worktrees: branch -fd of a held branch, a forced delete, is another act, and is allowed",
+   VCS + " branch -fd x", "allow", cwd=TWACT)
+sh("two-worktrees: branch -fm of a held branch, a forced move, is another act, and is allowed",
+   VCS + " branch -fm x y", "allow", cwd=TWACT)
+sh("two-worktrees: branch -m of a held branch with no force is another act, and is allowed",
+   VCS + " branch -m x y", "allow", cwd=TWACT)
+sh("two-worktrees: branch --list is a list, another act, and is allowed",
+   VCS + " branch --list", "allow", cwd=TWACT)
+sh("two-worktrees: branch --list with a force letter and a held name is a list, another act, and is allowed",
+   VCS + " branch --list -f x", "allow", cwd=TWACT)
+# THE OWN TREE THROUGH `git -C`. The tree a `git -C` names is the tree the call runs in, so the holder's own
+# update-ref of x is allowed there.
+sh("two-worktrees: git -C <holder> update-ref refs/heads/x HEAD, run in the holder's own tree, is allowed",
+   VCS + " -C " + slash(TWHOLD) + " update-ref refs/heads/x HEAD", "allow", cwd=TWHOLD)
 
 
 def _two_worktrees_calls(command, cwd):
