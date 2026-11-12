@@ -1485,6 +1485,150 @@ class StaleAgentLockTests(unittest.TestCase):
             self.assertTrue(decision["reason"].startswith("locked:"), "kept for another reason: %s" % decision["reason"])
 
 
+    # The write time of a lock comes from the admin dir the listing reported for that tree. The tree's
+    # `.git` file is only a pointer, and a pointer to another tree's admin dir must not supply the time.
+
+    def restore_git_file_after(self, path):
+        """Read PATH's `.git` file now, and put its bytes back after the case, whatever the case wrote."""
+        with open(os.path.join(path, ".git"), encoding="utf-8") as handle:
+            original = handle.read()
+        self.addCleanup(self.put_back_git_file, path, original)
+
+    @staticmethod
+    def put_back_git_file(path, original):
+        git_file = os.path.join(path, ".git")
+        if os.path.isdir(git_file):
+            shutil.rmtree(git_file)
+        elif os.path.lexists(git_file):
+            os.remove(git_file)
+        write(git_file, original)
+
+    def point_git_file_at(self, path, target):
+        """Rewrite PATH's `.git` file to `gitdir: TARGET`. The original comes back after the case."""
+        self.restore_git_file_after(path)
+        write(os.path.join(path, ".git"), "gitdir: %s\n" % target)
+
+    def test_lock_write_time_read_through_another_trees_git_file_keeps(self):
+        # Red on the unchanged code. `_lock_written_ms` reads this tree's `.git` file, which here names
+        # another worktree's admin dir. That dir's `locked` file is a day before the holder started, so the
+        # no-start verdict reads a reused pid and frees a live holder's tree. The write time must come from
+        # the admin dir the listing reported for this entry, or be None, and None keeps the tree.
+        holder = self.live_holder()
+        path = self.no_start_tree("nsforeign", holder)
+        other = self.add("nsforeign-other", "held by lane-x")
+        _age_admin_files(other, 2 * 60 * 60)
+        locked = self.lock_file(path)
+        other_locked = self.lock_file(other)
+        other_admin = run_vcs(other, "rev-parse", "--absolute-git-dir").stdout.strip()
+        started = self.holder_start_s(holder)
+        for lock in (locked, other_locked):
+            os.utime(lock, (started - self.DAY_S, started - self.DAY_S))
+        self.assert_no_start_scope("nsforeign", path, holder)
+        self.assertEqual(int(os.path.getmtime(other_locked)), started - self.DAY_S,
+                         "the other tree's lock file time was not set")
+        with self.subTest(arm="control: the tree's own .git reads its own lock time, and the reused pid frees"):
+            decision = sweep.decide_worktree(self.root, self.fresh_entry(path), attended=True)
+            self.assertEqual(decision["action"], "reap", "the control kept: %s" % decision["reason"])
+        self.point_git_file_at(path, other_admin)
+        with self.subTest(arm="foreign .git: no write time for this tree"):
+            entry = self.fresh_entry(path)
+            self.assertEqual(entry["locked_reason"], "claude agent agent-nsforeign (pid %d)" % holder.pid,
+                             "the listing lost the holder's lock")
+            self.assertIsNone(entry["locked_at_ms"],
+                              "the write time came from another worktree's admin dir: %r" % entry["locked_at_ms"])
+        with self.subTest(arm="foreign .git: the verdict keeps the tree"):
+            decision = sweep.decide_worktree(self.root, self.fresh_entry(path), attended=True)
+            self.assertEqual(decision["action"], "keep", "freed a live holder's tree on another tree's write time")
+            self.assertTrue(decision["reason"].startswith("locked:"), "kept for another reason: %s" % decision["reason"])
+
+    def test_relative_gitdir_reads_the_same_lock_write_time(self):
+        holder = self.live_holder()
+        path = self.no_start_tree("nsrel", holder)
+        locked = self.lock_file(path)
+        started = self.holder_start_s(holder)
+        os.utime(locked, (started - self.DAY_S, started - self.DAY_S))
+        self.assert_no_start_scope("nsrel", path, holder)
+        absolute = self.fresh_entry(path)["locked_at_ms"]
+        self.assertIsNotNone(absolute, "precondition: the absolute gitdir gave no write time")
+        self.point_git_file_at(path, os.path.relpath(os.path.dirname(locked), path))
+        self.assertEqual(self.fresh_entry(path)["locked_at_ms"], absolute,
+                         "a relative gitdir read a different write time")
+
+    def test_git_file_as_a_directory_reads_no_lock_write_time(self):
+        holder = self.live_holder()
+        path = self.no_start_tree("nsdir", holder)
+        locked = self.lock_file(path)
+        started = self.holder_start_s(holder)
+        os.utime(locked, (started - self.DAY_S, started - self.DAY_S))
+        self.assert_no_start_scope("nsdir", path, holder)
+        self.assertIsNotNone(self.fresh_entry(path)["locked_at_ms"], "precondition: the file read gave no write time")
+        self.restore_git_file_after(path)
+        git_dir = os.path.join(path, ".git")
+        os.remove(git_dir)
+        os.makedirs(git_dir)
+        # An old `locked` inside the directory: a reader that took `.git` for an admin dir would free the holder.
+        inner = os.path.join(git_dir, "locked")
+        write(inner, "")
+        os.utime(inner, (started - self.DAY_S, started - self.DAY_S))
+        entry = self.fresh_entry(path)
+        self.assertEqual(entry["locked_reason"], "claude agent agent-nsdir (pid %d)" % holder.pid,
+                         "the listing lost the holder's lock")
+        self.assertIsNone(entry["locked_at_ms"], "read a write time through a .git directory: %r" % entry["locked_at_ms"])
+        self.assertIsNot(sweep.stale_agent_lock_verdict(entry["locked_reason"], entry["locked_at_ms"]), True,
+                         "the verdict frees a tree whose .git is a directory")
+
+    def test_missing_git_file_reads_no_lock_write_time(self):
+        holder = self.live_holder()
+        path = self.no_start_tree("nsnone", holder)
+        locked = self.lock_file(path)
+        started = self.holder_start_s(holder)
+        os.utime(locked, (started - self.DAY_S, started - self.DAY_S))
+        self.assert_no_start_scope("nsnone", path, holder)
+        self.assertIsNotNone(self.fresh_entry(path)["locked_at_ms"], "precondition: the file read gave no write time")
+        self.restore_git_file_after(path)
+        os.remove(os.path.join(path, ".git"))
+        entry = self.fresh_entry(path)
+        self.assertEqual(entry["locked_reason"], "claude agent agent-nsnone (pid %d)" % holder.pid,
+                         "the listing lost the holder's lock")
+        self.assertIsNone(entry["locked_at_ms"], "read a write time with no .git file: %r" % entry["locked_at_ms"])
+        self.assertIsNot(sweep.stale_agent_lock_verdict(entry["locked_reason"], entry["locked_at_ms"]), True,
+                         "the verdict frees a tree with no .git file")
+
+    def test_unlock_for_removal_passes_the_write_time_to_the_lock_re_read(self):
+        # Red when `_lock_unlockable` drops the write time it passes to the stale verdict: the re-read then
+        # keeps a reused pid's lock. Green on the unchanged code.
+        holder = self.live_holder()
+        path = self.no_start_tree("nsunlock", holder)
+        locked = self.lock_file(path)
+        started = self.holder_start_s(holder)
+        os.utime(locked, (started - self.DAY_S, started - self.DAY_S))
+        self.assert_no_start_scope("nsunlock", path, holder)
+        decision = sweep.decide_worktree(self.root, self.fresh_entry(path), attended=True)
+        self.assertEqual(decision["action"], "reap", "kept before the re-read: %s" % decision["reason"])
+        self.assertTrue(decision.get("unlock"), "no unlock was planned for a reused pid's lock")
+        lifted = sweep.unlock_for_removal(self.root, path, decision)
+        self.assertTrue(lifted, "the unlock re-read kept a reused pid's lock: %s" % decision.get("reason"))
+        self.assertTrue(decision.get("unlocked"), "the lock was not taken off: %s" % decision.get("error"))
+        self.assertIsNone(self.fresh_entry(path)["locked_reason"], "git still lists the tree as locked")
+
+    def test_restore_cut_short_passes_the_write_time_of_a_reused_pid_lock(self):
+        # Red when the cut-short write-back drops the write time it passes to the lock check: the deleted
+        # tracked file then stays deleted. Green on the unchanged code.
+        holder = self.live_holder()
+        path = self.no_start_tree("nscut", holder)
+        locked = self.lock_file(path)
+        started = self.holder_start_s(holder)
+        os.utime(locked, (started - self.DAY_S, started - self.DAY_S))
+        self.assert_no_start_scope("nscut", path, holder)
+        tracked = os.path.join(path, "f.txt")
+        self.assertTrue(os.path.isfile(tracked), "the fixture has no tracked file to cut")
+        os.remove(tracked)
+        write(os.path.join(os.path.dirname(locked), sweep.REMOVAL_MARKER), "")
+        sweep._restore_cut_short(self.root, self.fresh_entry(path))
+        self.assertTrue(os.path.isfile(tracked),
+                        "the cut-short write-back left the file deleted: the lock check got no write time")
+
+
 class ListenerDecisionTests(unittest.TestCase):
     """`sweep.find_swept_listeners` / `sweep.decide_listener`. Every listener here is a REAL
     process this suite starts itself (`spawn_plain_listener` / `spawn_orphaned_listener`),
