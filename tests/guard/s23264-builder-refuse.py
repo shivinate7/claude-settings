@@ -2042,7 +2042,7 @@ add("report-sha-missing: a 13-character hex token is not a sha",
     "allow", tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
     message="Token 6c2e9a0f4b7d1 is in the log.")
 # Decision agent-report-shas-resolve, What counts as a sha: a sha on one side of a range is judged, the blob ids of an
-# index line are skipped, and a word that holds :// is skipped whole.
+# index line are skipped, and a word that holds :// has its URL skipped from the scheme on, so a sha before it is judged.
 add("report-sha-missing: a made-up sha on the far side of main.. is refused",
     "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
     message="Diff main..8c1f0e2a7 is open.", carries=("8c1f0e2a7",))
@@ -2055,6 +2055,15 @@ add("report-sha-missing: the blob ids of an index line are not commits",
 add("report-sha-missing: the two shas of a compare link to another repo are not judged",
     "allow", tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
     message="See https://github.com/other/repo/compare/abc1234...def5678 for the diff.")
+# A made-up sha as the text of a link is judged: only the link's URL is skipped, from its scheme on. A sha in a
+# commit URL's path is skipped, as before.
+add("report-sha-missing: a made-up sha as the text of a commit link is refused",
+    "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Done. [d1e0f2c3b4](https://github.com/shivinate7/claude-settings/commit/d1e0f2c3b4) is the fix.",
+    carries=("d1e0f2c3b4",))
+add("report-sha-missing: a commit URL with a made-up sha in its path is not judged",
+    "allow", tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="See https://github.com/shivinate7/claude-settings/commit/d1e0f2c3b4 for it.")
 
 
 # --- the cases that need a real sha, read at run time: log checks, so the fixtures are built by the check.
@@ -2228,6 +2237,21 @@ LOG_CHECKS_EXTRA.append(("report-sha-missing: a 12-character sha that resolves i
 LOG_CHECKS_EXTRA.append(("report-sha-missing: a clean hand-back from an agent's worktree starts no git process",
                          rsha_agent_clean_cost_case))
 FIXTURELESS_CHECKS.update((rsha_short12_real_case, rsha_agent_clean_cost_case))
+
+
+def rsha_link_text_real_case():
+    """A real sha as the text of its own commit link is allowed: the sha before the link's scheme resolves."""
+    rsha_ready()
+    short = RSHA_SHA["base"][:10]
+    if not rsha_sha_like(short):
+        return False, "the 10-character prefix %r is not sha-like, so the control proves nothing" % short
+    got, reason = rsha_judge(RSHA_LANE, "Done. [%s](https://github.com/shivinate7/claude-settings/commit/%s) is the fix."
+                             % (short, RSHA_SHA["base"]))
+    return rsha_allowed(got, reason, "a real sha as the text of a commit link")
+
+
+LOG_CHECKS_EXTRA.append(("report-sha-missing: a real sha as the text of a commit link is allowed", rsha_link_text_real_case))
+FIXTURELESS_CHECKS.add(rsha_link_text_real_case)
 
 
 # --- a commit the clone has not fetched: the clone is cut before the commit exists, so it holds no such object, and
