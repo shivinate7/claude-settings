@@ -941,12 +941,17 @@ def offers_a_pick(text):
     return len(numbers) >= 2 and context
 
 
+def has_open_question(text):
+    """True when `text` holds a "?" outside quotes, backticks and blockquoted lines. The one home for the
+    question test: the Input Needed check and the lane ack both call it."""
+    kept = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith(">"))
+    return bool(QUESTION_MARK_RE.search(QUOTED_RE.sub("", kept)))
+
+
 def asks_a_question(text):
     """True when the Input Needed item holds a sentence that ends in "?" outside quotes, backticks and
     blockquoted lines (questions-reach-page: a question for the owner, whether or not it offers a pick)."""
-    section = input_needed_section(text)
-    kept = "\n".join(line for line in section.splitlines() if not line.lstrip().startswith(">"))
-    return bool(QUESTION_MARK_RE.search(QUOTED_RE.sub("", kept)))
+    return has_open_question(input_needed_section(text))
 
 
 # compaction-carry: after a compaction the session reports two lines, `Recovered:` (what it got back
@@ -963,6 +968,18 @@ CARRY_LINES = (
 )
 SOURCE_RE = re.compile(r"\b(?:git|page|digest)\b", re.I)
 NONE_ITEM_RE = re.compile(r"(?:none|nothing)\b", re.I)
+
+
+def message_asks(rec):
+    """True when an incoming message holds a "?" outside quotes, code spans, fenced blocks and blockquoted
+    lines (the lane ack: such a reply is an answer, not an ack). A "?" inside a URL does not count."""
+    content = (rec.get("message") or {}).get("content")
+    if isinstance(content, list):
+        content = "\n".join(b.get("text", "") for b in content
+                            if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str))
+    if not isinstance(content, str):
+        return False
+    return has_open_question(FENCE_RE.sub(" ", content))
 
 
 def _reply_text(rec):
@@ -1188,7 +1205,7 @@ def _turn_acts(records, turn, acks):
     message; when that message is the ack of a send from a session in `acks`, the turn reaches back past it."""
     cut = len(records) - len(turn)
     if cut and peer_sender(records[cut - 1]) in acks:
-        idx = last_incoming_index(records, acks)
+        idx = last_incoming_index(records, acks, message_asks)
         turn = records if idx is None else records[idx + 1:]
     uses = [u for r in turn if not r.get("isSidechain") for u in tool_uses(r)]
     return uses, [send_targets(u) for u in uses]
@@ -3211,10 +3228,10 @@ def main():
     cannot = ""
     if last_human_idx is not None and cannot_refused is not None:
         try:
-            # A try backs a claim only in this turn: after the last message, a peer's included. A peer's reply to a send of
-            # this turn is an ack and starts no turn, as in the question check.
+            # A try backs a claim only in this turn: after the last message, a peer's included. message_asks keeps a
+            # peer reply that holds a "?" as an answer that starts a turn; a plain-text reply is an ack and starts none.
             acks = {sender: {sender} | PARENT_TARGETS for sender in map(peer_sender, records) if sender}
-            idx = last_incoming_index(records, acks)
+            idx = last_incoming_index(records, acks, message_asks)
             ack_turn = records if idx is None else records[idx + 1:]
             cannot = cannot_problem(ack_turn, text, cannot_refused)
         except Exception as exc:

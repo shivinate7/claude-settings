@@ -124,6 +124,19 @@ def landed_reply(text):
     return trg.assistant_text(text + "\n\n" + trg.GOOD_REPORT)
 
 
+PARENT_SESSION = "session_parent1"  # the id the parent's replies carry as their sender
+
+
+def parent_send():
+    """A send to @parent that the parent delivered: the send a parent's reply answers, so the reply is its ack."""
+    return trg.SameTurnWriter().send(session_id="@parent", result=trg.SameTurnWriter.DELIVERED)
+
+
+def parent_reply(body):
+    """A reply from the parent session, a peer message in the shape a real transcript stores."""
+    return trg.peer_msg(body, from_session=PARENT_SESSION)
+
+
 def input_report(first, *more):
     """A report whose Input Needed item holds `first`, with `more` as its continuation lines."""
     lines = ["> **Done** BUILT abc123", "> **Deviations** none", "> **Input Needed** " + first]
@@ -191,6 +204,11 @@ class CannotClaimTests(unittest.TestCase):
         self.assertLess(reason.index("Remedy:"), reason.index("Lines:"), "the remedy follows the lines: %s" % reason)
         remedy = reason[reason.index("Remedy:"):reason.index("Lines:")]
         self.assertNotRegex(remedy, ACT_WORDS, "the remedy names the act it refuses: %s" % remedy)
+
+    def assert_blocks_for(self, out, variant, line, cause):
+        """assert_blocked_for, with the cause named first, so a failure says which gap it is."""
+        self.assertIsNotNone(out, cause)
+        return self.assert_blocked_for(out, variant, line)
 
     def assert_passes(self, out, case):
         self.assertIsNone(out, "%s was refused: %s" % (case, out and out.get("reason")))
@@ -310,6 +328,31 @@ class CannotClaimTests(unittest.TestCase):
         out = self.stop([trg.human("open a PR"), *failed_pr_create(), trg.assistant_text("Opened nothing."),
                          trg.human("try again"), trg.assistant_text(line)])
         self.assert_blocked_for(out, NO_TRY, line)
+
+    def test_cc_red_a_parent_reply_with_a_question_mark_moves_the_claim_window(self):
+        # Catches: the parent's first reply read as the ack of the lane's send when it asks a new question, so the
+        # failed try before it backs the claim after it. The twin with no "?" comes first: that ack keeps the try in
+        # the window.
+        line = "I can't open the PR: `mcp__github__create_pull_request` returned 422."
+        before = [trg.human("open a PR"), *failed_pr_create(), *parent_send()]
+        self.assert_passes(self.stop([*before, parent_reply("Got it."), landed_reply(line)]),
+                           "scope: a reply with no ? is an ack, so the failed try backs the claim")
+        out = self.stop([*before, parent_reply("Is the pick still open?"), landed_reply(line)])
+        self.assert_blocks_for(out, NO_TRY, line, "the parent's plain ? was read as its ack, so the try backed the claim")
+
+    def test_cc_red_a_lone_apostrophe_or_quote_does_not_hide_the_question_mark(self):
+        # Catches: a scan that reads a lone apostrophe, or a lone opening quote, as the start of a quoted span that
+        # runs to the end of the reply, so the plain "?" after it is hidden. The reply then reads as an ack, and the
+        # try backs the claim. Each shape's twin with no "?" comes first: that ack keeps the try in the window.
+        line = "I can't open the PR: `mcp__github__create_pull_request` returned 422."
+        before = [trg.human("open a PR"), *failed_pr_create(), *parent_send()]
+        for label, body in (("a lone apostrophe", "Don't you want it?"),
+                            ("a lone opening quote", 'Quick check: "ship it, want it?')):
+            with self.subTest(shape=label):
+                self.assert_passes(self.stop([*before, parent_reply(body.replace("?", ".")), landed_reply(line)]),
+                                   "scope: the twin of %s with no ? is an ack" % label)
+                out = self.stop([*before, parent_reply(body), landed_reply(line)])
+                self.assert_blocks_for(out, NO_TRY, line, "the plain ? after %s was hidden, so it read as an ack" % label)
 
     # ---- green: the twins of the reds, and the cites. Each passes for its named reason, with no confounder.
 
