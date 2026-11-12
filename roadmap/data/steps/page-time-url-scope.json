@@ -1,0 +1,14 @@
+{
+ "id": "page-time-url-scope",
+ "title": "The time check of rule message-time-matches-clock judges only the waiting page's artifact",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL3preQpR1zdQ3z1WR8",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "PR #2720 judges a blank or non-ISO time by collection name only, so a non-ISO added in another artifact's items, receipts or asks collection is refused (review round 3 limit).",
+ "source": "coordinator pick 08:25 CST Nov 12 (Q2 option b, can be undone)",
+ "note": "Waits on PR #2720 merging; lane fan-code-waiting-page builds it after.",
+ "updatedAt": "$T"
+}
