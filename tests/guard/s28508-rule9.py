@@ -518,6 +518,56 @@ for _name, _prompt in WRITE_PROSE:
         tool="Agent", prompt=_prompt, subagent_type="Explore")
 add("brief-write-needs-writer: Explore brief with an empty prompt is allowed", "allow",
     tool="Agent", prompt="", subagent_type="Explore")
+# Bypasses and false alarms in the brief-write reader. A bypass is an order the reader lets through: a file named
+# with no path, an article before the file, a verb the reader has no word for (put, redirect, call the Write tool),
+# a path in quotes or bold, a save led by "So", a save in a later clause. Each is denied for an Explore brief, in the
+# Agent and the Workflow form. Its same-shape controls pass: the same order to a builder, and its reply twin, which
+# names no file. A false alarm is prose with a path after a write verb, or a command span whose `>` is no redirect.
+# Each is allowed for an Explore brief, in both forms. Failure classes: a bypass the reader passes, a control a writer
+# role or a reply must keep, and a false deny on a read-only brief.
+WRITE_BYPASS = (
+    ("a file named with no path", "Write the findings to a file.", "Write the findings to your reply."),
+    ("a new file named with no path", "Write your findings to a new file.", "Write your findings to your reply."),
+    ("a markdown file named with no path", "Save the findings to a markdown file.", "Save the findings in your reply."),
+    ("a path after an article", "Write the findings to the file docs/audit.md.",
+     "Write the findings to the lead in your reply."),
+    ("a put into a path", "Put the findings in docs/audit.md.", "Put the findings in your reply."),
+    ("a redirect in prose", "Redirect the output to audit.md.", "Report the output in your reply."),
+    ("a tee in prose", "Pipe the findings through tee audit.md.", "Report the findings in your reply."),
+    ("a Write tool call", "Call the Write tool on audit.md.", "Call the lead on the findings, then report."),
+    ("a redirect target in quotes", "Run `printf x > 'audit.md'` and report.", "Run `printf x` and report."),
+    ("a path in double quotes", 'Write the findings to "audit.md".', 'Write the findings to "the lead".'),
+    ("a path in bold", "Write the findings to **audit.md**.", "Write the findings to **the lead**."),
+    ("a save led by So", "So save the findings to audit.md.", "So report the findings to the lead."),
+    ("a save in a later clause", "Read the spec. When done save the findings to audit.md.",
+     "Read the spec. When done report the findings in your reply."),
+)
+for _name, _order, _reply in WRITE_BYPASS:
+    add("brief-write-needs-writer: Explore brief that orders a write by %s is denied" % _name, "deny",
+        WRITE_BRIEF, tool="Agent", prompt=_order, subagent_type="Explore")
+    add("brief-write-needs-writer: Workflow Explore agent that orders a write by %s is denied" % _name, "deny",
+        WRITE_BRIEF, tool="Workflow", script=_step_flow(json.dumps(_order), "agentType: 'Explore'"))
+    add("brief-write-needs-writer: builder brief with the order by %s is allowed" % _name, "allow",
+        tool="Agent", prompt=_order, subagent_type="builder", model="sonnet")
+    add("brief-write-needs-writer: Workflow builder agent with the order by %s is allowed" % _name, "allow",
+        tool="Workflow", script=_step_flow(json.dumps(_order), "agentType: 'builder', model: 'sonnet'"))
+    add("brief-write-needs-writer: Explore brief with the reply twin of the order by %s is allowed" % _name, "allow",
+        tool="Agent", prompt=_reply, subagent_type="Explore")
+WRITE_FALSE_ALARMS = (
+    ("a table of rules in a repo file", "Make a table of the rules in hooks/guard.py."),
+    ("a reply list of rules in a repo file", "Create a list in your reply of the rules in hooks/guard.py."),
+    ("a reply that cites a repo file", "Write your findings to the lead, citing each rule in hooks/guard.py."),
+    ("a ban on changes to a repo file", "Make no changes to hooks/guard.py. Report only."),
+    ("a ban on writing to a file", "Write nothing to audit.md. Report the findings."),
+    ("a write-up that names a path", "Write-up goes to docs/audit.md, which the record-writer owns."),
+    ("a verdict written as PASS or FAIL", "Write the verdict as PASS/FAIL for the round."),
+    ("a count comparison in a span", "Check that `count > 0` holds, then report."),
+)
+for _name, _prompt in WRITE_FALSE_ALARMS:
+    add("brief-write-needs-writer: Explore brief with %s is allowed" % _name, "allow",
+        tool="Agent", prompt=_prompt, subagent_type="Explore")
+    add("brief-write-needs-writer: Workflow Explore agent with %s is allowed" % _name, "allow",
+        tool="Workflow", script=_step_flow(json.dumps(_prompt), "agentType: 'Explore'"))
 
 
 # ---- A spawn's brief that orders a discard of the working tree (rule brief-destructive-git, rule
