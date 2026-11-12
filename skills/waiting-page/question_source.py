@@ -8,7 +8,7 @@ so they cannot differ.
     python3 skills/waiting-page/question_source.py < spec.json      prints {"chat": ..., "item": ...} as JSON
 
 The spec is the item's own fields, with `options`, and optionally:
-  shown    the `shown` list of an earlier item: [{key, id, label}, ...]. The new options must extend it, position by
+  shown    required by the command line, a list; [] for a new item. The `shown` list of an earlier item: [{key, id, label}, ...]. The new options must extend it, position by
            position, in key, id and label, or render raises ValueError. That is the freeze (guard rule
            `option-letters-frozen`) read before the write, not after it.
   changes  {key: note}. A shown option listed here keeps its shown key, id and label and carries the note as its `note`
@@ -91,7 +91,7 @@ def render(spec):
 def main():
     try:
         spec = json.load(sys.stdin)
-        if isinstance(spec, dict) and "shown" not in spec:
+        if isinstance(spec, dict) and not isinstance(spec.get("shown"), list):
             raise ValueError("the spec carries no `shown`: give the item's shown list, or [] for a new item")
         result = render(spec)
     except (ValueError, AttributeError, KeyError, TypeError) as err:
