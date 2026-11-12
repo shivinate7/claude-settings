@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "",
   "why": "Guard rule agent-handoff-write (#1679) refuses an agent's Write, Edit, MultiEdit or NotebookEdit of ~/.claude/handoffs/<session_id>.md, but a Bash heredoc or redirect into that file still passes, and Claude could write that by mistake.",
-  "note": "Cited as `Fix: step:handoff-bash-redirect` in decision precompact-handoff, item 14. Done check: a red guard test where an agent's Bash redirect into the handoff is allowed, then refused. Filed from lane handoff-per-agent (session_013NEJKz785dJ3UKyxpvQuZu, PR #1679) at the coordinator's ask, 18:35 CST Nov 7. Stacked on #1679 (coordinator 18:35 CST). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJKz785dJ3UKyxpvQuZu).",
+  "note": "Cited as `Fix: step:handoff-bash-redirect` in decision precompact-handoff, item 14. Done check: a red guard test where an agent's Bash redirect into the handoff is allowed, then refused. Filed from lane handoff-per-agent ([ended:lane:-handoff-per-agent], PR #1679) at the coordinator's ask, 18:35 CST Nov 7. Stacked on #1679 (coordinator 18:35 CST). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-handoff-per-agent]).",
   "updatedAt": "2026-11-12T07:22:00-06:00"
 }

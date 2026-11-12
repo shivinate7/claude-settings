@@ -1,7 +1,7 @@
 {
   "title": "Check STALE010 reads a Class.method cite",
   "why": "A `Class.method` cite is not read today, so a stale one passes (debt stale010-dotted-cite, filed by #1893).",
-  "note": "Filed 09:35 CST Nov 8 (coordinator 09:34 CST). Doing in lane record-claim-cites-code; branch from #1893's head, Merge after: #1893. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL33wvLc6xtDnBTJDAw).",
+  "note": "Filed 09:35 CST Nov 8 (coordinator 09:34 CST). Doing in lane record-claim-cites-code; branch from #1893's head, Merge after: #1893. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:record-claim-cites-code]).",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "",

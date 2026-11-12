@@ -5,7 +5,7 @@
   "order": 265.6,
   "lane": "",
   "why": "The check is quadratic when `cookie:` repeats. Lane notes-fix-page measured 40k chars at 1.5 s and 80k at 6.4 s; this lane re-measured 20k at 0.33 s and 40k at 1.39 s on main 174b005c1.",
-  "note": "Test-author pins the verdicts and a same-process timing ratio, then builder, then reviewer. Runner 8 batches it. Topic waiting-page. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL2L6zBtUfVRwm5DrXB).",
+  "note": "Test-author pins the verdicts and a same-process timing ratio, then builder, then reviewer. Runner 8 batches it. Topic waiting-page. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:export-page-cookie-linear]).",
   "owner": "coordinator",
   "updatedAt": "2026-11-12T07:22:00-06:00"
 }

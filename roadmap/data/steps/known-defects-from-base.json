@@ -4,6 +4,6 @@
   "status": "done",
   "order": 103.33,
   "why": "A known-defects entry could be dropped or changed on a branch with no trace in the report.",
-  "note": "Nov 6 11:51 CST (coordinator audit, Explore sonnet; PR head reachable from origin/main): DONE, evidence #1282 on main.\nNov 5 18:21 CST (lane session_013NEJL2gZYcG8qoVPaBFunY): draft PR #1282 at head 875186aa. A dropped entry reads MISSING unless a commit carries `Known-defect-removed: <id>`; a changed entry reads CHANGED unless a commit carries `Known-defect-changed: <id>`.",
+  "note": "Nov 6 11:51 CST (coordinator audit, Explore sonnet; PR head reachable from origin/main): DONE, evidence #1282 on main.\nNov 5 18:21 CST (lane [ended:lane:-known-defects-from-base]): draft PR #1282 at head 875186aa. A dropped entry reads MISSING unless a commit carries `Known-defect-removed: <id>`; a changed entry reads CHANGED unless a commit carries `Known-defect-changed: <id>`.",
   "updatedAt": "2026-11-06T17:53:00Z"
 }

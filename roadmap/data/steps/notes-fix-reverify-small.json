@@ -5,7 +5,7 @@
   "order": 1.2,
   "owner": "coordinator",
   "why": "Coordinator, 14:23 CST Nov 7: notes-keep-reverify re-checked 146 rows. 18 to fix, 18 to delete, 110 to keep (86 rare and harmless, 18 for the owner to decide, 6 that need the Mac).",
-  "note": " Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJKz9f8KxCfb9zS1HSNV).",
+  "note": " Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-notes-fix-reverify-small]).",
   "lane": "",
   "updatedAt": "2026-11-12T07:22:00-06:00"
 }

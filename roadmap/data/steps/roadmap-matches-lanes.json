@@ -4,6 +4,6 @@
   "status": "done",
   "order": 103.3375,
   "why": "shiv, Oct 30 16:14 CDT (via coordinator): pick a on the setup gaps.",
-  "note": "Lane session_013NEJKzcr1CZUgbFf48KeaX. Cause: on Oct 30 the 16:11 CDT reconcile found 14 doing or active steps with no lane or PR. Done check: the triage scan lists each doing or active step that names no live lane session or open PR. Done: #890 in batch 39 #916, main d657e1da (coordinator, Oct 31 20:01 CDT).",
+  "note": "Lane [ended:lane-roadmap-matches-lanes:-triage-s-scan-checks-e]. Cause: on Oct 30 the 16:11 CDT reconcile found 14 doing or active steps with no lane or PR. Done check: the triage scan lists each doing or active step that names no live lane session or open PR. Done: #890 in batch 39 #916, main d657e1da (coordinator, Oct 31 20:01 CDT).",
   "updatedAt": "2026-11-01T01:01:00Z"
 }

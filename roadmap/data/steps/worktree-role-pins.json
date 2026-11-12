@@ -1,7 +1,7 @@
 {
   "title": "The role guard's fresh-worktree cases are pinned, and a builder never works in another agent's worktree",
   "why": "Replaces PRs #1702 (step merge-commit-role-scope) and #1704 (role-scope-notes), which closed when #1521 (mixed-merge conflict route) took over the merge-commit role check (lane mixed-merge-resolver, relaying the coordinator's ruling of 04:08 CST Nov 8).",
-  "note": "Carries: the fresh-worktree pin cases, with the mutant re-anchored to #1521's own_changes; the agents/builder.md line \"never work in another agent's worktree\"; and the note that a builder in a test-author's worktree is refused. Branches from main once #1521 lands. Lane session_013NEJL1CxMTqgaXC4PMxQLc. Filed 04:10 CST Nov 8. Doing 05:58 CST Nov 10: open PR #2114 on branch worktree-role-pins (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL1CxMTqgaXC4PMxQLc).",
+  "note": "Carries: the fresh-worktree pin cases, with the mutant re-anchored to #1521's own_changes; the agents/builder.md line \"never work in another agent's worktree\"; and the note that a builder in a test-author's worktree is refused. Branches from main once #1521 lands. Lane [ended:lane:-mixed-merge-resolver]. Filed 04:10 CST Nov 8. Doing 05:58 CST Nov 10: open PR #2114 on branch worktree-role-pins (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-mixed-merge-resolver]).",
   "phase": "now",
   "status": "ready",
   "order": 588,

@@ -5,7 +5,7 @@
   "order": 930,
   "owner": "coordinator",
   "why": "Runner 8, 15:16 CST Nov 9 (via the coordinator): in batch 69 checks-guard used 27 of 27 min and one attempt hit the cap; checks-macos-b ran 26 of 31 and checks-windows-rest 26 of 28. A cap hit turns a batch red and costs a rebuild.",
-  "note": "Fix: split checks-guard, or give it headroom (skill ci-hygiene). Follows ci-recap-jobs (done, #1347). The coordinator starts a lane (15:45 CST Nov 9). Lane session_013NEJKypwFEtaJwfYrMpZ5T started 15:46 CST Nov 9 (coordinator). Sighting (coordinator 16:29 CST Nov 9): checks-merge-install's checkout-detection step ran 9 min 41 s of its 10 min cap on main, 97% with no headroom. PR #2469 (branch ci-guard-headroom) released into batch-70c (coordinator 20:36 CST Nov 9). Done: #2469 merged in batch 70 (PR #2498, 0e6509a96, 00:52 CST Nov 10).",
+  "note": "Fix: split checks-guard, or give it headroom (skill ci-hygiene). Follows ci-recap-jobs (done, #1347). The coordinator starts a lane (15:45 CST Nov 9). Lane [ended:lane:-ci-guard-headroom] started 15:46 CST Nov 9 (coordinator). Sighting (coordinator 16:29 CST Nov 9): checks-merge-install's checkout-detection step ran 9 min 41 s of its 10 min cap on main, 97% with no headroom. PR #2469 (branch ci-guard-headroom) released into batch-70c (coordinator 20:36 CST Nov 9). Done: #2469 merged in batch 70 (PR #2498, 0e6509a96, 00:52 CST Nov 10).",
   "updatedAt": "2026-11-10T11:20:00-06:00",
   "lane": "archived, handoff at handoffs/session_013NEJKypwFEtaJwfYrMpZ5T.md on archive/session-handoffs-2026-11-10"
 }

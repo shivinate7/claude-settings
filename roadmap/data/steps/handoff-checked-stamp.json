@@ -5,7 +5,7 @@
   "order": 926,
   "owner": "coordinator",
   "why": "Coordinator, 2026-11-09 14:11 CST: it marked every handoff premise as checked but had re-checked only two, and fixed it by hand. A false Checked time hides a stale premise from the next session.",
-  "note": "Sighting 1. Fix to find: a guard that compares each changed Checked time in the handoff against the premises the session actually read or checked since compaction, and refuses a stamp with no read behind it. Related, done: handoff-read-before-write (a session must read its handoff after compaction). Lane session_013NEJL1s91Kb775BV6ECCxH started 15:55 CST Nov 9 (coordinator). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL1s91Kb775BV6ECCxH).",
+  "note": "Sighting 1. Fix to find: a guard that compares each changed Checked time in the handoff against the premises the session actually read or checked since compaction, and refuses a stamp with no read behind it. Related, done: handoff-read-before-write (a session must read its handoff after compaction). Lane [ended:lane:-handoff-checked-stamp] started 15:55 CST Nov 9 (coordinator). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-handoff-checked-stamp]).",
   "updatedAt": "2026-11-12T07:22:00-06:00",
   "lane": ""
 }

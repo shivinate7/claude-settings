@@ -3,7 +3,7 @@
   "status": "done",
   "order": 981,
   "why": "Rulings, asks and follow-ups that live only in the coordinator's transcript are lost unless something reads them back against the tracked homes.",
-  "note": "Owner 09:05 CST Nov 10 (relayed by the coordinator, 09:11 CST): Sonnet extractors over the coordinator transcript, one Sonnet reconciler against main, the roadmap and the PRs. First run started 09:05 CST Nov 10 by the coordinator; It runs as the coordinator's workflow wf_8af462fc-358, not a lane session. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was coordinator session_013NEJL2hB1pLZPDpzas7VgB (workflow)). Lane code-roadmap started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Closed as not a lane step (coordinator pick 08:06 CST Nov 12, via lane fan-code-small-homes): it stays the coordinator's workflow run wf_8af462fc-358.",
+  "note": "Owner 09:05 CST Nov 10 (relayed by the coordinator, 09:11 CST): Sonnet extractors over the coordinator transcript, one Sonnet reconciler against main, the roadmap and the PRs. First run started 09:05 CST Nov 10 by the coordinator; It runs as the coordinator's workflow wf_8af462fc-358, not a lane session. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was coordinator [ended:Claude-settings-coordinator-handoff] (workflow)). Lane code-roadmap started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Closed as not a lane step (coordinator pick 08:06 CST Nov 12, via lane fan-code-small-homes): it stays the coordinator's workflow run wf_8af462fc-358.",
   "lane": "",
   "blockedBy": [],
   "updatedAt": "2026-11-12T08:06:00-06:00",

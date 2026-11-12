@@ -2,7 +2,7 @@
   "title": "The page export and WAITING_COLLECTIONS include receipts",
   "lane": "session_013NEJL1s4J4rQVVz1kBBJfh",
   "why": "Owner ask, 13:20 CST Nov 7 (\"why not fix it then\"): the page export and WAITING_COLLECTIONS leave out the `receipts` collection, so receipts are lost from the record branch.",
-  "note": "Done: a red test where an export of a page with a receipt drops it, then green; receipts appear under waiting/ on the next export. Built in #1443 (head 3274c89bf), with runner 8 to merge (coordinator, 14:11 CST Nov 7). Doing 05:58 CST Nov 10: open PR #1443 on branch waiting-export-receipts (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL3a6tqDKidXRwjLeAE). Lane prose-waiting-page started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
+  "note": "Done: a red test where an export of a page with a receipt drops it, then green; receipts appear under waiting/ on the next export. Built in #1443 (head 3274c89bf), with runner 8 to merge (coordinator, 14:11 CST Nov 7). Doing 05:58 CST Nov 10: open PR #1443 on branch waiting-export-receipts (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-waiting-export-receipts]). Lane prose-waiting-page started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
   "phase": "now",
   "status": "doing",
   "order": 0.75,

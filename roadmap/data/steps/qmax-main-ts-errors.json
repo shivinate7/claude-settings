@@ -5,7 +5,7 @@
   "order": 0.12,
   "owner": "coordinator",
   "why": "Coordinator, 13:59 CST Nov 7: q_max main has 33 TypeScript errors.",
-  "note": "Renamed from qmax-main-map-ts at 14:00 CST. The MAP part stays with step qmax-map-format-skew (coordinator, 14:00 CST). Unclear: q_max repo; not readable from claude-settings (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJKzRCmwHVEerq6qBgSn).",
+  "note": "Renamed from qmax-main-map-ts at 14:00 CST. The MAP part stays with step qmax-map-format-skew (coordinator, 14:00 CST). Unclear: q_max repo; not readable from claude-settings (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-qmax-verify-report-fixes]).",
   "lane": "",
   "updatedAt": "2026-11-12T07:22:00-06:00"
 }

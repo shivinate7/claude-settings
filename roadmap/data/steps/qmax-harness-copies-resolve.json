@@ -1,7 +1,7 @@
 {
   "title": "q_max: read import-reader and source-text from claude-settings, and delete q_max's copies",
   "why": "#1006's leftover (lane qmax-revive-idle): q_max main still keeps its own copies of harness/import-reader.mjs (61 lines) and harness/source-text.mjs (201 lines), so two homes drift.",
-  "note": "Read both through harness/map-skill.mjs, the one resolver, then delete the copies. Done: neither file exists in q_max main, and the checks that used them still pass. Filed under pr-backlog-clear. Unclear: q_max repo; not readable from claude-settings (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL34hZs3F4j8Tq4iVVx).",
+  "note": "Read both through harness/map-skill.mjs, the one resolver, then delete the copies. Done: neither file exists in q_max main, and the checks that used them still pass. Filed under pr-backlog-clear. Unclear: q_max repo; not readable from claude-settings (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-qmax-harness-copies]).",
   "phase": "now",
   "status": "ready",
   "order": 0.25,

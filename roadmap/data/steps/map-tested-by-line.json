@@ -4,6 +4,6 @@
   "status": "done",
   "order": 150.5,
   "why": "The shared map has no tested-by line, so banchi lost 81 checked test-to-file links when banchi #1063 (item 209 a) moved to it.",
-  "note": "Nov 5 21:37 CST (triage): MAP11 on main (commit bee15802).\nNov 5 12:29 CST (coordinator): lane session_013NEJL1i7HSru8MRKq6B1BY started; builds on a meanwhile. Owner question: page item 270 (how strict the check is). Nov 5 09:35 CST (coordinator): needs a design first. Its lane starts after map7-scope-mappaths and map-show-decision-lookup land, because all three touch the same skill.",
+  "note": "Nov 5 21:37 CST (triage): MAP11 on main (commit bee15802).\nNov 5 12:29 CST (coordinator): lane [ended:lane:-map-tested-by-line] started; builds on a meanwhile. Owner question: page item 270 (how strict the check is). Nov 5 09:35 CST (coordinator): needs a design first. Its lane starts after map7-scope-mappaths and map-show-decision-lookup land, because all three touch the same skill.",
   "updatedAt": "2026-11-06T03:37:00Z"
 }

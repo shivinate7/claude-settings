@@ -4,6 +4,6 @@
   "status": "done",
   "order": 478,
   "why": "Owner, chat, Nov 1 22:52 CST: plan what decides a trusted device or session, reach without trust, and a message-board fallback.",
-  "note": "Nov 6 12:51 CST (coordinator): PR #1051 (plan doc) goes to batch runner 8.\nPlan only. Lane session_013NEJL2LFR3L7iTRZVqw8Uf, started Nov 1 22:55 CST. Ready. Port: yes. Triage sweep 03:45 CST Nov 10: done; plan PR #1051 merged.",
+  "note": "Nov 6 12:51 CST (coordinator): PR #1051 (plan doc) goes to batch runner 8.\nPlan only. Lane [ended:lane-local-session-reach-(claude-settings-plan-onl], started Nov 1 22:55 CST. Ready. Port: yes. Triage sweep 03:45 CST Nov 10: done; plan PR #1051 merged.",
   "updatedAt": "2026-11-10T03:45:00-06:00"
 }

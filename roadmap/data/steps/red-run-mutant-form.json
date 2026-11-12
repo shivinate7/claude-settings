@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "",
   "why": "#1655 (57526aaec) and #1647 (18b628f73) used `Red-run: none: ...; mutant red` for tests that cannot fail on an old commit; fix checks called it a mislabel.",
-  "note": "Fix: add `Red-run: mutant: <mutation> -> <N> failed on <sha>` to lint/check_red_run.py and rewrite its header. Done check: lint/test_check_red_run.py accepts the mutant form and rejects a malformed one. Filed from lane notes-fix-large-3 (session_013NEJL1rKuNDSwMxwArjXHb), 18:04 CST Nov 7, at the coordinator's ask. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL1rKuNDSwMxwArjXHb).",
+  "note": "Fix: add `Red-run: mutant: <mutation> -> <N> failed on <sha>` to lint/check_red_run.py and rewrite its header. Done check: lint/test_check_red_run.py accepts the mutant form and rejects a malformed one. Filed from lane notes-fix-large-3 ([ended:lane:-notes-fix-large-3]), 18:04 CST Nov 7, at the coordinator's ask. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-notes-fix-large-3]).",
   "updatedAt": "2026-11-12T07:22:00-06:00"
 }

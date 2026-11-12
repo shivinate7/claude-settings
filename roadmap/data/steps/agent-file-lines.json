@@ -4,6 +4,6 @@
   "status": "done",
   "order": 488,
   "why": "Deep audit 1102 (report docs/plans/deep-audit/report.md on audit/deep-1102 6b6a41f3, rows staged-diff-step-agents and taskstop-all-agents): agents/designer.md and agents/record-writer.md lack the staged-diff step (decision lanes-start-in-tool-worktrees:37); agents/design-reviewer.md and agents/claude-code-guide.md lack TaskStop (debt agent-reports-with-live-watcher).",
-  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): DONE, evidence on main: agent_brief.py diff --cached.\nStaged-diff: propose one home in hooks/agent_brief.py COMMON; a test reads each committing agent file, red on designer and record-writer. TaskStop: a lint test requires it in each agents/ file that can run Bash, red on design-reviewer and claude-code-guide. Lane session_013NEJKzkFkD59zqcvN8JigR, started by the coordinator Nov 3. Ready.",
+  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): DONE, evidence on main: agent_brief.py diff --cached.\nStaged-diff: propose one home in hooks/agent_brief.py COMMON; a test reads each committing agent file, red on designer and record-writer. TaskStop: a lint test requires it in each agents/ file that can run Bash, red on design-reviewer and claude-code-guide. Lane [ended:lane:-agent-file-lines-(staged-diff-TaskStop)], started by the coordinator Nov 3. Ready.",
   "updatedAt": "2026-11-06T18:03:00Z"
 }

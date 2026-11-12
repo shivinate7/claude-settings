@@ -4,6 +4,6 @@
  "status": "done",
  "order": 103.3375002,
  "why": "From the test and CI plan (docs/plans/test-ci-standard.md, merged Nov 1 18:28 CST in PR #977), lane 2 of 12, ranked by harm avoided.",
- "note": "Done on main: batch 65 (ce951ee6, PRs #1053 and #1062); lane archived (triage check, Nov 3 17:10 CST). Earlier note: Repo: claude-settings. Fix the test-author wording; done when a check refuses a lane PR with new tests and no red run. Ready. Port: yes. Doing, Nov 1 18:31 CST: lane session_013NEJL4LWMqYCsYAAqkNbne.",
+ "note": "Done on main: batch 65 (ce951ee6, PRs #1053 and #1062); lane archived (triage check, Nov 3 17:10 CST). Earlier note: Repo: claude-settings. Fix the test-author wording; done when a check refuses a lane PR with new tests and no red run. Ready. Port: yes. Doing, Nov 1 18:31 CST: lane [ended:lane:-tci-2-tci-3-test-first-guards].",
  "updatedAt": "2026-11-03T23:10:00Z"
 }

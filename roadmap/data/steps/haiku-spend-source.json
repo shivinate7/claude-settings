@@ -1,6 +1,6 @@
 {
   "title": "Measure which caller spends the Haiku tokens: the auto-mode permission check or the judge hooks",
-  "why": "Lane token-spend-sources (session_013NEJL2ffE4xixcyVkMbpuV), 12:16 CST Nov 8, measured: Haiku is 10-25% of a lane's cost; the caller is unmeasured.",
+  "why": "Lane token-spend-sources ([ended:token-spend-sources]), 12:16 CST Nov 8, measured: Haiku is 10-25% of a lane's cost; the caller is unmeasured.",
   "note": "",
   "phase": "now",
   "owner": "claude-settings",

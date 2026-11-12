@@ -1,7 +1,7 @@
 {
   "title": "A repo with no ci-job config gets a floor and an unknown-cap line, and record ci-job-caps holds the matrix-cap rule",
   "why": "Follow-up from lane job-cap-expressions: a repo with no config file sets no floor and prints no unknown-cap line, so a missing cap goes unseen. The matrix-cap rule is not yet in record ci-job-caps.",
-  "note": "Fix: one PR from 7267de93c with `Merge after: #1876`; it sets the floor and prints the unknown-cap line when no config exists, and lands the matrix-cap rule in record ci-job-caps. Queue fix (owner item 386: a fix rides in the lane that found it). Slug from the coordinator (04:35 CST Nov 8). Filed 04:37 CST Nov 8. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL2mzycmcUKim3G7RkZ).",
+  "note": "Fix: one PR from 7267de93c with `Merge after: #1876`; it sets the floor and prints the unknown-cap line when no config exists, and lands the matrix-cap rule in record ci-job-caps. Queue fix (owner item 386: a fix rides in the lane that found it). Slug from the coordinator (04:35 CST Nov 8). Filed 04:37 CST Nov 8. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-job-cap-expressions]).",
   "phase": "now",
   "status": "ready",
   "order": 603,

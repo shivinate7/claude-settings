@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "",
   "why": "Lane replay-profile-parts: commit 7ba74efd9 staged a git rm and left a tracked edit in the same folder unstaged (coordinator, 17:31 CST Nov 7).",
-  "note": "Follows this lane's stale-tree PR (step resumed-agent-stale-tree), same commit-time home. Done check: a red test where the commit asks, and an unstaged edit in another folder still passes. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL49gUhQAEPTctz3JHn).",
+  "note": "Follows this lane's stale-tree PR (step resumed-agent-stale-tree), same commit-time home. Done check: a red test where the commit asks, and an unstaged edit in another folder still passes. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-resumed-agent-stale-tree]).",
   "updatedAt": "2026-11-12T07:22:00-06:00"
 }

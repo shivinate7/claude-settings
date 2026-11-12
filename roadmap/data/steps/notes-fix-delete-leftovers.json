@@ -5,7 +5,7 @@
   "order": 1.3,
   "owner": "coordinator",
   "why": "Coordinator, 14:32 CST Nov 7.",
-  "note": "Title read from the slug; the coordinator was asked for a one-line goal. Triage sweep 04:49 CST Nov 10: back to ready. Lane session_013NEJL38tqHPZrQNHNdo9ba is archived or finished; no open PR (725 read), no cited PR merged, no cited commit and no slug on main. Coordinator started lane session_013NEJKzZHBm92GrFExrQ6qE at 04:53 CST Nov 10. Done, coordinator 04:59 CST Nov 10: both rows it names are fixed on main (agent-end-log-loses-row: janitor/agent_end_reap.py log wait and 7c26e9bf8; install-checkout-flake: hooks/test_install_src.sh exports CLAUDE_SETTINGS_FETCH_TIMEOUT=30), and the delete pass removed both. Coordinator pick, process only: the step had no named goal, so no page item.",
+  "note": "Title read from the slug; the coordinator was asked for a one-line goal. Triage sweep 04:49 CST Nov 10: back to ready. Lane [ended:lane:-notes-fix-delete-leftovers] is archived or finished; no open PR (725 read), no cited PR merged, no cited commit and no slug on main. Coordinator started lane [ended:notes-fix-delete-leftovers] at 04:53 CST Nov 10. Done, coordinator 04:59 CST Nov 10: both rows it names are fixed on main (agent-end-log-loses-row: janitor/agent_end_reap.py log wait and 7c26e9bf8; install-checkout-flake: hooks/test_install_src.sh exports CLAUDE_SETTINGS_FETCH_TIMEOUT=30), and the delete pass removed both. Coordinator pick, process only: the step had no named goal, so no page item.",
   "lane": "session_013NEJKzZHBm92GrFExrQ6qE",
   "updatedAt": "2026-11-10T04:56:00-06:00"
 }

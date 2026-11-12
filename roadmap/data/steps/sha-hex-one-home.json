@@ -5,7 +5,7 @@
   "owner": "coordinator",
   "lane": "",
   "why": "Two readers of the same thing drift apart; one home keeps them in step.",
-  "note": "Topic merge-tool. merge.py's revert-commit scan uses SHA_HEX, and janitor/sweep.py _live_remote_heads shares GitLock's ls-remote reader. Lane merge-lock-expired-delete-race runs it, stacked on #1708. A SHA-256 note: fix none, until 2026-11-21. Filed 19:22 CST Nov 7. Built as #1729, reviewed, with runner 8; stack #1460 -> #1657 -> #1708 -> #1729 (20:10 CST). Reviewed and with runner 8 as #1729 (ada21a45f) (lane merge-lock-expired-delete-race, 08:28 CST Nov 8). Doing 05:58 CST Nov 10: open PR #1729 on branch sha-hex-one-home (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL2sZ68ECc62SiwfqPk).",
+  "note": "Topic merge-tool. merge.py's revert-commit scan uses SHA_HEX, and janitor/sweep.py _live_remote_heads shares GitLock's ls-remote reader. Lane merge-lock-expired-delete-race runs it, stacked on #1708. A SHA-256 note: fix none, until 2026-11-21. Filed 19:22 CST Nov 7. Built as #1729, reviewed, with runner 8; stack #1460 -> #1657 -> #1708 -> #1729 (20:10 CST). Reviewed and with runner 8 as #1729 (ada21a45f) (lane merge-lock-expired-delete-race, 08:28 CST Nov 8). Doing 05:58 CST Nov 10: open PR #1729 on branch sha-hex-one-home (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-merge-lock-expired-delete-race]).",
   "phase": "now",
   "updatedAt": "2026-11-12T07:22:00-06:00"
 }

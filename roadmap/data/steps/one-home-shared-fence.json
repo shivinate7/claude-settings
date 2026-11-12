@@ -5,7 +5,7 @@
   "order": 263.0,
   "owner": "coordinator",
   "why": "Coordinator 14:49 CST: the word-run checks each carry their own code-fence pattern.",
-  "note": "One shared FENCE regex in lint/word_runs.py that accepts any indent, with today's verdicts pinned by the tests on branch one-home-notes. Kept doing on: #1564 open draft (one-home-shared-fence-r2-build) (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJKzbDHRpreufhWY48Vb).",
+  "note": "One shared FENCE regex in lint/word_runs.py that accepts any indent, with today's verdicts pinned by the tests on branch one-home-notes. Kept doing on: #1564 open draft (one-home-shared-fence-r2-build) (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-one-home-check]).",
   "lane": "",
   "updatedAt": "2026-11-12T07:22:00-06:00"
 }

@@ -4,6 +4,6 @@
   "status": "done",
   "order": 499,
   "why": "Debt local-triage-no-tier-proof (docs/debts/local-triage-no-tier-proof.md, commit d221ebb6, from home triage): guard rule roadmap-one-writer refuses a local triage session's push to its record branch, because a local session has no cloud tags to prove its tier.",
-  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): DONE, evidence on main: 94b0df6b0.\nDebt filed: docs/debts debt `local-triage-tier-proof` (a local triage session cannot prove its tier). Owner ruling 2026-11-05 07:44 CST (item local-triage-tier-word): no tier word, not cloud-only; a tier-file fix only if it works on both Mac and Windows; until then build nothing. Debt PR is a draft with batch runner 8 (lane local-triage-tier-debt, session_013NEJKyuP9hv1hMGDEG69G2); this step is done when it merges.",
+  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): DONE, evidence on main: 94b0df6b0.\nDebt filed: docs/debts debt `local-triage-tier-proof` (a local triage session cannot prove its tier). Owner ruling 2026-11-05 07:44 CST (item local-triage-tier-word): no tier word, not cloud-only; a tier-file fix only if it works on both Mac and Windows; until then build nothing. Debt PR is a draft with batch runner 8 (lane local-triage-tier-debt, [ended:lane:-local-triage-tier-debt]); this step is done when it merges.",
   "updatedAt": "2026-11-06T18:03:00Z"
 }

@@ -1,6 +1,6 @@
 {
   "title": "Note stale011-batch-moves-cite becomes a debt",
-  "why": "Coordinator 13:07 CST Nov 8, from lane cite-range-symbol-match (session_013NEJL34KjkQwzUueKThXhM), #2196 round 3 PASS at 179f482ad: round 3 measured 4 of the 12 latest main merge ranges with a cite another lane moved, so Claude hits it in normal work and the note becomes a debt (rule roles-findings-are-debts-or-notes). Merge after #2196.",
+  "why": "Coordinator 13:07 CST Nov 8, from lane cite-range-symbol-match ([ended:lane:-cite-range-symbol-match]), #2196 round 3 PASS at 179f482ad: round 3 measured 4 of the 12 latest main merge ranges with a cite another lane moved, so Claude hits it in normal work and the note becomes a debt (rule roles-findings-are-debts-or-notes). Merge after #2196.",
   "note": " Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose after code; it waits behind the code it describes. Lane code-decisions started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
   "phase": "now",
   "owner": "claude-settings",

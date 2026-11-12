@@ -4,6 +4,6 @@
   "status": "done",
   "order": 103.32,
   "why": "Owner ruling, 11:38 CST Nov 6: a self-caused mistake is a strong sign a guard is missing; the report names the missing guard, not an apology.",
-  "note": "Nov 6 14:40 CST (triage audit): done. Merged on main: rule building-mistake-names-its-guard and the mistake check (commits 9970c5f0, 3c2d1d97).\nNov 6 11:38 CST (coordinator): lane started, session_013NEJL4EmKMDaZuw8A7wA3v.",
+  "note": "Nov 6 14:40 CST (triage audit): done. Merged on main: rule building-mistake-names-its-guard and the mistake check (commits 9970c5f0, 3c2d1d97).\nNov 6 11:38 CST (coordinator): lane started, [ended:lane:-mistake-means-missing-guard].",
   "updatedAt": "2026-11-06T20:40:00Z"
 }

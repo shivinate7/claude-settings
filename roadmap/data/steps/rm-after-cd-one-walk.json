@@ -5,7 +5,7 @@
   "order": 266.90999999999997,
   "owner": "coordinator",
   "why": "guard_rm_var's _cd_word (rm-after-cd) keeps its own textual cd walk, apart from #1508's dir_before_segment: two homes for one capability.",
-  "note": "Starts after #1508 and #1670 merge. Done check: rm-after-cd reads dir_before_segment, and its tests keep the same verdicts. Gap from lane git-write-after-failed-cd via the coordinator, 21:00 CST Nov 7; the coordinator starts the lane then. Filed 21:00 CST Nov 7. Coordinator, Nov 8 19:02 CST: stays todo until #1670 merges (#1508 is merged). Lane session_013NEJKzCcVJYhu39C4BXuSP started 12:13 CST Nov 9 (coordinator). Back to todo 12:18 CST Nov 9 (coordinator): starts after #1670 merges; its lane session_013NEJKzCcVJYhu39C4BXuSP stays idle until then.",
+  "note": "Starts after #1508 and #1670 merge. Done check: rm-after-cd reads dir_before_segment, and its tests keep the same verdicts. Gap from lane git-write-after-failed-cd via the coordinator, 21:00 CST Nov 7; the coordinator starts the lane then. Filed 21:00 CST Nov 7. Coordinator, Nov 8 19:02 CST: stays todo until #1670 merges (#1508 is merged). Lane [ended:Lane-rm-after-cd-one-walk] started 12:13 CST Nov 9 (coordinator). Back to todo 12:18 CST Nov 9 (coordinator): starts after #1670 merges; its lane [ended:Lane-rm-after-cd-one-walk] stays idle until then.",
   "updatedAt": "2026-11-10T11:20:00-06:00",
   "lane": "archived, handoff at handoffs/session_013NEJKzCcVJYhu39C4BXuSP.md on archive/session-handoffs-2026-11-10"
 }

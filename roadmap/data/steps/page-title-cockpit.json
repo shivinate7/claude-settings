@@ -4,6 +4,6 @@
   "status": "done",
   "order": 484.100004,
   "why": "Owner ruling in chat, Nov 2 11:12 CST: each repo's page is titled just \"<repo> Cockpit\".",
-  "note": "Nov 6 11:51 CST (coordinator audit, Explore sonnet; PR head reachable from origin/main): DONE, evidence #1100 on main.\nLane page-title-cockpit (session_013NEJL1fXkpTkTyXnWoLpvb), started 11:13 CST by the coordinator. After it merges, each page writer republishes its page; triage 5 republishes the claude-settings page. Port: yes, every repo's page.",
+  "note": "Nov 6 11:51 CST (coordinator audit, Explore sonnet; PR head reachable from origin/main): DONE, evidence #1100 on main.\nLane page-title-cockpit ([ended:lane:-page-title-cockpit]), started 11:13 CST by the coordinator. After it merges, each page writer republishes its page; triage 5 republishes the claude-settings page. Port: yes, every repo's page.",
   "updatedAt": "2026-11-06T17:53:00Z"
 }

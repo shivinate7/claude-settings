@@ -4,6 +4,6 @@
  "status": "done",
  "order": 479,
  "why": "Owner, chat, Nov 1 23:31 CST, pick a: every owner question goes to the page writer in the same turn it is asked, and an owner answer in chat closes the page item. No 5-minute wait. Logged as Queue item 158.",
- "note": "Done: merged in batch 1, PR #1117 as main 72034d9a, Nov 3 17:23 CST. Earlier note: Lane session_013NEJL1ZBXHMUwyb8FNiUAJ mechanizes it and rewrites rule questions-go-to-owner's 5-minute clause. Ready. Port: yes.",
+ "note": "Done: merged in batch 1, PR #1117 as main 72034d9a, Nov 3 17:23 CST. Earlier note: Lane [ended:lane-questions-reach-page] mechanizes it and rewrites rule questions-go-to-owner's 5-minute clause. Ready. Port: yes.",
  "updatedAt": "2026-11-03T23:28:00Z"
 }

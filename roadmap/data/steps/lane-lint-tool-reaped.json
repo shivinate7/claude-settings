@@ -1,6 +1,6 @@
 {
   "title": "Lane lint reads unknown, or refuses to start, when its own worktree can be reaped mid-run",
-  "why": "Lane lane-lint-hook-suites (session_013NEJL3JoPTyn7Ny4jUb88L), 12:22 CST Nov 8: it ran `merge --lane-lint 1844` from a finished agent's worktree; the agent-end cleanup removed that worktree mid-run, and 30 CI steps read `FAIL ... (verdict printed no verdict line)`. A run whose own tool vanished should read unknown, or refuse to start from a worktree the cleanup can reap. Stopgap: run it from a `git archive` copy in the scratchpad.",
+  "why": "Lane lane-lint-hook-suites ([ended:lane:-lane-lint-hook-suites]), 12:22 CST Nov 8: it ran `merge --lane-lint 1844` from a finished agent's worktree; the agent-end cleanup removed that worktree mid-run, and 30 CI steps read `FAIL ... (verdict printed no verdict line)`. A run whose own tool vanished should read unknown, or refuse to start from a worktree the cleanup can reap. Stopgap: run it from a `git archive` copy in the scratchpad.",
   "note": "",
   "phase": "now",
   "owner": "claude-settings",

@@ -1,7 +1,7 @@
 {
   "title": "A test lint flags a `\" + NAME + \"` concatenation inside one string literal in hooks/test_*.py",
-  "why": "Lane env-file-shell-c (session_013NEJKytPs46Qp4KDoqbDvz), relayed by the coordinator 14:28 CST Nov 8: a test-author wrote `'\" + ENV + \"'` inside one Python string literal, so 8 guard test cases never named the env file and passed green while testing nothing. The lane caught it by probe. No test-lint step covers it (triage grep). Scan with the Python tokenizer, so a real concatenation outside a literal is not flagged.",
-  "note": " Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL18smzkUjB4HfZkmrC).",
+  "why": "Lane env-file-shell-c ([ended:env-file-shell-c]), relayed by the coordinator 14:28 CST Nov 8: a test-author wrote `'\" + ENV + \"'` inside one Python string literal, so 8 guard test cases never named the env file and passed green while testing nothing. The lane caught it by probe. No test-lint step covers it (triage grep). Scan with the Python tokenizer, so a real concatenation outside a literal is not flagged.",
+  "note": " Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:env-const-in-literal]).",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "",

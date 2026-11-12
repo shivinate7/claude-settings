@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "",
   "why": "The merge tool skips judging `merge -C /other $(echo 5) --confirm`, because the `)` that closes a `$(` cuts the args (round 3 on #2504, 91dfc65b1; the same on #1166's head; coordinator 08:26 CST Nov 8).",
-  "note": "Done check: a red test where that form is judged. Merge after #2504. Debt merge-subst-paren-closes points at it. Doing in lane merge-repo-dir-flag (session_013NEJL19PYKPFXLekGuTmnX). Filed by triage 08:27 CST Nov 8. #2509 (merge-subst-paren-v2) released to batch 72 after #1166 and #2504 (coordinator 07:31 CST Nov 10). It retires debt merge-subst-paren-closes. Set done when #2509 merges. Dead wait re-pointed 13:18 CST Nov 10 (step dead-pr-waits): #1982 closed unmerged; #2504 replaced it. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL19PYKPFXLekGuTmnX).",
+  "note": "Done check: a red test where that form is judged. Merge after #2504. Debt merge-subst-paren-closes points at it. Doing in lane merge-repo-dir-flag ([ended:lane:-merge-repo-dir-flag]). Filed by triage 08:27 CST Nov 8. #2509 (merge-subst-paren-v2) released to batch 72 after #1166 and #2504 (coordinator 07:31 CST Nov 10). It retires debt merge-subst-paren-closes. Set done when #2509 merges. Dead wait re-pointed 13:18 CST Nov 10 (step dead-pr-waits): #1982 closed unmerged; #2504 replaced it. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-merge-repo-dir-flag]).",
   "updatedAt": "2026-11-12T07:22:00-06:00"
 }

@@ -4,6 +4,6 @@
  "status": "done",
  "order": 505,
  "why": "Child-guard survey verdict: promote. Plan docs/plans/child-guard-promotion.md, section 'Promotion lanes', on branch child-guard-promotion (PR #1119, head ea66d8e), lane 6.",
- "note": "Dropped, not built (coordinator, Nov 3 16:47 CST): its premise fails. bin/ci-job <job> --lint already runs code-check locally on a draft (lane session_013NEJL3AJAj8PFXsQpZswCu measured it at 16:47 CST). The degen removal is step comment-check-degen-removal.",
+ "note": "Dropped, not built (coordinator, Nov 3 16:47 CST): its premise fails. bin/ci-job <job> --lint already runs code-check locally on a draft (lane [ended:lane:-comment-check-local-entry] measured it at 16:47 CST). The degen removal is step comment-check-degen-removal.",
  "updatedAt": "2026-11-03T22:48:00Z"
 }

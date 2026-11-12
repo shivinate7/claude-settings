@@ -5,6 +5,6 @@
   "order": 261.3,
   "owner": "coordinator",
   "why": "Coordinator, 14:09 CST Nov 7: #1437 closed as replaced by #1353 (merge-guard-flag-from-paths). This is the part of #1437 that #1353 left out.",
-  "note": "Starts after step pr-state-is-on-the-pr. Lane merge-guard-flag-from-paths (session_013NEJKzA9twzd9Ahb9mcj3L) confirmed the gap at 22:34 CST Nov 7: refuse_owed_round (#1773) and --reviewed read only the record's label, so a hand-written record gets past. Fix: run #1353's guard_hits in both, through one helper. Also starts after #1773. Same owner ask as merge-guard-flag-from-paths (ask-mw59xljoxp), so the hold lets it start.",
+  "note": "Starts after step pr-state-is-on-the-pr. Lane merge-guard-flag-from-paths ([ended:lane:-merge-guard-flag-from-paths]) confirmed the gap at 22:34 CST Nov 7: refuse_owed_round (#1773) and --reviewed read only the record's label, so a hand-written record gets past. Fix: run #1353's guard_hits in both, through one helper. Also starts after #1773. Same owner ask as merge-guard-flag-from-paths (ask-mw59xljoxp), so the hold lets it start.",
   "updatedAt": "2026-11-07T22:33:00-06:00"
 }

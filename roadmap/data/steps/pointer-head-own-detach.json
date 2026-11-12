@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "",
   "why": "The pointer-head hook refused `git checkout --detach FETCH_HEAD` in an agent's own worktree on PR #1625, though briefs tell agents to detach (coordinator, 17:17 CST Nov 7). A false alarm on an act the briefs require.",
-  "note": "Done check: a red test on the detach in an agent-owned tree, with a detach in the main checkout still refused. Unclear: guard_pointer.py passes other trees; no detach test or Nov 7 fix found (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL1mEoRz2pudgzqgH58).",
+  "note": "Done check: a red test on the detach in an agent-owned tree, with a detach in the main checkout still refused. Unclear: guard_pointer.py passes other trees; no detach test or Nov 7 fix found (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-pointer-head-own-detach]).",
   "updatedAt": "2026-11-12T07:22:00-06:00"
 }

@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "",
   "why": "A resumed agent keeps its old id, and the stall watch does not list it again.",
-  "note": "Third of three. Stacked on #1682. Filed from lane stall-watch-agents, 18:38 CST Nov 7. Started 19:37 CST Nov 7, stacked on #1682. Built as #1730 (review record at 6653345), with runner 8 (20:10 CST). Doing 05:58 CST Nov 10: open PR #1730 on branch stall-watch-resume (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJKzPiiVLh3Sr1Jdoj76).",
+  "note": "Third of three. Stacked on #1682. Filed from lane stall-watch-agents, 18:38 CST Nov 7. Started 19:37 CST Nov 7, stacked on #1682. Built as #1730 (review record at 6653345), with runner 8 (20:10 CST). Doing 05:58 CST Nov 10: open PR #1730 on branch stall-watch-resume (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-stall-watch-agents]).",
   "updatedAt": "2026-11-12T07:22:00-06:00"
 }

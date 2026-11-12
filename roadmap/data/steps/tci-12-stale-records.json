@@ -4,6 +4,6 @@
  "status": "done",
  "order": 103.3375012,
  "why": "From the test and CI plan (docs/plans/test-ci-standard.md, merged Nov 1 18:28 CST in PR #977), lane 12 of 12, ranked by harm avoided.",
- "note": "Done on main: PR #991 in batch 60 (PR #1009); lane archived (triage check, Nov 3 17:10 CST). Earlier note: Repo: claude-settings. Fix docs/decisions/same-check-kinds.md, lint/rule_mechanisms.json and the cap comments in .github/workflows/checks.yml. Ready. Port: yes. Doing, Nov 1 18:31 CST: lane session_013NEJL1Ki9kmKrK5evyHagv. Possible false alarm found Nov 1 (needs a line in docs/debts/notes.md by a lane): the report guard's model-name check reads only the latest reviewer spawn, so it flags a correct \"reviewer haiku\" for round 1.",
+ "note": "Done on main: PR #991 in batch 60 (PR #1009); lane archived (triage check, Nov 3 17:10 CST). Earlier note: Repo: claude-settings. Fix docs/decisions/same-check-kinds.md, lint/rule_mechanisms.json and the cap comments in .github/workflows/checks.yml. Ready. Port: yes. Doing, Nov 1 18:31 CST: lane [ended:lane:-tci-12-stale-records]. Possible false alarm found Nov 1 (needs a line in docs/debts/notes.md by a lane): the report guard's model-name check reads only the latest reviewer spawn, so it flags a correct \"reviewer haiku\" for round 1.",
  "updatedAt": "2026-11-03T23:10:00Z"
 }

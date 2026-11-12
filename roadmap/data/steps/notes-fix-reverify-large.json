@@ -5,7 +5,7 @@
   "order": 1.21,
   "owner": "coordinator",
   "why": "Coordinator, 14:23 CST Nov 7, from notes-keep-reverify's re-check of 146 rows.",
-  "note": " Possible false alarm (lane notes-fix-large-1, 20:29 CST Nov 8): the installed detached-launch guard refused a #2338 reviewer's read-only grep as 'starts a process and detaches it'; its only `&` was inside quotes or in `&&`. #2338 changes the glued-& reading in hooks/guard_kill.py; its round 2 adds rows with `&` inside quotes, a lone apostrophe and a `#` in text. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL4AKgUjS1CWQvcdNwc).",
+  "note": " Possible false alarm (lane notes-fix-large-1, 20:29 CST Nov 8): the installed detached-launch guard refused a #2338 reviewer's read-only grep as 'starts a process and detaches it'; its only `&` was inside quotes or in `&&`. #2338 changes the glued-& reading in hooks/guard_kill.py; its round 2 adds rows with `&` inside quotes, a lone apostrophe and a `#` in text. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-notes-fix-reverify-large]).",
   "lane": "",
   "updatedAt": "2026-11-12T07:22:00-06:00"
 }

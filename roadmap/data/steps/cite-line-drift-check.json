@@ -5,7 +5,7 @@
   "order": 536.2,
   "owner": "coordinator",
   "why": "Lane prose-governance-workflow, relayed by the coordinator 2026-11-07 04:15 CST: a `(read path:line)` cite drifts on any edit above it. STALE002 checks only that the file exists, and record review caught five drifted cites by hand.",
-  "note": "Under step prose-governance-workflow. At merge, re-read the cited line and flag it when its text changed in the merge range. Done check: a red test on a drifted cite, and green on a stable one. A check's verdict changes, so a build lane (test-author, builder, reviewer). Same lane as prose-judge-labelled-set. No owner question. Lane prose-governance-workflow (session_013NEJL32AmBg2eZnNkXRFQK) started it 2026-11-07 04:15 CST. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1409. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was open PR #1409).",
+  "note": "Under step prose-governance-workflow. At merge, re-read the cited line and flag it when its text changed in the merge range. Done check: a red test on a drifted cite, and green on a stable one. A check's verdict changes, so a build lane (test-author, builder, reviewer). Same lane as prose-judge-labelled-set. No owner question. Lane prose-governance-workflow ([ended:lane:-prose-governance-workflow]) started it 2026-11-07 04:15 CST. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1409. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was open PR #1409).",
   "updatedAt": "2026-11-12T07:22:00-06:00",
   "lane": ""
 }

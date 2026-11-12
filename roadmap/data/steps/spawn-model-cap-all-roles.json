@@ -5,7 +5,7 @@
   "order": 264.9,
   "lane": "",
   "why": "Incident 15:04 CST Nov 7: in lane notes-fix-reverify-large, test-authors ran on Opus, above the model-per-role table.",
-  "note": "Topic agent-models. Guard change, full review rounds. Red test first. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL2B1oRJaBTe16wm1VG).",
+  "note": "Topic agent-models. Guard change, full review rounds. Red test first. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:spawn-model-cap-all-roles]).",
   "owner": "coordinator",
   "updatedAt": "2026-11-12T07:22:00-06:00"
 }

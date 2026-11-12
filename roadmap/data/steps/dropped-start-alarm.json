@@ -4,7 +4,7 @@
   "status": "done",
   "order": 508,
   "why": "Child-guard survey verdict: promote. Plan docs/plans/child-guard-promotion.md, section 'Promotion lanes', on branch child-guard-promotion (PR #1119, head ea66d8e), lane 9.",
-  "note": "Promotion lane 9 of 11 (rank = work order). Child removal: banchi dropped-start-alarm.yml. Evidence: waits of 1,309 s and 4,141 s. The child pins the shared action or hook first, then removes its copy. A child removal starts only on the owner's ask. Lane session_013NEJKyjovszSALiJjquc3r, started by the coordinator Nov 3. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs). Coordinator started lane session_013NEJL33wvXPQtRejMvrLgE at 03:46-03:49 CST Nov 10. Done, coordinator 03:51 CST Nov 10: on main at e5aa7a607. The 03:45 sweep sent it to ready by mistake, because it read open PRs only.",
+  "note": "Promotion lane 9 of 11 (rank = work order). Child removal: banchi dropped-start-alarm.yml. Evidence: waits of 1,309 s and 4,141 s. The child pins the shared action or hook first, then removes its copy. A child removal starts only on the owner's ask. Lane [ended:lane:-dropped-start-alarm], started by the coordinator Nov 3. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs). Coordinator started lane [ended:dropped-start-alarm] at 03:46-03:49 CST Nov 10. Done, coordinator 03:51 CST Nov 10: on main at e5aa7a607. The 03:45 sweep sent it to ready by mistake, because it read open PRs only.",
   "updatedAt": "2026-11-10T03:52:00-06:00",
   "lane": "session_013NEJL33wvXPQtRejMvrLgE"
 }

@@ -3,7 +3,7 @@
   "lane": "",
   "title": "The env guard covers repeated docker value flags and npm exec, npx and pnpm exec",
   "why": "Two env gaps, taken as a PR stacked on #1776 (coordinator, 00:00 CST Nov 8).",
-  "note": "Lane name and stack from the coordinator; the step did not exist on the roadmap. Related open item 399 (env-guard-reads-code). Filed 00:02 CST Nov 8. Lane session_013NEJL2GCqtkmpEVLrpgPF2 owns #1776 and the stacked follow-up (coordinator, 00:01 CST Nov 8). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJL2GCqtkmpEVLrpgPF2.md on archive/session-handoffs-2026-11-10).",
+  "note": "Lane name and stack from the coordinator; the step did not exist on the roadmap. Related open item 399 (env-guard-reads-code). Filed 00:02 CST Nov 8. Lane [ended:Lane:-env-runner-child-command] owns #1776 and the stacked follow-up (coordinator, 00:01 CST Nov 8). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJL2GCqtkmpEVLrpgPF2.md on archive/session-handoffs-2026-11-10).",
   "phase": "now",
   "order": 544,
   "owner": "triage",

@@ -1,6 +1,6 @@
 {
   "title": "The Stop-hook report-shape guard stays quiet on a turn that lands nothing",
-  "why": "The report-shape Stop hook fired on a turn with no commit, push or merge, though rule reports-no-report-when-nothing-landed says such a turn gives no report (lane other-checkout-cp-own (session_013NEJL3R2CBFavz7grtbJY8); coordinator, 04:13 CST Nov 8).",
+  "why": "The report-shape Stop hook fired on a turn with no commit, push or merge, though rule reports-no-report-when-nothing-landed says such a turn gives no report (lane other-checkout-cp-own ([ended:lane:-other-checkout-cp-own]); coordinator, 04:13 CST Nov 8).",
   "note": "Fix: the report-shape guard reads the turn's landing acts first and skips a turn with no commit, push, merge or opened PR. Red case first: a one-line turn with no landing act is refused today; control: a turn that pushes and ends with no report still refuses (step tracking-turn-report-clash). Owner: lane other-checkout-cp-own, a fix in that lane (coordinator, 04:13 CST Nov 8). Queue fix. Filed 04:20 CST Nov 8. Built as #2060 (guard-false-alarms) with three other false-alarm fixes; head 64bd92f0c, round 3 PASS, net value zero, fix check PASS, lane lint PASS; handed to runner 8 (lane, 11:29 CST Nov 8).",
   "phase": "now",
   "status": "ready",

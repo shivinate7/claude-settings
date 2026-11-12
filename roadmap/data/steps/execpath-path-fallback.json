@@ -4,6 +4,6 @@
  "status": "done",
  "order": 492,
  "why": "Owner ask, Nov 3 15:53 CST; decision precompact-handoff, item 12: with CLAUDE_CODE_EXECPATH unset, the handoff hook cannot find the claude binary.",
- "note": "Nov 5 12:03 CST (lane): done with no code change. Cause: the cloud environment snapshot was built Nov 3 15:34 CST at da8d8073, before #1116 (decision cloud-start-hooks-run-fresh lines 34-35). Main's fallback works in a fresh run. Owner task: page item 269, rebuild the snapshot. Fall back to `claude` on the PATH in hooks/precompact_handoff.py; red first with the variable unset. Lane session_013NEJL1cPzSjSedg2F37vFZ, started by the coordinator Nov 3. Ready.",
+ "note": "Nov 5 12:03 CST (lane): done with no code change. Cause: the cloud environment snapshot was built Nov 3 15:34 CST at da8d8073, before #1116 (decision cloud-start-hooks-run-fresh lines 34-35). Main's fallback works in a fresh run. Owner task: page item 269, rebuild the snapshot. Fall back to `claude` on the PATH in hooks/precompact_handoff.py; red first with the variable unset. Lane [ended:lane:-execpath-path-fallback], started by the coordinator Nov 3. Ready.",
  "updatedAt": "2026-11-05T18:04:00Z"
 }

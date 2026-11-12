@@ -1,6 +1,6 @@
 {
   "title": "rule_audit resolves module-level string constants and scans hooks/call_judge.py",
-  "note": "PR 4 stacked on #1431. Built in #1446 (coordinator, 14:15 CST Nov 7). Doing 05:58 CST Nov 10: open PR #1446 on branch rule-audit-constant-ids (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJKzQsAzQkvsohtkLuJP).",
+  "note": "PR 4 stacked on #1431. Built in #1446 (coordinator, 14:15 CST Nov 7). Doing 05:58 CST Nov 10: open PR #1446 on branch rule-audit-constant-ids (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-judge-timeout-retries-once]).",
   "lane": "",
   "phase": "now",
   "status": "ready",

@@ -4,6 +4,6 @@
   "status": "done",
   "order": 103.21039,
   "why": "Nov 1 22:15 CST (coordinator): the mailaudit page URL that layout.py gives (artifact:mailaudit-page) reads \"not found\" from two sessions, and the owner's artifact list holds no mailaudit page. Mailaudit item 37, pending since Oct 28, had no live home.",
-  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): DONE, evidence on main: f0e674ba3.\nFix: a check reads each repo's page URL from layout.py and reports a page that is not found (unknown when the read cannot run, rule verification-report-unknown-reads); a dead URL points at the live page that holds that repo's items (today the claude-settings Queue, artifact:queue). Items from a dead page are re-filed there. Port: yes, every repo. Ready. Lane session_013NEJL1KXjcFYdWJrRWJ32D, started by the coordinator Nov 3 16:57 CST.",
+  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): DONE, evidence on main: f0e674ba3.\nFix: a check reads each repo's page URL from layout.py and reports a page that is not found (unknown when the read cannot run, rule verification-report-unknown-reads); a dead URL points at the live page that holds that repo's items (today the claude-settings Queue, artifact:queue). Items from a dead page are re-filed there. Port: yes, every repo. Ready. Lane [ended:lane:-layout-page-url-live], started by the coordinator Nov 3 16:57 CST.",
   "updatedAt": "2026-11-06T18:03:00Z"
 }

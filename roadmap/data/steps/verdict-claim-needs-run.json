@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "",
   "why": "Incident, 16:31 CST Nov 7: the coordinator told a lane that #1516's check would refuse an act, without running it, and the check passed it. Rule verification-report-unknown-reads.",
-  "note": "A send that claims a check or guard will refuse or allow something is refused unless the sender ran that check in the same turn or cites its run. Lane past-ruling-on-send takes it (coordinator, 17:05 CST). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL3ZtjRrvWWB5nAzQiv).",
+  "note": "A send that claims a check or guard will refuse or allow something is refused unless the sender ran that check in the same turn or cites its run. Lane past-ruling-on-send takes it (coordinator, 17:05 CST). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-past-ruling-on-send]).",
   "updatedAt": "2026-11-12T07:22:00-06:00"
 }

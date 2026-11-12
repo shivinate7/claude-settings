@@ -3,7 +3,7 @@
   "order": 265.2,
   "lane": "",
   "why": "A lane picks a lint code (STALEnnn, STEnnn) on its branch that another lane or main already uses. Proven case: stale-flags used STALE003 (cef5c8e31), which main uses for the dead-path check; it was renamed by hand to STALE007 in 62fe3dc93.",
-  "note": "A check, run in CI and in the merge tool's fresh-base re-check, refuses a code the branch adds that the base tip already defines, and a code defined twice in one tree. Red test first. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL2GctUCgksFKSWZykD).",
+  "note": "A check, run in CI and in the merge tool's fresh-base re-check, refuses a code the branch adds that the base tip already defines, and a code defined twice in one tree. Red test first. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lint-codes-unique]).",
   "owner": "coordinator",
   "phase": "now",
   "status": "ready",

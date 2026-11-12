@@ -1,7 +1,7 @@
 {
   "title": "Tests cover every STALE007 form, and the stale-cites-at-merge Test copy bullet matches the reader",
   "why": "STALE007 forms with no test: `add_argument(*NAME)`, a single-target loop over a table, a keyword helper argument, and a cost test for the helper read. The stale-cites-at-merge \"Test copy\" bullet calls the test helper `argument_flags` a near copy of the reader, though the reader now also reads tables and `*NAME` (lane prose-governance-workflow, 05:24 CST Nov 8).",
-  "note": "Fix: a test per form above, and the Test copy bullet rewritten to match the reader. Notes stale-flags-untested-forms and stale-flags-test-copy-stale in PR 1929 cite this step. Lands after PR 1179. Queue fix (owner 13:20 CST Nov 7). Filed 05:30 CST Nov 8; lane prose-governance-workflow (session_013NEJKz49VptC1nSSWVrPN8) filed it. Lane code-unmapped started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
+  "note": "Fix: a test per form above, and the Test copy bullet rewritten to match the reader. Notes stale-flags-untested-forms and stale-flags-test-copy-stale in PR 1929 cite this step. Lands after PR 1179. Queue fix (owner 13:20 CST Nov 7). Filed 05:30 CST Nov 8; lane prose-governance-workflow ([ended:lane:-prose-governance-workflow]) filed it. Lane code-unmapped started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
   "status": "doing",
   "order": 619,
   "lane": "session_013NEJL3VvsFr2K1WX9t5ch3",

@@ -1,7 +1,7 @@
 {
   "title": "The guard refuses Edit and Write in the pointer checkout",
   "why": "A lane edited the shared pointer checkout that other sessions read; guard pointer-head stopped only its branch switch, not the edits.",
-  "note": "Coordinator, 04:28 CST Nov 9. Incident: lane fresh-round3-route (#2411) edited the pointer checkout first; guard pointer-head refused only the branch switch. Harm: edits land in a shared checkout that other sessions read. Unassigned; the coordinator routes it after batch 68. Batch 68 merged (#2449, 11:55 CST Nov 9): free to start. Lane session_013NEJL37Ec6fLvdD1sAMqxo started 12:13 CST Nov 9 (coordinator). Done: on main by #2456, 247aab76a (coordinator's Explore agent (Sonnet) read of origin/main 0e6509a96, 05:01 CST Nov 10).",
+  "note": "Coordinator, 04:28 CST Nov 9. Incident: lane fresh-round3-route (#2411) edited the pointer checkout first; guard pointer-head refused only the branch switch. Harm: edits land in a shared checkout that other sessions read. Unassigned; the coordinator routes it after batch 68. Batch 68 merged (#2449, 11:55 CST Nov 9): free to start. Lane [ended:Lane-pointer-checkout-edit] started 12:13 CST Nov 9 (coordinator). Done: on main by #2456, 247aab76a (coordinator's Explore agent (Sonnet) read of origin/main 0e6509a96, 05:01 CST Nov 10).",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "archived, handoff at handoffs/session_013NEJL37Ec6fLvdD1sAMqxo.md on archive/session-handoffs-2026-11-10",

@@ -4,7 +4,7 @@
   "status": "done",
   "order": 103.345,
   "why": "Each claim about a GitHub act names the route that works.",
-  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): lane live; owner 11:33 CST: \"tons of github tools are blocked one way and work another in cloud\"; draft #1294. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs). Coordinator started lane session_013NEJL2BaXBKAKsaV9SaZoV at 03:46-03:49 CST Nov 10. Done, coordinator 03:51 CST Nov 10: on main at 3478d733b; the rest is step github-route-rows-rest. The 03:45 sweep sent it to ready by mistake, because it read open PRs only.",
+  "note": "Nov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): lane live; owner 11:33 CST: \"tons of github tools are blocked one way and work another in cloud\"; draft #1294. Triage sweep 03:45 CST Nov 10: back to ready; no lane named, no open PR (open PRs read pages 1-8, 725 PRs). Coordinator started lane [ended:github-route-claims] at 03:46-03:49 CST Nov 10. Done, coordinator 03:51 CST Nov 10: on main at 3478d733b; the rest is step github-route-rows-rest. The 03:45 sweep sent it to ready by mistake, because it read open PRs only.",
   "updatedAt": "2026-11-10T03:52:00-06:00",
   "lane": "session_013NEJL2BaXBKAKsaV9SaZoV"
 }

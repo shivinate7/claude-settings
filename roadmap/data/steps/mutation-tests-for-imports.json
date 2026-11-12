@@ -4,6 +4,6 @@
   "status": "done",
   "order": 103.29,
   "why": "The first real mutation-report run read 0/9 because `--tests-for` misses suites that import the module (run 42064515414).",
-  "note": "Nov 6 11:51 CST (coordinator audit, Explore sonnet; PR head reachable from origin/main): DONE, evidence #1268 on main.\nNov 5 11:27 CST (coordinator): lane session_013NEJL3fnCr7oTY49NLweMJ. Step mutation-report-child-adoption waits on this.",
+  "note": "Nov 6 11:51 CST (coordinator audit, Explore sonnet; PR head reachable from origin/main): DONE, evidence #1268 on main.\nNov 5 11:27 CST (coordinator): lane [ended:lane:-mutation-tests-for-imports]. Step mutation-report-child-adoption waits on this.",
   "updatedAt": "2026-11-06T17:53:00Z"
 }

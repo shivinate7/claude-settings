@@ -4,6 +4,6 @@
  "status": "done",
  "order": 103.33752,
  "why": "shiv, Oct 30 16:14 CDT (via coordinator): pick a on the setup gaps.",
- "note": "Lane session_013NEJL2aEYN1uRGADDZ5nr4. Cause: on Oct 30 shiv answered the item 98 outcome question to the coordinator in chat, and the page writer did not hear it. Done check: an answer given in chat to a page item reaches the page writer, who closes or updates the item. Done: lane page-answer-send merged to main in batch 42 (503b198f); lane idle since Nov 1 05:12 CST, archived by the coordinator.",
+ "note": "Lane [ended:lane-chat-answers-reach-page:-an-owner-s-chat-answ]. Cause: on Oct 30 shiv answered the item 98 outcome question to the coordinator in chat, and the page writer did not hear it. Done check: an answer given in chat to a page item reaches the page writer, who closes or updates the item. Done: lane page-answer-send merged to main in batch 42 (503b198f); lane idle since Nov 1 05:12 CST, archived by the coordinator.",
  "updatedAt": "2026-11-02T00:58:00Z"
 }

@@ -4,6 +4,6 @@
   "status": "done",
   "order": 103.3525,
   "why": "Owner pick 272 b (11:46 CST Nov 6): keep rule ux-swift-same-intent as written and file one debt per app that breaks it.",
-  "note": "Nov 6 12:17 CST (coordinator): DONE. Debts swift-stack-spacing-unset opened as home #559, degen #454 and mailaudit #200, all with batch runner 9. Item 272 closes when all three merge.\nNov 6 12:13 CST (coordinator): lane swift-layout-debts (session_013NEJL1fhSHHMagDmF1QHhu) started.\nCoordinator 12:12 CST. Rule home: docs/design/layout.md ux-swift-same-intent. Breaches (lane ux-swift-same-intent-check scan, Nov 6): home 30 of 302 stacks set no spacing; degen 37 of 214; mailaudit 10 of 87, plus a padding push at native/Manifest/ItemLine.swift:90. ios-adblock holds the rule.",
+  "note": "Nov 6 12:17 CST (coordinator): DONE. Debts swift-stack-spacing-unset opened as home #559, degen #454 and mailaudit #200, all with batch runner 9. Item 272 closes when all three merge.\nNov 6 12:13 CST (coordinator): lane swift-layout-debts ([ended:lane:-swift-layout-debts]) started.\nCoordinator 12:12 CST. Rule home: docs/design/layout.md ux-swift-same-intent. Breaches (lane ux-swift-same-intent-check scan, Nov 6): home 30 of 302 stacks set no spacing; degen 37 of 214; mailaudit 10 of 87, plus a padding push at native/Manifest/ItemLine.swift:90. ios-adblock holds the rule.",
   "updatedAt": "2026-11-06T18:17:30Z"
 }

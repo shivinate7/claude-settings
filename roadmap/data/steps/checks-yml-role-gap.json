@@ -4,6 +4,6 @@
   "status": "done",
   "order": 103.37,
   "why": "In the waiting-export lane (#1287) the guard refused the test-author on .github/workflows/checks.yml, so the orchestrator wrote the CI step itself. No agent role could add a test-run step the right way.",
-  "note": "Nov 6 11:44 CST (triage): #1291 merged Nov 6 01:08 CST.\nNov 5 23:55 CST (lane session_013NEJL4Khyddm2xUvEnQc4s): draft PR #1291 (role guard: a test-author owns a CI step that runs a test suite), head 9575f824, review round 3 PASS with positive net safety value, handed to batch runner 8. A test-author may add or remove only whole test-run steps; a builder is refused when it disables or drops a test run. New debt workflow-wrapped-test-run: a wrapped run such as `timeout 600 python3 ...` is refused as a dropped test.",
+  "note": "Nov 6 11:44 CST (triage): #1291 merged Nov 6 01:08 CST.\nNov 5 23:55 CST (lane [ended:lane:-checks-yml-role-gap]): draft PR #1291 (role guard: a test-author owns a CI step that runs a test suite), head 9575f824, review round 3 PASS with positive net safety value, handed to batch runner 8. A test-author may add or remove only whole test-run steps; a builder is refused when it disables or drops a test run. New debt workflow-wrapped-test-run: a wrapped run such as `timeout 600 python3 ...` is refused as a dropped test.",
   "updatedAt": "2026-11-06T17:44:00Z"
 }
