@@ -1108,6 +1108,31 @@ class WorktreeDecisionTests(unittest.TestCase):
         self.assertEqual(decision["reason"], "unreadable-subject")
 
 
+@contextlib.contextmanager
+def _unreadable_file(path):
+    """Every stat, lstat and open of PATH raises EACCES, and every other path reads as usual. A chmod
+    would not do it: this suite runs as root, which reads a mode-000 file."""
+    named = os.path.normcase(os.path.abspath(path))
+
+    def refused(target):
+        try:
+            return os.path.normcase(os.path.abspath(os.fspath(target))) == named
+        except TypeError:  # a file descriptor, not a path
+            return False
+
+    def refusing(real):
+        def call(target, *args, **kwargs):
+            if refused(target):
+                raise PermissionError(errno.EACCES, "unreadable for this case", path)
+            return real(target, *args, **kwargs)
+        return call
+
+    with mock.patch.object(os, "stat", new=refusing(os.stat)), \
+            mock.patch.object(os, "lstat", new=refusing(os.lstat)), \
+            mock.patch("builtins.open", new=refusing(open)):
+        yield
+
+
 class StaleAgentLockTests(unittest.TestCase):
     """A claude agent lock (`claude agent agent-<id> (pid N start <UTC date>)`) is stale when its
     pid is dead, or alive with another start time. A stale lock no longer keeps the worktree; the
@@ -1292,6 +1317,172 @@ class StaleAgentLockTests(unittest.TestCase):
     def test_preview_never_unlocks(self):
         sweep.sweep_repo(self.root, confirm=False, restore_log_path=os.path.join(ROOT, "p.log"))
         self.assertTrue(guard.worktree_locked(self.root, self.wt["dead"]))
+
+    # A no-start lock (`claude agent agent-<id> (pid N)`) has no start time to compare. Its holder is
+    # stale when it is alive and started more than SESSION_LIVE_TOLERANCE_MS after the lock file was
+    # written: the pid was reused. The verdict takes that write time as LOCKED_AT_MS; None means the
+    # write time could not be read, and then a live holder keeps.
+    LOCK_S = int(datetime(2026, 11, 12, 12, 0, tzinfo=timezone.utc).timestamp())
+    LOCK_MS = LOCK_S * 1000
+    DAY_S = 24 * 3600
+    DAY_MS = DAY_S * 1000
+
+    def no_start_verdict(self, actual_start_ms, locked_at_ms):
+        """The verdict on a no-start lock held by this process, read as started at ACTUAL_START_MS
+        (None: confirmed dead; PROCESS_START_UNREADABLE: could not tell)."""
+        reason = "claude agent agent-nostart (pid %d)" % os.getpid()
+        with mock.patch.object(sweep.git_reads, "_process_start_ms", return_value=actual_start_ms):
+            return sweep.stale_agent_lock_verdict(reason, locked_at_ms=locked_at_ms)
+
+    def test_no_start_lock_held_by_a_reused_pid_is_stale(self):
+        got = self.no_start_verdict(self.LOCK_MS + sweep.git_reads.SESSION_LIVE_TOLERANCE_MS + 1000,
+                                    self.LOCK_MS)
+        self.assertIs(got, True, "holder started after its lock was written (a reused pid): verdict %r" % (got,))
+
+    def test_no_start_lock_held_by_a_true_holder_is_held(self):
+        got = self.no_start_verdict(self.LOCK_MS - 3600 * 1000, self.LOCK_MS)
+        self.assertIs(got, False, "holder started before its lock was written (the true holder): verdict %r" % (got,))
+
+    def test_no_start_lock_holder_started_within_tolerance_is_held(self):
+        got = self.no_start_verdict(self.LOCK_MS + sweep.git_reads.SESSION_LIVE_TOLERANCE_MS // 2, self.LOCK_MS)
+        self.assertIs(got, False, "holder started within tolerance after its lock was written: verdict %r" % (got,))
+
+    def test_no_start_lock_with_no_write_time_is_held(self):
+        got = self.no_start_verdict(self.LOCK_MS + 10 * self.DAY_MS, None)
+        self.assertIs(got, False, "an unreadable write time kept no live holder's lock: verdict %r" % (got,))
+
+    def test_no_start_lock_with_an_unreadable_process_read_is_unknown(self):
+        got = self.no_start_verdict(sweep.git_reads.PROCESS_START_UNREADABLE, self.LOCK_MS)
+        self.assertIsNone(got, "an unreadable process read gave %r, not None" % (got,))
+
+    def test_no_start_lock_of_a_dead_holder_is_stale(self):
+        for written in (self.LOCK_MS, None):
+            with self.subTest(locked_at_ms=written):
+                got = self.no_start_verdict(None, written)
+                self.assertIs(got, True, "a confirmed dead holder kept its lock: verdict %r" % (got,))
+
+    def test_no_start_lock_leaves_the_dated_form_alone(self):
+        stamp = time.strftime("%a %b %d %H:%M:%S %Y", time.gmtime(self.LOCK_S))
+        reason = "claude agent agent-dated (pid %d start %s)" % (os.getpid(), stamp)
+        cases = ((self.LOCK_MS, False, "the holder is the one that wrote the lock"),
+                 (self.LOCK_MS + 10 * self.DAY_MS, True, "the holder started another time than the lock's date"))
+        for actual, want, why in cases:
+            for written in (None, self.LOCK_MS - self.DAY_MS, self.LOCK_MS + self.DAY_MS):
+                with self.subTest(actual=actual, locked_at_ms=written):
+                    with mock.patch.object(sweep.git_reads, "_process_start_ms", return_value=actual):
+                        got = sweep.stale_agent_lock_verdict(reason, locked_at_ms=written)
+                    self.assertIs(got, want, "%s: verdict %r, want %r (write time %r)" % (why, got, want, written))
+
+    @unittest.skipIf(not sys.platform.startswith("linux"), "the ticks form is read from /proc on Linux only")
+    def test_no_start_lock_leaves_the_ticks_form_alone(self):
+        ticks = _AgentEndFixture.host_start_ticks()
+        require(ticks is not None, "could not read this process's start ticks from /proc")
+        held = "claude agent agent-ticks (pid %d start %d)" % (os.getpid(), ticks)
+        reused = "claude agent agent-ticks (pid %d start %d)" % (os.getpid(), ticks + 1)
+        for reason, want in ((held, False), (reused, True)):
+            for written in (None, self.LOCK_MS - self.DAY_MS, self.LOCK_MS + self.DAY_MS):
+                with self.subTest(reason=reason, locked_at_ms=written):
+                    got = sweep.stale_agent_lock_verdict(reason, locked_at_ms=written)
+                    self.assertIs(got, want, "ticks form: verdict %r, want %r (write time %r)" % (got, want, written))
+
+    # The end-to-end no-start cases. The holder is a real sleeping child that is neither this process nor
+    # an ancestor, so no own-lock rule can free its lock; its real start time is the one the verdict reads.
+
+    def live_holder(self):
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"], cwd=ROOT,
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+
+        def reap_holder():
+            child.kill()
+            child.wait(timeout=10)
+
+        self.addCleanup(reap_holder)
+        require(child.poll() is None, "the holder exited before the lock")
+        require(child.pid not in (os.getpid(), os.getppid()), "the holder is an ancestor of this process")
+        return child
+
+    def no_start_tree(self, name, holder):
+        """A clean, merged, pushed tree locked by `claude agent agent-<name> (pid N)`, N the HOLDER."""
+        path = self.add(name, "claude agent agent-%s (pid %d)" % (name, holder.pid))
+        _age_admin_files(path, 2 * 60 * 60)
+        return path
+
+    @staticmethod
+    def lock_file(path):
+        """The `locked` file git keeps for PATH. Its write time is the one the verdict reads."""
+        admin = run_vcs(path, "rev-parse", "--absolute-git-dir").stdout.strip()
+        locked = os.path.join(admin, "locked")
+        require(os.path.isfile(locked), "git wrote no locked file at %s" % locked)
+        return locked
+
+    @staticmethod
+    def holder_start_s(holder):
+        started = sweep.git_reads._process_start_ms(holder.pid)
+        require(isinstance(started, int), "could not read the start time of pid %d" % holder.pid)
+        return started // 1000  # `ps` prints whole seconds
+
+    def fresh_entry(self, path):
+        """The one `parse_worktree_list` entry for PATH, read now."""
+        found = [e for e in sweep.parse_worktree_list(self.root) if _norm_path(e["path"]) == _norm_path(path)]
+        self.assertEqual(len(found), 1, "worktree %s is not listed once" % path)
+        return found[0]
+
+    def assert_no_start_scope(self, name, path, holder):
+        """Scope before subject: the holder runs, and the tree is listed locked in the no-start form."""
+        self.assertIsNone(holder.poll(), "the holder exited")
+        self.assertEqual(self.fresh_entry(path)["locked_reason"],
+                         "claude agent agent-%s (pid %d)" % (name, holder.pid),
+                         "the lock is not the no-start form")
+
+    def test_no_start_lock_whose_holder_started_after_the_write_is_freed(self):
+        # Red on the unchanged code: a no-start lock has no pid-reuse check, so the alive holder keeps the
+        # tree as "locked: ...". The lock file was written a day before the holder started.
+        holder = self.live_holder()
+        path = self.no_start_tree("nsreuse", holder)
+        locked = self.lock_file(path)
+        started = self.holder_start_s(holder)
+        os.utime(locked, (started - self.DAY_S, started - self.DAY_S))
+        self.assert_no_start_scope("nsreuse", path, holder)
+        self.assertEqual(int(os.path.getmtime(locked)), started - self.DAY_S, "the lock file's time was not set")
+        decision = sweep.decide_worktree(self.root, self.fresh_entry(path), attended=True)
+        self.assertEqual(decision["action"], "reap", "kept: %s" % decision["reason"])
+        sweep.remove_worktree(self.root, path, decision)
+        self.assertEqual(decision["action"], "reap", "the removal re-read kept the tree: %s" % decision["reason"])
+        self.assertNotIn("error", decision)
+        self.assertFalse(os.path.exists(path), "the tree of a reused pid's lock is still on disk")
+
+    def test_no_start_lock_written_after_its_holder_started_keeps(self):
+        # Green on the unchanged code and after the fix: the true holder wrote its lock after it started.
+        holder = self.live_holder()
+        path = self.no_start_tree("nsctl", holder)
+        locked = self.lock_file(path)
+        started = self.holder_start_s(holder)
+        self.assert_no_start_scope("nsctl", path, holder)
+        self.assertGreaterEqual(os.path.getmtime(locked), started,
+                                "the lock was not written after its holder started")
+        decision = sweep.decide_worktree(self.root, self.fresh_entry(path), attended=True)
+        self.assertEqual(decision["action"], "keep", "reaped a true holder's tree: %s" % decision["reason"])
+        self.assertTrue(decision["reason"].startswith("locked:"), "kept for another reason: %s" % decision["reason"])
+        self.assertTrue(os.path.isdir(path), "the tree of a live holder was removed")
+
+    def test_no_start_lock_with_an_unreadable_write_time_keeps(self):
+        # The write time is the only thing that frees this lock. The same tree is freed with the write time
+        # readable (red on the unchanged code) and kept with it unreadable (green on both).
+        holder = self.live_holder()
+        path = self.no_start_tree("nsfail", holder)
+        locked = self.lock_file(path)
+        started = self.holder_start_s(holder)
+        os.utime(locked, (started - self.DAY_S, started - self.DAY_S))
+        self.assert_no_start_scope("nsfail", path, holder)
+        with self.subTest(arm="write time readable: the holder is a reused pid"):
+            decision = sweep.decide_worktree(self.root, self.fresh_entry(path), attended=True)
+            self.assertEqual(decision["action"], "reap", "kept: %s" % decision["reason"])
+        with self.subTest(arm="write time unreadable: keep"):
+            with _unreadable_file(locked):
+                decision = sweep.decide_worktree(self.root, self.fresh_entry(path), attended=True)
+            self.assertEqual(decision["action"], "keep", "reaped on an unreadable write time: %s" % decision["reason"])
+            self.assertTrue(decision["reason"].startswith("locked:"), "kept for another reason: %s" % decision["reason"])
 
 
 class ListenerDecisionTests(unittest.TestCase):
