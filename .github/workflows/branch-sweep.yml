@@ -89,7 +89,7 @@ jobs:
                 failed=1
                 continue
               fi
-              # A tip that is not a full lowercase sha (empty, null, a prefix-match array) is a failed read, not a moved tip.
+              # A tip that is not a full lowercase sha (empty, null) is a failed read, not a moved tip.
               if ! [[ "$tip" =~ ^[0-9a-f]{40}$ ]]; then
                 echo "::warning::the tip read of $name returned no sha; not deleted"
                 failed=1
