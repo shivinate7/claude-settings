@@ -6,8 +6,9 @@ Each agent role file (the ten named roles, and any other agents/*.md) and the la
 check exports. The line counts as body text only. A line inside a code fence (``` or ~~~), an HTML
 comment, a code span or a 4-space indented code block does not count, and neither does a line in an
 agent file's frontmatter. A code span stays inside one paragraph. A list item's 4-space continuation
-counts. A comment opener or a fence marker inside inline code or in the middle of a line opens nothing,
-and a lone quote or backtick in prose hides nothing. The line may wrap over a line break.
+counts. A comment opener inside inline code opens nothing, even across a line break. A fence marker
+in the middle of a line opens nothing. A lone quote in prose hides nothing, and a lone backtick does
+not pair across a blank line. The line may wrap over a line break.
 A file that cannot be read is unknown (exit 2, named), never clear.
 
 The no-argument run reads the module's ROOT when it runs. These cases patch ROOT to a fixture tree.
