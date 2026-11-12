@@ -2091,10 +2091,20 @@ class LintSetsBatchLabel(LintPostsPassComment):
         self.use_ci_job(PASSING, 0)
         rc, out = self.lane("--lane-lint", self.head("feat"), "--integration")
         self.assertEqual(rc, 2, out)
+        self.assertIn("--integration goes with --lane-lint on a pull request number", out)  # old argparse also exits 2, for "unrecognized arguments"
 
     def test_integration_without_lane_lint_is_a_usage_error(self):
         rc, out = self.lane("--integration", "7")
         self.assertEqual(rc, 2, out)
+        self.assertIn("--integration goes with --lane-lint on a pull request number", out)
+
+    def test_an_integration_unknown_lifted_by_a_reason_adds_no_label(self):
+        tm.install_gh_shim(self)
+        tm.GhHalf.set(self)
+        self.use_ci_job(UNKNOWN, 2)
+        rc, out = self.lane("--lane-lint", "7", "--integration", "--lint-unknown-ok", "shellcheck is not installed on this machine", host=merge.Host())
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.labeled(), [], "an unknown lifted by a reason added the batch label, and it is no PASS:\n" + out)
 
 
 class LintCheckReviewed(tm.ReviewEnv):
