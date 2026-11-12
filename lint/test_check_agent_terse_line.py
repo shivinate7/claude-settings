@@ -10,7 +10,7 @@ A file that cannot be read is unknown (exit 2, named), never clear.
 
 The no-argument run reads the module's ROOT when it runs. These cases patch ROOT to a fixture tree.
 """
-import contextlib, io, os, shutil, sys, tempfile, time, unittest, uuid
+import contextlib, io, os, shutil, sys, tempfile, unittest
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -18,6 +18,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import check_agent_terse_line as C  # noqa: E402  the check and the one home of TERSE_LINE
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+# The sweep of old run folders is proved once, in lint/test_find_copies.py, so this suite does not repeat it.
 RUN_FOLDER = _test_temp.run_folder()
 
 TERSE_LINE = C.TERSE_LINE
@@ -237,22 +238,6 @@ class RealTree(unittest.TestCase):
 
     def test_the_real_tree_passes_the_no_argument_run(self):
         self.assertEqual(check_files(), (0, ""), "the real tree fails the no-argument run")
-
-
-class RunFolder(unittest.TestCase):
-    def test_first_request_sweeps_old_siblings_and_keeps_new_ones(self):
-        # test-temp-standard: the first request of a run removes a sibling over a day old and keeps a newer one.
-        root = os.path.join(RUN_FOLDER, "sweep")
-        old = os.path.join(root, "1-%s" % uuid.uuid4().hex)
-        new = os.path.join(root, "2-%s" % uuid.uuid4().hex)
-        for path in (old, new):
-            os.makedirs(path)
-        two_days_ago = time.time() - 2 * 24 * 60 * 60
-        os.utime(old, (two_days_ago, two_days_ago))
-        own = _test_temp.run_folder(temp_root=root)
-        self.assertFalse(os.path.exists(old), "an old sibling run folder survived the sweep")
-        self.assertTrue(os.path.isdir(new), "a new sibling run folder was swept")
-        self.assertTrue(os.path.isdir(own))
 
 
 def tearDownModule():
