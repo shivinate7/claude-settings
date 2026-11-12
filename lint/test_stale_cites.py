@@ -121,11 +121,14 @@ def parse(out):
 
 
 def direct_step_env(rng, fail):
-    """The env bin/ste-changed sets for the step, with FAIL given. run.sh runs from here, so FAIL can differ."""
-    return dict(os.environ, TMPDIR=rng.case, GITHUB_STEP_SUMMARY=os.path.join(rng.case, "summary.md"),
-                EVENT_NAME="pull_request", BASE_REF="main", DEFAULT_BRANCH="main", REF_NAME="topic",
-                SCOPE="changed", FAIL=fail, PATHS_GLOB="**/*.md", EXCLUDE="", CHANGED_PATHS_GLOB="*.md",
-                DECISIONS_DIR="")
+    """The env bin/ste-changed sets for the step, with FAIL given. run.sh runs from here, so FAIL can differ. CI is
+    popped, as run_check pops it: a case that states the local rule reads it unset, and a CI case sets CI on top."""
+    env = dict(os.environ, TMPDIR=rng.case, GITHUB_STEP_SUMMARY=os.path.join(rng.case, "summary.md"),
+               EVENT_NAME="pull_request", BASE_REF="main", DEFAULT_BRANCH="main", REF_NAME="topic",
+               SCOPE="changed", FAIL=fail, PATHS_GLOB="**/*.md", EXCLUDE="", CHANGED_PATHS_GLOB="*.md",
+               DECISIONS_DIR="")
+    env.pop("CI", None)  # CI turns an unknown read red (decision ci-unknown-is-red)
+    return env
 
 
 def git_commands(trace_path):
