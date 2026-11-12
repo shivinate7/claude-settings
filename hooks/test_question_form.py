@@ -710,15 +710,16 @@ PROSE = "Based on the log, option A is safer."
 # (name, the context lines in order, verdict). Only `Based on (<kind>):` is a Based on line, so prose that
 # starts with the same two words is not one, and does not move a Based on line before Problem.
 LINE_VARIANTS = [
-    ("the lines in order", [GOAL, PROBLEM, *BASED, DEPARTS], None),
+    ("the lines in order", [GOAL, PROBLEM, *BASED, DEPARTS, AGAINST], None),
     ("Problem before Goal", [PROBLEM, GOAL, *BASED, DEPARTS], (FORM_RULE, None)),
     ("a Based on line before Problem", [GOAL, BASED[0], PROBLEM, BASED[1], DEPARTS], (FORM_RULE, None)),
     ("every Based on line before Problem", [GOAL, *BASED, PROBLEM, DEPARTS], (FORM_RULE, None)),
     ("a Based on line before Goal", [BASED[0], GOAL, PROBLEM, BASED[1], DEPARTS], (FORM_RULE, None)),
-    ("prose that starts with Based on, after the form lines", [GOAL, PROBLEM, *BASED, DEPARTS, PROSE], None),
-    ("prose that starts with Based on, between Goal and Problem", [GOAL, PROSE, PROBLEM, *BASED, DEPARTS], None),
+    ("prose that starts with Based on, after the form lines", [GOAL, PROBLEM, *BASED, DEPARTS, AGAINST, PROSE], None),
+    ("prose that starts with Based on, between Goal and Problem", [GOAL, PROSE, PROBLEM, *BASED, DEPARTS, AGAINST],
+     None),
     ("prose that starts with Based on, beside three Based on lines",
-     [GOAL, PROBLEM, *BASED, THIRD, PROSE, DEPARTS], None),
+     [GOAL, PROBLEM, *BASED, THIRD, PROSE, DEPARTS, AGAINST], None),
     ("prose that starts with Based on is no Based on line", [GOAL, PROBLEM, PROSE, DEPARTS], (FORM_RULE, "Based on")),
     ("a Based on kind outside PREMISE_KINDS still refuses beside the prose",
      [GOAL, PROBLEM, BASED[0], "Based on (guess): the log is old.", PROSE, DEPARTS], (FORM_RULE, "Based on")),
@@ -1482,7 +1483,7 @@ def case_departs_line_forms_pass():
         dp_chat("a line form %r passes" % body, body, None)
         dp_page("a page line form %r passes" % body, body, None)
     # CRLF line endings: the same form lines, joined with CR LF. The line's \r is no part of either side.
-    crlf = "\r\n".join(line for line in (GOAL, PROBLEM, *BASED, DEPARTS) if line)
+    crlf = "\r\n".join(line for line in (GOAL, PROBLEM, *BASED, DEPARTS, AGAINST) if line)
     box = chat_box()
     box["questions"][0]["question"] = crlf
     chat("a question with CRLF line endings and a valid Departs from line passes", box, None)
@@ -2023,7 +2024,7 @@ MA144_ID = "ma144-tab-bar"
 MA144_OWNER_SESSION = "session_013NEJKymmzw37seAr3Qq5nv"  # the session id in MA144's owner field
 VI_FRAGMENTS = (r"\brepo\b", r"shivinate7/claude-settings")
 
-MA144 = json.loads(r'''{"added":"2026-11-08T04:12:00Z","context":"Goal: MANIFEST works well on the open iPhone Duo, in the Card in Hand design you picked on 2026-10-27 12:25 CDT.\nProblem (rule): degen puts its tab bar under the left page. The design lane's pick departs from that ruling, so it needs your word.\nBased on (read): README, choice 3.\nDeparts from: degen's Duo layout, tab bar under the left page — MANIFEST puts it under the right page.","designs":[{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-a.png","label":"Under the right page","option":"a","slug":"ma144-3-a"},{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-b.png","label":"Under the left page, on the keys","option":"b","slug":"ma144-3-b"},{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-c.png","label":"Under the left page, under the keys","option":"c","slug":"ma144-3-c"}],"home":"mailaudit #144","id":"ma144-tab-bar","kind":"decision","look":true,"n":389,"options":[{"design":"ma144-3-a","gain":"It never moves, and it shows while you type.","how":"The tab bar stays under the right page in every pose.","key":"a","label":"Under the right page, always","lose":"Degen puts it on the left, so the two apps differ."},{"design":"ma144-3-b","gain":"Same side as degen.","how":"The tab bar sits under the left page and rides on top of the keys.","key":"b","label":"Under the left page, on top of the keys","lose":"It jumps 256 pt each time the keys move."},{"design":"ma144-3-c","gain":"Same as degen.","how":"The tab bar sits under the left page, below the keys.","key":"c","label":"Under the left page, under the keys, as degen does","lose":"You must drop the keys to change tabs."}],"owner":"batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv)","pick":"a","ref":"mailaudit #144 (Duo round 2, Card in Hand; branch design/duo-round2, head 441b4e46d); its README, section Choices","short":"Duo tab bar place","status":"open","title":"Duo tab bar: where does it sit?","why":"The design lane picks a: it never moves, and it shows while you type."}''')
+MA144 = json.loads(r'''{"added":"2026-11-08T04:12:00Z","context":"Goal: MANIFEST works well on the open iPhone Duo, in the Card in Hand design you picked on 2026-10-27 12:25 CDT.\nProblem (rule): degen puts its tab bar under the left page. The design lane's pick departs from that ruling, so it needs your word.\nBased on (read): README, choice 3.\nDeparts from: degen's Duo layout, tab bar under the left page — MANIFEST puts it under the right page.\nAgainst the pick (sonnet): the tab bar under the left page matches degen, and the two apps stay alike.","designs":[{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-a.png","label":"Under the right page","option":"a","slug":"ma144-3-a"},{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-b.png","label":"Under the left page, on the keys","option":"b","slug":"ma144-3-b"},{"drawn":951,"file":"docs/design/duo-card-in-hand/png/3-c.png","label":"Under the left page, under the keys","option":"c","slug":"ma144-3-c"}],"home":"mailaudit #144","id":"ma144-tab-bar","kind":"decision","look":true,"n":389,"options":[{"design":"ma144-3-a","gain":"It never moves, and it shows while you type.","how":"The tab bar stays under the right page in every pose.","key":"a","label":"Under the right page, always","lose":"Degen puts it on the left, so the two apps differ."},{"design":"ma144-3-b","gain":"Same side as degen.","how":"The tab bar sits under the left page and rides on top of the keys.","key":"b","label":"Under the left page, on top of the keys","lose":"It jumps 256 pt each time the keys move."},{"design":"ma144-3-c","gain":"Same as degen.","how":"The tab bar sits under the left page, below the keys.","key":"c","label":"Under the left page, under the keys, as degen does","lose":"You must drop the keys to change tabs."}],"owner":"batch runner 9 (session_013NEJKymmzw37seAr3Qq5nv)","pick":"a","ref":"mailaudit #144 (Duo round 2, Card in Hand; branch design/duo-round2, head 441b4e46d); its README, section Choices","short":"Duo tab bar place","status":"open","title":"Duo tab bar: where does it sit?","why":"The design lane picks a: it never moves, and it shows while you type."}''')
 
 
 def ma144(repo=OTHER_REPO, checked=None, **over):
