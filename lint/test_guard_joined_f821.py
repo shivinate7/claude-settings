@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Joined-order F821 check for the guard runner's section files. Standard library, and ruff.
+"""Joined-order lint for the guard runner's section files: the codes ruff.toml selects, F and E9. Standard library, and ruff.
 
     python3 lint/test_guard_joined_f821.py              the cases
     python3 lint/test_guard_joined_f821.py --root DIR   the check on the checkout at DIR: one line per finding,
@@ -173,7 +173,7 @@ def read(root, rel):
         return f.read()
 
 
-class JoinedOrderF821(unittest.TestCase):
+class JoinedOrderLint(unittest.TestCase):
     """The join, the check and the wiring. Each planted case builds its tree in this run's folder."""
 
     def setUp(self):
@@ -307,7 +307,7 @@ class JoinedOrderF821(unittest.TestCase):
             block = workflow_steps.job_block(text, job) or ""
             runs += [workflow_steps.run_body(step) or "" for step in workflow_steps.step_blocks(block)]
         self.assertTrue(any("lint/test_guard_joined_f821.py" in run for run in runs),
-                        "checks.yml runs no step of the joined-order F821 suite")
+                        "checks.yml runs no step of the joined-order lint suite")
 
 
 def setUpModule():
