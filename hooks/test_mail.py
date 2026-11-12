@@ -206,6 +206,7 @@ def load_hook():
 
 
 MAIL_MODULE = load_hook()
+REAL_HELD_PLATFORMS = getattr(MAIL_MODULE, "HELD_PLATFORMS", ())  # read before any case pins it
 
 
 def turn_start_lines(payload, env):
@@ -536,6 +537,13 @@ class MailCase(unittest.TestCase):
         self.case = os.path.join(ROOT, digest)
         os.makedirs(self.case)
         self.counter = 0
+        # A case that reads a turn start must not depend on the host: a Mac holds the turn start (MacHold).
+        self.hold(())
+
+    def hold(self, platforms):
+        patcher = mock.patch.object(MAIL_MODULE, "HELD_PLATFORMS", platforms, create=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def tearDown(self):
         tracked_tree.rm_tree(self.case)
@@ -1082,6 +1090,13 @@ class MacHold(MailCase):
         mid = "0a1b2c3d4eaa"
         store.seed("cloud/sess-b", mid, "request", "cloud/sess-a", "Body marker: mac-hold\n")
         return mid, self.machine("b", store, session="sess-b")
+
+    def setUp(self):
+        super().setUp()
+        self.hold(REAL_HELD_PLATFORMS)
+
+    def test_the_hold_names_darwin(self):
+        self.assertIn("darwin", REAL_HELD_PLATFORMS, "HELD_PLATFORMS does not name darwin: %r" % (REAL_HELD_PLATFORMS,))
 
     def test_linux_turn_start_lists_the_message(self):
         mid, reader = self.seeded_reader()
