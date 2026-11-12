@@ -33,6 +33,10 @@ RF_OTHER, RF_OTHER_AGENT = "builder-pr13", "b5d0a7c3e91f2468"
 RF_SHARED = "worker-pr12"
 RF_SHARED_REVIEWER_AGENT, RF_SHARED_BUILDER_AGENT = "a9f2c6e1d7b04385", "b1c4e8a2f7d93056"
 RF_UNKNOWN = "reviewer-pr14"
+RF_WT_UNKNOWN, RF_WT_UNKNOWN_AGENT = "builder-pr35", "b4d7e2a9f1c63058"
+RF_WT_LIVE, RF_WT_LIVE_AGENT = "builder-pr36", "b6e1c8f3a9d27540"
+RF_CASE_LOWER, RF_CASE_LOWER_AGENT = "reviewer-pr37", "a7f0d5b2e8c39416"
+RF_CASE_CAP, RF_CASE_CAP_AGENT = "reviewer-pr38", "a1e6c9f4d2b87053"
 RF_NOTICE, RF_NOTICE_AGENT = "reviewer-pr15", "a4e7b0d3c9f15862"
 RF_TASKID, RF_TASKID_AGENT = "reviewer-pr16", "a6f3d9c2e8b14750"
 RF_STOPPED, RF_STOPPED_AGENT = "reviewer-pr17", "a8e4b1d7f2c90316"
@@ -89,12 +93,12 @@ def rf_launch(tool_id, subagent_type, name, agent_id, isolation=None):
     return rr_spawn(tool_id, subagent_type, name=name, result=rf_launch_result(tool_id, agent_id), isolation=isolation)
 
 
-def rf_launch_unknown(tool_id, subagent_type, name):
+def rf_launch_unknown(tool_id, subagent_type, name, isolation=None):
     """A background spawn named `name` whose launch result holds a bare string as toolUseResult, so its state is
     not readable from the record."""
     record = json.loads(role_result(tool_id, "Async agent launched successfully."))
     record["toolUseResult"] = "Async agent launched successfully."
-    return rr_spawn(tool_id, subagent_type, name=name, result=json.dumps(record))
+    return rr_spawn(tool_id, subagent_type, name=name, result=json.dumps(record), isolation=isolation)
 
 
 def rf_finish(tool_id, kind="queue-operation", status="completed", task_id=None):
@@ -188,6 +192,19 @@ def rf_workflow_launch(transcript_name, run):
 
 
 RF_TRANSCRIPTS = {
+    # A worktree builder whose launch result holds a bare string, so its agent id is not in the record, and whose
+    # finish notice names that id. A running worktree builder beside it, its agent id in its launch result.
+    "worktree-builder-unknown-result-finished": rr_session(
+        rf_launch_unknown("b1", "builder", RF_WT_UNKNOWN, isolation="worktree"),
+        rf_finish("b1", task_id=RF_WT_UNKNOWN_AGENT),
+        rf_launch("b2", "builder", RF_WT_LIVE, RF_WT_LIVE_AGENT, isolation="worktree")),
+    # Two background reviewers that finished: the first spawned as `reviewer`, the second as `Reviewer`. Each is
+    # followed by its round's review log.
+    "bg-reviewer-case-pair-finished": rr_session(
+        rf_launch("r1", "reviewer", RF_CASE_LOWER, RF_CASE_LOWER_AGENT), rf_finish("r1"),
+        rr_comment("c1", rr_record(1)),
+        rf_launch("r2", "Reviewer", RF_CASE_CAP, RF_CASE_CAP_AGENT), rf_finish("r2"),
+        rr_comment("c2", rr_record(2))),
     # A background reviewer that finished: its launch result, its finish notice, then the round's record.
     "bg-reviewer-finished": rr_session(rf_launch("r1", "reviewer", RF_REVIEW, RF_REVIEW_AGENT),
                                        rf_finish("r1"), rr_comment("c1", rr_record())),
@@ -558,6 +575,22 @@ rf_allow("a reviewer that runs, then a same-name spawn whose result is an error,
          {"to": RF_ERR_RUNNING, "message": RF_MSG}, rf_path("running-then-errored-spawn"))
 rf_ask("a reviewer whose finish notice says it is still running asks",
        {"to": RF_RUNNING_AGENT, "message": RF_MSG}, rf_path("reviewer-notice-running"))
+# Asked: the send names the builder by its agent id, which its finish notice carries. Its launch result holds a bare
+# string, so the guard cannot read its state. The name-addressed send to it asks too (the control). The id-addressed
+# send to the running worktree builder passes: its id resolves, and its state is running.
+rf_ask("an id-addressed send to a finished worktree builder whose launch result holds a bare string asks",
+       {"to": RF_WT_UNKNOWN_AGENT, "message": RF_MSG}, rf_path("worktree-builder-unknown-result-finished"))
+rf_ask("control: a name-addressed send to that builder asks: its launch result holds a bare string",
+       {"to": RF_WT_UNKNOWN, "message": RF_MSG}, rf_path("worktree-builder-unknown-result-finished"))
+rf_allow("control: an id-addressed send to a still-running worktree builder passes",
+         {"to": RF_WT_LIVE_AGENT, "message": RF_MSG}, rf_path("worktree-builder-unknown-result-finished"))
+# Refused: a reviewer spelled `Reviewer` is refused as the lower-case one is. The lower-case send is the control, on
+# the same transcript, so the spelling is what decides.
+rf_refuse("control: a finished reviewer named in lower case is refused, beside a `Reviewer` spawn in the transcript",
+          {"to": RF_CASE_LOWER, "message": RF_MSG}, rf_path("bg-reviewer-case-pair-finished"))
+rf_refuse("a finished Reviewer spelled with a capital R, with no worktree, is refused as the lower-case one is",
+          {"to": RF_CASE_CAP, "message": RF_MSG}, rf_path("bg-reviewer-case-pair-finished"),
+          carries=("prior report",))
 
 
 # A `to` in the `name [ref]` form, which SendMessage writes when a name is ambiguous. The ref is the first eight hex of
