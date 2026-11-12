@@ -27,7 +27,7 @@
   - One database read and one database write per counted press. 0 counter reads or writes on page load (the page's own items, answers and meta loads are not counts).
   - Proof: the `usage:` cases in `skills/waiting-page/tests/page.test.mjs`.
     - A load reads and writes no counter, and each Add to list counts up: "a load reads and writes no counter, and each Add to list writes ask-add with n counting up".
-    - One +1 per press, and a press that changes nothing writes nothing: the Send ask, Send answers, Copy answers, Status tab, Status view and tile cases.
+    - One +1 per press, and a press that changes nothing writes nothing: the Status tab, Status view and tile cases. An empty Send ask or Send answers press is read from the code, not tested.
     - No store writes none and throws nothing: "with a store a press writes its counter, and with no store the same presses write none and throw nothing".
     - A refused usage write does not stop the press: "a usage write the store refuses does not stop the press it counts, and the bar does not say Not saved".
 - Known limit: trend and burn have no control. A view opening means "shown", not "read". Step `page-status-cut-unread` must not cut on view counts alone.
