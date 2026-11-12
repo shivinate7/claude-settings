@@ -899,17 +899,22 @@ class GitFixtureMixin:
                         starts.append(entry.split("built-in: git ", 1)[1].strip())
         return lines, starts
 
-    def make_fetch_killed_shim(self):
-        """A folder whose `git` exits 143 for `fetch`, the status of a git that SIGTERM ended, and runs the real git for
-        every other call. The refresh fails as a killed refresh does, with no timer involved."""
+    def make_git_stub(self, name, body):
+        """A folder, named `name` under the run root, whose `git` runs the shell `body` first and then the real git with
+        the same arguments. A body that exits ends the call with its status. Every git stub on PATH is built here."""
         real = shutil.which("git")
-        folder = os.path.join(self.root, "fetch-killed-shim")
+        folder = os.path.join(self.root, name)
         os.makedirs(folder)
         script = os.path.join(folder, "git")
         with open(script, "w", encoding="utf-8") as handle:
-            handle.write('#!/bin/sh\nif [ "$1" = fetch ]; then exit 143; fi\nexec "%s" "$@"\n' % real)
+            handle.write('#!/bin/sh\n%s\nexec "%s" "$@"\n' % (body, real))
         os.chmod(script, 0o755)
         return folder
+
+    def make_fetch_killed_shim(self):
+        """A folder whose `git` exits 143 for `fetch`, the status of a git that SIGTERM ended, and runs the real git for
+        every other call. The refresh fails as a killed refresh does, with no timer involved."""
+        return self.make_git_stub("fetch-killed-shim", 'if [ "$1" = fetch ]; then exit 143; fi')
 
     def run_to_slow_step(self, path_dir=None):
         """The hook's stdout lines kept when its slow step is cut off, and whether the step was reached.
@@ -1382,6 +1387,61 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         self.assertEqual(len(refresh), 1, "want one did-not-run line, got %r" % refresh)
         self.assertIsNotNone(REFRESH_FAILED.match(refresh[0]), "the line is not the refresh line: %r" % refresh[0])
 
+    def test_a_default_renamed_from_master_to_main_refreshes_main_with_no_did_not_run_line(self):
+        # origin's default was master and is now main. origin/HEAD still names origin/master, and origin's main moved on.
+        stale = self.head_sha()
+        vcs(self.origin_repo, "update-ref", "refs/heads/master", stale)
+        vcs(self.origin_repo, "symbolic-ref", "HEAD", "refs/heads/master")
+        fresh = self.advance_origin_main()
+        vcs(self.origin_repo, "symbolic-ref", "HEAD", "refs/heads/main")
+        vcs(self.origin_repo, "branch", "-q", "-D", "master")
+        vcs(self.primary, "update-ref", "refs/remotes/origin/master", stale)
+        vcs(self.primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/master")
+        self.assertFalse(self.remote_has_ref("refs/heads/master"), "scope: origin still has master")
+        self.assertEqual(self.resolve("origin/main"), stale, "scope: origin/main is not the stale tip")
+        self.assertEqual(vcs(self.primary, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").stdout.strip(),
+                         "origin/master", "scope: origin/HEAD does not name origin/master")
+        self.assertNotEqual(self.blob("HEAD", "CLAUDE.md"), self.blob(fresh, "CLAUDE.md"),
+                            "scope: the checkout's CLAUDE.md does not differ from the renamed main")
+        lines = self.run_checked()
+        self.assertEqual([line for line in lines if "did not run" in line], [],
+                         "the refresh asked for master, which origin no longer has: %r" % lines)
+        self.assertEqual(self.resolve("origin/main"), fresh, "origin/main was not refreshed to the renamed main's tip")
+        self.assert_one_differ_line(lines, "CLAUDE.md", "origin/main", fresh)
+
+    def test_a_remote_with_no_main_and_no_origin_head_prints_no_did_not_run_line(self):
+        # origin's default is master and origin has no main. origin/HEAD is unset, so the refresh must learn the default
+        # from origin and must not ask for main.
+        fresh = self.tip_with(GRANT_FRESH, GRANT_STALE_DOT)
+        vcs(self.primary, "push", "-q", "origin", "%s:refs/heads/master" % fresh)
+        vcs(self.origin_repo, "symbolic-ref", "HEAD", "refs/heads/master")
+        vcs(self.origin_repo, "branch", "-q", "-D", "main")
+        vcs(self.primary, "update-ref", "-d", "refs/remotes/origin/main")
+        self.assertEqual(self.resolve("origin/master"), fresh, "scope: origin/master is not the fresh tip")
+        self.assertIsNone(self.resolve("origin/HEAD"), "scope: origin/HEAD is set")
+        self.assertFalse(self.remote_has_ref("refs/heads/main"), "scope: origin still has main")
+        self.assertNotEqual(self.blob("HEAD", "CLAUDE.md"), self.blob("origin/master", "CLAUDE.md"),
+                            "scope: the checkout's CLAUDE.md does not differ from origin/master")
+        lines = self.run_checked()
+        self.assertEqual([line for line in lines if "did not run" in line], [],
+                         "the refresh asked for main on a remote with no main: %r" % lines)
+        self.assert_one_differ_line(lines, "CLAUDE.md", "origin/master", fresh)
+
+    def test_a_refused_main_fetch_on_a_remote_with_main_keeps_origin_main_and_prints_one_line(self):
+        # origin has main and trunk, and origin/HEAD names trunk. Every fetch that asks for main is refused with an exit
+        # status, not a kill. The stale origin/main must survive a refused fetch, and one line says the refresh did not run.
+        vcs(self.primary, "push", "-q", "origin", "HEAD:refs/heads/trunk")
+        vcs(self.primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+        fresh = self.advance_origin_main()
+        stale = self.resolve("origin/main")
+        self.assertNotEqual(stale, fresh, "scope: origin/main is already fresh")
+        self.assertTrue(self.remote_has_ref("refs/heads/main"), "scope: origin has no main")
+        folder = self.make_git_stub("refused-main-shim", 'case "$*" in fetch*refs/heads/main*) exit 1;; esac')
+        lines = self.run_checked(path_dir=folder)
+        self.assertEqual(self.resolve("origin/main"), stale, "a refused fetch of main moved or deleted origin/main")
+        refresh = [line for line in lines if REFRESH_FAILED.match(line)]
+        self.assertEqual(len(refresh), 1, "want one did-not-run line, got %r" % lines)
+
     def test_no_origin_remote_starts_no_fetch_and_prints_no_refresh_line(self):
         vcs(self.primary, "remote", "remove", "origin")
         self.assertEqual(vcs(self.primary, "remote").stdout.strip(), "", "scope: a remote is still configured")
@@ -1433,6 +1493,30 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         stale = self.resolve("origin/main")
         lines = self.run_checked()
         self.assert_one_differ_line(lines, "CLAUDE.md", "origin/main", stale)
+
+    def assert_a_hung_refresh_keeps_origin_main(self, command):
+        """With origin ahead of origin/main, a `git <command>` that hangs past the bound leaves the refresh not run: one
+        did-not-run line, a grant line marked unrefreshed, and origin/main at its old tip. The bound is one second, so
+        the watchdog ends the hang; the stub's sleep only has to outlast it."""
+        fresh = self.advance_origin_main()
+        stale = self.stage_a_lane_grant()
+        self.assertNotEqual(stale, fresh, "scope: origin/main is already fresh")
+        folder = self.make_git_stub("hung-%s-shim" % command, 'if [ "$1" = %s ]; then sleep 20; fi' % command)
+        lines = self.run_checked(path_dir=folder, fetch_timeout="1")
+        refresh = [line for line in lines if REFRESH_FAILED.match(line)]
+        self.assertEqual(len(refresh), 1, "want one did-not-run line for a hung %s, got %r" % (command, lines))
+        self.assertEqual(self.resolve("origin/main"), stale, "origin/main moved in a run where git %s hangs" % command)
+        grant = self.grant_lines_of(lines)
+        self.assertEqual(len(grant), 1, "want one grant line, got %r" % grant)
+        found = UNREFRESHED.match(grant[0])
+        self.assertIsNotNone(found, "the grant line is not marked unrefreshed: %r" % grant[0])
+        self.assertTrue(stale.startswith(found.group(1)), "the line's sha is not origin/main's kept tip: %r" % grant[0])
+
+    def test_an_ls_remote_that_hangs_prints_one_did_not_run_line_and_keeps_origin_main(self):
+        self.assert_a_hung_refresh_keeps_origin_main("ls-remote")
+
+    def test_a_fetch_that_hangs_prints_one_did_not_run_line_and_keeps_origin_main(self):
+        self.assert_a_hung_refresh_keeps_origin_main("fetch")
 
     # The grant line prints before a slow step, even when the refresh fails or is killed. The slow step is the caution
     # call, which runs before the grant block on main. run_to_slow_step cuts the run there.
