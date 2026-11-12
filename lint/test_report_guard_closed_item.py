@@ -18,7 +18,9 @@ refuses an Input Needed line that cites a closed item. The rules the cases pin:
   ("> 1. 214" cites 214).
 - Not a cite, though a number follows the item: a count ("214 and 5 others", "381, 2 of which"), a clock time,
   a percent, an hour count, an ordinal, a fraction ("11/10"), a dash option ("214 - 3 options"), a blockquoted
-  bullet option after the item ("item 214" then "> - 3 options").
+  bullet option after the item ("item 214" then "> - 3 options"), a count after "to", ";" or "+" ("214 to 3
+  options", "214; 3 tests", "214 + 3 more"), and a sub-bullet under a numbered bullet, which is the item's own text
+  ("- 214 pick" then "  - 1 a: ship"), plain or under a label.
 - A cited item whose status is `closed` in the copy refuses the Stop. The refusal states that each closed item
   reads closed in the waiting copy, and names no step for the session.
 - An open or missing item passes. A same-turn ArtifactData read of collection `items` that shows the item open
@@ -593,6 +595,29 @@ class ClosedItemFalseCiteTests(ClosedItemFixture):
     def test_option_bullet_after_a_pick_is_no_cite(self):
         # Catches: the option bullet "- 1 a: ship" under "Pick for item 214" read as a cite of item 1.
         self.check_false_cite("Pick for item 214\n> - 1 a: ship", 1, "Pick for item 214, then a bullet '- 1 a: ship'")
+
+    def test_sub_bullet_under_a_numbered_bullet_is_no_cite(self):
+        # Catches: the sub-bullet "- 1 a: ship" under the numbered bullet "- 214 pick" read as a cite of item 1. A
+        # number under a numbered bullet is that item's own text, so only 214 is cited.
+        self.check_false_cite("items:\n> - 214 pick\n>   - 1 a: ship", 1,
+                              "items: then '- 214 pick' and its sub-bullet '- 1 a: ship'")
+
+    def test_sub_bullet_under_a_numbered_bullet_in_a_label_list_is_no_cite(self):
+        # Catches: the same sub-bullet read as a cite of item 1 when the list sits under "Items waiting on you:".
+        self.check_false_cite("Items waiting on you:\n> - 214 pick\n>   - 1 a: ship", 1,
+                              "Items waiting on you: then '- 214 pick' and its sub-bullet '- 1 a: ship'")
+
+    def test_count_after_to_is_no_cite(self):
+        # Catches: "to 3 options" read as a range that cites item 3.
+        self.check_false_cite("item 214 to 3 options.", 3, "item 214 to 3 options")
+
+    def test_count_after_semicolon_is_no_cite(self):
+        # Catches: "; 3 tests" read as a list that cites item 3.
+        self.check_false_cite("items 214; 3 tests.", 3, "items 214; 3 tests")
+
+    def test_count_after_plus_is_no_cite(self):
+        # Catches: "+ 3 more" read as a list that cites item 3.
+        self.check_false_cite("items 214 + 3 more.", 3, "items 214 + 3 more")
 
 
 class ClosedItemPassTests(ClosedItemFixture):
