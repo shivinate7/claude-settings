@@ -16560,9 +16560,9 @@ class ReviewGuardCost(ReviewEnv):
 # so the age is exact.
 SEND_BACK_NOW = 1794153600  # 2026-11-08T16:00:00Z, the clock every send-back case reads at
 SEND_BACK_HOUR = 3600  # seconds
-LANE_ID = "01SendBackLaneQm7x"  # the id of the lane session a pull request body names as https://claude.ai/code/session_<id>
-LANE_SESSION = f"session_{LANE_ID}"  # the token a send back line prints for it, whole
-LANE_BODY = f"Change summary.\n\nhttps://claude.ai/code/{LANE_SESSION}\n"
+LANE_ID = "01SendBackLaneQm7x"  # the id of the session that a pull request body of that lane names as https://claude.ai/code/session_<id>
+LANE_TOKEN = f"session_{LANE_ID}"  # the token a send back line prints for it, whole
+LANE_BODY = f"Change summary.\n\nhttps://claude.ai/code/{LANE_TOKEN}\n"
 KNOWN_STALE = {REVIEW_HEAD: [REVIEW_OLD_HEAD]}  # the live head is one commit on REVIEW_OLD_HEAD, so a record for REVIEW_OLD_HEAD is stale for certain; unscripted, its commit read fails and the survival is unknown
 
 def utc_before(seconds):
@@ -16587,7 +16587,7 @@ def assert_off_the_list(test, lines, n):
     still = [l for l in lines if l.startswith(f"#{n} ") or (l.startswith("no record:") and re.search(rf"#{n}\b", l))]
     test.assertEqual(still, [], "#%d still prints its old line:\n%s" % (n, out))
 
-def send_back_line(test, lines, n, reason, token=LANE_SESSION):
+def send_back_line(test, lines, n, reason, token=LANE_TOKEN):
     """The one send back line of pull request n: it names `token` (the whole `session_<id>`, or `no session`), then `reason` (a regex) in brackets."""
     hits = [l for l in lines if l.startswith(f"{merge.REVIEW_SEND_BACK}#{n} ")]
     test.assertEqual(len(hits), 1, "want one send back line for #%d:\n%s" % (n, "\n".join(lines)))
