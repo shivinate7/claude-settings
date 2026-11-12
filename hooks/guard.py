@@ -3540,7 +3540,7 @@ def brief_destructive_hit(tool: str, tool_input) -> str:
 def step_up_hit(tool: str, tool_input) -> str:
     """The step-up reason for a spawn whose marker and model disagree, or "". Only a line
     that starts with the marker, or the brief's first line, counts. A missing model runs the env default, which is Sonnet for a builder; a reviewer's
-    frontmatter model is haiku, so a reviewer on a later-round or fix-check brief must name sonnet. A reviewer on either that names Opus
+    frontmatter model is haiku, so a reviewer on a later-round or fix-verifier brief must name sonnet. A reviewer on either that names Opus
     passes here and is refused by the Opus ceiling (opus_spawn_hit), so the remedy names Sonnet only (decision agent-model-cap)."""
     if tool in SPAWN_TOOLS and isinstance(tool_input.get("prompt"), str):
         return step_up_reason(tool_input["prompt"], tool_input.get("subagent_type"), tool_input.get("model"))
@@ -3569,7 +3569,7 @@ def step_up_reason(prompt: str, role, model) -> str:
         if role == "reviewer" and kind == "round" and n == "3" and "sonnet" not in model and "opus" not in model:
             return "Reviewer round 3 runs on Sonnet. Spawn it with model sonnet."
     if role == "reviewer" and ("fixcheck", None) in marker_hits(prompt) and (not model or "haiku" in model):
-        return "Reviewer fix check runs on Sonnet. Spawn it with model sonnet."
+        return "Reviewer fix verifier runs on Sonnet. Spawn it with model sonnet."
     if role == "builder" and builder_third_round(prompt) and "opus" not in model:
         return "Builder round 3 runs on Opus. Spawn it with model opus."
     return ""
@@ -3593,7 +3593,7 @@ ROLE_DEFAULT = "general-purpose"
 # A reviewer whose brief's first non-blank line starts with FIX_CHECK_MARKER (a fix check) may also run Sonnet above its row.
 # An Explore may run Sonnet, above its Haiku row, or Opus (opus_spawn_hit), only when its brief's first non-blank line carries
 # EXPLORE_AUDIT_MARKER (decision agent-model-cap). Case-sensitive, so lowercase prose does not count. It counts on the first line, with anything ahead of it, as BRIEF_MARKERS says; marker_hits reads it.
-from shared_names import EXPLORE_AUDIT_MARKER, FIX_CHECK_MARKER  # noqa: E402  the one home (hooks/shared_names.py); the spawn judge (hooks/call_judge.py) imports only EXPLORE_AUDIT_MARKER
+from shared_names import EXPLORE_AUDIT_MARKER, FIX_CHECK_MARKER  # noqa: E402  the one home, shared with the spawn judge (hooks/call_judge.py)
 from shared_names import REPO_TAG, repo_tag_names  # noqa: E402  the one home of the repo tag, shared with skills/roadmap/build.py
 EXPLORE_ROLE = "Explore"
 ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")
