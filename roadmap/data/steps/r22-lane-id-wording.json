@@ -1,7 +1,7 @@
 {
  "id": "r22-lane-id-wording",
  "title": "Restart plan R22 point 2 sends a lane's id to its step, not the roster",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL2mrYd9Cn6HaYDwW9g",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Lane fan-prose-unmapped-5 16:15 CST Nov 12; coordinator pick 16:15 CST (process-only): restart-plan.md:909-910 sends a started lane's id to \"that roster line\", but the roster holds standing sessions only (skills/project-ops/SKILL.md:52-54, templates/roster.md:17); a lane id goes in the step's lane field (today's practice). R22 itself stands.",
  "source": "coordinator 16:15 CST Nov 12",
- "note": "Record-writer, on branch restart-plan: replace the sentence with \"The session that starts a standing session sends triage the new id; triage rewrites that roster line. The session that starts a lane sends triage its id; triage writes it to the step's `lane` field.\" No owner item: wording slip, ruling unchanged.",
- "updatedAt": "2026-11-12T16:18:52-06:00"
+ "note": "Record-writer, on branch restart-plan: replace the sentence with \"The session that starts a standing session sends triage the new id; triage rewrites that roster line. The session that starts a lane sends triage its id; triage writes it to the step's `lane` field.\" No owner item: wording slip, ruling unchanged. Done 16:20 CST Nov 12: pushed to restart-plan as 6d3c5480d (plans/restart-plan.md:914-916); triage read the new sentence on origin/restart-plan.",
+ "updatedAt": "2026-11-12T16:20:48-06:00"
 }
