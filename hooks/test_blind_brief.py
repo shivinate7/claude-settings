@@ -280,10 +280,29 @@ class BriefFaults(unittest.TestCase):
                 self.assertIn("outside", codes(self.m.brief_faults(brief(header=header))))
 
     def test_long_digit_run_is_fast(self):
+        # Growth, in one process: a 20000-digit run and an 80000-digit run, best of three each, the two
+        # sizes alternated inside the loop so load hits both alike. Linear work quadruples (ratio near 4);
+        # quadratic work grows sixteenfold (near 16). The bound 8 sits between them. The same-length dot
+        # filler keeps the claim that digits are no slower than other text.
         import time
-        start = time.time()
-        self.m.brief_faults(brief(job=JOB + "\n" + "1" * 20000))
-        self.assertLess(time.time() - start, 2)
+
+        def timed(text):
+            start = time.perf_counter()
+            self.m.brief_faults(text)
+            return time.perf_counter() - start
+
+        small_text = brief(job=JOB + "\n" + "1" * 20000)
+        big_text = brief(job=JOB + "\n" + "1" * 80000)
+        small = big = float("inf")
+        for _ in range(3):
+            small = min(small, timed(small_text))
+            big = min(big, timed(big_text))
+        self.assertLess(big / small, 8.0,
+                        "an 80000-digit run takes %.1fx as long as a 20000-digit run" % (big / small))
+        filler_text = brief(job=JOB + "\n" + "." * 20000)
+        filler = min(timed(filler_text) for _ in range(3))
+        self.assertLess(small / filler, 3.0,
+                        "a 20000-digit run takes %.1fx as long as a same-length filler" % (small / filler))
 
     def test_device_written_sizes_pass(self):
         line = "iPhone Duo, 1114 x 705 pt open, 540 x 720 px per screen."
