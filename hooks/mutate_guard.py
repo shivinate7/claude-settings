@@ -923,9 +923,11 @@ MUTATIONS = [
      '    refuse(tool, "deny", "frozen-path", FROZEN_REASON + " " + target, target)', "guard", 'frozen: Write of a config hook'),
     # Added: rules guard.py grew after the prior mutation run.
     ("live-stream: never refuse a live stream",
+     '    for segment in split_segments(stripped):\n'
      '        matched = live_stream_hit(segment)\n'
      '        if matched and stream_family:\n'
      '            refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)',
+     '    for segment in split_segments(stripped):\n'
      '        matched = live_stream_hit(segment)\n'
      '        if False:\n'
      '            refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)', "guard", 'stream: tail -f never ends'),
