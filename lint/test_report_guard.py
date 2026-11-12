@@ -951,9 +951,9 @@ class ItemCiteTests(unittest.TestCase):
         self.assert_refused("Triage left: const s = `a\nb`; then item 46 waits.", "46")
 
     def test_icite_red_bare_cite_at_the_end_of_a_long_reply_is_refused(self):
-        # the full-size state: the scope word is on line 1, the bare cite is the last of 2000 lines
+        # the full-size state: the bare cite is in the last of 2000 lines, and the scope word is in that same sentence
         long_reply = "\n".join("Line %d of the report, no cite here." % n for n in range(2000))
-        self.assert_refused("Triage left the report open.\n" + long_reply + "\nThen item 46 waits.", "46")
+        self.assert_refused(long_reply + "\nTriage: item 46 is open.", "46")
 
     # the scope ruling: a bare item cite is read only when its clause names waiting page, waiting-page or triage
     def test_icite_red_bare_item_in_a_cart_sentence_passes(self):
