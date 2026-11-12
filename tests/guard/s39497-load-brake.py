@@ -30,16 +30,19 @@ FAMILY = "load-brake"
 #                  claude_procs key in a reading changes nothing. A cpu_pct key in a stub reading changes
 #                  nothing either: a change that still reads the CPU refuses on those stubs and fails here.
 #                  The OS sources, all faked by THE FAKE HOST: darwin reads memory through sysctlbyname;
-#                  linux reads memory unread; both read the disk through shutil.disk_usage on the home
-#                  folder. Neither reads the CPU ticks, the load average, or waits.
+#                  linux reads memory in use from /proc/meminfo, 100 * (MemTotal - MemAvailable) / MemTotal,
+#                  and a cgroup memory.max of `max`, or no file, means MemTotal. Both read the disk through
+#                  shutil.disk_usage on the home folder. Neither reads the CPU ticks, the load average, or waits.
 # The judge must call it by its bare name, so the probe's patch (set on every guard module that
 # holds the name) is the function that runs. A function the probe cannot replace fails every case.
 # The reading of a call is one read_load() per start call, and none on any other call.
 # THE FAKE HOST. A case with a `fake` spec runs the real read_load under fakes, in the probe, and judges the
 # call on what it read. The fake sets sys.platform, ctypes.CDLL and ctypes.cdll, os.getloadavg (the load
-# average, which no reading uses), shutil.disk_usage, and the /proc/stat file (builtins.open and io.open).
-# Each source is restored before the judge runs. Tick samples: a base sample, then one that adds the case's
-# busy share, so a reader that reads the ticks would see that share. `tick_reads` counts each read of them.
+# average, which no reading uses), shutil.disk_usage, the /proc/stat file, /proc/meminfo and
+# /sys/fs/cgroup/memory.max (builtins.open and io.open). `meminfo_opens` counts each open of /proc/meminfo, so a case
+# can check that the reader opened the file before it checks the value. Each source is restored before the judge runs.
+# Tick samples: a base sample, then one that adds the case's busy share, so a reader that reads the ticks would see
+# that share. `tick_reads` counts each read of them.
 # THE WAITS. Every time.sleep the probe makes is counted in `sleeps`, and nothing waits. On Windows the probe
 # also counts each GetSystemTimes call (`GetSystemTimes`). A judge with no `reading` and no `fake` runs the
 # real reader on this host (the live judge), so its waits and tick calls are the lane call's own.
@@ -100,7 +103,7 @@ def under_fake(read, fake):
     real_open = open
     busy = int(fake["busy"])
     samples = [(1000, 0, 9000, 0), (1000 + busy * 10, 0, 9000 + (100 - busy) * 10, 0)]   # (user, system, idle, nice)
-    calls = {"ticks": 0, "stat": 0}
+    calls = {"ticks": 0, "stat": 0, "meminfo": 0, "cgroup": 0}
 
     def sample(counter):
         # A read past 100 raises, so a loop with no bound fails its case instead of hanging the run.
@@ -124,10 +127,22 @@ def under_fake(read, fake):
         return types.SimpleNamespace(mach_host_self=lambda: 1, host_statistics=host_statistics,
                                      sysctlbyname=sysctlbyname)
 
+    def fake_file(text, name, counter):
+        # "missing" is the file that is not there: the open raises, as the OS's does.
+        calls[counter] += 1
+        if text == "missing":
+            raise FileNotFoundError(2, "No such file or directory", name)
+        return io.StringIO(text)
+
     def stat_open(file, *args, **kwargs):
-        if str(file) == "/proc/stat":
+        name = str(file)
+        if name == "/proc/stat":
             user, system, idle, nice = sample("stat")
             return io.StringIO("cpu  %d %d %d %d 0 0 0 0 0 0\n" % (user, nice, system, idle))
+        if name == "/proc/meminfo":
+            return fake_file(fake["meminfo"], name, "meminfo")
+        if name == "/sys/fs/cgroup/memory.max":
+            return fake_file(fake["cgroup"], name, "cgroup")
         return real_open(file, *args, **kwargs)
 
     total, free = int(fake["disk_total_gb"] * GB), int(fake["disk_free_gb"] * GB)
@@ -143,6 +158,8 @@ def under_fake(read, fake):
             return read()
         finally:
             out["tick_reads"] = calls["ticks"] + calls["stat"]
+            out["meminfo_opens"] = calls["meminfo"]
+            out["cgroup_opens"] = calls["cgroup"]
 
 
 out = {"reads": 0}
@@ -271,12 +288,41 @@ def lb_gb(free, total):
     return re.compile(re.escape("disk %.1f GB free of %.0f GB" % (free, total)))
 
 
-def lb_fake(platform, busy=10.0, load=0.5, memory=40, disk_total=926.0, disk_free=500.0):
+LB_MEMINFO_NAMES = (
+    "SwapCached", "Active", "Inactive", "Active(anon)", "Inactive(anon)", "Active(file)", "Inactive(file)",
+    "Unevictable", "Mlocked", "SwapTotal", "SwapFree", "Zswap", "Zswapped", "Dirty", "Writeback", "AnonPages",
+    "Mapped", "Shmem", "KReclaimable", "Slab", "SReclaimable", "SUnreclaim", "KernelStack", "PageTables",
+    "SecPageTables", "NFS_Unstable", "Bounce", "WritebackTmp", "CommitLimit", "Committed_AS", "VmallocTotal",
+    "VmallocUsed", "VmallocChunk", "Percpu", "HardwareCorrupted", "AnonHugePages", "ShmemHugePages",
+    "ShmemPmdMapped", "FileHugePages", "FilePmdMapped", "CmaTotal", "CmaFree", "Unaccepted", "Hugepagesize",
+    "HugePages_Total", "HugePages_Free", "HugePages_Rsvd", "HugePages_Surp", "DirectMap4k", "DirectMap2M",
+    "DirectMap1G")
+
+
+def lb_meminfo(total_kb, available_kb, free_kb=None):
+    """The text of /proc/meminfo in the real file's shape, about 50 keys, MemTotal first. MemFree sits well under
+    MemAvailable, as it does on a machine whose cache can be reclaimed, so a reader that took MemFree would read
+    another share."""
+    free_kb = available_kb // 5 if free_kb is None else free_kb
+    rows = [("MemTotal", "%d kB" % total_kb), ("MemFree", "%d kB" % free_kb),
+            ("MemAvailable", "%d kB" % available_kb), ("Buffers", "200000 kB"),
+            ("Cached", "%d kB" % max(available_kb - free_kb, 0))]
+    rows += [(name, ("%d" if name.startswith("HugePages_") else "%d kB") % (1000 + n))
+             for n, name in enumerate(LB_MEMINFO_NAMES)]
+    return "".join("%s: %s\n" % row for row in rows)
+
+
+def lb_fake(platform, busy=10.0, load=0.5, memory=40, disk_total=926.0, disk_free=500.0, meminfo=None,
+            cgroup="max\n"):
     """A fake host for THE FAKE HOST: `busy` the CPU share the tick samples would show, `load` the 1-minute
     load average, `memory` the percent in use, and the disk in GB. The defaults are a quiet host with room on
-    the disk."""
+    the disk. `meminfo` is the text of /proc/meminfo: by default a 16 GB host at `memory` percent in use; the
+    word "missing" makes the file not there. `cgroup` is /sys/fs/cgroup/memory.max, the same way."""
+    total_kb = 16 * 1024 * 1024
+    if meminfo is None:
+        meminfo = lb_meminfo(total_kb, int(round(total_kb * (100 - memory) / 100.0)))
     return {"platform": platform, "busy": busy, "load": load, "memory": memory,
-            "disk_total_gb": disk_total, "disk_free_gb": disk_free}
+            "disk_total_gb": disk_total, "disk_free_gb": disk_free, "meminfo": meminfo, "cgroup": cgroup}
 
 
 def lb_reading(**changes):
@@ -416,8 +462,7 @@ def lb_decision_check(tool, reading, want, names=(), background=None, tool_input
 
 
 def lb_no_read_check(tool, tool_input=None, event=None, agent=None, remote=None):
-    """A call that reads no load under the worst reading: one that is not a lane start, or a lane start in a
-    cloud session (`remote` "true"), where the brake is skipped and the reader is never called."""
+    """A call that reads no load under the worst reading: one that is not a lane start, so the reader is never called."""
     def check():
         got, reason, side = lb_run(tool, {"mode": "judge", "reading": LB_ALL_HIGH}, tool_input, event, agent,
                                    remote=remote)
@@ -502,7 +547,7 @@ def lb_reader_files(side):
 
 
 def lb_reader_shape(side):
-    supported = sys.platform in ("win32", "darwin")
+    supported = sys.platform in ("win32", "darwin", "linux")
     if side.get("raised"):
         if supported:
             return False, "exception raised in read_load on %s: %s" % (sys.platform, side["raised"])
@@ -738,6 +783,61 @@ lb_add("the reader returns no cpu_pct key on darwin", lb_reader_fake(lb_fake("da
 lb_add("the reader returns no cpu_pct key on linux", lb_reader_fake(lb_fake("linux"), lb_no_cpu_key))
 
 
+# LINUX MEMORY. The reader reads memory in use from /proc/meminfo: 100 * (MemTotal - MemAvailable) / MemTotal. The
+# scope comes first: the reader opens the file once. Then the value, which is `want`, or None when the file gives none.
+def lb_memory_check(want):
+    def check(side):
+        opens = side.get("meminfo_opens")
+        if opens != 1:
+            return False, "read_load opened /proc/meminfo %s time(s), want 1" % (opens,)
+        got = (side.get("reading") or {}).get("memory_pct")
+        if want is None:
+            if got is None:
+                return True, "/proc/meminfo opened once, memory_pct None"
+            return False, "memory_pct is %r, want None: the file gives no reading" % (got,)
+        if isinstance(got, bool) or not isinstance(got, (int, float)):
+            return False, "memory_pct is %r, want %.1f" % (got, want)
+        if abs(got - want) > 0.05:
+            return False, "memory_pct is %.2f, want %.1f" % (got, want)
+        return True, "/proc/meminfo opened once, memory_pct %.1f" % got
+    return check
+
+
+# A 16 GB host with 2 GB available is 75% in use. MemFree is 0.1 GB, so a reader that took MemFree reads 98.75%.
+LB_MEMINFO_75 = lb_meminfo(8000000, 2000000, free_kb=100000)
+lb_add("linux memory: read_load reads /proc/meminfo, 100 * (MemTotal - MemAvailable) / MemTotal: 75.0%, not MemFree",
+       lb_reader_fake(lb_fake("linux", meminfo=LB_MEMINFO_75), lb_memory_check(75.0), side_check=True))
+lb_add("linux memory: a cgroup memory.max with no file leaves the total at MemTotal: 75.0%",
+       lb_reader_fake(lb_fake("linux", meminfo=LB_MEMINFO_75, cgroup="missing"), lb_memory_check(75.0),
+                      side_check=True))
+lb_add("linux memory: a /proc/meminfo that is not there reads None, and the reader does not raise",
+       lb_reader_fake(lb_fake("linux", meminfo="missing"), lb_memory_check(None), side_check=True))
+lb_add("linux memory: an empty /proc/meminfo reads None, and the reader does not raise",
+       lb_reader_fake(lb_fake("linux", meminfo=""), lb_memory_check(None), side_check=True))
+lb_add("linux memory: a /proc/meminfo with no MemAvailable and a MemTotal that is not a number reads None",
+       lb_reader_fake(lb_fake("linux", meminfo="MemTotal: lots kB\nMemFree: 1 kB\n"), lb_memory_check(None),
+                      side_check=True))
+lb_add("linux memory: a /proc/meminfo with MemTotal 0 reads None, not a division by zero",
+       lb_reader_fake(lb_fake("linux", meminfo=lb_meminfo(0, 0)), lb_memory_check(None), side_check=True))
+
+
+def lb_disk_check(total, free):
+    """disk_free_gb is the free space on the home drive, shutil.disk_usage's free in GB, and disk_total_gb its size:
+    both read as they are, not clamped, so the brake's allowance is the free GB the OS reports."""
+    def check(reading):
+        got_free, got_total = reading.get("disk_free_gb"), reading.get("disk_total_gb")
+        if got_free is None or got_total is None:
+            return False, "read_load left the disk unread: %r" % (reading,)
+        if abs(got_free - free) > 0.01 or abs(got_total - total) > 0.01:
+            return False, "disk_free_gb %s, disk_total_gb %s, want %s and %s" % (got_free, got_total, free, total)
+        return True, "disk_free_gb %s of disk_total_gb %s" % (got_free, got_total)
+    return check
+
+
+lb_add("disk 252 GB with 29.7 GB free: read_load reads the free space, 29.7 GB of 252 GB",
+       lb_reader_fake(lb_fake("linux", disk_total=252.0, disk_free=29.7), lb_disk_check(252.0, 29.7)))
+
+
 # Memory 90% and 80% are the memory levels. The CPU never adds to a refusal, and a CPU reading never makes a busy
 # call of its own.
 for _short, _tool in LB_SPAWNS:
@@ -846,10 +946,10 @@ lb_add("an agent's session tool that writes nothing reads no load under the wors
 lb_add("a Bash call whose agent_id is malformed reads no load under the worst reading",
        lb_no_read_check("Bash", {"command": "echo hi"}, agent="not an id!"))
 
-# CLOUD. decision session-tiers: the load brake is local-only. With CLAUDE_CODE_REMOTE=true a start call is
-# allowed at busy and full. These run end to end, so an allowed call's file writes are checked too (nothing reaches
-# guard.log). The section below already holds an Agent with run_in_background true, a Workflow and the writes at full,
-# so those are not repeated here.
+# CLOUD. The brake runs in a cloud session (CLAUDE_CODE_REMOTE "true") as it does locally: a full machine refuses
+# every lane start and every agent's disk-filling call, and a busy one refuses a background spawn. The one skip is the
+# session start, start_session: the new session runs in another container, so the brake reads nothing there (a forced
+# split). These run end to end, so a refused call's file writes are checked too (only guard.log).
 LB_CLOUD = "true"
 CLOUD_VALUES = ((None, False), ("true", True), ("TRUE", False), ("True", False), ("1", False), ("", False),
                 ("false", False), (" true", False))
@@ -858,27 +958,43 @@ for _tool, _bg, _say in (("Agent", False, "run_in_background false"),
                          ("Task", True, "run_in_background true"),
                          ("Task", False, "run_in_background false"),
                          ("Task", None, "run_in_background left out")):
-    lb_add("cloud: %s, memory 99%%, disk 1.0 GB free of 926 GB, %s: allowed, nothing written" % (_tool, _say),
-           lb_decision_check(_tool, LB_ALL_HIGH, "allow", background=_bg, reads=None, remote=LB_CLOUD))
-lb_add("cloud: start_session, memory 99%, disk 1.0 GB free of 926 GB: allowed, nothing written",
-       lb_decision_check("mcp__ccd_session__start_session", LB_ALL_HIGH, "allow", reads=None, remote=LB_CLOUD))
-for _tool in ("Agent", "Task"):
-    lb_add("cloud: %s, memory 91.7%%, run_in_background true: busy, allowed" % _tool,
-           lb_decision_check(_tool, lb_reading(memory_pct=91.7), "allow", background=True, reads=None,
+    lb_add("CLAUDE_CODE_REMOTE=true: %s, memory 97.2%%, %s: refused as locally, names the memory, one read" % (_tool, _say),
+           lb_decision_check(_tool, lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL, background=_bg,
                              remote=LB_CLOUD))
-lb_add("cloud: an agent's Bash, memory 99%, disk 1.0 GB free of 926 GB: allowed, nothing written",
-       lb_decision_check("Bash", LB_ALL_HIGH, "allow", tool_input={"command": "echo hi"}, agent=LB_AGENT,
-                         reads=None, remote=LB_CLOUD))
-lb_add("cloud: an agent's Agent call, memory 97.2%: allowed",
-       lb_decision_check("Agent", lb_reading(memory_pct=97.2), "allow", agent=LB_AGENT, reads=None,
+lb_add("CLAUDE_CODE_REMOTE=true: start_session, memory 99%, disk 1.0 GB free of 926 GB: allowed, the reader runs 0 times "
+       "(the session start keeps its skip)",
+       lb_decision_check("mcp__ccd_session__start_session", LB_ALL_HIGH, "allow", reads=0, remote=LB_CLOUD))
+for _tool in ("Agent", "Task"):
+    lb_add("CLAUDE_CODE_REMOTE=true: %s, memory 91.7%%, run_in_background true: busy, refused as locally, names "
+           "the memory" % _tool,
+           lb_decision_check(_tool, lb_reading(memory_pct=91.7), "deny", LB_MEM_BUSY, background=True,
+                             remote=LB_CLOUD))
+lb_add("CLAUDE_CODE_REMOTE=true: an agent's Agent call, memory 97.2%: refused as locally, names the memory, one read",
+       lb_decision_check("Agent", lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL, agent=LB_AGENT,
                          remote=LB_CLOUD))
-lb_add("cloud: Agent, darwin host at memory 97.2%, run_in_background false, the real reader: allowed",
-       lb_decision_check("Agent", None, "allow", background=False, fake=lb_fake("darwin", memory=97.2), reads=None,
-                         remote=LB_CLOUD))
-lb_add("cloud: Agent, linux disk 3.1 GB free of 926 GB, run_in_background true, the real reader: allowed",
-       lb_decision_check("Agent", None, "allow", background=True, fake=lb_fake("linux", disk_free=3.1), reads=None,
-                         remote=LB_CLOUD))
-# Only the exact value "true" is cloud: the other values keep the local brake, so the refusal still stands.
+lb_add("CLAUDE_CODE_REMOTE=true: Agent, darwin host at memory 97.2%, run_in_background false, the real reader: "
+       "refused, names the memory",
+       lb_decision_check("Agent", None, "deny", (lb_names("memory", "97.0", "97"),), background=False,
+                         fake=lb_fake("darwin", memory=97.2), remote=LB_CLOUD))
+lb_add("CLAUDE_CODE_REMOTE=true: Agent, linux disk 3.1 GB free of 926 GB, run_in_background true, the real reader: "
+       "refused, names the disk",
+       lb_decision_check("Agent", None, "deny", (lb_gb(3.1, 926),), background=True,
+                         fake=lb_fake("linux", disk_free=3.1), remote=LB_CLOUD))
+# A 252 GB disk is busy under 15 GB free and full under 5 GB, so the free space is the allowance. The local rows are
+# the reference; the cloud rows must match them.
+for _remote, _say in ((None, "CLAUDE_CODE_REMOTE unset"), (LB_CLOUD, "CLAUDE_CODE_REMOTE=true")):
+    lb_add("%s: Agent, 252 GB disk with 29.7 GB free, run_in_background true: allowed, the reader runs once" % _say,
+           lb_decision_check("Agent", None, "allow", background=True,
+                             fake=lb_fake("linux", disk_total=252.0, disk_free=29.7), remote=_remote))
+    lb_add("%s: Agent, 252 GB disk with 14.9 GB free, run_in_background true: busy, refused, names the disk and the "
+           "free space" % _say,
+           lb_decision_check("Agent", None, "deny", (lb_gb(14.9, 252), LB_FREE_DISK), background=True,
+                             lacks=(LB_FOREGROUND,), fake=lb_fake("linux", disk_total=252.0, disk_free=14.9),
+                             remote=_remote))
+    lb_add("%s: Agent, 252 GB disk with 4.9 GB free, run_in_background false: full, refused, names the disk" % _say,
+           lb_decision_check("Agent", None, "deny", (lb_gb(4.9, 252),), background=False,
+                             fake=lb_fake("linux", disk_total=252.0, disk_free=4.9), remote=_remote))
+# Only the exact value "true" is a cloud session: the other values are local, so the refusal still stands.
 for _remote in ("1", "TRUE", ""):
     lb_add("CLAUDE_CODE_REMOTE=%r is local: Agent, memory 97.2%%, run_in_background false: full, refused" % _remote,
            lb_decision_check("Agent", lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL, background=False,
@@ -924,10 +1040,10 @@ lb_add('cloud check: guard_core.is_cloud exists and is True only for exactly "tr
 lb_add("cloud check: guard.py's brake guard holds guard_core.is_cloud, one home", cloud_one_home_check)
 
 
-# A CLOUD SESSION. The brake is specific to local sessions: with CLAUDE_CODE_REMOTE "true" it skips every lane
-# start and every running-lane call, and reads no load, so the reader is never called. Only the exact value
-# "true" is a cloud session. Unset and "false" are local and keep the brake. Every label names CLAUDE_CODE_REMOTE,
-# so MUTATE_ONLY=CLAUDE_CODE_REMOTE runs this section alone.
+# THE SAME BRAKE EVERYWHERE. A cloud session (CLAUDE_CODE_REMOTE "true") is braked as a local one is: each full reading
+# refuses the lane start, the agent's disk-filling call and the running agent's call, and the reader runs once. Only
+# the exact value "true" is a cloud session. Unset, "false" and "true" keep the brake, so each full reading is refused
+# under each value. Every label names CLAUDE_CODE_REMOTE, so MUTATE_ONLY=CLAUDE_CODE_REMOTE runs this section alone.
 LB_FULL_READING = lb_reading(memory_pct=97.2)   # a full machine: memory over 95%
 
 
@@ -963,26 +1079,9 @@ def lb_hit_check(which, tool, reading, tool_input, remote=None, deny=None, reads
     return check
 
 
-# Cloud: the direct pairs are empty and the reader never runs.
-lb_add("CLAUDE_CODE_REMOTE=true, Agent run_in_background true, memory 97.2%: load_hit returns the empty pair, "
-       "the reader never runs",
-       lb_hit_check("load_hit", "Agent", LB_FULL_READING, lb_lane_input("Agent", True), remote="true", reads=0))
-lb_add("CLAUDE_CODE_REMOTE=true, Workflow, memory 97.2%: load_hit returns the empty pair, the reader never runs",
-       lb_hit_check("load_hit", "Workflow", LB_FULL_READING, lb_lane_input("Workflow"), remote="true", reads=0))
-lb_add("CLAUDE_CODE_REMOTE=true, an agent's Bash, memory 97.2%: running_agent_hit returns the empty pair, "
-       "the reader never runs",
-       lb_hit_check("running_agent_hit", "Bash", LB_FULL_READING, {"command": "echo hi"}, remote="true", reads=0,
-                    agent=LB_AGENT))
-lb_add("CLAUDE_CODE_REMOTE=true, Agent run_in_background true, full reading: allowed, the reader never runs",
-       lb_no_read_check("Agent", lb_lane_input("Agent", True), remote="true"))
-lb_add("CLAUDE_CODE_REMOTE=true, Workflow, full reading: allowed, the reader never runs",
-       lb_no_read_check("Workflow", lb_lane_input("Workflow"), remote="true"))
-for _tool, _given in LB_WRITES:   # the agent's Bash is the first of these
-    lb_add("CLAUDE_CODE_REMOTE=true, an agent's %s, full reading: allowed, the reader never runs" % _tool,
-           lb_no_read_check(_tool, _given, agent=LB_AGENT, remote="true"))
-
-# Local: unset and "false" keep the brake, so each full reading is still refused, and the reader runs once.
-for _remote, _say in ((None, "unset"), ("false", "false")):
+# The direct pairs, the decisions and the agent writes: a full reading is refused under each value, and the reader runs
+# once. The cloud steer below says what a cloud session does, since its disk does not drain while it waits.
+for _remote, _say in ((None, "unset"), ("false", "false"), ("true", "true, a cloud session")):
     lb_add("CLAUDE_CODE_REMOTE %s, Agent run_in_background true, memory 97.2%%: load_hit refuses, names the memory"
            % _say,
            lb_hit_check("load_hit", "Agent", LB_FULL_READING, lb_lane_input("Agent", True), remote=_remote,
@@ -1004,6 +1103,23 @@ for _remote, _say in ((None, "unset"), ("false", "false")):
            lb_decision_check("Bash", LB_FULL_READING, "deny", LB_MEM_FULL + (LB_STOP_AGENT,),
                              tool_input={"command": "echo hi"}, agent=LB_AGENT, remote=_remote))
 
+# A cloud session's agent writes are refused at full too. The Bash is the first of LB_WRITES.
+for _tool, _given in LB_WRITES:
+    lb_add("CLAUDE_CODE_REMOTE=true, an agent's %s, memory 97.2%%: refused, names the memory, tells the agent to stop"
+           % _tool,
+           lb_decision_check(_tool, LB_FULL_READING, "deny", LB_MEM_FULL + (LB_STOP_AGENT,), tool_input=_given,
+                             agent=LB_AGENT, remote="true"))
+
+# THE CLOUD STEER. A cloud session's disk does not drain while it waits, so a full disk's reason names the two things
+# that free it: free space, or end the session and tell the parent. "Wait, then retry" alone strands it.
+CLOUD_STEER_FREE = re.compile(r"free (?:up )?(?:disk )?space|end (?:your|this) (?:session|turn)", re.I)
+CLOUD_STEER_PARENT = re.compile(r"\bparent\b", re.I)
+lb_add("CLAUDE_CODE_REMOTE=true, Agent, 252 GB disk with 3.1 GB free: load_hit refuses, and the reason says to free "
+       "space or end the session, and to tell the parent",
+       lb_hit_check("load_hit", "Agent", lb_reading(disk_free_gb=3.1, disk_total_gb=252.0),
+                    lb_lane_input("Agent", True), remote="true",
+                    deny=(lb_gb(3.1, 252), CLOUD_STEER_FREE, CLOUD_STEER_PARENT)))
+
 for _short, _tool in LB_TOOLS:
     lb_add("%s with the real reader starts no child process" % _short,
            lb_real_children_check(_tool), real=True)
@@ -1011,7 +1127,7 @@ lb_add("Agent with run_in_background false, the real reader, starts no child pro
        lb_real_children_check("Agent", background=False), real=True)
 lb_add("the real reader starts no child process", lb_reader(lb_reader_children), real=True)
 lb_add("the real reader writes no file", lb_reader(lb_reader_files), real=True)
-lb_add("the real reader returns readings in range, and on Windows and Mac reads memory and disk, with no cpu_pct key",
+lb_add("the real reader returns readings in range, and on Windows, Mac and Linux reads memory and disk, with no cpu_pct key",
        lb_reader(lb_reader_shape), real=True)
 
 
@@ -1054,7 +1170,8 @@ lb_add("Windows: no start call on the live judge makes a GetSystemTimes call", l
 # as an agent's is, so a lane its orchestrator leaves waiting stops writing. The session's own id is
 # CLAUDE_CODE_REMOTE_SESSION_ID (cse_<x>, read as session_<x>). Its own get_session record in the transcript must tag
 # cs-build:lane, with no other cs-build: tier tag, and no set_session_tags naming it may follow that record. Any other
-# session, a cloud session, a session with no own id, and any read error passes. A session with an own id reads the
+# session, a session with no own id, and any read error passes. A cloud lane is braked as a local one is. A session
+# with an own id reads the
 # load once, and opens its transcript only when the reading is full.
 LB_LANE_TAGS = ["cs-build:lane", "cs-repo:o/r"]
 LB_LANE = role_call("g1", LB_LANE_TAGS)   # the lane's own record, as its transcript holds it
@@ -1070,12 +1187,12 @@ LB_LONG = [line for n in range(200)                               # a 400-line t
            for line in (role_use("f%d" % n, "Bash", {"command": "ls"}), role_result("f%d" % n, "a.txt"))]
 
 
-def lb_lane_direct_check(tool, tool_input, reading, names):
+def lb_lane_direct_check(tool, tool_input, reading, names, remote=None):
     """lane_session_hit, called direct on the lane's own call under `reading`: its pair is a refusal that names each
-    of `names`, and the reader ran once."""
+    of `names`, and the reader ran once. `remote` is CLAUDE_CODE_REMOTE, as lb_run's."""
     def check():
         got, reason, side = lb_run(tool, {"mode": "lane", "reading": reading}, tool_input, own_env=LB_OWN,
-                                   transcript=LB_LANE)
+                                   transcript=LB_LANE, remote=remote)
         if got == "error":
             return False, reason
         pair = side.get("lane")
@@ -1092,13 +1209,14 @@ def lb_lane_direct_check(tool, tool_input, reading, names):
     return check
 
 
-def lb_lane_refusal_check(tool, tool_input, reading, names):
+def lb_lane_refusal_check(tool, tool_input, reading, names, remote=None):
     """A lane session's call under `reading` is refused, names each of `names`, and tells the lane to end its turn and
     report to @parent. The reader runs once. The full run is checked first, so the direct call is judged only once the
-    run refuses. The direct call must refuse the same way."""
+    run refuses. The direct call must refuse the same way. `remote` is CLAUDE_CODE_REMOTE, as lb_run's."""
     full = tuple(names) + LB_LANE_REMEDY
-    judge = lb_decision_check(tool, reading, "deny", full, tool_input=tool_input, own_env=LB_OWN, transcript=LB_LANE)
-    direct = lb_lane_direct_check(tool, tool_input, reading, full)
+    judge = lb_decision_check(tool, reading, "deny", full, tool_input=tool_input, own_env=LB_OWN, transcript=LB_LANE,
+                              remote=remote)
+    direct = lb_lane_direct_check(tool, tool_input, reading, full, remote=remote)
 
     def check():
         ok, note = judge()
@@ -1125,12 +1243,12 @@ def lb_lane_refusal_quiet_check():
     return check
 
 
-def lb_lane_quiet_check(own_env=None, remote=None):
+def lb_lane_quiet_check(own_env=None):
     """A call that no lane check reaches, at a full reading: it is allowed, the reader runs no time, the transcript is
     not opened, and no file is written."""
     def check():
         got, reason, side = lb_run("Bash", {"mode": "judge", "reading": LB_ALL_HIGH}, LB_LANE_BASH, own_env=own_env,
-                                   transcript=LB_LANE, spy=True, remote=remote)
+                                   transcript=LB_LANE, spy=True)
         if got == "error":
             return False, reason
         if got != "allow":
@@ -1246,9 +1364,10 @@ lb_add("a lane record at the end of a 400-line transcript, memory 97.2%: full, r
        lb_decision_check("Bash", LB_FULL_READING, "deny", LB_MEM_FULL + LB_LANE_REMEDY, tool_input=LB_LANE_BASH,
                          own_env=LB_OWN, transcript=LB_LONG + LB_LANE))
 
-# No lane check reaches these calls: a cloud session, a session with no own id, and an own id in another shape.
-lb_add("CLAUDE_CODE_REMOTE=true with a lane record, memory 99%: allowed, the reader runs 0 times, transcript not opened",
-       lb_lane_quiet_check(own_env=LB_OWN, remote="true"))
+lb_add("CLAUDE_CODE_REMOTE=true with a lane record, memory 97.2%: refused, names the memory and the lane remedy, the "
+       "reader runs once",
+       lb_lane_refusal_check("Bash", LB_LANE_BASH, LB_FULL_READING, (LB_MEM_FULL,), remote="true"))
+# No lane check reaches these calls: a session with no own id, and an own id in another shape.
 lb_add("a lane record and no own id, memory 99%: allowed, the reader runs 0 times, transcript not opened",
        lb_lane_quiet_check(own_env=None))
 lb_add("a lane record and an own id in another shape (xyz), memory 99%: allowed, the reader runs 0 times, "
