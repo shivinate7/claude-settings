@@ -331,8 +331,8 @@ the answers at each wake, and at the start of each turn while it has an item ope
 while `meta/page.parked` is not empty): `ArtifactData list answers`. That read is the fallback when no wake comes. A peer session never
 relays an answer's text. It sends only the page URL, the item id and the act, and the receiver checks the answer itself (decision relayed-grant-read-from-page). An answer typed in the chat counts the same. A chat answer to an open item: the
 writer adds the answer and its time to the item's `context`, and the writer closes it. Nothing is
-written to `answers/`, so steps 2 to 4 of "Route and close" skip their delete.
-At a turn start the owning session skips a kept answer on a closed item and does not re-route it.
+written to `answers/`, so steps 3 and 4 of "Route and close" skip their delete.
+At a turn start the owning session skips a kept answer on a closed item and does not re-route it, except an arbiter ruling's `overturn` answer (step 5).
 The writer also sets `lastAnswer` from the chat answer, with the time the owner gave it.
 
 - A session watches the page first (`ArtifactComments` action `watch` with the page URL) when it
@@ -417,7 +417,7 @@ report (see the park branch below). A `none` answer on this path gets no new opt
 - Withdrawn. If a kept answer is gone from an open item at the owning session's re-read, the owner withdrew it. The session drops `lane`
   (`{"lane": {"__delete__": true}}`) and nothing else, leaves the item open as unanswered, and tells the receiver the act is withdrawn.
 - Chat answer. A chat answer closes the item (decision questions-go-to-owner, and the busy-lane rule), so no page answer
-  can follow. Steps 2 to 4 skip their delete, and the writer sets `lastAnswer` from it. It has no `answers/<id>`, so
+  can follow. Steps 3 and 4 skip their delete, and the writer sets `lastAnswer` from it. It has no `answers/<id>`, so
   `page_grant.py` can never count it for a receiver. The routing session tells the owner in its reply that the receiver needs
   the owner's grant typed in the receiver's own session.
 
