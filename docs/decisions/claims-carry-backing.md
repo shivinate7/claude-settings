@@ -51,6 +51,20 @@ Lane ruling, 2026-11-07 23:50 CST, lane session, process-only: only a table act 
 
 Coordinator, 2026-11-07 14:36 CST, process-only: the waiting page judges a task's "Why yours" line by guard rule `task-why-cited`. It accepts a route-row cite and a dated measured cite only, and reads no refusals file, so a backtick tool-name cite does not pass there.
 
+Coordinator pick, 2026-11-07 15:12 CST, rewritten 15:38 CST after review round 1, process-only, reversible (lane `why-cite-matches-act`): a page task's route cite must name a row that covers the task's act.
+
+- Act text: when the task carries a `command`, each line of it (each variant of `{powershell, mac}`), split at `&&`, `||` and `;`, with a leading `env` and `NAME=value` assignments dropped. With no command, each backtick span in the write's `context`.
+- Cover: the cited id is one of the rows on this surface whose `pattern` matches a piece of act text. The match is the route matcher's (`hooks/route_match.py`). Two rows may share a pattern, so the rule is membership. One covered piece covers a task of several steps.
+- No cover: refused when the act is known. A command is known. A backtick span is known only when it matches some other row on this surface. A span no row matches, such as a button label `Merge`, names no act here. Remedy: cite the row of the act, or name the act's command.
+- Each route cite on the line is judged. A line with one covering cite passes. Else a line with one uncovered cite is refused.
+- Unknown, never a refusal: no act text, a span that matches no row, a cited row with no pattern or one that does not compile, or a row not on this surface. The page guard runs before the write and has no note channel, so it lets the write through, as it does for a row whose outcome does not read.
+- A dated `(measured ...)` cite on the line backs it on its own, as the 12:59 pick says; the route cover is not read then.
+- Alternates do not cover: a row's `alternates` name other acts, not this one.
+- Known limit: an update or `str_replace` that carries no `command` cannot see the stored one, so it is judged on its own spans only.
+- Replies are out of scope: part (b), the reply judge, judges a reply's cite against its act.
+
+Reason: the 12:34 lane ruling checks a row's outcome but never which act the row is about. A delete task citing a row for another act passed (incident from lane `task-names-check-line-not-truth`, 2026-11-07 15:10 CST). Reusing the route matcher keeps one home for "which act is this row". Refusing only a known act keeps press-only tasks and quoted text free of false alarms.
+
 ## Incident
 
 `docs/decisions/session-tiers.md:64` (origin/main 7975f6d8) said "The cloud cannot close a pull request". One fact sat in three places: that line, the 2026-10-30 refusals in `docs/decisions/auto-mode-owner-acts.md` (lines 79-82 on origin/main), and the grant "Acts the cloud refuses" in `.claude/CLAUDE.md:16-19`. It stayed on main with no check. Measured 2026-11-06 on origin/main (7975f6d8): a grep of `lint`, `hooks`, `merge` and `actions` finds no check that reads the phrase.

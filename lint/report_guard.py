@@ -1732,10 +1732,12 @@ def _measured(line):
     return "ok"
 
 
-def _route_verdict(ids):
+def _route_verdict(ids, texts=None):
     """(kind, text) for the route ids a Why yours line cites: kind "ok", "works" (a row says the act is doable),
-    "dead" (no row holds the id), or "unknown" (the file or the row's outcome on this surface did not read). Reads the
-    rows file once, through hooks/route_match.py. A row of another surface says nothing here, so it reads unknown."""
+    "dead" (no row holds the id), "uncovered" (a row says refused or asks, but covers none of the act pieces `texts`),
+    or "unknown" (the file or the row's outcome on this surface did not read). Reads the rows file once, through
+    hooks/route_match.py. A row of another surface says nothing here, so it reads unknown. No `texts`, or a cover
+    that cannot be judged, never gives "uncovered"."""
     _hooks_on_path()
     import route_match
     rows = route_match.read_rows()
@@ -1743,7 +1745,7 @@ def _route_verdict(ids):
         return "unknown", ("the route rows file did not read, so the route cite %s went unchecked"
                            % ", ".join(ids))
     here = route_match.surface()
-    kinds = []
+    kinds, uncovered, readable = [], [], False
     for rid in ids:
         held = [row for row in rows if row.get("id") == rid]
         row = next((r for r in held if r.get("surface") == here), None)
@@ -1755,14 +1757,25 @@ def _route_verdict(ids):
             kinds.append(("works", "route row %s says this act works on %s, so it is not the owner's to do; the route is %s"
                           % (rid, here, row.get("route") or "the one that row names")))
         else:
-            return "ok", ""
+            cover = route_match.cite_covers(rid, rows, texts or [])
+            if cover == "covers":
+                return "ok", ""
+            readable = True
+            if cover == "no":
+                uncovered.append(("uncovered", "route row %s covers none of the act (%s). Remedy: cite the row of "
+                                  "the act, or name the act's command" % (rid, "; ".join(texts)[:120])))
+    # One covering cite passes the line; an unreadable cover alone never refuses.
+    if uncovered:
+        return uncovered[0]
+    if readable:
+        return "ok", ""
     for kind in ("works", "dead", "unknown"):
         for found, text in kinds:
             if found == kind:
                 return kind, text
 
 
-def cite_tokens_verdict(line):
+def cite_tokens_verdict(line, texts=None):
     """(kind, detail) for the route and measured cite tokens of `line` alone, with no capability verb needed: the page
     reads a str_replace fragment that swaps only a cite (hooks/question_form.py). Kind is "undated" (a `(measured ...)`
     token with no date or no check and result), "works", "dead", "unknown" as `_route_verdict` gives them, or "ok"
@@ -1771,13 +1784,14 @@ def cite_tokens_verdict(line):
     if found and found.group(1).strip() and _measured(line) == "bad":  # a bare "(measured)" is a premise kind, not a cite
         return "undated", ""
     ids = ROUTE_CITE_RE.findall(line)
-    return _route_verdict(ids) if ids else ("ok", "")
+    return _route_verdict(ids, texts) if ids else ("ok", "")
 
 
-def why_yours_verdict(hook, line):
+def why_yours_verdict(hook, line, texts=None):
     """(kind, detail) for one Why yours `line`. Kind is "ok" (a choice phrase, no capability verb, or a cite that holds),
     "none" (a capability reason with no cite), "undated" (a `(measured ...)` cite with no date or no check and result),
-    "works" (a cited row says the act is doable), "dead" (a cited id no row holds), "unknown" (the rows file or the
+    "works" (a cited row says the act is doable), "dead" (a cited id no row holds), "uncovered" (a cited row covers none
+    of the act pieces `texts`; only the page passes them), "unknown" (the rows file or the
     row's outcome on this surface did not read) or "unread" (the refusals file did not read). Detail is the text of the
     last three. A `hook` of None reads no refusals file: the waiting page (hooks/question_form.py) accepts a route cite
     and a dated measured cite only. The refusals file is read for a capability line, the rows file only for a line
@@ -1789,7 +1803,7 @@ def why_yours_verdict(hook, line):
     if refused or measured == "ok":
         return "ok", ""
     ids = ROUTE_CITE_RE.findall(line)
-    kind, detail = _route_verdict(ids) if ids else ("none", "")
+    kind, detail = _route_verdict(ids, texts) if ids else ("none", "")
     if kind != "none":
         return kind, detail
     if measured == "bad":
