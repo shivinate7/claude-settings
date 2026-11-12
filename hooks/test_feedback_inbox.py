@@ -4004,10 +4004,11 @@ def case_standing_grant_without_a_once_item_keeps_today_reason():
 
 # --------------------------------------------------------------------------- page-form-to-template cases
 # A waiting-page comment is answered by rewriting its item, never by a thread reply (ruling c164). So each
-# comment's item routes to the shared template, skills/waiting-page: a task homed to a step file that names it,
-# or the opt-out `[note] -> not-page-form`. The rule applies in the claude-settings repo and in the page writer's
-# session only. The step file is read from the record branch's remote-tracking ref, as the filing check reads
-# its copy. Every case captures the comment through the capture hook, so the block is the harness's shape.
+# comment's item routes to the shared template, skills/waiting-page. In claude-settings that is a task homed to a
+# step file that names it, or the opt-out `[note] -> not-page-form`. The rule applies in the page writer's session,
+# in any repo. Outside claude-settings the item routes out instead (the block of cases after these). The step file
+# is read from the record branch's remote-tracking ref, as the filing check reads its copy. Every case captures the
+# comment through the capture hook, so the block is the harness's shape.
 
 CLAUDE_SETTINGS_ORIGIN = "https://github.com/shivinate7/claude-settings.git"  # layout.repo_name reads the slug from it
 CLAUDE_SETTINGS_SLUG = "shivinate7/claude-settings"
@@ -4076,13 +4077,14 @@ def record_step(root, slug):
         return None
 
 
-def page_comment_run(cfg, sid, wake, items, url=PAGE_CODE_URL, cwd=None, writer=None):
-    """Captures one page comment through the capture hook, jots its item lines, names `writer` as the page writer
-    (this session when None), and runs the guard at its Stop. Returns the guard's Proc."""
+def page_comment_run(cfg, sid, wake, items, url=PAGE_CODE_URL, cwd=None, writer=None, before=()):
+    """Captures one page comment through the capture hook, jots its item lines, writes the transcript as `before`
+    then the records that name `writer` as the page writer (this session when None), and runs the guard at its
+    Stop. Returns the guard's Proc."""
     capture(cfg, sid, PAGE_COMMENT.format(url=url, wake=wake), cwd=cwd)
     for line in items:
         add_item(cfg, sid, line)
-    write_transcript(cfg, sid, writer_records(sid if writer is None else writer))
+    write_transcript(cfg, sid, list(before) + writer_records(sid if writer is None else writer))
     return guard(cfg, sid, cwd=cwd, transcript=transcript_of(cfg, sid))
 
 
@@ -4193,18 +4195,6 @@ def case_page_form_other_artifact_passes():
         expect_silent(name, p)
 
 
-def case_page_form_other_repo_passes():
-    """Green control. The same Asked comment, on the same waiting page, in a repo that is not claude-settings: silent.
-    The other repo names the same page, so only the repo gate differs."""
-    cfg, sid = new_cfg(), "page-form-repo"
-    other = waiting_repo()
-    name = "page-form green: the same comment in a repo that is not claude-settings"
-    p = page_comment_run(cfg, sid, ASKED_WAKE, [NOTE_ITEM], cwd=other)
-    want = (("verbatim", True), ("artifact", True), ("repo", False), ("writer", True))
-    if expect_facts(name, page_comment_facts(cfg, sid, other, PAGE_CODE_URL, ASKED_WAKE), want):
-        expect_silent(name, p)
-
-
 def case_page_form_not_the_writer_passes():
     """Green control. The same Asked comment in claude-settings, from a session that is not the page writer: the
     transcript names another session as writer. Silent, so the rule holds only in the writer's session."""
@@ -4282,6 +4272,147 @@ def case_page_form_closed_not_page_form_passes():
     p = page_comment_run(cfg, sid, ASKED_WAKE, ["- fb-0961-6 [note] -> not-page-form [closed]"], cwd=root)
     if expect_facts(name, page_comment_facts(cfg, sid, root, PAGE_CODE_URL, ASKED_WAKE), SCOPE_IN):
         check(name + ": not blocked", p.code == 0 and block_reason(p) is None, p.desc())
+
+
+# --------------------------------------- page-form-to-template outside claude-settings
+# Outside claude-settings the template is not in the repo, so a page-form comment's item routes out to
+# claude-settings: `[repo] -> repo:shivinate7/claude-settings`, whose send the repo-item check already reads, or the
+# opt-out `[note] -> not-page-form`. A task homed to a step is not that route. The fixture repo's record branch holds
+# the template step, so a task on it resolves, and only the rule can refuse it.
+
+ROUTE_FORM = "[repo] -> repo:%s" % CLAUDE_SETTINGS_SLUG  # the route out of another repo
+OPT_OUT_FORM = "[note] -> not-page-form"
+OUTSIDE_SCOPE = (("verbatim", True), ("artifact", True), ("repo", False), ("writer", True))
+SETTINGS_SEND = "Sent the owner's page comment to shivinate7/claude-settings for triage."  # names the repo as a token
+ACME_SEND = "Sent the owner's page comment to acme/gadgets for triage."  # names another repo
+
+
+def acme_repo():
+    """A repo other than claude-settings, whose waiting page is PAGE_URL. Its record branch holds the template step."""
+    return record_repo("acme-widgets", {"roadmap/data/steps/%s.json" % TEMPLATE_STEP: TEMPLATE_STEP_TEXT},
+                       origin="https://github.com/acme/widgets.git")
+
+
+def comment_records(wake, sends=()):
+    """The owner's record of the page comment, then one send per message in `sends`: the proof the repo-item check
+    reads, after the owner's record."""
+    return [owner_rec(PAGE_COMMENT.format(url=PAGE_CODE_URL, wake=wake))] + [send_rec(msg) for msg in sends]
+
+
+def expect_outside_block(name, p):
+    """A block whose reason names the rule and both forms of the item line: the route out and the opt-out."""
+    reason = block_reason(p)
+    check(name + ": blocks", p.code == 0 and reason is not None, p.desc())
+    if reason is not None:
+        check(name + ": reason names page-form-to-template", "page-form-to-template" in reason, reason)
+        check(name + ": reason names %s" % ROUTE_FORM, ROUTE_FORM in reason, reason)
+        check(name + ": reason names %s" % OPT_OUT_FORM, OPT_OUT_FORM in reason, reason)
+
+
+def case_page_form_other_repo_note_blocks():
+    """Red. The same Asked comment, in a repo other than claude-settings, with only a note: the Stop blocks, and the
+    reason names the rule and both forms of the item line. The scope facts are asserted first."""
+    cfg, sid = new_cfg(), "page-form-acme-note"
+    root = acme_repo()
+    name = "page-form red: other repo, Asked wake, [note] -> noted"
+    p = page_comment_run(cfg, sid, ASKED_WAKE, [NOTE_ITEM], cwd=root)
+    if expect_facts(name, page_comment_facts(cfg, sid, root, PAGE_CODE_URL, ASKED_WAKE), OUTSIDE_SCOPE):
+        expect_outside_block(name, p)
+
+
+def case_page_form_other_repo_task_blocks():
+    """Red. A task homed to a step whose file on this repo's record branch names skills/waiting-page is not the route
+    out: the template lives in claude-settings, so the Stop blocks and names the rule. The step file is a fixture
+    fact, asserted first."""
+    cfg, sid = new_cfg(), "page-form-acme-task"
+    root = acme_repo()
+    name = "page-form red: other repo, task on a step that names skills/waiting-page"
+    p = page_comment_run(cfg, sid, ASKED_WAKE, ["- fb-0961-7 [task] -> step:%s" % TEMPLATE_STEP], cwd=root)
+    step = record_step(root, TEMPLATE_STEP)
+    check(name + ": scope its step file names skills/waiting-page",
+          step is not None and "skills/waiting-page" in step, step)
+    if expect_facts(name, page_comment_facts(cfg, sid, root, PAGE_CODE_URL, ASKED_WAKE), OUTSIDE_SCOPE):
+        expect_outside_block(name, p)
+
+
+def case_page_form_other_repo_route_elsewhere_blocks():
+    """Red. A repo item routes the comment to a repo that is not claude-settings. Its send is proved, so the repo-item
+    check passes, and only the rule refuses the item: the Stop blocks and names the rule and the route out."""
+    cfg, sid = new_cfg(), "page-form-acme-gadgets"
+    root = acme_repo()
+    name = "page-form red: other repo, [repo] -> repo:acme/gadgets with its send"
+    p = page_comment_run(cfg, sid, ASKED_WAKE, ["- fb-0961-8 [repo] -> repo:acme/gadgets"], cwd=root,
+                         before=comment_records(ASKED_WAKE, [ACME_SEND]))
+    if expect_facts(name, page_comment_facts(cfg, sid, root, PAGE_CODE_URL, ASKED_WAKE), OUTSIDE_SCOPE):
+        expect_outside_block(name, p)
+
+
+def case_page_form_other_repo_route_to_settings_passes():
+    """Green control. The same comment, routed `[repo] -> repo:shivinate7/claude-settings`, with the owner's record of
+    it and a send that names claude-settings after that record: silent."""
+    cfg, sid = new_cfg(), "page-form-acme-route"
+    root = acme_repo()
+    name = "page-form green: other repo, [repo] -> repo:shivinate7/claude-settings with its send"
+    p = page_comment_run(cfg, sid, ASKED_WAKE, ["- fb-0961-9 %s" % ROUTE_FORM], cwd=root,
+                         before=comment_records(ASKED_WAKE, [SETTINGS_SEND]))
+    if expect_facts(name, page_comment_facts(cfg, sid, root, PAGE_CODE_URL, ASKED_WAKE), OUTSIDE_SCOPE):
+        expect_silent(name, p)
+
+
+def case_page_form_other_repo_route_without_send_blocks():
+    """Control, green on main. The route out still needs its send: the owner's record of the comment, then the route
+    with no send after it. The repo-item check blocks it and names the repo, so the rule must not pass it alone."""
+    cfg, sid = new_cfg(), "page-form-acme-nosend"
+    root = acme_repo()
+    name = "page-form control: other repo, the route with no send"
+    p = page_comment_run(cfg, sid, ASKED_WAKE, ["- fb-0961-10 %s" % ROUTE_FORM], cwd=root,
+                         before=comment_records(ASKED_WAKE))
+    if expect_facts(name, page_comment_facts(cfg, sid, root, PAGE_CODE_URL, ASKED_WAKE), OUTSIDE_SCOPE):
+        expect_repo_unsent(name, p, "fb-0961-10", CLAUDE_SETTINGS_SLUG)
+
+
+def case_page_form_other_repo_opt_out_passes():
+    """Green control. The same comment, with the opt-out `[note] -> not-page-form`: silent."""
+    cfg, sid = new_cfg(), "page-form-acme-optout"
+    root = acme_repo()
+    name = "page-form green: other repo, [note] -> not-page-form"
+    p = page_comment_run(cfg, sid, ASKED_WAKE, ["- fb-0961-11 %s" % OPT_OUT_FORM], cwd=root)
+    if expect_facts(name, page_comment_facts(cfg, sid, root, PAGE_CODE_URL, ASKED_WAKE), OUTSIDE_SCOPE):
+        expect_silent(name, p)
+
+
+def case_page_form_other_repo_saved_wake_passes():
+    """Green control. A Saved wake whose items carry no note in parentheses, in another repo: silent."""
+    cfg, sid = new_cfg(), "page-form-acme-saved"
+    root = acme_repo()
+    name = "page-form green: other repo, Saved wake with no note"
+    p = page_comment_run(cfg, sid, PLAIN_SAVED_WAKE, [NOTE_ITEM], cwd=root)
+    check(name + ": scope the items carry no parenthesis", "(" not in PLAIN_SAVED_WAKE.split("Items: ", 1)[1],
+          PLAIN_SAVED_WAKE)
+    if expect_facts(name, page_comment_facts(cfg, sid, root, PAGE_CODE_URL, PLAIN_SAVED_WAKE), OUTSIDE_SCOPE):
+        expect_silent(name, p)
+
+
+def case_page_form_other_repo_other_artifact_passes():
+    """Green control. The same Asked comment on an artifact that is not the waiting page, in another repo: silent."""
+    cfg, sid = new_cfg(), "page-form-acme-other"
+    root = acme_repo()
+    name = "page-form green: other repo, Asked wake on an artifact that is not the waiting page"
+    p = page_comment_run(cfg, sid, ASKED_WAKE, [NOTE_ITEM], url=OTHER_PAGE_URL, cwd=root)
+    want = (("verbatim", True), ("artifact", False), ("repo", False), ("writer", True))
+    if expect_facts(name, page_comment_facts(cfg, sid, root, OTHER_PAGE_URL, ASKED_WAKE), want):
+        expect_silent(name, p)
+
+
+def case_page_form_other_repo_not_the_writer_passes():
+    """Green control. The same Asked comment in another repo, from a session that is not the page writer: silent."""
+    cfg, sid = new_cfg(), "page-form-acme-not-writer"
+    root = acme_repo()
+    name = "page-form green: other repo, a session that is not the page writer"
+    p = page_comment_run(cfg, sid, ASKED_WAKE, [NOTE_ITEM], cwd=root, writer=NOT_THE_WRITER)
+    want = (("verbatim", True), ("artifact", True), ("repo", False), ("writer", False))
+    if expect_facts(name, page_comment_facts(cfg, sid, root, PAGE_CODE_URL, ASKED_WAKE), want):
+        expect_silent(name, p)
 
 
 CASES = (
@@ -4472,12 +4603,20 @@ CASES = (
     case_page_form_not_page_form_note_passes,
     case_page_form_plain_saved_wake_passes,
     case_page_form_other_artifact_passes,
-    case_page_form_other_repo_passes,
     case_page_form_not_the_writer_passes,
     case_page_form_failed_record_read_stands_down,
     case_page_form_saved_wake_with_a_note_blocks,
     case_page_form_closed_not_page_form_passes,
     case_page_form_undone_wake_passes,
+    case_page_form_other_repo_note_blocks,
+    case_page_form_other_repo_task_blocks,
+    case_page_form_other_repo_route_elsewhere_blocks,
+    case_page_form_other_repo_route_to_settings_passes,
+    case_page_form_other_repo_route_without_send_blocks,
+    case_page_form_other_repo_opt_out_passes,
+    case_page_form_other_repo_saved_wake_passes,
+    case_page_form_other_repo_other_artifact_passes,
+    case_page_form_other_repo_not_the_writer_passes,
 )
 
 
