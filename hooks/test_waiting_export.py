@@ -565,7 +565,7 @@ def queue_repo(name):
 
 def case_n1_non_writer_set_of_an_unexported_collection_passes():
     """A session that the transcript names as not the page writer, setting a collection the copy does not export."""
-    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id="receipts/x")
+    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id="scratch/x")
     expect_pass("N1", run_stop("n1", base_repo("n1"), records, writer="session_other"))
 
 
@@ -668,16 +668,46 @@ def case_n14_no_writer_named_and_an_export_run_makes_the_writer_block():
     expect_block("N14", run_stop("n14", base_repo("n14"), records, writer=None), (SCRIPT,))
 
 
-def case_n15_writer_set_of_receipts_passes():
-    """The writer sets receipts/x by doc_id: receipts is no exported collection."""
-    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id="receipts/x")
+def case_n15_writer_set_of_scratch_passes():
+    """The writer sets scratch/x by doc_id: scratch is no exported collection."""
+    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id="scratch/x")
     expect_pass("N15", run_stop("n15", base_repo("n15"), records))
 
 
-def case_n16_writer_write_by_path_to_receipts_passes():
-    """The writer writes receipts/x by its path key: the same collection filter, through the path."""
-    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id=None, path="receipts/x")
+def case_n15b_writer_set_of_receipts_blocks():
+    """The writer sets receipts/x by doc_id: receipts is an exported collection, so it blocks as an item does."""
+    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id="receipts/x")
+    expect_block("N15b", run_stop("n15b", base_repo("n15b"), records), (SCRIPT,))
+
+
+def case_n16_writer_write_by_path_to_scratch_passes():
+    """The writer writes scratch/x by its path key: the same collection filter, through the path."""
+    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id=None, path="scratch/x")
     expect_pass("N16", run_stop("n16", base_repo("n16"), records))
+
+
+def case_n16b_writer_write_by_path_to_receipts_blocks():
+    """The writer writes receipts/x by its path key: the path prefix names an exported collection."""
+    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id=None, path="receipts/x")
+    expect_block("N16b", run_stop("n16b", base_repo("n16b"), records), (SCRIPT,))
+
+
+def case_n18_writer_update_of_a_receipt_blocks():
+    """The writer updates receipts/r1 by its collection field, which the copy has not seen: it blocks as an item does."""
+    records = [owner(at(18, 50))] + page_write(at(19), action="update", collection="receipts", doc_id="r1")
+    expect_block("N18", run_stop("n18", base_repo("n18"), records), (SCRIPT,))
+
+
+def case_n1b_non_writer_set_of_receipts_passes():
+    """A session the transcript names as not the page writer, setting receipts/x: a non-writer's write passes."""
+    records = [owner(at(18, 50))] + page_write(at(19), collection=None, doc_id="receipts/x")
+    expect_pass("N1b", run_stop("n1b", base_repo("n1b"), records, writer="session_other"))
+
+
+def case_n2b_non_writer_update_of_a_receipt_passes():
+    """A session the transcript names as not the page writer, updating receipts/r1: a non-writer's write passes."""
+    records = [owner(at(18, 50))] + page_write(at(19), action="update", collection="receipts", doc_id="r1")
+    expect_pass("N2b", run_stop("n2b", base_repo("n2b"), records, writer="session_other"))
 
 
 def case_n17_writer_write_by_path_to_items_blocks():
@@ -773,9 +803,14 @@ CASES.extend((
     case_n12_remote_writer_without_the_env_passes,
     case_n13_another_writer_is_not_overruled_by_a_mention_of_the_script,
     case_n14_no_writer_named_and_an_export_run_makes_the_writer_block,
-    case_n15_writer_set_of_receipts_passes,
-    case_n16_writer_write_by_path_to_receipts_passes,
+    case_n15_writer_set_of_scratch_passes,
+    case_n15b_writer_set_of_receipts_blocks,
+    case_n16_writer_write_by_path_to_scratch_passes,
+    case_n16b_writer_write_by_path_to_receipts_blocks,
     case_n17_writer_write_by_path_to_items_blocks,
+    case_n18_writer_update_of_a_receipt_blocks,
+    case_n1b_non_writer_set_of_receipts_passes,
+    case_n2b_non_writer_update_of_a_receipt_passes,
     case_u1_export_check_returns_the_reason,
     case_u2_git_failure_gives_a_note_and_no_reason,
 ))
