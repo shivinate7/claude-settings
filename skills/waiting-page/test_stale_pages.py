@@ -2658,8 +2658,8 @@ class UnreadStale(FolderCase):
         self.assert_unknown(rc, out, "woke")
         self.assert_no_listed_line(out, "an answer was listed against an unreadable woke")
 
-    def test_an_int_woke_20261112_gates_the_answers_as_main_does_and_is_not_unknown(self):
-        # main reads the int 20261112 as the date 2026-11-12: an answer before that day is listed (exit 1), one after it is not (exit 0).
+    def test_an_int_woke_20261112_checks_the_answers_as_main_does_and_is_not_unknown(self):
+        # Proves an int woke in YYYYMMDD form checks the answers by the date main reads from it: before that day the ask is listed (exit 1), after it not (exit 0). A read that calls the int unknown (exit 2) would drop a listed ask.
         cases = ((EARLY, [unread_line("colour-pick", 143, "ops", EARLY, woke=20261112)], 1), ("2026-11-13T12:00:00Z", ["unread: clean"], 0))
         for at, want, code in cases:
             with self.subTest(answered=at):
@@ -2727,7 +2727,7 @@ class UnreadStale(FolderCase):
 
 
 class ParseUtcTime(unittest.TestCase):
-    """parse_utc reads an int date as main does: 20261112 is the midnight of 2026-11-12, not None. Main reads it through fromisoformat
+    """parse_utc reads an int date as main does: an int in YYYYMMDD form is the midnight of that day, not None. Main reads it through fromisoformat
     on str(text), which takes the basic form from Python 3.11, the CI version."""
 
     def test_an_int_date_reads_as_its_midnight_timestamp_as_main_reads_it(self):
