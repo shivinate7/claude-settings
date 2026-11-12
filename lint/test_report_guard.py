@@ -211,7 +211,15 @@ NO_PROCESS_CODE = (
 )
 
 
+# A guard run whose hook names no cwd reads the repo that holds the suite, so its verdict would follow the branch
+# the suite runs on. Each run starts in this folder instead: one per run, made at import, with no repo in it.
+NO_REPO_CWD = os.path.join(RUN_FOLDER, "no-repo")
+os.makedirs(NO_REPO_CWD, exist_ok=True)
+
+
 def run_guard(guard, hook, raw_stdin=None, env=None, block=(), refuse_process=False):
+    if isinstance(hook, dict):
+        hook = {"cwd": NO_REPO_CWD, **hook}  # a case that names its own cwd keeps it
     stdin_text = raw_stdin if raw_stdin is not None else json.dumps(hook)
     argv = [sys.executable, guard]
     if block:
@@ -225,6 +233,7 @@ def run_guard(guard, hook, raw_stdin=None, env=None, block=(), refuse_process=Fa
         text=True,
         timeout=15,
         env=env,
+        cwd=NO_REPO_CWD,
     )
     return run
 
@@ -5703,6 +5712,187 @@ class MistakeNamesGuardTests(unittest.TestCase):
 
     def test_mg_red_forgot_the_check_before_when_clause_blocks(self):
         self.assert_blocked(mg_report("I forgot the check when the lane was open."))
+
+
+# The step check of the Fix field on a landed turn: each `Fix: step:<slug>` on a line the branch adds to the notes
+# file must name its step in Done. The notes file is the rolled-out one (docs/debts/notes.md), and each case builds
+# a git repo: origin/main holds the notes file as the base, and one branch commit adds to it.
+NOTES_REL = os.path.join("docs", "debts", "notes.md")
+NOTES_BASE = "# Notes: findings too unlikely to hit to be debts\n"
+STEP_NOTE = "- new-note: a gap. Fix: step:fix-alpha\n"
+NONE_NOTE = "- new-note: a gap. Fix: none — owner decides\n"
+DONE_STEP_NAMED = "> **Done** RECORDED abc1234 filed the note; its fix is step:fix-alpha\n> **Next** wait"
+DONE_STEP_UNNAMED = "> **Done** RECORDED abc1234 filed the note\n> **Next** wait"
+DONE_PREFIX_ONLY = "> **Done** RECORDED abc1234 filed the note; its fix is step:fix-alpha-two\n> **Next** wait"
+DONE_BUILT = "> **Done** BUILT abc1234 fixed the guard\n> **Next** wait"
+# Every fixture commit and turn carries a time, as a real commit and a real transcript do. The base is a day before
+# every turn, so it is never one of a turn's commits. A turn's start is its human message's stamp, in the transcript's form.
+BASE_AT = "2026-11-06T12:00:00+0000"
+TURN_AT = "2026-11-07T09:00:00.000Z"
+COMMIT_AT = "2026-11-07T09:05:00+0000"
+LATER_TURN_AT = "2026-11-07T10:00:00.000Z"
+LATER_COMMIT_AT = "2026-11-07T10:05:00+0000"
+
+
+def git_in(folder, *args):
+    subprocess.run(["git", "-C", folder, *args], check=True, capture_output=True, text=True)
+
+
+def git_out(folder, *args):
+    return subprocess.run(["git", "-C", folder, *args], check=True, capture_output=True, text=True).stdout.strip()
+
+
+def commit_at(folder, subject, at):
+    """Commit what is staged, with the author and committer time `at` (a git date)."""
+    env = dict(os.environ, GIT_AUTHOR_DATE=at, GIT_COMMITTER_DATE=at)
+    subprocess.run(["git", "-C", folder, "commit", "-q", "-m", subject], check=True, capture_output=True, text=True,
+                   env=env)
+
+
+def amend_at(folder, at):
+    """Amend the last commit with no edit and no staged change. Its committer time becomes `at`; its author time is kept.
+    Returns the amended commit's short sha."""
+    env = dict(os.environ, GIT_COMMITTER_DATE=at)
+    subprocess.run(["git", "-C", folder, "commit", "--amend", "--no-edit"], check=True, capture_output=True, text=True,
+                   env=env)
+    return git_out(folder, "rev-parse", "--short=7", "HEAD")
+
+
+def init_repo(folder, base=None):
+    """A git repo at `folder`, rolled out to the layout, whose origin/main holds the notes file as `base`, or no notes
+    file when base is None. Nothing is committed past origin/main."""
+    os.makedirs(folder, exist_ok=True)
+    git_in(folder, "init", "-q", "-b", "main")
+    git_in(folder, "config", "user.email", "t@example.com")
+    git_in(folder, "config", "user.name", "t")
+    write_file(os.path.join(folder, ".claude", "layout-extras.json"), json.dumps({"kinds": {}, "rolled-out": True}))
+    write_file(os.path.join(folder, "README.md"), "# Repo\n")
+    if base is not None:
+        write_file(os.path.join(folder, NOTES_REL), base)
+    git_in(folder, "add", "-A")
+    commit_at(folder, "base", BASE_AT)
+    git_in(folder, "update-ref", "refs/remotes/origin/main", "HEAD")
+    return folder
+
+
+def commit_notes(folder, text, subject, at=COMMIT_AT):
+    """Commit the notes file as `text`, or move the README when text is None, at the time `at`. Returns the commit's
+    short sha."""
+    if text is None:
+        write_file(os.path.join(folder, "README.md"), "# Repo\n\n%s\n" % subject)
+    else:
+        write_file(os.path.join(folder, NOTES_REL), text)
+    git_in(folder, "add", "-A")
+    commit_at(folder, subject, at)
+    return git_out(folder, "rev-parse", "--short=7", "HEAD")
+
+
+def tool_result_text(text, tool_use_id="tu_1"):
+    """A tool result that holds `text`, as a command prints it: a commit prints `[branch sha] subject`."""
+    block = {"type": "tool_result", "tool_use_id": tool_use_id, "content": text}
+    return {"type": "user", "isSidechain": False, "message": {"role": "user", "content": [block]}}
+
+
+def human_at(text, at):
+    """A human message stamped `at`: the start of the turn it opens."""
+    rec = human(text)
+    rec["timestamp"] = at
+    return rec
+
+
+class NotesFixTests(unittest.TestCase):
+    """The step check on a landed turn, in report_guard.py's Stop hook. A turn judges only the notes and debt lines that
+    its own commits added: the commits dated at or after the turn's start. A commit that prints its `[branch sha]`
+    line also names itself in the turn's tool results, and a `git commit -q` prints nothing, so time is the test."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(dir=RUN_FOLDER)  # this run's folder, never the system temp dir (test-temp-standard)
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.repo = os.path.join(self.tmp, "repo")
+
+    def stop(self, records):
+        """Run the Stop guard on `records` with cwd self.repo. Returns the decision, or None when the guard is quiet."""
+        path = write_transcript(records, self.tmp)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False, "cwd": self.repo}
+        run = run_guard(REPORT_GUARD, hook)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertNotIn("Traceback", run.stderr)
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def turn(self, subject, sha, done, at=TURN_AT):
+        """One landed turn: a `git commit` that printed its `[main sha] subject` line, then the reply `done`. It starts
+        at `at`, its human message's time."""
+        return [human_at("do " + subject, at), tool_use_msg("Bash", {"command": "git commit -m %s" % subject}),
+                tool_result_text("[main %s] %s\n 1 file changed" % (sha, subject)), assistant_text(done)]
+
+    def amend_turn(self, subject, sha, done, at=TURN_AT):
+        """One landed turn that amends a commit: the amend prints the amended `[main sha] subject` line, then the reply."""
+        return [human_at("do " + subject, at), tool_use_msg("Bash", {"command": "git commit --amend --no-edit"}),
+                tool_result_text("[main %s] %s\n 1 file changed" % (sha, subject)), assistant_text(done)]
+
+    def quiet_turn(self, subject, done, at=TURN_AT):
+        """One landed turn whose `git commit -q` printed nothing, so no tool result names its commit."""
+        return [human_at("do " + subject, at), tool_use_msg("Bash", {"command": "git commit -q -m %s" % subject}),
+                tool_result_text(""), assistant_text(done)]
+
+    def assert_blocks_naming(self, out, step):
+        self.assertIsNotNone(out)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn(step, out["reason"])
+
+    def test_step_absent_from_done_blocks(self):
+        init_repo(self.repo, base=NOTES_BASE)
+        sha = commit_notes(self.repo, NOTES_BASE + STEP_NOTE, "one")
+        self.assert_blocks_naming(self.stop(self.turn("one", sha, DONE_STEP_UNNAMED)), "fix-alpha")
+
+    def test_step_named_in_done_passes(self):
+        init_repo(self.repo, base=NOTES_BASE)
+        sha = commit_notes(self.repo, NOTES_BASE + STEP_NOTE, "one")
+        self.assertIsNone(self.stop(self.turn("one", sha, DONE_STEP_NAMED)))
+
+    def test_fix_none_passes(self):
+        init_repo(self.repo, base=NOTES_BASE)
+        sha = commit_notes(self.repo, NOTES_BASE + NONE_NOTE, "one")
+        self.assertIsNone(self.stop(self.turn("one", sha, DONE_STEP_UNNAMED)))
+
+    def test_repo_with_no_notes_file_stays_quiet(self):
+        init_repo(self.repo)  # no notes file on either side of the branch
+        sha = commit_notes(self.repo, None, "one")
+        self.assertIsNone(self.stop(self.turn("one", sha, DONE_STEP_UNNAMED)))
+
+    def test_step_named_only_as_a_prefix_of_another_step_blocks(self):
+        # Done names fix-alpha-two. A substring match would read fix-alpha as named and pass.
+        init_repo(self.repo, base=NOTES_BASE)
+        sha = commit_notes(self.repo, NOTES_BASE + STEP_NOTE, "one")
+        self.assert_blocks_naming(self.stop(self.turn("one", sha, DONE_PREFIX_ONLY)), "fix-alpha")
+
+    def test_build_only_done_does_not_run_the_step_check(self):
+        init_repo(self.repo, base=NOTES_BASE)
+        sha = commit_notes(self.repo, NOTES_BASE + STEP_NOTE, "one")
+        self.assertIsNone(self.stop(self.turn("one", sha, DONE_BUILT)))
+
+    def test_quiet_commit_adding_a_step_fix_blocks_when_done_omits_the_step(self):
+        # `git commit -q` prints no `[branch sha]` line, so the turn's commit is found by its committer time instead.
+        init_repo(self.repo, base=NOTES_BASE)
+        commit_notes(self.repo, NOTES_BASE + STEP_NOTE, "one")
+        self.assert_blocks_naming(self.stop(self.quiet_turn("one", DONE_STEP_UNNAMED)), "fix-alpha")
+
+    def test_an_earlier_commit_amended_in_a_later_turn_does_not_block(self):
+        # Turn one adds the step fix in a commit that names it in Done. Turn two amends that commit with no edit: its
+        # author time stays turn one's, its committer time is turn two's. Turn two's Done omits the step.
+        init_repo(self.repo, base=NOTES_BASE)
+        first = commit_notes(self.repo, NOTES_BASE + STEP_NOTE, "one")
+        amended = amend_at(self.repo, LATER_COMMIT_AT)
+        self.assertIsNone(self.stop(self.turn("one", first, DONE_STEP_NAMED)
+                                    + self.amend_turn("one", amended, DONE_STEP_UNNAMED, at=LATER_TURN_AT)))
+
+    def test_a_fix_added_on_an_earlier_turn_does_not_block_a_later_turn(self):
+        # Turn one adds the step fix and names it in Done. Turn two commits a README change and omits the step.
+        init_repo(self.repo, base=NOTES_BASE)
+        first = commit_notes(self.repo, NOTES_BASE + STEP_NOTE, "one")
+        second = commit_notes(self.repo, None, "two", at=LATER_COMMIT_AT)
+        self.assertIsNone(self.stop(self.turn("one", first, DONE_STEP_NAMED)
+                                    + self.turn("two", second, DONE_STEP_UNNAMED, at=LATER_TURN_AT)))
 
 
 if __name__ == "__main__":

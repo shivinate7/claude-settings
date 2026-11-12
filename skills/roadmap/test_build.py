@@ -4328,5 +4328,44 @@ class SharedTagNames(unittest.TestCase):
                 self.assertFalse(build.repo_tag_names(tag, slug))
 
 
+# The expired-note line of the upkeep list. Today is PINNED_TODAY, injected through FIXED_TODAY, so no case reads the clock.
+PINNED_TODAY = "2026-11-07"
+NOTES_AT = pathlib.Path("docs", "debts", "notes.md")  # the layout's own path for the debt-notes key
+EXPIRED_NOTE = "- expired-note: a gap. Fix: none — owner decides. Until: 2026-11-01\n"
+LIVE_NOTES = ("- live-note: a gap. Fix: none — owner decides. Until: 2026-11-20\n"
+              "- today-note: a gap. Fix: none — owner decides. Until: 2026-11-07\n")  # dated today is not expired
+
+
+class ExpiredNotes(Fixture):
+    """The upkeep list prints one line per notes line whose Until is before today, and no line for a live one."""
+
+    def build(self, text=None):
+        """Build from main, after `text` is committed as the notes file when given. Returns the build's output."""
+        git(self.repo, "checkout", "-q", "main")
+        if text is not None:
+            path = self.repo / NOTES_AT
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+            git(self.repo, "add", "-A")
+            git(self.repo, "commit", "-q", "-m", "notes")
+        with mock.patch.dict(os.environ, {"FIXED_TODAY": PINNED_TODAY}):
+            code, out = run_build("--repo", str(self.repo), "--out", str(self.out))
+        self.assertEqual(code, 0, out)
+        return out
+
+    def test_expired_note_gets_one_line(self):
+        out = self.build(EXPIRED_NOTE)
+        self.assertEqual(sum("expired-note" in line for line in out.splitlines()), 1, out)
+
+    def test_unexpired_note_gets_no_line(self):
+        out = self.build(LIVE_NOTES)
+        self.assertEqual([line for line in out.splitlines() if "live-note" in line or "today-note" in line], [], out)
+
+    def test_repo_with_no_notes_file_prints_nothing_extra(self):
+        bare = self.build()  # no notes file on main
+        live = self.build(LIVE_NOTES)  # the same repo, with notes that are not expired
+        self.assertEqual(bare, live)
+
+
 if __name__ == "__main__":
     unittest.main()

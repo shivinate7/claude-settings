@@ -100,6 +100,13 @@ With none the entry is `<step id> (not shown green on main)`. A missing or
 unparsable updatedAt gives `<step id> (updatedAt unreadable)`. The row reads the step files only, so it needs no live
 file. It adds no process, file, timer or log: it reads the notes already loaded.
 
+The upkeep list also prints one line per expired note (decision `notes-name-their-fix`): each bullet of the
+checkout's debt notes file whose `Fix: none` form carries an `Until: YYYY-MM-DD` before today, as
+`  expired note: <slug> (Until <date>) in <path>`. A checkout with no notes file, or no expired note, prints
+nothing. The grammar and the date (FIXED_TODAY, else the clock) come from lint/check_record_slugs.py, the one
+home; a fault reading them prints one `expired notes: unknown (<why>)` line, never silence. A layout fault reads
+`unknown (the layout could not be read)`, with no file name.
+
 Before it builds, it refuses a record branch with git conflict markers (step c72) in any file under
 SCANNED, and writes no page.
 
@@ -110,6 +117,7 @@ fields (id, session_status, tags) per session in the live file it already writes
 one read of the waiting page's items (n, status, home) to that same publish. This script adds no git
 process, file, timer or log for it. The dated-claim row adds no git process, file, timer or log: it reads
 the notes already loaded.
+The expired-note lines add one read of the notes file: no git process, file, timer or log.
 The next act (`next_act`) serves the ready steps and the stalled steps. A ready step (status todo or ready, phase now,
 no live lane, no open pull naming it, no valid pause, no open lane-less page item, not landed) prints `ready not
 started: <id> (<age>h)`; one more than READY_AGE_LIMIT_HOURS old also prints `ready over limit: <id> (start lane;
@@ -1615,6 +1623,23 @@ def idle_lanes_report(repo, live, record_branch=None, main_branch="main"):
     return idle_lanes(work, steps, marks, slug, repo, main_branch, unread)
 
 
+def expired_note_lines(repo):
+    """One printed line per notes line whose Until date is past, from the grammar home lint/check_record_slugs.py.
+    A fault there is one `unknown` line. One read of the notes file; no git process."""
+    try:
+        sys.path.insert(0, str(LINT))
+        import check_record_slugs
+        return ["  expired note: %s (Until %s) in %s" % (slug, until, path)
+                for path, slug, until in check_record_slugs.expired_notes(str(repo), check_record_slugs.today())]
+    except Exception as err:  # a read that could not run is unknown, never a clear list
+        if type(err).__name__ == "LayoutError":  # the text names the extras file, which the build's stdout does not
+            return ["  expired notes: unknown (the layout could not be read)"]
+        return ["  expired notes: unknown (%s)" % err]
+    finally:
+        if str(LINT) in sys.path:
+            sys.path.remove(str(LINT))
+
+
 def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_branch="main", unread=None, ref=None):
     now = datetime.datetime.now(datetime.timezone.utc)
     open_ = open_steps(steps)
@@ -1667,6 +1692,9 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
     for label, v in rows:
         if v:
             print(f"  {label}: {', '.join(v)}")
+    if repo is not None:
+        for line in expired_note_lines(repo):
+            print(line)
 
 
 if __name__ == "__main__":
