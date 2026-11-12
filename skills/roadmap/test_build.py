@@ -2287,7 +2287,8 @@ class LiveStatusPhase(UpkeepFixture):
 
 class BlockedNoOpenBlocker(UpkeepFixture):
     """The upkeep row `blocked with no open blocker`: each blocked step whose blockedBy names no open step. A blocker is
-    open when its status is not done; a blocker that names no step does not hold the step, and is named in its entry.
+    open when its status is neither done nor folded, since a folded step is absorbed into another lane; a blocker that
+    names no step does not hold the step, and is named in its entry.
     A step with an open blocker is never listed, nor is a step that is not blocked. A missing or null blockedBy names no
     blocker, so the step is listed plainly. Any other non-list blockedBy, or a list holding a non-string, lists the step
     as unreadable, and never crashes the build."""
@@ -2322,7 +2323,7 @@ class BlockedNoOpenBlocker(UpkeepFixture):
         self.commit_step("c6", status="blocked", blockedBy=["c2", "c5"], order=6)  # a blocked blocker and a doing one
         self.commit_step("c7", status="blocked", blockedBy=["c2"], order=7)  # a blocked blocker is still open
         self.commit_step("c8", status="blocked", blockedBy=["c3", "c98"], order=8)  # open beside an unknown blocker
-        entries = self.listed("a blocked step with an empty blockedBy is not listed")[1]
+        entries = self.listed("the row should list the control step that names no blocker, and no step with an open blocker")[1]
         self.assertIn("c2", entries, "scope first: the control step with no blocker is listed")
         self.assertEqual(entries, ["c2"], "a blocked step with an open blocker is not listed")
 
@@ -2333,8 +2334,8 @@ class BlockedNoOpenBlocker(UpkeepFixture):
         self.commit_step("c5", status="ready", blockedBy=[], order=5)
         self.commit_step("c6", status="queued", blockedBy=[], order=6)
         self.commit_step("c7", status="done", blockedBy=[], order=7)
-        self.assertEqual(self.listed("a blocked step with an empty blockedBy is not listed"), (1, ["c2"]),
-                         "only the blocked step is listed; a step in another status is not")
+        self.assertEqual(self.listed("the row should list the blocked step that names no blocker, and no step in another status"),
+                         (1, ["c2"]), "only the blocked step is listed; a step in another status is not")
 
     def test_a_blocker_that_names_no_step_is_listed_and_named(self):
         self.commit_step("c2", status="done", order=2)
@@ -2358,7 +2359,8 @@ class BlockedNoOpenBlocker(UpkeepFixture):
                 self.assertEqual(listed, (1, ["c6"]), "a missing or null blockedBy names no blocker, so the step is listed plainly")
 
     def test_an_unreadable_blocked_by_is_listed_and_never_crashes(self):
-        for name, value in (("string", "c9"), ("number", 3), ("object", {"id": "c9"}), ("list of a number", [3])):
+        for name, value in (("string", "c9"), ("number", 3), ("object", {"id": "c9"}), ("list of a number", [3]),
+                            ("list of a list", [["c9"]]), ("list of null", [None])):
             with self.subTest(name):
                 git(self.repo, "checkout", "-q", "roadmap")
                 self.commit_step("c6", status="blocked", blockedBy=value, order=6)
@@ -2383,21 +2385,22 @@ class BlockedNoOpenBlocker(UpkeepFixture):
     def test_the_build_source_spells_the_blocked_status_only_in_its_home(self):
         path = HERE / "build.py"
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        home = set()  # the nodes of the status constants, the one place the blocked word is listed with the others
+        # BLOCKED_STATUS is the one home of the blocked word. STATES holds the thread states, a different set, so it is
+        # allowed by name. Any other string constant equal to blocked is a second spelling, in a tuple or a comparison.
+        home = set()
         for node in ast.walk(tree):
-            if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id in ("KNOWN_STATUS", "BLOCKED_STATUS")
+            if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id in ("BLOCKED_STATUS", "STATES")
                                                     for t in node.targets):
                 home.update(id(n) for n in ast.walk(node.value))
-        step_words = ("todo", "ready", "doing", "active", "queued", "folded")
-        containers = sorted(n.lineno for n in ast.walk(tree)
-                            if isinstance(n, (ast.Tuple, ast.List, ast.Set)) and id(n) not in home
-                            and any(isinstance(e, ast.Constant) and e.value == "blocked" for e in n.elts)
-                            and any(isinstance(e, ast.Constant) and e.value in step_words for e in n.elts))
-        compares = sorted(n.lineno for n in ast.walk(tree)
-                          if isinstance(n, ast.Compare) and any(isinstance(op, (ast.Eq, ast.NotEq)) for op in n.ops)
-                          and any(isinstance(x, ast.Constant) and x.value == "blocked" for x in [n.left, *n.comparators]))
-        self.assertEqual(containers, [], "a step-status list holds blocked at these lines of build.py, outside the status home")
-        self.assertEqual(compares, [], "an == or != comparison with blocked is at these lines of build.py")
+        spelled = sorted(n.lineno for n in ast.walk(tree)
+                         if isinstance(n, ast.Constant) and n.value == "blocked" and id(n) not in home)
+        self.assertEqual(spelled, [], "the word blocked is spelled at these lines of build.py, outside BLOCKED_STATUS")
+
+    def test_a_folded_blocker_is_finished_so_its_step_is_listed(self):
+        self.commit_step("f", status="folded", order=2)
+        self.commit_step("c1", status="blocked", blockedBy=["f"], order=1)
+        self.assertEqual(self.listed("the row should list the blocked step whose only blocker is folded, since folded is finished"),
+                         (1, ["c1"]), "a folded blocker is absorbed into another lane, not open work, so c1 is listed")
 
 
 class StagedNoteCap(Fixture):
