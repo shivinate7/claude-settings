@@ -21,7 +21,7 @@ A skill matches on its folder name or its `name`, so a renamed skill with a new 
 through its files.
 
 Files inside a reported skill copy are not reported again. License and lock files, parent
-files under an examples/ or templates/ folder, small files and files over MAX_BYTES are skipped. Exit 0: no copies. Exit 1: copies found.
+files under an examples/ or templates/ folder, small files and files over MAX_BYTES are skipped. A child file at a path in OWN_FILES (its own PR template) is skipped when it matches the parent file at that same path, however near-equal; a copy elsewhere, or of another parent file at that path, is still reported. Exit 0: no copies. Exit 1: copies found.
 Exit 2: the child or parent cannot be read, so the result is unknown.
 Cost: one `git ls-files` per tree and one read of each listed file. No process stays running.
 """
@@ -44,6 +44,7 @@ SKIP_NAMES = re.compile(r"^(LICENSE|LICENCE|NOTICE|COPYING)(\..*)?$|^\.git(ignor
                         r"^(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|Cargo\.lock|poetry\.lock)$",
                         re.IGNORECASE)
 TEMPLATE_DIRS = {"examples", "templates"}  # a parent file here is meant to be copied, so it is no copy
+OWN_FILES = {".github/pull_request_template.md"}  # each repo keeps its own, so the same path is no copy
 SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build"}
 DEFAULT_PARENT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -155,7 +156,9 @@ def find_file_copies(parent, pfiles, child, cfiles, skip_folders, threshold):
 
         same = by_hash.get(hashlib.sha256(data).hexdigest()) if len(data) >= MIN_BYTES else None
         if same:
-            found.append({"child": rel, "parent": min(same, key=rank), "kind": "byte-equal", "score": 1.0})
+            parent_rel = min(same, key=rank)
+            if not (rel in OWN_FILES and parent_rel == rel):
+                found.append({"child": rel, "parent": parent_rel, "kind": "byte-equal", "score": 1.0})
             continue
         clines = significant_lines(data)
         if not clines:
@@ -174,7 +177,7 @@ def find_file_copies(parent, pfiles, child, cfiles, skip_folders, threshold):
             score = len(plines & clines) / len(plines)
             if score >= threshold and (best is None or (-score, rank(p)) < (-best[1], rank(best[0]))):
                 best = (p, score)
-        if best:
+        if best and not (rel in OWN_FILES and best[0] == rel):
             found.append({"child": rel, "parent": best[0], "kind": "near-equal", "score": round(best[1], 2)})
     return found
 
