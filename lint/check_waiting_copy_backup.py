@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-"""Check that the waiting copy in git is a backup, never a live source (decision waiting-page-one-store).
+"""Check that the waiting copy in git is a backup, and no tool but one reads it as a live source (decision waiting-page-one-store).
 
 The page's database is the one store. The copy folder (layout kind `waiting-data`) serves recovery and
 account moves, so a tool that reads its content as a source treats a stale backup as the truth. Two checks:
 
-  reader  a tool under skills/, hooks/, lint/ or bin/ that names the copy folder and reads its content
-          in one function (a non-Python file: on one line). A test path (hooks/guard.py is_test_rel) is not a tool.
-  prose   skills/waiting-page/SKILL.md, skills/waiting-page/reference/copies-and-accounts.md and the module
-          docstring of skills/waiting-page/export_page.py each say "backup".
+  reader  a tool under skills/, hooks/, lint/ or bin/ whose code reads the copy folder. A test path
+          (hooks/guard.py is_test_rel) is not a tool. Python is followed with `ast`: a copy name (the
+          string "waiting-data", a call to waiting_copy(), the layout path of the kind) reaches a path read
+          (open, read_text, a listing of a collection) through variables, return values and helper
+          parameters, or sits in a git read (show, grep, cat-file). A read of lint/layout.json is no read of
+          the copy. In export_page.py every function that reads a path is a reader unless it is a function of
+          the recovery, merge or export modes (EXPORT_MODES). JavaScript and shell are read by one scanner,
+          file by file: the copy name and a read word (cat, head, jq, readFileSync, git show, ...) anywhere in code.
+  prose   the copy's three prose homes each say, in one sentence, that the copy is a backup.
 
     python3 lint/check_waiting_copy_backup.py [--root DIR]
 
@@ -15,10 +20,6 @@ Exit 0 clean. Exit 1 findings, one line each:
     <path>:<line>: reads the waiting copy folder as a live source
     <path>: does not call the waiting copy a backup
 Exit 2 unknown: a prose file or a source file cannot be read or parsed (and no finding).
-
-Python is read with `ast`, so a mention in a docstring, a comment or a string never counts. JavaScript and
-shell go through one small scanner that blanks comments and strings (it keeps the copy name and the git
-read words when they stand alone as a string).
 """
 import argparse
 import ast
@@ -28,35 +29,61 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
+sys.path.insert(0, HERE)
 import guard  # noqa: E402  is_test_rel is the one home of what a test path is (hooks/guard.py)
+import layout  # noqa: E402  the one home of the copy folder's kind and path (lint/layout.py)
 
-COPY_KIND = "waiting-data"  # the layout kind of the copy folder (lint/layout.json)
+COPY_KIND = "waiting-data"  # the layout kind of the copy folder
+COPY_PATH = layout.layout()["kinds"][COPY_KIND]["path"].strip("/")  # where that kind lives, as a path segment
+COLLECTIONS = layout.WAITING_COLLECTIONS  # the folders of the copy that hold docs
+LAYOUT_FILE = os.path.basename(layout.LAYOUT_FILE)  # a read of it reads the kind's key, not the copy
 COPY_RESOLVER = "waiting_copy"  # a call that resolves the copy folder (hooks/feedback_guard.py)
-READ_CALLS = frozenset(("open", "read", "read_text", "read_bytes", "load", "readFileSync", "readFile"))
-READ_WORDS = frozenset(("grep", "cat-file", "show"))  # git read verbs, as a string in an argument list
+PATH_READS = frozenset(("open", "read_text", "read_bytes"))  # read the content of a path
+PRESENCE = frozenset(("isfile", "exists", "is_file", "listdir", "scandir", "walk", "glob", "iglob", "iterdir"))
+GIT_READS = frozenset(("grep", "cat-file", "show"))  # git read verbs, as an argument or a word
+SHELL_READS = frozenset(("cat", "head", "tail", "jq", "sed", "awk", "less", "more"))
+JS_READS = frozenset(("readFileSync", "readFile", "createReadStream", "readdirSync", "existsSync"))
 SOURCE_FOLDERS = ("skills", "hooks", "lint", "bin")
 SKIP_DIRS = frozenset(("__pycache__", "node_modules", ".git"))
 JS_SUFFIXES = (".js", ".mjs", ".cjs", ".ts")
 SHELL_SUFFIXES = (".sh", ".bash")
 LIVE = "reads the waiting copy folder as a live source"
 NOT_BACKUP = "does not call the waiting copy a backup"
-BACKUP = re.compile(r"\bbackups?\b", re.IGNORECASE)
 WAITING = "skills/waiting-page"
-PROSE = (WAITING + "/SKILL.md", WAITING + "/reference/copies-and-accounts.md", WAITING + "/export_page.py")
-DOCSTRING_PROSE = WAITING + "/export_page.py"  # the module docstring is the prose, not a code comment
+SKILL, COPIES, EXPORT = WAITING + "/SKILL.md", WAITING + "/reference/copies-and-accounts.md", WAITING + "/export_page.py"
+PROSE = (SKILL, COPIES, EXPORT)
+FEEDBACK_GUARD = "hooks/feedback_guard.py"
+FILING_CHECK = "Homes.filed_numbers"  # the filing check (debt filing-check-reads-copy)
 
-# Functions that may read the copy, by (path, function name), each with the debt that files why. Rule
-# building-allow-list-is-the-constant: the copy folder is named by COPY_KIND and COPY_RESOLVER above.
+# Qualified functions that may read the copy, and how many reads each may hold: more reads than that are findings.
 ALLOWED = {
-    ("hooks/feedback_guard.py", "filed_numbers"): "filing-check-reads-copy",
+    (FEEDBACK_GUARD, FILING_CHECK): 1,
 }
+# The functions of export_page.py that read a path, by mode. A new function that reads one is a finding.
+EXPORT_MODES = {
+    "export": ("load_json", "docs_in", "read_page", "supporting_files", "existing", "fetched_docs", "export",
+               "export_all", "check_only"),
+    "recovery": ("read_copy", "rebuild"),
+    "merge": ("live_docs", "merged_design", "merge"),
+}
+EXPORT_FUNCTIONS = frozenset(name for names in EXPORT_MODES.values() for name in names)
 
-NAMES_COPY = re.compile(r"(?<![\w-])" + re.escape(COPY_KIND) + r"(?![\w-])|\b" + COPY_RESOLVER + r"\s*\(")
-READS = re.compile(r"\b(?:" + "|".join(sorted(re.escape(w) for w in READ_CALLS | READ_WORDS)) + r")\b")
+NAME_AFTER_SLASH = re.compile(r"(?<![\w-])%s(?![\w-])" % re.escape(COPY_KIND))
+NAME_IN_PATH = re.compile(r"(?:(?<![\w.-])%s|(?<![\w/.-])%s)/" % (re.escape(COPY_KIND), re.escape(COPY_PATH))
+                          + r"|:(?:%s|%s)\b" % (re.escape(COPY_KIND), re.escape(COPY_PATH)))
+GIT_IN_STRING = re.compile(r"\bgit\b.*\b(?:%s)\b" % "|".join(sorted(map(re.escape, GIT_READS))))
+COLLECTION_IN_PATH = re.compile(r"(?:^|/)(?:%s)(?:/|$)" % "|".join(COLLECTIONS))
+SPAWN_FIRST = ("self", "cls")
 
 
 class Unreadable(Exception):
     """A file could not be read or parsed: unknown, never a pass."""
+
+
+def names_copy(text):
+    """True when the string `text` is the copy's kind, or a path or git ref into it. A sentence that only
+    mentions the folder does not count."""
+    return text == COPY_KIND or bool(NAME_IN_PATH.search(text))
 
 
 def call_name(node):
@@ -68,6 +95,19 @@ def call_name(node):
     return None
 
 
+def call_inputs(call):
+    """The expressions a call reads from: its arguments, keywords and, for a method, its receiver."""
+    found = list(call.args) + [k.value for k in call.keywords]
+    if isinstance(call.func, ast.Attribute):
+        found.append(call.func.value)
+    return found
+
+
+def subtree(nodes):
+    for node in nodes:
+        yield from ast.walk(node)
+
+
 def own_nodes(body):
     """Every node of the statements in `body`, leaving out the bodies of nested functions (their own units)."""
     stack, out = [n for n in body if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))], []
@@ -77,54 +117,168 @@ def own_nodes(body):
         for child in ast.iter_child_nodes(node):
             if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 stack.append(child)
-    return out
+    return sorted(out, key=lambda n: (getattr(n, "lineno", 0), getattr(n, "col_offset", 0)))
 
 
-def units(tree):
-    """(name, body) of the module's own statements and of each function."""
-    found = [("<module>", tree.body)]
-    found += [(n.name, n.body) for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+class Unit:
+    """A function, or the module's own statements."""
+
+    def __init__(self, qual, name, params, body):
+        self.qual, self.name, self.params, self.nodes = qual, name, params, own_nodes(body)
+        docs = {id(n.value) for n in self.nodes if isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)}
+        self.strings = [n for n in subtree(self.nodes) if isinstance(n, ast.Constant) and isinstance(n.value, str)
+                        and id(n) not in docs]
+        self.calls = [n for n in self.nodes if isinstance(n, ast.Call)]
+        self.assigns = [n for n in self.nodes if isinstance(n, (ast.Assign, ast.AnnAssign, ast.AugAssign)) and n.value]
+        self.returns = [n.value for n in self.nodes if isinstance(n, ast.Return) and n.value]
+        self.tainted = set()  # local names that hold the copy folder
+        self.derived = dict((p, {p}) for p in params)  # local name -> the parameters it comes from
+
+
+def assigned_names(node):
+    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+    return {n.id for t in targets for n in ast.walk(t) if isinstance(n, ast.Name)}
+
+
+def units_of(tree):
+    parents = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parents[child] = parent
+    found = [Unit("<module>", "<module>", [], tree.body)]
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            chain, up = [node.name], parents.get(node)
+            while up is not None:
+                if isinstance(up, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                    chain.append(up.name)
+                up = parents.get(up)
+            params = [a.arg for a in node.args.posonlyargs + node.args.args + node.args.kwonlyargs]
+            if params and params[0] in SPAWN_FIRST:
+                params = params[1:]
+            found.append(Unit(".".join(reversed(chain)), node.name, params, node.body))
     return found
 
 
+def is_write_open(call):
+    mode = call.args[1] if len(call.args) > 1 else next((k.value for k in call.keywords if k.arg == "mode"), None)
+    return (call_name(call) == "open" and isinstance(mode, ast.Constant) and isinstance(mode.value, str)
+            and any(c in mode.value for c in "wax") and "+" not in mode.value)
+
+
+def is_path_read(call):
+    """True for a call that reads a path: its content, or a presence check or listing of a collection of docs. A
+    write, and a read of the layout file, are not."""
+    name = call_name(call)
+    if name not in PATH_READS and name not in PRESENCE:
+        return False
+    if is_write_open(call):
+        return False
+    texts = [n.value for n in subtree(call_inputs(call)) if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+    if any(t.endswith(LAYOUT_FILE) for t in texts):
+        return False
+    return name in PATH_READS or any(COLLECTION_IN_PATH.search(t) for t in texts)
+
+
+class Analysis:
+    """What a Python file's units read, followed through variables, return values and helper parameters."""
+
+    def __init__(self, units):
+        self.units = units
+        self.by_name = {}
+        for unit in units:
+            self.by_name.setdefault(unit.name, []).append(unit)
+        self.copy_functions = {COPY_RESOLVER}
+        self.opens = {}  # function name -> the parameters it passes to a path read
+        for _ in range(len(units) + 2):  # to a fixed point: each round can only add a name
+            before = (len(self.copy_functions), sum(len(v) for v in self.opens.values()))
+            for unit in units:
+                self.follow(unit)
+            if before == (len(self.copy_functions), sum(len(v) for v in self.opens.values())):
+                break
+
+    def is_copy(self, node, unit):
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Constant) and isinstance(sub.value, str) and names_copy(sub.value):
+                return True
+            if isinstance(sub, ast.Call) and call_name(sub) in self.copy_functions:
+                return True
+            if isinstance(sub, ast.Name) and sub.id in unit.tainted:
+                return True
+        return False
+
+    def opened_positions(self, call):
+        """The argument expressions of `call` that its callee passes to a path read."""
+        name = call_name(call)
+        out = []
+        for helper in self.by_name.get(name, ()):
+            wanted = self.opens.get(helper.name, set())
+            for index, arg in enumerate(call.args):
+                if index < len(helper.params) and helper.params[index] in wanted:
+                    out.append(arg)
+            out += [k.value for k in call.keywords if k.arg in wanted]
+        return out
+
+    def follow(self, unit):
+        for _ in range(3):
+            for node in unit.assigns:
+                names = assigned_names(node)
+                if self.is_copy(node.value, unit):
+                    unit.tainted |= names
+                used = {n.id for n in ast.walk(node.value) if isinstance(n, ast.Name)}
+                for name in names:
+                    unit.derived.setdefault(name, set()).update(*(unit.derived.get(u, ()) for u in used))
+        if any(self.is_copy(value, unit) for value in unit.returns):
+            self.copy_functions.add(unit.name)
+        passed = set()
+        for call in unit.calls:
+            inputs = call_inputs(call) if is_path_read(call) else self.opened_positions(call)
+            for name in {n.id for n in subtree(inputs) if isinstance(n, ast.Name)}:
+                passed |= unit.derived.get(name, set())
+        if passed:
+            self.opens.setdefault(unit.name, set()).update(passed)
+
+    def sinks(self, unit):
+        """The lines of `unit` that read the copy."""
+        lines = set()
+        for call in unit.calls:
+            if is_path_read(call) and any(self.is_copy(e, unit) for e in call_inputs(call)):
+                lines.add(call.lineno)
+            elif any(self.is_copy(arg, unit) for arg in self.opened_positions(call)):
+                lines.add(call.lineno)
+        for node in subtree(unit.nodes):
+            if isinstance(node, (ast.List, ast.Tuple, ast.Call)):
+                direct = node.elts if not isinstance(node, ast.Call) else node.args
+                if any(isinstance(e, ast.Constant) and e.value in GIT_READS for e in direct) and self.is_copy(node, unit):
+                    lines.add(node.lineno)
+        for const in unit.strings:
+            if GIT_IN_STRING.search(const.value) and names_copy(const.value):
+                lines.add(const.lineno)
+        return sorted(lines)
+
+
 def python_readers(rel, text):
-    """[line] of each function (or the module body) in `text` that names the copy and reads."""
+    """[line] of each read of the copy in the Python source `text`, less what ALLOWED lets through."""
     try:
         tree = ast.parse(text)
     except (SyntaxError, ValueError) as err:
         raise Unreadable("%s: cannot parse: %s" % (rel, err))
-    facts = []
-    for name, body in units(tree):
-        docs = {id(n.value) for n in own_nodes(body) if isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)}
-        names, reads, calls = [], False, set()
-        for node in own_nodes(body):
-            if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docs:
-                if node.value == COPY_KIND:
-                    names.append(node.lineno)
-            elif isinstance(node, ast.List):  # a git argument list; a tuple or set of words is a table
-                reads = reads or any(isinstance(e, ast.Constant) and e.value in READ_WORDS for e in node.elts)
-            elif isinstance(node, ast.Call):
-                called = call_name(node)
-                if called == COPY_RESOLVER:
-                    names.append(node.lineno)
-                if called in READ_CALLS:
-                    reads = True
-                elif called:
-                    calls.add(called)
-        facts.append((name, min(names) if names else 0, reads, calls))
-    reading = {name for name, _, reads, _ in facts if reads}
-    # One step only: a helper that reads makes its caller a reader. A longer chain (layout.path reaches a
-    # config read through two helpers) is a resolver, not a reader of the copy.
-    reading |= {name for name, _, _, calls in facts if calls & reading}
-    return [(line, name) for name, line, _, _ in facts if line and name in reading]
+    analysis = Analysis(units_of(tree))
+    found = set()
+    for unit in analysis.units:
+        lines = analysis.sinks(unit)
+        if rel == EXPORT and unit.name not in EXPORT_FUNCTIONS:
+            lines = sorted(set(lines) | {c.lineno for c in unit.calls if is_path_read(c)})
+        elif rel == EXPORT:
+            lines = []
+        found.update(lines[ALLOWED.get((rel, unit.qual), 0):][:1])  # one finding per function: its first read
+    return sorted(found)
 
 
 def blank_code(text, shell):
-    """`text` with each comment blanked and each string cut to its content when that is the copy name or a git
-    read word, else to empty quotes. Newlines stay, so a line number is still the source's. A template literal
-    and a block comment may span lines."""
-    out, i, n = [], 0, len(text)
-    word_start = True
+    """(code lines, strings): `text` with each comment and the inside of each string blanked, split by line, and the
+    strings as (line, body). A template literal and a block comment may span lines."""
+    out, strings, i, n, line, word_start = [], [], 0, len(text), 1, True
     while i < n:
         ch = text[i]
         if shell and ch == "#" and word_start:
@@ -139,6 +293,7 @@ def blank_code(text, shell):
             end = text.find("*/", i + 2)
             end = n if end < 0 else end + 2
             out.append("\n" * text.count("\n", i, end))
+            line += text.count("\n", i, end)
             i = end
             continue
         if ch in "'\"`":
@@ -146,24 +301,42 @@ def blank_code(text, shell):
             while j < n and text[j] != ch:
                 j += 2 if text[j] == "\\" else 1
             body = text[i + 1:j]
-            keep = body if body == COPY_KIND or body in READ_WORDS else ""
-            out.append(ch + keep + ch + "\n" * body.count("\n"))
+            strings.append((line, body))
+            out.append(ch + ch + "\n" * body.count("\n"))
+            line += body.count("\n")
             i = j + 1
             word_start = False
             continue
         out.append(ch)
+        if ch == "\n":
+            line += 1
         word_start = ch in " \t\n;|&(" if shell else False
         i += 1
-    return "".join(out)
+    return "".join(out).split("\n"), strings
 
 
 def line_readers(text, shell):
-    """[line] of each line of a JavaScript or shell file that names the copy and reads, on that one line."""
+    """[line] of the first read in a JavaScript or shell file that names the copy, anywhere in the file."""
+    code, strings = blank_code(text, shell)
+    names = any(NAME_AFTER_SLASH.search(c) or NAME_IN_PATH.search(c) for c in code) or any(names_copy(s) for _, s in strings)
+    if not names:
+        return []
+    layout_lines = {n for n, s in strings if s.endswith(LAYOUT_FILE)}
+    collection = any(COLLECTION_IN_PATH.search(s) or s in COLLECTIONS for _, s in strings) or any(
+        re.search(r"\b(?:%s)\b" % "|".join(COLLECTIONS), c) for c in code)
+    words = SHELL_READS | GIT_READS | (JS_READS - {"readdirSync", "existsSync"})
+    word = re.compile(r"(?<![\w-])(?:%s)(?![\w-])" % "|".join(sorted(map(re.escape, words))))
+    presence = re.compile(r"\b(?:readdirSync|existsSync)\b")
     found = []
-    for number, line in enumerate(blank_code(text, shell).split("\n"), 1):
-        if NAMES_COPY.search(line) and READS.search(line):
-            found.append((number, ""))
-    return found
+    for number, c in enumerate(code, 1):
+        if number in layout_lines:
+            continue
+        if word.search(c) or (collection and presence.search(c)):
+            found.append(number)
+    for number, s in strings:
+        if number not in layout_lines and (s in GIT_READS or GIT_IN_STRING.search(s)):
+            found.append(number)
+    return sorted(found)[:1]
 
 
 def kind_of(rel, text):
@@ -221,10 +394,14 @@ def check_readers(root):
         except Unreadable as err:
             unknown.append(str(err))
             continue
-        for line, function in hits:
-            if (rel, function) not in ALLOWED:
-                findings.append("%s:%d: %s" % (rel, line, LIVE))
+        findings += ["%s:%d: %s" % (rel, line, LIVE) for line in hits]
     return findings, unknown
+
+
+def says_backup(text):
+    """True when one sentence of `text` has both the word copy and the word backup."""
+    return any(re.search(r"\bcopy\b", s, re.I) and re.search(r"\bbackups?\b", s, re.I)
+               for s in re.split(r"(?<=[.!?])\s+|\n\s*\n", text))
 
 
 def check_prose(root):
@@ -232,7 +409,7 @@ def check_prose(root):
     for rel in PROSE:
         try:
             text = read_text(os.path.join(root, *rel.split("/")), rel)
-            if rel == DOCSTRING_PROSE:
+            if rel == EXPORT:  # the module docstring is the prose, not a code comment
                 try:
                     text = ast.get_docstring(ast.parse(text)) or ""
                 except (SyntaxError, ValueError) as err:
@@ -240,7 +417,7 @@ def check_prose(root):
         except Unreadable as err:
             unknown.append(str(err))
             continue
-        if not BACKUP.search(text):
+        if not says_backup(text):
             findings.append("%s: %s" % (rel, NOT_BACKUP))
     return findings, unknown
 
