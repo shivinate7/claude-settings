@@ -8,19 +8,24 @@ it stands in the working tree. A part is any indented numbered line: `N. text` w
 the nearest bullet above it that opens a ruling, `- **<ID>.` (ID like R26, G1, D3), else `(no ruling id)`. Part text is
 the part line plus the following lines indented deeper than its marker. It ends at the next part, bullet, heading,
 blank line, or a line at the marker's indent or less. Each part needs one valid cite `step:<slug>` in its part text,
-outside a code fence. A valid cite names a live step: a file roadmap/data/steps/<slug>.json on git branch roadmap, read
-with git (origin/roadmap first, then roadmap), never the working tree. An opaque slug (one letter then digits, such as
-c55) is valid only with a gloss in parentheses right after it.
+outside a code fence. A valid cite names a live step: a file roadmap/data/steps/<slug>.json on the record branch,
+which lint/layout.py record_branch() names (the extras key "record-branch", else roadmap). The branch is read with
+git (origin's ref first, then the local one), never the working tree. An opaque slug (one letter then digits, such
+as c55) is valid only with a gloss in parentheses right after it. A fence that never closes runs to the end of the
+file, so its opening line is flagged.
 
     python3 lint/check_plan_step_cites.py [--root DIR]
 
-Exit 0: clean. Exit 1: a part has no valid cite, printed as `<file>:<line>: <ruling> part <N>: <reason>`. Exit 2:
-UNKNOWN, printed, when the roadmap branch or the plans home cannot be read. Unknown is never 0.
+Exit 0: clean. Exit 1: a part has no valid cite, printed as `<file>:<line>: <ruling> part <N>: <reason>`, or a fence
+never closes, printed as `<file>:<line>: unclosed code fence hides the parts below it` at the opening fence. Exit 2:
+UNKNOWN, printed, when the record branch, its name or the plans home cannot be read. Unknown is never 0.
 
 Each case builds a fixture repo under this run's folder (lint/_test_temp.py): a base commit that marks the repo rolled
-out to the layout, a roadmap branch that holds the live steps, and plan files left in the working tree.
+out to the layout, a record branch (roadmap unless the extras file names another) that holds the live steps, and plan
+files left in the working tree.
 CHECK_PLAN_STEP_CITES_UNDER_TEST overrides the module path, which a mutant run uses.
 """
+import json
 import os
 import re
 import shutil
@@ -137,10 +142,21 @@ class Fixture(unittest.TestCase):
         """Empty the plans home, so the next lint judges only the plans that the subtest writes next."""
         shutil.rmtree(os.path.join(self.tree, *PLANS.split("/")), ignore_errors=True)
 
-    def assertStepScope(self, slug, on_branch, in_tree):
+    def set_extras(self, **keys):
+        """Write the extras file, rolled out, with each key given. Rolled out keeps every kind at its layout path."""
+        self.write({EXTRAS_REL: json.dumps(dict({"kinds": {}, "rolled-out": True}, **keys)) + "\n"})
+
+    def move_record_branch(self, branch, slugs):
+        """Name `branch` as the record branch, with the steps only on it. roadmap is removed, so no case reads it by accident."""
+        self.set_extras(**{"record-branch": branch})
+        self.git("update-ref", "-d", "refs/heads/roadmap")
+        self.make_branch("refs/heads/" + branch, slugs)
+        self.assertFalse(self.git_ok("rev-parse", "--verify", "-q", "refs/heads/roadmap"), "scope: roadmap is still there")
+
+    def assertStepScope(self, slug, on_branch, in_tree, branch="roadmap"):
         """Scope before the verdict: where the step file is, so the verdict that follows judges the step a case names."""
-        self.assertEqual(self.git_ok("cat-file", "-e", "roadmap:%s/%s.json" % (STEPS, slug)), on_branch,
-                         "scope: %s on the roadmap branch is not %s" % (slug, on_branch))
+        self.assertEqual(self.git_ok("cat-file", "-e", "%s:%s/%s.json" % (branch, STEPS, slug)), on_branch,
+                         "scope: %s on the %s branch is not %s" % (slug, branch, on_branch))
         self.assertEqual(os.path.isfile(os.path.join(self.tree, *STEPS.split("/"), slug + ".json")), in_tree,
                          "scope: %s in the working tree is not %s" % (slug, in_tree))
 
@@ -155,13 +171,17 @@ class Fixture(unittest.TestCase):
         self.assertEqual(rc, 0, "expected exit 0, got %d:\n%s" % (rc, out))
         self.assertNotIn("Traceback", out, out)
 
-    def assertFlagged(self, rel, line, ruling, part, reason, args=None, cwd=None):
-        """Exit 1, and exactly one part is flagged: this line, with this ruling, part number and reason."""
+    def assertLine(self, want, args=None, cwd=None):
+        """Exit 1, no traceback, and a line that is exactly `want` with nothing after it but blanks. Returns the output."""
         rc, out = self.lint(args, cwd)
         self.assertEqual(rc, 1, "expected exit 1, got %d:\n%s" % (rc, out))
         self.assertNotIn("Traceback", out, out)
-        want = "%s:%d: %s part %d: %s" % (rel, line, ruling, part, reason)
         self.assertTrue(re.search(re.escape(want) + r"[ \t]*$", out, re.M), "no line `%s` in:\n%s" % (want, out))
+        return out
+
+    def assertFlagged(self, rel, line, ruling, part, reason, args=None, cwd=None):
+        """Exit 1, and exactly one part is flagged: this line, with this ruling, part number and reason."""
+        out = self.assertLine("%s:%d: %s part %d: %s" % (rel, line, ruling, part, reason), args, cwd)
         flagged = [text for text in out.splitlines() if re.search(r" part \d+: ", text)]
         self.assertEqual(len(flagged), 1, "more than one part is flagged:\n%s" % out)
 
@@ -327,6 +347,34 @@ class StepCiteCase(Fixture):
         self.plan_file("fenced-block.md", text)
         self.assertClean()
 
+    def test_stray_open_fence_is_flagged_at_its_opening_line(self):
+        """A fence that never closes hides every line below it. The check flags the opening fence, not a part."""
+        for mark in ("```", "~~~"):
+            with self.subTest(mark=mark):
+                self.reset_plans()
+                text = plan(RULING, "  1. Build the widget. step:build-widget", mark, "- **R2. y**", "  1. x")
+                rel = self.plan_file("stray-fence.md", text)
+                self.assertLine("%s:%d: unclosed code fence hides the parts below it" % (rel, line_of(text, mark)))
+
+    def test_properly_closed_fence_stays_clean(self):
+        """The stray fence's lines with the fence closed. The ruling and part inside it are text, so the plan is clean."""
+        self.assertStepScope("build-widget", on_branch=True, in_tree=False)
+        self.assertStepScope("ship-widget", on_branch=True, in_tree=False)
+        text = plan(RULING, "  1. Build the widget. step:build-widget", "```", "- **R2. y**", "  1. x", "```",
+                    "  2. Ship it. step:ship-widget")
+        self.plan_file("closed-fence.md", text)
+        self.assertClean()
+
+    def test_two_closed_fences_stay_clean(self):
+        """Two fences, each closed by its own mark. An uncited example part inside one of them is text, not a part."""
+        self.assertStepScope("build-widget", on_branch=True, in_tree=False)
+        self.assertStepScope("ship-widget", on_branch=True, in_tree=False)
+        text = plan(RULING, "  1. Build the widget. step:build-widget", "```", "- **R2. y**", "  1. x", "```",
+                    "  2. Ship it. step:ship-widget", "~~~", "  3. An example part in a second block.", "~~~",
+                    "  3. Test it. step:build-widget")
+        self.plan_file("two-fences.md", text)
+        self.assertClean()
+
     def test_empty_plans_home_and_an_empty_plan_pass(self):
         home = os.path.join(self.tree, *PLANS.split("/"))
         os.makedirs(home)
@@ -382,6 +430,67 @@ class StepCiteCase(Fixture):
         cwd = tempfile.mkdtemp(dir=RUN_FOLDER, prefix="cwd_")
         self.addCleanup(tracked_tree.rm_tree, cwd)
         self.assertUnknown(args=["--root", missing], cwd=cwd)
+
+    def test_a_live_step_on_the_named_record_branch_passes(self):
+        self.move_record_branch("records", LIVE)
+        self.assertEqual(layout.record_branch(self.tree), "records", "scope: the layout does not name records")
+        self.assertStepScope("build-widget", on_branch=True, in_tree=False, branch="records")
+        self.assertStepScope("build-widget", on_branch=False, in_tree=False)  # roadmap is gone: it cannot supply the step
+        self.plan_file("records-live.md", plan(RULING, "  1. Build the widget. step:build-widget",
+                                               "  2. Ship it. step:ship-widget"))
+        self.assertClean()
+
+    def test_a_gone_step_on_the_named_record_branch_is_flagged(self):
+        self.move_record_branch("records", LIVE)
+        self.assertEqual(layout.record_branch(self.tree), "records", "scope: the layout does not name records")
+        self.assertStepScope("gone-step", on_branch=False, in_tree=False, branch="records")
+        text = plan(RULING, "  1. Build the widget. step:gone-step", "  2. Ship it. step:ship-widget")
+        rel = self.plan_file("records-gone.md", text)
+        self.assertFlagged(rel, line_of(text, "  1. "), "R26", 1, "step gone-step does not exist")
+
+    def assertRoadmapNotRead(self, state):
+        """The steps on roadmap must not count when records is the named branch: exit 2, or exit 1 with the cited step
+        flagged as gone. Exit 0 would mean roadmap supplied the steps."""
+        rc, out = self.lint()
+        self.assertNotIn("Traceback", out, out)
+        read_as_unknown = rc == 2 and "UNKNOWN" in out
+        flagged_as_gone = rc == 1 and "step build-widget does not exist" in out
+        self.assertTrue(read_as_unknown or flagged_as_gone,
+                        "the steps on roadmap were read though records is the named branch (%s): exit %d\n%s"
+                        % (state, rc, out))
+
+    def test_steps_only_on_roadmap_are_not_read_when_records_is_absent(self):
+        self.set_extras(**{"record-branch": "records"})
+        self.assertEqual(layout.record_branch(self.tree), "records", "scope: the layout does not name records")
+        self.assertFalse(self.git_ok("rev-parse", "--verify", "-q", "refs/heads/records"), "scope: records exists")
+        self.assertStepScope("build-widget", on_branch=True, in_tree=False)
+        self.assertStepScope("ship-widget", on_branch=True, in_tree=False)
+        self.plan_file("roadmap-only.md", plan(RULING, "  1. Build the widget. step:build-widget",
+                                               "  2. Ship it. step:ship-widget"))
+        self.assertRoadmapNotRead("records absent")
+
+    def test_steps_only_on_roadmap_are_not_read_when_records_holds_no_steps(self):
+        self.set_extras(**{"record-branch": "records"})
+        self.make_branch("refs/heads/records", [])
+        self.assertEqual(layout.record_branch(self.tree), "records", "scope: the layout does not name records")
+        self.assertTrue(self.git_ok("rev-parse", "--verify", "-q", "refs/heads/records"), "scope: records is absent")
+        self.assertStepScope("build-widget", on_branch=False, in_tree=False, branch="records")
+        self.assertStepScope("build-widget", on_branch=True, in_tree=False)
+        self.plan_file("roadmap-only-empty.md", plan(RULING, "  1. Build the widget. step:build-widget",
+                                                     "  2. Ship it. step:ship-widget"))
+        self.assertRoadmapNotRead("records with no steps")
+
+    def test_an_invalid_record_branch_name_exits_two_as_unknown(self):
+        text = plan(RULING, "  1. Build the widget. step:build-widget", "  2. Ship it. step:ship-widget")
+        self.assertStepScope("build-widget", on_branch=True, in_tree=False)  # a cited live step, so 0 is the old answer
+        for bad in ("bad..name", "records.lock", "/records", "bad name"):
+            with self.subTest(branch=bad):
+                self.reset_plans()
+                self.set_extras(**{"record-branch": bad})
+                with self.assertRaises(layout.BranchNameError):  # scope: the layout refuses this name; the check must too
+                    layout.record_branch(self.tree)
+                self.plan_file("bad-branch.md", text)
+                self.assertUnknown()
 
 
 if __name__ == "__main__":
