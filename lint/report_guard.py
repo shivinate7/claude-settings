@@ -2587,12 +2587,12 @@ REVIEW_NOT_DONE = (
 )
 REVIEW_UNPARSED = (
     "Review-log guard: this reply claims a review PASS for PR #%d, and the newest review log on that PR does not parse, "
-    "so merge reads no record from it.%s Remedy: have the reviewer run `merge %d --review-record --head <the head the reviewer "
+    "so merge reads no review log from it.%s Remedy: have the reviewer run `merge %d --review-record --head <the head the reviewer "
     "read> --kind <kind> --guard <yes|no> --round <N:ROLE:MODEL:VERDICT>`, post the log it prints as a new comment on "
     "PR #%d, then report again."
 )
 REVIEW_UNPARSED_CI = (" Cause: the CI line must be the last line before `---`, and nothing may follow it; a line after the CI "
-                      "line makes the record unreadable.")
+                      "line makes the review log unreadable.")
 
 
 def review_claims(text):

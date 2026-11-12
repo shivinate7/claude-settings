@@ -30,7 +30,7 @@
                           (live_review_state). A read or a merge-tree that cannot run, such as a commit the checkout lacks after one fetch, keeps
                           the record stale and the line says unknown; the fix verifier then refuses. Any other difference keeps today's rules.
   merge --reviewed        one line per open PR that has a review log comment, with its state (bad when the newest does not parse) and its
-                          live CI; then the PRs with no record.
+                          live CI; then the PRs with no review log.
   merge --reviewed --root DIR [--root DIR ...]
                           the same list for each repo checkout DIR, in the order given, one block each: `repo OWNER/NAME:`, that repo's lines,
                           then at most one batch line naming its done PRs on the base, ascending: `open batch now: OWNER/NAME #a #b`, or
@@ -3909,9 +3909,9 @@ def review_state(rec, head):
     rounds say. A PASS on a guard or check no change counts as the last recorded round passing, even when that round failed. The design-reviewer hold stays, and with no round recorded it is open. On the final
     round the rules above run as written: it keeps the net value that round gave and settles none that is owed."""
     if rec is None:
-        return "bad", "the newest record does not parse"
+        return "bad", "the newest review log does not parse"
     if rec["head"] != head:
-        return "stale", f"the record is for head {rec['head'][:9]}"
+        return "stale", f"the review log is for head {rec['head'][:9]}"
     if rec["net"] == "negative":
         return "held", "net value is negative"
     rounds = rec["rounds"]
@@ -4087,7 +4087,7 @@ def reviewed_read(h):
                 state, why = LINT_NOT_READY[lint][0], f"{LINT_NOT_READY[lint][1]}. Run `merge --lane-lint {n}`"
         ci = "draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
         lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}; CI {ci}")
-    return lines + ([f"no record: {', '.join(bare)}"] if bare else []), done, pulls
+    return lines + ([f"no review log: {', '.join(bare)}"] if bare else []), done, pulls
 
 def reviewed_lines(h):
     """-> the lines of `merge --reviewed` (see reviewed_read, which holds the gh cost of one repo). `--root` runs this once per root, so the
@@ -5010,7 +5010,7 @@ def write_merge_role(tier):
     if not sid:
         raise Stop("--role needs CLAUDE_CODE_REMOTE_SESSION_ID, and it is not set. " + ROLE_CITE)
     if tier not in MERGE_ROLES:
-        raise Stop("this session's tier may not record a merge role. Run `merge --lane-lint <pr>` first. Then post the review log on the pull request; the batch runner finds it. " + ROLE_CITE)  # names no valid tier: a lane must not learn which to claim
+        raise Stop("this session's role may not record a merge role. Run `merge --lane-lint <pr>` first. Then post the review log on the pull request; the batch runner finds it. " + ROLE_CITE)  # names no valid tier: a lane must not learn which to claim
     path = role_path()
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")  # replace, so a reader never sees half a file
     try:
@@ -5100,7 +5100,7 @@ def build_parser():
     p.add_argument("--config", default=".github/stamp.json")
     p.add_argument("--idle-lanes", action="store_true", help="list the lanes to archive from the roadmap's live file; takes no lock, merges and posts nothing")
     p.add_argument("--live", default=None, metavar="FILE", help="with --idle-lanes: the publisher's live-work file")
-    p.add_argument("--reviewed", action="store_true", help="list open pull requests with their review log state and live CI")
+    p.add_argument("--reviewed", action="store_true", help="list open pull requests with their review log state and live CI, then the PRs with no review log.")
     p.add_argument("--root", action="append", default=[], metavar="DIR", help="with --reviewed: a repo checkout to list, in place of the working directory's; repeat it for each repo")
     p.add_argument("--release-check", nargs="+", action="extend", type=pr_arg, metavar="N", help="one line per pull request: PASS, or FAIL and the reasons (open, review log done at the live head and unedited, lint verdict, clean merge, stack); a missing line is a FAIL; takes no lock, merges nothing")
     p.add_argument("--lint", action="append", type=lint_arg, default=[], metavar="N@SHA:VERDICT", help="with --release-check: the lint verdict of pull request N on head SHA (full lowercase 40-hex; PASS, FAIL or UNKNOWN-AT-CAP); a SHA that is not the live head FAILs, and a number with none FAILs")
@@ -5306,7 +5306,7 @@ def main(argv, host=None, lock=None, hosts=None):
             if info["state"] != "OPEN":
                 raise Stop(f"the pull request is {info['state']} " + REVIEW_CITE)
             if info["head"] != a.head:  # a push after the review must not relabel the old rounds as current
-                raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its record. " + REVIEW_CITE)
+                raise Stop(f"the pull request head is {info['head'][:9]}, not the reviewed {a.head[:9]}. Review the new head, then write its review log. " + REVIEW_CITE)
             files = h.pr_files(a.pr, info["changed_files"])
             hits = guard_hits([p for p, _, _ in files])
             if a.guard == "no" and hits:

@@ -9,7 +9,7 @@ Modes:
   A plain typed ask that holds the word `override` may grant one too, after a model call
   (decision owner-override; hooks/override.py). It prints one more line.
 - --agent: At SubagentStart, gives the agent the time in US Central as context.
-- --page-note: After an ArtifactData read of one waiting-page answer, saves the owner's note on it to the session's inbox, like a chat message (decision owner-feedback-inbox). It prints no time line.
+- --page-note: After an ArtifactData read of one waiting-page answer, saves the owner's note on it to the session's feedback log, like a chat message (decision owner-feedback-inbox). It prints no time line.
 
 Sessions speak times in US Central, 24-hour clock (decision local-time-central). Prints one line, for example "Local time: YYYY-MM-DD 21:40 CDT (UTC-05:00) Later times: run ~/.claude/bin/now-central, never from memory."
 The pointer follows the time line on the same line. The inbox stamp and `line()` carry no pointer. The helper bin/now-central prints later times from this module's clock.
