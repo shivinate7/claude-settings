@@ -1218,7 +1218,8 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
 REPO_REASON = (
     "merge-confirm-repo: this session's own record does not prove it may merge in the checkout this command acts in. "
     "A merge is allowed only in a repo that a cs-repo tag of the session's own get_session record names. "
-    "If that repo is this session's own: run get_session (no argument) alone in its own turn, then retry. "
+    "If that repo is this session's own and its record holds no cs-repo tag for it: tag the session cs-repo:<owner>/<name> with "
+    "set_session_tags on its own id, then re-read its record with get_session (no argument) alone in its own turn, then retry. "
     + OWNER_LANE_ASK + ". The batch runner is one whose cs-repo tags name the repo "
     "(list_sessions, tag cs-build:batch-runner). "
     "(decision merge-confirm-repo, a cloud merge acts only in a repo its own record names)"
