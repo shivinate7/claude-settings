@@ -1034,6 +1034,63 @@ class UnknownTests(StaleCase):
         self.assertRegex(out, "(?i)unknown", out)
 
 
+class CiHistoryTests(StaleCase):
+    """Under env CI, a base the clone cannot read is fetched first, through lint/git_fetch.py, the one home code_check
+    also uses. The check is red only when the fetch fails too, or when no fetch can supply the base (decision
+    ci-unknown-is-red). With CI unset the local rule holds: unknown and exit 0. That control sits last."""
+
+    NOTES_CITE = "# Notes\n\n(hooks/guard.py _process_start_ms)\n"
+
+    def removed_name_range(self):
+        """A range that removes `_process_start_ms` from hooks/guard.py, so the cite on line 3 of the note is STALE002."""
+        def change(repo):
+            write(repo, "hooks/guard.py", "def keep():\n    return 1\n")
+            commit(repo)
+        return self.make_range(base_files(self.NOTES_CITE), change)
+
+    def test_a_depth_one_clone_under_ci_fetches_the_base_and_reports_the_finding(self):
+        rng = self.removed_name_range()
+        clone = self.depth_one_clone(rng)
+        self.assertEqual(git(clone, "remote", "get-url", "origin"), rng.repo,
+                         "scope: the clone's origin is not the source repo, so the fetch has nothing to reach")
+        rc, out = self.run_check(rng._replace(repo=clone), extra_env={"CI": "1"})
+        self.assertEqual(sorted((p, n, c) for p, n, c, _ in parse(out)), [(NOTES, 3, "STALE002")],
+                         "a depth-1 clone under CI did not fetch the base and report its STALE002 finding\n" + out)
+        self.assertEqual(rc, 1, "a depth-1 clone under CI printed the finding but exited %d, not 1\n%s" % (rc, out))
+
+    def test_a_full_clone_whose_base_shares_no_history_with_head_is_red_under_ci(self):
+        rng = self.removed_name_range()
+        tree = git(rng.repo, "rev-parse", rng.base + "^{tree}")
+        orphan = git(rng.repo, "commit-tree", tree, "-m", "unrelated base")
+        git(rng.repo, "remote", "add", "origin", rng.repo)  # a reachable origin: the fetch runs and finds nothing new
+        self.assertEqual(git(rng.repo, "rev-parse", "--is-shallow-repository"), "false",
+                         "scope: the repo is not a full clone")
+        no_base = subprocess.run(["git", "merge-base", orphan, rng.head], cwd=rng.repo, capture_output=True)
+        self.assertNotEqual(no_base.returncode, 0, "scope: the base still shares history with the head")
+        rc, out = self.run_check(rng, spec="%s...%s" % (orphan, rng.head), extra_env={"CI": "1"})
+        self.assertNotEqual(rc, 0, "a base that shares no history with the head exited 0 under CI, not red\n" + out)
+        self.assertNotIn("stale-cites: PASS", out, "a base that shares no history with the head printed PASS\n" + out)
+        self.assertIn(orphan[:7], out, "the red output does not name the base that shares no history with the head\n" + out)
+
+    def test_a_depth_one_clone_whose_origin_is_unreachable_is_red_under_ci(self):
+        rng = self.removed_name_range()
+        clone = self.depth_one_clone(rng)
+        gone = os.path.join(rng.case, "no-such-origin")
+        git(clone, "remote", "set-url", "origin", gone)
+        self.assertFalse(os.path.exists(gone), "scope: the origin path exists, so the fetch would not fail")
+        rc, out = self.run_check(rng._replace(repo=clone), extra_env={"CI": "1"})
+        self.assertIn("stale-cites: UNKNOWN", out, "an unreachable origin under CI printed no final UNKNOWN line\n" + out)
+        self.assertNotEqual(rc, 0, "an unreachable origin under CI exited 0, not red\n" + out)
+        self.assertNotIn("stale-cites: PASS", out, "an unreachable origin under CI printed PASS\n" + out)
+
+    def test_with_ci_unset_the_same_clone_keeps_the_local_unknown_and_exit_zero(self):
+        rng = self.removed_name_range()
+        clone = self.depth_one_clone(rng)
+        rc, out = self.run_check(rng._replace(repo=clone))
+        self.assertTrue(unknown_lines(out), "a depth-1 clone with CI unset printed no unknown line\n" + out)
+        self.assertEqual(rc, 0, "a depth-1 clone with CI unset did not keep the local exit 0\n" + out)
+
+
 class ResolveTests(StaleCase):
     """resolves reads whether a rev names a commit. Each pinned input states its answer here, so a change to what
     resolves returns shows as the input that moved."""
