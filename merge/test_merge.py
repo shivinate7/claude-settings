@@ -14812,7 +14812,7 @@ class ReviewFixFlag(ReviewEnv):
         self.assertEqual(rc, 0, out + err)
 
     def test_a_fix_verifier_with_no_round_is_refused_and_prints_no_record(self):
-        # A record with a fix verifier and no round reads open ("no round is recorded"), and four were posted that way. The tool refuses it: exit 2, no
+        # A record with a fix verifier and no round reads open ("no round is recorded"). The tool refuses it: exit 2, no
         # record, and a message that names --round. The control, the same argv with --round, exits 0.
         argv = ("7", "--review-record", "--kind", "normal", "--guard", "no", "--head", self.head())
         for verdict in ("PASS", "FAIL"):
