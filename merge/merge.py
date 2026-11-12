@@ -3057,7 +3057,7 @@ def ci_job_run(wt, *args, notes=None):
 
 MUTATE_JOB, MUTATE_STEP = "checks-mutate-guard", "Guard mutation test"  # the job and step of checks.yml whose run: line and timeout-minutes the lint reads at the head
 MUTATE_TEST_FILE = re.compile(r"hooks/mutate_[^/]*\.(?:py|mjs)")
-MUTATE_SKIPPED = "mutation test run skipped here: it runs at the lane's hand-off lint"  # the batch head prints this where the run would start
+MUTATE_SKIPPED = "mutation test run skipped here: it runs at the lane's hand-off lint"  # printed wherever the lint skips the run: the batch head, or a pre-join lint whose hand-off PASS names the head
 
 def mutate_report_counts(out):
     """-> (killed, survived, unknown, unread, tally, wrong) of a mutation test run's stdout, or None when it holds no report. Two forms: the per-file
