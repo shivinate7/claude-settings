@@ -1,15 +1,17 @@
 {
  "id": "queue-score-plus-agent",
  "title": "The roadmap build scores each step, and a triage agent checks the top at each batch merge",
- "status": "ready",
+ "status": "blocked",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
  "lane": "",
  "owner": "triage",
- "blockedBy": [],
+ "blockedBy": [
+  "upkeep-keys-live-status"
+ ],
  "why": "The queue order drifts when triage forgets the c55 re-weigh; the owner wants it to fix itself.",
  "source": "owner 11:24 CST Nov 12 via the retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ, 11:26 and 11:28 CST): \"this is good approved: (d) Score plus agent (recommended)\"",
  "note": "Ruled option (d): the roadmap build gives each step a score from facts it already holds: it cites an owner ruling, how long it has been ready, how many steps wait on it, and whether the owner flagged it. At each batch merge a triage agent checks the top of that order and may move a step, with a one-line reason. Not picked: (f), the lane-start check. Home: decision session-tiers (the triage role); the lane writes the re-rank rule there beside c55, with the owner's words and time. Reads live statuses, so it waits on step upkeep-keys-live-status. The page pass at each batch merge (open threads, republish on a template change, re-sort) rides the same trigger. Replaces the hand re-weigh in plans/reweigh-2026-11-12. Ready, no lane.",
- "updatedAt": "2026-11-12T11:28:45-06:00",
+ "updatedAt": "2026-11-12T11:33:32-06:00",
  "order": -301
 }

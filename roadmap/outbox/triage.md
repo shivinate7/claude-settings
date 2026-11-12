@@ -788,3 +788,4 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - Lane fixed-number-limits-census (coordinator 11:22 CST Nov 12): 63 fixed limits found (R37 said ~45): 7 owner-ruled, 37 decision-only, 19 with no ruling. Sim-lease clash on page item 554 sim-lease-load-measure.
 - Cull picks, coordinator 11:22 CST Nov 12 (reversible), for lane guard-false-alarm-cull: delete the Recovered/Handoff-gave report line check and the Departs-from dash separator check; the both-sides check stays.
 - Pick on #2815 (lone-lane merge confirm), coordinator 11:22 CST Nov 12: the confirm passes only when the PR head equals a branch tip in the calling session's own checkout.
+- Lane outbox-notes-land (coordinator 11:32 CST Nov 12) lands the outbox notes on main and sends the coordinator the list; clear those lines from this outbox when it arrives.
