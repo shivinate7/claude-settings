@@ -14,7 +14,7 @@ Cause of the death of batch 104's first build: unmeasured. That build ran in a L
 
 A second, separate gap: a `--ready` lint that times out at 3600 s prints no log path. ci-job's own files sit in the session's temp folder, which `janitor/temp_sweep.py` removes once the transcript is idle 24 hours on Windows (decision `windows-temp-sweep`). That sweep did not remove batch 104's log: that run was not on Windows.
 
-Home: `state/` is removed by no sweep. Checked with `grep -rn "batch-build\|state/" janitor/*.py hooks/*.py`: the janitor and the hooks name only their own files in `state/` (for example `agent-end-payloads.jsonl`, `sim-boots.jsonl`, `janitor-runs.jsonl`). None removes the folder or `batch-build/`.
+Its home is `state/`: no sweep removes it. Checked with `grep -rn "batch-build\|state/" janitor/*.py hooks/*.py`: the janitor and the hooks name only their own files in `state/` (for example `agent-end-payloads.jsonl`, `sim-boots.jsonl`, `janitor-runs.jsonl`). None removes the folder or `batch-build/`.
 
 Named reader: the batch runner, after a dead or failed build, then the retrospective.
 
