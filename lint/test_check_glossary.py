@@ -896,6 +896,7 @@ class UncommittedTests(Fixture):
     so a green case cannot pass because its file was never written."""
 
     IGNORE = "__pycache__/\n"  # the check imports its modules, so each run writes bytecode into lint/ and hooks/
+    PDF_BYTES = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n" + bytes(range(1, 256)) * 40  # a PDF header, then bytes with no NUL
 
     def setUp(self):
         super().setUp()
@@ -1152,6 +1153,36 @@ class UncommittedTests(Fixture):
         code, out = self.run_check()
         self.assertEqual(code, 1, "a UTF-8 untracked file with a NUL passed unread\n" + out)
         self.assertIn("docs/debts/nul.md:1", out, "the NUL file's line was not read\n" + out)
+
+    def assert_pdf_scope(self, data):
+        """The bytes hold no NUL in their first 8 KB and do not decode as UTF-8, so binary() decides the file."""
+        self.assertNotIn(b"\0", data[:8192], "scope: the first 8 KB hold a NUL, so the NUL test alone would decide")
+        with self.assertRaises(UnicodeDecodeError, msg="scope: the bytes decode as UTF-8, so binary() is never reached"):
+            data.decode("utf-8")
+
+    def test_untracked_pdf_with_no_nul_in_its_first_bytes_is_skipped_quietly_in_ci(self):
+        """binary(): a PDF header makes the file binary though no NUL is in its first 8 KB, so it is skipped, not UNKNOWN."""
+        self.base_repo()
+        self.assert_pdf_scope(self.PDF_BYTES)
+        self.put_bytes("docs/debts/paper.pdf", self.PDF_BYTES)
+        self.assertState("?? docs/debts/paper.pdf")
+        code, out = self.run_check(ci=True)
+        self.assertNotIn("UNKNOWN", out, "an untracked PDF with no NUL printed UNKNOWN: its header was not read as binary\n" + out)
+        self.assertEqual(code, 0, "an untracked PDF with no NUL failed the check in CI\n" + out)
+
+    def test_untracked_file_with_the_pdf_bytes_and_a_broken_header_is_unknown_and_red_in_ci(self):
+        """The near-miss control: the same bytes with one letter of the magic changed. Only the header makes a file
+        binary, so this file cannot be read: UNKNOWN locally, red in CI."""
+        self.base_repo()
+        broken = self.PDF_BYTES.replace(b"%PDF-", b"%PDX-", 1)
+        self.assertNotIn(b"%PDF-", broken[:8192], "scope: the control still carries the PDF header")
+        self.assert_pdf_scope(broken)
+        self.put_bytes("docs/debts/paper.pdf", broken)
+        self.assertState("?? docs/debts/paper.pdf")
+        code, out = self.run_check()
+        self.assertIn("UNKNOWN", out, "an untracked file with a broken header and invalid UTF-8 passed silently\n" + out)
+        code, out = self.run_check(ci=True)
+        self.assertEqual(code, 1, "an untracked file with a broken header and invalid UTF-8 is not red in CI\n" + out)
 
 
 def load_check():
