@@ -3298,16 +3298,20 @@ class ParallelPreviewTests(unittest.TestCase):
         self.assertEqual(peak, 1)
         self.assertNotIn("empty-a", sweep.list_local_branches(root))
 
-    def _peak_concurrency(self, name, run):
+    def _peak_concurrency(self, name, run, hold=1.0):
         """Highest number of calls to `sweep.<name>` in flight at once during `run()`, in a
-        preview."""
+        preview. A call holds until another call is in flight, or HOLD seconds pass: an overlap is
+        seen by condition, and a serial run only pays the bound."""
         real, lock, state = getattr(sweep, name), threading.Lock(), {"now": 0, "peak": 0}
+        overlapped = threading.Event()
 
         def wrapped(*a, **k):
             with lock:
                 state["now"] += 1
                 state["peak"] = max(state["peak"], state["now"])
-            time.sleep(0.2)  # holds the call open so a concurrent second call overlaps; the case asserts the peak count
+                if state["now"] > 1:
+                    overlapped.set()
+            overlapped.wait(hold)  # the bound only ends a hold that no second call came to
             try:
                 return real(*a, **k)
             finally:
