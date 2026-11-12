@@ -989,3 +989,4 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - [lane fan-prose-unmapped-5 via coordinator 16:13 CST Nov 12] A subagent's new-file Write in docs/debts was refused, so #2748's debts stayed as notes; possible false alarm, check which guard refused.
 - [lane fan-prose-unmapped-5 via coordinator 16:13 CST Nov 12] All PRs handed to runner 10: #2661, #2715-#2717, #2726, #2736, #2747, #2748, #2833, #2913; merge order #2748, #2833, #2913.
 - [triage 16:14 CST Nov 12] The earlier line "R22 point 2 wording needs an owner rewrite" is settled: a wording slip, filed as step r22-lane-id-wording (no owner item).
+- sim-lease-gaps 16:22 CST Nov 12: Lane lane-sim-hold-path via coordinator 16:24 CST Nov 12 (#2937 handed to runner 10 at 08b635ee5): the drive-rule stack (#1599, #1692, #2033, #2061) gate must test SHELL_COMMAND_TOOLS, since the guard now judges the Monitor tool's command like Bash.

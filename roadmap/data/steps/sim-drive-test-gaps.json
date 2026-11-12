@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "",
   "why": "Two hold arms and the simctl verbs in the simulator-drive guard have no test case or mutant.",
-  "note": "Lane sim-lease-gaps ([ended:lane:-sim-lease-gaps]). #1692 is reverted to its round-3 tree with its record posted; #1699 is stacked on it. Coordinator 19:06 CST Nov 7. Kept doing on: #1692 and #1699 open drafts (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-sim-lease-gaps]).",
-  "updatedAt": "2026-11-12T07:22:00-06:00"
+  "note": "Lane sim-lease-gaps ([ended:lane:-sim-lease-gaps]). #1692 is reverted to its round-3 tree with its record posted; #1699 is stacked on it. Coordinator 19:06 CST Nov 7. Kept doing on: #1692 and #1699 open drafts (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-sim-lease-gaps]). Lane lane-sim-hold-path via coordinator 16:24 CST Nov 12 (#2937 handed to runner 10 at 08b635ee5): the drive-rule stack (#1599, #1692, #2033, #2061) gate must test SHELL_COMMAND_TOOLS, since the guard now judges the Monitor tool's command like Bash.",
+  "updatedAt": "2026-11-12T16:22:39-06:00"
 }
