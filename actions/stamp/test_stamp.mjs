@@ -923,17 +923,14 @@ test("cite.scanGlobs and cite.excludeGlobs: a scanned suffix is rewritten, an ex
     initRepo(root);
     write(root, "docs/decisions/_widgets.md", '---\nid:\nslug: widgets\ngloss: "widgets ship"\ndate: 2026-01-05\n---\n\nBody.\n');
     write(root, "data/links.csv", "ref\n[[widgets]]\n");
-    write(root, "data/links.txt", "[[widgets]]\n");
-    write(root, "test/fixtures/sample.md", "[[widgets]]\n");
     write(root, "docs/citation-syntax.md", "Write [[slug]] to cite a record.\n");
-    commit(root, "a pending record, cites in three places, and a syntax example");
+    commit(root, "a pending record, a scanned cite, and a syntax example");
 
     // the syntax example is excluded. Only the pending record itself is refused, on main.
     assert.deepEqual(check(root, filenameConfig()).filter((p) => !p.includes("still pending")), []);
     stamp(root, filenameConfig());
     assert.equal(read(root, "data/links.csv"), "ref\nD1, widgets ship\n");
-    assert.equal(read(root, "data/links.txt"), "[[widgets]]\n"); // .txt is not in scanGlobs
-    assert.equal(read(root, "test/fixtures/sample.md"), "[[widgets]]\n"); // excluded
+    assert.equal(read(root, "docs/citation-syntax.md"), "Write [[slug]] to cite a record.\n"); // excluded
   }));
 
 test("excludeFiles: a listed file in a record folder is not read as a record", () =>
@@ -1563,6 +1560,211 @@ test("config.kinds missing, a string, {} or null is still refused", () =>
       assert.notEqual(r.status, 0, `kinds ${JSON.stringify(kinds)} must refuse`);
       assert.equal(r.stderr.includes("config.kinds must be"), true, r.stderr);
     });
+  }));
+
+// ---------------------------------------------------------------- a pending cite that
+// cite.scanGlobs does not read, or that cite.excludeGlobs covers. --claim and --check refuse before
+// anything is written, name the file and line, and print the fix. A file that only teaches the cite
+// syntax stays silent under its exclude entry.
+const SCAN_MD = { scanGlobs: ["**/*.md"], excludeGlobs: [] };
+const BLOCK = "plugins/_shared/fidelity.block";
+const BLOCK_TEXT = "one\ntwo\nSee [[p]] here.\n"; // the cite is on line 3
+const EXCLUDE_WINS = { scanGlobs: ["**/*.md", "plugins/_shared/*.block"], excludeGlobs: ["plugins/_*/**"] };
+const CITE_FIX = /add "([^"]+)" to cite\.scanGlobs in \.github\/stamp\.json/;
+
+const outputOf = (r) => `${r.stdout}${r.stderr}`;
+
+// The frontmatter example with this test's cite block, at .github/stamp.json: the path a repo
+// edits, so the CLI's fix names the file the repo really keeps.
+function writeStampConfig(root, cite) {
+  const config = JSON.parse(readFileSync(join(HERE, "examples/frontmatter.stamp.json"), "utf8"));
+  config.cite = { ...config.cite, ...cite };
+  write(root, ".github/stamp.json", JSON.stringify(config, null, 2) + "\n");
+}
+
+// claimRepo's tree, then the config and the files, committed on wt/lane, so each file is tracked.
+// The pending record p claims D-002.
+function pendingCiteRepo(root, cite, files) {
+  claimRepo(root);
+  writeStampConfig(root, cite);
+  for (const [rel, text] of Object.entries(files)) write(root, rel, text);
+  commit(root, "the pending record, the config, and the files");
+}
+
+// The scope step for the exclude cases: with the entry gone, the same tree passes --check, so the
+// entry is the only cause of the refusal.
+function excludeWinsRepo(root) {
+  pendingCiteRepo(root, EXCLUDE_WINS, { [BLOCK]: BLOCK_TEXT });
+  writeStampConfig(root, { ...EXCLUDE_WINS, excludeGlobs: [] });
+  const scoped = runStamp(root, ".github/stamp.json", "check");
+  assert.equal(scoped.status, 0, `scope: with no excludeGlobs entry the tree must pass --check:\n${outputOf(scoped)}`);
+  writeStampConfig(root, EXCLUDE_WINS);
+}
+
+test("pending cite: --claim refuses an unscanned pending cite, names its file and line, prints the scanGlobs fix, and writes nothing", () =>
+  withTempDir((root) => {
+    pendingCiteRepo(root, SCAN_MD, { "docs/guide.md": "See [[p]] for the plan.\n", [BLOCK]: BLOCK_TEXT });
+    assert.equal(read(root, BLOCK).split("\n")[2], "See [[p]] here.", "scope: the cite must sit on line 3 of a tracked file");
+    assert.match(read(root, "docs/decisions/p.md"), /^id: pending$/m, "scope: p must still be pending");
+
+    const r = runStamp(root, ".github/stamp.json", "claim");
+    const out = outputOf(r);
+    assert.notEqual(r.status, 0, `--claim exited 0 with an unscanned pending cite:\n${out}`);
+    assert.match(out, /plugins\/_shared\/fidelity\.block:3/, `--claim named no file and line for the unscanned cite:\n${out}`);
+    assert.doesNotMatch(out, /Record-claim:/, `--claim printed a claim line on a refusal:\n${out}`);
+    const status = git(root, "status", "--porcelain");
+    assert.equal(status, "", `--claim wrote files on a refusal:\n${status}`);
+
+    const fix = CITE_FIX.exec(out);
+    assert.ok(fix, `--claim printed no fix of the form add "<glob>" to cite.scanGlobs in .github/stamp.json:\n${out}`);
+    writeStampConfig(root, { scanGlobs: ["**/*.md", fix[1]], excludeGlobs: [] });
+    commit(root, "scan the block, as the refusal says");
+    const fixed = runStamp(root, ".github/stamp.json", "claim");
+    assert.equal(fixed.status, 0, `the printed fix did not let --claim pass:\n${outputOf(fixed)}`);
+    assert.equal(read(root, BLOCK).split("\n")[2], "See D-002, p here.", "the scanned block was not rewritten");
+  }));
+
+test("pending cite: --check refuses the same unscanned cite off the default branch, names its file and line, and passes once the printed fix is applied", () =>
+  withTempDir((root) => {
+    pendingCiteRepo(root, SCAN_MD, { "docs/guide.md": "See [[p]] for the plan.\n", [BLOCK]: BLOCK_TEXT });
+    assert.equal(currentBranch(root), "wt/lane", "scope: --check must run off the default branch");
+    assert.equal(read(root, BLOCK).split("\n")[2], "See [[p]] here.", "scope: the cite must sit on line 3 of a tracked file");
+
+    const r = runStamp(root, ".github/stamp.json", "check");
+    const out = outputOf(r);
+    assert.notEqual(r.status, 0, `--check exited 0 with an unscanned pending cite:\n${out}`);
+    assert.match(out, /plugins\/_shared\/fidelity\.block:3/, `--check named no file and line for the unscanned cite:\n${out}`);
+    const fix = CITE_FIX.exec(out);
+    assert.ok(fix, `--check printed no fix of the form add "<glob>" to cite.scanGlobs in .github/stamp.json:\n${out}`);
+    writeStampConfig(root, { scanGlobs: ["**/*.md", fix[1]], excludeGlobs: [] });
+    commit(root, "scan the block, as the refusal says");
+    const fixed = runStamp(root, ".github/stamp.json", "check");
+    assert.equal(fixed.status, 0, `--check still refused after the printed fix:\n${outputOf(fixed)}`);
+  }));
+
+test("pending cite: --claim refuses a pending cite that an excludeGlobs entry covers, though scanGlobs names the file, and names that entry", () =>
+  withTempDir((root) => {
+    excludeWinsRepo(root);
+
+    const r = runStamp(root, ".github/stamp.json", "claim");
+    const out = outputOf(r);
+    assert.notEqual(r.status, 0, `--claim exited 0 with a pending cite inside an excludeGlobs entry:\n${out}`);
+    assert.match(out, /plugins\/_shared\/fidelity\.block:3/, `--claim named no file and line:\n${out}`);
+    assert.match(out, /cite\.excludeGlobs/, `--claim did not name cite.excludeGlobs as the cause:\n${out}`);
+    assert.equal(out.includes('"plugins/_*/**"'), true, `--claim did not name the exclude entry:\n${out}`);
+    const status = git(root, "status", "--porcelain");
+    assert.equal(status, "", `--claim wrote files on a refusal:\n${status}`);
+
+    writeStampConfig(root, { ...EXCLUDE_WINS, excludeGlobs: [] });
+    commit(root, "remove the entry that covers the block");
+    const fixed = runStamp(root, ".github/stamp.json", "claim");
+    assert.equal(fixed.status, 0, `removing the named entry did not let --claim pass:\n${outputOf(fixed)}`);
+  }));
+
+test("pending cite: --check refuses a pending cite that an excludeGlobs entry covers, names that entry, and passes once it is removed", () =>
+  withTempDir((root) => {
+    excludeWinsRepo(root);
+
+    const r = runStamp(root, ".github/stamp.json", "check");
+    const out = outputOf(r);
+    assert.notEqual(r.status, 0, `--check exited 0 with a pending cite inside an excludeGlobs entry:\n${out}`);
+    assert.match(out, /plugins\/_shared\/fidelity\.block:3/, `--check named no file and line:\n${out}`);
+    assert.match(out, /cite\.excludeGlobs/, `--check did not name cite.excludeGlobs as the cause:\n${out}`);
+    assert.equal(out.includes('"plugins/_*/**"'), true, `--check did not name the exclude entry:\n${out}`);
+
+    writeStampConfig(root, { ...EXCLUDE_WINS, excludeGlobs: [] });
+    commit(root, "remove the entry that covers the block");
+    const fixed = runStamp(root, ".github/stamp.json", "check");
+    assert.equal(fixed.status, 0, `removing the named entry did not let --check pass:\n${outputOf(fixed)}`);
+  }));
+
+// The cite scanner reads text, so the cases that break a naive scanner go in: a comment opener
+// inside a string, a multi-line template literal, and a lone quote in prose. Each cite sits outside
+// scanGlobs and must still refuse at its own line.
+const SCANNER_SHAPES = [
+  ["a comment opener inside a string", "plugins/_shared/label.mjs", 1, 'export const label = "// not a comment"; export const cite = "[[p]]";\n'],
+  ["the second line of a multi-line template literal", "plugins/_shared/doc.mjs", 2, "export const doc = `first line\n[[p]] on line two`;\n"],
+  ["a lone quote in prose", "plugins/_shared/prose.txt", 1, "Don't drop [[p]] here.\n"],
+];
+for (const [shape, rel, line, text] of SCANNER_SHAPES) {
+  test(`pending cite: --check refuses a pending cite after ${shape}, at ${rel}:${line}`, () =>
+    withTempDir((root) => {
+      pendingCiteRepo(root, SCAN_MD, { [rel]: text });
+      assert.equal(read(root, rel).split("\n")[line - 1].includes("[[p]]"), true, `scope: ${rel} must hold the cite on line ${line}`);
+
+      const r = runStamp(root, ".github/stamp.json", "check");
+      const out = outputOf(r);
+      assert.notEqual(r.status, 0, `--check passed a pending cite after ${shape}:\n${out}`);
+      assert.equal(out.includes(`${rel}:${line}`), true, `--check did not name ${rel}:${line} after ${shape}:\n${out}`);
+    }));
+}
+
+test("pending cite: --claim names every unscanned file that holds a pending cite, not only the first", () =>
+  withTempDir((root) => {
+    const files = [
+      ["plugins/_shared/a.block", "x\nSee [[p]].\n", 2],
+      ["plugins/_shared/b.block", "See [[p]].\n", 1],
+      ["plugins/_shared/c.block", "x\ny\nSee [[p]].\n", 3],
+    ];
+    pendingCiteRepo(root, SCAN_MD, Object.fromEntries(files.map(([rel, text]) => [rel, text])));
+    for (const [rel, , line] of files) {
+      assert.equal(read(root, rel).split("\n")[line - 1], "See [[p]].", `scope: ${rel} must hold the cite on line ${line}`);
+    }
+
+    const r = runStamp(root, ".github/stamp.json", "claim");
+    const out = outputOf(r);
+    assert.notEqual(r.status, 0, `--claim exited 0 with three unscanned pending cites:\n${out}`);
+    for (const [rel, , line] of files) {
+      assert.equal(out.includes(`${rel}:${line}`), true, `--claim did not name ${rel}:${line}:\n${out}`);
+    }
+  }));
+
+// Green controls: each passes on today's code and must keep passing.
+test("pending cite: a repo with no unscanned pending cite passes --check and --claim", () =>
+  withTempDir((root) => {
+    pendingCiteRepo(root, SCAN_MD, { "docs/guide.md": "See [[p]] for the plan.\n" });
+
+    const check = runStamp(root, ".github/stamp.json", "check");
+    assert.equal(check.status, 0, `--check refused a repo with no unscanned cite:\n${outputOf(check)}`);
+    const claim = runStamp(root, ".github/stamp.json", "claim");
+    assert.equal(claim.status, 0, `--claim refused a repo with no unscanned cite:\n${outputOf(claim)}`);
+    assert.match(outputOf(claim), /Record-claim: D-002/, `--claim printed no claim line:\n${outputOf(claim)}`);
+    assert.equal(read(root, "docs/guide.md"), "See D-002, p for the plan.\n", "the scanned cite was not rewritten");
+  }));
+
+test("pending cite: an excluded file that only teaches the cite syntax passes --check and --claim", () =>
+  withTempDir((root) => {
+    const teaching = "# Citing\n\nWrite `[[p]]` to cite a record.\n\n```\n[[p]]\n```\n";
+    pendingCiteRepo(root, { scanGlobs: ["**/*.md"], excludeGlobs: ["docs/citation-syntax.md"] }, {
+      "docs/citation-syntax.md": teaching,
+      "docs/guide.md": "See [[p]] for the plan.\n",
+    });
+    assert.equal(read(root, "docs/citation-syntax.md").includes("`[[p]]`"), true, "scope: the syntax file must show the cite in a code span");
+
+    const check = runStamp(root, ".github/stamp.json", "check");
+    assert.equal(check.status, 0, `--check refused a file that only teaches the syntax:\n${outputOf(check)}`);
+    const claim = runStamp(root, ".github/stamp.json", "claim");
+    assert.equal(claim.status, 0, `--claim refused a file that only teaches the syntax:\n${outputOf(claim)}`);
+    assert.equal(read(root, "docs/citation-syntax.md"), teaching, "the excluded syntax file was rewritten");
+  }));
+
+test("pending cite: a file git does not track is not read as a refusal", () =>
+  withTempDir((root) => {
+    pendingCiteRepo(root, SCAN_MD, { "docs/guide.md": "See [[p]] for the plan.\n" });
+    write(root, BLOCK, BLOCK_TEXT); // written, never committed
+
+    assert.equal(git(root, "ls-files", "--others", "--exclude-standard").includes(BLOCK), true, "scope: the block must be untracked");
+    const r = runStamp(root, ".github/stamp.json", "check");
+    assert.equal(r.status, 0, `--check refused a file git does not track:\n${outputOf(r)}`);
+  }));
+
+test("pending cite: a tracked binary file that holds the cite bytes is not read as text", () =>
+  withTempDir((root) => {
+    pendingCiteRepo(root, SCAN_MD, { "docs/guide.md": "See [[p]] for the plan.\n", "data/blob.bin": Buffer.from("\0[[p]]\n") });
+    assert.equal(readFileSync(join(root, "data/blob.bin")).includes(0), true, "scope: the file must hold a NUL byte");
+
+    const r = runStamp(root, ".github/stamp.json", "check");
+    assert.equal(r.status, 0, `--check read a binary file as text:\n${outputOf(r)}`);
   }));
 
 // ---------------------------------------------------------------- near-miss cites
