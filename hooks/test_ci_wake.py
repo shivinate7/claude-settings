@@ -912,7 +912,10 @@ def case_real_run_listed_late():
     gives up ends in `CI unknown ... no run yet`. It lists again and judges the run it finds."""
     for label, runs in (("no run at the first two lists, the real run at the third", [late(923, 3)]),
                         ("draft run listed skipped, the real run at the third list",
-                         [DRAFT_DONE, late(923, 3)])):
+                         [DRAFT_DONE, late(923, 3)]),
+                        ("draft run ended success with its rollup skipped, the real run at the third list",
+                         [run(921, "checks", "success", [job("scope", "success"), job("unit", "skipped"),
+                                                         job(REQUIRED_CHECK, "skipped")]), late(923, 3)])):
         res = run_hook(bash("gh pr ready 12"), fixture(READY, runs), launcher=FAST_SLEEP_LAUNCHER)
         expect_verdict(label, res, "green")
         check("%s: waited on the real run (923) after 3 lists" % label,

@@ -300,7 +300,7 @@ def wait_for(sha, cwd, deadline, repo=""):
         for r in fresh:
             watch_run(r["databaseId"], cwd, deadline, repo)
         try:
-            got = [gh_json(["run", "view", str(r["databaseId"]), *extra, "--json", "databaseId,name,status,conclusion,jobs"], cwd)
+            got = [gh_json(["run", "view", str(r["databaseId"]), *extra, "--json", "databaseId,name,status,conclusion,event,jobs"], cwd)
                    for r in fresh]
         except Unknown:
             if viewed and judged_red(viewed):
