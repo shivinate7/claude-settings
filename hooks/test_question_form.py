@@ -23,8 +23,9 @@ Interface the module must match (the lane's form contract):
 - A question to the owner holds a line at a line start, `Departs from: <what on main> — <what changes>`
   (rule question-departs), after the form passes. Both sides are non-empty, and the change side says a change,
   not a restatement of main (none, nothing, n/a, no change, unchanged, stays, keeps, as today, as on main,
-  same as, already; word match) before the change side's first ";", or anywhere when it has none. The chat
-  box judges it in `question`; a page decision in `context`.
+  same as, already; word match) before the change side's first ";", or anywhere when it has none. With no dash,
+  the words are read in the whole line before its first ";". The chat box judges it in `question`; a page
+  decision in `context`.
 - A widening option: page `widens: true`, never in `pick`; chat `Goes against your ruling: a repo changes to
   fit a shared tool, never the tool to fit a repo` in its label or description, and never `(Recommended)` in
   its label (rule uniform-pick).
@@ -790,6 +791,8 @@ CLAUDE_WAITS_ON_OWNER_PRESS = [
     # Twins of the approval-note and merge-queue cases below: a word or a comma after the press word is still his press.
     "Claude merges after the owner's approval on GitHub.",
     "Claude waits for the owner's merge, then tags it.",
+    # "to" after the owner's merge does not end his press: "merge to land" is still his, as "merge" alone is.
+    "Claude waits for the owner's merge to land.",
 ]
 # A session or Claude clause that joins a press by "and" with no subject ("and approve it", "and approve on GitHub"),
 # or that waits on the owner's approval, leaves that press to the owner: the option needs a link.
@@ -798,6 +801,11 @@ SESSION_LEAVES_OWNER_PRESS = [
     "The session clicks Merge and approve it.",
     "Claude merges PR #374 after the review and approve it.",
     "The session clicks Merge after the owner's approval.",
+    # The owner's approval with a word after it ("via GitHub", "needed", "through the portal", "gate") is still his press.
+    "The session clicks Merge after the owner's approval via GitHub.",
+    "The session clicks Merge after the owner's approval needed.",
+    "The session clicks Merge after the owner's approval through the portal.",
+    "The session clicks Merge after the owner's approval gate.",
 ]
 # "the owner's merge commit" names a git object the session keeps, not a press the owner makes: it needs no link.
 SESSION_KEEPS_OWNER_MERGE = ["The session merges PR #374 keeping the owner's merge commit."]
@@ -813,6 +821,9 @@ SESSION_NAMES_OWNER_RIGHTS = [
     "The session merges PR #374 once the owner's approval note is in.",
     "The session merges PR #374 with the owner's merge method.",
 ]
+# "to" after the owner's merge names the branch the merge goes to ("merge to main"), not a press he makes now: the
+# session clicks Merge, and he presses nothing. Each passes.
+SESSION_NAMES_MERGE_TARGET = ["The session clicks Merge after the owner's merge to main is in on GitHub."]
 # A label that asks him to click is his press whatever the how says: the session's click in the how leaves it his.
 LABEL_ASKS_CLICK_SESSION_HOW = [("Click Merge on GitHub", "The session clicks Merge after your pick.")]
 
@@ -888,6 +899,11 @@ def case_session_press_needs_no_link():
         page("a session clause that names the owner's rights or a past press, %r, with no link, passes" % how, "set",
              entry_of(page_item(options=[dict(session, how=how), keep])), None)
         chat("a session clause that names the owner's rights or a past press, %r, with no url, passes" % how,
+             chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), None)
+    for how in SESSION_NAMES_MERGE_TARGET:
+        page("a session clause that names the owner's merge to a branch, %r, with no link, passes" % how, "set",
+             entry_of(page_item(options=[dict(session, how=how), keep])), None)
+        chat("a session clause that names the owner's merge to a branch, %r, with no url, passes" % how,
              chat_box(options=[chat_of(dict(session, how=how)), chat_of(keep)]), None)
     for label, how in LABEL_ASKS_CLICK_SESSION_HOW:
         page("a label %r that asks him to click, with how %r, with no link, is refused as press-link" % (label, how),
@@ -1495,6 +1511,42 @@ def case_departs_line_forms_pass():
     chat("a question with CRLF line endings and a valid Departs from line passes", box, None)
     page("a decision with CRLF line endings and a valid Departs from line passes", "set",
          entry_of(dict(ITEM92, context=crlf)), None)
+
+
+# A line with no dash splits at its first space, so a no-change word can sit in the main side ("same as main",
+# "keeps the check"), where the change side never shows it. Its main side can also be the template's placeholder.
+NO_DASH_NO_CHANGE = [
+    "Departs from: same as main",
+    "Departs from: no change",
+    "Departs from: nothing changes",
+    "Departs from: already done",
+    "Departs from: keeps the check",
+]
+NO_DASH_PLACEHOLDER = ["Departs from: <what on main> moves the check to lint"]
+# No-dash lines that pass: a real main side, and a no-change word only after the first ";".
+NO_DASH_PASS = [
+    "Departs from: lint/stamp.py:run_stamp moves the stamp check to the lint job",
+    "Departs from: lint/stamp.py:run_stamp moves the list; it already loads from cache",
+]
+
+
+def case_departs_no_dash_no_change_word_refused():
+    for body in NO_DASH_NO_CHANGE:
+        dp_chat("a no-dash line %r whose change says no change is refused as question-departs" % body, body,
+                (DEPARTS_RULE, "no change"))
+        dp_page("a page no-dash line %r whose change says no change is refused as question-departs" % body, body,
+                (DEPARTS_RULE, "no change"))
+    for body in NO_DASH_PASS:
+        dp_chat("a no-dash line %r with no no-change word before the first ';' passes" % body, body, None)
+        dp_page("a page no-dash line %r with no no-change word before the first ';' passes" % body, body, None)
+
+
+def case_departs_no_dash_placeholder_refused():
+    for body in NO_DASH_PLACEHOLDER:
+        dp_chat("a no-dash template line %r is refused as question-departs" % body, body,
+                (DEPARTS_RULE, "placeholder"))
+        dp_page("a page no-dash template line %r is refused as question-departs" % body, body,
+                (DEPARTS_RULE, "placeholder"))
 
 
 def case_departs_str_replace_forms():
@@ -2520,7 +2572,8 @@ def main():
                  case_departs_valid_passes, case_departs_out_of_scope_passes, case_departs_str_replace,
                  case_departs_ids_and_order, case_departs_reasons,
                  case_departs_no_change_word_before_the_semicolon, case_departs_placeholders_are_refused,
-                 case_departs_line_forms_pass, case_departs_str_replace_forms,
+                 case_departs_line_forms_pass, case_departs_no_dash_no_change_word_refused,
+                 case_departs_no_dash_placeholder_refused, case_departs_str_replace_forms,
                  case_port_main_side, case_port_departs_shapes, case_call_judge,
                  case_widens_text_is_the_set_words, case_widens_reasons_carry_no_topic_id,
                  case_widens_words_in_every_home, case_widens_words_in_the_reply_judge_prompt,
