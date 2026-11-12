@@ -6,4 +6,6 @@ Non-urgent notes, findings and filing requests for the triage thread (ruling Oct
 - One item per bullet. Name the step it touches, and the id of shiv's message when the item carries his word.
 - Rewrite your own file to hold only what is still unfiled. Pull right before each write.
 - Triage reads this folder at each wake, files each item, and removes what it filed. `python3 roadmap/build.py` prints how many files wait.
+- A `<slug>-handoff.md` file is a lane's handoff, committed before it tags itself archive-ready (owner, 09:47 CST
+  Nov 12; step handoff-lands-tracked-first). Triage keeps it and does not count or file it.
 - Send a message instead only when work is blocked on it, or shiv asked for something to be passed on.

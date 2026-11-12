@@ -203,7 +203,9 @@ def main():
     (ROOT / "roadmap.html").write_text(head + sep + "\n" + stub + rest, encoding="utf-8")
     print(f"roadmap.html: {len(data['steps'])} steps, {len(data['topics'])} topics, {len(data['meta'])} meta")
     upkeep(data["steps"])
-    outbox = sorted(p.name for p in (ROOT / "outbox").glob("*.md") if p.name != "README.md")
+    # A lane's <slug>-handoff.md is kept for reference, not filed, so it is not counted.
+    outbox = sorted(p.name for p in (ROOT / "outbox").glob("*.md")
+                    if p.name != "README.md" and not p.name.endswith("-handoff.md"))
     print(f"outbox: {len(outbox)} file(s)" + (": " + ", ".join(outbox) if outbox else ""))
 
 

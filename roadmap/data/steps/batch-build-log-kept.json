@@ -1,14 +1,14 @@
 {
  "id": "batch-build-log-kept",
  "title": "`merge --batch-build` writes its own log where a cleanup cannot remove it",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL3zeWnjihGXaU7aKYE",
  "owner": "triage",
  "blockedBy": [],
  "why": "Batch 104's first build died after about 70 min, and its log was gone, so the cause is unknown.",
  "source": "retrospective 10:25 CST Nov 12, via coordinator 10:27 CST (rule building-mistake-names-its-guard)",
  "note": "Code, merge/merge.py. Ready, no lane.",
- "updatedAt": "2026-11-12T10:28:00-06:00"
+ "updatedAt": "2026-11-12T10:32:00-06:00"
 }
