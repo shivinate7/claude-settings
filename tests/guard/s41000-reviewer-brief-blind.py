@@ -85,6 +85,21 @@ rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Verdict for r
 rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a lowercase round 1 result: FAIL line",
            "Re-check the floor fix.\nround 1 result: FAIL\nFiles: hooks/guard.py.")
 
+# Prior verdicts a reviewer must not read, in shapes the guard misses: a leading verdict after a report label,
+# a round label with no number, a round label with a dash for its colon, and a bold mark between the label and
+# the verdict word. Each brief holds one such shape and no second report label, so the verdict alone must refuse.
+# Each is a haiku reviewer at round 1, so no step-up rule refuses it either.
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief whose Done: line leads with FAIL, round 1 of 3",
+           "Re-check the floor fix.\nDone: FAIL, round 1 of 3, haiku\n- hooks/guard.py:2454, the floor reads the model before the role.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Round 1 line that takes a dash, then FAIL",
+           "Re-check the floor fix.\nRound 1 — FAIL\n- hooks/guard.py:2454, the floor reads the model before the role.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Prior round: FAIL line, no verdict word before the colon",
+           "Re-check the floor fix.\nPrior round: FAIL\n- hooks/guard.py:2454, the floor reads the model before the role.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a bold **Round 1:** FAIL line",
+           "Re-check the floor fix.\n**Round 1:** FAIL\n- hooks/guard.py:2454, the floor reads the model before the role.")
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a bold **Verdict:** FAIL line",
+           "Re-check the floor fix.\n**Verdict:** FAIL\n- hooks/guard.py:2454, the floor reads the model before the role.")
+
 # Allowed. A later round gets the prior round's findings as a list, a fix check gets the one finding it checks, and
 # the task's own words name the rule without a shape at line start. A builder's brief may hold its report.
 rbb_allow("reviewer-brief-blind: allowed: a Round 2 of 3 reviewer brief with a findings list, file:line plus claim",
@@ -122,6 +137,22 @@ rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a line that open
           "Re-check the floor fix.\nPASS: the diff fixes the finding.\nFiles: hooks/guard.py.")
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a pasted test line, FAIL: test_x",
           "Re-check the floor fix.\nFAIL: test_x\nFiles: hooks/guard.py.")
+# A brief that asks for a verdict, or for a report's shape, is not a report. Its twins that must still refuse are
+# `Verdict: CHANGES` (above) for the verdict line, and the heading form `## Done` with a body under each label for the
+# bare label list.
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief whose Verdict: line names two words, PASS or FAIL, to choose from",
+          "Check the floor fix.\nVerdict: PASS or FAIL, then findings.\nFiles: hooks/guard.py.")
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief that asks for a Report with: list of the four labels, bare",
+          "Check the floor fix.\nReport with:\n- Done\n- Deviations\n- Input Needed\n- Next\nFiles: hooks/guard.py.")
+# A Done: and a Next: line that state the done condition and the next step are the task's words, not a builder's report.
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with Done: when and Next: lines that describe the task",
+          "Check the floor fix in hooks/guard.py.\nDone: when the floor reads the role before the model, and the section's "
+          "cases pass.\nNext: list each finding as file, line and claim.\nFiles: hooks/guard.py.")
+# The green control for the line above: the same two labels with a builder's result. It stays refused, so a guard that
+# drops Next from the label set would fail it.
+rbb_refuse("reviewer-brief-blind: refused: a reviewer brief with a Done: result and a Next: line, a builder's report",
+           "Check the floor fix.\nDone: the floor fix is in.\nNext: merge it.\nFiles: hooks/guard.py.")
+
 # The empty state: a reviewer brief with no text holds no report, so it passes.
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with an empty prompt", "")
 add("reviewer-brief-blind: allowed: a Workflow agent() reviewer on Round 2 of 3 with a findings list",
