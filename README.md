@@ -113,7 +113,7 @@ Leave network access at Trusted, or add `raw.githubusercontent.com`, `github.com
 variables or secrets. If this repo goes private, add it under the environment's Repositories.
 install.sh also writes a `SessionStart` hook that re-runs it, so each new or resumed session
 re-fetches the files, from `stable` as well. To install `main` instead, the recovery when `stable`
-is stuck, set `CLAUDE_SETTINGS_REF=main` as an environment variable: the setup script, `install.sh`
+is stuck, set `CLAUDE_SETTINGS_REF=main` as an environment variable. The setup script, `install.sh`
 and the `SessionStart` hook read it, and it stays silent where a missing `stable` would print a `WARN`.
 Any other branch name works the same way.
 
@@ -394,8 +394,8 @@ the roster, a brief and a role handoff note. A repo adopts it only on the owner'
   Cost, per session start or resume: one detached child, at most one network fetch and one
   `git ls-remote` that asks whether `origin` still has `stable`. A local
   `git fetch .` runs only when `main` moves by ref because no tree holds it. The helper and the
-  installer start only when the pin is not at `origin/stable` (local `main` with no `stable`). Files written: the lock directory, made
-  and removed each time; install-log lines only on a failure or a missing `stable`, plus the start and end lines of the
+  installer start only when the pin is not at `origin/stable` (local `main` with no `stable`). Files written: the lock directory, made and removed each time.
+  The install-log lines are written only on a failure or a missing `stable`, plus the start and end lines of the
   helper and of the installer when they run. The install log's reader is the owner; no hook reads it. Case 34 of
   `merge/test_install_from_main.sh` proves the no-move cost: no log line, no installer, one fetch.
 * **Why agents cannot nest.** `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1` removes the `Agent`
