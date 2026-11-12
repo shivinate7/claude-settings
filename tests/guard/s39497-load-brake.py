@@ -974,7 +974,7 @@ lb_add("CLAUDE_CODE_REMOTE=true: an agent's Agent call, memory 97.2%: refused as
                          remote=LB_CLOUD))
 lb_add("CLAUDE_CODE_REMOTE=true: Agent, darwin host at memory 97.2%, run_in_background false, the real reader: "
        "refused, names the memory",
-       lb_decision_check("Agent", None, "deny", (lb_names("memory", "97.0", "97"),), background=False,
+       lb_decision_check("Agent", None, "deny", lb_names("memory", "97.0", "97"), background=False,
                          fake=lb_fake("darwin", memory=97.2), remote=LB_CLOUD))
 lb_add("CLAUDE_CODE_REMOTE=true: Agent, linux disk 3.1 GB free of 926 GB, run_in_background true, the real reader: "
        "refused, names the disk",
@@ -1366,7 +1366,7 @@ lb_add("a lane record at the end of a 400-line transcript, memory 97.2%: full, r
 
 lb_add("CLAUDE_CODE_REMOTE=true with a lane record, memory 97.2%: refused, names the memory and the lane remedy, the "
        "reader runs once",
-       lb_lane_refusal_check("Bash", LB_LANE_BASH, LB_FULL_READING, (LB_MEM_FULL,), remote="true"))
+       lb_lane_refusal_check("Bash", LB_LANE_BASH, LB_FULL_READING, LB_MEM_FULL, remote="true"))
 # No lane check reaches these calls: a session with no own id, and an own id in another shape.
 lb_add("a lane record and no own id, memory 99%: allowed, the reader runs 0 times, transcript not opened",
        lb_lane_quiet_check(own_env=None))
