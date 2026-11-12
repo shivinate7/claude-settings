@@ -48,7 +48,7 @@ Designer kind: informed. No mockup: no visible text changes (items 2 and 4).
 
 - `skills/waiting-page/page.html`: line 2 `<title>Cockpit</title>`; the line 968 comment; line 972
   `document.title`, with no " · Status" suffix.
-- `skills/waiting-page/SKILL.md` line 423: set `<title>` to "<repo> Cockpit".
+- skill `waiting-page`, "Make a repo's page" step 2: set `<title>` to "<repo> Cockpit".
 - `hooks/guard.py` `PAGE_EMPTY_REASON` (line 3183): remedy says "<repo> Cockpit". Guard text, so
   the lane gets a reviewer.
 - `hooks/test_guard.py` line 14154 (`title_text="claude-settings Queue"`).

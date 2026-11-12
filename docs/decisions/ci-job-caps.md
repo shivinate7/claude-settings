@@ -8,7 +8,7 @@ Owner, 2026-11-10 12:11 CST, to triage: "i thought i'd already established to co
 
 So the stopgap covers the CI job caps raised here, and local tool caps too:
 
-- CI job caps: `checks` 52 to 75 min, `checks-macos` 55 to 75, `checks-mutate-guard` 45 to 75, `checks-windows-sweep` 40 to 75, and `merge.deadlineMinutes` 65 to 80 (the largest cap plus 5). The three Windows guard jobs, `checks-windows-guard`, `-2` and `-3`, rise from 20 to 75 min.
+- CI job caps: `checks-merge-install` 30 to 75 min. Its two slow steps are the merge tool git-half suite (689 s in run 43164094808) and the install.sh checkout-detection suite (888 s or more there, so its own step cap is 30). No split is needed. `checks` 52 to 75 min, `checks-macos` 55 to 75, `checks-mutate-guard` 45 to 75, `checks-windows-sweep` 40 to 75, and `merge.deadlineMinutes` 65 to 80 (the largest cap plus 5). The three Windows guard jobs, `checks-windows-guard`, `-2` and `-3`, rise from 20 to 75 min.
 - The merge tool's lane lint bound, `LINT_SECONDS` in `merge/merge.py`: 1200 s to 3600 s.
 - The Retire check's bound per suite, `TIMEOUT` in `lint/check_debt_retire.py`: 600 s to 1800 s.
 - The Python floor check's bound, `TIMEOUT` in `lint/check_python_floor.py`: 300 s to 900 s.
@@ -33,7 +33,7 @@ Window: each row names its own. A row marked "window of 2026-11-05" or "window o
 | Job | Runner | n | Median | Slowest | Cap before | Cap after | Slowest as % of cap after | Cap ends, no red step | Target met |
 |---|---|---|---|---|---|---|---|---|---|
 | checks (window of 2026-11-05) | ubuntu | 27 | 19.8 | 22.8 | 52 | 75 (interim, stopgap, owner 12:11 CST Nov 10) | 30 | 0 | yes |
-| checks-merge-install (split off checks; window of 2026-11-06) | ubuntu | 30 | 17.7 | 21.0 | 60 (provisional) | 30 | 70 | 0 | yes |
+| checks-merge-install (window of 2026-11-12: newest 30 push runs on main, to run 43164094808) | ubuntu | 29 green of 30 | unmeasured (counts differ by reader) | 26.7 green (run 43148329817); 30.2 cap end (run 43164094808 attempt 1, cancelled; attempt 2 green, 25.1) | 30 | 75 (interim, stopgap, owner 12:11 CST Nov 10) | 36 (26.7 green) | 1: run 43164094808, 30.2 min, no red step | yes at the job cap; the step cap rose too (see the step bullet) |
 | checks-guard and checks-guard-2 (2 Linux shards of the guard suite; window of 2026-11-09) | ubuntu | 30 (unsplit suite) | 21.1 | 27.2 (run 42682869856, attempt 1, cap end) | 27 | 60 (provisional, each shard; rule 6 below) | unmeasured per shard; the unsplit slowest was 100% of 27 | 1: run 42682869856, attempt 1, 27.2 min (the re-run took 27.0) | no, until 5 green shard runs |
 | checks-windows-rest (window of 2026-11-09) | windows | 30 | 19.25 | 25.8 (run 42682869856, attempt 1) | 28 | 37 | 70 | 0 in window; 6 earlier runs ended attempt 1 at 33.0 min (42458595807, 41001319842, 40996271237, 40965609603, 40947283778, 40939155321), cap then unread | yes |
 | checks-windows-sweep (new; projected) | windows | 30 | 7.3 (projected) | 19.1 (projected: sum of two step maxima) | none | 75 (interim, stopgap, owner 12:11 CST Nov 10) | 26 (19.6 projected) | 0 | yes |
@@ -69,7 +69,7 @@ Window: each row names its own. A row marked "window of 2026-11-05" or "window o
 - Lane shoot-job-cap, measured in run 42733987294 (a `workflow_dispatch` on branch `shoot-job-cap-b`, head cf004ea64, n 1 per job):
   - `checks-shoot` took 1.35 min and keeps its cap 10, a stopgap. `checks-waiting-page` took 12.7 min in one run, and that run was red. A new job keeps the provisional cap 60 until 5 green runs (How to measure again, step 6). Re-measure on a green run, then set the cap from 5 green runs.
   - The step "install.sh checkout-detection suite" has its own cap in `checks-merge-install` and in `shell-macos`.
-  - `checks-merge-install` step cap 15: n 6 min, 7.90, 8.62, 8.67, 9.60, 9.68 green (runs 42682869856, 42733987294, 42669400649, 42717988296, 42700538152) and 10.22 cut at the old cap, a floor (run 42708195330); 10.22 / 0.7 = 14.6, rounded up. The job took 20.8 min, 69% of its cap 30.
+  - `checks-merge-install` step cap 30 (interim, stopgap, owner 12:11 CST Nov 10). Run 43164094808 attempt 1 ran the step 888 s, a floor, since the old job cap cut it. The green max is 754 s (run 43164094808 attempt 2).
   - `shell-macos` step cap 24: n 7 min, 9.65 to 15.00 green and 16.2 twice as a floor (runs 42700538152, 42682869856, 42676155839, 42733987294, 42669400649, 42708195330, 42717988296); 16.2 / 0.7, rounded up. On run 42717988296 all 168 cases passed 7 s before the old 16 min cut, so the step was slow, not hung. The measured run took 14.98 min for the step and 24.4 for the job.
   - `shell-macos` job cap 40: the figure 27.7 min is a projection, the step floor 16.2 plus about 11.5 min of other steps from run 42120437163; 27.7 / 0.7, rounded up. The measured run took 24.4 min. Main's own two runs read 9.65 and 15.0 min, so the spread is runner speed.
   - Run 42733987294 is red in `checks-waiting-page`: 126 of 1934 narrow-width layout cases fail, from batch 70's waiting page lanes (the commits are not on main 624dcc188). A defect to fix in those lanes, so no cap changes for it, and no test was skipped or weakened.
