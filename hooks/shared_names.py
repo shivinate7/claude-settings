@@ -92,10 +92,12 @@ STEP_TAG = "cs-step:"
 TOPIC_TAG = "cs-topic:"
 BUILD_TAG = "cs-build:"
 LANE_TAG = BUILD_TAG + "lane"
+COORDINATOR_TAG = BUILD_TAG + "coordinator"  # a coordinator session (hooks/call_judge.py judges its picks)
 # A lane start prompt opens with `Grant: <owner words>, <time>`; the guard reads the line by this marker (rules
 # lane-effort-pin and lane-one-topic).
 LANE_GRANT_MARKER = "Grant:"
 CREATE_SESSION_TOOL = REMOTE_SERVER + "__create_session"
+PICK_SEND_TOOL = REMOTE_SERVER + "__send_message"  # the send a coordinator's pick goes by (hooks/call_judge.py)
 
 
 def lane_tags(tool_input: dict[str, Any]) -> list[Any]:

@@ -38,6 +38,18 @@ run (a model error, a source that exists and cannot be read, or a refusal that c
 shown), the question is refused with the Unvetted remedy, unless its own text carries an `Unvetted:` line. An absent
 source allows, with one stderr line.
 
+A coordinator's pick (rule `pick-judge`, decision pick-cites-ruling-before-send): a `mcp__claude-code-remote__send_message`
+from a session tagged cs-build:coordinator (own_session.own_session_read, as guard.lane_session_hit reads the lane tag)
+whose text holds the whole word `pick` or `hold` must cite a ruling (a plan R-number, a decision, debt or step id,
+a page item) or say `no ruling found: <what was searched>`. Neither is a code refusal with the remedy, no model call.
+Otherwise one Sonnet call (PICK_JUDGE, the question_form.past_rulings candidates and the cited plan R-number text from
+docs/plans) refuses a pick the cited text contradicts or does not say. Any other sender or text exits at once, with no
+model call. A page item is unreadable by the hook, and the prompt says so. A model error allows, with one stderr line.
+Cost: a send with no pick or hold word, or from no coordinator, starts no process and makes no model call. A pick with
+a cite or a no-ruling statement: one git process (question_form.past_rulings) and one Sonnet call, PAST_RULING_TIMEOUT s.
+A pick with neither: one git process only if a record slug could still be the cite, no model call. Nothing is
+written but the guard.log line of a refusal.
+
 Fail open. Any other model error, odd answer or unreadable input allows, with one stderr line.
 
 Two exceptions, opus_ask() and override_ask(): the owner's plain asks (decision owner-override) fail CLOSED. Each
@@ -54,6 +66,7 @@ Cost: one more haiku call (low effort, OPUS_SCOPE_TIMEOUT s) for such an ask, no
 """
 import json
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -65,13 +78,15 @@ if HERE not in sys.path:
 # shared_names is standard library only and adds about 2 ms.
 from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402
 from shared_names import DATA_TOOL  # noqa: E402  stdlib only: the one home of the tool name
+from shared_names import COORDINATOR_TAG, PICK_SEND_TOOL  # noqa: E402  stdlib only: the coordinator tag, the send tool
 
 OK_SHAPE = {"ok": (True, False)}
-SPAWN_RULE, QUESTION_RULE = "spawn-judge", "question-judge"
+SPAWN_RULE, QUESTION_RULE, PICK_RULE = "spawn-judge", "question-judge", "pick-judge"
 # The record each refusal cites. The spawn judge has its own; every other rule here (the model's question verdict
 # and the code rules question_form.chat_hit names) is the question reviewer's.
 SPAWN_CITE = "(decision haiku-prompt-hooks, the spawn judge refuses a brief that breaks the spawn rules)"
 QUESTION_CITE = "(decision question-reviewer-agent-hook, a question is reviewed before it reaches the owner)"
+PICK_CITE = "(decision pick-cites-ruling-before-send, a coordinator's pick cites a ruling before it is sent)"
 # THE TIME BUDGET. One model call per hook run, so the longest path is the question call's 60 s plus
 # start-up. The settings.json PreToolUse entry for this hook carries "timeout": 70.
 SPAWN_MODEL, SPAWN_TIMEOUT = "claude-sonnet-5-5", 30
@@ -335,7 +350,7 @@ def refuse(payload, tool, args, rule, reason):
     if reason.startswith(rule):
         reason = reason[len(rule):].lstrip(" :-")
     vetoed = explore_off_model(tool, args)
-    text = reason + " " + {SPAWN_RULE: SPAWN_CITE}.get(rule, QUESTION_CITE)  # the text both paths below carry
+    text = reason + " " + {SPAWN_RULE: SPAWN_CITE, PICK_RULE: PICK_CITE}.get(rule, QUESTION_CITE)  # the text both paths below carry
     try:
         import guard_core
         guard_core.set_log_session(payload.get("session_id"))
@@ -377,10 +392,154 @@ def past_ruling_context(payload, units):
             question_form.unreadable_sources(unknown))
 
 
+# A coordinator's pick (rule pick-judge): the judge of a send_message that states a pick or hold. Not a JUDGES row,
+# because JUDGES holds one row per tool of the model-per-role table (lint/test_settings_matcher.py, ROW_NAMES); its
+# model is the past-ruling check's (PAST_RULING_MODEL), and agent-model-cap names its row.
+PICK_PROMPT = (
+    "A coordinator session sends the message below to another session. It states a pick or a hold. The text after the "
+    "message lists the rulings it may rest on: the plan R-numbers it cites with their text, and past rulings one per "
+    "line as `<id>: <text>`. Refuse when a ruling the message cites says the opposite of the pick, or does not say "
+    "what the message claims it says (a point or a number the cited text lacks), or when the message says "
+    "`no ruling found` and a listed ruling decides the pick. A source marked not searched cannot be checked: never "
+    "refuse for that alone, and never read it as clear. When you refuse, the reason names the cited ruling (its id, or "
+    "the plan R-number) and says what it states. Block only on a clear miss; when unsure answer {\"ok\": true}. "
+    "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<the ruling, what it says, and the fix, one line>\"}."
+)
+PICK_JUDGE = (PICK_PROMPT, PAST_RULING_MODEL, PAST_RULING_TIMEOUT, PICK_RULE,
+              "the pick is not backed by the ruling it cites.")
+PICK_NO_CITE = (
+    "a coordinator's pick or hold must cite the ruling it rests on, or say what it searched. Add the ruling it follows "
+    "(a plan R-number, `decision <slug>`, `step <slug>`, `debt <slug>` or a page item number), or the line "
+    "`no ruling found: <what was searched>`, and send it again.")
+PICK_WORD = re.compile(r"\b(?:pick|hold)\b", re.I)
+PICK_NO_RULING = re.compile(r"\bno ruling found[ \t]*:[ \t]*\w", re.I)
+PICK_PLAN_REF = re.compile(r"(?<![\w-])R(\d{1,3})(?!\w)")
+PICK_ITEM_REF = re.compile(r"\bitems?[ \t]+#?(\d+)", re.I)
+PICK_RECORD_REF = re.compile(r"\b(?:decisions?|debts?|steps?)[ \t]+[`'\"]?(\w+(?:-\w+)+)", re.I)
+PICK_PATH_REF = re.compile(r"(?<![\w/-])(?:decisions|debts)/([\w.-]*\w)")
+PICK_PLAN_CAP = 3000
+PICK_PLAN_BOUND = re.compile(r"^(?:[-*][ \t]+\*{0,2}R\d+\.|#{1,6}[ \t])")
+
+
+def is_coordinator(payload):
+    """True when the sender's own session record is tagged cs-build:coordinator: the record own_session reads from the
+    transcript, as guard.lane_session_hit reads the lane tag. An agent's call, an unset or odd record id and a
+    transcript that cannot be read are no coordinator (the last prints one stderr line)."""
+    if payload.get("agent_id"):
+        return False
+    transcript = payload.get("transcript_path")
+    import override  # the one reader of the record id: the env names it, the payload's id is a local UUID
+    own_id = override.remote_session_id()
+    if own_id is None or not isinstance(transcript, str) or not transcript:
+        return False
+    import own_session
+    try:
+        tags = own_session.own_session_read(transcript, own_id)[0]
+    except (OSError, ValueError, TypeError) as exc:
+        print("call judge failed open: the sender's own record was not read: %s" % " ".join(str(exc).split()),
+              file=sys.stderr)
+        return False
+    return isinstance(tags, list) and COORDINATOR_TAG in [t.strip().casefold() for t in tags if isinstance(t, str)]
+
+
+def plan_texts(root, numbers):
+    """({R-number: [`<plan file> R<n>: <text>`]}, the R-numbers no plan defines) for the plan R-numbers a pick cites.
+    A plan is a file of docs/plans in the repo root; an R-number's text runs from its bullet (`- **R22.`) to the next
+    top-level bullet or heading, white space collapsed and capped. A file that cannot be read is skipped."""
+    folder = os.path.join(root, "docs", "plans")
+    try:
+        names = sorted(n for n in os.listdir(folder) if n.endswith(".md"))
+    except OSError:
+        names = []
+    found = {n: [] for n in numbers}
+    for name in names:
+        try:
+            with open(os.path.join(folder, name), encoding="utf-8") as handle:
+                lines = handle.read().splitlines()
+        except (OSError, UnicodeDecodeError):
+            continue
+        for number in numbers:
+            opener = re.compile(r"^[-*][ \t]+\*{0,2}R%s\." % number)
+            for i, line in enumerate(lines):
+                if not opener.match(line):
+                    continue
+                end = next((j for j in range(i + 1, len(lines)) if PICK_PLAN_BOUND.match(lines[j])), len(lines))
+                text = " ".join(" ".join(lines[i:end]).split())[:PICK_PLAN_CAP]
+                found[number].append("%s R%s: %s" % (name, number, text))
+    return found, [n for n in numbers if not found[n]]
+
+
+def pick_cites(message, candidate_ids):
+    """(R-numbers, page item numbers, cited record slugs, whether the message says no ruling found). A record slug is the
+    stem a `decision <slug>`, `step <slug>`, `debt <slug>` or `decisions/<slug>` names, or a listed record's stem that
+    the text names as a whole word (candidate_ids, which may be empty)."""
+    plans = sorted(set(PICK_PLAN_REF.findall(message)), key=int)
+    items = sorted(set(PICK_ITEM_REF.findall(message)), key=int)
+    slugs = {m.lower() for m in PICK_RECORD_REF.findall(message)} | {m.lower() for m in PICK_PATH_REF.findall(message)}
+    for record_id in candidate_ids:
+        stem = record_id.split("/", 1)[-1]
+        if "-" in stem and re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(stem), message, re.I):
+            slugs.add(stem.lower())
+    return plans, items, sorted(slugs), bool(PICK_NO_RULING.search(message))
+
+
+def judge_pick(payload, tool, args):
+    """A coordinator's pick or hold, sent by send_message, must cite a ruling that says it. Code refuses a pick with no
+    cite and no `no ruling found:` line. One Sonnet call judges a cited one against the cited text."""
+    message = args.get("message")
+    if not isinstance(message, str) or not PICK_WORD.search(message):
+        return 0  # the cheapest test first: most sends hold neither word
+    try:
+        if not is_coordinator(payload):
+            return 0
+        import question_form
+        cwd = payload.get("cwd") or ""
+        root = question_form._git_root_of(cwd) or cwd or os.getcwd()
+        plans, items, slugs, none_found = pick_cites(message, [])
+        read = None  # (candidates, unknown): one git process
+        if not (plans or items or slugs or none_found):
+            read = question_form.past_rulings(message, root)  # a listed record's slug may still be the cite
+            plans, items, slugs, none_found = pick_cites(message, question_form.candidate_ids(read[0]))
+            if not (plans or items or slugs or none_found):
+                return refuse(payload, tool, args, PICK_RULE, PICK_NO_CITE)
+        candidates, unknown = read or question_form.past_rulings(message, root)
+        plan_found, plan_missing = plan_texts(root, plans)
+        stems = {c.split(": ", 1)[0].split("/", 1)[-1].lower(): c for c in candidates}
+        listed = [stems[s] for s in slugs if s in stems]
+        unknown = list(unknown)
+        if plan_missing:
+            unknown.append("plan R-numbers %s (no plan file in docs/plans holds them)"
+                           % ", ".join("R" + n for n in plan_missing))
+        if items:
+            unknown.append("page items %s (the hook cannot read the waiting page)" % ", ".join(items))
+        if [s for s in slugs if s not in stems]:
+            unknown.append("cited records %s (not among the records read)" % ", ".join(s for s in slugs if s not in stems))
+        tail = ""
+        if any(plan_found.values()):
+            tail += "\n\nPlan R-numbers the message cites, one per line as `<plan file> R<n>: <text>`:\n" + "\n".join(
+                line for number in plans for line in plan_found[number])
+        tail += question_form.candidates_block(listed or candidates, unknown)
+        prompt, model, timeout, rule, fallback = PICK_JUDGE
+        verdict, error = invoke_model(prompt + "\n\nMessage:\n" + message + tail, model=model, timeout=timeout,
+                                      shape=OK_SHAPE, effort=None)
+    except Exception as exc:
+        print("call judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()), file=sys.stderr)
+        return 0
+    if error:
+        print("call judge failed open: %s" % " ".join(str(error).split()), file=sys.stderr)
+        return 0
+    if verdict.get("ok") is False:
+        reason = verdict.get("reason")
+        return refuse(payload, tool, args, rule, reason if isinstance(reason, str) and reason.strip() else fallback)
+    return 0
+
+
 def main():
     try:
         payload = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
         tool, args = payload.get("tool_name"), payload.get("tool_input")
+        if tool == PICK_SEND_TOOL:
+            return judge_pick(payload, tool, args) if isinstance(args, dict) else 0
         if tool not in JUDGES:
             return 0
         if not isinstance(args, dict):
