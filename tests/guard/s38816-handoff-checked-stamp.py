@@ -677,6 +677,7 @@ LOG_CHECKS_EXTRA.append(("handoff-checked-stamp: a premise that was [ruling] bef
 
 
 # =========================================================================== the machine-load brake
-# The brake's local cases are local runs. A cloud container sets CLAUDE_CODE_REMOTE=true, which turns the brake off, so the
-# suite drops it here, and a cloud case passes its own value to lb_decision_check (`remote`). No other case reads it.
+# The brake's local cases are local runs. A cloud container sets CLAUDE_CODE_REMOTE=true, which the brake reads (the same
+# brake runs there, except a session start), so the suite drops it here, and a cloud case passes its own value to
+# lb_decision_check (`remote`). No other case reads it.
 os.environ.pop("CLAUDE_CODE_REMOTE", None)
