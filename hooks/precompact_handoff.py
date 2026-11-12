@@ -1060,6 +1060,8 @@ COORDINATOR_TAG = "cs-build:coordinator"
 OWNER_NAMED_MAX = 5  # the newest unanswered refusals the section must name
 OWNER_LABEL_CHARS = 60  # a longer label keeps its head and tail
 _OWNER_HEAD = re.compile(r"^##[ \t]+%s[ \t]*$" % re.escape(OWNER_HEADING), re.I | re.M)
+_CODE_SPAN = re.compile(r"`+([^`]+)`+")
+_LIST_MARK = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+")
 _ANY_HEAD = re.compile(r"^#{1,2}[ \t]")
 _FENCE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})(.*)$")
 
@@ -1154,9 +1156,9 @@ def owner_waits_scan(transcript_path, own_id):
     return COORDINATOR_TAG in tags, list(refused.values())
 
 
-def _owner_section(text):
-    """The squashed text under the owner-waits heading, up to the next `#` or `##` heading that is not
-    inside a fenced code block; None when the heading is missing."""
+def _owner_lines(text):
+    """The lines under the owner-waits heading, up to the next `#` or `##` heading that is not inside a
+    fenced code block; None when the heading is missing."""
     head = _OWNER_HEAD.search(text)
     if not head:
         return None
@@ -1171,7 +1173,19 @@ def _owner_section(text):
         elif fence is None and _ANY_HEAD.match(line):
             break
         kept.append(line)
-    return _squash(" ".join(kept))
+    return kept
+
+
+def _owner_entries(lines):
+    """The names the section holds, each whole: every backtick code span, and every line with its list
+    marker and closing punctuation removed. An act is named only when its identifier is one entry, so a
+    longer act that holds it as text (`git push` inside `git push --force origin main`) does not name it."""
+    entries = set()
+    for line in lines:
+        entries.update(_squash(span) for span in _CODE_SPAN.findall(line))
+        entries.add(_squash(_LIST_MARK.sub("", line)).rstrip(".;:,"))
+    entries.discard("")
+    return entries
 
 
 def owner_waits_gap(payload):
@@ -1192,17 +1206,19 @@ def owner_waits_gap(payload):
         if not coordinator:
             return ""
         with open(path, "r", encoding="utf-8") as f:
-            section = _owner_section(f.read())
+            lines = _owner_lines(f.read())
+        section = None if lines is None else _squash(" ".join(lines))
+        entries = _owner_entries(lines or [])
         problems = []
         if section is None:
             problems.append("It has no `## %s` section." % OWNER_HEADING)
         elif not section:
             problems.append("Its `## %s` section is empty; write `none` when nothing waits." % OWNER_HEADING)
-        unnamed = [label for ident, label in refused[-OWNER_NAMED_MAX:] if not section or ident not in section]
+        unnamed = [label for ident, label in refused[-OWNER_NAMED_MAX:] if ident not in entries]
         if unnamed:
             problems.append("The section does not name these refused acts: %s. Name each, with what it "
                             "unblocks, or the act that replaced it. Name each by the whole first line of its command, or "
-                            "its path or url; a label with `...` is cut short." % "; ".join(unnamed))
+                            "its path or url, in backticks or alone on its line; a label with `...` is cut short." % "; ".join(unnamed))
         if not problems:
             return ""
         return ("Your handoff at %s must keep every item waiting on the owner in this session. %s Fix it "
