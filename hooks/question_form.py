@@ -1068,6 +1068,17 @@ def waiting_page_root(tool_input, cwd):
     return root if root and layout.is_waiting_page_url(root, tool_input.get("url")) else None
 
 
+def names_no_artifact(url):
+    """True when `url` names no artifact (no string, empty, or a bare .../artifact/ link), by lint/layout.py artifact_id."""
+    return not _layout().artifact_id(url)
+
+
+def has_waiting_page(cwd):
+    """True when cwd's repo has a waiting page (lint/layout.py, the one home); a repo with no page reads as unknown."""
+    root = _git_root_of(cwd)
+    return bool(root) and _layout().waiting_page(root) != "unknown"
+
+
 def design_file_problems(writes, root):
     """[(doc_id, slug, sentence)] for each `designs` entry in `writes` (design_writes' picture writes) that has no
     `file`, or whose `file` lint/layout.py mockup_home_problem refuses against this machine's home. The sentence names
