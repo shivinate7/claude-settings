@@ -1081,6 +1081,44 @@ class CiHistoryTests(StaleCase):
                          "a depth-1 clone under CI did not fetch the base and report its STALE002 finding\n" + out)
         self.assertEqual(rc, 1, "a depth-1 clone under CI printed the finding but exited %d, not 1\n%s" % (rc, out))
 
+    def test_a_depth_one_clone_of_real_history_under_ci_fetches_for_the_root_form_range(self):
+        """`HEAD~1..HEAD` in a depth-1 clone of real history. The clone's head looks like a root until it is unshallowed,
+        so the first-push guard must wait for the fetch: the fetch runs and the removed name is reported."""
+        rng = self.removed_name_range()
+        clone = self.depth_one_clone(rng)
+        self.assertEqual(git(rng.repo, "rev-parse", "HEAD~1"), rng.base,
+                         "scope: HEAD~1 of the origin is not the base, so the range is not the root form")
+        self.assertEqual(git(clone, "remote", "get-url", "origin"), rng.repo,
+                         "scope: the clone's origin is not the source repo, so the fetch has nothing to reach")
+        rc, out = self.run_check(rng._replace(repo=clone), spec="HEAD~1..HEAD", extra_env={"CI": "1"})
+        self.assertNotIn("no base", out,
+                         "a depth-1 clone of real history under CI took its head for a first push, without a fetch\n" + out)
+        self.assertEqual(sorted((p, n, c) for p, n, c, _ in parse(out)), [(NOTES, 3, "STALE002")],
+                         "the root-form range in a depth-1 clone did not fetch the base and report its STALE002 finding\n"
+                         + out)
+        self.assertEqual(rc, 1, "the root-form range in a depth-1 clone printed the finding but exited %d, not 1\n%s"
+                         % (rc, out))
+
+    def test_a_shallow_origin_that_leaves_the_clone_shallow_is_red_under_ci_not_a_first_push(self):
+        """A shallow origin cannot unshallow its clone, so the head still looks like a root and the base is still absent.
+        The first-push guard after the fetch waits for a full clone, so this is no first push. Red under CI, UNKNOWN and
+        exit 1 (decision stale-cites-at-merge: red when the base still shares no history with the head)."""
+        rng = self.removed_name_range()
+        origin = self.depth_one_clone(rng)
+        clone = os.path.join(rng.case, "shallow-of-shallow")
+        self.assertEqual(shallow_clone.make(origin, clone, rng.head), "",
+                         "scope: the clone of the shallow origin was not made")
+        self.assertTrue(shallow_clone.facts(clone, rng.head)["shallow"], "scope: the clone of the shallow origin is not shallow")
+        self.assertFalse(has_object(clone, rng.base), "scope: the base is cut from the clone of the shallow origin")
+        rc, out = self.run_check(rng._replace(repo=clone), spec="HEAD~1..HEAD", extra_env={"CI": "1"})
+        self.assertEqual(git(clone, "rev-parse", "--is-shallow-repository"), "true",
+                         "scope: the fetch unshallowed the clone, so the run did not reach the post-fetch first-push guard\n"
+                         + out)
+        self.assertEqual(rc, 1, "a shallow clone whose fetch left it shallow exited %d under CI, not 1\n%s" % (rc, out))
+        self.assertIn("stale-cites: UNKNOWN", out, "a shallow clone whose fetch left it shallow printed no UNKNOWN line\n" + out)
+        self.assertNotIn("no base", out, "a shallow clone whose fetch left it shallow printed the first-push no-base line\n" + out)
+        self.assertNotIn("stale-cites: PASS", out, "a shallow clone whose fetch left it shallow printed PASS\n" + out)
+
     def test_a_full_clone_whose_base_shares_no_history_with_head_is_red_under_ci(self):
         rng = self.removed_name_range()
         tree = git(rng.repo, "rev-parse", rng.base + "^{tree}")
