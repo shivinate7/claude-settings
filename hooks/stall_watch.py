@@ -378,9 +378,9 @@ def proc_table(timeout=TOOL_TIMEOUT):
 
 def tree_cpu(table, pid):
     """{pid: CPU seconds} for every process under pid in a proc_table. pid's own time is left out: a
-    builtin loop in the job shell, with no child, is no sign of work. At Stop the roots are the job's
-    subshell under a hook-wrapped job (its own time is left out too), so a builtin spin there is not seen
-    as busy and the job is listed; the watcher reports it."""
+    builtin loop in the job shell, with no child, is no sign of work. At Stop the root is the job's
+    shell; in a hook-wrapped job its subshell is under it and counts, so a builtin spin reads busy and Stop
+    does not list the job; the watcher reports it."""
     rows, kids, _ = table
     cpu, stack = {}, list(kids.get(str(pid), []))
     while stack:
