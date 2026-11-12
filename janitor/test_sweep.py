@@ -1831,7 +1831,7 @@ class StaleAgentLockTests(unittest.TestCase):
 
     @unittest.skipIf(not sys.platform.startswith("linux"), "the /proc route is Linux only")
     def test_linux_no_start_lock_held_by_a_plain_argv_ancestor_reads_live(self):
-        # Red on 1468147e7: the /proc route reads this process's own ancestor as a reused pid, because its argv is
+        # Red without the ancestry walk: the /proc route reads this process's own ancestor as a reused pid, because its argv is
         # plain `sh` and its cwd is outside the tree, so the verdict is stale. An ancestor is the host whatever its
         # argv: stale is False, and own_agent_lock_verdict is True. Depth 2 runs the probe under a second shell,
         # so a check on the parent alone fails it.
@@ -1853,7 +1853,7 @@ class StaleAgentLockTests(unittest.TestCase):
 
     @unittest.skipIf(not sys.platform.startswith("linux"), "the /proc route is Linux only")
     def test_linux_no_start_lock_held_by_a_plain_argv_holder_outside_the_chain_is_stale_and_not_own(self):
-        # Green on 1468147e7 and after the fix: the control for the ancestor case above. The holder is a `sleep`
+        # Green with and without the ancestry walk: the control for the ancestor case above. The holder is a `sleep`
         # outside this process's ancestry, so the route still frees it (stale True), and it is not this session's
         # own lock (own False).
         holder = self.live_holder(argv=["sleep", "300"] if shutil.which("sleep") else None)
@@ -1872,7 +1872,7 @@ class StaleAgentLockTests(unittest.TestCase):
 
     @unittest.skipIf(not sys.platform.startswith("linux"), "the /proc route is Linux only")
     def test_linux_no_start_lock_whose_parent_read_fails_keeps(self):
-        # Red on 7d0d0e84f: that commit has no ancestry walk, so the holder frees whatever the parent reads say.
+        # Red without the ancestry walk: the holder frees whatever the parent reads say.
         # The subject arm makes every parent read return None, so the walk cannot rule out an ancestor: keep.
         holder = self.live_holder(argv=["sleep", "300"] if shutil.which("sleep") else None)
         path = self.no_start_tree("nsparent", holder)
@@ -1890,7 +1890,7 @@ class StaleAgentLockTests(unittest.TestCase):
 
     @unittest.skipIf(not sys.platform.startswith("linux"), "the /proc route is Linux only")
     def test_linux_no_start_lock_whose_ancestry_walk_exhausts_its_bound_keeps(self):
-        # Red on 7d0d0e84f: that commit has no ancestry walk, so the holder frees. The subject arm makes every
+        # Red without the ancestry walk: the holder frees. The subject arm makes every
         # parent read return the walk's own pid, a cycle that never reaches the holder or PID 1. The walk runs
         # out of MAX_CLIMB steps, and an exhausted bound keeps.
         holder = self.live_holder(argv=["sleep", "300"] if shutil.which("sleep") else None)
@@ -10860,7 +10860,7 @@ class OwnAgentLockTests(unittest.TestCase):
 
     @unittest.skipIf(not sys.platform.startswith("linux"), "the /proc route is Linux only")
     def test_linux_no_start_lock_held_by_a_plain_argv_ancestor_follows_the_own_lock_rules(self):
-        # Red on 1468147e7: the /proc route reads the ancestor's lock as a reused pid, so the tree goes on the stale
+        # Red without the ancestry walk: the /proc route reads the ancestor's lock as a reused pid, so the tree goes on the stale
         # route ("removable: stale agent lock") and never meets the own-lock gate (merged, idle 30 min). The probe
         # runs under the holder, so the holder is its ancestor. Arm 1 frees as an own lock. Arms 2 and 3 keep as
         # "locked:" under --attended, where the stale route reaps with no merge read and no idle read.
