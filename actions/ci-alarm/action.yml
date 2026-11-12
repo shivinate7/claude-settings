@@ -10,8 +10,9 @@ description: >
   run's head (contents API, once), besides the jobs reads; the step needs python3 and runs `clear_rule.py` from the action path.
   A job cancelled at its own job-level `timeout-minutes` raises the alarm, in a cancelled run and in a failure run (the job ran at
   least the cap, the cap read from the workflow file at the run's head; a job with no job-level cap has GitHub's default, 360
-  minutes). The issue line names the job, the cap, the minutes and the run id and reads "cap end", not "red": the merge gate reads such a
-  job as UNKNOWN, and the alarm is the signal. A job cancelled under its cap stays quiet; an unreadable cap, a null `started_at` or a
+  minutes). The issue line names the job, the cap, the minutes and the run id and reads "cap end", not "red". The merge gate leaves a
+  run with no red job and a job timed out at a job-level cap it finds in its checkout out of red and out of unknown, and reads UNKNOWN
+  for a cancelled job with no job-level cap or a cap it does not find; the alarm is the signal. A job cancelled under its cap stays quiet; an unreadable cap, a null `started_at` or a
   cancelled run with no jobs is "unknown". A cap end in an earlier attempt of a run whose newest attempt succeeded is named in the
   log ("cap end named", with job, cap, minutes and run id) and opens no issue. Cost of that check: one jobs read per judged run
   (failed or cancelled), the workflow read only when a job was cancelled, plus the workflows-list read, and one jobs read per
