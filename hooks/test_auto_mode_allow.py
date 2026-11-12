@@ -709,8 +709,28 @@ class BatchBuildAndDropIsAllowed(unittest.TestCase):
     def test_never_covers_names_each_check_lifting_flag(self):
         clause = never_covers(self.entry())
         self.assertIsNotNone(clause, "need a 'Never covers' sentence")
-        for act in ("--confirm", "--base-red-ok", "--undo-check-unknown-ok", "--lint-unknown-ok"):
+        for act in ("--confirm", "--base-red-ok", "--undo-check-unknown-ok", "--lint-unknown-ok", "--config", "--unlock", "--with"):
             self.assertIn(act, clause, "Never covers does not name %s" % act)
+
+    def test_covers_names_each_added_form_and_the_pick(self):
+        covers = bounds_text(self.entry())
+        for form in ("`merge --batch-build NAME --blame PR --run URL`", "`--on BRANCH`", "`--base BRANCH`"):
+            self.assertIn(form, covers, "the entry does not name the form %s" % form)
+        self.assertIn("2026-11-12 13:40 CST, pick b", covers, "the entry does not cite the owner's pick b")
+
+    def test_covers_binds_the_repo_owner(self):
+        self.assertIn("a repo owned by shivinate7", bounds_text(self.entry()), "the entry does not bind the repo owner shivinate7")
+
+    def test_covers_names_exactly_the_flags_of_the_pick(self):
+        flags = set(re.findall(r"--[a-z]+(?:-[a-z]+)*", bounds_text(self.entry())))
+        self.assertEqual(flags, {"--batch-build", "--batch-drop", "--ready", "--blame", "--run", "--on", "--base"},
+                         "Covers names a flag set other than the owner's pick: %s" % sorted(flags))
+
+    def test_a_flag_outside_the_six_is_not_covered(self):
+        covers = bounds_text(self.entry())
+        for flag in ("--config", "--unlock", "--with", "--confirm", "--base-red-ok", "--undo-check-unknown-ok", "--lint-unknown-ok",
+                     "--idle-lanes", "--session"):
+            self.assertNotIn(flag, covers, "Covers names %s, a flag outside the six" % flag)
 
 
 if __name__ == "__main__":
