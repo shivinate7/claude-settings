@@ -173,7 +173,7 @@ parent, or miss a message while busy.
 - A brief for a lane or a local session goes in `briefs/<step>-<slug>.md` on the record branch,
   from `brief.md`. Its full text also goes in the step's `ask` field.
 - When a ruling changes a step, update the brief file and the `ask` copy in the same turn.
-- Every lane keeps its prose short. Keep your prose to what the reader needs, with no narration; reasoning and tool inputs are never cut.
+- Keep your prose to what the reader needs, with no narration; reasoning and tool inputs are never cut.
 
 ## Portability
 
