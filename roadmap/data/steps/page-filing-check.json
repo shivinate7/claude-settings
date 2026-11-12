@@ -1,9 +1,10 @@
 {
   "title": "The feedback guard proves a page item exists, not only that it was sent",
   "phase": "now",
-  "status": "todo",
+  "status": "done",
   "order": -291,
   "why": "Owner grant Nov 2 13:12 and 13:13 CST (page item 175): one narrow check that a writer's filing landed, kept in the feedback guard.",
-  "note": "hooks/feedback_guard.py already proves ruling and task homes in git. Extend page:<n> to require the item in the repo's waiting store (records/waiting/). Waits on lane waiting-data-in-repo, which merges only on the owner's word.",
-  "updatedAt": "2026-11-12T11:17:26-06:00"
+  "note": "hooks/feedback_guard.py already proves ruling and task homes in git. Extend page:<n> to require the item in the repo's waiting store (records/waiting/). Waits on lane waiting-data-in-repo, which merges only on the owner's word. Done check green on main (lane session_013NEJKzzSH1qHLmMz7RZ81z, 14:51 CST Nov 12; triage read origin/main 14:53 CST: hooks/test_feedback_inbox.py has 4 case_page_read_back cases): hooks/feedback_guard.py page_problem checks a transcript read-back of the live page (ArtifactData get/list/query of items returning n) first and falls back to the git copy, whose miss tells the writer to read the item back. The note's records/waiting/ premise was stale.",
+  "updatedAt": "2026-11-12T14:52:43-06:00",
+  "lane": ""
 }

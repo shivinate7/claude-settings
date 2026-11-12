@@ -1,11 +1,11 @@
 {
   "title": "#1796's archive-then-delete notes each carry a Fix line",
   "why": "#1796 adds 9 archive-then-delete-* lines to docs/debts/notes.md; the owner's 13:20 CST ruling says each note carries a Fix line (coordinator, 23:49 CST Nov 7).",
-  "note": "Waits on #1516's note form landing on main. Then triage checks each of the 9 lines; any without a Fix line goes to the notes lane. Title from the coordinator's message. Filed 23:51 CST Nov 7. Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose after code; it waits behind the code it describes.",
+  "note": "Waits on #1516's note form landing on main. Then triage checks each of the 9 lines; any without a Fix line goes to the notes lane. Title from the coordinator's message. Filed 23:51 CST Nov 7. Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose after code; it waits behind the code it describes. Lane started 14:52 CST Nov 12 (coordinator, from the batch 104 review). Lane 14:51 CST Nov 12: draft #2960 removes the duplicate notes window-env-forms-unread and last-nudge-gap-no-summary (kept the copies with Fix and Until lines). The nine archive-then-delete notes are not on main at bcbeaa26a: #1796 (lane/archive-push-gates-delete) closed unmerged, so they never landed. Triage 14:53 CST: that half is void; #2960 ships the duplicate removal and closes the step.",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": -290,
   "owner": "triage",
-  "lane": "",
-  "updatedAt": "2026-11-12T11:17:26-06:00"
+  "lane": "session_013NEJL3wKqWLbdyQ3Vo58Zv",
+  "updatedAt": "2026-11-12T14:52:43-06:00"
 }

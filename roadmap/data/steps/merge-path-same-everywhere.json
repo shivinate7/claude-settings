@@ -1,12 +1,12 @@
 {
   "title": "One merge role proof on local and cloud, from the roadmap roster",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": -299,
   "owner": "triage",
   "why": "Owner glossary ruling topic 1, 14:36 CST Nov 10.",
-  "note": "Glossary topic 1 close (owner 14:36 CST Nov 10), rulings G6 (role proof from the roadmap Standing sessions roster; cloud tags optional; local sessions have a session id) and G10 (a lone lane merges as batch runner). Refuter route 14:54 CST: put the one proof in guard_merge.py role_proof_hit (~984) on the roster and G10; drop the CLAUDE_CODE_REMOTE == 'true' tests in merge.py (~3740, ~3905, ~3956); keep the role file on both platforms; standingGrant enforced on both. Folds in plan lane A's merge.py half (merge.py ~3725-3755 stores raw cse_ ids; remote_session_id() returns session_ ids, so read and write change in one commit). Owns the session-start tier line (session_start.sh:20, hooks/test_session_start.py). Do not install cloud_allow.json locally. Measure first: which env var holds the local id. Safety hole to weigh: a lane a coordinator started passing as owner-started; round-3 net-value test. Records: session-tiers, standing-merge-grant, auto-mode-owner-acts; delete todo.md:22. After #2566 merges. Blocker glossary-roles-g1-g3 cleared 13:55 CST Nov 12: it has no step file; its branch merged (0f01d4249) and #2566 is on main (50bf06b2a) (lane glossary-same-local-cloud). Coordinator 13:55 CST Nov 12: lane glossary-same-local-cloud takes it after #2790 merges.",
-  "updatedAt": "2026-11-12T13:58:22-06:00",
-  "lane": "",
+  "note": "Glossary topic 1 close (owner 14:36 CST Nov 10), rulings G6 (role proof from the roadmap Standing sessions roster; cloud tags optional; local sessions have a session id) and G10 (a lone lane merges as batch runner). Refuter route 14:54 CST: put the one proof in guard_merge.py role_proof_hit (~984) on the roster and G10; drop the CLAUDE_CODE_REMOTE == 'true' tests in merge.py (~3740, ~3905, ~3956); keep the role file on both platforms; standingGrant enforced on both. Folds in plan lane A's merge.py half (merge.py ~3725-3755 stores raw cse_ ids; remote_session_id() returns session_ ids, so read and write change in one commit). Owns the session-start tier line (session_start.sh:20, hooks/test_session_start.py). Do not install cloud_allow.json locally. Measure first: which env var holds the local id. Safety hole to weigh: a lane a coordinator started passing as owner-started; round-3 net-value test. Records: session-tiers, standing-merge-grant, auto-mode-owner-acts; delete todo.md:22. After #2566 merges. Blocker glossary-roles-g1-g3 cleared 13:55 CST Nov 12: it has no step file; its branch merged (0f01d4249) and #2566 is on main (50bf06b2a) (lane glossary-same-local-cloud). Coordinator 13:55 CST Nov 12: lane glossary-same-local-cloud takes it after #2790 merges. Lane started 14:52 CST Nov 12 (coordinator, from the batch 104 review).",
+  "updatedAt": "2026-11-12T14:52:43-06:00",
+  "lane": "session_013NEJL2wQ2Pw7ozZ57fWSWZ",
   "blockedBy": []
 }
