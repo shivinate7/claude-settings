@@ -2124,8 +2124,9 @@ class UnreadStale(FolderCase):
 
 # --lag: how long each answer took to read back, and which answers are unread past a set age (waiting-page SKILL.md, the wake;
 # decision waiting-page-one-store, Mechanism step 3). It reads the two files the wake saves beside each other in one folder, as
-# --unread does: answers.json and receipts.json, each a list of {"id", "data"} entries. Both must be there and parse, or the mode
-# is unknown. It writes no file, starts no process and reads no clock: --now sets the time, as --parked's does.
+# --unread does: answers.json and receipts.json, each a list of {"id", "data"} entries; both must be there and parse, or the mode is
+# unknown. It also reads items.json, to skip an answer whose item is gone, as --unread does. It writes no file, starts no process
+# and reads no clock: --now sets the time, as --parked's does.
 #   read-delay <id> answered <at>, read <read>, delay <N>s       an answer with a receipt whose read is at or after its at
 #   unread-old <id> answered <at>, no read after it, age <N>s    an answer with no such receipt, older than --max-age (default 60 min)
 #   lag total: A answers, R read, U unread older than M min, Y unread within M min    the last line, always
@@ -2149,15 +2150,27 @@ def cst_text(when):
     return (when - timedelta(hours=6)).strftime("%Y-%m-%d %H:%M CST")
 
 
+def items_for(answers):
+    """One open item for each answer's item: a park answer's item is the id after `park.`. The store writes these, so a case
+    lacks an item only when it passes its own list."""
+    found = {}
+    for entry in answers:
+        item_id = entry["id"][len("park."):] if entry["id"].startswith("park.") else entry["id"]
+        found.setdefault(item_id, item_entry(item_id, "open"))
+    return list(found.values())
+
+
 class LagStale(FolderCase):
     """The --lag mode. Each case saves its own answers.json and receipts.json, then runs the script on them."""
     FOLDER = "lag"
 
-    def store(self, answers=(), receipts=(), layout="flat"):
-        """Saves the wake's two files, each a list of {id, data} entries as ArtifactData list returns them. layout="per-doc" saves
-        the old shape instead: answers/<id>.json and receipts/<id>.json folders with their marker. The mode reads neither as a store."""
+    def store(self, answers=(), receipts=(), layout="flat", items=None):
+        """Saves the wake's three files, each a list of {id, data} entries as ArtifactData list returns them. `items` defaults to
+        items_for(answers), so a case lacks an item only when it passes its own list. layout="per-doc" saves the old shape instead:
+        answers/<id>.json and receipts/<id>.json folders with their marker. The mode reads neither as a store."""
         if layout == "flat":
-            self.write_store({"answers": list(answers), "receipts": list(receipts)})
+            items = items_for(answers) if items is None else items
+            self.write_store({"answers": list(answers), "receipts": list(receipts), "items": list(items)})
             return
         for folder, entries in (("answers", answers), ("receipts", receipts)):
             os.makedirs(os.path.join(self.folder, folder), exist_ok=True)
@@ -2221,6 +2234,24 @@ class LagStale(FolderCase):
         self.assert_run(self.run_lag(), 1, [
             "unread-old re-answered answered 2026-11-12 08:00 CST, no read after it, age 7200s",
             lag_total(1, 0, 1, 0)], "a read from before the answer cleared it")
+
+    def test_several_receipts_for_one_answer_have_their_delay_to_the_earliest_read_at_or_after_it(self):
+        # Listed latest first, so a mode that takes the first entry, or the latest, gives the wrong delay.
+        self.store(answers=[pick_answer_entry("reread", "2026-11-12T12:00:00Z")],
+                   receipts=[receipt_entry("reread", read="2026-11-12T15:00:00Z"),
+                             receipt_entry("reread", read="2026-11-12T13:00:00Z"),
+                             receipt_entry("reread", read="2026-11-12T11:00:00Z")])
+        self.assert_run(self.run_lag(codes=(0,)), 0, [
+            "read-delay reread answered 2026-11-12 06:00 CST, read 2026-11-12 07:00 CST, delay 3600s",
+            lag_total(1, 1, 0, 0)], "the delay did not run to the earliest read at or after the answer")
+
+    def test_an_answer_whose_item_is_gone_is_skipped_and_not_counted(self):
+        self.store(answers=[pick_answer_entry("gone-item", "2026-11-12T13:00:00Z"),
+                            pick_answer_entry("plain", "2026-11-12T13:00:00Z")],
+                   items=[item_entry("plain", "open")])
+        self.assert_run(self.run_lag(), 1, [
+            "unread-old plain answered 2026-11-12 07:00 CST, no read after it, age 10800s",
+            lag_total(1, 0, 1, 0)], "an answer whose item is gone was named or counted; --unread skips such an answer")
 
     def test_the_age_boundary_exactly_60_minutes_is_not_named_and_one_second_over_is(self):
         self.store(answers=[pick_answer_entry("exact-hour", "2026-11-12T15:00:00Z"),
