@@ -4607,7 +4607,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             ask_command("bare-merge", BARE_MERGE_REASON, "gh pr merge " + merging[0], "bare merge")
 
     # 6a. A merge-tool call with a role flag its own get_session record does not prove (rule merge-role-proof).
-    matched = role_proof_hit(stripped, transcript, agent) or solo_hat_confirm_hit(stripped, cwd, transcript)
+    matched = role_proof_hit(stripped, transcript, agent) or solo_hat_confirm_hit(stripped, cwd, transcript, agent)
     if matched:
         refuse(tool, "deny", "merge-role-proof", ROLE_REASON, matched)
 

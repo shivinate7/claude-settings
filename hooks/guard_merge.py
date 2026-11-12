@@ -1161,28 +1161,32 @@ def _is_solo_hat_call(command: str) -> bool:
     return any(role_call_of(segment) == SOLO_HAT_TIER for segment in split_segments(command) if segment.strip())
 
 
-def _solo_hat_holds(transcript: str) -> bool:
-    """False when the session wore the solo hat and its newest own record now carries a cs-build tag other than the batch runner's: a
-    solo session that then tagged itself coordinator, lane or triage keeps no hat. True when it never wore the hat (a lane record
-    with no solo grant, a real batch runner) and when no record is readable: merge-confirm-repo refuses that case on its own."""
+def _solo_hat_holds(transcript: str, agent: bool = False) -> bool:
+    """False when a `merge --confirm` has no hat behind it: the caller is a subagent whose session record lacks the batch-runner tag
+    (one role per agent, and the record is shared with its parent), or the session wore the solo hat and its own record then changed:
+    a cs-build tag other than the batch runner's, or a set_session_tags call on itself after the record. True when it never wore the
+    hat (a lane record with no solo grant, a real batch runner) and when no record is readable: merge-confirm-repo refuses that case."""
     from override import remote_session_id
     own_id = remote_session_id()
     if not own_id or not transcript:
         return True
-    tags = own_session.own_session_read(transcript, own_id)[0]
-    if not tags or ROLE_TAG_PREFIX + SOLO_HAT_TIER in tags \
-            or not any(isinstance(tag, str) and tag.startswith(ROLE_TAG_PREFIX) for tag in tags):
+    tags, tagged_after = _own_session_read(transcript, own_id)
+    if tags is None or ROLE_TAG_PREFIX + SOLO_HAT_TIER in tags:
+        return True
+    if agent:
+        return False
+    if not tagged_after and not any(isinstance(tag, str) and tag.startswith(ROLE_TAG_PREFIX) for tag in tags):
         return True
     return not own_session.solo_hat_granted(transcript, own_id, _is_solo_hat_call)
 
 
-def solo_hat_confirm_hit(stripped: str, cwd: str, transcript: str) -> str:
-    """Return a short label when a cloud session's `merge --confirm` runs after the session wore the solo hat and then tagged itself
-    with another cs-build tag, else ''. Fails closed like role_proof_hit: an error in the reads is a refusal. Outside the cloud nothing
-    is judged. Cost: none for a call that is no merge confirm, else one transcript read."""
+def solo_hat_confirm_hit(stripped: str, cwd: str, transcript: str, agent: bool = False) -> str:
+    """Return a short label when a cloud session's `merge --confirm` has no hat behind it (see _solo_hat_holds), else ''. Fails closed
+    like role_proof_hit: an error in the reads is a refusal. Outside the cloud nothing is judged. Cost: none for a call that is no
+    merge confirm, else one transcript read."""
     if not is_cloud():
         return ""
-    return "merge --confirm" if _unproved_confirm(stripped, cwd, transcript, 0, lambda repo: _solo_hat_holds(transcript), False) else ""
+    return "merge --confirm" if _unproved_confirm(stripped, cwd, transcript, 0, lambda repo: _solo_hat_holds(transcript, agent), False) else ""
 
 
 # ---- merge --confirm: the checkout it acts in must be a repo the own record names (rule merge-confirm-repo)
