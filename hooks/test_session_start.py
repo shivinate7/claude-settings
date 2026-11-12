@@ -454,6 +454,24 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         self.assertIn("cs-build:batch-runner", role[0])
         self.assertNotIn("coordinator", role[0].lower(), role[0])
 
+    # The lone lane (cs-build:lane, no parent_session_id) merges as the batch runner (ruling G10), so the line tells it the role command.
+    def test_a_lone_lane_is_told_it_may_run_the_merge_role_command(self):
+        told = [s for s in sentences(hook_tier_line())
+                if "~/.claude/bin/merge --role batch-runner" in s and "cs-build:lane" in s and "no parent_session_id" in s
+                and re.search(r"\bmay (?:also )?run\b", s)]
+        self.assertTrue(told, "no sentence tells a lone lane (cs-build:lane, no parent_session_id) it may run `~/.claude/bin/merge --role batch-runner`")
+
+    # A roster batch runner with no cs-build:batch-runner tag is a batch runner too: the Standing sessions roster names it.
+    def test_a_roster_batch_runner_with_no_tag_is_told_it_may_run_the_merge_role_command(self):
+        told = [s for s in sentences(hook_tier_line())
+                if "~/.claude/bin/merge --role batch-runner" in s and "Standing sessions" in s and re.search(r"\bmay (?:also )?run\b", s)]
+        self.assertTrue(told, "no sentence tells a roster batch runner with no tag that it may run `~/.claude/bin/merge --role batch-runner`")
+
+    # A lane with a parent_session_id is still told it never runs the role command (a green control: the line says so now)
+    def test_a_lane_with_a_parent_is_still_told_it_never_runs_the_merge_role_command(self):
+        told = [s for s in sentences(hook_tier_line()) if "lane" in s and re.search(r"\bnever runs\b", s)]
+        self.assertTrue(told, "no sentence tells a lane it never runs the merge role command")
+
     # decision session-tiers: no sentence of the tier line says a coordinator merges; "never merges" is not a merge
     def test_no_sentence_of_the_tier_line_says_a_coordinator_merges(self):
         told = [s for s in sentences(hook_tier_line()) if self.says_coordinator_merges(s)]
