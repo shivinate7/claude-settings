@@ -141,7 +141,7 @@
                           the same build, stacked by the tool on the ready batch whose CI is running (a head `batch-*`, a frozen block, not a draft),
                           or on the tip of a chain of them. With none running it builds on the base and says so. Two running batches that stack on
                           nothing in common stop the run: nothing is pushed, and --on names the one. Goes with no --on and no --ready. Cost: one
-                          pull list, one protection read, and one CI read per ready batch pull request, on top of the build's own reads.
+                          pull list, one protection read, and two CI reads (checks and runs) per ready batch pull request, on top of the build's own reads.
   merge --role TIER       cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role).
 
