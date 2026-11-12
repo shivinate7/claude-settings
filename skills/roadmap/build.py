@@ -48,7 +48,7 @@ file is missing or unreadable; its readAt is not an ISO time, has no time zone, 
 old or is more than FUTURE_MINUTES ahead; it has no sessions list; the repo's GitHub name cannot be read;
 or a session row or pull row has the wrong shape.
 
-The upkeep row "blocked with no open blocker" names each blocked step whose blockedBy is empty or names only done steps.
+The upkeep row "blocked with no open blocker" names each blocked step whose blockedBy is missing, null, empty or names only done or folded steps.
 A blocker naming no step reads `<id> (unknown blocker <x>)` when no other blocker is open. An open blocker keeps the step
 unlisted. A blockedBy that is not a list of ids reads `<id> (blockedBy unreadable)`.
 
@@ -196,7 +196,10 @@ FUTURE_MINUTES = 5
 TODO_STATUS = ("todo", "ready")
 LIVE_STATUS = ("doing", "active")
 BLOCKED_STATUS = "blocked"
-KNOWN_STATUS = TODO_STATUS + ("queued", BLOCKED_STATUS, "folded") + LIVE_STATUS + ("done",)
+FOLDED_STATUS = "folded"
+# A finished step holds no one: done, or folded into another step.
+FINISHED_STATUS = ("done", FOLDED_STATUS)
+KNOWN_STATUS = TODO_STATUS + ("queued", BLOCKED_STATUS) + LIVE_STATUS + FINISHED_STATUS
 # The statuses the stale and empty rows read: blocked and folded steps wait on purpose, so they are never listed.
 LISTED_STATUS = TODO_STATUS + ("queued",) + LIVE_STATUS
 TOP = 5
@@ -1349,17 +1352,20 @@ def unlaned(open_, marks, work):
 
 
 def unblocked(open_, steps):
-    """Entries for each blocked step that no open step holds. A blocker is open when its step is not done. A blocker
-    naming no step does not hold the step; it is named when no other blocker is open. A blockedBy that is not a list of
-    ids reads `<id> (blockedBy unreadable)`."""
+    """Entries for each blocked step that no open step holds. A blocker is open when its step is not finished, so a
+    done or folded blocker is finished. A blocker naming no step does not hold the step; it is named when no other
+    blocker is open. A missing or null blockedBy holds nothing, so the entry is the id. A blockedBy that is not a list
+    of ids reads `<id> (blockedBy unreadable)`."""
     out = []
     for k, d in open_:
         if d.get("status") != BLOCKED_STATUS:
             continue
         ids = d.get("blockedBy")
+        if ids is None:
+            ids = []
         if not isinstance(ids, list) or not all(isinstance(b, str) for b in ids):
             out.append("%s (blockedBy unreadable)" % k)
-        elif any(b in steps and steps[b].get("status") != "done" for b in ids):
+        elif any(b in steps and steps[b].get("status") not in FINISHED_STATUS for b in ids):
             continue
         else:
             unknown = [b for b in ids if b not in steps]
