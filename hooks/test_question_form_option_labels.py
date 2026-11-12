@@ -24,8 +24,9 @@ Three parts, one file:
   3. The page's own copy of the star and the answer label is tested in skills/waiting-page/tests/page.test.mjs.
      page_grant.py's ignoring of the answer `label` is tested in skills/waiting-page/test_page_grant_label.py.
 
-Red on the round-2 base: the cases of part 1e and the re-pointed fn: case fail on an assert about the verdict, and
-every other case passes. The fn: cases run there, because chat_page_label_hit is built. Run with the argument
+Red on the round-2 base: the cases of part 1e and the re-pointed fn: case fail on an assert about the verdict.
+Part 1f's cases fail on the carry head, 74ca6c20d0, where every other case passes. The fn: cases run there,
+because chat_page_label_hit is built. Run with the argument
 `behaviour` to skip them, for a base without that function. Without it, every case runs.
 
 Standard library only, no test runner. Run it from the repository root:
