@@ -1428,6 +1428,12 @@ ARCHIVE_READ_REASON = (
     "the open pull requests of the lane's repo could not be read, so the guard cannot tell whether its "
     "records have landed. Retry once gh answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
+ARCHIVE_SCOPE_REASON = (
+    "the lane's repo is outside this session's GitHub scope, so its pull requests and branches could not be read from "
+    "here, and waiting will not change that. Route the archive to the batch runner whose session holds that repo "
+    "(the lane's cs-repo tag names it). (decision session-tiers, a lane closes only after its records pull request has landed)"
+)
+ARCHIVE_SCOPE_MATCH = "archive of a lane whose repo is outside this session's GitHub scope"
 ARCHIVE_NO_PR_REASON = (
     "a branch of the lane is ahead of its repo's default branch and has no pull request that covers it, so closing "
     "the lane now strands that work. Either open a pull request for that branch and hand it to the batch runner, or "
@@ -1451,9 +1457,20 @@ _AHEAD = ("ahead", "diverged")
 _CONTAINED = ("behind", "identical")  # a compare of base...head where the head is already in the base
 
 
-def _read_json(host, rel: str, what: str):
-    """The parsed JSON of one REST read of `host`; a failed read or a reply that is not JSON raises RuntimeError."""
+def _scope_checked(module, code, out, repo_level=False):
+    """Raise the merge tool's ScopeStop when a failed read shows a repo out of this session's scope (module.is_scope: the
+    proxy's 403, and for a `repo_level` read also a 404), so archive_hit tells it from a transient failure. A merge tool
+    without the reader leaves the failure as it was."""
+    reader, stop = getattr(module, "is_scope", None), getattr(module, "ScopeStop", None)
+    if reader is not None and stop is not None and reader(code, out, repo_level):
+        raise stop(out)
+
+
+def _read_json(module, host, rel: str, what: str):
+    """The parsed JSON of one REST read of `host`; a failed read or a reply that is not JSON raises RuntimeError
+    (ScopeStop when the repo is out of this session's scope; the read of the repo itself, rel "", also on a 404)."""
     code, out = host.api(rel)
+    _scope_checked(module, code, out, repo_level=not rel)
     try:
         if code:
             raise ValueError(out)
@@ -1468,6 +1485,7 @@ def _compare_status(module, host, base: str, head: str, missing_ok: bool = False
     code, out = host.api("compare/" + base + "..." + head)
     if code and missing_ok and not module.is_net(code, out) and re.search(r"\bHTTP 404\b", out):
         return None
+    _scope_checked(module, code, out)
     try:
         if code:
             raise ValueError(out)
@@ -1541,7 +1559,7 @@ def _covered(module, host, branch: str, tip, rows, pool) -> bool:
     if _is_open(rows):
         return True
     if tip is None:
-        tip = str(_read_json(host, "branches/" + branch, "branch")["commit"]["sha"])
+        tip = str(_read_json(module, host, "branches/" + branch, "branch")["commit"]["sha"])
     if any(str(row["head"]["sha"]) == tip for row in rows if _is_merged(row)):
         return True
     if any(row["state"] == "closed" and not _is_merged(row) for row in rows):
@@ -1590,7 +1608,7 @@ def _stranded_branch(module, ccrs, tag_repos, slugs, open_rows) -> bool:
         def ahead(branch):
             """True when `branch` is not the default or an archive copy, and its compare with the default reads ahead."""
             if repo not in defaults:
-                defaults[repo] = str(_read_json(host, "", "repo")["default_branch"])
+                defaults[repo] = str(_read_json(module, host, "", "repo")["default_branch"])
             if branch.startswith("archive/") or branch == defaults[repo]:
                 return False
             return _compare_status(module, host, defaults[repo], branch, missing_ok=True) in _AHEAD
@@ -1680,6 +1698,7 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
         return "archive of a lane with no step or repo tag", ARCHIVE_TAGS_REASON
     lanes = [c for c in ccrs if isinstance(c, dict) and isinstance(c.get("tags"), list) and ARCHIVE_LANE_TAG in c["tags"]]
     reading_branches = False  # picks the reason a failed read refuses with
+    module = None
     try:  # cost, all under one shared MERGE_READ_TIMEOUT: one paged gh REST read per cs-repo tag (one in practice), through
         # the merge tool's page reader; one compare read per open draft of the lane; per repo, one matching-refs read per
         # slug form (a paged read); and, for each branch the records name, one repo read per repo, one compare read per
@@ -1702,7 +1721,10 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
                         return "archive of lane " + slug + " with open pull request " + str(row.get("number", "?")), ARCHIVE_OPEN_REASON
             reading_branches = True
             stranded = _stranded_branch(module, lanes, repos, slugs, open_rows)
-    except (Exception, SystemExit):
+    except (Exception, SystemExit) as e:
+        scope_stop = getattr(module, "ScopeStop", None)
+        if scope_stop is not None and isinstance(e, scope_stop):  # typed, never read from the message: no retry from here passes it
+            return ARCHIVE_SCOPE_MATCH, ARCHIVE_SCOPE_REASON
         if reading_branches:
             return "archive with an unreadable branch read", ARCHIVE_BRANCH_READ_REASON
         return "archive with an unreadable pull request list", ARCHIVE_READ_REASON

@@ -196,6 +196,9 @@ class UnreadJobs(Stop):
 class NetStop(Stop):
     """A `gh` call kept failing with a network error. Not a refusal: the caller must not revert a claim for it."""
 
+class ScopeStop(Stop):
+    """A read that failed because the repo is outside this session's GitHub scope (is_scope). Waiting and retrying from this session never pass it."""
+
 class Unproven(NetStop):
     """A read after the claim push could not run, so the result is unknown. Not a refusal: the claim stays (decision standing-merge-grant)."""
 
@@ -349,6 +352,18 @@ def is_net(c, out):
     """A failed call whose output is a network error line. JSON is gh's answer (a check named EOF), not its error line,
     unless gh's own 5xx line ends it."""
     return bool(c and (GH_API_TAIL.search(out) or (NET_ERROR.search(out) and not out.lstrip().startswith(("[", "{")))))
+
+# A repo this session cannot reach: the cloud proxy's 403 sentence, or GitHub's 404 for a repo the token cannot see. `gh api` prints the JSON
+# body, then its own tail line, which ends the output (`gh: Not Found (HTTP 404)`). Anchored on that tail or on the start of the JSON body,
+# never free text: a PR title that quotes the sentence is no match. A 5xx or a rate limit is is_net, never scope.
+_SCOPE_TEXT = "GitHub access to this repository is not enabled for this session"
+SCOPE_DENIED = re.compile(r"gh: " + _SCOPE_TEXT + r"\b[^\n]*\(HTTP 403\)\s*\Z|\A\s*\{\s*\"message\"\s*:\s*\"" + _SCOPE_TEXT)
+NOT_FOUND = re.compile(r"gh: [^\n]*\(HTTP 404\)\s*\Z")
+
+def is_scope(c, out, repo_level=True):
+    """A failed call whose output is the proxy's scope 403, or, for a read of the repo itself (`repo_level`: its pull request list, its own
+    record), GitHub's 404. A 404 on a branch or a commit means that branch or commit is missing, never that the repo is out of reach."""
+    return bool(c and not is_net(c, out) and (SCOPE_DENIED.search(out) or (repo_level and NOT_FOUND.search(out))))
 
 _HEAD_BLOCK = re.compile(r"HTTP/\d(?:\.\d)? \d{3}\b[^\n]*(?:\n(.*?\r?\n)?\r?\n|\n?.*\Z)", re.S)  # what `gh api -i` prints first: the status line, the headers, a blank line. An empty body leaves no blank line: the block then runs to the end
 
@@ -973,6 +988,8 @@ class Host:
         for n in range(1, PAGE_CEILING + 1):
             c, out = self.api(rel, "-i", fields={**(fields or {}), "per_page": 100, "page": n})
             headers, out = split_headers(out)
+            if is_scope(c, out):
+                raise ScopeStop(f"reading {rel} from GitHub failed on page {n}: {out}")  # typed, so the archive guard tells it from a transient failure
             try:
                 if c:
                     raise ValueError(out)
