@@ -5,8 +5,8 @@ TERSE_LINE is the one home of the line. Each agents/*.md file and the lane start
 (skills/project-ops/templates/operating-model.md) must hold it in body text. A line inside a code
 fence (``` or ~~~), an HTML comment, an inline code span, a 4-space indented code block or the YAML
 frontmatter does not count: quoted text and metadata are not an instruction. A comment opened mid-line hides
-text only up to its `-->` in the same paragraph. A comment opened at a line start hides through the line that
-closes it. Whitespace collapses, so the line may wrap.
+text only up to its `-->` in the same paragraph, and a heading, fence, list item, quote or rule line ends it too. A
+comment opened at a line start hides through the line that closes it. Whitespace collapses, so the line may wrap.
 
     python3 lint/check_agent_terse_line.py [file ...]
 
@@ -30,13 +30,21 @@ LANE_TEXT = os.path.join("skills", "project-ops", "templates", "operating-model.
 
 FENCE = re.compile(r" {0,3}(`{3,}|~{3,})")  # matched at a line start
 LIST_ITEM = re.compile(r" {0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)")  # matched at a line start
+HEADING = re.compile(r"#{1,6}(?=[ \t\r\n]|\Z)")  # matched at a line start; a heading at column 0 ends every list
+BLANK = re.compile(r"\n[ \t\r]*\n")  # a paragraph break: a blank line, CRLF or LF
+# A line that ends a paragraph, so a comment opened mid-line above it ends there: a heading, a fence, a quote, a rule
+# line or a non-empty list item, each after at most 3 spaces. A list item nested 4 or more columns in does not end
+# it, and an ordered item ends it whatever its number; CommonMark's list rules are not rebuilt.
+INTERRUPT = (r" {0,3}(?:#{1,6}(?=[ \t\r\n]|\Z)|`{3,}|~{3,}|>"
+             r"|[-*+][ \t]+\S|\d{1,9}[.)][ \t]+\S"
+             r"|(?:-[ \t]*){3,}(?=\r?(?:\n|\Z))|(?:\*[ \t]*){3,}(?=\r?(?:\n|\Z))|(?:_[ \t]*){3,}(?=\r?(?:\n|\Z)))")
 # A code span hides a comment opener inside it and is itself dropped. It ends at a paragraph break: a newline
 # followed by a blank line cannot be inside it, so a lone backtick pairs with nothing across blank lines.
 # An inline comment (a `<!--` that is not at a line start) is hidden only when its `-->` comes before the
-# paragraph break. With no close in its paragraph it is plain text and hides nothing. A comment at a line
-# start is a block, read by `block_comment_end`.
-SPAN_OR_COMMENT = re.compile(r"(?P<code>(`+)(?:(?!\2(?!`))[^\n]|\n(?![ \t]*\n))*?\2(?!`))"
-                             r"|(?P<comment><!--(?:(?!-->)(?:[^\n]|\n(?![ \t]*\n)))*-->)",
+# paragraph break or an INTERRUPT line. With no close there it is plain text and hides nothing. A comment at a
+# line start is a block, read by `block_comment_end`.
+SPAN_OR_COMMENT = re.compile(r"(?P<code>(`+)(?:(?!\2(?!`))[^\n]|\n(?![ \t\r]*\n))*?\2(?!`))"
+                             r"|(?P<comment><!--(?:(?!-->)(?:[^\n]|\n(?![ \t\r]*\n)(?!" + INTERRUPT + r")))*-->)",
                              re.DOTALL)
 ITEM_MARKER = re.compile(r" {0,3}(?:[-*+]|\d{1,9}[.)])( *)(\S?)")  # the marker and its gap, to find the content column
 
@@ -68,7 +76,8 @@ def block_comment_end(text: str, pos: int, end: int, in_list: bool, width: int):
     The opener is `<!--` after at most 3 spaces (counted from the list item's content column inside a
     list item). It closes on the line that holds `-->`, and the rest of that line is hidden too. With no
     close it hides the rest of the text, or inside a list item the rest of the item: the item ends at
-    the next non-blank line indented less than its content column.
+    the next non-blank line indented less than its content column. It reads line by line from the opener
+    and stops at the close or the item's end, so it scans only what it hides.
     """
     line = text[pos:end]
     spaces = len(line) - len(line.lstrip(" "))
@@ -77,22 +86,21 @@ def block_comment_end(text: str, pos: int, end: int, in_list: bool, width: int):
     inside = in_list and spaces >= width
     if spaces - (width if inside else 0) > 3:
         return None
-    limit = len(text)
-    if inside:
-        scan = end + 1
-        while scan < len(text):
-            stop = text.find("\n", scan)
-            stop = len(text) if stop < 0 else stop
-            row = text[scan:stop].expandtabs(4)
-            if row.strip() and len(row) - len(row.lstrip(" ")) < width:
-                limit = scan
-                break
-            scan = stop + 1
-    close = text.find("-->", pos + spaces + 4, limit)
-    if close < 0:
-        return limit
-    stop = text.find("\n", close)
-    return len(text) if stop < 0 else stop + 1
+    if "-->" in line[spaces + 4:]:
+        return min(end + 1, len(text))
+    scan = end + 1
+    while scan < len(text):
+        stop = text.find("\n", scan)
+        stop = len(text) if stop < 0 else stop
+        row = text[scan:stop]
+        if inside:
+            flat = row.expandtabs(4)
+            if flat.strip() and len(flat) - len(flat.lstrip(" ")) < width:
+                return scan
+        if "-->" in row:
+            return min(stop + 1, len(text))
+        scan = stop + 1
+    return len(text)
 
 
 def body_text(text: str) -> str:
@@ -100,14 +108,20 @@ def body_text(text: str) -> str:
 
     One pass in reading order, so each construct hides the others' markers: a fence marker inside a
     comment opens no fence, and a comment opener inside a fence or a code span opens no comment.
-    A comment opened mid-line hides text only up to its `-->` in the same paragraph; with none it is plain
-    text. A comment opened at a line start is a block (`block_comment_end`). A fence opens only at a line start and closes on the same character, at least as long, with
-    nothing else on the line; an unclosed fence runs to the end. A line indented 4 spaces (or a tab) is
-    code, unless it continues a paragraph line just above it or sits in a list item.
+    A comment opened mid-line hides text only up to its `-->` in the same paragraph, and a heading, fence,
+    list item, quote or rule line ends it; with no close it is plain text. A comment opened at a line start is
+    a block (`block_comment_end`). A fence opens only at a line start and closes on the same character, at
+    least as long, with nothing else on the line; an unclosed fence runs to the end. A line indented 4 spaces
+    (or a tab) is code, unless it continues a paragraph line just above it or sits in a list item. `widths`
+    holds the content column of each open list item, innermost last; a column-0 heading or fence empties it,
+    and a non-blank line after a blank line pops each item it is not indented into.
+    A paragraph is searched for code spans and comments only when it holds a backtick or a `-->`, so a
+    paragraph of bare openers costs one scan, not one search per opener.
     """
     kept, pos, size = [], 0, len(text)
     hit, searched = None, False
-    prev, in_list, width = "blank", False, 0  # prev: the last line's kind, "blank", "text" or "code"
+    prev, widths = "blank", []  # prev: the last line's kind, "blank", "text" or "code"
+    pend, marked = -1, False  # the end of the paragraph holding pos, and whether it holds a backtick or a `-->`
     while pos < size:
         end = text.find("\n", pos)
         end = size if end < 0 else end
@@ -115,6 +129,8 @@ def body_text(text: str) -> str:
         found = FENCE.match(text, pos) if at_line_start else None
         if found:
             marker = found.group(1)
+            if found.start(1) == pos:
+                widths.clear()
             pos = end + 1
             while pos < size:
                 end = text.find("\n", pos)
@@ -128,26 +144,37 @@ def body_text(text: str) -> str:
             continue
         if at_line_start:
             line = text[pos:end]
+            flat = line.expandtabs(4)
+            indent = len(flat) - len(flat.lstrip(" "))
             if not line.strip():
                 prev = "blank"
-            elif line.startswith(("    ", "\t")) and prev != "text" and not in_list:
-                prev = "code"
-                pos = end + 1
-                continue
             else:
-                if not line.startswith((" ", "\t")) or LIST_ITEM.match(line):
-                    if LIST_ITEM.match(line):
-                        in_list, width = True, item_width(line)
-                    elif prev == "blank":
-                        in_list = False
+                if prev == "blank":
+                    while widths and indent < widths[-1]:
+                        widths.pop()
+                if line.startswith(("    ", "\t")) and prev != "text" and not widths:
+                    prev = "code"
+                    pos = end + 1
+                    continue
+                if LIST_ITEM.match(line):
+                    column = len(line) - len(line.lstrip(" "))
+                    while widths and column < widths[-1]:
+                        widths.pop()
+                    widths.append(item_width(line))
+                elif HEADING.match(line):
+                    widths.clear()
                 prev = "text"
-                skip = block_comment_end(text, pos, end, in_list, width)
+                skip = block_comment_end(text, pos, end, bool(widths), widths[-1] if widths else 0)
                 if skip is not None:
                     pos = skip
                     continue
-        if not searched or (hit and hit.start() < pos):
+        if pos > pend:
+            blank = BLANK.search(text, pos)
+            pend = blank.start() if blank else size
+            marked = text.find("`", pos, pend) >= 0 or text.find("-->", pos, pend) >= 0
+        if marked and (not searched or (hit and hit.start() < pos)):
             hit, searched = SPAN_OR_COMMENT.search(text, pos), True
-        if hit and hit.start() < end:
+        if marked and hit and hit.start() < end:
             kept.append(text[pos:hit.start()])
             kept.append(" " if hit.group("code") else "")
             pos = hit.end()
