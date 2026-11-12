@@ -443,6 +443,9 @@ READY_PAGE_REPO = re.compile(r"^(?:github\.com/)?([A-Za-z0-9_.-]+)/([A-Za-z0-9_.
 READY_PAGE_ORIGIN = re.compile(r"(?:^|[/@])github\.com[:/]([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/?$")
 
 
+READY_PAGE_URL = re.compile(r"^https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/pull/(\d+)/?(?:[?#].*)?$")
+
+
 def _ready_page_slug(pattern, text: str) -> str:
     """The lower-case owner/name a repo text or origin URL names, or "". GitHub names compare without case."""
     found = pattern.search(text.strip())
@@ -464,6 +467,14 @@ def ready_page_read(selector: str, repo: str, where: str):
     if module is None:
         return "unknown", "the merge tool could not be loaded"
     selector = selector[1:] if selector[:1] == "#" and selector[1:].isdigit() else selector
+    named = READY_PAGE_URL.match(selector.strip())
+    if named:
+        # A pull request URL names its repo, and the root below is chosen from the repo: take it before the choice, or a URL for
+        # another repo would be read in this checkout. A -R repo that is not the URL's repo is a conflict, never read as either.
+        url_slug = named.group(1).lower()
+        if repo and _ready_page_slug(READY_PAGE_REPO, repo) != url_slug:
+            return "unknown", "the -R repository and the pull request URL name different repositories"
+        repo, selector = named.group(1), named.group(2)
     clone = ""
     try:
         with module.shared_deadline(READY_PAGE_TIMEOUT):
