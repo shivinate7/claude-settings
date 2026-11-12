@@ -1,0 +1,14 @@
+{
+ "id": "gh-get-timeout-retry",
+ "title": "The merge tool retries a GitHub read that timed out, once",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane merge-claim-survives-timeout 13:37 CST Nov 12: a timed-out gh GET is never retried.",
+ "source": "lane merge-claim-survives-timeout 13:37 CST Nov 12",
+ "note": "An unreviewed fix exists at archive/merge-claim-survives-timeout (b642e49ce). Its one full test_merge run ended FAILED (1 of 1608); which test, and whether main fails it too, is unknown. Treat it as unproven: a new lane reruns the suite on main and on b642e49ce first.",
+ "updatedAt": "2026-11-12T13:39:34-06:00"
+}

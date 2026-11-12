@@ -5,7 +5,7 @@
   "order": 266.4,
   "owner": "coordinator",
   "why": "Incident, 2026-11-07 15:38 CST: triage put item 376 on the page. Its only change from main was a widening option, and decision uniform-over-variants already rules that the shared tool never grows a second form. The coordinator withdrew it at 15:41 CST. The owner saw a question a ruling answers.",
-  "note": "In hooks/question_form.py: when every option but the recommended one sets widens:true, refuse with 'uniform-over-variants decides this; take the non-widening option'. Done check: item 376's shape is red, and a question with two non-widening options passes. The check's verdict changes, so this is a build lane. Lane past-ruling-on-send takes it on a new branch (coordinator, 15:44 CST). In review round 1 at 17:05 CST. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-past-ruling-on-send]).",
-  "updatedAt": "2026-11-12T13:26:59-06:00",
+  "note": "In hooks/question_form.py: when every option but the recommended one sets widens:true, refuse with 'uniform-over-variants decides this; take the non-widening option'. Done check: item 376's shape is red, and a question with two non-widening options passes. The check's verdict changes, so this is a build lane. Lane past-ruling-on-send takes it on a new branch (coordinator, 15:44 CST). In review round 1 at 17:05 CST. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-past-ruling-on-send]). Coordinator 13:37 CST Nov 12: already pushed 1416409b9, so it finishes; no fold.",
+  "updatedAt": "2026-11-12T13:39:34-06:00",
   "lane": "session_013NEJKzNDgCKgjct5ZNZtN7"
 }

@@ -1,15 +1,15 @@
 {
  "id": "batch-push-refused-in-run",
  "title": "A push to a lane branch inside a running batch is refused",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
- "lane": "session_013NEJL2Jn7itL9P8sAXmdov",
+ "lane": "",
  "owner": "triage",
  "blockedBy": [],
  "why": "Plan R26 (batch freeze) and R55 (owner 13:21 CST Nov 12, merge flow first; home decision no-merge-during-batch-ci).",
  "source": "lane batch-freeze-lane-set-enforce 13:22 CST Nov 12",
- "note": "Split from step batch-freeze-lane-set-enforce so its built part can merge: main has the frozen set, blame-limited --batch-drop and --ready; the lane built the FREEZE_CITE swap and a settings entry for the three flags (commit 3e17eb534). Left: a guard that refuses a push to a lane branch inside a running batch. It must read the batch PR body at push time, and the cloud has no gh for that read, so the route is open (MCP read, or a record the merge tool writes at batch build). State its cost per push. Red first.",
- "updatedAt": "2026-11-12T13:26:59-06:00",
+ "note": "Split from step batch-freeze-lane-set-enforce so its built part can merge: main has the frozen set, blame-limited --batch-drop and --ready; the lane built the FREEZE_CITE swap and a settings entry for the three flags (commit 3e17eb534). Left: a guard that refuses a push to a lane branch inside a running batch. It must read the batch PR body at push time, and the cloud has no gh for that read, so the route is open (MCP read, or a record the merge tool writes at batch build). State its cost per push. Red first. Closed 13:41 CST Nov 12 (coordinator 13:37): covered by #2463 (step lane-push-frozen-in-batch); the only gap, draft batch PRs, runs no CI, so not built.",
+ "updatedAt": "2026-11-12T13:39:34-06:00",
  "order": -316
 }
