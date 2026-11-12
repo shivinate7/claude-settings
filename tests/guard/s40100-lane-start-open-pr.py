@@ -22,9 +22,9 @@ FAMILY = "rule9"  # the lane start cases keep rule 9's family, as the lane cases
 # fragments, then the warning. Each failure message names one cause.
 #
 # FIXTURES. The two incident pull requests are the real text read from shivinate7/claude-settings: #2767 (draft,
-# step outbox-ruling-home-check) and #1552 (draft, step round1-sonnet-guard-table). #2767 names its step in prose,
+# step outbox-ruling-home-check) and #1552 (draft, the sonnet-at-first-review step). #2767 names its step in prose,
 # `Step outbox-ruling-home-check (owner ...`, with no colon. #1552 names no step at all, so case 2 adds one marker
-# line, `Lane: round1-sonnet-guard-table`, as the nearest shape the marker grammar reads. The synthetic holder in
+# line naming its step, as the nearest shape the marker grammar reads. The synthetic holder in
 # the two-holder case is constructed.
 GH_ARGS = ["pr", "list", "--repo", "shivinate7/claude-settings", "--state", "open",
            "--json", "number,title,body,headRefName,isDraft", "--limit", "100"]
