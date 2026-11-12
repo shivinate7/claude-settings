@@ -611,6 +611,7 @@ def role_create_call(tool_id, tags, session=ROLE_NEW, plain=False, key="id"):
 # lane-one-topic: a lane on topic icons, and an older lane with two steps and no topic.
 STEP_TOPIC_TAGS = ["cs-build:lane", "cs-step:icon-a", "cs-topic:icons", "cs-repo:o/r"]
 STEP_OLD_TAGS = ["cs-build:lane", "cs-step:icon-a", "cs-step:icon-b", "cs-repo:o/r"]
+STEP_TOPIC_T_TAGS = ["cs-build:lane", "cs-step:x", "cs-topic:t", "cs-repo:o/r"]
 STEP_COLORS_TAGS = ["cs-build:lane", "cs-step:colors-a", "cs-topic:colors", "cs-repo:o/r"]
 
 
@@ -720,6 +721,7 @@ ROLE_LINES = {
     # lane-one-topic shapes. A lane is one topic: its cs-topic tag, beside one or more cs-step tags. An older
     # lane has no cs-topic, so its cs-step tags alone judge a brief. The create shapes read the start of the lane.
     "step-topic-lane": role_target_call("t1", STEP_TOPIC_TAGS),
+    "step-topic-t-lane": role_target_call("t1", STEP_TOPIC_T_TAGS),
     "step-old-lane": role_target_call("t1", STEP_OLD_TAGS),
     "step-triage": role_target_call("t1", TRIAGE_TAGS),
     "step-lane-then-triage": role_target_call("t1", STEP_TOPIC_TAGS) + role_target_call("t2", TRIAGE_TAGS),
