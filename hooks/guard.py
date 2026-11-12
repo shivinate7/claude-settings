@@ -217,11 +217,13 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        hand-off could go missing. A missing or non-string `to`, an agent name, @parent and the
                        mcp__claude-code-remote__send_message tool pass. An override lifts it.
   pass-claim-cites-verdict
-                       deny. A SendMessage or send_message whose text says a check passed ("passed", "passes", "green" or
-                       "clean" within four words of lint, CI, tests, checks, suite, ci-job or build) with no verbatim
+                       deny. A SendMessage or send_message whose text says a check passed ("passed", "passes", "pass", "green"
+                       or "clean" within four words of lint, tests, checks, suite or ci-job) with no verbatim
                        `PASS <cmd> (<secs>s)` line in a non-sidechain Bash call's result, from a `verdict` call of this
-                       session's transcript. Backticks, a fence, a question, a negation or condition, a named speaker
-                       and a count ("12 passed") are no claim. A call with a non-empty agent_id (an agent's own report)
+                       session's transcript whose command matches the check (a roster command for lint and ci-job, a
+                       test command for tests and suite, either for checks). A sentence in backticks, a fence, a
+                       question, a negation or condition in the claim's clause, a named speaker and a count ("12
+                       passed") are no claim. A call with a non-empty agent_id (an agent's own report)
                        and an unreadable transcript pass. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   gh-write-cloud       deny. In a cloud session, a gh write: `gh pr` create, merge, comment, edit, close, review or
@@ -6249,8 +6251,12 @@ def judge(payload) -> None:
     # A send that says a check passed with no verdict line in this session's transcript (rule pass-claim-cites-verdict).
     # A call from an agent (non-empty agent_id) is the agent's own report, not the session's claim, so it is not judged.
     if tool in ("SendMessage", BRIEF_TOOL) and not payload.get("agent_id"):
-        import pass_claim
-        claimed = pass_claim.send_problem(tool_input.get("message"), payload.get("transcript_path"))
+        try:
+            import pass_claim
+            claimed = pass_claim.send_problem(tool_input.get("message"), payload.get("transcript_path"))
+        except Exception as exc:  # an ImportError too: the check fails open and the later checks still run
+            print("pass-claim guard failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
+            claimed = ""
         if claimed:
             refuse(tool, "deny", "pass-claim-cites-verdict", PASS_CLAIM_REASON, claimed)
 
