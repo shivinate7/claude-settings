@@ -639,12 +639,12 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
      Owner: "opus could compact tigheter than sonnet no?". Yes; that key sets it per model. Why the
      coordinator compacts at 441,600 and seeded sessions at 384,000 is still unmeasured; the step finds
      the setting that causes it.
-  2. b. Owner: "it seems like what we have planned fixes this already? ... it saves time and money no?".
+  2. b. Owner: "it seems like what we have planned fixes this already? ... it saves time and money no?". (step:stop-checks-one-message)
      Mostly: R24 (each refusal names a working way out), R27 (feedback items close themselves) and the
      guard cull (3.6) cover most repeats. Two parts are new: all end-of-turn checks speak in one merged
      message, so one fix turn answers them all. And the hook drafts the "Recovered" and "Handoff gave"
      lines after a compaction, so they are not retyped after a refusal.
-  3. c. A check-in that waits on CI waits at most 55 minutes, so a wake stays inside the prompt cache.
+  3. c. A check-in that waits on CI waits at most 55 minutes, so a wake stays inside the prompt cache. (step:ci-wait-cap-55)
      It changes rule git-ci-wait-checks-in ("each wider apart") to "each wider apart, never past 55
      minutes". Owner: "we should keep some sort of tabs on how anthropic determiines warm cash so this
      doesn't go stale". The cap is read from one constant that names its source: the cache lifetime in
@@ -731,7 +731,7 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   2. The split: skill compliance-check is the one-time sweep that brings a repo in line; a check (step:child-repo-gap)
      in child CI keeps it there. The check flags a contradicting line with no exemption line, and pins
      move when claude-settings main changes an action.
-  3. shiv-stylisms content (are its 23 rules still right) joins R35's review, which the owner signs.
+  3. shiv-stylisms content (are its 23 rules still right) joins R35's review, which the owner signs. (step:global-claude-md-scope-audit)
 
 - **R43. A usage brake on accounts with a rate limit.** Owner 13:48 CST Nov 11: "it might just be
   somehow local in my mac's coordinators handoffs and not on claude-settings anywhere but ya it was
@@ -756,7 +756,7 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   2. Proposed for stage 3, after a Plan agent and a refuter: a lane merges on its own green checks and (step:merge-flow-after-anthropic)
      its review, sized by risk. Main's CI runs after the merge; a red run bisects and reverts the
      breaking commit. Sessions install from a stable branch that moves only when main is green.
-  3. Guard numbers: reverts per merge, and the pace numbers. Main must first finish a CI run (#2591).
+  3. Guard numbers: reverts per merge, and the pace numbers. Main must first finish a CI run (#2591). (step:guard-numbers-per-merge)
   Owner 13:43 CST: "lanes compete more for the machine isn't a real problem on cloud sessions where each
   spawns its own machine right? and then it is true for local machines though (which is why we have
   load brakes for local right" and "r42 part 2: i'm pretty open to this radical approach -- A". Part 1
