@@ -37,6 +37,7 @@ import test_call_judge as tcj  # noqa: E402  the model stub and git fixtures (on
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
 import test_refusal_note as hook_base  # noqa: E402  the route-rows seam name and fixture (one home, hooks/test_refusal_note.py)
+import report_guard as rg  # noqa: E402  bare_cite, the one home of the item-cite check (lint/report_guard.py)
 
 GOOD_REPORT = "> **Done** BUILT abc123\n> **Next** ship it"
 # The correction step's words (decision guard-remedy-not-to-owner, shared tails). A refusal holds none of them; the
@@ -887,6 +888,270 @@ class DoneFormatAndCiteTests(unittest.TestCase):
         path = write_transcript(records, self.tmp.name)
         hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": True}
         self.assertEqual(run_guard(REPORT_GUARD, hook).stdout.strip(), "")
+
+
+class ItemCiteTests(unittest.TestCase):
+    """speak-cite-id-plus-gloss for page item numbers: bare_cite in report_guard.py, and the Stop hook.
+
+    An item cite is `item <n>`, `items <n> and <m>` or `items <n>, <m>`, with an optional `page` or
+    `waiting-page` before it. The first time a number appears in a reply, it needs its short name beside
+    it. A later cite of that number needs none. On a reply, a bare `item <n>` is read only when its clause
+    also names `waiting page`, `waiting-page` or `triage` outside code (the scope ruling); a bare `page` elsewhere
+    in the sentence does not count. `page item <n>` and `waiting-page item <n>` are always read. The text matrix
+    lives here, on bare_cite. The Stop cases
+    prove only the wiring.
+    """
+
+    def setUp(self):
+        # test-temp-standard: this case's folder comes from the run folder, never the system temp dir
+        self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
+        self.addCleanup(self.tmp.cleanup)
+
+    def assert_refused(self, text, number=None):
+        got = rg.bare_cite(text)
+        self.assertTrue(got, "item cite with no short name must be refused: %r gave no cite" % text)
+        if number is not None:
+            self.assertEqual(got, number, "the refused cite must be item %s: %r gave %r" % (number, text, got))
+
+    def assert_passes(self, text, why="item cite with its short name must pass"):
+        got = rg.bare_cite(text)
+        self.assertEqual(got, "", "%s: %r gave %r" % (why, text, got))
+
+    # refused: a number with no name beside it, on a reply that names triage (the scope ruling)
+    def test_icite_red_bare_item_number_is_refused(self):
+        self.assert_refused("Triage left item 46 open.", "46")
+
+    def test_icite_red_bare_items_pair_is_refused(self):
+        self.assert_refused("Triage left items 46 and 47 open.", "46")
+
+    def test_icite_red_bare_items_list_is_refused(self):
+        self.assert_refused("Triage left items 46, 47 open.", "46")
+
+    def test_icite_red_one_bare_number_in_a_pair_is_refused(self):
+        self.assert_refused("Triage left items 46 (search pill clear) and 47 open.", "47")
+
+    def test_icite_red_page_prefix_does_not_hide_a_bare_cite(self):
+        for text in ("page item 46", "waiting-page item 46"):
+            with self.subTest(text=text):
+                self.assert_refused(text)
+
+    def test_icite_red_first_bare_cite_is_refused_when_a_later_one_is_named(self):
+        self.assert_refused("Triage left item 46 open. Later, item 46 (search pill clear).", "46")
+
+    def test_icite_red_comment_opener_in_a_code_span_does_not_hide_a_bare_cite(self):
+        self.assert_refused("Triage left a note `/* open` and item 46 waits.", "46")
+
+    def test_icite_red_lone_quote_does_not_hide_a_bare_cite(self):
+        self.assert_refused("Triage: don't skip item 46.", "46")
+
+    def test_icite_red_lone_backtick_does_not_hide_a_bare_cite(self):
+        self.assert_refused("Triage: use ` then item 46 waits.", "46")
+
+    def test_icite_red_multi_line_template_literal_does_not_hide_a_bare_cite(self):
+        self.assert_refused("Triage left: const s = `a\nb`; then item 46 waits.", "46")
+
+    def test_icite_red_bare_cite_at_the_end_of_a_long_reply_is_refused(self):
+        # the full-size state: the bare cite is in the last of 2000 lines, and the scope word is in that same sentence
+        long_reply = "\n".join("Line %d of the report, no cite here." % n for n in range(2000))
+        self.assert_refused(long_reply + "\nTriage: item 46 is open.", "46")
+
+    # the scope ruling: a bare item cite is read only when its clause names waiting page, waiting-page or triage
+    def test_icite_red_bare_item_in_a_cart_sentence_passes(self):
+        self.assert_passes("Fixed the cart so item 2 no longer renders twice.",
+                           "no waiting page or triage in its clause, so a bare item is not read")
+
+    def test_icite_red_bare_item_in_a_list_sentence_passes(self):
+        self.assert_passes("Reordered the list so item 1 comes first.",
+                           "no waiting page or triage in its clause, so a bare item is not read")
+
+    def test_icite_red_scope_word_in_a_code_span_does_not_turn_scope_on(self):
+        self.assert_passes("Run `triage` first; item 46 waits.",
+                           "a scope word inside a code span does not name triage")
+
+    def test_icite_red_scope_word_in_a_fence_does_not_turn_scope_on(self):
+        self.assert_passes("```\ntriage\n```\nitem 46 waits.",
+                           "a scope word inside a fence does not name triage")
+
+    def test_icite_red_homepage_does_not_turn_scope_on(self):
+        self.assert_passes("The homepage shows item 46 waiting.",
+                           "homepage is not the word page, so it does not turn the scope on")
+
+    def test_icite_green_page_word_refuses_a_bare_item(self):
+        self.assert_refused("page item 46 is open.", "46")
+
+    def test_icite_green_lone_quote_before_a_scope_word_still_refuses(self):
+        self.assert_refused("Don't triage item 46.", "46")
+
+    def test_icite_green_lone_backtick_before_a_scope_word_still_refuses(self):
+        self.assert_refused("Use ` then triage item 46.", "46")
+
+    # capital forms are read: the same cite with a capital I or S is refused
+    def test_icite_red_capital_item_after_a_triage_label_is_refused(self):
+        self.assert_refused("Triage: Item 46 is open.", "46")
+
+    def test_icite_red_capital_items_pair_after_a_triage_label_is_refused(self):
+        self.assert_refused("Triage: Items 46 and 47 are open.", "46")
+
+    # a list tail joins a number only to a plural head: a year or a count after a singular item is not a cite
+    def test_icite_red_year_after_a_named_item_is_not_a_cite(self):
+        self.assert_passes("Triage owner: item 137 (pick a), 2026-11-01 18:38 CST.",
+                           "a list tail joins a number only to a plural head, so 2026 after a singular item is not a cite")
+
+    def test_icite_red_tail_of_a_singular_item_is_not_a_cite(self):
+        self.assert_passes("page item 46 (search pill clear), 3 times",
+                           "a list tail joins a number only to a plural head, so 3 after a singular item is not a cite")
+
+    def test_icite_green_plural_list_tail_joins_a_bare_number(self):
+        self.assert_refused("Triage left items 46 (search pill clear), 47 open.", "47")
+
+    # a backticked record name counts as the record; a backticked code span does not
+    def test_icite_red_backticked_record_name_counts_as_the_record(self):
+        self.assert_passes("triage: `precompact-handoff.md`, item 8")
+
+    def test_icite_green_backticked_code_is_not_a_record_name(self):
+        self.assert_refused("triage: `make`, item 8", "8")
+
+    # a quoted name after a colon, and a name in the next table cell, are names
+    def test_icite_red_quoted_name_after_a_colon_passes(self):
+        self.assert_passes('page item 180: "align all"')
+
+    def test_icite_red_table_cell_name_passes(self):
+        self.assert_passes("| page item 46 | search pill clear |")
+
+    def test_icite_green_empty_table_cell_is_not_a_name(self):
+        self.assert_refused("| page item 46 | |", "46")
+
+    # passes: the name sits beside the number, or the number is a later cite of a named one
+    def test_icite_green_named_cites_pass(self):
+        for text in ("Triage left item 46 (search pill clear)", "page item 382 (merge-unreviewed-head)",
+                     "Triage left item 46, search pill clear",
+                     "Triage left items 46 (search pill clear) and 47 (stale head record)",
+                     "Triage left search pill clear (item 46)"):
+            with self.subTest(text=text):
+                self.assert_passes(text)
+
+    def test_icite_green_later_cite_of_a_named_number_passes(self):
+        self.assert_passes("Triage left item 46 (search pill clear) ... later item 46 again")
+
+    def test_icite_green_record_named_cites_pass(self):
+        for text in ("Triage left precompact-handoff, item 9", "Triage left docs/decisions/precompact-handoff.md, item 8",
+                     "Triage left c193-sizes.md item 3"):
+            with self.subTest(text=text):
+                self.assert_passes(text)
+
+    def test_icite_green_skipped_text_is_not_a_cite(self):
+        for text in ("Triage left: use `item 46` as the label.", "Triage left.\n```\nitem 46\n```",
+                     "Triage left.\n```\nrun item 46\nand item 47\n```",
+                     "See [item 46](https://x.test/p/46) for the page.",
+                     "Triage left open https://x.test/items-46 now."):
+            with self.subTest(text=text):
+                self.assert_passes(text)
+
+    def test_icite_green_empty_and_numberless_text_pass(self):
+        for text in ("", "Triage: the item count went from 46 to 47.", "Triage: items were fine and done."):
+            with self.subTest(text=text):
+                self.assert_passes(text)
+
+    # a table bar is no gloss for a record id: a bare D12 in a table cell with a name after the bar is refused
+    def test_icite_red_bare_record_id_in_a_table_cell_is_refused(self):
+        got = rg.bare_cite("Triage left D12 | waiting on owner |")
+        self.assertEqual(got, "D12", "the D-id reader must refuse a bare D12 in a table cell: a bar is no gloss "
+                                     "for a record id, so it gave %r" % got)
+
+    # the scope read keeps a markdown link's text: `see [the waiting page](url)` holds the name waiting page
+    def test_icite_red_scope_word_in_link_text_turns_the_scope_on(self):
+        got = rg.bare_item_cite("Item 46 is open; see [the waiting page](https://x.test/w).", scoped=True)
+        self.assertEqual(got, "46", "the scope read must keep a link's text, so the page word in it turns the "
+                                    "scope on: it gave %r" % got)
+
+    # an item number takes a record slug before it with no comma, as a list head does
+    def test_icite_red_record_slug_with_no_comma_names_the_item(self):
+        got = rg.bare_item_cite("Open: the answered-sink-notes item 4.")
+        self.assertEqual(got, "", "a record slug before an item number names it, with or without a comma: "
+                                  "it gave %r" % got)
+
+    # an item number with a table bar and a name after the bar passes (the item `|` form)
+    def test_icite_green_item_number_with_a_table_bar_and_a_name_passes(self):
+        got = rg.bare_item_cite("Triage left item 46 | waiting on owner |", scoped=True)
+        self.assertEqual(got, "", "an item cite with a table bar and a name after it must pass: it gave %r" % got)
+
+    # a list bullet's lead is its own line: a heading or a bullet above an item is no dash gloss before it
+    def test_icite_red_bullet_under_a_heading_is_not_a_dash_gloss(self):
+        got = rg.bare_item_cite("## Next steps\n\n- item 46 waits for the owner.")
+        self.assertEqual(got, "46", "a heading above a bullet is no gloss for the bullet's item: it gave %r" % got)
+
+    def test_icite_red_bullet_under_a_plain_line_is_not_a_dash_gloss(self):
+        got = rg.bare_item_cite("Where things stand\n\n- Item 46 is red")
+        self.assertEqual(got, "46", "a plain line above a bullet is no gloss for the bullet's item: it gave %r" % got)
+
+    def test_icite_red_bullet_under_a_bullet_is_not_a_dash_gloss(self):
+        got = rg.bare_item_cite("- Recheck the build\n- item 47 blocks the merge")
+        self.assertEqual(got, "47", "a bullet above a bullet is no gloss for the item: it gave %r" % got)
+
+    def test_icite_green_dash_gloss_on_the_item_line_still_names_the_item(self):
+        got = rg.bare_item_cite("- Search pill — item 46 waits.")
+        self.assertEqual(got, "", "a two-word gloss and a dash on the item's own line still name it: it gave %r" % got)
+
+    # a digit-led token is no record slug, so a date before an item number does not name it
+    def test_icite_red_date_before_a_bare_item_is_not_a_slug(self):
+        got = rg.bare_item_cite("Owner ruling 2026-11-06, item 183")
+        self.assertEqual(got, "183", "a date is no record slug, so it names no item: it gave %r" % got)
+
+    def test_icite_red_short_date_before_a_bare_item_is_not_a_slug(self):
+        got = rg.bare_item_cite("On 11-08 item 46 closed")
+        self.assertEqual(got, "46", "a short date is no record slug, so it names no item: it gave %r" % got)
+
+    # markers around a cite are not its text: a bold or italic name after the closing marks still names the item
+    def test_icite_red_bold_or_italic_cite_with_its_name_after_passes(self):
+        for text in ("**Item 46** (search pill clear)", "**Item 46:** search pill clear",
+                     "**item 46** — search pill clear", "*item 46* (search pill clear)"):
+            with self.subTest(text=text):
+                got = rg.bare_item_cite(text)
+                self.assertEqual(got, "", "markers around a cite must not hide the name after them: %r gave %r"
+                                 % (text, got))
+
+    def test_icite_green_bold_bare_item_is_still_refused(self):
+        got = rg.bare_item_cite("**Item 46** is open.")
+        self.assertEqual(got, "46", "a bold cite with no name after its marks is still refused: it gave %r" % got)
+
+    # the scope reads a bare item cite only in a clause that names waiting page, waiting-page or triage
+    def test_icite_red_bare_page_word_in_another_clause_does_not_turn_scope_on(self):
+        text = "Fixed the page so item 2 no longer renders twice."
+        self.assertRegex(text, r"\bpage\b", "the scope premise: the reply holds the bare word page")
+        self.assertIsNone(re.search(r"waiting[- ]page|triage", text, re.I),
+                          "the scope premise: the reply names no waiting page and no triage")
+        self.assert_passes(text, "the word page names no waiting page or triage, so a bare item 2 is not read")
+
+    def test_icite_red_page_word_before_a_bare_item_does_not_turn_scope_on(self):
+        text = "The page now shows item 3 of the brief in red."
+        self.assertRegex(text, r"\bpage\b", "the scope premise: the reply holds the bare word page")
+        self.assertIsNone(re.search(r"waiting[- ]page|triage", text, re.I),
+                          "the scope premise: the reply names no waiting page and no triage")
+        self.assert_passes(text,
+                           "the word page names no waiting page or triage, so a bare item 3 is not read")
+
+    def test_icite_green_page_item_form_is_refused_without_a_waiting_word(self):
+        self.assert_refused("Open: page item 9.", "9")
+
+    def test_icite_green_waiting_page_clause_refuses_a_bare_item(self):
+        self.assert_refused("Waiting page: item 12 is open.", "12")
+
+    # the Stop hook, through main: the wiring of the same check
+    def test_icite_red_bare_item_in_a_report_blocks_through_main(self):
+        reply = "Triage left item 46 open.\n\n> **Done** BUILT guard, PR #226\n> **Next** none"
+        run = landed_run(self.tmp.name, reply)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertTrue(run.stdout.strip(), "the Stop hook stayed silent on a bare item cite")
+        out = json.loads(run.stdout)
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("Cite-gloss guard", out["reason"])
+        self.assertIn("46", out["reason"])
+
+    def test_icite_green_named_item_in_a_report_passes_through_main(self):
+        reply = "Triage left item 46 (search pill clear).\n\n> **Done** BUILT guard, PR #226\n> **Next** none"
+        run = landed_run(self.tmp.name, reply)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stdout.strip(), "", "the Stop hook blocked a named item cite: %s" % run.stdout[:200])
 
 
 class DoneNamesModelsTests(unittest.TestCase):
