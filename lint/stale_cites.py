@@ -108,7 +108,11 @@ when a row id is gone it also lists the tree once and reads each tracked .md onc
 A touched .py or .sh adds one `git cat-file --batch`, which the flag reader and the name reader share, and, through
 the report below, one `ls-tree`, so it starts 5. A removed or renamed path adds `ls-tree` and that `cat-file --batch`,
 so 5 at most. Each tracked .md is read once, and only when a removed or renamed path, a name that a touched .py no
-longer defines, or a flag that a touched .py or .sh no longer declares, gives the findings something to look for. A touched .py also loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
+longer defines, or a flag that a touched .py or .sh no longer declares, gives the findings something to look for.
+A flag read through a parent parser or a helper (`parent_flags`, for a removed flag of a .py that imports one) first lists
+the whole head tree with one `ls-tree` and keeps it in `rng.tree`, then reads the module's blob through the same `cat-file`.
+That listing is the one the report would have made, so the count stays 5 (CostTests, test a_flag_read_through_an_untouched_helper_starts_no_git_process_beyond_the_five).
+A touched .py also loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
 STALE008 starts at most the one `cat-file`. It reads every tracked .md, through the same `ls-tree` and `cat-file`, only
 when a touched .py changed a module-level literal, as the removed-name read does. Otherwise it reads only the touched .md
 whose added lines hold a value cite of a .py, .mjs, .js, .cjs, .ts or .sh file, found from the diff already read. Such a
