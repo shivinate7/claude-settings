@@ -845,7 +845,7 @@ SKILL_COPY_DIR="$CLAUDE_DIR/backups/skill-copies"
 # them would make each cloud start see a changed skill and back it up. Any other file there is a real change.
 tree_hash() {
   [ -d "$1" ] || return 1
-  ( cd "$1" && find . -name '*.pyc' -path '*/__pycache__/*' -prune -o -type f -print | LC_ALL=C sort | while IFS= read -r f; do
+  ( cd "$1" && find . -type f ! \( -name '*.pyc' -path '*/__pycache__/*' \) -print | LC_ALL=C sort | while IFS= read -r f; do
       printf '%s ' "$f"; sha256_of < "$f"
     done ) | sha256_of
 }
