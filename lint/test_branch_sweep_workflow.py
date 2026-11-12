@@ -107,6 +107,11 @@ LOOP_LINE = '          while read -r verb name reason; do\n'
 BUDGET_LINE = '          remaining=$(gh api rate_limit --jq .resources.core.remaining)\n'
 RESERVE_LINE = '          reserve=$(python3 actions/branch-sweep/sweep.py --budget-reserve)\n'
 VERDICT_LOOP_END = '          done < "$RUNNER_TEMP/verdicts.txt"\n'
+DELETE_COMPARE = '              if [ "$remaining" -lt "$reserve" ]; then\n'
+OLD_READ = '        run: gh api --paginate "repos/$REPO/pulls?state=open&per_page=100" --jq \'.[].head.ref\' > "$RUNNER_TEMP/open-heads.txt"\n'
+NEW_READ = ('        run: |\n'
+            '          gh api --paginate "repos/$REPO/pulls?state=open&per_page=100" --jq \'.[].head.ref\' > "$RUNNER_TEMP/open-heads.txt"\n'
+            '          if [ "$(wc -l < "$RUNNER_TEMP/open-heads.txt")" -gt 0 ]; then echo "open heads listed"; fi\n')
 
 
 def variant(old, new):
@@ -119,6 +124,13 @@ def lint_path(path):
     """The lint's stdout lines for one workflow file. The exit code is not read: a missing lint prints nothing."""
     done = subprocess.run([sys.executable, LINT, "--workflow", path], capture_output=True, text=True, env=ENV)
     return [line for line in done.stdout.splitlines() if line.strip()]
+
+
+def line_of(text, needle):
+    """The 1-based number of the one line of text that holds needle."""
+    hits = [n for n, line in enumerate(text.splitlines(), 1) if needle in line]
+    assert len(hits) == 1, "needle must name one line: %r" % needle
+    return hits[0]
 
 
 class Workflow(unittest.TestCase):
@@ -151,6 +163,9 @@ class Workflow(unittest.TestCase):
         found = [line for line in findings if line.startswith(rule + ": " + where)]
         place = "" if line_no is None else " on line %d" % line_no
         self.assertTrue(found, "%s: no %s finding%s, got %r" % (msg, rule, place, lines))
+
+    def assertNoRuleFinding(self, text, rule, msg):
+        self.assertEqual([line for line in self.lint(text) if line.startswith(rule + ": ")], [], msg)
 
     def test_contents_write_only_is_clean(self):
         self.assertClean(GOOD, "a workflow that requests only contents is not clean")
@@ -340,6 +355,42 @@ class Workflow(unittest.TestCase):
     def test_comparison_against_a_literal_is_flagged(self):
         self.assertRuleFinding(variant('"$remaining" -lt "$reserve"', '"$remaining" -lt 300'), "budget",
                                "the delete loop compares against a literal, a copy of the reserve")
+
+    def test_pulls_step_compare_against_a_number_is_clean(self):
+        # The open-PR read has no delete, so a number compare there is no copy of the reserve.
+        self.assertNoRuleFinding(variant(OLD_READ, NEW_READ), "budget",
+                                 "a -gt 0 compare in the pulls step, which has no delete, is a budget finding")
+
+    def test_literal_compare_in_the_delete_block_still_flags_beside_a_pulls_compare(self):
+        # Control, green on the old code. The pulls-step compare above must not hide the delete loop's literal.
+        text = variant(OLD_READ, NEW_READ).replace('"$remaining" -lt "$reserve"', '"$remaining" -lt 300')
+        self.assertRuleFinding(text, "budget", "the delete loop compares against 300 beside a pulls-step compare",
+                               line_of(text, '"$remaining" -lt 300'))
+
+    def test_arithmetic_compare_against_a_literal_is_flagged(self):
+        text = variant(DELETE_COMPARE, '              if (( remaining < 300 )); then\n')
+        self.assertRuleFinding(text, "budget", "the delete loop compares with (( )) against 300, a copy of the reserve",
+                               line_of(text, "(( remaining < 300 ))"))
+
+    def test_quoted_literal_compare_is_flagged(self):
+        text = variant(DELETE_COMPARE, '              if [ "$remaining" -lt "300" ]; then\n')
+        self.assertRuleFinding(text, "budget", "the delete loop compares against a quoted 300, a copy of the reserve",
+                               line_of(text, '-lt "300"'))
+
+    def test_arithmetic_compare_against_the_reserve_is_clean(self):
+        # Control, green on the old code: the reserve is read from sweep.py, so no literal is compared.
+        self.assertNoRuleFinding(variant(DELETE_COMPARE, '              if (( remaining < reserve )); then\n'), "budget",
+                                 "an arithmetic compare against the reserve variable is a budget finding")
+
+    def test_literal_in_a_quoted_echo_is_clean(self):
+        # Control, green on the old code: a quoted string is text, not a compare.
+        text = variant(DELETE_COMPARE, DELETE_COMPARE + '              echo "-lt 300 is a literal compare"\n')
+        self.assertNoRuleFinding(text, "budget", "a -lt 300 inside an echo string is a budget finding")
+
+    def test_literal_in_a_shell_comment_is_clean(self):
+        # Control, green on the old code: a shell comment is no command.
+        text = variant(DELETE_COMPARE, DELETE_COMPARE + '              # if [ "$remaining" -lt 300 ]; then\n')
+        self.assertNoRuleFinding(text, "budget", "a -lt 300 in a shell comment is a budget finding")
 
 
 def tearDownModule():
