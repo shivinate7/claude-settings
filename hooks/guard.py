@@ -4714,7 +4714,7 @@ def data_tool_hit(tool_input, cwd="", session_id=None):
 
 
 # Rule `answers-session-write` (decision answers-session-write; pick 2 of waiting-page-one-store). An answer on
-# the waiting page is the owner's word. Claude has written one by mistake in normal work, and the page reads it as
+# the waiting page is the owner's own reply. Claude has written one by mistake in normal work, and the page reads it as
 # the owner's grant. The rule judges four surfaces: ArtifactData (hooks/question_form.py answers_write_hit), Write and
 # Edit, and the shell (a redirect, `tee`, `cp`, `mv`, `rm`, `sed -i` by `shell_write_hit`, and a git add or commit that
 # names the path by `answers_git_hit`). The path test is question_form.is_answers_path. A read, and a mention in a quote,

@@ -2,7 +2,7 @@
 FAMILY = "answers-session-write"
 #
 # The answers guard (roadmap step answers-session-write-guard, pick 2 of decision waiting-page-one-store).
-# An answer on the waiting page is the owner's word. A session that writes one forges it, and Claude has
+# An answer on the waiting page is the owner's own reply. A session that writes one forges it, and Claude has
 # written an answer by mistake in normal work, so the guard refuses a session's write into the answers:
 #   1. an ArtifactData write whose collection is answers, or whose doc_id or collection names an answers/
 #      path, on any page URL (a session has no right to forge an answer on any waiting page). A delete

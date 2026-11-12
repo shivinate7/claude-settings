@@ -4,7 +4,7 @@
 
 The guard refuses a session's write into the answers of the waiting page (rule `answers-session-write`). It is pick 2 of decision `waiting-page-one-store` (taken by the coordinator, 2026-11-12 11:43 CST, as an undoable pick).
 
-- An answer is the owner's word. The page reads it as his grant, so a session that writes one forges a grant he never gave.
+- An answer is the owner's own reply. The page reads it as his grant, so a session that writes one forges a grant he never gave.
 - Incident class: Claude writing an answer by mistake in normal work, for example while it tests another rule: six existing test families write an answers record only to test another rule. `SKILL.md` "Read the answers" said "this sentence is the only guard" before this rule.
 - The rule judges four surfaces, through one path test and one field test in `hooks/question_form.py` (`is_answers_path`, `answers_write_hit`):
   - `ArtifactData`: any op but a read (`get`, `list`, `query`) or `delete` (below), alone or in a `batch`, whose `collection` is the answers collection (`lint/layout.py` `WAITING_ANSWERS`), or whose `collection`, `doc_id` or `path` lies under `answers/`. On any page url: a session has no right to forge an answer on any waiting page.

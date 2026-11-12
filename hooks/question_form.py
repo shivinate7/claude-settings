@@ -1102,7 +1102,7 @@ def is_waiting_page(tool_input, cwd) -> bool:
 
 
 # Rule `answers-session-write` (decision answers-session-write, pick 2 of waiting-page-one-store). An answer on the
-# waiting page is the owner's word, so no session writes one: the guard reads the same path and the same ArtifactData
+# waiting page is the owner's own reply, so no session writes one: the guard reads the same path and the same ArtifactData
 # fields here, for all three tools it judges (ArtifactData, Write and Edit, the shell). The collection's name is
 # lint/layout.py WAITING_ANSWERS, never a copy. A read and a delete pass; any other op is judged.
 ANSWERS_READ_OPS = ("get", "list", "query")
