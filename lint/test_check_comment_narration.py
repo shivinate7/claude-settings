@@ -150,9 +150,9 @@ class Case(unittest.TestCase):
         self.git("symbolic-ref", "HEAD", "refs/heads/main")
 
     def git(self, *args):
-        subprocess.run(["git", "-C", self.tree, "-c", "user.name=test", "-c", "user.email=test@example.com",
-                        "-c", "core.autocrlf=false", *args],
-                       check=True, capture_output=True, text=True, env=GIT_ENV)
+        return subprocess.run(["git", "-C", self.tree, "-c", "user.name=test", "-c", "user.email=test@example.com",
+                               "-c", "core.autocrlf=false", *args],
+                              check=True, capture_output=True, text=True, env=GIT_ENV).stdout
 
     def commit(self, msg, files):
         for rel, text in files.items():
@@ -414,6 +414,60 @@ class Ratchet(Case):
         rc, out = self.lint("--base", "origin/no-such-branch")
         self.assertNotEqual(rc, 0, out)
         self.assertIn("no-such-branch", out)
+
+
+class MovedLines(Case):
+    """A line the diff moves is not new. A line counts as moved only when the same diff deletes that exact text.
+
+    Each case cuts one base file into pieces. The change first proves its own state: each piece is a new file,
+    not a rename of the cut file, and each comment the pieces take is deleted from the base file. Only then does
+    the check run, so a clean result can only come from the move."""
+
+    BLOCK_A = "def a():\n    x = 1\n    # owner ruling applies here\n    return x\n"
+    BLOCK_B = "def b():\n    y = 2\n    # fixed in round 2\n    return y\n"
+    BLOCK_C = "def c():\n    z = 3\n    # MEASURED 40 ms\n    return z\n"
+
+    def cut(self, pieces, keep=None):
+        """Base: old.py holds BLOCK_A, BLOCK_B and BLOCK_C. The change keeps `keep` in old.py (None deletes it) and
+        adds `pieces`. Returns the check's (exit code, output)."""
+        self.base({"old.py": "\n\n".join((self.BLOCK_A, self.BLOCK_B, self.BLOCK_C))})
+        self.change({"old.py": keep, **pieces})
+        status = self.git("diff", "-M", "--name-status", "origin/main")
+        for path in pieces:
+            self.assertIn("A\t%s\n" % path, status, "fixture state: %s is not a new file\n%s" % (path, status))
+        patch = self.git("diff", "-U0", "-M", "origin/main")
+        for block in (self.BLOCK_A, self.BLOCK_B, self.BLOCK_C):
+            if block not in (keep or ""):
+                comment = next(row for row in block.splitlines() if "#" in row)
+                self.assertIn("\n-" + comment + "\n", patch, "fixture state: the base comment is not deleted: " + comment)
+        return self.lint()
+
+    def test_comments_moved_out_of_a_deleted_file_are_clean(self):
+        rc, out = self.cut({"parts/a.py": self.BLOCK_A, "parts/b.py": self.BLOCK_B, "parts/c.py": self.BLOCK_C})
+        self.assertEqual(rc, 0, "moved comments counted as added\n" + out)
+
+    def test_comments_moved_out_of_a_kept_file_are_clean(self):
+        rc, out = self.cut({"parts/a.py": self.BLOCK_A}, keep=self.BLOCK_B + "\n\n" + self.BLOCK_C)
+        self.assertEqual(rc, 0, "moved comment counted as added while its file is kept\n" + out)
+
+    def test_flagged_comment_the_base_holds_in_an_untouched_part_still_fails(self):
+        keep = self.BLOCK_B + "\n\n" + self.BLOCK_C
+        rc, out = self.cut({"parts/a.py": self.BLOCK_A, "parts/d.py": "def d():\n    # fixed in round 2\n    return 4\n"},
+                           keep=keep)
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "parts/d.py", 2)
+
+    def test_moved_comment_changed_while_moved_still_fails(self):
+        changed = self.BLOCK_A.replace("applies here\n", "applies here.\n")
+        rc, out = self.cut({"parts/a.py": changed, "parts/b.py": self.BLOCK_B, "parts/c.py": self.BLOCK_C})
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "parts/a.py", 3)
+
+    def test_new_flagged_comment_beside_a_move_still_fails(self):
+        rc, out = self.cut({"parts/a.py": self.BLOCK_A, "parts/b.py": self.BLOCK_B, "parts/c.py": self.BLOCK_C,
+                            "parts/new.py": "x = 1\n# owner ruling is new here\n"})
+        self.assertEqual(rc, 1, out)
+        self.assertHit(out, "parts/new.py", 2)
 
 
 class Quiet(Case):
