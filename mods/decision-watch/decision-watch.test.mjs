@@ -387,11 +387,14 @@ await test('turn.complete trigger 5: a second turn while a judge runs starts no 
 // A turn that cannot be judged leaves a SKIP line, never silence. skipLogged is registered before the turn that
 // writes the line, and answers true or false so a missing line fails with its own message.
 const skipLogged = (h, ms) => waitLog(h, /^\S+ SKIP /m, ms).then(() => true, () => false)
-// Only the transcript lookup hangs, so the log (which also asks $.fs.exists) still works.
-const slowLookup = h => {
+// Only the transcript lookup answers differently, so the log (which also asks $.fs.exists) still works. `answer` gives
+// that lookup's reply: a promise that never settles (a hung lookup), or false (no transcript).
+const lookupOverride = (h, answer) => {
   const exists = h.$.fs.exists
-  h.$.fs.exists = p => (p === transcriptOf(h) ? new Promise(() => {}) : exists(p))
+  h.$.fs.exists = p => (p === transcriptOf(h) ? answer() : exists(p))
 }
+const slowLookup = h => lookupOverride(h, () => new Promise(() => {}))
+const missingLookup = h => lookupOverride(h, () => false)
 
 await test('turn.complete trigger 6: a transcript lookup slower than its 500 ms bound still writes a SKIP line and judges nothing', async () => {
   const h = await load(host())
@@ -420,6 +423,25 @@ await test('turn.complete trigger 7: a hung transcript lookup holds next(e) unti
   assert.equal(await within(fire(fast, 'turn.complete', turnEvent(), NEXT), 400, 'a fast lookup was held for the full wait'), NEXT)
   assert.match(allLog(fast), /^\S+ STOP seen /m, 'a fast lookup returned with no STOP seen line in the log')
   assert.doesNotMatch(allLog(fast), /SKIP /, `a fast lookup wrote a SKIP line (returned after ${Date.now() - t1} ms)`)
+})
+
+// Decision decision-watch-finds-transcript: a turn whose transcript is not found shows one UNKNOWN notice per session,
+// as an in-session toast. The SKIP line stays in the log. A turn is done once its STOP seen line is written, so turnDone
+// waits for that line; flush() then drains the microtasks the turn queued, and a toast it queued has been called.
+await test('turn.complete no transcript: the first turn shows one UNKNOWN notice, and the next turn of the same session shows none', async () => {
+  const h = await load(host())
+  missingLookup(h)
+  const turnDone = async turnId => {
+    const stopSeen = waitLog(h, /STOP seen/)
+    await fire(h, 'turn.complete', turnEvent({ turnId }), {})
+    await stopSeen
+    await flush()
+  }
+  await turnDone('t1')
+  same(h.toasts.length, 1, 'notices shown after the first turn with no transcript')
+  assert.ok(h.toasts[0].startsWith(UNKNOWN), `the notice is not an UNKNOWN: ${JSON.stringify(h.toasts[0])}`)
+  await turnDone('t2')
+  same(h.toasts.length, 1, 'notices shown after the second turn of the same session')
 })
 
 // /clear gives the process a new session id with no session.start (SessionEndInput and the session.start note in the
