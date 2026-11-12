@@ -4,7 +4,8 @@ FAMILY = "push-target-named"
 # RULE push-target-named (brief-names-push-target). An agent's `git push` is judged against the `Push to:` line of its
 # own brief: the first user record of the agent's own transcript, which s14736's agent_transcript names beside the main
 # transcript. A line that starts, after markdown lead characters and spaces, with `Push to:` names the one branch the
-# agent may push to, or `none`. The first such line decides. A line inside a fence or in backticks does not count. Only
+# agent may push to, or `none`. The first line with a real value decides: a placeholder line (`<branch>`) is skipped. A
+# line inside a fence or in backticks does not count. Only
 # a payload with a valid agent_id is judged: a top-level push and a dry run are not. The fixtures reuse the agent-file
 # writer of s14736 (write_agent_transcripts), the one home of that layout.
 PUSH_TARGET_RULE = "push-target-named"
@@ -24,8 +25,14 @@ def pt_fixture(name, agents):
 
 
 def pt_one(text):
-    """The agent file of PUSH_TARGET_AGENT: its brief is one user record holding `text`."""
+    """The agent file of PUSH_TARGET_AGENT: its brief is one user record holding `text`. A list of blocks is the
+    record's content as given: role_said writes a list as it is, and agent_brief_text joins its text blocks, one per line."""
     return [(PUSH_TARGET_AGENT, [text])]
+
+
+def pt_blocks(*parts):
+    """The content of a user record that is a list of text blocks, the shape a message of several parts takes."""
+    return [{"type": "text", "text": part} for part in parts]
 
 
 pt_fixture("pt-none", pt_one("Push to: none\n\nTask: report only."))
@@ -47,6 +54,22 @@ pt_fixture("pt-second-record", [(PUSH_TARGET_AGENT, ["Task: report only.", "Push
 pt_fixture("pt-empty-file", [(PUSH_TARGET_AGENT, [])])
 pt_fixture("pt-no-agent-file", [])
 pt_fixture("pt-agent-folder", [(PUSH_TARGET_AGENT, None)])
+# A value read without its code ticks, a trailing full stop or a refs/heads/ prefix. pt-origin-prefix is the origin/
+# spelling.
+pt_fixture("pt-tick-value", pt_one("Push to: `lane-x`\n\nTask: push."))
+pt_fixture("pt-dot-value", pt_one("Push to: lane-x.\n\nTask: push."))
+pt_fixture("pt-refs-value", pt_one("Push to: refs/heads/lane-x\n\nTask: push."))
+# A bold lead is no line.
+pt_fixture("pt-bold-lead", pt_one("**Push to:** lane-x\n\nTask: push."))
+# A placeholder line is skipped, indented or not, and the real line below it decides.
+pt_fixture("pt-placeholder-then-x", pt_one("Push to: <branch>\nPush to: lane-x\n"))
+pt_fixture("pt-indented-placeholder-then-x", pt_one("    Push to: <branch>\nPush to: lane-x\n"))
+pt_fixture("pt-indented-placeholder", pt_one("    Push to: <branch>\n"))
+# A brief that names the branch PUSHFEAT sits on, for a plain --tags push.
+pt_fixture("pt-feat", pt_one("Push to: feat\n\nTask: push."))
+# A brief held as a list of text blocks, and one whose only block is not text.
+pt_fixture("pt-blocks-lane-x", pt_one(pt_blocks("# Brief", "Push to: lane-x", "Task: push.")))
+pt_fixture("pt-blocks-no-text", pt_one([{"type": "tool_result", "tool_use_id": "t1", "content": "Push to: lane-x"}]))
 # The brief-names-push-target re-point: the existing agent pushes of s21304, s22868 and s23264 send `git push origin work`,
 # and each agent's brief names `work`, so they stay allowed once the rule is built. One file for the four agent ids.
 pt_fixture("pt-repoint", [("auth1", ["Push to: work"]), ("rw1", ["Push to: work"]), ("bld1", ["Push to: work"]),
@@ -161,4 +184,71 @@ pt_case("push-target-named: an unreadable agent transcript, a folder, leaves the
         carries=(PUSH_TARGET_NO_TARGET,), lacks=("lane-x",))
 pt_case("push-target-named: a payload with no transcript_path leaves the push with no brief, so it is refused",
         VCS + " push origin HEAD:lane-x", "deny", None, rule=PUSH_TARGET_RULE,
+        carries=(PUSH_TARGET_NO_TARGET,), lacks=("lane-x",))
+
+# A value is read without its code ticks, a trailing full stop or a refs/heads/ prefix, as an origin/ prefix already is. Each
+# spelling allows a push to its branch, and each refuses a push to another. The allow is the red; the refusal is its control.
+pt_case("push-target-named: a backticked Push to: value allows a push to its branch",
+        VCS + " push origin HEAD:lane-x", "allow", "pt-tick-value", silent=True)
+pt_case("push-target-named: a backticked Push to: value refuses a push to another branch",
+        VCS + " push origin HEAD:lane-y", "deny", "pt-tick-value", rule=PUSH_TARGET_RULE,
+        lacks=("lane-y", PUSH_TARGET_NO_TARGET))
+pt_case("push-target-named: a Push to: value with a trailing full stop allows a push to its branch",
+        VCS + " push origin HEAD:lane-x", "allow", "pt-dot-value", silent=True)
+pt_case("push-target-named: a Push to: value with a trailing full stop refuses a push to another branch",
+        VCS + " push origin HEAD:lane-y", "deny", "pt-dot-value", rule=PUSH_TARGET_RULE,
+        lacks=("lane-y", PUSH_TARGET_NO_TARGET))
+pt_case("push-target-named: a refs/heads/ Push to: value allows a push to its branch",
+        VCS + " push origin HEAD:lane-x", "allow", "pt-refs-value", silent=True)
+pt_case("push-target-named: a refs/heads/ Push to: value refuses a push to another branch",
+        VCS + " push origin HEAD:lane-y", "deny", "pt-refs-value", rule=PUSH_TARGET_RULE,
+        lacks=("lane-y", PUSH_TARGET_NO_TARGET))
+pt_case("push-target-named: an origin/ Push to: value refuses a push to another branch",
+        VCS + " push origin HEAD:lane-y", "deny", "pt-origin-prefix", rule=PUSH_TARGET_RULE,
+        lacks=("lane-y", PUSH_TARGET_NO_TARGET))
+
+# A bold lead is no line, so the push is refused with the no-target remedy.
+pt_case("push-target-named: a bold **Push to:** lead is no line, so the push is refused with the remedy",
+        VCS + " push origin HEAD:lane-x", "deny", "pt-bold-lead", rule=PUSH_TARGET_RULE,
+        carries=(PUSH_TARGET_NO_TARGET,), lacks=("lane-x",))
+
+# A placeholder line is skipped, indented or not. The real line below it decides, so a refusal for another branch names a
+# mismatch, never a brief with no target.
+pt_case("push-target-named: a placeholder Push to: line is skipped, so the real line below it allows its branch",
+        VCS + " push origin HEAD:lane-x", "allow", "pt-placeholder-then-x", silent=True)
+pt_case("push-target-named: an indented placeholder line is skipped, so the real line below it allows its branch",
+        VCS + " push origin HEAD:lane-x", "allow", "pt-indented-placeholder-then-x", silent=True)
+pt_case("push-target-named: a placeholder line is skipped, so the real line below it refuses another branch",
+        VCS + " push origin HEAD:lane-y", "deny", "pt-placeholder-then-x", rule=PUSH_TARGET_RULE,
+        lacks=("lane-y", PUSH_TARGET_NO_TARGET))
+pt_case("push-target-named: an indented placeholder line is skipped, so the real line below it refuses another branch",
+        VCS + " push origin HEAD:lane-y", "deny", "pt-indented-placeholder-then-x", rule=PUSH_TARGET_RULE,
+        lacks=("lane-y", PUSH_TARGET_NO_TARGET))
+pt_case("push-target-named: an indented placeholder with no real line below it is refused, with the remedy",
+        VCS + " push origin HEAD:lane-x", "deny", "pt-indented-placeholder", rule=PUSH_TARGET_RULE,
+        carries=(PUSH_TARGET_NO_TARGET,), lacks=("lane-x",))
+
+# A --tags push sends every tag to origin, so no branch a brief names covers it. A plain --tags push is refused under
+# any brief.
+pt_case("push-target-named: a --tags push to the brief's own branch is refused, since every tag reaches origin",
+        VCS + " push --tags origin HEAD:lane-x", "deny", "pt-lane-x", rule=PUSH_TARGET_RULE,
+        lacks=("lane-x", PUSH_TARGET_NO_TARGET))
+pt_case("push-target-named: a plain --tags push under a brief naming the current branch is refused",
+        VCS + " push --tags origin", "deny", "pt-feat", rule=PUSH_TARGET_RULE, lacks=(PUSH_TARGET_NO_TARGET,))
+pt_case("push-target-named: a plain --tags push with no remote is refused under a brief naming another branch",
+        VCS + " push --tags", "deny", "pt-lane-x", rule=PUSH_TARGET_RULE, lacks=(PUSH_TARGET_NO_TARGET,))
+pt_case("push-target-named: a plain --tags push under a none brief is refused, as every push is",
+        VCS + " push --tags origin", "deny", "pt-none", rule=PUSH_TARGET_RULE, lacks=(PUSH_TARGET_NO_TARGET,))
+pt_case("push-target-named: a plain --tags push under a brief with no line is refused, with the remedy",
+        VCS + " push --tags origin", "deny", "pt-no-line", rule=PUSH_TARGET_RULE, carries=(PUSH_TARGET_NO_TARGET,))
+
+# A brief held as a list of text blocks is read as the text of its blocks, one per line. A block that is not text is
+# no brief.
+pt_case("push-target-named: a brief held as a list of text blocks allows a push to the branch its Push to: line names",
+        VCS + " push origin HEAD:lane-x", "allow", "pt-blocks-lane-x", silent=True)
+pt_case("push-target-named: a brief held as a list of text blocks refuses a push to another branch",
+        VCS + " push origin HEAD:lane-y", "deny", "pt-blocks-lane-x", rule=PUSH_TARGET_RULE,
+        lacks=("lane-y", PUSH_TARGET_NO_TARGET))
+pt_case("push-target-named: a list with no text block is no brief, so the push is refused with the remedy",
+        VCS + " push origin HEAD:lane-x", "deny", "pt-blocks-no-text", rule=PUSH_TARGET_RULE,
         carries=(PUSH_TARGET_NO_TARGET,), lacks=("lane-x",))
