@@ -45,5 +45,6 @@ The test-author and the builder each get their own isolated worktree (decision `
 ## Report
 
 Read each time you write from `~/.claude/bin/now-central`, never from memory.
+When the work is done, and before the report: run the self-check in decision `session-tiers` (Archiving scope). Commit the handoff to `roadmap/outbox/<slug>-handoff.md` on the record branch, where `<slug>` is this lane's branch slug. Then set this session's tag `cs-archive-ready:<slug>` with set_session_tags. Then report.
 Cap <N> lines: Done, Deviations, Input Needed, Next. Add one line: "Port to other repos: yes or
 no, and why". Send the green, reviewed head and branch to the coordinator. Do not merge.
