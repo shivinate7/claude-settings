@@ -5196,8 +5196,9 @@ def _sim_route_remedy(rest: list) -> str:
 
 
 def sim_lease_holds(session: str, udids: list) -> bool:
-    """True when SESSION holds a live sim-lease whose slot maps to every UDID in UDIDS (decision
-    sim-test-is-the-one-boot-path, ruling 5). The slot map, the liveness test and the read live in bin/sim-lease,
+    """True when SESSION holds a live own-boot sim-lease whose slot maps to every UDID in UDIDS (decision
+    sim-test-is-the-one-boot-path, ruling 5). A reuse lease (it carries `reuse`) is a lease on a device this session did
+    not boot, so it allows no boot. The slot map, the liveness test and the read live in bin/sim-lease,
     loaded by path as it has no .py name. An empty session or UDIDS, or any failure to load or read, is False:
     the refusal stands. The read takes no lock and writes nothing, and no bytecode file is written for the load."""
     if not session or not udids:
@@ -5211,7 +5212,7 @@ def sim_lease_holds(session: str, udids: list) -> bool:
         lease = importlib.util.module_from_spec(spec)
         loader.exec_module(lease)
         held = {lease.SLOT_UDID[e["slot"]].casefold() for e in lease.live_leases()
-                if session == e.get("session") and e.get("slot") in lease.SLOT_UDID}
+                if session == e.get("session") and e.get("slot") in lease.SLOT_UDID and not e.get("reuse")}
     except Exception:
         return False
     finally:

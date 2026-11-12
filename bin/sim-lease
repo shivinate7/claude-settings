@@ -18,8 +18,8 @@ take  queues PID and waits for its turn. Granted: prints the slot, `1`, `2` or `
       SIM_LEASE_POLL (default 2) seconds. --pid is required on take and give: without it, or with any other bad argument, one usage line goes to stderr and the
       exit is 2. --session defaults to $CLAUDE_CODE_SESSION_ID.
 give  frees PID's lease and its queue place. It is idempotent and always exits 0.
-renew stamps PID's lease `granted` with now, so SIM_LEASE_MAX counts the silence since the last renew. It exits 0 when
-      PID holds a lease, else 1 (a no-op host: 0, as give). A live holder calls it (bin/sim-test, every SIM_TEST_RENEW s).
+renew exits 0 when PID holds a lease, else 1 (a no-op host: 0, as give). It writes nothing. A live holder calls it
+      (bin/sim-test, every SIM_TEST_RENEW s) to learn that its lease is gone.
 status  prints one line per lease (with the device's `udid`), one per waiter, and the load.
 
 Limits on every grant: the 5-minute load is under 100 and the 1-minute load is under 60.
@@ -30,10 +30,10 @@ waiting take stamps `seen`, its time in epoch seconds, on its queue entry (the t
 time.time()). A waiter whose `seen` is older than SIM_LEASE_SKIP seconds (default 30, unmeasured) is stale and is passed
 over: a take whose process stopped polling, with its pid still alive, would block the queue for good. A stale waiter keeps
 its place, and its next poll makes it fresh again, ahead of every later waiter. A waiter with no `seen` counts as fresh.
-Each lease records `granted`, its grant time in epoch seconds (env SIM_LEASE_NOW when set, else time.time()); renew stamps
-it again. On every take, a lease whose `granted` is older than SIM_LEASE_MAX seconds (default 1800, unmeasured) is dropped,
-so a holder that goes silent cannot keep a slot for good. live_leases() treats such a lease as not live, on the same clock.
-A lease with no `granted` does not expire.
+Each lease records `granted`, its grant time in epoch seconds (env SIM_LEASE_NOW when set, else time.time()). A lease has no
+time limit: a live pid keeps its lease however long it is silent, since a slow holder is not a crash (coordinator pick).
+A lease that carries `reuse` (the UDID of the booted device it took) is a reuse lease: it takes the slot, and the guard
+reads it as no boot of this session's own.
 Reaping, on every call: a lease or waiter whose pid is dead, or whose `ps -o lstart=` start time differs from the one
 recorded at take, is dropped. A holder that dies therefore never needs to give. Only a `ps` that exits 1 means dead: any
 other failure (another exit code, a timeout, a missing binary) keeps the entry, as unknown.
@@ -46,8 +46,8 @@ State: ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-lease/leases.json, written 
 under an fcntl.flock on the file lock in the same folder. The lock is held for one read-decide-write step, never
 while sleeping.
 Cost: per call, one `uname`, one `ps` per recorded pid, and one `sysctl` on take and status (take: one `sysctl` per poll). A
-renew is one such call: one sim-lease process, and one leases.json write. Files written:
-leases.json, only when its content changes (a waiting take changes it each poll, with its `seen`; a renew, its `granted`), plus the empty lock file. No daemon, no log.
+renew is one such call: one sim-lease process, and no write. Files written:
+leases.json, only when its content changes (a waiting take changes it each poll, with its `seen`), plus the empty lock file. No daemon, no log.
 Reader: the guard calls live_leases() (SLOT_UDID maps a slot to its device) to let a session's MCP launch boot the device
 its own live lease holds. It takes no flock and writes nothing: one read of leases.json and one `ps` per lease.
 macOS only in effect; it runs under python3's standard library alone.
@@ -82,20 +82,9 @@ def state_dir():
                         "state", "sim-lease")
 
 
-def lease_max():
-    """SIM_LEASE_MAX in seconds (default 1800, unmeasured)."""
-    return float(os.environ.get("SIM_LEASE_MAX") or 1800)
-
-
 def now_s():
     """The clock of the tool: env SIM_LEASE_NOW when set, else time.time()."""
     return float(os.environ.get("SIM_LEASE_NOW") or time.time())
-
-
-def lease_expired(lease, now, max_age):
-    """True when a lease's silence, now minus its `granted`, is over max_age. A lease with no `granted` does not expire.
-    The one test: take drops by it and live_leases skips by it."""
-    return lease.get("granted") is not None and now - lease["granted"] > max_age
 
 
 def out(cmd, env=None):
@@ -150,7 +139,7 @@ def is_live(entry):
 
 
 def live_leases():
-    """The lease records whose holder is live and not past SIM_LEASE_MAX, read from leases.json with no flock and no write: a reader that
+    """The lease records whose holder is live, read from leases.json with no flock and no write: a reader that
     reaps through State would rewrite the file and create the lock. No file means no leases. A file that cannot be
     read, or whose shape is wrong, raises OSError, ValueError, KeyError or TypeError, and the caller decides. It does
     not consult is_noop(): a lease on file is live whatever this host is. Cost: one read and one `ps` per lease."""
@@ -159,8 +148,7 @@ def live_leases():
             data = json.load(f)
     except FileNotFoundError:
         return []
-    now, max_age = now_s(), lease_max()
-    return [e for e in data["leases"] if isinstance(e, dict) and is_live(e) and not lease_expired(e, now, max_age)]
+    return [e for e in data["leases"] if isinstance(e, dict) and is_live(e)]
 
 
 class State:
@@ -231,8 +219,11 @@ def stamp(now):
 
 def lease_of_entry(entry, slot, udid, now):
     """The lease record for a queue entry granted slot: the entry without its queue-only fields, with slot, device UDID (udid
-    is the reused device, None for an own boot) and the grant time."""
+    is the reused device, None for an own boot) and the grant time. A reuse lease keeps `reuse`, set to the UDID it got
+    (one of several when the entry listed more), so a reader tells it from an own-boot lease."""
     rec = {k: v for k, v in entry.items() if k not in ("reuse", "reuse_any", "seen")}
+    if udid:
+        rec["reuse"] = udid
     return dict(rec, slot=slot, udid=udid or SLOT_UDID[slot], granted=stamp(now))
 
 
@@ -295,7 +286,6 @@ def cmd_take(args):
     wait = args.wait if args.wait is not None else float(os.environ.get("SIM_LEASE_WAIT") or 300)
     poll = float(os.environ.get("SIM_LEASE_POLL") or 2)
     skip = float(os.environ.get("SIM_LEASE_SKIP") or 30)
-    max_age = lease_max()
     session = args.session or os.environ.get("CLAUDE_CODE_SESSION_ID") or ""
     noop, darwin = is_noop()
     if noop:
@@ -330,7 +320,6 @@ def cmd_take(args):
                 if not any(e["pid"] == pid for e in st.data["queue"]):
                     st.data["queue"].append(dict(entry))
                 now = now_s()
-                st.data["leases"] = [e for e in st.data["leases"] if not lease_expired(e, now, max_age)]
                 for e in st.data["queue"]:
                     if e["pid"] == pid:
                         e["seen"] = stamp(now)
@@ -370,11 +359,7 @@ def cmd_renew(args):
     if is_noop()[0]:
         return 0
     with State(create=False) as st:
-        lease = st.lease_of(args.pid)
-        if lease is None:
-            return 1
-        lease["granted"] = stamp(now_s())
-    return 0
+        return 0 if st.lease_of(args.pid) else 1
 
 
 def cmd_status(_args):
