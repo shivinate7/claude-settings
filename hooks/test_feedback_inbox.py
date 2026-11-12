@@ -4521,6 +4521,31 @@ def case_closing_adds_no_process_and_rewrites_the_inbox_only_when_it_closes():
           set(rewritten) <= {turns_rel(sid)}, rewritten)
 
 
+REF_ITEMS = (HELD_RULING, HELD_TASK, "- fb-0958-3 [ruling] -> decisions/not-yet.md")  # three open items, one repo
+
+
+def case_refs_are_listed_once_per_repo_not_per_item():
+    """Three open ruling and task items name homes in one repo. The Stop's home check and the compaction note each list
+    the repo's refs with one for-each-ref, not one per item, so the count of starts does not grow with the items."""
+    cfg, sid = new_cfg(), "refs-once"
+    write_file(inbox_of(cfg, sid), render_block("three open items", items=REF_ITEMS))
+    # The turn state judged all three ids, so the Stop makes no model call and its only starts are the home check's.
+    write_file(os.path.join(cfg, turns_rel(sid)),
+               json.dumps({"seen": 1, "burst": [], "judged": ["fb-0958-1", "fb-0958-2", "fb-0958-3"]}))
+    stop_log = os.path.join(os.path.dirname(cfg), "refs-stop.log")
+    guard(cfg, sid, extra_env={"FG_ALL_STARTS": stop_log})
+    stop_lists = [a for a in logged_starts(stop_log) if git_verb(a) == "for-each-ref"]
+    check("refs once: the Stop lists the repo's refs once for three items", len(stop_lists) == 1,
+          "for-each-ref starts=%d: %s" % (len(stop_lists), stop_lists))
+    write_file(inbox_of(cfg, sid), render_block("three open items", items=REF_ITEMS))
+    write_file(sidecar_of(cfg, sid), fixture_repo())
+    note_log = os.path.join(os.path.dirname(cfg), "refs-note.log")
+    reorient_counted(cfg, sid, note_log)
+    note_lists = [a for a in logged_starts(note_log) if git_verb(a) == "for-each-ref"]
+    check("refs once: the compaction note lists the repo's refs once for three items", len(note_lists) == 1,
+          "for-each-ref starts=%d: %s" % (len(note_lists), note_lists))
+
+
 def case_handoff_refusal_names_closed_as_a_way_out():
     """The standing-id refusal names `[closed]` in the same message as the handoff entry it asks for."""
     cfg, sid = new_cfg(), "refusal-closed"
@@ -4639,7 +4664,7 @@ def case_question_box_answer_is_saved_like_a_typed_message():
           captured_texts(cfg3, sid3))
 
 
-# --------------------------------------------------------------------------- round 1 review: answer-only, per-line proof, the close window, the remedy
+# --------------------------------------------------------------------------- question box: answer-only saves, per-line close proof, the close window, the remedy
 
 QUESTION_TEXT = "Approve and publish the settings.json ruling now?"
 LATER_HEADER = "2026-10-13 10:09 CDT (UTC-05:00)"
@@ -4651,7 +4676,8 @@ def case_question_box_saves_the_answer_and_never_the_question():
     it, to a tracked settings.json, is refused as no grant. Saved with the question, it would pass as granted."""
     repo = make_repo("qbox-settings", tracked=("settings.json", "decisions/a-ruling.md"))
     cfg, sid = new_cfg(), "qbox-answer-only"
-    p = question_hook(cfg, sid, 'The user answered: "%s"="No". Continue.' % QUESTION_TEXT, cwd=repo)
+    p = question_hook(cfg, sid, 'The user answered: "%s"="No". Continue.' % QUESTION_TEXT, cwd=repo,
+                      questions=box_questions(QUESTION_TEXT))
     check("question answer only: the hook exits 0", p.code == 0, p.desc())
     blocks = read_blocks(read_or_empty(inbox_of(cfg, sid)))
     check("question answer only: the answer is saved as one block", len(blocks) == 1, blocks)
@@ -4741,7 +4767,7 @@ def case_block_refusal_remedy_names_closed_beside_the_handoff():
     check("block remedy: the remedy names [closed] as a way out, beside the handoff", "[closed]" in remedy, remedy)
 
 
-# --------------------------------------------------------------------------- round 2 review: box shapes, a lone CR
+# --------------------------------------------------------------------------- question box shapes, and a lone CR in the inbox
 
 SHIP_QUESTION = "Ship the cap change?"
 MULTI_QUESTION = 'Do I have approval to merge "PR 1", "PR 2" now?'
@@ -5049,6 +5075,7 @@ CASES = (
     case_one_question_answer_keeps_its_quote_marks_whole,
     case_box_answer_in_a_dict_is_saved_and_notes_stay_in_the_string,
     case_lone_cr_in_a_grant_block_keeps_the_refused_ruling_open,
+    case_refs_are_listed_once_per_repo_not_per_item,
 )
 
 
