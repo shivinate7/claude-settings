@@ -250,6 +250,8 @@ LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a he
 # It reads RULE_DIRS, never a copy.
 GUARD_PATHS = stale_cites.RULE_DIRS + ("merge/", "githooks/")
 GUARD_FILES = ("settings.json",)
+# A text file under a GUARD_PATHS folder that no check reads by path: a change to it alone is no guard change. guard_hits reads this tuple.
+GUARD_TEXT_FILES = (".github/pull_request_template.md",)
 REVIEW_CITE = "(decision pr-review-record, a review record names the head it reviewed and only an open pull request takes one)"
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
 REPO_CITE = "(decision merge-confirm-repo, -C names the checkout a merge acts in, so a -C that names no folder stops the merge)"
@@ -5023,10 +5025,10 @@ def write_merge_role(tier):
         raise Stop(f"cannot write the merge role to {path} {ROLE_CITE}: {e}.")
 
 def guard_hits(paths):
-    """-> the sorted paths that start with a GUARD_PATHS entry or equal a GUARD_FILES entry, less each test path: a test file alone is no
+    """-> the sorted paths that start with a GUARD_PATHS entry or equal a GUARD_FILES entry, less each GUARD_TEXT_FILES entry and each test path: a test file alone is no
     guard change (decision hold-unsafe-after-round-3). hooks/guard.py is_test_rel is the one home of what a test path is."""
     import guard as hook_guard  # here, not at the top: it loads the whole guard set, and only the review record needs it
-    return sorted(p for p in paths if (p.startswith(GUARD_PATHS) or p in GUARD_FILES) and not hook_guard.is_test_rel(p))
+    return sorted(p for p in paths if (p.startswith(GUARD_PATHS) or p in GUARD_FILES) and p not in GUARD_TEXT_FILES and not hook_guard.is_test_rel(p))
 
 def is_doc(path):
     """A doc is a .md under docs/, or the root README.md. Case is ignored and the path is not stripped, so a stray space makes it a non-doc.
