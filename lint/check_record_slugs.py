@@ -15,13 +15,22 @@ the one home of this grammar (FIX_BODY, NONE_REASONS, parse_fix); lint/report_gu
     Fix: none -- <reason>   or "none —"; the reason is one of NONE_REASONS
     Fix: already fixed on main <sha>   a hex sha of 7 to 40 digits (with or without the "none --" lead) that is a
                             commit and an ancestor of origin/main (`git merge-base --is-ancestor`)
-Three more rules read the notes file (decision `notes-name-their-fix`):
+Four more rules read the notes file (decisions `notes-name-their-fix` and `notes-sightings-expiry`):
   Ratchet: when the branch touches the notes file, the bullets with no valid Fix at HEAD may not outnumber those at
     the merge base of origin/main and HEAD. Both counts are read live; the total prints. A HEAD with none to count
     reads no base.
   Until: a `Fix: none` line the branch adds or edits carries `Until: YYYY-MM-DD`, today or later and no more than
     UNTIL_CAP_DAYS (14) from today. A step or already-fixed line needs no date. Today is FIXED_TODAY (ISO), else the clock.
   Upkeep: expired_notes lists the `Fix: none` lines whose Until is past, for skills/roadmap/build.py.
+  Seen (decision notes-sightings-expiry): a notes line the branch adds carries `Seen: YYYY-MM-DD xN` (N of 1 or more; the
+    last Seen on the line counts), dated today or earlier and no more than SEEN_EXPIRY_DAYS (30) old. A line it edits
+    needs none, but a field it carries must be valid and its N may not drop below the merge base's. N of 2 or more is red:
+    the note is a debt, so move it to a debt file with its Seen line. A debt file the branch adds or edits may carry a
+    `Seen:` line (column one, or after one leading `- `); present, it is a calendar date no later than today and N of 1 or
+    more, with no age limit. parse_seen is the one home of the grammar; janitor/sweep.py imports it.
+  Expiry: unseen_notes lists each note of a checkout whose last sighting (its Seen date, else the author date of the
+    commit that last touched it) is over SEEN_EXPIRY_DAYS old, and each line with no true date (a shallow-clone boundary
+    line: last sighting None, UNKNOWN). A line not yet committed is seen today. janitor/sweep.py --expire-notes calls it.
 A notes line holds the field anywhere (the last `Fix:` on the line counts). A debt file holds it as a line that
 starts `Fix:` at column one, or after one leading `- `. A notes line whose `- <slug>:` already exists at the merge
 base is an edit and passes, so old lines never turn red. Only a step Fix reads origin/roadmap, and only an
@@ -38,11 +47,23 @@ Cost, every git read of a run with no file argument, per notes file path (the la
   - three per already-fixed sha (fixed_on_main: a rev-parse of origin/main, a rev-parse of the sha, a merge-base);
   - the ratchet, only when the branch touches the notes file: an ls-tree and a show of HEAD, and, when HEAD has a
     bullet with no valid Fix, a merge-base plus an ls-tree and a show of the merge base.
+  - the Seen rule: no git process of its own beyond the diff and the shows above (an edited debt file is
+    shown too);
+  - unseen_notes, only when the sweep runs --expire-notes: one `git blame --line-porcelain` per notes file, and
+    one rev-parse when a boundary line shows;
+  - --next-debt: one listing of the debt folder, then a read of each debt; --debt-flow: one git diff, once per
+    batch merge.
 No file is written, no process is left running, no timer. commit_fixes (read by lint/report_guard.py) is one git show
 of one commit, one process.
 
     python3 lint/check_record_slugs.py [file ...]
         # files given: check those, skip git
+    python3 lint/check_record_slugs.py --next-debt
+        # prints the slug of the open debt to fix next: the highest Seen count, then the oldest Seen date (a debt with no
+        # Seen line is x1 with no date, after the dated ones), then the slug. The notes file and the README are no debts
+    python3 lint/check_record_slugs.py --debt-flow START END
+        # prints `debts opened N, closed M`, then one `+ <slug>` or `- <slug>` line per debt file added or deleted from the
+        # merge base of START and END to END (the fifth pace number of a batch merge)
 
 The functions take a repo root, so lint/compliance_probes.py reads a child's records with them.
 """
@@ -75,11 +96,12 @@ def git_names(root, *args):
     return [name for name in r.stdout.split("\0") if name]
 
 
-def changes(root, base="origin/main", head="HEAD"):
+def changes(root, base="origin/main", head="HEAD", renames=True):
     """(added, moved) files of `root` from the merge base of `base` and `head` to `head`, from one process. `moved` holds
-    (status, old, new) for each delete, modify and rename; a rename names two paths. -M is explicit, so diff.renames in a
-    config never moves the verdict. Raises Unknown when git cannot say."""
-    names = git_names(root, "diff", "--name-status", "-z", "-M", f"{base}...{head}")
+    (status, old, new) for each delete, modify and rename; a rename names two paths. The rename flag is explicit (-M, or
+    --no-renames for the debt flow, where a rename is a delete and an add), so diff.renames in a config never moves the
+    verdict. Raises Unknown when git cannot say."""
+    names = git_names(root, "diff", "--name-status", "-z", "-M" if renames else "--no-renames", f"{base}...{head}")
     added, moved, i = [], [], 0
     while i < len(names):
         status = names[i]
@@ -226,26 +248,39 @@ def fixed_on_main(root, sha, ref="origin/main"):
         raise MainUnread("the %s read did not run (%s)" % (ref, err))
 
 
-def added_note_lines(root, path, base="origin/main", head="HEAD", edits=False):
-    """The bullet lines the branch adds to the notes file `path`, from the merge base of `base` and `head`, minus each
-    line whose `- <slug>:` the merge base already holds (an edit), unless `edits`, which keeps them. A heading or a
-    blank line is no note. Raises Unknown when git cannot say. A file the branch deletes or never holds adds no line,
-    and its base is not read."""
+def note_changes(root, path, base="origin/main", head="HEAD"):
+    """[(line, base line)] for each bullet the branch adds to the notes file `path`, from the merge base of `base` and
+    `head`. The base line is the one the merge base holds under the same `- <slug>:` (the line is an edit), else None
+    (the line is new). A heading or a blank line is no note. Raises Unknown when git cannot say. A file the branch
+    deletes or never holds adds no line, and its base is not read."""
     if not git_text(root, "ls-tree", "--name-only", head, "--", path).strip():
         return []
     diff = git_text(root, "-c", "core.quotepath=off", "diff", "--unified=0", "--no-color", "--no-ext-diff",
                     "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", f"{base}...{head}", "--", path)
     notes = [l for l in patch_added(diff).get(path, (False, []))[1] if NOTE_LINE.match(l)]
-    if not notes or edits:
-        return notes
+    if not notes:
+        return []
     mb = git_text(root, "merge-base", base, head).strip()
-    held = set()
+    held = {}
     if git_text(root, "ls-tree", "--name-only", mb, "--", path).strip():
         for old in git_text(root, "show", mb + ":" + path).splitlines():
             m = NOTE_SLUG.match(old)
             if m:
-                held.add(m.group(1))
-    return [l for l in notes if not (NOTE_SLUG.match(l) and NOTE_SLUG.match(l).group(1) in held)]
+                held.setdefault(m.group(1), old)
+    return [(l, held.get(NOTE_SLUG.match(l).group(1)) if NOTE_SLUG.match(l) else None) for l in notes]
+
+
+def all_note_changes(root, base="origin/main", head="HEAD"):
+    """{path: note_changes} for each notes file of `root`, read once so the Fix, Until and Seen checks share one read."""
+    return {path: note_changes(root, path, base, head) for path in layout.candidates(root, "debt-notes")}
+
+
+def added_note_lines(root, path, base="origin/main", head="HEAD", edits=False, changed=None):
+    """The bullet lines the branch adds to the notes file `path`, minus each line whose `- <slug>:` the merge base
+    already holds (an edit), unless `edits`, which keeps them. `changed` is the all_note_changes result, when the
+    caller already holds it. Raises Unknown when git cannot say."""
+    pairs = changed[path] if changed is not None else note_changes(root, path, base, head)
+    return [line for line, held in pairs if edits or held is None]
 
 
 def _note_entry(path, line):
@@ -257,17 +292,18 @@ def _debt_entry(path, lines):
     return (path, path, [parse_fix(l) for l in lines if DEBT_FIX_LINE.match(l)])
 
 
-def added_fixes(root, files, head="HEAD"):
+def added_fixes(root, files, head="HEAD", changed=None, texts=None):
     """[(path, label, fixes)] for each note line the branch adds and each debt file among `files` (the added files).
     `fixes` holds one parse_fix result per Fix field: one for a note line, one per Fix line of a debt file. So []
-    is a debt file with no Fix line, and None marks a field in no listed form."""
+    is a debt file with no Fix line, and None marks a field in no listed form. `changed` (all_note_changes) and
+    `texts` (debt_texts) are the reads a caller already holds."""
     out = []
     for path in layout.candidates(root, "debt-notes"):
-        out += [_note_entry(path, line) for line in added_note_lines(root, path)]
+        out += [_note_entry(path, line) for line in added_note_lines(root, path, changed=changed)]
     debt = debt_file(root)
     for path in files:
         if debt(path):
-            out.append(_debt_entry(path, show(root, head, path)))
+            out.append(_debt_entry(path, texts[path] if texts is not None else show(root, head, path)))
     return out
 
 
@@ -322,11 +358,11 @@ def until_problem(line, now):
     return ""
 
 
-def until_failures(root, now):
+def until_failures(root, now, changed=None):
     """[(path, label, why)] for each line the branch adds or edits in the notes file that fails the Until rule."""
     bad = []
     for path in layout.candidates(root, "debt-notes"):
-        for line in added_note_lines(root, path, edits=True):
+        for line in added_note_lines(root, path, edits=True, changed=changed):
             why = until_problem(line, now)
             if why:
                 bad.append((path, _note_entry(path, line)[1], why))
@@ -348,6 +384,192 @@ def expired_notes(root, now):
                 if NOTE_LINE.match(line) and fix and fix[0] == "none" and until and until < now:
                     out.append((path, _note_entry(path, line)[1], until))
     return out
+
+
+SEEN_EXPIRY_DAYS = 30  # a note whose last sighting is older than this many days expires; a new note's Seen is no older
+SEEN_MARK = re.compile(r"(?<![\w-])Seen:[ \t]*")
+SEEN_BODY = re.compile(r"([0-9]{4}-[0-9]{2}-[0-9]{2}) x([0-9]+)(?![\w])")
+DEBT_SEEN_LINE = re.compile(r"^(?:- )?Seen:")
+BLAME_HEAD = re.compile(r"^([0-9a-f]{40}) [0-9]+ ([0-9]+)(?: [0-9]+)?$")
+NOT_COMMITTED = "0" * 40  # the blame commit of a line that is not committed yet
+
+
+def parse_seen(text):
+    """(date, count) of the last `Seen: YYYY-MM-DD xN` on `text`, or None when there is none or it is malformed: a date
+    that is no calendar day, a count of 0, or no count. A malformed field is told from a missing one by SEEN_MARK.
+    The text is read as text, never as code, as parse_fix does."""
+    marks = list(SEEN_MARK.finditer(text))
+    m = SEEN_BODY.match(text, marks[-1].end()) if marks else None
+    if not m:
+        return None
+    try:
+        date = datetime.date.fromisoformat(m.group(1))
+    except ValueError:
+        return None
+    count = int(m.group(2))
+    return (date, count) if count >= 1 else None
+
+
+def seen_problem(line, now, added=True, floor=0):
+    """Why the note `line` fails the Seen rule, else ''. A line the branch adds needs a valid field whose date is no
+    older than SEEN_EXPIRY_DAYS. A line it edits needs none, but a field it carries must be valid (the age is not
+    judged, so an old line is never red for being old). Either way the date is not in the future, N is under 2 (a
+    second sighting makes the note a debt), and N is not below `floor`, the count the merge base held."""
+    if not SEEN_MARK.search(line):
+        return "has no Seen: YYYY-MM-DD xN (a note counts its sightings)" if added else ""
+    seen = parse_seen(line)
+    if seen is None:
+        return "has a Seen field that is not Seen: YYYY-MM-DD xN (a calendar date, N of 1 or more)"
+    date, count = seen
+    if date > now:
+        return "has a Seen date (%s) in the future" % date
+    if added and date < now - datetime.timedelta(days=SEEN_EXPIRY_DAYS):
+        return "has a Seen date (%s) more than %d days old" % (date, SEEN_EXPIRY_DAYS)
+    if count < floor:
+        return "lowers its sightings from x%d to x%d" % (floor, count)
+    if count >= 2:
+        return "has %d sightings, so it is a debt: move it to a debt file, carry its Seen line, and delete the note line" % count
+    return ""
+
+
+def seen_failures(root, now, changed=None):
+    """[(path, label, why)] for each line the branch adds or edits in the notes file that fails the Seen rule."""
+    bad = []
+    changed = all_note_changes(root) if changed is None else changed
+    for path, pairs in changed.items():
+        for line, held in pairs:
+            floor = (parse_seen(held) or (None, 0))[1] if held else 0
+            why = seen_problem(line, now, added=held is None, floor=floor)
+            if why:
+                bad.append((path, _note_entry(path, line)[1], why))
+    return bad
+
+
+def debt_seen_problem(lines, now):
+    """Why the Seen lines of a debt file fail, else ''. A line that starts `Seen:` at column one, or after one leading
+    `- `, must be a calendar date no later than `now` and N of 1 or more. There is no age limit. No Seen line is fine."""
+    for line in lines:
+        if DEBT_SEEN_LINE.match(line):
+            seen = parse_seen(line)
+            if seen is None:
+                return "has a Seen line that is not Seen: YYYY-MM-DD xN (a calendar date, N of 1 or more)"
+            if seen[0] > now:
+                return "has a Seen date (%s) in the future" % seen[0]
+    return ""
+
+
+def debt_texts(root, files, moved, head="HEAD"):
+    """{path: lines at head} for each debt file the branch adds, edits or renames in: one show each."""
+    debt = debt_file(root)
+    paths = [f for f in files if debt(f)] + [new for status, _old, new in moved if status in "MR" and debt(new)]
+    return {path: show(root, head, path) for path in dict.fromkeys(paths)}
+
+
+def debt_seen_failures(texts, now):
+    """[(path, path, why)] for each debt file of `texts` (debt_texts) whose Seen line is malformed or in the future."""
+    return [(path, path, why) for path, lines in texts.items() for why in [debt_seen_problem(lines, now)] if why]
+
+
+def _blame_date(entry, shallow, now):
+    """The date a blame entry says its line was last touched: now for a line not committed, None (UNKNOWN) for a
+    boundary line of a shallow clone, else the author date in the author's own zone."""
+    if entry["sha"] == NOT_COMMITTED:
+        return now
+    if entry["boundary"] and shallow is not False:
+        return None
+    zone = entry["tz"]
+    sign = -1 if zone.startswith("-") else 1
+    offset = datetime.timedelta(hours=int(zone[1:3]), minutes=int(zone[3:5])) * sign
+    return datetime.datetime.fromtimestamp(entry["time"], datetime.timezone(offset)).date()
+
+
+def blame_lines(root, path):
+    """[(entry, line text)] for each line of the notes file `path` in the checkout `root`, from one `git blame
+    --line-porcelain`. An entry holds sha, line (1-based), boundary, time and tz. Raises Unknown when git cannot blame."""
+    out = git_text(root, "blame", "--line-porcelain", "--", path)
+    rows, entry = [], None
+    for row in out.split("\n"):
+        if entry is None:
+            m = BLAME_HEAD.match(row)
+            if m:
+                entry = {"sha": m.group(1), "line": int(m.group(2)), "boundary": False, "time": 0, "tz": "+0000"}
+        elif row.startswith("\t"):
+            rows.append((entry, row[1:].rstrip("\r")))
+            entry = None
+        elif row == "boundary":
+            entry["boundary"] = True
+        elif row.startswith("author-time "):
+            entry["time"] = int(row.split(" ", 1)[1])
+        elif row.startswith("author-tz "):
+            entry["tz"] = row.split(" ", 1)[1]
+    return rows
+
+
+def unseen_notes(root, now):
+    """[(path, line number, slug, last sighting, line text)] for each bullet of the notes file in the checkout `root` that
+    expired (last sighting more than SEEN_EXPIRY_DAYS before `now`) or has no true date (last sighting None, UNKNOWN).
+    The last sighting is the valid Seen date of the line, else the author date of the commit that last touched it,
+    from one `git blame --line-porcelain` per notes file. A line whose blame commit is a shallow-clone boundary
+    is UNKNOWN: the clone cut its history. A line not yet committed is seen `now`. Raises Unknown when git cannot
+    blame, and layout.LayoutError when the layout cannot be read."""
+    found = []
+    for path in layout.candidates(root, "debt-notes"):
+        if not os.path.isfile(os.path.join(root, *path.split("/"))):
+            continue
+        rows = [(e, text) for e, text in blame_lines(root, path) if NOTE_LINE.match(text)]
+        shallow = None
+        if any(e["boundary"] for e, _text in rows):  # the one rev-parse, and only when a boundary line exists
+            import git_reads  # the one home of the shallow probe (hooks/git_reads.py), loaded on use
+            shallow = git_reads.is_shallow(root)
+        for entry, text in rows:
+            seen = parse_seen(text)
+            last = seen[0] if seen else _blame_date(entry, shallow, now)
+            if last is None or (now - last).days > SEEN_EXPIRY_DAYS:
+                found.append((path, entry["line"], _note_entry(path, text)[1], last, text))
+    return found
+
+
+def debt_dirs(root):
+    """The debt folders of `root`, as debt_file reads them: the repo's own when legacy-repos keeps them, else the
+    layout's candidates."""
+    kept = layout.unmoved(root).get("debts")
+    return (kept,) if kept else layout.candidates(root, "debts")
+
+
+def open_debts(root):
+    """[(slug, count, date)] for each debt file in the debt folders of the checkout `root`, from one listing of each
+    folder and one read of each debt. The count and date come from the last valid Seen line (`Seen:` at column one,
+    or after `- `); a debt with no valid Seen line counts as 1 with no date."""
+    debt = debt_file(root)
+    found = []
+    for folder in dict.fromkeys(debt_dirs(root)):
+        base = os.path.join(root, *folder.split("/"))
+        if not os.path.isdir(base):
+            continue
+        for name in sorted(os.listdir(base)):
+            if not debt(folder + "/" + name):
+                continue
+            with open(os.path.join(base, name), encoding="utf-8", errors="replace") as handle:
+                seen = [parse_seen(l) for l in handle.read().splitlines() if DEBT_SEEN_LINE.match(l)]
+            date, count = (seen[-1] if seen and seen[-1] else (None, 1))
+            found.append((name[:-3], count, date))
+    return found
+
+
+def next_debt(root):
+    """The slug of the open debt to fix next, or None when there is none: the highest Seen count, then the oldest Seen
+    date (a debt with no date after the dated ones), then the slug."""
+    ranked = sorted(open_debts(root), key=lambda d: (-d[1], d[2] is None, d[2] or datetime.date.max, d[0]))
+    return ranked[0][0] if ranked else None
+
+
+def debt_flow(root, start, end):
+    """(opened slugs, closed slugs): the debt files added and deleted between the refs `start` and `end`, from one git
+    diff with renames off. The folder's README and notes file are no debts. Raises Unknown when git cannot say."""
+    added_files, moved = changes(root, start, end, renames=False)
+    debt = debt_file(root)
+    return (sorted(os.path.basename(f)[:-3] for f in added_files if debt(f)),
+            sorted(os.path.basename(old)[:-3] for status, old, _new in moved if status == "D" and debt(old)))
 
 
 def unfixed_notes(root, ref):
@@ -434,7 +656,41 @@ def too_long(files, dirs):
             and f.endswith(".md") and len(os.path.basename(f.replace("\\", "/"))[:-3]) > MAX]
 
 
+def report_command(args):
+    """The exit code of `--next-debt` or `--debt-flow START END` when `args` is one of them, else None."""
+    if args[:1] == ["--next-debt"] and len(args) == 1:
+        try:
+            slug = next_debt(ROOT)
+        except layout.LayoutError as err:
+            print("check_record_slugs: FAIL: " + str(err))
+            return 1
+        if slug is None:
+            print("check_record_slugs: no open debt", file=sys.stderr)
+        else:
+            print(slug)
+        return 0
+    if args[:1] == ["--debt-flow"] and len(args) == 3 and not any(a.startswith("-") for a in args[1:]):
+        try:
+            opened, closed = debt_flow(ROOT, args[1], args[2])
+        except layout.LayoutError as err:
+            print("check_record_slugs: FAIL: " + str(err))
+            return 1
+        except Unknown as err:  # a pace number that could not be read is unknown, never 0
+            print("check_record_slugs: UNKNOWN, " + str(err))
+            return 1
+        print("debts opened %d, closed %d" % (len(opened), len(closed)))
+        for slug in opened:
+            print("+ " + slug)
+        for slug in closed:
+            print("- " + slug)
+        return 0
+    return None
+
+
 def main(args):
+    done = report_command(args)
+    if done is not None:
+        return done
     unknown = [a for a in args if a.startswith("-")]
     if unknown:  # read as a file name, an unknown option would skip git and check nothing
         print("check_record_slugs: FAIL: unknown option: %s" % " ".join(unknown))
@@ -446,12 +702,14 @@ def main(args):
         return 1
     try:
         if args:  # files given: the diff is not read, so the feel-fix and Fix checks do not run
-            files, feel, entries, dated, ratchet = args, [], [], [], None
+            files, feel, entries, dated, seen, ratchet = args, [], [], [], [], None
         else:
             files, moved = changes(ROOT)
             feel = unchecked_feel_debts(ROOT, moved)
-            entries = added_fixes(ROOT, files)
-            dated = until_failures(ROOT, today())
+            changed, texts, now = all_note_changes(ROOT), debt_texts(ROOT, files, moved), today()
+            entries = added_fixes(ROOT, files, changed=changed, texts=texts)
+            dated = until_failures(ROOT, now, changed=changed)
+            seen = seen_failures(ROOT, now, changed=changed) + debt_seen_failures(texts, now)
             ratchet = notes_ratchet(ROOT, files, moved)
     except layout.LayoutError as err:
         print("check_record_slugs: FAIL: " + str(err))
@@ -475,7 +733,7 @@ def main(args):
         return 1
     for path, label, why in unfixed:
         print('check_record_slugs: FAIL: "%s" %s: %s' % (label, why, path))
-    for path, label, why in dated:
+    for path, label, why in dated + seen:
         print('check_record_slugs: FAIL: "%s" %s: %s' % (label, why, path))
     grown = False
     if ratchet:
@@ -483,7 +741,7 @@ def main(args):
         grown = head > base
         print("check_record_slugs: %s: notes with no valid Fix: %d now, %d at the merge base%s: %s"
               % ("FAIL" if grown else "ok", head, base, " (the count may not grow)" if grown else "", path))
-    return 1 if bad or feel or unfixed or dated or grown else 0
+    return 1 if bad or feel or unfixed or dated or seen or grown else 0
 
 
 if __name__ == "__main__":

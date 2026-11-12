@@ -38,6 +38,20 @@ Usage:
                                                          # flag has a budget
     python3 janitor/sweep.py --purge                     # preview which tombstones are past 90 days
     python3 janitor/sweep.py --purge --confirm           # actually drop tombstones past 90 days
+    python3 janitor/sweep.py --root REPO --expire-notes  # preview the notes whose last sighting is over 30 days old
+    python3 janitor/sweep.py --root REPO --expire-notes --confirm
+                                                         # delete those lines from the checkout's notes file
+
+`--expire-notes` is its own mode (decision notes-sightings-expiry): it reads the notes file of the one checkout
+named by `--root` or ROOT (that checkout, never its primary one, and never a discovered list), and sweeps no branch,
+worktree or process. A note expires when its last sighting is more than 30 days before today: its `Seen:` date, else the
+author date of the commit that last touched the line. A line whose blame commit is a shallow-clone boundary has no true
+date: it is counted UNKNOWN and kept. A line not yet committed is seen today. The grammar and the window come from
+lint/check_record_slugs.py (repo `lint/`, installed `~/.claude/lint/`), the one home, loaded only in this mode. With
+`--confirm` it deletes the expired lines from the file and stops: it never commits, pushes or removes a branch, writes
+no run log, and refuses on the default branch and on a notes file with uncommitted changes. UNKNOWN lines do not change
+the exit code. Cost: one `git blame` per notes file, one rev-parse when a boundary line shows, a few ref reads and one
+git status with `--confirm`; no process left running and no log.
 
 With no ROOT and no `--discover`, the sweep reads `janitor.roots` from this repository's own
 settings.json. Absent, it discovers under every one of `~/Developer`, `~/Clones`, `~/src`,
@@ -3259,6 +3273,100 @@ def print_purge_report(decisions, confirm: bool, out=sys.stdout):
           % (len(decisions), counts.get("purge", 0), counts.get("keep", 0)), file=out)
 
 
+# ------------------------------------------------------------------ the notes' expiry (--expire-notes)
+
+LINT_DIR = os.path.join(REPO_ROOT, "lint")  # the grammar's home: repo `lint/`, installed `~/.claude/lint/`
+
+
+def _notes_grammar():
+    """lint/check_record_slugs.py, the one home of the Seen grammar and its window (decision notes-sightings-expiry),
+    loaded when the expiry runs, so no other mode of this file needs the lint folder."""
+    if LINT_DIR not in sys.path:
+        sys.path.insert(0, LINT_DIR)
+    import check_record_slugs
+    return check_record_slugs
+
+
+def _expire_refusal(root, notes_paths):
+    """Why `--confirm` may not rewrite the notes files of the checkout `root`, else ''. It refuses on the default
+    branch, and on a notes file with uncommitted changes. A read that cannot run refuses too."""
+    base = git_reads.resolve_default_base(root)
+    head = git_reads._git(root, "symbolic-ref", "-q", "--short", "HEAD")
+    if base is None or head is None:
+        return "git could not say which branch is the default or which is checked out"
+    branch = head.stdout.strip() if head.returncode == 0 else ""
+    if branch and branch == base.removeprefix("origin/"):
+        return "HEAD is the default branch (%s); run it on a branch that will merge" % branch
+    dirty = git_reads.porcelain(root, notes_paths)
+    if dirty is None:
+        return "git could not say whether the notes file has uncommitted changes"
+    if dirty:
+        return "the notes file has uncommitted changes; commit or discard them first"
+    return ""
+
+
+def _delete_note_lines(root, path, items):
+    """Delete from the notes file `path` of `root` the (1-based line number, text) of `items`, keeping every other byte.
+    Each line must still read as it did, else nothing is written. True when the file was rewritten."""
+    full = os.path.join(root, *path.split("/"))
+    with open(full, encoding="utf-8", errors="surrogateescape", newline="") as handle:
+        rows = handle.read().split("\n")
+    if any(number > len(rows) or rows[number - 1].rstrip("\r") != text for number, text in items):
+        return False
+    gone = {number for number, _text in items}
+    with open(full, "w", encoding="utf-8", errors="surrogateescape", newline="") as handle:
+        handle.write("\n".join(row for i, row in enumerate(rows, 1) if i not in gone))
+    return True
+
+
+def expire_notes(root, confirm: bool, out=sys.stdout, err=sys.stderr) -> int:
+    """The notes expiry of one checkout, decision notes-sightings-expiry. A preview lists each note whose last sighting is
+    more than SEEN_EXPIRY_DAYS before today, and counts the UNKNOWN lines (a shallow clone cut their history). With
+    `confirm` it also deletes the expired lines from the notes file and stops there: it never commits, pushes, or
+    removes a branch, and it writes no run log. It refuses on the default branch and on a dirty notes file.
+    UNKNOWN lines are never deleted and never change the exit code. Cost: one `git blame` per notes file, and one
+    rev-parse when a boundary line shows. Returns the exit code."""
+    grammar = _notes_grammar()
+    top = git_reads._git(root, "rev-parse", "--show-toplevel")
+    if top is None or top.returncode != 0:
+        print("janitor: %s is not inside a repository" % root, file=err)
+        return 1
+    root = os.path.normpath(top.stdout.strip())
+    try:
+        now = grammar.today()
+        paths = [p for p in grammar.layout.candidates(root, "debt-notes")
+                 if os.path.isfile(os.path.join(root, *p.split("/")))]
+        if confirm and paths:
+            why = _expire_refusal(root, paths)
+            if why:
+                print("janitor: --expire-notes --confirm refused: %s" % why, file=err)
+                return 1
+        found = grammar.unseen_notes(root, now)
+    except ValueError as err_:  # FIXED_TODAY is the one value read here that can fail to parse
+        print("janitor: FIXED_TODAY is not an ISO date (%s)" % err_, file=err)
+        return 1
+    except (grammar.Unknown, grammar.layout.LayoutError) as err_:
+        print("janitor: UNKNOWN, the notes read did not run (%s)" % err_, file=err)
+        return 1
+    expired = [item for item in found if item[3] is not None]
+    unknown = [item for item in found if item[3] is None]
+    print("janitor notes expiry -- %s" % ("CONFIRM: deleting the expired lines" if confirm
+                                          else "PREVIEW: nothing is deleted"), file=out)
+    for path, number, slug, last, _text in expired:
+        print("  EXPIRED %s line %d %s, last seen %s (%d days ago)" % (path, number, slug, last, (now - last).days),
+              file=out)
+    print("notes expired: %d, UNKNOWN (no true date, kept): %d" % (len(expired), len(unknown)), file=out)
+    if confirm:
+        for path in paths:
+            mine = [item for item in expired if item[0] == path]
+            if mine and not _delete_note_lines(root, path, [(i[1], i[4]) for i in mine]):
+                print("janitor: %s changed under the read; nothing was deleted from it" % path, file=err)
+                return 1
+        print("deleted: %d lines, committed: nothing (git keeps them; commit the deletion yourself)" % len(expired),
+              file=out)
+    return 0
+
+
 # ------------------------------------------------------------------ CLI
 
 
@@ -3305,9 +3413,22 @@ def main(argv=None) -> int:
                        help="only worktrees whose branch is already in the default branch, "
                             "judged with no fetch, no remote read and no branch work; "
                             "a preview without --confirm")
+    modes.add_argument("--expire-notes", action="store_true", dest="expire_notes",
+                       help="only the notes' expiry: list each note in the checkout's notes file whose last "
+                            "sighting is more than 30 days old; with --confirm, delete those lines from the file "
+                            "(never commits, pushes or removes a branch; refuses on the default branch and on a "
+                            "dirty notes file). Takes --root or ROOT, the checkout itself, never a discovered one")
     parser.add_argument("--settings-path", metavar="PATH",
                          help="testing only: overrides the settings.json read for janitor.roots")
     args = parser.parse_args(argv)
+
+    if args.expire_notes:
+        if args.purge:
+            parser.error("--expire-notes cannot be combined with --purge")
+        targets = [os.path.abspath(r) for r in [*args.roots, *([args.root] if args.root else [])]]
+        if not targets:
+            parser.error("--expire-notes needs --root PATH (the checkout whose notes file it reads)")
+        return max(expire_notes(target, args.confirm) for target in targets)
 
     restore_log_path = args.restore_log or default_restore_log_path()
 
