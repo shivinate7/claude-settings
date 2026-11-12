@@ -2198,5 +2198,8 @@
 - scratchpad-folder-python-rmtree: `python -c 'import shutil; shutil.rmtree(...)'` on a scratchpad folder is not read, as the guard cannot see a path inside program text. Decision: scratchpad-owner.
 - scratchpad-folder-git-clean: `git clean -fdx` run inside a scratchpad checkout removes untracked files without a folder name for the guard to read. Decision: scratchpad-owner.
 - scratchpad-folder-over-cap: a folder check reads 5000 entries. Past that, a file of another agent that comes later in the walk is not seen and the removal passes. Decision: scratchpad-owner.
-- scratchpad-folder-parent-rm: `rm -rf` of a folder above the session scratchpad lies outside it, so no scratchpad rule applies. Decision: scratchpad-owner.
+- scratchpad-folder-parent-rm: `rm -rf` of the session folder above the scratchpad, or `S/../*`, resolves outside the scratchpad, so no scratchpad rule applies. It deletes the files of every agent, and it escapes the folder check. Decision: scratchpad-owner.
+- scratchpad-folder-records-rm: an agent's `rm -rf S/.writers` is skipped by the folder walk, so it passes. It wipes every record, and a later overwrite of another agent's file then passes. Decision: scratchpad-owner.
+- scratchpad-folder-env-target: an `rm` target built from `$TMPDIR` or `$(...)` is not read, as `shell_abs` expands no environment variable. A folder named that way passes the folder check. Decision: scratchpad-owner.
+- scratchpad-folder-dotdot-last: `rm -rf S/sub/deep/..` is refused by the folder check, though coreutils `rm` refuses a `..` last word itself. The refusal is harmless. Decision: scratchpad-owner.
 - scratchpad-folder-move-loses-records: a moved scratchpad folder keeps no records for the files in it, because each record is keyed by the old path. Later runs of those files pass. Decision: scratchpad-owner.
