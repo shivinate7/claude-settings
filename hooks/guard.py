@@ -6174,13 +6174,13 @@ def judge(payload) -> None:
     if lane_prompt:
         refuse(tool, "deny", "lane-effort-pin", LANE_EFFORT_REASON, lane_prompt)
 
-    # 9b2b. The lane repo tag: a lane session carries the full `cs-repo` tag of the checkout that starts it.
+    # 9b2b. The lane repo tag: a lane carries the full `cs-repo` tag of the checkout that starts it.
     # After the effort pin, so a call that breaks both reads the pin first. An override lifts it.
     repo_tag_hit_tags, lane_repo = lane_repo_tag_hit(tool, tool_input, cwd)
     if repo_tag_hit_tags:
         refuse(tool, "deny", "lane-repo-tag", LANE_REPO_TAG_REASON % (REPO_TAG + (lane_repo or "<owner>/<name>")), repo_tag_hit_tags)
 
-    # 9b2c. The lane start settings: a lane session names its model, of its row's family, and its source_url. After the
+    # 9b2c. The lane start settings: a lane names its model, of its row's family, and its source_url. After the
     # repo tag. An override lifts it.
     lane_missing = lane_start_settings_hit(tool, tool_input)
     if lane_missing:
