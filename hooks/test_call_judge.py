@@ -1844,7 +1844,7 @@ def case_challenge_question_writes_no_grant():
     check("grant text: the challenge is judged once and reaches the owner with no refusal",
           len(r.calls) == 1 and r.code == 0 and r.out == "", detail(r))
     grants = os.path.join(r.base, "config", "state", "override")
-    check("grant text: no override pass is written", not os.path.isdir(grants) or not os.listdir(grants), detail(r))
+    check("grant text: no override is written", not os.path.isdir(grants) or not os.listdir(grants), detail(r))
     check("grant text: guard.log holds no override line", "\toverride\t" not in r.log, r.log[-200:])
 
 
