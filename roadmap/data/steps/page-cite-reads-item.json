@@ -1,0 +1,14 @@
+{
+ "id": "page-cite-reads-item",
+ "title": "A page item that cites another item's answer reads that item first, and the check refuses a cited date it cannot find",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Incident 13:57 CST Nov 12: triage posted item 625 citing \"your Nov 8 answer\" for item 485; item 485 was posted Nov 10 and holds no answer. Fixed in place at 13:57 CST.",
+ "source": "triage 13:58 CST Nov 12 (own mistake)",
+ "note": "Fix: question-judge (or the page writer's check) resolves each cited item number or \"your <date> answer\" against the items collection and refuses a date or answer that does not match. Red first on item 625's first text. Kin: page-item-past-ruling.",
+ "updatedAt": "2026-11-12T13:58:22-06:00"
+}

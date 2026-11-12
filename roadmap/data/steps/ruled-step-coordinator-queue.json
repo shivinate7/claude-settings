@@ -6,9 +6,9 @@
   "phase": "next",
   "lane": "",
   "why": "Ruled steps waited as report lines; a report is for the owner to read, not a queue to act on.",
-  "note": "R42 part 1 (owner 13:39 and 13:43 CST Nov 11, relayed by the retrospective; plan 7a78c5c). 13:39: \"A seems fine but a report is still just a report yanno that's something for me to read rather than something to act upon\". 13:43: \"lanes compete more for the machine isn't a real problem on cloud sessions where each spawns its own machine right? ... which is why we have load brakes for local\". The coordinator starts such a step under rule parallelism-keep-going. The receiver's reply naming the step is the receipt; the sender's log item points to it. Lane prose-decisions started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Lane cleared 13:38 CST Nov 12 (retrospective 13:36 CST sweep): its session (\"Lane fan-prose-decisions\") is idle and completed with no branch for this step.",
+  "note": "R42 part 1 (owner 13:39 and 13:43 CST Nov 11, relayed by the retrospective; plan 7a78c5c). 13:39: \"A seems fine but a report is still just a report yanno that's something for me to read rather than something to act upon\". 13:43: \"lanes compete more for the machine isn't a real problem on cloud sessions where each spawns its own machine right? ... which is why we have load brakes for local\". The coordinator starts such a step under rule parallelism-keep-going. The receiver's reply naming the step is the receipt; the sender's log item points to it. Lane prose-decisions started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Lane cleared 13:38 CST Nov 12 (retrospective 13:36 CST sweep): its session (\"Lane fan-prose-decisions\") is idle and completed with no branch for this step. Sizing read 13:57 CST Nov 12: rides open #2670 (same clause in its title); no new lane.",
   "source": "owner 2026-11-11 13:39-13:43 CST, relayed by the retrospective session",
   "owner": "coordinator",
-  "updatedAt": "2026-11-12T13:38:03-06:00",
+  "updatedAt": "2026-11-12T13:58:22-06:00",
   "blockedBy": []
 }

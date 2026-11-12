@@ -6,9 +6,9 @@
   "phase": "next",
   "lane": "",
   "why": "A wrong transcript path makes decision watch read nothing, with no sign.",
-  "note": "R41 (owner 13:36 CST Nov 11, \"r41 yes on all\", relayed by the retrospective; plan restart-plan 0f99805, R41 item 1). Keep all 5 mods, 11 skills and shiv-stylisms; fix seven defects. Audit notes: the retrospective's scratchpad, on request. Decision watch finds the transcript by session id when the given path fails, names the path in its UNKNOWN once per session, and shows the silent no-transcript case once. Red cases: Windows backslash, drive letter, ~, Git Bash /c/, a second config dir, a long folder name. Lane prose-decisions started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Lane cleared 13:38 CST Nov 12 (retrospective 13:36 CST sweep): its session (\"Lane fan-prose-decisions\") is idle and completed with no branch for this step.",
+  "note": "R41 (owner 13:36 CST Nov 11, \"r41 yes on all\", relayed by the retrospective; plan restart-plan 0f99805, R41 item 1). Keep all 5 mods, 11 skills and shiv-stylisms; fix seven defects. Audit notes: the retrospective's scratchpad, on request. Decision watch finds the transcript by session id when the given path fails, names the path in its UNKNOWN once per session, and shows the silent no-transcript case once. Red cases: Windows backslash, drive letter, ~, Git Bash /c/, a second config dir, a long folder name. Lane prose-decisions started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Lane cleared 13:38 CST Nov 12 (retrospective 13:36 CST sweep): its session (\"Lane fan-prose-decisions\") is idle and completed with no branch for this step. Sizing read 13:57 CST Nov 12: rides open #2769 (code) and #2672 (record); no new lane.",
   "source": "owner 2026-11-11 13:36 CST, relayed by the retrospective session",
   "owner": "triage",
-  "updatedAt": "2026-11-12T13:38:03-06:00",
+  "updatedAt": "2026-11-12T13:58:22-06:00",
   "blockedBy": []
 }

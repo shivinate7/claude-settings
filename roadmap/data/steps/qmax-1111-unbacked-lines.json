@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "",
   "why": "The merge-time prose judge on q_max #1111 (merged d6f044774) flagged four lines that cite no run or decision: CLAUDE.md line 19 (DOC10 swept the whole corpus and ran locally), docs/api.md line 56 (the put-back door route), docs/api.md line 232 (`/api/corpus/slice` views and refusal fields), docs/commands.md line 36 (ste-lint pinned commit, origin/main handling, CI behaviour).",
-  "note": "Fix: cite the backing or cut the claim. Docs-only, in q_max. Waits under the owner's 21:42 CST hold (item 384). Same shape as step batch62-unbacked-lines. Slug and title by triage; no source gave one. Filed from runner 9, 22:55 CST Nov 7. Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose, first wave. Lane cleared 13:38 CST Nov 12 (retrospective 13:36 CST sweep): its session (\"Lane qmax-1111-unbacked-lines: back or cut q_max 1\") is idle and completed with no branch for this step.",
-  "updatedAt": "2026-11-12T13:38:03-06:00"
+  "note": "Fix: cite the backing or cut the claim. Docs-only, in q_max. Waits under the owner's 21:42 CST hold (item 384). Same shape as step batch62-unbacked-lines. Slug and title by triage; no source gave one. Filed from runner 9, 22:55 CST Nov 7. Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose, first wave. Lane cleared 13:38 CST Nov 12 (retrospective 13:36 CST sweep): its session (\"Lane qmax-1111-unbacked-lines: back or cut q_max 1\") is idle and completed with no branch for this step. Sizing read 13:57 CST Nov 12: its record says it waits under the owner's hold (item 384); confirm the hold is lifted before a lane starts.",
+  "updatedAt": "2026-11-12T13:58:22-06:00"
 }
