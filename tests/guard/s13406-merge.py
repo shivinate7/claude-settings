@@ -951,6 +951,7 @@ role_refuse("a lone quote in a comment does not hide the call on the next line",
 # Each roster checkout is a real repository whose origin/roadmap ref holds one CLAUDE.md, and a case's cwd names it.
 ROSTER_DIR = os.path.join(ROOT, "roster")
 ROSTER_LOCAL = "0b1c2d3e-4f50-4a61-8b72-9c83d4e5f601"  # a local session's id, as CLAUDE_CODE_SESSION_ID carries it (form unmeasured in a roster)
+ROSTER_OTHER_LOCAL = "1c2d3e4f-5061-4b72-8c93-0d1e2f3a4b52"  # another local session's id: the roster names ROSTER_LOCAL, so this one stays refused
 LOCAL_ROLE_ENV = {"CLAUDE_CODE_SESSION_ID": ROSTER_LOCAL}
 RUNNER_TITLE = "claude-settings batch runner 10"
 
@@ -1029,6 +1030,8 @@ roster_allow("roster: tags are optional, so an untagged record of a roster batch
              roster_path("runner"), transcript=role_path("untagged"))
 roster_allow("roster: a local session whose id the roster names batch runner records batch-runner from its own id",
              roster_path("local-runner"), env=LOCAL_ROLE_ENV, session=ROSTER_LOCAL)
+roster_refuse("roster: a local session whose bare id is another uuid stays refused, though the roster names a local runner",
+              roster_path("local-runner"), env={"CLAUDE_CODE_SESSION_ID": ROSTER_OTHER_LOCAL}, session=ROSTER_OTHER_LOCAL)
 role_allow("G10: a lone lane (cs-build:lane, no parent_session_id) records batch-runner as the batch runner",
            MERGE_SHIM + " --role batch-runner", role_path("lone-lane"))
 roster_refuse("roster: a session the roster names coordinator is refused, and the coordinator never merges",
