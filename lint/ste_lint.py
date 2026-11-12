@@ -1564,27 +1564,64 @@ def ui_suppressions(copy: _UICopy) -> Dict[int, Optional[List[str]]]:
 # --------------------------------------------------------------------------
 
 
-# The one home of the retired names: GLOSSARY.md, read on each run, never copied here.
-GLOSSARY_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "GLOSSARY.md")
+# The one home of the retired names: GLOSSARY.md, read on each run, never copied here. The real path of this
+# file leads to the repo, so a symlinked install finds the glossary too.
+GLOSSARY_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "GLOSSARY.md")
 _USES_RE = re.compile(r"uses '([^']+)'; the glossary name is '([^']+)'")
+_ONE_TERM_CACHE = {}
+
+
+def reset_one_term_cache():
+    _ONE_TERM_CACHE.clear()
+
+
+def _glossary_table():
+    """The glossary table, read once per run and path, or None when it cannot be read (said once on stderr)."""
+    if GLOSSARY_PATH not in _ONE_TERM_CACHE:
+        table = None
+        try:
+            import check_glossary
+            with open(GLOSSARY_PATH, encoding="utf-8-sig") as f:
+                table = check_glossary.rows(f.read())
+        except (ImportError, OSError, ValueError, IndexError):
+            print("ste_lint: unknown: GLOSSARY.md is unreadable at %s, so STE022 did not run" % GLOSSARY_PATH,
+                  file=sys.stderr)
+        _ONE_TERM_CACHE[GLOSSARY_PATH] = table
+    return _ONE_TERM_CACHE[GLOSSARY_PATH]
+
+
+def one_term_skip(path):
+    """True for a file that names the retired words on purpose or is vendored: the list check_glossary keeps."""
+    import check_glossary
+    p = path.replace("\\", "/")
+    return any(p.endswith(e) if not e.endswith("/") else e in p for e in check_glossary.SKIP_CODE)
 
 
 def one_term_findings(text):
-    """(offset, name, term) for each retired name that `text` holds. Nothing when GLOSSARY.md is unreadable.
+    """(offset, name, term) for each use of a retired name in `text`. Nothing when GLOSSARY.md is unreadable.
 
-    Cost: one read of GLOSSARY.md per Linter run, in the process already running; no file written."""
-    try:
-        import check_glossary
-        with open(GLOSSARY_PATH, encoding="utf-8-sig") as f:
-            table = check_glossary.rows(f.read())
-    except (ImportError, OSError, ValueError):
+    Cost: one read of GLOSSARY.md per run, in the process already running; no file written."""
+    table = _glossary_table()
+    if table is None:
         return []
+    import check_glossary
     out = []
     for problem in check_glossary.name_problems("", text, table, plain=True):
         m = _USES_RE.search(problem)
-        if m:
-            hit = re.search(r"\b" + re.escape(m.group(1)) + r"(?:e?s)?\b", text, re.I)
-            out.append((hit.start() if hit else 0, m.group(1), m.group(2)))
+        if not m:
+            continue
+        name, term = m.group(1), m.group(2)
+        if name in check_glossary.PLATFORM_NAMES or name.startswith(check_glossary.PLATFORM_PREFIXES):
+            continue
+        # A spelling of the name: whole words, plural too, or a camelCase run of the same words.
+        parts = [re.escape(w) for w in re.split(r"[^A-Za-z0-9]+", name) if w]
+        pattern = r"(?<![A-Za-z0-9])" + r"[^A-Za-z0-9]?".join(parts) + r"(?:e?s)?(?-i:(?![a-z0-9]))"
+        hits = [h.start() for h in re.finditer(pattern, text, re.I)]
+        for at in hits or [0]:
+            token = re.match(r"\w*", text[max(0, text.rfind(" ", 0, at) + 1):]).group(0)
+            if token in check_glossary.PLATFORM_NAMES or token.startswith(check_glossary.PLATFORM_PREFIXES):
+                continue  # Claude Code's own name: SubagentStop holds the retired name subagent
+            out.append((at, name, term))
     return out
 
 
@@ -1708,7 +1745,7 @@ class Linter:
     # -- file ------------------------------------------------------------
 
     def check_text(self, path: str, text: str) -> List[Finding]:
-        self.skip_one_term = os.path.basename(path) == "GLOSSARY.md"
+        self.skip_one_term = one_term_skip(path)
         lines = text.splitlines()
         paragraphs, suppressed, file_disable = segment_markdown(
             lines, "procedural" if self.config["mode"] == "procedural" else "descriptive")
@@ -1727,7 +1764,7 @@ class Linter:
         paragraphs = source_prose_paragraphs(path, text)
         if paragraphs is None:
             return self.check_text(path, text)
-        self.skip_one_term = False
+        self.skip_one_term = one_term_skip(path)
         findings = self._check_paragraphs(paragraphs)
         for finding in findings:
             finding.path = path
@@ -1742,6 +1779,7 @@ class Linter:
         only in procedural mode, which Markdown headings and list items select,
         and UI copy has neither.
         """
+        self.skip_one_term = one_term_skip(path)
         copy = ui_copy(path, text)
         findings = [f for f in self._check_paragraphs(copy.paragraphs)
                     if f.code not in UI_SKIP]
