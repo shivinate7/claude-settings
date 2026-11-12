@@ -4,6 +4,10 @@
 
 Owner, 2026-11-06 12:43 CST (waiting-page item 279, pick b): a replay corpus per model judge, with known allow and deny cases, in the style of decision `mutation-ci-report-and-replay`. CI runs a judge's corpus only when its prompt, model or code changes. A normal use makes no model call. A CI run that touches a judge makes one call per case. The repo secret `CLAUDE_CODE_OAUTH_TOKEN` is set (owner, waiting-page items 283 and 282 b).
 
+## Departs from
+
+Item 279 pick b, whole text: "Replay cases for each judge. A set of known allow and deny cases runs in CI whenever a judge's prompt or model changes." Gain: "A judge that starts allowing what it should refuse is caught before it merges." Lose: "Model calls in CI only, when a judge changes." The owner picked a, b and d at 12:43 CST on 2026-11-06. It names the corpus and nothing else. It says nothing about a retry or a batch cap. So two `feedback_guard` behaviours are lane choices pending the owner, with no ruling found in the repo. They are the retry of an item that got no verdict, and the cap of 20 new items per Stop (REPEAT_BATCH, hooks/feedback_guard.py). Triage found no other item for them (asked 08:15 CST, 2026-11-12). Decision owner-feedback-inbox holds both.
+
 ## The shape
 
 - The runner is `hooks/judge_replay.py`. Its modes: `--changed BASE` (the judges whose scope the committed diff BASE...HEAD touches, or every judge when the diff moves the claude CLI pin), `--judge NAME`, `--all`, `--paths` (names the touched judges from paths on stdin), `--probe` (one small call, to prove the sign-in) and `--runs N` (default 1).
@@ -55,9 +59,9 @@ One serial `--all` run, one run per case: 58 calls in 201 s.
 ## Cost
 
 - Normal use: no call and no process. The runner is not named in `settings.json` or in any hook.
-- A CI run that touches a judge: N calls, N being the cases of each touched judge times 3 (`--runs 3`, the majority of answered runs decides a case). `--all`, and a change that touches every judge, is 174 calls (about 10 min, unmeasured in CI: 3 x the 201 s local run). The job runs only with the secret `CLAUDE_CODE_OAUTH_TOKEN` and skips a pull request from a fork, so a fork costs no call. The job reads the diff with the `--paths` call of the scope step (one Python start, no call) and starts one `claude -p` process per call. A `decision_watch` case also starts the git processes of its temp repo and of the judge's own status, diff and log reads, and removes the folder after.
+- A CI run that touches a judge: N calls, N being the cases of each touched judge times 3 (`--runs 3`; a case needs a strict majority of all 3 runs, so 2 agreeing answers and 1 error pass at 2/3, and 1 answer and 2 errors read UNKNOWN). `--all`, and a change that touches every judge, is 174 calls (about 10 min, unmeasured in CI: 3 x the 201 s local run). The job runs only with the secret `CLAUDE_CODE_OAUTH_TOKEN` and skips a pull request from a fork, so a fork costs no call. The job reads the diff with the `--paths` call of the scope step (one Python start, no call) and starts one `claude -p` process per call. A `decision_watch` case also starts the git processes of its temp repo and of the judge's own status, diff and log reads, and removes the folder after.
 - Files written: none in the repo. The CI job writes one token file (`state/hook-token`) in a runner temp folder.
-- Job cap (decision `ci-job-caps`): 75 minutes, the interim stopgap (owner, 2026-11-10 12:11 CST), so the cap does not end the job before a red step. The figure at 75 is unmeasured; the first CI run on a pull request that touches a judge replaces it.
+- Job cap (decision `ci-job-caps`): 75 minutes, the interim stopgap (owner, 2026-11-10 12:11 CST), If every call hung to its timeout, the replay would run about 3 x 2442 s (about 122 min) and the cap would cancel the job. `all-jobs-passed` reads a cancelled job as not passed, so the run still fails, but with no red step. A step-level timeout is not added. The figure at 75 is unmeasured; the first CI run on a pull request that touches a judge replaces it.
 
 ## The reader
 

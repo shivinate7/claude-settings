@@ -1453,11 +1453,11 @@ jobs:
   # The model judges' replay (decision judge-replay-corpus, owner item 279 pick b, 2026-11-06 12:43 CST). Each judge has a corpus of known
   # allow and deny cases (.github/judge-replay/corpus/<name>.json). On a pull request that touches a judge's scope (its module, hooks/decision_watch.py,
   # a module its prompt or model comes from, its corpus, or the runner), the job replays that judge's corpus through its real entry function:
-  # three model calls per case (--runs 3, a case's verdict is the majority of its answered runs). The scope flag judge_replay is set by .github/scripts/ci-scope.sh from `hooks/judge_replay.py --paths`. The
+  # three model calls per case (--runs 3, a case's verdict needs a strict majority of all 3 runs: 2 agreeing answers and 1 error pass at 2/3, 1 answer and 2 errors read UNKNOWN, which is red). The scope flag judge_replay is set by .github/scripts/ci-scope.sh from `hooks/judge_replay.py --paths`. The
   # job always runs, so all-jobs-passed reads it; its steps carry the scope condition, and skip on a push or schedule and on a pull request from
   # a fork, which has no secret. The model token is the repo secret CLAUDE_CODE_OAUTH_TOKEN, written to the file decision_watch._hook_token
   # reads. With no secret the sign-in probe fails, and the job is red (decision ci-unknown-is-red). Cap (ci-job-caps): 75, the interim stopgap
-  # (owner 12:11 CST Nov 10), so the cap never ends the job before a red step. Cost, unmeasured in CI: one local run of every corpus took 201 s at one run
+  # (owner 12:11 CST Nov 10). If every call hung to its timeout, the replay would run about 3 x 2442 s (about 122 min) and the cap would cancel the job. all-jobs-passed reads a cancelled job as not passed, so the run still fails, but with no red step. The first CI run measures it; no step-level timeout is added. Cost, unmeasured in CI: one local run of every corpus took 201 s at one run
   # per case (58 calls); three runs make 174 calls, about 10 min, plus about 2 min for the install. The first CI run on a pull request that touches a judge replaces it.
   judge-replay:
     runs-on: ubuntu-latest
