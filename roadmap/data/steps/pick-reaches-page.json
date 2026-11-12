@@ -1,0 +1,14 @@
+{
+ "id": "pick-reaches-page",
+ "title": "A coordinator pick reaches the page as an item the owner can overrule",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 12:08 CST Nov 12 (coordinator relay 12:10 CST): he cannot see coordinator picks anywhere to overrule them.",
+ "source": "coordinator 12:10 CST Nov 12",
+ "note": "A check that a coordinator message saying \"coordinator pick\" has a matching item on the page with `stands: true` (section Pick stands). Extend the home of steps c102 (an undoable pick is taken, not asked; the Stop reply judge) and c118 (a decision always reaches a clickable pick), both done, before a new home. Red first on today's case: 19 picks on Nov 12 with no page item until 12:13 CST.",
+ "updatedAt": "2026-11-12T12:14:53-06:00"
+}
