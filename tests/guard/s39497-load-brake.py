@@ -227,6 +227,12 @@ try:
                 body = json.loads(sys.stdin.read())
                 direct = getattr(g, "lane_session_hit", None)
                 out["lane"] = None if direct is None else list(direct(body, body.get("tool_name")))
+            elif spec["mode"] == "busy":
+                # load_busy, called direct on the case's reading (it reads nothing), then load_hit's Workflow refusal under
+                # the same reading, which is the one read of the call. A guard with no load_busy leaves busy None.
+                busy = getattr(g, "load_busy", None)
+                out["busy"] = None if busy is None else list(busy(spec["reading"]))
+                out["hit"] = list(g.load_hit("Workflow", {}))
             else:
                 g.main()
         except SystemExit:
@@ -719,6 +725,56 @@ lb_add("disk 100 GB, 9.9 GB free: busy, Workflow refused, names disk 9.9 GB free
        lb_decision_check("Workflow", lb_reading(disk_free_gb=9.9, disk_total_gb=100.0), "deny", (lb_gb(9.9, 100),)))
 lb_add("disk 100 GB, 10.0 GB free: not busy, Workflow allowed",
        lb_decision_check("Workflow", lb_reading(disk_free_gb=10.0, disk_total_gb=100.0), "allow"))
+def lb_busy_check(reading, want):
+    """load_busy, called direct on `reading`, returns `want`: the busy readings as text, or [] when the reading is not
+    busy. It reads nothing of its own, so the one read is load_hit's, inside the Workflow call under the same reading.
+    That call is refused exactly when `want` is not empty, and its refusal names each text load_busy returned."""
+    def check():
+        got, reason, side = lb_run("Workflow", {"mode": "busy", "reading": reading})
+        if got == "error":
+            return False, reason
+        if side.get("busy") is None:
+            return False, "guard.py defines no load_busy"
+        if side.get("reads") != 1:
+            return False, "the reader ran %s time(s) for one call, want 1" % side.get("reads")
+        busy, hit = side["busy"], side.get("hit")
+        if busy != want:
+            return False, "load_busy returned %r, want %r" % (busy, want)
+        if not want:
+            if hit != ["", ""]:
+                return False, "the Workflow call is refused on a reading load_busy calls not busy: %s" % hit[0][:100]
+            return True, "load_busy returns [] and the Workflow call is allowed"
+        if not isinstance(hit, list) or len(hit) != 2 or not hit[0]:
+            return False, "the Workflow call is allowed on a reading load_busy calls busy: %r" % (hit,)
+        for text in want:
+            if text not in hit[0]:
+                return False, "the Workflow refusal does not name %r: %s" % (text, hit[0][:100])
+        if hit[1] != ", ".join(want):
+            return False, "the Workflow refusal's matched text is %r, want %r" % (hit[1], ", ".join(want))
+        return True, "load_busy returns %r and the Workflow refusal names each" % (want,)
+    return check
+
+
+# load_busy itself, the one busy bar, called direct on each reading. Its list is the text the Workflow refusal names.
+lb_add("load_busy: memory 85.0%, not busy: returns [], the Workflow call is allowed",
+       lb_busy_check(lb_reading(memory_pct=85.0), []))
+lb_add("load_busy: memory 85.1%, busy: returns ['memory 85.1% in use'], the Workflow refusal names it",
+       lb_busy_check(lb_reading(memory_pct=85.1), ["memory 85.1% in use"]))
+lb_add("load_busy: disk 926 GB, 14.9 GB free, busy: returns ['disk 14.9 GB free of 926 GB']",
+       lb_busy_check(lb_reading(disk_free_gb=14.9, disk_total_gb=926.0), ["disk 14.9 GB free of 926 GB"]))
+lb_add("load_busy: disk 926 GB, 15.0 GB free, not busy: returns []",
+       lb_busy_check(lb_reading(disk_free_gb=15.0, disk_total_gb=926.0), []))
+lb_add("load_busy: disk 100 GB, 9.9 GB free, busy: returns ['disk 9.9 GB free of 100 GB']",
+       lb_busy_check(lb_reading(disk_free_gb=9.9, disk_total_gb=100.0), ["disk 9.9 GB free of 100 GB"]))
+lb_add("load_busy: disk 100 GB, 10.0 GB free, not busy: returns []",
+       lb_busy_check(lb_reading(disk_free_gb=10.0, disk_total_gb=100.0), []))
+lb_add("load_busy: memory 90.0% and disk 926 GB at 14.0 GB free, both busy: returns both in order, the refusal names both",
+       lb_busy_check(lb_reading(memory_pct=90.0, disk_free_gb=14.0, disk_total_gb=926.0),
+                     ["memory 90.0% in use", "disk 14.0 GB free of 926 GB"]))
+lb_add("load_busy: every reading None (unread): returns [], the Workflow call is allowed",
+       lb_busy_check({"memory_pct": None, "disk_free_gb": None, "disk_total_gb": None}, []))
+lb_add("load_busy: an empty reading {}: returns [], the Workflow call is allowed",
+       lb_busy_check({}, []))
 lb_add("disk GB not clamped: a 926 GB disk with 119 GB free reads disk_total_gb 926 and disk_free_gb 119",
        lb_reader_fake(lb_fake("darwin", disk_total=926.0, disk_free=119.0), lb_gb_unclamped))
 # Memory 80% is under the 85% that memory alone needs, so it is not busy. The brake reads no CPU: the load average
