@@ -3561,7 +3561,7 @@ def step_up_hit(tool: str, tool_input) -> str:
 
 def step_up_reason(prompt: str, role, model, rounds=None) -> str:
     """The step-up refusal for a brief whose marker and model disagree, or "". The model each marker needs is its round row
-    (role_round_model; `rounds` is role_round_table's read, read here when not given). Round 2 must name its row's model exactly.
+    (role_round_model; `rounds` is role_round_table's read, read here when not given). The second round must name its row's model exactly.
     A later round or a fix check must not name a model below its row; above it passes here, and the Opus ceiling judges Opus."""
     model = str(model or "").strip().lower()
     role = role_key(role)
@@ -3618,7 +3618,7 @@ ROLE_REVIEWER_ROUND_REMEDY = (", or, when this brief is for review round %s, ope
                               ", or, when it is for a guard or check diff, start a line with `%s`")
 ROLE_REVIEWER_FIX_CHECK_REMEDY = (", or, when this brief is a fix check, open its first line with the `%s` marker, "
                                   "or with `Round N of 3 (fix check)` (N = %s)")
-# Last sentence of a reviewer's refusal. It says the first review runs on the role's model only while round 1 has no row above the reviewer's row.
+# Last sentence of a reviewer's refusal. It says the first review runs on the role's model only while the first round has no row above the reviewer's row.
 ROLE_REVIEWER_FIRST_ROUND_NOTE = "; review round 1 and the test-author run on their role's model"
 ROLE_TEST_AUTHOR_NOTE = "; the test-author runs on its role's model"
 # An Explore has a second way past its row, so only its refusal names it, and only for a ranked model: the marker
@@ -3674,14 +3674,14 @@ def role_model_table(pointer_root):
 
 
 # THE ROUND ROWS (decision agent-model-cap, "The round rows"). A table under the header `Role | Round | Model | Effort` names the
-# model of each review round: the key is (role, round, kind), the round a number or "fix verifier", the kind "guard" for a
-# round 1 brief with the guard marker and "other" for every other brief. role_round_table is the one reader; the merge tool
+# model of each round: the key is (role, round, kind), the round a number or "fix verifier", the kind "guard" for a
+# first-round brief with the guard marker and "other" for every other brief. role_round_table is the one reader; the merge tool
 # reads it through the guard's helpers. A row the record lacks, or one whose model has no rank, falls back to
 # ROLE_ROUND_FALLBACK, the models the guard enforced before the rows existed. Cost: one more read of the record per spawn.
 ROLE_ROUND_HEADER = ["role", "round", "model", "effort"]
 ROLE_ROUND_CELL = re.compile(r"(\d+|fix verifier)(?:\s+(guard|other))?$")
 ROLE_ROUND_FIX = "fix verifier"
-ROLE_ROUND_EXACT = ("2",)  # round 2 above its row is refused at the step-up, where no override lifts it; a later round above its row falls to the Opus ceiling
+ROLE_ROUND_EXACT = ("2",)  # the second round above its row is refused at the step-up, where no override lifts it; a later round above its row falls to the Opus ceiling
 ROLE_ROUND_FALLBACK = dict([(("reviewer", n, "other"), "sonnet") for n in ROLE_REVIEWER_FREE_ROUNDS]
                            + [(("reviewer", "1", "guard"), "sonnet"), (("reviewer", ROLE_ROUND_FIX, "other"), "sonnet"),
                               (("builder", "3", "other"), "opus")])
@@ -3930,7 +3930,7 @@ def reviewer_round_models(rounds, prompt):
 
 def reviewer_free_rounds(rounds, row):
     """The rounds whose `other` round row for a reviewer is above `row` (the reviewer's role-row model), in order: the rounds a
-    `Round N of 3` marker lifts a reviewer. Round 1 is in it only when its `other` row is above the role's row."""
+    `Round N of 3` marker lifts a reviewer. The first round is in it only when its `other` row is above the role's row."""
     rank = ROLE_MODEL_RANK.index(row)
     found = {n for role, n, kind in set(ROLE_ROUND_FALLBACK) | set(rounds or ())
              if role == "reviewer" and kind == "other" and n.isdigit()
