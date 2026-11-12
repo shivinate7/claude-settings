@@ -270,6 +270,13 @@ class RoleFileBody(BodyCases, unittest.TestCase):
         self.assertEqual(self.verdict("Intro.\n\n---\n\n" + TERSE_LINE + "\n\n---", front=None), (0, ""),
                          "a --- rule that is not on line 1 was read as frontmatter and hid the line")
 
+    def test_a_line_before_a_rule_off_line_one_counts(self):
+        # Control first: the same text with no rule counts.
+        self.assertEqual(self.verdict(TERSE_LINE + "\n\nsome text\n\nIntro.", front=None), (0, ""),
+                         "control: a line before plain text with no rule was flagged")
+        self.assertEqual(self.verdict(TERSE_LINE + "\n\nsome text\n\n---\n\nIntro.", front=None), (0, ""),
+                         "a --- rule that is not on line 1 was read as frontmatter and hid the line before it")
+
 
 class LaneTextBody(BodyCases, unittest.TestCase):
     NAME = LANE_TEXT
