@@ -711,7 +711,7 @@ test("tile offsets: a touch page banded every 100 px in two colours keeps every 
 });
 
 // ---- Pinned elements in a touch stitch: what sits in the page, shown where it sits ----
-// The stitch hides fixed elements on tiles after the first, and sets sticky elements to static for the whole stitch.
+// The stitch hides fixed elements on tiles after the first, and sets sticky elements to position:relative with offsets auto for the whole stitch, so they stay in the flow (no jump per tile) and an absolute child keeps them as its containing block.
 // Each case reads its own shot from one shared run, at 390 with touch, and asserts the page height before the column.
 // The expected runs are what a plain full-page capture gives at 1440 (no touch), or the page's own geometry.
 const PINNED_SHOTS = {
