@@ -3419,6 +3419,9 @@ BRIEF_DESTRUCTIVE_NEXT_TO = ("avoid", "without")   # a negator only as the word 
 BRIEF_DESTRUCTIVE_RUN_VERBS = ("run", "use", "call", "execute", "type")
 BRIEF_DESTRUCTIVE_NOT = re.compile(r"\b(?:do|must|should|can)\s+not\b", re.IGNORECASE)
 BRIEF_DESTRUCTIVE_LIST_COMMA = re.compile(r"\x00\s*,\s*(?:(?:and|or|nor)\s+)*(?=\x00|$)", re.IGNORECASE)
+BRIEF_DESTRUCTIVE_NEGATOR_COMMA = re.compile(
+    r"(?<![\w'-])(never|no|don't|(?:do|must|should|can)\s+not|shouldn't|mustn't|can't|cannot)\s*,[^,;.]{1,60},",
+    re.IGNORECASE)
 BRIEF_DESTRUCTIVE_BULLET = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
 BRIEF_DESTRUCTIVE_SKIP = ("branch-delete", "worktree-remove", "worktree-prune")
 BRIEF_DESTRUCTIVE_REASON = (
@@ -3479,11 +3482,14 @@ def _brief_prohibits(before: str) -> bool:
     count only as the word directly before it."""
     # an earlier span reads as one word, so "Never run `a` or `b`" keeps its negation for `b`
     # a comma after a span, with only "or"/"and" before the next span, continues the list and drops the earlier spans
-    # from the negator's window; a comma before plain words ends the clause
+    # from the negator's window; a comma before plain words ends the clause, but a negator, a comma, an aside and a
+    # second comma ("Do not, under any circumstances, write") keep the window
     # a span becomes a NUL, which no prose word holds, so "fix, `git reset`" is no list; a NUL already in the brief
     # reads as a space first, so it cannot pose as a span
     spans = BRIEF_DESTRUCTIVE_SPAN.sub("\x00", before.replace("\x00", " "))
     listed = BRIEF_DESTRUCTIVE_LIST_COMMA.sub("", spans)
+    # a negator, a comma, an aside and a second comma ("Do not, under any circumstances, write") keep the negator's window
+    listed = BRIEF_DESTRUCTIVE_NEGATOR_COMMA.sub(r"\1", listed)
     words = _brief_words(re.split(r"[;.,]", listed)[-1])
     return any(word in BRIEF_DESTRUCTIVE_NEGATORS for word in words[-4:]) \
         or bool(words) and words[-1] in BRIEF_DESTRUCTIVE_NEXT_TO
@@ -3557,7 +3563,10 @@ def brief_destructive_hit(tool: str, tool_input) -> str:
 #     only when their object is the agent's own output: "your" or "finding(s)" before the destination ("Add your
 #     findings to a.md"), or after "with" in "update <path> with". "make sure" and "ensure" are wrappers: inside one, a
 #     passive ("is saved to a.md") orders a write. Also "create a file", a `tee <path>` in prose, and a call or use of
-#     the Write tool.
+#     the Write tool. Compose verbs also take "at" ("Write a report at docs/review.md"), a colon after a short object that
+#     names the output ("Write the report: docs/review.md"), and "<path> with your <report>" ("Create docs/review.md with
+#     your report"); a redirect in prose outside a span ("run cat v > audit.md") counts. A verb reads 400 chars before it
+#     and 300 after it (BRIEF_WRITE_WINDOW, BRIEF_WRITE_REACH), so one long line costs time in proportion to its length.
 # Passes: a negator before the verb in its clause (_brief_prohibits) or between the verb and its destination, a "Must
 # deny:" or "Add a case:" line, and a negating heading's cover. The forms this reader misses are the Limits in decision
 # brief-write-needs-writer. The override lifts it. Cost: pure text work inside the one guard call. No process, no file.
@@ -3574,14 +3583,28 @@ BRIEF_WRITE_TOKEN = re.compile(r"\s+(?:(?:the|a|an|your|this|new)\s+)*(`?[\w~./#
 BRIEF_WRITE_UPDATE = re.compile(r"\s+(?:the\s+)?(`?[\w~./#-]+`?)\s+with(?![\w-])", re.IGNORECASE)
 BRIEF_WRITE_SURE = re.compile(r"\s+sure(?![\w-])", re.IGNORECASE)
 BRIEF_WRITE_ENSURE = re.compile(
-    r"(?<![\w-])(?:make\s+sure|be\s+sure|ensure)\s+[^.!?;:,]*?(?<![\w-])(?:is|are|gets?|be)\s+(?:saved|written|stored"
+    r"(?<![\w-])(?:make\s+sure|be\s+sure|ensure)\s+[^.!?;:,]{0,200}?(?<![\w-])(?:is|are|gets?|be)\s+(?:saved|written|stored"
     r"|dumped|appended|put|placed|output|generated|drafted|redirected)(?![\w-])", re.IGNORECASE)
 BRIEF_WRITE_WRAPPER = re.compile(
     r"(?<![\w-])(?:(?:remember|be\s+sure|make\s+sure)\s+to|(?:your|the)\s+(?:job|task)\s+is\s+to"
     r"|the\s+agent\s+(?:should|must|will|needs?\s+to))(?![\w-])", re.IGNORECASE)
 BRIEF_WRITE_REST_END = re.compile(r"[.!?;:](?=\s|$)|,(?=\s|$)|\b(?:and|then|but)\b", re.IGNORECASE)
+BRIEF_WRITE_WINDOW = 400   # chars of text before a verb that a clause can use; a longer run is read as its last 400
+BRIEF_WRITE_REACH = 300    # chars after a verb that its object and destination can span
+BRIEF_WRITE_COLON_NOUN = re.compile(
+    r"(?<![\w-])(?:report|findings?|review|audit|summary|verdict|notes|results?|analysis|answer|output|plan)(?![\w-])",
+    re.IGNORECASE)
+BRIEF_WRITE_AT_NOT = frozenset(("of", "about", "for", "on", "with", "from", "by", "that", "which"))
+BRIEF_WRITE_WITH_VERBS = ("update", "create", "write")
+BRIEF_WRITE_MAY_NOT = re.compile(r"(?<![\w-])(?:(?:may|will)\s+(?:not|never)|won['’]t)(?![\w-])", re.IGNORECASE)
+BRIEF_WRITE_EXTENSIONS = frozenset((
+    "md mdx txt rst adoc json jsonl yaml yml toml ini cfg conf env log csv tsv html htm css scss js jsx ts tsx mjs cjs py "
+    "pyi sh bash zsh ps1 bat cmd go rs java kt swift c h cpp hpp cs rb php sql xml lock diff patch png jpg jpeg gif svg "
+    "pdf docx xlsx pptx zip gz tar").split())
 BRIEF_WRITE_FILE = re.compile(r"\b(?:create|write|make|touch)\s+(?:a|an|the|new)\s+(?:new\s+)?file\b", re.IGNORECASE)
-BRIEF_WRITE_TOOL = re.compile(r"(?<![\w-])(?:use|call|invoke|run)\s+(?:the\s+)?write\s+tool\b", re.IGNORECASE)
+BRIEF_WRITE_TOOL = re.compile(
+    r"(?<![\w-])(?:use|call|invoke|run)\s+(?:the\s+)?write\s+tool\b(?!\s+(?:tests?|cases?|specs?|checks?|guard|rule|hook"
+    r"|names?|output|docs?|results?)\b)", re.IGNORECASE)
 BRIEF_WRITE_PROSE_TEE = re.compile(r"(?<![\w-])tee\s+(?:-\w+\s+)*(`?[\w~./#-]+)", re.IGNORECASE)
 BRIEF_WRITE_LEAD = frozenset((
     "please", "now", "you", "must", "should", "will", "can", "to", "just", "always", "finally", "also", "then", "are",
@@ -3612,10 +3635,12 @@ def _brief_write_target_ok(target: str) -> bool:
 
 
 def _brief_write_path(token: str) -> bool:
-    """True when a word is path-shaped: it ends in an extension, starts with `~/` or `./`, or holds a slash that is no
-    word pair (PASS/FAIL, and/or)."""
+    """True when a word is path-shaped: it ends in a file extension from BRIEF_WRITE_EXTENSIONS (a dotted name such as
+    `total.length` is no file), starts with `~/` or `./`, or holds a slash that is no word pair (PASS/FAIL, and/or)."""
     token = token.strip("`").rstrip(".,)")
-    if re.search(r"\.[A-Za-z]\w{0,7}(?:#|$)", token) or (token.startswith(("~/", "./")) and len(token) > 2):
+    dotted = re.search(r"\.([A-Za-z]\w{0,7})(?:#|$)", token)
+    if dotted and dotted.group(1).lower() in BRIEF_WRITE_EXTENSIONS \
+            or (token.startswith(("~/", "./")) and len(token) > 2):
         return True
     parts = [part for part in token.split("/") if part]
     return "/" in token and bool(parts) and not all(part.isupper() for part in parts) \
@@ -3640,55 +3665,92 @@ def _brief_write_leads(before: str) -> bool:
     return all(word in BRIEF_WRITE_LEAD for word in _brief_words(clause))
 
 
-def _brief_write_object(rest: str, compose: bool) -> bool:
+def _brief_write_object(rest: str, compose: bool, quoted: bool = False) -> bool:
     """True when the first destination word in the clause after a write verb leads to a path or to "a file", with no
-    negator before it. A compose verb's first "in", "inside", "at" or "under" names a topic, not a destination."""
+    negator before it. A compose verb's first "in", "inside" or "under" names a topic, not a destination; its "at" does
+    too when a word such as "of", "about" or an -ing word sits before it, or when the verb is quoted."""
     match = BRIEF_WRITE_DEST.search(rest)
-    if not match or any(word in BRIEF_WRITE_NEGATORS for word in _brief_words(rest[:match.start()])):
+    if not match:
         return False
-    if compose and match.group(1).lower() in BRIEF_WRITE_PLACE_ONLY:
+    before = _brief_words(rest[:match.start()])
+    if any(word in BRIEF_WRITE_NEGATORS for word in before):
+        return False
+    word = match.group(1).lower()
+    if compose and (word in BRIEF_WRITE_PLACE_ONLY and word != "at" or word == "at" and (
+            quoted or len(before) > 3 or any(w in BRIEF_WRITE_AT_NOT or w.endswith("ing") for w in before))):
         return False
     after = rest[match.end():]
     token = BRIEF_WRITE_TOKEN.match(after)
     return bool(BRIEF_WRITE_FILE_NOUN.match(after)) or bool(token) and _brief_write_path(token.group(1))
 
 
+def _brief_write_colon(text: str, verb: re.Match, rest: str) -> bool:
+    """True for "Write the report: docs/review.md": a short object that names the agent's own output, then a colon
+    and a path-shaped word."""
+    colon = verb.end() + len(rest)
+    if text[colon:colon + 1] != ":" or len(rest.split()) > 4 or not BRIEF_WRITE_COLON_NOUN.search(rest) \
+            or any(word in BRIEF_WRITE_NEGATORS for word in _brief_words(rest)):
+        return False
+    token = BRIEF_WRITE_TOKEN.match(text, colon + 1)
+    return bool(token) and _brief_write_path(token.group(1))
+
+
 def _brief_write_orders(text: str) -> bool:
     """True when one prose line, marks removed, orders a file write: a write verb in command form with a file
-    destination, a passive write inside "make sure", "create a file", a `tee <path>`, or the Write tool."""
+    destination, a passive write inside "make sure", "create a file", a `tee <path>`, or the Write tool. Only the
+    BRIEF_WRITE_WINDOW chars before a verb and the BRIEF_WRITE_REACH chars after it are read, so a long line costs
+    time in proportion to its length."""
+    spans = [span.span() for span in BRIEF_DESTRUCTIVE_SPAN.finditer(text)]   # command text, read by _brief_write_command
     for verb in BRIEF_WRITE_VERB.finditer(text):
-        name, before = verb.group(1).lower(), text[:verb.start()]
-        rest = BRIEF_WRITE_REST_END.split(text[verb.end():], 1)[0]
+        name, before = verb.group(1).lower(), text[max(0, verb.start() - BRIEF_WRITE_WINDOW):verb.start()]
+        end = BRIEF_WRITE_REST_END.search(text, verb.end(), verb.end() + BRIEF_WRITE_REACH)
+        rest = text[verb.end():end.start() if end else verb.end() + BRIEF_WRITE_REACH]
         if name == "make" and BRIEF_WRITE_SURE.match(rest) or not _brief_write_leads(before) or _brief_prohibits(before):
             continue
-        if name == "update":
+        quoted = any(start <= verb.start() < stop for start, stop in spans)   # a phrase quoted in a span is text
+        if name in BRIEF_WRITE_WITH_VERBS and not quoted:
             target = BRIEF_WRITE_UPDATE.match(rest)
             if target and _brief_write_path(target.group(1)) and BRIEF_WRITE_OWN.search(rest[target.end():]):
                 return True
-        elif name in BRIEF_WRITE_CHANGE:
+        if name == "update":
+            continue
+        if name in BRIEF_WRITE_CHANGE:
             dest = BRIEF_WRITE_DEST.search(rest)
             if dest and BRIEF_WRITE_OWN.search(rest[:dest.start()]) and _brief_write_object(rest, False):
                 return True
-        elif _brief_write_object(rest, name in BRIEF_WRITE_COMPOSE):
+        elif _brief_write_object(rest, name in BRIEF_WRITE_COMPOSE, quoted) \
+                or not quoted and name not in BRIEF_WRITE_CHANGE and _brief_write_colon(text, verb, rest):
             return True
     for match in BRIEF_WRITE_ENSURE.finditer(text):
-        before = text[:match.start()]
+        before = text[max(0, match.start() - BRIEF_WRITE_WINDOW):match.start()]
         if _brief_write_leads(before) and not _brief_prohibits(before) \
-                and _brief_write_object(BRIEF_WRITE_REST_END.split(text[match.end():], 1)[0], False):
+                and _brief_write_object(BRIEF_WRITE_REST_END.split(text[match.end():match.end() + BRIEF_WRITE_REACH], 1)[0], False):
             return True
-    spans = [span.span() for span in BRIEF_DESTRUCTIVE_SPAN.finditer(text)]   # command text, read by _brief_write_command
     for pattern in (BRIEF_WRITE_FILE, BRIEF_WRITE_TOOL, BRIEF_WRITE_PROSE_TEE):
         for match in pattern.finditer(text):
-            before = text[:match.start()]
+            before = text[max(0, match.start() - BRIEF_WRITE_WINDOW):match.start()]
             if pattern is BRIEF_WRITE_PROSE_TEE:
                 ordered = _brief_write_path(match.group(1)) and not _brief_prohibits(before) \
                     and not any(start <= match.start() < end for start, end in spans)
             elif pattern is BRIEF_WRITE_FILE:
                 ordered = _brief_write_leads(before) and not _brief_prohibits(before)
-            else:
-                ordered = not _brief_prohibits(before)
+            else:   # a "may not", "will not" or "won't" before the tool is a ban; a bare "may" or "will" is not
+                ordered = not _brief_prohibits(BRIEF_WRITE_MAY_NOT.sub("never", before))
             if ordered:
                 return True
+    return False
+
+
+def _brief_write_prose_redirect(line: str) -> bool:
+    """True when a prose line, outside backtick spans and quotes, redirects a command's output into a path ("run cat
+    v > audit.md"). A `>` at the line start is a quote mark, and a comparison names no path."""
+    bare = BRIEF_DESTRUCTIVE_SPAN.sub(lambda span: " " * len(span.group(0)), line)
+    bare = BRIEF_WRITE_QUOTED.sub(lambda quoted: " " * len(quoted.group(0)), bare)
+    for match in BRIEF_WRITE_REDIRECT.finditer(bare):
+        before = bare[max(0, match.start() - BRIEF_WRITE_WINDOW):match.start()]
+        if before.strip() and re.search(r"[A-Za-z]", match.group(1)) and not _brief_write_target_ok(match.group(1)) \
+                and not _brief_prohibits(re.sub(r"(?<=\w)\.(?=\w)", "_", before)):   # a dot in a name ends no clause
+            return True
     return False
 
 
@@ -3712,7 +3774,7 @@ def _brief_write_prose(prompt: str) -> str:
             covered = False
         if covered or stripped.startswith("$ ") or BRIEF_DESTRUCTIVE_CASE_DATA.search(line):
             continue
-        if _brief_write_orders(BRIEF_WRITE_MARKS.sub("", line)):
+        if _brief_write_orders(BRIEF_WRITE_MARKS.sub("", line)) or _brief_write_prose_redirect(line):
             return stripped
     return ""
 
