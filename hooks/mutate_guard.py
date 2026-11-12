@@ -925,7 +925,7 @@ MUTATIONS = [
     ("live-stream: never refuse a live stream",
      '    for segment in split_segments(stripped):\n'
      '        matched = live_stream_hit(segment)\n'
-     '        if matched:\n'
+     '        if matched and stream_family:\n'
      '            refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)',
      '    for segment in split_segments(stripped):\n'
      '        matched = live_stream_hit(segment)\n'
@@ -933,7 +933,7 @@ MUTATIONS = [
      '            refuse(tool, "deny", "live-stream", LIVE_STREAM_REASON, matched)', "guard", 'stream: tail -f never ends'),
     ("waiter: never refuse a waiter loop (Rule 9)",
      '    matched = waiter_verdict(split_segments(stripped), background)\n'
-     '    if matched:\n'
+     '    if matched and stream_family:\n'
      '        if poller:',
      '    matched = waiter_verdict(split_segments(stripped), background)\n'
      '    if False:\n'
