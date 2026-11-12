@@ -220,22 +220,27 @@ def language_of(path, std):
     return next((n for n in SCANNED if word and word in rows.get(n, {}).get("shebangs", [])), None)
 
 
-def added_lines(base, std):
+def added_lines(base, std, exclude=()):
     """Map each changed path in a scanned language to (language, the set of line numbers the diff adds).
 
-    A line the same diff deletes, with the same text, is a move and not added (diff_moves). A move into an
+    A path that starts with an `exclude` prefix is not scanned, on either side of the diff. A line the same
+    diff deletes, with the same text, from a scanned path is a move and not added (diff_moves). A move into an
     untracked file has no diff, so it is no move: that file is not in the diff and stays unchecked here."""
+
+    def scanned(path):
+        return not path.startswith(exclude) and language_of(path, std) is not None
+
     git("rev-parse", "--verify", "--quiet", base + "^{commit}")
     fork = git("merge-base", base, "HEAD").strip()
     diff = git("diff", "-U0", "-M", "--no-color", "--no-ext-diff", fork)
-    left = diff_moves.deleted_texts(diff, lambda old: language_of(old, std) is not None)
+    left = diff_moves.deleted_texts(diff, scanned)
     added, path, header, line = {}, None, False, 0
     for row in diff.split("\n"):
         if row.startswith("diff --git "):
             path, header = None, True
         elif header and row.startswith("+++ "):
             path = None if row == "+++ /dev/null" else row[6:].split("\t")[0]
-            lang = language_of(path, std) if path else None
+            lang = language_of(path, std) if path and not path.startswith(exclude) else None
             if lang is None:
                 path = None
             else:
@@ -777,7 +782,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
     try:
         std = load_standard()
-        files = {p: v for p, v in added_lines(args.base, std).items() if not p.startswith(tuple(args.exclude))}
+        files = added_lines(args.base, std, tuple(args.exclude))
     except Unread as e:
         print("UNKNOWN: %s (base %s)" % (e, args.base), file=sys.stderr)
         return 2
