@@ -402,6 +402,7 @@ OWN_LANE_TAGS = ["cs-build:lane", "cs-repo:shivinate7/claude-settings"]
 # with no origin read, so no fixture repo is needed here.
 START_TOPIC_TAGS = OWN_LANE_TAGS + ["cs-topic:alpha"]
 OLD_START_TAGS = OWN_LANE_TAGS + ["cs-step:icon-a"]
+TRIAGE_START_TAGS = ["cs-build:triage"] + START_TOPIC_TAGS[1:]  # a start that is no lane: the lane tag swapped, the topic kept
 START_BRIEF = LANE_GRANT + "\nLane brief: icon-a. Topic: alpha."
 START_TOPIC_REASON = ("names a topic that the start's cs-topic tag does not hold",)
 
@@ -472,6 +473,10 @@ start_allow("an older-lane start for step icon-a with the three role ids is allo
             LANE_GRANT + "\nLane brief: icon-a. Topic: icons." + IDS_LINES, tags=OLD_START_TAGS)
 start_allow("an older-lane start for step icon-a with the three role labels and no ids is allowed",
             LANE_GRANT + "\nLane brief: icon-a. Topic: icons." + LABEL_LINES, tags=OLD_START_TAGS)
+# Passes: a start that is no lane is not judged by the role check, though its brief names no role label. Its tags keep
+# cs-topic:alpha, so the topic check passes, and only the lane gate decides whether the role check runs.
+start_allow("a start that is no lane (cs-build:triage, no cs-build:lane) with a marker brief and no role labels is allowed",
+            START_BRIEF, tags=TRIAGE_START_TAGS)
 # Refused on the topic, as before: a start whose brief names topic colors on a lane of topic alpha. The ids do not rescue
 # a wrong topic, and with no ids the topic reason still wins over the role reason. The topic refusal of a start names no
 # session id, so `session id` tells it apart from the role reason, which asks for none.
