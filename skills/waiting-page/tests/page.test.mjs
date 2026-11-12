@@ -4291,6 +4291,7 @@ test("ask-phase-out: the read asks list is labelled Read asks, each row says Mar
 
 test("ask-phase-out: a closed item with a closed time shows as one line in the Answered section, with its home, its short reply and Mark read", async (t) => {
   const page = await open(t, { items: [AP_OPEN, AP_CLOSED] }); if (!page) return;
+  await openAnswered(page);
   await mustHave(page, "#tier-answered", `an Answered section for No. ${AP_CLOSED.n}, a closed item with a closed time`);
   await mustHave(page, `#tier-answered #line-${AP_CLOSED.n}`, `one line of No. ${AP_CLOSED.n} in the Answered section`);
   const line = page.locator(`#tier-answered #line-${AP_CLOSED.n}`);
@@ -4303,6 +4304,7 @@ test("ask-phase-out: a closed item with a closed time shows as one line in the A
 
 test("ask-phase-out: Mark read on a closed item's line writes dismissed with update on items, sets and deletes nothing, and the line has no Mark read after the press", async (t) => {
   const page = await open(t, { items: [AP_OPEN, AP_CLOSED] }); if (!page) return;
+  await openAnswered(page);
   await mustHave(page, `#tier-answered #line-${AP_CLOSED.n}`, `one line of No. ${AP_CLOSED.n}`);
   const press = await needButton(page.locator(`#tier-answered #line-${AP_CLOSED.n}`), new RegExp(`^Mark read: No\\. ${AP_CLOSED.n},`), `Mark read on the line of No. ${AP_CLOSED.n}`);
   await press.click();
@@ -4318,6 +4320,7 @@ test("ask-phase-out: Mark read on a closed item's line writes dismissed with upd
 
 test("ask-phase-out: a closed line marked read leaves the Answered list on reload, and sits behind Show read items", async (t) => {
   const page = await open(t, { items: [AP_OPEN, AP_CLOSED], keepItems: true }); if (!page) return;
+  await openAnswered(page);
   // Setup: before Mark read, the line of No. 70 is in the Answered list.
   await mustHave(page, `#tier-answered #line-${AP_CLOSED.n}`, `the line of No. ${AP_CLOSED.n} in the Answered section before Mark read`);
   const press = await needButton(page.locator(`#tier-answered #line-${AP_CLOSED.n}`), new RegExp(`^Mark read: No\\. ${AP_CLOSED.n},`), `Mark read on the line of No. ${AP_CLOSED.n}`);
@@ -4328,6 +4331,7 @@ test("ask-phase-out: a closed line marked read leaves the Answered list on reloa
   await page.reload();
   await page.waitForFunction("state.items.length > 0");
   await mustHave(page, `#item-${TASK.id}`, `the open task ${TASK.id} after the reload`);
+  await openAnswered(page);
   // Scope first: the Answered section is drawn, with the read item behind its fold, so the absence below is real.
   await mustHave(page, "#tier-answered", "the Answered section after the reload");
   await mustHave(page, "#readItems", "the Show read items fold in the Answered section after the reload");
@@ -4339,6 +4343,7 @@ test("ask-phase-out: a closed line marked read leaves the Answered list on reloa
 
 test("ask-phase-out: Mark read on a closed item's line leaves a Marked read. line in its place this visit, with Mark unread", async (t) => {
   const page = await open(t, { items: [AP_OPEN, AP_CLOSED] }); if (!page) return;
+  await openAnswered(page);
   const press = await needButton(page.locator(`#tier-answered #line-${AP_CLOSED.n}`), new RegExp(`^Mark read: No\\. ${AP_CLOSED.n},`), `Mark read on the line of No. ${AP_CLOSED.n}`);
   await press.click();
   await apWaitUpdates(page, "items", 1);
@@ -4357,6 +4362,7 @@ test("ask-phase-out: Mark read on a closed item's line leaves a Marked read. lin
 
 test("ask-phase-out: Mark read on a closed item's line moves focus to its Marked read line, and the Answered sub-line says a marked line stays until the next load", async (t) => {
   const page = await open(t, { items: [AP_OPEN, AP_CLOSED] }); if (!page) return;
+  await openAnswered(page);
   // Scope first: the press is the Mark read button of the line of No. 70, and no other element.
   const press = await needButton(page.locator(`#tier-answered #line-${AP_CLOSED.n}`), new RegExp(`^Mark read: No\\. ${AP_CLOSED.n},`), `Mark read on the line of No. ${AP_CLOSED.n}`);
   assert.equal(await press.evaluate((b, n) => { const l = b.closest("article"); return !!l && l.id === "line-" + n; }, AP_CLOSED.n), true, `the Mark read press is not on the line of No. ${AP_CLOSED.n}`);
@@ -4373,6 +4379,7 @@ test("ask-phase-out: Mark read on a closed item's line moves focus to its Marked
 
 test("ask-phase-out: a read item sits under Show read items, and Mark unread on it writes dismissed null with update", async (t) => {
   const page = await open(t, { items: [AP_OPEN, AP_READ] }); if (!page) return;
+  await openAnswered(page);
   const fold = page.getByRole("button", { name: /Show \d+ read items?/ });
   assert.equal(await fold.count(), 1, `no Show read items fold: No. ${AP_READ.n}, a read item, is not behind one button`);
   await fold.click();
@@ -4384,6 +4391,27 @@ test("ask-phase-out: a read item sits under Show read items, and Mark unread on 
   assert.equal(ups.length, 1, `Mark unread made ${ups.length} update writes on items, not one`);
   assert.equal(ups[0].id, AP_READ.id, `Mark unread updated ${ups[0].id}, not ${AP_READ.id}`);
   assert.deepEqual(ups[0].body, { dismissed: null }, `Mark unread wrote ${JSON.stringify(ups[0].body)}, not dismissed: null`);
+});
+
+// A closed line whose reply is new at load: the Answered section opens on load, as it does for a card with a New reply (freezeSunk reads the lines too).
+const AP_NEW_REPLY = mk("ap-new-reply", 81, { status: "closed", closed: "2026-11-09T15:00:00Z", home: "step:ask-phase-out", title: "A line with a new reply", reply: "Filed as step ask-phase-out.", replied: "2026-11-10T19:00:00Z" });
+// A closed line with no reply at load, which takes one after load: the closed Answered head marks it.
+const AP_LATE_LINE = mk("ap-late-line", 82, { status: "closed", closed: "2026-11-09T15:00:00Z", home: "step:ask-phase-out", title: "A line that takes a late reply", reply: "Filed as step ask-phase-out." });
+
+test("ask-phase-out: a closed line with a New reply at load opens the Answered section on load", async (t) => {
+  const page = await open(t, { items: [AP_OPEN, AP_NEW_REPLY] }); if (!page) return;
+  await need(page.locator(`#tier-answered #line-${AP_NEW_REPLY.n}`), `No. ${AP_NEW_REPLY.n}, a closed line, is not in the Answered section`);
+  assert.equal(await page.locator("#b-answered").getAttribute("aria-expanded"), "true", `the New reply on the closed line No. ${AP_NEW_REPLY.n} did not open the Answered section on load`);
+});
+
+test("ask-phase-out: a late reply on a closed line marks the closed Answered head, and the section stays closed", async (t) => {
+  const page = await open(t, { items: [AP_OPEN, AP_LATE_LINE] }); if (!page) return;
+  await need(page.locator(`#tier-answered #line-${AP_LATE_LINE.n}`), `No. ${AP_LATE_LINE.n}, a closed line, is not in the Answered section`);
+  assert.equal(await page.locator("#b-answered").getAttribute("aria-expanded"), "false", "the Answered section opened on load with no New reply in it");
+  assert.equal(await headMark(page), 0, "the closed Answered head marks at load, before any reply");
+  await page.evaluate((item) => window.__putItem(item), { ...AP_LATE_LINE, reply: "Thanks, noted.", replied: LATER_REPLY_AT });
+  await page.waitForFunction((rep) => state.lines.some((l) => l.replied === rep), LATER_REPLY_AT);
+  assert.equal(await headMark(page), 1, `a late reply on the closed line No. ${AP_LATE_LINE.n} did not mark the closed Answered head`);
 });
 
 test("ask-phase-out: control: a closed item with no closed time counts as read, and it is nowhere on the page", async (t) => {
@@ -4416,6 +4444,7 @@ test("ask-phase-out: control: an unknown field on an item still draws its Which 
 
 test("ask-phase-out: an answered item filed and not waiting shows one line in the Answered section, with its home", async (t) => {
   const page = await open(t, { items: [AP_OPEN, AP_FILED], answers: answerOf(AP_FILED), receipts: { [AP_FILED.id]: { read: "2026-10-26T02:00:00Z", filed: "2026-10-26T03:00:00Z" } } }); if (!page) return;
+  await openAnswered(page);
   await mustHave(page, `#tier-answered #line-${AP_FILED.n}`, `one line of No. ${AP_FILED.n} in the Answered section`);
   const said = ((await page.locator(`#tier-answered #line-${AP_FILED.n}`).textContent()) || "").replace(/\s+/g, " ");
   assert.ok(said.includes("c1"), `the line of No. ${AP_FILED.n} does not name its home c1: ${JSON.stringify(said)}`);
@@ -4424,6 +4453,7 @@ test("ask-phase-out: an answered item filed and not waiting shows one line in th
 
 test("ask-phase-out: control: a filing-pending answer keeps today's card, with Change, no Mark read, and its rail chip in the Answered row", async (t) => {
   const page = await open(t, { items: [AP_OPEN, AP_PENDING], answers: answerOf(AP_PENDING) }); if (!page) return;
+  await openAnswered(page);
   await mustHave(page, `#tier-answered #item-${AP_PENDING.id}`, `card of No. ${AP_PENDING.n}, filing pending, in the Answered section`);
   const c = card(page, AP_PENDING);
   assert.match(((await c.locator(".ans").textContent()) || "").trim(), /^Filing pending/, `card of No. ${AP_PENDING.n} does not read Filing pending`);
@@ -4469,6 +4499,7 @@ test("ask-phase-out: control: a routed item read at load counts 0 in the Answere
 
 test("ask-phase-out: control: an unread routed item counts 1 in the Answered header before and after Change", async (t) => {
   const page = await aprOpen(t, APR_UNREAD); if (!page) return;
+  await openAnswered(page);
   await mustHave(page, `#tier-answered #line-${APR_UNREAD.n}`, `the line of No. ${APR_UNREAD.n} in the Answered section`);
   const before = await answeredHeader(page);
   assert.equal(before, "1", `the Answered header counts ${before} before Change, with No. ${APR_UNREAD.n} drawn as a line`);
@@ -4483,6 +4514,7 @@ test("ask-phase-out: control: an unread routed item counts 1 in the Answered hea
 
 test("ask-phase-out: a routed item read at load, taken to Change from Show read items, is counted in the Answered header", async (t) => {
   const page = await aprOpen(t, APR_ROUTED); if (!page) return;
+  await openAnswered(page);
   await changeReadItem(page, APR_ROUTED);
   const got = await answeredHeader(page);
   assert.equal(got, "1", `the Answered header counts ${got}, but No. ${APR_ROUTED.n} is drawn as a card in the section`);
@@ -4490,6 +4522,7 @@ test("ask-phase-out: a routed item read at load, taken to Change from Show read 
 
 test("ask-phase-out: the rail's Answered row counts the card of a read routed item taken to Change", async (t) => {
   const page = await aprOpen(t, APR_ROUTED); if (!page) return;
+  await openAnswered(page);
   await changeReadItem(page, APR_ROUTED);
   const row = page.locator('#rail a.ov-head[href="#tier-answered"]');
   await need(row, `the rail has no Answered row, but No. ${APR_ROUTED.n} is drawn as a card in the Answered section`);
@@ -4514,6 +4547,7 @@ test("ask-phase-out: a read item that a session gives waits is counted in the An
 // ---------------------------------------------------------------- ask-phase-out: the line head, the read list's Mark unread, the rail's order
 test("ask-phase-out: Mark unread in the read asks list is quiet, as it is in the read items list", async (t) => {
   const page = await open(t, { items: [AP_OPEN, AP_READ], dbExtra: { asks: { [DIS_KEEP.id]: DIS_KEEP, [DIS_HIDDEN.id]: DIS_HIDDEN } }, storage: RPL_NEW }); if (!page) return;
+  await openAnswered(page);
   await shownBox(page, DIS_KEEP.text, DIS_SHOWN);
   await mustHave(page, "#askDismissed", "Show read asks unfold");
   await page.click("#askDismissed");
@@ -4531,6 +4565,7 @@ test("ask-phase-out: Mark unread in the read asks list is quiet, as it is in the
 for (const width of [768, 1280]) {
   test(`ask-phase-out: a long closed title at ${width} px is cut with an ellipsis, on one row with its number and home`, async (t) => {
     const page = await open(t, { items: [AP_OPEN, AP_LONG], viewport: { width, height: 900 } }); if (!page) return;
+    await openAnswered(page);
     await mustHave(page, "#line-77 .fhead", "the head of the long-title line");
     await mustHave(page, "#line-77 .fno", "the number of the long-title line");
     await mustHave(page, "#line-77 .ftext", "the title of the long-title line");
