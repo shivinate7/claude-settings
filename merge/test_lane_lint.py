@@ -11,6 +11,8 @@ The SIGTERM case and the slot cases run merge in a subprocess through HARNESS, w
 in this process. The slot cases (lint slots: a lane lint waits for one of merge.lint_slots() slots) set the slot count and the bound
 (merge.LINT_SECONDS) in that subprocess, and read the order of the stub's starts and ends, never the clock.
 BatchLintFlags runs the real bin/ci-job through merge.lane_lint on a batch's four checks.yml lint CI steps, each script logged once with its argv; cost per case: one ci-job copy and run, one worktree, four CI step runs, 0.5 s measured (3 runs of 2 cases). Its two lint-set cases (no lint step; a step that runs only off a pull request) run the same way with their own checks job.
+Its two slot-hold cases hold every lane-lint slot, or none, in the default config folder of a scratch home (HOME moved there), and
+run the same ci-job once; the lint runs in this run's config folder (BatchLintFlags.cfg). No case sleeps: FirstPollStops stops a wait at its first poll.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
 import ast, atexit, contextlib, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
@@ -1820,6 +1822,31 @@ def link_or_copy(src, dst):
         (shutil.copytree if os.path.isdir(src) else shutil.copy2)(src, dst)
 
 
+def home_env(home):
+    """The env that moves the default config folder (<home>/.claude) to `home`: expanduser reads HOME on POSIX and USERPROFILE on Windows."""
+    return {"HOME": home, "USERPROFILE": home}
+
+
+class SlotWaitBound(Exception):
+    """A wait for a lane-lint slot, stopped at its first poll. A plain Exception, so take_lint_slot's `except OSError` does not swallow it."""
+
+
+class FirstPollStops:
+    """merge's `time` for one case. Its sleep raises SlotWaitBound at the first lane-slot poll and returns at once for any other pause,
+    so a wait for a slot that never frees ends in this run and no case sleeps. Every other name is the real time module."""
+
+    def __init__(self):
+        self.polls = 0
+
+    def sleep(self, seconds):
+        if seconds == merge.LINT_SLOT_POLL:
+            self.polls += 1
+            raise SlotWaitBound("a lane-lint slot wait polled")
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
 class BatchLintFlags(tm.Env):
     """`merge --lane-lint <batch>` runs the real bin/ci-job on the batch's checks job: each of its four lint CI steps runs once, with the argv checks.yml gives it."""
 
@@ -1830,6 +1857,7 @@ class BatchLintFlags(tm.Env):
         self.calls = os.path.join(self.t, "calls")
         os.makedirs(self.calls)
         self.ci_job = self.copy_ci_job()
+        self.cfg = tempfile.mkdtemp(dir=RUN_FOLDER)  # the config folder the lint is given: its lane-lint slots are this run's, never the user's
 
     def call_log(self, script):
         return os.path.join(self.calls, os.path.basename(script) + ".jsonl")
@@ -1872,7 +1900,8 @@ class BatchLintFlags(tm.Env):
 
     def lane_lint(self, target, out):
         """merge.lane_lint of `target` against BASE, in the lane checkout, through the copy of ci-job. Its output goes to `out`. A refusal raises."""
-        env = {"VERDICT_LOG": os.path.join(self.t, "verdict.log")}  # one log for the run: no ci-job log lands in the system temp dir
+        env = {"CLAUDE_CONFIG_DIR": self.cfg,  # the lint takes its lane-lint slots here, never in the default folder (the user's own)
+               "VERDICT_LOG": os.path.join(self.t, "verdict.log")}  # one log for the run: no ci-job log lands in the system temp dir
         with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER), unittest.mock.patch.object(merge, "CI_JOB", self.ci_job), \
                 unittest.mock.patch.dict(os.environ, env), contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
             return merge.lane_lint(self.co, target, self.host, base=BASE)
@@ -1948,6 +1977,54 @@ class BatchLintFlags(tm.Env):
         lines = pass_lines(text)
         self.assertEqual(len(lines), 1, text)
         self.assertIn(PUSH_ONLY, lines[0], text)
+
+    def hold_default_folder_slots(self, count):
+        """Hold `count` lane-lint slots in the default config folder of a scratch home, with merge.take_lint_slot itself. A lint with no
+        CLAUDE_CONFIG_DIR looks in that folder. The locks are released at teardown. -> (the scratch home, the held fds)."""
+        home = os.path.join(self.t, "home")
+        os.makedirs(home)
+        with unittest.mock.patch.dict(os.environ, home_env(home)):
+            held = [merge.take_lint_slot() for _ in range(count)]
+        self.addCleanup(lambda: [os.close(fd) for fd in held if fd is not None])
+        return home, held
+
+    def lane_lint_at_home(self, home, out):
+        """self.lane_lint with the default config folder at `home`, and a wait for a slot stopped at its first poll. -> (rc, the
+        exception raised or None, the polls made)."""
+        clock = FirstPollStops()
+        rc, raised = None, None
+        with unittest.mock.patch.dict(os.environ, home_env(home)), unittest.mock.patch.object(merge, "time", clock):
+            try:
+                rc = self.lane_lint(BATCH, out)
+            except Exception as e:  # a refusal or the stopped wait: the asserts name which one
+                raised = e
+        return rc, raised, clock.polls
+
+    def assert_batch_lint_starts_at_once(self, held_count):
+        """With `held_count` lane-lint slots held in the default config folder, the batch's lint polls for no slot and passes."""
+        self.push_batch(BATCH)
+        home, held = self.hold_default_folder_slots(held_count)
+        # the scope first (P7): the default folder holds exactly the slots this case means it to hold
+        self.assertNotIn(None, held, "the default config folder could not be given %d lane-lint slots" % held_count)
+        self.assertEqual(len(held), held_count, "the default config folder holds %d lane-lint slots, want %d" % (len(held), held_count))
+        if held_count:
+            self.assertTrue(os.path.isdir(os.path.join(home, ".claude", "state", "lane-lint-slots")),
+                            "the held slots are not in the default config folder of the scratch home")
+        out = io.StringIO()
+        rc, raised, polls = self.lane_lint_at_home(home, out)
+        text = out.getvalue()
+        self.assertEqual(polls, 0, "the batch's lint waited for a lane-lint slot that the default config folder holds: %r\n%s" % (raised, text))
+        self.assertEqual(rc, 0, "the batch's lint refused: %r\n%s" % (raised, text))
+        self.assertEqual(len(pass_lines(text)), 1, text)
+
+    def test_every_slot_the_default_config_folder_holds_is_no_wait_for_the_batch_lint(self):
+        """The batch's lint runs in the config folder it is given, not the default one: with every lane-lint slot held in the default
+        folder, it takes a slot of its own at once and passes."""
+        self.assert_batch_lint_starts_at_once(merge.lint_slots())
+
+    def test_with_no_slot_held_in_the_default_config_folder_the_batch_lint_passes_at_once(self):
+        """The control for the hold: with no slot held in the default folder, the batch's lint starts at once and passes."""
+        self.assert_batch_lint_starts_at_once(0)
 
 
 class ReadyChecks(CiJobStub, tm.RecordsEnv):
