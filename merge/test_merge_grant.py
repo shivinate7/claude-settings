@@ -318,37 +318,37 @@ class ReviewGrantFlag(tm.ReviewEnv):
                 out, _err = self.assert_usage_error(*self.granted("--grant", grant_text(cite=f"item 396 a, owner, {date}")))
                 self.assertNotIn(tm.REVIEW_MARKER, out)
 
-    def fix_check_host(self, earlier):
+    def fix_verifier_host(self, earlier):
         """The pull request at the live head, with one earlier record `earlier` (its whole text) on the fix base REVIEW_OLD_HEAD."""
         return self.record_host(tm.review_comment(1, 7, earlier), head=self.head())
 
-    def fix_check_argv(self, verdict, rounds=FOUR, grant=None):
+    def fix_verifier_argv(self, verdict, rounds=FOUR, grant=None):
         """The argv of a fix check on the live head after `rounds`: the fix base REVIEW_OLD_HEAD, the fix check's model, `verdict`, and the grant when given."""
         return self.granted("--fix-check", f"{tm.REVIEW_OLD_HEAD}:reviewer:{tm.merge.REVIEW_FIX_GUARD_MODEL}:{verdict}",
                             *(("--grant", grant) if grant else ()), rounds=rounds)
 
-    def test_a_granted_round_four_pass_then_a_fix_check_pass_with_grant_prints_the_record(self):
+    def test_a_granted_round_four_pass_then_a_fix_verifier_pass_with_grant_prints_the_record(self):
         # the fix check rebuilds the round-4 body, and that body must carry the grant too, or parse_review reads it as no record
-        host = self.fix_check_host(tm.record_text(head=tm.REVIEW_OLD_HEAD, rounds=round_four_text("PASS"), grant=(f"Grant: {REVIEW_GRANT}",)))
-        rc, out, err = self.run_or_fail(*self.fix_check_argv("PASS", grant=REVIEW_GRANT), host=host)
+        host = self.fix_verifier_host(tm.record_text(head=tm.REVIEW_OLD_HEAD, rounds=round_four_text("PASS"), grant=(f"Grant: {REVIEW_GRANT}",)))
+        rc, out, err = self.run_or_fail(*self.fix_verifier_argv("PASS", grant=REVIEW_GRANT), host=host)
         self.assertEqual(rc, 0, "merge refused a granted round-4 fix check PASS:\n" + out + err)
         body = tm.posted_body(self, out)
         self.assertIn(f"Grant: {REVIEW_GRANT}", body.splitlines(), "the printed record has no Grant line:\n" + body)
         self.assertEqual(tm.parse_text(self, body).get("fix"), tm.REVIEW_FIX_PASS, "the printed record has no PASS fix check line:\n" + body)
 
-    def test_a_granted_round_four_then_a_fix_check_fail_prints_the_record(self):
-        host = self.fix_check_host(tm.record_text(head=tm.REVIEW_OLD_HEAD, rounds=round_four_text("PASS"), grant=(f"Grant: {REVIEW_GRANT}",)))
-        rc, out, err = self.run_or_fail(*self.fix_check_argv("FAIL", grant=REVIEW_GRANT), host=host)
+    def test_a_granted_round_four_then_a_fix_verifier_fail_prints_the_record(self):
+        host = self.fix_verifier_host(tm.record_text(head=tm.REVIEW_OLD_HEAD, rounds=round_four_text("PASS"), grant=(f"Grant: {REVIEW_GRANT}",)))
+        rc, out, err = self.run_or_fail(*self.fix_verifier_argv("FAIL", grant=REVIEW_GRANT), host=host)
         self.assertNotIn("Traceback", err, "a granted round-4 fix check FAIL printed a traceback:\n" + err)
         self.assertEqual(rc, 0, f"a granted round-4 fix check FAIL exited {rc}, not a record:\n" + out + err)
         body = tm.posted_body(self, out)
         self.assertIn(f"Grant: {REVIEW_GRANT}", body.splitlines(), "the printed record has no Grant line:\n" + body)
         self.assertEqual(tm.parse_text(self, body).get("fix"), tm.REVIEW_FIX_FAIL, "the printed record has no FAIL fix check line:\n" + body)
 
-    def test_an_ungranted_round_three_fix_check_pass_still_prints_the_record(self):
+    def test_an_ungranted_round_three_fix_verifier_pass_still_prints_the_record(self):
         # control: no grant, so the third round is final. It passes on the old code too, so a red run shows only the granted cases
-        host = self.fix_check_host(tm.record_text(head=tm.REVIEW_OLD_HEAD, rounds=tm.REVIEW_PASSED_THREE))
-        rc, out, err = self.run_or_fail(*self.fix_check_argv("PASS", rounds=(*self.THREE[:4], "--round", "3:reviewer:opus:PASS")), host=host)
+        host = self.fix_verifier_host(tm.record_text(head=tm.REVIEW_OLD_HEAD, rounds=tm.REVIEW_PASSED_THREE))
+        rc, out, err = self.run_or_fail(*self.fix_verifier_argv("PASS", rounds=(*self.THREE[:4], "--round", "3:reviewer:opus:PASS")), host=host)
         self.assertEqual(rc, 0, "merge refused an ungranted round-3 fix check PASS:\n" + out + err)
         body = tm.posted_body(self, out)
         self.assertEqual(tm.parse_text(self, body).get("fix"), tm.REVIEW_FIX_PASS, "the printed record has no PASS fix check line:\n" + body)
