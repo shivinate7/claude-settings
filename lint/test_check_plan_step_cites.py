@@ -12,7 +12,8 @@ outside a code fence. A valid cite names a live step: a file roadmap/data/steps/
 which lint/layout.py record_branch() names (the extras key "record-branch", else roadmap). The branch is read with
 git (origin's ref first, then the local one), never the working tree. An opaque slug (one letter then digits, such
 as c55) is valid only with a gloss in parentheses right after it. A fence that never closes runs to the end of the
-file, so its opening line is flagged.
+file, so its opening line is flagged. A fence closes only on a line of the same mark, at least as long, with nothing
+else on it.
 
     python3 lint/check_plan_step_cites.py [--root DIR]
 
@@ -180,10 +181,18 @@ class Fixture(unittest.TestCase):
         return out
 
     def assertFlagged(self, rel, line, ruling, part, reason, args=None, cwd=None):
-        """Exit 1, and exactly one part is flagged: this line, with this ruling, part number and reason."""
+        """Exit 1, and exactly one part is flagged: this line, with this ruling, part number and reason. Returns the output."""
         out = self.assertLine("%s:%d: %s part %d: %s" % (rel, line, ruling, part, reason), args, cwd)
         flagged = [text for text in out.splitlines() if re.search(r" part \d+: ", text)]
         self.assertEqual(len(flagged), 1, "more than one part is flagged:\n%s" % out)
+        return out
+
+    def assertUnclosed(self, rel, line, args=None, cwd=None):
+        """Exit 1, the unclosed-fence flag at this opening line, and no part flagged: the parts below the fence are hidden."""
+        out = self.assertLine("%s:%d: unclosed code fence hides the parts below it" % (rel, line), args, cwd)
+        self.assertEqual([text for text in out.splitlines() if re.search(r" part \d+: ", text)], [],
+                         "a part is flagged below an unclosed fence:\n%s" % out)
+        return out
 
     def assertUnknown(self, args=None, cwd=None):
         rc, out = self.lint(args, cwd)
@@ -374,6 +383,46 @@ class StepCiteCase(Fixture):
                     "  3. Test it. step:build-widget")
         self.plan_file("two-fences.md", text)
         self.assertClean()
+
+    def test_four_backtick_fence_is_closed_only_by_four_backticks(self):
+        """A four-backtick fence holds a three-backtick line as text. Only the four-backtick line closes it, so the
+        uncited part after the block is the one flag and no fence is left open."""
+        text = plan(RULING, "````", "```", "  1. An example part inside the block.", "````", "  2. Ship it.")
+        rel = self.plan_file("four-backticks.md", text)
+        out = self.assertFlagged(rel, line_of(text, "  2. Ship it."), "R26", 2, "no step cited")
+        self.assertNotIn("unclosed code fence", out, out)
+
+    def test_tilde_fence_holding_a_backtick_line_closes_on_a_tilde_line(self):
+        """A tilde fence holds a backtick line as text. The tilde line closes it, so the cited part after it is clean."""
+        self.assertStepScope("ship-widget", on_branch=True, in_tree=False)
+        text = plan(RULING, "~~~", "```", "  1. An example part inside the block.", "~~~",
+                    "  2. Ship it. step:ship-widget")
+        self.plan_file("tilde-block.md", text)
+        self.assertClean()
+
+    def test_backtick_fence_is_not_closed_by_a_tilde_line(self):
+        """A backtick fence closes on a backtick line only. The tilde line leaves it open, so the opening line is flagged
+        and the part below it is hidden."""
+        text = plan(RULING, "```", "  1. An example part inside the block.", "~~~", "  2. Ship it.")
+        rel = self.plan_file("backtick-then-tilde.md", text)
+        self.assertUnclosed(rel, line_of(text, "```"))
+
+    def test_fence_is_not_closed_by_a_line_with_an_info_string(self):
+        """A closing line is the fence marks and nothing else. A line with text after the marks leaves the block open."""
+        for closing in ("``` text", "```python"):
+            with self.subTest(closing=closing):
+                self.reset_plans()
+                text = plan(RULING, "```", "  1. An example part inside the block.", closing, "  2. Ship it.")
+                rel = self.plan_file("info-string-close.md", text)
+                self.assertUnclosed(rel, line_of(text, "```"))
+
+    def test_longer_fence_closes_a_shorter_one(self):
+        """A fence closes on a fence of the same mark at least as long. The four-backtick line closes the three-backtick
+        block, so the uncited part after it is the one flag and no fence is left open."""
+        text = plan(RULING, "```", "  1. An example part inside the block.", "````", "  2. Ship it.")
+        rel = self.plan_file("longer-closes.md", text)
+        out = self.assertFlagged(rel, line_of(text, "  2. Ship it."), "R26", 2, "no step cited")
+        self.assertNotIn("unclosed code fence", out, out)
 
     def test_empty_plans_home_and_an_empty_plan_pass(self):
         home = os.path.join(self.tree, *PLANS.split("/"))
