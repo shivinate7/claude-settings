@@ -297,6 +297,9 @@ jobs:
       - name: Stale prose check fixture suite
         run: python3 lint/test_stale_cites.py
 
+      - name: Git fetch helper fixture suite
+        run: python3 lint/test_git_fetch.py
+
       - name: Route judge measure fixture suite
         run: python3 lint/test_prove_route_judge.py
 
