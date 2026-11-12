@@ -103,7 +103,7 @@ guard rule, so the watcher does the waiting and the session is told once.
 When a turn ends, a Stop hook runs `hooks/stall_watch.py --stop`. It reads the session transcript and
 lists each open background shell and background agent that has been quiet longer than the age.
 For a shell, the signal is its output file, and each log its
-command names must be quiet too. A relative log resolves against the call record's `cwd`. A shell whose
+command names must be quiet too. A relative log resolves against the call record's `cwd`, after any sure `cd` the command makes (`named_logs`, above). A shell whose
 output file is not found is listed as unknown. It prints one systemMessage that tells the model to stop
 the shell or tell the owner. A job is listed once per crossing, at the first Stop after its stall crossed (see below).
 
