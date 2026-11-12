@@ -1254,6 +1254,19 @@ def artcite_noted_case(tag, command, cwd=ARTREC, env_path=None, want="allow"):
     return True, "%s: decision %s, with one noted %s line that says unknown" % (command, got, ARTCITE_RULE)
 
 
+def artcite_pinned_refusal_case(tag, command, cwd):
+    """One triage push that push-all-main refuses before the cite rule is reached (guard.py step 4, then step 6a2). A pin:
+    the refusal holds under its own rule id, and the cite rule writes no line for the push."""
+    config = _artcite_config(tag)
+    got, reason = decide(_artcite_case(command, config=config, cwd=cwd))
+    if got != "deny" or not reason.startswith(PUSH_ALL_RULE + ":"):
+        return False, "%s was %s, want a deny by %s: %s" % (command, got, PUSH_ALL_RULE, reason[:90])
+    lines = _artcite_rule_rows(config)
+    if lines:
+        return False, "%s wrote %d %s line(s): the cite rule was reached" % (command, len(lines), ARTCITE_RULE)
+    return True, "%s: denied by %s, and no %s line" % (command, PUSH_ALL_RULE, ARTCITE_RULE)
+
+
 def artcite_unknown_head_case():
     """A head the guard cannot read is noted as unknown and allowed. With no git on PATH the pushed steps cannot be
     read, while the triage proof and the destination need no git. So the push reaches the new read, and only it fails."""
@@ -1325,12 +1338,13 @@ def artcite_noreg_cites_case():
 
 
 def artcite_push_all_case():
-    """Finding 2, the silent pass: `--all` names no ref, so its source is None and the rule wrote no line. A push of every
-    branch sends the record branch, so it is noted unknown and never denied."""
+    """Finding 2: `--all` names no ref, so the cite rule has no source to read. push-all-main (rule push-all-main) refuses
+    this push first, as an every-branch push, so the cite check is not reached. A pin of that refusal. The scope check
+    keeps the pin real: the push would send the record branch, so ARTREC must hold it."""
     scope = _artcite_record_ref_scope()
     if scope:
         return False, scope
-    return artcite_noted_case("artcite-push-all", VCS + " push --all origin", want="not-refuse")
+    return artcite_pinned_refusal_case("artcite-push-all", VCS + " push --all origin", ARTREC)
 
 
 def artcite_push_mirror_case():
@@ -1360,8 +1374,9 @@ def artcite_cmd_clean_head_case():
 
 
 def artcite_glob_clean_head_case():
-    """Finding 3, the silent pass: a glob source (`feat*`) maps to HEAD on a clean head (ARTCLEAN). Noted, never denied."""
-    return artcite_noted_case("artcite-glob-clean", VCS + " push origin feat*:roadmap", cwd=ARTCLEAN, want="not-refuse")
+    """Finding 3: a glob source (`feat*`) from a clean head (ARTCLEAN). push-all-main (rule push-all-main) refuses it first,
+    as an every-branch push, so the cite check is not reached. A pin of that refusal."""
+    return artcite_pinned_refusal_case("artcite-glob-clean", VCS + " push origin feat*:roadmap", ARTCLEAN)
 
 
 # A triage push that sends a bare link in a step is refused, whichever form names the pushed head.
