@@ -46,7 +46,7 @@ const ASKED_AFTER_SEND = "2026-10-30T00:00:00Z";
 // failSetText: a write to asks whose text holds it is refused with code denied, so one ask of a batch fails and the rest save.
 // hold: { set: n } or { delete: n }. An asks write or delete after the first n waits at the hold until window.__release() runs; window.__held counts the calls waiting.
 // A case disarms it with window.__hold = null, since the init script arms it again on every load (a reload).
-function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, failSetText = "", failUpdate = false, comments, meta, groups, receipts, holdReceipts, holdAsks = false, dbExtra = {}, noStore = false, hold = {}, keepItems = false }) {
+function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, failSetText = "", failUpdate = false, failUpdateIn = "", comments, meta, groups, receipts, holdReceipts, holdAsks = false, dbExtra = {}, noStore = false, hold = {}, keepItems = false }) {
   const { meta: metaExtra, ...otherExtra } = dbExtra;
   const data = { items: { ...Object.fromEntries(items.map((i) => [i.id, i])), ...rawItems }, answers: { ...answers }, meta: { ...(meta ? { page: meta } : {}), ...metaExtra }, groups: { ...groups }, receipts: { ...receipts }, ...otherExtra };
   window.__reads = []; window.__uses = [];
@@ -85,8 +85,8 @@ function stubDb({ items, rawItems, answers, failDelete, failDeleteIn, failSet, f
         get: async () => { window.__reads.push([name, id]); return dsnap(name, id); },
         set: async (body) => { if (name === "asks") await holdFor("set"); if (failSet || (name === "asks" && failSetText && String(body.text).includes(failSetText))) throw { code: "denied" }; window.__log.push(["set", name, id, body]); (data[name] = data[name] || {})[id] = body; if (name === "asks") keepAsks(); setTimeout(() => fire(name, id), 0); },
         // A merge write, as the runtime's update: the fields given are set, the rest of the record stays. It is refused when the record is gone.
-        // failUpdate refuses every asks update with permission-denied, as a store that cannot write does.
-        update: async (body) => { if (failUpdate && name === "asks") throw { code: "permission-denied" }; if (!(data[name] || {})[id]) throw { code: "not-found" }; window.__log.push(["update", name, id, body]); data[name][id] = { ...data[name][id], ...body }; if (name === "asks") keepAsks(); if (name === "items") keepItemsStore(); setTimeout(() => fire(name, id), 0); },
+        // failUpdate refuses every asks update with permission-denied, as a store that cannot write does. failUpdateIn names one collection whose updates are refused the same way (items, for a line's Mark read).
+        update: async (body) => { if ((failUpdate && name === "asks") || failUpdateIn === name) throw { code: "permission-denied" }; if (!(data[name] || {})[id]) throw { code: "not-found" }; window.__log.push(["update", name, id, body]); data[name][id] = { ...data[name][id], ...body }; if (name === "asks") keepAsks(); if (name === "items") keepItemsStore(); setTimeout(() => fire(name, id), 0); },
         delete: async () => { if (name === "asks") await holdFor("delete"); if (failDelete || failDeleteIn === name) throw { code: "denied" }; window.__log.push(["delete", name, id]); delete (data[name] || {})[id]; if (name === "asks") keepAsks(); setTimeout(() => fire(name, id), 0); },
         onSnapshot: (cb) => { window.__reads.push([name, id]); (docSubs[name + "/" + id] = docSubs[name + "/" + id] || []).push(cb); setTimeout(() => cb(dsnap(name, id)), 0); return () => {}; },
       }),
@@ -124,7 +124,7 @@ after(async () => { if (browser) await browser.close(); });
 
 // clock: a fixed browser time (an ISO string), so a case reads the page's clock without the real one. keepStorage: each storage key is set
 // only when absent, so a reload keeps what the page wrote on the earlier load (a reload that resets storage would undo it).
-async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, holdAsks = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, hasTouch = false, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false, keepItems = false } = {}) {
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, holdAsks = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, hasTouch = false, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false, failUpdateIn = "", keepItems = false } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   // hasTouch: a touch device, so the page's pointer: coarse rules apply.
@@ -139,7 +139,7 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   // Every other request (the fonts) is refused.
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body }) : r.abort()));
   await page.addInitScript(() => { new MutationObserver(() => { const w = document.querySelector(".dfitwrap"); if (w && window.__firstFit === undefined) window.__firstFit = w.getBoundingClientRect().height; }).observe(document, { childList: true, subtree: true }); });
-  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, failSetText, failUpdate, comments, meta, groups, receipts, holdReceipts, holdAsks, dbExtra, noStore, hold, keepItems });
+  await page.addInitScript(stubDb, { items, rawItems, answers, failDelete, failDeleteIn, failSet, failSetText, failUpdate, failUpdateIn, comments, meta, groups, receipts, holdReceipts, holdAsks, dbExtra, noStore, hold, keepItems });
   await page.addInitScript(({ kv, keep }) => { for (const k in kv) { if (keep && localStorage.getItem(k) !== null) continue; localStorage.setItem(k, kv[k]); } }, { kv: storage, keep: keepStorage });
   // platform: the OS a browser reports, as navigator.platform with no userAgentData (a Windows or a Mac browser).
   if (platform) await page.addInitScript((p) => { Object.defineProperty(navigator, "platform", { get: () => p }); Object.defineProperty(navigator, "userAgentData", { get: () => undefined }); }, platform);
@@ -4297,6 +4297,108 @@ test("ask-phase-out: the rail's Answered row follows the Answered section's orde
   const secN = r.sec.map((x) => (x === "item-" + TASK.id ? TASK.n : x));
   assert.deepEqual(secN, [AP_NEWER.n, AP_CLOSED.n, TASK.n], "the Answered section is not newest first: " + JSON.stringify(secN));
   assert.deepEqual(r.rail, secN, "the rail's Answered row " + JSON.stringify(r.rail) + " is not in the section's order " + JSON.stringify(secN));
+});
+
+// ---------------------------------------------------------------- ask-phase-out states: the mockup's states the block above does not pin (step ask-phase-out)
+// Each name starts "ask-phase-out states:", so a run selects these cases with --test-name-pattern. The states are the mockup's
+// (docs/design/ask-phase-out.html): show, back, failed, all-read, rail-chips, read-lists and the No home named pill. The block above pins
+// page, marked, read-lists for asks, and the no-Dismiss words. No case pins the options the owner did not pick (rail-none, fresh-opens, today).
+// A closed item read and then replied to: its `replied` is later than `dismissed`, so it comes back as a line with the New reply mark.
+const AP_BACK = mk("ap-back", 81, { status: "closed", closed: "2026-11-09T15:00:00Z", dismissed: "2026-11-09T16:00:00Z", replied: "2026-11-09T17:25:00Z", home: "step:ask-phase-out", reply: "A reply after the mark." });
+// A closed item with no home: its pill reads No home named, so a gap in routing shows.
+const AP_NOHOME = mk("ap-nohome", 82, { status: "closed", closed: "2026-11-09T15:00:00Z", home: "", reply: "Filed with no home." });
+// Twelve read closed items, each marked an hour after the last: the full-size read list, newest mark first.
+const AP_READ_MANY = Array.from({ length: 12 }, (_, i) => mk(`ap-read-many-${i}`, 90 + i, { status: "closed", closed: "2026-11-09T09:00:00Z", dismissed: `2026-11-09T${String(10 + i).padStart(2, "0")}:00:00Z`, home: "step:ask-phase-out", reply: `Read item ${90 + i}.` }));
+
+// show: Show answer on a closed item's line opens it in place, with its number, home, Fold, title, full reply and where it went.
+test("ask-phase-out states: Show answer on a closed item's line opens it in place, with its number, home, Fold, title, reply and where it went", async (t) => {
+  const page = await open(t, { items: [AP_OPEN, AP_CLOSED] }); if (!page) return;
+  const line = `#tier-answered #line-${AP_CLOSED.n}`;
+  await mustHave(page, line, `the one line that closed item No. ${AP_CLOSED.n}, with a closed time, draws in the Answered section`);
+  await (await needButton(page.locator(line), new RegExp(`Show answer for No\\. ${AP_CLOSED.n}\\b`), `Show answer on the line of No. ${AP_CLOSED.n}`)).click();
+  await needButton(page.locator(line), /^Fold$/, `Fold on the opened line of No. ${AP_CLOSED.n}`);
+  const said = ((await page.locator(line).textContent()) || "").replace(/\s+/g, " ");
+  const want = [["its number", `No. ${AP_CLOSED.n}`], ["its home", AP_CLOSED.home], ["its title", AP_CLOSED.title], ["its full reply", AP_CLOSED.reply], ["where it went", `The record stays in ${AP_CLOSED.home}.`]];
+  for (const [what, words] of want) assert.ok(said.includes(words), `the opened line of No. ${AP_CLOSED.n} does not show ${what} "${words}": ${JSON.stringify(said)}`);
+});
+
+// show: an ask whose home is "item N" links to the line of No. N, and the link opens that line.
+test("ask-phase-out states: an ask whose home is item N links to the line of N, and the link opens that line", async (t) => {
+  const ask = { ...AP_ASK, id: "ask-ap-link", home: `item ${AP_CLOSED.n}` };
+  const page = await open(t, { items: [AP_OPEN, AP_CLOSED], dbExtra: { asks: { [ask.id]: ask } }, storage: RPL_SEEN }); if (!page) return;
+  await mustHave(page, `li#row-${ask.id}`, `the row of the routed ask ${ask.id}, which holds its home`);
+  await (await needButton(page.locator(`li#row-${ask.id}`), /Show answer/, `Show answer on the row of ${ask.id}`)).click();
+  const link = page.locator(`li#row-${ask.id} a[href="#line-${AP_CLOSED.n}"]`);
+  assert.equal(await link.count(), 1, `the home "item ${AP_CLOSED.n}" of ${ask.id} is not a link to the line of No. ${AP_CLOSED.n}`);
+  await link.click();
+  const opened = await page.waitForFunction((n) => { const l = document.getElementById("line-" + n); return !!l && l.textContent.includes("The record stays in"); }, AP_CLOSED.n, { timeout: 3000 }).then(() => true, () => false);
+  assert.equal(opened, true, `the link to the line of No. ${AP_CLOSED.n} did not open that line`);
+});
+
+// failed: the store refuses Mark read on a closed item's line. The line stays, keeps Mark read, and says it stays on the list.
+test("ask-phase-out states: when the store refuses Mark read on a closed item's line, the line stays with Mark read and says it stays on the list", async (t) => {
+  const page = await open(t, { items: [AP_OPEN, AP_CLOSED], failUpdateIn: "items" }); if (!page) return;
+  const line = `#tier-answered #line-${AP_CLOSED.n}`;
+  await mustHave(page, line, `the one line that closed item No. ${AP_CLOSED.n}, with a closed time, draws in the Answered section`);
+  await (await needButton(page.locator(line), new RegExp(`^Mark read: No\\. ${AP_CLOSED.n},`), `Mark read on the line of No. ${AP_CLOSED.n}`)).click();
+  const said = await page.waitForFunction((n) => { const l = document.getElementById("line-" + n); return !!l && l.textContent.includes("Not marked read (permission-denied). It stays on the list."); }, AP_CLOSED.n, { timeout: 3000 }).then(() => true, () => false);
+  assert.equal(said, true, `the refused Mark read of No. ${AP_CLOSED.n} does not say Not marked read (permission-denied). It stays on the list.`);
+  const after = ((await page.locator(line).textContent()) || "").replace(/\s+/g, " ");
+  assert.ok(!after.includes("Marked read."), `the refused line of No. ${AP_CLOSED.n} reads as Marked read.: ${JSON.stringify(after)}`);
+  await needButton(page.locator(line), new RegExp(`^Mark read: No\\. ${AP_CLOSED.n},`), `Mark read still on the line of No. ${AP_CLOSED.n} after the refusal`);
+});
+
+// all-read: every closed item is read. The Answered header counts 0, the section says All read., and the read items stay behind their fold.
+test("ask-phase-out states: with every closed item read, the Answered header counts 0, the section says All read., and Show read items stays", async (t) => {
+  const page = await open(t, { items: [AP_OPEN, AP_READ] }); if (!page) return;
+  await mustHave(page, "#tier-answered", "the Answered section, which a closed item with a closed time keeps after every item is read");
+  const got = await answeredHeader(page);
+  assert.equal(got, "0", `the Answered header counts ${got} with every closed item read, not 0`);
+  const said = ((await page.locator("#tier-answered").textContent()) || "").replace(/\s+/g, " ");
+  assert.ok(said.includes("All read."), `the Answered section does not say All read.: ${JSON.stringify(said)}`);
+  await mustHave(page, "#readItems", "the Show read items fold, with the read item behind it");
+  assert.equal(await page.locator(`#tier-answered #line-${AP_READ.n}`).count(), 0, `No. ${AP_READ.n}, read, is drawn as a line`);
+});
+
+// back: a read item whose writer replied after the mark comes back as a line, with the New reply mark, and leaves Show read items.
+test("ask-phase-out states: a read closed item whose writer replied after the mark comes back as a line with the New reply mark, out of Show read items", async (t) => {
+  const page = await open(t, { items: [AP_OPEN, AP_BACK], answers: answerOf(AP_BACK) }); if (!page) return;
+  const line = `#tier-answered #line-${AP_BACK.n}`;
+  await mustHave(page, line, `the line that read item No. ${AP_BACK.n}, replied to after its mark, draws in the Answered section`);
+  await mustHave(page, `${line} .newmark`, `the New reply mark on the line of No. ${AP_BACK.n}`);
+  assert.equal(await page.locator("#readItems").count(), 0, `No. ${AP_BACK.n} is behind Show read items after its reply`);
+});
+
+// rail-chips: Mark read on a closed item's line takes its chip out of the rail's Answered row.
+test("ask-phase-out states: Mark read on a closed item's line takes its chip out of the rail's Answered row", async (t) => {
+  const page = await open(t, { items: [AP_OPEN, AP_CLOSED] }); if (!page) return;
+  assert.ok((await railChipsIn(page, "answered")).includes(AP_CLOSED.id), `the rail's Answered row has no chip for closed No. ${AP_CLOSED.n}, with a closed time, before Mark read`);
+  await (await needButton(page.locator(`#tier-answered #line-${AP_CLOSED.n}`), new RegExp(`^Mark read: No\\. ${AP_CLOSED.n},`), `Mark read on the line of No. ${AP_CLOSED.n}`)).click();
+  const marked = await page.waitForFunction((n) => { const l = document.getElementById("line-" + n); return !!l && l.textContent.includes("Marked read."); }, AP_CLOSED.n, { timeout: 3000 }).then(() => true, () => false);
+  assert.equal(marked, true, `No. ${AP_CLOSED.n} did not draw as Marked read.`);
+  assert.ok(!(await railChipsIn(page, "answered")).includes(AP_CLOSED.id), `the chip of No. ${AP_CLOSED.n} is still in the rail's Answered row after Mark read`);
+});
+
+// read-lists, full size: all 12 read items sit behind Show read items, newest mark first, each with Mark unread.
+test("ask-phase-out states: Show read items draws all 12 read items, newest mark first, each with Mark unread", async (t) => {
+  const page = await open(t, { items: [AP_OPEN, ...AP_READ_MANY] }); if (!page) return;
+  const fold = page.getByRole("button", { name: /Show 12 read items/ });
+  assert.equal(await fold.count(), 1, "no Show 12 read items fold: the 12 read items are not behind one button");
+  await fold.click();
+  await mustHave(page, "#readItemList", "the read items list");
+  const ids = await page.locator("#readItemList article[id^='line-']").evaluateAll((els) => els.map((e) => e.id));
+  const want = [...AP_READ_MANY].reverse().map((it) => `line-${it.n}`);
+  assert.deepEqual(ids, want, `the read items list is not all 12, newest mark first: ${JSON.stringify(ids)}`);
+  assert.equal(await page.locator("#readItemList").getByRole("button", { name: /^Mark unread: No\./ }).count(), 12, "a read item in the list has no Mark unread");
+});
+
+// No home named: a closed item with no home draws its pill No home named on its line, so a gap in routing shows.
+test("ask-phase-out states: a closed item with no home shows the pill No home named on its line", async (t) => {
+  const page = await open(t, { items: [AP_OPEN, AP_NOHOME] }); if (!page) return;
+  const line = `#tier-answered #line-${AP_NOHOME.n}`;
+  await mustHave(page, line, `the one line that closed item No. ${AP_NOHOME.n}, with no home, draws in the Answered section`);
+  const said = ((await page.locator(line).textContent()) || "").replace(/\s+/g, " ");
+  assert.ok(said.includes("No home named"), `the line of No. ${AP_NOHOME.n} with no home does not say No home named: ${JSON.stringify(said)}`);
 });
 
 // ---------------------------------------------------------------- the ask stack: Add to list, one Send, one Undo for the batch
