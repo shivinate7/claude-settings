@@ -18,6 +18,8 @@ Three parts, one file:
   1f. Round 3 (review of round 2): a cite with no colon whose id has no digit and no hyphen, and the chat option forms
      "Option A: x", "A x", "a)x" and "**a**) x", are not read. A write the chat refutes must be checked or noted, never
      a silent allow. Each red case fails on the carry head with an allow and zero noted lines; each control is green.
+  1g. A bold letter with a dash ("**A** — Blue") reads the dash as the separator, so the chat text is "Blue". The page
+     label "Blue" is allowed with no noted line; another label is still refused.
   2. The `recommended` field. The page stars `recommended`, falling back to `pick`. The widening guard
      (widens_pick_hit, rule uniform-pick) also refuses a `recommended` that names a widening option. The page draws
      `recommended` (its itemFields block lists it).
@@ -642,6 +644,34 @@ def case_wire_clean_writes_log_no_noted_line():
                     set_write(ITEM), write_transcript("clean-no-cite", chat_question((CHAT_A, CHAT_B_MISMATCH), cite=None)))
 
 
+# ------------------------------------------------------------------ 1g. a bold letter with a dash
+
+# A dash after a bold letter ("**A** — Blue", "**A** - Blue", "**Option A** — Blue") separates the letter from its text.
+# The chat text for letter a is "Blue", so the page label "Blue" is a right answer and must be allowed with no noted line.
+BOLD_DASH_LINES = (
+    ("bold-em-dash", "**A** — Blue"),
+    ("bold-hyphen", "**A** - Blue"),
+    ("bold-option-em-dash", "**Option A** — Blue"),
+)
+
+
+def case_wire_bold_dash_chat_forms_allow_the_page_label():
+    """Each bold letter with a dash, beside the page label "Blue" for letter a, is allowed and logs no noted line for the
+    rule. Read with the dash as the separator, the chat's text for a is "Blue" and equals the label."""
+    for slug, line in BOLD_DASH_LINES:
+        transcript = write_transcript(slug, chat_question((line, CHAT_B)))
+        wire_zero_noted("wire: the chat line %s with the page label Blue is allowed, with no noted line" % slug,
+                        set_write(ITEM, options_with_a("Blue")), transcript)
+
+
+def case_wire_bold_dash_chat_form_refuses_another_label():
+    """The same bold letter with an em dash, beside the page label Green, is still refused as option-labels-match-chat.
+    The allowance covers the label that equals the chat's text, not every label."""
+    transcript = write_transcript("bold-em-dash-green", chat_question(("**A** — Blue", CHAT_B)))
+    wire_refuses("wire: a bold letter with an em dash refuses the page label Green",
+                 set_write(ITEM, options_with_a("Green")), transcript)
+
+
 # ------------------------------------------------------------------ 2. the recommended field (uniform-pick)
 
 def decision_with(**over):
@@ -725,7 +755,8 @@ CASES = (case_fn_equal_labels_pass, case_fn_case_and_spaces_fold, case_fn_chat_s
          case_wire_one_word_colonless_cite_is_checked_or_noted, case_wire_one_word_colon_cite_is_refused,
          case_wire_option_word_form_is_checked_or_noted, case_wire_bare_letter_form_is_checked_or_noted,
          case_wire_no_space_form_is_checked_or_noted, case_wire_bold_paren_form_is_checked_or_noted,
-         case_wire_unread_forms_with_the_page_text_are_allowed, case_wire_clean_writes_log_no_noted_line)
+         case_wire_unread_forms_with_the_page_text_are_allowed, case_wire_clean_writes_log_no_noted_line,
+         case_wire_bold_dash_chat_forms_allow_the_page_label, case_wire_bold_dash_chat_form_refuses_another_label)
 FN_CASES = tuple(c for c in CASES if c.__name__.startswith("case_fn_"))
 
 
