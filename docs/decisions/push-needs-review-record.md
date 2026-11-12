@@ -112,7 +112,7 @@ The cost case `a push reads git for a held report only when one is held` pins ze
 - A fork's `head` of the form `owner:branch` is read as `branch`.
 - A Bash review log post whose command does not hold the review log text (a body read from a file) is not a review log.
 - A destination the guard cannot resolve never matches a known head, so that push passes.
-- Any error passes (fail open): a transcript that cannot be read, a merge module that cannot load, or an exception in `review_record_hit` (`except Exception: pass`; note `push-record-scan-bug-fails-open`).
+- Any error passes (fail open): a transcript that cannot be read, a merge module that cannot load, or an exception in `review_record_hit` (`except Exception: pass`; note `push-record-scan-error-fails-open`).
 - A round report pushed over without its review log can never be cleared: `merge --review-record --head A` refuses once the head moved. So every later push in that session asks, and the ask text gives no way out. A typed override is the way.
 - Ask scope: any push while a report is pending asks, an unrelated branch too (old ruled behaviour).
 
