@@ -15379,7 +15379,7 @@ class ReviewedList(ReviewEnv):
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD), batch_pull(8, REVIEW_OLD_HEAD)], comments)
         self.assertEqual(rc, 0, out + err)
         self.assertIn(8, no_record_numbers(out), out)
-        self.assertFalse([l for l in out.splitlines() if l.startswith("#8 ")], out)
+        self.assertRegex(list_line(self, out, 8), r"^#8 feat8 \w{9} no record: .*; next: none, owner triage, age .*, RED; CI not read$")
         list_line(self, out, 7)
 
     def test_a_comment_without_the_marker_is_not_a_record(self):
@@ -15391,8 +15391,8 @@ class ReviewedList(ReviewEnv):
     def test_a_record_on_a_pr_that_is_not_open_is_not_listed(self):
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 99, record_text(n=99, rounds=REVIEW_PASS))])
         self.assertEqual(rc, 0, out + err)
-        self.assertNotIn("99", out)
         self.assertEqual(no_record_numbers(out), {7}, out)
+        self.assertNotIn("#99", out)  # "#99", not "99": an age in hours printed by the real clock can hold 99
 
     def test_a_draft_is_listed_with_no_ci_read(self):
         host, rc, out, err = self.listing([batch_pull(9, REVIEW_HEAD, draft=True)], [review_comment(1, 9, record_text(n=9, rounds=REVIEW_PASS)), lint_of(9, REVIEW_HEAD)])
