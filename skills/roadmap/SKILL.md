@@ -92,8 +92,8 @@ GitHub, so the publisher reads them just before the build and passes one file:
   (`head`) and GitHub's `merged` flag. Triage's live-file brief must fill it; see "A merge marks a step".
 - `sessions`: `list_sessions`, every page, each row copied as it comes with only these fields: `id`, `session_status`,
   `tags`, `status_bucket` and `updated_at` (the timestamp list_sessions gives for the session's last activity; ISO time
-  with a zone). The flagged sessions row reads `updated_at`. A working row with no zoned `updated_at` makes the whole
-  list unknown. A producer that cannot send it must say so.
+  with a zone). The flagged sessions row reads `updated_at`. A working row with no zoned `updated_at` makes the flagged
+  sessions row unknown. A producer that cannot send it must say so.
   `status_bucket` is the bucket list_sessions returns (`SESSION_STATUS_BUCKET_WORKING`, `_BLOCKED`, `_REVIEW_READY`, `_COMPLETED`, `_FAILED`);
   it is optional, and a row without it reads as not completed. `updated_at` is optional for a row that is not working. The upkeep list reads the rows for steps
   in progress and for lanes to archive. A live file with no `sessions` list still renders
@@ -316,7 +316,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
 About six git processes, plus up to four when a step cites a mockup, and one file written per build. With `--live`, the publisher's reads add
 one `list_threads` walk and one or two GitHub list calls, and one file it writes and the roadmap build script
 reads. The stale-step row adds one more `list_sessions` walk inside that publish, and three more
-fields per session in the file. The flagged sessions row adds `status_bucket` and `updated_at` per session to that file and
+fields per session in the file. The flagged sessions row adds `updated_at` per session to that file and
 no other read. The page-ruling row adds one `ArtifactData list items` read (every
 page) to the same publish. The roadmap build script adds no git process, file, timer or log for either row. The
 dated-claim row reads the notes already loaded and adds nothing.
