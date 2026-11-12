@@ -33,8 +33,8 @@ class CloudRoute(unittest.TestCase):
 
     def test_cloud_to_cloud_does_not_route_by_send_message(self):
         item = self.cloud_item()
-        self.assertNotRegex(item, r"`send_message`",
-                            "the cloud-to-cloud route still sends by cloud send_message, which leaves no copy: %r" % item)
+        self.assertNotRegex(item, r"send_message",
+                            "the cloud-to-cloud route names cloud send_message, which leaves no copy: %r" % item)
 
     def test_cloud_to_cloud_names_the_check_in_and_the_open_doorbell(self):
         item = self.cloud_item()
@@ -44,6 +44,11 @@ class CloudRoute(unittest.TestCase):
     def test_the_address_is_found_without_the_device(self):
         item = self.cloud_item()
         self.assertIn("cloud/session_", item, "the route does not give the cloud address form: %r" % item)
+        self.assertNotIn("cloud/session_<id>`, never", item)
+        self.assertNotRegex(item, r"--to cloud/session_<id>.*from the `list_sessions` row", "the route doubles the session_ prefix")
+
+    def test_the_route_says_it_needs_the_store(self):
+        self.assertIn("MAILBOX_REPO", self.cloud_item(), "the route does not say it needs MAILBOX_REPO in the env")
 
 
 class DecisionState(unittest.TestCase):
@@ -52,6 +57,9 @@ class DecisionState(unittest.TestCase):
             text = handle.read()
         self.assertNotIn("the code still sends cloud to cloud by `send_message`", text,
                          "the decision's State line is stale: the build has landed")
+        state = [line for line in text.splitlines() if line.startswith("State: `mail send`")]
+        self.assertEqual(len(state), 1, "the State line is missing")
+        self.assertIn("MAILBOX_REPO", state[0], "the State line claims the mailbox route without its env condition")
 
 
 if __name__ == "__main__":
