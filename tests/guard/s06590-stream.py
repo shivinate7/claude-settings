@@ -1199,10 +1199,10 @@ add("background-end: a PowerShell cd with a quoted backslash path before ; still
 # `merge --lane-lint`, `merge --release-check`, and `bin/ci-job`. A bare `merge --review-record` is allowed (rule 8): its
 # output is a record to post, and a verdict run would hide it. A bare run prints the
 # check's own output, so the agent reads whatever ends the line. The incident form read `echo $?` as "lane lint
-# passes". The remedy is `verdict <cmd>` inline. A roster command under verdict, a merge preview, a grep that names
-# the script and a bare test run are no bare run. A background roster run piped into tail or head stays check-tail's
-# refusal: those rows assert check-tail and lack bare-check, so the reason is printed once. A bare ci-job piped into
-# tail in the foreground is bare-check's refusal.
+# passes". The remedy is `verdict <cmd>` inline. A roster command under verdict, a merge preview and a grep that names
+# the script are no bare run. A bare test run is one (see the test-run rows below). A background roster run piped into
+# tail or head stays check-tail's refusal: those rows assert check-tail and lack bare-check, so the reason is printed
+# once. A bare ci-job piped into tail in the foreground is bare-check's refusal.
 
 
 for _name, _command in (
@@ -1345,6 +1345,28 @@ for _name, _command in (
     ("git commit whose message names a test run", 'git commit -m "run python3 hooks/test_guard.py"'),
 ):
     sh("bare-check: " + _name + " is no test run, so it is allowed", _command, "allow", cwd=NOGIT)
+
+# A syntax check, a version or a help screen runs no test, so it is no test run, in the foreground or the background.
+# A run that names a test file or a test directory to run stays bare: it is refused, and its remedy is verdict.
+for _name, _command in (
+    ("node --check of a test module", "node --check tests/foo.test.mjs"),
+    ("bash -n of a test script", "bash -n tests/test_x.sh"),
+    ("sh -n of a test script", "sh -n hooks/test_cloud_setup.sh"),
+    ("pytest --version", "pytest --version"),
+    ("pytest --help", "pytest --help"),
+):
+    sh("bare-check: " + _name + " is no test run, so it is allowed", _command, "allow", cwd=NOGIT)
+    add("bare-check: " + _name + ", backgrounded, is no test run, so it is allowed", "allow", cwd=NOGIT,
+        run_in_background=True, description=TAIL_BG_UNTIL, command=_command)
+for _name, _command in (
+    ("pytest on a directory", "pytest tests/"),
+    ("bash on a test script under tests/", "bash tests/test_x.sh"),
+    ("node on a test module", "node tests/foo.test.mjs"),
+):
+    sh("bare-check: " + _name + " with no verdict wrapper is refused", _command, "deny", BARE_CHECK, cwd=NOGIT,
+       carries=BARE_REMEDY)
+    add("bare-check: " + _name + " with no verdict wrapper, backgrounded, is refused", "deny", BARE_CHECK,
+        cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL, command=_command, carries=BARE_REMEDY)
 
 # A background roster run piped into tail stays check-tail's refusal, and bare-check does not add a second.
 add("bare-check: merge --lane-lint piped to tail, backgrounded, stays check-tail, not refused twice", "deny",
