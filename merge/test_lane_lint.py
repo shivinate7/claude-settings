@@ -2026,6 +2026,68 @@ class BatchLintFlags(tm.Env):
         """The control for the hold: with no slot held in the default folder, the batch's lint starts at once and passes."""
         self.assert_batch_lint_starts_at_once(0)
 
+    def test_lint_slot_unlocks_its_fd_before_closing_it_and_frees_the_slot_when_the_unlock_raises(self):
+        """The release calls guard_core.unlock_fd on the slot's own fd while that fd is still open, then closes it. When the unlock
+        raises OSError, the close still happens and the slot is free after it. The probe opens the slot file anew and try-locks it:
+        a lock the slot's fd holds reads as taken, and each body checks that first."""
+        import guard_core  # hooks/, on sys.path from the top of this file
+        slot = os.path.join(self.cfg, "state", "lane-lint-slots", "slot-0.lock")
+        real_take = merge.take_lint_slot
+        taken, unlocks = [], []
+
+        def recording_take():
+            fd = real_take()
+            taken.append(fd)
+            return fd
+
+        def fd_open(fd):
+            try:
+                os.fstat(fd)
+            except OSError:
+                return False
+            return True
+
+        def record_unlock(fd):
+            unlocks.append((fd, fd_open(fd)))
+
+        def refuse_unlock(fd):
+            raise OSError("simulated unlock failure")
+
+        def slot_held():  # True while a lock on the slot file is held: a newly opened file cannot take it
+            fd = os.open(slot, os.O_RDWR)
+            try:
+                return not guard_core.try_lock_fd(fd)
+            finally:
+                os.close(fd)
+
+        def one_slot_with(unlock):  # lint_slot over one slot in this case's config folder, with guard_core.unlock_fd set to `unlock`
+            stack = contextlib.ExitStack()
+            stack.enter_context(unittest.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.cfg}))
+            stack.enter_context(unittest.mock.patch.object(merge, "lint_slots", return_value=1))
+            stack.enter_context(unittest.mock.patch.object(merge, "take_lint_slot", recording_take))
+            stack.enter_context(unittest.mock.patch.object(guard_core, "unlock_fd", unlock))
+            return stack
+
+        with one_slot_with(record_unlock):
+            with merge.lint_slot():
+                held = slot_held()
+        self.assertTrue(held, "the probe read the slot free while lint_slot held it, so the probe proves nothing")
+        self.assertTrue(unlocks, "lint_slot released the slot without calling unlock_fd")
+        self.assertEqual(unlocks[0][0], taken[0], "unlock_fd ran on an fd other than the slot's")
+        self.assertTrue(unlocks[0][1], "unlock_fd ran after the slot's fd was closed")
+        self.assertFalse(fd_open(taken[0]), "lint_slot did not close the slot's fd after it unlocked it")
+
+        del taken[:]
+        with one_slot_with(refuse_unlock):
+            try:
+                with merge.lint_slot():
+                    held = slot_held()
+            except OSError as e:
+                self.fail("an OSError from unlock_fd escaped lint_slot: %s" % e)
+        self.assertTrue(held, "the probe read the slot free while lint_slot held it, so the probe proves nothing")
+        self.assertFalse(fd_open(taken[0]), "lint_slot did not close the slot's fd after its unlock raised")
+        self.assertFalse(slot_held(), "the slot is still held after lint_slot released it")
+
 
 class ReadyChecks(CiJobStub, tm.RecordsEnv):
     """The ready check of the draft step (merge.draft_step): before a draft goes ready, the repo's declared merge.readyChecks
