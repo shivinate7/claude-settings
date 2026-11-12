@@ -81,6 +81,50 @@ class OneTermTests(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertIn("STE022", r.stdout)
 
+    def test_every_use_in_one_paragraph_warns_at_its_own_line(self):
+        got = lint("The gate refuses.\nIt stops.\nThe gate refuses again.\n")
+        self.assertEqual(sorted(f.line for f in got), [1, 3])
+
+    def test_camel_case_name_reports_its_own_column(self):
+        got = lint("The batchBranch runs.\n")
+        self.assertEqual([(f.line, f.col) for f in got], [(1, 5)])
+
+    def test_glossary_file_skip_does_not_leak_to_the_next_file(self):
+        linter = ste_lint.Linter(dict(ste_lint.DEFAULT_CONFIG))
+        linter.check_text("GLOSSARY.md", "The gate refuses.\n")
+        got = [f for f in linter.check_ui("a.tsx", "export const A = () => <p>The gate refuses the push.</p>;\n")
+               if f.code == "STE022"]
+        self.assertEqual(len(got), 1)
+
+    def test_platform_names_pass(self):
+        self.assertEqual(lint("The SubagentStop hook runs.\n"), [])
+        self.assertEqual(lint("A permission deny rule runs.\n"), [])
+
+    def test_vendored_folder_is_skipped(self):
+        self.assertEqual(lint("The gate refuses.\n", path="skills/impeccable/x.md"), [])
+
+    def test_glossary_is_read_once_per_run(self):
+        import check_glossary
+        ste_lint.reset_one_term_cache()
+        calls = []
+        real = check_glossary.rows
+        check_glossary.rows = lambda t: calls.append(1) or real(t)
+        try:
+            lint("The gate one.\n\nThe gate two.\n\nThe gate three.\n")
+        finally:
+            check_glossary.rows = real
+        self.assertEqual(len(calls), 1)
+
+    def test_symlinked_linter_finds_the_glossary(self):
+        with tempfile.TemporaryDirectory() as d:
+            link = os.path.join(d, "ste_lint.py")
+            os.symlink(os.path.join(HERE, "ste_lint.py"), link)
+            a = os.path.join(d, "a.md")
+            with open(a, "w", encoding="utf-8") as f:
+                f.write("The gate refuses the push.\n")
+            r = subprocess.run([sys.executable, link, a], capture_output=True, text=True)
+            self.assertIn("STE022", r.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
