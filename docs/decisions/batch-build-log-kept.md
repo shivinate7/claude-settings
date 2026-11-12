@@ -10,7 +10,9 @@
 4. The build keeps the newest 20 logs in the folder and removes the rest, each with its `NAME.tmp/` folder. It never removes its own.
 5. A log that cannot be opened prints one stderr line naming its path. The build goes on without it.
 
-Cause, most likely and unmeasured: a `--ready` lint timed out at 3600 s and printed no log path. ci-job's own files sat in the session's temp folder, which `janitor/temp_sweep.py` removes once the transcript is idle 24 hours on Windows (decision `windows-temp-sweep`). The evidence was gone when the runner looked. This record did not re-read that run.
+Cause of the death of batch 104's first build: unmeasured. That build ran in a Linux cloud container and ended at about 10:24 CST with nothing pushed. What is known is that the build wrote no log of its own, so its output lived only in the session and was lost with it. This record did not re-read that run.
+
+A second, separate gap: a `--ready` lint that times out at 3600 s prints no log path. ci-job's own files sit in the session's temp folder, which `janitor/temp_sweep.py` removes once the transcript is idle 24 hours on Windows (decision `windows-temp-sweep`). That sweep did not remove batch 104's log: that run was not on Windows.
 
 Home: `state/` is removed by no sweep. Checked with `grep -rn "batch-build\|state/" janitor/*.py hooks/*.py`: the janitor and the hooks name only their own files in `state/` (for example `agent-end-payloads.jsonl`, `sim-boots.jsonl`, `janitor-runs.jsonl`). None removes the folder or `batch-build/`.
 
