@@ -16,7 +16,10 @@ status  prints one line per lease, one per waiter, and the brake's readings.
 
 Limits on every grant: the machine-load brake is not busy (decision machine-load-brake): memory over 85%, or disk free
   under the smaller of 10% of the disk and 15 GB, is busy. The brake's own functions decide: hooks/guard.py read_load
-  and load_busy. A reading that cannot be read counts as normal, so it grants. The load average is never read.
+  and load_busy. A reading that cannot be read counts as normal, so it grants. A brake that cannot be loaded (hooks/guard.py
+  or a family module is missing or broken) grants nothing: take exits 1 with one stderr line, "brake could not be loaded",
+  and leaves no lease and no queue place; status prints that line and exits 0 (decision guard-hooks-fail-closed).
+  The load average is never read.
   duo: slot 1 when it is free; slot 2 only while slot 1 is held, under the same bar.
   pro: only while nothing else is leased. A held pro lease refuses every duo.
 The queue is strict FIFO: only its head is granted, so a later take never passes an earlier one.
@@ -30,8 +33,9 @@ Start times: `ps` runs with TZ=UTC, so a start time recorded under one TZ matche
 State: ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-lease/leases.json, written through a temp file and os.replace
 under an fcntl.flock on the file lock in the same folder. The lock is held for one read-decide-write step, never
 while sleeping.
-Cost: per call, one `uname` and one `ps` per recorded pid. Take and status add one in-process brake read: one memory
-counter (Mac, ctypes) and one statfs, with no `sysctl` and no child process (take: one read per poll). Files written:
+Cost: per call, one `uname` and one `ps` per recorded pid. Per process, take and status load hooks/guard.py and its family
+modules once (about 0.2 s, measured on one machine); then each call, or each poll of a waiting take, adds one memory
+counter read (Mac, ctypes) and one statfs, with no `sysctl` and no child process. Files written:
 leases.json, only when its content changes, plus the empty lock file. No daemon, no timer, no log.
 Reader: the guard calls live_leases() (SLOT_UDID maps a slot to its device) to let a session's MCP launch boot the device
 its own live lease holds. It takes no flock and writes nothing: one read of leases.json and one `ps` per lease.
@@ -88,10 +92,13 @@ def start_time(pid):
 
 _guard = []
 
+NO_BRAKE = "brake could not be loaded"
+
 
 def brake():
     """hooks/guard.py, the one home of the machine-load brake (decision machine-load-brake), loaded by path once per
-    run. None when it cannot be loaded: the brake is then unread and counts as normal. No bytecode file is written."""
+    run. None when it cannot be loaded (hooks/guard.py or one of its family modules): the brake is then absent, and a
+    take refuses (decision guard-hooks-fail-closed). No bytecode file is written."""
     if not _guard:
         keep = sys.dont_write_bytecode
         try:
@@ -109,8 +116,8 @@ def brake():
 
 
 def read_load():
-    """The brake's readings (guard.read_load: memory_pct, disk_free_gb, disk_total_gb), or None when the brake
-    cannot be read. One memory counter and one statfs, in this process."""
+    """The brake's readings (guard.read_load: memory_pct, disk_free_gb, disk_total_gb), or None when they cannot be
+    read. One memory counter and one statfs, in this process."""
     guard = brake()
     try:
         reading = guard.read_load() if guard else None
@@ -120,10 +127,13 @@ def read_load():
 
 
 def busy_now(load):
-    """The busy readings as text (guard.load_busy), or [] when the machine is not busy or the brake is unread."""
+    """The busy readings as text (guard.load_busy), or [] when the machine is not busy or its load is unread. An
+    absent brake is never normal: it reads as busy, so no path grants without a brake."""
     guard = brake()
+    if guard is None:
+        return [NO_BRAKE]
     try:
-        return guard.load_busy(load) if guard and load is not None else []
+        return guard.load_busy(load) if load is not None else []
     except Exception:
         return []
 
@@ -216,7 +226,7 @@ class State:
 
 def decide(data, entry, load):
     """The slot for entry (`1`, `2` or `pro`) when it may be granted now, else None. A busy machine (the brake's
-    busy bar) grants nothing, slot 2 included; an unread brake counts as normal."""
+    busy bar) grants nothing, slot 2 included; an unread reading counts as normal."""
     if data["queue"][0]["pid"] != entry["pid"] or busy_now(load):
         return None
     held = {e["slot"] for e in data["leases"]}
@@ -259,6 +269,9 @@ def cmd_take(args):
     if not started:
         print("sim-lease: pid %d is not alive" % pid, file=sys.stderr)
         return 2
+    if brake() is None:
+        print("sim-lease: no lease taken: %s (reinstall claude-settings)" % NO_BRAKE, file=sys.stderr)
+        return 1
     entry = {"pid": pid, "start": started, "device": args.device, "session": session}
     # A TERM or INT while waiting leaves through the finally block, which drops the queue place.
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
@@ -314,6 +327,9 @@ def cmd_status(_args):
             print("lease slot %s pid %s device %s session %s" % (e["slot"], e["pid"], e["device"], e.get("session") or "-"))
         for e in st.data["queue"]:
             print("waiter pid %s device %s session %s" % (e["pid"], e["device"], e.get("session") or "-"))
+    if brake() is None:
+        print("brake: %s" % NO_BRAKE)
+        return 0
     load = read_load()
     print("brake: %s; busy: %s" % (readings_text(load), ", ".join(busy_now(load)) or "no"))
     return 0
