@@ -163,3 +163,41 @@ for _name, _cmd, _dir in (
     ("an empty command", "", NOGIT),
 ):
     sh("fetch-head allowed, %s" % _name, _cmd, "allow", cwd=_dir)
+
+# A ref wrapped in shell syntax the read check must still see: a subshell's closing paren, a redirect written onto
+# the ref, and a `;` inside a $( ) text, which the text order walks before the fetch that follows it.
+fetch_head_refused("fetch-head read in a subshell after a cd, the closing paren does not hide the ref, denies",
+                   "(cd lane && " + VCS + " rev-parse FETCH_HEAD)", cwd=ROOT)
+fetch_head_refused("fetch-head read in a subshell, the closing paren does not hide the ref, denies",
+                   "(" + VCS + " show FETCH_HEAD)", cwd=GITWT)
+fetch_head_refused("fetch-head read with a redirect written onto the ref, denies",
+                   VCS + " rev-parse FETCH_HEAD>out", cwd=GITWT)
+fetch_head_refused("fetch-head read after a ; inside a $( ) text, before a fetch, denies",
+                   "echo $(true; " + VCS + " show FETCH_HEAD); " + VCS + " fetch y", cwd=GITWT)
+
+# A word that is a grep pattern or a path after `--` is no ref, even when a value flag comes before it.
+sh("fetch-head allowed, the pattern of a grep after a -C context count is no ref",
+   VCS + " grep -C 3 FETCH_HEAD", "allow", cwd=GITWT)
+sh("fetch-head allowed, a path after -- is no ref",
+   VCS + " log -- FETCH_HEAD", "allow", cwd=GITWT)
+
+# Pins: a grep whose pattern is the name is no ref, and each verb that takes a ref denies it.
+sh("fetch-head allowed, a git grep whose pattern is the name is no ref",
+   VCS + " grep FETCH_HEAD", "allow", cwd=GITWT)
+for _name, _cmd in (
+    ("tag", VCS + " tag v1 FETCH_HEAD"),
+    ("push", VCS + " push origin FETCH_HEAD:refs/heads/x"),
+    ("restore", VCS + " restore --source FETCH_HEAD p.txt"),
+    ("archive", VCS + " archive FETCH_HEAD"),
+    ("revert", VCS + " revert FETCH_HEAD"),
+    ("update-ref", VCS + " update-ref refs/heads/x FETCH_HEAD"),
+    ("read-tree", VCS + " read-tree FETCH_HEAD"),
+    ("range-diff", VCS + " range-diff main...FETCH_HEAD"),
+):
+    fetch_head_refused("fetch-head read by %s, denies" % _name, _cmd, cwd=GITWT)
+
+# -m takes a message in merge and tag, so the ref after the message is the read.
+fetch_head_refused("fetch-head read after merge -m, whose value is a message, denies",
+                   VCS + " merge -m msg FETCH_HEAD", cwd=GITWT)
+fetch_head_refused("fetch-head read after tag -m, whose value is a message, denies",
+                   VCS + " tag -m msg v1 FETCH_HEAD", cwd=GITWT)
