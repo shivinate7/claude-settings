@@ -77,6 +77,11 @@ push_case("includes alone is not a force, so a plain push allows", "--force-if-i
 # The refusal names no --force-if-includes: the form the classifier refuses must not be the one it prints.
 sh("push: the refusal names no --force-if-includes", VCS + " push --force origin feat", "deny", "force-push",
    cwd=PUSHFEAT, lacks=("--force-if-includes",))
+# The sha is the tip this session's own last push left, not a remote-tracking ref: a fetch refreshes that
+# ref, so a lease read from it passes over newer work.
+sh("push: the refusal names the tip your own last push left, not a remote-tracking ref",
+   VCS + " push --force origin feat", "deny", "force-push", cwd=PUSHFEAT,
+   carries=("your own last push",), lacks=("remote-tracking",))
 push_case("a force while the default branch is trunk, main is ordinary there",
           "--force origin HEAD:main", "deny", cwd=PUSHTRUNK)
 push_case("a push option value is not the remote", "--force-with-lease --force-if-includes -o x origin HEAD:trunk",
