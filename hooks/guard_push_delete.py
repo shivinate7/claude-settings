@@ -1621,8 +1621,11 @@ _HELD_SHA_CAP = 8
 _NOTICE = re.compile(r"<tool-use-id>\s*([^<\s]+)\s*</tool-use-id>.*?<result>(.*?)</result>", re.S)
 _HANDBACK = re.compile(r'<agent-message from="([^"]+)">(.*?)</agent-message>', re.S)
 _AGENT_ID = re.compile(r"agentId:\s*(\S+)")
-# The reviewed head a report names: the hex word after `head` (`Reviewed at head <sha>`, `Diff base A, head B`).
-_HEAD_WORD = re.compile(r"\bhead\b[\s:`*]*(?:at\s+)?([0-9a-f]{7,40})\b", re.I)
+# The reviewed head a report names: the hex word after `head` or `reviewed` (`Reviewed at head <sha>`,
+# `Diff base A, head B`, `reviewed <sha>`). A `head` right after `main` or `Base:` names the base, not the reviewed
+# head (`Base: main head B, reviewed A`); _BASE_BEFORE reads the text before the match.
+_HEAD_WORD = re.compile(r"\b(?:reviewed(?:\s+at)?(?:\s+head)?|head)\b[\s:`*]*(?:at\s+)?([0-9a-f]{7,40})\b", re.I)
+_BASE_BEFORE = re.compile(r"\b(?:main|base)[\s:`*]*$", re.I)
 _HAND_FRAMES = tuple(tag for tag in MACHINE_TAGS if "<agent-message" in tag)
 
 
@@ -1746,7 +1749,8 @@ def _reviewed_heads(body: str):
     trailer = None
     for trailer in _AGENT_ID.finditer(body):
         pass
-    found = _HEAD_WORD.findall(body[:trailer.start()] if trailer else body)
+    text = body[:trailer.start()] if trailer else body
+    found = [match.group(1) for match in _HEAD_WORD.finditer(text) if not _BASE_BEFORE.search(text[:match.start()])]
     return tuple(dict.fromkeys(word.lower() for word in found if _sha_like(word.lower())))
 
 
@@ -1759,11 +1763,13 @@ def _same_sha(one: str, other: str) -> bool:
 class _RecordLines:
     """The lines a posted record holds, as a membership test for a pending report (role, word, kind, number,
     heads). A round report is held by a Round line of its role, verdict and round, a fix check by the Fix check
-    line of its role and verdict. A report that names reviewed heads is held only when the record's Head (the
-    record's Fix check sha, for a fix check) is one of them."""
+    line of its role and verdict. A report that names reviewed heads is held only when the record's Head is one of
+    them. A fix check may also match the record's Fix check sha: the merge tool records a fix check at the new
+    head with its Fix check line at the head the fix diff starts from, and a report may name either."""
 
     def __init__(self, record):
-        self.rounds = {(role, word, "round", number): record["head"] for number, role, _, word in record["rounds"]}
+        self.head = record["head"]
+        self.rounds = {(role, word, "round", number): self.head for number, role, _, word in record["rounds"]}
         self.fix = record["fix"]
 
     def __contains__(self, report):
@@ -1771,12 +1777,13 @@ class _RecordLines:
         if kind == "fix":
             if not self.fix or (role, word) != (self.fix[1], self.fix[3]):
                 return False
-            head = self.fix[0]
+            shas = (self.fix[0], self.head)
         else:
             head = self.rounds.get((role, word, kind, number))
             if head is None:
                 return False
-        return not heads or any(_same_sha(head, named) for named in heads)
+            shas = (head,)
+        return not heads or any(_same_sha(sha or "", named) for sha in shas for named in heads)
 
 
 def _commit_of(where, ref):
