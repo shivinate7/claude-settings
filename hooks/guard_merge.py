@@ -2234,13 +2234,17 @@ def hook_bypass_hit(texts):
 # FETCH_HEAD is one file per checkout, and every fetch in that checkout rewrites it. Read-only agents may share a
 # checkout (parallelism-each-own-checkout), so a read of FETCH_HEAD can return the ref another agent fetched
 # (decision fetch-head-shared-race: two audit agents moved it between a fetch and a read). The one safe read sits in the
-# same command as its own fetch, after it: no other command runs between the two. Read off the parsed tokens of
+# same command as its own fetch, after it: that narrows the window to one command, it does not close it, since another
+# agent can fetch inside it. Read off the parsed tokens of
 # a segment whose COMMAND WORD is git, so an echo, a grep pattern, a commit message and quoted text that name the
 # word are never read; a read is a ref argument of a read verb that is FETCH_HEAD, or a range or revision form of
-# it. The walk is `_hook_events`'s: segments in order, then the texts a shell, `eval` or runner hands on, each
-# `$( )` text a command of its own; a fetch in the outer text clears a read in a `$( )` text.
-# Known limits (decision fetch-head-shared-race): `cat .git/FETCH_HEAD` is no git read and passes, `git pull` is
-# no fetch for this check, and a fetch that fails before a `;` read still clears it.
+# it; a `--git-path FETCH_HEAD` reads no content and passes. The walk is `_hook_events`'s: segments in order, each
+# segment's `$( )` texts first (the shell runs them while it expands the words), then the texts a shell, `eval` or
+# runner hands on. A fetch clears only the reads after it in that order.
+# Known limits (decision fetch-head-shared-race, debt fetch-head-read-gaps): `cat .git/FETCH_HEAD` is no git read and
+# passes; a fetch that fails before a `;` or `|` read still clears it; `git -C <other> fetch` clears a bare read here;
+# an attached `--source=FETCH_HEAD` or `--onto=FETCH_HEAD` is no word the check reads. `git pull` is no fetch for
+# this check, an over-refusal, not a miss.
 FETCH_HEAD_REASON = (
     "Rule (Git): this command reads git's shared fetch result, one file per checkout that every fetch there rewrites, "
     "so it can return the ref another agent fetched, not the one you did. "
@@ -2251,9 +2255,19 @@ FETCH_HEAD_REASON = (
 _FETCH_HEAD_READ_VERBS = {
     "show", "log", "diff", "rev-parse", "cat-file", "merge", "rev-list", "merge-base", "diff-tree", "ls-tree", "describe",
     "name-rev", "cherry-pick", "checkout", "switch", "reset", "rebase", "format-patch", "shortlog", "show-branch", "blame",
+    # verbs that take a ref as a start point or a target: `worktree add <dir> FETCH_HEAD`, `branch <b> FETCH_HEAD`
+    "worktree", "branch", "grep", "archive", "tag", "revert", "update-ref", "push", "read-tree", "restore", "range-diff",
+    "commit-tree", "merge-tree", "cherry", "whatchanged", "diff-index", "verify-commit", "bisect", "difftool",
+    "for-each-ref",
 }
-_FETCH_HEAD_REF = re.compile(r"(?:^|\.\.\.?|\^)FETCH_HEAD(?:$|[:^~@{])")
-_FETCH_HEAD_VALUE_FLAGS = {"--grep", "-S", "-G", "--author", "--committer", "--since", "--until", "--format", "--pretty", "-m", "-F"}
+# `FETCH_HEAD` alone, or as a range end (`..`, `...` before it or `..` after it), or with a revision suffix. The dot
+# of `FETCH_HEAD.md` ends nothing: only a double dot does.
+_FETCH_HEAD_REF = re.compile(r"(?:^|\.\.\.?|\^)FETCH_HEAD(?:$|[:^~@{]|\.\.)")
+# Flags whose NEXT word is a pattern, a person, a date or a path, not a ref. `--pretty` and `--format` take their value
+# after `=` only, so a bare one is no value flag.
+_FETCH_HEAD_VALUE_FLAGS = {"--grep", "-S", "-G", "--author", "--committer", "--since", "--until", "--git-path", "-e"}
+# -m and -F take a value (a message, a file, a parent number) only in these verbs; in log and show -m is a boolean.
+_FETCH_HEAD_MESSAGE_VERBS = {"merge", "tag", "cherry-pick", "revert"}
 
 
 def _fetch_head_event(segment: str):
@@ -2273,27 +2287,38 @@ def _fetch_head_event(segment: str):
         return ("fetch",)
     if verb not in _FETCH_HEAD_READ_VERBS:
         return ()
+    value_flags = _FETCH_HEAD_VALUE_FLAGS | ({"-m", "-F"} if verb in _FETCH_HEAD_MESSAGE_VERBS else set())
     args = tokens[cursor + 1:]
+    # `git grep <pattern> [<rev>]`: the first word that is no flag is the pattern, unless -e gives it.
+    pattern_next = verb == "grep" and not any(arg.startswith("-e") for arg in args)
     for at, arg in enumerate(args):
-        if at and args[at - 1] in _FETCH_HEAD_VALUE_FLAGS:
+        if at and args[at - 1] in value_flags:
             continue   # a pattern or a message, not a ref
-        if arg.startswith("-") or not _FETCH_HEAD_REF.search(arg):
+        if arg.startswith("-"):
+            continue
+        if pattern_next:
+            pattern_next = False
+            continue
+        if not _FETCH_HEAD_REF.search(arg):
             continue
         return ("read", " ".join(tokens[index:cursor + 1]) + " " + arg)
     return ()
 
 
 def _fetch_head_events(text: str):
-    """The fetch and read events of a command text in order, through the same walk as `_hook_events`."""
+    """The fetch and read events of a command text in order, through the same walk as `_hook_events`. The `$( )` texts
+    of a segment run while the shell expands its words, before the segment's own command: they come first."""
+    from guard_env import substitution_commands   # imported late: a family reads only the families before it
     for segment in split_segments(text):
         if not segment.strip():
             continue
+        for inner_text in substitution_commands(segment, segment):
+            yield from _fetch_head_events(inner_text)
         event = _fetch_head_event(segment)
         if event:
             yield event
         tokens = segment_tokens(segment)
         if tokens:
-            from guard_env import substitution_commands   # imported late: a family reads only the families before it
             for inner in inner_commands(tokens):
                 stripped = strip_heredoc_bodies(inner)
                 for each in (stripped, *substitution_commands(inner, stripped)):
@@ -2302,7 +2327,8 @@ def _fetch_head_events(text: str):
 
 def fetch_head_read_hit(texts) -> str:
     """The matched text of the first FETCH_HEAD read in `texts` (the command, then its `$( )` texts) that no git fetch
-    earlier in the command precedes, else ''. A fetch in the outer text clears a read in a `$( )` text."""
+    earlier in the command precedes, else ''. A `$( )` text counts at the place its segment runs, so a fetch written
+    after it clears nothing."""
     fetched = False
     for text in texts:
         for event in _fetch_head_events(text):
