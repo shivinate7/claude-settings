@@ -763,11 +763,12 @@ FAIL_REF_RE = re.compile(r"\b(?:on|at)\s+(?:%s|%s)" % (BASE_REF, SHA_WORD), re.I
 TOO_RE = re.compile(r"\b(?:too|also|as\s+well)\b", re.I)
 # _clause.clauses cuts a sentence at a stop, a comma, but and because. The lead-in words of _clause (joiners, reason links,
 # subordinators, relatives) cut each of those again, where _clause.lead_opens_clause says the word opens a clause: "yet" and
-# "as" double as other words, and "as" is no lead-in in "as well", the words TOO_RE reads.
+# "as" double as other words. "as" is no lead-in in "as well", the words TOO_RE reads, and "yet" is none in "as yet".
 _AS = "as"
+_YET = "yet"
 PRE_LEAD_RE = re.compile(
-    r"\b(?:%s)\b|\b%s\b(?!\s+well\b)" % (
-        "|".join(w for w in _clause.LEAD_INS if w != _AS), _AS), re.I)
+    r"\b(?:%s)\b|\b%s\b(?!\s+well\b)|(?<!\bas\s)\b%s\b" % (
+        "|".join(w for w in _clause.LEAD_INS if w not in (_AS, _YET)), _AS, _YET), re.I)
 MAIN_RUN_RE = re.compile(
     r"\bon\s+{b}\s+(?:at\s+(?:commit\s+)?{s}|\(\s*{s}\s*\))|\b{b}@{s}".format(b=BASE_REF, s=SHA_WORD), re.I)
 MAIN_RUN_URL_RE = re.compile(r"https?://\S*/actions/runs/\d+\S*", re.I)
