@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-12T21:20:33Z",
+  "context": "Goal: the merge tool never repeats an act on GitHub that may already have happened, such as a merge or a posted comment.\nProblem (rule): your ruling of Oct 16 keeps 3 retries on every GitHub call; the lane's fix sends a write (PUT, POST, PATCH, DELETE) once on a server error or lost reply, so it changes your ruling and the merge of PR #2964 waits for your word.\nBased on (measured): on this PR's head the merge PUT goes out once; on main it goes out 4 times (lane retry-net-method-safe, 15:19 CST today).\nBased on (read): the 3 retries protected a merge run from failing on one lost reply; now, after one lost reply, the merge reads the PR's state: merged carries on, still open stops with \"run again\".\nDeparts from: main retries every GitHub call 3 times on a server error \u2014 a write is sent once and the merge reads the PR's state; reads and rate limits still retry 3 times.",
+  "home": "decision standing-merge-grant (its sentence on the 3 retries)",
+  "id": "retry-once-unsafe-methods",
+  "kind": "decision",
+  "n": 650,
+  "options": [
+    {
+      "gain": "A write the server may already have done is never sent again, so no double merge or double comment.",
+      "how": "The lane keeps its change; the decision's sentence becomes \"A non-idempotent method is sent once on a 5xx or network error\", with your time.",
+      "id": "send-writes-once",
+      "key": "a",
+      "label": "Send a write once (Recommended)",
+      "lose": "One more run to type when a write's reply is lost and the PR is still open."
+    },
+    {
+      "gain": "A lost reply on a write is retried with no run to repeat.",
+      "how": "The lane drops the change for writes; your Oct 16 ruling stands as written.",
+      "id": "keep-three-retries",
+      "key": "b",
+      "label": "Keep 3 retries for every call",
+      "lose": "A write the server already did can be sent up to 3 more times, as the merge PUT is today."
+    }
+  ],
+  "owner": "lane retry-net-method-safe (session_013NEJL1ubMb2G2VdQNW823R)",
+  "ref": "lane retry-net-method-safe 15:19 CST Nov 12, PR #2964",
+  "repo": "shivinate7/claude-settings",
+  "short": "Writes sent once on a server error",
+  "status": "open",
+  "title": "May the merge tool send a write to GitHub only once on a server error?",
+  "why": "The fix changes your Oct 16 ruling of 3 retries for every call."
+}

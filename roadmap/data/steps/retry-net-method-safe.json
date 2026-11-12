@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Lane merge-net-small-fixes 14:33 CST Nov 12: retry_net resends any method on a 5xx reply; a PUT merge went 4 times.",
  "source": "lane merge-net-small-fixes 14:33 CST Nov 12",
- "note": "Fix in merge/merge.py retry_net: retry GET only (or a PUT/POST only when the call is idempotent by design); read the last -X, not the first. Red first on the 4-times PUT merge. Lane started 14:37 CST Nov 12.",
- "updatedAt": "2026-11-12T14:40:54-06:00"
+ "note": "Fix in merge/merge.py retry_net: retry GET only (or a PUT/POST only when the call is idempotent by design); read the last -X, not the first. Red first on the 4-times PUT merge. Lane started 14:37 CST Nov 12. Lane 15:19 CST Nov 12 (PR #2964): round 1 FAIL on one point, decision standing-merge-grant says \"The 3 retries stay (owner ruling 2026-10-16)\". Stale-decision protocol: outcome protected, a lost reply does not fail the merge run; now protected by reading the PR state after one lost reply (MERGED carries on, OPEN stops with \"run again\"). Measured: PUT merge 1 call on this head, 4 on main. Sentence rewritten in place, marked owner ruling pending. Owner item 650 (retry-once-unsafe-methods); the merge waits on it. Not blocking: the lock-release DELETE loses its retry; the lock comment already says no late retry, left as is. A fix round (tests, idempotent mark on set_body, more -X forms) comes on #2964.",
+ "updatedAt": "2026-11-12T15:21:20-06:00"
 }
