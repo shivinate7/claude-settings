@@ -6061,14 +6061,15 @@ class GhHalf(Env):
 
     def assert_draft_stops(self, rc, out, before):
         """A draft confirm is the records step: it pushes at most the page, marks the pull request ready, and stops.
-        It never merges, claims a record number, or waits on a check. before: the head sha before the run."""
+        It never merges or waits on a check; it claims the record numbers in its one commit. before: the head sha before the run."""
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.ticks, 0, "waited on a draft")
         self.assertNotIn(CHECKS_CALL, self.calls())
         self.assertNotIn(MERGE_CALL, self.calls())
         self.assertNotIn("Traceback", out)
         sh(self.co, "git", "fetch", "-q", "origin")
-        self.assertEqual(sh(self.co, "git", "log", f"{before}..{self.head()}", "--format=%(trailers:key=Record-claim,valueonly)"), "")
+        # re-pointed (owner ask, Nov 12 13:15 CST): the draft step claims the record numbers, in the one commit that carries the page
+        self.assertLessEqual(len(sh(self.co, "git", "rev-list", f"{before}..{self.head()}").split()), 1)
 
     def test_a_draft_pr_previews_with_the_undo_check_and_claims_nothing_or_waits(self):
         self.set(draft=True)
@@ -9675,17 +9676,17 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.host.readies, [7])
         self.assertFalse(getattr(self.host, "merged", False), out)
 
-    def test_prepare_claims_no_record_numbers(self):
-        # The pending decision on the head stays pending: claims are made at a ready confirm, never on the draft step.
+    def test_prepare_claims_the_record_numbers_with_the_page(self):
+        # Re-pointed (owner ask, Nov 12 13:15 CST, one CI run per merge): the draft step claims the pending decision, in one commit with the page.
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
         before = self.head()
         rc, out = self.draft_confirm()
         self.assertEqual(rc, 0, out)
         after = self.head()
         self.assertNotEqual(after, before)
-        self.assertEqual(sh(self.co, "git", "log", f"{before}..{after}", "--format=%s"), "Rebuild the records page")
-        self.assertEqual(sh(self.co, "git", "log", f"{before}..{after}", "--format=%(trailers:key=Record-claim,valueonly)").strip(), "")
-        self.assertIn("id: pending", self.show("feat", "docs/decisions/second.md"))
+        self.assertEqual(sh(self.co, "git", "log", f"{before}..{after}", "--format=%s"), "Claim record numbers")
+        self.assertEqual(sh(self.co, "git", "log", f"{before}..{after}", "--format=%(trailers:key=Record-claim,valueonly)").strip(), "D-002")
+        self.assertNotIn("id: pending", self.show("feat", "docs/decisions/second.md"))
         self.assertEqual(self.host.readies, [7])
 
     def test_prepare_then_confirm_merges_the_head_prepare_pushed(self):
@@ -9719,7 +9720,7 @@ class RecordsRebuild(RecordsEnv):
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.rev("origin/main^2"), ready_head, "a commit was pushed after the ready run")
-        self.assertEqual(self.host.waits, [(ready_head, None)], "the ready confirm waited on a head other than the ready head")
+        self.assertEqual(self.host.waits, [(ready_head, ready_head)], "the ready confirm waited on a head other than the ready head")
         self.assertTrue(getattr(self.host, "merged", False), out)
 
     def test_prepare_draft_confirm_never_calls_merge_on_any_path(self):
