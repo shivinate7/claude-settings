@@ -1,0 +1,15 @@
+{
+ "id": "lane-start-checks-open-pr",
+ "title": "A lane start for a step refuses when an open PR already names the step, unless the brief cites it",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 14:54 CST Nov 12: it started lanes outbox-ruling-home-check and round1-sonnet-guard-table without checking open PRs; draft #2767 and #1552 already held the work, so one lane stopped and one carries the old PR.",
+ "source": "coordinator 14:54 CST Nov 12 (its own miss)",
+ "note": "At create_session for a cs-step tag, search open PRs naming the step (title, body, branch) and refuse the start when one is found unless the brief cites that PR. Red first on today's two starts. Rule building-mistake-names-its-guard.",
+ "updatedAt": "2026-11-12T14:54:04-06:00",
+ "order": -310
+}

@@ -1,0 +1,14 @@
+{
+ "id": "field-rule-tie-in-page-reasons",
+ "title": "PAGE_REASONS ties each waiting-page field to its guard rule, so the generated field table can carry a rule column",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane skill-text-once 14:53 CST Nov 12: #2702 generates the field table without a guard-rule column, because code gives no field-to-rule tie (mockup-home and page-item-design are not in PAGE_REASONS); a hand-kept column would go stale unread.",
+ "source": "lane skill-text-once 14:53 CST Nov 12",
+ "note": "Add a field-to-rule tie in PAGE_REASONS, including mockup-home and page-item-design; the generated table gains the rule column from it. Red first on a field with no tie. Round-3 note: skills/waiting-page/test_field_table.py reads page.html's itemFields block by its exact opener, so a format-only edit of that block turns it red. After #2702 merges.",
+ "updatedAt": "2026-11-12T14:54:04-06:00"
+}
