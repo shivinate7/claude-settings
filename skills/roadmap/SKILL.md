@@ -3,7 +3,7 @@ name: roadmap
 description: Use when a session builds a repo's roadmap block, or the user says "build the roadmap" or "update the status tab". Bakes the steps on the repo's record branch and the record homes in the checkout into the roadmap block of the repo's one page, and prints the upkeep list for triage.
 ---
 
-A repo has one page: the waiting page. Its Status tab shows the repo's plan from its homes. This
+A repo has one page: the page. Its Status tab shows the repo's plan from its homes. This
 skill publishes no page. The script makes one marked roadmap block, and the page writer splices
 it into the live page (see "Publish the roadmap block"). The old roadmap URL retires: it gets no more
 publishes. The page's URL is the `waiting-page` key of the layout extras file. The `roadmap` key there
