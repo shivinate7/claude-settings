@@ -330,6 +330,69 @@ sh("draft-pr: a perl file with an escaped backtick in a double-quoted string, th
 sh("draft-pr: a perl file with an apostrophe in a comment, then a backtick gh pr create span, is refused",
    "\n".join(["cat > f.pl <<'EOF'", "# don't", "print `gh pr create -t x`;", "EOF", "perl f.pl"]),
    "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# A python or node body that hands a double-quoted `$( )` or backtick span to a shell call runs that span through a
+# shell, so a gh pr create inside it runs. os.system, os.popen, subprocess with shell=True, and node's exec, execSync
+# and spawnSync sh -c each do it, and each form is refused. The controls after each group print the same span as
+# data and stay allowed. A node backtick span is refused already (the cases above), so the node forms use `$( )`.
+PY_SHELL_SINKS = (
+    ("os.system", 'import os\nos.system("echo %s")'),
+    ("os.popen", 'import os\nos.popen("echo %s")'),
+    ("subprocess.run shell=True", 'import subprocess\nsubprocess.run("echo %s", shell=True)'),
+    ("subprocess.check_output shell=True", 'import subprocess\nsubprocess.check_output("echo %s", shell=True)'),
+    ("subprocess.Popen shell=True", 'import subprocess\nsubprocess.Popen("echo %s", shell=True)'),
+)
+NODE_SHELL_SINKS = (
+    ("execSync", 'require("child_process").execSync("echo %s")'),
+    ("exec", 'require("child_process").exec("echo %s")'),
+    ("spawnSync sh -c", 'require("child_process").spawnSync("sh", ["-c", "echo %s"])'),
+)
+SHELL_SPANS = (("$( )", "$(" + PR_BODY + ")"), ("backtick", "`" + PR_BODY + "`"))
+NODE_SPAN = "$(" + PR_BODY + ")"
+for _sink, _call in PY_SHELL_SINKS:
+    for _span, _text in SHELL_SPANS:
+        _body = _call % _text
+        sh("draft-pr: a python %s call with a double-quoted %s gh pr create span, fed to python3, is refused"
+           % (_sink, _span),
+           "\n".join(["python3 - <<'EOF'", _body, "EOF"]), "deny", "draft-pr", cwd=NOGIT,
+           carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+        sh("draft-pr: a python %s call with a double-quoted %s gh pr create span, in a written file run by python3, is refused"
+           % (_sink, _span),
+           "\n".join(["cat > f.py <<'EOF'", _body, "EOF", "python3 f.py"]), "deny", "draft-pr", cwd=NOGIT,
+           carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+for _sink, _call in NODE_SHELL_SINKS:
+    _body = _call % NODE_SPAN
+    sh("draft-pr: a node %s call with a double-quoted $( ) gh pr create span, fed to node, is refused" % _sink,
+       "\n".join(["node - <<'EOF'", _body, "EOF"]), "deny", "draft-pr", cwd=NOGIT,
+       carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+    sh("draft-pr: a node %s call with a double-quoted $( ) gh pr create span, in a written file run by node, is refused"
+       % _sink,
+       "\n".join(["cat > f.js <<'EOF'", _body, "EOF", "node f.js"]), "deny", "draft-pr", cwd=NOGIT,
+       carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+for _span, _text in SHELL_SPANS:
+    sh("draft-pr: a python print of a double-quoted %s gh pr create span, fed to python3, is allowed" % _span,
+       "\n".join(["python3 - <<'EOF'", 'print("echo %s")' % _text, "EOF"]), "allow", cwd=NOGIT)
+    sh("draft-pr: a python print of a double-quoted %s gh pr create span, in a written file run by python3, is allowed"
+       % _span,
+       "\n".join(["cat > f.py <<'EOF'", 'print("echo %s")' % _text, "EOF", "python3 f.py"]), "allow", cwd=NOGIT)
+sh("draft-pr: a node console.log of a double-quoted $( ) gh pr create span, fed to node, is allowed",
+   "\n".join(["node - <<'EOF'", 'console.log("echo %s")' % NODE_SPAN, "EOF"]), "allow", cwd=NOGIT)
+sh("draft-pr: a node console.log of a double-quoted $( ) gh pr create span, in a written file run by node, is allowed",
+   "\n".join(["cat > f.js <<'EOF'", 'console.log("echo %s")' % NODE_SPAN, "EOF", "node f.js"]), "allow", cwd=NOGIT)
+# ash runs the file it is given, so a gh pr create line in such a file runs. The guard names no ash as a shell, so a
+# file that python3 runs first and ash then runs is a shell run that goes unjudged. Each form below is refused. The pin
+# after them: a file that python3 alone runs stays allowed, as the python cases above pin.
+for _name, _lines in (
+    ("a no-extension file run by python3, then by ash", ["cat > p <<'EOF'", PR_BODY, "EOF", "python3 p", "ash p"]),
+    ("a .py file run by python3 with ;, then by ash", ["cat > p.py <<'EOF'", PR_BODY, "EOF", "python3 p.py; ash p.py"]),
+    ("a file run by python3, then piped into ash", ["cat > p <<'EOF'", PR_BODY, "EOF", "python3 p; cat p | ash"]),
+    ("a file run by python3, then by busybox ash", ["cat > p <<'EOF'", PR_BODY, "EOF", "python3 p; busybox ash p"]),
+    ("a file run by python3, then ash -c on its cat", ["cat > p <<'EOF'", PR_BODY, "EOF", 'python3 p; ash -c "$(cat p)"']),
+):
+    sh("draft-pr: " + _name + ", holding a bare gh pr create line, is refused",
+       "\n".join(_lines), "deny", "draft-pr", cwd=NOGIT, carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a no-extension file from a quoted heredoc, with a bare gh pr create line, run by python3 alone, is allowed",
+   "\n".join(["cat > p <<'EOF'", PR_BODY, "EOF", "python3 p"]), "allow", cwd=NOGIT)
+
 # Limits of the draft-pr rule (decision `draft-until-reviewed`), no case: `gh api -X POST .../pulls`,
 # `hub pull-request`, and short-flag clusters such as `-dt x` (refused, a rare false alarm).
 
