@@ -663,6 +663,21 @@ def push_verdict(args, cwd: str, overrides=None) -> str:
     return "" if includes or not unpinned else "deny"
 
 
+def push_is_plain(args) -> bool:
+    """True when the push carries no force, no lease of any form, no `--force-if-includes`, no `+` refspec,
+    and no `--tags` or `--follow-tags` (or an unambiguous prefix of either): it moves only the branches
+    it names, forward. A `--no-force-with-lease` that cancels a lease counts as none."""
+    force, _mirror, _every, includes, _unpinned, leased, _delete, _upstream, _remote, plain = _push_parse(args)
+    if force or leased or includes or any(spec.startswith("+") for spec in plain):
+        return False
+    for arg in args:
+        name = arg.replace('"', "").replace("'", "").partition("=")[0]
+        if name.startswith("--") and (
+                (len(name) >= 4 and "--tags".startswith(name)) or (len(name) >= 5 and "--follow-tags".startswith(name))):
+            return False
+    return True
+
+
 def _push_tags_only(args) -> bool:
     """True when the push carries `--tags` (or an unambiguous prefix): with no refspec it moves tags only."""
     for arg in args:

@@ -23,7 +23,7 @@ from guard_pointer import (
     pointer_checkout,
 )
 from guard_push_delete import (
-    DEFAULT_BRANCH_FALLBACK, push_calls, push_destinations, push_refspecs, push_target, push_verdict,
+    DEFAULT_BRANCH_FALLBACK, push_calls, push_destinations, push_is_plain, push_refspecs, push_target,
 )
 
 
@@ -1277,7 +1277,11 @@ RECORD_REASON = (
     "roadmap-one-writer: the repo's record branch has one writer, the triage session, and this session's own "
     "record does not prove it is triage. Send the step change to the triage session (list_sessions, tag "
     "cs-build:triage, same cs-repo). If this session is triage: run get_session (no argument) alone in its "
-    "own turn, then retry. (decision session-tiers, the triage session is the only writer of the record branch)"
+    "own turn, then retry. A lane may push only its own roadmap/outbox/<slug>-handoff.md, as plain commits that "
+    "each add or change that file alone, with no force, lease or tags. If the lane's push was refused for that "
+    "form: fetch the record branch's origin tip (a single-branch clone widens its fetch refspec first), fix the "
+    "commits, then retry the handoff push. (decision session-tiers, the triage session is the only writer of the "
+    "record branch)"
 )
 
 
@@ -1371,16 +1375,18 @@ HANDOFF_PATH = re.compile(r"roadmap/outbox/(" + HANDOFF_SLUG.pattern + r")-hando
 
 
 def _lane_handoff_holds(args, where: str, overrides, root: str, destination, tags) -> bool:
-    """True when a lane's push of `args` to the record branch changes exactly one path against the record
-    branch's origin tip, that path is roadmap/outbox/<slug>-handoff.md, the file is added or modified, and the
-    slug is the lane's own: a slug of one of its cs-step tags, else its checkout's branch with a leading `lane/`
-    cut. Fails closed: a force, a delete, a mirror, an unnamed remote or source, no origin tip, an unreadable
-    diff, a rename, a delete or an empty diff is False. One `git diff --name-status` runs at most once
-    per call (a `symbolic-ref` follows only when no cs-step tag names the slug)."""
-    if push_verdict(args, where, overrides) != "":  # a force, a lease, a `+` refspec or a delete is no handoff
-        return False
-    named = push_refspecs(args)
-    if named is None or not named[0] or destination is None:
+    """True when a lane's push of `args` to the record branch sends only commits that each change one path
+    against their parent, that path is roadmap/outbox/<slug>-handoff.md in every commit, the change is an add
+    or a modify, and the slug is the lane's own: a slug of one of its cs-step tags, else its checkout's branch
+    with a leading `lane/` cut. The range is the commits from the record branch's origin tip to the pushed
+    source, read per commit, so a file added in one commit and removed in a later one is seen. Fails closed:
+    a force, a lease of any form, `--force-if-includes`, a `+` refspec, a delete, a mirror, `--tags`,
+    `--follow-tags`, an unnamed remote or source, no origin tip, an unreadable range, a merge or root commit,
+    a rename, a delete or an empty range is False. Cost: two git processes, `rev-list --parents` for the
+    range and one `diff-tree --stdin` for every commit's paths (a `symbolic-ref` follows only when no cs-step
+    tag names the slug)."""
+    named = push_refspecs(args)  # None for a mirror, `--all`, a delete or a tags-only push
+    if named is None or not named[0] or destination is None or not push_is_plain(args):
         return False
     remote, specs = named
     if len(specs) > 1:
@@ -1388,16 +1394,33 @@ def _lane_handoff_holds(args, where: str, overrides, root: str, destination, tag
     source = specs[0].partition(":")[0] if specs else "HEAD"
     if not source or source.startswith("-"):
         return False
-    done = _git(root, "diff", "--name-status", "refs/remotes/" + remote + "/" + destination, source, "--")
+    walk = _git(root, "rev-list", "--parents", "refs/remotes/" + remote + "/" + destination + ".." + source, "--")
+    if walk is None or walk.returncode != 0:
+        return False
+    commits = []
+    for line in walk.stdout.splitlines():
+        fields = line.split()
+        if len(fields) != 2:  # a root commit (1 field) or a merge (3 or more) hides its paths from diff-tree
+            return False
+        commits.append(fields[0])
+    if not commits:
+        return False
+    done = _git(root, "diff-tree", "--stdin", "--no-commit-id", "--no-renames", "-r", "--name-status",
+                stdin="\n".join(commits) + "\n")
     if done is None or done.returncode != 0:
         return False
     changes = [line.split("\t") for line in done.stdout.splitlines() if line.strip()]
-    if len(changes) != 1 or len(changes[0]) != 2 or changes[0][0] not in ("A", "M"):
+    if not changes or any(len(change) != 2 or change[0] not in ("A", "M") for change in changes):
         return False
-    found = HANDOFF_PATH.fullmatch(changes[0][1])
-    if not found:
+    slugs = set()
+    for change in changes:
+        found = HANDOFF_PATH.fullmatch(change[1])
+        if not found:
+            return False
+        slugs.add(found.group(1))
+    if len(slugs) != 1:  # every commit names the one own handoff path
         return False
-    slug = found.group(1)
+    slug = slugs.pop()
     if slug in [str(t)[len(ARCHIVE_STEP_PREFIX):].strip() for t in tags if str(t).startswith(ARCHIVE_STEP_PREFIX)]:
         return True
     branch = _git(root, "symbolic-ref", "-q", "--short", "HEAD")
@@ -1412,7 +1435,7 @@ def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of
     `record_branch_of(root)` reads the checkout's branch (lint/layout.py); a read error means the default.
     `read_verb(subcommand, args)` is guard.py's own test for a dry run, which moves nothing. The proof is
     read only after a push reaches the branch. Triage is allowed with no diff read. A lane is allowed only
-    for its own handoff file (`_lane_handoff_holds`), which costs one changed-path read."""
+    for its own handoff file (`_lane_handoff_holds`), which reads the pushed range's paths in two git processes."""
     for segment in split_segments(stripped):
         for args, where, overrides in _push_calls(segment, stripped, cwd):
             if read_verb("push", args):
