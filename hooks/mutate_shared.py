@@ -153,6 +153,25 @@ def job_count() -> int:
     return max(1, wanted or os.cpu_count() or 1)
 
 
+def parse_shard(value: str):
+    """Read MUTATE_SHARD's `i/n` as (i, n), with 1 <= i <= n. An empty value, an unset MUTATE_SHARD, reads as
+    (1, 1): every mutant. Raise ValueError on any other value."""
+    if not value:
+        return 1, 1
+    found = re.fullmatch(r"([0-9]+)/([0-9]+)", value)
+    if found:
+        i, n = int(found.group(1)), int(found.group(2))
+        if 1 <= i <= n:
+            return i, n
+    raise ValueError("MUTATE_SHARD must read i/n with 1 <= i <= n")
+
+
+def shard_of(items, shard):
+    """The items of shard (i, n): those at positions i-1, i-1+n, and so on. Shards 1 to n cover each item once."""
+    i, n = shard
+    return list(items)[i - 1::n]
+
+
 def skip_reason(only_on):
     """Return why a mutation marked `only_on` does not run on this platform, or None to run it.
 

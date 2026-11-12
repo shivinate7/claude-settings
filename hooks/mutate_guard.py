@@ -4358,6 +4358,19 @@ def main() -> int:
                 return 1
             seen_paths[candidate.lower()] = (control_index, label)
 
+    # MUTATE_SHARD=i/n runs one slice of MUTATIONS (CI runs two shards). The pre-checks above read the
+    # whole list, so a stale anchor or a shared path fails in every shard alike.
+    value = os.environ.get("MUTATE_SHARD", "")
+    try:
+        shard = mutate_shared.parse_shard(value)
+    except ValueError as error:
+        print("ERROR MUTATE_SHARD=%r: %s" % (value, error))
+        return 1
+    mine = mutate_shared.shard_of(MUTATIONS, shard)
+    if not mine:
+        print("ERROR MUTATE_SHARD=%r takes no mutation: %d mutations in all" % (value, len(MUTATIONS)))
+        return 1
+
     work = tempfile.mkdtemp(prefix="mutate_guard_")
     # A "watch" mutant is a copy of config_watch.py that runs OUTSIDE hooks/, as its own
     # subprocess, and it does a plain `import guard` (never GUARD_UNDER_TEST: a mutation of the
@@ -4378,8 +4391,8 @@ def main() -> int:
 
     try:
         return mutate_shared.run_mutants(
-            MUTATIONS, lambda entry: run_mutant(sources, work, entry),
-            controls=run_controls(sources, work, MUTATIONS), control_of=lambda entry: mutation_parts(entry)[3])
+            mine, lambda entry: run_mutant(sources, work, entry),
+            controls=run_controls(sources, work, mine), control_of=lambda entry: mutation_parts(entry)[3])
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
