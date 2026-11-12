@@ -199,11 +199,16 @@ _SCOPE_NOUN = r"(?:all|any|every)\s+(?:repos?|prs?|branch(?:es)?|open|green|new|
 STANDING = re.compile(_WORD % (r"always|standing|from now on|" + _STANDING_SCOPE), re.IGNORECASE)  # counts anywhere
 STANDING_NOUN = re.compile(_WORD % _SCOPE_NOUN, re.IGNORECASE)
 HANDOFF_VERB = re.compile(r"(?<![A-Za-z0-9_])(?:hand[ \t]+in|hand|send|post|report)[ \t]+$", re.IGNORECASE)  # right before the noun
-# The act stems a handoff clause must not hold after its object, in any form ("merging", "landed"). Wider than ACT, which
-# decides only whether a message grants; these decide whether a handoff object is an act's object too.
-ACT_STEMS = ("merg", "push", "delet", "deploy", "releas", "publish", "ship", "land", "clos", "approv")
+# The act stems a handoff object must not meet, in any form ("merging", "landed"). Wider than ACT, which decides only
+# whether a message grants; these decide whether a handoff object is an act's object too. Each is a regex fragment that
+# starts a word. "tag" counts only as a verb with an object ("tag it"): a label such as "(tag cs-build:triage)" has a
+# colon in its token and is none.
+ACT_STEMS = ("merg", "push", "delet", "deploy", "releas", "publish", "ship", "land", "clos", "approv", "revert", "rebas",
+             r"tag(?:s|ged|ging)?(?=[ \t]+[^\s:]+(?:\s|$))")
 ACT_STEM = re.compile(r"(?<![A-Za-z0-9_])(?:%s)" % "|".join(ACT_STEMS), re.IGNORECASE)
-CLAUSE_END = re.compile(r"[,;:\u2013\u2014]|--|(?<=\s)-|-(?=\s)")  # a comma, semicolon, colon or dash; a hyphen in a word is none
+# Where the clause before a handoff verb starts: a comma, semicolon, colon, dash, full stop or newline. A colon or a
+# full stop inside a token ("https://", "v1.2", "e.g") is none; a hyphen in a word is none.
+CLAUSE_START = re.compile(r"[,;\n\u2013\u2014]|--|:(?=\s|$)|\.(?=\s|$)|(?<=\s)-|-(?=\s)")
 CLOSED_TOKEN = re.compile(r"(?<!\S)\[closed\](?!\S)")
 # A grant's [ruling] home may also be one of these root files, when git tracks it on some branch.
 GRANT_ROOT_HOMES = ("settings.json", ".claude/CLAUDE.md")
@@ -901,19 +906,26 @@ def is_grant(text):
 
 
 def handoff_object(text, noun):
-    """True when a handoff verb stands right before the scope noun match, with only spaces between, and the rest of the
-    noun's clause, up to the next comma, semicolon, colon or dash, holds no act stem."""
-    if HANDOFF_VERB.search(text, 0, noun.start()) is None:
+    """True when a handoff verb stands right before the scope noun match, with only spaces between, and no act stem
+    (ACT_STEMS) appears in either window: after the noun to the end of the message, or before the verb back to the
+    nearest comma, semicolon, colon, dash, full stop or newline."""
+    verb = HANDOFF_VERB.search(text, 0, noun.start())
+    if verb is None:
         return False
-    end = CLAUSE_END.search(text, noun.end())
-    return ACT_STEM.search(text, noun.end(), end.start() if end else len(text)) is None
+    if ACT_STEM.search(text, noun.end()) is not None:
+        return False
+    start = 0
+    for mark in CLAUSE_START.finditer(text, 0, verb.start()):
+        start = mark.end()
+    return ACT_STEM.search(text, start, verb.start()) is None
 
 
 def standing_word(text):
     """True when the message, fenced text left out, holds a standing word. A scope noun ("any PR", "every open") counts
     wherever it sits, except as a handoff verb's object: "Hand in any PR to the batch runner" only says where the lane
-    hands its work. Limits: only the base verbs count, so "sends any PR" bars; an act word before the verb is not read,
-    so "merge and send any PR to triage" passes."""
+    hands its work. Limits: only the base verbs count, so "sends any PR" bars; the clause before the verb starts at the
+    nearest comma, semicolon, colon, dash, full stop or newline, so "Approved send any PR" bars on "Approved"; an act
+    stem anywhere after the noun bars, however far; "tag" bars only before a word with no colon."""
     plain = unfenced(text)
     if STANDING.search(plain):
         return True
