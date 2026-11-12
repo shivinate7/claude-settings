@@ -50,3 +50,77 @@ sh("builder-test: a redirect onto lint/test_rule_audit.py is refused",
    "echo x > lint/test_rule_audit.py", "deny", rule=BT, carries=("test-author",), **CULL_BUILDER)
 sh("builder-test: rm of hooks/test_guard.py is refused",
    "rm hooks/test_guard.py", "deny", rule=BT, carries=("test-author",), **CULL_BUILDER)
+
+# THE NAME IS NOT THE HEAD. hooks/guard_frozen.py reads a call named `run_folder` as lint/_test_temp.py's run
+# folder by its name alone. So a `run_folder` the script defines itself (a lambda), or one reached through an
+# attribute chain, reads as that folder, and its join to a test path is allowed. Each script below has a join
+# head that is not that function, so its join to a test path is refused. The argument forms (positional,
+# keyword, starred) are refused on this head already: these cases pin that, so a rule that loosens them goes red.
+# A bare `run_folder()` imported from lint/_test_temp.py, and `_test_temp.run_folder()`, stay allowed.
+CULL_NAME_DIR = os.path.join(ROOT, "cull-43518-names")
+write(os.path.join(CULL_NAME_DIR, "own_lambda.py"), '''import os
+
+run_folder = lambda: os.path.join(os.getcwd(), "tests")
+
+with open(os.path.join(run_folder(), "test_x.py"), "w") as handle:
+    handle.write("pass\\n")
+''')
+write(os.path.join(CULL_NAME_DIR, "attr_chain.py"), '''import os
+
+import a
+
+with open(os.path.join(a.b.run_folder(), "test_x.py"), "w") as handle:
+    handle.write("pass\\n")
+''')
+write(os.path.join(CULL_NAME_DIR, "arg_positional.py"), '''import os
+
+import _test_temp
+
+with open(os.path.join(_test_temp.run_folder(os.getcwd()), "test_x.py"), "w") as handle:
+    handle.write("pass\\n")
+''')
+write(os.path.join(CULL_NAME_DIR, "arg_keyword.py"), '''import os
+
+import _test_temp
+
+with open(os.path.join(_test_temp.run_folder(temp_root="hooks"), "test_x.py"), "w") as handle:
+    handle.write("pass\\n")
+''')
+write(os.path.join(CULL_NAME_DIR, "arg_starred.py"), '''import os
+
+import _test_temp
+
+args = ("hooks",)
+
+with open(os.path.join(_test_temp.run_folder(*args), "test_x.py"), "w") as handle:
+    handle.write("pass\\n")
+''')
+write(os.path.join(CULL_NAME_DIR, "import_attr.py"), '''import os
+
+import _test_temp
+
+with open(os.path.join(_test_temp.run_folder(), "hooks/test_guard.py"), "w") as handle:
+    handle.write("pass\\n")
+''')
+write(os.path.join(CULL_NAME_DIR, "import_bare.py"), '''import os
+
+from _test_temp import run_folder
+
+with open(os.path.join(run_folder(), "hooks/test_guard.py"), "w") as handle:
+    handle.write("pass\\n")
+''')
+for _cull_script, _cull_why in (
+        ("own_lambda.py", "a lambda the script defines as run_folder"),
+        ("attr_chain.py", "an attribute chain, a.b.run_folder()"),
+        ("arg_positional.py", "run_folder given a positional argument"),
+        ("arg_keyword.py", "run_folder given a keyword argument"),
+        ("arg_starred.py", "run_folder given a starred argument")):
+    sh("builder run: a join on %s is refused" % _cull_why,
+       "verdict python3 " + os.path.join(CULL_NAME_DIR, _cull_script).replace(os.sep, "/"), "deny",
+       rule=BT, carries=("test-author",), **CULL_BUILDER)
+for _cull_script, _cull_why in (
+        ("import_attr.py", "_test_temp.run_folder() after import _test_temp"),
+        ("import_bare.py", "a bare run_folder() after from _test_temp import run_folder")):
+    sh("builder run: a join on %s is allowed" % _cull_why,
+       "verdict python3 " + os.path.join(CULL_NAME_DIR, _cull_script).replace(os.sep, "/"), "allow",
+       **CULL_BUILDER)
