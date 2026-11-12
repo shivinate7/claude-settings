@@ -571,5 +571,95 @@ for _name in FIXTURES:
     setattr(RemedyReasons, "test_2_%s_still_blocks" % _name, _case_2(_name))
 
 
+# ------------------------------------------------------------------ R39: the relayed question and the record's steps
+#
+# R39 in docs/plans/restart-plan.md. A relayed question (report_guard.past_ruling_problem) judges item 8 with call_judge's
+# text, the one home. The owner-facing refusal holds no steps (decision guard-remedy-not-to-owner, session_wording), so the
+# session's how-to to challenge is the Past-ruling step section of that record: its steps name the four elements, and no
+# step tells the session to withdraw or drop the question. The four element checks below copy those of
+# hooks/test_call_judge.py element_checks, because this file's red run imports the test_call_judge.py of the old commit,
+# where a new name would crash the run instead of failing a check.
+
+CHALLENGE_ASKED = (
+    tcj.APPS_GOAL + "\n"
+    + ("Challenge to %s: its sentence keeps the apps' access as is. The audit counts 14 apps now, not the 9 it was "
+       "written on, so the outcome it protected needs a fresh measure. Proposed fix: remove the 5 unused apps."
+       % tcj.APPS_SLUG))
+PAST_RULING_HEAD = re.compile(r"(?m)^### Past-ruling guard\b")
+
+
+def challenge_elements(text):
+    """(label, passed) for the four elements of a measured challenge in `text`, as hooks/test_call_judge.py reads them."""
+    t = text.lower()
+    return [
+        ("names the record and its sentence", "record" in t and "sentence" in t),
+        ("names a measure", re.search(r"\bmeasure", t) is not None),
+        ("allows the word unmeasured in place of a measure", "unmeasured" in t),
+        ("names the outcome the ruling protected and what protects it now",
+         "outcome" in t and "protect" in t and re.search(r"\bnow\b", t) is not None),
+        ("names a proposed fix", "propos" in t and re.search(r"\bfix", t) is not None),
+    ]
+
+
+def past_ruling_steps():
+    """The text of the record's Past-ruling section, from its heading to the next ## or ### heading, or None."""
+    with open(RECORD, encoding="utf-8") as handle:
+        record = handle.read()
+    head = PAST_RULING_HEAD.search(record)
+    if not head:
+        return None
+    rest = record[head.end():]
+    end = SECTION_END.search(rest)
+    return rest[:end.start()] if end else rest
+
+
+class RelayedChallenge(unittest.TestCase):
+    """A relayed question's item 8 is call_judge's text, and the record's Past-ruling steps carry the challenge."""
+
+    def relayed_prompt(self, asked):
+        """(verdict, prompt): what report_guard.past_ruling_problem returns for `asked`, and the prompt it sends. The model
+        call is a stub that answers ok, so the prompt is read back and no model runs."""
+        import decision_watch
+        sent = []
+
+        def stub(prompt, **_):
+            sent.append(prompt)
+            return {"ok": True}, ""
+
+        real = decision_watch.invoke_model
+        decision_watch.invoke_model = stub
+        try:
+            verdict = RG.past_ruling_problem(asked, tcj.DECISIONS_REPO)
+        finally:
+            decision_watch.invoke_model = real
+        return verdict, (sent[0] if sent else "")
+
+    def test_relayed_question_sends_call_judge_item_8(self):
+        import call_judge
+        _, prompt = self.relayed_prompt(CHALLENGE_ASKED)
+        self.assertNotEqual(prompt, "", "the relayed question made no model call")
+        self.assertIn("8. " + call_judge.PAST_RULING_ITEM, prompt,
+                      "the relayed prompt does not carry call_judge's item 8")
+
+    def test_item_8_names_a_challenge_that_passes(self):
+        import call_judge
+        self.assertIn("challenge", call_judge.PAST_RULING_ITEM.lower(), "item 8 names no challenge that passes")
+
+    def test_past_ruling_steps_name_how_to_challenge(self):
+        section = past_ruling_steps()
+        self.assertIsNotNone(section, "the record has no Past-ruling step section")
+        self.assertIn("challenge", section.lower(), "the Past-ruling steps name no way to challenge a ruling")
+        for label, ok in challenge_elements(section):
+            with self.subTest(element=label):
+                self.assertTrue(ok, "the Past-ruling steps do not say: %s" % label)
+
+    def test_past_ruling_steps_never_say_withdraw(self):
+        section = past_ruling_steps()
+        self.assertIsNotNone(section, "the record has no Past-ruling step section")
+        bad = [line for line in section.splitlines()
+               if STEP_LINE.search(line) and any(p in line.lower() for p in ("withdraw", "drop the question"))]
+        self.assertEqual(bad, [], "a Past-ruling step tells the session to withdraw the question: %r" % bad)
+
+
 if __name__ == "__main__":
     unittest.main()
