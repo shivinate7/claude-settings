@@ -93,14 +93,17 @@ trailing Z, and never on exit 2.
 answers.json and receipts.json (a list of {"id", "data"} entries each). One line per item answer the writer has not
 read back, in answers.json order, then exit 1:
 `answer-unread <id> (item <n>, owner <owner>, answered <at>, before wake <woke>)`
-(`?` for a missing n or owner). An answer is listed when it is an item answer (not `park.<id>`, `parked: true` or
-act `park`), its item exists (open, or closed with the answer kept), its `at` is earlier than meta `woke` (the
+(`?` for a missing n or owner). The line names the sessions the answer wakes: an item with `wakes` (a non-empty list of
+session ids) gets `wakes <id> <id>` in place of `owner <owner>`, and the owner is named only when it is in the list; an
+item with no `wakes` (absent or null) wakes its owner. `wakes` that is not a non-empty list of one-word strings (a string,
+`[]`, a non-string or empty name) is unknown for that answer, never read as the owner or as nobody.
+An answer is listed when it is an item answer (not `park.<id>`, `parked: true` or act `park`), its item exists (open, or closed with the answer kept), its `at` is earlier than meta `woke` (the
 writer's previous wake) and no receipt with the answer's id has a `read` at or after `at`. A receipt with only `filed`
 does not clear it (the check reads `read` only, never `filed`). With no `woke` (absent or null) every answer with
 no such receipt is listed, and the last field reads `before wake: none recorded`. With none listed,
 `unread: clean` and exit 0. A missing or unreadable file, a file of the wrong shape (meta not an object, the others
-not a list), an unreadable `woke`, an answer with no readable `at`
-or a compared receipt with no readable `read` prints an `unknown:` line and exits 2.
+not a list), an unreadable `woke`, an answer with no readable `at`, a compared receipt with no readable `read`,
+or a listed answer whose item has malformed `wakes` prints an `unknown:` line and exits 2.
 The mode reads no clock and has no time bound: what it lists depends on the saved files alone. `woke` is the writer's
 own optional field in meta/page. The incident: an answer that sat unread 10.5 h (owner's report).
 Write `read` and `filed` as ISO UTC with a trailing Z: a time with no zone is read in the host's zone.
@@ -787,8 +790,16 @@ def unread_mode(argv):
             unknown.append("unknown: the receipt of answer %s has no readable read" % key)
             continue
         item = item_data[key]
-        lines.append("answer-unread %s (item %s, owner %s, answered %s, %s)" % (
-            key, item.get("n", "?"), item.get("owner", "?"), data(r)["at"],
+        wakes = item.get("wakes")
+        if wakes is None:  # no wakes: the owner alone is woken
+            who = "owner %s" % item.get("owner", "?")
+        elif isinstance(wakes, list) and wakes and all(isinstance(w, str) and len(w.split()) == 1 for w in wakes):
+            who = "wakes %s" % " ".join(wakes)
+        else:  # wakes that name no session are never read as "the owner" or "nobody"
+            unknown.append("unknown: the item of answer %s has wakes that are not a non-empty list of session ids" % key)
+            continue
+        lines.append("answer-unread %s (item %s, %s, answered %s, %s)" % (
+            key, item.get("n", "?"), who, data(r)["at"],
             "before wake %s" % woke_text if woke is not None else "before wake: none recorded"))
     out = lines + unknown
     print("\n".join(out) if out else "unread: clean")
