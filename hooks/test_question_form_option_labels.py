@@ -10,12 +10,12 @@ Three parts, one file:
      Function cases (fn:) call question_form.chat_page_label_hit(item_id, options, chat_text) directly.
      Wiring cases (wire:) run hooks/guard.py as a hook process with a transcript_path holding the chat question,
      the way the page-item write path reads a chat text.
-  1e. Round 2 (coordinator ruling 07:57 CST Nov 12, citing the owner's 12:35 CST Nov 8 words): the page label must
+  1e. Label edges: the page label must
      equal the chat label after folding, and only the chat label may be the shorter one, at a word boundary. A chat
      line the check cannot read (A, em dash, text; **A** text; a cite with no colon) is checked or noted. A page
      letter the chat question never writes is refused. A curly apostrophe or an em dash folds equal to its plain
      form. A payload with no transcript_path logs one noted line.
-  1f. Round 3 (review of round 2): a cite with no colon whose id has no digit and no hyphen, and the chat option forms
+  1f. Chat text the label check does not read: a cite with no colon whose id has no digit and no hyphen, and the chat option forms
      "Option A: x", "A x", "a)x" and "**a**) x", are not read. A write the chat refutes must be checked or noted, never
      a silent allow. Each red case fails on the carry head with an allow and zero noted lines; each control is green.
   1g. A bold letter with a dash ("**A** — Blue") reads the dash as the separator, so the chat text is "Blue". The page
@@ -27,7 +27,7 @@ Three parts, one file:
      page_grant.py's ignoring of the answer `label` is tested in skills/waiting-page/test_page_grant_label.py.
 
 Red on the round-2 base: the cases of part 1e and the re-pointed fn: case fail on an assert about the verdict.
-Part 1f's cases fail on the carry head, 74ca6c20d0, where every other case passes. The fn: cases run there,
+Part 1f's cases fail while the check allows a write the chat refutes; every other case passes. The fn: cases run there,
 because chat_page_label_hit is built. Run with the argument
 `behaviour` to skip them, for a base without that function. Without it, every case runs.
 
@@ -442,7 +442,7 @@ def case_wire_footer_second_item_is_allowed():
                 set_write(FOOT_TWO, options_with_a("Wait a day")), transcript)
 
 
-# ------------------------------------------------------------------ 1e. round 2: the label rule's edges
+# ------------------------------------------------------------------ 1e. The label rule's edges
 
 def options_with_c():
     """OPTIONS plus a third option, c, that no chat question in these cases writes."""
@@ -544,7 +544,7 @@ def case_wire_empty_transcript_path_is_noted():
     no_transcript_noted("empty-path", "", "an empty transcript_path")
 
 
-# ------------------------------------------------------------------ 1f. round 3: cites and forms the check did not read
+# ------------------------------------------------------------------ 1f. Cites and forms the label check does not read
 
 # Two gaps in the round-2 check. A chat text it does not read is allowed with no note, so a write the chat refutes passes:
 #  - a cite with no colon counts only when its id holds a digit or a hyphen (PAGE_ITEM_CITE), so "Page item merge",
