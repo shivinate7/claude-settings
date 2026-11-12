@@ -27,6 +27,7 @@ import hashlib
 import io
 import json
 import os
+import shlex
 import shutil
 import signal
 import socket
@@ -1161,6 +1162,94 @@ def _empty_proc_cmdline(pid):
         yield
 
 
+# ----------------------------------------------------------- a plain-argv ancestor holder
+#
+# A no-start lock held by this process's own chain. The holder is a `sh` whose argv is `sh` alone: its
+# program arrives on its stdin, so no path it runs can put "claude" or "agent" into its argv (a checkout
+# or worktree path may hold either). A probe is a python the holder runs (depth 1), or one a second shell
+# runs (depth 2), so the holder is the probe's parent or grandparent. The probe reports its own ancestry,
+# read raw from /proc, and a case asserts that scope before the verdict it judges.
+
+def probe_source(body):
+    """A probe program: put this suite's import roots first, read this process's ancestry, then BODY."""
+    paths = [HERE, os.path.join(REPO_ROOT, "hooks"), os.path.join(HERE, "..", "lint")]
+    return ("import json, os, sys\n"
+            "sys.path[:0] = " + repr(paths) + "\n"
+            "import sweep\n"
+            "chain = []\n"
+            "pid = os.getpid()\n"
+            "while pid > 1 and len(chain) < 64:\n"
+            "    with open('/proc/%d/stat' % pid, encoding='utf-8') as handle:\n"
+            "        pid = int(handle.read().rsplit(')', 1)[1].split()[1])\n"
+            "    chain.append(pid)\n") + body
+
+
+def verdict_body(reason, tree):
+    """The probe body for `stale_agent_lock_verdict` and `own_agent_lock_verdict` of a no-start REASON in TREE."""
+    return ("REASON = %r\nTREE = %r\n" % (reason, tree)
+            + "print(json.dumps({'chain': chain, 'stale': sweep.stale_agent_lock_verdict(REASON, None, TREE),"
+              " 'own': sweep.own_agent_lock_verdict(REASON, None, TREE)}))\n")
+
+
+def decision_body(repo, entry, attended):
+    """The probe body for `decide_worktree` on ENTRY, the one `parse_worktree_list` entry, in REPO."""
+    return ("REPO = %r\n" % repo
+            + "ENTRY = json.loads(%r)\n" % json.dumps(entry)
+            + "print(json.dumps({'chain': chain, 'decision': sweep.decide_worktree(REPO, ENTRY, attended=%r)},"
+              " default=str))\n" % attended)
+
+
+def write_probe(folder, body, depth):
+    """Write the probe for BODY under FOLDER and return the line the plain holder runs. Depth 2 runs the
+    probe from a second shell, so the holder is the probe's grandparent."""
+    os.makedirs(folder, exist_ok=True)
+    probe = os.path.join(folder, "probe.py")
+    write(probe, probe_source(body))
+    run = "%s %s\nexit $?\n" % (shlex.quote(sys.executable), shlex.quote(probe))
+    if depth == 1:
+        return run
+    middle = os.path.join(folder, "middle.sh")
+    write(middle, run)
+    return "sh %s\nexit $?\n" % shlex.quote(middle)
+
+
+def start_plain_holder(folder):
+    """A `sh` that runs the program written to its stdin, with its cwd in FOLDER (outside any tree a case locks)."""
+    os.makedirs(folder, exist_ok=True)
+    return subprocess.Popen(["sh"], cwd=folder, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True)
+
+
+def stop_plain_holder(holder):
+    if holder.poll() is None:
+        holder.kill()
+        holder.wait(timeout=10)
+
+
+def run_plain_holder(holder, line):
+    """Send LINE to the holder's shell and wait for it to finish. Returns (stdout, stderr)."""
+    return holder.communicate(input=line, timeout=60)
+
+
+def assert_holder_scope(test, holder, tree):
+    """Scope before subject, read raw while the holder still runs: its argv names neither claude nor agent,
+    and its cwd is outside TREE."""
+    test.assertIsNone(holder.poll(), "scope: the holder exited before its probe ran")
+    with open("/proc/%d/cmdline" % holder.pid, "rb") as handle:
+        argv = handle.read().lower()
+    test.assertFalse(b"claude" in argv or b"agent" in argv, "scope: the holder's argv names claude or agent")
+    cwd = os.path.normcase(os.path.realpath(os.readlink("/proc/%d/cwd" % holder.pid)))
+    tree_key = os.path.normcase(os.path.realpath(tree))
+    test.assertFalse(cwd == tree_key or cwd.startswith(tree_key.rstrip(os.sep) + os.sep),
+                     "scope: the holder's cwd is inside the tree")
+
+
+def probe_report(test, out, err):
+    """The probe's one JSON report, the last line it printed."""
+    test.assertTrue(out.strip(), "the probe printed no report; its stderr ends: %s" % err.strip()[-300:])
+    return json.loads(out.strip().splitlines()[-1])
+
+
 def verdict_on(platform):
     """Decorator for one case: `stale_agent_lock_verdict` sees sys.platform as PLATFORM. Only the verdict
     call is patched. A patch over the whole case would send every POSIX process read down its Windows
@@ -1739,6 +1828,44 @@ class StaleAgentLockTests(unittest.TestCase):
         sweep.remove_worktree(self.root, path, decision)
         self.assertNotIn("error", decision)
         self.assertFalse(os.path.exists(path), "the tree of a reused pid running another program is still on disk")
+
+    @unittest.skipIf(not sys.platform.startswith("linux"), "the /proc route is Linux only")
+    def test_linux_no_start_lock_held_by_a_plain_argv_ancestor_reads_live(self):
+        # Red on 1468147e7: the /proc route reads this process's own ancestor as a reused pid, because its argv is
+        # plain `sh` and its cwd is outside the tree, so the verdict is stale. An ancestor is the host whatever its
+        # argv: stale is False, and own_agent_lock_verdict is True. Depth 2 runs the probe under a second shell,
+        # so a check on the parent alone fails it.
+        for depth in (1, 2):
+            with self.subTest(depth=depth):
+                folder = os.path.join(ROOT, "ancestor-depth-%d" % depth)
+                tree = os.path.join(folder, "tree")
+                holder = start_plain_holder(folder)
+                self.addCleanup(stop_plain_holder, holder)
+                reason = "claude agent agent-ancestor%d (pid %d)" % (depth, holder.pid)
+                line = write_probe(folder, verdict_body(reason, tree), depth)
+                assert_holder_scope(self, holder, tree)
+                report = probe_report(self, *run_plain_holder(holder, line))
+                self.assertIn(holder.pid, report["chain"], "scope: the holder is not in the probe's ancestry")
+                self.assertIs(report["stale"], False,
+                              "the /proc route reads a live ancestor as a reused pid: stale %r" % report["stale"])
+                self.assertIs(report["own"], True,
+                              "a live ancestor is not this session's own lock: own %r" % report["own"])
+
+    @unittest.skipIf(not sys.platform.startswith("linux"), "the /proc route is Linux only")
+    def test_linux_no_start_lock_held_by_a_plain_argv_holder_outside_the_chain_is_stale_and_not_own(self):
+        # Green on 1468147e7 and after the fix: the control for the ancestor case above. The holder is a `sleep`
+        # outside this process's ancestry, so the route still frees it (stale True), and it is not this session's
+        # own lock (own False).
+        holder = self.live_holder(argv=["sleep", "300"] if shutil.which("sleep") else None)
+        path = self.no_start_tree("nsown", holder)
+        self.assert_no_start_scope("nsown", path, holder)
+        reason = self.fresh_entry(path)["locked_reason"]
+        with self.subTest(arm="stale"):
+            self.assertIs(sweep.stale_agent_lock_verdict(reason, None, path), True,
+                          "a plain-argv holder outside the ancestry reads as live")
+        with self.subTest(arm="own"):
+            self.assertIs(sweep.own_agent_lock_verdict(reason, None, path), False,
+                          "a holder outside the ancestry is this session's own lock")
 
     @unittest.skipIf(not sys.platform.startswith("linux"), "the /proc route is Linux only")
     def test_linux_no_start_lock_whose_holder_works_inside_its_tree_keeps_despite_a_write_time_gap(self):
@@ -10553,9 +10680,10 @@ class OwnAgentLockTests(unittest.TestCase):
     has a cwd inside it, and no live session holds it. Any other lock keeps. An unreadable
     ancestor read keeps. Each case builds its own real repository, worktree and lock."""
 
-    def own_lock_tree(self, name, pid, prepare=None, check=None, age=2 * 60 * 60):
+    def own_lock_tree(self, name, pid, prepare=None, check=None, age=2 * 60 * 60, start=True):
         """A clean, pushed, merged worktree locked by `claude agent agent-<name> (pid PID start ...)`
-        with PID's real start time. PREPARE runs before the lock, CHECK after it, and the admin
+        with PID's real start time, or with no start time when START is false: `(pid PID)`, the form the
+        Linux route judges. PREPARE runs before the lock, CHECK after it, and the admin
         files are aged last, so a git read in CHECK cannot make the tree look active."""
         root = os.path.join(ROOT, "own-lock-" + name)
         make_repo(root, {"f.txt": "base\n"})
@@ -10565,16 +10693,29 @@ class OwnAgentLockTests(unittest.TestCase):
                 "worktree add %s failed" % name)
         if prepare is not None:
             prepare(path)
-        start = guard._process_start_ms(pid)
-        require(isinstance(start, int), "could not read the start time of pid %d" % pid)
-        stamp = time.strftime("%a %b %e %H:%M:%S %Y", time.gmtime(start / 1000))
-        reason = "claude agent agent-%s (pid %d start %s)" % (name, pid, stamp)
+        if start:
+            started = guard._process_start_ms(pid)
+            require(isinstance(started, int), "could not read the start time of pid %d" % pid)
+            stamp = time.strftime("%a %b %e %H:%M:%S %Y", time.gmtime(started / 1000))
+            reason = "claude agent agent-%s (pid %d start %s)" % (name, pid, stamp)
+        else:
+            reason = "claude agent agent-%s (pid %d)" % (name, pid)
         require(run_vcs(root, "worktree", "lock", path, "--reason", reason).returncode == 0,
                 "lock of %s failed" % name)
         if check is not None:
             check(root, path)
         _age_admin_files(path, age)
         return root, path
+
+    @staticmethod
+    def commit_ahead(path):
+        """One commit that main lacks, pushed to a lane branch: the tree is unmerged, but fully pushed."""
+        write(os.path.join(path, "lane.txt"), "ahead of main\n")
+        run_vcs(path, "add", "-A")
+        require(run_vcs(path, *IDENT, "commit", "-q", "-m", "lane work").returncode == 0,
+                "commit in %s failed" % path)
+        pushed = run_vcs(path, "push", "-q", "origin", "HEAD:refs/heads/lane-ahead")
+        require(pushed.returncode == 0, "push of the lane failed: %s" % pushed.stderr.strip())
 
     @staticmethod
     def entry_for(root, path):
@@ -10616,19 +10757,11 @@ class OwnAgentLockTests(unittest.TestCase):
 
     def test_own_lock_on_an_unmerged_pushed_tree_keeps(self):
         # Green today: the lock keeps. The rule must keep it too, because HEAD is not in main.
-        def commit_ahead(path):
-            write(os.path.join(path, "lane.txt"), "ahead of main\n")
-            run_vcs(path, "add", "-A")
-            require(run_vcs(path, *IDENT, "commit", "-q", "-m", "lane work").returncode == 0,
-                    "commit in %s failed" % path)
-            pushed = run_vcs(path, "push", "-q", "origin", "HEAD:refs/heads/lane-ahead")
-            require(pushed.returncode == 0, "push of the lane failed: %s" % pushed.stderr.strip())
-
         def subject(root, path):
             self.assertIs(sweep._merged_read(root, path), False, "HEAD is in main, not ahead of it")
             self.assertIs(sweep.fully_pushed(path), True, "the ahead commit is not pushed")
 
-        root, path = self.own_lock_tree("ahead", os.getppid(), prepare=commit_ahead, check=subject)
+        root, path = self.own_lock_tree("ahead", os.getppid(), prepare=self.commit_ahead, check=subject)
         decision = sweep.decide_worktree(root, self.entry_for(root, path))
         self.assertEqual(decision["action"], "keep", "reaped an unmerged tree: %s" % decision["reason"])
 
@@ -10684,6 +10817,38 @@ class OwnAgentLockTests(unittest.TestCase):
                 decision = sweep.decide_worktree(root, entry)
             self.assertTrue(read.called, "the ancestor read was never made")
             self.assertEqual(decision["action"], "keep", "reaped on an unreadable ancestor: %s" % decision["reason"])
+
+    @unittest.skipIf(not sys.platform.startswith("linux"), "the /proc route is Linux only")
+    def test_linux_no_start_lock_held_by_a_plain_argv_ancestor_follows_the_own_lock_rules(self):
+        # Red on 1468147e7: the /proc route reads the ancestor's lock as a reused pid, so the tree goes on the stale
+        # route ("removable: stale agent lock") and never meets the own-lock gate (merged, idle 30 min). The probe
+        # runs under the holder, so the holder is its ancestor. Arm 1 frees as an own lock. Arms 2 and 3 keep as
+        # "locked:" under --attended, where the stale route reaps with no merge read and no idle read.
+        arms = [
+            ("merged and idle 2 h frees as an own lock", {}, False, "reap", "removable: own agent lock"),
+            ("unmerged, pushed, under --attended keeps", {"prepare": self.commit_ahead}, True, "keep", "locked:"),
+            ("merged, idle 5 min, under --attended keeps", {"age": 5 * 60}, True, "keep", "locked:"),
+        ]
+        for index, (label, options, attended, action, reason) in enumerate(arms):
+            with self.subTest(arm=label):
+                folder = os.path.join(ROOT, "own-plain-%d" % index)
+                holder = start_plain_holder(folder)
+                self.addCleanup(stop_plain_holder, holder)
+                root, path = self.own_lock_tree("plain%d" % index, holder.pid, start=False, **options)
+                entry = self.entry_for(root, path)
+                self.assertEqual(entry["locked_reason"], "claude agent agent-plain%d (pid %d)" % (index, holder.pid),
+                                 "the lock is not the no-start form")
+                line = write_probe(folder, decision_body(root, entry, attended), 1)
+                assert_holder_scope(self, holder, path)
+                report = probe_report(self, *run_plain_holder(holder, line))
+                self.assertIn(holder.pid, report["chain"], "scope: the holder is not in the probe's ancestry")
+                decision = report["decision"]
+                self.assertEqual(decision["action"], action,
+                                 "decided %s, want %s: %s" % (decision["action"], action, decision["reason"]))
+                self.assertTrue(decision["reason"].startswith(reason),
+                                "decided for the wrong reason: %s" % decision["reason"])
+                if action == "reap":
+                    self.assertTrue(decision.get("unlock"), "the own lock was not marked for unlock")
 
 
 if __name__ == "__main__":
