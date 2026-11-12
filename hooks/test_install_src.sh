@@ -4958,8 +4958,8 @@ caseP3() {
 
 # ---- caseP4: with no origin/stable, a local install pins the clone's local main and says so in one WARN line naming stable ----
 # install.sh's pin_commit falls back to the clone's local main when origin holds no stable branch. Local main is made one
-# commit ahead of origin's main, so a pin at origin/main would differ from the pin at local main. The fallback is never
-# silent (coordinator ruling, act 2 round 1, 2026-11-12 CST).
+# commit ahead of origin's main, so a pin at origin/main would differ from the pin at local main. The fallback must not be
+# silent: the case checks for one WARN line that names stable.
 caseP4() {
   name="caseP4: with no origin/stable, a local install pins the clone's local main and says so in one WARN line naming stable"
   fx="$work/p4-fx"; h="$work/p4-home"; co="$work/p4-co"; cfg="$work/p4-cfg"

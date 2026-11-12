@@ -542,7 +542,7 @@ caseV() {
 
 # stable_404_curl <case>: a fake curl that answers 404 (exit 22, as curl -f does) for the stable branch's install.sh, and
 # serves a stub install.sh for main's, which writes agents/builder.md so the setup reads installed. Every call's argv goes
-# to <case>/curl.log. Coordinator ruling, act 2 round 1 (2026-11-12 11:34 CST): a stable 404 falls back to main with one WARN.
+# to <case>/curl.log. The setup then fetches main's install.sh and says the stable 404 once, in one WARN line naming stable.
 stable_404_curl() {
   printf '#!/bin/sh\nmkdir -p "$CLAUDE_CONFIG_DIR/agents" && : > "$CLAUDE_CONFIG_DIR/agents/builder.md"\n' > "$1/served-install.sh"
   cat > "$1/bin/curl" <<EOF

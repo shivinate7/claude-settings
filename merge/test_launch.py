@@ -150,8 +150,8 @@ class Launch(unittest.TestCase):
         self.assertNotEqual(probe.returncode, 0, "FIXTURE origin still has a stable branch")
 
     def test_no_stable_runs_origin_main_not_the_checkout(self):
-        # With no stable branch on origin, the launcher runs origin's main, not the checkout's own tree (coordinator
-        # ruling, act 2 round 1, 2026-11-12 11:34 CST). The checkout is still at v1 here.
+        # With no stable branch on origin, the launcher runs origin's main, not the checkout's own tree.
+        # The checkout is still at v1 here, so the run must print RAN v2.
         self.drop_stable()
         self.release("v2", stable=False)
         rc, out, err = self.merge()

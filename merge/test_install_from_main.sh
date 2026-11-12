@@ -1056,7 +1056,7 @@ case22() {
 case23() {
   name="case23: SessionStart hook with main checked out in the clone and a tracked change that blocks the fast-forward leaves the tree and the change alone, moves the pin to origin/stable, and logs one line naming main"
   d="$work/case23"; hook_fixture "$d" main
-  # Re-pointed (coordinator ruling, act 2 round 1, 2026-11-12 11:34 CST): a dirty tree is skipped only when the change blocks
+  # A dirty tree is skipped only when the change blocks
   # the fast-forward, so origin's main now changes notes.txt, and the local edit below blocks it.
   printf 'origin edit\n' >> "$d/pusher/notes.txt"
   git -C "$d/pusher" add notes.txt
@@ -1654,7 +1654,7 @@ case48() {
 }
 
 # ---- Case 49: CLAUDE_SETTINGS_REF=main -> the hook's compare is with main, so the pin at main is current and no helper runs ----
-# Re-pointed from "the helper re-runs" (coordinator ruling, act 2 round 1, 2026-11-12 11:34 CST): the hook's p= honours
+# The hook's p= honours
 # CLAUDE_SETTINGS_REF=main, so a pin at local main is on the recovery ref and the helper does not run.
 case49() {
   name="case49: SessionStart hook with CLAUDE_SETTINGS_REF=main and the pin at origin's main does not re-run the helper, and the pin stays at main"
