@@ -349,6 +349,7 @@ meets each item below. What the tool does when it runs is written in `confirm` i
 8. `merge.readyChecks` is an optional list of step names of the repo's `checks` job. On a draft, `merge <pr> --confirm` runs
    them through `bin/ci-job checks --step NAME ...` before any push and before the ready mark. A FAIL or unknown stops the
    draft: `lanes-run-no-full-ci-job`, a lane runs no full CI job. Absent: no ready check runs, and one line says so.
+9. `merge.busyFiles` is an optional list of path patterns (fnmatch). A new `merge --batch-build` refuses two lanes that change the same matching file: `busy-file-stacked-batches`, build one lane first, then the next with `--on`. Absent: no check.
 
 ## Adoption checklist, the merge tool
 
