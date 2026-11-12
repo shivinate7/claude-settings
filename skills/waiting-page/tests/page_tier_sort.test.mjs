@@ -45,9 +45,10 @@ function stubDb({ items, answers, groups, meta, holdMeta, failMeta, metaFirst })
   const data = { items: Object.fromEntries(items.map((i) => [i.id, i])), answers: { ...answers }, groups: { ...groups }, receipts: {}, meta: meta ? { page: meta } : {} };
   window.__log = [];
   const subs = {};
-  // holdMeta: the meta document's listener is kept, and window.__releaseMeta delivers it. The stub has no clock, so a case names the moment meta arrives.
+  // holdMeta: the meta document's listener is kept, and window.__releaseMeta delivers it and returns how many it delivered. The stub has no clock of its
+  // own: a case names the moment meta arrives, and a case with `clock` runs the page's own timers on Playwright's fake clock.
   const heldMeta = [];
-  window.__releaseMeta = () => heldMeta.splice(0).forEach((cb) => cb(dsnap("meta", "page")));
+  window.__releaseMeta = () => { const cbs = heldMeta.splice(0); cbs.forEach((cb) => cb(dsnap("meta", "page"))); return cbs.length; };
   const snap = (name) => ({ docs: Object.entries(data[name] || {}).map(([id, v]) => ({ id, data: () => v })) });
   const dsnap = (name, id) => ({ exists: !!(data[name] || {})[id], data: () => (data[name] || {})[id] || null });
   const fire = (name) => (subs[name] || []).forEach((cb) => cb(snap(name)));
@@ -80,8 +81,9 @@ function stubDb({ items, answers, groups, meta, holdMeta, failMeta, metaFirst })
   window.claude = { use: async (cap) => (cap === "db" ? db : null) };
 }
 
-// Loads the page with these items and waits until the first one is drawn. Each case gets its own browser page.
-async function open(t, { items, answers = {}, groups = {}, meta, holdMeta = false, failMeta = false, metaFirst = false }) {
+// Loads the page with these items and waits until the first one is drawn. Each case gets its own browser page. `clock` puts the page's timers on
+// Playwright's fake clock before it loads, so a case advances them with page.clock.runFor and never waits on the wall clock.
+async function open(t, { items, answers = {}, groups = {}, meta, holdMeta = false, failMeta = false, metaFirst = false, clock = false }) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
@@ -90,6 +92,7 @@ async function open(t, { items, answers = {}, groups = {}, meta, holdMeta = fals
   // The page is served from a stand-in origin, so the init script and localStorage both apply. Every other request is refused.
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body: html }) : r.abort()));
   await page.addInitScript(stubDb, { items, answers, groups, meta, holdMeta, failMeta, metaFirst });
+  if (clock) await page.clock.install();
   await page.goto(ORIGIN);
   await page.waitForFunction("state.items.length > 0");
   // A held or failed meta draws no card until it settles, so a case with one waits on its own marker instead.
@@ -362,4 +365,99 @@ test("at 1280 the first run in the rail's chips has no top gap: its label's marg
   const second = await marginOf(1), first = await marginOf(0);
   assert.equal(second, "4px", "the second run's label has no 4px gap, so the width rule does not apply here");
   assert.equal(first, "0px", "the first run's label has a top gap from .rrepo: " + first);
+});
+
+// ---------------------------------------------------------------- the meta that never answers, the loading line's status, the rail while held (review round 2)
+
+// db.d.ts: a store that goes quiet is time-limited at about 10 s, and the page's own wait is the one these cases run out on the fake clock.
+const META_WAIT_MS = 10_000;
+
+// The list a settled meta gives repo-less items: one tier in age order, no repo head, and the rail drawn with a chip per item.
+async function assertDrawnRepoless(page, ids, when) {
+  assert.doesNotMatch(await page.locator("#list").innerText(), /Loading the items waiting on you/, `${when}: the loading line still shows`);
+  assert.deepEqual(await tierIds(page, "holds"), ids, `${when}: the cards are not in age order`);
+  assert.equal(await page.locator(".subgrp, .subhead").count(), 0, `${when}: a repo head is drawn for repo-less items alone`);
+  assert.equal(await page.locator("#rail").evaluate((el) => el.hidden), false, `${when}: the rail is hidden`);
+  assert.equal(await page.locator("#rail .nchip").count(), ids.length, `${when}: the rail does not draw one chip per item`);
+}
+
+test("a meta that never answers: after the page's 10 s wait it treats the meta as failed and draws the repo-less items", async (t) => {
+  const first = blk("silent-a", 1, { added: at(1) });
+  const second = blk("silent-b", 2, { added: at(2) });
+  const page = await open(t, { items: [first, second], meta: META, holdMeta: true, clock: true }); if (!page) return;
+  await page.clock.runFor(META_WAIT_MS);
+  await assertDrawnRepoless(page, [first.id, second.id], "after 10 s of fake time (db.d.ts: about 10 s)");
+});
+
+test("control: with the fake clock on and the meta answered, the same items draw the same list", async (t) => {
+  const first = blk("answered-a", 1, { added: at(1) });
+  const second = blk("answered-b", 2, { added: at(2) });
+  const page = await open(t, { items: [first, second], meta: META, clock: true }); if (!page) return;
+  await page.clock.runFor(META_WAIT_MS);
+  await assertDrawnRepoless(page, [first.id, second.id], "with the meta answered, after 10 s of fake time");
+});
+
+test("a late meta after the 10 s wait moves no drawn card and adds or removes no repo head", async (t) => {
+  // The older item names this repo's slug. With no meta it is another repo under its own head; a late meta would make it this repo and merge it in by age.
+  const repoless = blk("late-repoless", 2, { added: at(2) });
+  const slug = blk("late-slug", 1, { added: at(1), repo: "owner/this-repo" });
+  const page = await open(t, { items: [repoless, slug], meta: META, holdMeta: true, clock: true }); if (!page) return;
+  await page.clock.runFor(META_WAIT_MS);
+  assert.doesNotMatch(await page.locator("#list").innerText(), /Loading the items waiting on you/, "after 10 s of fake time (db.d.ts: about 10 s): the loading line still shows");
+  const before = await tierIds(page, "holds"), headsBefore = await page.locator(".subhead").allInnerTexts();
+  assert.deepEqual(before, [repoless.id, slug.id], "after 10 s of fake time the order is not this repo's item first, then the other repo's");
+  const delivered = await page.evaluate(() => window.__releaseMeta());
+  assert.ok(delivered >= 1, "the held meta had no listener to deliver it, so the late meta was never sent");
+  await page.waitForFunction("feed.meta === true");
+  assert.deepEqual(await tierIds(page, "holds"), before, "the late meta moved a drawn card");
+  assert.deepEqual(await page.locator(".subhead").allInnerTexts(), headsBefore, "the late meta changed the repo heads");
+});
+
+test("control: a failed meta read draws the late-meta case's order, with the other repo under a head", async (t) => {
+  // The same items as the late-meta case, settled by a failed read: the state the 10 s wait leaves, which the late meta must not change.
+  const repoless = blk("late-repoless-ctl", 2, { added: at(2) });
+  const slug = blk("late-slug-ctl", 1, { added: at(1), repo: "owner/this-repo" });
+  const page = await open(t, { items: [repoless, slug], failMeta: true }); if (!page) return;
+  await page.waitForFunction("window.__metaFailed === true");
+  assert.deepEqual(await tierIds(page, "holds"), [repoless.id, slug.id], "a failed read does not draw this repo's item first");
+  const heads = await page.locator(".subhead").allInnerTexts();
+  assert.ok(heads.some((h) => /this-repo/.test(h)), "no repo head names the other repo: " + JSON.stringify(heads));
+});
+
+test("while the repo meta is held the loading line is a role=status, and it is not one once the meta settles", async (t) => {
+  const a = blk("status-a", 1, { added: at(1) });
+  const page = await open(t, { items: [a], meta: META, holdMeta: true }); if (!page) return;
+  assert.match(await page.locator("#list").innerText(), /Loading the items waiting on you/, "scope: the list is not on its loading line while the meta is held");
+  assert.equal(await page.locator('#list [role="status"]', { hasText: "Loading the items waiting on you" }).count(), 1, "the loading line has no role=status while the repo meta is held");
+  await page.evaluate(() => window.__releaseMeta());
+  await page.waitForFunction("feed.meta === true");
+  assert.equal(await page.locator('[role="status"]', { hasText: "Loading the items waiting on you" }).count(), 0, "the loading line is still a role=status after the repo meta settles");
+});
+
+test("while the repo meta is held #list is aria-busy, and the attribute is gone once the meta settles", async (t) => {
+  const a = blk("busy-a", 1, { added: at(1) });
+  const page = await open(t, { items: [a], meta: META, holdMeta: true }); if (!page) return;
+  assert.match(await page.locator("#list").innerText(), /Loading the items waiting on you/, "scope: the list is not on its loading line while the meta is held");
+  assert.equal(await page.locator("#list").getAttribute("aria-busy"), "true", "#list is not aria-busy while the repo meta is held");
+  await page.evaluate(() => window.__releaseMeta());
+  await page.waitForFunction("feed.meta === true");
+  assert.equal(await page.locator("#list").getAttribute("aria-busy"), null, "#list keeps aria-busy after the repo meta settles");
+});
+
+// Twelve items across two repos: a rail that draws while the meta is held would draw a chip for each of them.
+const twelveItems = () => Array.from({ length: 12 }, (_, i) => blk("rail-" + (i + 1), i + 1, { added: at(i + 1), ...(i % 2 ? { repo: "owner/other-repo" } : {}) }));
+
+test("while the repo meta is held the rail is hidden and draws no chip", async (t) => {
+  const page = await open(t, { items: twelveItems(), meta: META, holdMeta: true }); if (!page) return;
+  assert.match(await page.locator("#list").innerText(), /Loading the items waiting on you/, "scope: the list is not on its loading line while the meta is held");
+  const rail = page.locator("#rail");
+  assert.equal(await rail.evaluate((el) => el.hidden), true, "the rail is shown while the repo meta is held");
+  assert.equal(await rail.isHidden(), true, "the rail is drawn on screen while the repo meta is held");
+  assert.equal(await rail.evaluate((el) => el.childElementCount), 0, "the rail draws chips while the repo meta is held");
+});
+
+test("control: once the repo meta answers, the rail is shown and draws a chip per item", async (t) => {
+  const page = await open(t, { items: twelveItems(), meta: META }); if (!page) return;
+  assert.equal(await page.locator("#rail").evaluate((el) => el.hidden), false, "the rail stays hidden after the repo meta answers");
+  assert.equal(await page.locator("#rail .nchip").count(), 12, "the rail does not draw one chip per item");
 });
