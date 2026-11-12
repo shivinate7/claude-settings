@@ -934,7 +934,11 @@ class LockAtomic(WaitCase):
             if len(fake.sleeps) == 1 and "holder" not in probe:
                 probe["holder"] = (read_lock(lock) or {}).get("pid")
 
-        code, text = run_wait(machine.env, FakeTime(hook=first_poll), Procs(), max_seconds=90)
+        try:
+            code, text = run_wait(machine.env, FakeTime(hook=first_poll), Procs(), max_seconds=90)
+        except Exception as error:  # a crash on the empty lock is this case's failure, named by the assert below
+            self.fail("the waiter raised %s on a leftover empty lock, so it did not treat the file as stale: %s"
+                      % (type(error).__name__, error))
         self.assertIn("holder", probe, "the waiter never polled with the empty lock on disk: it did not start")
         self.assertEqual(probe["holder"], WAITER_PID,
                          "an empty lock file was not replaced: it still names pid %r" % (probe["holder"],))
