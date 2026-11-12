@@ -31,7 +31,7 @@
                           the record stale and the line says unknown; the fix verifier then refuses. Any other difference keeps today's rules.
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
                           live CI; then the PRs with no record. A draft open over 12 h whose newest
-                          record is missing, stale (not for the live head), bad or for another PR prints `send back: #N session_ID (REASON)`
+                          record is missing, stale (not for the live head, and not kept by clean merges of main), bad or for another PR prints `send back: #N session_ID (REASON)`
                           instead (`no session` when the body names none); the batch runner sends it back to that lane session.
                           Cost: no new gh call, process, file or timer; it reads fields the PR list already returns.
   merge --reviewed --root DIR [--root DIR ...]
@@ -4100,7 +4100,7 @@ def reviewed_read(h, now=time.time):
     A draft open more than SEND_BACK_HOURS before `now` (epoch seconds, or a function that returns them) whose newest record is missing, stale, bad
     or names another pull request prints `send back: #<n> <session> (<reason>)` in place of its `no record:` entry or state line; the session is
     the last claude.ai/code/session_ link of the pull request body, or `no session`. Stale is as live_review_state reads it: a record kept by clean
-    merges of main is not stale. Cost of the send-back: none of its own. It reads only the created_at, draft and body fields the pull list already
+    merges of main is not stale, and one whose survival read failed (REVIEW_SURVIVAL_UNKNOWN in the why) is unknown, not stale: it keeps its state line. Cost of the send-back: none of its own. It reads only the created_at, draft and body fields the pull list already
     returns, and live_review_state's reads run for a record exactly as they do without it: no new gh call, process, file or timer."""
     main = h.base
     pulls = h.pages("pulls", fields={"state": "open"})
@@ -4118,7 +4118,8 @@ def reviewed_read(h, now=time.time):
             if rec and rec["n"] != n:
                 rec, err = None, f"the record names pull request #{rec['n']}, not #{n}"
             state, state_why = live_review_state(h, rec, sha, main)
-            why = f"bad: {err}" if rec is None else f"stale: the record is for head {rec['head'][:9]}" if state == "stale" else None
+            unknown = state == "stale" and REVIEW_SURVIVAL_UNKNOWN in state_why  # the survival read failed: the record may still hold, so nothing is sent back
+            why = f"bad: {err}" if rec is None else f"stale: the record is for head {rec['head'][:9]}" if state == "stale" and not unknown else None
         if why and d.get("draft") and clock - review_created(d) > SEND_BACK_HOURS * 3600:
             ids = re.findall(rf"claude\.ai/code/({SESSION_ID.pattern})", d.get("body") or "")
             lines.append(f"{REVIEW_SEND_BACK}#{n} {ids[-1] if ids else 'no session'} ({why})")
