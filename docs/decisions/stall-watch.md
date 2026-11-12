@@ -116,8 +116,8 @@ parsing closes it. Its transcript is `<dir of the session file>/<file stem>/suba
 built with `os.path`. The launch's `outputFile` is the fallback. The age is that file's mtime. A row names
 the agent id and the remedy: stop it, then resume it by name, or send a fresh reviewer the prior report
 (`roles-resume-by-name`). The listing rules are the shell's: once per crossing, against the previous Stop.
-A transcript found in neither place is listed as unknown, once. An agent is not listed as quiet while a tool_use in the read window has no tool_result: that is one long call, not a stall, except a Bash or
-PowerShell call at least 900 s old (below). The check reads that from the end of the
+A transcript found in neither place is listed as unknown, once. An agent is not listed as quiet while a tool_use in the read window has no tool_result: that is one long call, not a stall.
+A Bash or PowerShell call at least 900 s old is the exception (below). The check reads that from the end of the
 transcript, for a quiet agent only. The read is the last 64 KB. It doubles until it holds a whole last
 record, up to `TAIL_MAX`, 32 MB. An empty transcript, or one whose every tool_use in the read window has its tool_result, is listed when quiet. A transcript that cannot be
 read is listed. An open call with `run_in_background` true is not busy: a quiet agent with one is listed as quiet.
@@ -142,7 +142,7 @@ hide it. An open call whose only candidates have no readable timestamp is not li
 worse. The stuck row also needs the transcript quiet past the quiet age. Its crossing is the later of the
 call's time plus the cap and the transcript's mtime plus the quiet age. It is listed once per crossing, at
 the first Stop after that crossing, against the previous Stop. A later write to the transcript moves the
-crossing, so the same hung call can be listed again after it; the quiet row behaves the same and keeps its
+crossing, so the same hung call can be listed again after it. The quiet row behaves the same and keeps its
 own crossing.
 Cost: one `stat` per running agent, and one tail read of every quiet agent at every Stop, including one
 already listed. The read is 64 KB, doubled up to `TAIL_MAX`, 32 MB. The cost of a read for an agent that
