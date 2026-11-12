@@ -852,7 +852,7 @@ def CTRL3_run_folder_sweep_removes_a_day_old_sibling_and_keeps_a_new_one():
 
 # ---------------------------------------------- the first-failure rule, the prompted mark, the login text
 
-# The owner's 15:33 CST Nov 6 failure, verbatim from roadmap/data/steps/model-call-auth-check.json (the note field).
+# The refresh failure text, copied verbatim from a real failed refresh, so the cases match what a user sees.
 REFRESH_TEXT = ("Failed to refresh OAuth token: another Claude Code process is refreshing it or exited "
                 "mid-refresh")
 

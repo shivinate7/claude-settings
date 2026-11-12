@@ -651,9 +651,9 @@ REFRESH_TEXT = ("Failed to refresh OAuth token: another Claude Code process is r
 
 
 def case_refresh_failure_leaves_a_record_naming_it_for_the_hook_session():
-    """F4, streak half (review round 1): a judge call from the SendMessage hook that fails with the owner's 15:33 CST
-    Nov 6 refresh text leaves a record for the hook's session that names the text. Owner, 11:43 CST Nov 6: "It never
-    fails quietly". Keep-green on the build head: every failure that is not a reply is recorded."""
+    """F4, streak half: a judge call from the SendMessage hook that fails with the refresh text (REFRESH_TEXT) leaves a
+    record for the hook's session that names the text. A failure is never quiet, so every failure that is not a reply
+    is recorded."""
     r = run_hook(hook_input(session=SID_A), model_fail=True, fail_text=REFRESH_TEXT, reader_mode="idle")
     check("refresh: the wording call ran", len(r.wording_calls) == 1, detail(r))
     found = []
