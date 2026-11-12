@@ -1340,10 +1340,17 @@ def case_quoted_span_after_edit_verb():
     # `quoted`). The same span after a run verb is a command. A listed program stays a shell line when quoted, and
     # so does a span whose sentence has both verbs: a run verb in the sentence wins (command_in_item_hit).
     span = "scripts/x.py --y"
-    for verb in ("Find", "Locate", "Replace", "Swap", "Search for", "Look for", "Edit", "Delete", "Remove"):
+    for verb in ("Find", "Locate", "Replace", "Swap", "Search for", "Look for", "Edit"):
         text = "%s the line `%s` in the page" % (verb, span)
         span_scope("%s quotes the span" % verb, text, span)
         page("an edit-verb step (%s) quoting `%s` passes" % (verb, span), "set", entry_of(task_item([text])), None)
+    # Delete and remove are no edit verb here: a step that deletes a lane may run the span ("Delete the lane with
+    # `merge --drop 5`"), so the span is read as a command. case_delete_remove_span_is_a_shell_line holds the wording.
+    for verb in ("Delete", "Remove"):
+        text = "%s the line `%s` in the page" % (verb, span)
+        span_scope("%s holds the span" % verb, text, span)
+        page("a %s step holding `%s` is refused as a shell line" % (verb.lower(), span), "set",
+             entry_of(task_item([text])), ("command-in-item", "shell line"))
     text = "Run `%s` in the page" % span
     span_scope("run takes the same span", text, span)
     page("the same span after run is refused as a shell line", "set", entry_of(task_item([text])),
@@ -1356,6 +1363,20 @@ def case_quoted_span_after_edit_verb():
     span_scope("find and run share one sentence", text, span)
     page("a sentence with both find and run refuses the span as a shell line", "set", entry_of(task_item([text])),
          ("command-in-item", "shell line"))
+
+
+def case_delete_remove_span_is_a_shell_line():
+    # "Delete the lane with `merge --drop 5`." runs that command, so the span is a shell line, as after a run verb.
+    # "Find the lane with the same span" quotes it and passes: the verb alone decides. Delete and remove are not edit
+    # verbs (question_form.SPAN_EDIT_VERB), so the span is never quoted after them.
+    span = "merge --drop 5"
+    for text in ("Delete the lane with `%s`." % span, "Remove the lane: `%s`" % span):
+        span_scope("delete or remove holds the span: %s" % text, text, span)
+        page("a step that says `%s` is refused as a shell line" % text, "set", entry_of(task_item([text])),
+             ("command-in-item", "shell line"))
+    text = "Find the lane with `%s`." % span
+    span_scope("find holds the same span", text, span)
+    page("a find step quoting `%s` passes" % span, "set", entry_of(task_item([text])), None)
 
 
 def case_quoted_span_run_after_is_refused():
@@ -2753,6 +2774,7 @@ def main():
                  case_chat_reasons_name_a_remedy_and_no_page_field, case_page_reasons_are_one_table,
                  case_gh_login_hit_direct, case_gh_login_switch_on_the_page, case_command_in_item_spans,
                  case_quoted_span_after_edit_verb, case_quoted_span_run_after_is_refused,
+                 case_delete_remove_span_is_a_shell_line,
                  case_departs_missing, case_departs_empty_or_malformed, case_departs_restates_main,
                  case_departs_valid_passes, case_departs_out_of_scope_passes, case_departs_str_replace,
                  case_departs_ids_and_order, case_departs_reasons,
