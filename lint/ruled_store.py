@@ -8,15 +8,17 @@
 The store is the folder roadmap/rulings on origin/roadmap of REPO, one JSON file per ruling. An entry holds `id`,
 `at` (ISO 8601 with a zone), `ruling`, `source`, `status` ("open" or "closed"), `supersedes` (a list of
 {"kind", "ref"}) or `supersedes_none` (the reason it supersedes nothing; a reason that starts with "unread" means
-triage has not read it yet), and optionally `lands_in` ({"path", "contains"}).
+triage has not read it yet), and optionally `quote` (the owner's own words), `step` (the roadmap step that lands the
+ruling) and `lands_in` ({"path", "contains"}).
 
-An entry is open until the owner's ruling is on main. It closes when `status` is "closed", or when the text of
+An entry is open until its ruling is on main. It closes when `status` is "closed", or when the text of
 `lands_in.contains` is found, whitespace-normalised, in the blob of `lands_in.path` on origin/main. Triage writes
 the entries, and the restart plan cites them. The decision record is ruled-store-one-home.
 
-ENTRIES_LIFT_GUARDS is the one switch (owner item 646). False, the setting, makes an entry text only: it informs a
-session and the question judge and lifts no guard rule. True lets an open entry lift the guard rules it names in
-its `supersedes` (kind "guard-rule"). Nothing calls lifted_guards yet; the switch sets what it returns.
+ENTRIES_LIFT_GUARDS is the one switch. True (decision ruled-store-one-home) lets an open entry govern the guard rules it
+names in its `supersedes` (kind "guard-rule"): ruling_for_guard finds the entry, and guard_ruling_line words the note
+a guard prints when it lets the ruled act through. False makes an entry text only. No guard calls ruling_for_guard yet;
+a follow-up step wires it into the shared guard core.
 
 Cost: this module keeps no process and no timer and writes no file. ruled_entries starts two read-only git processes
 (one ls-tree, one cat-file --batch). open_entries starts one more cat-file --batch, and only when an open entry
@@ -30,7 +32,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 
-ENTRIES_LIFT_GUARDS = False  # owner item 646: False is text only (option a); True lets an open entry lift guard rules
+ENTRIES_LIFT_GUARDS = True  # an open entry governs the guard rules it names
 STORE_REF = "origin/roadmap"
 MAIN_REF = "origin/main"
 STORE_DIR = "roadmap/rulings/"
@@ -176,6 +178,29 @@ def lifted_guards(entries):
             if item.get("kind") == "guard-rule" and isinstance(ref, str) and ref not in lifted:
                 lifted.append(ref)
     return lifted
+
+
+def _guard_name(ref):
+    """The guard rule a `supersedes` ref names: its first token, since a ref may carry trailing prose."""
+    parts = ref.split() if isinstance(ref, str) else []
+    return parts[0] if parts else ""
+
+
+def ruling_for_guard(guard_rule, entries):
+    """The newest open entry whose `supersedes` names `guard_rule` (kind "guard-rule", first token of the ref), or None.
+    None while ENTRIES_LIFT_GUARDS is False. A closed entry in `entries` is ignored."""
+    if not ENTRIES_LIFT_GUARDS:
+        return None
+    named = [e for e in entries if e.get("status") != "closed"
+             and any(i.get("kind") == "guard-rule" and _guard_name(i.get("ref")) == guard_rule
+                     for i in _supersedes(e))]
+    return max(named, key=entry_instant) if named else None
+
+
+def guard_ruling_line(entry):
+    """The line a guard prints when an entry's ruling lets the act through."""
+    return "ruled by %s (owner %s): %s" % (entry.get("id", "?"), entry.get("at", "?"),
+                                          _norm(str(entry.get("ruling", "")))[:RULING_CUT])
 
 
 def check_entry(entry):

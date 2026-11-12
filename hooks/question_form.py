@@ -1535,7 +1535,7 @@ PAST_RULING_RULE = "past-ruling"
 UNVETTED_LINE = re.compile(r"^[ \t>*+-]*Unvetted:[ \t]*\S", re.I | re.M)
 UNREADABLE = "unreadable"
 CLOSED_ITEMS = "closed page items"
-INDEX_CAP, STEP_TOP, STEP_GIT_TIMEOUT = 800, 30, 10
+INDEX_CAP, STEP_TOP, STEP_GIT_TIMEOUT, RULED_TOP = 800, 30, 10, 8
 RULING_HEADING = re.compile(r"^##[ \t]+The ruling[ \t]*$", re.I | re.M)
 RULING_WORDS = re.compile(r"ruling|owner|shiv", re.I)
 SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
@@ -1698,9 +1698,10 @@ def _step_rulings(steps, words):
     return [line for _, _, line in sorted(scored)[:STEP_TOP]]
 
 
-def _ruled_candidates(roots, unknown):
-    """The open entries of the ruled store (lint/ruled_store.py, the one reader), as
-    `ruled:<id>: <ruling> (owner <at>; open, not on main; supersedes <refs>)`, newest first. The store is read from the
+def _ruled_candidates(roots, unknown, words):
+    """The open entries of the ruled store (lint/ruled_store.py, the one reader) whose ruling shares a word with the
+    question (`words`, the step rulings' word test), as
+    `ruled:<id>: <ruling> (owner <at>; open, not on main; supersedes <refs>)`, newest first, at most RULED_TOP. The store is read from the
     first root that has one: the repo, else the claude-settings checkout. No store anywhere adds "ruled store
     (absent)"; a store git failed to read adds "ruled store (unreadable: git)"."""
     lint = os.path.join(HERE, "..", "lint")
@@ -1717,7 +1718,8 @@ def _ruled_candidates(roots, unknown):
         if state == "ok":
             opened = ruled_store.open_entries(entries, root)
             lines = []
-            for entry in sorted(opened, key=ruled_store.entry_instant, reverse=True):
+            related = [e for e in opened if _words(str(e.get("ruling", ""))) & words]
+            for entry in sorted(related, key=ruled_store.entry_instant, reverse=True)[:RULED_TOP]:
                 ruling = " ".join(str(entry.get("ruling", "")).split())[:INDEX_CAP]
                 lines.append("ruled:%s: %s (owner %s; open, not on main; supersedes %s)"
                              % (entry.get("id", "?"), ruling, entry.get("at", "?"),
@@ -1730,7 +1732,7 @@ def _ruled_candidates(roots, unknown):
 
 
 def past_rulings(question_text, repo_root):
-    """(candidates, unknown). `candidates` are lines `<id>: <text>`: every open ruled-store entry as `ruled:<id>`, every decision and debt record, then the step
+    """(candidates, unknown). `candidates` are lines `<id>: <text>`: the (up to eight) open ruled-store entries that share words with the question, as `ruled:<id>`, every decision and debt record, then the step
     rulings that share words with the question. `unknown` lists each source not searched: "<source> (absent)"
     for a source the repo does not have, "<source> (unreadable: ...)" for one that exists and failed, and always
     "closed page items". Absent sources never refuse; unreadable ones do (see unreadable_sources)."""
@@ -1745,7 +1747,7 @@ def past_rulings(question_text, repo_root):
         unknown.append("claude-settings decision records (absent)")
     elif os.path.realpath(other) != os.path.realpath(repo_root):
         roots.append(other)
-    candidates += _ruled_candidates(roots, unknown)
+    candidates += _ruled_candidates(roots, unknown, _words(question_text))
     for folder, label in (("decisions", "decision records"), ("debts", "debt records")):
         found = False
         for root in roots if folder == "decisions" else roots[:1]:
