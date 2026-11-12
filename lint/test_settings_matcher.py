@@ -2,6 +2,7 @@
 """The PreToolUse matcher that routes to hooks/guard.py must cover every tool the guard judges.
 Run: python3 lint/test_settings_matcher.py. Without Workflow and start_session in the matcher,
 the guard's agent-model-floor never sees those calls.
+It also pins settings.json's permissions.allow for the page tools (owner ruling R21, page-write-no-card).
 """
 import ast, glob, json, os, re, sys, unittest
 
@@ -744,6 +745,39 @@ class JudgeModelRows(unittest.TestCase):
         judges = call_judge_judges()
         wrong = dict(judges, Agent=(judges["Agent"][0], "claude-haiku-9-9") + tuple(judges["Agent"][2:]))
         self.assertTrue(any(g.startswith("Agent: table model") for g in table_gaps(self.text, wrong)))
+
+
+class PermissionsAllow(unittest.TestCase):
+    """permissions.allow in settings.json holds the page-tool names that owner ruling R21 (page-write-no-card)
+    allows with no card. Each name is a literal here. The list itself is read from SETTINGS, never copied."""
+
+    def allow_list(self):
+        # Scope first: a moved key or an empty list must fail here, or the absence case would pass on nothing.
+        with open(SETTINGS, encoding="utf-8") as handle:
+            permissions = json.load(handle).get("permissions")
+        self.assertIsInstance(permissions, dict, "settings.json has no permissions object")
+        allow = permissions.get("allow")
+        self.assertIsInstance(allow, list, "settings.json permissions.allow is not a list")
+        self.assertTrue(allow, "settings.json permissions.allow is empty")
+        return allow
+
+    def test_artifactdata_is_allowed(self):
+        self.assertIn("ArtifactData", self.allow_list(),
+                      "ArtifactData is missing from permissions.allow (R21, page-write-no-card)")
+
+    def test_db_usage_is_allowed(self):
+        self.assertIn("mcp__claude-artifacts__db_usage", self.allow_list(),
+                      "db_usage is missing from permissions.allow (R21, page-write-no-card)")
+
+    def test_read_artifact_is_allowed(self):
+        self.assertIn("mcp__claude-artifacts__read_artifact", self.allow_list(),
+                      "read_artifact is missing from permissions.allow (R21, page-write-no-card)")
+
+    def test_artifactcomments_is_not_allowed(self):
+        # No grant covers ArtifactComments. A scoped form such as ArtifactComments(...) allows it too.
+        held = [entry for entry in self.allow_list()
+                if entry == "ArtifactComments" or entry.startswith("ArtifactComments(")]
+        self.assertFalse(held, "ArtifactComments is on permissions.allow, and no grant covers it")
 
 
 if __name__ == "__main__":
