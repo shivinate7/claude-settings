@@ -99,10 +99,10 @@ for _name, _command in (
      "\n".join(["python3 - <<EOF", 'x = "$(gh pr create -t x)"', "EOF"])),
     ("a bash -c wrapper with short flags", "bash -c 'gh pr create -t x'"),
     # An unquoted body reads every `$( )` and backtick span live, whatever quotes surround it. Bash ends a body
-    # only at a line that is exactly the delimiter (under `<<-`, after leading tabs). The four rows below end
-    # their body early at a padded EOF line that bash keeps open, so the single-quoted `$( )` after it runs under
-    # bash, and the guard reads it as text. The rows after them are pins: green on the base, and each guards the
-    # shape or a scanner case in the body.
+    # only at a line that is exactly the delimiter (under `<<-`, after leading tabs). The four rows below pin the
+    # refusal for a body that stays open past an end line bash does not accept: the single-quoted `$( )` after
+    # that line still runs under bash. The rows after them pin the body's shape and its scanner cases, each with
+    # a `gh pr create` in the body that must be refused.
     ("an unquoted python body, a tab-indented EOF line ahead of a single-quoted $( ) gh pr create",
      "\n".join(["python3 - <<EOF", "\tEOF", "x = '$(gh pr create -t x)'", "EOF"])),
     ("an unquoted python body, a space-indented EOF line ahead of a single-quoted $( ) gh pr create",
