@@ -2507,13 +2507,14 @@ _STOPS_PAGE = []
 def stops_fields_page():
     """A page whose itemFields block is the real page's list plus `stops`. The list is read from the page, never copied, and
     the seam GUARD_ITEM_FIELDS_PAGE points the check at it, so a stops write is judged by the stops rule, not by
-    item-field-rendered. The real page lists `stops` now (page.html itemFields), so the seam adds nothing it does not already list."""
+    item-field-rendered. The real page lists `stops` (page.html itemFields), and the seam writes that list as it is."""
     if not _STOPS_PAGE:
         fields = question_form._item_fields(question_form.ITEM_FIELDS_PAGE)
         check("stops: the page's itemFields list reads", fields is not None, "no itemFields list in the page")
+        check("stops: the page's itemFields list names stops", "stops" in (fields or []), "the page does not list stops")
         path = os.path.join(RUN_FOLDER, "stops_fields_page.html")
         with open(path, "w", encoding="utf-8") as f:
-            f.write('<script type="application/json" id="itemFields">%s</script>' % json.dumps((fields or []) + ["stops"]))
+            f.write('<script type="application/json" id="itemFields">%s</script>' % json.dumps(fields or []))
         _STOPS_PAGE.append(path)
     return _STOPS_PAGE[0]
 
