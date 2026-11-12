@@ -21,6 +21,8 @@ Owner answers, 2026-10-17 12:14 CDT:
 
 Owner answer, 2026-10-17 12:53 CDT: a lane may reword a line when the result has fewer lines and words than before and keeps the current reason. The owner gave no other reason.
 
+Owner ruling, 2026-11-07 13:20 CST: "why not fix it then"; at 13:25 CST: "I want the guard itself". A found gap gets a fix, not a note. Each note line a branch adds, and each debt file it adds, names its fix. The guard and its forms are in `notes-name-their-fix` (each note names its fix).
+
 ## Why
 
 The tree carries more records than a session can read. A cull keeps the rulings in force and drops the rest. The protected outcome: a session finds the current ruling fast, and no stale text misleads it.

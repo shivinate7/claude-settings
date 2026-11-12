@@ -155,6 +155,22 @@ checkout the global rules file names (the copied cloud layout); a tool it cannot
 blocks: it adds a systemMessage that says UNKNOWN. Cost: 2 gh reads per claimed PR in a lane Stop, plus the guard_merge and merge module imports; no file,
 process kept or timer. A stale record adds the clean-merge read (merge/merge.py clean_merges_after): one commit read and one compare per merge
 commit, local git starts, and at most one `git fetch origin`, all inside the review check's REVIEW_CHECK_BUDGET. A stop_hook_active rewrite is not checked.
+
+Notes-fix step check (decision `notes-name-their-fix`): on a landed turn with a well-formed report whose Done has a
+RECORDED item, each `Fix: step:<slug>` that this turn's own commits add to the debt notes file or in a new debt file
+must have its slug in Done as a whole word (`step:<slug>` or the bare slug; a longer slug that starts with it does not
+count). The turn's commits are those on HEAD and not on origin/main with an author time at or after the turn's
+start, the stamp of its last human message. Time finds them, so a quiet `git commit -q` and a redirected one count. A
+line an earlier turn added is never judged again, and an amend or rebase of an earlier commit keeps its author
+time, so it is not judged either. A commit cherry-picked this turn keeps its old author time and is missed: a
+fail open. A commit made in another checkout counts only once it is on HEAD.
+A write to the remote through an MCP tool makes no local commit and is out of scope. An unreadable stamp, a git
+failure and an unreadable commit all fail open. A turn with no commit, a checkout with no notes file on disk, and the
+none and already-fixed forms pass. The Fix grammar lives in lint/check_record_slugs.py (parse_fix, commit_fixes) and
+is imported here, never copied; CI judges whether the step exists, this check judges only that Done names it. Cost:
+on a landed Stop with a RECORDED item in a checkout that holds the notes file, one git log of origin/main..HEAD, then
+one git process per commit of the turn (a show limited to the notes and debt paths). No file written, no process left
+running, no timer.
 """
 import bisect
 import datetime
@@ -1173,6 +1189,49 @@ def mistake_problem(text):
             or any(MISTAKE_GUARD_WORD_RE.search(s) and DONE_REF_RE.search(s) for s in _sentences(deviations))):
         return ""
     return MISTAKE_REASON % repr(clause[:80])
+
+
+NOTES_FIX_REASON = (
+    "Notes-fix guard: a commit of this turn adds a Fix that names step %s, and Done does not name it. Name each step "
+    "the turn adds in Done, so the gap has a fix somebody sees (decision notes-name-their-fix).")
+
+
+def turn_commits(git_text, root, start):
+    """The shas of the commits on HEAD and not on origin/main whose author time is at or after `start` (an aware
+    datetime), read with `git_text` (check_record_slugs.git_text, the one no-window git read). Raises on a git failure
+    or a time git prints badly; the caller fails open."""
+    out = git_text(root, "log", "--no-merges", "--format=%H %at", "origin/main..HEAD")
+    since = start.timestamp()
+    return [sha for sha, when in (line.split() for line in out.splitlines() if line.strip()) if int(when) >= since]
+
+
+def notes_fix_problem(text, cwd, started):
+    """The refusal text when Done has a RECORDED item and a `Fix: step:<slug>` that a commit of this turn (made at or
+    after `started`, the turn's start stamp) adds names a slug that Done does not, else ''. The step's existence is
+    CI's to judge."""
+    if not any("RECORDED" in DONE_KIND_RE.findall(item) for item in done_items(block_text(text, keep_indent=True))):
+        return ""
+    root = repo_root(cwd)
+    if not root:
+        return ""
+    # A repo with no notes file keeps no notes: no git process starts for it.
+    if not any(os.path.isfile(os.path.join(root, p)) for p in layout.candidates(root, "debt-notes")):
+        return ""
+    import check_record_slugs  # the one home of the Fix grammar and of how a commit's added lines are read
+    shas = turn_commits(check_record_slugs.git_text, root, _parse_iso(started))
+    done = report_section(text, "Done")
+    missing = []
+    for sha in shas:
+        try:
+            entries = check_record_slugs.commit_fixes(root, sha)
+        except check_record_slugs.Unknown:  # a sha git cannot read is not judged
+            continue
+        for _path, _label, fixes in entries:
+            for fix in fixes:
+                if fix and fix[0] == "step" and fix[1] not in missing \
+                        and not re.search(r"(?<![\w-])" + re.escape(fix[1]) + r"(?![\w-])", done):
+                    missing.append(fix[1])
+    return " ".join(NOTES_FIX_REASON % ("`step:%s`" % slug) for slug in missing)
 
 
 def _own_lane_read(path, own_id):
@@ -3278,6 +3337,12 @@ def main():
                 reasons.append(mistake)
         except Exception as exc:
             print("mistake check failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
+        try:
+            notes_fix = notes_fix_problem(text, hook.get("cwd"), records[last_human_idx].get("timestamp"))
+            if notes_fix:
+                reasons.append(notes_fix)
+        except Exception as exc:
+            print("notes-fix check failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
     reasons += [r for r in relay if r]
     if hand_off:
         reasons.append(hand_off)
