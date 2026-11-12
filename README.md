@@ -88,14 +88,15 @@ rm -f "$f"
 exit 0
 ```
 
-Also set these three as environment variables in the same cloud environment menu. They are
-three of the `env` keys of `settings.json` (read `settings.json` `env`; decision `agent-model-cap`),
+Also set these four as environment variables in the same cloud environment menu. They are
+the `env` keys of `settings.json` (read `settings.json` `env`; decision `agent-model-cap`),
 but a session can start without them. Measured in another session: the SessionStart refresh
 rewrites `settings.json` after Claude Code reads it.
 
 * `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`
 * `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL=sonnet`
 * `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1`
+* `PLAYWRIGHT_SKIP_BROWSER_GC=1` (decision `playwright-install-once`)
 
 The cloud image already has Playwright's Chromium in `/opt/pw-browsers`. Sessions set
 `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers` and `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`. A setup
