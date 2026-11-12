@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Controls for skills/waiting-page/page_grant.py: the page's answer `label` is not part of the grant.
+"""Controls for skills/waiting-page/page_grant.py: the page's answer `label` is read only to check the choice.
 
-The waiting page now saves a readable `label` beside `choice` on each decision answer: "A: <option label>" for a pick,
-a list of those for a multi item, "none of these" for none. `choice` stays the key, or the list of keys, and only
-`choice` decides the grant. These cases pin that page_grant.py counts an answer that carries a `label`, and that the
-label never changes the verdict: a label that names another option than `choice` does not move the grant.
+The waiting page saves a readable `label` beside `choice` on each decision answer: "A: <option label>" for a pick,
+a list of those for a multi item, "none of these" for none. `choice` stays the key, or the list of keys, and `choice`
+decides the grant. These cases pin that page_grant.py counts an answer whose label matches its choice, that a label of
+the wrong shape is not read, and that a label naming another option than `choice` is held, not counted (ruling R60,
+exit 3): the owner confirms in words.
 
-They are green controls on the current checker, so they show no red. Their reds are the page tests in
-skills/waiting-page/tests/page.test.mjs, which show that the page writes the label.
+The controls are green on the current checker. The held case is red on the commit before the build of ruling R60 (its
+commit trailer names that commit). The page tests in skills/waiting-page/tests/page.test.mjs show that the page writes
+the label.
 
     python3 skills/waiting-page/test_page_grant_label.py
 
@@ -42,10 +44,12 @@ class LabelIsNotTheGrant(tpg.Base):
         r = self.check(self.repo(), self.pair(answer_fields={"label": ITEM_A}), pick="a")
         self.assertCounted(r, tpg.verdict("a"))
 
-    def test_label_naming_another_option_does_not_move_the_grant(self):
-        """The label names option B, the choice is a: the grant is a, because the label is not read."""
+    def test_label_naming_another_option_is_held_not_counted(self):
+        """The label names option B, the choice is a: the answer names an option the item no longer holds at key a, so
+        it is held (exit 3) and is not a grant. The owner confirms in words which option he meant."""
         r = self.check(self.repo(), self.pair(answer_fields={"label": ITEM_B}), pick="a")
-        self.assertCounted(r, tpg.verdict("a"))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertTrue(r.stdout.startswith("held: "))
 
     def test_label_that_is_a_list_on_a_pick_one_answer_is_not_read(self):
         """A label of the wrong shape is still not read: the choice alone is the grant."""
