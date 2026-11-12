@@ -1,12 +1,12 @@
 {
   "title": "Lane lint runs once per lane, at hand-off; batch CI runs lint first and cancels the rest when it goes red",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 1022,
   "owner": "triage",
   "why": "Owner ruling R4, 14:56 CST Nov 10 (\"yes D is approved\", relayed by the retrospective session): no added wait in the usual case, and the full suite in batch CI is still the final check (roles-each-layer-proves-once).",
   "note": "Drop the lane lint at join and on the batch head (decision lanes-run-no-full-ci-job). Batch CI runs lint first and cancels the rest of the run when lint goes red; the files in the red output name the lane to drop; the next run is the one that merges. First confirm whether CI cancels on the first failure and whether every red lint maps to one lane. Record lands in #2565 (time-limits-end-hangs-only); build after it merges. Plan branch restart-plan, stage 3. Unblocked 12:06 CST Nov 12 (retrospective 12:03 CST): its wait on #2565 was dead (closed unmerged). Ruled (R4, owner 14:56 CST Nov 10). Case: batch 104 went red in the checks job 11:55 CST while macOS and Windows ran on; no wake. Whether any red job cancels the run: page item 559 red-job-cancels-run.",
-  "updatedAt": "2026-11-12T12:06:21-06:00",
-  "lane": "",
+  "updatedAt": "2026-11-12T12:07:43-06:00",
+  "lane": "session_013NEJL1GDo9M4LUHh6W7GiA",
   "blockedBy": []
 }

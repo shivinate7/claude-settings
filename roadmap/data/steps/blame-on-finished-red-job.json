@@ -1,0 +1,14 @@
+{
+ "id": "blame-on-finished-red-job",
+ "title": "Accept a batch blame once the named job has finished red",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJKzzqqpnCFLtG3BUNif",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 12:04 CST Nov 12, typed in batch runner 10: \"Yes raise that -- time waste for no output gain is just wasted time.\"",
+ "source": "coordinator 12:06 CST Nov 12",
+ "note": "`merge --batch-build N --blame PR --run URL` refuses while the run is still going (merge/merge.py about line 4921), so a batch waits for macOS and Windows after a finished red job already shows the cause (batch 104: red 11:55 CST, cause reproduced 11:57 CST). Fix: accept a blame once the named job has finished red; keep the refusal for a job still running. Red first.",
+ "updatedAt": "2026-11-12T12:07:43-06:00"
+}

@@ -1,11 +1,11 @@
 {
   "title": "The merge tool judges a merge command whose args hold a $( ) substitution",
   "phase": "guards",
-  "status": "ready",
+  "status": "doing",
   "order": 678,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJL3GTFJLwXVvpL2kzcN",
   "why": "The merge tool skips judging `merge -C /other $(echo 5) --confirm`, because the `)` that closes a `$(` cuts the args (round 3 on #2504, 91dfc65b1; the same on #1166's head; coordinator 08:26 CST Nov 8).",
   "note": "Done check: a red test where that form is judged. Merge after #2504. Debt merge-subst-paren-closes points at it. Doing in lane merge-repo-dir-flag ([ended:lane:-merge-repo-dir-flag]). Filed by triage 08:27 CST Nov 8. #2509 (merge-subst-paren-v2) released to batch 72 after #1166 and #2504 (coordinator 07:31 CST Nov 10). It retires debt merge-subst-paren-closes. Set done when #2509 merges. Dead wait re-pointed 13:18 CST Nov 10 (step dead-pr-waits): #1982 closed unmerged; #2504 replaced it. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-merge-repo-dir-flag]). Dead-wait re-point 11:58 CST Nov 12 (step dead-pr-waits part a; triage Explore Sonnet audit, PR states read via GitHub): drop the wait on #1166 (merged Nov 11); #2504, #2509 and #2106 are closed and parked; the rebuild on main is owed and no PR exists.",
-  "updatedAt": "2026-11-12T11:59:20-06:00"
+  "updatedAt": "2026-11-12T12:07:43-06:00"
 }
