@@ -20111,6 +20111,17 @@ class BatchFreeze(CloudSession):
     # merge.batch_build_log_path, so a run on code without the log fails at the missing log, not at a missing name.
     OLD_LOG_MTIME = 1_600_000_000  # older than the sweep's idle limit, so each fixture log sorts before any real build's log
     IDLE_TRANSCRIPT_SECONDS = 25 * 3600  # over the temp step's 24-hour limit, with a wide margin
+    TEMP_NAMES = ("TMPDIR", "TEMP", "TMP")  # the variables a child's tempfile reads, in the order Python reads them
+    QUICK_TEXT = "quick lint output: lint/quick.py ran"  # the quick step prints this; a case finds its output on disk by this text
+    KILL_POLLS = 3000  # the disk is read every 10 ms until the output is there: 30 s at most, so a build that never writes it still ends
+    LINT_CHECKS_YML = ("name: checks\non: push\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
+                       "      - name: slow lint\n        run: python3 lint/slow.py\n"
+                       "      - name: quick lint\n        run: python3 lint/quick.py\n")
+    SLOW_LINT = ("import os, time\n"
+                 "for _ in range(6000):  # the case puts the release file (named by the environment) when it is done; the bound ends a step never released\n"
+                 "    if os.path.exists(os.environ['CI_JOB_TEST_RELEASE']):\n"
+                 "        break\n"
+                 "    time.sleep(0.01)\n")
 
     def batch_log(self, name="nightly"):
         """Where a build of batch NAME writes its log: <config dir>/state/batch-build/NAME.log, the config dir being this case's."""
@@ -20281,6 +20292,100 @@ class BatchFreeze(CloudSession):
         self.assertEqual(os.path.realpath(seen[0]) if seen[0] else None, os.path.realpath(log),
                          "ci-job's VERDICT_LOG is %r, not the batch build log %s: the lint's output goes nowhere a build log holds" % (seen[0], log))
         self.assertEqual(rc, 0, "--ready with a passing lint exited %s: %s" % (rc, out))
+
+    def files_holding(self, text, roots):
+        """The files under `roots` whose text holds `text`, as paths. A root that is not there holds none."""
+        found = []
+        for root in roots:
+            for folder, _, names in os.walk(root):
+                for name in names:
+                    path = os.path.join(folder, name)
+                    try:
+                        with open(path, encoding="utf-8", errors="replace") as f:
+                            if text in f.read():
+                                found.append(path)
+                    except OSError:
+                        pass  # a file that went between the walk and the read holds nothing to find
+        return found
+
+    def lint_checkout(self):
+        """A checkout whose checks job runs two lint steps: a slow one first, which runs until the case puts its release file, and a quick one
+        second. CI_JOB_LINT_WORKERS=2 runs both at once. -> the checkout's folder."""
+        root = os.path.join(self.t, "lint-checkout")
+        put(os.path.join(root, ".github", "workflows", "checks.yml"), self.LINT_CHECKS_YML)
+        put(os.path.join(root, "lint", "slow.py"), self.SLOW_LINT)
+        put(os.path.join(root, "lint", "quick.py"), "print(%r)\n" % self.QUICK_TEXT)
+        sh(root, "git", "init", "-q")
+        return root
+
+    def killing_ci_job(self, checkout, roots, seen):
+        """A ci_job_stub answer that runs the real bin/ci-job in `checkout`, with the env merge gives it. It SIGKILLs ci-job once the quick
+        step's output is under `roots`, as merge's timeout does, then raises TimeoutExpired as that timeout does. ci-job's output goes to
+        files, not pipes: the slow step it leaves running must not hold a pipe open. `seen` gets True when the output was on disk before the kill."""
+        def answer(args, env, timeout):
+            with open(os.path.join(self.t, "ci-job.out"), "w", encoding="utf-8") as out, \
+                    open(os.path.join(self.t, "ci-job.err"), "w", encoding="utf-8") as err:
+                proc = subprocess.Popen(list(args), cwd=checkout, env=env, stdout=out, stderr=err)
+                for _ in range(self.KILL_POLLS):
+                    if proc.poll() is not None or self.files_holding(self.QUICK_TEXT, roots):
+                        break
+                    time.sleep(0.01)
+                seen.append(bool(self.files_holding(self.QUICK_TEXT, roots)))
+                proc.kill()  # SIGKILL on POSIX: the kill merge's timeout sends
+                proc.wait()
+            raise subprocess.TimeoutExpired(args, timeout)
+        return answer
+
+    def test_a_ready_lint_runs_ci_job_with_its_temp_variables_in_the_batch_folder(self):
+        for n in (101, 102):
+            self.lane(n)
+        self.frozen_batch("nightly", [101, 102], draft=True)
+        seen = []
+
+        def passes(args, env, timeout):
+            env = env or {}
+            seen.append(({name: env.get(name) for name in self.TEMP_NAMES}, os.path.isdir(env.get("TMPDIR") or "")))
+            return 0, ""
+        with unittest.mock.patch.dict(os.environ), self.ci_job_stub(passes, tempfile.mkdtemp(dir=self.run_dir)):
+            for name in self.TEMP_NAMES:
+                os.environ.pop(name, None)  # the run's own environment names no temp folder: only merge may name one for ci-job
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertEqual(len(seen), 1, "the --ready lint ran ci-job %d times, not once: %s" % (len(seen), out))
+        values, folder_there = seen[0]
+        want = os.path.realpath(os.path.join(self.cfg, "state", "batch-build", "nightly.tmp"))
+        for name in self.TEMP_NAMES:
+            got = values[name]
+            self.assertEqual(os.path.realpath(got) if got else None, want,
+                             "ci-job's %s is %r, not the batch build's folder %s, so its lint output lands in a folder the temp step removes" % (name, got, want))
+        self.assertTrue(folder_there, "the folder ci-job's TMPDIR names is not there when ci-job starts: the build did not make it")
+
+    def test_a_killed_lint_keeps_a_finished_steps_output_through_the_temp_sweep(self):
+        checkout = self.lint_checkout()
+        for n in (101, 102):
+            self.lane(n)
+        self.frozen_batch("nightly", [101, 102], draft=True)
+        temp_root, session = self.idle_session_temp()
+        state = os.path.join(self.cfg, "state", "batch-build")
+        release = os.path.join(self.t, "release")  # an absolute path: the slow step ends when it appears, wherever its working folder is
+        self.addCleanup(put, release, "")  # runs before self.t is removed, so a slow step still running ends with the case
+        seen = []
+        env = {"CI_JOB_LINT_WORKERS": "2", "TMPDIR": session, "TEMP": session, "TMP": session,  # a session's temp folder, as ci-job reads it
+               "CI_JOB_TEST_RELEASE": release}
+        try:
+            with unittest.mock.patch.dict(os.environ, env), \
+                    self.ci_job_stub(self.killing_ci_job(checkout, [session, state], seen), session):
+                rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        finally:
+            put(release, "")  # the slow step ends now, before the sweep, as it would not after a real kill
+        self.assertEqual(seen, [True], "setup: the quick step's output was not on disk before the kill, so the kill proves nothing: %s" % out)
+        self.assertNotEqual(rc, 0, "a killed lint let --ready exit 0: %s" % out)
+        self.assertTrue(os.path.isdir(state), "setup: the build made no state/batch-build folder: %s" % out)
+        failures, swept = self.sweep_temp(temp_root)
+        self.assertEqual(failures, 0, "the temp-folder step failed: %s" % swept)
+        self.assertFalse(os.path.exists(session), "positive control: the idle session folder %s is still there after the step, so the step "
+                                                  "did not run on it: %s" % (session, swept))
+        self.assertTrue(self.files_holding(self.QUICK_TEXT, [state]),
+                        "the quick step's output is gone after the temp-folder step: ci-job wrote it into the session's temp folder, which the step removes: %s" % swept)
 
 # `merge --touches [--run RUN_ID] [--case TEXT]... [--file PATH]...`: the open pull requests that already touch a failing case or a named file.
 # The incident's fixtures: red main run 42559512356 failed two brief-destructive-git cases, and open pull 2390 already fixes them.
