@@ -54,13 +54,16 @@ RR_AGENT_ONE = "a5e0c1d7b2f94e381"
 RR_AGENT_TWO = "b7d2f9e4a0c13658e"
 
 
-def rr_spawn(tool_id, subagent_type, tool="Agent", agent=None, name=None, result=None):
+def rr_spawn(tool_id, subagent_type, tool="Agent", agent=None, name=None, result=None, isolation=None):
     """A spawn of `subagent_type` and its result, as the transcript holds them. With `agent`, the spawn runs in the
     background: its result is the launch notice that names `agent`, not the report. `name` adds the spawn's name to
-    its input, and `result` (a line the caller built) replaces the plain text result."""
+    its input, `isolation` (for example "worktree") adds the Agent tool's isolation input, and `result` (a line the
+    caller built) replaces the plain text result."""
     tool_input = {"subagent_type": subagent_type, "prompt": "Review PR #12.", "model": "sonnet"}
     if name is not None:
         tool_input["name"] = name
+    if isolation is not None:
+        tool_input["isolation"] = isolation
     if result is None:
         text = "Verdict: PASS." if agent is None else RR_LAUNCH % (agent, agent, agent)
         result = role_result(tool_id, text)
