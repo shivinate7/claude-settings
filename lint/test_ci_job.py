@@ -1401,9 +1401,9 @@ class LintTools(Job):
 
     def setUp(self):
         super().setUp()
-        # CI's checkout has actions/code-check, the table it reads from lint/, and the root ruff.toml that sets its ruff
-        # rules. A local uses: runs the repo under test's own copy. The base carries all three (lane commits them), so
-        # the diff under test has none of them.
+        # CI's checkout has actions/code-check, the table it reads from lint/, the comment check's files, and the root
+        # ruff.toml that sets its ruff rules. A local uses: runs the repo under test's own copy. The base carries all of
+        # them (lane commits them), so the diff under test has none of them.
         shutil.copytree(os.path.join(CHECKOUT, "actions", "code-check"),
                         os.path.join(self.root, "actions", "code-check"))
         shutil.copytree(os.path.join(CHECKOUT, "actions", "zizmor"), os.path.join(self.root, "actions", "zizmor"))
@@ -1411,6 +1411,12 @@ class LintTools(Job):
         shutil.copyfile(os.path.join(CHECKOUT, "lint", "code_check_standard.json"),
                         os.path.join(self.root, "lint", "code_check_standard.json"))
         shutil.copyfile(os.path.join(CHECKOUT, "ruff.toml"), os.path.join(self.root, "ruff.toml"))
+        # code_check.py runs the comment check as a child, and a missing child reads unknown, which is red under CI. The
+        # child and the three modules it imports are the files given here; the whole folders would put every lint file
+        # under ruff in each run.
+        os.makedirs(os.path.join(self.root, "hooks"))
+        for rel in ("lint/check_comment_narration.py", "lint/layout.py", "lint/diff_moves.py", "hooks/_nowindow.py"):
+            shutil.copyfile(os.path.join(CHECKOUT, rel), os.path.join(self.root, rel))
 
     def git(self, *a):
         subprocess.run(["git", "-C", self.root, *a], check=True, env=ENV, capture_output=True)
