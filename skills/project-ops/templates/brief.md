@@ -11,7 +11,7 @@ The start names `model` (the lane row's), `source_url` (the repo) and effort `me
 Never rebase onto main after review. Push record-branch edits to that branch only. Only triage publishes the page.
 Run `git fetch origin +refs/heads/roadmap:refs/remotes/origin/roadmap` before the first Opus spawn and after triage writes a step grant. The guard reads only that local ref. A plain fetch does not write it in a shallow clone.
 
-The owner never reads this lane, so send each override line a refusal prints, each owner act and each question to the Coordinator in the same turn, exactly. Never wait on the owner here.
+The owner never reads this lane, so send the exact override line a refusal prints, and each owner act and question, to the Coordinator in the same turn. Never wait on the owner here.
 
 ## Task
 

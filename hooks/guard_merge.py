@@ -1711,40 +1711,6 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
     return None
 
 
-BRIEF_OWNER_REASON = (
-    "this lane brief does not say the owner never reads it. Add the template sentence from the brief template "
-    "(skills/project-ops/templates/brief.md): it holds the phrases `" + OWNER_UNREAD_PHRASES[0] + "` and `"
-    + OWNER_UNREAD_PHRASES[1] + "`, and tells the lane to send each override line, owner act and question to the "  # glossary-ok: session-tiers is the decision's file name
-    "Coordinator. (decision session-tiers, a lane holds one topic)"
-)
-
-
-def brief_owner_hit(tool: str, tool_input):
-    """Return (matched, reason) when this send_message, or lane create_session, is a lane brief whose text lacks one
-    of OWNER_UNREAD_PHRASES, else None. A brief is a message whose first non-blank line, after an optional Grant
-    line, starts with LANE_BRIEF_MARKER (the same marker match as brief_hit, defined below). The match is whitespace-flattened and
-    case-blind. Cost: the message text only; no transcript read."""
-    if not isinstance(tool_input, dict):
-        return None
-    if tool == BRIEF_TOOL:
-        text = tool_input.get("message")
-    elif is_lane_create_session(tool, tool_input):
-        text = tool_input.get("prompt")
-    else:
-        return None
-    if not isinstance(text, str):
-        return None
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    if lines and lines[0].startswith(LANE_GRANT_MARKER):
-        lines = lines[1:]
-    if not lines or not _BRIEF_MARKER_LINE.match(lines[0]):
-        return None
-    flat = " ".join(text.split()).casefold()
-    if all(p.casefold() in flat for p in OWNER_UNREAD_PHRASES):
-        return None
-    return "lane brief that does not say the owner never reads it", BRIEF_OWNER_REASON
-
-
 # ---- send_message: a lane brief goes to a lane of its own topic (rule lane-one-topic)
 BRIEF_TOOL = "mcp__claude-code-remote__send_message"
 LANE_BRIEF_MARKER = "Lane brief:"  # the first non-blank line of a brief (after its Grant line, if any) starts `Lane brief: <step>. Topic: <topic>.`
@@ -1797,6 +1763,28 @@ BRIEF_GRANT_REASON = (
 )
 
 
+BRIEF_OWNER_REASON = (
+    "this lane brief does not say the owner never reads it. One sentence of it must hold the phrases `"
+    + OWNER_UNREAD_PHRASES[0] + "` and `" + OWNER_UNREAD_PHRASES[1] + "` and the word Coordinator. Add the "
+    "template sentence from the brief template (skills/project-ops/templates/brief.md): it tells the lane to send "
+    "each override line, owner act and question to the Coordinator in the same turn. "
+    "(decision questions-go-to-owner, a lane sends its question to its parent)"
+)
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+_COORDINATOR = re.compile(r"\bCoordinator\b", re.IGNORECASE)
+
+
+def brief_owner_hit(text: str):
+    """Return (matched, reason) unless one sentence of the lane brief `text` holds every phrase of
+    OWNER_UNREAD_PHRASES and the word Coordinator, else None. The text is whitespace-flattened first, sentences end at
+    `.`, `!` or `?` followed by a space or the end, and the match is case-blind. brief_hit calls it for a brief it
+    already judged a lane's, after its topic check. Cost: the message text only, no read."""
+    for sentence in _SENTENCE_END.split(" ".join(text.split())):
+        if _COORDINATOR.search(sentence) and all(p.casefold() in sentence.casefold() for p in OWNER_UNREAD_PHRASES):
+            return None
+    return "lane brief that does not say the owner never reads it", BRIEF_OWNER_REASON
+
+
 def topic_hit(first: str, tags, start: bool = False):
     """(matched, reason) when the brief line `first` names a topic the lane holding `tags` does not hold, else None.
     A lane with a cs-topic tag is judged by the brief's Topic, an older lane without one by the brief's step against
@@ -1826,7 +1814,9 @@ def brief_hit(tool: str, tool_input, transcript: str):
     create_session that made it) has no cs-build:lane tag passes. A lane with a cs-topic tag is judged by the
     brief's Topic, an older lane without one by the brief's step against its cs-step tags (topic_hit). A
     create_session call that tags a lane is judged the same way, by its prompt against its own tags, with no
-    transcript read. Fails closed: any error in the reads is a refusal, because the guard-wide crash path fails open."""
+    transcript read. A brief that passes its topic check is then judged by brief_owner_hit: one sentence must say
+    the owner never reads the lane (decision questions-go-to-owner). A target that is no lane gets no such judgment.
+    Fails closed: any error in the reads is a refusal, because the guard-wide crash path fails open."""
     if not isinstance(tool_input, dict):
         return None
     if tool == BRIEF_TOOL:
@@ -1847,7 +1837,7 @@ def brief_hit(tool: str, tool_input, transcript: str):
     if grant is not None and not grant_line_holds_words(grant):
         return "lane brief under an empty or placeholder Grant line", BRIEF_GRANT_REASON
     if tool != BRIEF_TOOL:
-        return topic_hit(first, lane_tags(tool_input), start=True)
+        return topic_hit(first, lane_tags(tool_input), start=True) or brief_owner_hit(text)
     target = tool_input.get("session_id")
     try:  # cost: one transcript read per brief
         tags, tagged_after = _own_session_read(transcript, target, created=True) \
@@ -1860,7 +1850,7 @@ def brief_hit(tool: str, tool_input, transcript: str):
         return None
     if tagged_after:  # a set_session_tags call on the target followed its record, so the topic or steps may have changed
         return "lane brief to a target whose record is stale", BRIEF_STALE_REASON
-    return topic_hit(first, tags)
+    return topic_hit(first, tags) or brief_owner_hit(text)
 
 
 # ---- send_message: a header stamp matches the clock (rule message-time-matches-clock)
