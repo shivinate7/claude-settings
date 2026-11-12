@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
+# Each c_ case runs by name through t, an indirect call that shellcheck cannot follow.
+# shellcheck disable=SC2329
 # Cases for actions/ci-alarm/wake.sh, the one home of a CI alarm on a push to main. The wake posts one
 # comment on the merged pull request that produced the commit, holding the marker `<!-- main-alarm:KEY -->`.
-# A repeat of KEY on that pull request posts nothing. A commit with no merged pull request opens no issue:
+# A repeat of KEY on that pull request posts nothing. Only a pull request merged into main counts, since the
+# alarm is for a push to main. A commit with no such pull request opens no issue:
 # the wake exits non-zero and says why.
 #
 # The fake gh (first on PATH in each run) serves three routes and logs each call to $CALLS, one line each:
@@ -67,10 +70,10 @@ SH
 chmod +x "$tmp/bin/gh"
 
 SHA=0123456789abcdef0123456789abcdef01234567
-ONE='[{"number": 7, "merged_at": "2026-11-12T12:00:00Z"}]'
+ONE='[{"number": 7, "merged_at": "2026-11-12T12:00:00Z", "base": {"ref": "main"}}]'
 # The environment a case starts from. run_wake drops or overrides names here, and env -i keeps CI variables out.
 DEF=(REPO=o/r "SHA=$SHA" KEY=run-42 "TEXT=CI alarm: main is red" GH_TOKEN=fake)
-bad=0 why= code= out= calls=
+bad=0 why='' code='' out='' calls=''
 
 # need <cause> <test...>: runs the test. When it fails, the case stops and <cause> is its one named cause.
 need() { local cause="$1"; shift; "$@" || { why="$cause"; return 1; }; }
@@ -109,11 +112,11 @@ run_wake() {
 n_post() { grep -c '^post' "$tmp/calls"; }
 n_other() { grep -c '^other' "$tmp/calls"; }
 
-# posted_on_7 <KEY>: one pulls read, one comments read of PR 7, one post on PR 7 of the repo, with the marker and TEXT.
-posted_on_7() {
-  need "the calls were not one pulls read, one comments read of PR 7 and one post on PR 7" \
-    [ "$calls" = "$(printf 'pulls\ncomments 7\npost 7 o/r')" ] &&
-  need "the posted comment lacks the marker for KEY $1" grep -qF -- "<!-- main-alarm:$1 -->" "$tmp/bodies" &&
+# posted_on <pr> <KEY>: one pulls read, one comments read of pr, one post on pr of the repo, with the marker and TEXT.
+posted_on() {
+  need "the calls were not one pulls read, one comments read of PR $1 and one post on PR $1" \
+    [ "$calls" = "$(printf 'pulls\ncomments %s\npost %s o/r' "$1" "$1")" ] &&
+  need "the posted comment lacks the marker for KEY $2" grep -qF -- "<!-- main-alarm:$2 -->" "$tmp/bodies" &&
   need "the posted comment lacks the TEXT" grep -qF -- "CI alarm: main is red" "$tmp/bodies" &&
   need "exit was not 0 after a post" [ "$code" = 0 ]
 }
@@ -127,6 +130,12 @@ no_merged_pr_refused() {
   need "the message does not name KEY" grep -qF -- run-42 "$1" &&
   need "the message does not name the commit" grep -qF -- "${SHA:0:7}" "$1" &&
   need "exit was 0 for a commit with no merged pull request" [ "$code" != 0 ]
+}
+
+# names_failure <file the message must be in>: a failed read or post names KEY and says nobody was woken.
+names_failure() {
+  need "the failure message does not name KEY" grep -qF -- run-42 "$1" &&
+  need "the failure message does not say nobody was woken" grep -qF -- "nobody was woken" "$1"
 }
 
 # Each case starts from empty fixtures; it sets the reads it expects, then runs the wake once.
@@ -147,7 +156,7 @@ c_fake_gh_control() {
 c_one_merged_pr() {
   pulls_are "$ONE"; comments_on 7 '[]'
   run_wake -
-  posted_on_7 run-42
+  posted_on 7 run-42
 }
 
 c_same_key_repeat_skips() {
@@ -172,13 +181,13 @@ c_same_key_repeat_on_page_two_skips() {
 c_key_a_is_not_matched_by_a_b() {
   pulls_are "$ONE"; comments_on 7 '[{"body": "<!-- main-alarm:a-b -->\nearlier"}]'
   run_wake - KEY=a
-  posted_on_7 a
+  posted_on 7 a
 }
 
 c_other_key_on_pr_posts() {
   pulls_are "$ONE"; comments_on 7 '[{"body": "<!-- main-alarm:other-run -->\nearlier"}]'
   run_wake -
-  posted_on_7 run-42
+  posted_on 7 run-42
 }
 
 c_no_merged_pr_names_key_and_sha_in_summary() {
@@ -194,31 +203,55 @@ c_no_merged_pr_names_key_and_sha_on_stderr() {
 }
 
 c_only_unmerged_pr_is_refused_like_no_pr() {
-  pulls_are '[{"number": 8, "merged_at": null}]'
+  pulls_are '[{"number": 8, "merged_at": null, "base": {"ref": "main"}}]'
   run_wake - "GITHUB_STEP_SUMMARY=$tmp/summary"
   no_merged_pr_refused "$tmp/summary"
 }
 
 c_unmerged_and_merged_pr_posts_on_merged() {
-  pulls_are '[{"number": 8, "merged_at": null}, {"number": 7, "merged_at": "2026-11-12T12:00:00Z"}]'
+  pulls_are '[{"number": 8, "merged_at": null, "base": {"ref": "main"}}, {"number": 7, "merged_at": "2026-11-12T12:00:00Z", "base": {"ref": "main"}}]'
   comments_on 7 '[]'
   run_wake -
-  posted_on_7 run-42
+  posted_on 7 run-42
 }
 
 # The later merge comes first in the list, so a read of the first entry would pick PR 9.
 c_two_merged_prs_posts_on_earliest() {
-  pulls_are '[{"number": 9, "merged_at": "2026-11-12T13:00:00Z"}, {"number": 7, "merged_at": "2026-11-12T12:00:00Z"}]'
+  pulls_are '[{"number": 9, "merged_at": "2026-11-12T13:00:00Z", "base": {"ref": "main"}}, {"number": 7, "merged_at": "2026-11-12T12:00:00Z", "base": {"ref": "main"}}]'
   comments_on 7 '[]'
   run_wake -
-  posted_on_7 run-42
+  posted_on 7 run-42
+}
+
+# The batch merge came first, so a pick by merge time alone takes PR 1: the base filter must skip it.
+c_main_merge_wins_over_an_earlier_batch_merge() {
+  pulls_are '[{"number": 2, "merged_at": "2026-11-12T12:00:00Z", "base": {"ref": "main"}}, {"number": 1, "merged_at": "2026-11-12T11:00:00Z", "base": {"ref": "batch-103"}}]'
+  comments_on 2 '[]'
+  comments_on 1 '[]'
+  run_wake -
+  posted_on 2 run-42
+}
+
+# A merge into another branch is not the pull request that put the commit on main.
+c_only_batch_merge_is_refused_like_no_pr() {
+  pulls_are '[{"number": 7, "merged_at": "2026-11-12T12:00:00Z", "base": {"ref": "batch-103"}}]'
+  comments_on 7 '[]'
+  run_wake - "GITHUB_STEP_SUMMARY=$tmp/summary"
+  no_merged_pr_refused "$tmp/summary"
+}
+
+c_main_unmerged_and_batch_merge_is_refused_like_no_pr() {
+  pulls_are '[{"number": 8, "merged_at": null, "base": {"ref": "main"}}, {"number": 7, "merged_at": "2026-11-12T12:00:00Z", "base": {"ref": "batch-103"}}]'
+  comments_on 7 '[]'
+  run_wake - "GITHUB_STEP_SUMMARY=$tmp/summary"
+  no_merged_pr_refused "$tmp/summary"
 }
 
 c_pulls_read_fails_is_loud_and_posts_nothing() {
   pulls_are "$ONE"; comments_on 7 '[]'
   run_wake - "FAIL=pulls"
   need "the calls were not exactly one pulls read, then nothing" [ "$calls" = pulls ] &&
-  need "a failed pulls read printed no message" [ -n "$(cat "$tmp/err" "$tmp/summary")" ] &&
+  names_failure "$tmp/err" &&
   need "exit was 0 after a failed pulls read" [ "$code" != 0 ]
 }
 
@@ -227,7 +260,7 @@ c_comments_read_fails_is_loud_and_posts_nothing() {
   run_wake - "FAIL=comments 7"
   need "the calls were not one pulls read then one failed comments read of PR 7" [ "$calls" = "$(printf 'pulls\ncomments 7')" ] &&
   need "a comments read that failed was followed by a post" [ "$(n_post)" = 0 ] &&
-  need "a failed comments read printed no message" [ -n "$(cat "$tmp/err" "$tmp/summary")" ] &&
+  names_failure "$tmp/err" &&
   need "exit was 0 after a failed comments read" [ "$code" != 0 ]
 }
 
@@ -236,7 +269,7 @@ c_failed_post_is_loud() {
   run_wake - "FAIL=post*"
   need "the calls were not one pulls read, one comments read and one post attempt on PR 7" \
     [ "$calls" = "$(printf 'pulls\ncomments 7\npost 7 o/r')" ] &&
-  need "a failed post printed no message" [ -n "$(cat "$tmp/err" "$tmp/summary")" ] &&
+  names_failure "$tmp/err" &&
   need "exit was 0 after a failed post" [ "$code" != 0 ]
 }
 
@@ -286,6 +319,9 @@ t "no PR: refused, names KEY and SHA on stderr, opens no issue" c_no_merged_pr_n
 t "only an unmerged PR: refused like no PR" c_only_unmerged_pr_is_refused_like_no_pr
 t "one unmerged and one merged PR: comment on the merged one" c_unmerged_and_merged_pr_posts_on_merged
 t "two merged PRs: comment on the earliest merged" c_two_merged_prs_posts_on_earliest
+t "a merge into batch-103 before the main merge: comment on the main merge" c_main_merge_wins_over_an_earlier_batch_merge
+t "only a merge into batch-103: refused like no PR, names KEY and SHA in the step summary" c_only_batch_merge_is_refused_like_no_pr
+t "a main PR unmerged and a merge into batch-103: refused like no PR" c_main_unmerged_and_batch_merge_is_refused_like_no_pr
 t "pulls read fails: exit non-zero with a message, no post" c_pulls_read_fails_is_loud_and_posts_nothing
 t "comments read fails: exit non-zero with a message, no post" c_comments_read_fails_is_loud_and_posts_nothing
 t "failed post: exit non-zero with a message" c_failed_post_is_loud
