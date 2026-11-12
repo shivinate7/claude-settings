@@ -822,15 +822,18 @@ t alarm cap-end-the-pr-holds-only-another-run-still-wakes "" "" "$(capmsg 5420 s
 # Two cap-end runs, the older already named on the PR: each run reads the PR, and only the newer one posts.
 runs_are "$(gh_run ci cancelled 2026-01-01 https://runs/wake-named-5431 push 5431)" "$(gh_run ci cancelled 2026-01-02 https://runs/wake-new-5432 push 5432)"
 jobs_of 5431 scope-guard:cancelled:40
-jobs_of 5432 scope-guard:cancelled:41
+jobs_of 5432 build-guard:cancelled:41
 workflow_at 5431 scope-guard:37
-workflow_at 5432 scope-guard:37
+workflow_at 5432 build-guard:37
 wake_comments_on 7 '[{"body": "<!-- main-alarm:cap:5431 -->\nalready woken"}]'
 run_alarm
 cap_quiet two-cap-runs-one-named-verdict-is-alarm-with-no-issue zero
 wake_is two-cap-runs-one-named-each-run-reads-the-pr-and-only-the-new-run-posts 2 2 1
+# The new run's title names its own first cap job (build-guard), not the older run's (scope-guard).
 if grep -qF -- "<!-- main-alarm:cap:5432 -->" "$tmp/wakebodies" && ! grep -qF -- "cap:5431" "$tmp/wakebodies"; then echo "ok   two-cap-runs-one-named-posts-the-new-run-only"
 else echo "FAIL two-cap-runs-one-named-posts-the-new-run-only: the posted bodies do not name run 5432 alone ($(tr '\n' ' ' < "$tmp/wakebodies"))"; bad=1; fi
+if sed -n '2p' "$tmp/wakebodies" | grep -qxF -- "CI job hit its time cap on main: build-guard"; then echo "ok   two-cap-runs-one-named-title-names-the-new-runs-own-job"
+else echo "FAIL two-cap-runs-one-named-title-names-the-new-runs-own-job: the posted title is not 'CI job hit its time cap on main: build-guard'"; bad=1; fi
 # A cap end whose commit has no pull request into main: its wake fails and names its run in the step summary. The other cap end
 # still wakes, no issue is opened, the verdict is alarm, and the exit is non-zero.
 runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/wake-nopr-5441 push 5441)" "$(gh_run ci cancelled 2026-01-01 https://runs/wake-withpr-5442 push 5442)"
