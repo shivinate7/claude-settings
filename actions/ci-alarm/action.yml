@@ -8,10 +8,11 @@ description: >
   top-level `&&` conjunct `github.event_name == 'X'` for another event than the green run's (`all-jobs-passed` and `ci-done` run on
   pull_request only), so a newer green push run clears a red nightly. Cost: per clear candidate one read of the workflow file at the green
   run's head (contents API, once), besides the jobs reads; the step needs python3 and runs `clear_rule.py` from the action path.
-  A job cancelled at its own job-level `timeout-minutes` (a cap end) raises the alarm in a failure run that no newer green run
-  clears, and in the newest cancelled run of a group, every attempt of it included. The job ran at least the cap, read from the
+  A job cancelled at its own job-level `timeout-minutes` (a cap end) is named in a failure run that no newer green run
+  clears (that run is red by its conclusion), and raises the alarm in the newest cancelled run of a group, every attempt of it included. The job ran at least the cap, read from the
   workflow file at the run's head; a job with no job-level cap has GitHub's default, 360 minutes. The issue line names the job,
-  the cap, the minutes and the run id, and reads "cap end", not "red". A failure run that the merge tool calls clear opens no
+  the cap, the minutes and the run id. The step prints `alarm` when only a cap end in a cancelled run is named and `red` when a failure
+  run is named; the issue title stays "CI red on <branch>". A failure run that the merge tool calls clear opens no
   issue, a cap end in it included. A cap end in a cancelled run alarms even when the merge tool calls that run clear. A job cancelled under its cap stays quiet. An unreadable cap, a null `started_at`, or a
   cancelled run or one of its earlier attempts with no jobs is "unknown". The merge gate leaves a run with no red job and a job
   timed out at a job-level cap it finds out of red and out of unknown; the alarm is the signal. A group whose newest run is a

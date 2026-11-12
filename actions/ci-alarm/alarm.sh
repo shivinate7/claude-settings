@@ -12,13 +12,13 @@
 # run alarms even when the merge tool calls that run clear: the cancelled loop applies no clear (base_state does, `cleared(r, cancelled=True)`).
 # A group whose newest run is a re-run still going (queued or in progress, attempt above 1) is unknown: a warning, no issue, never
 # green, never the older run. A first attempt still going is skipped, and the older run is judged.
-# A job cancelled at its cap raises the alarm: it ran at least its job-level `timeout-minutes` (completed_at - started_at, from the
+# A job cancelled at its cap is named: it ran at least its job-level `timeout-minutes` (completed_at - started_at, from the
 # jobs read), the cap read from the run's workflow file at its head; a job with no job-level `timeout-minutes` has GitHub's default
-# cap, 360 minutes. The issue names the job, the cap, the minutes and the run id. It does so for a failure run that is not cleared
-# and for a cancelled run, in every attempt of it (the alarm reads each earlier attempt of a cancelled re-run). The merge gate
-# (merge.py base_state) leaves a run with no red job and a job timed out at a job-level cap it finds in its checkout out of red and
-# out of unknown; it reads UNKNOWN for a cancelled job with no job-level cap or a cap it does not find. The alarm is the signal
-# (it is a cap end, not a red job).
+# cap, 360 minutes. The issue names the job, the cap, the minutes and the run id. A failure run that is not cleared is red by its
+# conclusion, and the cap end only names the job in it. A cancelled run alarms on a cap end, in every attempt of it (the alarm reads
+# each earlier attempt of a cancelled re-run). The merge gate (merge.py base_state) leaves a run with no red job and a job timed out
+# at a job-level cap it finds in its checkout out of red and out of unknown. A cancelled run reads UNKNOWN there for a job with no
+# job-level cap or a cap it does not find; a failure run reads red. The alarm is the signal (a cap end is not a red job).
 # A job cancelled under its cap (a person, or an earlier failure) stays quiet. A cancelled job with no started_at, a non-integer cap
 # (an expression), no single job of that name in the file, a cancelled run or an earlier attempt of it with no jobs, or a failed
 # read is unknown, never red and never clear. A cap end in an earlier attempt of a run whose newest attempt succeeded is only named,
@@ -30,7 +30,8 @@
 # No long-lived process starts: short jq, awk, gh and python3 processes run, and the only files written are temp cache files in a
 # folder this script removes on exit. Needs python3 (stdlib only) and clear_rule.py beside this file; no checkout.
 # Env: BRANCH, SELF (this workflow's name, left out), GH_TOKEN, GITHUB_REPOSITORY. Exit 0
-# always: the alarm is the issue, not a red job. Prints "green", "red" or "unknown"; a failed read or write is unknown, never red.
+# always: the alarm is the issue, not a red job. Prints "green", "red", "alarm" or "unknown": red when a failure run is named,
+# alarm when only a cap end in a cancelled run is. A failed read or write is unknown, never red.
 set -o pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 branch="${BRANCH:-main}"
@@ -152,6 +153,7 @@ flight="$(jq -r '[.[] | select(.status != "completed") | "\(.workflowName) run \
 [ -z "$flight" ] || capunk="re-run in flight: $flight"
 # Red = failure, timed_out or startup_failure, unless a clearing run N exists (see the header). A job of it cancelled at its cap is named.
 red=""
+redrun=""
 failed="$(jq -c '.[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "startup_failure")' <<<"$newest")" \
   || unknown "could not read the runs"
 while IFS= read -r r; do
@@ -175,6 +177,7 @@ while IFS= read -r r; do
     fi
   fi
   red+="$(jq -r '"- \(.workflowName) (\(.conclusion)): \(.url)"' <<<"$r")"$'\n'
+  redrun=1
   # The run is red by its conclusion whatever its jobs say: a job cancelled at its cap is named, and an unreadable read names nothing.
   if rjobs="$(jobs_of "$rid")"; then
     cap_ends "$rid" "$rjobs"
@@ -221,4 +224,4 @@ if [ -z "$red" ] && [ -n "$capunk" ]; then unknown "$capunk"; fi
 if [ -z "$red" ]; then echo green; exit 0; fi
 # issue.sh prints nothing on success and `unknown` plus a warning when the issue write fails.
 res="$(bash "$here/issue.sh" "CI red on $branch" "$(printf 'CI alarm on %s:\n\n%s' "$branch" "$red")")"
-if grep -qx unknown <<<"$res"; then echo "$res"; else echo red; fi
+if grep -qx unknown <<<"$res"; then echo "$res"; elif [ -n "$redrun" ]; then echo red; else echo alarm; fi
