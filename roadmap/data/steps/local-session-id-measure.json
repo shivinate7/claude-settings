@@ -1,0 +1,14 @@
+{
+ "id": "local-session-id-measure",
+ "title": "Measure the session id a local Claude Code session reports",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane merge-path-same-everywhere 16:41 CST Nov 12: unknown whether a local session's get_session ccr.id equals session_<CLAUDE_CODE_SESSION_ID>; cloud ids are bare UUID, cse_<x> and session_<x>.",
+ "source": "lane merge-path-same-everywhere 16:41 CST Nov 12",
+ "note": "In one local session (Mac or Windows), print CLAUDE_CODE_SESSION_ID and get_session ccr.id; then the merge tool matches that one form (decision uniform-over-variants).",
+ "updatedAt": "2026-11-12T16:43:14-06:00"
+}
