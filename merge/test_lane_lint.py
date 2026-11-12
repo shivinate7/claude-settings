@@ -1518,6 +1518,8 @@ BATCH_NO_LINT = "batch-lint-flags-no-lint"  # a batch whose checks job holds NO_
 NO_LINT_STEPS = (("Build", "      - name: Build\n        run: make build\n"),
                  ("Unit tests", "      - name: Unit tests\n        run: python3 -m pytest -q\n"))
 BATCH_PUSH_ONLY = "batch-lint-flags-push-only"  # a batch whose checks job adds one lint step that runs only off a pull request
+NO_CI = "batch-lint-flags-no-ci"  # a head with no workflow at all: ci-job finds no checks job to run
+STARTER_STEP = "Add the starter CI"  # the step of skill project-ops that a no-CI refusal names; a copy, because a red copy of this suite imports the old test_merge
 PUSH_ONLY = "Push-only lint"
 PUSH_ONLY_STEP = (PUSH_ONLY, "      - name: Push-only lint\n        if: ${{ github.event_name != 'pull_request' }}\n"
                              "        run: python3 lint/check_push_only.py\n")
@@ -1713,6 +1715,42 @@ class BatchLintFlags(tm.Env):
             self.lane_lint(BATCH_NO_LINT, out)
         self.assertIn("no lint CI step ran", str(raised.exception), out.getvalue())
         self.assertEqual(pass_lines(out.getvalue()), [], "a lint run that picked no lint step read as a pass: " + out.getvalue())
+
+    def push_no_ci_head(self, files, workflows_listed):
+        """Push NO_CI: main plus `files`, and assert the scope first: a head that has no workflow file is the no-CI case, one that has a workflow is not."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", NO_CI, "origin/" + BASE)
+        for path, text in files.items():
+            tm.put(os.path.join(o, path), text)
+        tm.sh(o, "git", "add", "-A")
+        tm.sh(o, "git", "commit", "-q", "-m", NO_CI + ": a head with no CI")
+        tm.sh(o, "git", "push", "-q", "origin", NO_CI)
+        head = tm.sh(o, "git", "rev-parse", "HEAD")
+        listed = tm.sh(o, "git", "ls-tree", "-r", "--name-only", head)
+        self.assertEqual(".github/workflows/" in listed, workflows_listed, "scope: the head's workflow files are not the ones this case names:\n" + listed)
+
+    def assert_no_ci_refusal(self):
+        """The lint of NO_CI refuses: it names the starter CI step (decision same-check-kinds, plan R17), offers no --lint-unknown-ok lift
+        (the exemption the owner refused), and reads as no pass."""
+        out = io.StringIO()
+        with self.assertRaises(merge.Stop) as raised:
+            self.lane_lint(NO_CI, out)
+        text = str(raised.exception) + out.getvalue()
+        self.assertEqual(pass_lines(out.getvalue()), [], "a head with no CI read as a pass: " + text)
+        self.assertIn("project-ops", text, "the no-CI refusal names no project-ops step")
+        self.assertIn(STARTER_STEP, text, "the no-CI refusal does not name the starter CI step")
+        self.assertNotIn("--lint-unknown-ok", text, "the no-CI refusal offers --lint-unknown-ok, the exemption the owner refused")
+
+    def test_a_head_with_no_workflow_folder_refuses_as_no_ci_and_names_the_starter_step(self):
+        self.push_no_ci_head({"notes.md": "# Notes\n"}, workflows_listed=False)
+        self.assert_no_ci_refusal()
+
+    def test_a_head_whose_workflow_has_no_checks_job_refuses_as_no_ci_and_names_the_starter_step(self):
+        self.push_no_ci_head({".github/workflows/lint.yml": "name: lint\non: push\njobs:\n  lint:\n    runs-on: ubuntu-latest\n"
+                                                          "    steps:\n      - name: Lint\n        run: python3 lint/check.py\n"},
+                             workflows_listed=True)
+        self.assert_no_ci_refusal()
 
     def test_a_lint_step_that_runs_only_off_a_pull_request_is_named_on_the_pass_line(self):
         self.push_batch(BATCH_PUSH_ONLY, found=self.found + [PUSH_ONLY_STEP])
