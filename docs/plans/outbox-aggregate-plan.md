@@ -88,6 +88,32 @@ Trap: gathering into `roadmap/outbox/triage.md` clears nothing. It already holds
 - b. Pick the clearing route: each child's triage clears (recommended), or a one-time override push per repo (item 490 route).
 - c. Measure Mac `ls-remote` auth (session-messages.md step 2) before the mailbox is the only route.
 
+## Refuter verdict: revise (refuter opus, 2026-11-12 15:10 CST)
+
+The refuter held only the step text and this plan. Findings, with this lane's change to the plan (checked: commit
+833b0c472 exists; the step page-feedback-to-template note names no repos):
+
+- P1 fails as framed. Triage commit 833b0c472 (Nov 10, "file the outbox sweep, 14 new steps and 15 folds, owner
+  pick 493 a") already filed 29 claude-settings findings from home, banchi, degen and q_max. They sat in the
+  children's `docs/debts/`, `notes.md`, `specs/todo.md` and roadmap steps, not in `roadmap/outbox/`. **Change:**
+  the Nov 10 sweep is the baseline. Open question for the owner: does "outbox" mean only the folder, or every
+  child home that holds a claude-settings item? The plan does not settle it.
+- P6 fails. The recorded pick names no repos; the 5 came from item 490. **Change:** owner act a needs no
+  grant for the 5; only access (attach) stands. P4's quote "every session writes only in its own repo, no guard
+  changes" is unknown against the recorded pick; treat it as item 493's page text only.
+- Simpler route, taken: act 1 reads only the 11 repos not swept on Nov 10 (cost: nothing written since Nov 10 is
+  re-checked in the 5). Act 5 (a per-repo `ls-remote` poll in `build.py`) is dropped as a stop-gap that act 6
+  replaces; measure Mac auth first (owner act c), then go to act 6 (cost: Mac senders have no coverage until
+  measured; they keep writing their own outbox).
+- Gap, added as act 4a: act 4 needs one edit to the shared template
+  `skills/project-ops/templates/operating-model.md:166`, which every child copies. A lane makes it, with a check
+  that the copied line matches.
+- Gap: act 3 files notes in `docs/debts/notes.md` through a lane, where Nov 10 filed triage steps on the record
+  branch. Reason to differ: unmeasured. Until the owner picks, follow Nov 10 (steps on the record branch).
+- Unknown, to measure in act 1: were the 29 items of Nov 10 ever removed from their child homes? If not, those
+  homes have not cleared, and act 4 covers them.
+
 ## Next
 
-Run act 1 (needs owner act a). Then plan acts 2 and 3 item by item.
+Triage puts the plan on the owner's page with two questions: what "outbox" covers, and the clearing route
+(owner act b). Act 1 on the 11 unswept repos waits on access (owner act a).
