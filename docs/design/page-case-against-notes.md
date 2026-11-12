@@ -42,8 +42,9 @@ Departs from: main draws the Against line as plain context — the card draws it
 - Rule ux-label-once: the first block in page order shows "Against the pick". Each later block shows the glyph, the
   key and the case, with the words for screen readers only. The same home as `REPLY_WORDS` and `replyFirst`.
 - Other, `every`: words on every block. Gain: each card reads alone. Loss: `label_once.py` flags it.
-- `label_once.py` on the dumped frames: `case` names "against the pick" twice because it counts the hidden `.sr` copy,
-  and "sonnet" twice, which is data. `bin/shoot` marks only unshown elements `hidden`, so the reviewer judges these.
+- `label_once.py` on the dumped frames: `case` and `two` name "against the pick" twice. The second is the `.sr` copy,
+  which no frame shows. Whether `bin/shoot` marks a clipped `.sr` span `hidden` is unknown, so the reviewer judges it
+  against the screenshot. "sonnet" twice is data.
 - Pick: words once. Owner grant: no.
 
 ## 5. A long case (pick: whole), states `long` and `clamp`
@@ -58,6 +59,9 @@ Departs from: main draws the Against line as plain context — the card draws it
 - An open decision that owes a case (a pick, not `stands: true`, not `port`, the guard's `_challenged_judged` test) and
   has none shows one dashed line: "No case against the pick on this item." Rule ux-unknown-is-not-empty: a missing case
   must not read as "nothing against it".
+- The test reads the pick the card shows, `pickKeys(it)`, not `it.pick`: the page hides a pick that does not fit the
+  item, and a card with no visible pick gets no quiet line. On a multi or ranked item the head names each key of
+  `pickKeys`, in its order, not one letter (not drawn).
 - A port item and a stood pick owe none (decision question-form), so they show as today.
 - Other, `bare`: the old item shows nothing too. Gain: no new line while old items drain. Loss: the owner cannot tell
   "no case written" from "no block". Hide: "Hide old item shows nothing".
