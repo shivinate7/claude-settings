@@ -35,7 +35,7 @@ Hook: stall_watch.py --hook
   harness output file), so a redirect in the command cannot hide it from the watcher or the Stop check.
   Each log the original names (named_logs: `> F`, `>> F`, `&> F`, `>& F`, `tee F`, `--log F`)
   is passed as `--also F`. A relative F after a `cd` or `pushd` that surely runs in the main shell is
-  joined to its target. The directory can be unknown: `cd $X`, `cd -`, a cd behind `||`, `&` or `then`,
+  joined to its target. The directory can be unknown: `cd $X`, `cd -`, a cd behind `||`, `&` or `then`, a cd that ends in `&`, `|` or `||`,
   or inside `{ }`. Then the hook leaves F out of `--also` and passes `--unwatched F`. The STALL report names it.
   A list that ends in `&` runs in a background subshell, so its cd does not move the main shell.
   Cost: one append per heartbeat by the tool, and one read of BEAT on each 0.2 s loop pass in the watcher.
@@ -73,6 +73,10 @@ Stop: stall_watch.py --stop
   and it closes as a shell does. It is not listed while a tool_use in the read window has no tool_result, read from
   the last 64 KB of a quiet agent's transcript, widened to hold a whole last record. Cost: one stat per
   running agent, one tail read per quiet agent. Any error, or stop_hook_active true, prints nothing and exits 0. No posix check.
+  A shell job about to be listed is dropped when a process under it burns CPU, the watcher's rule (posix with
+  lsof only). The job has no pid at Stop, so its processes are the ones that hold its output file as stdout or
+  stderr. Two ps reads 1.5 s apart, only when a quiet shell job has such a process. The job shell's own time
+  does not count. A listed job whose named log has an unknown directory says so: that log is not watched.
   Seams: STALL_WATCH_NOW (epoch seconds), STALL_WATCH_OUTPUT_BASE (replaces the folder of each
   output path, keeps the file name), STALL_WATCH_QUIET (the age in seconds).
   A listed job shows the `until:` note from the description of the call that started it (Bash or
@@ -196,7 +200,8 @@ def read_named_logs(command):
     text. Only a cd that surely runs in the main shell moves the directory. That is the first command
     of a list item (after the start, `;`, a newline or `(`), or one after only cds joined by `&&`.
     These leave the directory unknown: a cd after `||`, `&`, `|`, `then`, `do`, `{` or `)`, and a cd
-    after a command joined by `&&`. So do a cd that ends in `&` or `|`, a cd inside `{ }`, and `popd`.
+    after a command joined by `&&`. So do a cd that ends in `&`, `|` or `||` (also before a newline),
+    a cd inside `{ }`, and `popd`.
     A `(` saves the directory and a `)` restores it. A list that ends in a lone `&` runs in a
     background subshell. Its logs resolve against its own directory, and after the `&` the directory
     is the one where that list started. A compound command (`{ }`, `if`, `while`, `for`, `case`) has
@@ -267,7 +272,7 @@ def read_named_logs(command):
             while j < len(tokens) and not set(tokens[j]) <= punct:
                 j += 1
             ends = tokens[j] if j < len(tokens) else ""
-            if tok == "popd" or not only_cds or braces or ends in ("&", "|", "|&"):
+            if tok == "popd" or not only_cds or braces or ends == "&" or ends.startswith("|"):
                 cwd = None
             else:
                 cwd = _cd_target(tokens[i + 1:j], cwd)
@@ -353,29 +358,88 @@ def cpu_seconds(text):
     return int(days or 0) * 86400 + int(hours or 0) * 3600 + int(mins) * 60 + float(secs)
 
 
-def job_state(pid):
-    """Return the ps state of pid, or '' when it is gone. A Z state is an ended job whose
-    parent shell has not yet waited for it. The answer's `cpu` holds the CPU seconds of each process
-    under it, from the same one ps call (the watcher reads CPU time as a sign of life)."""
+PS_DOWN = "(ps did not answer"
+
+
+def proc_table():
+    """(rows, kids, note) from one ps call: rows is {pid: [pid, ppid, stat, time]}, kids {ppid: [pid]}.
+    note is the text of a ps that gave no answer, else ''."""
     out = _run(["ps", "-axo", "pid=,ppid=,stat=,time="])
-    if out.startswith("(ps did not answer"):  # unreadable is not ended
-        return JobState(out.strip())
+    if out.startswith(PS_DOWN):
+        return {}, {}, out.strip()
     rows, kids = {}, {}
     for line in out.splitlines():
         p = line.split()
         if len(p) >= 4:
             rows[p[0]] = p
             kids.setdefault(p[1], []).append(p[0])
-    if str(pid) not in rows:
-        return JobState("")
-    state = JobState(rows[str(pid)][2])
-    state.cpu, stack = {}, list(kids.get(str(pid), []))
-    while stack:  # the job shell's own time is left out: a builtin loop in it, with no child, is no sign of work
+    return rows, kids, ""
+
+
+def tree_cpu(table, pid):
+    """{pid: CPU seconds} for every process under pid in a proc_table. pid's own time is left out: a
+    builtin loop in the job shell, with no child, is no sign of work."""
+    rows, kids, _ = table
+    cpu, stack = {}, list(kids.get(str(pid), []))
+    while stack:
         cur = stack.pop()
-        if cur not in state.cpu and cur != str(pid):
-            state.cpu[cur] = cpu_seconds(rows[cur][3])
+        if cur not in cpu and cur != str(pid):
+            cpu[cur] = cpu_seconds(rows[cur][3])
             stack.extend(kids.get(cur, []))
+    return cpu
+
+
+def cpu_advanced(seen, cpu):
+    """True when a process in cpu has more CPU seconds than in seen (a new one counts from 0)."""
+    return any(secs > seen.get(p, 0.0) for p, secs in cpu.items())
+
+
+def job_state(pid):
+    """Return the ps state of pid, or '' when it is gone. A Z state is an ended job whose
+    parent shell has not yet waited for it. The answer's `cpu` holds the CPU seconds of each process
+    under it, from the same one ps call (the watcher reads CPU time as a sign of life)."""
+    table = proc_table()
+    if table[2]:  # unreadable is not ended
+        return JobState(table[2])
+    if str(pid) not in table[0]:
+        return JobState("")
+    state = JobState(table[0][str(pid)][2])
+    state.cpu = tree_cpu(table, pid)
     return state
+
+
+CPU_SAMPLE = 1.5  # seconds between the two ps reads at Stop: whole-second CPU time must tick in between
+
+
+def busy_outputs(paths):
+    """The output files in paths whose job has CPU time advancing in a process under it, the Stop-side
+    form of the watcher's CPU-time-as-life rule. posix with lsof only: else none. A job's processes are
+    found by the output file they hold as stdout or stderr (the job has no pid at Stop); the files are
+    the ones about to be listed. Two ps reads CPU_SAMPLE apart, and only when some process holds a file."""
+    if os.name != "posix" or not paths or not shutil.which("lsof"):
+        return set()
+    names = {os.path.realpath(p): p for p in paths}
+    holders, pid, fd = {}, None, None
+    for line in _run(["lsof", "-nP", "-F", "pfn", "--"] + list(names)).splitlines():
+        if line.startswith("p"):
+            pid, fd = line[1:], None
+        elif line.startswith("f"):
+            fd = line[1:]
+        elif line.startswith("n") and fd in ("1", "2") and line[1:] in names:
+            holders.setdefault(line[1:], set()).add(pid)
+    if not holders:
+        return set()
+    before = proc_table()
+    time.sleep(CPU_SAMPLE)
+    after = proc_table()
+    if before[2] or after[2]:
+        return set()
+    busy = set()
+    for name, pids in holders.items():
+        for root in (p for p in pids if p in after[0] and after[0][p][1] not in pids):
+            if cpu_advanced(tree_cpu(before, root), tree_cpu(after, root)):
+                busy.add(names[name])
+    return busy
 
 
 def ended_state(state):
@@ -487,7 +551,7 @@ def watch(pid, log, quiet, also=(), beat=None, log_fd=None, beat_fd=None, unwatc
                 next_check = now + 1.0
                 cpu = getattr(state, "cpu", None)
                 if cpu is not None:  # CPU time that advanced in the job or a process under it is life
-                    if any(secs > seen_cpu.get(p, 0.0) for p, secs in cpu.items()):
+                    if cpu_advanced(seen_cpu, cpu):
                         last = time.monotonic()
                     seen_cpu = cpu
                 if also:
@@ -612,8 +676,8 @@ def parse_time(text):
 
 
 def scan_jobs(transcript):
-    """Return ({job id: (output path or None, until note or '', (named logs, cwd), start time or None,
-    is an agent)}, previous Stop time or None) for every job with no terminal task notice and no TaskStop
+    """Return ({job id: (output path or None, until note or '', (named logs, cwd, unresolved logs),
+    start time or None, is an agent)}, previous Stop time or None) for every job with no terminal task notice and no TaskStop
     result. A job is a shell (toolUseResult backgroundTaskId) or a background agent (toolUseResult
     isAsync true, status async_launched, agentId; its path is the launch's outputFile). The
     note and the named logs come from the call that started the job, matched by tool_use_id. The
@@ -672,7 +736,8 @@ def scan_jobs(transcript):
                         cmd = b["input"].get("command")
                         if isinstance(cmd, str):
                             cwd = rec.get("cwd")
-                            logs[b.get("id")] = (named_logs(cmd), cwd if isinstance(cwd, str) else None)
+                            named, unresolved = read_named_logs(cmd)
+                            logs[b.get("id")] = (named, cwd if isinstance(cwd, str) else None, unresolved)
                 stops.update(b["id"] for b in content if isinstance(b, dict)
                              and b.get("type") == "tool_use" and b.get("name") == "TaskStop"
                              and isinstance(b.get("id"), str))
@@ -682,7 +747,7 @@ def scan_jobs(transcript):
                     for b in content:
                         if isinstance(b, dict) and b.get("type") == "tool_result" and isinstance(b.get("tool_use_id"), str) and b["tool_use_id"] in stops:
                             done.update(stopped_ids(b.get("content")))
-    return ({k: (v, notes.get(job_call.get(k)) or "", logs.get(job_call.get(k)) or ((), None), began.get(k),
+    return ({k: (v, notes.get(job_call.get(k)) or "", logs.get(job_call.get(k)) or ((), None, ()), began.get(k),
                 k in agents)
              for k, v in jobs.items() if k not in done}, prev_stop)
 
@@ -776,9 +841,9 @@ def stop():
         now = float(os.environ.get("STALL_WATCH_NOW") or time.time())
         quiet = float(os.environ.get("STALL_WATCH_QUIET") or DEFAULT_QUIET)
         base = os.environ.get("STALL_WATCH_OUTPUT_BASE")
-        rows = []
+        rows, quiet_shells = [], {}  # quiet_shells: row index -> the output file of that shell job
         open_jobs, prev_stop = scan_jobs(call["transcript_path"])
-        for job, (path, note, (named, cwd), began, agent) in open_jobs.items():
+        for job, (path, note, (named, cwd, unresolved), began, agent) in open_jobs.items():
             until = " | until: " + note if note else ""
             real = path
             if path and base:
@@ -808,13 +873,19 @@ def stop():
                         rows.append("%s: background agent, no activity for %ds: %s%s %s" % (
                             job, idle, real, until, AGENT_REMEDY))
                 continue
-            for mark in log_marks([p for p in named if os.path.isabs(p) or cwd], cwd).values():
+            watched = [p for p in named if os.path.isabs(p) or cwd]
+            unwatched = list(unresolved) + [p for p in named if p not in watched]
+            for mark in log_marks(watched, cwd).values():
                 if mark:  # a named log the job still writes keeps it off the list
                     idle = min(idle, now - mark[1])
             if idle >= quiet:
                 if prev_stop is not None and now - idle + quiet <= prev_stop:
                     continue  # its stall crossed before the previous Stop, which listed it
-                rows.append("%s: no output for %ds: %s%s" % (job, idle, path, until))
+                miss = " (named log not watched, its directory is unknown: %s)" % ", ".join(unwatched) if unwatched else ""
+                quiet_shells[len(rows)] = real
+                rows.append("%s: no output for %ds: %s%s%s" % (job, idle, path, until, miss))
+        busy = busy_outputs(list(quiet_shells.values()))  # a job whose process tree burns CPU is not quiet
+        rows = [r for i, r in enumerate(rows) if quiet_shells.get(i) not in busy]
         if rows:
             head = "Background jobs still running and quiet: stop it or tell the owner."
             if "| until: " in "".join(rows):

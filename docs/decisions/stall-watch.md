@@ -65,7 +65,7 @@ guard rule, so the watcher does the waiting and the session is told once.
   A relative log after a `cd` or `pushd` is joined to its target when the hook builds the wrapper. The same
   tokenizer reads the cd, so a cd in quotes, a comment or a heredoc body is text. Only a cd that surely
   runs in the main shell moves the directory: the first command of a list item, or one that follows only
-  cds joined by `&&`. A cd behind `||`, `&`, `|` or `then`, or inside `{ }`, leaves it unknown.
+  cds joined by `&&`. A cd behind `||`, `&`, `|` or `then`, a cd that ends in `&`, `|` or `||` (also before a newline), or inside `{ }`, leaves it unknown.
   A list that ends in `&` runs in a background subshell, so after the `&` the directory is the list's start.
   Limit: `builtin cd`, `command cd` and `eval "cd ..."` are not read as a cd.
   Limit: a cd inside a shell heredoc body (`bash <<EOF`) is read as moving the main shell.
@@ -123,7 +123,16 @@ previous Stop was listed there, so it is silent now. A job that goes quiet again
 again. An unknown job (no output file) is listed once, at the first Stop after its call: its call record's
 time must be later than the previous Stop. Limit: a job whose output file existed at the previous Stop and
 is gone now is not listed. With no summary, or a summary with no readable timestamp,
-every quiet job is listed. The state is the transcript: no file is written and no process is started.
+every quiet job is listed. The state is the transcript: no file is written.
+Stop-side CPU rule: a shell job about to be listed is dropped when a process under it burns CPU, the
+watcher's rule (posix with lsof only; `busy_outputs`). The job has no pid at Stop, so its processes are
+those that hold its output file as stdout or stderr. Two `ps` reads 1.5 s apart tell whether CPU time advanced.
+Stop-side unresolved-log rule: a listed job whose named log has an unknown directory says that log is
+not watched, as the watcher's report does. The job is still listed when quiet. Limit: a spinning child is
+never reported (the watcher counts CPU as life); a builtin spin in the job's shell is. Cost: no process
+that lives on, no file, no timer. A quiet shell job whose output file a process holds costs one `lsof`,
+two `ps` reads and a 1.5 s wait at that Stop (the `ps` reads only when a process holds the file); none for a Stop that lists no shell job.
+
 Cost: one more JSON parse per `stop_hook_summary` line (one a Stop run), in the one pass that `scan_jobs`
 already makes, at each Stop (unmeasured).
 
