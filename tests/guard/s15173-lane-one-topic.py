@@ -270,8 +270,8 @@ roles_refuse("a Page writer label is no role: a brief naming a Page writer id fo
 roles_refuse("a Pretriage label is no Triage label: a brief naming Pretriage is refused",
              role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\nPretriage: session_x1" + RUNNER_LINE, ["Triage"])
 
-# Allowed (coordinator ruling, 2026-11-08 07:58 CST): a role label may have words before its id, and its colon is
-# optional.
+# Allowed: a role label may have words before its id, and its colon is optional. Briefs write the label loosely, so
+# the check must still read the id as that role.
 step_allow("a triage label with no colon, triage session_abc123, is allowed: the colon is optional",
            role_path("step-topic-lane"), ROLE_TOP + COORD_LINE + "\ntriage session_abc123" + RUNNER_LINE)
 step_allow("a Triage label with words before its id, Triage session: session_x1, is allowed",
