@@ -5,7 +5,7 @@
     python3 actions/ci-limits/ci_limits.py --table    a markdown table, one row per job
 
 The limit ends a hung job and nothing else, so it is generous: the slowest sample x 1.5, rounded up, at most 360.
-A sample is a green job run, or a run the cap cut (cancelled, no failed step, minutes at or past the cap in force):
+A sample is a green job run, or a run the cap cut (cancelled, no failed step, minutes at or past the cap passed in, the workflow's `timeout-minutes` today):
 a cut run counts as at least its limit. A job that failed or was cancelled early is no sample.
 A new job (no green run yet) takes its nearest kind's limit x 1.5, else the largest old limit x 1.5. A new job cut at
 its cap was misjudged and takes the largest. The deadline is the slowest green run's wall clock x 1.5, at least the
@@ -62,7 +62,7 @@ def margin(minutes):
 
 
 def is_cut(job, minutes, cap):
-    """Ended by its cap: cancelled, no step failed, and it ran at least as long as the cap in force. A cancel from a newer push comes earlier."""
+    """Ended by its cap: cancelled, no step failed, and it ran at least as long as the cap passed in. A cancel from a newer push comes earlier."""
     return (job.get("conclusion") == "cancelled" and minutes >= cap
             and not any(s.get("conclusion") == "failure" for s in job.get("steps") or ()))
 

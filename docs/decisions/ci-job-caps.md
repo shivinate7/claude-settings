@@ -50,8 +50,8 @@ Owner, 2026-11-10 14:09 CST: a time limit stays only to end a hung job. Decision
 | deadlineMinutes | 360 | the merge deadline |
 
 - A step's limit is in the JSON (`--json`), keyed `job/step`, from the same rules.
-- `all-jobs-passed` and `ci-done` wait on the other jobs, so their limits follow the slowest job.
-- `deadlineMinutes` is at the 360 clamp: one green run in the window had a wall clock of 277 minutes (run 42547961769).
+- `all-jobs-passed` and `ci-done` were skipped in all 31 job lists of the window, so they have no green run and show estimates (the largest limit times 1.5).
+- `deadlineMinutes` is at the 360 clamp. One green attempt, run 42547961769 attempt 1, ran 4 hours 37 minutes from its first job start to its last job end, though no job of it ran past its limit. The cause of the gap is unmeasured.
 - The jobs of `lane-touched-tests.yml` (draft runs only) are outside the table. Its `run` jobs keep a provisional 10 minute cap and `touched` keeps 5.
 - The macOS jobs stay at 3 (`checks-macos`, `checks-macos-b`, `shell-macos`): a fourth would queue.
 - Debts `windows-shards-outgrow-caps` and `mutate-guard-split` hold the splits of the Windows guard shards and of `checks-mutate-guard`.
@@ -60,7 +60,7 @@ Owner, 2026-11-10 14:09 CST: a time limit stays only to end a hung job. Decision
 
 1. Run `python3 actions/ci-limits/ci_limits.py --table` from a checkout of this repo, with `gh` signed in. It reads the jobs API, with 31 calls in one process.
 2. Minutes come from `job_minutes` in `merge/merge.py`, and the caps from `job_caps` in the same file. The script calls both. Do not write a second reader.
-3. A cut run is cancelled, has no failed step, and ran at least as long as its cap in force. A run cancelled earlier by a newer push or a batch rebuild is no sample.
+3. A cut run is cancelled, has no failed step, and ran at least as long as the job's `timeout-minutes` in the workflow today. A run cancelled earlier by a newer push or a batch rebuild is no sample.
 4. When the API cannot be read, every limit is 360 and the script warns on stderr.
 
 Kind: process
