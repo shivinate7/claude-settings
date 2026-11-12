@@ -21,9 +21,12 @@
                           sha. Posts nothing: the lane posts it as a PR comment. --fix-check adds the optional `Fix check:` line after
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
                           unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
-                          PR's issue comments since the PR opened; or (a fix after a merge of main) that record reads done with a PASS Fix check line and SHA is a merge commit whose first
+                          PR's issue comments since the PR opened; or the PR has no record at all and SHA holds HEAD (a PR opened after
+                          the review: HEAD may predate the PR; the record still owes its round); or (a fix after a merge of main) that record reads done with a PASS Fix check line and SHA is a merge commit whose first
                           parent is HEAD and whose second parent is on the base, with no edit beyond git's own merge (a merge that conflicts may edit its conflicted paths only).
-                          MODEL must be sonnet on every record (exit 2 otherwise).
+                          --fix-check MODEL must be sonnet (exit 2 otherwise). A reviewer's second review takes sonnet only; the third, or a granted fourth,
+                          may take opus (decision agent-model-cap); the first takes any MODEL. `merge --reviewed` reads a Fix check PASS that has no
+                          round line beside it with the round of the earlier record on the same PR whose Head is the Fix check's HEAD.
                           A review log stays done when the live head differs from its Head only by clean merges of main: each
                           commit after Head is a merge with two parents, its second parent on main and its tree `git merge-tree --write-tree` of them.
                           Any commit with one parent ends the walk as stale. `merge --reviewed` proves it
@@ -3897,6 +3900,25 @@ def parse_review(text):
         return None
     return {"n": int(n), "head": head, "kind": kind, "guard": guard, "rounds": rounds, "net": net.group(1), "fix": fix, "grant": grant}
 
+def newest_review(bodies):
+    """-> the parsed newest record of `bodies` (one pull request's review record texts, oldest first), None when it does not parse. The one home of
+    that read, for `merge --reviewed`, the --root blocks and the lane Stop hook. A newest record with a Fix check line, no round and no Grant line
+    takes the rounds of the newest earlier record on the same pull request whose Head is the fix check's reviewed head, when that record has a round
+    and no Fix check line (the newest record at that head decides: a bare or fixed one gives nothing, and no older record is read past it): a lane may
+    log the round and the fix check at different heads (step review-record-fix-check-reads). Its own Kind and Guard or check stay;
+    the Net value is the earlier record's (decision hold-unsafe-after-round-3: a fix keeps the net value its round gave). `inherited_from` is the
+    index in `bodies` of the record that gave the rounds, so release_check reads that one for an edit. Cost: one parse per record, no read."""
+    recs = [parse_review(b) for b in bodies]
+    rec = recs[-1]
+    if rec and rec["fix"] and not rec["rounds"] and not rec["grant"]:
+        for i in range(len(recs) - 2, -1, -1):
+            old = recs[i]
+            if old and old["n"] == rec["n"] and old["head"] == rec["fix"][0]:
+                if old["rounds"] and not old["fix"]:
+                    return {**rec, "rounds": old["rounds"], "net": old["net"], "inherited_from": i}  # the Net value goes with the rounds, so a fix record's own value never lifts a hold the round gave (a hold typed only on the fix record is ignored)
+                break
+    return rec
+
 def review_state(rec, head):
     """-> (state, why) of a parsed record against the PR's live `head`. States: bad (rec is None), stale, held, done, open.
     The done rules follow roles-review-cap-three and the decision pr-review-record: the last round is all PASS, or a fix check PASS counts as that round
@@ -4076,7 +4098,7 @@ def reviewed_read(h):
         if not bodies:
             bare.append(f"#{n}")
             continue
-        rec = parse_review(bodies[-1])
+        rec = newest_review(bodies)
         rec = rec if rec and rec["n"] == n else None
         state, why = live_review_state(h, rec, sha, main)
         if state == "done":
@@ -4293,7 +4315,7 @@ def release_check(root, h, numbers, lints, root_why=None):
     `; `; a PASS whose lint is UNKNOWN-AT-CAP reads `#N PASS (lint unknown at cap)`. A check that cannot run is a reason (`unknown (...)`), and every
     number gets a line, so a missing line cannot read as a pass. `lints` maps a number to the (sha, verdict) of the lint the caller reports. The checks:
     the pull request is open; its newest review record is done at the live head
-    (live_review_state, as `--reviewed` reads it); that record is unedited (created_at equals updated_at); the lint ran on the live head and its verdict is PASS or UNKNOWN-AT-CAP;
+    (live_review_state, as `--reviewed` reads it); that record is unedited (created_at equals updated_at), and so is the earlier record that gave it its rounds (newest_review: a fix check with no round line); the lint ran on the live head and its verdict is PASS or UNKNOWN-AT-CAP;
     the merge with the base tip is clean; and a base that is not the default branch is the head of a pull request in the call that passes.
     `root_why` says why the checkout root could not be read; then no check runs, and each number's one reason is that unknown.
     Cost: one `pulls/N` read per number and one list read of the repo's comments since the oldest of them (every page), one fetch per distinct
@@ -4330,15 +4352,15 @@ def release_check(root, h, numbers, lints, root_why=None):
                 out.append("no review record")
             else:
                 body, created, updated = rows[-1]  # only the newest record counts
-                rec = parse_review(body)
+                rec = newest_review([r[0] for r in rows])
                 rec = rec if rec and rec["n"] == n else None
                 state, why = live_review_state(h, rec, i["head"], default) if default else review_state(rec, i["head"])  # no default branch read: no walk, the why of that read follows below
                 if state != "done":
                     out.append(why)
                 if created is None or updated is None:
                     out.append(unknown_reason("the newest review record gave no timestamps"))
-                elif created != updated:
-                    out.append("the newest review record was edited after it was posted")
+                elif created != updated or (rec and rec.get("inherited_from") is not None and rows[rec["inherited_from"]][1] != rows[rec["inherited_from"]][2]):  # inherited rounds come from an older record: it must be unedited too
+                    out.append("the newest review record was edited after it was posted" if created != updated else "a review record that gives the rounds was edited after it was posted")
         if lints.get(n) is None:
             out.append("no lint verdict was given")
         elif lints[n][0] != i["head"]:
@@ -5315,9 +5337,11 @@ def main(argv, host=None, lock=None, hosts=None):
             if misfits:
                 raise Stop(f"Kind: the diff breaks --kind {a.kind} at " + ", ".join(misfits) + ". Write the record with the kind the diff has. " + REVIEW_CITE)
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed
-                earlier = [parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
-                last = earlier[-1] if earlier else None
-                if not last or last["head"] != a.fix_check[0]:
+                earlier = h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])
+                last = newest_review(earlier) if earlier else None  # an inherited round counts, so a fix after a merge of main reads the record as --reviewed does
+                if not earlier:  # a PR opened after the review has no record to name the verified head: it may predate the PR, so the new head must hold it
+                    ok = h.holds_head(a.fix_check[0], a.head)
+                elif not last or last["head"] != a.fix_check[0]:
                     ok = False
                 elif not last["fix"]:
                     ok = True

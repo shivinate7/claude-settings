@@ -413,6 +413,16 @@ class ReviewRecordTests(unittest.TestCase):
         self.serve(comments=[record(), record(head=OLD)])
         self.assert_blocked(self.stop(self.lane_turn(report(CLAIM))))
 
+    def test_a_fix_verifier_in_a_later_log_reads_the_round_of_the_earlier_log(self):
+        # Catches: the hook parsing the newest record alone, so a fix check whose round sits in the log at the reviewed head reads open here
+        # while `merge --reviewed` reads it done (step review-record-fix-check-reads).
+        earlier = record(head=OLD, rounds=[(1, "reviewer", "sonnet", "FAIL")])
+        later = record(head=LIVE, rounds=[], fix=(OLD, "reviewer", "sonnet", "PASS"))
+        self.serve(comments=[earlier, later])
+        out = self.stop(self.lane_turn(report(CLAIM)))
+        self.assert_two_rest_reads()
+        self.assertIsNone(out, out)
+
     def test_record_whose_rounds_hold_no_pass_does_not_satisfy_a_pass_claim(self):
         # Catches: a record for the live head read as satisfying a PASS claim when none of its rounds passed.
         for verdict in ("FAIL", "PARTIAL"):
