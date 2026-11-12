@@ -5737,6 +5737,8 @@ class PassClaimCitesVerdictTests(unittest.TestCase):
         return "> **Done**\n> - BUILT 3193a06: " + item + "\n> **Next** none"
 
     def run_stop(self, reply, calls=(), landed=False, env=None, refuse_process=False):
+        # calls holds one record list per tool call (see call); a flat list of records would merge its dicts' keys.
+        self.assertTrue(all(isinstance(call, list) for call in calls), "calls must be a list of record lists")
         records = [human("run the check")]
         for call in calls:
             records += call
@@ -5883,8 +5885,30 @@ class PassClaimCitesVerdictTests(unittest.TestCase):
     def test_control_cite_early_in_a_long_transcript_passes_and_a_late_fail_is_refused(self):
         early = self.call(self.CMD, self.PASS_LINE, "tu_v")
         late = self.call(self.CMD, self.FAIL_LINE, "tu_z")
-        self.assert_passes(self.report("lint passed."), calls=early + self.long_body(400))
-        self.assert_blocked(self.report("lint passed."), calls=early + self.long_body(400) + late)
+        self.assert_passes(self.report("lint passed."), calls=[early + self.long_body(400)])
+        self.assert_blocked(self.report("lint passed."), calls=[early + self.long_body(400) + late])
+
+    # Real call forms: a cite through the full verdict path, after a cd, or through the repo's own runner. Each control
+    # has a red sibling with the same call and a SKIP-only result, so the form is what passes.
+
+    VERDICT_FORMS = ("~/.claude/bin/verdict python3 lint/test_x.py",
+                     "cd x && ~/.claude/bin/verdict python3 lint/test_x.py",
+                     "python3 bin/verdict python3 lint/test_x.py")
+
+    def test_control_cite_in_each_real_verdict_form_passes_and_its_skip_sibling_is_refused(self):
+        for n, form in enumerate(self.VERDICT_FORMS):
+            with self.subTest(form=form):
+                self.assert_passes(self.report("lint passed."),
+                                   calls=[self.call(form, self.PASS_LINE, "tu_p%d" % n)])
+                self.assert_blocked(self.report("lint passed."),
+                                    calls=[self.call(form, self.SKIP_LINE, "tu_k%d" % n)])
+
+    def test_control_cite_as_a_list_of_text_blocks_passes_and_its_skip_sibling_is_refused(self):
+        # A tool result's content may come as a list of text blocks, as _result_text reads it.
+        passed = [{"type": "text", "text": self.PASS_LINE}]
+        skipped = [{"type": "text", "text": self.SKIP_LINE}]
+        self.assert_passes(self.report("lint passed."), calls=[self.call(self.CMD, passed, "tu_l")])
+        self.assert_blocked(self.report("lint passed."), calls=[self.call(self.CMD, skipped, "tu_m")])
 
     # Cost: the refusal is one stdout line, with no process started and no file written (decision
     # guard-remedy-not-to-owner, "Cost"). A fresh config folder must stay empty after the refused run.
