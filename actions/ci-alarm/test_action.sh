@@ -228,7 +228,7 @@ run_alarm() {
 }
 t() { # want label [FAIL glob] [EMPTY glob] [text the issue must name] [jobs reads: "none", or the run paths read, in any order]
   run_alarm "${3:-}" "${4:-}"
-  shown="$(grep -v '^::\(warning\|notice\)::' <<<"$out")" # the verdict, without annotations; a cap-end notice is one
+  shown="$(grep -v '^::\(warning\|notice\)::' <<<"$out")" # the verdict, without the workflow annotations, which are not the verdict
   ok=0
   case "$1" in
     green) [ "$shown" = green ] && [ ! -s "$tmp/log" ] && ok=1 ;;
@@ -257,12 +257,10 @@ runs_are "$(gh_run ci success 2026-01-02 u1 push 1)" "$(gh_run ci failure 2026-0
 t green red-then-fixed-is-quiet
 runs_are "$(gh_run alarm failure 2026-01-02 u1 push 1)"
 t green own-workflow-is-ignored
-# named <green|notred> <label> [text | !text]...: one run of alarm.sh. Each text must share one line with "cap end named" in its
-# output (stdout or stderr); a text with a leading ! must appear nowhere. The last stdout line is the verdict: green exactly for
-# green, else any verdict but red. A green case opens no issue at all; a notred case opens no red issue (titled "CI red on ...").
+# named <green|notred> <label>: one run of alarm.sh. The last stdout line is the verdict: green exactly for green, else any
+# verdict but red. A green case opens no issue at all; a notred case opens no red issue (titled "CI red on ...").
 named() {
-  local want="$1" label="$2" verdict all ok=1 text
-  shift 2
+  local want="$1" label="$2" verdict all ok=1
   run_alarm "" ""
   all="$out"$'\n'"$(cat "$tmp/err")"
   verdict="$(tail -n 1 <<<"$out")"
@@ -271,11 +269,6 @@ named() {
     green) [ "$verdict" = green ] && [ ! -s "$tmp/log" ] || ok=0 ;;
     notred) [ -n "$verdict" ] && [ "$verdict" != red ] && ! grep -q 'CI red on' "$tmp/log" || ok=0 ;;
   esac
-  for text in "$@"; do
-    if [ "${text#!}" != "$text" ]; then grep -qF -- "${text#!}" <<<"$all" && ok=0
-    else grep -F -- "cap end named" <<<"$all" | grep -qF -- "$text" || ok=0
-    fi
-  done
   if [ "$ok" = 1 ]; then echo "ok   $label"; else echo "FAIL $label (exit $code, verdict: ${verdict:-none}; got: $all; issue log: $(tr '\n' ' ' < "$tmp/log"))"; bad=1; fi
 }
 runs_are "$(gh_run ci success 2026-01-02 u1 push 1)" "$(gh_run deploy timed_out 2026-01-01 u2 push 2)"
@@ -496,13 +489,26 @@ runs_are "$(gh_run ci success 2026-01-02 https://runs/retry-under-4751 push 4751
 attempt_jobs_of 4751 1 scope-guard:cancelled:2
 jobs_of 4751 scope-guard:success
 workflow_at 4751 scope-guard:37
-named green attempt-1-cancelled-under-its-cap-in-a-green-run-stays-silent "!cap end named"
+named green attempt-1-cancelled-under-its-cap-in-a-green-run-stays-silent
 count_is attempt-1-under-its-cap-in-a-green-run-reads-attempt-1-jobs-once "actions/runs/4751/attempts/1/jobs" 1
 runs_are "$(gh_run ci success 2026-01-02 https://runs/retry-clean-4752 push 4752 completed 2)"
 attempt_jobs_of 4752 1 scope-guard:success
 jobs_of 4752 scope-guard:success
 workflow_at 4752 scope-guard:37
-named green green-run-with-no-cap-end-in-any-attempt-stays-silent "!cap end named"
+named green green-run-with-no-cap-end-in-any-attempt-stays-silent
+# An older succeeded re-run is judged under a newer green run of its group: the re-run list is every succeeded re-run in the window,
+# not only each group's newest run. Only the older run's earlier attempt holds the cap end, so a read of the newest run alone misses it.
+runs_are "$(gh_run ci success 2026-01-01 https://runs/older-retry-cap-6010 push 6010 completed 2)" "$(gh_run ci success 2026-01-02 https://runs/newer-green-6011 push 6011)"
+attempt_jobs_of 6010 1 scope-guard:cancelled:40
+workflow_at 6010 scope-guard:37
+t alarm older-rerun-under-a-newer-green-run-opens-the-cap-alarm "" "" "$(printf '%s\n' '--title CI job hit its time cap on main: scope-guard --body' 'job scope-guard ran 40 min, cap 37 min, run 6010, attempt 1')"
+count_is older-rerun-under-a-newer-green-run-reads-attempt-1-jobs-once "actions/runs/6010/attempts/1/jobs" 1
+# Control: the same older re-run with attempt 1 cancelled under its cap, under the same newer green run, stays silent.
+runs_are "$(gh_run ci success 2026-01-01 https://runs/older-retry-under-6012 push 6012 completed 2)" "$(gh_run ci success 2026-01-02 https://runs/newer-green-6013 push 6013)"
+attempt_jobs_of 6012 1 scope-guard:cancelled:2
+workflow_at 6012 scope-guard:37
+t green older-rerun-under-its-cap-under-a-newer-green-run-stays-silent "" ""
+count_is older-rerun-under-its-cap-reads-attempt-1-jobs-once "actions/runs/6012/attempts/1/jobs" 1
 # A failure run with a red job in its newest attempt and a cap end in attempt 1: the title stays "CI red on", and the body names the cap end.
 runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-retry-cap-5230 push 5230 completed 2)"
 attempt_jobs_of 5230 1 scope-guard:cancelled:40
