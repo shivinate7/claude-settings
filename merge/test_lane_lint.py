@@ -1523,11 +1523,20 @@ PUSH_ONLY_STEP = (PUSH_ONLY, "      - name: Push-only lint\n        if: ${{ gith
                              "        run: python3 lint/check_push_only.py\n")
 
 
-def real_ci_steps():
-    """(name, CI step text) of BATCH_CI_STEPS in checks.yml's checks job, in file order, read by the shared parser."""
+def checks_job(job):
+    """The raw text of checks.yml's job `job`, below its name line, read from the file. None when the job is absent."""
     with open(CHECKS_YML, encoding="utf-8") as f:
-        block = job_block(f.read(), "checks")
-    return [(step_key(st, "name"), st) for st in step_blocks(block) if step_key(st, "name") in BATCH_CI_STEPS]
+        return job_block(f.read(), job)
+
+
+def real_job_steps(job):
+    """(name, CI step text) of each step of checks.yml's job `job`, in file order, read by the shared parser."""
+    return [(step_key(st, "name"), st) for st in step_blocks(checks_job(job))]
+
+
+def real_ci_steps():
+    """(name, CI step text) of BATCH_CI_STEPS in checks.yml's checks job, in file order."""
+    return [(name, st) for name, st in real_job_steps("checks") if name in BATCH_CI_STEPS]
 
 
 def workflow_text(found):
@@ -1595,8 +1604,9 @@ def link_or_copy(src, dst):
         (shutil.copytree if os.path.isdir(src) else shutil.copy2)(src, dst)
 
 
-class BatchLintFlags(tm.Env):
-    """`merge --lane-lint <batch>` runs the real bin/ci-job on the batch's checks job: each of its four lint CI steps runs once, with the argv checks.yml gives it."""
+class BatchLintFixture(tm.Env):
+    """The bin/ci-job fixture: the repo pair, a copy of bin/ci-job whose check scripts log their calls, push_files to commit a branch
+    on origin, and lane_lint to run merge.lane_lint on a target. BatchLintFlags and GuardSliceLint extend it, so no case copies it."""
 
     def setUp(self):
         with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER):  # Env.setUp makes its repos in the temp dir: keep them in this run's folder
@@ -1630,20 +1640,26 @@ class BatchLintFlags(tm.Env):
         os.chmod(self.ste_path, 0o755)
         return os.path.join(bin_dir, "ci-job")
 
-    def push_batch(self, branch, skip=(), found=None):
-        """Push `branch` to origin: one commit on main holding checks.yml's checks job (`found`, else the four lint CI steps) and a
-        logging stub for each check script of the four, except the scripts in `skip`. -> the branch's head sha."""
+    def push_files(self, branch, files, message):
+        """Commit `files` ({repo path: text}) on `branch`, made from origin/main, and push it to origin. -> the branch's head sha."""
         o = self.other
         tm.sh(o, "git", "fetch", "-q", "origin")
         tm.sh(o, "git", "checkout", "-q", "-B", branch, "origin/" + BASE)
-        tm.put(os.path.join(o, ".github", "workflows", "checks.yml"), workflow_text(self.found if found is None else found))
-        for name, ci_step in self.found:
-            if name != STE and script_of(ci_step) not in skip:
-                tm.put(os.path.join(o, script_of(ci_step)), CALL_STUB % self.call_log(script_of(ci_step)))
+        for path, text in files.items():
+            tm.put(os.path.join(o, path), text)
         tm.sh(o, "git", "add", "-A")
-        tm.sh(o, "git", "commit", "-q", "-m", branch + ": the checks job's lint CI steps and their stubs")
+        tm.sh(o, "git", "commit", "-q", "-m", message)
         tm.sh(o, "git", "push", "-q", "origin", branch)
         return tm.sh(o, "git", "rev-parse", "HEAD")
+
+    def push_batch(self, branch, skip=(), found=None):
+        """Push `branch` to origin: one commit on main holding checks.yml's checks job (`found`, else the four lint CI steps) and a
+        logging stub for each check script of the four, except the scripts in `skip`. -> the branch's head sha."""
+        files = {".github/workflows/checks.yml": workflow_text(self.found if found is None else found)}
+        for name, ci_step in self.found:
+            if name != STE and script_of(ci_step) not in skip:
+                files[script_of(ci_step)] = CALL_STUB % self.call_log(script_of(ci_step))
+        return self.push_files(branch, files, branch + ": the checks job's lint CI steps and their stubs")
 
     def lane_lint(self, target, out):
         """merge.lane_lint of `target` against BASE, in the lane checkout, through the copy of ci-job. Its output goes to `out`. A refusal raises."""
@@ -1651,6 +1667,10 @@ class BatchLintFlags(tm.Env):
         with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER), unittest.mock.patch.object(merge, "CI_JOB", self.ci_job), \
                 unittest.mock.patch.dict(os.environ, env), contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
             return merge.lane_lint(self.co, target, self.host, base=BASE)
+
+
+class BatchLintFlags(BatchLintFixture):
+    """`merge --lane-lint <batch>` runs the real bin/ci-job on the batch's checks job: each of its four lint CI steps runs once, with the argv checks.yml gives it."""
 
     def test_lane_lint_runs_each_batch_check_once_with_the_argv_checks_yml_gives(self):
         head = self.push_batch(BATCH)
