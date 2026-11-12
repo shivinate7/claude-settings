@@ -7,7 +7,7 @@ question-form holds the ruling; rule `style-question-form` holds the text.
     item_hit(op, entry, cwd) -> (rule, matched)   one waiting-page write: set, update or str_replace
 
 ("", "") is a pass. hooks/call_judge.py calls chat_hit and page_item_hit; hooks/guard.py data_tool_hit calls
-page_item_hit, which filters the ArtifactData writes by collection and url and then calls item_hit; a write to another page gets only the check for an option keyed none. Nothing here writes a file. The only process it starts is the one git read of past_rulings, for a caller that makes a model call anyway.
+page_item_hit, which filters the ArtifactData writes by collection and url and then calls item_hit; a write to another page gets only the check for an option keyed none. Nothing here writes a file. The only processes it starts are the git reads of past_rulings (the roadmap step notes, and the ruled store: one ls-tree, one cat-file, and one more when an entry names `lands_in`), for a caller that makes a model call anyway.
 
     past_rulings(text, repo_root) -> (candidates, unknown)   the decision, debt and step rulings the judge reads
     key_overlap(reply, earlier)   -> clashing option keys     lint/report_guard.py rule question-keys
@@ -1698,8 +1698,39 @@ def _step_rulings(steps, words):
     return [line for _, _, line in sorted(scored)[:STEP_TOP]]
 
 
+def _ruled_candidates(roots, unknown):
+    """The open entries of the ruled store (lint/ruled_store.py, the one reader), as
+    `ruled:<id>: <ruling> (owner <at>; open, not on main; supersedes <refs>)`, newest first. The store is read from the
+    first root that has one: the repo, else the claude-settings checkout. No store anywhere adds "ruled store
+    (absent)"; a store git failed to read adds "ruled store (unreadable: git)"."""
+    lint = os.path.join(HERE, "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    try:
+        import ruled_store
+    except Exception as exc:
+        unknown.append("ruled store (%s: %s)" % (UNREADABLE, type(exc).__name__))
+        return []
+    state = "absent"
+    for root in roots:
+        entries, state = ruled_store.read_store(root)
+        if state == "ok":
+            opened = ruled_store.open_entries(entries, root)
+            lines = []
+            for entry in sorted(opened, key=ruled_store.entry_instant, reverse=True):
+                ruling = " ".join(str(entry.get("ruling", "")).split())[:INDEX_CAP]
+                lines.append("ruled:%s: %s (owner %s; open, not on main; supersedes %s)"
+                             % (entry.get("id", "?"), ruling, entry.get("at", "?"),
+                                ruled_store.supersedes_text(entry)))
+            return lines
+        if state == "unreadable":
+            break
+    unknown.append("ruled store (%s)" % ("absent" if state == "absent" else "%s: git" % UNREADABLE))
+    return []
+
+
 def past_rulings(question_text, repo_root):
-    """(candidates, unknown). `candidates` are lines `<id>: <text>`: every decision and debt record, then the step
+    """(candidates, unknown). `candidates` are lines `<id>: <text>`: every open ruled-store entry as `ruled:<id>`, every decision and debt record, then the step
     rulings that share words with the question. `unknown` lists each source not searched: "<source> (absent)"
     for a source the repo does not have, "<source> (unreadable: ...)" for one that exists and failed, and always
     "closed page items". Absent sources never refuse; unreadable ones do (see unreadable_sources)."""
@@ -1714,6 +1745,7 @@ def past_rulings(question_text, repo_root):
         unknown.append("claude-settings decision records (absent)")
     elif os.path.realpath(other) != os.path.realpath(repo_root):
         roots.append(other)
+    candidates += _ruled_candidates(roots, unknown)
     for folder, label in (("decisions", "decision records"), ("debts", "debt records")):
         found = False
         for root in roots if folder == "decisions" else roots[:1]:
