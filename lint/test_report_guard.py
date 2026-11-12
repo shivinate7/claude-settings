@@ -5913,6 +5913,22 @@ class NotesFixTests(unittest.TestCase):
         sha = git_out(self.repo, "rev-parse", "--short=7", "HEAD")
         self.assertIsNone(self.stop(self.turn("one", sha, DONE_STEP_NAMED)))
 
+    def test_typo_edit_to_a_line_that_already_names_its_step_passes(self):
+        # The step fix is on main already. This commit fixes a typo in that line and adds no step.
+        init_repo(self.repo, base=NOTES_BASE + STEP_NOTE)
+        sha = commit_notes(self.repo, NOTES_BASE + "- new-note: a gapp. Fix: step:fix-alpha\n", "one")
+        self.assertIn(NOTES_REL.replace(os.sep, "/"),
+                      git_out(self.repo, "show", "--name-only", "--format=", sha).splitlines())  # scope: the notes file
+        out = self.stop(self.turn("one", sha, DONE_STEP_UNNAMED))
+        self.assertIsNone(out, "a typo edit demanded Done name its step again: %s" % (out or {}).get("reason"))
+
+    def test_typo_edit_plus_a_new_step_line_still_blocks(self):
+        # Control for the typo case: a new step line in the same commit is still judged, so Done must name its step.
+        init_repo(self.repo, base=NOTES_BASE + STEP_NOTE)
+        sha = commit_notes(self.repo, NOTES_BASE + "- new-note: a gapp. Fix: step:fix-alpha\n"
+                           + "- other-note: a gap. Fix: step:fix-beta\n", "one")
+        self.assert_blocks_naming(self.stop(self.turn("one", sha, DONE_STEP_UNNAMED)), "fix-beta")
+
 
 if __name__ == "__main__":
     unittest.main()
