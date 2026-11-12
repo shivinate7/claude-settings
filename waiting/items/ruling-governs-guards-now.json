@@ -7,18 +7,19 @@
   "n": 646,
   "options": [
     {
-      "gain": "A ruling holds everywhere within one turn, guards included, with no override typing.",
-      "how": "Only triage writes the store, from your quoted words with their time; each lift names one guard rule; the entry closes when main takes the change in.",
+      "gain": "Guards stay code-only; a ruling never loosens a guard before its code is reviewed.",
+      "how": "Rulings govern prose and the past-ruling checks only; a guard keeps refusing until its code merges. Pair it with step ruled-prose-express so a ruled change reaches main faster.",
       "key": "a",
-      "label": "Your ruling governs the guard now (Recommended)",
-      "lose": "The store becomes a strong lever: a wrong entry lifts a guard until someone notices."
+      "label": "Rulings govern text only (Recommended)",
+      "lose": "You keep typing override, or waiting, on every ruled change to a hook until it merges."
     },
     {
-      "gain": "Guards stay code-only; a ruling never loosens a guard before its code is reviewed.",
-      "how": "Rulings govern prose and the past-ruling checks only; a guard keeps refusing until its code merges.",
+      "gain": "A ruling holds everywhere within one turn, guards included, with no override typing.",
+      "how": "Only triage writes the store, from your quoted words with their time; each lift names one guard rule; the entry closes when main takes the change in. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
       "key": "b",
-      "label": "Rulings govern text only",
-      "lose": "You keep typing override, or waiting, on every ruled change to a hook."
+      "label": "Your ruling governs the guard now",
+      "lose": "The store becomes a second form the guards accept: a wrong entry lifts a guard until someone notices.",
+      "widens": true
     }
   ],
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
