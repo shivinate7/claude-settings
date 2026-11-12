@@ -944,6 +944,36 @@ class ConfirmHead(Env):
         self.assertEqual(self.claims(), 0, "a claim was pushed for a bad head")
         self.assertFalse(self.lock_ref(), "the lock was left behind")
 
+    def claim_push(self):
+        """The tool's own claim on origin's feat: one commit on its head with a Record-claim trailer, as head_claim writes it. -> its sha."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "commit", "-q", "--allow-empty", "-m", "Claim record numbers", "-m", "Record-claim: D-9")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        return sh(o, "git", "rev-parse", "HEAD")
+
+    def test_a_claim_on_the_relayed_head_holds_with_no_racing_fetch(self):
+        relayed = self.head()  # the head the relay named
+        live = self.claim_push()  # the tool's own claim on it: the one commit relayed_head_holds allows above the relayed head
+        self.assertTrue(merge.relayed_head_holds(self.co, "feat", relayed, live), "a claim on the relayed head does not hold the relayed yes")
+
+    def test_a_racing_fetch_of_another_ref_does_not_change_the_relayed_head_verdict(self):
+        relayed = self.head()
+        live = self.claim_push()
+        sh(self.other, "git", "push", "-q", "origin", f"{relayed}:refs/heads/side")  # another ref whose fetch moves FETCH_HEAD in this clone
+        real, raced = merge.git, []
+        def racing(cwd, *a, input=None):
+            out = real(cwd, *a, input=input)
+            if a[:1] == ("fetch",) and any("refs/heads/feat" in x for x in a):
+                real(cwd, "fetch", "-q", "origin", "refs/heads/side")  # another fetch lands between the branch fetch and the head read
+                raced.append(a)
+            return out
+        with unittest.mock.patch.object(merge, "git", racing):
+            holds = merge.relayed_head_holds(self.co, "feat", relayed, live)
+        self.assertEqual(len(raced), 1, "the racing fetch did not run between the branch fetch and the head read")  # scope: the race happened
+        self.assertTrue(holds, "a racing fetch of another ref changed the relayed-yes verdict: the head was read through FETCH_HEAD")
+
 class ShallowMain(unittest.TestCase):
     """ff_main in a shallow clone of origin. The commit it moves to is on origin/main, but the clone cuts the history
     between that commit and main. The folders come from this run's run folder (test-temp-standard), not the system temp dir."""
