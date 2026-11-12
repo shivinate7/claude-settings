@@ -3519,7 +3519,7 @@ MUTATIONS = [
      '    if False:',
      "guard", "a reviewer whose launch result holds a bare string asks"),
     ("resume-finished-reviewer: a state the read cannot place is refused as finished",
-     '        return "ask", RESUME_ASK_REASON, "%s to a %s of unknown state" % (tool, role), ""',
+     '        return "ask", RESUME_ASK_REASON % {"role": role}, "%s to a %s of unknown state" % (tool, role), ""',
      '        return "deny", RESUME_REASON, "%s to a %s of unknown state" % (tool, role), ""',
      "guard", "a reviewer whose launch result holds a bare string asks"),
     ("resume-finished-reviewer: a transcript that cannot be read is refused",
