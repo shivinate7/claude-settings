@@ -821,11 +821,11 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .stack .sn { font: 600 13px/44px var(--mono); color: var(--muted); text-align: end; }
 .stack .stext { margin: 0; min-width: 0; padding-block: 10px; white-space: pre-line; overflow-wrap: anywhere; }
 .stack .stext.sedit { padding-block: 0; }
-/* Wraps, so in a column too narrow for Edit and Remove side by side the second press drops under the first, inside its card. A label
-   wider than the whole column breaks inside its press. `anywhere`, since the label is the press's flex item, which never shrinks below
-   its min-content; a press that fits keeps its word whole, as the wrap is placed on each press's own max-content. */
+/* Wraps, so in a column too narrow for Edit and Remove side by side the second press drops under the first, inside its card. The label sits in one
+   grid track that may shrink to nothing, so a press never runs past its card; the label breaks between words, and inside a word only
+   where the word is wider than the whole card (a flex press would keep the word whole and run on). */
 .stack .sacts { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
-.stack .sacts .btn { min-height: 44px; min-inline-size: 0; max-inline-size: 100%; white-space: normal; overflow-wrap: break-word; hyphens: manual; }
+.stack .sacts .btn { display: inline-grid; grid-template-columns: minmax(0, max-content); min-height: 44px; min-inline-size: 0; max-inline-size: 100%; white-space: normal; overflow-wrap: break-word; hyphens: manual; }
 .stack .sstate { min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding-inline: 10px; font-size: 14px; color: var(--muted); white-space: nowrap; }
 .stack .sstate.ok { color: var(--good); font-weight: 600; }
 .stack textarea, .askform textarea.copybox { width: 100%; min-height: 66px; resize: vertical; padding: 8px 12px; border: 1.5px solid var(--acc); border-radius: var(--r); background: var(--surface); font: inherit; color: var(--ink); }
