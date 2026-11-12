@@ -18283,6 +18283,8 @@ class BatchFreeze(CloudSession):
         self.job_reads = []  # each run id whose jobs were read, in order: a refusal made before the read leaves it empty
         self.host.failed_jobs = self.read_failed_jobs
         self.host.failed_lines = self.read_failed_lines  # Host.failed_lines flattens failed_jobs, so the fake does too
+        self.busy = set()  # pull request numbers whose head has CI running, as Host.head_busy answers
+        self.host.heads_busy = lambda pairs: {n for n, _sha in pairs if n in self.busy}
 
     def lane(self, n, on=None):
         """Lane PR #n: a branch on origin with one commit of its own, off origin/main (or, with `on`, off lane #on, so its head contains
@@ -19578,6 +19580,100 @@ class BatchFreeze(CloudSession):
         self.assertEqual(rc, 1, "a blame of #103 with a green run exited %s, not 1: %s" % (rc, out))
         self.assert_untouched(pr, snap, out)
 
+    # Pipeline: `--batch-build NAME PR... --on-running` stacks the new batch on the batch whose ready run is in progress, found by the tool.
+
+    def on_line(self, pr):
+        return next((x for x in block_lines(self.body(pr)) or [] if x.startswith("On: ")), None)
+
+    def test_on_running_stacks_the_new_batch_on_the_one_batch_whose_ci_is_running(self):
+        for n in (101, 104):
+            self.lane(n)
+        x = self.frozen_batch("x", [101])
+        self.busy.add(x)
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "104", "--on-running")
+        self.assertEqual(rc, 0, "a build on the running batch exited %s: %s" % (rc, out))
+        nightly = self.host.batch_pr("batch-nightly")
+        self.assertIsNotNone(nightly, "--on-running built no batch-nightly: %s" % out)
+        self.assertEqual((self.on_line(nightly[0]) or "").split(" ")[:2], ["On:", "batch-x"], "batch-nightly is not stacked on batch-x: %s" % out)
+        self.assertTrue(self.on_origin(self.head("batch-x"), "batch-nightly"), "batch-nightly does not hold batch-x's head: %s" % out)
+
+    def test_on_running_picks_the_tip_of_a_chain_of_running_batches(self):
+        for n in (101, 102, 104):
+            self.lane(n)
+        x = self.frozen_batch("x", [101])
+        y = self.frozen_batch("y", [102], on="batch-x")
+        self.busy.update({x, y})
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "104", "--on-running")
+        nightly = self.host.batch_pr("batch-nightly")
+        self.assertIsNotNone(nightly, "--on-running built no batch-nightly over a chain: %s" % out)
+        self.assertEqual((self.on_line(nightly[0]) or "").split(" ")[:2], ["On:", "batch-y"], "batch-nightly is not stacked on the chain's tip batch-y: %s" % out)
+
+    def test_on_running_with_no_batch_running_builds_on_the_base_and_says_so(self):
+        for n in (101, 104):
+            self.lane(n)
+        self.frozen_batch("x", [101])  # ready, but its CI is not running
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "104", "--on-running")
+        nightly = self.host.batch_pr("batch-nightly")
+        self.assertIsNotNone(nightly, "--on-running with nothing running built no batch: %s" % out)
+        self.assertIsNone(self.on_line(nightly[0]), "a batch with nothing running to stack on got an On line: %s" % out)
+        self.assertRegex(out, r"no batch (is )?running", "the build does not say no batch is running: %s" % out)
+
+    def test_on_running_with_two_unrelated_running_batches_stops_and_builds_nothing(self):
+        for n in (101, 102, 104):
+            self.lane(n)
+        x = self.frozen_batch("x", [101])
+        y = self.frozen_batch("y", [102])
+        self.busy.update({x, y})
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "104", "--on-running")
+        self.assertRegex(out, r"more than one batch is running", "two running batches that stack on nothing common are not refused as ambiguous: %s" % out)
+        self.assertEqual(rc, 1, "an ambiguous --on-running exited %s, not 1: %s" % (rc, out))
+        self.assertIsNone(self.host.batch_pr("batch-nightly"), "an ambiguous --on-running built a batch: %s" % out)
+        self.assertEqual(self.pushes(), [], "an ambiguous --on-running pushed: %s" % out)
+
+    def test_on_running_ignores_a_running_draft_and_a_running_batch_on_another_base(self):
+        for n in (101, 102, 104):
+            self.lane(n)
+        x = self.frozen_batch("x", [101], draft=True)
+        y = self.frozen_batch("y", [102])
+        self.host.batch_pulls[y]["base"] = "release"
+        self.busy.update({x, y})
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "104", "--on-running")
+        nightly = self.host.batch_pr("batch-nightly")
+        self.assertIsNotNone(nightly, "--on-running built no batch beside a running draft and a running batch on another base: %s" % out)
+        self.assertIsNone(self.on_line(nightly[0]), "--on-running stacked on a draft or on a batch of another base: %s" % out)
+
+    def test_on_running_does_not_stack_a_batch_on_itself(self):
+        for n in (101, 104):
+            self.lane(n)
+        x = self.frozen_batch("nightly", [104])
+        self.busy.add(x)  # the batch being built again is itself the one running
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "104", "--on-running")
+        self.assertEqual(rc, 0, "the same-set build of the running batch itself exited %s: %s" % (rc, out))
+        self.assertIsNone(self.on_line(x), "--on-running stacked batch-nightly on itself: %s" % out)
+
+    def test_on_running_is_refused_beside_blame(self):
+        for n in (101, 104):
+            self.lane(n)
+        self.frozen_batch("nightly", [101])
+        url = self.scripted_run(7201, "failure", self.head("batch-nightly"))
+        rc, out = self.run_batch("--batch-build", "nightly", "--blame", "101", "--run", url, "--on-running")
+        self.assertRegex(out, r"--on-running", "--blame beside --on-running is not refused by name: %s" % out)
+        self.assertEqual(rc, 2, "--blame beside --on-running exited %s, not 2: %s" % (rc, out))
+
+    def test_on_running_does_not_go_with_on(self):
+        for n in (101, 104):
+            self.lane(n)
+        rc, out = self.run_batch("--batch-build", "nightly", "104", "--on-running", "--on", "batch-x")
+        self.assertRegex(out, r"--on-running", "--on-running beside --on is not refused by name: %s" % out)
+        self.assertEqual(rc, 2, "--on-running beside --on exited %s, not 2: %s" % (rc, out))
+
     def test_a_blame_with_no_run_is_refused_and_names_the_run_flag(self):
         for n in (101, 102, 103):
             self.lane(n)
@@ -20552,6 +20648,43 @@ class BatchFreeze(CloudSession):
 
     def test_a_base_red_reason_is_accepted_beside_batch_build(self):
         self.assert_accepted_beside_build("--base-red-ok", "the batch carries the fix")
+
+    # Pipeline: the real Host.heads_busy and running_batch, through PullsHost's count_gh: each REST route goes through the real Host.api and
+    # pages, and a scripted gh answers it as GitHub does. Each batch head has its check `checks` pending, so every batch pull is busy.
+
+    def busy_chain_host(self, base, chain):
+        """-> a PullsHost whose open pulls are the ready batch pull requests of `chain`: (batch name, head sha) pairs, all on `base`. Each batch
+        stacks on the one before it (its On line); the first stacks on nothing."""
+        pulls, rows, on = [], {}, None
+        for i, (name, sha) in enumerate(chain):
+            body = freeze_body(freeze_inner(name, [(101, OWN_SHA)], on=on))
+            pulls.append({**batch_pull(201 + i, sha, base=base, head_ref=merge.integration_branch(name)), "state": "open", "body": body})
+            rows[sha] = [batch_run("checks")]
+            on = (merge.integration_branch(name), sha)
+        return PullsHost(pulls, rows, count_gh=True)
+
+    def test_running_batch_reads_the_required_checks_of_the_base_it_is_given(self):
+        host = self.busy_chain_host("release", [("x", "1" * 40), ("y", "2" * 40)])
+        tip = merge.running_batch(host, "release")
+        protection = [rel for rel in host.gh_calls if "/protection/" in rel]
+        self.assertTrue(protection, "running_batch on release read no branch protection at all")
+        self.assertIn("branches/release/protection/required_status_checks", protection,
+                      "running_batch on release did not read the protection of release: %s" % protection)
+        self.assertNotIn("branches/main/protection/required_status_checks", protection,
+                         "running_batch on release read the protection of main: %s" % protection)
+        self.assertEqual(tip, "batch-y", "running_batch on release did not return the tip of the running chain: %s" % tip)
+
+    def test_heads_busy_reads_the_required_checks_once_for_all_the_busy_batch_pulls(self):
+        chain = [("x", "1" * 40), ("y", "2" * 40), ("z", "3" * 40)]
+        host = self.busy_chain_host("main", chain)
+        tip = merge.running_batch(host, "main")
+        judged = sorted(rel for rel in host.gh_calls if rel.endswith("/check-runs"))
+        self.assertEqual(judged, sorted(f"commits/{sha}/check-runs" for _name, sha in chain),
+                         "heads_busy did not read the check runs of each of the three busy batch heads: %s" % judged)
+        protection = [rel for rel in host.gh_calls if "/protection/" in rel]
+        self.assertEqual(len(protection), 1,
+                         "heads_busy read branch protection %d times for three busy batch pull requests, not once: %s" % (len(protection), protection))
+        self.assertEqual(tip, "batch-z", "running_batch did not return the tip of the three-batch chain: %s" % tip)
 
 # `merge --touches [--run RUN_ID] [--case TEXT]... [--file PATH]...`: the open pull requests that already touch a failing case or a named file.
 # The incident's fixtures: red main run 42559512356 failed two brief-destructive-git cases, and open pull 2390 already fixes them.
