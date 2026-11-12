@@ -39,20 +39,31 @@ it still counts when it is an operand of `-` or the receiver or argument of `.ti
 `.duration(to:`: that is a measured duration. An assert's message argument is not read. Clock reads inside a Swift interpolation
 hole are masked.
 
+Keep marker: a comment on the finding's own line, `# time-pinned-ok: <reason>` (Python) or
+`// time-pinned-ok: <reason>` (JS, TS, Swift), keeps that finding out of the listing. It applies to every
+category alike. The reason must not be blank. A marker on another line, or marker text inside a string,
+keeps nothing. It is read from real comments only: Python from tokenizer comment tokens, JS and Swift from
+the `//` comment spans the masker blanks (a block comment is not a marker). A kept finding is counted,
+never listed.
+
 Paths are relative to <root>. Output is one `<path>:<line>: <category>: <source line>` per finding
 (one per line and category), then `UNREAD <path>: <reason>` per file that could not be read, then a
-summary. A file that cannot be read or parsed is unread, never clean.
-Exit 0: nothing found, nothing unread. Exit 1: findings. Exit 2: the root cannot be read, or nothing
-found but some file unread, so the result is unknown.
+summary. The summary ends `; kept N` when N > 0 findings were kept by the marker. `--json` holds listed
+findings only, and its counts leave kept findings out. A file that cannot be read or parsed is unread,
+never clean.
+Exit 0: nothing listed, nothing unread (kept findings alone leave it 0). Exit 1: findings listed. Exit 2:
+the root cannot be read, or nothing listed but some file unread, so the result is unknown.
 Cost: one `git ls-files` (or one folder walk outside a git tree) and one read of each test file. No
 process stays running.
 """
 import argparse
 import ast
+import io
 import json
 import os
 import re
 import sys
+import tokenize
 import warnings
 from bisect import bisect_right
 
@@ -427,6 +438,25 @@ class Hits:
         self.found.add((bisect_right(self.starts, pos), category))
 
 
+# ---- the keep marker ---------------------------------------------------------------------------------
+
+KEEP_MARKER = {"python": re.compile(r"#\s*time-pinned-ok:(.*)", re.S),
+               "js": re.compile(r"//\s*time-pinned-ok:(.*)", re.S)}
+KEEP_MARKER["swift"] = KEEP_MARKER["js"]
+
+
+def kept_lines(text, comments, marker):
+    """The lines of text whose own comment holds the keep marker with a reason. `comments` is a list of
+    (start, end) spans of real comments (never string text), so the marker is read from comments only."""
+    starts = [0] + [x.end() for x in re.finditer("\n", text)]
+    kept = set()
+    for a, b in comments:
+        got = marker.search(text[a:b])
+        if got and got.group(1).strip():
+            kept.add(bisect_right(starts, a))
+    return kept
+
+
 # ---- Python, through ast -----------------------------------------------------------------------------
 
 PY_CLOCKS = {"time.time", "time.monotonic", "time.perf_counter", "time.process_time", "time.time_ns",
@@ -612,7 +642,21 @@ def scan_python(text):
                 name = n.func.attr if isinstance(n.func, ast.Attribute) else getattr(n.func, "id", "")
                 if name.startswith("assert") and any(holds_clock(x, tainted, True) for x in assert_parts(n, name)):
                     found.add((n.lineno, "elapsed-assert"))
-    return found
+    return found, python_kept(text)
+
+
+def python_kept(text):
+    """Lines whose real comment (a tokenizer COMMENT token, never string text) holds the keep marker."""
+    kept = set()
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+            if tok.type == tokenize.COMMENT:
+                got = KEEP_MARKER["python"].search(tok.string)
+                if got and got.group(1).strip():
+                    kept.add(tok.start[0])
+    except (tokenize.TokenError, SyntaxError):
+        pass  # the lines read so far still count; any line not read lists, which is the safe side
+    return kept
 
 
 # ---- JS and TS: one-pass masker, then patterns -------------------------------------------------------
@@ -622,9 +666,9 @@ _RE_WORDS = {"return", "typeof", "case", "do", "else", "in", "of", "yield", "awa
              "throw", "new"}
 
 
-def mask_js(src):
+def mask_js(src, comments=None):
     """src with every comment and every string, template or regex body blanked. Same length, same newlines.
-    Quote and backtick delimiters stay."""
+    Quote and backtick delimiters stay. A list passed as `comments` gets the (start, end) of each `//` comment."""
     n = len(src)
     out = list(src)
     template_parts = []  # brace depth at each open `${`
@@ -701,6 +745,8 @@ def mask_js(src):
         if c == "/" and d == "/":
             j = src.find("\n", i)
             j = n if j < 0 else j
+            if comments is not None:
+                comments.append((i, j))
             blank(i, j)
             i = j
             continue
@@ -870,7 +916,8 @@ def parse_test_head(m, i):
 
 
 def scan_js(text):
-    m = mask_js(text)
+    comments = []
+    m = mask_js(text, comments)
     hits = Hits(m)
     fake_clock = re.search(r"(?<![\w$])useFakeTimers\s*\(", m) is not None
     claimed = []  # character ranges whose `timeout:` a test-cap finding already holds
@@ -948,7 +995,7 @@ def scan_js(text):
         got = args_of(mm.end() - 1)
         if got and is_num(m[got[1][0][0]:got[1][0][1]]):
             hits.add(mm.start(), "wait-cap")
-    return hits.found
+    return hits.found, kept_lines(text, comments, KEEP_MARKER["js"])
 
 
 # ---- Swift: one-pass masker, then patterns -----------------------------------------------------------
@@ -964,9 +1011,9 @@ SWIFT_DECL = re.compile(r"(?<![\w$.])(?:let|var)\s+(?=[A-Za-z_])")
 SWIFT_ASSERT = re.compile(r"(?<![\w$])(?:XCTAssert\w*|#expect|#require)\s*\(")
 
 
-def mask_swift(src):
+def mask_swift(src, comments=None):
     """src with every comment and every string body blanked, interpolation holes included. Same length,
-    same newlines. String delimiters stay."""
+    same newlines. String delimiters stay. A list passed as `comments` gets the (start, end) of each `//` comment."""
     n = len(src)
     out = list(src)
 
@@ -1024,6 +1071,8 @@ def mask_swift(src):
         if c == "/" and d == "/":
             j = src.find("\n", i)
             j = n if j < 0 else j
+            if comments is not None:
+                comments.append((i, j))
             blank(i, j)
             i = j
         elif c == "/" and d == "*":
@@ -1099,7 +1148,8 @@ def swift_function_returns(m, start, end):
 
 
 def scan_swift(text):
-    m = mask_swift(text)
+    comments = []
+    m = mask_swift(text, comments)
     hits = Hits(m)
 
     def args_of(open_idx):
@@ -1133,34 +1183,36 @@ def scan_swift(text):
         label = {"wait": r"(?<![\w])for\s*:", "fulfillment": r"(?<![\w])of\s*:"}.get(mm.group(1))
         if label is None or re.search(label, body):
             hits.add(mm.start(), "wait-cap")
-    return hits.found
+    return hits.found, kept_lines(text, comments, KEEP_MARKER["swift"])
 
 
 # ---- driver ------------------------------------------------------------------------------------------
 
 def scan_file(root, rel, kind):
-    """(findings as (line, category) pairs, lines of the file) or (None, reason) when it cannot be read."""
+    """(listed findings as (line, category) pairs, lines of the file, kept findings) or (None, reason, set()) when
+    it cannot be read. A kept finding sits on a line that holds the keep marker with a reason."""
     path = os.path.join(root, rel)
     try:
         if not os.path.isfile(path):
-            return None, "not a regular file"
+            return None, "not a regular file", set()
         if os.path.getsize(path) > MAX_BYTES:
-            return None, f"over {MAX_BYTES} bytes"
+            return None, f"over {MAX_BYTES} bytes", set()
         with open(path, "rb") as f:
             data = f.read()
     except OSError as e:
-        return None, f"cannot be read: {e.strerror or e}"
+        return None, f"cannot be read: {e.strerror or e}", set()
     try:
         text = data.decode("utf-8-sig")
     except UnicodeDecodeError:
-        return None, "not UTF-8"
+        return None, "not UTF-8", set()
     try:
-        found = {"python": scan_python, "js": scan_js, "swift": scan_swift}[kind](text)
+        found, kept = {"python": scan_python, "js": scan_js, "swift": scan_swift}[kind](text)
     except SyntaxError as e:
-        return None, f"syntax error at line {e.lineno}: {e.msg}"
+        return None, f"syntax error at line {e.lineno}: {e.msg}", set()
     except (ValueError, RecursionError, MemoryError) as e:
-        return None, f"cannot be parsed: {type(e).__name__}: {e}"
-    return found, re.split(r"\r\n|\r|\n", text)
+        return None, f"cannot be parsed: {type(e).__name__}: {e}", set()
+    held = {f for f in found if f[0] in kept}
+    return found - held, re.split(r"\r\n|\r|\n", text), held
 
 
 def main(argv=None):
@@ -1177,14 +1229,16 @@ def main(argv=None):
         print(f"unknown: git ls-files failed in {root}")
         return 2
     findings = []
+    kept_total = 0
     for rel in files:
         kind = kind_of(rel)
         if kind is None:
             continue
-        found, detail = scan_file(root, rel, kind)
+        found, detail, held = scan_file(root, rel, kind)
         if found is None:
             unread.append({"path": rel, "reason": detail})
             continue
+        kept_total += len(held)
         for line, category in sorted(found):
             src = detail[line - 1].strip() if 0 < line <= len(detail) else ""
             findings.append({"path": rel, "line": line, "category": category, "lang": kind,
@@ -1200,7 +1254,7 @@ def main(argv=None):
         nfiles = len({f["path"] for f in findings})
         print(f"{len(findings)} time-pinned in {nfiles} files (sleep {counts['sleep']}, "
               f"elapsed-assert {counts['elapsed-assert']}, test-cap {counts['test-cap']}, "
-              f"wait-cap {counts['wait-cap']}); {len(unread)} unread")
+              f"wait-cap {counts['wait-cap']}); {len(unread)} unread" + (f"; kept {kept_total}" if kept_total else ""))
     if findings:
         return 1
     return 2 if unread else 0
