@@ -98,9 +98,75 @@ for _name, _command in (
     ("an unquoted body a shell expands, fed to python",
      "\n".join(["python3 - <<EOF", 'x = "$(gh pr create -t x)"', "EOF"])),
     ("a bash -c wrapper with short flags", "bash -c 'gh pr create -t x'"),
+    # An unquoted body reads every `$( )` and backtick span live, whatever quotes surround it. Bash ends a body
+    # only at a line that is exactly the delimiter (under `<<-`, after leading tabs). The four rows below pin the
+    # refusal for a body that stays open past an end line bash does not accept: the single-quoted `$( )` after
+    # that line still runs under bash. The rows after them pin the body's shape and its scanner cases, each with
+    # a `gh pr create` in the body that must be refused.
+    ("an unquoted python body, a tab-indented EOF line ahead of a single-quoted $( ) gh pr create",
+     "\n".join(["python3 - <<EOF", "\tEOF", "x = '$(gh pr create -t x)'", "EOF"])),
+    ("an unquoted python body, a space-indented EOF line ahead of a single-quoted $( ) gh pr create",
+     "\n".join(["python3 - <<EOF", "  EOF", "x = '$(gh pr create -t x)'", "EOF"])),
+    ("an unquoted python body, an EOF line with a trailing space ahead of a single-quoted $( ) gh pr create",
+     "\n".join(["python3 - <<EOF", "EOF ", "x = '$(gh pr create -t x)'", "EOF"])),
+    ("an unquoted python body under <<-, a space-indented EOF line ahead of a single-quoted $( ) gh pr create",
+     "\n".join(["python3 - <<-EOF", "  EOF", "x = '$(gh pr create -t x)'", "EOF"])),
+    ("an unquoted python body, a single-quoted $( ) gh pr create",
+     "\n".join(["python3 - <<EOF", "x = '$(gh pr create -t x)'", "EOF"])),
+    ("an unquoted python body, a single-quoted backtick gh pr create span",
+     "\n".join(["python3 - <<EOF", "x = '`gh pr create -t x`'", "EOF"])),
+    ("an unquoted cat body, a single-quoted $( ) gh pr create",
+     "\n".join(["cat > notes.txt <<EOF", "x = '$(gh pr create -t x)'", "EOF"])),
+    ("a python file from an unquoted heredoc, a single-quoted $( ) gh pr create, run by python3",
+     "\n".join(["cat > f.py <<EOF", "x = '$(gh pr create -t x)'", "EOF", "python3 f.py"])),
+    ("an unquoted python body, a lone apostrophe ahead of a single-quoted $( ) gh pr create",
+     "\n".join(["python3 - <<EOF", "# don't", "x = '$(gh pr create -t x)'", "EOF"])),
+    ("an unquoted python body, a comment opener inside a string ahead of a single-quoted $( ) gh pr create",
+     "\n".join(["python3 - <<EOF", "y = 'a # b'", "x = '$(gh pr create -t x)'", "EOF"])),
+    ("an unquoted python body, a multi-line triple-quoted string ahead of a single-quoted $( ) gh pr create",
+     "\n".join(["python3 - <<EOF", 'y = """', "line", '"""', "x = '$(gh pr create -t x)'", "EOF"])),
 ):
     sh("draft-pr: " + _name + " is refused", _command, "deny", "draft-pr", cwd=NOGIT,
        carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# Controls, green. Bash runs none of these, so each is allowed. A quoted heredoc keeps its `$( )` as text. A `<<-`
+# body ends at a tab-indented EOF line, so the single-quoted `$( )` after it is shell text. A backslash keeps the
+# `$(` literal in an unquoted body.
+sh("draft-pr: a quoted python heredoc, a single-quoted $( ) gh pr create, is allowed",
+   "\n".join(["python3 - <<'EOF'", "x = '$(gh pr create -t x)'", "EOF"]), "allow", cwd=NOGIT)
+sh("draft-pr: a quoted python heredoc, a space-indented EOF line ahead of a single-quoted $( ) gh pr create, is allowed",
+   "\n".join(["python3 - <<'EOF'", "  EOF", "x = '$(gh pr create -t x)'", "EOF"]), "allow", cwd=NOGIT)
+sh("draft-pr: an unquoted python body under <<-, a tab-indented EOF line that ends it, then a single-quoted $( ) gh pr create, is allowed",
+   "\n".join(["python3 - <<-EOF", "\tEOF", "x = '$(gh pr create -t x)'", "EOF"]), "allow", cwd=NOGIT)
+sh("draft-pr: an unquoted python body, a backslash before a single-quoted $( ) gh pr create, is allowed",
+   "\n".join(["python3 - <<EOF", "x = '\\$(gh pr create -t x)'", "EOF"]), "allow", cwd=NOGIT)
+# To bash, `\r` is not a blank, so `<<'EOF'\r` has the delimiter `EOF\r`, and the body ends at a line `EOF\r`.
+# The shell line after that line runs, so its live `$( )` is an act the guard must refuse. Each row ends with a
+# plain `EOF` line: a guard that holds the body open past the CRLF line reads the act as body text up to it.
+for _name, _command in (
+    ("a quoted python heredoc with a CRLF EOF line, then a live $( ) gh pr create",
+     "\n".join(["python3 - <<'EOF'\r", "EOF\r", 'x = "$(gh pr create -t x)"', "EOF"])),
+    ("a quoted cat heredoc with a body line and a CRLF EOF line, then a live $( ) gh pr create",
+     "\n".join(["cat > notes.txt <<'EOF'\r", "text\r", "EOF\r", 'x = "$(gh pr create -t x)"', "EOF"])),
+    ("a python file from a quoted CRLF heredoc, with a live $( ) in an os.system call, run by python3",
+     "\n".join(["cat > f.py <<'EOF'\r", "import os\r", 'os.system("x=$(gh pr create -t x)")\r', "EOF\r",
+                "python3 f.py", "EOF"])),
+):
+    sh("draft-pr: " + _name + " is refused", _command, "deny", "draft-pr", cwd=NOGIT,
+       carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# The same shape with an LF end line is refused, so the CRLF end is the only difference. A quoted heredoc whose
+# body is text alone is allowed with a CRLF end line or an LF one: bash reads the body as data, so the
+# `gh pr create` in it is text.
+sh("draft-pr: a quoted python heredoc with an LF EOF line, then a live $( ) gh pr create, is refused",
+   "\n".join(["python3 - <<'EOF'", "EOF", 'x = "$(gh pr create -t x)"', "EOF"]), "deny", "draft-pr", cwd=NOGIT,
+   carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+sh("draft-pr: a quoted cat heredoc with a CRLF EOF line, and gh pr create as text in its body, is allowed",
+   "\n".join(["cat > notes.txt <<'EOF'\r", "gh pr create -t x\r", "EOF\r"]), "allow", cwd=NOGIT)
+sh("draft-pr: a quoted cat heredoc with an LF EOF line, and gh pr create as text in its body, is allowed",
+   "\n".join(["cat > notes.txt <<'EOF'", "gh pr create -t x", "EOF"]), "allow", cwd=NOGIT)
+# An LF header ends its body only at a line `EOF`, so a CRLF `EOF` line in the body is text, and the `$( )` after it
+# is text too. A rule that ends a body at a CR-terminated `EOF` line wrongly refuses this allowed row.
+sh("draft-pr: a quoted cat heredoc with an LF header, a CRLF EOF line in its body, and a $( ) text line after it, is allowed",
+   "\n".join(["cat > notes.txt <<'EOF'", "text", "EOF\r", "echo $(gh pr create -t x)", "EOF"]), "allow", cwd=NOGIT)
 # UNCERTAIN, kept as main has it. A wrapper word (`env`, `sudo`) before a python run is read as a possible
 # shell, so the body stays in view and the case is refused. Move it to allow only with a decision on wrappers.
 for _name, _command in (
