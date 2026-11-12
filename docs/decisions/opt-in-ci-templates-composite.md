@@ -29,6 +29,8 @@ The pre-commit hook reads the index. It refuses a staged environment file, which
 
 `checks.yml` runs the eight tests. It calls one template, `ci-done-comment`, because this repo's own sessions wait on its CI (decision ci-wait-reads-run-status, "The cloud wake"). CI templates are opt-in per repo, so a repo with no CI is never stuck on red checks. The nightly alarm is not enabled.
 
+A CI alarm on a push to main wakes the batch runner and opens no issue (owner ruling R53, 13:07 CST Nov 12). `actions/ci-alarm/wake.sh` is the one home of that wake, and `test_wake.sh` tests it. Per the coordinator's pick (13:12 CST Nov 12), it comments on the merged pull request that produced the commit. It needs `REPO`, `SHA`, `KEY`, `TEXT` and `GH_TOKEN`. The hidden marker `<!-- main-alarm:KEY -->` in that comment is the memory: a pull request that holds it gets no second comment. A commit with no merged pull request opens no issue. The alarm job ends red with the message in the step summary.
+
 Each template ships a test that goes red on its defect (`test_action.sh`, `test_comment.py`, `test_readme_links.py`, `test_hook.sh`, `test_pre_commit.sh`, `skip-locally-fail-in-ci.test.mjs`).
 
 Kind: process
