@@ -41,7 +41,7 @@ const sentItem = () => mk("sent-closed", 90, { status: "closed", lastAnswer: { c
 
 // The stub database: each collection is a map of id to data, and each write fires its listeners. window.__putItem is a session's
 // write after load; window.__answers reads the answers the page wrote.
-function stubDb({ items, answers, groups, meta, holdMeta }) {
+function stubDb({ items, answers, groups, meta, holdMeta, failMeta, metaFirst }) {
   const data = { items: Object.fromEntries(items.map((i) => [i.id, i])), answers: { ...answers }, groups: { ...groups }, receipts: {}, meta: meta ? { page: meta } : {} };
   window.__log = [];
   const subs = {};
@@ -59,7 +59,15 @@ function stubDb({ items, answers, groups, meta, holdMeta }) {
     set: async (body) => { window.__log.push(["set", name, id, body]); (data[name] = data[name] || {})[id] = body; setTimeout(() => fire(name), 0); },
     update: async (body) => { if (!(data[name] || {})[id]) throw { code: "not-found" }; data[name][id] = { ...data[name][id], ...body }; setTimeout(() => fire(name), 0); },
     delete: async () => { delete (data[name] || {})[id]; setTimeout(() => fire(name), 0); },
-    onSnapshot: (cb) => { if (name === "meta" && holdMeta) heldMeta.push(cb); else setTimeout(() => cb(dsnap(name, id)), 0); return () => {}; },
+    onSnapshot: (cb, failed) => {
+      // failMeta: the read fails, and window.__metaFailed says so once the failure is delivered.
+      if (name === "meta" && failMeta) setTimeout(() => { window.__metaFailed = true; if (failed) failed({ code: "unavailable" }); }, 0);
+      else if (name === "meta" && holdMeta) heldMeta.push(cb);
+      // metaFirst: the page subscribes to items before meta, so a synchronous meta arrives before any item: a load with the meta present.
+      else if (name === "meta" && metaFirst) cb(dsnap(name, id));
+      else setTimeout(() => cb(dsnap(name, id)), 0);
+      return () => {};
+    },
   });
   const db = {
     doc: (p) => docRef(p.split("/")[0], p.split("/")[1]),
@@ -73,7 +81,7 @@ function stubDb({ items, answers, groups, meta, holdMeta }) {
 }
 
 // Loads the page with these items and waits until the first one is drawn. Each case gets its own browser page.
-async function open(t, { items, answers = {}, groups = {}, meta, holdMeta = false }) {
+async function open(t, { items, answers = {}, groups = {}, meta, holdMeta = false, failMeta = false, metaFirst = false }) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
@@ -81,10 +89,11 @@ async function open(t, { items, answers = {}, groups = {}, meta, holdMeta = fals
   t.after(() => page.close());
   // The page is served from a stand-in origin, so the init script and localStorage both apply. Every other request is refused.
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body: html }) : r.abort()));
-  await page.addInitScript(stubDb, { items, answers, groups, meta, holdMeta });
+  await page.addInitScript(stubDb, { items, answers, groups, meta, holdMeta, failMeta, metaFirst });
   await page.goto(ORIGIN);
   await page.waitForFunction("state.items.length > 0");
-  await page.waitForSelector(`#item-${items[0].id}`);
+  // A held or failed meta draws no card until it settles, so a case with one waits on its own marker instead.
+  if (!holdMeta && !failMeta) await page.waitForSelector(`#item-${items[0].id}`);
   return page;
 }
 
@@ -301,33 +310,45 @@ test("a group whose member gains stops after load keeps the head count the order
   assert.match(head, /\bstops 1\b/, "the group head does not show the count the order sorts by (its union at load, 1): " + head);
 });
 
-test("until the repo meta arrives the tiers draw flat: no sub-heads and no 'This repo first.' line", async (t) => {
-  // The items arrive; the meta document is held back, so the page does not yet know which repo is this one.
+// The repo meta, held back or failed in the cases below: this repo is named "owner/this-repo".
+const META = { repo: "owner/this-repo" };
+
+test("until the repo meta settles the page draws its loading line, with no tier, card or repo head", async (t) => {
+  // The items arrive; the meta document is held back, so the page cannot yet say which repo is this one.
   const repoless = blk("meta-repoless", 1, { added: at(1) });
   const other = blk("meta-other", 2, { added: at(2), repo: "owner/other-repo" });
-  const page = await open(t, { items: [repoless, other], holdMeta: true }); if (!page) return;
-  assert.equal(await page.locator("#tier-holds section.subgrp").count(), 0, "a repo sub-head is drawn before the repo meta arrives");
-  assert.doesNotMatch(await page.locator("#tier-holds .tsub").innerText(), /This repo first\./, "the key line says 'This repo first.' before the repo meta arrives");
+  const page = await open(t, { items: [repoless, other], meta: META, holdMeta: true }); if (!page) return;
+  assert.match(await page.locator("#list").innerText(), /Loading the items waiting on you/, "the loading line is not shown while the repo meta is held");
+  assert.equal(await page.locator("section.tier").count(), 0, "a tier is drawn before the repo meta settles");
+  assert.equal(await page.locator("article.card").count(), 0, "a card is drawn before the repo meta settles");
+  assert.equal(await page.locator(".subgrp, .subhead").count(), 0, "a repo head is drawn before the repo meta settles");
 });
 
-test("the order after the repo meta arrives is the order a load with the meta gives, and no card moves when the two orders agree", async (t) => {
-  const META = { repo: "owner/this-repo" };
-  // The own-repo item is the older one. Before the meta it is an other-repo group, so the flat draw puts the repo-less item
-  // first; with the meta it is this repo's, and sorts by age inside the own group, ahead of the repo-less item.
-  const ownSlug = blk("meta-order-slug", 1, { added: at(1), repo: "owner/this-repo" });
+test("when the repo meta arrives the page redraws, in the order a load with the meta gives", async (t) => {
+  // The other-repo item is the oldest. Drawn flat it comes first; with the meta this repo's group sorts first, its items by age.
+  const other = blk("meta-order-other", 1, { added: at(1), repo: "owner/other-repo" });
   const repoless = blk("meta-order-repoless", 2, { added: at(2) });
-  const other = blk("meta-order-other", 3, { added: at(3), repo: "owner/other-repo" });
-  const items = [ownSlug, repoless, other];
-  const held = await open(t, { items, holdMeta: true }); if (!held) return;
-  const before = await tierIds(held, "holds");
+  const ownSlug = blk("meta-order-slug", 3, { added: at(3), repo: "owner/this-repo" });
+  const items = [other, repoless, ownSlug];
+  const held = await open(t, { items, meta: META, holdMeta: true }); if (!held) return;
   await held.evaluate(() => window.__releaseMeta());
   await held.waitForFunction("feed.meta === true");
+  assert.doesNotMatch(await held.locator("#list").innerText(), /Loading the items waiting on you/, "the loading line still shows after the repo meta arrives");
   const after = await tierIds(held, "holds");
-  const full = await open(t, { items, meta: META });
-  const withMeta = await tierIds(full, "holds");
-  assert.deepEqual(after, withMeta, "after the meta arrives the order is not the order a load with the meta gives: " + after.join(", "));
-  // A card may move on the meta's arrival only when the order before it differs from the order with it.
-  if (JSON.stringify(before) === JSON.stringify(withMeta)) assert.deepEqual(after, before, "a card moved when the meta arrived");
+  const full = await open(t, { items, meta: META, metaFirst: true });
+  assert.deepEqual(after, await tierIds(full, "holds"), "after the meta arrives the order is not the order a load with the meta gives: " + after.join(", "));
+});
+
+test("when the repo meta read fails the page settles, and repo-less items alone draw no repo head", async (t) => {
+  // identity.name lives in the meta document, so a failed read leaves no name to fall back to: repo-less items are this repo's.
+  const first = blk("meta-fail-a", 1, { added: at(1) });
+  const second = blk("meta-fail-b", 2, { added: at(2) });
+  const page = await open(t, { items: [first, second], failMeta: true }); if (!page) return;
+  await page.waitForFunction("window.__metaFailed === true");
+  assert.doesNotMatch(await page.locator("#list").innerText(), /Loading the items waiting on you/, "the loading line still shows after the repo meta read failed");
+  assert.deepEqual(await tierIds(page, "holds"), [first.id, second.id], "the repo-less items are not drawn in tier order after the failed meta read");
+  assert.equal(await page.locator(".subgrp, .subhead").count(), 0, "a repo head is drawn for repo-less items alone after the failed meta read");
+  assert.doesNotMatch(await page.locator("#tier-holds .tsub").innerText(), /This repo first\./, "the key line says 'This repo first.' with repo-less items alone");
 });
 
 test("at 1280 the first run in the rail's chips has no top gap: its label's margin-top is 0", async (t) => {
