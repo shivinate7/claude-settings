@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fails when a merge or branch silently drops or reverts earlier work. Stdlib and git only.
 
-    python3 lint/check_silent_undo.py [--upstream origin/main] [--head HEAD] [--strict]
+    python3 lint/check_silent_undo.py [--upstream BASE] [--head HEAD] [--strict]   # BASE: the tracked upstream, else origin/main
     python3 lint/check_silent_undo.py --history [REV] [--window 60]   # audit, always exit 0
 
 Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
@@ -674,6 +674,24 @@ def resolve_upstream(cwd, upstream):
     raise Unknown("no %s here, nothing to compare against" % upstream)
 
 
+DEFAULT_BASE = "origin/main"
+
+
+def default_base(cwd, head):
+    """(base, why) for a run with no --upstream: the branch's tracked upstream, so a branch stacked on another is judged
+    against the branch it stacks on. The branch's own pushed copy (branch.<name>.merge names its own name) is no base:
+    that and no tracking at all give origin/main. A head that is no branch (a sha, a detached HEAD) tracks nothing."""
+    name = git(cwd, "rev-parse", "--abbrev-ref", head, ok=(0, 128))[1].strip()
+    if name and name != "HEAD":
+        merge = git(cwd, "config", "--get", "branch.%s.merge" % name, ok=(0, 1))[1].strip()
+        up = git(cwd, "rev-parse", "--abbrev-ref", "%s@{upstream}" % name, ok=(0, 128))[1].strip()
+        if up and merge != "refs/heads/" + name:
+            return up, "the branch's tracked upstream"
+        if up:
+            return DEFAULT_BASE, "%s tracks its own pushed copy %s" % (name, up)
+    return DEFAULT_BASE, "no tracked upstream"
+
+
 def generated_page(cwd, head, paths, upstream="origin/main", tool=None):
     """(page path, True when head's copy equals what the generator writes for head's tree).
     The generator is the upstream's own lint/hook_catalog.py, never the head's: a head that edits the generator and
@@ -803,7 +821,7 @@ def say(line):
 
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--upstream", default="origin/main")
+    ap.add_argument("--upstream", help="the base to compare against; default: the branch's tracked upstream, else origin/main")
     ap.add_argument("--head", default="HEAD")
     ap.add_argument("--window", type=int, default=60, help="history mode only")
     ap.add_argument("--strict", action="store_true", help="unknown exits 1 (also when env CI is set)")
@@ -811,6 +829,9 @@ def main(argv):
     ap.add_argument("--repo", default=os.getcwd())
     a = ap.parse_args(argv)
     try:
+        if a.upstream is None and not a.history:
+            a.upstream, why = default_base(a.repo, a.head)
+            say("silent-undo: base: %s (%s)" % (a.upstream, why))
         if a.history:
             n, hits = history(a.repo, a.history, a.window)
             say("\n".join(hits))
