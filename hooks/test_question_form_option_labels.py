@@ -15,7 +15,7 @@ Three parts, one file:
      line the check cannot read (A, em dash, text; **A** text; a cite with no colon) is checked or noted. A page
      letter the chat question never writes is refused. A curly apostrophe or an em dash folds equal to its plain
      form. A payload with no transcript_path logs one noted line.
-  1f. Chat text the label check does not read: a cite with no colon whose id has no digit and no hyphen, and the chat option forms
+  1f. Unread chat forms: a cite with no colon whose id has no digit and no hyphen, and the chat option forms
      "Option A: x", "A x", "a)x" and "**a**) x", are not read. A write the chat refutes must be checked or noted, never
      a silent allow. Each red case fails on the carry head with an allow and zero noted lines; each control is green.
   1g. A bold letter with a dash ("**A** — Blue") reads the dash as the separator, so the chat text is "Blue". The page
@@ -27,8 +27,8 @@ Three parts, one file:
      page_grant.py's ignoring of the answer `label` is tested in skills/waiting-page/test_page_grant_label.py.
 
 Red on the round-2 base: the cases of part 1e and the re-pointed fn: case fail on an assert about the verdict.
-Part 1f's cases fail while the check allows a write the chat refutes; every other case passes. The fn: cases run there,
-because chat_page_label_hit is built. Run with the argument
+Part 1f's cases fail while the check allows, with no note, a write the chat refutes. The fn: cases need
+chat_page_label_hit. Run with the argument
 `behaviour` to skip them, for a base without that function. Without it, every case runs.
 
 Standard library only, no test runner. Run it from the repository root:
