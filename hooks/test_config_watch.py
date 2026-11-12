@@ -26,6 +26,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 GUARD = os.path.join(HERE, "guard.py")
 sys.path.insert(0, HERE)
 from git_bash import find_git_bash  # noqa: E402  the one home of the Git Bash lookup
+import local_time  # noqa: E402  the one home of the Central clock and its DST rule
 
 
 # Git Bash by full path, never a bare "bash" (hooks/git_bash.py says why). `to_bash_path` below builds the
@@ -99,7 +100,6 @@ def _iso(hours_from_now: float) -> str:
 
 VALID_UNTIL = _iso(1)     # one hour ahead: current
 PASSED_UNTIL = _iso(-1)   # one hour ago: expired
-TOO_FAR_UNTIL = _iso(48)  # two days ahead: over the 24-hour ceiling
 
 # TEST_CLOCK_ENV must match `config_watch.TEST_CLOCK_ENV`. It is the only way a fixture can put
 # `_agentCapUntil` EXACTLY on the 24-hour boundary: `datetime.now()` called once to build the
@@ -118,11 +118,34 @@ def _fmt(when: datetime) -> str:
 
 
 CLOCK_AT_REFERENCE = _fmt(REFERENCE_NOW)
-BOUNDARY_24H_UNTIL = _fmt(REFERENCE_NOW + timedelta(hours=24))           # ahead == 86400s: accepted
-BOUNDARY_INSIDE_UNTIL = _fmt(REFERENCE_NOW + timedelta(seconds=86399))   # ahead == 86399s: accepted
-BOUNDARY_OUTSIDE_UNTIL = _fmt(REFERENCE_NOW + timedelta(seconds=86401))  # ahead == 86401s: revoked
-BOUNDARY_AT_DEADLINE_UNTIL = _fmt(REFERENCE_NOW)                         # ahead == 0s: accepted
-BOUNDARY_PAST_UNTIL = _fmt(REFERENCE_NOW - timedelta(seconds=1))         # ahead == -1s: revoked
+# The pinned clock as LOCAL_TIME_NOW reads it (`local_time.clock`): ISO-8601 with an offset.
+CLOCK_AT_REFERENCE_ISO = REFERENCE_NOW.isoformat()
+LOCAL_TIME_ENV = "LOCAL_TIME_NOW"
+NEAR_UNTIL = _fmt(REFERENCE_NOW + timedelta(hours=1))
+FAR_30H_UNTIL = _fmt(REFERENCE_NOW + timedelta(hours=30))
+FAR_48H_UNTIL = _fmt(REFERENCE_NOW + timedelta(hours=48))
+FAR_400D_UNTIL = _fmt(REFERENCE_NOW + timedelta(days=400))
+# The cap-lift deadline has no ceiling any more (owner ruling, page item 602, pick a, 2026-11-12
+# 12:54 CST). These instants test the edges that remain: current, and passed.
+BOUNDARY_24H_UNTIL = _fmt(REFERENCE_NOW + timedelta(hours=24))             # ahead == 86400s: accepted
+JUST_UNDER_24H_UNTIL = _fmt(REFERENCE_NOW + timedelta(seconds=86399))      # ahead == 86399s: accepted
+JUST_OVER_24H_UNTIL = _fmt(REFERENCE_NOW + timedelta(seconds=86401))       # ahead == 86401s: accepted
+BOUNDARY_AT_DEADLINE_UNTIL = _fmt(REFERENCE_NOW)                           # ahead == 0s: accepted
+BOUNDARY_PAST_UNTIL = _fmt(REFERENCE_NOW - timedelta(seconds=1))           # ahead == -1s: revoked
+
+# Two deadlines the ask must show in US Central (rule style-time-central-24h): one in winter (CST),
+# one in summer (CDT). The expected text is read from the one Central helper, never typed by hand,
+# so a builder that echoes the UTC reading, or hard-codes CST, reads as wrong.
+WINTER_UNTIL = "2099-01-15T03:30:00Z"
+SUMMER_UNTIL = "2099-07-15T03:30:00Z"
+
+
+def _utc(text):
+    return datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+
+
+WINTER_WANT = local_time.central_hhmm(_utc(WINTER_UNTIL))  # 21:30 CST, on the 14th
+SUMMER_WANT = local_time.central_hhmm(_utc(SUMMER_UNTIL))  # 22:30 CDT, on the 14th
 
 
 def cap_json(model=None, force=None, until=None, extra=None):
@@ -212,15 +235,25 @@ class Project(object):
         text = self.content()
         return bool(text) and "opus" in text
 
+    def pre_full(self, tool, tool_input, clock=None):
+        """Run the PreToolUse guard and return (decision, reason): the decision is allow, ask or
+        deny, and the reason is the printed one, '' when none. `clock`, an ISO-8601 string, pins
+        the time the guard's Central helper reads, through LOCAL_TIME_ENV."""
+        env = self.env()
+        if clock is not None:
+            env[LOCAL_TIME_ENV] = clock
+        out = run(GUARD, self.payload(tool, tool_input), env)
+        if not out.strip():
+            return "allow", ""
+        try:
+            block = json.loads(out)["hookSpecificOutput"]
+            return block["permissionDecision"], block.get("permissionDecisionReason", "")
+        except Exception:
+            return "allow", ""
+
     def pre(self, tool, tool_input) -> str:
         """Run the PreToolUse guard and return its decision: allow, ask or deny."""
-        out = run(GUARD, self.payload(tool, tool_input), self.env())
-        if not out.strip():
-            return "allow"
-        try:
-            return json.loads(out)["hookSpecificOutput"]["permissionDecision"]
-        except Exception:
-            return "allow"
+        return self.pre_full(tool, tool_input)[0]
 
     def post(self, tool, tool_input, clock=None) -> str:
         """Run the PostToolUse watch and return its systemMessage, or ''.
@@ -490,8 +523,15 @@ approved_case("an approved lift with a missing _agentCapUntil is revoked",
               cap_json(model="opus", force="1"), "bad")
 approved_case("an approved lift with an unparseable _agentCapUntil is revoked",
               cap_json(model="opus", force="1", until="not-a-time"), "bad")
-approved_case("an approved lift with _agentCapUntil more than 24h ahead is revoked",
-              cap_json(model="opus", force="1", until=TOO_FAR_UNTIL), "bad")
+approved_case("an approved lift with _agentCapUntil more than 24h ahead is NOT reverted, "
+              "at any length once asked", cap_json(model="opus", force="1", until=FAR_48H_UNTIL),
+              "far", clock=CLOCK_AT_REFERENCE)
+approved_case("an approved lift with _agentCapUntil 30 hours ahead is NOT reverted (no ceiling)",
+              cap_json(model="opus", force="1", until=FAR_30H_UNTIL), "far",
+              clock=CLOCK_AT_REFERENCE)
+approved_case("an approved lift with _agentCapUntil 400 days ahead is NOT reverted (no ceiling)",
+              cap_json(model="opus", force="1", until=FAR_400D_UNTIL), "far",
+              clock=CLOCK_AT_REFERENCE)
 approved_case("an approved lift with _agentCapUntil already passed is revoked",
               cap_json(model="opus", force="1", until=PASSED_UNTIL), "bad")
 approved_case("an approved lift with a valid, current _agentCapUntil is NOT reverted, "
@@ -509,20 +549,18 @@ approved_case("an approved lift with a valid, current _subagentCapUntil (the old
 chain_case("a second approved lift keeps the ORIGINAL pre-lift content as prior, so a later "
            "revert never installs the first lift's own content")
 
-# The 24-hour boundary, pinned exactly with TEST_CLOCK_ENV (see REFERENCE_NOW above). The code
-# accepts a deadline AT the ceiling and AT the deadline instant itself: both `ahead > 24h` and
-# `ahead < 0` are strict, so `ahead == 86400` and `ahead == 0` both read as "no problem".
-approved_case("an approved lift with _agentCapUntil exactly 24 hours ahead is accepted "
-              "(the ceiling is inclusive)",
+# The edges of the deadline, pinned exactly with TEST_CLOCK_ENV (see REFERENCE_NOW above). A
+# deadline is current at the instant itself and passed one second after it. The 24-hour edge no
+# longer revokes anything, so the 24-hour and 86401-second instants read as current too.
+approved_case("an approved lift with _agentCapUntil exactly 24 hours ahead is accepted",
               cap_json(model="opus", force="1", until=BOUNDARY_24H_UNTIL), "valid",
               clock=CLOCK_AT_REFERENCE)
-approved_case("an approved lift with _agentCapUntil one second inside the 24h bound is "
-              "accepted",
-              cap_json(model="opus", force="1", until=BOUNDARY_INSIDE_UNTIL), "valid",
+approved_case("an approved lift with _agentCapUntil one second short of 24 hours ahead is accepted",
+              cap_json(model="opus", force="1", until=JUST_UNDER_24H_UNTIL), "valid",
               clock=CLOCK_AT_REFERENCE)
-approved_case("an approved lift with _agentCapUntil one second outside the 24h bound is "
-              "revoked",
-              cap_json(model="opus", force="1", until=BOUNDARY_OUTSIDE_UNTIL), "bad",
+approved_case("an approved lift with _agentCapUntil one second beyond 24 hours ahead is NOT "
+              "reverted (no ceiling)",
+              cap_json(model="opus", force="1", until=JUST_OVER_24H_UNTIL), "far",
               clock=CLOCK_AT_REFERENCE)
 approved_case("an approved lift with _agentCapUntil exactly at the deadline instant is "
               "accepted (not yet passed)",
@@ -531,6 +569,73 @@ approved_case("an approved lift with _agentCapUntil exactly at the deadline inst
 approved_case("an approved lift with _agentCapUntil one second past the deadline is revoked",
               cap_json(model="opus", force="1", until=BOUNDARY_PAST_UNTIL), "bad",
               clock=CLOCK_AT_REFERENCE)
+
+
+@case("a deadline-only Edit that moves an approved lift's end to 30 hours ahead leaves it lifted "
+      "and silent", "expiry", kind="far")
+def extended_deadline_edit(project):
+    project.settle()
+    near = cap_json(model="opus", force="1", until=NEAR_UNTIL)
+    project.pre("Write", {"file_path": project.settings, "content": near})
+    write(project.settings, near)
+    project.post("Write", {"file_path": project.settings, "content": near}, CLOCK_AT_REFERENCE)
+    old = '"%s": "%s"' % (EXPIRY_FIELD, NEAR_UNTIL)
+    new = '"%s": "%s"' % (EXPIRY_FIELD, FAR_30H_UNTIL)
+    tool_input = {"file_path": project.settings, "old_string": old, "new_string": new}
+    decision = project.pre("Edit", tool_input)
+    write(project.settings, project.content().replace(old, new))
+    message = project.post("Edit", tool_input, CLOCK_AT_REFERENCE)
+    return {"pre": decision, "lifted": project.lifted(), "message": message}
+
+
+# --------------------------------------------------------------------------- the deadline ask
+#
+# A write that sets or changes the cap-lift deadline joins the agent-model-cap ask that a model
+# raise already gets, and the ask shows the end in US Central: 24-hour clock with the zone (rule
+# style-time-central-24h). The guard judges each write before it lands, so each case asks it first.
+
+def deadline_edit(project, before, after):
+    """Put an approved lift in place, then ask the guard about an Edit that changes only its end."""
+    write(project.settings, cap_json(model="opus", force="1", until=before))
+    old = '"%s": "%s"' % (EXPIRY_FIELD, before)
+    new = '"%s": "%s"' % (EXPIRY_FIELD, after)
+    decision, reason = project.pre_full(
+        "Edit", {"file_path": project.settings, "old_string": old, "new_string": new},
+        CLOCK_AT_REFERENCE_ISO)
+    write(project.settings, project.content().replace(old, new))
+    return {"pre": decision, "reason": reason}
+
+
+@case("a deadline-only Edit that moves an approved lift's end to a winter time asks under "
+      "agent-model-cap and names the end in Central", "ask", kind="deadline", want=WINTER_WANT)
+def deadline_edit_winter(project):
+    return deadline_edit(project, NEAR_UNTIL, WINTER_UNTIL)
+
+
+@case("a deadline-only Edit that moves an approved lift's end to a summer time asks under "
+      "agent-model-cap and names the end in Central with CDT", "ask", kind="deadline",
+      want=SUMMER_WANT)
+def deadline_edit_summer(project):
+    return deadline_edit(project, NEAR_UNTIL, SUMMER_UNTIL)
+
+
+@case("a Write that sets only the cap-lift end asks under agent-model-cap and names the end in "
+      "Central", "ask", kind="deadline", want=WINTER_WANT)
+def deadline_set_write(project):
+    content = json.dumps({EXPIRY_FIELD: WINTER_UNTIL})
+    decision, reason = project.pre_full(
+        "Write", {"file_path": project.settings, "content": content}, CLOCK_AT_REFERENCE_ISO)
+    write(project.settings, content)
+    return {"pre": decision, "reason": reason}
+
+
+@case("a model raise still asks under agent-model-cap and names the model", "ask", kind="model")
+def model_raise_still_asks(project):
+    content = cap_json(model="opus", force="1", until=NEAR_UNTIL)
+    decision, reason = project.pre_full(
+        "Write", {"file_path": project.settings, "content": content}, CLOCK_AT_REFERENCE_ISO)
+    write(project.settings, content)
+    return {"pre": decision, "reason": reason}
 
 
 # --------------------------------------------------------------------------- the old shape
@@ -561,9 +666,31 @@ def old_shape_baseline(project):
 
 # --------------------------------------------------------------------------- the run
 
+def expect_ask(entry, result):
+    """Return (ok, note) for one settings write the guard judged before it landed.
+
+    Scope before subject: first the decision, then the rule that asked, then the text it printed.
+    """
+    decision = result["pre"]
+    reason = result["reason"]
+    if decision != "ask":
+        return (False, "the write was %s, not asked: the ask does not cover it" % decision)
+    if not reason.startswith("agent-model-cap:"):
+        return (False, "asked, but not under agent-model-cap: %r" % reason[:80])
+    if entry["kind"] == "model":
+        if (KEY + " = opus") not in reason:
+            return (False, "the model raise ask no longer names opus: %r" % reason[:80])
+        return (True, "the model raise still asks under agent-model-cap, and names opus")
+    if entry["want"] not in reason:
+        return (False, "the ask does not show the end as %r in Central with its zone" % entry["want"])
+    return (True, "asked under agent-model-cap, and shows the end as %r" % entry["want"])
+
+
 def expectation(entry, result):
     """Return (ok, note) for one finished case."""
     group = entry["group"]
+    if group == "ask":
+        return expect_ask(entry, result)
     lifted = result["lifted"]
     message = result["message"]
     if group in ("bypass", "stop"):
@@ -590,6 +717,14 @@ def expectation(entry, result):
             return (lifted and not message,
                     "stayed lifted and silent, as a valid deadline should" if lifted and not
                     message else "a valid, current deadline was mishandled")
+        if kind == "far":
+            if not lifted:
+                return (False, "reverted a deadline more than 24 hours ahead: the ceiling still "
+                        "applies")
+            if message:
+                return (False, "spoke about a deadline more than 24 hours ahead: the ceiling still "
+                        "applies")
+            return (True, "stayed lifted and silent: any length stands once asked")
         if kind == "nocap":
             return ((not lifted) and not message,
                     "untouched and silent" if (not lifted and not message)
