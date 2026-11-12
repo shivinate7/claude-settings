@@ -2179,4 +2179,5 @@
 - link-problem-runner-only: `link_problem` in `lint/rule_audit.py` reads only the runner text, so a row that cites a runner case with a ref only a section names gets a false "neither imports nor runs". No current row hits it. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
+- cut-at-older-cap-reads-as-cancel: `is_cut` in `actions/ci-limits/ci_limits.py` compares a cancelled job's minutes with the cap on `origin/main` today, so a run cut at an older, lower cap reads as a newer-push cancel and is no sample. Known limit. Decision: time-limits-end-hangs-only.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).

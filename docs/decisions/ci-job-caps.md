@@ -5,19 +5,19 @@
 A full CI run is red only when something is broken, never because a job ran out of time (owner, 2026-10-27, roadmap step c95). A job's time limit exists to end a hang, so it is generous and computed: decision `time-limits-end-hangs-only` holds the rule, and `actions/ci-limits/ci_limits.py` computes it. R3 of the restart plan replaced the 80% target, the re-cap-or-split item and the measured-figure comment of step c95.
 
 - A job's limit is the slowest sample of the newest 30 completed push runs on main, times 1.5, never plus a fixed number.
-- By default a job that ends at its cap with no failed CI step is a sample of at least its cap, so its limit rises. The owner's answer is pending (waiting-page item 586); `--green-only` ignores a cut run.
+- A job that ends at its cap with no failed CI step is a sample of at least its cap, so its limit rises x 1.5 per cut run, up to 360 (owner, 2026-11-12 12:54 CST, waiting-page item 586, pick a). A job that truly hangs ratchets to 360 until the silence stop ends hangs.
 - A job with no green run yet is new. It takes the limit of its nearest kind times 1.5, else the largest times 1.5. If it is cut at that limit, it was misjudged and takes the largest times 1.5.
-- Every job limit is at least the median of all job limits, derived each run (coordinator, 2026-11-12 12:22 CST), so a job that runs for seconds is never cut at a minute.
+- Every job limit is at least the median of the measured job limits, derived each run (coordinator pick, 2026-11-12 12:22 CST), so a job that runs for seconds is never cut at a minute. A new job's estimate is not measured.
 - A job skipped in every run of the window never ran on main. It shows "not measured on main", in the table and as null in the JSON, and it joins no median, estimate or deadline.
 - The caps the script compares a cut run against are the `timeout-minutes` of `checks.yml` on the base ref (`origin/main`), never the checkout.
-- `merge.deadlineMinutes` is the slowest green run's wall clock times 1.5, at least the largest job limit.
+- The script computes `merge.deadlineMinutes`: the slowest green run's wall clock times 1.5, at least the largest job limit. Today `.github/stamp.json` holds 80 and the merge tool reads that, until series step S2 makes it read the script.
 - The `timeout-minutes` in `.github/workflows/checks.yml` still hold stored numbers, raised generously as a stopgap until time-pinned tests are gone (owner, 2026-11-01 18:44 CST, decision `test-strategy-reset`). A later step makes them read the script.
 - The local tool limits (`LINT_SECONDS` in `merge/merge.py`, `TIMEOUT` in `lint/check_debt_retire.py` and `lint/check_python_floor.py`, and `timeout` in `hooks/mutate_guard.py` and `janitor/mutate_sweep.py`) stay raised (owner, 2026-11-10 12:11 CST) until the silence stop replaces them. Any other local time limit rises when it fails off time.
 - The raised caps and local limits end with roadmap step `time-pinned-tests-go` (time-pinned tests are gone), and with the silence stop.
 
 ## The table
 
-`python3 actions/ci-limits/ci_limits.py --table` prints it. This copy was read at 12:25 CST on 2026-11-12 from the newest 30 completed push runs of `checks.yml` on main (run 42544938082, 2026-11-09, to run 43244808204), with the caps of `origin/main`. Limits are minutes. The median floor is 33. No job was cut at its estimate while new.
+`python3 actions/ci-limits/ci_limits.py --table` prints it. This copy was read at 13:00 CST on 2026-11-12 from the newest 30 completed push runs of `checks.yml` on main (run 42544938082, 2026-11-09, to run 43244808204), with the caps of `origin/main`. Limits are minutes. The median floor is 33. No job was cut at its estimate while new.
 
 | Job | Limit (minutes) | Note |
 | --- | --- | --- |
@@ -58,7 +58,7 @@ A full CI run is red only when something is broken, never because a job ran out 
 
 ## How to measure again
 
-1. Run `python3 actions/ci-limits/ci_limits.py --table` from a checkout of this repo, with `gh` signed in. It reads the jobs API: one call for the run list and one per run, in one process.
+1. Run `python3 actions/ci-limits/ci_limits.py --table` from a checkout of this repo, with `gh` signed in. It reads the jobs API: one script run, 1 + n `gh` calls (n = 30 runs).
 2. Minutes come from `job_minutes` in `merge/merge.py`, and the caps from `job_caps` in the same file. The script calls both. Do not write a second reader.
 3. A cut run is cancelled, has no failed CI step, and ran at least as long as the job's `timeout-minutes` on the base ref. A run cancelled earlier by a newer push or a batch rebuild is no sample.
 4. When the API cannot be read, every limit is 360 and the script warns on stderr.

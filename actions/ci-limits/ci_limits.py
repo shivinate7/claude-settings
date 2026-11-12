@@ -6,17 +6,18 @@
 
 The limit ends a hung job and nothing else, so it is generous: the slowest sample x 1.5, rounded up, at most 360.
 A sample is a green job run, or a run the cap cut (cancelled, no failed CI step, minutes at or past the cap passed in,
-the workflow's `timeout-minutes` on the base ref): a cut run counts as at least its limit. That is the default and the
-owner's question is open (decision time-limits-end-hangs-only); --green-only, or cut_counts_as_sample=False, ignores a cut run. A job that
-failed, or was cancelled before its cap by a newer push, is no sample.
+the workflow's `timeout-minutes` on the base ref): a cut run counts as at least its limit, so its limit rises x 1.5 per cut
+run up to 360 (owner, decision time-limits-end-hangs-only). A job that failed, or was cancelled before its cap by a newer
+push, is no sample.
 A new job (no green run yet) takes its nearest kind's limit x 1.5, else the largest old limit x 1.5. A new job cut at
-its cap was misjudged and takes the largest. Every job limit is at least the median of all job limits (median_floor),
+its cap was misjudged and takes the largest. Every job limit is at least the median of the measured job limits (median_floor; an estimate is not measured),
 so a job that runs for seconds is never cut at a minute. A job skipped in every run of the window never ran on main:
 its limit is None (JSON null, table "not measured on main"), and it joins no median, estimate or deadline.
 The deadline is the slowest green run's wall clock x 1.5, at least the largest job limit, new-job estimates included.
+With no measured job and no green run it is 360, never 0.
 
-Cost: one `gh api` call for the run list and one per run (1 + n, n = 30), plus one more per further 100 job rows of a run,
-in one process. No timer, no file written. A read that fails gives every limit 360 and one warning line on stderr:
+Cost: one script run makes 1 + n `gh api` calls (n = 30 runs), plus one more per further 100 job rows of a run.
+No timer, no file written. A read that fails gives every limit 360 and one warning line on stderr:
 a hung job still ends, a good job is never cut.
 Run it from a checkout of this repo: job_minutes is merge/merge.py's, the one reader of a job's minutes.
 """
@@ -74,7 +75,7 @@ def margin(minutes):
 
 
 def median_floor(values):
-    """The median of the job limits, rounded up: no job's limit is below it. Derived each run, never stored. No values, no floor."""
+    """The median of the measured job limits (an estimate is not one), rounded up: no job's limit is below it. Derived each run, never stored. No values, no floor."""
     ordered = sorted(values)
     n = len(ordered)
     if not n:
@@ -88,7 +89,7 @@ def is_cut(job, minutes, cap):
             and not any(s.get("conclusion") == "failure" for s in job.get("steps") or ()))
 
 
-def analyse(jobs_by_run, caps, kinds, window, cut_counts_as_sample=True):
+def analyse(jobs_by_run, caps, kinds, window):
     """-> (limits, misjudged). See job_limits."""
     kinds = {name: kind_of(name) for name in caps} if kinds is None else kinds
     samples, steps, green, cut, seen, ran = {}, {}, set(), set(), set(), set()
@@ -106,9 +107,7 @@ def analyse(jobs_by_run, caps, kinds, window, cut_counts_as_sample=True):
             if job.get("conclusion") == "success":
                 green.add(name)
             elif is_cut(job, minutes, caps[name]):
-                cut.add(name)  # a cut still marks a new job misjudged, sample or not
-                if not cut_counts_as_sample:
-                    continue
+                cut.add(name)
             else:
                 continue
             samples.setdefault(name, []).append(minutes)
@@ -130,7 +129,7 @@ def analyse(jobs_by_run, caps, kinds, window, cut_counts_as_sample=True):
         same_kind = [v for n, v in old.items() if kinds.get(n) is not None and kinds.get(n) == kinds.get(name)]
         base = max(same_kind) if same_kind and not misjudged_now else largest
         raw[name] = CLAMP if base is None else min(CLAMP, -(-base * MARGIN_NUM // MARGIN_DEN))
-    floor = median_floor(raw.values())
+    floor = median_floor(old.values())
     limits = {name: max(v, floor) for name, v in raw.items()}
     limits.update({name: None for name in not_measured})
     for key, values in steps.items():
@@ -138,12 +137,12 @@ def analyse(jobs_by_run, caps, kinds, window, cut_counts_as_sample=True):
     return limits, misjudged
 
 
-def job_limits(jobs_by_run, caps, kinds=None, window=30, cut_counts_as_sample=True):
+def job_limits(jobs_by_run, caps, kinds=None, window=30):
     """jobs_by_run: completed push runs on main, newest first, [{"run_id": int, "jobs": [jobs-API job, ...]}].
     caps: {job name: timeout-minutes in force}. kinds: {job name: kind}, else kind_of.
     -> ({job name: minutes, or None when the job never ran on main; "job/CI step": minutes},
         the job names cut at their estimate while still new)."""
-    return analyse(jobs_by_run, caps, kinds, window, cut_counts_as_sample)
+    return analyse(jobs_by_run, caps, kinds, window)
 
 
 def deadline_minutes(jobs_by_run, limits, window=30):
@@ -162,10 +161,10 @@ def deadline_minutes(jobs_by_run, limits, window=30):
             wall = job_minutes({"started_at": min(j["started_at"] for j in timed), "completed_at": max(j["completed_at"] for j in timed)})
             if wall is not None:
                 deadline = max(deadline, margin(wall))
-    return min(CLAMP, deadline)
+    return min(CLAMP, deadline) if deadline else CLAMP  # no measured job and no green run: no data is never a 0 deadline
 
 
-def read_limits(fetch, caps, kinds=None, window=30, cut_counts_as_sample=True):
+def read_limits(fetch, caps, kinds=None, window=30):
     """-> (limits with "deadlineMinutes", misjudged, warning lines). A failed fetch gives every limit CLAMP and one warning."""
     try:
         jobs_by_run = fetch()
@@ -174,7 +173,7 @@ def read_limits(fetch, caps, kinds=None, window=30, cut_counts_as_sample=True):
         limits = {name: CLAMP for name in caps}
         limits["deadlineMinutes"] = CLAMP
         return limits, [], ["ci-limits: cannot read the jobs API (%s). Every limit is %d minutes." % (why, CLAMP)]
-    limits, misjudged = job_limits(jobs_by_run, caps, kinds, window, cut_counts_as_sample)
+    limits, misjudged = job_limits(jobs_by_run, caps, kinds, window)
     limits["deadlineMinutes"] = deadline_minutes(jobs_by_run, {n: limits[n] for n in caps}, window)
     return limits, misjudged, []
 
@@ -194,9 +193,8 @@ def main(argv, fetch, caps, kinds=None, out=None, err=None):
     form = parser.add_mutually_exclusive_group(required=True)
     form.add_argument("--json", action="store_true")
     form.add_argument("--table", action="store_true")
-    parser.add_argument("--green-only", action="store_true", help="a run the cap cut is no sample")
     args = parser.parse_args(argv)
-    limits, misjudged, warnings = read_limits(fetch, caps, kinds, cut_counts_as_sample=not args.green_only)
+    limits, misjudged, warnings = read_limits(fetch, caps, kinds)
     for line in warnings:
         print(line, file=err)
     for name in misjudged:
