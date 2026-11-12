@@ -67,6 +67,23 @@ CJS_FALLBACK_CATCHER = ("const { add } = require('./calc.cjs');\n"
                         "  process.exit(1);\n"
                         "}\n"
                         "console.log('ok');\n")
+CJS_PKG_CATCHER = ("const { add } = require('./calc.cjs');\n"
+                   "try {\n"
+                   "  require('kb-present/missing');\n"
+                   "} catch {\n"
+                   "  // the package is installed by a part that passed: only its file is absent\n"
+                   "}\n"
+                   "if (add(1, 2) !== 3) {\n"
+                   "  console.log('FAIL: add(1, 2) is not 3');\n"
+                   "  process.exit(1);\n"
+                   "}\n"
+                   "console.log('ok');\n")
+# The plant puts a fallback import in add(): only the planted copy imports the module, so only its run logs it.
+PLANTED_IMPORT = ("try:\n"
+                  "        import kb_extra_only\n"
+                  "    except ImportError:\n"
+                  "        pass\n"
+                  "    return a - b")
 PLAIN_CATCHER = ("import sys\n"
                  "from calc import add\n\n"
                  "if add(1, 2) != 3:\n"
@@ -276,6 +293,12 @@ class CrossPartFallbackTests(unittest.TestCase):
         code, out, err = ci.known_run(defects, repo, profile=cross_part_profile(ci.FAILING_INSTALL))
         self.assert_unknown_naming_module_and_part(code, out, err, "kb-fb-node", MISSING_NODE)
 
+    def test_a_planted_import_of_a_missing_module_reads_unknown_when_only_the_planted_run_imports_it(self):
+        repo = python_repo(PLAIN_CATCHER)
+        defects = [ci.defect("kb-planted-import", "return a + b", PLANTED_IMPORT, CATCHER, file="calc.py")]
+        code, out, err = ci.known_run(defects, repo, profile=cross_part_profile(ci.FAILING_INSTALL))
+        self.assert_unknown_naming_module_and_part(code, out, err, "kb-planted-import", MISSING_PY)
+
     def test_the_import_log_lives_only_under_the_replay_temp_folder_and_is_removed(self):
         sidecar = os.path.join(ci.fresh(), "log_paths.txt")
         temp = ci.fresh()
@@ -350,8 +373,8 @@ class LoadHookTests(unittest.TestCase):
                         argv=["sh", "-c", shell_check])]
         code, out, err = ci.known_run(defects, repo, profile=cross_part_profile(ci.FAILING_INSTALL))
         self.assert_caught(code, out, err, "kb-sh",
-                           "pick A, 15:54 CST, and its lane pick at 16:58 CST: a shell check is no Python or Node "
-                           "catcher, so no load hook is owed and the failed install reads CAUGHT")
+                           "a shell check is no Python or Node catcher, so no load hook is owed and the failed "
+                           "install reads CAUGHT")
 
     def test_a_cjs_require_of_a_missing_package_under_a_failed_install_reads_unknown_never_caught(self):
         repo = repo_with({CJS_MODULE: CJS_CALC, CJS_CATCHER: CJS_FALLBACK_CATCHER})
@@ -410,6 +433,16 @@ class LoadHookTests(unittest.TestCase):
         code, out, err = ci.known_run(defects, repo, profile=profile)
         self.assert_caught(code, out, err, "kb-subpath",
                            "a present package's missing subpath is no failed install's gap")
+
+    def test_a_cjs_require_of_a_missing_file_in_a_present_package_under_a_failed_install_reads_caught(self):
+        # Green pin: the package came from a part that passed, so its missing file logs nothing.
+        repo = repo_with({CJS_MODULE: CJS_CALC, CJS_CATCHER: CJS_PKG_CATCHER})
+        defects = [dict(ci.defect("kb-cjs-subpath", "return a + b", "return a - b", CJS_CATCHER, file=CJS_MODULE),
+                        argv=["node", CJS_CATCHER])]
+        profile = cross_part_profile(ci.FAILING_INSTALL, oracle_install=PKG_INSTALL)
+        code, out, err = ci.known_run(defects, repo, profile=profile)
+        self.assert_caught(code, out, err, "kb-cjs-subpath",
+                           "a present package's missing file is no failed install's gap")
 
     def test_the_load_hook_file_is_written_once_for_two_defects_in_one_replay(self):
         sidecar = os.path.join(ci.fresh(), "hook_marks.txt")
