@@ -7,6 +7,8 @@ Modes:
 - SubagentStop: When a builder, test-author or record-writer stops, judges its whole diff
   against its role, for example a builder that changed a test path. A builder's offence
   is refused at its first stop; any other role's offence is logged for the reviewer.
+- PostToolUse: After a builder's Bash or PowerShell call, reads git status once and refuses
+  the call's result when a test path changed.
 
 Claude Code runs this script before each matched tool call. The script reads one
 JSON object on stdin and answers on stdout.
