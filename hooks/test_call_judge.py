@@ -1814,6 +1814,22 @@ def case_new_fact_alone_question_gets_item_8():
     new_shape_checks(item8, "new fact alone question: item 8")
 
 
+def case_new_fact_is_one_the_ruling_left_unweighed():
+    # A new fact is a measure or an observed harm the ruling left unweighed. A measure of what the ruling claims, a
+    # restatement of its claim, or the word unmeasured alone is not a new fact. The check reads the item's sentences.
+    item = load_file_module(HOOK, "call_judge_under_test").PAST_RULING_ITEM
+    flat = " ".join(item.split())
+    sentences = sentences_of(item)
+    check("unweighed: the item says a measure is a new fact only when the ruling left it unweighed",
+          re.search(r"\bmeasure\b(?:(?!\bclaim)[^.])*\bunweighed\b", flat.lower()) is not None, flat[:300])
+    check("unweighed: the item says the word unmeasured alone is not a new fact",
+          any("unmeasured" in s and "new fact" in s and re.search(r"\b(not|never|no)\b", s) for s in sentences),
+          flat[:300])
+    check("unweighed: the item says a restatement of the ruling's own claim is not a new fact",
+          any(("restat" in s or "own claim" in s) and "new fact" in s and re.search(r"\b(not|never|no)\b", s)
+              for s in sentences), flat[:300])
+
+
 def case_past_ruling_item_refuses_a_bare_re_ask():
     # A re-ask that brings no new fact is refused by a sentence of the item. The refusal no longer points at a four-part
     # challenge: "such a challenge" named that bar.
@@ -2139,6 +2155,7 @@ def main():
                  case_past_ruling_item_never_says_withdraw, case_bare_re_ask_is_refused_beside_a_passing_challenge,
                  case_past_ruling_item_says_a_challenge_never_grants, case_challenge_question_writes_no_grant,
                  case_challenge_text_never_lifts_a_refusal, case_new_fact_alone_passes_with_the_record,
+                 case_new_fact_is_one_the_ruling_left_unweighed,
                  case_plain_words_explain_keeps_its_rule_id, case_judges_call_no_grant_reader,
                  case_past_ruling_denial_keeps_its_id_and_date, case_past_ruling_denial_plain_reason_keeps_its_id_and_date,
                  case_past_ruling_replay_item_532, case_past_ruling_replay_item_532_challenge_passes,
