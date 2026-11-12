@@ -637,7 +637,9 @@ def main(argv):
             if wanted and name not in wanted:
                 continue
             if lint and not kind[n - 1]:
-                if LOCAL_ACTION.fullmatch(uses(step)):
+                if "failure()" in (step_key(step, "if") or "") and condition(step_key(step, "if"), True) is False:
+                    print("%-15s %s: runs only after a failed job; a lint run has none" % ("not run", name))
+                elif LOCAL_ACTION.fullmatch(uses(step)):
                     tally["unknown"] += 1
                     print("%-15s %s: --lint cannot run this repo's action %s" % ("unknown", name, uses(step)))
                 else:

@@ -280,6 +280,10 @@ def all_jobs(text):
             if not isinstance(job["steps"][-1].get("env"), dict):
                 job["steps"][-1]["env"] = {}
             job["steps"][-1]["env"][m.group(1)] = m.group(2)
+    # The red-job wake step (a `job:` input) ends every job and is no suite step (decision ci-wait-reads-run-status).
+    for job in jobs.values():
+        job["steps"] = [st for st in job["steps"]
+                        if not ("actions/ci-done-comment" in st.get("uses", "") and "job" in (st.get("env") or {}))]
     return jobs
 
 
