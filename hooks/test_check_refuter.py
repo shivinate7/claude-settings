@@ -34,8 +34,7 @@ The hook cases reuse hooks/test_call_judge.py: its run_hook, its claude stub and
 harness and the step fixture). The refute cases replace decision_watch.invoke_model in this process. A missing module
 fails each case with a named cause, never a crash.
 
-The non-brief cases are controls: they pass on main, where call_judge ignores send_message, and they guard the
-builder's marker check.
+The non-brief cases guard the marker check: a call that is no lane brief is passed through with no model call.
 """
 import contextlib
 import json
