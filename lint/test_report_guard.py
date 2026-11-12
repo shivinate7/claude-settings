@@ -5874,9 +5874,10 @@ class PassClaimCitesVerdictTests(unittest.TestCase):
     def test_control_a_lone_quote_does_not_hide_a_later_claim(self):
         self.assert_blocked(self.report('Size 12" and lint passed.'))
 
-    def test_red_the_refusal_says_the_command_must_match_the_claim(self):
+    def test_red_the_refusal_says_the_command_matches_the_claims_check(self):
+        # A Stop refusal holds facts only (decision guard-remedy-not-to-owner), so the rule is stated as a fact.
         out = self.assert_blocked(self.report("lint passed."))
-        self.assertIn("must match the claim", out["reason"].lower())
+        self.assertIn("matches the claim's check", out["reason"].lower())
 
     # Rule 4: a cite backs a claim only when its check matches. A lint or checks claim needs a roster command, a
     # tests claim needs a command that names a test, and `verdict true` backs nothing.
