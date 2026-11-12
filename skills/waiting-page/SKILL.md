@@ -49,52 +49,52 @@ The URL is the `waiting-page` key in the repo's extras file, `.claude/layout-ext
 Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `answered`) from `~/.claude/bin/now-central --iso`, never from memory.
 
 - `items/<id>`: one per waiting item. The database key is the item's id. The `id` field is optional
-  and ignored: the page, the guard and the tools read the key. Each field, with the guard rules that judge it (the table is generated: `python3 skills/waiting-page/field_table.py`):
+  and ignored: the page, the guard and the tools read the key. Each field (the table is generated: `python3 skills/waiting-page/field_table.py`; the guard rules are stated once, where each is defined below):
 
   <!-- gen:item-fields -->
   Guard rule `item-field-rendered` judges every field name: a write names only the fields below.
 
-  | Field | Guard rules | Meaning |
-  | --- | --- | --- |
-  | `id` |  | Optional and ignored: the page, the guard and the tools read the database key. |
-  | `n` |  | A stable number the owner answers by. |
-  | `kind` | `command-in-item`, `gh-login-switch`, `option-letter-keys`, `owner-judge`, `port-question`, `press-link`, `question-departs`, `question-form`, `task-names-check`, `uniform-pick` | `decision` or `task`. |
-  | `status` | `option-letter-keys`, `owner-judge`, `question-departs`, `question-form`, `rework-off-page` | `open` or `closed`. A closed item passes every rule in this row. |
-  | `added` |  | ISO time the item was added. |
-  | `ref` |  | Each id with its plain name. |
-  | `title` | `option-letter-keys`, `port-question`, `press-link`, `rework-off-page` | The item's name. |
-  | `short` |  | Optional, 24 characters or fewer: the name on the wide left list. Longer or missing, the list shows `title` cut with an ellipsis. |
-  | `owner` |  | The session that reads the answer at its wake. |
-  | `home` |  | The step, PR or record the answer goes to. A step is its bare step id, so the roadmap upkeep row can match it. |
-  | `context` | `option-letter-keys`, `owner-judge`, `port-question`, `question-departs`, `question-form`, `rework-off-page`, `task-names-check`, `task-why-cited` | Plain text, line breaks kept. Holds the question form's lines, the Departs from line and a task's Why yours line. |
-  | `holds` | `port-question` | What is stopped until the answer. |
-  | `by` |  | ISO deadline. |
-  | `stands` | `owner-judge` | `true`: the pick stands. |
-  | `arbiter` |  | `true` marks a ruling the arbiter decided. |
-  | `ruled` |  | ISO time of the ruling, on an arbiter item. |
-  | `rank` |  | Order inside a tier. |
-  | `group` |  | Slug of the item's group. |
-  | `port` | `port-question` | A port or redesign question. |
-  | `look` |  | A question about how something looks. |
-  | `designs` |  | A list of `{slug, label, file}`: the mockups. An option names its picture with `design`. |
-  | `options` | `option-letter-keys`, `press-link`, `question-form`, `rework-off-page`, `uniform-pick` | A decision's list of `{key, label, how, gain, lose}`, plus optional `design`, `differs` and `widens`. |
-  | `pick` | `uniform-pick` | The key you recommend; a list of keys on a `multi` item. Never names a `widens` option. |
-  | `why` | `option-letter-keys`, `rework-off-page` | Why the pick. |
-  | `multi` |  | The owner ticks any number of options. |
-  | `ranked` |  | The owner also orders the ticked options. |
-  | `steps` | `command-in-item`, `option-letter-keys`, `press-link`, `rework-off-page` | A task's list of strings. |
-  | `links` | `press-link` | A list of `{label, url}`, on a task or on an option. A step or option that presses in a web app needs one. |
-  | `command` | `command-in-item`, `gh-login-switch` | A task's `{powershell, mac}`, two strings, shown in a closed disclosure with a Copy button. |
-  | `minutes` |  | A task's time. |
-  | `reply` |  | What the session says back to a comment or a note. |
-  | `replied` |  | ISO time of the last reply or `waits` change. |
-  | `lastAnswer` |  | The owner's last answer: `{choice, note, at}`, `{done, note, at}` or `{act: "park", note, at}`. |
-  | `lane` |  | The busy lane the answer waits on. |
-  | `waits` |  | The CI run or PR the item waits on. |
-  | `repo` | `question-checked-with-repo` | `owner/name`: the repo the question is about. Required on every open decision and task. |
-  | `checked_with` | `question-checked-with-repo` | The session id that said the owner has not ruled on it. Required when `repo` is not this page's repo. |
-  | `closed` |  | ISO UTC time, trailing `Z`, the item closed. Written in the same `update` as `status: "closed"`. |
-  | `dismissed` |  | ISO time, or `null`: the owner's read mark. Only the page writes it; a session write is refused. |
+  | Field | Meaning |
+  | --- | --- |
+  | `id` | Optional and ignored: the page, the guard and the tools read the database key. |
+  | `n` | A stable number the owner answers by. |
+  | `kind` | `decision` or `task`. |
+  | `status` | `open` or `closed`. A closed item passes every rule in this row. |
+  | `added` | ISO time the item was added. |
+  | `ref` | Each id with its plain name. |
+  | `title` | The item's name. |
+  | `short` | Optional, 24 characters or fewer: the name on the wide left list. Longer or missing, the list shows `title` cut with an ellipsis. |
+  | `owner` | The session that reads the answer at its wake. |
+  | `home` | The step, PR or record the answer goes to. A step is its bare step id, so the roadmap upkeep row can match it. |
+  | `context` | Plain text, line breaks kept. Holds the question form's lines, the Departs from line and a task's Why yours line. |
+  | `holds` | What is stopped until the answer. |
+  | `by` | ISO deadline. |
+  | `stands` | `true`: the pick stands. |
+  | `arbiter` | `true` marks a ruling the arbiter decided. |
+  | `ruled` | ISO time of the ruling, on an arbiter item. |
+  | `rank` | Order inside a tier. |
+  | `group` | Slug of the item's group. |
+  | `port` | A port or redesign question. |
+  | `look` | A question about how something looks. |
+  | `designs` | A list of `{slug, label, file}`: the mockups. An option names its picture with `design`. |
+  | `options` | A decision's list of `{key, label, how, gain, lose}`, plus optional `design`, `differs` and `widens`. |
+  | `pick` | The key you recommend; a list of keys on a `multi` item. Never names a `widens` option. |
+  | `why` | Why the pick. |
+  | `multi` | The owner ticks any number of options. |
+  | `ranked` | The owner also orders the ticked options. |
+  | `steps` | A task's list of strings. |
+  | `links` | A list of `{label, url}`, on a task or on an option. A step or option that presses in a web app needs one. |
+  | `command` | A task's `{powershell, mac}`, two strings, shown in a closed disclosure with a Copy button. |
+  | `minutes` | A task's time. |
+  | `reply` | What the session says back to a comment or a note. |
+  | `replied` | ISO time of the last reply or `waits` change. |
+  | `lastAnswer` | The owner's last answer: `{choice, note, at}`, `{done, note, at}` or `{act: "park", note, at}`. |
+  | `lane` | The busy lane the answer waits on. |
+  | `waits` | The CI run or PR the item waits on. |
+  | `repo` | `owner/name`: the repo the question is about. Required on every open decision and task. |
+  | `checked_with` | The session id that said the owner has not ruled on it. Required when `repo` is not this page's repo. |
+  | `closed` | ISO UTC time, trailing `Z`, the item closed. Written in the same `update` as `status: "closed"`. |
+  | `dismissed` | ISO time, or `null`: the owner's read mark. Only the page writes it; a session write is refused. |
   <!-- /gen -->
 
   - An update carries again every stored field that a guard judges together with the field it sets, because the guard cannot see the stored fields.

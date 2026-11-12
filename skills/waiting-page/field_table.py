@@ -7,13 +7,13 @@
 
 Sources, read each run and never copied here:
   page.html `itemFields` block   the fields and their order (hooks/question_form.py `_item_fields`).
-  hooks/question_form.py         `PAGE_REASONS`: every guard rule the table names must be a key of it.
-  field_table.json               the two things no code holds: a field's one-line meaning, and the guard
-                                 rules that judge it. The guard exposes no field-to-rule tie.
+  hooks/question_form.py         `PAGE_REASONS`: the rule the block's first line names must be a key of it.
+  field_table.json               a field's one-line meaning, which no code holds. A field-to-guard-rule column
+                                 is left out: the guard exposes no field-to-rule tie, so a column would go stale unread.
 
 Problems, one line each, exit 1, nothing written: the block is unreadable, an itemFields field has no entry in
-the data file, the data file names a field the page does not list, an entry has no meaning, or an entry names a
-rule that is not in PAGE_REASONS. Exit 2 when an input cannot be read or SKILL.md has not exactly one block.
+the data file, the data file names a field the page does not list, an entry has no meaning, or the rule the block names
+is not in PAGE_REASONS. Exit 2 when an input cannot be read or SKILL.md has not exactly one block.
 
 Options for tests: --skill FILE, --page FILE, --data FILE.
 """
@@ -29,7 +29,7 @@ import question_form  # noqa: E402
 OPEN, CLOSE = "<!-- gen:item-fields -->", "<!-- /gen -->"
 # The block sits inside the first bullet of "The database", so every line carries its two-space indent.
 INDENT = "  "
-EVERY_FIELD_RULE = "item-field-rendered"  # judges every field name, so it has no column cell of its own
+EVERY_FIELD_RULE = "item-field-rendered"  # judges every field name, so the block names it once, above the table
 FENCE = "```"
 
 
@@ -43,8 +43,6 @@ def problems(fields, data, reasons):
         if not isinstance(entry, dict) or not str(entry.get("meaning") or "").strip():
             out.append("field %s has no meaning" % field)
             continue
-        out += ["field %s names rule %s, which is not in PAGE_REASONS" % (field, r)
-                for r in entry.get("rules", []) if r not in reasons]
     if EVERY_FIELD_RULE not in reasons:
         out.append("rule %s is not in PAGE_REASONS" % EVERY_FIELD_RULE)
     return out
@@ -55,10 +53,9 @@ def cell(text):
 
 
 def render(fields, data):
-    rows = ["| Field | Guard rules | Meaning |", "| --- | --- | --- |"]
+    rows = ["| Field | Meaning |", "| --- | --- |"]
     for f in fields:
-        rules = ", ".join("`%s`" % r for r in data[f].get("rules", []))
-        rows.append("| `%s` | %s | %s |" % (f, rules, cell(data[f]["meaning"])))
+        rows.append("| `%s` | %s |" % (f, cell(data[f]["meaning"])))
     lines = [OPEN, "Guard rule `%s` judges every field name: a write names only the fields below." % EVERY_FIELD_RULE,
              ""] + rows + [CLOSE]
     return "\n".join(INDENT + l if l else l for l in lines)
