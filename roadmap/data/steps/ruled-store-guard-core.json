@@ -1,0 +1,16 @@
+{
+ "id": "ruled-store-guard-core",
+ "title": "Shared guard core names the ruling that allows or may replace an act",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "ruled-store-one-home"
+ ],
+ "why": "lane ruled-store-one-home 16:30 CST Nov 12; retrospective asked for it. The store lookup is built (#2992) but no guard calls it.",
+ "source": "lane ruled-store-one-home 16:30 CST Nov 12",
+ "note": "Wire the shared guard core to ruling_for_guard / guard_ruling_line (\"allowed by ruling <id>\", \"a newer ruling may apply: <id>\"), plus the CLAUDE.md line that an open, checked store entry outranks main's text (R59 parts 2-3). Also: lifted_guards / ruling_for_guard should honour lands_in; tighten the duplicate-supersedes check to key full refs, not the first token.",
+ "updatedAt": "2026-11-12T16:32:13-06:00"
+}
