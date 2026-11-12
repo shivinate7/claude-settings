@@ -17,14 +17,19 @@ settings deny rule still sees it:
 
 The watcher streams LOG, and any new byte of BEAT, to stdout (the harness output file). A tool that
 is quiet by design (bin/verdict) appends its heartbeat to BEAT, so a redirect in the command cannot
-hide it. After N silent seconds it prints one report that starts with a
-line `STALL:`, and exits 3. The command keeps running. If the pid ends first, the watcher exits 0,
-and `wait` returns the command's code.
+hide it. After N silent seconds with no quiet-by-design waiter, the watcher prints one report that
+starts with a line `STALL:`, ends the job's whole process tree (C in the step record), and exits 3.
+If the pid ends first, the watcher exits 0, and `wait` returns the command's code.
 
 The STALL line lists the job's shell (the pid `&` gave) and every process under it, parent first.
-Stopping all of them, in that order, ends every shape with nothing left, and the report needs no
-scan of the command text. The shape cases stall a command in sh, bash and zsh and stop the listed
-pids. A shape that a shell cannot parse, such as `time while` in dash, runs in the other shells.
+The watcher ends them itself, so nothing that the job started is left. The tree is read while the
+job runs (run_sampled), because the watcher has ended it by the time the wrapper returns. The shape
+cases stall a command in sh, bash and zsh. A shape that a shell cannot parse, such as `time while`
+in dash, runs in the other shells.
+
+Waiting rules the cases encode (see the 28-cases): a process that waits on a quiet child is not
+hung (A); a lone `sleep N` followed by one command is not hung, and neither is that command while
+it runs quietly (B); any other quiet tree is hung and is ended after the quiet age.
 
 Every case runs the real hook and the real rewritten command, the way the harness runs them. No
 case imports the module. Two environment variables steer the run:
@@ -33,7 +38,7 @@ case imports the module. Two environment variables steer the run:
 - STALL_WATCH_QUIET: the quiet seconds the hook writes into the rewritten command. The tests set 2,
   and the verdict cases (24a-24c) set 3.
 
-Report format the tests read: `pid=<a>,<b>,...` on the STALL line lists the pids to stop, parent first.
+Report format the tests read: `pid=<a>,<b>,...` on the STALL line lists the pids of the tree, parent first.
 Its absolute path, ending in .log, names the log. Pids are found by regex, so spacing around `=` is
 tolerant.
 
@@ -69,6 +74,11 @@ CASES = []
 
 PID_RE = re.compile(r"\bpid\b\W{0,3}(\d+)")
 LOG_RE = re.compile(r"(/\S+\.log)\b")
+NO_SUCH_PID = 2147483646  # no process has this pid; an in-process watch run may signal it harmlessly
+# Seconds to wait for a stalled job's tree to be gone. The watcher kills it before the wrapper returns, so
+# this is a short settle, well under the 30 s and 100 s sleeps the cases use: a job that would have ended
+# on its own is not mistaken for a kill.
+STALL_SETTLE = 2
 
 ORIG_QUOTING = r'''printf '%s\n' "it's" 'x$HOME' "$((1+2))" && echo chained # trailing comment'''
 QUOTING_WANT = "it's\nx$HOME\n3\nchained\n"
@@ -141,16 +151,6 @@ def tree(root):
         found.append((p, args_of.get(p, "")))
         stack.extend(kids.get(p, []))
     return found
-
-
-def pid_alive(pid):
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
 
 
 def kill_all(pids):
@@ -239,9 +239,24 @@ def job_env(**extra):
     return env
 
 
-def run_rewritten(command, shell="/bin/sh", timeout=40, mark=None, env=None, quiet="2"):
+def descendants(table, root):
+    """The pids under root in a {pid: (ppid, args)} table. root itself is not in the answer."""
+    kids = {}
+    for pid, (ppid, _args) in table.items():
+        kids.setdefault(ppid, []).append(pid)
+    found, stack = [], list(kids.get(root, []))
+    while stack:
+        cur = stack.pop()
+        found.append(cur)
+        stack.extend(kids.get(cur, []))
+    return found
+
+
+def run_sampled(command, shell="/bin/sh", timeout=40, mark=None, env=None, quiet="2"):
     """Run the rewritten command in the given shell, with `env` as its environment (default: job_env()).
-    Return (rc or None, text, seconds, cmd).
+    Return (rc or None, text, seconds, cmd, tree). tree is {pid: (ppid, args)} for the processes under
+    the wrapper, from the latest sample of the largest size taken while it ran. The watcher ends a stalled job, so the
+    job is gone when the wrapper returns, and the sample is the only record of its tree.
     The mark is the shell's $0, so ps shows it on the job and reap() finds a job that no report
     names. Text added to the command would change it, for one ending in a backslash."""
     cmd, _hso = rewrite(command, quiet=quiet)
@@ -249,20 +264,34 @@ def run_rewritten(command, shell="/bin/sh", timeout=40, mark=None, env=None, qui
     d = new_dir()
     out_path = os.path.join(d, "harness.out")
     start = time.monotonic()
+    tree, rc = {}, None
     with open(out_path, "wb") as out:
         proc = subprocess.Popen([shell, "-c", cmd, mark], cwd=d, stdin=subprocess.DEVNULL,
                                 stdout=out, stderr=subprocess.STDOUT,
                                 env=job_env() if env is None else env)
-        try:
-            rc = proc.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-            rc = None
+        while True:
+            table = {pid: (ppid, args) for pid, ppid, args in process_table()}
+            under = descendants(table, proc.pid)
+            if len(under) >= len(tree):  # the latest of the largest samples: the tree just before any stall
+                tree = {pid: table[pid] for pid in under}
+            if proc.poll() is not None:
+                rc = proc.returncode
+                break
+            if time.monotonic() - start >= timeout:
+                proc.kill()
+                proc.wait()
+                break
+            time.sleep(0.1)  # a poll on the job's end, bounded by timeout; no assert reads the clock
     secs = time.monotonic() - start
     with open(out_path, encoding="utf-8", errors="replace") as f:
         text = f.read()
     remember(text)
+    return rc, text, secs, cmd, tree
+
+
+def run_rewritten(command, shell="/bin/sh", timeout=40, mark=None, env=None, quiet="2"):
+    """Return (rc or None, text, seconds, cmd) of run_sampled, for a case that needs no tree."""
+    rc, text, secs, cmd, _tree = run_sampled(command, shell=shell, timeout=timeout, mark=mark, env=env, quiet=quiet)
     return rc, text, secs, cmd
 
 
@@ -278,22 +307,42 @@ def job_files(cmd):
     return flag_value("--log"), flag_value("--beat")
 
 
-def stall_problems(rc, text, secs, sleep_args=None):
-    """Checks shared by the stall cases. Return a list of problems."""
+def stall_verdict_problems(rc, text, secs):
+    """The watcher's verdict on a stalled job: exit 3, a STALL line, a pid on it, within about 4 s."""
     problems = expect(rc == 3, f"exit {rc}, want 3")
     lines = text.splitlines()
     stall_at = next((i for i, line in enumerate(lines) if line.startswith("STALL:")), None)
     problems += expect(stall_at is not None, "no line starts with STALL:")
     problems += expect(secs <= 5.0, f"rewritten command ran {secs:.1f}s, want about 4s")
-    m = PID_RE.search(text)
-    if not m:
-        return problems + ["report names no pid="]
-    pid = int(m.group(1))
-    problems += expect(pid_alive(pid), f"pid {pid} is not alive after the watcher exited")
-    if sleep_args:
-        args = [a for _p, a in tree(pid)]
-        problems += expect(any(sleep_args in a for a in args),
-                           f"no process with args {sleep_args!r} under pid {pid}")
+    if not PID_RE.search(text):
+        problems.append("report names no pid=")
+    return problems
+
+
+def left_behind(tree, mark=None):
+    """{pid: args} for each process of a sampled tree that still runs, and each process whose args carry
+    mark. A zombie has ended, so it is not left behind. tree may be None or empty."""
+    left = {}
+    if tree:
+        live = set(alive(list(tree)))
+        left = {pid: tree[pid][1] for pid in live}
+    if mark:
+        for pid, _ppid, args in process_table():
+            if mark in args:
+                left.setdefault(pid, args)
+    return left
+
+
+def stall_problems(rc, text, secs, tree):
+    """Checks shared by the stall cases: the verdict, and the kill (C): once the watcher has ended the job,
+    nothing that the sampled tree held still runs. Return a list of problems."""
+    problems = stall_verdict_problems(rc, text, secs)
+    problems += expect(bool(tree), "the sampler never saw the job's tree, so the kill is not checked")  # scope first
+    wait_until(lambda: not left_behind(tree), STALL_SETTLE)  # the kill is done before the wrapper returns
+    left = left_behind(tree)
+    if left:
+        pid, args = min(left.items())
+        problems.append(f"the watcher ended the job (exit 3), but pid {pid} ({args[:40]!r}) of its tree still runs")
     return problems
 
 
@@ -380,11 +429,11 @@ def zsh_glob_fails_as_zsh_does():
 
 @posix_case
 def quiet_sleep_stalls_and_exits_3():
-    """3a. quiet sleep 30: STALL with a pid within about 4 s, exit 3, sleep still alive"""
+    """3a. quiet sleep 30: STALL with a pid within about 4 s, exit 3, and the watcher ends the sleep with the job (C)"""
     problems = []
     for shell in shells():
-        rc, text, secs, _cmd = run_rewritten("sleep 30", shell=shell)
-        problems += [f"{shell}: {p}" for p in stall_problems(rc, text, secs, sleep_args="sleep 30")]
+        rc, text, secs, _cmd, tree = run_sampled("sleep 30", shell=shell)
+        problems += [f"{shell}: {p}" for p in stall_problems(rc, text, secs, tree)]
         reap()
     return problems
 
@@ -628,28 +677,31 @@ def order_problems(listed, ppid_of=None):
 
 
 def job_problems(shell, template, pidfiles=()):
-    """Stall template in shell and check its statement: the STALL line lists the job's shell and every
-    process under it, parent first, and stopping them all in that order ends the job with nothing
-    left. template may hold @MARK@ (a token that only this job carries in its ps lines) and @NEVER@
-    (a file path that only a command after the stall point creates, so it must stay absent).
-    pidfiles name files where job processes wrote their pids, and each pid must be listed.
+    """Stall template in shell and check its statement under the kill rule (C). The STALL line lists the
+    job's shell and every process under it, parent first. The watcher ends the job, and then nothing under
+    its shell still runs, and nothing that carries the job's mark runs (a respawned loop body included).
+    template may hold @MARK@ (a token that only this job carries in its ps lines) and @NEVER@ (a file
+    path that only a command after the stall point creates, so it must stay absent). pidfiles name files
+    where job processes wrote their pids, and each pid must be listed. The tree is the sample taken while
+    the job ran (run_sampled), so the parent-first check reads the tree before the watcher ended it.
     Return a list of problems."""
     mark = new_mark()
     never = os.path.join(new_dir(), mark + ".b")
     orig = template.replace("@MARK@", mark).replace("@NEVER@", never)
-    rc, text, secs, _cmd = run_rewritten(orig, shell=shell, timeout=10, mark=mark)
-    problems = stall_problems(rc, text, secs)
+    rc, text, secs, _cmd, tree = run_sampled(orig, shell=shell, timeout=10, mark=mark)
+    problems = stall_verdict_problems(rc, text, secs)
     problems += expect("Traceback" not in text, "the watcher crashed: " + (crash_line(text) or "traceback"))
     listed = stall_pids(text)
-    args_of = {pid: args for pid, _ppid, args in process_table()}
-    ppid_of = ppids()
+    args_of = {pid: args for pid, (_ppid, args) in tree.items()}
+    ppid_of = {pid: ppid for pid, (ppid, _args) in tree.items()}
     carriers = {pid for pid, args in args_of.items() if mark in args}
     tops = [pid for pid in carriers if ppid_of[pid] not in carriers]  # the job's shell, found without the line
     if len(tops) != 1:
         kill_all(carriers)
-        return problems + [f"found {len(tops)} job shells (pids {sorted(tops)}), want 1"]
+        return problems + [f"found {len(tops)} job shells in the sampled tree (pids {sorted(tops)}), want 1"]
     job = tops[0]
-    below = [pid for pid, _args in tree(job)]
+    below = descendants(tree, job)
+    sub = {pid: tree[pid] for pid in [job] + below}
     if not listed:
         problems.append("the STALL line lists no pid")
     else:
@@ -657,7 +709,7 @@ def job_problems(shell, template, pidfiles=()):
             problems.append(f"the line starts with pid {listed[0]} ({args_of.get(listed[0], 'gone')[:40]!r}), "
                             f"not the job's shell, pid {job}")
         problems += order_problems(listed, ppid_of)
-    for pid in alive(below):
+    for pid in below:
         if pid not in listed:
             problems.append(f"pid {pid} ({args_of.get(pid, '')[:40]!r}) is under the job's shell, "
                             f"and the line does not list it")
@@ -667,24 +719,13 @@ def job_problems(shell, template, pidfiles=()):
             problems.append("a job process wrote no pid file")
         elif member not in listed:
             problems.append(f"the line does not list job process pid {member}")
-    before = alive(below)
-    for pid in listed:  # one at a time, in line order: the parent dies first and starts nothing more
-        kill_all([pid])
-    time.sleep(0.5)
-    deadline = time.monotonic() + 2.5
-    while True:
-        left = {pid: args for pid, _ppid, args in process_table() if mark in args}
-        for pid in alive(before):
-            left.setdefault(pid, args_of.get(pid, ""))
-        if not left or time.monotonic() > deadline:
-            break
-        time.sleep(0.1)
+    wait_until(lambda: not left_behind(sub, mark), STALL_SETTLE)
+    left = left_behind(sub, mark)
     if left:
-        pid, args = next(iter(left.items()))
-        problems.append(f"stopping pids {','.join(map(str, listed))} leaves the job running: "
-                        f"pid {pid} ({args[:40]!r})")
+        pid, args = min(left.items())
+        problems.append(f"the watcher ended the job (exit 3), but pid {pid} ({args[:40]!r}) still runs")
     if "@NEVER@" in template and os.path.exists(never):
-        problems.append("a command after the stall point ran after the stop")
+        problems.append("a command after the stall point ran")
     kill_all(left)
     return problems
 
@@ -772,8 +813,9 @@ def nested_pipeline_line_lists_every_member_and_inner_shell():
 
 @posix_case
 def sequence_never_starts_its_next_command_after_the_stop():
-    """18. a; b: after the line is stopped, b never starts"""
-    return shape_problems([("a; b", "sleep 30.@MARK@; touch @NEVER@")])
+    """18. a; b: after the watcher ends the job, b never starts. The pause is the second one: a lone sleep
+    followed by one command is not hung (28c), so a; b waits out a pause, a command, then a hung sleep"""
+    return shape_problems([("a; b", "sleep 1.@MARK@; echo x; sleep 30.@MARK@; touch @NEVER@")])
 
 
 @posix_case
@@ -807,48 +849,53 @@ def command_after_a_loop_ends_with_the_stop():
 
 @posix_case
 def reap_ends_a_job_that_no_report_names():
-    """22. reap() ends an endless loop that no report names: it finds the job by its mark"""
-    rc, text, _secs, _cmd = run_rewritten("while true; do sleep 1; done")
-    problems = expect(rc == 3, f"exit {rc}, want 3")
-    m = PID_RE.search(text)
-    job = [pid for pid, _args in tree(int(m.group(1)))] if m else []
+    """22. reap() ends a job that no report names: a waiter the watcher leaves running (28a), found by its mark"""
+    mark = new_mark()
+    code = "import subprocess\nsubprocess.run(['sleep', '100.%s'])" % mark
+    cmd, _hso = rewrite("%s -c %s" % (shlex.quote(PY), shlex.quote(code)))
+    proc = subprocess.Popen(["/bin/sh", "-c", cmd, mark], cwd=new_dir(), stdin=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=job_env())
     try:
-        problems += expect(m is not None, "report names no pid=")
-        PIDS.clear()  # as when a report names the wrong pid: only the mark is left to find the job
-        reap()
-        deadline = time.monotonic() + 2.5
-        while alive(job) and time.monotonic() < deadline:
-            time.sleep(0.1)
-        problems += expect(not alive(job), f"reap() left the job running: pids {alive(job)}")
+        started = wait_until(lambda: any(a.startswith("sleep") and mark in a for _p, _pp, a in process_table()), 10)
+        problems = expect(started, "the waiter's sleep never started, so reap() has nothing to end")
+        if started:
+            PIDS.clear()  # no report names the job: only the mark is left to find it
+            reap()
+            if not wait_until(lambda: not left_behind(None, mark), 5):
+                problems.append(f"reap() left the job running: {left_behind(None, mark)}")
+        return problems
     finally:
-        kill_all(alive(job))  # the job must not outlive a failing case
-        reap()
-    return problems
+        proc.kill()
+        proc.wait()
+        reap()  # the job must not outlive a failing case
 
 
 @posix_case
-def log_keeps_growing_after_watcher_exits():
-    """7. after the watcher exits 3, the command's later output still reaches the log"""
-    # The tail sleep keeps the job alive after its last write, so the poll below sees LOG before a
-    # job that removes its own log at exit does so.
-    rc, text, _secs, _cmd = run_rewritten("echo first; sleep 4; echo second; sleep 2")
+def log_gets_no_later_line_once_the_watcher_ends_the_job():
+    """7. after the watcher ends a stalled job (exit 3), the job is gone, and its later line never reaches the log"""
+    rc, text, _secs, _cmd, tree = run_sampled("echo first; sleep 4; echo second; sleep 2")
     problems = expect(rc == 3, f"exit {rc}, want 3 (the 4 s gap is a stall)")
     m = LOG_RE.search(text)
     if not m:
         reap()
         return problems + ["report names no log="]
     log = m.group(1)
-    deadline = time.monotonic() + 15
-    body = ""
-    while time.monotonic() < deadline:
+    printed = []
+
+    def gone_or_printed():  # the later line may land inside the settle window: watch the log for it
         if os.path.exists(log):
             with open(log, encoding="utf-8", errors="replace") as f:
-                body = f.read()
-            if "second" in body:
-                break
-        time.sleep(0.2)
-    problems += expect("first" in body, "log lacks the output printed before the stall")
-    problems += expect("second" in body, "log lacks output printed after the watcher exited")
+                if "second" in f.read():
+                    printed.append(True)
+                    return True
+        return not left_behind(tree)
+
+    wait_until(gone_or_printed, STALL_SETTLE)
+    if printed:
+        problems.append("the job printed its later line after the watcher ended it (exit 3)")
+    elif left_behind(tree):
+        problems.append(f"the job still runs after the watcher ended it (exit 3): {sorted(left_behind(tree))}")
+    problems += expect("first" in text, "the output printed before the stall never reached the watcher")
     reap()
     return problems
 
@@ -943,14 +990,17 @@ def simulated_watch(phase, ps_secs, tick_extra, quiet=2.0, period=1.7, writes=6)
     sw.time = type("Clock", (), {
         "monotonic": staticmethod(lambda: clock[0]),
         "sleep": staticmethod(lambda secs: clock.__setitem__(0, clock[0] + secs + tick_extra))})
-    sw.os = type("Os", (), {"path": type("Path", (), {"exists": staticmethod(lambda _p: True)})})
+    # The fake os never signals: a stalled simulated job must not kill anything (C ends a stalled job).
+    sw.os = type("Os", (), {"path": type("Path", (), {"exists": staticmethod(lambda _p: True)}),
+                            "kill": staticmethod(lambda _pid, _sig: None)})
     sw.job_state = job_state
     sw.log_marks = lambda paths, base=None: {p: (sum(1 for w in stamps if w <= clock[0]), 0) for p in paths}
     sw.report = lambda *_a: None
     real_open = builtins.open
     builtins.open = lambda *_a, **_k: Empty()
     try:
-        return sw.watch(1, "log", quiet, ["named.log"])
+        # NO_SUCH_PID, not a live pid: a stalled simulated job must never signal init or any real process.
+        return sw.watch(NO_SUCH_PID, "log", quiet, ["named.log"])
     finally:
         builtins.open = real_open
 
@@ -966,10 +1016,10 @@ def named_log_written_slower_than_the_check_is_no_stall():
 
 @posix_case
 def named_log_that_stops_growing_stalls():
-    """23c. the same job whose log stops growing: STALL within about 4 s, exit 3, the job alive"""
+    """23c. the same job whose log stops growing: STALL within about 4 s, exit 3, the watcher ends the job (C)"""
     log = shlex.quote(os.path.join(new_dir(), "merge.log"))
-    rc, text, secs, _cmd = run_rewritten("echo once >> %s; sleep 30 >> %s 2>&1" % (log, log))
-    problems = stall_problems(rc, text, secs, sleep_args="sleep 30")
+    rc, text, secs, _cmd, tree = run_sampled("echo once >> %s; sleep 30 >> %s 2>&1" % (log, log))
+    problems = stall_problems(rc, text, secs, tree)
     reap()
     return problems
 
@@ -983,11 +1033,11 @@ def log_named_only_in_a_string_or_comment_still_stalls():
     writer = subprocess.Popen([PY, "-c", "import sys, time\nwhile True:\n    open(sys.argv[1], 'a').write('x\\n'); time.sleep(0.3)", log])
     try:
         orig = "echo '> %s' \"--log %s\" >%s; sleep 30 # >> %s" % (log, log, os.devnull, q)
-        rc, text, secs, _cmd = run_rewritten(orig)
+        rc, text, secs, _cmd, tree = run_sampled(orig)
     finally:
         writer.kill()
         writer.wait()
-    problems = stall_problems(rc, text, secs, sleep_args="sleep 30")
+    problems = stall_problems(rc, text, secs, tree)
     reap()
     return problems
 
@@ -995,8 +1045,8 @@ def log_named_only_in_a_string_or_comment_still_stalls():
 @posix_case
 def quiet_job_with_no_named_log_stalls():
     """23e. a quiet job whose only redirection is to the null device, with no other log: STALL"""
-    rc, text, secs, _cmd = run_rewritten("sleep 30 >%s 2>&1" % os.devnull)
-    problems = stall_problems(rc, text, secs, sleep_args="sleep 30")
+    rc, text, secs, _cmd, tree = run_sampled("sleep 30 >%s 2>&1" % os.devnull)
+    problems = stall_problems(rc, text, secs, tree)
     reap()
     return problems
 
@@ -1092,9 +1142,9 @@ def busy_child_behind_a_pipe_is_no_stall():
 
 @posix_case
 def sleeping_child_behind_a_pipe_still_stalls():
-    """25b. control: sleep 30 behind `| tail -1` has no CPU time and no output: STALL, exit 3, the sleep alive"""
-    rc, text, secs, _cmd = run_rewritten(pipe_job("sleep 30"))
-    problems = stall_problems(rc, text, secs, sleep_args="sleep 30")
+    """25b. control: sleep 30 behind `| tail -1` has no CPU time and no output: STALL, exit 3, and the watcher ends the pipeline (C)"""
+    rc, text, secs, _cmd, tree = run_sampled(pipe_job("sleep 30"))
+    problems = stall_problems(rc, text, secs, tree)
     reap()
     return problems
 
@@ -1233,8 +1283,8 @@ def cd_to_an_unknown_dir_reports_the_log_as_unwatched():
         return ["the rewrite passes no --unwatched log, so the unknown directory is not reported"]
     if " --also " in cmd:
         return ["the rewrite still passes --also for a log whose directory is unknown"]
-    rc, text, secs, _cmd = run_rewritten(orig, env=job_env(REPO=repo))
-    problems = stall_problems(rc, text, secs, sleep_args="sleep 30")
+    rc, text, secs, _cmd, tree = run_sampled(orig, env=job_env(REPO=repo))
+    problems = stall_problems(rc, text, secs, tree)
     if not any(line.startswith("Named log not watched") and line.endswith(": log") for line in text.splitlines()):
         problems += ["the STALL report has no 'Named log not watched' line for log"]
     reap()
@@ -1335,26 +1385,29 @@ def wait_until(cond, secs):
 
 
 def stall_then_end_problems(shell):
-    """A1 for one shell. The job prints a line, stalls, then ends after the wrapper has returned."""
-    done = os.path.join(new_dir(), "done")  # the job's last act, so the wait below has a file to see
-    orig = 'echo pre-stall-line; echo x >> "$STALL_WATCH_BEAT"; sleep 4; touch %s' % shlex.quote(done)
+    """A1 for one shell. The job prints a line, then stalls: the watcher ends it (C), and once the job is
+    gone neither LOG nor BEAT is left. A lone sleep with no command after it is hung, so it stalls."""
+    orig = 'echo pre-stall-line; echo x >> "$STALL_WATCH_BEAT"; sleep 100'
     try:
-        rc, text, _secs, cmd = run_rewritten(orig, shell=shell)
+        rc, text, secs, cmd, tree = run_sampled(orig, shell=shell)
         log, beat = job_files(cmd)
         if log is None or beat is None:
             return ["the rewrite names no --log or no --beat"]
         lines = text.splitlines()
-        problems = expect(rc == 3, f"exit {rc}, want 3")
-        problems += expect(any(line.startswith("STALL:") for line in lines), "no STALL: line on the wrapper's stdout")
+        problems = stall_verdict_problems(rc, text, secs)
         # Scope: both files exist when the wrapper returns, so their removal below proves something.
         problems += expect(os.path.exists(log), f"LOG {log} is gone when the wrapper returns")
         problems += expect(os.path.exists(beat), f"BEAT {beat} is gone when the wrapper returns")
+        problems += expect(bool(tree), "the sampler never saw the job's tree, so the kill is not checked")
         header = next((i for i, line in enumerate(lines) if re.match(r"Last \d+ output lines:$", line)), None)
         problems += expect(header is not None, "the STALL report has no 'Last N output lines:' header")
         if header is not None:
             problems += expect(any("pre-stall-line" in line for line in lines[header + 1:]),
                                "the pre-stall line is not in the report's tail")
-        problems += expect(wait_until(lambda: os.path.exists(done), 30), "the job did not end within 30 s")
+        if problems:
+            return problems
+        if not wait_until(lambda: not left_behind(tree), STALL_SETTLE):
+            return problems + [f"the job still runs after the watcher ended it (exit 3): {sorted(left_behind(tree))}"]
         wait_until(lambda: not (os.path.exists(log) or os.path.exists(beat)), 5)
         problems += expect(not os.path.exists(log), f"LOG {log} is left after the job ended")
         problems += expect(not os.path.exists(beat), f"BEAT {beat} is left after the job ended")
@@ -1365,8 +1418,8 @@ def stall_then_end_problems(shell):
 
 @posix_case
 def stalled_job_leaves_no_files_when_it_ends():
-    """A1. a job that stalls, then ends: the STALL report reaches stdout with the pre-stall line in its
-    tail, and once the job ends neither LOG nor BEAT is left"""
+    """A1. a job that stalls and is ended by the watcher: the STALL report reaches stdout with the pre-stall
+    line in its tail, and once the job is gone neither LOG nor BEAT is left"""
     problems = []
     for shell in shells():
         problems += ["%s: %s" % (shell, p) for p in stall_then_end_problems(shell)]
@@ -1411,6 +1464,106 @@ def fast_job_output_is_relayed_on_every_run():
                 found += expect(text == want, f"output {text[:80]!r}, want {want[:80]!r}")
                 if found:  # the first bad run says enough; a long list hides it
                     return problems + ["%s, %r, run %d: %s" % (shell, orig[:20], n + 1, p) for p in found]
+    return problems
+
+
+def waiter_job(children):
+    """A Python parent that starts each child (an argv list) and waits on all of them: the shape of merge
+    waiting on its git children. The parent is not a shell, so it is a waiter, not a shell copy."""
+    code = ("import subprocess\nkids = [subprocess.Popen(c) for c in %s]\nfor k in kids:\n    k.wait()\n"
+            % json.dumps(children))
+    return "%s -c %s" % (shlex.quote(PY), shlex.quote(code))
+
+
+def ran_to_end_problems(rc, text, want_line, cause):
+    """The job ran to its last line: exit 0, no STALL line, and want_line printed. When the watcher ended
+    it (exit 3, or a STALL line), that is the one cause named here."""
+    if rc == 3 or "STALL:" in text:
+        return [f"the watcher ended a job that was still running ({cause}): exit {rc}"]
+    problems = expect(rc == 0, f"exit {rc}, want 0 ({cause})")
+    problems += expect(want_line in text.splitlines(), f"the job's last line {want_line!r} is missing ({cause})")
+    return problems
+
+
+def hung_end_problems(rc, text):
+    """The watcher ends a hung job: exit 3, and a STALL line on the wrapper's stdout."""
+    problems = expect(rc == 3, f"exit {rc}, want 3: the watcher did not end the hung job")
+    problems += expect(any(line.startswith("STALL:") for line in text.splitlines()), "no STALL: line on the wrapper's stdout")
+    return problems
+
+
+@posix_case
+def waiter_on_a_quiet_child_is_no_stall():
+    """28a. A: a process that waits on one quiet child (a `sleep 4`, as merge waits on git) under a 2 s quiet:
+    no STALL, the job runs to its last line, exit 0"""
+    rc, text, _secs, _cmd = run_rewritten(waiter_job([["sleep", "4"]]) + "; echo done")
+    reap()
+    return ran_to_end_problems(rc, text, "done", "a waiter on one quiet child")
+
+
+@posix_case
+def waiter_on_two_quiet_children_is_no_stall():
+    """28b. A: a process that waits on two quiet children (two `sleep 4`, as merge waits on its git children):
+    no STALL, the job runs to its last line, exit 0"""
+    rc, text, _secs, _cmd = run_rewritten(waiter_job([["sleep", "4"], ["sleep", "4"]]) + "; echo done")
+    reap()
+    return ran_to_end_problems(rc, text, "done", "a waiter on two quiet children")
+
+
+@posix_case
+def lone_sleep_then_one_command_is_no_stall():
+    """28c. B: `sleep 4; echo done` under a 2 s quiet: no STALL during the lone sleep, the command runs, exit 0"""
+    rc, text, _secs, _cmd = run_rewritten("sleep 4; echo done")
+    reap()
+    return ran_to_end_problems(rc, text, "done", "a lone sleep, ended before its one command ran")
+
+
+@posix_case
+def one_command_after_a_pause_is_not_ended_before_its_read():
+    """28d. B: `sleep 1`, then one command that prints after 4 s of quiet, under a 2 s quiet: the watcher does
+    not end that command before its line is read, exit 0"""
+    code = "import time\ntime.sleep(4)\nprint('read-me')"
+    rc, text, _secs, _cmd = run_rewritten("sleep 1; %s -c %s" % (shlex.quote(PY), shlex.quote(code)))
+    reap()
+    return ran_to_end_problems(rc, text, "read-me", "one command quiet past the quiet age")
+
+
+@posix_case
+def ended_job_leaves_no_descendant_running():
+    """28e. C: a hung job with a background child, `( sleep 100 & sleep 100 )`: the watcher ends it and
+    nothing under the job's shell still runs, in each shell"""
+    return shape_problems([("subshell with a background child", "( sleep 100.@MARK@ & sleep 100.@MARK@ )")])
+
+
+@posix_case
+def ended_job_that_traps_term_is_still_gone():
+    """28f. C: a hung loop that traps TERM and keeps looping: the watcher ends it, and nothing under its shell
+    is left, though TERM alone does not end the loop, in each shell"""
+    return shape_problems([("loop trapping TERM", "trap 'echo caught' TERM; while :; do sleep 100.@MARK@; done")])
+
+
+@posix_case
+def second_pause_after_one_pause_and_a_command_is_still_ended():
+    """28g. control, passes on the branch: `sleep 1; echo a; sleep 100; echo b`. The second pause is hung, so
+    STALL and exit 3 come after the quiet age. The end's kill is 28e and 28f"""
+    rc, text, _secs, _cmd = run_rewritten("sleep 1; echo a; sleep 100; echo b")
+    reap()
+    problems = expect("a" in text.splitlines(), "the job never printed its first line, so the stall is not its second pause")
+    if not problems:
+        problems += hung_end_problems(rc, text)
+    return problems
+
+
+@posix_case
+def hung_cat_on_a_dead_pipe_is_still_ended():
+    """28h. control, passes on the branch: a cat on a FIFO that nothing writes, with no child: STALL and exit 3
+    after the quiet age"""
+    fifo = os.path.join(new_dir(), "dead.fifo")
+    rc, text, _secs, _cmd = run_rewritten("mkfifo %s && cat %s" % (shlex.quote(fifo), shlex.quote(fifo)))
+    reap()
+    problems = expect(os.path.exists(fifo), "mkfifo did not make the FIFO, so the cat never blocked on it")
+    if not problems:
+        problems += hung_end_problems(rc, text)
     return problems
 
 
