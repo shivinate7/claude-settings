@@ -823,9 +823,10 @@ def case_page_override():
 
 def case_page_model_failure_refuses_as_unvetted():
     r = run_hook(page_input("set", good_page_item()), answer=PAGE_FLAG, model_fail=True)
-    check("page unvetted: a model failure on an item write refuses once, with the Unvetted guard's facts",
-          r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny"
-          and facts_only_line(r.reason(), "UNVETTED_REASON") and len(r.calls) == 1, detail(r))
+    check("page unvetted: a model failure on an item write refuses once, the remedy names Unvetted:",
+          r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny" and "Unvetted:" in r.reason()
+          and len(r.calls) == 1, detail(r))
+    check("page unvetted: the refusal is rule past-ruling", r.reason().startswith("past-ruling: "), r.reason()[:160])
 
 
 def case_page_str_replace_judged():
@@ -1659,9 +1660,10 @@ def case_unvetted_marker():
 def case_unvetted_page_marker():
     item = good_page_item()
     r = run_hook(page_input("set", item, cwd=DECISIONS_REPO), answer=ALLOW, model_fail=True)
-    check("unvetted page: a model error refuses the item write once, with the Unvetted guard's facts",
-          r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny"
-          and facts_only_line(r.reason(), "UNVETTED_REASON") and len(r.calls) == 1, detail(r))
+    check("unvetted page: a model error refuses the item write once, the remedy names Unvetted:",
+          r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny" and "Unvetted:" in r.reason()
+          and len(r.calls) == 1, detail(r))
+    check("unvetted page: the refusal is rule past-ruling", r.reason().startswith("past-ruling: "), r.reason()[:160])
     marked = good_page_item(context=item["context"] + "\n" + UNVETTED_LINE)
     r = run_hook(page_input("set", marked, cwd=DECISIONS_REPO), answer=ALLOW, model_fail=True)
     # Re-pointed: the attempt that counts is the dedicated call. The form judge is not held to one call here.
@@ -1961,8 +1963,10 @@ def case_send_model_error_refuses_as_unvetted_unless_marked():
         r = run_hook(send_input(tool, INCIDENT_357), model_fail=True)
         check(name + ": the model is called and fails", len(r.calls) == 1, detail(r))
         check(name + ": refused as Unvetted", (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
-        check(name + ": the refusal carries the Unvetted guard's facts, facts only",
-              facts_only_line(r.reason(), "UNVETTED_REASON"), r.reason()[:200])
+        check(name + ": the refusal names the Unvetted marker", bool(call_marker) and call_marker in r.reason(),
+              r.reason()[:200])
+        check(name + ": the refusal is rule past-ruling", r.reason().startswith("past-ruling: "), r.reason()[:160])
+        check(name + ": guard.log records a past-ruling deny", "\tdeny\tpast-ruling\t" in r.log, r.log[-200:])
         check(name + ": the refusal names the cause, a check that could not run", "could not run" in r.reason(), detail(r))
         r = run_hook(send_input(tool, marked), model_fail=True)
         check(name + " with an Unvetted line: the model is called and fails", len(r.calls) == 1, detail(r))
@@ -1973,17 +1977,20 @@ def case_send_two_questions_one_unvetted_line_is_refused_when_a_check_cannot_run
     # Two owner questions in one send, and one `Unvetted:` line, in either place. The check cannot run (the model fails),
     # so the send is refused: each question needs its own marker, as a page batch already does. Both places are cased, so
     # a check that reads only the first question's block, or only the last, fails one of them.
+    marker = unvetted_marker(guard_constant(HOOK, "UNVETTED_REMEDY"))
     first, second = INCIDENT_357, INCIDENT_370
-    orders = (("after the first question", first + "\n" + UNVETTED_LINE + "\n\n" + second),
+    orders =(("after the first question", first + "\n" + UNVETTED_LINE + "\n\n" + second),
               ("after the second question", first + "\n\n" + second + "\n" + UNVETTED_LINE))
     for label, message in orders:
         for tool in SEND_TOOLS:
             name = "send two questions, marker %s, via %s" % (label, tool)
             r = run_hook(send_input(tool, message), model_fail=True)
             check(name + ": the check is attempted", len(r.calls) >= 1, detail(r))
-            check(name + ": refused with the Unvetted guard's facts",
+            check(name + ": refused, and the refusal names the Unvetted marker",
                   (r.deny() or {}).get("permissionDecision") == "deny"
-                  and facts_only_line(r.reason(), "UNVETTED_REASON"), detail(r))
+                  and bool(marker) and marker in r.reason(), detail(r))
+            check(name + ": the refusal is rule past-ruling", r.reason().startswith("past-ruling: "),
+                  r.reason()[:160])
     # Control, green on the old code: each question carries its own marker, so the send is not refused.
     both = first + "\n" + UNVETTED_LINE + "\n\n" + second + "\n" + UNVETTED_LINE
     for tool in SEND_TOOLS:
@@ -2067,8 +2074,9 @@ def case_page_past_ruling_error_is_unvetted_unless_marked():
     check("page past C: the write is refused as Unvetted", (r.deny() or {}).get("permissionDecision") == "deny",
           detail(r))
     check("page past C: no form call follows the refusal", len(form_calls(r)) == 0, detail(r))
-    check("page past C: the refusal carries the Unvetted guard's facts, facts only",
-          facts_only_line(r.reason(), "UNVETTED_REASON"), r.reason()[:200])
+    marker = unvetted_marker(guard_constant(HOOK, "UNVETTED_REMEDY"))
+    check("page past C: the refusal names the Unvetted marker", bool(marker) and marker in r.reason(), r.reason()[:200])
+    check("page past C: the refusal is rule past-ruling", r.reason().startswith("past-ruling: "), r.reason()[:160])
     marked = dict(WORKTREE_PAGE_ITEM, context=WORKTREE_PAGE_ITEM["context"] + "\n" + UNVETTED_LINE)
     r = run_hook(page_input("set", marked, cwd=INCIDENT_REPO), answer=ALLOW, past_fail=True)
     check("page past C: with an Unvetted: line in context, the dedicated call fails and the write is not refused",
@@ -2124,7 +2132,7 @@ def case_page_batch_passes_every_write_to_the_dedicated_call():
 
 def case_page_batch_with_one_unvetted_line_is_refused_when_a_check_cannot_run():
     # Two questions in one batch. Only the second carries `Unvetted:`, and the dedicated call fails. The first
-    # question was never checked, so the batch is refused with the Unvetted guard's facts: each question needs its own marker.
+    # question was never checked, so the batch is refused with the Unvetted remedy: each question needs its own marker.
     marked = "\n".join((GOAL_LINE, PROBLEM_LINE, *BASED_LINES, DEPARTS_LINE, UNVETTED_LINE))
     writes = [{"op": "set", "collection": PAGE_ITEMS, "doc_id": "p1", "data": good_page_item(PAGE_MARK)},
               {"op": "set", "collection": PAGE_ITEMS, "doc_id": "p2", "data": good_page_item(PAGE_MARK_B, context=marked)}]
@@ -2133,8 +2141,11 @@ def case_page_batch_with_one_unvetted_line_is_refused_when_a_check_cannot_run():
           len(past_calls(r)) >= 1, detail(r))
     check("page batch, one Unvetted line, check down: the batch is denied",
           (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
-    check("page batch, one Unvetted line, check down: the refusal carries the Unvetted guard's facts, facts only",
-          facts_only_line(r.reason(), "UNVETTED_REASON"), r.reason()[:200])
+    marker = unvetted_marker(guard_constant(HOOK, "UNVETTED_REMEDY"))
+    check("page batch, one Unvetted line, check down: the refusal names the Unvetted marker",
+          bool(marker) and marker in r.reason(), r.reason()[:200])
+    check("page batch, one Unvetted line, check down: the refusal is rule past-ruling",
+          r.reason().startswith("past-ruling: "), r.reason()[:160])
 
 
 def case_page_form_error_refuses_as_unvetted():
@@ -2280,22 +2291,24 @@ def case_page_check_that_cannot_run_refuses_unvetted():
 def case_send_timeout_refusal_is_labelled_past_ruling():
     # A model timeout on a send is the dedicated past-ruling check that could not run. Its refusal is Unvetted, and its
     # rule is past-ruling, in the reason and in guard.log, as a refusal the check itself makes names it.
+    marker = unvetted_marker(guard_constant(HOOK, "UNVETTED_REMEDY"))
     for tool in SEND_TOOLS:
         name = "send, model timeout, via %s" % tool
         r = run_hook(send_input(tool, INCIDENT_357), model_timeout=True)
         check(name + ": the one dedicated call is made and times out", len(r.calls) == 1, detail(r))
         check(name + ": refused as Unvetted", (r.deny() or {}).get("permissionDecision") == "deny"
-              and "Unvetted guard" in r.reason(), detail(r))
+              and bool(marker) and marker in r.reason(), detail(r))
         check(name + ": the rule label is past-ruling", r.reason().startswith("past-ruling: "), r.reason()[:160])
         check(name + ": guard.log records a past-ruling deny", "\tdeny\tpast-ruling\t" in r.log, r.log[-200:])
 
 
 def case_page_dedicated_error_refusal_is_labelled_past_ruling():
     # A model error in the dedicated past-ruling call of a page write: the Unvetted refusal is rule past-ruling too.
+    marker = unvetted_marker(guard_constant(HOOK, "UNVETTED_REMEDY"))
     page_item_passes_the_form("label")
     r = run_hook(page_input("set", WORKTREE_PAGE_ITEM, cwd=INCIDENT_REPO), answer=ALLOW, past_fail=True)
     check("page label: the dedicated call fails and the write is refused as Unvetted",
-          (r.deny() or {}).get("permissionDecision") == "deny" and "Unvetted guard" in r.reason(), detail(r))
+          (r.deny() or {}).get("permissionDecision") == "deny" and bool(marker) and marker in r.reason(), detail(r))
     check("page label: the rule label is past-ruling", r.reason().startswith("past-ruling: "), r.reason()[:160])
     check("page label: guard.log records a past-ruling deny", "\tdeny\tpast-ruling\t" in r.log, r.log[-200:])
 
@@ -2424,6 +2437,101 @@ def case_send_tool_names_come_from_shared_names():
         check("%s: imports SEND_TOOLS from shared_names" % label, imports_send_tools(path), label)
 
 
+# ------------------------------------------------------------------ one text per outcome, the cap join, pinned names
+#
+# A check that cannot run refuses a page write with the Unvetted remedy from call_judge.py, whichever check could not run.
+# The copies of constants below are read at test time, so a change to one side fails here, not in a session.
+
+
+def unvetted_template(text, remedy):
+    """`text` with the reason of the Unvetted remedy `remedy` masked as `<why>`: from the remedy's fixed head to its fixed
+    tail. The text as it is when the remedy has no single reason slot, or the head or the tail is absent, so a refusal
+    worded another way never matches."""
+    if remedy.count("%s") != 1:
+        return text
+    head, tail = remedy.split("%s", 1)
+    at = text.find(head)
+    end = text.find(tail, at + len(head)) if at >= 0 else -1
+    if end < 0:
+        return text
+    return text[:at] + head + "<why>" + text[end:]
+
+
+def case_dedicated_and_form_failures_print_one_text():
+    # Two checks on one page item cannot run: the dedicated past-ruling call (a model error) and the form judge (a model
+    # error). Both are the Unvetted outcome of one write, so both refusals print the one Unvetted remedy with its reason
+    # filled in. Only the rule label may differ: the dedicated call's refusal is rule past-ruling.
+    remedy = guard_constant(HOOK, "UNVETTED_REMEDY")
+    check("one text, the remedy: call_judge holds the Unvetted remedy with one reason slot", remedy.count("%s") == 1,
+          remedy[:120])
+    page_item_passes_the_form("one text")
+    dedicated = run_hook(page_input("set", WORKTREE_PAGE_ITEM, cwd=INCIDENT_REPO), answer=ALLOW, past_fail=True)
+    form = run_hook(page_input("set", WORKTREE_PAGE_ITEM, cwd=INCIDENT_REPO), answer=ALLOW, past=ALLOW, form_fail=True)
+    check("one text, the dedicated call: its failure refuses the write", (dedicated.deny() or {}).get(
+        "permissionDecision") == "deny", detail(dedicated))
+    check("one text, the form judge: its failure refuses the write, after the dedicated call passes",
+          (form.deny() or {}).get("permissionDecision") == "deny" and len(past_calls(form)) == 1
+          and len(form_calls(form)) == 1, detail(form))
+    dedicated_text = dedicated.reason().split(": ", 1)[-1]  # the rule label is not part of the text
+    form_text = form.reason().split(": ", 1)[-1]
+    check("one text, same outcome: the dedicated-call refusal and the form-judge refusal print one text",
+          bool(remedy) and unvetted_template(dedicated_text, remedy) == unvetted_template(form_text, remedy),
+          "dedicated: %r :: form: %r" % (dedicated_text[:200], form_text[:200]))
+
+
+def case_capped_questions_starts_each_cut_unit_on_its_own_line():
+    # Two questions, each over half the cap, so the cap cuts each one mid-line. The second question's Goal line must open
+    # a line of the capped text: a join with no newline reads "...xxxGoal: g2", and the question is no longer a form line.
+    # Controls, green on the old code: two units that fit whole come back whole, and one unit past the cap stays within it.
+    try:
+        capped = getattr(load_file_module(HOOK, "probe_capped_questions"), "capped_questions", None)
+    except Exception:  # a module that does not load fails the check below, named, instead of crashing the run
+        capped = None
+    cap = guard_constant(REPORT_GUARD, "ASK_TEXT_MAX")
+    check("capped questions: call_judge holds capped_questions and report_guard holds an int ASK_TEXT_MAX",
+          callable(capped) and isinstance(cap, int), (capped, cap))
+    if not (callable(capped) and isinstance(cap, int)):
+        return
+    first = "Goal: g1\n" + "a" * 3100 + "\n"
+    second = "Goal: g2\n" + "b" * 3100 + "\n"
+    lines = (first + second).splitlines(keepends=True)
+    check("capped questions, scope: each unit is over half the cap, so each is cut mid-line",
+          len(first) > cap // 2 and len(second) > cap // 2 and len(first) + len(second) > cap,
+          (len(first), len(second), cap))
+    out = capped(lines, [0, 2, 4], cap)
+    check("capped questions: the second unit's Goal line opens a line of the capped text",
+          re.search(r"^Goal: g2", out, re.M) is not None, out[2980:3020])
+    check("capped questions: the capped text stays within the cap", len(out) <= cap, len(out))
+    short = ["Goal: g1\n", "short one\n", "Goal: g2\n", "short two\n"]
+    check("capped questions, control: two short units that fit whole come back whole",
+          capped(short, [0, 2, 4], cap) == "".join(short), capped(short, [0, 2, 4], cap)[:120])
+    one = ["Goal: g1\n"] + ["c" * 100 + "\n"] * 80  # one unit, about 8,100 characters: past the cap
+    cut = capped(one, [0, len(one)], cap)
+    check("capped questions, control: one unit past the cap is cut within it, and not to nothing",
+          0 < len(cut) <= cap, len(cut))
+
+
+def case_unrun_reason_copies_the_report_guard_unvetted_text():
+    # The hook's UNRUN_REASON copies report_guard.UNVETTED_REASON without the record cite, because that module may be what
+    # failed to import. The copy plus report_guard's own cite must read as report_guard's text, word for word.
+    unrun = guard_constant(HOOK, "UNRUN_REASON")
+    report = guard_constant(REPORT_GUARD, "UNVETTED_REASON")
+    cite = guard_constant(REPORT_GUARD, "REMEDY_CITE")
+    check("UNRUN_REASON: call_judge holds the copy, and report_guard holds UNVETTED_REASON and REMEDY_CITE",
+          bool(unrun) and bool(report) and bool(cite), (bool(unrun), bool(report), bool(cite)))
+    check("UNRUN_REASON + report_guard's cite reads as report_guard.UNVETTED_REASON",
+          bool(unrun) and bool(report) and bool(cite) and unrun + " (" + cite + ")." == report,
+          (unrun[:120], report[:120]))
+
+
+def case_past_ruling_rule_name_is_question_forms_rule():
+    # call_judge names the past-ruling rule without importing question_form, so the name is copied. It must equal the
+    # rule question_form holds, or a refusal would name a rule the form checks never use.
+    name = guard_constant(HOOK, "PAST_RULING_RULE_NAME")
+    rule = guard_constant(os.path.join(HERE, "question_form.py"), "PAST_RULING_RULE")
+    check("PAST_RULING_RULE_NAME equals question_form.PAST_RULING_RULE", bool(name) and name == rule, (name, rule))
+
+
 def main():
     for case in (case_agent_refusal,case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -2471,7 +2579,11 @@ def main():
                  case_page_dedicated_error_refusal_is_labelled_past_ruling,
                  case_send_cap_keeps_a_later_question,
                  case_send_problem_line_in_an_open_fence_or_tab_block_is_judged,
-                 case_send_tool_names_come_from_shared_names):
+                 case_send_tool_names_come_from_shared_names,
+                 case_dedicated_and_form_failures_print_one_text,
+                 case_capped_questions_starts_each_cut_unit_on_its_own_line,
+                 case_unrun_reason_copies_the_report_guard_unvetted_text,
+                 case_past_ruling_rule_name_is_question_forms_rule):
         try:
             case()
         except Exception as exc:
