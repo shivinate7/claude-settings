@@ -1453,7 +1453,7 @@ def inbox_stop(hook):
             if notes:
                 out["systemMessage"] = " ".join(notes)
         if reasons:
-            out.update(decision="block", reason="Feedback log (decision %s): " % FEEDBACK_LOG_SLUG
+            out.update(decision="block", reason=f"Feedback log (decision {FEEDBACK_LOG_SLUG}): "
                        + "; ".join(r.rstrip(".") for r in reasons)
                        + (". The check reads the feedback log at each Stop, so items added in any later turn count,"
                           " and no new heading is needed. Send each page ruling to the page writer, each repo item's"
