@@ -332,6 +332,7 @@ while `meta/page.parked` is not empty): `ArtifactData list answers`. That read i
 relays an answer's text. It sends only the page URL, the item id and the act, and the receiver checks the answer itself (decision relayed-grant-read-from-page). An answer typed in the chat counts the same. A chat answer to an open item: the
 writer adds the answer and its time to the item's `context`, and the writer closes it. Nothing is
 written to `answers/`, so steps 2 to 4 of "Route and close" skip their delete.
+At a turn start the owning session skips a kept answer on a closed item and does not re-route it.
 The writer also sets `lastAnswer` from the chat answer, with the time the owner gave it.
 
 - A session watches the page first (`ArtifactComments` action `watch` with the page URL) when it
@@ -421,7 +422,7 @@ report (see the park branch below). A `none` answer on this path gets no new opt
   the owner's grant typed in the receiver's own session.
 
 The writer reads each `kept-answer:` line at its wake ("Keep the page on main's code", step 2). The item is closed and its answer is still kept:
-the close kept it on purpose, so leave it. Delete `answers/<id>` (pinned to its version) only when the item is reopened or reworded (steps 3 and 4, and an overturn). When the act is not done, reopen the item with `lane` and `lastAnswer`.
+the close kept it on purpose, so leave it. Delete `answers/<id>` (pinned to its version) only when the item is reworded (steps 3 and 4) or overturned (step 5). When the act is not done, reopen the item with `lane` and `lastAnswer`; the reopen keeps `answers/<id>`.
 The `kept-answer:` line is the writer-path check: a close that drops `answers/<id>` is wrong.
 A closed item with `waits` is named too ("is closed with waits"), since a chat answer can close an item during a wait. When its wait has ended, drop `waits` and keep the answer.
 A `kept-answer: unknown` line means that the check did not run: fetch again.
@@ -452,7 +453,7 @@ for the done report. A Park is the exception (see the park branch). Otherwise it
    roadmap upkeep row "page rulings not on their step" checks.
 2. Close the item: `ArtifactData update items/<id> {"status": "closed", "closed": "<now, ISO UTC with a trailing Z>"}`, pinned to the version
    you read (`if_version`). If the close conflicts, the owner marked the item read in the meantime: read it again and retry the close. Copy the answer's `choice` or `done`, its `note` and its `at` into the item's `lastAnswer`
-   in the same update. The close keeps `answers/<id>` on purpose. The writer deletes it only when the item is reopened or reworded (steps 3 and 4, and an overturn). The page shows a closed
+   in the same update. The close keeps `answers/<id>` on purpose. A close never deletes it; only a reword (steps 3 and 4) or an overturn (step 5) does. The page shows a closed
    item as one line, with its home and its reply, until the owner marks it read. The page shows `lastAnswer` as the answer on the opened line, and on an item left open (steps 3, 4 and a busy lane).
 3. If the answer is `none` with no clear direction, and you write the new `options`, `pick` and `why` from the
    note in this same turn (a `multi` item's new `pick` is a list), set `added` to now. Write `lastAnswer` from
