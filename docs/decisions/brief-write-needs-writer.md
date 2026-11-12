@@ -24,7 +24,7 @@ Rule `brief-write-needs-writer` in `hooks/guard.py` refuses an Agent, Task or Wo
 - Limits. These orders pass, and Claude could write each in normal work:
   - an order broken across lines ("Write the findings" then "to docs/audit.md" on the next line).
   - a noun between the article and the path: "the audit doc docs/audit.md".
-  - a destination that is not path-shaped: "to notes", "to disk", a span target `> out`.
+  - a destination that is not path-shaped: "to notes", "to disk", and `> out` in a backtick span, a fence or a `$ ` line.
   - a compose verb with "in": "Write the findings in docs/audit.md".
   - a non-path destination word before the path: "Save the findings as a table in docs/audit.md".
   - an object joined by "and" or a comma: "Write the findings and the verdict to audit.md".
