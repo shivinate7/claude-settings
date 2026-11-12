@@ -1806,8 +1806,8 @@ def brief_hit(tool: str, tool_input, transcript: str):
     must hold the owner's words (grant_line_holds_words). A target whose newest record (get_session, or the
     create_session that made it) has no cs-build:lane tag passes. A lane with a cs-topic tag is judged by the
     brief's Topic, an older lane without one by the brief's step against its cs-step tags (topic_hit). A
-    create_session call that tags a lane is judged the same way, by its prompt against its own tags, with no
-    transcript read. Fails closed: any error in the reads is a refusal, because the guard-wide crash path fails open."""
+    create_session call that tags a lane is judged the same way, by its prompt against its own tags and for its
+    role ids (_brief_ids_hit), with no transcript read. Fails closed: any error in the reads is a refusal, because the guard-wide crash path fails open."""
     if not isinstance(tool_input, dict):
         return None
     if tool == BRIEF_TOOL:
@@ -1828,7 +1828,7 @@ def brief_hit(tool: str, tool_input, transcript: str):
     if grant is not None and not grant_line_holds_words(grant):
         return "lane brief under an empty or placeholder Grant line", BRIEF_GRANT_REASON
     if tool != BRIEF_TOOL:
-        return topic_hit(first, lane_tags(tool_input), start=True)
+        return topic_hit(first, lane_tags(tool_input), start=True) or _brief_ids_hit(text)
     target = tool_input.get("session_id")
     try:  # cost: one transcript read per brief
         tags, tagged_after = _own_session_read(transcript, target, created=True) \
