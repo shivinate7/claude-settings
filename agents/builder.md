@@ -64,7 +64,7 @@ watch` or a loop with a pause, is not yours to run.
 
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next.
 Under Done, the first line is BUILT, PARTIAL, or OTHER. Then list the worktree path and
-the brief's branch you pushed to (or that nothing was pushed), one `Files:` line (each entry a repo-relative path with an optional `:range`, and nothing else;
+the brief's branch you pushed to (or that nothing was pushed), one `Files:` line (each entry a repo-relative path with an optional `:range`, and nothing else; a fix for a review lists only the files that fix changed, not the branch's;
 `~/.claude/lint/check_report_in_head.py`, which works from any repo, reads it against the pushed head), and the checks run with their outcome. Drop a label
 that does not apply. Write plainly (rule output-write-in-ste). Start with the point. No preamble.
 Report in under 25 lines unless the brief names another cap.

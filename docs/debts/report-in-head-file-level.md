@@ -1,6 +1,6 @@
 # The report-in-head check works at file level
 
-**What.** The check shows that each reported file changed from the base, not that each reported edit landed. A builder whose second edit to an already changed file was refused, and who reports it, still passes. A fix round that passes `--base <last reviewed head>` narrows this to the round's own change, but a refused second edit in one round to one file passes too.
+**What.** The check shows that each reported file changed from the base, not that each reported edit landed. A builder whose second edit to an already changed file was refused, and who reports it, still passes. A fix for a review that passes `--base <last reviewed head>` narrows this to the round's own change, but a refused second edit in one round to one file passes too.
 
 **Where.** `lint/check_report_in_head.py`, `pushed_diff` (paths only, no hunks) and `reported_paths` (a `:range` is dropped).
 

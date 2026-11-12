@@ -10,7 +10,7 @@ The harm it stops: a review of a pushed branch that lacks a whole file the build
 
 The lane rule: before a lane spawns the reviewer, it runs `python3 ~/.claude/lint/check_report_in_head.py --branch <branch> --report <file>` on the builder's report. That is the installed copy, so a lane in another repo runs it too.
 
-- A fix round passes `--base <last reviewed head>`, so a refused fix-round edit to a file round 1 already touched still fails.
+- A fix for a review passes `--base <last reviewed head>`, so a refused edit in that fix to a file an earlier round already touched still fails.
 - A 0 passes. The lane spawns the reviewer.
 - A 1 sends the builder back. The output names each reported path that is not in the diff.
 - A 2 is reported as unknown (branch not on origin, git failure, closed stdin with no report file, an unreadable report file, no `Files:` line, two `Files:` lines, an empty one, `Files: none`, an absolute path, a range with no path before it, or a report that is not UTF-8). The lane does not call it a pass.
@@ -18,7 +18,7 @@ The lane rule: before a lane spawns the reviewer, it runs `python3 ~/.claude/lin
 
 Scope: file level. The check shows that each reported file changed from the base, not that each reported edit landed: a second edit to a file that already changed passes (debt `report-in-head-file-level`). A changed file the report leaves out is not judged.
 
-Entry forms read: paths split on `,` or `;`. Each may carry backticks or bold marks, a leading `./`, a trailing `.`, a trailing parenthesised note, and an optional `:range` (spaces round the `:` and the dash, an `L` before a number). The docstring of the check lists them. What still exits 1 is a path not in the diff.
+Entry forms read: paths split on `,` or `;`. Each may carry backticks or bold marks, a leading `./`, a trailing `.`, a trailing parenthesised note, a note after the path (`path: new helper`, `path - added`), and an optional `:range` (spaces round the `:` and the dash, an `L` before a number). A path-like token in parentheses is a listed path. A line that ends in `,` or `;` goes on to the next line, and `- ` or `* ` bullets right after the Files line add paths, each only when it is one path-like token. A form like `1. Files:` or `Files (changed):` is unknown, and the message names `Files:`. The docstring of the check lists them. What still exits 1 is a path not in the diff.
 
 Cost: 3 git calls per run (one fetch of the branch and the base, one rev-parse, one diff). The fetch updates FETCH_HEAD and the remote-tracking refs it fetches, nothing else. A lane runs it once per builder report, before review.
 

@@ -8,19 +8,23 @@ A builder's report lists the files it changed on one `Files:` line (`agents/buil
 builder's edit and the builder still report it. The reviewer then reads a change that is not there. This check reads the pushed head, never the local tree: it fetches refs/heads/<branch> from origin, and
 the base too when <base> is `origin/<name>`, so a stale local ref never stands in. It diffs `--name-only
 --no-renames` from the merge base of <base> and that head to the head. A renamed file shows under both names. A fix
-round passes `--base <last reviewed head>`, so only the round's own change counts.
+for a review passes `--base <last reviewed head>`, so only that fix's own change counts.
 
 The report line: one line that starts, after any blockquote, bullet or bold marks, with `Files:`. It holds
 repo-relative paths split on `,` or `;`. Each entry may carry backticks or bold marks (`**path**:10-20`), a leading
-`./`, a trailing `.`, a trailing parenthesised note (`(new)`, `(lines 10-20)`), and an optional `:<range>`
-(`lint/a.py:10-20`; spaces allowed round the `:` and the dash; a hyphen or an en dash; an `L` before either number,
-as in `L10-L20`). A bare range after a separator (`30-40`) continues the prior path's range. `Files: none` (any
-case) reports no files. Other lines are not read. The report is read as strict UTF-8, from stdin or the file,
+`./`, a trailing `.`, a trailing parenthesised note (`(new)`, `(lines 10-20)`), a note after the path (`path: new
+helper`, `path - added`), and an optional `:<range>` (`lint/a.py:10-20`; spaces allowed round the `:` and the dash; a
+hyphen or an en dash; an `L` before either number, as in `L10-L20`). A bare range after a separator (`30-40`)
+continues the prior path's range. A path-like token inside parentheses (`(lint/a.py)`, `(see lint/a.py)`) is a
+listed path. The list goes on past the `Files:` line in two forms: a next line after a line that ends in `,` or `;`
+(a wrapped line), and `- ` or `* ` bullets right after it. Each bullet counts only when it is one path-like token,
+so a prose bullet (`- Done: widget edited`) is not read. `Files: none` (any case) reports no files. A blank line ends
+the list. Other lines are not read. The report is read as strict UTF-8, from stdin or the file,
 whatever the locale.
 
 Exit 0: every listed path is in the diff. Exit 1: each missing path is named. Exit 2: UNKNOWN, because the branch is
 not on origin, git failed, stdin is closed with no --report file, the report file cannot be read, the report is not
-UTF-8, has no `Files:` line, more than one, an empty one, `Files: none`, an absolute path entry, or a range with no
+UTF-8, has no line in the accepted form `Files:` (`1. Files:` and `Files (changed):` are not), more than one, an empty one, `Files: none`, an absolute path entry, or a range with no
 path before it.
 Unknown is never 0 here: a green exit on an unread head would hide the gap.
 
@@ -44,8 +48,14 @@ DASHES = "-–—"
 SPAN = r"L?\d+(?:\s*[%s]\s*L?\d+)?" % DASHES
 RANGE = re.compile(r"\s*:\s*%s$" % SPAN)
 BARE_RANGE = re.compile(r"^%s$" % SPAN)
-NOTE = re.compile(r"\s*\([^()]*\)$")
 ABSOLUTE = re.compile(r"^(?:/|\\|[A-Za-z]:[\\/])")
+PAREN = re.compile(r"\(([^()]*)\)")
+BULLET = re.compile(r"^\s*[-*]\s+(.*)$")
+# a note after the path: `path: new helper` or `path - added`; a range was cut before this runs
+NOTE_AFTER = re.compile(r"^(\S+?)\s*(?::\s+|\s+[%s]\s+)\S.*$" % DASHES)
+# path-like: a slash, or an extension that starts with a letter, so `e.g.` and `v1.10` are not paths
+EXTENSION = re.compile(r"\.[A-Za-z][A-Za-z0-9]{1,4}$")
+FORM = "the accepted form is one line `Files: path, path`"
 USAGE = "usage: check_report_in_head.py --branch <name> [--base <ref>] [--root <dir>] [--report <path>|-]"
 
 
@@ -76,40 +86,87 @@ def split_entries(line):
 
 
 def clean_entry(entry):
-    """The entry without backticks, bold marks, a trailing period, or a trailing parenthesised note."""
+    """The entry without backticks, bold marks, or a trailing period."""
     entry = entry.replace("`", "").replace("**", "").strip()
     while True:
         before = entry
-        entry = NOTE.sub("", entry.rstrip(".").strip()).strip("*").strip()
+        entry = entry.rstrip(".").strip().strip("*").strip()
         if entry == before:
             return entry
 
 
+def path_like(token):
+    return "/" in token or bool(EXTENSION.search(token))
+
+
+def take_parens(entry):
+    """(the entry without its parenthesised groups, the path-like tokens inside them). `(new)` holds none."""
+    inner = []
+    while True:
+        m = PAREN.search(entry)
+        if not m:
+            return entry, inner
+        for token in re.findall(r"[^\s,;]+", clean_entry(m.group(1))):
+            token = clean_entry(RANGE.sub("", token.strip(":")))
+            if path_like(token):
+                inner.append(token)
+        entry = entry[:m.start()] + " " + entry[m.end():]
+
+
+def list_items(report):
+    """[(text, is_bullet)] of the report's one Files line and the lines that go on from it."""
+    lines = report.splitlines()
+    starts = [i for i, line in enumerate(lines) if FILES_LINE.match(line)]
+    if not starts:
+        raise Unknown("the report has no `Files:` line; " + FORM)
+    if len(starts) > 1:
+        raise Unknown("the report has %d `Files:` lines, want one; %s" % (len(starts), FORM))
+    items = [(FILES_LINE.match(lines[starts[0]]).group(1), False)]
+    for line in lines[starts[0] + 1:]:
+        bullet = BULLET.match(line)
+        if not line.strip() or FILES_LINE.match(line):
+            break
+        if bullet:
+            items.append((bullet.group(1), True))
+        elif items[-1][0].rstrip().endswith((",", ";")):
+            items.append((line, False))
+        else:
+            break
+    return items
+
+
 def reported_paths(report):
-    """The repo-relative paths of the report's one Files line, in order, without repeats."""
-    lines = [m.group(1) for m in map(FILES_LINE.match, report.splitlines()) if m]
-    if not lines:
-        raise Unknown("the report has no Files line")
-    if len(lines) > 1:
-        raise Unknown("the report has %d Files lines, want one" % len(lines))
-    entries = [e for e in map(clean_entry, split_entries(lines[0])) if e]
-    if len(entries) == 1 and entries[0].lower() == "none":
+    """The repo-relative paths of the report's one Files line and its continuation, in order, without repeats."""
+    items = list_items(report)
+    entries = [(e, bullet) for text, bullet in items for e in split_entries(text)]
+    if len(entries) == 1 and clean_entry(entries[0][0]).lower() == "none":
         raise Unknown("no files reported (the Files line says none)")
     paths = []
-    for entry in entries:
+    for raw, bullet in entries:
+        raw, inner = take_parens(raw)
+        entry = clean_entry(raw)
+        found = []
         if BARE_RANGE.match(entry):
-            if not paths:
+            if not paths and not bullet:
                 raise Unknown("the Files line starts with a range and no path: " + entry)
-            continue
-        if ABSOLUTE.match(entry):
-            raise Unknown("the Files line holds an absolute path: " + entry)
-        entry = clean_entry(RANGE.sub("", entry))
-        while entry.startswith("./"):
-            entry = entry[2:]
-        if entry and entry not in paths:
-            paths.append(entry)
+        elif entry:
+            if ABSOLUTE.match(entry):
+                raise Unknown("the Files line holds an absolute path: " + entry)
+            entry = clean_entry(RANGE.sub("", entry))
+            note = NOTE_AFTER.match(entry)
+            entry = clean_entry((note.group(1) if note else entry).rstrip(":"))
+            while entry.startswith("./"):
+                entry = entry[2:]
+            # a bullet is a path only when it is one path-like token, so prose in a bullet is not read
+            if entry and not (bullet and (len(entry.split()) > 1 or not path_like(entry))):
+                found.append(entry)
+        for path in found + inner:
+            if ABSOLUTE.match(path):
+                raise Unknown("the Files line holds an absolute path: " + path)
+            if path not in paths:
+                paths.append(path)
     if not paths:
-        raise Unknown("the Files line is empty")
+        raise Unknown("the Files line is empty; " + FORM)
     return paths
 
 
