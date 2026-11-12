@@ -1,0 +1,14 @@
+{
+ "id": "page-narrow-overflow-rest",
+ "title": "Page presses, the Questions tab, the Answered row date, the failure line and folded titles fit their boxes at 180-260 px and 150-300% text",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane page-narrow-word-breaks 15:19 CST Nov 12: on #2347's page the Dismiss, Restore, Reply and Send answers presses, the Questions tab, the Answered row date, the \"(permission-denied)\" failure line and folded titles overflow their boxes at 180-260 px, 150-300% text (Dismiss label 170 px in a 110 px press at 180 px, 300%) instead of breaking inside a word, so step page-narrow-word-breaks's premise does not hold for them.",
+ "source": "lane page-narrow-word-breaks 15:19 CST Nov 12",
+ "note": "Each named element stays inside its box at 180-260 px and 150-300% text (wrap, shrink or stack); a screen check per element red first on #2347's page. A screen lane: designer before the builder, design reviewer after. After #2982 merges.",
+ "updatedAt": "2026-11-12T15:19:43-06:00"
+}

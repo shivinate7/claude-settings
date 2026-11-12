@@ -1,0 +1,14 @@
+{
+ "id": "page-narrow-breaks-cases",
+ "title": "Screen cases for #2982: the edit, removed and failed states, a dark cell and a 1280 pin",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane page-narrow-word-breaks 15:19 CST Nov 12: #2982's design review was partial; it did not cover the edit, removed and failed states, a dark-theme cell or a 1280 px pin.",
+ "source": "lane page-narrow-word-breaks 15:19 CST Nov 12",
+ "note": "Add those cases to the page's screen checks and give a verdict per screen. After #2982 merges.",
+ "updatedAt": "2026-11-12T15:19:43-06:00"
+}
