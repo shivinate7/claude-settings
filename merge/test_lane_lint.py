@@ -868,6 +868,9 @@ def branch_of(n):
     return "lane-" + str(n).translate(str.maketrans("0123456789", "abcdefghij"))
 
 
+INTEGRATION_NAME = "cross-measure"  # the batch the integration cases lint; its branch is merge.integration_branch(INTEGRATION_NAME)
+
+
 def names_pr(text, number):
     """True when `text` names PR `number`, as #N or as a bare N. A hex run, such as a commit's sha, never counts."""
     return re.search(r"(?<![0-9a-f])#?%d(?![0-9a-f])" % number, text) is not None
@@ -1504,6 +1507,85 @@ class CrossMeasure(LaneFixture):
         self.assertEqual(pass_lines(text), [], "the refusal printed a PASS line: " + text)
         self.assertEqual(lints, 0, "the ci-job lint ran beside a counted clash: " + text)
         self.assertEqual(self.host.posted, [], "the refusal posted a lane-lint comment: " + text)
+
+    # The batch integration PRs (the integration rule). PR 7 is a batch integration PR when its body holds a freeze block and its branch is
+    # merge.integration_branch of that block's name. A clash of its head with a same-lane PR is a report line, not a FAIL; a base conflict stays a FAIL.
+
+    def integration_body(self):
+        """The body of PR 7 on INTEGRATION_NAME: its freeze block with one frozen lane, then the session line a lane PR carries, so PR #8
+        reads as a same-lane PR (same_lane)."""
+        base = tm.sh(self.other, "git", "rev-parse", "origin/main")
+        return lane_body(OWN, "\n".join(merge.freeze_lines(INTEGRATION_NAME, {6: base})))
+
+    def assert_integration_scope(self):
+        """Precondition: PR 7's body holds a freeze block for INTEGRATION_NAME, and PR 7 is on that batch's integration branch."""
+        block = merge.parse_freeze(self.host.body)
+        self.assertIsNotNone(block, "precondition: PR 7's body holds no freeze block, so the case probes a lane PR")
+        self.assertEqual(block["name"], INTEGRATION_NAME, "precondition: the freeze block names another batch")
+        self.assertEqual(self.host.branch, merge.integration_branch(INTEGRATION_NAME),
+                         "precondition: PR 7 is not on its batch's integration branch, so it is a lane PR")
+
+    def test_an_integration_pr_whose_head_conflicts_with_a_same_lane_pr_passes_and_reports_the_clash(self):
+        """A batch integration PR does not FAIL on a clash with a same-lane PR: the lanes rebase after the merge, so the clash is one report
+        line after the PASS line, naming PR #8 and its file."""
+        head = self.commit_on(merge.integration_branch(INTEGRATION_NAME), {"shared-a.txt": "integration 7\n"}, "origin/main")
+        sib = self.pr_writes(8, {"shared-a.txt": "lane 8\n"}, lane_body(OWN))
+        self.host.branch, self.host.body = merge.integration_branch(INTEGRATION_NAME), self.integration_body()
+        self.assert_integration_scope()
+        self.assertTrue(same_lane(self.host.body, self.host.pulls[8]["body"]), "precondition: PR 8 is not in this lane, so the case probes nothing")
+        self.assertEqual(self.clash(head, "origin/main"), "clean", "precondition: the integration head does not merge clean with main")
+        self.assertEqual(self.clash(sib, "origin/main"), "clean", "precondition: PR 8 does not merge clean with main, so the clash is not the pair the case names")
+        self.assertEqual(self.clash(head, sib), "conflict", "precondition: the integration head and PR 8 do not clash, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 0, "a clash of a batch integration PR with a same-lane PR refused the lane: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, "the lane did not print one PASS line: " + text)
+        lines = text.splitlines()
+        pass_at = next(i for i, line in enumerate(lines) if line.startswith("PASS:"))
+        report = [line for line in lines[pass_at + 1:] if names_pr(line, 8)]
+        self.assertTrue(report, "no report line after the PASS names the clashing PR #8: " + text)
+        self.assertIn("shared-a.txt", "\n".join(report), "the report line for PR #8 does not name the clashing file: " + text)
+        self.assertRegex("\n".join(report), r"(?i)rebase[^\n]*after[^\n]*merge", "the report line for PR #8 does not say the lanes rebase after the merge: " + text)
+        self.assertNotIn("FAIL", "\n".join(report), "the report line for PR #8 reads as a FAIL: " + text)
+        self.assertEqual(lints, 1, "the ci-job lint did not run once on the passing integration PR: " + text)
+
+    def test_an_integration_pr_whose_head_conflicts_with_main_still_fails_and_names_main(self):
+        """The integration rule lifts only a clash with a PR's head. A batch head that conflicts with main still FAILs, names main, and runs no ci-job."""
+        head = self.commit_on(merge.integration_branch(INTEGRATION_NAME), {"shared-a.txt": "integration 7\n"}, "origin/main")
+        self.commit_on("main", {"shared-a.txt": "main\n"}, "origin/main")
+        self.host.branch, self.host.body = merge.integration_branch(INTEGRATION_NAME), self.integration_body()
+        self.assert_integration_scope()
+        self.assertEqual(self.clash(head, "origin/main"), "conflict", "precondition: the integration head merges clean with main, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a batch integration head that conflicts with main passed the lane: " + text)
+        self.assert_conflict_line_names(text, "main", "the refusal")
+        self.assertEqual(pass_lines(text), [], "a batch integration head that conflicts with main printed a PASS line: " + text)
+        self.assertEqual(lints, 0, "the ci-job lint ran past a base conflict of a batch integration head: " + text)
+
+    def test_a_freeze_block_on_a_branch_that_is_not_its_integration_branch_is_a_lane_pr_and_fails(self):
+        """A freeze block makes a PR an integration PR only on its integration branch. On any other branch it is a lane PR, so a clash
+        with a same-lane PR FAILs. Each branch is a subTest; the second is another batch's branch name."""
+        head = self.own_writes({"shared-a.txt": "lane 7\n"})
+        sib = self.pr_writes(8, {"shared-a.txt": "lane 8\n"}, lane_body(OWN))
+        tm.sh(self.other, "git", "push", "-q", "origin", "%s:refs/heads/batch-elsewhere" % head)
+        self.host.body = self.integration_body()
+        self.assertIsNotNone(merge.parse_freeze(self.host.body), "precondition: PR 7's body holds no freeze block, so the case probes no integration rule")
+        self.assertTrue(same_lane(self.host.body, self.host.pulls[8]["body"]), "precondition: PR 8 is not in this lane, so the case probes nothing")
+        self.assertEqual(self.clash(sib, "origin/main"), "clean", "precondition: PR 8 does not merge clean with main, so the clash is not counted")
+        self.assertEqual(self.clash(head, sib), "conflict", "precondition: the lane head and PR 8 do not clash, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        for branch in ("feat", "batch-elsewhere"):
+            with self.subTest(branch=branch):
+                self.host.branch = branch
+                self.assertNotEqual(branch, merge.integration_branch(INTEGRATION_NAME), "precondition: the branch is the integration branch, so the case probes nothing")
+                rc, text, lints, _, _ = self.measured("--lane-lint", "7")
+                self.assertEqual(rc, 1, "a freeze block on branch %s passed as an integration PR: %s" % (branch, text))
+                self.assertTrue(names_pr(text, 8), "the refusal does not name the same-lane PR #8: " + text)
+                self.assertIn("shared-a.txt", text, "the refusal does not name the clashing file: " + text)
+                self.assertRegex(text, r"FAIL", "the refusal does not read as a FAIL: " + text)
+                self.assertEqual(pass_lines(text), [], "a lane PR on branch %s printed a PASS line: %s" % (branch, text))
+                self.assertEqual(lints, 0, "the ci-job lint ran past the FAIL on branch %s: %s" % (branch, text))
 
 
 BATCH = "batch-lint-flags"  # the batch the case lints: a pushed branch whose checks job holds the four CI steps below
