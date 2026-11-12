@@ -1757,6 +1757,7 @@ LANE_PR = "7"  # the lane's pull request: FakeHost's own number, whose head is L
 GUARD_FILE = "hooks/guard_probe.py"  # a hooks/guard_*.py file: ci-scope.sh's guard arm names it
 SUITE_FILE = "tests/guard/s-lane-probe.py"  # a file of the guard suite: ci-scope.sh's guard arm names it too
 DOCS_FILE = "docs/lane-notes.md"  # a .md file: ci-scope.sh turns no flag on for it
+CODE_FILE = "lint/lane_probe.py"  # a lint/*.py file: ci-scope.sh's lint arm turns `code` on and no guard flag
 CHECKS_REL = ".github/workflows/checks.yml"  # the workflow of GUARD_JOB; a lane's own edit to it is the one its lint reads
 FAILING_CI_SCOPE = "printf 'guard=false\\ncode=false\\n' >> \"$GITHUB_OUTPUT\"\nexit 1\n"  # writes both flags off, then exits 1: a failing ci-scope.sh that still answers
 GUARD_STUB = """import json, os, subprocess, sys
@@ -1809,6 +1810,12 @@ class GuardSliceLint(BatchLintFixture):
     def changed_files(self):
         """The paths the lane's own commit changes against main, sorted, read from git."""
         return sorted(tm.sh(self.other, "git", "diff", "--name-only", "origin/" + BASE + "...HEAD").splitlines())
+
+    def scope_flags(self):
+        """The flags ci-scope.sh gives the lane's own commit against BASE, read through merge.ci_scope_run as the guard slice reads them."""
+        _, c, flags = merge.ci_scope_run(self.other, "origin/" + BASE, os.path.join(self.t, "scope-output"))
+        self.assertEqual(c, 0, "precondition: ci-scope.sh fails on the lane, so it answers no flags: %s" % flags)
+        return flags
 
     def lint(self, unknown_ok=""):
         """merge.lane_lint of the lane's pull request through the real ci-job. -> (rc, its output). A refusal fails the case with its text."""
@@ -1931,6 +1938,16 @@ class GuardSliceLint(BatchLintFixture):
         self.assertEqual(rc, 0, text)
         self.assertEqual(len(pass_lines(text)), 1, text)
         self.assertEqual(self.stub_calls(GUARD_SCRIPT), [], "a lane touching no guard file ran the guard script: " + text)
+
+    def test_a_lane_whose_ci_scope_turns_code_on_and_guard_off_runs_no_guard_slice(self):  # the control: the guard flag alone sends a lane to the slice
+        self.lane({CODE_FILE: "# lane probe\n"})
+        self.assertEqual(self.changed_files(), [CODE_FILE], "precondition: the lane does not change %s alone, so the case probes nothing else" % CODE_FILE)
+        flags = self.scope_flags()
+        self.assertEqual((flags.get("code"), flags.get("guard")), ("true", "false"), "precondition: ci-scope.sh does not turn code on and guard off for %s: %s" % (CODE_FILE, flags))
+        rc, text = self.lint()
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+        self.assertEqual(self.stub_calls(GUARD_SCRIPT), [], "a lane whose ci-scope turns code on and guard off ran the guard script: " + text)
 
     def test_a_failing_windows_slice_refuses_the_lane_and_names_the_step(self):
         self.lane({GUARD_SCRIPT: self.guard_stub(1)})
