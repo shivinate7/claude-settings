@@ -1576,7 +1576,7 @@ PUSH_ASK_REASON = (
 #
 # A shell `git push` asks while the session's own transcript shows a PR known to the session and a
 # reviewer or design-reviewer report with no later posted review log that holds a line with that report's role,
-# verdict and round, and Head when the report names its reviewed head (decision push-needs-review-record).
+# verdict and round, and Head when the report names its reviewed head (decision push-needs-review-log).
 # A push to the head branch of a PR whose posted review log holds a `Fix check:` line is refused. Cost: one pass over the transcript per push, failing
 # open on any error. A line is parsed only when it holds a mark below, or a tool_result for a call already seen
 # (one dict lookup per id). The merge module loads only when the scan finds a report with the Done-line shape,
@@ -1585,13 +1585,13 @@ REVIEW_LOG_REASON = (
     "push-needs-review-record: a reviewer report in this session has no posted review log at the head it "  # glossary-ok: the decision slug, a literal
     "reviewed, and a push now moves that head. Order: record first, then the push. Render the record with "
     "`merge <pr> --review-record --head <reviewed sha>` (it refuses once the head moves), post it with the "
-    "GitHub MCP comment tool, then push. (decision push-needs-review-record)"
+    "GitHub MCP comment tool, then push. (decision push-needs-review-log)"
 )
 REVIEW_LOG_FIX_REASON = (
     "push-needs-review-record: the posted review log for this pull request already holds a "
     "`Fix check:` line, "  # glossary-ok: the literal line text the merge tool writes
     "and the merge tool takes one fix verifier per review log. Put the next fix on a new branch and open a new PR "
-    "for it, then push that branch. (decision push-needs-review-record)"
+    "for it, then push that branch. (decision push-needs-review-log)"
 )
 _CREATE_PR_TOOL = "mcp__github__create_pull_request"
 _COMMENT_TOOL = "mcp__github__add_issue_comment"
