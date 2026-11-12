@@ -4,7 +4,7 @@
 
 - The waiting page counts each counted press in its own database. Collection `usage`, one doc per key, `{n, at}`. Never browser storage.
 - A count is kept only for a named reader (rule `outcomes-mechanize-rules`).
-- Status: built. `countUse` in `skills/waiting-page/page.html` writes `usage`. The press never waits on it, and it swallows every error. It does nothing with no store. A load reads and writes no counter.
+- Status: built. `countUse` in `skills/waiting-page/page.html` writes `usage`. The press does not await it (read from the code; no test holds a write open), and a refused write is proved not to stop the press. It does nothing with no store. A load reads and writes no counter.
 - Why: two roadmap steps need the owner's use before they cut anything.
   - Step `page-ask-box-one-send` (one Ask box, one Send) reads the Ask box and Send counts.
   - Step `page-status-cut-unread` (cut the Status tiles, trend and burn if unread) reads the Status counts.
@@ -24,7 +24,7 @@
 - Export: the copy does not include `usage`. The export's five collections are `items`, `answers`, `groups`, `asks` and `meta`. None of them is `usage`.
 - Cost:
   - 0 processes started. 0 files written. No timer. No listener.
-  - One database read and one database write per counted press. 0 database calls on page load.
+  - One database read and one database write per counted press. 0 counter reads or writes on page load (the page's own items, answers and meta loads are not counts).
   - Proof: the `usage:` cases in `skills/waiting-page/tests/page.test.mjs`.
     - A load reads and writes no counter, and each Add to list counts up: "a load reads and writes no counter, and each Add to list writes ask-add with n counting up".
     - One +1 per press, and a press that changes nothing writes nothing: the Send ask, Send answers, Copy answers, Status tab, Status view and tile cases.
@@ -38,6 +38,7 @@
 - Known limit: two tile keys that differ only outside `[a-z0-9-]` share one count.
 - Known limit: counts start at merge. Earlier use is unknown.
 - Coordinator ruling, 2026-11-07 12:11 CST: picks accepted.
+- Owner ruling, 2026-11-12 12:40 CST (cited in step `page-usage-counters`): the page database is the one store; counts live there.
 
 Kind: process
 Home: rule:outcomes-mechanize-rules

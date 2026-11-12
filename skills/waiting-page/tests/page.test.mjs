@@ -9814,3 +9814,29 @@ test("usage: a saved Changes view is restored on Status open with no view write,
   assert.deepEqual(views.filter((u) => u.key !== "view-rec"), [], "opening Status on a remembered view wrote a view counter");
   assert.deepEqual(await usageOf(page, "view-rec"), [counted("view-rec", 1)], "switching to Records did not write view-rec once, with n 1");
 });
+
+test("usage: Ctrl+Enter on the Ask box counts ask-send once, and Ctrl+Enter on a card counts answers-send once", async (t) => {
+  const page = await open(t, { clock: USAGE_AT }); if (!page) return;
+  await page.fill("#askText", "Keyboard ask");
+  await page.press("#askText", "Control+Enter");
+  await landed(page, "ask-send", 1);
+  assert.deepEqual(await usageOf(page, "ask-send"), [counted("ask-send", 1)], "Ctrl+Enter in the Ask box did not count ask-send once");
+  await takePick(page, DECISION);
+  await page.keyboard.press("Control+Enter");
+  await landed(page, "answers-send", 1);
+  await page.waitForTimeout(300); // a second count, if the key handler made one, lands in this time
+  assert.deepEqual(await usageOf(page, "answers-send"), [counted("answers-send", 1)], "Ctrl+Enter did not count answers-send exactly once");
+});
+
+test("usage: the arrow keys count the Status tab and a Status view once each", async (t) => {
+  const page = await open(t, { clock: USAGE_AT, pageHtml: mergedPage("--no-roadmap") }); if (!page) return;
+  await page.locator("#tabQ").focus();
+  await page.keyboard.press("ArrowRight");
+  await landed(page, "status-tab", 1);
+  assert.deepEqual(await usageOf(page, "status-tab"), [counted("status-tab", 1)], "the arrow key to Status did not count status-tab once");
+  await page.locator("#vt-plan").focus();
+  await page.keyboard.press("ArrowRight");
+  await landed(page, "view-log", 1);
+  await sentinel(page);
+  assert.deepEqual(await usageOf(page, "view-log"), [counted("view-log", 1)], "the arrow key to a view did not count view-log once");
+});
