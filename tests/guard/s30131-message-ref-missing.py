@@ -358,3 +358,13 @@ mrf_case("a PR in a double-quoted span is not judged", "allow",
 mrf_case("PR #8 merged, bare, is refused and named", "deny", "PR #8 merged.", carries=("#8",))
 mrf_case("this repo's link to PR #8 merged is refused and named", "deny",
          "[PR #8](https://github.com/o/r/pull/8) merged.", carries=("#8",))
+# A sha written as the text of a link to another repo's commit names that repo's commit, so it is not judged, as a PR
+# in the same link form is not. Its control is the same shape with this repo's origin, which is refused. The quote
+# rule blanks each `"..."` span on a line, and a `>` after the span must not make the rest of the line a quote line.
+mrf_case("a made-up sha as the link text of another repo's commit is not judged", "allow",
+         "Upstream fix: [0123abc](https://github.com/acme/widgets/commit/0123abc) merged.")
+mrf_case("a made-up sha as the link text of this repo's commit is refused", "deny",
+         "Upstream fix: [0123abc](https://github.com/o/r/commit/0123abc) merged.", carries=("0123abc",))
+mrf_case("a made-up sha after a closed double-quoted span and a > mark is refused", "deny",
+         '"x" > landed as 0123abc', carries=("0123abc",))
+mrf_case("a made-up sha after x and a > mark is refused", "deny", "x > landed as 0123abc", carries=("0123abc",))

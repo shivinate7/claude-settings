@@ -2064,6 +2064,23 @@ add("report-sha-missing: a made-up sha as the text of a commit link is refused",
 add("report-sha-missing: a commit URL with a made-up sha in its path is not judged",
     "allow", tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
     message="See https://github.com/shivinate7/claude-settings/commit/d1e0f2c3b4 for it.")
+# A line that starts with `index ` is skipped only when it is a diff header, `index <hex>..<hex>`. A sentence that starts
+# with the word index is judged. The blob-id line above is the control for the header form.
+add("report-sha-missing: a made-up sha on a line that starts with the word index is refused",
+    "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="index regenerated at 0123abc", carries=("0123abc",))
+# The judge must read a 64,000-letter line in linear time. The bound is 5 s, measured on this host: a linear judge takes
+# 0.12 s on that line and 0.11 s on 16,000 letters, and the quadratic one takes 13.7 s and 0.9 s. A Windows run has no
+# limit, as the merge case in the merge section has none there. The control has no limit: a made-up sha after the same
+# line must still be refused, so a fast verdict that skips a long line fails it.
+RSHA_LONG_LINE = "x" * 64000
+RSHA_SPEED_S = 5
+add("report-sha-missing: a hand-back of one 64,000-letter line is judged within 5 s",
+    "allow", tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message=RSHA_LONG_LINE, max_seconds=RSHA_SPEED_S if os.name != "nt" else None)
+add("report-sha-missing: a made-up sha after a 64,000-letter line is refused, so a fast verdict is not a skip",
+    "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message=RSHA_LONG_LINE + " 0123abc", carries=("0123abc",))
 
 
 # --- the cases that need a real sha, read at run time: log checks, so the fixtures are built by the check.
