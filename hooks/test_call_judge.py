@@ -60,8 +60,9 @@ Interface the hook must match:
   ruling is found in the prompt with the call's JSON cut out. A search that cannot read a source prints one stderr
   line, `past-ruling search unknown:`, and never says clear.
 - A challenge to a past ruling (decision `question-form`, rule outcomes-stale-decision-protocol): item 8 passes a
-  question that names the record and brings a new fact. The outcome protected, what protects it now and a proposed fix
-  are optional. It refuses a re-ask that brings no new fact. A denial tells the session how to challenge, never to
+  question that names the record and brings a new fact, or that names the record and says the claim is unmeasured.
+  The outcome protected, what protects it now and a proposed fix are optional. It refuses a re-ask that brings no new
+  fact. A denial tells the session how to challenge, never to
   withdraw. A challenge is a question, never a grant (see the section "a challenge to a past ruling").
 - A relative file_path on an items set or update with no `data`: the file is read against the payload's `cwd`, as
   question_form._write_data reads it, so that write is judged like inline data (the section "a relative file_path").
@@ -1740,6 +1741,35 @@ def names_a_new_fact_alone_passes(text):
                for s in sentences_of(text))
 
 
+# A negative word, then `new fact` within three words: "is not a new fact", "does not count as a new fact".
+NEGATED_NEW_FACT = re.compile(r"\b(?:not|never|no)\b(?:\s+[\w'-]+){0,3}\s+new fact")
+
+
+def restates_is_no_new_fact(text):
+    """True when a sentence of `text` says a restatement of the ruling's own claim is not a new fact."""
+    return any(("restat" in s or "own claim" in s) and "new fact" in s and re.search(r"\b(not|never|no)\b", s) is not None
+               for s in sentences_of(text))
+
+
+def names_an_unmeasured_claim_passes(text):
+    """True when a sentence of `text` says a challenge that names the record and says the claim is unmeasured passes. A
+    sentence with a negative word (not, never, no) says the opposite, so it does not count."""
+    return any("unmeasured" in s and "record" in s and "pass" in s and re.search(r"\b(not|never|no)\b", s) is None
+               for s in sentences_of(text))
+
+
+def says_unmeasured_is_no_new_fact(text):
+    """True when a sentence of `text` refuses the word unmeasured as a new fact."""
+    return any("unmeasured" in s and NEGATED_NEW_FACT.search(s) is not None for s in sentences_of(text))
+
+
+def excludes_a_re_ask_without_the_record(text):
+    """True when a sentence of `text` says a re-ask that does not name the record is not a challenge: a negative word
+    (not, no, without) governs the record, and the sentence says not a challenge."""
+    return any(re.search(r"\bre-?ask", s) is not None and re.search(r"\b(?:not|no|without)\b[^.]*\brecord\b", s) is not None
+               and "challenge" in s and re.search(r"\bnot\b", s) is not None for s in sentences_of(text))
+
+
 def new_shape_checks(text, subject):
     """Checks that `text` passes a challenge that names the record and brings a new fact, with the other parts optional,
     refuses a re-ask that brings no new fact, and no longer says a new fact alone is not a pass. `subject` opens each
@@ -1815,19 +1845,20 @@ def case_new_fact_alone_question_gets_item_8():
 
 
 def case_new_fact_is_one_the_ruling_left_unweighed():
-    # A new fact is a measure or an observed harm the ruling left unweighed. A measure of what the ruling claims, a
-    # restatement of its claim, or the word unmeasured alone is not a new fact. The check reads the item's sentences.
+    # A new fact is a measure or an observed harm the ruling left unweighed. A challenge that names the record and says the
+    # claim is unmeasured passes too: the owner's rule says measure the claim, or say unmeasured. A restatement of the
+    # ruling's own claim is not a new fact. The check reads the item's sentences; a failure prints the sentences with the word.
     item = load_file_module(HOOK, "call_judge_under_test").PAST_RULING_ITEM
     flat = " ".join(item.split())
-    sentences = sentences_of(item)
+    unmeasured = " | ".join(s.strip() for s in sentences_of(item) if "unmeasured" in s)
     check("unweighed: the item says a measure is a new fact only when the ruling left it unweighed",
           re.search(r"\bmeasure\b(?:(?!\bclaim)[^.])*\bunweighed\b", flat.lower()) is not None, flat[:300])
-    check("unweighed: the item says the word unmeasured alone is not a new fact",
-          any("unmeasured" in s and "new fact" in s and re.search(r"\b(not|never|no)\b", s) for s in sentences),
-          flat[:300])
+    check("unweighed: the item says a challenge that names the record and says the claim is unmeasured passes",
+          names_an_unmeasured_claim_passes(item), unmeasured[:300])
+    check("unweighed: the item no longer says the word unmeasured is not a new fact",
+          not says_unmeasured_is_no_new_fact(item), unmeasured[:300])
     check("unweighed: the item says a restatement of the ruling's own claim is not a new fact",
-          any(("restat" in s or "own claim" in s) and "new fact" in s and re.search(r"\b(not|never|no)\b", s)
-              for s in sentences), flat[:300])
+          restates_is_no_new_fact(item), flat[:300])
 
 
 def case_past_ruling_item_refuses_a_bare_re_ask():
@@ -1848,7 +1879,8 @@ def case_past_ruling_item_never_says_withdraw():
 
 def case_past_ruling_tail_names_the_record_and_the_new_fact():
     # The how-to-challenge tail of a past-ruling denial: name the record, bring the new fact, the other parts optional, and
-    # never withdraw. Read from call_judge.CHALLENGE_HOW, never copied here.
+    # never withdraw. It also carries both exclusions: a restatement of the ruling's claim is no new fact, and a re-ask that
+    # does not name the record is no challenge. Read from call_judge.CHALLENGE_HOW, never copied here.
     tail = load_file_module(HOOK, "call_judge_under_test").CHALLENGE_HOW
     lower = tail.lower()
     check("tail: names the record and brings the new fact", "record" in lower and "new fact" in lower, tail[:300])
@@ -1856,6 +1888,9 @@ def case_past_ruling_tail_names_the_record_and_the_new_fact():
           tail[:300])
     hits = [p for p in WITHDRAW_PHRASES if p in lower]
     check("tail: never tells the session to withdraw the question", not hits, hits)
+    check("tail: a restatement of the ruling's own claim is not a new fact", restates_is_no_new_fact(tail), tail[:300])
+    check("tail: a re-ask that does not name the record is not a challenge", excludes_a_re_ask_without_the_record(tail),
+          tail[:300])
 
 
 def case_bare_re_ask_is_refused_beside_a_passing_challenge():
