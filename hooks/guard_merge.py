@@ -327,7 +327,8 @@ def undrafted_pr_create(segment: str) -> bool:
 
 
 # ---- a pull request made or marked ready through `gh api` (rules draft-pr, ready-lane)
-DRAFT_API_REASON = ("draft-pr: open every PR as a draft. Add -F draft=true to the gh api POST of the pulls route. "
+DRAFT_API_REASON = ("draft-pr: open every PR as a draft. To create one, add -F draft=true to the gh api POST of the "
+                    "pulls route. To read, add -X GET (gh api makes a call with fields a POST). "
                     "Only the batch's integration PR goes ready; CI skips drafts.")
 GH_API_PULLS_ROUTE = re.compile(r"^/?repos/[^/\s]+/[^/\s]+/pulls(?:/(\d+))?/?(?:\?.*)?$")
 GH_API_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
@@ -336,8 +337,11 @@ GH_API_FIELD_FLAGS = ("-f", "-F", "--field", "--raw-field")
 def _gh_api_pulls(args):
     """("create" or "patch", the draft field's value lowercased or "") for `gh api` arguments that POST to the pulls
     collection or PATCH one pull request, else None. Reads the method as gh does (the last method flag wins; with none,
-    a field or input flag makes it a POST). The last draft field wins. An --input body is unread, so it sets no draft."""
-    method, endpoint, draft, fielded, index = "", "", "", False, 0
+    a field or input flag makes it a POST). The last draft field wins. An --input body is unread, so it sets no draft; a PATCH
+    with an --input body and no draft field returns the draft value "input", which a ready mark treats as unknown.
+    Named limit (rule ready-lane): the body file is not read, so a lane's PATCH with --input is refused conservatively,
+    a rare false alarm for a lane, which has no PATCH to make that is not a ready mark."""
+    method, endpoint, draft, fielded, has_input, index = "", "", "", False, False, 0
     while index < len(args):
         arg = args[index]
         index += 1
@@ -360,33 +364,63 @@ def _gh_api_pulls(args):
         elif arg.startswith(("-f", "-F")) and not arg.startswith("--"):
             value, fielded = arg[2:], True
         elif arg == "--input":
-            index, fielded = index + 1, True
+            index, fielded, has_input = index + 1, True, True
         elif arg.startswith("--input="):
-            fielded = True
+            fielded, has_input = True, True
         elif not arg.startswith("-") and not endpoint:
             endpoint = arg
         if value is not None and value.partition("=")[0] == "draft":
             draft = value.partition("=")[2].lower()
-    route = GH_API_PULLS_ROUTE.match(endpoint)
+    route = GH_API_PULLS_ROUTE.match(re.sub(r"^https?://[^/]+", "", endpoint))   # an absolute URL is the same route
     if not route:
         return None
     method = method or ("POST" if fielded else "GET")
     if route.group(1) is None and method == "POST":
         return "create", draft
     if route.group(1) is not None and method == "PATCH":
-        return "patch", draft
+        return "patch", draft or ("input" if has_input else "")
     return None
+
+
+def _gh_calls(segment: str):
+    """[the tokens after `gh`] for each gh call in the segment, or in a `sh -c` script it holds."""
+    tokens = segment_tokens(segment) or []
+    script = inline_script(tokens) if tokens else ""
+    if script:
+        return [rest for part in split_segments(script) if part.strip() for rest in _gh_calls(part)]
+    rest = gh_call_of(segment)
+    return [rest] if rest else []
 
 
 def _gh_api_pulls_calls(segment: str):
     """[(kind, draft)] for the `gh api` pull request calls in the segment, or in a `sh -c` script it holds."""
-    tokens = segment_tokens(segment) or []
-    script = inline_script(tokens) if tokens else ""
-    if script:
-        return [hit for part in split_segments(script) if part.strip() for hit in _gh_api_pulls_calls(part)]
-    rest = gh_call_of(segment)
-    hit = _gh_api_pulls(rest[1:]) if rest and rest[0] == "api" else None
-    return [hit] if hit else []
+    hits = (_gh_api_pulls(rest[1:]) for rest in _gh_calls(segment) if rest[0] == "api")
+    return [hit for hit in hits if hit]
+
+
+def gh_api_graphql_has(segment: str, word: str) -> bool:
+    """True when the segment holds a `gh api graphql` call with a -f/-F field (any key) that names `word`, such as a
+    mutation. A query read from a file (`-f query=@f`, --input) is unread and counts as no match."""
+    for rest in _gh_calls(segment):
+        args = rest[1:]
+        if rest[0] != "api" or "graphql" not in [a for a in args if not a.startswith("-")][:1]:
+            continue
+        index = 0
+        while index < len(args):
+            arg = args[index]
+            index += 1
+            value = ""
+            if arg in GH_API_FIELD_FLAGS:
+                value, index = (args[index] if index < len(args) else ""), index + 1
+            elif arg.startswith(("--field=", "--raw-field=")):
+                value = arg.split("=", 1)[1]
+            elif arg.startswith(("-f", "-F")) and not arg.startswith("--"):
+                value = arg[2:]
+            elif arg in GH_API_VALUE_FLAGS:
+                index += 1
+            if word in value:
+                return True
+    return False
 
 
 def undrafted_api_pr_create(segment: str) -> bool:
@@ -395,8 +429,10 @@ def undrafted_api_pr_create(segment: str) -> bool:
 
 
 def api_ready_mark(segment: str) -> bool:
-    """True for a segment that marks a pull request ready through `gh api` PATCH with draft=false (rule ready-lane)."""
-    return any(kind == "patch" and draft == "false" for kind, draft in _gh_api_pulls_calls(segment))
+    """True for a segment that marks a pull request ready through `gh api`: a PATCH of a pull request with draft=false or
+    an unread --input body, or the GraphQL markPullRequestReadyForReview mutation (rule ready-lane)."""
+    return (any(kind == "patch" and draft in ("false", "input") for kind, draft in _gh_api_pulls_calls(segment))
+            or gh_api_graphql_has(segment, "markPullRequestReadyForReview"))
 
 
 # ---- a gh write in a cloud session (rule gh-write-cloud)
@@ -548,6 +584,15 @@ AUTO_MERGE_REASON = (
 )
 
 
+def auto_merge_hit(segment: str) -> str:
+    """The matched call when the segment (or a `sh -c` script it holds) turns on GitHub's auto-merge: `gh pr merge --auto`
+    or a `gh api graphql` enablePullRequestAutoMerge mutation, else "" (rule auto-merge). Disabling it matches nothing."""
+    for rest in _gh_calls(segment):
+        if rest[:2] == ["pr", "merge"] and "--auto" in rest[2:] and "-h" not in rest and "--help" not in rest:
+            return "gh pr merge --auto"
+    return "gh api graphql auto-merge" if gh_api_graphql_has(segment, "enablePullRequestAutoMerge") else ""
+
+
 # ---- a lane marks a pull request ready (rule ready-lane)
 READY_LANE_REASON = (
     "ready-lane: a lane's pull request stays a draft. Only the batch's integration PR goes ready, and the batch "
@@ -564,7 +609,7 @@ def ready_lane_hit(tool: str, tool_input: dict, command: str, segments, transcri
     if tool == READY_PAGE_MCP_TOOL:
         matched = "update_pull_request draft false" if tool_input.get("draft") is False else ""
     elif any(api_ready_mark(seg) for seg in segments):
-        matched = "gh api PATCH draft=false"
+        matched = "gh api ready mark"
     elif ready_page_calls(tool, tool_input, command):
         matched = "gh pr ready"
     else:

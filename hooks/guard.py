@@ -583,7 +583,7 @@ while True:
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
-            undrafted_pr_create, undrafted_api_pr_create, uses_merge_tool, ready_page_hit,
+            undrafted_pr_create, undrafted_api_pr_create, uses_merge_tool, ready_page_hit, auto_merge_hit,
             AUTO_MERGE_REASON, AUTO_MERGE_TOOL, DRAFT_API_REASON, READY_LANE_REASON, ready_lane_hit,
         )
         _loading = "guard_frozen"
@@ -4608,6 +4608,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if verdict != "green":
             refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
                    "gh pr merge " + merging[0] + " " + verdict)
+        # The auto-merge flag is judged after the checks, so a pending head still gets the merge-checks reason, and
+        # before the bare-merge ask, which would otherwise answer first (rule auto-merge).
+        if auto_merge_hit(segment):
+            refuse(tool, "deny", "auto-merge", AUTO_MERGE_REASON, "gh pr merge --auto")
         # A green bare merge in a repo that uses the merge tool asks; a deny above still wins.
         if cite_where and uses_merge_tool(cite_where):
             ask_command("bare-merge", BARE_MERGE_REASON, "gh pr merge " + merging[0], "bare merge")
@@ -4635,6 +4639,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "gh pr create")
     if any(undrafted_api_pr_create(seg) for seg in pr_segments):
         refuse(tool, "deny", "draft-pr", DRAFT_API_REASON, "gh api pulls create")
+
+    # 6b0. GitHub's auto-merge turned on by the GraphQL mutation, or by gh pr merge --auto inside a `sh -c` script (rule
+    # auto-merge). The plain gh form was judged in step 6, after its merge checks.
+    matched = next((hit for hit in map(auto_merge_hit, pr_segments) if hit), "")
+    if matched:
+        refuse(tool, "deny", "auto-merge", AUTO_MERGE_REASON, matched)
 
     # 6b1. A lane marks a pull request ready (rule ready-lane). One transcript read, only for a call that marks one ready.
     matched = ready_lane_hit(tool, {}, raw, pr_segments, transcript)
