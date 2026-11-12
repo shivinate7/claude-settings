@@ -255,7 +255,7 @@ sh("env-child: deny, uv runs a python script fed by a heredoc that prints os.env
    "deny", "env-file", cwd=NOGIT)
 for _child_ok in (
     "uv run --env-file " + ENV + " python app.py",
-    "uv run --env-file " + ENV + " pytest",
+    "verdict uv run --env-file " + ENV + " pytest",
     "docker run --env-file " + ENV + " myimage",
     "docker run --env-file " + ENV + " myimage npm start",
     "docker run --env-file " + ENV + " -e MODE=env myimage",
@@ -303,24 +303,24 @@ sh("env-child: allow, a separator inside single quotes is text, echo 'a && env'"
 sh("env-child: allow, a lone quote in a shell string is text, echo don't",
    "uv run --env-file " + ENV + " sh -c \"echo don't\"", "allow", cwd=NOGIT)
 sh("env-child: allow, a line break between npm ci and npm test is two app commands",
-   "uv run --env-file " + ENV + " sh -c \"npm ci\nnpm test\"", "allow", cwd=NOGIT)
+   "verdict uv run --env-file " + ENV + " sh -c \"npm ci\nnpm test\"", "allow", cwd=NOGIT)
 sh("env-child: allow, docker runs sh -c whose segments are cd and npm start",
    "docker run --env-file " + ENV + " alpine sh -c \"cd /app && npm start\"", "allow", cwd=NOGIT)
 sh("env-child: allow, uv runs sh -c whose segments are npm ci and npm test",
-   "uv run --env-file " + ENV + " sh -c \"npm ci; npm test\"", "allow", cwd=NOGIT)
+   "verdict uv run --env-file " + ENV + " sh -c \"npm ci; npm test\"", "allow", cwd=NOGIT)
 sh("env-child: allow, docker --pull takes a value, so the child is myimage",
    "docker run --pull always --env-file " + ENV + " myimage", "allow", cwd=NOGIT)
 sh("env-child: allow, uv --extra takes a value, so the child is pytest",
-   "uv run --env-file " + ENV + " --extra dev pytest", "allow", cwd=NOGIT)
+   "verdict uv run --env-file " + ENV + " --extra dev pytest", "allow", cwd=NOGIT)
 # A flag that takes no value (-q, --reinstall, --verbose, --rm) is skipped alone, so the word after it is
 # the child. The words after the child are its own arguments: -k env and -m env are pytest's, and serve
 # env is the image's.
 sh("env-child: allow, uv -q takes no value, so the child is pytest with -k env",
-   "uv run --env-file " + ENV + " -q pytest -k env", "allow", cwd=NOGIT)
+   "verdict uv run --env-file " + ENV + " -q pytest -k env", "allow", cwd=NOGIT)
 sh("env-child: allow, uv --reinstall takes no value, so the child is pytest with -k env",
-   "uv run --env-file " + ENV + " --reinstall pytest -k env", "allow", cwd=NOGIT)
+   "verdict uv run --env-file " + ENV + " --reinstall pytest -k env", "allow", cwd=NOGIT)
 sh("env-child: allow, uv --verbose takes no value, so the child is pytest with -m env",
-   "uv run --env-file " + ENV + " --verbose pytest -m env", "allow", cwd=NOGIT)
+   "verdict uv run --env-file " + ENV + " --verbose pytest -m env", "allow", cwd=NOGIT)
 sh("env-child: allow, docker --rm takes no value, so the child is myimage with serve env",
    "docker run --env-file " + ENV + " --rm myimage serve env", "allow", cwd=NOGIT)
 # A value flag that the list does not hold takes the word after it, so the child after exec is env.
@@ -426,9 +426,9 @@ sh("env-child: allow, uv -v takes no value, so vitest runs with the filter env",
 # npx's --silent are bools, so the word after each is the program, and env after it is the program's
 # argument. A bun ./x is a script path, not bun's x alias, so env is its argument.
 sh("env-child: allow, uv --exact takes no value, so pytest runs with the filter env",
-   "uv run --env-file " + ENV + " --exact pytest -k env", "allow", cwd=NOGIT)
+   "verdict uv run --env-file " + ENV + " --exact pytest -k env", "allow", cwd=NOGIT)
 sh("env-child: allow, uv --all-groups takes no value, so pytest runs with the filter env",
-   "uv run --env-file " + ENV + " --all-groups pytest -k env", "allow", cwd=NOGIT)
+   "verdict uv run --env-file " + ENV + " --all-groups pytest -k env", "allow", cwd=NOGIT)
 sh("env-child: allow, npx --silent takes no value, so jest runs with the filter env",
    "npx --env-file=" + ENV + " --silent jest -t env", "allow", cwd=NOGIT)
 sh("env-child: allow, bun ./x runs the script ./x, not bun's x alias, so env is its argument",
@@ -475,11 +475,11 @@ sh("env-child: allow, uv --refresh takes no value, so vitest runs with the filte
 # uv's --upgrade-package and --refresh-package take a value, so X is not a flag. The allow is the
 # control: pytest is the child. The deny puts env after X, and env is the child.
 sh("env-child: allow, uv --upgrade-package takes X, so pytest is the child, a control",
-   "uv run --env-file " + ENV + " --upgrade-package X pytest", "allow", cwd=NOGIT)
+   "verdict uv run --env-file " + ENV + " --upgrade-package X pytest", "allow", cwd=NOGIT)
 sh("env-child: deny, uv --upgrade-package takes X, so env after it is the child",
    "uv run --env-file " + ENV + " --upgrade-package X env", "deny", "env-file", cwd=NOGIT)
 sh("env-child: allow, uv --refresh-package takes X, so pytest is the child, a control",
-   "uv run --env-file " + ENV + " --refresh-package X pytest", "allow", cwd=NOGIT)
+   "verdict uv run --env-file " + ENV + " --refresh-package X pytest", "allow", cwd=NOGIT)
 sh("env-child: deny, uv --refresh-package takes X, so env after it is the child",
    "uv run --env-file " + ENV + " --refresh-package X env", "deny", "env-file", cwd=NOGIT)
 
@@ -488,11 +488,11 @@ sh("env-child: deny, uv --refresh-package takes X, so env after it is the child"
 # as its value, so the program's word starts a child and env is read as the child. Each deny beside it
 # puts env in the child's place with the same flag, so a fix that stops reading these flags fails it.
 sh("env-child: allow, uv --exact takes no value, so pytest runs with the filter -k env",
-   "uv run --env-file " + ENV + " --exact pytest -k env", "allow", cwd=NOGIT)
+   "verdict uv run --env-file " + ENV + " --exact pytest -k env", "allow", cwd=NOGIT)
 sh("env-child: deny, uv --exact takes no value, so env is the child, the control for --exact",
    "uv run --env-file " + ENV + " --exact env", "deny", "env-file", cwd=NOGIT)
 sh("env-child: allow, uv --all-groups takes no value, so pytest runs with the filter env",
-   "uv run --env-file " + ENV + " --all-groups pytest env", "allow", cwd=NOGIT)
+   "verdict uv run --env-file " + ENV + " --all-groups pytest env", "allow", cwd=NOGIT)
 sh("env-child: deny, uv --all-groups takes no value, so env is the child, the control for it",
    "uv run --env-file " + ENV + " --all-groups env", "deny", "env-file", cwd=NOGIT)
 sh("env-child: allow, npx --silent takes no value, so jest runs with the filter -t env",
@@ -571,7 +571,7 @@ sh("env-child: allow, podman container run with serve as the child, the control 
 sh("env-child: allow, a $ in a cd segment is an argument, docker runs sh -c cd $APP_DIR && npm start",
    "docker run --env-file " + ENV + " img sh -c \"cd $APP_DIR && npm start\"", "allow", cwd=NOGIT)
 sh("env-child: allow, a $ in a pytest argument is an argument, uv runs sh -c pytest --basetemp=$TMPDIR",
-   "uv run --env-file " + ENV + " sh -c 'pytest --basetemp=$TMPDIR'", "allow", cwd=NOGIT)
+   "verdict uv run --env-file " + ENV + " sh -c 'pytest --basetemp=$TMPDIR'", "allow", cwd=NOGIT)
 sh("env-child: allow, a $ in a node script argument is an argument, npm exec -c node $SCRIPT",
    "npm --env-file=" + ENV + " exec -c 'node $SCRIPT'", "allow", cwd=NOGIT)
 sh("env-child: deny, echo prints a $ variable in a shell string, uv runs sh -c echo $DB_URL",
@@ -668,7 +668,7 @@ sh("env-child: deny, npx runs node -p that prints process.env",
 
 # Controls for the wrapper and npx cases above: the same runners with an app as the child stay allowed.
 sh("env-child: allow, uv run --env-file runs timeout 5 pytest, the control for timeout 5 env",
-   "uv run --env-file " + ENV + " timeout 5 pytest", "allow", cwd=NOGIT)
+   "verdict uv run --env-file " + ENV + " timeout 5 pytest", "allow", cwd=NOGIT)
 sh("env-child: allow, npx runs node app.js, the control for npx node -e and node -p",
    "npx --env-file=" + ENV + " node app.js", "allow", cwd=NOGIT)
 
@@ -787,13 +787,13 @@ sh("env-child: allow, docker compose config --volumes lists volume names, not va
 sh("env-child: allow, docker compose config --images lists image names, not values",
    "docker compose --env-file " + ENV + " config --images", "allow", cwd=NOGIT)
 sh("env-child: allow, sh -c export FOO=bar sets a variable and runs pytest, uv run",
-   "uv run --env-file " + ENV + " sh -c 'export FOO=bar && pytest'", "allow", cwd=NOGIT)
+   "verdict uv run --env-file " + ENV + " sh -c 'export FOO=bar && pytest'", "allow", cwd=NOGIT)
 sh("env-child: allow, sh -c declare -f prints function bodies only, uv run",
    "uv run --env-file " + ENV + " sh -c 'declare -f'", "allow", cwd=NOGIT)
 sh("env-child: allow, sh -c typeset -i x=1 sets an integer, uv run",
    "uv run --env-file " + ENV + " sh -c 'typeset -i x=1'", "allow", cwd=NOGIT)
 sh("env-child: allow, sh -c set -euo pipefail sets options and runs pytest, uv run",
-   "uv run --env-file " + ENV + " sh -c 'set -euo pipefail; pytest'", "allow", cwd=NOGIT)
+   "verdict uv run --env-file " + ENV + " sh -c 'set -euo pipefail; pytest'", "allow", cwd=NOGIT)
 
 # The perl and ruby code reader must not end a string early. A // , a /* or a # inside quotes is text, so the
 # call after it still runs. A lone quote in text is an apostrophe, not a string opener, so the call after it

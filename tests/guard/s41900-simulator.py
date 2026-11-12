@@ -354,7 +354,7 @@ def register_simulator_boot_cases():
        "xcodebuild -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UC + "'",
        "deny", rule="simulator-boot-route", env_path=one_path, config=one_cfg, carries=generic)
     sh("control: a test of a booted simulator by id is allowed",
-       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UA + "'",
+       "verdict xcodebuild test -scheme App -destination 'platform=iOS Simulator,id=" + SIM_UA + "'",
        "allow", env_path=one_path, config=one_cfg)
     sh("control: a build of a booted simulator by name is allowed",
        "xcodebuild build -scheme App -destination 'platform=iOS Simulator,name=Alpha Pro'",
@@ -419,10 +419,10 @@ def register_simulator_boot_cases():
     # control is the same destination without the glued paren. Today the glued value reads OS as "17.0)",
     # drops the runtime filter, and judges the shut-down 25.0 copy too.
     sh("route: OS=17.0 in a subshell, its paren glued to the value, judges the 17.0 copy only: booted, so allowed",
-       "(cd ios && xcodebuild test -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=17.0')",
+       "(cd ios && verdict xcodebuild test -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=17.0')",
        "allow", env_path=os_two_path, config=os_two_cfg)
     sh("control: OS=17.0 with no glued paren judges the 17.0 copy only: booted, so allowed",
-       "xcodebuild test -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=17.0'",
+       "verdict xcodebuild test -scheme App -destination 'platform=iOS Simulator,name=Delta,OS=17.0'",
        "allow", env_path=os_two_path, config=os_two_cfg)
 
     # The sim-test lock does not decide an MCP launch: a shut-down device is refused by the lease whether the

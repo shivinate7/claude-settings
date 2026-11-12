@@ -70,7 +70,7 @@ gl("a switch with no gh command after it is allowed", "allow", GL_SWITCH, GL_SWI
 gl("a # comment line holding a gh command is allowed", "allow", "# gh pr ready 5", "# gh pr ready 5")
 gl("a gh command echoed as text is allowed", "allow", 'echo "gh pr list"', 'echo "gh pr list"')
 gl("a command that is only gh auth login is allowed", "allow", "gh auth login", "gh auth login")
-gl("a command with no gh is allowed", "allow", "python3 hooks/test_guard.py", "python3 hooks/test_guard.py")
+gl("a command with no gh is allowed", "allow", "verdict python3 hooks/test_guard.py", "verdict python3 hooks/test_guard.py")
 gl("ghq is not gh and is allowed", "allow", "ghq get x", "ghq get x")
 gl("ssemwal-cdc on a repo not under shivinate7 is allowed", "allow",
    "gh auth switch -u ssemwal-cdc && gh api repos/ssemwal-cdc/ops-tools/pulls/5",

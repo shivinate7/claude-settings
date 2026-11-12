@@ -2,14 +2,14 @@
 FAMILY = "paths"
 
 for ordinary in (
-    "npm test",
+    "verdict npm test",
     "node harness/check-invariants.mjs",
     VCS + " status --short",
     VCS + " add -A",
     VCS + " add -A && " + VCS + " commit -m WIP",
     'grep -rn "tieOutState" src/',
     'sed -i "s/a/b/" src/components/Dashboard.tsx',
-    "python hooks/test_guard.py",
+    "verdict python hooks/test_guard.py",
 ):
     sh("ordinary: " + ordinary[:44], ordinary, "allow", cwd=NOGIT)
 sh("ordinary: npm ci is not the PowerShell ci alias", "npm ci", "allow", tool="PowerShell",
@@ -275,9 +275,9 @@ sh("builder script file: a lone quote in a string in a python file does not hide
 # GREEN: a script that only reads a test path, names one in a string, or writes outside the tests stays
 # allowed; so does a test-author's run, a script path that is no file, and a run that is only named.
 sh("builder script file: a script that only reads a test path is allowed",
-   "python3 tools/reads_test.py", "allow", **SB)
+   "verdict python3 tools/reads_test.py", "allow", **SB)
 sh("builder script file: a script that names a test path only in a string it prints is allowed",
-   "python3 tools/names_test.py", "allow", **SB)
+   "verdict python3 tools/names_test.py", "allow", **SB)
 sh("builder script file: a script that writes a non-test path is allowed",
    "python3 tools/writes_doc.py", "allow", **SB)
 sh("builder script file: a test-author running the script that writes a test path is allowed",
@@ -879,14 +879,14 @@ sh("builder-test: --agent builder with no agent_id shell write of a test is allo
 sh("builder-test: shell grep of tests/test_guard.py for a mutating word is allowed",
    "grep -n install tests/test_guard.py", "allow", **BR)
 sh("builder-test: shell pytest -k with a mutating word is allowed",
-   "python3 -m pytest -k copy tests/test_guard.py", "allow", **BR)
+   "verdict python3 -m pytest -k copy tests/test_guard.py", "allow", **BR)
 # A `bash -c` script is read at its command position, as the shell reads it: a mutating word that is only an
 # argument of a test run inside it reads as a read. A write to a test inside the script stays refused, whether
 # the write is the script's first command or a later one after `;`.
 sh("builder-test: bash -c pytest -k with a mutating word on a test is allowed",
-   'bash -c "pytest -k install tests/test_x.py"', "allow", **BR)
+   'bash -c "verdict pytest -k install tests/test_x.py"', "allow", **BR)
 sh("builder-test: timeout around bash -c pytest -k with a mutating word on a test is allowed",
-   'timeout 300 bash -c "pytest -k move tests/x.py"', "allow", **BR)
+   'timeout 300 bash -c "verdict pytest -k move tests/x.py"', "allow", **BR)
 sh("builder-test: bash -c echo redirect onto a test is refused",
    'bash -c "echo x > tests/test_x.py"', "deny", rule=BT, carries=("test-author",), **BR)
 sh("builder-test: bash -c cp onto a test is refused",
