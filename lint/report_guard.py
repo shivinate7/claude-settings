@@ -1048,12 +1048,17 @@ GIT_CALL_RE = re.compile(r"(?:^|[;&|(])\s*git\b")
 
 def sources_seen(records):
     """The carry sources the main-session tool calls in `records` show, in git, page, digest order: git is a Bash
-    `git` call, page an Artifact read, digest a Read of a file under handoffs/. Reads the records only."""
+    `git` call, page an Artifact read, digest a Read of a file under handoffs/. A call counts only when its result
+    (paired by tool_use_id) is not an error. Reads the records only."""
+    failed = {b.get("tool_use_id") for rec in records if not rec.get("isSidechain")
+              for b in tool_results(rec) if b.get("is_error")}
     seen = set()
     for rec in records:
         if rec.get("isSidechain"):
             continue
         for use in tool_uses(rec):
+            if use.get("id") in failed:
+                continue
             name, args = use.get("name"), use.get("input") or {}
             if name == "Bash" and GIT_CALL_RE.search(str(args.get("command", ""))):
                 seen.add("git")
@@ -1062,6 +1067,22 @@ def sources_seen(records):
             elif name == "Read" and "handoffs/" in str(args.get("file_path", "")).replace("\\", "/"):
                 seen.add("digest")
     return [source for source in ("git", "page", "digest") if source in seen]
+
+
+DRAFT_HEADER = "\nDraft of each missing line:\n"
+
+
+def join_reasons(reasons):
+    """The reasons joined by spaces with the rule suffix, then each carry draft on its own line after all of them,
+    so a pasted draft line carries no other text."""
+    heads, drafts = [], []
+    for reason in reasons:
+        head, _, tail = reason.partition(DRAFT_HEADER)
+        heads.append(head)
+        if tail:
+            drafts.append(tail)
+    joined = " ".join(heads) + " (rule reports-order-of-labels)"
+    return joined + DRAFT_HEADER + "\n".join(drafts) if drafts else joined
 
 
 def carry_drafts(records, missing):
@@ -1116,7 +1137,7 @@ def recovered_problem(records, text):
         return ""
     refusal = owner_line("Recovered guard", "; ".join(reasons))
     drafts = carry_drafts(records[boundary + 1:], missing)
-    return refusal + "\nDraft of each missing line:\n" + "\n".join(drafts) if drafts else refusal
+    return refusal + DRAFT_HEADER + "\n".join(drafts) if drafts else refusal
 
 
 def repo_root(cwd):
@@ -3161,7 +3182,7 @@ def main():
         if hold:
             reasons.insert(0, hold_reason(hold))
         if reasons:
-            print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (rule reports-order-of-labels)"}))
+            print(json.dumps({"decision": "block", "reason": join_reasons(reasons)}))
         return
     # A marker left by a rewrite that never ran must not reach a later turn: only the Stop
     # straight after a missing-report block may consume one.
@@ -3278,7 +3299,7 @@ def main():
             pick.append(refusal)
             pick = [r for r in pick if r]
             if pick:
-                reason = " ".join(pick) + " (rule reports-order-of-labels)"
+                reason = join_reasons(pick)
                 finish({"decision": "block", "reason": reason})
             else:
                 finish({"systemMessage": note} if note else None)
@@ -3341,7 +3362,7 @@ def main():
     if refusal:
         reasons.append(refusal)
     if reasons:
-        reason = " ".join(reasons) + " (rule reports-order-of-labels)"
+        reason = join_reasons(reasons)
         if not shape_ok:
             write_marker(hook, last_human_idx)
         finish({"decision": "block", "reason": reason})

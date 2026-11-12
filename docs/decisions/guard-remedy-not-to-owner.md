@@ -71,7 +71,7 @@ Text: two inline facts in `recovered_problem`. The two line forms below live her
   - `Recovered: <each fact, with its source: git, page or digest>`, or `Recovered: none`.
   - `Handoff gave: <facts the handoff supplied that the summary did not>`, or `Handoff gave: none`.
 - If a Recovered item names no source, end it with git, page or digest. Items split on ";" outside parentheses. An item that starts with "none" or "nothing" needs no source.
-- The refusal may also carry a draft of each missing line (see Build). The steps stay in this record.
+- The refusal may also carry a draft of each missing line under the header "Draft of each missing line:", one per line, after all other reasons (see Build). The steps stay in this record.
 
 ### Departs-from guard (any reply with a pick)
 
