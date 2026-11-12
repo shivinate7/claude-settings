@@ -145,8 +145,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        No remote tip, a push that moves nothing, a draft holder, another base, a dry run
                        and a push of main pass, and so does a tip the default branch already holds. A
                        delete part of a push is no move; `--all` judges each branch. A list or compare
-                       that cannot be read, or a `$NAME` destination, allows the push and
-                       logs `push-batch-unread`. (decision batch-freeze-lane-set)
+                       that cannot be read, a glob or `$NAME` destination or source, or an unread
+                       default branch, allows the push and logs `push-batch-unread`.
+                       (decision batch-freeze-lane-set)
   env-file             deny. Any read or write of an environment file.
   process-args         deny. A command that prints other processes' full arguments, which can hold a
                        secret: `ps` with an args column (`aux`, `-ef`, `-f`, `-o args|command|cmd`),
