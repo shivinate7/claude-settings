@@ -1,14 +1,14 @@
 {
  "id": "all-skipped-reads-green",
- "status": "todo",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
- "lane": "",
+ "lane": "cs-step:all-skipped-reads-green",
  "owner": "triage",
  "blockedBy": [],
- "updatedAt": "2026-11-11T23:28:00-06:00",
+ "updatedAt": "2026-11-11T23:29:00-06:00",
  "title": "A CI run where every job skipped does not count as green for a merge",
  "why": "When every job skips, the all-jobs-passed rollup skips too and GitHub counts it as passing, so a batch with no checks run reads green (q_max #1158, 23:28 CST Nov 11).",
  "source": "coordinator 23:27 CST Nov 11, from batch runner 11; incident q_max #1158",
- "note": "Find where to refuse it: the shared all-jobs-passed action, or merge.py's read of the required check. Then check every child repo's checks.yml for the same branch filter (step qmax-ci-batch-heads fixes q_max's). A real incident, so a step, not a note."
+ "note": "Find where to refuse it: the shared all-jobs-passed action, or merge.py's read of the required check. Then check every child repo's checks.yml for the same branch filter (step qmax-ci-batch-heads fixes q_max's). A real incident, so a step, not a note. Lane started 23:28 CST Nov 11 (coordinator), stability fix under the owner 13:51 CST grant; it stays out of hooks/test_guard.py until the guard test split lands."
 }
