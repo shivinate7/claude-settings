@@ -5,6 +5,10 @@ respawn of 22:38 CST Nov 11: coordinator session_013NEJL1gw6EdrSyvHkTUEx6, triag
 session_013NEJKzCzoWhfP8FMCPtQU6, batch runner session_013NEJL2f1YCYsvLdpFqtWP3. Rewritten in place each
 time a point settles; git keeps the history. Last rewrite: 22:44 CST Nov 11. The owner's list closed at 18:43 CST Nov 10; R21 to R45 came after.
 
+Rulings not yet on main live in one store: roadmap/rulings/<id>.json on branch roadmap, one file per ruling, written only by
+triage (R59, step ruled-store-one-home). Sessions read it at start and the past-ruling check reads it before main. This plan cites
+an entry by its id; it does not hold the ruling's open state. An entry closes when main takes it in.
+
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
 Read it top to bottom: five stages in the order they run. Each stage holds the rulings that govern it,
