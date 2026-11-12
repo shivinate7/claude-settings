@@ -170,6 +170,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 import stale_cites  # noqa: E402  the one home of the rule dirs (lint/stale_cites.py); the lint dir is on sys.path from the records import above
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
+import layout as repo_layout  # noqa: E402  the one home of the decisions path (lint/layout.py, key "decisions"); stdlib only, so no import cycle
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -5034,15 +5035,15 @@ def is_doc(path):
     low = path.lower()
     return low.endswith(".md") and (low.startswith("docs/") or low == "readme.md")
 
-DECISIONS_DIR = "docs/decisions/"
+DECISIONS_DIR = repo_layout.layout()["kinds"]["decisions"]["path"].lower() + "/"  # lower case, because is_doc ignores case too
 
 def kind_misfits(kind, files):
     """-> the sorted paths that break the kind, over (path, status, additions) triples.
-    docs-only: a path that is not a doc (a .md under docs/, or the root README.md), or a decision record (a path under DECISIONS_DIR) that is added or modified.
+    docs-only: a path that is not a doc (a .md under docs/, or the root README.md), or a decision record (a path under DECISIONS_DIR, case ignored) with any status but removed.
     A decision record is a rule's source, and decision docs-only-prs-skip-review keeps it out of a docs-only change.
     delete-only: a path that adds lines or is new (added, renamed, copied)."""
     if kind == "docs-only":
-        return sorted(p for p, st, _ in files if not is_doc(p) or (p.startswith(DECISIONS_DIR) and st in ("added", "modified")))
+        return sorted(p for p, st, _ in files if not is_doc(p) or (p.lower().startswith(DECISIONS_DIR) and st != "removed"))
     if kind == "delete-only":
         return sorted(p for p, st, add in files if add > 0 or st in ("added", "renamed", "copied"))
     return []
