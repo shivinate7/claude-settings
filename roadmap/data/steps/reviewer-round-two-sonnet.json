@@ -1,0 +1,16 @@
+{
+ "id": "reviewer-round-two-sonnet",
+ "title": "Reviewers run Sonnet from review round 2, as the rule says, though agents/reviewer.md pins haiku",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "test-guard-split-per-rule"
+ ],
+ "why": "Rule roles-third-round-steps-up (the third try steps up a model) says reviewers run Sonnet from round 2, but agents/reviewer.md pins `model: haiku` and the spawn guard refuses an override, so every fix check on Nov 11 ran haiku (lane main-protection-ruleset-text, #2622).",
+ "source": "coordinator 00:05 CST Nov 12; outbox note brief-names-role-not-model",
+ "note": "Stability fix after the guard test split; no owner ask (coordinator). A rule clash, not only brief wording. Related: steps builder-model-pin and reviewer-model-hook-latest. Folded from outbox note brief-names-role-not-model (coordinator 23:09 CST Nov 11): record-writer agents in lanes #2611, #2612 and q_max#1157 ran haiku although their briefs said Sonnet, since agents/record-writer.md also pins haiku; briefs name the role only, never a model.",
+ "updatedAt": "2026-11-12T00:06:00-06:00"
+}
