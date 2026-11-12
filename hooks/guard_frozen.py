@@ -1096,6 +1096,38 @@ def _sed_s_flag_runs(script: str) -> bool:
     return False
 
 
+def _sed_expressions(words) -> list:
+    """The scripts a sed command line gives with `-e`, read as sed's option parser reads them: a separate word
+    (`-e S`, `--expression S`), glued (`-eS`, `--expression=S`), or the `e` ending a short-option group
+    (`-ne S`, `-Ee S`, `-neS`). In a group, `f` and `l` take the rest as their own argument and `i` takes it
+    as a backup suffix, so `-ie` has no script. Options end at `--`."""
+    scripts, at = [], 0
+    while at < len(words):
+        word = words[at]
+        at += 1
+        if word == "--":
+            break
+        if word.startswith("--expression="):
+            scripts.append(word[len("--expression="):])
+        elif word == "--expression":
+            if at < len(words):
+                scripts.append(words[at])
+                at += 1
+        elif re.match(r"-[^-]", word):
+            for place, letter in enumerate(word[1:], 2):
+                if letter == "e":
+                    rest = word[place:]
+                    if rest:
+                        scripts.append(rest)
+                    elif at < len(words):
+                        scripts.append(words[at])
+                        at += 1
+                    break
+                if letter in "fli":
+                    break
+    return scripts
+
+
 def _runs_a_substitution(word: str) -> bool:
     """True when the shell runs a `$( )`, `${ }`, backtick or `<( )` in `word`: one not inside single quotes,
     read by the one quote walk (`walk_quotes`), so `'a'$(x)'b'` runs its `$(`. A spot the walk steps over
@@ -1121,8 +1153,7 @@ def _runs_its_text(command: str, rest) -> bool:
                 or (subcommand == "submodule" and "foreach" in plain)
                 or (subcommand == "bisect" and plain[:1] == ["run"]))
     if command == "sed":
-        scripts = [value for flag, value in zip(words, words[1:]) if flag in ("-e", "--expression")]
-        scripts += [word for word in words if word.startswith("--expression=")]
+        scripts = _sed_expressions(words)
         if not scripts:
             scripts = [word for word in words if not word.startswith("-")][:1]
         return any(_SED_RUNS_OR_WRITES.search(script) or _sed_s_flag_runs(script) for script in scripts)
