@@ -81,6 +81,7 @@ Pinned choices (each one a departure or an open point, not settled by the spec):
 Every machine gets a git identity, as a configured Mac does. A machine with no identity is not covered.
 """
 import contextlib
+import hashlib
 import importlib.machinery
 import importlib.util
 import io
@@ -529,7 +530,10 @@ def cli_in_process(machine, *args):
 
 class MailCase(unittest.TestCase):
     def setUp(self):
-        self.case = os.path.join(ROOT, self.id().rsplit(".", 1)[-1])
+        # A short name keeps git's paths under the Windows path limit. The test id is in each failure
+        # message, so the folder needs only a unique name. makedirs refuses a clash.
+        digest = hashlib.sha256(self.id().encode("utf-8")).hexdigest()[:10]
+        self.case = os.path.join(ROOT, digest)
         os.makedirs(self.case)
         self.counter = 0
 
