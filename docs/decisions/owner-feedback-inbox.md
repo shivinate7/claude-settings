@@ -67,18 +67,30 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   semicolon, dash or newline, or a colon or full stop followed by whitespace or the end of the message. A colon or full
   stop glued to the next word is no mark, so "Approved:hand in any PR" and "Approved. merge:hand in any PR" bar. The
   stems are the guard's ACT_STEMS, in any form: merg, push, delet, deploy, releas, publish, ship, land, clos, approv,
-  revert, rebas, squash, integrat, accept, rollback, commit, "roll back" (also "roll it back", "rolled back"), "bring
+  revert, rebas, squash, integrat, accept, rollback, commit, "roll ... back" (also "roll it back", "rolled back"), "bring
   ... into main" and the whole word "run" ("batch runner" is none). "Tag" is a stem only as a verb ("tag it"), never as
   a label ("(tag cs-build:triage)"). The scan is one pass over the message, so a long message gets a verdict at once.
   Limits: "Please hand in any PR." passes, as the verb stands right before the noun. "sends any PR" bars, as only the
   base verbs count. "Approved send any PR" bars, as no mark ends the clause before the verb. An act stem anywhere after
   the noun bars, however far. "Tag" before any word with no colon bars, even as a noun. A stem inside a longer word
   bars ("acceptance", "integration"), as the stems are prefixes.
+  Limits that pass. A handoff destination of main passes: "Approved: send any PR to main" and "post any PR to
+  origin/main", as "main" is no stem. Land synonyms pass too: "fast-forward main", "cherry-pick it", "put it on
+  main", "pull it into main", "update main" and "move main". The list is closed, so any other act word outside the
+  stems passes too. The harm is a standing grant to land on main, filed as a one-shot `once:` note. The stem
+  "bring ... into main" bars only when the text after "bring", up to the space before "into", is at most 40
+  characters, with no full stop or new line in it. So "bring all of the green open pull requests we spoke of into
+  main" passes. The stem "roll ... back" bars only with two or fewer words between "roll" and "back". So "roll the
+  whole batch of changes back" passes, and "roll the batch back" bars. Task words after the noun (run, commit,
+  accept, tag, close, delete, merge, approved) also end the exception. These false alarms are stated limits. Without
+  the exception, a scope noun bars a once: home anyway, so the once: home is barred either way.
   A grant's ruling home may also be `settings.json` or `.claude/CLAUDE.md` at the repo root, if some
   branch tracks it. A plain ruling there still blocks. A lone short message counts. Risk kind: named
   incident. F47 (an all-repos grant left in chat) and F31 (a grant homed to the handoff), in the
   owner-feedback audit (claude-settings draft PR #1008, `docs/plans/owner-feedback-audit.md`). Landed
-  2026-11-02. Cost: two regexes on text in memory.
+  2026-11-02. Cost, in memory and linear in the message: the grant check runs two regexes. Each open `once:` note
+  runs the standing-word check: five regexes and one bisect pass over the scope nouns. Both checks also match once
+  per line, for fences.
 - **The guard.** A Stop check refuses to end a turn in four base cases, and in the Pages, grant and
   closed-note cases below. A burst's message has no items. An
   item has no kind or home. A ruling or task, open or closed, names a home that is not a file under its
