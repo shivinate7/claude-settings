@@ -27,7 +27,9 @@ MODEL_ID = re.compile(r"claude-([a-z]+)-(\d+)-(\d{1,2})(?:\D.*)?\Z", re.S)
 FAMILY_WORD = re.compile(r"(?<![a-z])(" + "|".join(MODEL_FAMILIES) + r")(?![a-z])", re.I)
 VERSION_AFTER = re.compile(r"[\s_-]*(\d+)(?:[.-](\d{1,2}))?(?!\d)")
 VERSION_BEFORE = re.compile(r"(?<!\d)(\d+)(?:[.-](\d{1,2}))?[\s_-]*\Z")
-ADDRESS = re.compile(r"<[^>]*>")
+# Only an angle-bracket text with an `@` in it is an address; `Claude <Opus 5.5>` is a name.
+ADDRESS = re.compile(r"<[^>]*@[^>]*>")
+CO_AUTHOR = re.compile(r"^[ \t]*Co-Authored-By:[ \t]*(.+?)[ \t]*$", re.I | re.M)
 TAIL_BYTES = 64 * 1024   # the first read of a transcript's end; it doubles until an assistant record shows
 TAIL_MAX = 16 * 1024 * 1024
 SYNTHETIC = "<synthetic>"
@@ -100,6 +102,8 @@ def trailer_differs(value, own):
         return False   # "Claude Code 2.1", `GPT-4`, a person
     if found.group(1).lower() != own[0]:
         return True
+    if any(other.group(1).lower() != own[0] for other in FAMILY_WORD.finditer(value, found.end())):
+        return True   # "Claude Haiku 5.5 & Claude Opus 5.5": a later name of another family
     version = VERSION_AFTER.match(value, found.end()) or VERSION_BEFORE.search(value[:found.start()])
     if not version:
         return False
@@ -123,16 +127,29 @@ def unpushed_trailers(where, sources):
     return found
 
 
-def commit_trailer_hit(stripped, cwd, transcript, agent_id):
+def message_trailers(text):
+    """The Co-Authored-By values in the last paragraph of a commit message `text`."""
+    paragraphs = re.split(r"\n[ \t]*\n", text.strip())
+    return [value for value in CO_AUTHOR.findall(paragraphs[-1])] if paragraphs else []
+
+
+def commit_trailer_hit(stripped, cwd, transcript, agent_id, read_verb=None, call_commits=None):
     """(matched text, reason) for the first push of an agent that sends a commit whose Co-Authored-By names a model
     other than the agent's own, read from its transcript. Else None. No agent, no readable transcript, an
-    unmapped model id and a git error all give None. Cost: one transcript read and one `git log` per push."""
+    unmapped model id and a git error all give None. A dry run (`read_verb("push", args)`) sends nothing and is
+    skipped. A commit the same call makes does not exist yet, so `call_commits()` gives the message text the call
+    carries (`-m`, a `-F` file on disk, a heredoc): its trailers are judged as the unpushed ones are.
+    Cost: one transcript read and one `git log` per push; the call's own commit text is read once, in memory and
+    from the message files the call names."""
     if not agent_id or not isinstance(transcript, str) or not transcript.endswith(".jsonl"):
         return None
     owns = None   # the agent's (family, major, minor) names, [] when unreadable; read at most once
+    in_call = None   # the call's own commit messages, read at most once
     pushes = [push for segment in split_segments(stripped) if segment.strip()
               for push in _push_calls(segment, stripped, cwd)]   # inner_commands reads `bash -c`, `sh -lc`
     for args, where, _overrides in pushes:
+        if read_verb is not None and read_verb("push", args):
+            continue
         named = push_refspecs(args)
         if named is None or not where or not os.path.isdir(where):
             continue
@@ -141,7 +158,11 @@ def commit_trailer_hit(stripped, cwd, transcript, agent_id):
             source = _plain_source(spec.lstrip("+").partition(":")[0])
             if source not in sources:
                 sources.append(source)
-        values = unpushed_trailers(where, sources)
+        values = unpushed_trailers(where, sources) or []
+        if in_call is None:
+            in_call = [("this call's commit", value) for text in (call_commits() if call_commits else [])
+                       for value in message_trailers(text)]
+        values = values + in_call
         if not values:
             continue
         if owns is None:   # only when a push has a trailer to judge

@@ -1847,6 +1847,24 @@ def message_texts(segment: str, raw: str, where: str, before: int, titles: bool 
     return call is not None, texts, ""
 
 
+def commit_message_texts(stripped: str, raw: str, cwd: str):
+    """The message each `git commit` in the call carries, one string per commit: its `-m` values joined as
+    paragraphs (git's way), a `-F` file that exists now, and a heredoc fed to `-F -`. Reads the call's own text
+    and files only, never a push, an `echo` or another command's words. A file that cannot be read adds no text
+    (rule cite-by-id refuses it earlier). The one reader of a message is `message_texts`."""
+    ends = []
+    segments = split_segments(stripped, ends)
+    found = []
+    for number, (segment, before) in enumerate(zip(segments, heredoc_offsets(segments, ends, stripped == raw))):
+        if not segment.strip():
+            continue
+        where = dir_before_segment(segments, number, cwd, ends) or cwd
+        read = message_texts(segment, raw, where, before)
+        if read is not None and read[0] and read[1]:
+            found.append("\n\n".join(read[1]))
+    return found
+
+
 def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:
     """Return the first record path a commit message or PR body cites, else ''. A message file
     that cannot be read returns UNREAD_MARK + its name.
@@ -4659,7 +4677,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 
     # 6c4. An agent's push of a commit whose Co-Authored-By names another model than the agent's own (rule
     # commit-trailer-model). Cost: one transcript read and one log read per agent push; none for any other call.
-    trailer = commit_trailer_hit(stripped, cwd, transcript, scratchpad_agent(payload))
+    trailer = commit_trailer_hit(stripped, cwd, transcript, scratchpad_agent(payload), read_verb,
+                                 lambda: commit_message_texts(stripped, raw, cwd))
     if trailer:
         refuse(tool, "deny", "commit-trailer-model", trailer[1], trailer[0])
 
