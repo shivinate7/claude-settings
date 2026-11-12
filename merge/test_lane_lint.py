@@ -1526,6 +1526,7 @@ FLOOR_NAMES = ("Python 3.9 floor check", "Python 3.9 floor fixture suite")
 FLOOR_CHECK = "lint/check_python_floor.py"  # the script the floor check runs, and the file the suite reads: a lint tree lacked it in the incident
 FLOOR_SUITE = "lint/test_check_python_floor.py"  # the fixture suite that failed on FileNotFoundError for that file
 WORKFLOW_PATH = ".github/workflows/checks.yml"  # the file the lint reads its steps from: the other file a lint tree lacked in the incident
+LINT_TREE_FILE_TEXT = "# a file the head's tree holds and the lint tree is made without\n"  # the body of a file the LintTreeFileMain cases push; the lint never reads it
 SELECTOR = os.path.join(REPO, ".github", "scripts", "touched-tests.py")  # read at test time: its tables give the skip reasons, and the lint tree loads it
 LOAD_4 = "def load():\n    return 4\n"  # main's lint/load.py
 LOAD_8 = "def load():\n    return 8\n"  # lane-b's change to it
@@ -2066,6 +2067,20 @@ def link_or_copy(src, dst):
         (shutil.copytree if os.path.isdir(src) else shutil.copy2)(src, dst)
 
 
+def missing_from_lint_tree(rels):
+    """A patch: the lint tree merge.add_worktree makes lacks each of `rels`, as the incident's tree did. The head's branch holds them; the tree
+    on disk does not. The one home of that tree shape: BatchLintFlags and LintTreeFileMain both patch through it."""
+    made = merge.add_worktree
+
+    def add_worktree_without(root, head):
+        tmp, wt = made(root, head)
+        for rel in rels:
+            os.remove(os.path.join(wt, *rel.split("/")))
+        return tmp, wt
+
+    return unittest.mock.patch.object(merge, "add_worktree", add_worktree_without)
+
+
 class BatchLintFlags(tm.Env):
     """`merge --lane-lint <batch>` runs the real bin/ci-job on the batch's checks job: each of its four lint CI steps runs once, with the argv checks.yml gives it."""
 
@@ -2122,16 +2137,8 @@ class BatchLintFlags(tm.Env):
         `missing` names paths the lint tree lacks once it is made, as the incident's tree did: the branch holds them, the tree on disk does not.
         `unknown_ok` is the --lint-unknown-ok reason, passed as the command line passes it."""
         env = {"VERDICT_LOG": os.path.join(self.t, "verdict.log")}  # one log for the run: no ci-job log lands in the system temp dir
-        made = merge.add_worktree
-
-        def add_worktree_without(root, head):
-            tmp, wt = made(root, head)
-            for rel in missing:
-                os.remove(os.path.join(wt, *rel.split("/")))
-            return tmp, wt
-
         with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER), unittest.mock.patch.object(merge, "CI_JOB", self.ci_job), \
-                unittest.mock.patch.object(merge, "add_worktree", add_worktree_without), \
+                missing_from_lint_tree(missing), \
                 unittest.mock.patch.dict(os.environ, env), contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
             return merge.lane_lint(self.co, target, self.host, base=BASE, unknown_ok=unknown_ok)
 
@@ -2272,6 +2279,78 @@ class BatchLintFlags(tm.Env):
         lines = pass_lines(text)
         self.assertEqual(len(lines), 1, text)
         self.assertIn(PUSH_ONLY, lines[0], text)
+
+
+class LintTreeFileMain(LaneFixture):
+    """`merge --lane-lint <ref>` through main(): a lint tree that lacks a file its head's git tree holds is UNKNOWN. The refusal exits 1
+    (every lane-lint refusal does; exit 2 is argparse's usage code), names the file, runs no step, and --lint-unknown-ok never lifts it.
+    The control is a head whose tree never held those files: this check does not stop it."""
+
+    def setUp(self):
+        super().setUp()
+        self.use_ci_job(PASSING, 0)  # a step that ran would pass: a refusal that ran one reads as a pass here
+
+    def push_feat_files(self, files):
+        """One commit on origin's feat, made from origin/feat with `files` ({path: text}) written: the head's git tree holds them.
+        The lane checkout fetches it. -> the pushed sha."""
+        o = self.other
+        tm.sh(o, "git", "fetch", "-q", "origin")
+        tm.sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        for path, text in files.items():
+            tm.put(os.path.join(o, *path.split("/")), text)
+        tm.sh(o, "git", "add", "-A")
+        tm.sh(o, "git", "commit", "-q", "-m", "feat: files the lint tree is made without")
+        tm.sh(o, "git", "push", "-q", "origin", "feat")
+        tm.sh(self.co, "git", "fetch", "-q", "origin")
+        return tm.sh(o, "git", "rev-parse", "HEAD")
+
+    def lint(self, head, *extra, missing=()):
+        """merge --lane-lint <head> through main(), the lint tree made without `missing`. -> (rc, stdout and stderr together)."""
+        with missing_from_lint_tree(missing):
+            return self.run_lane("--lane-lint", head, *extra)
+
+    def test_a_head_holding_the_floor_check_whose_lint_tree_lacks_it_exits_1_names_the_file_as_unknown_and_runs_no_step(self):
+        head = self.push_feat_files({FLOOR_CHECK: LINT_TREE_FILE_TEXT})
+        self.assertEqual(tm.sh(self.co, "git", "ls-tree", "--name-only", head, "--", FLOOR_CHECK), FLOOR_CHECK,
+                         "the head's tree does not hold the file the lint tree is made without")
+        rc, text = self.lint(head, missing=(FLOOR_CHECK,))
+        self.assertEqual(rc, 1, "a lint tree that lacks a file its head holds exits %r, want 1: %s" % (rc, text))
+        self.assertIn("unknown", text, "the refusal does not say unknown: " + text)
+        self.assertIn(FLOOR_CHECK, text, "the refusal does not name the missing file: " + text)
+        self.assertEqual(pass_lines(text), [], "a lint of a tree missing its file read as a pass: " + text)
+        self.assertEqual(self.lint_calls(), [], "a lint step ran after its tree was found missing a file: " + text)
+
+    def test_a_reason_does_not_lift_the_missing_floor_check_file(self):
+        head = self.push_feat_files({FLOOR_CHECK: LINT_TREE_FILE_TEXT})
+        self.assertEqual(tm.sh(self.co, "git", "ls-tree", "--name-only", head, "--", FLOOR_CHECK), FLOOR_CHECK,
+                         "the head's tree does not hold the file the lint tree is made without")
+        rc, text = self.lint(head, "--lint-unknown-ok", "a reason the lint must not take", missing=(FLOOR_CHECK,))
+        self.assertNotEqual(rc, 0, "--lint-unknown-ok lifted a lint tree that lacks a file its head holds: " + text)
+        self.assertEqual(rc, 1, "a refusal that the reason does not lift exits %r, want 1: %s" % (rc, text))
+        self.assertIn("unknown", text, "the refusal does not say unknown: " + text)
+        self.assertIn(FLOOR_CHECK, text, "the refusal does not name the missing file: " + text)
+        self.assertEqual(pass_lines(text), [], "a lint of a tree missing its file read as a pass: " + text)
+        self.assertEqual(self.lint_calls(), [], "a lint step ran after its tree was found missing a file: " + text)
+
+    def test_a_head_holding_the_workflow_whose_lint_tree_lacks_it_exits_1_names_the_file_as_unknown_and_runs_no_step(self):
+        head = self.push_feat_files({WORKFLOW_PATH: WORKFLOW})
+        self.assertEqual(tm.sh(self.co, "git", "ls-tree", "--name-only", head, "--", WORKFLOW_PATH), WORKFLOW_PATH,
+                         "the head's tree does not hold the workflow the lint tree is made without")
+        rc, text = self.lint(head, missing=(WORKFLOW_PATH,))
+        self.assertEqual(rc, 1, "a lint tree that lacks the workflow its head holds exits %r, want 1: %s" % (rc, text))
+        self.assertIn("unknown", text, "the refusal does not say unknown: " + text)
+        self.assertIn(WORKFLOW_PATH, text, "the refusal does not name the missing workflow: " + text)
+        self.assertEqual(pass_lines(text), [], "a lint of a tree missing its workflow read as a pass: " + text)
+        self.assertEqual(self.lint_calls(), [], "a lint step ran after its tree was found missing the workflow: " + text)
+
+    def test_a_head_whose_tree_never_held_those_files_is_not_stopped_by_this_check(self):  # the control: green on the old code
+        head = self.head("feat")
+        self.assertEqual(tm.sh(self.co, "git", "ls-tree", "--name-only", head, "--", FLOOR_CHECK, WORKFLOW_PATH), "",
+                         "the head's tree holds a lint-tree file, so this is not the control")
+        rc, text = self.lint(head)
+        self.assertEqual(rc, 0, "a head that never held the lint-tree files was refused: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+        self.assertEqual(len(self.lint_calls()), 1, "the lint did not run once on the control head: " + text)
 
 
 class ReadyChecks(CiJobStub, tm.RecordsEnv):
