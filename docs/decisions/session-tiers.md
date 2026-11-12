@@ -167,7 +167,7 @@ Mechanics that carry out the rulings above. They are not owner rulings.
   - `list_sessions` leaves out runs a scheduled task started. The check misses a coordinator started that way.
 - **Session start** (lane L3). In a cloud session (`CLAUDE_CODE_REMOTE=true`), or in a session whose `CLAUDE_CODE_REMOTE_SESSION_ID` is set, `hooks/session_start.sh` prints one fixed line, in any working folder, git or not. The line tells the session to read its own record with `get_session`, and gives the check above.
   - The hook cannot read the role itself. `get_session` and `list_sessions` are MCP tools only, and a hook never calls the sessions API with a token.
-  - A session with neither value prints no line. A lane with an own id needs the line, so that the load brake can read its own record (decision `machine-load-brake`, the machine-load brake).
+  - A session with neither value prints no line. A local lane with an own id needs the line, so that the load brake can read its own record (decision `machine-load-brake`, the machine-load brake).
   - Cost: at most two env reads in the hook already running. No network, no new process, no timer, no file written. `hooks/test_session_start.py` proves the line prints once in cloud or with an own id, in a git folder or not, and never with neither.
 
 ## Why

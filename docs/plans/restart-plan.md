@@ -124,8 +124,9 @@ for the guard test file split.
   behave the same. A split the platform forces lives only inside the tool, never in a role's
   definition. Splits to remove in this lane: two tests for "cloud" in the code; guards that judge only
   one of start_session and create_session; the merge role file on the cloud only. Also the load brake on
-  the owner's computer only (done in lane brake-same-everywhere: the brake runs in the cloud). Only start_session and
-  create_session stay unread there, because each starts a session in another container. Also a lane the owner starts that cannot merge on the cloud yet
+  the owner's computer only (done in lane brake-same-everywhere: the Agent, Task and Workflow start refusal runs in the
+  cloud). start_session and create_session stay unread there, because each starts a session in another container.
+  Agent and lane writes stay unbraked there, because the braked call is the only way to free a cloud disk. Also a lane the owner starts that cannot merge on the cloud yet
   (docs/todo.md, "Let a solo session merge", owner 2026-11-02 14:02 CST). Deferred to a later build phase (owner 14:37 CST,
   "can be targeted after/later"): the details of forced splits, mainly a team that mixes local and
   cloud sessions while the mailbox bridge (MAILBOX_REPO) is off.

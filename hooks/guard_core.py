@@ -31,8 +31,8 @@ from git_reads import (  # noqa: F401
 
 def is_cloud() -> bool:
     """True in a Claude Code cloud session: CLAUDE_CODE_REMOTE is exactly "true". Read at each call. The one home of the
-    cloud check. The load brake runs the same in a cloud session (owner, 14:36 CST Nov 10); only its session-start
-    call stands down here, because the new session runs in another container."""
+    cloud check. The load brake's Agent, Task and Workflow refusal runs the same in a cloud session (owner, 14:36 CST
+    Nov 10). Its session-start read and its running agent and lane brake stand down here, splits the platform forces."""
     return os.environ.get("CLAUDE_CODE_REMOTE") == "true"
 
 

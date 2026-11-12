@@ -368,13 +368,13 @@ Other tools, in `judge` order:
                        `model` or no `source_url`; a value that is not text, or is empty or only whitespace once
                        stripped, counts as missing. A call with no lane tag passes. The deny reason names both
                        fields. Runs after lane-repo-tag. An override lifts it. (agent-model-cap)
-  load-brake           deny. On a local or cloud session, a lane-start call, an agent's shell or file write, or a lane
-                       session's own shell or file write, when the machine is busy (lane starts only) or full. A
-                       lane session is one whose own newest get_session record carries `cs-build:lane` and no other
-                       `cs-build:` tag; the coordinator, triage and the batch runner are never braked on their own
-                       calls. The transcript is read only at full. Only start_session skips it in the cloud; create_session is read nowhere.
-                       An override lifts it.
-                       (machine-load-brake)
+  load-brake           deny. A lane-start call, an agent's shell or file write, or a lane session's own shell or
+                       file write, when the machine is busy (lane starts only) or full. A lane session is one whose
+                       own newest get_session record carries `cs-build:lane` and no other `cs-build:` tag; the
+                       coordinator, triage and the batch runner are never braked on their own calls. The transcript
+                       is read only at full. In a cloud session only Agent, Task and Workflow are braked:
+                       start_session and agent and lane writes skip it, and create_session is read nowhere. An
+                       override lifts it. (machine-load-brake)
   workflow-args-shape-check
                        deny. A Workflow call whose `args` is, or holds as an array item or object value (one
                        level down), a placeholder: the whole value is an all-caps word with an underscore
@@ -3877,12 +3877,14 @@ def role_model_one(tool_input):
 # run_in_background out or sets it false. (In the desktop harness a left-out call still runs in the background
 # and the field is not offered, so busy does not slow an Agent call there.) Full (memory over 95%, disk free
 # under the smaller of 5% of the disk and 5 GB) refuses every start call. A reading that cannot be read counts as normal. Only an
-# agent's shell or file write also reads load (RUNNING_AGENT_TOOLS, below). The brake is the same in a cloud session
-# (owner, 14:36 CST Nov 10, glossary topic 1: no rule-chosen local/cloud split; a split the platform forces lives only
-# inside the tool). Two start tools run the new session in another container or machine, so this one's load says nothing
-# about it: start_session (SESSION_TOOL, read here and skipped in the cloud) and create_session (CREATE_SESSION_TOOL, not
-# in START_TOOLS, so read nowhere today). A cloud disk does not drain while a session waits, so a full cloud disk reading
-# swaps "Wait, then retry" for a steer (cloud_steer). Measured in a cloud container, 14:00 CST Nov 12: writes of about
+# agent's shell or file write also reads load (RUNNING_AGENT_TOOLS, below). In a cloud session the start refusal for
+# Agent, Task and Workflow runs as it does locally (owner, 14:36 CST Nov 10, glossary topic 1: no rule-chosen local/cloud
+# split; a split the platform forces lives only inside the tool). Three splits the platform forces remain. Two start
+# tools run the new session in another container or machine, so this one's load says nothing about it: start_session
+# (SESSION_TOOL, read here and skipped in the cloud) and create_session (CREATE_SESSION_TOOL, not in START_TOOLS, so read
+# nowhere today). The third is the running agent and lane brake, skipped in the cloud (see RUNNING_AGENT_TOOLS, below). A
+# cloud disk does not drain while a session waits, so a full cloud disk reading swaps "Wait, then retry" for a steer
+# (cloud_steer). Measured in a cloud container, 14:00 CST Nov 12: writes of about
 # 29 GB failed on a 252 GB disk that showed 29.7 GB free, so shutil.disk_usage free is the true allowance and the disk
 # lines stay.
 START_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
@@ -4031,36 +4033,41 @@ def load_hit(tool: str, tool_input) -> tuple:
 # stops even while its orchestrator waits on the owner. Busy lets it run. The orchestrator's own calls read nothing,
 # so the session that frees the disk is never braked by the full disk. A lane session (a session whose own record
 # carries the lane tag, lane_session_hit) is braked the same way on its own calls, since it is a lane too.
+# A cloud session skips both, a split the platform forces: a cloud disk does not drain by waiting, and the parent runs in
+# another container and cannot free this disk, so the braked call (an `rm`, a `git push`) is the only way to free it or
+# push the work. Braking it would make the recovery depend on the full disk it recovers
+# (verification-recovery-independent-of-state). The start refusal (load_hit) still runs there.
 RUNNING_AGENT_TOOLS = ("Bash", "PowerShell") + WRITE_TOOLS
 LOAD_LANE_FULL_REASON = ("the machine is full (%s). Stop this agent now: end your turn and report the reading to "
-                         "your orchestrator, which frees space or waits for the load to drop. %s" + LOAD_LANE_CITE)
+                         "your orchestrator, which frees space or waits for the load to drop. " + LOAD_LANE_CITE)
 
 
 def running_agent_hit(payload, tool: str) -> tuple:
     """(rule reason, matched) when an agent's disk-filling call meets a full machine, else ("", ""). One read
-    per such call; none for the orchestrator or a lane session (lane_session_hit judges that), and none for a
-    start call, which load_hit reads."""
+    per such call; none for the orchestrator or a lane session (lane_session_hit judges that), none for a
+    start call, which load_hit reads, and none in a cloud session (the forced split above RUNNING_AGENT_TOOLS)."""
     agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
-    if tool not in RUNNING_AGENT_TOOLS or not isinstance(agent_id, str) or not AGENT_ID.match(agent_id):
+    if is_cloud() or tool not in RUNNING_AGENT_TOOLS or not isinstance(agent_id, str) or not AGENT_ID.match(agent_id):
         return "", ""
     try:
         reading = read_load()
     except Exception:
         return "", ""
     full = load_full(reading)
-    return (LOAD_LANE_FULL_REASON % (", ".join(full), cloud_steer(full)), ", ".join(full)) if full else ("", "")
+    return (LOAD_LANE_FULL_REASON % ", ".join(full), ", ".join(full)) if full else ("", "")
 
 
 LOAD_SESSION_FULL_REASON = ("the machine is full (%s). You are a lane: end your turn now and send this "
                             "reading to your parent with send_message to @parent, which frees space or waits for the "
-                            "load to drop. %s" + LOAD_LANE_CITE)
+                            "load to drop. " + LOAD_LANE_CITE)
 
 
 def lane_session_hit(payload, tool: str) -> tuple:
     """(rule reason, matched) when a lane session's own disk-filling call meets a full machine, else ("", "").
     A call with an agent_id is an agent's (running_agent_hit). The load is read once; the transcript is read only
-    at full, and an unread record or any error counts as no lane."""
-    if not isinstance(payload, dict) or tool not in RUNNING_AGENT_TOOLS or payload.get("agent_id"):
+    at full, and an unread record or any error counts as no lane. A cloud session reads nothing (the forced split
+    above RUNNING_AGENT_TOOLS)."""
+    if not isinstance(payload, dict) or is_cloud() or tool not in RUNNING_AGENT_TOOLS or payload.get("agent_id"):
         return "", ""
     try:  # fails closed: an unimportable override or an unread id is no lane, so the later checks still run
         import override
@@ -4078,7 +4085,7 @@ def lane_session_hit(payload, tool: str) -> tuple:
             return "", ""
     except Exception:
         return "", ""
-    return LOAD_SESSION_FULL_REASON % (", ".join(full), cloud_steer(full)), ", ".join(full)
+    return LOAD_SESSION_FULL_REASON % ", ".join(full), ", ".join(full)
 
 
 def load_full(reading) -> list:
