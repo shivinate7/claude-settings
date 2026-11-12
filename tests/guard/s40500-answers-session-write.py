@@ -8,7 +8,10 @@ FAMILY = "answers-session-write"
 #      path, on any page URL (a session has no right to forge an answer on any waiting page);
 #   2. a Write or Edit whose file_path lies under the answers folder of the waiting data;
 #   3. a Bash call that writes there by a redirect, tee, cp, mv, rm or sed -i, or by a git add or commit
-#      that names the path.
+#      that names the path. The path may follow a leading cd, and an interpreter (python -c, a python
+#      heredoc, node -e) may write it from its script;
+#   4. a GitHub MCP write (create_or_update_file, push_files, delete_file) whose path names an answers
+#      path, on any branch.
 # A read of answers passes. A quoted, heredoc or commented mention of the path passes, since it is no write
 # (rule building-scanner-respects-strings). The writer's own copy step passes: its command line names no
 # answers path (skills/waiting-page, the copy stays live until step retire-page-copy).
@@ -180,6 +183,91 @@ aa_bash("the writer's export_page.py copy step is allowed",
 # copy step ends (step retire-page-copy). Pinned so no one refuses it early; see the report.
 aa_bash("the writer's git add of its copy folder is allowed until the copy step ends", "git add waiting-data",
         "allow")
+
+
+# ---- 4. Bash after a leading cd: the folder the cd enters is where a relative path lands, so the answers path
+# is judged from that folder. The controls keep a write to a sibling folder and a read of an answer file allowed.
+
+aa_bash("a relative redirect after a cd into waiting/answers is refused",
+        "cd waiting/%s && echo x > a1.json" % AA_COLLECTION, "deny")
+aa_bash("a relative redirect after a cd into waiting, to answers/, is refused",
+        "cd waiting && echo x > %s/a1.json" % AA_COLLECTION, "deny")
+aa_bash("a relative cp after a cd into waiting-data, to answers/, is refused",
+        "cd waiting-data && cp src.json %s/a1.json" % AA_COLLECTION, "deny")
+aa_bash("a relative redirect after a cd into waiting, to items/, is allowed",
+        "cd waiting && echo x > items/i1.json", "allow")
+aa_bash("a cat of an answer file after a cd into waiting/answers is allowed",
+        "cd waiting/%s && cat a1.json" % AA_COLLECTION, "allow")
+
+
+# ---- 5. Interpreters: a python -c, a python heredoc or a node -e that writes an answer file is refused, since the
+# script names the path and writes it itself. A python script that only reads the file, and one that writes a
+# waiting item, pass.
+
+aa_bash("a python -c that opens an answer file for write is refused",
+        "python3 -c \"open('waiting/%s/a1.json','w').write('x')\"" % AA_COLLECTION, "deny")
+aa_bash("a python heredoc that opens an answer file for write is refused",
+        "python3 - <<'EOF'\nopen(\"waiting/%s/a1.json\",\"w\").write(\"x\")\nEOF" % AA_COLLECTION, "deny")
+aa_bash("a node -e that writes an answer file with fs is refused",
+        "node -e \"require('fs').writeFileSync('waiting/%s/a1.json','x')\"" % AA_COLLECTION, "deny")
+aa_bash("a python -c after a cd into waiting that opens answers/ for write is refused",
+        "cd waiting && python3 -c \"open('%s/a1.json','w').write('x')\"" % AA_COLLECTION, "deny")
+aa_bash("a python -c that reads an answer file in 'r' mode is allowed",
+        "python3 -c \"print(open('waiting/%s/a1.json','r').read())\"" % AA_COLLECTION, "allow")
+aa_bash("a python -c that reads an answer file with no mode is allowed",
+        "python3 -c \"print(open('waiting/%s/a1.json').read())\"" % AA_COLLECTION, "allow")
+aa_bash("a python -c that writes a waiting item is allowed",
+        "python3 -c \"open('waiting/items/i1.json','w').write('x')\"", "allow")
+
+
+# ---- 6. GitHub MCP writes: a create, push or delete whose path names an answers path is refused, with or without a
+# branch argument. The same tools on a waiting item pass, and so does a read of an answer file. The 50-file push
+# is the full-size state (the batch of 50 above).
+
+def aa_gh(name, expected, tool, **fields):
+    """One GitHub MCP call in the fixture repo `x`, owned by `y`. A deny names RULE."""
+    add("answers session write: " + name, expected, RULE if expected == "deny" else None,
+        tool=tool, cwd=AA_REPO, owner="y", repo="x", **fields)
+
+
+AA_ANSWER_PATH = "waiting/%s/a1.json" % AA_COLLECTION
+AA_ANSWER_DATA_PATH = "waiting-data/%s/a1.json" % AA_COLLECTION
+AA_ITEM_PATH = "waiting/items/i1.json"
+AA_ITEM_DATA = '{"id": "i1"}\n'
+
+aa_gh("a create_or_update_file of an answer file under waiting/ is refused", "deny",
+      "mcp__github__create_or_update_file", path=AA_ANSWER_PATH, content='{"note": "x"}\n', message="record",
+      branch="lane-x")
+aa_gh("a create_or_update_file of an answer file under waiting-data/ is refused", "deny",
+      "mcp__github__create_or_update_file", path=AA_ANSWER_DATA_PATH, content='{"note": "x"}\n', message="record",
+      branch="lane-x")
+aa_gh("a create_or_update_file of an answer file with no branch argument is refused", "deny",
+      "mcp__github__create_or_update_file", path=AA_ANSWER_PATH, content='{"note": "x"}\n', message="record")
+aa_gh("a push_files with an answer file entry under waiting-data/ is refused", "deny",
+      "mcp__github__push_files", branch="lane-x", message="record",
+      files=[{"path": AA_ANSWER_DATA_PATH, "content": '{"note": "x"}\n'}])
+aa_gh("a push_files of 50 files whose last is an answer file is refused", "deny",
+      "mcp__github__push_files", branch="lane-x", message="record",
+      files=[{"path": "waiting/items/g%d.json" % i, "content": "{}\n"} for i in range(49)]
+      + [{"path": AA_ANSWER_PATH, "content": '{"note": "x"}\n'}])
+aa_gh("a delete_file of an answer file under waiting/ is refused", "deny",
+      "mcp__github__delete_file", path=AA_ANSWER_PATH, message="record", branch="lane-x", sha="0")
+
+aa_gh("a create_or_update_file of a waiting item is allowed", "allow",
+      "mcp__github__create_or_update_file", path=AA_ITEM_PATH, content=AA_ITEM_DATA, message="record",
+      branch="lane-x")
+aa_gh("a push_files of a waiting item is allowed", "allow",
+      "mcp__github__push_files", branch="lane-x", message="record",
+      files=[{"path": AA_ITEM_PATH, "content": AA_ITEM_DATA}])
+aa_gh("a push_files of 50 waiting items and no answer file is allowed", "allow",
+      "mcp__github__push_files", branch="lane-x", message="record",
+      files=[{"path": "waiting/items/g%d.json" % i, "content": "{}\n"} for i in range(50)])
+aa_gh("a push_files of an empty files list is allowed", "allow",
+      "mcp__github__push_files", branch="lane-x", message="record", files=[])
+aa_gh("a delete_file of a waiting item is allowed", "allow",
+      "mcp__github__delete_file", path=AA_ITEM_PATH, message="record", branch="lane-x", sha="0")
+aa_gh("a get_file_contents of an answer file is allowed", "allow",
+      "mcp__github__get_file_contents", path=AA_ANSWER_PATH, ref="lane-x")
 
 
 # ---- Scope and home checks, run as log checks: a failure names one cause.
