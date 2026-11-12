@@ -1641,13 +1641,15 @@ class BatchLintFixture(tm.Env):
         os.chmod(self.ste_path, 0o755)
         return os.path.join(bin_dir, "ci-job")
 
-    def push_files(self, branch, files, message):
-        """Commit `files` ({repo path: text}) on `branch`, made from origin/main, and push it to origin. -> the branch's head sha."""
+    def push_files(self, branch, files, message, remove=()):
+        """Commit `files` ({repo path: text}) and delete `remove` (repo paths) on `branch`, made from origin/main, and push it to origin. -> the branch's head sha."""
         o = self.other
         tm.sh(o, "git", "fetch", "-q", "origin")
         tm.sh(o, "git", "checkout", "-q", "-B", branch, "origin/" + BASE)
         for path, text in files.items():
             tm.put(os.path.join(o, path), text)
+        for path in remove:
+            os.remove(os.path.join(o, path))
         tm.sh(o, "git", "add", "-A")
         tm.sh(o, "git", "commit", "-q", "-m", message)
         tm.sh(o, "git", "push", "-q", "origin", branch)
@@ -1662,12 +1664,12 @@ class BatchLintFixture(tm.Env):
                 files[script_of(ci_step)] = CALL_STUB % self.call_log(script_of(ci_step))
         return self.push_files(branch, files, branch + ": the checks job's lint CI steps and their stubs")
 
-    def lane_lint(self, target, out):
+    def lane_lint(self, target, out, unknown_ok=""):
         """merge.lane_lint of `target` against BASE, in the lane checkout, through the copy of ci-job. Its output goes to `out`. A refusal raises."""
         env = {"VERDICT_LOG": os.path.join(self.t, "verdict.log")}  # one log for the run: no ci-job log lands in the system temp dir
         with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER), unittest.mock.patch.object(merge, "CI_JOB", self.ci_job), \
                 unittest.mock.patch.dict(os.environ, env), contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
-            return merge.lane_lint(self.co, target, self.host, base=BASE)
+            return merge.lane_lint(self.co, target, self.host, base=BASE, unknown_ok=unknown_ok)
 
 
 class BatchLintFlags(BatchLintFixture):
@@ -1755,6 +1757,8 @@ LANE_PR = "7"  # the lane's pull request: FakeHost's own number, whose head is L
 GUARD_FILE = "hooks/guard_probe.py"  # a hooks/guard_*.py file: ci-scope.sh's guard arm names it
 SUITE_FILE = "tests/guard/s-lane-probe.py"  # a file of the guard suite: ci-scope.sh's guard arm names it too
 DOCS_FILE = "docs/lane-notes.md"  # a .md file: ci-scope.sh turns no flag on for it
+CHECKS_REL = ".github/workflows/checks.yml"  # the workflow of GUARD_JOB; a lane's own edit to it is the one its lint reads
+FAILING_CI_SCOPE = "printf 'guard=false\\ncode=false\\n' >> \"$GITHUB_OUTPUT\"\nexit 1\n"  # writes both flags off, then exits 1: a failing ci-scope.sh that still answers
 GUARD_STUB = """import json, os, subprocess, sys
 with open(%r, 'a', encoding='utf-8') as f:
     print(json.dumps({'argv': sys.argv, 'head': subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip(),
@@ -1777,16 +1781,10 @@ class GuardSliceLint(BatchLintFixture):
     def setUp(self):
         super().setUp()
         self.host.branch = LANE
-        if shutil.which("python") is None and os.name != "nt":  # the slice's step runs `python`: a box with only python3 gets a shim for it
-            shim = os.path.join(self.t, "shim")
-            tm.put_shim(os.path.join(shim, "python"), '#!/bin/sh\nexec "%s" "$@"\n' % sys.executable)
-            patch = unittest.mock.patch.dict(os.environ, {"PATH": shim + os.pathsep + os.environ.get("PATH", "")})
-            patch.start()
-            self.addCleanup(patch.stop)
         with open(tm.SCOPE_SCRIPT, encoding="utf-8") as f:  # the real ci-scope.sh, read as SmallBaseMove.scoped reads it
             scope = f.read()
         # ci-scope.sh turns every flag on when landed-dirs.txt is unreadable, so the docs-only control needs both files
-        files = {".github/workflows/checks.yml": guard_workflow_text(self.found), GUARD_SCRIPT: self.guard_stub(0),
+        files = {CHECKS_REL: guard_workflow_text(self.found), GUARD_SCRIPT: self.guard_stub(0),
                  merge.CI_SCOPE: scope, "landed-dirs.txt": "hooks\n"}
         for name, ci_step in self.found:
             if name != STE:
@@ -1801,9 +1799,9 @@ class GuardSliceLint(BatchLintFixture):
         """The stub of GUARD_SCRIPT: it logs each run to its call log and exits with `rc`."""
         return GUARD_STUB % (self.call_log(GUARD_SCRIPT), rc)
 
-    def lane(self, files):
-        """Put the lane on LANE: one commit on main holding `files`, pushed. The host's changed files are the paths that commit changes. -> the head sha."""
-        head = self.push_files(LANE, files, "lane: the change the case lints")
+    def lane(self, files, remove=()):
+        """Put the lane on LANE: one commit on main holding `files` and deleting `remove`, pushed. The host's changed files are the paths that commit changes. -> the head sha."""
+        head = self.push_files(LANE, files, "lane: the change the case lints", remove)
         tm.sh(self.co, "git", "fetch", "-q", "origin")
         self.host.changed = [(path, "modified", 1) for path in self.changed_files()]
         return head
@@ -1812,31 +1810,119 @@ class GuardSliceLint(BatchLintFixture):
         """The paths the lane's own commit changes against main, sorted, read from git."""
         return sorted(tm.sh(self.other, "git", "diff", "--name-only", "origin/" + BASE + "...HEAD").splitlines())
 
-    def lint(self):
-        """merge.lane_lint of the lane's pull request through the real ci-job. -> (rc, its output). A refusal raises merge.Stop."""
+    def lint(self, unknown_ok=""):
+        """merge.lane_lint of the lane's pull request through the real ci-job. -> (rc, its output). A refusal fails the case with its text."""
         out = io.StringIO()
-        rc = self.lane_lint(LANE_PR, out)
+        try:
+            rc = self.lane_lint(LANE_PR, out, unknown_ok)
+        except merge.Stop as stop:
+            self.fail("the lint refused a lane that the case expects to pass: %s\n%s" % (stop, out.getvalue()))
         return rc, out.getvalue()
 
-    def assert_slice_runs_for(self, path):
-        """A lane whose one change is `path`, a guard file, runs the slice once in its head, with want_argv and want_env, and no shard."""
-        head = self.lane({path: "# lane probe\n"})
-        self.assertEqual(self.changed_files(), [path], "precondition: the lane does not change %s alone, so the case probes nothing else" % path)
+    def path_without_python(self):
+        """A PATH of one folder of this case's: a link to each program on os.environ's PATH but `python`, the first folder's name winning
+        as the shell's lookup does. So git, bash and the lint's python3 still resolve, and `python` is the one name missing."""
+        folder = os.path.join(self.t, "no-python")
+        os.makedirs(folder)
+        for d in os.environ.get("PATH", "").split(os.pathsep):
+            if not d or not os.path.isdir(d):
+                continue
+            for name in sorted(os.listdir(d)):
+                src = os.path.join(d, name)
+                if name == "python" or os.path.lexists(os.path.join(folder, name)):
+                    continue
+                if os.path.isfile(src) and os.access(src, os.X_OK):
+                    os.symlink(src, os.path.join(folder, name))
+        return folder
+
+    def unknown_slice_workflow(self):
+        """checks.yml as the lane's head holds it, with `continue-on-error: true` on the slice step: the runner reads no step as allowed
+        to fail, so the slice is unknown and its script never runs."""
+        text = guard_workflow_text(self.found)
+        name_line = "      - name: %s\n" % SLICE_STEP
+        self.assertEqual(text.count(name_line), 1, "precondition: checks.yml does not hold the slice step once, so the case cannot edit it")
+        return text.replace(name_line, name_line + "        continue-on-error: true\n", 1)
+
+    def assert_one_slice(self, files, remove=()):
+        """A lane whose commit writes `files` and deletes `remove` runs the slice once in its head, with want_argv and want_env, and no shard."""
+        head = self.lane(files, remove)
+        touched = sorted([*files, *remove])
+        self.assertEqual(self.changed_files(), touched, "precondition: the lane changes %s, not only the paths the case names" % ", ".join(touched))
         rc, text = self.lint()
         self.assertEqual(rc, 0, text)
         self.assertEqual(len(pass_lines(text)), 1, text)
         calls = self.stub_calls(GUARD_SCRIPT)
         slices = [c for c in calls if c["GUARD_TESTS"] == self.want_env["GUARD_TESTS"]]
-        self.assertEqual(len(slices), 1, "the Windows slice ran %d times for a lane touching %s, want once: %s" % (len(slices), path, text))
+        self.assertEqual(len(slices), 1, "the Windows slice ran %d times for a lane changing %s, want once: %s" % (len(slices), ", ".join(touched), text))
         self.assertEqual(slices[0]["argv"], self.want_argv[1:], "the slice ran with %s, checks.yml gives %s" % (slices[0]["argv"], self.want_argv[1:]))
         self.assertEqual(slices[0]["head"], head, "the slice ran in a tree other than the lane's head: " + text)
         self.assertEqual([c for c in calls if c["GUARD_SHARD"] is not None], [], "a lane lint ran a shard of the full guard suite: " + text)
+
+    def assert_slice_runs_for(self, path):
+        """A lane whose one change is `path`, a guard file, runs the slice once in its head, with want_argv and want_env, and no shard."""
+        self.assert_one_slice({path: "# lane probe\n"})
 
     def test_a_lane_touching_a_guard_script_runs_the_windows_slice_once_in_its_head(self):
         self.assert_slice_runs_for(GUARD_FILE)
 
     def test_a_lane_touching_a_guard_suite_file_runs_the_windows_slice_once_in_its_head(self):
         self.assert_slice_runs_for(SUITE_FILE)
+
+    def test_a_lane_lint_with_no_python_on_path_still_runs_the_slice_once(self):
+        if os.name == "nt":
+            self.skipTest("the Windows runner puts python on PATH, so python_front adds none there")
+        with unittest.mock.patch.dict(os.environ, {"PATH": self.path_without_python()}):
+            self.assertIsNone(shutil.which("python"), "precondition: PATH still holds a python, so python_front adds none and the case probes nothing")
+            for name in ("python3", "git", "bash"):
+                self.assertIsNotNone(shutil.which(name), "precondition: PATH lacks %s, which the lint needs" % name)
+            self.assert_one_slice({GUARD_FILE: "# lane probe\n"})
+
+    def test_a_lane_whose_head_has_no_ci_scope_runs_the_slice_once(self):  # fail-safe: no ci-scope.sh means every flag is on
+        self.assert_one_slice({DOCS_FILE: "lane notes\n"}, remove=(merge.CI_SCOPE,))
+
+    def test_a_lane_whose_ci_scope_exits_nonzero_runs_the_slice_once(self):  # fail-safe: a failing ci-scope.sh answers nothing
+        self.assert_one_slice({DOCS_FILE: "lane notes\n", merge.CI_SCOPE: FAILING_CI_SCOPE})
+
+    def test_a_slice_the_runner_cannot_read_is_refused_as_unknown_and_lint_unknown_ok_lifts_it(self):
+        self.lane({GUARD_FILE: "# lane probe\n", CHECKS_REL: self.unknown_slice_workflow()})
+        self.assertEqual(self.changed_files(), sorted([GUARD_FILE, CHECKS_REL]), "precondition: the lane changes other paths than the case names")
+        out = io.StringIO()
+        try:
+            self.lane_lint(LANE_PR, out)
+        except merge.Liftable as liftable:
+            refusal = liftable
+        except merge.Stop as stop:
+            self.fail("the unknown slice refused with a stop that no flag lifts, want a Liftable: %s" % stop)
+        else:
+            self.fail("the lint passed a lane whose slice the runner cannot read: " + out.getvalue())
+        self.assertIn(SLICE_STEP, str(refusal), "the unknown refusal does not name the slice: " + out.getvalue())
+        self.assertEqual(self.stub_calls(GUARD_SCRIPT), [], "the slice the runner cannot read ran its script anyway")
+        rc, text = self.lint("shellcheck is not on this box")
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(pass_lines(text), [], "--lint-unknown-ok printed a PASS line for an unknown slice: " + text)
+        self.assertRegex(text, r"(?i)unknown", "--lint-unknown-ok does not leave the unknown stop: " + text)
+
+    def test_a_slice_that_times_out_is_refused_as_unknown_and_lint_unknown_ok_does_not_lift_it(self):
+        self.lane({GUARD_FILE: "# lane probe\n"})
+        real_sh, timed_out = merge.sh, []
+
+        def time_out_the_slice(args, *rest, **kwargs):
+            if GUARD_JOB in args:  # the slice's ci-job run: it never finishes, and no clock is read
+                timed_out.append(list(args))
+                raise subprocess.TimeoutExpired(args, 1)
+            return real_sh(args, *rest, **kwargs)
+
+        out = io.StringIO()
+        with unittest.mock.patch.object(merge, "sh", time_out_the_slice):
+            try:
+                self.lane_lint(LANE_PR, out, "shellcheck is not on this box")
+            except merge.Stop as stop:
+                refusal = stop
+            else:
+                self.fail("--lint-unknown-ok lifted a slice that timed out: " + out.getvalue())
+        self.assertEqual(len(timed_out), 1, "the slice never ran, so the timeout proves nothing: " + out.getvalue())
+        self.assertRegex(str(refusal), r"(?i)unknown", "the refusal does not say the slice is unknown: " + str(refusal))
+        self.assertEqual(pass_lines(out.getvalue()), [], "a slice that timed out read as a pass: " + out.getvalue())
 
     def test_a_lane_touching_no_guard_file_runs_no_guard_script(self):  # the control
         self.lane({DOCS_FILE: "lane notes\n"})
