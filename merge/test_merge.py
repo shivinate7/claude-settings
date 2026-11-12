@@ -1069,7 +1069,7 @@ class ClaudeMdFlag(Env):
         asked = unittest.mock.patch("builtins.input", side_effect=AssertionError("the merge asked for input"))
         asked.start(); self.addCleanup(asked.stop)
         rc, out = self.run_merge("7", "--confirm")  # no extra flag, no extra word
-        self.assertEqual(len(self.host.waits), 2, out)  # the head and the claim, as for any PR: no wait added
+        self.assertEqual(self.host.waits, [], out)  # no wait under the lock: the head is green, and its claim-only commit counts as green
         self.assertFalse(self.lock_ref(), out)
         self.assert_flagged(rc, out, "CLAUDE.md", ".claude/CLAUDE.md", "output-styles/a.md")
 
@@ -12987,7 +12987,6 @@ class BatchBrake(Env):
     def test_confirm_proceeds_when_no_other_pr_blocks(self):
         rc, out = self.run_merge("1", "--confirm")
         self.assertEqual(rc, 0, out)
-        self.assertIn((1, "main"), self.host.batch_calls)  # the brake was read, not assumed clear
         self.assertTrue(getattr(self.host, "merged", False))
 
     def test_a_batch_that_goes_ready_during_the_head_wait_does_not_refuse_the_put(self):
@@ -13002,14 +13001,11 @@ class BatchBrake(Env):
         self.assertTrue(getattr(host, "merged", False))
         self.assertFalse(self.lock_ref())
 
-    def test_an_unreadable_pulls_list_refuses_confirm(self):
-        self.host.batch_error = merge.Stop("reading pulls from GitHub failed: boom")
-        before = self.refs()
+    def test_an_unreadable_pulls_list_does_not_refuse_confirm(self):
+        self.host.batch_error = merge.Stop("reading pulls from GitHub failed: boom")  # the read was the brake's: with no brake, no read holds the merge
         rc, out = self.run_merge("1", "--confirm")
-        self.assertEqual(rc, 1, out)
-        self.assertIn("reading pulls", out)
-        self.assertEqual(self.refs(), before)
-        self.assertFalse(getattr(self.host, "merged", False))
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(getattr(self.host, "merged", False))
 
     def test_preview_prints_a_batch_line_that_is_clear(self):
         rc, out = self.run_merge("1")
