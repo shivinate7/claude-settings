@@ -4,17 +4,19 @@ restart-plan R3). Stdlib only.
 
     python3 actions/ci-limits/test_ci_limits.py
 
-The module is not built yet. These cases pin the interface the builder implements:
+These cases pin the interface of ci_limits.py:
 
-  job_limits(jobs_by_run, caps, kinds=None, window=30) -> (limits, misjudged)
+  job_limits(jobs_by_run, caps, kinds=None, window=30, cut_counts_as_sample=True) -> (limits, misjudged)
       jobs_by_run: completed push runs on main, newest first: [{"run_id": int, "jobs": [jobs-API job, ...]}].
       caps: {job name: timeout-minutes in force}. A job cancelled at or past its cap is a cut sample.
+      cut_counts_as_sample=False ignores a cut run: a limit is then the green max x 1.5, floored by the median.
       kinds: {job name: kind}. limits: {job name: minutes, "job/step": minutes}, over every name in caps.
       misjudged: the job names cut at their estimate while still new.
   deadline_minutes(jobs_by_run, limits, window=30) -> minutes. limits holds the job-level limits only.
   read_limits(fetch, caps, kinds=None, window=30) -> (limits, misjudged, warnings). fetch() returns jobs_by_run,
       or raises. limits adds "deadlineMinutes". An error gives every limit 360 and one warning line.
-  main(argv, fetch, caps, kinds=None, out=None, err=None) -> exit code. argv is ["--json"] or ["--table"].
+  main(argv, fetch, caps, kinds=None, out=None, err=None) -> exit code. argv is ["--json"] or ["--table"],
+      and "--green-only" may follow it: that sets cut_counts_as_sample=False.
       Warnings go to err; the JSON or the table goes to out.
 
 Minutes are whole seconds over 60, read from the fixtures' own timestamps. No clock is injected, and nothing sleeps.
@@ -509,6 +511,47 @@ class WorkflowCapsRef(unittest.TestCase):
         caps = ci_limits.workflow_caps("main", self.root)
         self.assertEqual(caps.get("checks"), 60,
                          "checks on main is 60 (the checkout says 5, HEAD says 20), got %r" % (caps.get("checks"),))
+
+
+# checks-guard: green at 20 min (limit 30), and cut at 62 on its 60 min cap, so counting the cut gives 62 x 1.5 = 93.
+# Ignoring the cut gives the green 30, floored by the median of 30 and checks' 60, which is 45.
+SWITCH_CAPS = {"checks-guard": 60, "checks": 75}
+SWITCH_RUNS = [run(2, job("checks-guard", 62, "cancelled"), job("checks", 40)),
+               run(1, job("checks-guard", 20), job("checks", 40))]
+
+
+class CutSwitch(unittest.TestCase):
+    def test_default_counts_a_62_minute_cut_on_a_60_minute_cap(self):
+        limits, _ = ci_limits.job_limits(SWITCH_RUNS, SWITCH_CAPS)
+        self.assertEqual(limits["checks-guard"], 93,
+                         "by default a 62 min cut is a sample: 62 x 1.5 = 93, got %r" % (limits["checks-guard"],))
+
+    def test_switch_off_ignores_the_cut_and_floors_the_green_limit_at_the_median(self):
+        params = inspect.signature(ci_limits.job_limits).parameters
+        self.assertIn("cut_counts_as_sample", params,
+                      "job_limits has no cut_counts_as_sample switch: a cut run always counts as a sample")
+        limits, _ = ci_limits.job_limits(SWITCH_RUNS, SWITCH_CAPS, cut_counts_as_sample=False)
+        self.assertEqual(limits["checks-guard"], 45,
+                         "with the cut ignored checks-guard is its green 30, floored by the median 45, got %r"
+                         % (limits["checks-guard"],))
+
+    def test_cli_default_counts_the_cut(self):
+        out, err = io.StringIO(), io.StringIO()
+        rc = ci_limits.main(["--json"], fetch=lambda: SWITCH_RUNS, caps=SWITCH_CAPS, out=out, err=err)
+        self.assertEqual(rc, 0, "--json exited %r, want 0" % (rc,))
+        self.assertEqual(json.loads(out.getvalue())["checks-guard"], 93,
+                         "--json without --green-only should count the 62 min cut: 93")
+
+    def test_cli_green_only_flag_ignores_the_cut(self):
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            rc = ci_limits.main(["--json", "--green-only"], fetch=lambda: SWITCH_RUNS, caps=SWITCH_CAPS,
+                                out=out, err=err)
+        except SystemExit:
+            self.fail("main rejects --green-only: the CLI has no switch, so a cut always counts as a sample")
+        self.assertEqual(rc, 0, "--json --green-only exited %r, want 0" % (rc,))
+        self.assertEqual(json.loads(out.getvalue())["checks-guard"], 45,
+                         "--green-only should ignore the cut: checks-guard is 45")
 
 
 if __name__ == "__main__":
