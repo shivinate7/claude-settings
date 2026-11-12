@@ -210,11 +210,16 @@ jobs:
       - run: echo ok
 YML
 bad=0
-t() { # want label [FAIL glob] [EMPTY glob] [text the issue must name] [jobs reads: "none", or the run paths read, in any order]
+# run_alarm [FAIL glob] [EMPTY glob]: one run of alarm.sh on the case's fixtures, with a clean log, reads and scratch folder.
+# Sets out (stdout), code (exit status); stderr is in $tmp/err. The one home of the run step (t and named call it).
+run_alarm() {
   : > "$tmp/log"; : > "$tmp/reads"; : > "$tmp/pylog"; rm -rf "$tmp/scratch"; mkdir -p "$tmp/scratch"
   out="$(PATH="$tmp/bin:$PATH" RUNS="$tmp/runs" WORKFLOWS="$tmp/workflows" JOBS="$tmp/jobs" READS="$tmp/reads" LOG="$tmp/log" \
-    FAIL="${3:-}" EMPTY="${4:-}" PYLOG="$tmp/pylog" TMPDIR="$tmp/scratch" CONTENTS="$tmp/contents" CONTENTS_DEFAULT="$tmp/no-if.yml" GITHUB_REPOSITORY=o/r SELF=alarm bash "$here/alarm.sh" 2>"$tmp/err")"
+    FAIL="${1:-}" EMPTY="${2:-}" PYLOG="$tmp/pylog" TMPDIR="$tmp/scratch" CONTENTS="$tmp/contents" CONTENTS_DEFAULT="$tmp/no-if.yml" GITHUB_REPOSITORY=o/r SELF=alarm bash "$here/alarm.sh" 2>"$tmp/err")"
   code=$?
+}
+t() { # want label [FAIL glob] [EMPTY glob] [text the issue must name] [jobs reads: "none", or the run paths read, in any order]
+  run_alarm "${3:-}" "${4:-}"
   shown="$(grep -v '^::warning::' <<<"$out")" # the verdict, without annotations
   ok=0
   case "$1" in
@@ -242,22 +247,18 @@ runs_are "$(gh_run alarm failure 2026-01-02 u1 push 1)"
 t green own-workflow-is-ignored
 # named <green|notred> <label> [text | !text]...: one run of alarm.sh. Each text must share one line with "cap end named" in its
 # output (stdout or stderr); a text with a leading ! must appear nowhere. The last stdout line is the verdict: green exactly for
-# green, else any verdict but red. No issue may open.
+# green, else any verdict but red. A green case opens no issue at all; a notred case opens no red issue (titled "CI red on ...").
 named() {
-  local want="$1" label="$2" out code verdict all ok=1 text
+  local want="$1" label="$2" verdict all ok=1 text
   shift 2
-  : > "$tmp/log"; : > "$tmp/reads"; : > "$tmp/pylog"; rm -rf "$tmp/scratch"; mkdir -p "$tmp/scratch"
-  out="$(PATH="$tmp/bin:$PATH" RUNS="$tmp/runs" WORKFLOWS="$tmp/workflows" JOBS="$tmp/jobs" READS="$tmp/reads" LOG="$tmp/log" \
-    FAIL="" EMPTY="" PYLOG="$tmp/pylog" TMPDIR="$tmp/scratch" CONTENTS="$tmp/contents" CONTENTS_DEFAULT="$tmp/no-if.yml" GITHUB_REPOSITORY=o/r SELF=alarm bash "$here/alarm.sh" 2>"$tmp/err")"
-  code=$?
+  run_alarm "" ""
   all="$out"$'\n'"$(cat "$tmp/err")"
   verdict="$(tail -n 1 <<<"$out")"
   [ "$code" = 0 ] || ok=0
   case "$want" in
-    green) [ "$verdict" = green ] || ok=0 ;;
-    notred) [ -n "$verdict" ] && [ "$verdict" != red ] || ok=0 ;;
+    green) [ "$verdict" = green ] && [ ! -s "$tmp/log" ] || ok=0 ;;
+    notred) [ -n "$verdict" ] && [ "$verdict" != red ] && ! grep -q 'CI red on' "$tmp/log" || ok=0 ;;
   esac
-  [ ! -s "$tmp/log" ] || ok=0
   for text in "$@"; do
     if [ "${text#!}" != "$text" ]; then grep -qF -- "${text#!}" <<<"$all" && ok=0
     else grep -F -- "cap end named" <<<"$all" | grep -qF -- "$text" || ok=0
