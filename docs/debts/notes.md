@@ -2188,4 +2188,4 @@
 - ruling-cite-prose-fence: FENCE_RE (lint/check_red_run.py line 81) cuts from the first triple backtick to the next, so two prose mentions of triple backticks cut out the text between them, and a claim there passes. Decision: none.
 - ruling-cite-bullet-label: the label "- Owner ruling: x" and the phrase "per the owner's latest ruling" pass with no cite. The check has 0 hits in 10,277 commits for them. Decision: none.
 - ruling-cite-remedy-trailer: the printed remedy (lint/check_red_run.py line 260) says a `Ruling:` trailer line can cite a claim, but a trailer never covers a claim in a body paragraph. Decision: none.
-- ruling-cite-docstring-backticks: the docstring in lint/test_check_red_run.py (line 16) says a claim counts only "outside backticks", but `has_claim` drops the backtick characters and keeps the text inside them, so a claim inside a code span is checked. Decision: none.
+- ruling-cite-docstring-backticks: the docstring in lint/test_check_red_run.py (line 16) says a claim counts only "outside backticks", but `has_claim` drops the backtick characters and keeps the text inside them. A claim inside a code span is checked. Decision: none.
