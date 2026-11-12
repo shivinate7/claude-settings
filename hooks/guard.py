@@ -878,7 +878,7 @@ def fetch_moves_branch(args) -> bool:
     return False
 
 
-def silent_write_hit(segment: str, tail: str = ""):
+def silent_write_hit(segment: str, tail: str = "", outer_silenced: bool = False):
     """Return (matched text, mechanism, kind) for a write whose own trace is silenced, else
     ("", "", "").
 
@@ -891,8 +891,10 @@ def silent_write_hit(segment: str, tail: str = ""):
     2>&1` allowed. `merge --abort` is carved out inside the loop: it lands nothing, so it has no
     landing to prove. A call whose argv names a read (`read_verb`) is carved out the same way.
     `tail` is the last segment of the pipe this segment feeds, if any (see `tail_discards`).
+    A command a wrapper hands on (`bash -c`, `sh -c`, `eval`) is read as the bare form is, and a discard
+    on the wrapper itself silences what it runs (`outer_silenced`).
     """
-    silenced = discards_output(segment) or (bool(tail) and tail_discards(tail))
+    silenced = discards_output(segment) or (bool(tail) and tail_discards(tail)) or outer_silenced
     for subcommand, args in git_calls(segment):
         if subcommand == "fetch":
             # Only a fetch that moves a local branch (`src:dst`) is a write; a bare one is a read.
@@ -917,6 +919,12 @@ def silent_write_hit(segment: str, tail: str = ""):
             if (word == "make" and "merge" in rest) or (
                     word in ("gh", "gh.exe") and rest[:2] == ["pr", "merge"]):
                 return word + " " + " ".join(rest), "redirect", ("make merge" if word == "make" else "gh pr merge")
+    tokens = segment_tokens(segment)
+    for text in inner_commands(tokens) if tokens else []:
+        for part in split_segments(text):
+            hit = silent_write_hit(part, "", silenced)
+            if hit[0]:
+                return hit
     return "", "", ""
 
 
@@ -1422,6 +1430,7 @@ CAP_ASK_REASON = (
     "hold. A project settings file overrides user settings, so the write lifts the cap for every "
     "agent started there. Requested: {change}. File: {where}. "
     "Approve it only when a model above Sonnet is wanted for this project. "
+    "A lift past its expiry needs a current ISO-8601 _agentCapUntil field in the same file. "
     "(decision agent-model-cap, the owner's cap on the agent model lifts only with his word)"
 )
 
@@ -1844,9 +1853,10 @@ def cited_record_path(segment: str, raw: str, where: str, before: int) -> str:
     """Return the first record path a commit message or PR body cites, else ''. A message file
     that cannot be read returns UNREAD_MARK + its name.
 
-    Acts: `git commit` and `gh pr create|edit`.
+    Acts: `git commit`, `gh pr create|edit` and `gh pr merge`, whose squash subject and body become a
+    commit on main.
     """
-    read = message_texts(segment, raw, where, before)
+    read = message_texts(segment, raw, where, before, titles=True)
     if read is None:
         return ""
     is_commit, texts, unread = read
@@ -1891,7 +1901,7 @@ def lane_number_named(segment: str, raw: str, where: str, before: int) -> str:
     """Return the first session-number lane name (`N20`) in a commit message, PR body or title, or
     `gh pr merge` subject or body, else ''. Fenced blocks and backtick spans are quoted text and
     skipped. Same text extraction as cite-by-id. An unread message file returns UNREAD_MARK + its
-    name: cite-by-id refuses an unread create or edit file first, so this covers merge.
+    name, so a message that cannot be read is never passed as clean.
     """
     read = message_texts(segment, raw, where, before, titles=True)
     if read is None:
@@ -4238,6 +4248,21 @@ def refuse_ready_page(tool: str, tool_input: dict, command: str, where: str) -> 
         refuse(tool, "deny", "records-page-ready", hit[0], hit[1])
 
 
+def wrapped_script_segments(segment: str, depth: int = 0):
+    """Each segment of every script a wrapper in SEGMENT hands on, nested wrappers included. Depth is
+    bounded so a self-nesting text cannot loop."""
+    tokens = segment_tokens(segment)
+    if not tokens or depth > 4:
+        return []
+    found = []
+    for text in inner_commands(tokens):
+        for part in split_segments(text):
+            if part.strip():
+                found.append(part)
+                found.extend(wrapped_script_segments(part, depth + 1))
+    return found
+
+
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
                 transcript: str = "", agent: bool = False,
                 background: bool = False, description: str = "", payload=None) -> None:
@@ -4264,7 +4289,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # Not a recursive judge_shell: that clears PENDING_ASK and would lose a deny.
     texts = [stripped, *substitution_commands(raw, stripped)]
     whole_root = []   # command_root reads the whole command: once per command, never per segment
-    for segment in (part for text in texts for part in split_segments(text)):
+    # A script a shell wrapper runs (`sh -c`, `bash -lc`, `eval`) is judged as the bare command is.
+    own_segments = [part for text in texts for part in split_segments(text)]
+    for segment in own_segments + [inner for part in own_segments for inner in wrapped_script_segments(part)]:
         if not segment.strip():
             continue
         words = segment_tokens(segment)
@@ -4421,7 +4448,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if matched:
             refuse(tool, "deny", "cite-by-id", CITE_REASON, matched)
         matched = lane_number_named(segment, raw, cite_where, before)
-        if matched.startswith(UNREAD_MARK):   # a gh pr merge file: cite-by-id never reads merge
+        if matched.startswith(UNREAD_MARK):   # backstop: cite-by-id above reads the same files, merge too
             refuse(tool, "deny", "cite-by-id", UNREAD_REASON, matched[len(UNREAD_MARK):])
         if matched:
             refuse(tool, "deny", "lane-by-slug", LANE_REASON, matched)
@@ -4679,7 +4706,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # and rule 1 strips it. A command that writes a settings file and names the cap variable
     # somewhere else on the line is asked too: an over-trigger of one prompt, inside a scope this
     # narrow, beats a bypass by a second segment.
-    matched = shell_write_hit(raw, cwd, is_settings_file)
+    # A python or node script's own file call writes the file without a shell spot, so the interpreter reader adds it.
+    matched = shell_write_hit(raw, cwd, is_settings_file) or interpreter_write_hit(raw, cwd, is_settings_file)
     if matched:
         change = cap_change(raw)
         if change:

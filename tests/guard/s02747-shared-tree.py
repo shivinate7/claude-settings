@@ -1226,4 +1226,16 @@ sh("substitution: shared tree, a hash at a word start allowed", "echo hi #$(" + 
    "allow", cwd=NOGIT)
 
 
+# A DISCARD INSIDE A SHELL WRAPPER (debt guard-shell-wrap-discard-unread). The script that sh -c, bash -lc or eval
+# runs is a command, so a discard in it is judged as the bare form is. The green control is a read inside the same
+# wrapper, which stays allowed.
+for _name, _command in (
+    ("sh -c, a hard reset", "sh -c '" + VCS + " reset --hard'"),
+    ("bash -lc, a checkout of the whole tree", "bash -lc '" + VCS + " checkout .'"),
+    ("eval, a hard reset", "eval '" + VCS + " reset --hard'"),
+):
+    sh("shell wrap: %s denies, as the bare form does" % _name, _command, "deny", "shared-tree", cwd=NOGIT)
+sh("shell wrap: a status read inside bash -c stays allowed", "bash -c '" + VCS + " status'", "allow", cwd=NOGIT)
+
+
 # ============================================================ 1. branch delete / worktree remove/prune
