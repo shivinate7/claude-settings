@@ -4331,8 +4331,8 @@ class OutboxRulings(Fixture):
         git(self.repo, "add", "-A")
         git(self.repo, "commit", "-q", "-m", "outbox fixture on " + branch)
 
-    def ruling(self, step, home):
-        return '- %s [ruling] -> %s: "%s" (owner, 2026-11-10 15:22 CST)' % (step, home, self.WORDS)
+    def ruling(self, step, home, words=None):
+        return '- %s [ruling] -> %s: "%s" (owner, 2026-11-10 15:22 CST)' % (step, home, words or self.WORDS)
 
     @staticmethod
     def outbox_text(lines):
@@ -4442,6 +4442,69 @@ class OutboxRulings(Fixture):
         self.assertLessEqual(extra, 3, "the check started %d git processes, past the three it may start" % extra)
         self.assertEqual(after["written"], before["written"], "the check wrote files besides --out")
         self.assertEqual(after["running"], [], "processes still running after the build")
+
+    def test_directory_home_is_unknown_not_held(self):
+        # A folder on main is not a file. Its tree bytes name x.md, so a read that skips the type check says held.
+        self.commit_on("main", {"docs/dir/x.md": "A note in a folder.\n"})
+        self.assertEqual(git(self.repo, "cat-file", "-t", "main:docs/dir").strip(), "tree",
+                         "the fixture must make docs/dir a folder on main")
+        self.record_rulings("session-dir", [self.ruling("dir-step", "docs/dir", words="x.md")], steps=["dir-step"])
+        out = self.build_output()
+        self.assertEqual(self.verdict_lines(out, "dir-step", "docs/dir"), [["unknown"]],
+                         "docs/dir is a folder on main, not a file, so the one line must say unknown, never held:\n" + out)
+
+    def test_malformed_ruling_line_prints_unknown_malformed(self):
+        # Each form misses OUTBOX_RULING, which drops the line without a word. A well-formed line beside it stays held.
+        bad = (
+            ("no comma in the owner time",
+             '- bad-comma [ruling] -> %s: "%s" (owner 2026-11-10 15:22 CST)' % (self.HELD, self.WORDS)),
+            ("a colon in the home",
+             '- bad-colon [ruling] -> decision:x: "%s" (owner, 2026-11-10 15:22 CST)' % self.WORDS),
+            ("a star bullet",
+             '* bad-star [ruling] -> %s: "%s" (owner, 2026-11-10 15:22 CST)' % (self.HELD, self.WORDS)),
+            ("an indented dash bullet",
+             '  - bad-indent [ruling] -> %s: "%s" (owner, 2026-11-10 15:22 CST)' % (self.HELD, self.WORDS)),
+        )
+        for n, (label, line) in enumerate(bad):
+            with self.subTest(form=label):
+                control = "ok-%d" % n
+                before = self.build_output()
+                self.commit_on("roadmap", {"roadmap/outbox/bad-form-%d.md" % n:
+                                           self.outbox_text([self.ruling(control, self.HELD), line])})
+                after = self.build_output()
+                self.assertEqual(self.verdict_lines(after, control, self.HELD), [["held"]],
+                                 "scope: the well-formed line beside the bad one must read held:\n" + after)
+                new = after.count("unknown: malformed") - before.count("unknown: malformed")
+                self.assertEqual(new, 1, "a [ruling] line that misses the format must add one `unknown: malformed` "
+                                         "line, never nothing (%s):\n%s" % (label, after))
+
+    def test_backticked_home_is_unwrapped_then_judged_by_its_content(self):
+        self.record_rulings("session-tick", [
+            self.ruling("plain-step", self.HELD),
+            self.ruling("tick-kept-step", "`%s`" % self.HELD),
+            self.ruling("tick-reworded-step", "`%s`" % self.REWORDED),
+        ], steps=["plain-step", "tick-kept-step", "tick-reworded-step"])
+        out = self.build_output()
+        self.assertEqual(self.verdict_lines(out, "plain-step", self.HELD), [["held"]],
+                         "scope: the plain home must read held before a backticked one is judged:\n" + out)
+        for step, home, want in (("tick-kept-step", self.HELD, "held"),
+                                 ("tick-reworded-step", self.REWORDED, "not held")):
+            with self.subTest(step=step):
+                self.assertEqual(self.verdict_lines(out, step, home), [[want]],
+                                 "a backticked home is unwrapped as hooks/ruling_home.py _unwrap does, so its line "
+                                 "must read by the home's content, never unknown:\n" + out)
+
+    def test_decision_id_home_reads_unknown(self):
+        # Control, green on the old code: an id with no slash or dot is no repo path, and it reads unknown today.
+        self.record_rulings("session-id", [
+            self.ruling("id-d12-step", "D12"),
+            self.ruling("id-dash-step", "decision-12"),
+        ], steps=["id-d12-step", "id-dash-step"])
+        out = self.build_output()
+        for step, home in (("id-d12-step", "D12"), ("id-dash-step", "decision-12")):
+            with self.subTest(home=home):
+                self.assertEqual(self.verdict_lines(out, step, home), [["unknown"]],
+                                 "a decision id is no repo path, so the one line must say unknown, never held:\n" + out)
 
 
 class SharedTagNames(unittest.TestCase):
