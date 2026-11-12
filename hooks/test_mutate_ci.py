@@ -1103,7 +1103,7 @@ class KnownDefectsTests(unittest.TestCase):
         self.assertEqual(code, 1, "UNKNOWN exits 1: exit %d\n%s%s" % (code, out, err))
 
     def test_a_failed_install_of_the_part_with_no_regex_reads_the_defect_unknown_naming_that_part(self):
-        # The case as briefed. The head already needs c for x/1.py, so it reads UNKNOWN here too: green on the head.
+        # Part c has no regex, so the defect in x/1.py needs c's install. A failed c install makes the defect UNKNOWN.
         code, out, err = mixed_defect_run((PASSING_INSTALL, PASSING_INSTALL, FAILING_INSTALL))
         self.assertEqual(verdicts_of(out), {"kb-mix": "UNKNOWN"},
                          "part c has no regex, so the defect in x/1.py needs c's install, which failed\n" + out + err)
