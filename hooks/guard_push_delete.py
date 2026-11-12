@@ -1574,15 +1574,16 @@ PUSH_ASK_REASON = (
 
 # ------------------------------------------------------------------ push-needs-review-record
 #
-# A shell `git push` is refused while the session's own transcript shows a PR known to the session and a
+# A shell `git push` asks while the session's own transcript shows a PR known to the session and a
 # reviewer or design-reviewer report with no later posted record that holds a line with that report's role,
-# verdict and round (decision push-needs-review-record). Cost: one pass over the transcript per push, failing
+# verdict and round, and Head when the report names its reviewed head (decision push-needs-review-record).
+# A push to the head branch of a PR whose posted record holds a Fix check line is denied. Cost: one pass over the transcript per push, failing
 # open on any error. A line is parsed only when it holds a mark below, or a tool_result for a call already seen
 # (one dict lookup per id). The merge module loads only when the scan finds a report with the Done-line shape,
 # or a posted comment with a `Fix check:` line.
 REVIEW_RECORD_REASON = (
-    "push-needs-review-record: a reviewer report in this session has no posted review record, and a push now "
-    "moves the head the review read. Before any push, render the record with "
+    "push-needs-review-record: a reviewer report in this session has no posted review record at the head it "
+    "reviewed, and a push now moves that head. Order: record first, then the push. Render the record with "
     "`merge <pr> --review-record --head <reviewed sha>` (it refuses once the head moves), post it with the "
     "GitHub MCP comment tool, then push. (decision push-needs-review-record)"
 )
@@ -1617,6 +1618,8 @@ _HELD_SHA_CAP = 8
 _NOTICE = re.compile(r"<tool-use-id>\s*([^<\s]+)\s*</tool-use-id>.*?<result>(.*?)</result>", re.S)
 _HANDBACK = re.compile(r'<agent-message from="([^"]+)">(.*?)</agent-message>', re.S)
 _AGENT_ID = re.compile(r"agentId:\s*(\S+)")
+# The reviewed head a report names: the hex word after `head` (`Reviewed at head <sha>`, `Diff base A, head B`).
+_HEAD_WORD = re.compile(r"\bhead\b[\s:`*]*(?:at\s+)?([0-9a-f]{7,40})\b", re.I)
 _HAND_FRAMES = tuple(tag for tag in MACHINE_TAGS if "<agent-message" in tag)
 
 
@@ -1718,6 +1721,44 @@ def _named_sha(body: str):
             if len(found) == _HELD_SHA_CAP:
                 break
     return tuple(found)
+
+
+def _reviewed_heads(body: str):
+    """The shas a report names as its reviewed head, lower case, above its `agentId:` trailer; () when it names none."""
+    trailer = None
+    for trailer in _AGENT_ID.finditer(body):
+        pass
+    found = _HEAD_WORD.findall(body[:trailer.start()] if trailer else body)
+    return tuple(dict.fromkeys(word.lower() for word in found))
+
+
+def _same_sha(one: str, other: str) -> bool:
+    """True when two hex shas of 7+ characters name the same commit: one is a prefix of the other."""
+    one, other = one.lower(), other.lower()
+    return len(one) >= 7 and len(other) >= 7 and (one.startswith(other) or other.startswith(one))
+
+
+class _RecordLines:
+    """The lines a posted record holds, as a membership test for a pending report (role, word, kind, number,
+    heads). A round report is held by a Round line of its role, verdict and round, a fix check by the Fix check
+    line of its role and verdict. A report that names reviewed heads is held only when the record's Head (the
+    record's Fix check sha, for a fix check) is one of them."""
+
+    def __init__(self, record):
+        self.rounds = {(role, word, "round", number): record["head"] for number, role, _, word in record["rounds"]}
+        self.fix = record["fix"]
+
+    def __contains__(self, report):
+        role, word, kind, number, heads = report
+        if kind == "fix":
+            if not self.fix or (role, word) != (self.fix[1], self.fix[3]):
+                return False
+            head = self.fix[0]
+        else:
+            head = self.rounds.get((role, word, kind, number))
+            if head is None:
+                return False
+        return not heads or any(_same_sha(head, named) for named in heads)
 
 
 def _commit_of(where, ref):
@@ -1855,7 +1896,7 @@ def _transcript_events(path: str):
             for role, body in reports + _notice_reports(record, roles, agents):
                 verdict = _done_verdict(body)
                 if verdict:
-                    events.append(("report", role) + verdict + (_named_sha(body),))
+                    events.append(("report", role) + verdict + (_named_sha(body), _reviewed_heads(body)))
     return events
 
 
@@ -1880,7 +1921,9 @@ def review_record_hit(transcript: str, destinations=lambda: [], where: str = "")
     branch names the push writes; it runs only when a posted record holds a Fix check line. `where` is the
     push's checkout, where a held report's sha is read against the PR's head.
     1. A PR known to the session and a reviewer report with no later posted record holding a line with that
-       report's role, verdict and round (a fix check: the Fix check line's role and verdict). A report before any
+       report's role, verdict and round (a fix check: the Fix check line's role and verdict), and, when a report
+       read after the PR names its reviewed head, whose Head is that head (a fix check: the Fix check line's sha),
+       compared by prefix of 7+ characters either way. A report before any
        PR is known is held by its sha candidates, and counts when a PR becomes known for which one candidate
        counts (`_held_counts`); a report that PR does not count stays held for a later PR, and a report naming
        no candidate is dropped. A design-reviewer fix check is not read: a record holds a Fix check line for the
@@ -1906,15 +1949,15 @@ def review_record_hit(transcript: str, destinations=lambda: [], where: str = "")
                 if event[1] is not None and event[2]:
                     heads[event[1]] = event[2]
                 counted = _held_counts(early, event[2], where)
-                pending += counted
+                pending += [report + ((),) for report in counted]   # a held report names no head to match
                 early = [report for report in early if report[:-1] not in counted]   # held for a later PR
             elif event[0] == "report":
-                _, role, word, kind, number, shas = event
+                _, role, word, kind, number, shas, named = event
                 verdicts = merge.REVIEW_FIX_VERDICTS if kind == "fix" else merge.REVIEW_VERDICTS
                 if (role in merge.REVIEW_ROLES and word in verdicts
                         and (kind == "round" or role == merge.REVIEW_ROLES[0])):
                     if known:
-                        pending.append((role, word, kind, number))
+                        pending.append((role, word, kind, number, named))
                     elif shas:
                         early.append((role, word, kind, number, shas))
             else:
@@ -1923,11 +1966,10 @@ def review_record_hit(transcript: str, destinations=lambda: [], where: str = "")
                     continue
                 known = True
                 counted = _held_counts(early, None, where)   # no head branch is known
-                pending += counted
+                pending += [report + ((),) for report in counted]
                 early = [report for report in early if report[:-1] not in counted]
-                held = {(role, word, "round", number) for number, role, _, word in record["rounds"]}
+                held = _RecordLines(record)
                 if record["fix"]:
-                    held.add((record["fix"][1], record["fix"][3], "fix", None))
                     fixed.append(record["n"])
                 pending = [report for report in pending if report not in held]
         if pending:
