@@ -592,13 +592,14 @@ CHILD_EXITS_2 = ("import sys\n"
 
 
 def copied_runner(tmp, child=None):
-    """code_check.py and standard.json copied to tmp/a/b, so the comment check's child (../../lint, two folders up)
-    is missing. With child (source text), that child is written at tmp/lint/check_comment_narration.py.
-    Returns the copy's code_check.py."""
+    """code_check.py copied to tmp/a/b. The table it reads (../../lint/code_check_standard.json) is copied to tmp/lint,
+    so the comment check's child, also in ../../lint, is missing. With child (source text), that child is written at
+    tmp/lint/check_comment_narration.py. Returns the copy's code_check.py."""
     folder = os.path.join(tmp, "a", "b")
     os.makedirs(folder)
-    for name in ("code_check.py", "standard.json"):
-        shutil.copy(os.path.join(HERE, name), folder)
+    shutil.copy(RUNNER, folder)
+    os.makedirs(os.path.join(tmp, "lint"), exist_ok=True)
+    shutil.copy(STANDARD, os.path.join(tmp, "lint"))
     if child is not None:
         put(tmp, {"lint/check_comment_narration.py": child})
     return os.path.join(folder, "code_check.py")
