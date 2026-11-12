@@ -110,6 +110,8 @@ def stop_timeout():
 
 
 STOP_TIMEOUT = stop_timeout()
+PRINT_ROOM = 5  # seconds the Stop hook keeps after its shared model budget, to print its reply
+STOP_BUDGET_CEILING = STOP_TIMEOUT - PRINT_ROOM  # the most model time one Stop may spend: 75 s under the 80 s timeout
 
 
 def is_pick_claim(text):
@@ -159,11 +161,14 @@ class RulingSkipFixture(unittest.TestCase):
         self.run_dir = tempfile.mkdtemp(dir=trg.RUN_FOLDER)  # the run folder, never the system temp dir
         self.record = os.path.join(trg._ISOLATION["stub"], "calls.jsonl")
 
-    def stop(self, reply_text, answer=tcj.ALLOW, model_fail=False, repo=None, timeout_hit=False):
+    def stop(self, reply_text, answer=tcj.ALLOW, model_fail=False, repo=None, timeout_hit=False, active=False,
+             session_id=None):
         self.reset_calls()
         path = trg.write_transcript([trg.human("decide"), trg.assistant_text(reply_text)], self.run_dir)
-        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": False,
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": active,
                 "cwd": repo or RULING_REPO}
+        if session_id:
+            hook["session_id"] = session_id
         overrides = {"CJ_ANSWER": answer}
         if model_fail:
             overrides["CJ_MODEL_FAIL"] = "1"
@@ -334,6 +339,13 @@ class RulingSkipTests(RulingSkipFixture):
         self.assertLess(sum(timeouts), STOP_TIMEOUT,
                         "the two model calls may spend %s s, but the Stop hook has %s s for all its work"
                         % (sum(timeouts), STOP_TIMEOUT))
+        # The timeout is not the limit that keeps the print room: the shared budget is, so both must stay under it.
+        self.assertLessEqual(sum(timeouts), STOP_BUDGET_CEILING,
+                             "the two model calls may spend %s s, past the %s s that leave the Stop hook room to print"
+                             % (sum(timeouts), STOP_BUDGET_CEILING))
+        self.assertLessEqual(report_guard.STOP_BUDGET, STOP_BUDGET_CEILING,
+                             "report_guard.STOP_BUDGET is %s s, past the %s s that leave the Stop hook room to print"
+                             % (report_guard.STOP_BUDGET, STOP_BUDGET_CEILING))
 
     def test_r4_a_deadline_hit_refuses_and_does_not_pass(self):
         out = self.stop(pick_and_question(), answer=tcj.ALLOW, repo=RULING_REPO, timeout_hit=True)
@@ -371,6 +383,47 @@ class RulingSkipTests(RulingSkipFixture):
                 out = self.stop(reply(line))
                 self.assertFalse(refused_by_rule(out), "%s: a Done item with no pick was refused by the check" % label)
                 self.assertEqual(self.model_calls(), [], "%s: the model ran on a Done item with no pick" % label)
+
+    # A pick word and a ruling word that do not govern each other make no pick under a ruling.
+    # A cite may say "on item <N> <key>" after the ruling, as the owner's ruling on item 284 b does.
+
+    def test_r8_pick_words_that_name_no_pick_under_a_ruling_pass(self):
+        for label, line in (
+                ("a pick list, the ruling is its object", "> **Done** OTHER the pick list shows each ruling"),
+                ("took a look, the ruling is its object", "> **Done** OTHER took a look at the owner's ruling"),
+                ("the key ruling, not a key pick", "> **Done** OTHER took the key ruling into the check"),
+                ("chose, and a ruling in another clause", "> **Done** BUILT chose the simpler test; the ruling table is "
+                                                          "regenerated")):
+            with self.subTest(claim=label):
+                self.assertTrue(is_pick_claim(line), "%s: the line has no pick word and ruling cue, so it probes nothing"
+                                % label)
+                out = self.stop(reply(line))
+                self.assertFalse(refused_by_rule(out), "%s: a Done item with no pick under a ruling was refused" % label)
+                self.assertEqual(self.model_calls(), [], "%s: the model ran on a Done item with no pick under a ruling"
+                                 % label)
+
+    def test_r9_a_cite_with_on_before_its_item_is_accepted(self):
+        line = "> **Done** OTHER picked b under the owner's ruling on item 284 b (13:08 CST)"
+        self.assertTrue(is_pick_claim(line), "the cited line is not a pick claim, so it does not probe the cite")
+        out = self.stop(reply(line), answer=CONFIRM)
+        self.assertNotEqual(out.get("decision"), "block", "a valid cite with 'on' before its item was refused")
+        calls = self.model_calls()
+        self.assertEqual(len(calls), 1, "the cite never reached the model: %d calls" % len(calls))
+        self.assertIn(PICKED_LABEL, calls[0]["prompt"], "the cited item's ruling is missing from the prompt")
+
+    # With the refuter down, a rewrite must not be refused on every Stop: the first Stop refuses, and the rewrites pass.
+
+    def test_r10_refuter_down_refuses_the_first_stop_and_not_the_rewrites_after_it(self):
+        sid = "ruling-skip-outage"
+        line = done(cite(ITEM_REF))
+        self.assertTrue(is_pick_claim(line), "the cited line is not a pick claim, so the outage is not on the check")
+        first = self.stop(reply(line), model_fail=True, session_id=sid)
+        self.assert_refused(first, "the first Stop with the refuter down passed the claim")
+        for attempt in (2, 3):
+            with self.subTest(rewrite=attempt):
+                out = self.stop(reply(line), model_fail=True, session_id=sid, active=True)
+                self.assertFalse(refused_by_rule(out), "rewrite %d under the same refuter outage was refused again"
+                                 % attempt)
 
 
 class SpentDeadlineTests(unittest.TestCase):
@@ -429,6 +482,18 @@ class SpentDeadlineTests(unittest.TestCase):
         refusal, _ = self.check(reply(done(cite(DECISION_SLUG))), spent_at_start=True)
         self.assertIn(RULE, refusal, "a spent deadline let the decision cite pass")
         self.assertEqual(self.invoke.call_count, 0, "the refuter ran on a decision cite after the Stop deadline was spent")
+
+    def test_s4_a_review_check_that_spends_its_budget_leaves_the_refuter_its_full_limit(self):
+        # The review check runs first in the same Stop, on REVIEW_CHECK_BUDGET, and the refuter takes what is left of
+        # STOP_BUDGET. Once the review has spent its whole budget, the refuter must still get its full limit.
+        clock = 1000.0
+        with mock.patch.object(report_guard.time, "monotonic", return_value=clock):
+            report_guard._STARTED = clock - report_guard.REVIEW_CHECK_BUDGET
+            timeout = report_guard.call_timeout(report_guard.RULING_REFUTER_TIMEOUT, model=True)
+        self.assertIsNotNone(timeout, "no time was left for the refuter after the review check's whole budget")
+        self.assertGreaterEqual(timeout, report_guard.RULING_REFUTER_TIMEOUT,
+                                "after the review check's %s s, the refuter got %s s, under its %s s limit"
+                                % (report_guard.REVIEW_CHECK_BUDGET, timeout, report_guard.RULING_REFUTER_TIMEOUT))
 
 
 if __name__ == "__main__":
