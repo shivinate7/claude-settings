@@ -4312,6 +4312,9 @@ try:
             raise Refused(api_error(404, "Branch not protected"))
         finish(one({"strict": True, "contexts": S["contexts"], "checks": [{"context": c, "app_id": None} for c in S["contexts"]]}, jq), 0, include)
 
+    elif method == "GET" and rel in ("rules/branches/main", "rulesets"):  # GitHub's reply when no ruleset applies is []; a case sets S["main_rules"] for the rules
+        finish(one(S.get("main_rules") or [] if rel == "rules/branches/main" else [], jq), 0, include)
+
     else:
         raise Refused(api_error(404, "Not Found"))
 except Refused as e:
@@ -12556,6 +12559,83 @@ class MergeChecksFromProtection(unittest.TestCase):
         host.gh = lambda *a, **k: self.fail("a gh read was made")
         host.refuse_pinned_mismatch()
 
+REQUIRED_RULE = {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": REQUIRED_CHECK}]}}
+NO_CHECK_RULES = [{"type": "deletion"}, {"type": "non_fast_forward"}]  # the blocks ruling r adds that name no check
+
+class RulesHost(merge.Host):
+    """Host whose reads of main answer as GitHub does. `rules` is main's effective rules, [] when no ruleset applies: the rules/branches/main
+    read gives them, and the rulesets route gives the one ruleset that holds them, then its own read. `contexts` is the classic required checks,
+    None for no classic protection (a 404). `read_error`, when set, is the (code, output) that fails every ruleset read. Any other gh call fails the case."""
+    def __init__(self, rules, contexts, read_error=None):
+        super().__init__(required="protection", base="main", pause=lambda s: None)
+        self.rules, self.contexts, self.read_error = rules, contexts, read_error
+
+    def gh(self, args, cwd=None):
+        rel = args[1].split("/", 3)[-1]  # repos/{owner}/{repo}/<rel>
+        jq = args[args.index("--jq") + 1] if "--jq" in args else None
+        if rel == "branches/main/protection/required_status_checks":
+            if self.contexts is None:
+                return 1, rest_err(404, "Branch not protected")
+            return 0, REST.one({"contexts": self.contexts}, jq)
+        if rel in ("rules/branches/main", "rulesets", "rulesets/9") and self.read_error:
+            return self.read_error
+        if rel == "rules/branches/main":
+            return 0, REST.one(self.rules, jq)
+        if rel == "rulesets":
+            return 0, REST.one([{"id": 9, "name": "ruleset-9", "target": "branch"}] if self.rules else [], jq)
+        if rel == "rulesets/9":
+            return 0, REST.one({"id": 9, "target": "branch", "conditions": {"ref_name": {"include": ["refs/heads/main"], "exclude": []}},
+                                "rules": self.rules}, jq)
+        raise AssertionError("unexpected gh call: " + " ".join(args))
+
+class RulesetFirst(unittest.TestCase):
+    """Owner ruling c (19:49 CST Nov 11): the merge tool reads main's ruleset first and the classic protection second, so a repo whose ruleset
+    holds the checks and that has no classic protection merges. Ruling r (16:43 CST Nov 11): the ruleset requires the rollup, all-jobs-passed."""
+
+    def read(self, call):
+        try:
+            return call()
+        except merge.Stop as e:
+            self.fail("the merge tool stopped on main's required checks: %s" % e)
+
+    def test_a_ruleset_alone_names_the_required_check(self):
+        host = RulesHost([REQUIRED_RULE, *NO_CHECK_RULES], contexts=None)
+        self.assertEqual(self.read(host.protection_names), [REQUIRED_CHECK],
+                         "a ruleset that requires the rollup, with no classic protection, names the rollup")
+
+    def test_a_ruleset_alone_does_not_stop_the_merge(self):
+        host = RulesHost([REQUIRED_RULE, *NO_CHECK_RULES], contexts=None)
+        self.assertEqual(self.read(host.required_names), [REQUIRED_CHECK],
+                         "the wait has names to wait for: a repo with a ruleset and no classic protection merges")
+
+    def test_the_ruleset_is_read_before_the_classic_protection(self):
+        host = RulesHost([REQUIRED_RULE], contexts=["checks"])
+        self.assertEqual(self.read(host.protection_names), [REQUIRED_CHECK],
+                         "the ruleset's names come first, so the classic list does not name the checks here")
+
+    def test_a_ruleset_without_a_check_rule_hands_the_names_to_the_classic_protection(self):
+        host = RulesHost(NO_CHECK_RULES, contexts=["checks"])
+        self.assertEqual(self.read(host.protection_names), ["checks"],
+                         "a ruleset with no status-check rule leaves the names to the classic protection")
+
+    def test_no_ruleset_and_no_classic_protection_names_nothing(self):
+        host = RulesHost([], contexts=None)
+        self.assertIsNone(self.read(host.protection_names), "no ruleset and no classic protection name no check")
+
+    def test_every_context_the_ruleset_requires_is_named(self):
+        two = {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": REQUIRED_CHECK}, {"context": "extra-check"}]}}
+        host = RulesHost([two], contexts=None)
+        self.assertEqual(self.read(host.protection_names), [REQUIRED_CHECK, "extra-check"],
+                         "the wait names every check the ruleset requires, not only the first")
+
+    def test_a_failed_ruleset_read_stops_and_does_not_fall_back_to_the_classic_list(self):
+        host = RulesHost([], contexts=["checks"], read_error=(1, rest_err(403, "Resource not accessible by integration")))
+        try:
+            names = host.protection_names()
+        except merge.Stop:
+            return
+        self.fail("a failed ruleset read must stop the merge, not fall back to the classic list (got %r)" % (names,))
+
 @unittest.skipIf(os.name == "nt", "a Windows process gets no SIGTERM handler run")
 class SignalReleasesLock(Env):
     """c189 part 3: a run stopped by SIGTERM or SIGINT releases the merge lock (#746 left one live for 2.7 h)."""
@@ -12644,6 +12724,7 @@ class PullsHost(merge.Host):
         self.commit_reads = []  # the sha of each commits/<sha> read, in order
         self.commits = dict(commits or {})  # sha -> its parent shas, the commit read's answer
         self.trees = dict(trees or {})  # sha -> its tree sha, which the same answer names under commit.tree.sha
+        self.rules = []  # main's effective rules, as rules/branches/main answers them: [] when no ruleset applies
 
     def gh(self, args, cwd=None):
         if args[:2] == ["run", "list"]:
@@ -12711,6 +12792,10 @@ class PullsHost(merge.Host):
             return self.files_reply(rel, params, flags)
         if rel == "issues/comments":
             return REST.listing(self.comments, None, params, flags, None, 100)
+        if rel == f"rules/branches/{self.base}":
+            return json.dumps(self.rules)
+        if rel == "rulesets":
+            return json.dumps([])
         if rel == f"branches/{self.base}/protection/required_status_checks":
             return json.dumps(self.protection)
         if m and m.group(2) == "check-runs":
@@ -15445,15 +15530,17 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(len(reads), 1)
         self.assertEqual(reads[0].get("since"), "2026-10-01T00:00:00Z")
 
-    def test_one_ready_pr_with_a_record_costs_five_gh_calls(self):
-        # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses and the branch protection
+    def test_one_ready_pr_with_a_record_costs_six_gh_calls(self):
+        # decision pr-review-record, the cost: the pull list, the comments, then for the head its check runs, its statuses, main's ruleset (one read
+        # when no ruleset applies, by either route) and the branch protection, which is read second (ruling c, 19:49 CST Nov 11)
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments, {REVIEW_HEAD: [batch_run("checks", "completed", "success")]},
                                           count_gh=True)
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), r"CI green$")
-        self.assertEqual(host.gh_calls, ["pulls", "issues/comments", f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status",
-                                         "branches/main/protection/required_status_checks"])
+        self.assertEqual(host.gh_calls[:4], ["pulls", "issues/comments", f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status"])
+        self.assertIn(host.gh_calls[4], ("rules/branches/main", "rulesets"), "the ruleset read comes before the classic protection")
+        self.assertEqual(host.gh_calls[5:], ["branches/main/protection/required_status_checks"])
 
     def test_a_draft_with_a_record_reads_no_head_checks(self):
         host, rc, out, err = self.listing([batch_pull(9, REVIEW_HEAD, draft=True)], [review_comment(1, 9, record_text(n=9, rounds=REVIEW_PASS))],
@@ -16689,6 +16776,10 @@ if method == "GET" and re.fullmatch(r"branches/[^/]+/protection/required_status_
     if r["contexts"] is None:
         answer(api_error(404, "Branch not protected"), 1)
     answer(one({"contexts": r["contexts"]}, jq))
+if method == "GET" and rel == "rules/branches/main":  # no ruleset applies unless the root names rules: GitHub's reply is []
+    answer(one(r.get("rules", []), jq))
+if method == "GET" and rel == "rulesets":
+    answer(one([], jq))
 cmp = re.fullmatch(r"compare/([^/]+)\.\.\.([^/]+)", rel)
 if method == "GET" and cmp:
     answer(one({"status": r["compares"].get(cmp.group(1) + "..." + cmp.group(2), "diverged")}, jq))
