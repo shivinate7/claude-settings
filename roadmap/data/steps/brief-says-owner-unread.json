@@ -1,14 +1,14 @@
 {
  "id": "brief-says-owner-unread",
  "title": "The lane brief says the owner never reads the lane, and routes each override, owner act and question to the coordinator",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
- "lane": "",
+ "lane": "session_013NEJL2aRhUfdNWhTUtdKUH",
  "owner": "triage",
  "blockedBy": [],
  "why": "Owner 13:26 CST Nov 12: \"does anything in the briefs you spawn let lanes know that i won't be checking them and so if they need an override etc to let you know so you bring it to my attention?\"",
  "source": "retrospective 13:27 CST Nov 12",
- "note": "Home: decision questions-go-to-owner. Measured: skills/project-ops/templates/brief.md on main 2deb827ad has no such line, and no archive line. Fix: the brief template says the owner never reads the lane; each override line, owner act and question goes to the coordinator, which brings it to the page as an owner act naming the lane by role and step; a check refuses a brief without the line. Red first. The archive line rides step handoff-lands-tracked-first (lane archive-flow, running). Meanwhile the coordinator carries the line in briefs by hand.",
- "updatedAt": "2026-11-12T13:29:42-06:00"
+ "note": "Home: decision questions-go-to-owner. Measured: skills/project-ops/templates/brief.md on main 2deb827ad has no such line, and no archive line. Fix: the brief template says the owner never reads the lane; each override line, owner act and question goes to the coordinator, which brings it to the page as an owner act naming the lane by role and step; a check refuses a brief without the line. Red first. The archive line rides step handoff-lands-tracked-first (lane archive-flow, running). Meanwhile the coordinator carries the line in briefs by hand. Lane started 13:49 CST Nov 12; role-ids-in-brief folded in.",
+ "updatedAt": "2026-11-12T13:52:56-06:00"
 }

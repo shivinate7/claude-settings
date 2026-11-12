@@ -1,12 +1,12 @@
 {
   "title": "A PR whose owner quotes match the feedback log word for word skips the review round",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 1026,
   "owner": "triage",
   "why": "Owner 15:22 CST Nov 10 (R7, relayed by the retrospective session): \"this is very key yes\".",
-  "note": "Rewrite decision docs-only-prs-skip-review in place (item 205 b): an exact-quote match against the feedback log skips the docs-only review round. Its first user is the restart plan's own PR. Lane prose-unmapped-2 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Lane cleared 13:38 CST Nov 12 (retrospective 13:36 CST sweep): its session (\"Lane fan-prose-unmapped-2\") is idle and completed with no branch for this step.",
-  "updatedAt": "2026-11-12T13:38:03-06:00",
-  "lane": "",
+  "note": "Rewrite decision docs-only-prs-skip-review in place (item 205 b): an exact-quote match against the feedback log skips the docs-only review round. Its first user is the restart plan's own PR. Lane prose-unmapped-2 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Lane cleared 13:38 CST Nov 12 (retrospective 13:36 CST sweep): its session (\"Lane fan-prose-unmapped-2\") is idle and completed with no branch for this step. Lane started 13:49 CST Nov 12.",
+  "updatedAt": "2026-11-12T13:52:56-06:00",
+  "lane": "session_013NEJKygJbMN4tsZrzb9rkH",
   "blockedBy": []
 }

@@ -1,14 +1,14 @@
 {
  "id": "gh-get-timeout-retry",
  "title": "The merge tool retries a GitHub read that timed out, once",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
- "lane": "",
+ "lane": "session_013NEJL2UayGumX3LbxC3R4h",
  "owner": "triage",
  "blockedBy": [],
  "why": "Lane merge-claim-survives-timeout 13:37 CST Nov 12: a timed-out gh GET is never retried.",
  "source": "lane merge-claim-survives-timeout 13:37 CST Nov 12",
- "note": "An unreviewed fix exists at archive/merge-claim-survives-timeout (b642e49ce). Its one full test_merge run ended FAILED (1 of 1608); which test, and whether main fails it too, is unknown. Treat it as unproven: a new lane reruns the suite on main and on b642e49ce first.",
- "updatedAt": "2026-11-12T13:39:34-06:00"
+ "note": "An unreviewed fix exists at archive/merge-claim-survives-timeout (b642e49ce). Its one full test_merge run ended FAILED (1 of 1608); which test, and whether main fails it too, is unknown. Treat it as unproven: a new lane reruns the suite on main and on b642e49ce first. Lane merge-net-small-fixes started 13:49 CST Nov 12 with lock-listed-stdout-only.",
+ "updatedAt": "2026-11-12T13:52:56-06:00"
 }
