@@ -21,7 +21,7 @@ A skill matches on its folder name or its `name`, so a renamed skill with a new 
 through its files.
 
 Files inside a reported skill copy are not reported again. License and lock files, parent
-files under an examples/ or templates/ folder, small files and files over MAX_BYTES are skipped. A child file at a path in OWN_FILES (its own PR template) is not reported against the parent's template at that path, or a byte-equal twin of it, however near-equal; a copy elsewhere, or of another parent file, is still reported. Exit 0: no copies. Exit 1: copies found.
+files under an examples/ or templates/ folder, small files and files over MAX_BYTES are skipped. A child file at a path in OWN_FILES (its own PR template) is not reported against the parent's template at that path, a byte-equal copy of it, or a same-name twin byte-equal or near-equal to it; a copy elsewhere, or of another parent file, is still reported. Exit 0: no copies. Exit 1: copies found.
 Exit 2: the child or parent cannot be read, so the result is unknown.
 Cost: one `git ls-files` per tree and one read of each listed file. No process stays running.
 """
@@ -127,6 +127,26 @@ def find_skill_copies(parent, pfiles, child, cfiles):
     return found
 
 
+def near_score(plines, clines):
+    """Share of the parent's lines the child holds; -1, under any threshold, when the child only quotes the parent."""
+    if len(clines) > CHILD_GROWTH * len(plines):
+        return -1
+    return len(plines & clines) / len(plines)
+
+
+def own_twins(parent, rel, candidates, lines_of, threshold):
+    """Candidates that hold the parent's own file at rel: rel itself, a byte-equal copy at any path,
+    and a same-name twin near-equal to it. A child's own file is no copy of these."""
+    own = read(parent, rel)
+    if own is None:
+        return set()
+    own_lines = significant_lines(own) or set()
+    base = rel.split("/")[-1]
+    return {p for p in candidates
+            if p == rel or read(parent, p) == own
+            or (p.split("/")[-1] == base and near_score(lines_of[p], own_lines) >= threshold)}
+
+
 def find_file_copies(parent, pfiles, child, cfiles, skip_folders, threshold):
     by_hash, lines_of, index = {}, {}, {}
     for rel in pfiles:
@@ -169,14 +189,11 @@ def find_file_copies(parent, pfiles, child, cfiles, skip_folders, threshold):
                 for p in hits:
                     counts[p] = counts.get(p, 0) + 1
         best = None
-        own = read(parent, rel) if rel in OWN_FILES else None
+        excused = own_twins(parent, rel, counts, lines_of, threshold) if rel in OWN_FILES else set()
         for p in counts:
-            if own is not None and (p == rel or read(parent, p) == own):
+            if p in excused:
                 continue
-            plines = lines_of[p]
-            if len(clines) > CHILD_GROWTH * len(plines):
-                continue
-            score = len(plines & clines) / len(plines)
+            score = near_score(lines_of[p], clines)
             if score >= threshold and (best is None or (-score, rank(p)) < (-best[1], rank(best[0]))):
                 best = (p, score)
         if best:
