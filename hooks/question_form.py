@@ -914,6 +914,8 @@ CHALLENGED_MODELS = ("sonnet", "opus")
 # None with no parentheses; group 2 is the rest of the line.
 CHALLENGED_LINE = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?(?:\*\*)?Against the pick(?:\*\*)?[ \t]*(?:\(([^()\n]*)\))?[ \t]*"
                              r"(?:\*\*)?:(?:\*\*)?([^\n]*)", re.I | re.M)
+# A case that is only a filler word, or only dots or dashes, is no case. Real text that holds such a word passes.
+CHALLENGED_FILLER = re.compile(r"(?:none|nothing|n/?a|tbd|todo|\.+|\u2026|[-\u2013\u2014]+)[.!]*", re.I)
 CHALLENGED_REASON = ("A decision with a pick carries the case against it. Spawn one refuter and give it only the item's "
                      "Goal, Problem, Based on, options and pick, never `why`. Write its case in a line that starts "
                      "\"Against the pick (<model>): <case>\", where model is %s. "
@@ -934,7 +936,7 @@ def challenged_hit(text) -> str:
         rest = rest.strip()
         if not rest:
             return "Against the pick line with no text"
-        if is_placeholder(rest):
+        if is_placeholder(rest) or CHALLENGED_FILLER.fullmatch(rest):
             return "Against the pick line whose text is only a placeholder" + PLACEHOLDER_HINT
     return ""
 
