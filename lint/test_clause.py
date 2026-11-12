@@ -478,6 +478,20 @@ class LeadOpensClauseTests(unittest.TestCase):
         self.assertTrue(clause.lead_opens_clause("yet", " the failure is pre-existing"),
                         "lead_opens_clause: yet + the no longer opens a clause")
 
+    def test_each_plain_lead_in_opens_a_clause_whatever_follows(self):
+        # Catches: a plain lead-in (every LEAD_INS word but yet and as) that reads as no clause, so the negator before it never
+        # reaches the claim after it. The empty text and a full clause are both fixtures: a plain lead-in never reads the next word.
+        self.assertTrue({"yet", "as"} <= set(clause.LEAD_INS), "scope: yet or as is no longer a lead-in, so the split is wrong")
+        plain = [word for word in clause.LEAD_INS if word not in ("yet", "as")]
+        self.assertTrue(plain, "scope: no plain lead-in is left to test")
+        self.assertFalse(clause.lead_opens_clause("as", ""), "lead_opens_clause: as with no text opens a clause")
+        self.assertFalse(clause.lead_opens_clause("yet", ""), "lead_opens_clause: yet with no text opens a clause")
+        for word in plain:
+            for after in ("", " the failure is pre-existing"):
+                with self.subTest(lead=word, after=after):
+                    self.assertTrue(clause.lead_opens_clause(word, after),
+                                    "lead_opens_clause: plain lead-in %r opens no clause before %r" % (word, after))
+
 
 class LexiconTests(unittest.TestCase):
     def test_negators_are_the_negation_words(self):
