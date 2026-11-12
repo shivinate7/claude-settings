@@ -26,9 +26,10 @@
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), for lane post-batch-conflict-merge",
   "pick": "a",
   "ref": "coordinator 15:49 CST Nov 12; PR #2969",
+  "reply": "Closed by triage: your Nov 10 14:07 CST ruling already decides this. Decision pr-review-record says a clean merge of main keeps the review record, and a conflicted merge takes one more fix verifier. So option a holds without a new pick. Asked by mistake.",
   "repo": "shivinate7/claude-settings",
   "short": "Hunk-only review after a conflict merge",
-  "status": "open",
+  "status": "closed",
   "title": "After a conflicted main merge, may a review of only the resolved lines carry the change?",
   "why": "Your Nov 10 ruling keeps today's rules for any other difference, so a full review is owed unless you say otherwise."
 }
