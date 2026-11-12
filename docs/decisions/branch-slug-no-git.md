@@ -24,6 +24,11 @@ Claude Code's own worktree check refuses an agent's git command that names a bra
 - `push origin HEAD` from a local branch that holds the word passes, because the command names no such word.
 - A git call inside `bash -c "..."`, such as `bash -c "git checkout -b x"`, is not read.
 - A push whose name holds `$` is not read.
+- A start point other than the literal `<remote>/<name>` is not read. `origin/<name>~1`, `origin/<name>^`, `refs/remotes/origin/<name>`, `remotes/origin/<name>` and `FETCH_HEAD` are refused for a name that exists on origin.
+- A tag pushed by bare name is refused with the branch reason when its name holds the word. A `refs/tags/` destination is never checked.
+- A push by URL is refused unless a local branch holds the name. The fetch hint does not clear it.
+- A push to a remote that lacks the name is refused while another remote holds it. In a single-branch clone a fetch never creates the ref, so the fetch hint does not clear it.
+- `stash branch <name>` creates a name this rule does not read.
 
 Kind: process
 Home: hooks/guard_branch_worktree.py
