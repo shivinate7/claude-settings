@@ -1,0 +1,6 @@
+# Guards and skill tells still count only cloud send_message as a send
+
+- **What.** The Stop feedback guard accepts only `send_message` or `SendMessage` as proof that an owner answer reached the page writer, a repo's triage or a lane's parent. A session that follows the one-route ruling and sends by `mail send` leaves a Bash call, so the guard blocks it. The skill's page-writer tells (`answer-unread`, park) and the lane-to-parent tell also still name `send_message`, and `skills/waiting-page/test_skill_park_relay.py` pins that. Until they move, those routes stay on cloud `send_message` and keep the no-copy gap for those messages.
+- **Where.** `hooks/feedback_guard.py` (page, repo and answer sends); `lint/_transcript.py` `SEND_TOOLS`, `send_targets`; `skills/waiting-page/SKILL.md` (lane tell, `answer-unread` tell, park tell).
+- **Decision.** session-messages (messages to and from sessions).
+- **Retire.** The feedback guard accepts a `mail send --to <addr>` whose body names the item, with a red case first; the skill's three tells name `mail send` and `test_skill_park_relay.py` is re-pointed. Both need the owner's pick on the doorbell (open), because a mailbox-only tell wakes no idle session.
