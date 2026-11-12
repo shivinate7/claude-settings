@@ -14,6 +14,7 @@ The cases pin this contract:
   \\x0b, \\x0c, \\x1c-\\x1e or \\x85 inside a string never shifts a reported line or hides an added one.
 - Each hit row ends with a one-line remedy: say what and why; the history goes in git or the decision.
 - `--exclude PREFIX` skips the files under that path prefix. Repeat it for each prefix.
+- A deleted or renamed-away extensionless script is read from git at the base. Its old path never reads as UNKNOWN.
 - JS, TS, Astro and Swift comments follow the same rule. The same words in their strings or template text never fail.
 - A comment that states a run's colour or result on a head, on main or on the base is history.
   It fails under the `history phrase` pattern. A colour phrase after when, if, unless, until, while or once in the
@@ -228,6 +229,15 @@ class Case(unittest.TestCase):
         self.base({"keep.py": "x = 1\n", **(extra_base or {})})
         self.change(files)
         return self.lint()
+
+    def changed_paths(self, base="origin/main"):
+        return subprocess.run(["git", "-C", self.tree, "diff", "--name-only", base], capture_output=True,
+                              text=True, env=GIT_ENV, check=True).stdout.split()
+
+    def changed_status(self, base):
+        """`git diff -M --name-status` as text. A rename reads as `R<score>`, the old path, then the new path."""
+        return subprocess.run(["git", "-C", self.tree, "diff", "-M", "--name-status", base], capture_output=True,
+                              text=True, env=GIT_ENV, check=True).stdout
 
 
 class FlagsAddedLines(Case):
@@ -737,10 +747,6 @@ class UnreadScripts(Case):
     """An extensionless file whose shebang cannot be read has no language, so it is never scanned: its read must say UNKNOWN.
     The check exits 2 on any unread file, locally and in CI, as it does for every other unread file."""
 
-    def changed_paths(self):
-        return subprocess.run(["git", "-C", self.tree, "diff", "--name-only", "origin/main"], capture_output=True,
-                              text=True, env=GIT_ENV, check=True).stdout.split()
-
     def dangling_script(self):
         """`bin/tool` is a symlink to a target that is not there. Root reads through chmod 000, so a dangling link is the
         real read failure: git lists the path as added, and open() on it fails."""
@@ -773,6 +779,71 @@ class UnreadScripts(Case):
         self.assertIn("bin/tool", self.changed_paths(), "scope: the readable script is not in the change")
         rc, out = self.lint(ci=True)
         self.assertEqual(rc, 0, out)
+        self.assertNotIn("UNKNOWN", out)
+
+
+class DeletedScripts(Case):
+    """A change that deletes an extensionless script, or renames it away, leaves no file at its old path. The check
+    reads that old content from git at the base, so the old path never reads as UNKNOWN. A file still on disk that
+    cannot be read stays UNKNOWN: UnreadScripts pins that."""
+
+    # Full-size: the body runs past the 200 bytes the shebang read takes, so the fixture is not only a first line.
+    SCRIPT = "#!/bin/sh\n" + "".join("echo line %d\n" % n for n in range(1, 31))
+    NARRATED = SCRIPT.replace("echo line 15\n", "# fixed in round 2\necho line 15\n")
+    CLEAN_EDIT = SCRIPT.replace("echo line 15\n", "echo line fifteen\n")
+
+    def delete_script(self):
+        self.base({"keep.py": "x = 1\n", "bin/foo": self.SCRIPT})
+        self.change({"bin/foo": None})
+        self.assertIn("D\tbin/foo", self.changed_status("HEAD~1"), "scope: the change does not delete bin/foo")
+        self.assertFalse(os.path.lexists(os.path.join(self.tree, "bin", "foo")), "scope: bin/foo is still on disk")
+
+    def rename_script(self, new_text):
+        self.base({"keep.py": "x = 1\n", "bin/old": self.SCRIPT})
+        self.change({"bin/old": None, "bin/new": new_text})
+        status = self.changed_status("HEAD~1")
+        self.assertRegex(status, r"(?m)^R\d+\tbin/old\tbin/new$",
+                         "scope: the change is not a rename of bin/old to bin/new:\n" + status)
+        self.assertFalse(os.path.lexists(os.path.join(self.tree, "bin", "old")), "scope: bin/old is still on disk")
+
+    def test_deleted_script_with_no_comment_added_exits_0_with_no_unknown(self):
+        self.delete_script()
+        rc, out = self.lint("--base", "HEAD~1")
+        self.assertEqual(rc, 0, "a deleted extensionless script made the check exit non-zero: its old path is read "
+                                "from disk, not from git:\n" + out)
+        self.assertNotIn("UNKNOWN", out)
+
+    def test_deleted_script_with_no_comment_added_exits_0_with_no_unknown_in_ci(self):
+        self.delete_script()
+        rc, out = self.lint("--base", "HEAD~1", ci=True)
+        self.assertEqual(rc, 0, "under CI, a deleted extensionless script made the check exit non-zero: its old path "
+                                "is read from disk, not from git:\n" + out)
+        self.assertNotIn("UNKNOWN", out)
+
+    def test_renamed_script_with_a_clean_edit_exits_0_with_no_unknown_in_ci(self):
+        self.rename_script(self.CLEAN_EDIT)
+        rc, out = self.lint("--base", "HEAD~1", ci=True)
+        self.assertEqual(rc, 0, "under CI, a script renamed away made the check exit non-zero: its old path is read "
+                                "from disk, not from git:\n" + out)
+        self.assertNotIn("UNKNOWN", out)
+
+    def test_renamed_script_with_a_narrating_comment_exits_1_and_hits_the_new_path_in_ci(self):
+        self.rename_script(self.NARRATED)
+        rc, out = self.lint("--base", "HEAD~1", ci=True)
+        self.assertEqual(rc, 1, "under CI, a script renamed away with a narrating comment did not exit 1: its old path "
+                                "is read from disk, not from git:\n" + out)
+        self.assertHit(out, "bin/new", at(self.NARRATED, "fixed in round 2"))
+
+    def test_comment_moved_out_of_a_deleted_script_is_not_a_new_comment(self):
+        self.base({"keep.py": "x = 1\n", "bin/old": self.NARRATED})
+        self.change({"bin/old": None, "keep.py": "x = 1\n# fixed in round 2\n"})
+        status = self.changed_status("HEAD~1")
+        self.assertIn("D\tbin/old", status, "scope: the change does not delete bin/old:\n" + status)
+        self.assertIn("M\tkeep.py", status, "scope: the change does not add the comment to keep.py:\n" + status)
+        self.assertFalse(os.path.lexists(os.path.join(self.tree, "bin", "old")), "scope: bin/old is still on disk")
+        rc, out = self.lint("--base", "HEAD~1")
+        self.assertEqual(rc, 0, "a comment moved out of a deleted script counted as new: the deleted script's old "
+                                "content was not read from git:\n" + out)
         self.assertNotIn("UNKNOWN", out)
 
 
