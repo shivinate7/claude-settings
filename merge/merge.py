@@ -4657,23 +4657,30 @@ def stacked_without_base(root, h, base, heads, running, own=None, remedy="Add th
     if found:
         raise Stop("\n".join(found) + f"\n{remedy(sorted(named)) if callable(remedy) else remedy} Nothing was pushed. {FREEZE_CITE}")
 
-def busy_file_lanes(root, name, heads, base, config):
+def busy_file_lanes(root, name, heads, base, config, start):
     """Refuse (Stop) a new build in which two or more lanes each change the same file that merge.busyFiles names (fnmatch globs, read from the
     base's config): lanes that edit one busy file in one build collide at merge time, so the later ones go in a stacked batch (--on). Per-lane
-    files come from git (`git diff --name-only origin/BASE...HEAD`), with no host read. The config is read first, so a bad merge.busyFiles stops the
-    build before any push. A stacked lane's diff holds the commits it stacks on, so a lane stacked on a running batch is not told apart from it."""
+    files come from git (`git diff --no-renames -z --name-only START...HEAD`, with no host read): `start` is the head the build starts from, the base
+    tip or the running batch it stacks on, so a change the running batch holds is not the lane's. --no-renames names a moved file's old path too.
+    Two lanes whose heads contain one another (one stacks on the other) share a file only through the stack and do not collide. The config is
+    read first, so a bad merge.busyFiles stops the build before any push."""
     globs = load_config(root, base, config, " " + FREEZE_CITE)["merge"].get("busyFiles", [])
     if not globs:
         return
     touched = {}
     for n in sorted(heads):
-        c, out = git(root, "diff", "--name-only", f"origin/{base}...{heads[n]}")
+        c, out = git(root, "diff", "--no-renames", "-z", "--name-only", f"{start}...{heads[n]}")
         if c:
             raise Stop(f"cannot read the files #{n} changes against {base}: {out} Nothing was pushed. {FREEZE_CITE}")
-        for f in out.splitlines():
-            if any(fnmatch.fnmatchcase(f, g) for g in globs):
+        for f in out.split("\0"):
+            if f and any(fnmatch.fnmatchcase(f, g) for g in globs):
                 touched.setdefault(f, []).append(n)
-    shared = {f: ns for f, ns in sorted(touched.items()) if len(ns) > 1}
+    stacked = lambda a, b: git(root, "merge-base", "--is-ancestor", heads[a], heads[b])[0] == 0 or git(root, "merge-base", "--is-ancestor", heads[b], heads[a])[0] == 0
+    shared = {}
+    for f, ns in sorted(touched.items()):
+        hit = sorted({n for i, a in enumerate(ns) for b in ns[i + 1:] if not stacked(a, b) for n in (a, b)})
+        if hit:
+            shared[f] = hit
     if shared:
         lines = [f"{f} is changed by {lane_list(ns)}" for f, ns in shared.items()]
         raise Stop("\n".join(lines) + f"\nmerge.busyFiles names these files: lanes that change one in the same build collide, so nothing was pushed. Build one lane or group as batch {name}, "
@@ -4867,7 +4874,7 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", co
         for n in numbers:
             if fetch_branch(root, infos[n]["branch"], FREEZE_CITE) != heads[n]:
                 raise Stop(f"{infos[n]['branch']} moved while #{n} was read. Nothing was pushed. Run again. {FREEZE_CITE}")
-        busy_file_lanes(root, name, heads, base, config)
+        busy_file_lanes(root, name, heads, base, config, start)
         stacked_without_base(root, h, base, heads, start if on else None)
         build_integration_branch(root, name, start, sorted(heads.items()))
         try:
