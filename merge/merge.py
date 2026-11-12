@@ -3465,36 +3465,37 @@ def draft_step(root, cfg, n, host, info, unknown_ok=""):
     default = base == cfg["defaultBranch"]
     if not default:
         say(f"merge: {base} is not the default branch ({cfg['defaultBranch']}). The records page is rebuilt only for it. Nothing was pushed.")
-    if default or checks:  # one worktree, one open_worktree call, on either base
-        tmp, wt = open_worktree(root, info, base)
-        try:
-            handed_local(wt, f"origin/{base}", n, info, unknown_ok, cfg["defaultBranch"])  # before any push or ready check
-            if not default:
+    # one worktree, one open_worktree call, on any base: the no-Lanes check reads the head on every draft
+    tmp, wt = open_worktree(root, info, base)
+    try:
+        handed_local(wt, f"origin/{base}", n, info, unknown_ok, cfg["defaultBranch"])  # before any push or ready check
+        if not default:
+            if checks:
                 run_ready_checks(wt, n, base, checks)
-            else:
-                claim = head_claim(wt)  # a page commit on top would hide the claim from own_claim at the ready confirm
-                if claim:
-                    if checks:
-                        run_ready_checks(wt, n, base, checks)  # before the remedy: it has the session mark ready by hand, past the checks
-                    raise Stop(f"{info['head'][:9]} on {info['branch']} holds a Record-claim ({claim}), so the draft step adds no page commit on top of it. "
-                               f"Mark #{n} ready by hand ({READY_ROUTES}), then run --confirm again. Nothing was pushed. {RECORDS_CITE}")
-                # before the rebuild: a small-move proof resets the tree. before_wait: under confirm's lock it extends the lock
-                stale, stands = holds_base(wt, f"origin/{base}", info["head"], getattr(host, "before_wait", None))
-                if stale:  # holds_base ends with the remedy
-                    raise Stop(("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " Nothing was pushed.")
-                if stands:
-                    say(f"merge: {stands}. The green run stands.")
-                rebuilt = rebuild_records(wt)
-                sha = commit_claim(wt, None) if rebuilt else None
+        else:
+            claim = head_claim(wt)  # a page commit on top would hide the claim from own_claim at the ready confirm
+            if claim:
                 if checks:
-                    run_ready_checks(wt, n, base, checks)  # on the page commit when there is one, so what is checked is what is pushed
-                if rebuilt:
-                    push_branch(wt, info["branch"])
-                    say(f"merge: the records page pushed to {info['branch']} at {sha[:9]}.")
-                else:
-                    say(f"merge: the records page on {info['branch']} at {info['head'][:9]} is current. Nothing was pushed.")
-        finally:
-            drop_worktree(root, tmp, wt)
+                    run_ready_checks(wt, n, base, checks)  # before the remedy: it has the session mark ready by hand, past the checks
+                raise Stop(f"{info['head'][:9]} on {info['branch']} holds a Record-claim ({claim}), so the draft step adds no page commit on top of it. "
+                           f"Mark #{n} ready by hand ({READY_ROUTES}), then run --confirm again. Nothing was pushed. {RECORDS_CITE}")
+            # before the rebuild: a small-move proof resets the tree. before_wait: under confirm's lock it extends the lock
+            stale, stands = holds_base(wt, f"origin/{base}", info["head"], getattr(host, "before_wait", None))
+            if stale:  # holds_base ends with the remedy
+                raise Stop(("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " Nothing was pushed.")
+            if stands:
+                say(f"merge: {stands}. The green run stands.")
+            rebuilt = rebuild_records(wt)
+            sha = commit_claim(wt, None) if rebuilt else None
+            if checks:
+                run_ready_checks(wt, n, base, checks)  # on the page commit when there is one, so what is checked is what is pushed
+            if rebuilt:
+                push_branch(wt, info["branch"])
+                say(f"merge: the records page pushed to {info['branch']} at {sha[:9]}.")
+            else:
+                say(f"merge: the records page on {info['branch']} at {info['head'][:9]} is current. Nothing was pushed.")
+    finally:
+        drop_worktree(root, tmp, wt)
     ok, why = host.ready(n)
     if ok:
         say(f"merge: #{n} is ready now. Nothing was merged. When its run is green, run --confirm again to merge.")
@@ -4232,6 +4233,13 @@ def touches_lines(h, run, cases, files):
             out.append(f"#{d['number']} {d['head']['ref']} {d['head']['sha'][:9]} {'draft' if d.get('draft') else 'ready'}: " + "; ".join(hits))
     return (out or ([] if unknown else [TOUCH_NONE])), unknown
 
+_PLACEHOLDERS = {"tbd", "tba", "todo", "na", "none", "nothing", "unknown"}  # words people type where a reason belongs
+
+def real_reason(text):
+    """True when `text`, the inside of a reason's parentheses, says something: a placeholder word, bare punctuation or one character is no reason."""
+    words = re.sub(r"\W", "", text or "").lower()
+    return len(words) >= 2 and words not in _PLACEHOLDERS
+
 _PR_REF = re.compile(r"#(\d+)(?:\s*\(((?:[^()]|\([^()]*\))*)\))?")  # `#12`, then its reason in parentheses when one follows
 
 def label_colon(line):
@@ -4247,33 +4255,35 @@ def label_colon(line):
 def body_lanes(body):
     """-> (lanes, left_out) read from an integration PR body. lanes: the numbers on the BATCH_LANES line, or None when the body has none.
     The Lanes line may start with a list marker (`- ` or `* `) or bold (`**Lanes:**`), in any case. left_out: {number: [has a reason, ...]},
-    one entry per time the number is on a line that starts with a BATCH_LEFT_OUT prefix. Only the numbers after the label's colon (label_colon)
-    count. A reason is a `(...)` right after the number, or a `(...)` in the label before the colon."""
+    one entry per time the number is on a line that starts with a BATCH_LEFT_OUT prefix, after any indent, list marker or bold. Only the numbers
+    after the label's colon (label_colon) count. A reason is a `(...)` right after the number, or a `(...)` in the label before the colon,
+    and it must say something (real_reason)."""
     lanes, left = None, {}
     for line in body.splitlines():
         text = line.lstrip(" \t-*>")
         if text[:len(BATCH_LANES)].lower() == BATCH_LANES.lower():
             lanes = (lanes or []) + [int(m.group(1)) for m in _PR_REF.finditer(text[len(BATCH_LANES):])]
-        elif line.startswith(BATCH_LEFT_OUT) and label_colon(line) >= 0:
-            i = label_colon(line)
-            labelled = bool(re.search(r"\([^()]*\S[^()]*\)", line[:i]))
-            for m in _PR_REF.finditer(line[i + 1:]):
-                left.setdefault(int(m.group(1)), []).append(labelled or bool(m.group(2) and m.group(2).strip()))
+        elif text.startswith(BATCH_LEFT_OUT) and label_colon(text) >= 0:
+            i = label_colon(text)
+            labelled = any(real_reason(r) for r in re.findall(r"\(([^()]*)\)", text[:i]))
+            for m in _PR_REF.finditer(text[i + 1:]):
+                left.setdefault(int(m.group(1)), []).append(labelled or real_reason(m.group(2)))
     return lanes, left
 
 def handed_check(host, n, info):
     """The handed-lane check: the integration PR `n` names every handed lane PR in its body (decision batch-body-names-handed).
-    It applies only when the body has a `Lanes:` line; with none it reads nothing and returns None (handed_local reads the head instead).
+    A body with no `Lanes:` line is a lone lane's: it reads as an empty Lanes line, so each handed PR must be on a left-out line with a reason,
+    and a pass prints no count line (handed_local reads the head for merged lanes).
     A handed PR is an open PR on the same base whose newest review record reads done (reviewed_read's done set), less `n` and less one whose
     head the base already holds. One whose head the integration head holds is in the batch and must be on the Lanes line; any other must be
     on a left-out line with a reason; each PR on the Lanes line must be in the head. A finding raises Unnamed, one line per PR.
-    A failed read raises Stop: unknown is never a pass. -> the count line when every handed PR is named.
+    A failed read raises Stop: unknown is never a pass. -> the count line when every handed PR is named, None for a lone lane.
     Cost: reviewed_read's reads (two list reads and three gh calls per ready PR with a record); each compare is one gh api call: one per open PR
     on the base that reads done, other than `n` (against the base), one per handed PR and one per Lanes-named open PR not in the batch (against the
     integration head). No long-lived process, file or timer."""
     lanes, left = body_lanes(info.get("body") or "")
-    if lanes is None:
-        return None
+    lone = lanes is None
+    lanes = lanes or []
     base, head = info["base"], info["head"]
     done = reviewed_read(host)
     rows = {d["number"]: d["head"]["sha"] for d in done[2]}
@@ -4298,19 +4308,19 @@ def handed_check(host, n, info):
         named_lines = "\n".join(f"#{m} {' and '.join(whys)} of #{n}." for m, whys in sorted(found.items()))
         raise Unnamed(f"{named_lines}\nName each in the body of #{n}: on the {BATCH_LANES} line, or on a {'/'.join(BATCH_LEFT_OUT)} line with a reason. "
                       f"Nothing was pushed, marked ready, locked, claimed or merged. {HANDED_CITE}")
-    return f"merge: handed-lane check: {len(named)} lanes in the batch, {len(left)} named as left out."
+    return None if lone else f"merge: handed-lane check: {len(named)} lanes in the batch, {len(left)} named as left out."
 
 def handed_local(wt, base_ref, n, info, unknown_ok="", default=""):
-    """The handed-lane check for a body with no `Lanes:` line, in the worktree `wt` of the head: local git, no gh read. A head that merges
+    """The handed-lane check for a body with no `Lanes:` line, or an empty one, in the worktree `wt` of the head: local git, no gh read. A head that merges
     lane tips (read_lanes, less the dropped ones) is an integration head, so the missing Lanes line refuses. A read that fails raises Stop: unknown is never a pass,
     unless the run has the reason flag --undo-check-unknown-ok "<reason>", which lifts the same read for refuse_dropped_lane: one line says so
     and the reason is returned, for record_lift. On a base that is not `default` (the default branch), a tip that origin/<default> holds is the
     default branch merged into the head, not a lane. origin/<default> is fetched first: open_worktree and load_config fetch only the base
     and the head, and a stale ref reads a default-branch tip as a lane. A failed fetch or ancestry read is an unknown read, as above.
-    A body with a Lanes line is handed_check's. Cost, no gh call: read_lanes runs one `git log`, then one `git merge-base --is-ancestor`
+    A body whose Lanes line names a PR is handed_check's. Cost, no gh call: read_lanes runs one `git log`, then one `git merge-base --is-ancestor`
     per merged-in parent, plus a shallow-repo probe when one exits 1. On a base that is not the default branch, when it finds a lane tip,
     add one `git fetch` of the default branch and one ancestry read per lane tip (plus the probe on exit 1)."""
-    if body_lanes(info.get("body") or "")[0] is not None:
+    if body_lanes(info.get("body") or "")[0]:  # an empty Lanes line names no lane, so the head is read
         return None
     try:
         tips, dropped = read_lanes(wt, base_ref, info["head"])
