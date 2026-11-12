@@ -1,0 +1,6 @@
+# A listed folder's first word is read as the folder
+
+- **What.** `_listed_folder` takes the first non-dash word of a PowerShell listing as the folder. On origin/pwsh-r3-2 (PR #2744) that reads `*.py` as the folder in `ls *.py | % { Set-Content $_.FullName x }` and in `gci -Recurse -Filter *.py | % { Set-Content $_.FullName x }`, and the call allows. On origin/pwsh-r3-2 a `Where-Object` stage between a listing and the write escapes too. On origin/pwsh-r3-limits-2 (PR #2753) `ls *.py` still reads `*.py` (`_listed_path`), but `_listed_path` skips the `-Filter` value and returns `.` for the `gci` form, and `_listed_folder` walks back through a `Where-Object` stage. The `gci -Filter` outcome on that head is unmeasured. This is a common mass-replace idiom, so Claude is likely to write it in normal work.
+- **Where.** `hooks/guard_frozen.py`, `_listed_folder`. In the pwsh stack (PRs #2723, #2744, #2753), not yet on main. Read on origin/pwsh-r3-2 and origin/pwsh-r3-limits-2.
+- **Decision.** `guard-guards-mistakes-only` (a guard stops Claude's mistakes, not an attacker's forms).
+- **Retire.** A test in `hooks/test_guard.py`, red on origin/pwsh-r3-2 first, gives the two pipe forms above and a `Where-Object` stage, and expects a refusal for each.
