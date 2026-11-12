@@ -4535,6 +4535,70 @@ class IdleLanes(UpkeepFixture):
         self.assertEqual(self.idle_direct(), ["session_a (c1; topic -)", "session_b (c2; topic -)"],
                          "a done or todo step under session_a changed the lane's archive line")
 
+    def test_doing_step_with_a_padded_lane_id_holds_its_lane(self):
+        # c2 is doing, and its lane field is " session_a" with a leading space. The lane is session_a, so c2 holds it.
+        # session_b is the listed control.
+        self.land({"c1": {"status": "done", "order": 1},
+                   "c2": {"status": "doing", "order": 2, "lane": " session_a"},
+                   "c3": {"status": "done", "order": 3}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c3")])
+        steps, marks = self.steps_and_marks()
+        self.assertEqual(steps["c2"].get("lane"), " session_a", "scope: c2 does not carry the padded lane id")
+        self.assertNotIn("c2", marks, "scope: c2 reads as landed, so it is not a step still doing")
+        entries = self.idle_direct()
+        self.assertEqual(self.line_for(entries, "session_b"), "session_b (c3; topic -)", entries)
+        line = self.line_for(entries, "session_a")
+        self.assertTrue(line.startswith("hold (step c2 ") and line.endswith("; lane session_a)"),
+                        "a doing step with a padded lane id did not hold its lane: %r" % line)
+
+    def test_doing_step_with_a_capitalised_status_holds_its_lane(self):
+        # c2 reads "Doing", capitalised. The status is the word doing in any casing, so c2 holds session_a.
+        # session_b is the listed control.
+        self.land({"c1": {"status": "done", "order": 1},
+                   "c2": {"status": "Doing", "order": 2, "lane": "session_a"},
+                   "c3": {"status": "done", "order": 3}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c3")])
+        steps, marks = self.steps_and_marks()
+        self.assertEqual(steps["c2"].get("status"), "Doing", "scope: c2 does not read Doing")
+        self.assertNotIn("c2", marks, "scope: c2 reads as landed, so it is not a step still doing")
+        entries = self.idle_direct()
+        self.assertEqual(self.line_for(entries, "session_b"), "session_b (c3; topic -)", entries)
+        line = self.line_for(entries, "session_a")
+        self.assertTrue(line.startswith("hold (step c2 ") and line.endswith("; lane session_a)"),
+                        "a doing step with a capitalised status did not hold its lane: %r" % line)
+
+    def test_doing_step_with_a_padded_status_holds_its_lane(self):
+        # c2 reads " doing " with a space on each side. The status is the word doing with the spaces trimmed, so c2 holds
+        # session_a. session_b is the listed control.
+        self.land({"c1": {"status": "done", "order": 1},
+                   "c2": {"status": " doing ", "order": 2, "lane": "session_a"},
+                   "c3": {"status": "done", "order": 3}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c3")])
+        steps, marks = self.steps_and_marks()
+        self.assertEqual(steps["c2"].get("status"), " doing ", "scope: c2 does not read \" doing \"")
+        self.assertNotIn("c2", marks, "scope: c2 reads as landed, so it is not a step still doing")
+        entries = self.idle_direct()
+        self.assertEqual(self.line_for(entries, "session_b"), "session_b (c3; topic -)", entries)
+        line = self.line_for(entries, "session_a")
+        self.assertTrue(line.startswith("hold (step c2 ") and line.endswith("; lane session_a)"),
+                        "a doing step with a padded status did not hold its lane: %r" % line)
+
+    def test_done_or_todo_in_any_casing_under_a_lane_does_not_hold_it(self):
+        # The control for the casing cases. "Done", "DONE", "TODO" and "Todo" are not the word doing, so each names
+        # session_a and holds nothing. session_a is archived as today. session_b is the listed control.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "done", "order": 2},
+                   "c8": {"status": "Done", "order": 8, "lane": "session_a"},
+                   "c9": {"status": "DONE", "order": 9, "lane": "session_a"},
+                   "c10": {"status": "TODO", "order": 10, "lane": "session_a"},
+                   "c11": {"status": "Todo", "order": 11, "lane": "session_a"}})
+        self.publish(sessions=[self.lane("session_a", "c1"), self.lane("session_b", "c2")])
+        steps, _marks = self.steps_and_marks()
+        self.assertEqual([(steps[k].get("status"), steps[k].get("lane")) for k in ("c8", "c9", "c10", "c11")],
+                         [("Done", "session_a"), ("DONE", "session_a"), ("TODO", "session_a"), ("Todo", "session_a")],
+                         "scope: the cased done and todo steps do not read under session_a")
+        self.assertEqual(self.idle_direct(), ["session_a (c1; topic -)", "session_b (c2; topic -)"],
+                         "a done or todo step in another casing changed session_a's archive line")
+
 
 class SharedTagNames(unittest.TestCase):
     """The roadmap's tag names have one home, hooks/shared_names.py. build reads the very objects, so a
