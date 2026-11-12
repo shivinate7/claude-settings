@@ -52,3 +52,20 @@ add(PTR_NAME + "a reply on a GitHub pull request review thread is allowed", "all
 # An item rewrite is the remedy, so it must pass. up_item's pick is the non-widening option, which passes uniform-pick.
 add(PTR_NAME + "an item rewrite on the waiting page is allowed", "allow", None, tool="ArtifactData", cwd=PQ_REPO,
     url=PQ_URL, action="set", collection="items", doc_id="banchi-titles", data=up_item(pick="b", why="One form."))
+# A resolve is not a reply, so it passes. The ruling names replies only; this pins the action gate, so a
+# mutant that refuses resolve goes red.
+ptr_allow("a resolve of a thread on the waiting page is allowed", action="resolve", url=PQ_URL, thread_id=PTR_THREAD)
+
+# A reply is refused whatever form the page's url takes: the /code/artifact/ form with a query, a bare id, or
+# an http url. The guard compares artifact ids (lint/layout.py artifact_id), so these pin that reader.
+ptr_refuse("a reply on the waiting page at its /code/artifact/ url with a query is denied",
+           action="reply", url="https://claude.ai/code/artifact/pqpage?tab=questions", thread_id=PTR_THREAD,
+           text=PTR_TEXT)
+ptr_refuse("a reply on the waiting page with its bare id as the url is denied",
+           action="reply", url="pqpage", thread_id=PTR_THREAD, text=PTR_TEXT)
+ptr_refuse("a reply on the waiting page at an http url is denied",
+           action="reply", url="http://claude.ai/artifact/pqpage", thread_id=PTR_THREAD, text=PTR_TEXT)
+
+# A reply with no url, in a repo that has a waiting page, is refused: nothing says which artifact it lands in.
+ptr_refuse("a reply with no url in a repo with a waiting page is denied",
+           action="reply", thread_id=PTR_THREAD, text=PTR_TEXT)
