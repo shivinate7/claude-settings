@@ -264,7 +264,7 @@ def _script_mutates(script: str) -> bool:
     for segment in split_segments(script):
         command, rest = _segment_command([_unquoted(word) for word in _quoted_words(segment, True)])
         # `sed -i` is no mutating word: `writes_to` reads it by the sed option reader, so it must get that far.
-        if _mutates_as_command(command, rest) or (command == "sed" and _sed_options(rest)[1]):
+        if _mutates_as_command(command, rest) or (command == "sed" and _sed_options(rest, split_at_blanks=True)[1]):
             return True
     return False
 
@@ -286,7 +286,8 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     # `command` is the segment's resolved command name, given by a caller that reads a mutating
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
     if command is not None and not _mutates_as_command(command, words):
-        return command == "sed" and _sed_options([_unquoted(word) for word in words])[1]
+        # The caller splits a quoted word into pieces (`_words_of`), so the words are read as split at blanks.
+        return command == "sed" and _sed_options([_unquoted(word) for word in words], split_at_blanks=True)[1]
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
     return _sed_in_place_span(target, cmd)
@@ -1093,26 +1094,28 @@ def _sed_s_flag_runs(script: str) -> bool:
     return False
 
 
-def _sed_options(words) -> tuple:
+def _sed_options(words, split_at_blanks=False) -> tuple:
     """The scripts a sed command line gives with `-e`, and whether it edits files in place, read as sed's
     option parser reads them. A script is a separate word (`-e S`, `--expression S`), glued (`-eS`,
     `--expression=S`), or follows the `e` ending a short-option group (`-ne S`, `-Ee S`, `-neS`). The in-place
     flag is `--in-place`, `--in-place=SUFFIX`, or an `i` in a short-option group (`-i`, `-ri`, `-ibak`,
     `-i.bak`). In a group, `f` and `l` take the rest as their own argument and `i` takes it as a backup
     suffix, so `-ie` is in place with no script. A group spelt `-ei` or `-nei` also counts as in place: sed
-    reads the `i` as the script, but the fail-closed side refuses it. Options end at `--`."""
+    reads the `i` as the script, but the fail-closed side refuses it. Options end at `--`.
+    `split_at_blanks` reads words cut at blanks, where a quoted script falls into pieces: a piece may be
+    `--` or follow `-e`, so options do not end at `--` and `-e` takes no next word, the fail-closed side."""
     scripts, in_place, at = [], False, 0
     while at < len(words):
         word = words[at]
         at += 1
-        if word == "--":
+        if word == "--" and not split_at_blanks:
             break
         if word == "--in-place" or word.startswith("--in-place="):
             in_place = True
         elif word.startswith("--expression="):
             scripts.append(word[len("--expression="):])
         elif word == "--expression":
-            if at < len(words):
+            if at < len(words) and not split_at_blanks:
                 scripts.append(words[at])
                 at += 1
         elif re.match(r"-[^-]", word):
@@ -1121,7 +1124,7 @@ def _sed_options(words) -> tuple:
                     rest = word[place:]
                     if rest:
                         scripts.append(rest)
-                    elif at < len(words):
+                    elif at < len(words) and not split_at_blanks:
                         scripts.append(words[at])
                         at += 1
                     in_place = in_place or bool(re.match(r"[A-Za-eg-km-z]*i", rest))
@@ -1136,9 +1139,8 @@ def _sed_options(words) -> tuple:
 
 def _sed_in_place_span(target: str, cmd: str) -> bool:
     """True when a sed call in the text edits files in place and names the target after its `sed` word, in
-    one segment. The words between are read by `_sed_options`, split at blanks, so a quoted script that
-    holds an option-like word still counts, the fail-closed side."""
-    return any(_sed_options(found.group(1).split())[1]
+    one segment. The words between are read by `_sed_options`, split at blanks."""
+    return any(_sed_options(found.group(1).split(), split_at_blanks=True)[1]
                for found in re.finditer(r"\bsed\b([^\n;|&]*)" + target, cmd))
 
 
