@@ -1529,7 +1529,7 @@ class Host:
         unknown. Any other run that did not succeed is red (a broken workflow file runs no job).
         A cancelled run with no red job that nothing clears keeps its line, in the unknown detail and beside a red verdict. It is named with `gh run rerun <id>` only when its
         `head_sha` is the head_sha of the newest run on the page read (any status, any event in BASE_EVENTS, from the unfiltered list): runs on the base start at its head, and a re-run tests the run's own commit. Never named for a run with a red job or a re-run in flight.
-        A red verdict's detail also holds breaking_line's segment: the first red run with a green parent, as a re-run to try (a first red) or as the breaking merge (red again on its re-run).
+        A red verdict's detail also holds breaking_line's segment for each red run judged (one per file and group), the head group's first: the first red run with a green parent, as a re-run to try (a first red) or as the breaking merge (red again on its re-run).
         One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A failed read is unknown."""
         try:
             if os.path.dirname(ALARM_EVENTS) not in sys.path:
@@ -1541,7 +1541,7 @@ class Host:
             judged = [r for r in json.loads(out)["workflow_runs"] if (r["status"] == "completed" or (r.get("run_attempt") or 1) > 1)
                     and r["event"] in self.BASE_EVENTS and r["name"] not in self.ignore and r["path"].split("@")[0] in flows]
             red, unknown, read = [], [], {}
-            red_runs = []  # the runs behind `red`, newest first by the order they are judged in: the newest starts the walk to the breaking run
+            red_runs = []  # the runs behind `red`, one per file and group: each starts its own walk to the breaking run
             cancelled = []  # the cancelled runs with no red job that no run cleared: unknown alone, and named beside a red verdict, with their re-run when they are on the base's head
             base_head = next((r.get("head_sha") for r in json.loads(out)["workflow_runs"] if r["event"] in self.BASE_EVENTS), None)  # the newest run on the page starts at the base's head
 
@@ -1609,11 +1609,14 @@ class Host:
                 else:
                     red.append(f"{where} ended {r['conclusion']} with no red job")
                     red_runs.append(r)
-            blame = self.breaking_line(judged, min(red_runs, key=lambda r: age[r["id"]])) if red else None
+            # One walk per red group (red_runs holds one run per file and group): a red nightly or a red run of another file never hides the
+            # push run that broke the base. The head group (push, dispatch) goes first, so its breaking merge or re-run leads the detail red_base reads.
+            order = sorted(red_runs, key=lambda r: (self.BASE_EVENTS[r["event"]] != self.BASE_EVENTS["push"], age[r["id"]]))
+            blame = [s for s in (self.breaking_line(judged, r) for r in order) if s]
         except (Stop, ValueError, KeyError, TypeError, AttributeError, ImportError) as e:
             return "unknown", " ".join(str(e).split())
         if red:
-            return "red", " | ".join(red + ([blame] if blame else []) + cancelled)
+            return "red", " | ".join(red + blame + cancelled)
         return ("unknown", " | ".join(unknown + cancelled)) if unknown or cancelled else ("green", "")
 
     def breaking_line(self, judged, newest_red):
@@ -1623,7 +1626,7 @@ class Host:
         and is stepped over; a run not completed (a re-run in flight) stops the walk with a segment that says the breaking run is unknown. With no green parent on the page (a lone red run, or a page that is red to its end) nothing is named.
         A first red (`run_attempt` 1) is not blamed: its segment names `gh run rerun <id> --failed`, and red_base puts that before the reason flag, because a
         flaky run is the likelier cause. Red again on a re-run (`run_attempt` above 1), the segment names the run's commit and its pull request, read from
-        the number in the head commit's first line: `Merge pull request #N` for a merge commit, `(#N)` last for a squash. A schedule run names neither: it tests the head at run time."""
+        the number in the head commit's first line: `Merge pull request #N` for a merge commit, `(#N)` last for a squash. A schedule run names neither, and its first-red text promises no blame: it tests the head at run time."""
         key = (newest_red["path"], self.BASE_EVENTS[newest_red["event"]])
         first = None
         for r in judged[judged.index(newest_red):]:
@@ -1642,7 +1645,8 @@ class Host:
         sha = str(first.get("head_sha"))[:9]
         if (first.get("run_attempt") or 1) <= 1:
             return (f"run {first['id']} is the first red run after a green one, at {sha}: `{RERUN_REMEDY} {first['id']} --failed` re-runs its failed jobs, "
-                    "and it is blamed on its pull request only if that re-run is red again")
+                    + ("and as a schedule run it is never blamed on a commit, even if that re-run is red again" if first["event"] == "schedule"
+                       else "and it is blamed on its pull request only if that re-run is red again"))
         if first["event"] == "schedule":  # a nightly tests the base's head at run time, not the commit that started it: that commit is no suspect
             return (f"run {first['id']} is a schedule run, red again on its re-run: it tested the base's head when it ran, so no commit or pull request is named for it")
         head = (first.get("head_commit") or {}).get("message") or first.get("display_title") or ""
