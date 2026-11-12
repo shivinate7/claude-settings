@@ -1011,6 +1011,24 @@ class FlagTests(StaleCase):
         notes = "# Notes\n\n- check: `lint/a.py --check | jq --json`\n"
         self.assert_passes(self.range_drops_json_from_a(notes))
 
+    def assert_b_json_after_span_passes(self, span):
+        """`span` cites lint/a.py --check, then lint/b.py --json. a.py loses --json and b.py keeps it, so nothing is flagged."""
+        b_src = parser_script(["--json"])
+        self.assertEqual(argument_flags(b_src), {"--json"})  # scope: b.py keeps --json, and the range leaves b.py alone
+        self.assert_passes(self.range_drops_json_from_a("# Notes\n\n- check: `%s`\n" % span, others={SCRIPT_B: b_src}))
+
+    def test_a_flag_after_a_semicolon_glued_to_a_flag_is_not_read_for_the_script_before_it(self):
+        self.assert_b_json_after_span_passes("lint/a.py --check; lint/b.py --json")
+
+    def test_a_flag_after_a_spaced_semicolon_is_not_read_for_the_script_before_it(self):
+        self.assert_b_json_after_span_passes("lint/a.py --check ; lint/b.py --json")
+
+    def test_a_flag_after_a_double_pipe_is_not_read_for_the_script_before_it(self):
+        self.assert_b_json_after_span_passes("lint/a.py --check || lint/b.py --json")
+
+    def test_a_flag_after_a_single_ampersand_is_not_read_for_the_script_before_it(self):
+        self.assert_b_json_after_span_passes("lint/a.py --check & lint/b.py --json")
+
     def test_a_flag_right_after_its_own_script_is_still_flagged(self):
         notes = "# Notes\n\n- json: `lint/a.py --json`\n"
         found = self.assert_flags(self.range_drops_json_from_a(notes), [(NOTES, 3, "STALE007")])
