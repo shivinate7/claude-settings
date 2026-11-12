@@ -1,40 +1,38 @@
 #!/usr/bin/env bash
-# Alarm when the newest run of any (workflow, event group) on BRANCH is red. Groups and
-# the judged events are in events.json, the one home merge/merge.py reads too. A failed run R with a
-# red job (conclusion neither success, skipped, neutral nor cancelled) is cleared by a run N of the same
-# workflow and another group only when N is newer than R, is the newest of its group, succeeded, and
-# passes what R needs (clear_rule.py, the one home of the rule, which merge.py calls too): every job name of R, exact match, has
-# conclusion success in every N entry, except a job of R that is not red in R and whose job-level `if:` has a top-level `&&` conjunct
-# `github.event_name == 'X'` with X not N's event (all-jobs-passed and ci-done run on pull_request only, so a push or schedule run
-# skips them). So a newer green push run clears a red nightly. An R with no red job (no jobs,
-# all passed, cancelled or skipped only) is never cleared this way. The same failed-run rule as Host.base_state.
-# A failure run that the merge tool calls clear is not red, but a cap end in it still alarms (owner, page item 549 a, 12:07 CST Nov 12):
-# the clear drops its red jobs, never its cap end. A cap end in a cancelled run alarms even when the merge tool calls that run clear:
-# the cancelled loop applies no clear (base_state does, `cleared(r, cancelled=True)`).
+# Alarm when the newest run of any (workflow, event group) on BRANCH is red, or when any run in the 100-run window holds a job cancelled
+# at its time cap. Groups and the judged events are in events.json, the one home merge/merge.py reads too.
+# Red: a failed run R with a red job (conclusion neither success, skipped, neutral nor cancelled) is cleared by a run N of the same
+# workflow and another group only when N is newer than R, is the newest of its group, succeeded, and passes what R needs (clear_rule.py,
+# the one home of the rule, which merge.py calls too). Every job name of R, exact match, must have conclusion success in every N entry,
+# except a job of R that is not red in R and whose job-level `if:` has a top-level `&&` conjunct `github.event_name == 'X'` with X not
+# N's event (all-jobs-passed and ci-done run on pull_request only, so a push or schedule run skips them). So a newer green push run
+# clears a red nightly. An R with no red job (no jobs, all passed, cancelled or skipped only) is never cleared this way. Same failed-run
+# rule as Host.base_state.
 # A group whose newest run is a re-run still going (queued or in progress, attempt above 1) is unknown: a warning, no issue, never
 # green, never the older run. A first attempt still going is skipped, and the older run is judged.
-# A job cancelled at its cap is named: it ran at least its job-level `timeout-minutes` (completed_at - started_at, from the
-# jobs read), the cap read from the run's workflow file at its head; a job with no job-level `timeout-minutes` has GitHub's default
-# cap, 360 minutes. The issue names the job, the cap, the minutes and the run id. A failure run that is not cleared is red by its
-# conclusion, and the cap end only names the job in it; a cleared one is named without the red. A cancelled run alarms on a cap end, in every attempt of it (the alarm reads
-# each earlier attempt of a cancelled re-run). The merge gate (merge.py base_state) leaves a run with no red job and a job timed out
-# at a job-level cap it finds in its checkout out of red and out of unknown. A cancelled run reads UNKNOWN there for a job with no
-# job-level cap or a cap it does not find; a failure run reads red. The alarm is the signal (a cap end is not a red job).
+# Cap end (owner, page item 549 a, 12:07 CST Nov 12; judged in every run of the window, coordinator pick 12:26 CST): a job cancelled
+# at its cap ran at least its job-level `timeout-minutes` (completed_at - started_at, from the jobs read), the cap read from the run's
+# workflow file at its head. A job with no job-level `timeout-minutes` has GitHub's default cap, 360 minutes. Every such job opens an
+# issue, wherever it sits:
+#   - in any cancelled run of the window, newest of its group or not, and in each earlier attempt of it;
+#   - in any earlier attempt of a succeeded re-run;
+#   - in a failed run, in its newest attempt or an earlier one, whether a newer green run clears the run or not.
+# The clear drops a run's red jobs, never its cap end. The merge gate (merge.py base_state) leaves a run with no red job and a job timed
+# out at a job-level cap it finds in its checkout out of red and out of unknown; a cancelled run reads UNKNOWN there for a job with no
+# job-level cap or a cap it does not find, and a failure run reads red. The alarm is the signal, since a cap end is not a red job.
 # A job cancelled under its cap (a person, or an earlier failure) stays quiet. A cancelled job with no started_at, a non-integer cap
-# (an expression), no single job of that name in the file, a cancelled run or an earlier attempt of it with no jobs, or a failed
-# read is unknown, never red and never clear. A cap end in an earlier attempt of a run whose newest attempt succeeded is only named,
-# on a "cap end named" notice line, and opens no issue.
-# Cost: one runs read and the workflows-list read. Per judged run (failed or cancelled, the newest of its group) one jobs read, and
-# one workflow-file read when one of its jobs was cancelled, once per run. A cancelled re-run adds one jobs read per earlier attempt.
-# A succeeded re-run adds one jobs read per earlier attempt. A clear candidate N adds one jobs read, and one contents read of N's
-# workflow file at N's head (headSha) unless N leaves a red job of R unpassed (a certain red), and two clear_rule.py starts at most.
-# No long-lived process starts: short jq, awk, gh and python3 processes run, and the only files written are temp cache files in a
-# folder this script removes on exit. Needs python3 (stdlib only) and clear_rule.py beside this file; no checkout.
-# Env: BRANCH, SELF (this workflow's name, left out), GH_TOKEN, GITHUB_REPOSITORY. Exit 0
-# always: the alarm is the issue, not a red job. Prints "green", "red", "alarm" or "unknown": red when a failure run is named,
-# alarm when only a cap end is (in a cancelled run, or in a failure run that a newer green run clears). The issue title is "CI red on
-# BRANCH" with a red run, else "CI job hit its time cap on BRANCH: JOB" naming the first cap job; the body names every cap end. A failed
-# read or write is unknown, never red.
+# (an expression), no single job of that name in the file, a cancelled run or an earlier attempt of it with no jobs, or a failed read
+# is unknown, never red and never clear.
+# Verdict and title: "red" when a failure run with a red job, not cleared, is named, with the title "CI red on BRANCH"; every cap end is
+# then named in the body. Else "alarm", with the title "CI job hit its time cap on BRANCH: JOB" naming the first cap job; the body names
+# every cap end. A failed read or write is unknown, never red.
+# Cost: one runs read and the workflows-list read. One jobs read per judged run: each cancelled run of the window, and the newest run of
+# a group that failed. One jobs read per earlier attempt of a cancelled, failed or succeeded re-run. One workflow-file read per run
+# with a cancelled job, once. A clear candidate N adds one jobs read, and one contents read of N's workflow file at N's head (headSha)
+# unless N leaves a red job of R unpassed (a certain red), and two clear_rule.py starts at most. No long-lived process starts: short jq,
+# awk, gh and python3 processes run, and the only files written are temp cache files in a folder this script removes on exit.
+# Needs python3 (stdlib only) and clear_rule.py beside this file; no checkout.
+# Env: BRANCH, SELF (this workflow's name, left out), GH_TOKEN, GITHUB_REPOSITORY. Exit 0 always: the alarm is the issue, not a red job.
 set -o pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 branch="${BRANCH:-main}"
@@ -49,15 +47,18 @@ jq -e 'type == "array"' >/dev/null 2>&1 <<<"$runs" || unknown "gh run list gave 
 wf="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows" --paginate)" || unknown "gh api workflows failed"
 flows="$(jq -e -s 'if length > 0 and all(.[]; (.workflows | type) == "array") then [.[].workflows[]] else empty end' <<<"$wf" 2>/dev/null)" \
   || unknown "gh api workflows gave no list of workflows"
-# Latest run per workflow and event group, one JSON array. A run counts when it is completed or is a re-run still going (attempt
-# above 1); a first attempt still going waits its turn and is left out.
-newest="$(jq -c --arg self "${SELF:-}" --slurpfile ev "$here/events.json" --argjson flows "$flows" '
+# Every run of a judged workflow and event group, with its group. The cancelled and re-run loops below judge each of them.
+judged="$(jq -c --arg self "${SELF:-}" --slurpfile ev "$here/events.json" --argjson flows "$flows" '
   ([$flows[] | select(.state != "deleted" and (.path | startswith(".github/workflows/"))) | .id]) as $ids
   | map(select(.workflowName != $self and (.workflowDatabaseId as $i | $ids | index($i)) and ($ev[0][.event] != null))
-        | . + {group: $ev[0][.event]})
-  | map(select(.status == "completed" or (.attempt // 1) > 1))
+        | . + {group: $ev[0][.event]})' <<<"$runs")" \
+  || unknown "could not read the runs"
+# Latest run per workflow and event group, one JSON array. A run counts when it is completed or is a re-run still going (attempt
+# above 1); a first attempt still going waits its turn and is left out.
+newest="$(jq -c '
+  map(select(.status == "completed" or (.attempt // 1) > 1))
   | group_by([.workflowDatabaseId, .group])
-  | map(sort_by(.createdAt) | last)' <<<"$runs")" \
+  | map(sort_by(.createdAt) | last)' <<<"$judged")" \
   || unknown "could not read the runs"
 cache="$(mktemp -d)" || unknown "could not make a temp dir"
 trap 'rm -rf "$cache"' EXIT
@@ -75,7 +76,7 @@ jobs_of() {
 workflow_of() {
   [ -f "$cache/wf-$1" ] && return 0
   local run path sha
-  run="$(jq -c --argjson n "$1" '.[] | select(.databaseId == $n)' <<<"$newest")" || return 1
+  run="$(jq -c --argjson n "$1" '.[] | select(.databaseId == $n)' <<<"$judged")" || return 1
   path="$(jq -r --argjson i "$(jq .workflowDatabaseId <<<"$run")" '.[] | select(.id == $i) | .path' <<<"$flows")" || return 1
   sha="$(jq -r '.headSha // empty' <<<"$run")"
   { [ -n "$path" ] && [ -n "$sha" ]; } || return 1
@@ -148,6 +149,25 @@ cap_lines() {
   jq -Rr --argjson r "$1" --arg prefix "$2" --arg suffix "${3:-}" \
     'split("\t") | "\($prefix)job \(.[0]) ran \(.[2]) min, cap \(.[1]) min, run \($r.databaseId)\($suffix)"' <<<"${ends%$'\n'}"
 }
+# add_ends <run id> <run JSON> <jobs JSON> [suffix]: the cap ends of one attempt of a run, added to $capl (the lines of the run being
+# judged) and $firstcap (the first cap job of the whole alarm); an attempt that cannot be judged sets $capunk.
+add_ends() {
+  cap_ends "$1" "$3"
+  [ -z "$endunk" ] || capunk="$endunk"
+  [ -n "$ends" ] || return 0
+  [ -n "$firstcap" ] || firstcap="${ends%%$'\t'*}"
+  capl+="$(cap_lines "$2" "  cap end: " "${4:-}")"$'\n'
+}
+# earlier_attempts <run id> <run JSON> [strict]: add_ends for each attempt before the run's newest. The jobs of an attempt come from
+# the attempts endpoint, each read once. An attempt that cannot be read is unknown; with strict, an attempt with no jobs is too.
+earlier_attempts() {
+  local att ajobs
+  for att in $(seq 1 $(($(jq -r '.attempt // 1' <<<"$2") - 1))); do
+    ajobs="$(jobs_of "$1" "$att")" || { capunk="gh api attempt jobs failed for run $1 attempt $att"; continue; }
+    if [ -n "${3:-}" ] && jq -e 'length == 0' >/dev/null <<<"$ajobs"; then capunk="attempt $att of cancelled run $1 has no jobs"; continue; fi
+    add_ends "$1" "$2" "$ajobs" ", attempt $att"
+  done
+}
 # A group whose newest run is a re-run still going is unknown: never green, never judged by an older run. Like every unknown it waits
 # until the end, so an alarm found elsewhere still opens its issue.
 capunk=""
@@ -181,60 +201,44 @@ while IFS= read -r r; do
       done <<<"$cands"
     fi
   fi
+  capl=""
   if [ -n "$cleared" ]; then
-    # Not red: its red jobs are cleared. Its cap end still alarms, so the run is named only when it has one.
-    cap_ends "$rid" "$rjobs"
-    [ -z "$endunk" ] || capunk="$endunk"
-    if [ -n "$ends" ]; then
-      [ -n "$firstcap" ] || firstcap="${ends%%$'\t'*}"
-      red+="$(jq -r '"- \(.workflowName) (\(.conclusion), its red jobs cleared by a newer green run): \(.url)"' <<<"$r")"$'\n'"$(cap_lines "$r" "  cap end: ")"$'\n'
-    fi
+    # Not red: its red jobs are cleared. Its cap end, in any attempt, still alarms, so the run is named only when it has one.
+    add_ends "$rid" "$r" "$rjobs"
+    earlier_attempts "$rid" "$r"
+    [ -z "$capl" ] || red+="$(jq -r '"- \(.workflowName) (\(.conclusion), its red jobs cleared by a newer green run): \(.url)"' <<<"$r")"$'\n'"${capl%$'\n'}"$'\n'
     continue
   fi
   red+="$(jq -r '"- \(.workflowName) (\(.conclusion)): \(.url)"' <<<"$r")"$'\n'
   redrun=1
-  # The run is red by its conclusion whatever its jobs say: a job cancelled at its cap is named, and an unreadable read names nothing.
-  if rjobs="$(jobs_of "$rid")"; then
-    cap_ends "$rid" "$rjobs"
-    [ -z "$ends" ] || red+="$(cap_lines "$r" "  cap end: ")"$'\n'
-  fi
+  # The run is red by its conclusion whatever its jobs say: a job cancelled at its cap, in any attempt, is named under it, and an
+  # unreadable read names nothing.
+  if rjobs="$(jobs_of "$rid")"; then add_ends "$rid" "$r" "$rjobs"; fi
+  earlier_attempts "$rid" "$r"
+  red+="$capl"
 done <<<"$failed"
-# Cancelled runs: the alarm is raised when a job of the run was cancelled at its cap (see the header). An unknown waits until the end,
-# so an alarm found here or above still opens its issue.
-cancelled="$(jq -c '.[] | select(.conclusion == "cancelled")' <<<"$newest")" || unknown "could not read the runs"
+# Cancelled runs: the alarm is raised when a job of the run was cancelled at its cap (see the header). Every cancelled run in the
+# window is judged, not only the newest of its group. An unknown waits until the end, so an alarm found here or above still opens
+# its issue.
+cancelled="$(jq -c '.[] | select(.conclusion == "cancelled")' <<<"$judged")" || unknown "could not read the runs"
 while IFS= read -r r; do
   [ -n "$r" ] || continue
   rid="$(jq -r .databaseId <<<"$r")"
   rjobs="$(jobs_of "$rid")" || { capunk="gh api jobs failed for run $rid"; continue; }
   if jq -e 'length == 0' >/dev/null <<<"$rjobs"; then capunk="cancelled run $rid has no jobs"; continue; fi
-  cap_ends "$rid" "$rjobs"
-  [ -z "$endunk" ] || capunk="$endunk"
   capl=""
-  [ -z "$ends" ] || [ -n "$firstcap" ] || firstcap="${ends%%$'\t'*}"
-  [ -z "$ends" ] || capl+="$(cap_lines "$r" "  cap end: ")"$'\n'
-  # A re-run cancelled in its newest attempt: the cap end may sit in an earlier attempt. Each earlier attempt is read once, and one
-  # that cannot be read or has no jobs is unknown.
-  for att in $(seq 1 $(($(jq -r '.attempt // 1' <<<"$r") - 1))); do
-    ajobs="$(jobs_of "$rid" "$att")" || { capunk="gh api attempt jobs failed for run $rid attempt $att"; continue; }
-    if jq -e 'length == 0' >/dev/null <<<"$ajobs"; then capunk="attempt $att of cancelled run $rid has no jobs"; continue; fi
-    cap_ends "$rid" "$ajobs"
-    [ -z "$endunk" ] || capunk="$endunk"
-    [ -z "$ends" ] || [ -n "$firstcap" ] || firstcap="${ends%%$'\t'*}"
-    [ -z "$ends" ] || capl+="$(cap_lines "$r" "  cap end: " ", attempt $att")"$'\n'
-  done
+  add_ends "$rid" "$r" "$rjobs"
+  earlier_attempts "$rid" "$r" strict
   [ -z "$capl" ] || red+="$(jq -r '"- \(.workflowName) (cancelled): \(.url)"' <<<"$r")"$'\n'"${capl%$'\n'}"$'\n'
 done <<<"$cancelled"
-# A succeeded run that was re-run: a cap end in an earlier attempt is named, never red. A failed read is unknown.
-reruns="$(jq -c '.[] | select(.conclusion == "success" and (.attempt // 1) > 1)' <<<"$newest")" || unknown "could not read the runs"
+# A succeeded run that was re-run: a cap end in an earlier attempt alarms like any other cap end on the branch. A failed read is unknown.
+reruns="$(jq -c '.[] | select(.conclusion == "success" and (.attempt // 1) > 1)' <<<"$judged")" || unknown "could not read the runs"
 while IFS= read -r r; do
   [ -n "$r" ] || continue
   rid="$(jq -r .databaseId <<<"$r")"
-  for att in $(seq 1 $(($(jq -r .attempt <<<"$r") - 1))); do
-    ajobs="$(jobs_of "$rid" "$att")" || { capunk="gh api attempt jobs failed for run $rid attempt $att"; continue; }
-    cap_ends "$rid" "$ajobs"
-    [ -z "$endunk" ] || capunk="$endunk"
-    [ -z "$ends" ] || echo "::notice::ci-alarm: cap end named: $(cap_lines "$r" "" ", attempt $att" | paste -sd ';' -): $(jq -r .url <<<"$r")"
-  done
+  capl=""
+  earlier_attempts "$rid" "$r"
+  [ -z "$capl" ] || red+="$(jq -r '"- \(.workflowName) (succeeded on a later attempt): \(.url)"' <<<"$r")"$'\n'"${capl%$'\n'}"$'\n'
 done <<<"$reruns"
 red="${red%$'\n'}"
 if [ -z "$red" ] && [ -n "$capunk" ]; then unknown "$capunk"; fi

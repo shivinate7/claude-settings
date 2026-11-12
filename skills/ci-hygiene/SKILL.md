@@ -238,7 +238,8 @@ The seven opt-in templates of that decision:
   `if: ${{ !cancelled() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}`,
   `permissions: {pull-requests: write}`, and `with: needs: ${{ toJSON(needs) }}`.
 - `ci-alarm`: opens or comments on one issue when the newest run per workflow and per
-  event group on a branch (default `main`) is red. Groups: `actions/ci-alarm/events.json`. Runs of
+  event group on a branch (default `main`) is red. It also opens an issue when any run in the
+  last 100 holds a job cancelled at its time cap. Groups: `actions/ci-alarm/events.json`. Runs of
   other events, such as a Pages build, a `workflow_run` or a `repository_dispatch`, and runs of a
   deleted workflow, are not judged. A failed `gh` read prints `unknown` with a warning, never a red
   job. The caller is a scheduled workflow with `permissions: {actions: read, contents: read, issues: write}`. It
