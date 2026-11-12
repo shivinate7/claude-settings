@@ -30,6 +30,7 @@ Rule `brief-write-needs-writer` in `hooks/guard.py` refuses an Agent, Task or Wo
   - an object joined by "and" or a comma: "Write the findings and the verdict to audit.md".
   - add, update, record or log with an object that is neither "your" nor a finding: "Add a summary to audit.md".
   - a verb or lead-in outside the lists, and an order in another language.
+  - a lead-in "do not forget to": "Do not forget to write the findings to docs/audit.md".
 - Limits. These are false alarms: a Plan, refuter or reviewer brief that quotes a builder's task with a place or compose verb into a path ("Put the new helper in hooks/lib.py", "Write the new rule to hooks/guard.py", "Generate the map in docs/map/index.md") is denied. The override lifts it, or the brief words the task as a goal ("The helper belongs in hooks/lib.py").
 - Cost: pure text work inside the guard call already running. No process start, no file written.
 
