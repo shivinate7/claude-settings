@@ -32,25 +32,27 @@ RUNNER_ID = "session_RUNNER01"
 RUNNER_LINE = "\nBatch runner: " + RUNNER_ID
 IDS_LINES = COORD_LINE + TRIAGE_LINE + RUNNER_LINE
 LABEL_LINES = "\nCoordinator\nTriage\nBatch runner"
-# The form the old id refusal named. The refusal now carries none of it (ROLE_LACKS), so a role refusal has no form to
-# strip. outside_form in hooks/test_guard.py still reads this list.
-BRIEF_ROLE_FORM = ("Coordinator: session_", "Triage: session_", "Batch runner: session_")
 # A role refusal asks for no session id and names no gap limit: a label is all the brief needs.
 ROLE_LACKS = ("session_<id>", "80 char")
 
 
+def role_carry(missing):
+    """The phrase a role refusal carries for the roles it misses. The guard names them in its own order, by role."""
+    return ("does not name " + ", ".join(missing) + " by role",)
+
+
 def roles_refuse(name, transcript, message, missing, target=ROLE_OTHER):
     """A marker brief to a lane that clears the topic and step checks, and lacks a role label: refused. The reason names
-    each missing role, asks for no session id, and names none of the test's ids."""
-    step_refuse(name, transcript, message, target=target,
-                lacks=(target, COORD_ID, TRIAGE_ID, RUNNER_ID) + ROLE_LACKS, names=missing)
+    each missing role by role, asks for no session id, and names none of the test's ids."""
+    step_refuse(name, transcript, message, target=target, carries=role_carry(missing),
+                lacks=(target, COORD_ID, TRIAGE_ID, RUNNER_ID) + ROLE_LACKS)
 
 
-def step_refuse(name, transcript, message, target=ROLE_OTHER, carries=(), lacks=(), names=()):
+def step_refuse(name, transcript, message, target=ROLE_OTHER, carries=(), lacks=()):
     """A send_message the guard refuses. The reason names its rule, and the rule's own id. `lacks` names fragments
-    the reason must not hold, and `names` fragments it must name outside BRIEF_ROLE_FORM."""
+    the reason must not hold."""
     add("lane-one-topic: " + name, "deny", rule=LANE_ONE_TOPIC, tool=SEND_MESSAGE, cwd=NOGIT, transcript=transcript,
-        env=ROLE_ENV, session_id=target, message=message, carries=carries, lacks=lacks, names=names)
+        env=ROLE_ENV, session_id=target, message=message, carries=carries, lacks=lacks)
 
 
 def step_allow(name, transcript, message, target=ROLE_OTHER):
@@ -374,12 +376,12 @@ START_TOPIC_REASON = ("names a topic that the start's cs-topic tag does not hold
 ROLE_START_LACKS = ("start one with create_session", COORD_ID, TRIAGE_ID, RUNNER_ID) + ROLE_LACKS
 
 
-def start_refuse(name, prompt, tags=START_TOPIC_TAGS, carries=(), lacks=(), names=()):
+def start_refuse(name, prompt, tags=START_TOPIC_TAGS, carries=(), lacks=()):
     """A create_session start the guard refuses under lane-one-topic. It carries the effort, model and source that the
     other start rules judge, so the refusal is this rule's alone."""
     add("lane-one-topic: " + name, "deny", rule=LANE_ONE_TOPIC, tool=CREATE_SESSION, cwd=NOGIT, prompt=prompt,
         tags=tags, effort=LANE_EFFORT_FIELD, model="sonnet", source_url=LANE_SOURCE_URL,
-        carries=carries, lacks=lacks, names=names)
+        carries=carries, lacks=lacks)
 
 
 def start_allow(name, prompt, tags=START_TOPIC_TAGS):
@@ -389,9 +391,9 @@ def start_allow(name, prompt, tags=START_TOPIC_TAGS):
 
 
 def start_roles_refuse(name, prompt, missing, tags=START_TOPIC_TAGS):
-    """A start that clears the topic or step check and lacks a role label: refused. The reason names each missing role,
-    asks for no session id, and names none of the test's ids."""
-    start_refuse(name, prompt, tags=tags, lacks=ROLE_START_LACKS, names=missing)
+    """A start that clears the topic or step check and lacks a role label: refused. The reason names each missing role
+    by role, asks for no session id, and names none of the test's ids."""
+    start_refuse(name, prompt, tags=tags, carries=role_carry(missing), lacks=ROLE_START_LACKS)
 
 
 # Refused: a start that clears the topic check and names no label for any role. The reason names all three roles.

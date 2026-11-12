@@ -350,7 +350,7 @@ def windows_shaped(*parts):
 
 
 def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=None,
-        session=None, carries=(), lacks=(), names=(), config=None, agent_id=None, no_root=False, silent=False,
+        session=None, carries=(), lacks=(), config=None, agent_id=None, no_root=False, silent=False,
         agent_type=None, event=None, stop_active=False, windows=False, transcript=None,
         max_seconds=None, env=None, guard=None, **tool_input):
     """Register one case.
@@ -365,9 +365,6 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
     `carries` names fragments the printed reason MUST hold, which is how a case pins what an
     approver reads, not only the decision. A tuple inside `carries` is any-of: the reason holds
     one of its fragments. `lacks` names fragments the printed reason MUST NOT hold.
-
-    `names` names fragments the printed reason MUST hold outside the expected form, BRIEF_ROLE_FORM,
-    so a role named only inside that form does not count as named.
 
     A case NEVER opts out of the generic-reason check. Which fragments a reason may name is read
     from the case's RULE, through `REASON_MAY_NAME` below, so the exemption belongs to one rule and
@@ -387,7 +384,6 @@ def add(name, expected, rule=None, raw=None, tool="Bash", cwd=None, env_path=Non
         "session": session,
         "carries": (carries,) if isinstance(carries, str) else tuple(carries),
         "lacks": (lacks,) if isinstance(lacks, str) else tuple(lacks),
-        "names": (names,) if isinstance(names, str) else tuple(names),
         # The config directory the case runs against. It decides where the global rules file is
         # read from, so a pointer case names its own and every other case keeps the default.
         "config": config,
@@ -680,14 +676,6 @@ if _UNNAMED or _BAD_LOG:
 SKIP = "skip"
 
 
-def outside_form(reason):
-    """The reason with each BRIEF_ROLE_FORM prefix taken out, so a role named only inside the expected form does
-    not count as named. BRIEF_ROLE_FORM is set by the lane-one-topic section, which loads before any case runs."""
-    for prefix in BRIEF_ROLE_FORM:
-        reason = reason.replace(prefix, " ")
-    return reason
-
-
 def run_cases():
     mode = os.environ.get("GUARD_TESTS", "")
     if mode not in GUARD_TESTS_MODES:
@@ -739,10 +727,6 @@ def run_cases():
             ok = False
             note = "  (the reason carries %r, which it must not: %s)" % (
                 [f for f in case["lacks"] if f in reason][0], reason[:90])
-        elif ok and case.get("names") and [f for f in case["names"] if f not in outside_form(reason)]:
-            ok = False
-            note = "  (the reason does not name %r outside the expected form: %s)" % (
-                [f for f in case["names"] if f not in outside_form(reason)][0], reason[:90])
         elif ok and got != "allow" and names_the_target(reason, case["rule"]):
             ok = False
             note = "  (the reason names the forbidden target %r)" % names_the_target(
