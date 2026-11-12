@@ -1,0 +1,16 @@
+{
+ "id": "records-page-ready-reads-pr-repo",
+ "title": "Guard records-page-ready reads the PR's own repo, so a cloud child-repo runner can mark a batch ready",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "test-guard-split-per-rule"
+ ],
+ "why": "hooks/guard.py's records-page-ready check (update_pull_request branch) fetches the head in the session's own checkout, not the PR's repo, so every child-repo batch is refused when marked ready.",
+ "source": "coordinator 22:55 CST Nov 11; incident degen #643, batch runner 11, 22:54 CST",
+ "note": "Possible false alarm: every child-repo batch hits it. Fix: read owner/repo from tool_input and fetch from that repo. Test: a degen PR marked ready from a claude-settings checkout passes when its records page is ready. First wave after the guard test split, beside scratchpad-owner-follow-ups.",
+ "updatedAt": "2026-11-11T22:55:00-06:00"
+}

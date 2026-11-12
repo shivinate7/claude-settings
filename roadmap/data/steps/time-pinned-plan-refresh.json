@@ -6,6 +6,6 @@
   "owner": "coordinator",
   "lane": "session_013NEJL1ghTBQwutUbv5bq1j",
   "why": "Plan time-pinned-tests has no calendar column, and its Total counts hang guards. test-practices calls the P5 lint \"not built\" (timing-tests lane (session_013NEJL1jPC89ae6X6Pa4jmf), cited by Fix: lines in #2002's notes, 09:00 CST Nov 8).",
-  "note": "A docs-only change. Done check: the plan has the calendar column, Total leaves out hang guards, and test-practices names the built finder. Filed by triage 09:02 CST Nov 8. Sent by the coordinator 09:03 CST Nov 8 to the timing-tests lane. Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose, first wave.",
-  "updatedAt": "2026-11-11T22:50:00-06:00"
+  "note": "A docs-only change. Done check: the plan has the calendar column, Total leaves out hang guards, and test-practices names the built finder. Filed by triage 09:02 CST Nov 8. Sent by the coordinator 09:03 CST Nov 8 to the timing-tests lane. Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose, first wave. Lane report (coordinator 22:55 CST Nov 11, item 521): done as PR #2081, head 0ad45a967, lane lint green, handed to batch runner 10; stacked on unmerged #2002 and #1958.",
+  "updatedAt": "2026-11-11T22:55:00-06:00"
 }
