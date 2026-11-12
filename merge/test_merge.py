@@ -10499,7 +10499,11 @@ class LockProseStatesTheCode(unittest.TestCase):
 class GitLockExtendsForRateWaits(Env):
     """GitLock and Host under a rate-limited `gh` call: the run hands Host.before_wait the lock's extend_for, as confirm does
     (`getattr`, so a lock without one gives None and the host waits plain). The lock is a ref on the bare origin: its text is read there at each pause."""
-    NOW, MARGIN = 1000.0, 300
+    NOW, MARGIN, MAX_HOLD = 1000.0, 300, 6 * 3600  # MAX_HOLD is LOCK_MAX_HOLD, written as a literal (the ruling value)
+
+    def rate_403_with_retry_after(self, seconds):
+        """A rate-limited `gh api -i` reply that names its wait with Retry-After, as GitHub sends it: a status line, the headers, a blank line, then the body."""
+        return f"HTTP/2.0 403 Forbidden\nRetry-After: {seconds}\n\n" + RATE_403
 
     def published(self):
         if not self.lock_ref():
@@ -10635,6 +10639,48 @@ class GitLockExtendsForRateWaits(Env):
         kept = sh(self.co, "git", "ls-remote", "origin", "refs/heads/merge-lock/main").split()[0]
         self.assertIn("not this run's", release_out(self, self.glock, "0" * 40))
         self.assertEqual(sh(self.co, "git", "ls-remote", "origin", "refs/heads/merge-lock/main").split()[0], kept)
+
+    def test_a_wait_that_needs_a_hold_past_six_hours_from_the_take_stops_the_run_before_any_write(self):
+        """LOCK_MAX_HOLD counts from the take: a 900 s wait that needs the lock held past 6 h stops the run, with no push, no pause and no retry."""
+        host = self.held(self.MAX_HOLD)  # expires at the bound: NOW + 6 h
+        self.clock.t = self.NOW + self.MAX_HOLD - 1000  # the lock is live, and the wait needs NOW + 6 h + 200
+        self.gh = [(1, self.rate_403_with_retry_after(900)), (0, "[]")]
+        self.assertGreater(self.glock.until, self.clock.t, "the lock is not live at the rate wait, so the bound is not what this case tests")
+        self.assertGreater(self.clock.t + 900 + self.MARGIN, self.glock.until, "the wait needs no extension, so the bound is not what this case tests")
+        with self.assertRaises(merge.NetStop, msg="a wait past the six-hour bound was extended, not stopped") as cm:
+            host.gh(["run", "list"])
+        self.assertRegex(str(cm.exception), r"cannot be held past %d s" % self.MAX_HOLD)
+        self.assertEqual((self.seen, self.gh_calls), ([], 1), "a wait past the bound paused or retried")
+        self.assertEqual([c for c in self.cmds if "push" in c or "commit-tree" in c], [], "the run wrote a lock commit past the bound")
+        self.assertEqual(sh(self.co, "git", "ls-remote", "origin", "refs/heads/merge-lock/main").split()[0], self.token, "the lock on origin moved")
+        self.assertEqual(self.glock.until, self.NOW + self.MAX_HOLD)
+
+    def test_a_wait_that_needs_exactly_six_hours_from_the_take_is_extended(self):
+        """The bound is 'past': a wait that ends exactly at NOW + 6 h is still extended. A `>=` bound makes this one red."""
+        host = self.held(self.MAX_HOLD - 600)  # live at the read, 600 s left
+        self.clock.t = self.NOW + self.MAX_HOLD - 900 - self.MARGIN  # the wait needs NOW + 6 h, to the second
+        self.gh = [(1, self.rate_403_with_retry_after(900)), (0, "[]")]
+        self.assertGreater(self.glock.until, self.clock.t, "the lock is not live at the rate wait, so the bound is not what this case tests")
+        self.assertEqual(self.clock.t + 900 + self.MARGIN, self.NOW + self.MAX_HOLD, "the wait does not end at the bound, so the case tests nothing")
+        self.assertGreater(self.clock.t + 900 + self.MARGIN, self.glock.until, "the wait needs no extension, so the bound is not what this case tests")
+        try:
+            self.assertEqual(host.gh(["run", "list"]), (0, "[]"))
+        except merge.NetStop as e:
+            self.fail(f"a wait that ends exactly at six hours from the take was stopped, not extended: {e}")
+        self.assertEqual(self.seen, [(900, self.NOW + self.MAX_HOLD, self.NOW + self.MAX_HOLD)])
+        self.assertEqual(self.glock.until, self.NOW + self.MAX_HOLD)
+
+    def test_a_rate_wait_that_ends_exactly_at_the_expiry_extends_nothing(self):  # control, the boundary
+        """The lock covers a wait that needs the very second it expires: no extension and no push. A mutant that extends at the boundary makes this one red."""
+        host = self.held(400)  # expires at NOW + 400 = now + wait + margin
+        self.gh = [(1, self.rate_403_with_retry_after(100)), (0, "[]")]
+        self.assertEqual(self.clock.t + 100 + self.MARGIN, self.glock.until, "the wait does not end exactly at the expiry, so the case tests nothing")
+        try:
+            self.assertEqual(host.gh(["run", "list"]), (0, "[]"))
+        except merge.NetStop as e:
+            self.fail(f"a wait that ends exactly at the expiry was stopped: {e}")
+        self.assertEqual(self.seen, [(100, self.NOW + 400, self.NOW + 400)])
+        self.assertEqual([c for c in self.cmds if "push" in c], [], "a lock the wait ends inside was extended")
 
 class HostDefaultBranchRateRetry(unittest.TestCase):
     """host_default_branch (`gh api repos/{owner}/{repo}`, run in the checkout's root) on a rate-limit error. It retries like Host.gh:
