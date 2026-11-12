@@ -193,13 +193,15 @@ ACT = re.compile(_WORD % (r"merge|push|delete|deploy|release|publish|" + _STANDI
 # A standing scope however worded. ACT keeps its short list; these words only bar a once: home.
 _STANDING_SCOPE = (r"whenever|going forward|from here on|in (?:the )?future|by default|"
                    r"until (?:withdrawn|revoked|further notice|i say otherwise)|(?:each|every)\s+time")
-# A scope noun counts as standing only in a sentence that approves or acts on it (see standing_word); "Hand in any PR"
-# is the lane's own handoff, not an approval to act on every PR.
+# A scope noun bars a once: home wherever it sits, except in a sentence a handoff verb leads (see standing_word):
+# "Hand in any PR to the batch runner" is the lane's own handoff, not an approval to act on every PR.
 _SCOPE_NOUN = r"(?:all|any|every)\s+(?:repos?|prs?|branch(?:es)?|open|green|new|future)"
 STANDING = re.compile(_WORD % (r"always|standing|from now on|" + _STANDING_SCOPE), re.IGNORECASE)  # counts anywhere
 STANDING_NOUN = re.compile(_WORD % _SCOPE_NOUN, re.IGNORECASE)
 ACT_VERB = re.compile(_WORD % r"merge|push|delete|deploy|release|publish", re.IGNORECASE)
-SENTENCE_END = re.compile(r"(?<=[.!?])\s+|\n+")
+HANDOFF_LEAD = re.compile(r"[\s\"'(*>-]*(?:hand|send|post)(?![A-Za-z0-9_])", re.IGNORECASE)
+SENTENCE_END = re.compile(r"(?<=[.!?])\s+")  # a newline alone ends no sentence
+NOT_A_SENTENCE_END = re.compile(r"(?:e\.g|i\.e|etc|v\d+)\.$|://", re.IGNORECASE)  # the word before the stop: an abbreviation or a URL
 CLOSED_TOKEN = re.compile(r"(?<!\S)\[closed\](?!\S)")
 # A grant's [ruling] home may also be one of these root files, when git tracks it on some branch.
 GRANT_ROOT_HOMES = ("settings.json", ".claude/CLAUDE.md")
@@ -896,15 +898,34 @@ def is_grant(text):
     return GRANT.search(plain) is not None and ACT.search(plain) is not None
 
 
+def sentences(text):
+    """Split on sentence ends only: a stop then whitespace. Not at a newline, "e.g.", "i.e.", "etc.", "v2." or a URL's
+    trailing period."""
+    parts, start = [], 0
+    for m in SENTENCE_END.finditer(text):
+        word = re.search(r"\S+$", text[start:m.start()])
+        if word and NOT_A_SENTENCE_END.search(word.group(0)):
+            continue
+        parts.append(text[start:m.start()])
+        start = m.end()
+    parts.append(text[start:])
+    return parts
+
+
+def handoff_sentence(sent):
+    """True when a handoff verb (hand, send, post) leads the sentence and it holds no grant word or act verb, so a later
+    clause such as "then merge all PRs" still counts."""
+    return HANDOFF_LEAD.match(sent) is not None and not GRANT.search(sent) and not ACT_VERB.search(sent)
+
+
 def standing_word(text):
     """True when the message, fenced text left out, holds a standing word. A scope noun ("any PR", "every open") counts
-    only when its own sentence holds a grant word or an act verb; narrowest reading: a sentence that only describes the
-    lane's handoff has neither, so it is no standing approval."""
+    wherever it sits, except in a sentence a handoff verb leads: that one only describes where the lane hands its work.
+    Limit: "Please hand in any PR." is no handoff lead, so its noun bars."""
     plain = unfenced(text)
     if STANDING.search(plain):
         return True
-    return any(STANDING_NOUN.search(sent) and (GRANT.search(sent) or ACT_VERB.search(sent))
-               for sent in SENTENCE_END.split(plain))
+    return any(STANDING_NOUN.search(sent) and not handoff_sentence(sent) for sent in sentences(plain))
 
 
 def once_home(it, text):

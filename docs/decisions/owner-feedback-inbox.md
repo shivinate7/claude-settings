@@ -58,7 +58,11 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   all, any or every right before repo, repos, PR, PRs, branch or branches), fenced text left out, needs one of four
   homes: a `ruling` item whose home passes, an open `page` item with its send, a `note` item `-> not-a-grant`, or an
   open `note` item `-> once:<act>` for a one-shot approval. A once: home is barred when the message holds a standing
-  word (the guard's STANDING list, such as "whenever", "going forward", "each time", "until withdrawn", "any open").
+  word (the guard's STANDING list, such as "whenever", "going forward", "each time", "until withdrawn") or a scope
+  noun (all, any or every before repo, PR, branch, open, green, new or future) anywhere in it. One exception: a scope noun
+  in a sentence that "hand", "send" or "post" leads, with no grant word or act verb in it, is a handoff, not a standing
+  scope ("Hand in any PR to the batch runner."). Sentences end at a stop then a space, never at a newline, "e.g.", "i.e.",
+  "etc.", "v2." or a URL's trailing period. Limit: "Please hand in any PR." has no handoff lead, so it bars.
   A grant's ruling home may also be `settings.json` or `.claude/CLAUDE.md` at the repo root, if some
   branch tracks it. A plain ruling there still blocks. A lone short message counts. Risk kind: named
   incident. F47 (an all-repos grant left in chat) and F31 (a grant homed to the handoff), in the
