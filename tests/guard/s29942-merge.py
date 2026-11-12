@@ -177,6 +177,63 @@ scope_case("a lane the owner started that tags itself and does not read its reco
 sh("merge-confirm-repo: a lane the owner started with no cs-repo tag is denied, and its remedy names the owner-started lane",
    f"{MERGE_SHIM} 5 --confirm", "deny", rule=REPO_RULE, cwd=LANE_PROXY, transcript=LONE_UNTAGGED, env=CLOUD_ENV,
    carries=OWNER_LANE_ASK)
+
+# The head check of a lane the owner started. Its confirm must name, with --head, a head that is the tip of a branch in the checkout the
+# merge acts in: the head it built and pushed. The merge tool requires --head for the batch-runner role and compares it with the PR's live
+# head, so the two checks together put the PR's head in this checkout. The batch runner is not subject to it: its record carries
+# cs-build:batch-runner. Fixed commit objects (the empty tree, one identity, one date) give the same shas on every run.
+import hashlib  # noqa: E402  the fixed commit shas below; the section runs in the guard test's globals
+LANE_TIP = os.path.join(ROOT, "lanetip")  # a checkout whose origin is claude-settings, with one branch: lane-tip
+TIP_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"  # git's empty tree, in every repo
+
+
+def _commit_body(parent, message):
+    """The text of a commit object: the empty tree, one identity, one date, and the parent when there is one."""
+    lines = ["tree " + TIP_TREE] + (["parent " + parent] if parent else [])
+    lines += ["author lane <lane@example.com> 1794528000 +0000", "committer lane <lane@example.com> 1794528000 +0000", "", message]
+    return "\n".join(lines) + "\n"
+
+
+def _commit_sha(body):
+    """The sha git gives the commit object with this text."""
+    raw = body.encode()
+    return hashlib.sha1(b"commit %d\x00" % len(raw) + raw).hexdigest()
+
+
+PR_HEAD_BODY = _commit_body(None, "the head the pull request had")
+PR_HEAD = _commit_sha(PR_HEAD_BODY)                      # the head the PR had, now behind the local tip
+TIP_BODY = _commit_body(PR_HEAD, "the local tip, one commit past the pull request head")
+TIP = _commit_sha(TIP_BODY)                              # the tip of lane-tip in LANE_TIP
+OTHER_PR_HEAD = _commit_sha(_commit_body(None, "another pull request's head, not in this checkout"))
+
+
+def _build_lane_tip():
+    """LANE_TIP: a checkout with origin claude-settings, the two commits, and the branch lane-tip at the newer one."""
+    make_repo(LANE_TIP, {"README.md": "# lane\n"})
+    run_vcs(LANE_TIP, "remote", "add", "origin", "https://github.com/" + ARCH_REPO_SETTINGS)
+    for body, sha in ((PR_HEAD_BODY, PR_HEAD), (TIP_BODY, TIP)):
+        written = subprocess.run([VCS, "hash-object", "-t", "commit", "-w", "--stdin"], input=body, cwd=LANE_TIP,
+                                 capture_output=True, text=True)
+        if written.returncode != 0 or written.stdout.strip() != sha:
+            sys.exit("fixture setup failed in build_fixtures: git did not write the commit %s in %r. stderr: %s"
+                     % (sha, LANE_TIP, written.stderr.strip()))
+    run_vcs(LANE_TIP, "update-ref", "refs/heads/lane-tip", TIP)
+
+
+lazy_fixture([LANE_TIP], _build_lane_tip)
+
+
+def head_case(name, expected, head, transcript):
+    """One merge confirm in LANE_TIP that names `head` with --head. A deny must name REPO_RULE."""
+    sh("merge-confirm-repo: " + name, f"{MERGE_SHIM} 5 --confirm --head {head}", expected,
+       rule=REPO_RULE if expected == "deny" else None, cwd=LANE_TIP, transcript=transcript, env=CLOUD_ENV)
+
+
+head_case("a lane the owner started whose confirm names its own branch tip is allowed", "allow", TIP, LONE_CS)
+head_case("a lane the owner started whose confirm names another pull request's head is denied", "deny", OTHER_PR_HEAD, LONE_CS)
+head_case("a lane the owner started whose confirm names a head its branch has moved past is denied", "deny", PR_HEAD, LONE_CS)
+head_case("a batch runner whose confirm names a head outside this checkout is not judged and is allowed", "allow", OTHER_PR_HEAD,
+          TX_RUNNER)
 # Not judged: a merge named in quoted text, --lane-lint (no lock, no merge), and any session outside the cloud.
 repo_case("a merge named in a quoted echo is not judged", "allow", f"echo '{MERGE_SHIM} --repo-dir {REPO_B} 5 --confirm'", REPO_A, TX_A)
 repo_case("--lane-lint is not judged, whatever the record", "allow", f"{MERGE_SHIM} --lane-lint --repo-dir '{REPO_B}' 5", REPO_A, TX_NONE)
