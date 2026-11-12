@@ -1297,6 +1297,65 @@ class KeepMarkerPythonControlTest(FinderCase):
             "tests/test_triple_marker.py", text, ("time.sleep(1)", "sleep"), ("time.sleep(2)", "sleep")),
             "a marker inside a triple-quoted string is read as a comment")
 
+    def test_marker_in_a_string_opened_on_the_sleep_line_still_lists(self):
+        text = src(
+            "import time",
+            "",
+            "def test_doc():",
+            '    time.sleep(1); doc = """first',
+            "# time-pinned-ok: reason",
+            '"""',
+            "    time.sleep(2)",
+        )
+        self.put("tests/test_opener_marker.py", text)
+        code, out = self.report()
+        self.assertEqual(out["unread"], [], "the fixture is not read")
+        self.assertEqual(self.rows(out), pinned(
+            "tests/test_opener_marker.py", text, ("time.sleep(1)", "sleep"), ("time.sleep(2)", "sleep")),
+            "a marker in a string keeps the sleep on the line where the string opens")
+
+
+class KeepMarkerTestCapTest(FinderCase):
+    def test_marked_test_cap_is_kept_and_counted(self):
+        text = src(
+            "import time",
+            "import pytest",
+            "",
+            "pytestmark = pytest.mark.timeout(10)  # time-pinned-ok: suite runs under a fixed budget",
+            "",
+            "def test_x():",
+            "    time.sleep(1)",
+        )
+        path = "tests/test_kept_cap.py"
+        self.put(path, text)
+        code, out = self.report()
+        self.assertEqual(out["unread"], [], "the fixture is not read")
+        self.assertEqual(self.rows(out), pinned(path, text, ("time.sleep(1)", "sleep")),
+                         "a test-cap with a marker and a reason still lists")
+        proc = run(self.root)
+        last = proc.stdout.splitlines()[-1]
+        self.assertTrue(last.startswith("1 time-pinned in 1 files (sleep 1, elapsed-assert 0, test-cap 0, wait-cap 0)"),
+                        "the summary counts a kept test-cap: " + last)
+        self.assertIn("kept 1", last, "the summary does not count the kept test-cap")
+
+    def test_unmarked_test_cap_still_lists(self):
+        text = src(
+            "import time",
+            "import pytest",
+            "",
+            "pytestmark = pytest.mark.timeout(10)",
+            "",
+            "def test_x():",
+            "    time.sleep(1)",
+        )
+        path = "tests/test_unkept_cap.py"
+        self.put(path, text)
+        code, out = self.report()
+        self.assertEqual(out["unread"], [], "the fixture is not read")
+        self.assertEqual(self.rows(out), pinned(
+            path, text, ("pytestmark = pytest.mark.timeout(10)", "test-cap"), ("time.sleep(1)", "sleep")),
+            "an unmarked test-cap no longer lists")
+
 
 class KeepMarkerJsTest(FinderCase):
     def test_sleep_after_settimeout_or_sleep_with_marker_is_kept(self):
@@ -1405,6 +1464,30 @@ class KeepMarkerJsControlTest(FinderCase):
         self.assertEqual(self.rows(out), pinned(
             "tests/template_marker.test.js", text, ("await sleep(100)", "sleep"), ("await sleep(300)", "sleep")),
             "a marker inside a multi-line template is read as a comment")
+
+    def test_marker_in_a_block_comment_still_lists(self):
+        text = src(
+            "await sleep(250); /* time-pinned-ok: reason */",
+            "await sleep(100);",
+        )
+        self.put("tests/block.test.js", text)
+        code, out = self.report()
+        self.assertEqual(out["unread"], [], "the fixture is not read")
+        self.assertEqual(self.rows(out), pinned(
+            "tests/block.test.js", text, ("await sleep(250)", "sleep"), ("await sleep(100)", "sleep")),
+            "a marker in a block comment is read as a keep marker")
+
+    def test_marker_in_a_regex_literal_still_lists(self):
+        text = src(
+            "const re = /time-pinned-ok: reason/; await sleep(250);",
+            "await sleep(100);",
+        )
+        self.put("tests/regex.test.js", text)
+        code, out = self.report()
+        self.assertEqual(out["unread"], [], "the fixture is not read")
+        self.assertEqual(self.rows(out), pinned(
+            "tests/regex.test.js", text, ("await sleep(250)", "sleep"), ("await sleep(100)", "sleep")),
+            "a marker in a regex literal is read as a keep marker")
 
 
 class KeepMarkerSwiftTest(FinderCase):
