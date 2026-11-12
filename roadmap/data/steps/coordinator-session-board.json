@@ -1,6 +1,6 @@
 {
  "id": "coordinator-session-board",
- "title": "Each coordinator turn ends with a check of every live session, and a board it rewrites",
+ "title": "The coordinator's session board flags silent lanes that others wait on, and sends each one targeted nudge",
  "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
@@ -9,8 +9,8 @@
  "blockedBy": [],
  "why": "Plan R54 (owner 13:15 CST Nov 12; rewritten after his 13:20 CST pick a, restart-plan aa190fd): \"this is good, it can be an active nudger / checker against coordinator too right\".",
  "source": "retrospective 13:16 CST Nov 12",
- "note": "Home: decision session-tiers. (1) At each publish and each batch merge, the roadmap build (its --live sessions read, every page of the session list) lists each session the coordinator started that is not archived and is silent, waiting for action, or done. (2) Triage writes that list, with each session's step and PR, to the record branch. (3) Triage sends the coordinator each flagged line; its next report names an act for each: archive, nudge, or a reason to wait. (4) No read at the end of each turn. Lane session_013NEJL3bD7WV2R2WrMqh5Xz, re-pointed 13:23 CST. Coordinator split 13:36 CST Nov 12: three PRs, --live via merge --idle-lanes, the board, the report guard.",
- "updatedAt": "2026-11-12T13:39:34-06:00",
+ "note": "Home: decision session-tiers. (1) At each publish and each batch merge, the roadmap build (its --live sessions read, every page of the session list) lists each session the coordinator started that is not archived and is silent, waiting for action, or done. (2) Triage writes that list, with each session's step and PR, to the record branch. (3) Triage sends the coordinator each flagged line; its next report names an act for each: archive, nudge, or a reason to wait. (4) No read at the end of each turn. Lane session_013NEJL3bD7WV2R2WrMqh5Xz, re-pointed 13:23 CST. Coordinator split 13:36 CST Nov 12: three PRs, --live via merge --idle-lanes, the board, the report guard. Owner R56 (asked 13:46 CST, \"go\" 13:52 CST Nov 12; plan a853c38; home decision session-tiers): at each R54 read, flag a lane whose step another step's blockedBy names, or whose step is on R55's express list, only when it has sent no report or message since the last R54 read; the coordinator sends each flagged lane one line (\"reply if you are stuck and nobody picked it up\"); no broadcast. Retitled: the old title was the end-of-turn read he turned down at 13:19 CST.",
+ "updatedAt": "2026-11-12T13:55:11-06:00",
  "order": -308,
  "paused": false
 }

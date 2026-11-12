@@ -61,3 +61,4 @@ Relayed by the retrospective.
 - 13:40 CST, coordinator chat: item 619 b, "b: also allow --blame --run, --on and --base. This widens past your pick." Supersedes items 457 a and 458 a for those three flags only. The settings edit waits on his typed yes in lane batch-freeze-lane-set-enforce (item 620).
 - 13:45 CST, via retrospective: the auto-build half of merge-batch-split-and-pipeline (batch N+1 built on a running batch N) "needs to join the express list". Home: plan R55 (restart-plan a853c38).
 - 13:49 CST, page save: 618 b (widen the "Merge Tool Read Checks" allow text to name the batch label write); 617 a (accepted pick, lane audit).
+- R56, asked 13:46 CST, "go" 13:52 CST (via retrospective, plan a853c38): targeted nudge to silent lanes others wait on (blockedBy target or R55 express), once per R54 read, no broadcast. Home: decision session-tiers; step coordinator-session-board.
