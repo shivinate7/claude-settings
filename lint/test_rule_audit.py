@@ -246,6 +246,12 @@ class RuleAuditTests(unittest.TestCase):
         self.assertTrue(any("shared-trees-no-destructive-git" in p and "no rule anchor" in p
                             for p in problems), problems)
 
+    def test_zero_anchors_and_zero_rows_is_still_a_problem(self):
+        # No anchor and no row: no orphan can fail the audit, so the zero-anchor check alone must.
+        self.assertEqual(rule_audit.claude_md_anchors("No rule anchors here.\n"), [])
+        problems = run(md="No rule anchors here.\n", rule_map={"rules": {}})
+        self.assertTrue(any("found no rule anchors" in p for p in problems), problems)
+
     def test_unmechanized_count_is_never_compared_with_a_pin(self):
         rule_map = {
             "rules": {
