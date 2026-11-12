@@ -97,7 +97,7 @@ Sources:
   itself.
 
 Cost: no new long-lived process or file. The reads run per push, in the guard's own run.
-- Whole-guard counts per call, all checks included. Source: `record_push_cost_case` in `hooks/test_guard.py`.
+- Whole-guard counts per call, all checks included. Source: `record_push_cost_case` in `tests/guard/s13406-merge.py`.
   - `--all` to a named network remote: config 2, symbolic-ref 2, for-each-ref 2, rev-parse 1. The second
     `for-each-ref` lists the local branches. It runs only when no tracking ref shows an update.
   - `--all` to a local-path remote: config 2, symbolic-ref 1, rev-parse 1.
