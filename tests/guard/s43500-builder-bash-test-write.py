@@ -111,6 +111,9 @@ bbtw_add("builder-bash-test-write: a builder's PowerShell call that adds tests/f
 
 bbtw_add("builder-bash-test-write: a builder's call that changed only product code is allowed silently",
          "allow", BBTW_PRODUCT, silent=True)
+# No fall-through: a command the PreToolUse kill rule refuses still reads only the PostToolUse check, which allows it.
+bbtw_add("builder-bash-test-write: a builder's PostToolUse call with a refused command is judged only by the PostToolUse check, and allowed silently",
+         "allow", BBTW_PRODUCT, command="pkill -f node", silent=True)
 bbtw_add("builder-bash-test-write: a builder's call on a clean worktree is allowed silently",
          "allow", BBTW_CLEAN, silent=True)
 bbtw_add("builder-bash-test-write: a test-author's call that adds tests/foo.py is allowed silently",
@@ -220,16 +223,16 @@ def bbtw_status_once_product_case():
     return True, "one git status in a builder call that changed only product code"
 
 
-def bbtw_no_status_author_case():
-    """A test-author's call reads no git status: the check gates on the builder role first."""
+def bbtw_no_git_author_case():
+    """A test-author's call runs no git at all: a PostToolUse call returns before any PreToolUse read."""
     materialize(BBTW_UNTRACKED)
     note = _bbtw_scope(BBTW_UNTRACKED, "tests/foo.py")
     if note:
         return False, note
     _got, _reason, _folder, names = _bbtw_judge("cost-author", _bbtw_raw(BBTW_UNTRACKED, agent="test-author"), count_git=True)
-    if "status" in names:
-        return False, "git status ran in a test-author's call, want none"
-    return True, "no git status in a test-author's call"
+    if names:
+        return False, "git ran %d times in a test-author's call, want none: %r" % (len(names), names[:3])
+    return True, "no git call in a test-author's call"
 
 
 def bbtw_no_git_main_case():
@@ -242,6 +245,43 @@ def bbtw_no_git_main_case():
     if names:
         return False, "git ran %d times in the main session's call, want none: %r" % (len(names), names[:3])
     return True, "no git call in the main session's call"
+
+
+def _bbtw_stdout(raw, folder):
+    """The guard's exit code and stdout for one payload. decide returns only the verdict, which reads both block
+    shapes as deny, so this reads the printed JSON itself. The environment is the one decide sets."""
+    env = dict(os.environ)
+    for name in ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_PROJECT_DIR"):
+        env.pop(name, None)
+    env["CLAUDE_CONFIG_DIR"] = folder
+    env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    done = subprocess.run([sys.executable, GUARD], input=raw, capture_output=True, text=True, env=env, timeout=120)
+    return done.returncode, done.stdout
+
+
+def bbtw_block_shape_case():
+    """A block is a PostToolUse answer: {"decision": "block", "reason": ...} on stdout. Claude Code ignores a
+    PreToolUse hookSpecificOutput on this event, so that shape would let the call through unblocked."""
+    materialize(BBTW_UNTRACKED)
+    note = _bbtw_scope(BBTW_UNTRACKED, "tests/foo.py")
+    if note:
+        return False, note
+    code, out = _bbtw_stdout(_bbtw_raw(BBTW_UNTRACKED), os.path.join(ROOT, "bbtw-block-shape"))
+    if code != 0:
+        return False, "the guard exited %d, want 0" % code
+    try:
+        parsed = json.loads(out)
+    except ValueError:
+        return False, "stdout is not one JSON object: %r" % out[:80]
+    if not isinstance(parsed, dict):
+        return False, "stdout is JSON but not an object: %r" % out[:80]
+    if "hookSpecificOutput" in parsed:
+        return False, "the answer is a PreToolUse hookSpecificOutput, not a PostToolUse block"
+    if parsed.get("decision") != "block":
+        return False, "decision is %r, want block" % parsed.get("decision")
+    if not isinstance(parsed.get("reason"), str) or not parsed["reason"].strip():
+        return False, "the block carries no reason text"
+    return True, "the block is {decision: block, reason} on stdout"
 
 
 # ---------------------------------------------------------------- the settings entry (settings.json, read only)
@@ -331,8 +371,9 @@ BBTW_CHECKS = (
     ("builder-bash-test-write: a builder call that changed a test reads git status once", bbtw_status_once_test_case),
     ("builder-bash-test-write: a builder call that changed only product code reads git status once",
      bbtw_status_once_product_case),
-    ("builder-bash-test-write: a test-author's call reads no git status", bbtw_no_status_author_case),
+    ("builder-bash-test-write: a test-author's call runs no git at all", bbtw_no_git_author_case),
     ("builder-bash-test-write: the main session's call runs no git at all", bbtw_no_git_main_case),
+    ("builder-bash-test-write: a block is the PostToolUse {decision: block, reason} on stdout", bbtw_block_shape_case),
     ("builder-bash-test-write: settings.json has a PostToolUse entry for Bash|PowerShell that runs hooks/guard.py",
      bbtw_entry_case),
     ("builder-bash-test-write: the settings entry's gate starts the guard for each builder payload, unchanged",
@@ -342,7 +383,7 @@ BBTW_CHECKS = (
 )
 # A git stand-in is POSIX only. A gate runs the settings line under sh, which Windows cannot run here.
 BBTW_STAND_IN_CHECKS = (bbtw_unread_git_fails_case, bbtw_status_once_test_case, bbtw_status_once_product_case,
-                        bbtw_no_status_author_case, bbtw_no_git_main_case)
+                        bbtw_no_git_author_case, bbtw_no_git_main_case)
 BBTW_GATE_CHECKS = (bbtw_gate_passes_case, bbtw_gate_stops_case)
 for _label, _check in BBTW_CHECKS:
     LOG_FAMILY[_label] = FAMILY
