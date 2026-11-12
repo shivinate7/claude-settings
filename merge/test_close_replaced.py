@@ -283,17 +283,20 @@ class CloseAsCarried(CloseEnv):
         self.assertEqual(kind_lines(block, CARRIED), [], "#11 is carried by #10, which is named replaced:\n" + "\n".join(block))
 
     def test_identical_heads_close_only_the_higher_numbered_pr(self):
-        # #4 and #6 have one head, and each holds the other. Only #6 closes, by #4. #4 stays open.
+        # #4 and #6 have one head, and each holds the other. Only #6 closes, by #4. #4 stays open. Both are drafts: only a draft is carried.
         same = head_of(4)
-        block = self.block_for_alpha(pulls=[named_pull(4, same), named_pull(6, same)], comments=[record_of(4, same), record_of(6, same)],
+        block = self.block_for_alpha(pulls=[named_pull(4, same, draft=True), named_pull(6, same, draft=True)],
+                                     comments=[record_of(4, same), record_of(6, same)],
                                      check_rows={same: green()})
         self.assertEqual(kind_lines(block, CARRIED), ["close as carried: o/alpha #6 by #4"], "\n".join(block))
 
     def test_identical_heads_batch_the_lower_and_keep_the_higher_off_the_batch(self):
         # Pin of the batch half, on the direction of test_identical_heads_close_only_the_higher_numbered_pr: #4 holds, so it is batched, and
-        # #6 closes by #4, so it is not. A coordinator reply on the direction is pending; if the direction changes, this case and that one change together.
+        # #6 closes by #4, so it is not. Both are drafts: only a draft is carried. The coordinator ruled the direction at 08:02 CST: the lower
+        # batches, the higher closes. If that changes, this case and that one change together.
         same = head_of(4)
-        block = self.block_for_alpha(pulls=[named_pull(4, same), named_pull(6, same)], comments=[record_of(4, same), record_of(6, same)],
+        block = self.block_for_alpha(pulls=[named_pull(4, same, draft=True), named_pull(6, same, draft=True)],
+                                     comments=[record_of(4, same), record_of(6, same)],
                                      check_rows={same: green()})
         self.assertEqual(batch_lines_of(block), ["open batch now: o/alpha #4"], "the batch line does not hold the lower of two identical heads:\n" + "\n".join(block))
         self.assertNotIn("#6", "\n".join(batch_lines_of(block)), "the higher of two identical heads is on the batch line, though its close line names it")
@@ -301,7 +304,7 @@ class CloseAsCarried(CloseEnv):
     def test_a_chain_closes_each_lane_under_the_holder_outside_it(self):
         # #3 is inside #5, and #5 is inside #4. #3's lowest-numbered holder is #4, and #5's holder is #4. #4 closes nothing.
         heads = {3: head_of(3), 4: head_of(4), 5: head_of(5)}
-        pulls = [named_pull(n, heads[n]) for n in (3, 4, 5)]
+        pulls = [named_pull(n, heads[n], draft=n != 4) for n in (3, 4, 5)]  # #3 and #5 are drafts: only a draft is carried
         comments = [record_of(n, heads[n]) for n in (3, 4, 5)]
         compares = {(heads[3], heads[5]): "ahead", (heads[3], heads[4]): "ahead", (heads[5], heads[4]): "ahead"}
         host = closed_host("o/alpha", pulls=pulls, comments=comments, check_rows={h: green() for h in heads.values()}, compares=compares)
@@ -321,7 +324,7 @@ class CloseAsCarried(CloseEnv):
         # Probe: #5's head a is on main (compare a...main reads ahead), and open #9 holds a too. #5 is done, so only the carried check could
         # close it. Control: #6 is done on a head only #9 holds, and closes by #9.
         a, c, b9 = head_of(5), head_of(6), head_of(9)
-        pulls = [named_pull(5, a), named_pull(6, c), named_pull(9, b9)]
+        pulls = [named_pull(5, a, draft=True), named_pull(6, c, draft=True), named_pull(9, b9)]  # both done PRs are drafts: only a draft is carried
         comments = [record_of(5, a), record_of(6, c)]
         compares = {(a, b9): "ahead", (a, "main"): "ahead", (c, b9): "ahead"}
         host = closed_host("o/alpha", pulls, comments, check_rows={a: green(), c: green()}, compares=compares)
