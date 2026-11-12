@@ -2,10 +2,10 @@
   "title": "Rule builder-test-edit lets a builder write a probe under /tmp",
   "phase": "now",
   "status": "ready",
-  "order": 45,
+  "order": -178,
   "owner": "coordinator",
   "lane": "",
   "why": "Rule builder-test-edit refused a builder probe under /tmp, which decision builders-cannot-edit-tests (line 58) allows. A false alarm, reported by lane test-file-in-ci.",
   "note": "Coordinator 18:52 CST Nov 7. Nov 7 22:45 CST: held after round 3 (hole: after an uncertain cd with ;, newline or ||, a non-test file in a test folder is allowed). Archive archive/bpfa-build at 5fe1c2e70. Waiting-page item 396 builder-probe-round-4 asks for a fourth round. Owner item 396 a (06:08 CST Nov 8): the held fix gets a fourth round. A test-author pins the `;`, newline and `||` forms, the builder applies the either-folder fix, then one fresh review. Sighting (lane notes-fix-large-1, 06:57 CST Nov 8): a builder's read-only `python3 -c` probe that only printed `_quoted_words` was refused. Possible hole in the other direction: a builder's plain `touch tests/x` passes the builder check. Sighting 09:21 CST Nov 8 (coordinator, from lane message-time-matches-clock, [ended:lane:-message-time-matches-clock]): the builder-test-edit rule refused a builder's read-only grep of hooks/test_guard.py; a builder may read tests. The lane declined at 09:27 CST (#1979 is past its owner-granted round 4; a grep is a different defect), so it is filed apart as step builder-read-grep-refused. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJKzDBTjFbhzwzV96i8v.md on archive/session-handoffs-2026-11-10).",
-  "updatedAt": "2026-11-12T07:22:00-06:00"
+  "updatedAt": "2026-11-12T11:17:26-06:00"
 }

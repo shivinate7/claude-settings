@@ -2,10 +2,10 @@
   "title": "Lane brief and lease refusal name the sha form of force-with-lease",
   "phase": "now",
   "status": "ready",
-  "order": 103.3691,
+  "order": -172,
   "why": "Lanes learn the form the allow line covers, so rebased pushes stop being refused.",
   "note": "Owner picked b on item 286, 13:08 CST.\nCoordinator 13:02 CST Nov 6: recommended b on page item 286 (keep the sha form). The brief and the guard's refusal message show `git push --force-with-lease=<branch>:<sha>`. 9 refused lease pushes Nov 2-4 (docs/debts/notes.md). Waits on item 286. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1324. Frozen ( CST Nov 10, coordinator): #1324 draft, head 529d8f085. No owner question: page item 286 b (keep the sha form, and teach it) answers it with option a. After #1429 merges and the freeze lifts, redo #1324 on main, with its test pointing at #1429's entry, so the refusal and the brief teach only the sha form. Keep #1324 open until then. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was open PR #1324).",
-  "updatedAt": "2026-11-12T07:22:00-06:00",
+  "updatedAt": "2026-11-12T11:17:26-06:00",
   "lane": "",
   "blockedBy": []
 }

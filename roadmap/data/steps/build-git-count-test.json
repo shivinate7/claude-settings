@@ -1,10 +1,10 @@
 {
   "title": "A test pins the number of git processes one roadmap build starts",
-  "phase": "now",
+  "phase": "next",
   "status": "todo",
   "order": 103.65,
   "owner": "coordinator",
   "why": "README.md states the per-build git process count, but no test pins it, so the claim can rot (rule outcomes-mechanize-rules: a cost needs a test that proves it).",
   "note": "From #1757's findings (lane gap-check-merge-rebase) via the coordinator, 21:13 CST Nov 7. Coordinator starts a lane after #1757 lands. Filed 21:13 CST Nov 7.",
-  "updatedAt": "2026-11-07T21:13:00-06:00"
+  "updatedAt": "2026-11-12T11:17:26-06:00"
 }

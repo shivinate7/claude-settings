@@ -1,11 +1,11 @@
 {
   "title": "Rule simulator-drive-lease knows the simulator MCP's real read-action names",
-  "phase": "now",
+  "phase": "next",
   "status": "todo",
   "order": 55,
   "owner": "coordinator",
   "lane": "",
   "why": "Rule simulator-drive-lease raises a read false alarm, because it does not know the simulator MCP's real read-action names.",
   "note": "Needs a session on the owner's Mac to read the names. From lane sim-lease-gaps ([ended:lane:-sim-lease-gaps]) via the coordinator, 19:06 CST Nov 7.",
-  "updatedAt": "2026-11-07T19:08:00-06:00"
+  "updatedAt": "2026-11-12T11:17:26-06:00"
 }

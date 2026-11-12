@@ -1,10 +1,10 @@
 {
   "title": "A review record carries a reviewer ref that the merge tool checks",
-  "phase": "now",
+  "phase": "next",
   "status": "todo",
   "order": 0.9,
   "owner": "coordinator",
   "why": "Lane pr-state-is-on-the-pr, 13:35 CST Nov 7: today a lane can mint its own review record with `merge --review-record`.",
   "note": "Gap (lane pr-state-is-on-the-pr, 13:34 CST): `merge <pr> --review-record` (merge/merge.py, around lines 3346-3358) prints a record from whatever flags it gets, so a lane can mint and post its own PASS record. That defeats the review record and the new report_guard check (part 2, branch report-pass-record-2). Fix: the record carries the reviewer agent's id or a transcript ref the tool can check. Starts after pr-state-is-on-the-pr part 2 merges. The record must carry a reviewer ref (the reviewing agent or session), and merge refuses a record without one, or one whose ref is the lane itself. Done: a red test where a lane-minted record with no reviewer ref merges, then green.",
-  "updatedAt": "2026-11-07T13:42:00-06:00"
+  "updatedAt": "2026-11-12T11:17:26-06:00"
 }

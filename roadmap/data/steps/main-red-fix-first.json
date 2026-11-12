@@ -1,11 +1,11 @@
 {
   "title": "While main's checks are red, the next batch holds only PRs that turn main green",
-  "phase": "now",
+  "phase": "next",
   "status": "todo",
   "order": 0.06,
   "owner": "coordinator",
   "lane": "",
   "why": "Main sat red at 174b005c1 for 6 hours while its two reviewed fixes, #1434 and #1488, waited behind another batch's blocker.",
   "note": "Write it in skill ci-hygiene step 8 (batch lanes), plus a check where one fits. The coordinator ruled it by hand for #1434 and #1488 at 19:37 CST Nov 7. Not in lane process-held-end-to-end's steps yet; that lane was told, and may fold it. Filed 19:38 CST. Lane process-held-end-to-end (20:20 CST): it belongs to the links batch, integration CI and merge in that lane's record, which does not duplicate it.",
-  "updatedAt": "2026-11-07T20:20:00-06:00"
+  "updatedAt": "2026-11-12T11:17:26-06:00"
 }

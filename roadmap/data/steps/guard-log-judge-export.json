@@ -1,11 +1,11 @@
 {
   "title": "Export the judge refusal lines from guard.log for the replay corpus",
-  "phase": "now",
+  "phase": "next",
   "status": "todo",
   "order": 103.3686,
   "why": "The judge-replay corpus needs real allow and deny cases.",
   "note": "Coordinator 12:56 CST Nov 6: a session on the owner's computer exports the judge refusal lines from ~/.claude/guard.log, scrubbed of paths, tokens and private text, because the repo is public. Needs a Mac session. Feeds step judge-replay-corpus.",
-  "updatedAt": "2026-11-06T19:02:00Z",
+  "updatedAt": "2026-11-12T11:17:26-06:00",
   "paused": {
     "why": "Waits on a session on the owner's Mac to export the judge lines from guard.log.",
     "decides": "owner",

@@ -2,10 +2,10 @@
   "title": "One helper builds the mutation-test scaffold for both mutate_guard and mutate_sweep",
   "why": "hooks/mutate_guard.py copies the whole lint/ tree with copytree, and janitor/mutate_sweep.py copies a filtered set; rule building-one-home-per-capability (open note from #1504 and #1547, coordinator, 00:02 CST Nov 8).",
   "note": "Held under the item 384 hold. #1504 and #1547 are back with runner 8 (sweep scaffold fixed; 184 of 184 mutants killed). Slug from the coordinator; title by triage. Filed 00:05 CST Nov 8.",
-  "phase": "now",
+  "phase": "next",
   "status": "todo",
   "order": 545,
   "owner": "triage",
   "lane": "",
-  "updatedAt": "2026-11-08T00:03:00-06:00"
+  "updatedAt": "2026-11-12T11:17:26-06:00"
 }

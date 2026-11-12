@@ -1,11 +1,11 @@
 {
   "title": "Refuse `git branch -m` or `-M` on a branch another worktree has checked out",
-  "phase": "now",
+  "phase": "next",
   "status": "todo",
   "order": 103.52,
   "owner": "coordinator",
   "lane": null,
   "why": "A rename moved a branch out from under two agent worktrees ([ended:lane:-merge-guard-flag-from-paths], on #1353; coordinator, 22:57 CST Nov 7). Today only the note branch-rename-moves-worktrees covers it.",
   "note": "A guard change, so a build lane (test-author, builder, reviewer). Done check: a red test where `git branch -m` or `-M` names a branch that another worktree has checked out, and a rename of a branch no worktree holds still passes. Related: step checkout-b-current-branch, the same class (a branch write under another worktree). It is not folded in there, because that lane ([ended:lane:-lane-lint-runs-local-tools]) is already building. A queue-fix lane under the item 384 hold. Slug from the lane; title by triage.",
-  "updatedAt": "2026-11-07T22:58:00-06:00"
+  "updatedAt": "2026-11-12T11:17:26-06:00"
 }

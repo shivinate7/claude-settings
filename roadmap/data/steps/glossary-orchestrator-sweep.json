@@ -2,11 +2,11 @@
   "title": "Rewrite the old 'orchestrator' wording in agents/*.md and the design-explore, design-review and compliance-check skills to the glossary's session roles",
   "phase": "now",
   "status": "ready",
-  "order": 1020,
+  "order": -191,
   "owner": "triage",
   "why": "Owner glossary rulings, 2026-11-10: one name per thing, local and cloud alike.",
   "note": "The #2566 writer did not sweep these files (14:49 CST Nov 10). Glossary rulings G2 and G10. After #2566 merges.",
-  "updatedAt": "2026-11-10T14:49:00-06:00",
+  "updatedAt": "2026-11-12T11:17:26-06:00",
   "lane": "",
   "blockedBy": []
 }

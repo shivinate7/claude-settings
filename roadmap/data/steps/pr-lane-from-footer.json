@@ -2,10 +2,10 @@
   "title": "Triage reads a PR's lane from the PR itself before it relays a message about that PR",
   "why": "At 09:57 CST Nov 8 triage sent the #1969 and #1516 clash to the wrong lane: it took the lane of a step whose note mentioned #1969, not the lane named on #1969.",
   "note": "Filed 09:59 CST Nov 8 by triage for its own mistake (rule building-mistake-names-its-guard). Fix: a small reader prints a PR's head branch and the session its body footer names, and the waiting-page and roadmap skills tell triage to run it before relaying about a PR. Red case: #1969, whose footer names [ended:lane:-notes-fix-page].",
-  "phase": "now",
+  "phase": "next",
   "owner": "triage",
   "lane": "",
   "status": "todo",
   "order": 715,
-  "updatedAt": "2026-11-08T09:59:00-06:00"
+  "updatedAt": "2026-11-12T11:17:26-06:00"
 }

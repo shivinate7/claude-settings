@@ -3,9 +3,9 @@
   "order": 103.57,
   "why": "hooks/feedback_guard.py lines 105-106 and 1171-1172 say the output \"ended with the line `same`\", but `_cleared` now accepts `same` anywhere in the output. Found by lane page-check-at-publish (#1367; coordinator, 23:06 CST Nov 7).",
   "note": "The fix decides whether the text or the code is wrong. Done check: a test pins the chosen form, and the text says the same. Slug and title by triage; no source gave one. Waits under the item 384 hold unless the coordinator counts it as a queue fix. Not a queue fix: it blocks no merge, so it waits under the hold (coordinator, 23:07 CST).",
-  "phase": "now",
+  "phase": "next",
   "status": "todo",
   "owner": "coordinator",
   "lane": null,
-  "updatedAt": "2026-11-07T23:08:00-06:00"
+  "updatedAt": "2026-11-12T11:17:26-06:00"
 }

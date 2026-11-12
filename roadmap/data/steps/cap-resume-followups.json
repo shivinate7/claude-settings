@@ -1,10 +1,10 @@
 {
   "title": "Follow-ups to #1730: a resumed agent's open Bash call is not read as stuck, and two wording fixes",
-  "phase": "now",
+  "phase": "next",
   "status": "todo",
   "order": 53.1,
   "owner": "coordinator",
   "why": "#1730's round 3 left three open items. A foreground Bash call open when an agent is stopped keeps its old time after resume, so the cap lists the resumed agent as stuck.",
   "note": "Starts after #1730's batch merges. From #1730's round-3 open items, lane [ended:lane:-stall-watch-agents], via the coordinator 20:40 CST Nov 7. (1) Debt, conditional: measure whether TaskStop writes a tool_result for the open call; if none, ignore calls older than the resume time. (2) Reword the record and docstring that say a launch reopens an id. (3) Add the resume clause to 'a job counts as finished when ... notice or TaskStop'. Related: stall-watch-resume. Filed 20:41 CST Nov 7.",
-  "updatedAt": "2026-11-07T20:41:00-06:00"
+  "updatedAt": "2026-11-12T11:17:26-06:00"
 }

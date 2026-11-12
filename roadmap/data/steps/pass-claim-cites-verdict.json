@@ -4,5 +4,8 @@
  "status": "todo",
  "repo": "shivinate7/claude-settings",
  "why": "R20, owner 18:36 CST Nov 10 (\"yes\"), relayed by the retrospective session, after a session misread its own echo exit code as lane lint passes (owner shared 17:17 CST). (1) A \"passed\", \"green\" or \"clean\" claim in a report or a message to a parent cites a verdict line from this session's verdict log; the report guard refuses an uncited claim, remedy \"run it through verdict\". (2) Lint, ci-job, tests and the merge tool's release check run only through verdict; a bare run is refused with that form. Rule tokens-run-through-verdict has no enforcer on main today. Both inside existing guards, no new process. Homes: CLAUDE.md tokens-run-through-verdict; decision guard-remedy-not-to-owner. Plan stage 3.6, commit 9918ceb.",
- "source": "owner 2026-11-10 18:36 CST (R20), via retrospective session"
+ "source": "owner 2026-11-10 18:36 CST (R20), via retrospective session",
+ "phase": "now",
+ "order": -197,
+ "updatedAt": "2026-11-12T11:17:26-06:00"
 }

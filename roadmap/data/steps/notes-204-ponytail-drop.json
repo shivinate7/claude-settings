@@ -3,12 +3,13 @@
   "title": "Drop docs/debts/notes.md:204 and the unused ponytail marketplace",
   "status": "todo",
   "repo": "shivinate7/claude-settings",
-  "phase": "next",
+  "phase": "now",
   "lane": "",
   "why": "A stale note and an unused marketplace entry cost reads and mislead.",
   "note": "R41 (owner 13:36 CST Nov 11, \"r41 yes on all\", relayed by the retrospective; plan restart-plan 0f99805, R41 item 6). Keep all 5 mods, 11 skills and shiv-stylisms; fix seven defects. Audit notes: the retrospective's scratchpad, on request. docs/debts/notes.md:204 and the unused ponytail marketplace go.",
   "source": "owner 2026-11-11 13:36 CST, relayed by the retrospective session",
   "owner": "triage",
-  "updatedAt": "2026-11-11T13:39:00-06:00",
-  "blockedBy": []
+  "updatedAt": "2026-11-12T11:17:26-06:00",
+  "blockedBy": [],
+  "order": -194
 }

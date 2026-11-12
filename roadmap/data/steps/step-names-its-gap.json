@@ -2,10 +2,10 @@
   "title": "A roadmap commit that stages a step whose gap key matches an open step's is refused",
   "phase": "now",
   "status": "ready",
-  "order": 0.07,
+  "order": -176,
   "owner": "coordinator",
   "lane": "",
   "why": "One gap filed as several steps splits the work and its review: guard-pipe-on-merge-lint, verdict-pipe-masks-exit and bg-tail-loses-verdict; explore-no-create-session and reviewer-no-session-tools (b619241c4).",
   "note": "Home: roadmap/build.py check_staged on the record branch, which roadmap/hooks/pre-commit runs. Each step names its gap (a link from note to step). Done check: a red test where a commit staging a step whose gap key matches an open step's is refused, then green. From lane process-held-end-to-end's record (#1711), 20:20 CST Nov 7. It gates triage's own roadmap commits. Topic roadmap. Lane started by the coordinator, 20:20 CST. Built as #1750 (base roadmap, head a2e93875e): tool record round 1 haiku FAIL, round 2 sonnet PASS. No grant covers a merge into the roadmap branch: owner item 383 (record-branch-merge), 20:54 CST Nov 7. Follow-ups: gap-keys-backfill, gap-check-merge-rebase. Owner picked a on item 383 at 21:26 CST Nov 7: triage merges a reviewed, green PR into the roadmap branch. The grant lands in .claude/CLAUDE.md standing grants. Doing 05:58 CST Nov 10: open PR #1750 on branch step-names-its-gap (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJL39dinAf2VGG2b3Weo.md on archive/session-handoffs-2026-11-10).",
-  "updatedAt": "2026-11-12T07:22:00-06:00"
+  "updatedAt": "2026-11-12T11:17:26-06:00"
 }

@@ -4,8 +4,8 @@
   "title": "A record-writer may write a scratch .txt file",
   "why": "Lane notes-fix-guard-2 saw a record-writer refused a scratch .txt write; a possible false alarm (coordinator, 00:00 CST Nov 8).",
   "note": "Held under the item 384 hold. First name the guard or tool rule that refused, and check that the scratch path was the agent's own. No existing record-writer write-scope step was found. Title by triage. Filed 00:02 CST Nov 8.",
-  "phase": "now",
+  "phase": "next",
   "order": 543,
   "owner": "triage",
-  "updatedAt": "2026-11-08T00:00:00-06:00"
+  "updatedAt": "2026-11-12T11:17:26-06:00"
 }

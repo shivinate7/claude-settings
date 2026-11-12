@@ -2,10 +2,10 @@
   "title": "The merge tool splits a red batch, and builds the next batch while one runs",
   "phase": "now",
   "status": "ready",
-  "order": 103.505,
+  "order": -177,
   "owner": "coordinator",
   "lane": "",
   "why": "Owner pick on item 386 a (page save, 22:25 CST Nov 7) includes these two parts of the batch builder. Lane merge-builds-batches split them into their own step (coordinator, 22:33 CST).",
   "note": "The batch builder drops the failing lane and rebuilds, per rule git-integration-branch-merge, and builds batch N+1 on N's head while N's CI runs. Stacked on #1815 (merge-builds-batches) instead of waiting for its merge. An owner-pick lane, so the hold lets it start. Slug from the coordinator; title from item 386 option a. Related: step overlapping-batches (done) lets a batch run CI on top of the one ahead; this step makes the tool build it by itself. Lane [ended:lane:-merge-batch-split-and-pipeline] started, stacked on #1815 rather than waiting for its merge; it also takes #1815's flaky-lint note (coordinator, 00:52 CST Nov 8). Ready as draft #1894 (2e0301005), with runner 8, Merge after: #1815 (lane, 04:25 CST Nov 8). The PR files debt drop-red-hits-every-suite (per-job hit map) and adds 8 notes to docs/debts/notes.md. Doing 05:58 CST Nov 10: open PR #1894 on branch merge-batch-split-and-pipeline (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-merge-batch-split-and-pipeline]).",
-  "updatedAt": "2026-11-12T07:22:00-06:00"
+  "updatedAt": "2026-11-12T11:17:26-06:00"
 }

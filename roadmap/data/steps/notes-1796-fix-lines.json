@@ -4,8 +4,8 @@
   "note": "Waits on #1516's note form landing on main. Then triage checks each of the 9 lines; any without a Fix line goes to the notes lane. Title from the coordinator's message. Filed 23:51 CST Nov 7. Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose after code; it waits behind the code it describes.",
   "phase": "now",
   "status": "todo",
-  "order": 539,
+  "order": -171,
   "owner": "triage",
   "lane": "",
-  "updatedAt": "2026-11-11T20:42:00-06:00"
+  "updatedAt": "2026-11-12T11:17:26-06:00"
 }

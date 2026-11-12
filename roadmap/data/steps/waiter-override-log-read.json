@@ -2,10 +2,10 @@
   "title": "Read the waiter's override log for part (b) of waiter-wait-until",
   "why": "Lane waiter-wait-until left part (b) unknown and named this step for it (coordinator, 23:52 CST Nov 7).",
   "note": "Title by triage from the coordinator's message; no source wording beyond the slug. Held under the item 384 hold. Filed 23:54 CST Nov 7.",
-  "phase": "now",
+  "phase": "next",
   "status": "todo",
   "order": 540,
   "owner": "triage",
   "lane": "",
-  "updatedAt": "2026-11-07T23:52:00-06:00"
+  "updatedAt": "2026-11-12T11:17:26-06:00"
 }
