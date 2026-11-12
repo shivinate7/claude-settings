@@ -3229,13 +3229,13 @@ class DoubleBacktickMaskTests(unittest.TestCase):
 
 class DecisionGlossCollapseTests(unittest.TestCase):
     """The gloss tool writes a citation's title after its id. The masker drops that title for every
-    rule (lint/ste_lint.py build_gloss_pattern), so a double negative in a title the tool wrote fires
-    nothing once collapsed. A hermetic fixture folder stands in for a real `docs/decisions/`, so this
-    needs no other repository.
+    rule and for --stats (lint/ste_lint.py build_gloss_pattern), so a double negative in a title the
+    tool wrote fires nothing once collapsed, and the title's words are not counted. A hermetic fixture
+    folder stands in for a real `docs/decisions/`, so this needs no other repository.
     """
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)  # test-temp-standard: this run's folder
         self.decisions_dir = os.path.join(self.tmp.name, "decisions")
         os.makedirs(self.decisions_dir)
         self.addCleanup(self.tmp.cleanup)
@@ -3253,6 +3253,11 @@ class DecisionGlossCollapseTests(unittest.TestCase):
         linter = ste_lint.Linter(dict(ste_lint.DEFAULT_CONFIG))
         return linter.check_text("t.md", text)
 
+    def stats_words(self, text, use_gloss):
+        pattern = ste_lint.build_gloss_pattern(self.decisions_dir) if use_gloss else None
+        ste_lint.set_gloss_pattern(pattern)
+        return ste_lint.file_stats(text, dict(ste_lint.DEFAULT_CONFIG))["words"]
+
     def test_gloss_text_the_tool_wrote_is_not_linted_once_collapsed(self):
         self.write_entry("d-001.md", "D-001", "A title that is not unsafe")
         text = "The team agreed today about D-001, A title that is not unsafe, and it stays plain.\n"
@@ -3260,6 +3265,14 @@ class DecisionGlossCollapseTests(unittest.TestCase):
         self.assertIn("STE013", uncollapsed, "fixture title is not linted without the gloss")
         collapsed = [f.code for f in self.lint(text, use_gloss=True)]
         self.assertNotIn("STE013", collapsed)
+
+    def test_gloss_text_the_tool_wrote_is_not_counted_by_stats_once_collapsed(self):
+        self.write_entry("d-001.md", "D-001", "The rule that holds for every site")
+        text = "All sites follow D-001, The rule that holds for every site today.\n"
+        self.assertEqual(self.stats_words(text, use_gloss=False), 12,
+                         "fixture line is not 12 words without the gloss")
+        self.assertEqual(self.stats_words(text, use_gloss=True), 5,
+                         "gloss text the tool wrote is counted by --stats")
 
     def test_wrong_gloss_for_a_real_id_is_not_collapsed(self):
         self.write_entry("d-001.md", "D-001", "A title that is not unsafe")

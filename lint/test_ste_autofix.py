@@ -32,7 +32,11 @@ SHRINKS_TO_31 = SHRINKS_TO_30[:-1] + " again."
 
 
 class FixtureCountTests(unittest.TestCase):
-    """The word counts of the sentences above, and of the fixes that shorten them."""
+    """The word counts of the sentences above, the fixes that shorten them, each counting rule of
+    count_words ([8.4]-[8.7]), and what the --stats path (file_stats) leaves out."""
+
+    def stats_words(self, text):
+        return ste_lint.file_stats(text, dict(ste_lint.DEFAULT_CONFIG))["words"]
 
     def test_long_counts_38_words(self):
         self.assertEqual(ste_lint.count_words(LONG), 38)
@@ -44,6 +48,36 @@ class FixtureCountTests(unittest.TestCase):
         fixed_past, _ = ste_lint.apply_fixes(SHRINKS_TO_31)
         self.assertEqual(ste_lint.count_words(fixed_to), 30)
         self.assertEqual(ste_lint.count_words(fixed_past), 31)
+
+    def test_quoted_text_counts_as_one_word(self):
+        self.assertEqual(ste_lint.count_words('He said "stop the pump now" and left.'), 5,
+                         "quoted text is not counted as one word")
+
+    def test_a_lone_quote_opens_no_quoted_span(self):
+        self.assertEqual(ste_lint.count_words('The 5" pipe stays in the line.'), 7,
+                         "a lone double quote swallows the words after it")
+
+    def test_parenthesized_text_counts_as_one_word(self):
+        self.assertEqual(ste_lint.count_words("Run the pump (the large one) now."), 5,
+                         "parenthesized text is not counted as one word")
+
+    def test_number_with_its_unit_counts_as_one_word(self):
+        self.assertEqual(ste_lint.count_words("Set the cache to 512 MB now."), 6,
+                         "a number with its unit is not counted as one word")
+
+    def test_code_span_counts_as_one_word_in_stats(self):
+        self.assertEqual(self.stats_words("Run `a b c d e` now.\n"), 3,
+                         "a backtick code span is not counted as one word in --stats")
+
+    def test_code_span_with_comment_openers_counts_as_one_word_in_stats(self):
+        self.assertEqual(self.stats_words('Run `x = "/* a */"` then `y = "// b"` now.\n'), 5,
+                         "a code span holding comment openers is not counted as one word in --stats")
+
+    def test_fenced_template_literal_adds_no_words_to_stats(self):
+        fence = ("```js\nconst s = `line one " + " ".join(["word"] * 20)
+                 + "\nline two // keep /* keep */`;\n```\n\n")
+        self.assertEqual(self.stats_words(fence + "Plain words here.\n"), 3,
+                         "a fenced block adds words to --stats")
 
 
 # ------------------------------------------------------------------ 1. golden grammar set
