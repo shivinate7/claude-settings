@@ -1,0 +1,14 @@
+{
+ "id": "green-hook-skips-draft-run",
+ "title": "A CI status line never calls a draft run or a run with skipped required jobs green",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL2RSxowu3Q9ypQGB7G",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A reader trusts the green line and merges an untested head; the merge tool's own checks should still refuse.",
+ "source": "coordinator 12:16 CST Nov 12, from batch runner 10 at 12:15 CST on #2814",
+ "note": "A PostToolUse hook on update_pull_request printed \"CI green on d783a41: no failing jobs\" when the only run on that head was the draft run (27 jobs skipped, 1 success); the ready run had not started. Fix: a run whose required jobs were skipped, or a draft run, never reads green; say \"no ready run yet\". Red first. Lane started 12:16 CST, before this step was filed (coordinator pick, page item 585).",
+ "updatedAt": "2026-11-12T12:18:16-06:00"
+}
