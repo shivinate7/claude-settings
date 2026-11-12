@@ -557,6 +557,9 @@ def expect_block(name, p, named=(), unnamed=()):
     reason = block_reason(p) or ""
     check(name + ": blocks", p.code == 0 and block_reason(p) is not None, p.desc())
     check("%s: cites decision owner-feedback-inbox" % name, "decision owner-feedback-inbox" in reason, reason)
+    # Catches: the block reason naming the retired "Feedback inbox" heading. The heading names the feedback log.
+    check("%s: the reason opens with the feedback log's name" % name,
+          reason.startswith("Feedback log (decision owner-feedback-inbox): "), reason)
     for n in named:
         check("%s: names %s" % (name, n), n in reason, reason)
     for n in unnamed:
@@ -836,8 +839,11 @@ def case_guard_notes_heading_is_plain_text():
 def case_guard_unreadable_inbox_blocks_and_names_the_file():
     cfg, sid = new_cfg(), "unreadable-dir"
     os.makedirs(inbox_of(cfg, sid))
-    expect_block("guard: unreadable inbox (a directory) blocks", guard(cfg, sid),
+    p = guard(cfg, sid)
+    expect_block("guard: unreadable inbox (a directory) blocks", p,
                  named=(os.path.basename(inbox_of(cfg, sid)),))
+    check("guard: unreadable inbox (a directory) says the feedback log cannot be read",
+          "the feedback log %s cannot be read" % os.path.basename(inbox_of(cfg, sid)) in (block_reason(p) or ""), p.desc())
 
     cfg, sid = new_cfg(), "unreadable-bytes"
     os.makedirs(os.path.dirname(inbox_of(cfg, sid)), exist_ok=True)
@@ -1022,6 +1028,8 @@ def case_guard_apple_tv_burst_names_where_items_go():
           example_item_in(reason), reason)
     check("apple tv: the reason says items added in any later turn count",
           "any later turn" in reason, reason)
+    check("apple tv: the reason says the check reads the feedback log at each Stop",
+          "reads the feedback log at each Stop" in reason, reason)
 
 
 def case_guard_burst_heading_after_a_jotted_message_names_its_line():
@@ -2503,7 +2511,7 @@ def case_reorient_malformed_line_keeps_the_note():
         check("reorient malformed (%s): good open ids still print" % tag,
               ends_with_note(p, note), p.desc())
         check("reorient malformed (%s): the note does not fail on stderr" % tag,
-              "inbox note failed" not in p.err, p.desc())
+              "feedback log note failed" not in p.err, p.desc())
 
 
 def case_reorient_nothing_when_no_open_items():
@@ -2538,7 +2546,7 @@ def case_reorient_unreadable_inbox_prints_message_and_one_stderr_line():
             name = "reorient unreadable (%s, %s)" % (label, state_tag(ok_state))
             check("%s: the message prints, with no note" % name, ends_with_note(p, ""), p.desc())
             check("%s: one stderr line names the failure" % name,
-                  len(err) == 1 and "inbox note failed" in err[0], p.desc())
+                  len(err) == 1 and "feedback log note failed" in err[0], p.desc())
 
 
 # --------------------------------------------------------------------------- capture-all and burst cases

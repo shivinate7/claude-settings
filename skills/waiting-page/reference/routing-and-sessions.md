@@ -17,7 +17,7 @@ ask with no `reply` whose `owner` is the old writer is taken too ("Rotate the wr
 
 1. `update` the ask (never `set`) with `owner` (itself, or that session) and `read`, the time now.
 2. The owner session answers with `reply` and `answered` set to now. A question with a plain answer needs nothing else.
-3. Feedback (about the page, a rule or the way of working) is filed like a chat message. Jot it to the feedback inbox,
+3. Feedback (about the page, a rule or the way of working) is filed like a chat message. Jot it to the feedback log,
    `~/.claude/handoffs/<session id>.inbox.md`: a heading `### <stamp>`, then the text in a backtick fence (use more
    backticks if the text holds three), then one item line under the fence: `- fb-<HHMM>-<n> [<kind>] -> <home>`.
    The stamp is Central time with its offset, for example `2026-11-10 12:08 CST (UTC-06:00)`. Read the time from

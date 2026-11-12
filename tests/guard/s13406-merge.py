@@ -910,7 +910,7 @@ def role_allow(name, command, transcript, env=ROLE_ENV, **kw):
 role_allow("a batch runner records batch-runner", MERGE_SHIM + " --role batch-runner", role_path("runner"))
 # decision session-tiers: the coordinator never merges, so its own record does not allow the coordinator role.
 role_refuse("a coordinator records coordinator and is refused: the coordinator never merges", MERGE_SHIM + " --role coordinator",
-          role_path("coordinator"))
+          role_path("coordinator"), carries=("post the review log on the PR for your branch",))  # the refusal names the log the lane posts
 role_refuse("a batch runner that records coordinator is refused", MERGE_SHIM + " --role coordinator",
           role_path("runner"))
 role_refuse("a coordinator that records batch-runner is refused", MERGE_SHIM + " --role batch-runner",

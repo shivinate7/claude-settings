@@ -140,15 +140,15 @@ block, then the rewrite runs unchecked. A check that cannot run prints an UNKNOW
 Cost: a regex over the reply; on a claim, one pass over the transcript this hook already holds and one refusals file read;
 on a claim with a slug in parentheses, one read of the rule files per run; no file written, no timer, no log.
 
-Review-record check (incident: on Nov 7, 3 of 67 open PRs had a review record): in a lane (own get_session record tagged cs-build:lane, or with a parent), a reply line outside fences
+Review-log check (incident: on Nov 7, 3 of 67 open PRs had a review log): in a lane (own get_session record tagged cs-build:lane, or with a parent), a reply line outside fences
 that holds `round <N>` or `reviewer` and a capital PASS or PASSED claims a PASS, in either order; an inline code span counts. A PASS a negation governs ("not PASS",
 "did not PASS") claims nothing, nor does a PASS whose clause places it in the past ("was before the fix", "went stale"). Clauses split on `,`, `;` and `--`; a
 history word in another clause hides no claim. The line claims it for each PR it names, as
-`#<N>`, `PR <N>` or a github pull URL. The Stop is refused unless each such PR has a review record comment for its live head: the newest comment whose first line is
+`#<N>`, `PR <N>` or a github pull URL. The Stop is refused unless each such PR has a review log comment for its live head: the newest comment whose first line is
 the review marker, read by merge/merge.py parse_review (never retyped here), naming the PR, and that merge/merge.py live_review_state calls done for the live head,
 the one read `merge --reviewed` makes: a record survives clean merges of main, and a clean-merge read that cannot run keeps it stale, so it still blocks. A claim with no
 PR on its line is refused and asks for the PR. With no record for the live head, the remedy names the act (`merge <pr> --review-record ...`, then post the
-record) and never the live head; a record live_review_state reads open or held is refused with that state and its why, and no post act. A newest record that exists but does not parse is refused in its own words (PR named, "does not parse", the same
+log) and never the live head; a record live_review_state reads open or held is refused with that state and its why, and no post act. A newest record that exists but does not parse is refused in its own words (PR named, "does not parse", the same
 remedy as a missing record, with the post as a new comment), not as a missing record; it names the CI line as the cause only when text follows that line before the first `---` line. merge/merge.py is loaded by hooks/guard_merge.py merge_module: beside the hooks' real path (the installed symlink), then in the
 checkout the global rules file names (the copied cloud layout); a tool it cannot load is UNKNOWN. Reads: `gh api` REST only, two per claimed PR
 (the PR, then its issue comments, every page); a Stop with no claim, or in an owner-facing session, reads nothing. A failed read, or an error in the check, never
@@ -2558,7 +2558,7 @@ def cannot_problem(records, text, refused=()):
                     for head, lines in ((CANNOT_NO_TRY, no_try), (CANNOT_NO_CHECK, no_check)) if lines)
 
 
-# Review-record check: a lane's round PASS claim needs a review record for the PR's live head. See the module docstring.
+# Review-log check: a lane's round PASS claim needs a review log for the PR's live head. See the module docstring.
 REVIEW_TRIGGER_RE = re.compile(r"(?i:\bround\s+\d+\b|\breviewer\b)")
 REVIEW_PASS_RE = re.compile(r"\bPASS(?:ED)?\b")
 # A PASS that a negator governs: the negator, at most one word, then PASS.
@@ -2572,27 +2572,27 @@ REVIEW_PR_RE = re.compile(r"(?<![\w&])#(\d+)\b|\bPRs?\s*#?(\d+)\b|/pull/(\d+)\b"
 REVIEW_READ_TIMEOUT = 30  # seconds for one gh read
 REVIEW_CHECK_BUDGET = 70  # seconds for the whole review check of one reply, under the Stop hook's 80 s timeout (settings.json); the question and relay checks run outside this budget
 REVIEW_NO_PR = (
-    "Review-record guard: a line of this reply claims a review PASS but names no pull request. Name it as #<n> on that "
-    "line, and give it a review record for its live head (`merge <pr> --review-record ...`, then post the record on the PR)."
+    "Review-log guard: a line of this reply claims a review PASS but names no pull request. Name it as #<n> on that "
+    "line, and give it a review log for its live head (`merge <pr> --review-record ...`, then post the log on the PR)."
 )
 REVIEW_NO_RECORD = (
-    "Review-record guard: this reply claims a review PASS for PR #%d, and that PR has no review record for its live head. "
+    "Review-log guard: this reply claims a review PASS for PR #%d, and that PR has no review log for its live head. "
     "Remedy: have the reviewer run `merge %d --review-record --head <the head the reviewer read> --kind <kind> --guard "
-    "<yes|no> --round <N:ROLE:MODEL:VERDICT>`, post the record it prints as a comment on PR #%d, then report again."
+    "<yes|no> --round <N:ROLE:MODEL:VERDICT>`, post the log it prints as a comment on PR #%d, then report again."
 )
 # The record for the live head is posted, but merge's review_state reads it open or held: name that state and its why.
 REVIEW_NOT_DONE = (
-    "Review-record guard: this reply claims a review PASS for PR #%d, but merge reads its review record for the live head "
+    "Review-log guard: this reply claims a review PASS for PR #%d, but merge reads its review log for the live head "
     "as %s: %s. Review is not done, so no PASS claim yet. Report the review state as it stands."
 )
 REVIEW_UNPARSED = (
-    "Review-record guard: this reply claims a review PASS for PR #%d, and the newest review record on that PR does not parse, "
-    "so merge reads no record from it.%s Remedy: have the reviewer run `merge %d --review-record --head <the head the reviewer "
-    "read> --kind <kind> --guard <yes|no> --round <N:ROLE:MODEL:VERDICT>`, post the record it prints as a new comment on "
+    "Review-log guard: this reply claims a review PASS for PR #%d, and the newest review log on that PR does not parse, "
+    "so merge reads no review log from it.%s Remedy: have the reviewer run `merge %d --review-record --head <the head the reviewer "
+    "read> --kind <kind> --guard <yes|no> --round <N:ROLE:MODEL:VERDICT>`, post the log it prints as a new comment on "
     "PR #%d, then report again."
 )
 REVIEW_UNPARSED_CI = (" Cause: the CI line must be the last line before `---`, and nothing may follow it; a line after the CI "
-                      "line makes the record unreadable.")
+                      "line makes the review log unreadable.")
 
 
 def review_claims(text):
@@ -2639,7 +2639,7 @@ def _gh_json(args, cwd, end):
 
 
 def _newest_record(n, comments, merge_mod):
-    """(parsed record, body) of the newest review record comment of `comments` (oldest first). No marked comment is
+    """(parsed record, body) of the newest review log comment of `comments` (oldest first). No marked comment is
     (None, None); a marked comment that does not parse is (None, its body), so the caller needs no second read."""
     bodies = [c.get("body") or "" for c in comments if isinstance(c, dict)]
     marked = [b for b in bodies if b.splitlines()[:1] == [merge_mod.REVIEW_MARKER]]
@@ -2687,7 +2687,7 @@ def review_record_problem(hook, text):
             comments = [c for page in pages for c in (page if isinstance(page, list) else [page])]
             rec, body = _newest_record(n, comments, merge_mod)
         except Exception as err:  # a read that could not run is UNKNOWN, never clear and never a block
-            notes.append("Review-record guard: UNKNOWN, the check read nothing for PR #%d (%s)." % (n, type(err).__name__))
+            notes.append("Review-log guard: UNKNOWN, the check read nothing for PR #%d (%s)." % (n, type(err).__name__))
             continue
         if rec is None and body is not None:
             cause = REVIEW_UNPARSED_CI if _text_after_ci_line(body, merge_mod) else ""
@@ -2701,7 +2701,7 @@ def review_record_problem(hook, text):
             elif state != "done":
                 reasons.append(REVIEW_NO_RECORD % (n, n, n))
             if getattr(merge_mod, "REVIEW_SURVIVAL_UNKNOWN", None) and merge_mod.REVIEW_SURVIVAL_UNKNOWN in why:
-                notes.append("Review-record guard: PR #%d reads stale: %s." % (n, why))
+                notes.append("Review-log guard: PR #%d reads stale: %s." % (n, why))
     return " ".join(reasons), " ".join(notes)
 
 
@@ -3199,7 +3199,7 @@ def main():
     try:
         review, review_note = review_record_problem(hook, text)
     except Exception as err:  # a check that could not run is UNKNOWN, never silence and never a block
-        review_note = "Review-record guard: UNKNOWN, the check did not run (%s)." % type(err).__name__
+        review_note = "Review-log guard: UNKNOWN, the check did not run (%s)." % type(err).__name__
     note = " ".join(filter(None, [note, hand_note, review_note]))
     relay = []
     if last_human_idx is not None:  # a transcript with no human message never ran the relay and answered checks

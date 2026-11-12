@@ -12,6 +12,7 @@ file may keep its name only on a line whose comment holds the opt-out marker. A 
 prose ("the test will pass") is a reviewer's call, not this test's. The widened glossary check will replace this list.
 """
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -189,6 +190,65 @@ class LineScope(unittest.TestCase):
         self.assertEqual(hits(repo, self.OLD), [other])
 
 
+# The prose the glossary renames reach. A reader meets these words, and check_glossary.py never reads prose, so this
+# scan names the listed files that still hold a retired word. Only the listed paths are read. A kept name (a flag, a
+# slug, a file path) is no hit, and docs/ is not listed: its records keep their words.
+PROSE_PATHS = ("README.md", "agents/reviewer.md", "settings.json", "skills/project-ops", "skills/waiting-page")
+RENAMED_PROSE = re.compile(r"\breview records?\b|\binbox file\b|\bfeedback inbox\b|\bper-session inbox\b"
+                           r"|(?<![-./\w])inbox(?:es)?(?![-_\w]|\.\w)", re.I)  # a sentence's period ends it; `.inbox.md` is a path
+
+
+def renamed_term(line):
+    """True when a line holds a retired word for the review log or the feedback log."""
+    return RENAMED_PROSE.search(line) is not None
+
+
+def prose_paths(repo):
+    """The tracked files in the prose scope: each listed file, and each tracked file under a listed folder."""
+    return sorted(p for p in tracked(repo) if any(p == s or p.startswith(s + "/") for s in PROSE_PATHS))
+
+
+def prose_hits(repo, path):
+    """(line number, text) of each line of `path` that holds a retired word."""
+    with open(os.path.join(repo, path), encoding="utf-8", errors="replace") as handle:
+        return [(n, line.strip()) for n, line in enumerate(handle, 1) if renamed_term(line)]
+
+
+class RenamedProse(unittest.TestCase):
+    repo = ROOT
+
+    def test_the_scanner_flags_the_old_words_and_passes_the_kept_names(self):
+        for line in ("Print the review record for the head.", "Jot it to the feedback inbox.",
+                     "The check reads the inbox file at each Stop.", "Saves nothing to the inbox.",
+                     "Read the review records at each Stop.", "Two inboxes hold the notes."):
+            self.assertTrue(renamed_term(line), line)
+        for line in ("Each PR keeps its `pr-review-record`.", "merge <pr> --review-record prints the review log.",
+                     "Read `<session_id>.inbox.md` and `owner-feedback-inbox`.", "The review log is done."):
+            self.assertFalse(renamed_term(line), line)
+
+    def test_the_prose_scope_names_the_files_it_must_read(self):
+        paths = prose_paths(self.repo)
+        self.assertIn("README.md", paths, "the scope lacks README.md: %r" % paths)  # scope first, then the hits
+        self.assertIn("skills/waiting-page/SKILL.md", paths, "the scope lacks skills/waiting-page/SKILL.md")
+        self.assertIn("skills/project-ops/templates/operating-model.md", paths, "the scope lacks operating-model.md")
+
+    def test_no_prose_file_in_scope_keeps_a_retired_word(self):
+        for path in prose_paths(self.repo):
+            with self.subTest(path=path):
+                numbers = [n for n, _text in prose_hits(self.repo, path)]
+                self.assertEqual(numbers, [], "%s keeps a retired word on line(s) %s" % (path, numbers))
+
+    def test_the_kept_names_stay_in_the_prose(self):
+        # Green control: the flag, the slug and the file path keep their spelling, before and after the renames.
+        for path, kept in (("README.md", "merge <pr> --review-record"),
+                           ("settings.json", "--review-record"),
+                           ("skills/project-ops/templates/operating-model.md", "owner-feedback-inbox"),
+                           ("skills/waiting-page/reference/routing-and-sessions.md", ".inbox.md")):
+            with self.subTest(path=path):
+                with open(os.path.join(self.repo, path), encoding="utf-8") as handle:
+                    self.assertIn(kept, handle.read(), "%s lost its kept name %s" % (path, kept))
+
+
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
@@ -196,6 +256,6 @@ def tearDownModule():
 if __name__ == "__main__":
     if "--repo" in sys.argv:
         i = sys.argv.index("--repo")
-        RetiredNames.repo = sys.argv[i + 1]
+        RetiredNames.repo = RenamedProse.repo = sys.argv[i + 1]
         del sys.argv[i:i + 2]
     unittest.main()

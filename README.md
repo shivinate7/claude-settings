@@ -169,10 +169,10 @@ merge <pr> --confirm [--session NAME]   lock, claim, rebuild the records page, p
 merge --unlock [BRANCH] remove the merge lock on BRANCH (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
 merge -C PATH <pr> ...  act in the checkout at PATH, not the one the process stands in. Works with every form above and with --lane-lint. The last -C wins.
 merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...] [--net-value V]
-                        print the review record for the head SHA that was reviewed. Exit 1 when the PR's live head is another sha.
+                        print the review log for the head SHA that was reviewed. Exit 1 when the PR's live head is another sha.
                         Posts nothing: the lane posts it as a PR comment.
-merge --reviewed        one line per open PR that has a review record comment: its state (bad when the newest does not parse) and live CI.
-                        Then the PRs with no record.
+merge --reviewed        one line per open PR that has a review log comment: its state (bad when the newest does not parse) and live CI.
+                        Then the PRs with no review log.
 merge --reviewed --root DIR [--root DIR ...]
                         the same list for each repo checkout DIR, one block each, then one batch line per repo:
                         `open batch now: OWNER/NAME #a`, or `build next batch on the running head: ...`. A failed root prints unknown.
@@ -194,7 +194,7 @@ merge --touches [--run RUN_ID] [--case TEXT ...] [--file PATH ...]
                         Cost: API reads only. The pull list, one call per page of 100. One files read (its pages) per open PR.
                         For --run, the jobs read, one call per page of 100, and one log read per failed job but the rollup.
 merge --release-check N [N ...] [--lint N@SHA:PASS|UNKNOWN-AT-CAP|FAIL ...]
-                        one line per PR before it goes to a batch: `#N PASS`, or `#N FAIL: reasons`. Checks: open, review record done at the
+                        one line per PR before it goes to a batch: `#N PASS`, or `#N FAIL: reasons`. Checks: open, review log done at the
                         live head and unedited, lint verdict given for the live head (SHA a full lowercase 40-hex; a PASS on UNKNOWN-AT-CAP
                         reads `#N PASS (lint unknown at cap)`) and not FAIL, clean merge with the base, and a stacked base's PR in the call
                         and passing. A check that cannot run is a FAIL, so a missing line is never a pass. Exit 0 only when all PASS.

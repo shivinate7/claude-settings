@@ -125,15 +125,15 @@ parent, or miss a message while busy.
 - Never wait on the owner. A step that needs the owner's answer gets a note line
   `Deferred (owner, <date>): <why>`, and waits. All other work runs, in roadmap order.
 - A lane that hits a question for the owner parks that part, and goes on.
-- A lane posts its review record on its PR after each round (claude-settings record
+- A lane posts its review log on its PR after each round (claude-settings record
   `pr-review-record`). The batch runner finds it. The lane first runs `merge --lane-lint <pr>`. The batch
   runner runs it again on each lane head before the join, and refuses a red lane (claude-settings record
   `lanes-run-no-full-ci-job`). A lane never rebases onto main and never merges.
 - A record that files an owner ruling gets a round 1 review before it merges. Round 1 checks two things only (claude-settings decision `docs-only-prs-skip-review`).
-- Nobody pushes to a PR's head once a done review record is posted for that head, until the merge
+- Nobody pushes to a PR's head once a done review log is posted for that head, until the merge
   result is back. The exception is the fix that a FAIL round calls for, such as the round-1 fix on a
   `delete-only` change with Guard or check `no`, which reads done (claude-settings record
-  `pr-review-record`). That push makes the record stale, so the lane posts a new review record for the
+  `pr-review-record`). That push makes the record stale, so the lane posts a new review log for the
   new head. When the repo holds a standing merge grant, the batch runner merges under it. The owner is
   not asked.
 - A session that waits on CI sets a one-time check-in when it starts to wait, and again after each red job, each wider apart.
@@ -150,7 +150,7 @@ parent, or miss a message while busy.
 - Only triage writes new steps, merges, order and closes. Another session sends the item to triage,
   with the owner's message attached.
 - Owner feedback about another repo goes to that repo's triage, with the owner's message attached
-  (decision owner-feedback-inbox, one feedback inbox per repo).
+  (decision owner-feedback-inbox, one feedback log per repo).
 - A session rewrites the note, status and brief of a step it works on.
 - The roadmap is a current record, not a log. Rewrite a note to what is true now. Keep each ruling
   as one dated line.

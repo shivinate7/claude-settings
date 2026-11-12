@@ -564,7 +564,7 @@ def run_reorient_cleared(payload):
 
 
 def inbox_note(session_id):
-    """The owner feedback inbox's "After compaction" line (decision owner-feedback-inbox): the open
+    """The owner feedback log's "After compaction" line (decision owner-feedback-inbox): the open
     item ids (ruling, task, standing) from <session_id>.inbox.md. "" when there is nothing to say.
     Never raises: the reorient message must still print."""
     try:
@@ -576,7 +576,7 @@ def inbox_note(session_id):
         with open(paths[0], encoding="utf-8") as f:
             ids = feedback_guard.open_ids(feedback_guard.parse(f.read()))
     except Exception as e:
-        sys.stderr.write("precompact_handoff: inbox note failed: %s\n" % e)
+        sys.stderr.write("precompact_handoff: feedback log note failed: %s\n" % e)
         return ""
     if not ids:
         return ""
