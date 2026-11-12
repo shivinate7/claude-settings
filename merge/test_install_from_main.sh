@@ -942,7 +942,7 @@ sys.stdout.buffer.write(hits[0].encode("utf-8"))
 # trunk (the clone's checkout is on trunk, so main is free), main (the clone's own checkout is on
 # main), or linked (a linked worktree <dir>/linked holds main). The clone holds the real merge/install_from_main.sh, a stub install.sh that appends the
 # commit it ran from to $HOME/ran-install.txt, and a stub install.ps1. The config dir's CLAUDE.md
-# points at the pin.
+# points at the pin. $4 = payload puts the real install.sh in the clone instead of the stub (case 58).
 hook_fixture() {
   d="$1"
   make_shim "$d/shim"
@@ -954,11 +954,15 @@ hook_fixture() {
   git -C "$d/clone" config user.name t
   mkdir -p "$d/clone/merge"
   cp "$REPO_ROOT/merge/install_from_main.sh" "$d/clone/merge/install_from_main.sh"
-  cat > "$d/clone/install.sh" <<'EOF'
+  if [ "${4:-stub}" = payload ]; then
+    payload_files "$d/clone"   # the real install.sh and landed-dirs.txt (case 58)
+  else
+    cat > "$d/clone/install.sh" <<'EOF'
 #!/bin/sh
 printf '%s\n' "$(git -C "$(dirname "$0")" rev-parse HEAD)" >> "$HOME/ran-install.txt"
 EOF
-  printf 'stub\n' > "$d/clone/install.ps1"
+    printf 'stub\n' > "$d/clone/install.ps1"
+  fi
   printf 'notes\n' > "$d/clone/notes.txt"
   git -C "$d/clone" add -A
   git -C "$d/clone" commit -q -m init
@@ -1830,7 +1834,66 @@ case56() {
   else ok "$name"; fi
 }
 
-ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31 case32 case33 case34 case35 case36 case37 case38 case39 case40 case41 case42 case43 case44 case45 case46 case47 case48 case49 case50 case51 case52 case53 case54 case55 case56"
+# ---- Case 57: CLAUDE_SETTINGS_REF=main moves a pin at origin's stable to origin's main ----
+# Case 49 starts with the pin already at main. Here the pin sits at origin's stable, which main has moved past,
+# so the helper must move it to main's commit and not leave it on stable.
+case57() {
+  name="case57: the helper with CLAUDE_SETTINGS_REF=main moves a pin at origin's stable to origin's main and installs from it"
+  d="$work/case57"; h="$d/home"; SHIM="$d/shim"
+  hook_fixture "$d" trunk ahead
+  git -C "$d/clone" fetch -q origin
+  git -C "$d/clone-live" checkout -q --detach "$c1"
+  if [ "$(git -C "$d/clone" rev-parse refs/remotes/origin/stable)" != "$c1" ] \
+     || [ "$(git -C "$d/clone" rev-parse refs/remotes/origin/main)" != "$m1" ] \
+     || [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$c1" ] || [ "$m1" = "$c1" ]; then
+    bad "$name" "FIXTURE the pin is not at origin's stable $c1, or origin's main $m1 is not past it"
+    return
+  fi
+  CLAUDE_SETTINGS_REF=main
+  export CLAUDE_SETTINGS_REF
+  run_live "$d/clone"
+  unset CLAUDE_SETTINGS_REF
+  if [ "$rc" -ne 0 ]; then bad "$name" "helper exited $rc: $out"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$m1" ]; then bad "$name" "the pinned checkout is at $(git -C "$d/clone-live" rev-parse HEAD), want origin's main $m1 under CLAUDE_SETTINGS_REF=main: the pin stayed on stable"
+  elif [ "$(tail -n 1 "$h/ran-install.txt" 2>/dev/null)" != "$m1" ]; then bad "$name" "the installer did not run last from the pin at $m1: [$(cat "$h/ran-install.txt" 2>/dev/null)]"
+  else ok "$name"; fi
+}
+
+# ---- Case 58: origin's stable deleted, the clone's copy stale -> the real install.sh exits 0, writes its links, one WARN ----
+# The pin sits at the stale copy of stable (c0). Origin has no stable branch, so the helper pins local main (m1)
+# and prints one WARN line. Its install.sh is the real one, so it must read the commit the helper pinned, not the stale copy.
+case58() {
+  name="case58: the helper with origin's stable deleted and the clone's copy stale runs the real install.sh, which exits 0, links the config and prints one WARN naming stable"
+  if [ "$LINKS_OK" != yes ]; then skip "$name" "no symlink rights here, so the link check cannot run"; return; fi
+  d="$work/case58"; h="$d/home"; SHIM="$d/shim"
+  hook_fixture "$d" trunk ahead payload
+  git -C "$d/origin.git" update-ref -d refs/heads/stable
+  if git -C "$d/origin.git" rev-parse -q --verify refs/heads/stable >/dev/null; then
+    bad "$name" "FIXTURE origin still has a stable branch"
+    return
+  fi
+  if [ "$(git -C "$d/clone" rev-parse refs/remotes/origin/stable)" != "$c0" ] \
+     || [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$c0" ] \
+     || [ "$(git -C "$d/origin.git" rev-parse refs/heads/main)" != "$m1" ] || [ "$m1" = "$c0" ]; then
+    bad "$name" "FIXTURE the clone's origin/stable is not the stale $c0, the pin is not at it, or origin's main is not past it"
+    return
+  fi
+  run_live "$d/clone"
+  cfg="$h/.claude-cfg"
+  warns=$(printf '%s\n' "$out" | grep -c 'WARN')
+  if printf '%s' "$out" | grep -q 'is not detached at'; then
+    bad "$name" "install.sh refused the pin: it read the stale origin/stable copy, not the commit the helper pinned: $out"
+  elif [ "$rc" -ne 0 ]; then bad "$name" "helper exited $rc: $out"
+  elif grep -q 'exit=[1-9]' "$cfg/claude-settings-install.log" 2>/dev/null; then bad "$name" "an install log end line exited non-zero: $(cat "$cfg/claude-settings-install.log")"
+  elif [ ! -L "$cfg/settings.json" ]; then bad "$name" "settings.json in CLAUDE_CONFIG_DIR is not a link, so the install wrote no config link: $out"
+  elif ! cmp -s "$cfg/settings.json" "$d/clone-live/settings.json"; then bad "$name" "the settings.json link does not read the pinned checkout's file"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$m1" ]; then bad "$name" "the pinned checkout is at $(git -C "$d/clone-live" rev-parse HEAD), want local main $m1 once origin's stable is gone"
+  elif [ "$warns" -ne 1 ]; then bad "$name" "want one WARN line in the run's output, got $warns: $out"
+  elif ! printf '%s\n' "$out" | grep -q 'WARN.*stable'; then bad "$name" "the one WARN line does not name stable: $out"
+  else ok "$name"; fi
+}
+
+ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31 case32 case33 case34 case35 case36 case37 case38 case39 case40 case41 case42 case43 case44 case45 case46 case47 case48 case49 case50 case51 case52 case53 case54 case55 case56 case57 case58"
 if [ $# -gt 0 ]; then WANT="$*"; else WANT="$ALL"; fi
 for c in $WANT; do "$c"; done
 
