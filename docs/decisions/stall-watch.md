@@ -116,36 +116,42 @@ parsing closes it. Its transcript is `<dir of the session file>/<file stem>/suba
 built with `os.path`. The launch's `outputFile` is the fallback. The age is that file's mtime. A row names
 the agent id and the remedy: stop it, then resume it by name, or send a fresh reviewer the prior report
 (`roles-resume-by-name`). The listing rules are the shell's: once per crossing, against the previous Stop.
-A transcript found in neither place is listed as unknown, once. An agent is not listed as quiet while a tool_use in the read window has no tool_result: that is one long call, not a stall. The check reads that from the end of the
+A transcript found in neither place is listed as unknown, once. An agent is not listed as quiet while a tool_use in the read window has no tool_result: that is one long call, not a stall, except a Bash or
+PowerShell call at least 900 s old (below). The check reads that from the end of the
 transcript, for a quiet agent only. The read is the last 64 KB. It doubles until it holds a whole last
-record. An empty transcript, or one whose every tool_use in the read window has its tool_result, is listed when quiet. A transcript that cannot be
+record, up to `TAIL_MAX`, 32 MB. An empty transcript, or one whose every tool_use in the read window has its tool_result, is listed when quiet. A transcript that cannot be
 read is listed. An open call with `run_in_background` true is not busy: a quiet agent with one is listed as quiet.
 Cost (`outcomes-mechanize-rules`): one `stat` per running agent at each Stop, and one read of the
 transcript's end for each agent that is quiet, listed or not. No new process, timer or file. Case
-`A8_cost_one_stat_per_running_agent_and_a_read_only_when_quiet` counts both.
+`A8_cost_one_stat_per_running_agent_and_a_read_only_when_quiet` counts both, for an agent with no
+earlier summary.
 Limits: a session that is idle with no Stop sees nothing until its next Stop. A TaskStop or a terminal
 notice (completed, failed, killed or stopped) closes an agent id for the whole transcript. So an agent
 stopped or finished, then resumed under the same id, is never listed again (debt `agent-resume-reads-closed`,
 an agent resumed after it closed). A model turn longer than the age would list a busy agent. Measured on 5 local agent transcripts
 (559 records, 2026-11-07): the longest gap between records was 206 s, under the 300 s age.
 
-An agent whose oldest open Bash or PowerShell call is older than `OPEN_CALL_CAP`, 900 s, is listed. Its
+An agent whose oldest open Bash or PowerShell call is at least `OPEN_CALL_CAP`, 900 s, old is listed. Its
 row says it is stuck in one tool call and names the tool (coordinator ruling, 2026-11-07 18:38 CST; scope
-ruling, 19:19 CST). Reason: Bash's maximum is 600 s, so an older call is no long job but a hang, and an
-agent in one hung call never showed as quiet. Other tools (Agent, Task, Workflow, MCP) have no known
+ruling, 19:19 CST). Reason: Bash's default maximum timeout is 600 s, so an older call is no long job but a
+hang, and an agent in one hung call never showed as quiet. The env var `BASH_MAX_TIMEOUT_MS` can raise that
+maximum; it is unset here. PowerShell's maximum is not verified. Other tools (Agent, Task, Workflow, MCP) have no known
 maximum, so an open call of one reads busy. The age is the oldest open foreground Bash or PowerShell call
 with a readable timestamp, from its assistant record. An untimed call or a background call beside it does not
 hide it. An open call whose only candidates have no readable timestamp is not listed, since a false alarm is
 worse. The stuck row also needs the transcript quiet past the quiet age. Its crossing is the later of the
-call's time plus the cap and the transcript's mtime plus the quiet age. It is listed once, at the first Stop
-after that crossing, against the previous Stop; the quiet row keeps its own crossing.
-Cost: one `stat` per running agent, and one bounded tail read of every quiet agent at every Stop,
-including one already listed.
+call's time plus the cap and the transcript's mtime plus the quiet age. It is listed once per crossing, at
+the first Stop after that crossing, against the previous Stop. A later write to the transcript moves the
+crossing, so the same hung call can be listed again after it; the quiet row behaves the same and keeps its
+own crossing.
+Cost: one `stat` per running agent, and one tail read of every quiet agent at every Stop, including one
+already listed. The read is 64 KB, doubled up to `TAIL_MAX`, 32 MB. The cost of a read for an agent that
+already has a summary is unmeasured.
 
 Fix: none — no progress signal in the parent transcript to tell hung from busy. Until: 2026-11-21
 (a hung Agent or MCP call).
-Limit: `open_call` reads only the last 64 KB of the transcript. A hung call behind more than 64 KB of later
-records is missed.
+Limit: `open_call` reads the last 64 KB of the transcript, doubled until one whole record fits, up to
+`TAIL_MAX`, 32 MB. A hung call behind more than the final window of later records is missed.
 
 The hook exits 0 and never refuses. A crash never refuses a call, as advisory hooks stay fail-open
 (`guard-hooks-fail-closed`). It reuses the transcript parsing of the PreToolUse path, so that parsing has

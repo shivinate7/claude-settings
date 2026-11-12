@@ -61,9 +61,11 @@ Stop: stall_watch.py --stop
   a TaskStop call, 'Successfully stopped task: <id>'. A job with no output file is listed as
   unknown. A background agent (toolUseResult isAsync, status async_launched, agentId) is a job too: its
   transcript is <session dir>/<session stem>/subagents/agent-<id>.jsonl (else the launch's outputFile),
-  and it closes as a shell does. It is not listed while a tool_use in the read window has no tool_result, read from
-  the last 64 KB of a quiet agent's transcript, widened to hold a whole last record. Cost: one stat per
-  running agent, one tail read per quiet agent. Any error, or stop_hook_active true, prints nothing and exits 0. No posix check.
+  and it closes as a shell does. A tool_use in the read window with no tool_result hides it as busy, except an open
+  foreground Bash or PowerShell call with a readable time that is at least OPEN_CALL_CAP (900 s) old:
+  that agent is listed as stuck in one tool call, once its transcript is also quiet. The window is the
+  last 64 KB of a quiet agent's transcript, doubled until it holds a whole last record, up to TAIL_MAX
+  (32 MB). Cost: one stat per running agent, one tail read per quiet agent. Any error, or stop_hook_active true, prints nothing and exits 0. No posix check.
   Seams: STALL_WATCH_NOW (epoch seconds), STALL_WATCH_OUTPUT_BASE (replaces the folder of each
   output path, keeps the file name), STALL_WATCH_QUIET (the age in seconds).
   A listed job shows the `until:` note from the description of the call that started it (Bash or
