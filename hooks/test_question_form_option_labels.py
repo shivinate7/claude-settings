@@ -59,10 +59,10 @@ NOT_BUILT = object()  # chat_page_label_hit is not in hooks/question_form.py yet
 
 # The two options of the owner's question, as the page holds them. Letter = position: a is Keep it as is.
 OPTIONS = [
-    {"key": "a", "label": "Keep it as is", "gain": "No new form on the shared allow list.",
+    {"key": "a", "id": "keep-as-is", "label": "Keep it as is", "gain": "No new form on the shared allow list.",
      "lose": "Each batch waits until the coordinator wakes."},
-    {"key": "b", "label": "Allow merge --role", "gain": "The runner merges each batch alone.",
-     "lose": "A second merge form on the shared allow list."},
+    {"key": "b", "id": "allow-merge-role", "label": "Allow merge --role",
+     "gain": "The runner merges each batch alone.", "lose": "A second merge form on the shared allow list."},
 ]
 # The chat lines for OPTIONS. CHAT_B_MISMATCH names a different option for letter b: it is no prefix of the label.
 CHAT_A = "a) Keep it as is"
@@ -81,10 +81,12 @@ def chat_question(lines, cite=ITEM):
     return "\n".join(head + list(lines))
 
 
-def label_item(doc, options=None, **over):
-    """A waiting-page decision that passes the form and the other rules, with `options` as its options."""
+def label_item(doc, options=None, ids=True, **over):
+    """A waiting-page decision that passes the form and the other rules, with `options` as its options. Its `shown` is
+    the options as given; `ids` False leaves an option with no id as it is (the option-letters-frozen cases need that)."""
     item = tcj.good_page_item(id=doc)
     item["options"] = copy.deepcopy(OPTIONS if options is None else options)
+    item = tcj.with_frozen_fields(item, ids=ids)
     item.update(over)
     return item
 
@@ -168,7 +170,7 @@ def case_fn_letter_missing_from_chat_passes():
 
 
 def case_fn_letter_is_position():
-    options = copy.deepcopy(OPTIONS) + [{"key": "c", "label": "Wait a day", "gain": "g", "lose": "l"}]
+    options = copy.deepcopy(OPTIONS) + [{"key": "c", "id": "wait-a-day", "label": "Wait a day", "gain": "g", "lose": "l"}]
     fn_refuse("fn: letter c is the third option's position, so a differing c is refused",
               fn_label(ITEM, options, chat_question((CHAT_A, CHAT_B, "c) Hold for a day"))), "c")
 
@@ -258,7 +260,7 @@ def case_wire_differing_update_is_refused():
     """An update that carries options is judged on the same rule: a differing letter is refused."""
     transcript = write_transcript("differs-update", chat_question((CHAT_A, CHAT_B_MISMATCH)))
     call = {"action": "update", "collection": tcj.PAGE_ITEMS, "doc_id": ITEM,
-            "data": {"kind": "decision", "options": copy.deepcopy(OPTIONS)}}
+            "data": tcj.with_frozen_fields({"kind": "decision", "options": copy.deepcopy(OPTIONS)})}
     wire_refuses("wire: an update carrying options whose b differs from the chat's b is refused", call, transcript)
 
 
@@ -446,7 +448,7 @@ def case_wire_footer_second_item_is_allowed():
 
 def options_with_c():
     """OPTIONS plus a third option, c, that no chat question in these cases writes."""
-    return copy.deepcopy(OPTIONS) + [{"key": "c", "label": "Wait a day", "gain": "g", "lose": "l"}]
+    return copy.deepcopy(OPTIONS) + [{"key": "c", "id": "wait-a-day", "label": "Wait a day", "gain": "g", "lose": "l"}]
 
 
 def wire_checked_or_noted(name, call, transcript):
