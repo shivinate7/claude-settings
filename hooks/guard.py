@@ -2816,14 +2816,20 @@ BUILDER_UNDO_ROUTE = (
 )
 
 
+# The merge step of a builder's test conflict, shared by the diff refusal and the shell-write block.
+BUILDER_MERGE_ABORT_ROUTE = (
+    "If a merge is in progress and the refusal is about a test conflict, run `git merge --abort` "
+    "and report it, so the orchestrator hands the whole merge to a test-author. "
+)
+
+
 def builder_diff_reason() -> str:
     """The refusal text for a builder's test change. It names no path: it gives the undo route."""
     return (
         BUILDER_TEST_REASON + " The guard refuses a test change you made, at commit, push and stop. "
         + BUILDER_UNDO_ROUTE +
         "If a commit of yours holds the change, stop and report it. "
-        "If a merge is in progress and the refusal is about a test conflict, run `git merge --abort` "
-        "and report it, so the orchestrator hands the whole merge to a test-author. "
+        + BUILDER_MERGE_ABORT_ROUTE +
         "This refusal is final: never write the files another way. (decision builders-cannot-edit-tests)"
     )
 
@@ -2872,13 +2878,45 @@ def judge_stop(payload) -> None:
         record("SubagentStop", "noted", diff_rule(role), found or noted[0])
 
 
-def builder_shell_write_reason() -> str:
-    """The block text for a test change a builder's shell call left in its worktree. It names no path."""
+def builder_shell_write_reason(merging: bool = False) -> str:
+    """The block text for a test change a builder's shell call left in its worktree. It names no path.
+    `merging`: a merge is in progress and a test path is in conflict, so the merge-abort step is named."""
     return (
         BUILDER_TEST_REASON + " Your shell call left a test change in your worktree. " + BUILDER_UNDO_ROUTE
-        + "Then report the needed test change, so the orchestrator hands it to a test-author. "
-        "This refusal is final: never write the files another way. (decision builders-cannot-edit-tests)"
+        + "If you cannot undo it yourself, stop and report, so the orchestrator hands the paths to a test-author. "
+        + (BUILDER_MERGE_ABORT_ROUTE if merging else "")
+        + "This refusal is final: never write the files another way. (decision builders-cannot-edit-tests)"
     )
+
+
+# The two-letter `git status --porcelain` codes of a path a merge left unmerged.
+UNMERGED_CODES = ("DD", "AU", "UD", "UA", "DU", "AA", "UU")
+
+
+def merge_test_conflict(where: str, raw: str) -> bool:
+    """True when a merge is in progress and a test path is unmerged. The conflict is read from the status
+    answer already in hand. MERGE_HEAD is read from the git dir found by walking up from `where` to `.git`
+    (a folder, or a file `gitdir: <path>` in a linked worktree): no second git call."""
+    if not any(e[:2] in UNMERGED_CODES and is_builder_test_rel(e[3:]) for e in raw.split("\0") if len(e) >= 4):
+        return False
+    here = os.path.abspath(where)
+    while True:
+        dot = os.path.join(here, ".git")
+        if os.path.isdir(dot):
+            return os.path.exists(os.path.join(dot, "MERGE_HEAD"))
+        if os.path.isfile(dot):
+            try:
+                with open(dot, encoding="utf-8") as handle:
+                    line = handle.readline().strip()
+            except OSError:
+                return False
+            if not line.startswith("gitdir:"):
+                return False
+            return os.path.exists(os.path.join(here, line[len("gitdir:"):].strip(), "MERGE_HEAD"))
+        parent = os.path.dirname(here)
+        if parent == here:
+            return False
+        here = parent
 
 
 def status_paths(raw: str):
@@ -2923,7 +2961,8 @@ def judge_shell_write(payload) -> None:
     # A role guard stays outside every override (decision owner-override): a block is final.
     guard_core.set_override_veto(lambda: True)
     record(tool, "deny", "builder-bash-test-write", found)
-    print(json.dumps({"decision": "block", "reason": "builder-bash-test-write: " + builder_shell_write_reason()}))
+    print(json.dumps({"decision": "block", "reason": "builder-bash-test-write: "
+                      + builder_shell_write_reason(merge_test_conflict(where, answer.stdout))}))
     sys.exit(0)
 
 
