@@ -7,7 +7,8 @@ It reads refs/remotes/origin/*, the refs actions/checkout with fetch-depth 0 lea
 branch: `<delete|keep> <name> <reason>`. origin/HEAD is no branch and gets no line.
 
 A branch is deleted only when its last commit is on the default branch or on an archive/* branch. Never deleted:
-the default branch, main, master, roadmap (the record branch), archive/*, a branch named by --open-head
+the default branch, main, master, roadmap (the record branch), stable (it moves with green main, and child CI
+installs from it), archive/*, a branch named by --open-head
 (deleting the head of an open pull request closes the pull request), and a branch whose name has a character
 outside [A-Za-z0-9._/-] or starts with "-". The workflow puts the name raw into a DELETE URL, where `#` ends the
 path and could delete another branch, and a leading "-" reads as an option.
@@ -21,8 +22,8 @@ import subprocess
 import sys
 
 REMOTE = "refs/remotes/origin/"
-# Names kept whatever their history. roadmap holds the roadmap record and is never merged into main.
-PROTECTED = ("main", "master", "roadmap")
+# Names kept whatever their history. roadmap holds the roadmap record and is never merged into main. stable moves with green main (restart-plan R42 part 2), so its tip is always on main's history.
+PROTECTED = ("main", "master", "roadmap", "stable")
 SAFE_NAME = re.compile(r"[A-Za-z0-9._/-]+")
 
 
