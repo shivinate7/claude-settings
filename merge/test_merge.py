@@ -266,6 +266,9 @@ class FakeHost:
     def post_comment(self, n, body):  # the fake of Host.post_comment: a comment on pull request n, recorded for the case
         self.posted.append((n, body))
 
+    def comment_bodies(self, n):  # the fake of Host.comment_bodies: each comment body on pull request n, in post order
+        return [b for m, b in self.posted if m == n]
+
 MAILAUDIT_CHECK = "mailaudit-check"  # the required check a second checkout's stamp config names: a read of that config shows which checkout it came from
 
 class RepoHost(FakeHost):
@@ -19226,6 +19229,34 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.host.readies, [], "the drop marked a pull request ready")
         for name, mock in mocks.items():
             self.assertFalse(mock.called, "the drop called merge.%s: a drop runs no lane lint and no ready check" % name)
+
+    def test_a_lane_dropped_from_two_batches_is_refused_by_the_third_build_and_sent_to_a_fix_lane(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        self.frozen_batch("one", [101, 102], blamed=(102,))
+        rc, out = self.run_batch("--batch-drop", "one", "102")
+        self.assertEqual(rc, 0, "setup: the first drop exited %s: %s" % (rc, out))
+        self.frozen_batch("two", [102, 103], blamed=(102,))
+        rc, out = self.run_batch("--batch-drop", "two", "102")
+        self.assertEqual(rc, 0, "setup: the second drop exited %s: %s" % (rc, out))
+        self.assertIn("fix lane", out, "the second drop did not say lane #102 leaves the queue for a fix lane: %s" % out)
+        before = list(self.host.created)
+        rc, out = self.run_batch("--batch-build", "three", "101", "102")
+        self.assertNotEqual(rc, 0, "a build took lane #102, dropped from two batches, into a third: %s" % out)
+        self.assertIn("#102", out)
+        self.assertIn("fix lane", out, "the refusal does not name the fix lane: %s" % out)
+        self.assertEqual(self.host.created, before, "the refused build still opened a pull request")
+        self.assertEqual(sh(self.other, "git", "ls-remote", "origin", "batch-three").strip(), "", "the refused build pushed batch-three")
+
+    def test_a_lane_dropped_from_one_batch_still_joins_the_next(self):
+        for n in (101, 102):
+            self.lane(n)
+        self.frozen_batch("one", [101, 102], blamed=(102,))
+        rc, out = self.run_batch("--batch-drop", "one", "102")
+        self.assertEqual(rc, 0, "setup: the drop exited %s: %s" % (rc, out))
+        self.assertNotIn("fix lane", out, "the first drop sent lane #102 to a fix lane: %s" % out)
+        rc, out = self.run_batch("--batch-build", "two", "102")
+        self.assertEqual(rc, 0, "a lane dropped from one batch was refused by the next build: %s" % out)
 
     # After the build, a drop takes off only a lane that a red run blamed (decision batch-freeze-lane-set). The control is
     # test_a_blamed_lane_dropped_leaves_a_draft_that_needs_ready_again_and_the_next_ready_lints_once, which drops a blamed lane.
