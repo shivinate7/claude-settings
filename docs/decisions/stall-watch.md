@@ -73,12 +73,12 @@ guard rule, so the watcher does the waiting and the session is told once.
   Each background job starts one watcher process. Its process cost is open: owner Cockpit item 180 holds
   it (plan `docs/plans/align-watchers.md`). Each named log gets one stat a second in the watcher's own loop,
   one more before each stall report, and one at each Stop check. The beat file costs one append per
-  verdict heartbeat, plus one per ci-job step that runs (never under `--plan`). The watcher reads it on each 0.2 s loop pass.
+  verdict heartbeat, plus one per ci-job step that runs (never under `--plan`; about 93 steps in a `checks --lint` run, read from `ci-job checks --lint --plan`). The watcher reads it on each 0.2 s loop pass.
 - The job removes its beat file when it ends, and its log too unless it stalled (owner, item 405 a,
   2026-11-08 06:09 CST: "Keep a stalled job's log for 7 days"). Reason: a stalled job keeps writing after
   its STALL report, and that final output was lost when the job ended. On a stall the watcher writes a
   marker, `LOG.stalled`, beside the log before it exits 3. At the job's end the trap keeps the log if the
-  marker is there. Each `--hook` call then removes, from the log folder, every stall-watch log that has a marker and
+  marker is there. Each `--hook` call for a background Bash call then removes, from the log folder, every stall-watch log that has a marker and
   was last written over 7 days ago, and that marker, and no other file. No timer runs and no process starts. A job that never
   stalls leaves no files. The wrapper creates both files and opens both before the job starts. The watcher
   inherits those handles, so a job that ends at once loses no output, and the STALL report reads its tail

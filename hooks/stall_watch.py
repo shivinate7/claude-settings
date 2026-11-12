@@ -28,8 +28,8 @@ Hook: stall_watch.py --hook
   (the job keeps running and writing until then) and for the original's `exit N`, whose code the wrapper
   keeps. On a stall the watcher writes LOG.stalled, a marker beside the log, before it exits 3, and the
   trap keeps a log that has one. The STALL report says the log is kept 7 days, so the final output
-  of a job that keeps writing after its report stays readable (decision stall-watch). Each --hook call removes, from the log folder, every stall-watch log with a marker not
-  written for 7 days, and that marker, and no other file: no timer runs. Limit: an original that execs or sets its own
+  of a job that keeps writing after its report stays readable (decision stall-watch). Each --hook call for a background Bash call removes, from the log folder, every stall-watch log last
+  written over 7 days ago that has a marker, and that marker, and no other file: no timer runs. Limit: an original that execs or sets its own
   EXIT trap drops the trap; the wrapper's cleanup after `wait` (the trap's command) still cleans up a job that never stalled,
   and a stalled job of that kind leaves its log and marker for the 7-day prune.
 
