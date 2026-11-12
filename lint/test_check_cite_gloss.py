@@ -13,10 +13,15 @@ The check reads the lines the change adds or edits (origin/main...HEAD). It judg
 
 - a cite is a backticked span whose content, with quote marks and spaces dropped, is a record id;
 - the first use of an id is its first cite in the file, counted from the top, on a line that is not a heading;
+- a cite of the record's own slug needs no gloss: the record names itself;
 - a first use with no gloss is red. Its FAIL line, `check_cite_gloss: FAIL: ...`, names the path, the line, the slug.
 
+A run that cannot read its base prints UNKNOWN. Locally that exits 0; under CI it exits 1 (decision ci-unknown-is-red).
+assert_passes fails a run that printed UNKNOWN, so no case passes on an unread base.
+
 Each case builds a temp git repo. origin/main is the base, HEAD the change. The module runs from that tree.
-CITE_GLOSS_UNDER_TEST overrides the module path, for a mutant copy.
+CITE_GLOSS_UNDER_TEST overrides the module path, for a mutant copy. RECORD_DIFF_UNDER_TEST overrides the shared
+helper lint/_record_diff.py the same way, so the UNKNOWN branch can be silenced in a mutant.
 """
 import os
 import shutil
@@ -33,7 +38,9 @@ sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 
 MODULE = os.environ.get("CITE_GLOSS_UNDER_TEST") or os.path.join(HERE, "check_cite_gloss.py")
+RECORD_DIFF = os.environ.get("RECORD_DIFF_UNDER_TEST")  # a mutant of lint/_record_diff.py, else the tree's own copy
 DECISION = "docs/decisions/merge-lock.md"  # the record the cases cite: its slug is merge-lock
+LOCK_HELD = "docs/decisions/lock-held.md"  # a decision that cites its own slug: its slug is lock-held
 DEBT = "docs/debts/lock-read-error.md"  # the debt the cases add or edit
 NOTES = "docs/debts/notes.md"  # the folder's notes file: a list of notes, not a record
 PLAN = "docs/plans/lock-plan.md"  # a plan: a record in the glossary, but not in this check's folders
@@ -68,6 +75,8 @@ class CiteGlossTests(unittest.TestCase):
         self.tree = tempfile.mkdtemp(prefix="cgl_", dir=RUN_FOLDER)
         self.addCleanup(tracked_tree.rm_tree, self.tree)
         tracked_tree.copy_tracked(self.tree, "lint", "hooks")  # the layout and the check's imports
+        if RECORD_DIFF:
+            shutil.copyfile(RECORD_DIFF, os.path.join(self.tree, "lint", "_record_diff.py"))
         shutil.copyfile(MODULE, os.path.join(self.tree, "lint", "check_cite_gloss.py"))
         self.git("init", "-q")
         self.base({DECISION: MERGE_LOCK})  # merge-lock is a record id from the start
@@ -101,17 +110,30 @@ class CiteGlossTests(unittest.TestCase):
         for rel in files:
             self.assertIn(rel, named, "the change does not name %s" % rel)
 
-    def lint(self):
+    def lint(self, base=None, ci=False):
+        """Run the check. `base` names the ref to diff against (default origin/main). `ci` sets CI, as the workflow does."""
         env = dict(os.environ)
-        env.pop("CI", None)  # CI makes an unknown read red; these cases run locally
+        env.pop("CI", None)  # CI makes an unknown read red; the default run is local
+        if ci:
+            env["CI"] = "true"
         cmd = [sys.executable, os.path.join(self.tree, "lint", "check_cite_gloss.py")]
+        if base:
+            cmd += ["--base", base]
         r = subprocess.run(cmd, cwd=self.tree, env=env, capture_output=True, text=True,
                            encoding="utf-8", errors="replace")
         return r.returncode, r.stdout + r.stderr
 
-    def assert_passes(self):
-        rc, out = self.lint()
+    def unreadable_base(self):
+        """A ref the tree does not hold. Scope before subject: the case reads UNKNOWN only if this ref is absent."""
+        probe = subprocess.run(["git", "-C", self.tree, "rev-parse", "--verify", "--quiet", "no-such-ref"],
+                               capture_output=True, text=True)
+        self.assertNotEqual(probe.returncode, 0, "no-such-ref must be absent for this case")
+        return "no-such-ref"
+
+    def assert_passes(self, base=None):
+        rc, out = self.lint(base=base)
         self.assertEqual(rc, 0, out)
+        self.assertNotIn("UNKNOWN", out, "a run that printed UNKNOWN is not a pass\n" + out)
         self.assertEqual(flagged(out), [], out)
 
     def assert_flags(self, *cases):
@@ -145,6 +167,15 @@ class CiteGlossTests(unittest.TestCase):
     def test_default_passes_an_empty_change(self):
         # Empty state: the change adds no record line, so nothing is judged.
         self.change({ROOT_FILE: "nothing in a record folder\n"})
+        self.assert_passes()
+
+    def test_default_ignores_a_bare_cite_inside_a_real_fence(self):
+        # A fenced block holds no use: the bare cite inside it is not a first use, and the glossed one after it passes.
+        self.change({DEBT: record("```", "The lock is `merge-lock`.", "```", "Runs wait on `merge-lock`, one lock per base.")})
+        self.assert_passes()
+
+    def test_default_passes_a_glossed_cite_in_a_table_cell(self):
+        self.change({DEBT: record("| Id | Meaning |", "|---|---|", "| `merge-lock` (one lock per base) | the lock |")})
         self.assert_passes()
 
     # Red: each case names the one first use it must flag.
@@ -190,6 +221,25 @@ class CiteGlossTests(unittest.TestCase):
         self.change({DEBT: record(*body)})
         self.assert_flags((DEBT, 203, "merge-lock"))
 
+    def test_default_flags_a_bare_cite_after_a_line_that_opens_with_a_code_span(self):
+        # "```x```" is a code span, not a fence: it must not open a block that hides the rest of the record.
+        self.change({DEBT: record("```x``` is a code span, not a fence.", "The lock is `merge-lock`.")})
+        self.assert_flags((DEBT, 4, "merge-lock"))
+
+    def test_default_flags_a_bare_cite_in_a_table_cell(self):
+        self.change({DEBT: record("| Id | Meaning |", "|---|---|", "| `merge-lock` | the lock |")})
+        self.assert_flags((DEBT, 5, "merge-lock"))
+
+    def test_default_passes_a_record_that_cites_its_own_slug_without_a_gloss(self):
+        # The record names itself: its own slug is no first use that needs a gloss.
+        self.change({LOCK_HELD: "# Lock held\n\nA held lock blocks the merge (rule `lock-held`).\n"})
+        self.assert_passes()
+
+    def test_default_flags_another_id_a_record_cites_beside_its_own_slug(self):
+        # Only the record's own slug is exempt: the other bare first cite on the same line is still red.
+        self.change({LOCK_HELD: "# Lock held\n\nA held lock is `lock-held` and blocks `merge-lock`.\n"})
+        self.assert_flags((LOCK_HELD, 3, "merge-lock"))
+
     # Scope: only a record's first use on a changed line is judged.
 
     def test_default_ignores_a_bare_cite_already_on_an_unchanged_line(self):
@@ -213,6 +263,27 @@ class CiteGlossTests(unittest.TestCase):
     def test_default_leaves_the_debt_notes_file_unchecked(self):
         self.change({NOTES: "# Notes\n\n- lock-read-error: `merge-lock` races on a read error.\n"})
         self.assert_passes()
+
+    # An unread base is UNKNOWN: exit 0 locally, exit 1 under CI (decision ci-unknown-is-red).
+    # Each case has a bare first use, so a run that read the change would print a FAIL line.
+
+    def test_default_gives_unknown_on_an_unreadable_base(self):
+        self.change({DEBT: record("The lock is `merge-lock`.")})
+        rc, out = self.lint(base=self.unreadable_base())
+        self.assertIn("check_cite_gloss: UNKNOWN", out, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_ci_fails_an_unreadable_base(self):
+        self.change({DEBT: record("The lock is `merge-lock`.")})
+        rc, out = self.lint(base=self.unreadable_base(), ci=True)
+        self.assertIn("check_cite_gloss: UNKNOWN", out, out)
+        self.assertEqual(rc, 1, out)
+
+    def test_assert_passes_fails_a_run_that_printed_unknown(self):
+        self.change({DEBT: record("The lock is `merge-lock`, one lock per base.")})
+        with self.assertRaises(AssertionError) as caught:
+            self.assert_passes(base=self.unreadable_base())
+        self.assertIn("UNKNOWN", str(caught.exception))
 
 
 if __name__ == "__main__":
