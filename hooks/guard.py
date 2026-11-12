@@ -4689,7 +4689,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 # hooks/question_form.py is the one home of the rules (`port-question`, `uniform-pick`, `press-link`,
 # `command-in-item`, `gh-login-switch`, `task-names-check`, `task-why-cited`, `owner-judge`, `question-form`, `question-departs`). This check runs them only for a
 # write to this repo's waiting page.
-from shared_names import DATA_TOOL  # noqa: E402  the one home of the tool name, shared with hooks/call_judge.py
+from shared_names import DATA_TOOL, PAGE_TOOL, canonical_artifact_call  # noqa: E402  the one home of the tool names, shared with hooks/call_judge.py
 
 
 def data_tool_judge(tool_input, cwd="", session_id=None):
@@ -4717,7 +4717,6 @@ def data_tool_hit(tool_input, cwd="", session_id=None):
 # and its designData and roadmap blocks all equal to main's own (stale_pages.carries_data), is refused too:
 # it would drop the live page's data. A first publish, with no url, is not judged. A current page with data writes the stamp
 # (stale_pages.STAMP, main's blob sha) that hooks/session_start.sh reads back.
-PAGE_TOOL = "Artifact"
 PAGE_STALE_REASON = ("this file is behind main's skills/waiting-page/page.html, so a publish would put old page code on the "
                      "waiting page. Read the live page (Artifact action read), run the waiting-page skill's "
                      "stale_pages.py with `--page <saved live page> --write <out>`, and publish <out> to the same url. "
@@ -6049,6 +6048,8 @@ def judge(payload) -> None:
     tool_input = payload.get("tool_input", {}) or {}
     if not isinstance(tool_input, dict):
         return
+    # A Mac claude-artifacts call is judged in the shape of its cloud twin (shared_names.canonical_artifact_call).
+    tool, tool_input = canonical_artifact_call(tool, tool_input)
     # Read and Grep: no rule judges them, so the guard leaves at once and spends no git call.
     # worktree-home never judged them, the settings deny list owns the env files (Read and Edit of
     # `.env*` at any depth, `.env.example` carved out), and a frozen path stays readable.
