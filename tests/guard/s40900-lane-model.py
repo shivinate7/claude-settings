@@ -1,5 +1,5 @@
 # section 40900
-# The model a lane session starts on, against the lane row of decision agent-model-cap (rule lane-start-settings).
+# The model a lane starts on, against the lane row of decision agent-model-cap (rule lane-start-settings).
 # This section loads after s40805, because the pointer fixture it varies (role_table, role_config, ROLE_TABLE_HEAD,
 # ROLE_REAL_CFG) lives there. The lane constants come from s29666 and s30130. The presence and source_url cases stay in
 # s30130, beside the rule's other cases.
