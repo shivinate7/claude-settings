@@ -1,12 +1,14 @@
 # The batch runner logs each session's spend at each batch merge
 
+Step title: the heading above is the title of roadmap step `spend-log-per-batch`. It is not the owner's wording.
+
 ## The ruling
 
 Owner, 2026-11-11 11:55 CST, relayed by the retrospective session. Exact words: "spend should also be logged if literally free to do so since it gives us more data about how we do things".
 
-Ruling: log each session's spend at each batch merge, if literally free.
+Ruling: spend is logged, if literally free to do so.
 
-Duty: the batch runner logs only if the reads are literally free. Whether they are: unmeasured.
+Duty (plan design): the build gives the batch runner the log only if the reads are literally free. Whether they are: unmeasured.
 
 Plan design (restart plan 3.15), unruled: at each batch merge, the batch runner reads the `get_session` cost of each session and writes one line per session to the record branch.
 
@@ -38,11 +40,11 @@ The line's format and file: unruled; the builder proposes it.
 
 ## Where the duty is written
 
-The build writes this duty in the "Batch runner" bullet of `docs/decisions/session-tiers.md`. That bullet says what the batch runner does after each merge. `skills/project-ops/templates/operating-model.md` restates a shorter version of the bullet for other repos' project instructions. It is a template, so `docs/decisions/session-tiers.md` is the home.
+The build writes this duty in the "Batch runner" bullet of `docs/decisions/session-tiers.md`. That bullet says what the batch runner owns. `skills/project-ops/templates/operating-model.md` restates a shorter version of the bullet for other repos' project instructions. It is a template, so `docs/decisions/session-tiers.md` is the home.
 
 ## Dated by
 
-This record goes stale if `get_session` stops returning a cost, or if R33 or R34 is dropped as a reader. Then rewrite its Cost or Readers section in place.
+This record goes stale if `get_session` stops returning a cost, if R33 or R34 is dropped as a reader, or when either reader step ships. Then rewrite its Cost or Readers section in place.
 
 Kind: build
 Plan: docs/decisions/spend-log-per-batch.md#the-ruling (all)
