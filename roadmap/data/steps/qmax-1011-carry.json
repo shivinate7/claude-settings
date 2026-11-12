@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Runner 11 verdict 12:53 CST Nov 12 (stands item 604): q_max #1011 (\"Batch: ci-hygiene\") has its shard split on main, but not the stamp.yml timeout or the red-run PR comment.",
  "source": "coordinator 12:53 CST Nov 12",
- "note": "Revive the two parts from main, then close #1011. Part 1 (stamp.yml cap: 141 s measured against 3 min) waits on a pick: plan R3 wants a computed limit, and no script exists yet. Part 2 (ci-done comment job in checks.yml) goes on. The other 10 q_max rows stay open. Part 1 settled 13:00 CST Nov 12: decision ci-job-caps (owner, Nov 1 18:44 CST and Nov 10 12:11 CST) already rules job caps rise generously in the interim; stamp.yml goes to 5 min (141 s x2) with a comment that the computed limit is owed under R3. No page item (past-ruling guard).",
- "updatedAt": "2026-11-12T13:03:27-06:00"
+ "note": "Revive the two parts from main, then close #1011. Part 1 (stamp.yml cap: 141 s measured against 3 min) waits on a pick: plan R3 wants a computed limit, and no script exists yet. Part 2 (ci-done comment job in checks.yml) goes on. The other 10 q_max rows stay open. Part 1 settled 13:00 CST Nov 12: decision ci-job-caps (owner, Nov 1 18:44 CST and Nov 10 12:11 CST) already rules job caps rise generously in the interim; stamp.yml goes to 5 min (141 s x2) with a comment that the computed limit is owed under R3. No page item (past-ruling guard). Part 1 done 13:04 CST Nov 12: stamp.yml cap set to 5 min (141 s x2), commit b057ee758, under decision ci-job-caps; the lane withdrew its question. Part 2 (ci-done comment job) is in review.",
+ "updatedAt": "2026-11-12T13:07:51-06:00"
 }

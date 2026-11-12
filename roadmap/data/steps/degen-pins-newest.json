@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Retrospective audit of stands item 569 (coordinator 12:59 CST Nov 12): the pick to keep degen's pins was wrong under rule verification-newest-that-passes.",
  "source": "coordinator 12:59 CST Nov 12",
- "note": "Which pins is unknown; the pick names none. Read degen's pins, read each changelog, move each to the newest that passes its checks, and pin back with a reason any that break. Degen repo work: its own triage or runner.",
- "updatedAt": "2026-11-12T13:03:27-06:00"
+ "note": "Which pins is unknown; the pick names none. Read degen's pins, read each changelog, move each to the newest that passes its checks, and pin back with a reason any that break. Degen repo work: its own triage or runner. Degen repo work (coordinator 13:04 CST Nov 12): routed to degen's own triage, not a claude-settings lane. The roster names no degen triage or runner session yet, so it waits until one is named.",
+ "updatedAt": "2026-11-12T13:07:51-06:00"
 }

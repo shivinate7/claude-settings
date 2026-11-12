@@ -1,0 +1,14 @@
+{
+ "id": "remedy-claim-measured",
+ "title": "A remedy or advice line that claims an effect cites the run that measured it",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Incident: 10:55 CST Nov 12 advice \"kill the pid whose grandparent is init and the tree ends\" was disproved by runner 10's 11:14 CST kill of pid 32666 (lane stranded-jobs).",
+ "source": "coordinator 13:02 CST Nov 12, from lane stranded-jobs",
+ "note": "A remedy or advice line that claims an effect (\"ends the tree\", \"stops the job\") cites the run that measured it or says \"unmeasured\". Cost: a text scan of changed decision and remedy lines at lane lint; no new process. Overlap checked 13:07 CST: pass-claim-cites-verdict covers pass claims (\"passed\", \"green\") and msg-claims-vs-git covers lane and step claims; neither covers effect claims in remedy lines, so this stays its own step.",
+ "updatedAt": "2026-11-12T13:07:51-06:00"
+}

@@ -1,7 +1,7 @@
 {
  "id": "pick-rehome-sorting",
  "title": "Re-home the stopped-first sort pick to its real steps",
- "status": "ready",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Retrospective audit of stands item 566 (coordinator 12:59 CST Nov 12): its home, step waiting-page-sorting, does not exist.",
  "source": "coordinator 12:59 CST Nov 12",
- "note": "Re-home the pick (sort the most-stopped first) to steps tier-items-sorted and answered-sections-by-repo.",
- "updatedAt": "2026-11-12T13:03:27-06:00"
+ "note": "Re-home the pick (sort the most-stopped first) to steps tier-items-sorted and answered-sections-by-repo. Done 13:07 CST Nov 12 by triage: page item 566 now homes to steps tier-items-sorted and answered-sections-by-repo.",
+ "updatedAt": "2026-11-12T13:07:51-06:00"
 }

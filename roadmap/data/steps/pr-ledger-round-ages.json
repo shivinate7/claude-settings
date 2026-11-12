@@ -1,14 +1,14 @@
 {
  "id": "pr-ledger-round-ages",
  "title": "Measure review-round ages and replace the PR ledger's 72 hours",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJKyyBbKpddy7P4E8zBf",
  "owner": "triage",
  "blockedBy": [],
  "why": "Retrospective audit of stands item 572 (coordinator 12:59 CST Nov 12): the 72-hour window was a guessed number.",
  "source": "coordinator 12:59 CST Nov 12",
  "note": "Measure how old review rounds get, and set the PR ledger window from that measure, not a stored 72 h.",
- "updatedAt": "2026-11-12T13:03:27-06:00"
+ "updatedAt": "2026-11-12T13:07:51-06:00"
 }
