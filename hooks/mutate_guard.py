@@ -1246,14 +1246,15 @@ MUTATIONS = [
      '    if matched:\n'
      '        refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)', "guard", 'cap: a heredoc onto the config settings stays denied'),
     ("cap: the shell route reads the stripped command, so a heredoc body's cap change walks past",
-     '        change = cap_change(raw)',
-     '        change = cap_change(stripped)', "guard", 'cap: a heredoc writing a project settings file asks'),
+     '        change = cap_with_deadline(cap_change(raw), cap_deadline_end(cap_sed_parts(raw, matched, cwd)))',
+     '        change = cap_with_deadline(cap_change(stripped), cap_deadline_end(cap_sed_parts(raw, matched, cwd)))',
+     "guard", 'cap: a heredoc writing a project settings file asks'),
     ("cap: an earlier part wins, so an Edit names the value it leaves, not the one it arrives at",
      '            values[key] = value',
      '            values.setdefault(key, value)', "guard", 'cap: Edit turning the force flag off asks'),
     ("cap: a Write of a settings file never asks, so an opus lift lands unasked",
-     '        if is_settings_file(target, cwd):\n            change = cap_change_parts(write_content_parts(tool_input))',
-     '        if False:\n            change = cap_change_parts(write_content_parts(tool_input))', "guard",
+     '        if is_settings_file(target, cwd):\n            change = cap_with_deadline(cap_change_parts(write_content_parts(tool_input)),',
+     '        if False:\n            change = cap_with_deadline(cap_change_parts(write_content_parts(tool_input)),', "guard",
      'cap: Write of a project local settings file setting an opus model asks'),
     ("floor: the model test is case-sensitive, so a mixed-case haiku id walks past",
      '    return "haiku" in str(model).lower()',
@@ -1532,10 +1533,10 @@ MUTATIONS = [
      '    if ahead <= 0:', "watch",
      "exactly at the deadline instant is accepted"),
 
-    # ---- the cap-lift deadline ask and the end it prints, re-pointed 2026-11-12 (page item 602,
-    # pick a). The 24-hour ceiling is gone, so the boundary mutants above had no line left to hit.
-    # These break the guard's ask on a deadline write (`cap_deadline_end` and its two callers) and
-    # the Central text it prints. Each required name is a case in hooks/test_guard.py.
+    # ---- the cap-lift deadline ask. Each mutant below breaks one link of the end a write's ask shows:
+    # the passed-deadline test, the zone, the Central text, the ask a Write or a shell write makes on
+    # the end, the text an Edit or MultiEdit arrives at, the sed reading, and the space form of the
+    # assignment. Each required name is a case in tests/guard/s19328-model-cap.py.
     ("guard: the deadline ask runs backwards, so a current end is silent and a passed one is asked",
      '        if deadline < local_time.clock():\n            return ""',
      '        if deadline > local_time.clock():\n            return ""', "guard",
@@ -1551,13 +1552,44 @@ MUTATIONS = [
      "guard", "names the end in CST"),
     ("guard: a Write that sets the cap-lift end is not asked about, so its end is never shown",
      '            change = cap_with_deadline(cap_change_parts(write_content_parts(tool_input)),\n'
-     '                                       cap_deadline_end(write_content_parts(tool_input, arriving=True)))',
+     '                                       cap_deadline_end(cap_arriving_parts(tool_input, target, cwd)))',
      '            change = cap_change_parts(write_content_parts(tool_input))', "guard",
      "a Write that sets only the cap-lift end asks"),
     ("guard: a shell write that sets the cap-lift end is not asked about, so its end is never shown",
-     '        change = cap_with_deadline(cap_change(raw), cap_deadline_end([raw]))',
+     '        change = cap_with_deadline(cap_change(raw), cap_deadline_end(cap_sed_parts(raw, matched, cwd)))',
      '        change = cap_change(raw)', "guard",
      "a shell write that sets only the cap-lift end asks"),
+    ("guard: the edits of an Edit or MultiEdit apply last-first, so the end the file arrives at is the first edit's",
+     '    for edit in edits:\n        if not isinstance(edit, dict):\n            continue\n        old, new = edit.get("old_string"), edit.get("new_string")',
+     '    for edit in reversed(edits):\n        if not isinstance(edit, dict):\n            continue\n        old, new = edit.get("old_string"), edit.get("new_string")', "guard",
+     "a MultiEdit whose second edit moves only the end's value asks with the end the file"),
+    ("guard: an Edit reads no file on disk, so the end it leaves is read from its strings alone",
+     '    disk = cap_disk_text(target, cwd) if edits else None',
+     '    disk = None', "guard",
+     "an Edit that changes only the end's value, with no field name in its strings"),
+    ("guard: an Edit that leaves the cap-lift end alone asks with the end on disk anyway",
+     '    if cap_deadline_text([arrived]) == cap_deadline_text([disk]):\n        return strings\n    return [arrived]',
+     '    return [arrived]', "guard",
+     "an Edit that leaves a settings file's cap-lift end alone adds no ask"),
+    ("guard: a sed reads no substitution, so a sed's end is read from the command text alone",
+     '    if not re.search(r"\\bsed\\b", raw):',
+     '    if True:', "guard",
+     "a sed that changes only the end's value in a settings file"),
+    ("guard: the cap-lift end's assignment drops the space form, so a space-form end reads as its date",
+     '(?: [0-9][0-9:.+\\-Zz]*)?)"',
+     ')"', "guard",
+     "a Write that sets the cap-lift end in the space form asks"),
+
+    # ---- the one deadline parser, hooks/shared_names.py parse_deadline, which the guard and the config
+    # watch both call. These break its space form and its no-offset form.
+    ("parse-deadline: the space form is read as its date alone, so the end is midnight",
+     '    text = text.strip()\n    if text[-1:] in ("Z", "z"):',
+     '    text = text.strip().split(" ")[0]\n    if text[-1:] in ("Z", "z"):', "guard",
+     "a Write that sets the cap-lift end in the space form asks"),
+    ("parse-deadline: a text with no offset is read as the machine's local time, not UTC",
+     '    if deadline.tzinfo is None:\n        deadline = deadline.replace(tzinfo=timezone.utc)',
+     '    if deadline.tzinfo is None:\n        deadline = deadline.astimezone()', "guard",
+     "reads it as UTC on a machine east of UTC"),
 
     # ---- the liveness oracle's alive/dead/unreadable split, added for Windows parity. Each
     # mutant here folds the new third state back into one of the other two, the exact shape of

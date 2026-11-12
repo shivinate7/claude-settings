@@ -637,6 +637,13 @@ add("cap deadline: an Edit that moves only the end's value to an unparseable tim
     "allow", tool="Edit", cwd=NOGIT, file_path=disk_settings("value-malformed", OPUS_LIFT_WINTER),
     old_string='"%s"' % DEADLINE_WINTER, new_string='"next Tuesday"',
     silent=True, env=DISK_CLOCK)
+# AN EDIT THAT LEAVES THE END ALONE. The end is read from the file an edit arrives at only when the edit
+# changes the file's deadline text, so an unrelated edit to a file that already holds a current end adds
+# no ask of its own.
+UNRELATED_FILE = json.dumps({"env": {CAP_KEY: "sonnet", "TZ": "UTC"}, EXPIRY_KEY: DEADLINE_WINTER})
+add("cap deadline: an Edit that leaves a settings file's cap-lift end alone adds no ask, though the end is on disk",
+    "allow", tool="Edit", cwd=NOGIT, file_path=disk_settings("unrelated-edit", UNRELATED_FILE),
+    old_string='"TZ": "UTC"', new_string='"TZ": "CET"', silent=True, env=DISK_CLOCK)
 
 # ----------------------------------------------------- one reading of each offset form of the end
 #
@@ -653,5 +660,11 @@ for _form, _text in sorted(OFFSET_FORMS.items()):
         "names the end in CST" % _form,
         "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
         content=json.dumps({EXPIRY_KEY: _text}), carries=(WANT_WINTER,), env=DISK_CLOCK)
+# A NAIVE END IS UTC WHATEVER THE MACHINE'S ZONE. On a machine east of UTC, the naive 03:30 read as local
+# time is 18:30 UTC the day before, which shows 12:30 CST. The zone is set for this run's process only.
+add("cap deadline: a Write that sets the cap-lift end in the naive form reads it as UTC on a machine east of UTC",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
+    content=json.dumps({EXPIRY_KEY: OFFSET_FORMS["naive"]}), carries=(WANT_WINTER,),
+    env=dict(DISK_CLOCK, TZ="JST-9"))
 
 # =========================================================================== 6c. ask alone
