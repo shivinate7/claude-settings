@@ -1429,7 +1429,7 @@ ARCHIVE_READ_REASON = (
     "records have landed. Retry once gh answers. (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_SCOPE_REASON = (
-    "the repo {repo} is outside this session's GitHub scope, so its pull requests and branches could not be read from "
+    "the repo {repo} is outside this session's GitHub scope, so its pull requests and branches could not be read from "  # glossary-ok: session-tiers is the decision's file name
     "here, and waiting will not change that. Route the archive to the batch runner whose session holds {repo}. "
     "(decision session-tiers, a lane closes only after its records pull request has landed)"
 )  # the repo that failed (ScopeStop.repo), which may be a source-only repo no cs-repo tag names; "a repo of the lane" when the read named none
