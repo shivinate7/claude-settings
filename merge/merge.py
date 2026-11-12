@@ -117,6 +117,8 @@
                           they go in the pull request body between two marker lines. A second build of NAME is allowed only for that same
                           set and leaves the pull request as it is, draft or ready; a late PR, a moved head or a lane left out is refused,
                           and nothing is pushed or edited. Runs no lane lint and no ready check, waits for no CI, takes no lock.
+                          A new build is refused when two or more of its lanes each change the same file that merge.busyFiles (fnmatch
+                          globs, default none) names: build one lane or group, then the others with --on batch-NAME. Nothing is pushed.
                           A cloud run needs the batch-runner role.
   merge --batch-build NAME [PR ...] --ready [--lint-unknown-ok REASON]
                           lint the head of batch-NAME once (the lint of --lane-lint), run the repo's ready checks on it, and record the
@@ -2640,7 +2642,7 @@ def after_merge(root, cmds):
 # ------------------------------------------------------------------ the flow
 
 MERGE_DEFAULTS = {"method": "merge", "deadlineMinutes": 45, "requiredChecks": "protection", "afterMerge": []}
-MERGE_FIELDS = set(MERGE_DEFAULTS) | {"deleteBranch", "ignoreChecks", "keepBranches", "readyChecks", "standingGrant"}
+MERGE_FIELDS = set(MERGE_DEFAULTS) | {"deleteBranch", "ignoreChecks", "keepBranches", "readyChecks", "standingGrant", "busyFiles"}
 
 def host_default_branch(root):
     # time.sleep is looked up at call time, so a test's patch of it holds. No retry inside `shared_deadline`, as in Host.gh.
@@ -2781,6 +2783,7 @@ def load_config(root, base, path, cite=""):
                   (isinstance(am, list) and all(map(ne, am)), "afterMerge"),
                   ("readyChecks" not in m or isinstance(m["readyChecks"], list) and m["readyChecks"] and all(map(ne, m["readyChecks"])), "readyChecks"),
                   (isinstance(m.get("keepBranches", []), list) and all(map(plain_name, m.get("keepBranches", []))), "keepBranches"),
+                  (isinstance(m.get("busyFiles", []), list) and all(map(ne, m.get("busyFiles", []))), "busyFiles"),
                   (rc == "protection" or isinstance(rc, list) and rc and all(map(ne, rc)), "requiredChecks")):
         if not ok:
             raise Stop(f"{path} on {ref}: merge.{k} is not valid: {m[k]!r}.{cite}")
@@ -4654,6 +4657,28 @@ def stacked_without_base(root, h, base, heads, running, own=None, remedy="Add th
     if found:
         raise Stop("\n".join(found) + f"\n{remedy(sorted(named)) if callable(remedy) else remedy} Nothing was pushed. {FREEZE_CITE}")
 
+def busy_file_lanes(root, name, heads, base, config, cite):
+    """Refuse (Stop) a new build in which two or more lanes each change the same file that merge.busyFiles names (fnmatch globs, read from the
+    base's config): lanes that edit one busy file in one build collide at merge time, so the later ones go in a stacked batch (--on). Per-lane
+    files come from git (`git diff --name-only origin/BASE...HEAD`), with no host read. The config is read first, so a bad merge.busyFiles stops the
+    build before any push. A stacked lane's diff holds the commits it stacks on, so a lane stacked on a running batch is not told apart from it."""
+    globs = load_config(root, base, config, " " + cite)["merge"].get("busyFiles", [])
+    if not globs:
+        return
+    touched = {}
+    for n in sorted(heads):
+        c, out = git(root, "diff", "--name-only", f"origin/{base}...{heads[n]}")
+        if c:
+            raise Stop(f"cannot read the files #{n} changes against {base}: {out} Nothing was pushed. {cite}")
+        for f in out.splitlines():
+            if any(fnmatch.fnmatchcase(f, g) for g in globs):
+                touched.setdefault(f, []).append(n)
+    shared = {f: ns for f, ns in sorted(touched.items()) if len(ns) > 1}
+    if shared:
+        lines = [f"{f} is changed by {lane_list(ns)}" for f, ns in shared.items()]
+        raise Stop("\n".join(lines) + f"\nmerge.busyFiles names these files: lanes that change one in the same build collide, so nothing was pushed. Build one lane or group as batch {name}, "
+                   f"then the others with `--batch-build <other-name> <PR>... --on {integration_branch(name)}`. {cite}")
+
 def stray_heads(root, tip, block, stops, kept):
     """-> the heads a no-ff merge put on the integration branch at `tip`, along its first parents down to any commit of `stops`, that its frozen block
     does not list as a lane and no commit of `kept` (the base tip, the head it stacks on) holds: a lane a drop took off the block but a kill kept on
@@ -4842,6 +4867,7 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", co
         for n in numbers:
             if fetch_branch(root, infos[n]["branch"], FREEZE_CITE) != heads[n]:
                 raise Stop(f"{infos[n]['branch']} moved while #{n} was read. Nothing was pushed. Run again. {FREEZE_CITE}")
+        busy_file_lanes(root, name, heads, base, config, FREEZE_CITE)
         stacked_without_base(root, h, base, heads, start if on else None)
         build_integration_branch(root, name, start, sorted(heads.items()))
         try:
