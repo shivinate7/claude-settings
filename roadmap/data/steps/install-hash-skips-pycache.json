@@ -1,15 +1,15 @@
 {
   "id": "install-hash-skips-pycache",
   "title": "install.sh tree_hash skips __pycache__",
-  "status": "todo",
+  "status": "doing",
   "repo": "shivinate7/claude-settings",
   "phase": "now",
-  "lane": "",
+  "lane": "install-hash-skips-pycache",
   "why": "The cloud backs up waiting-page at each start because __pycache__ changes the hash: 23 copies, 38 MB.",
   "note": "R41 (owner 13:36 CST Nov 11, \"r41 yes on all\", relayed by the retrospective; plan restart-plan 0f99805, R41 item 2). Keep all 5 mods, 11 skills and shiv-stylisms; fix seven defects. Audit notes: the retrospective's scratchpad, on request. install.sh tree_hash skips __pycache__, so the cloud stops backing up waiting-page at each start (23 copies, 38 MB). Placed ahead of the older ready steps in now (triage re-weigh 11:17 CST Nov 12, plans/reweigh-2026-11-12.md): an owner ruling not yet started.",
   "source": "owner 2026-11-11 13:36 CST, relayed by the retrospective session",
   "owner": "triage",
-  "updatedAt": "2026-11-12T11:17:50-06:00",
+  "updatedAt": "2026-11-12T11:28:45-06:00",
   "blockedBy": [],
   "order": -199
 }

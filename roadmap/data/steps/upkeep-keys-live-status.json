@@ -1,14 +1,14 @@
 {
  "id": "upkeep-keys-live-status",
  "title": "The roadmap upkeep list reads the live statuses, not \"active\"",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "upkeep-keys-live-status",
  "owner": "triage",
  "blockedBy": [],
  "why": "The upkeep list is how triage sees a slip (step c55). It keys on status \"active\", which no step holds, so its stale and empty lists never fire and the ready count skips the \"ready\" steps.",
  "source": "retrospective 11:12 CST Nov 12, on the owner's question at 11:11 CST (\"is triage even thinking though or is it just appending only?\"); ruling c55 (owner Oct 26)",
  "note": "skills/roadmap/build.py upkeep() on main (line 1621, live = phases with an \"active\" step; ready list counts todo and active only). At roadmap 3b1a04109, 0 of 1,520 steps hold \"active\"; statuses in use: todo, ready, doing, blocked, queued, folded, done. Fix one home: main's skills/roadmap/build.py; the record branch's roadmap/build.py is a copy, so the lane says which one runs and drops the other or makes it call the first. Status names come from the one place the page defines them (KNOWN_STATUS, line 187), not a copy. todo and ready mean the same state (247 and 381 steps): flag it for one name. Red case first: a fixture with ready, todo and doing steps where the stale and empty lists must fire. Expect the first fixed run to list many steps; that is the slip c55 names, not a reason to loosen the check. Ready, no lane.",
- "updatedAt": "2026-11-12T11:17:26-06:00"
+ "updatedAt": "2026-11-12T11:28:45-06:00"
 }

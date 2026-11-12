@@ -1,11 +1,11 @@
 {
   "title": "One cleanup lane per child repo removes copies that decision child-cites-not-copies replaces with cites",
   "phase": "next",
-  "status": "doing",
+  "status": "ready",
   "order": 0.117,
   "owner": "coordinator",
   "why": "Coordinator queue, 13:18 CST Nov 7: after #1432 lands (decision child-cites-not-copies), each child repo still holds copies of claude-settings text.",
-  "note": "Waits on #1432. Then one lane per child: degen, home, joyous, mailaudit, q_max. Done: each child cites claude-settings instead of copying, and its checks pass. Waits on the merge of #1432 (coordinator, 14:31 CST Nov 7). Dead wait re-pointed 13:18 CST Nov 10 (step dead-pr-waits): #1106 closed unmerged; #1432 replaced it. Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose, first wave. Lane code-decisions started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
-  "updatedAt": "2026-11-12T07:29:00-06:00",
-  "lane": "session_013NEJL3J8hPzbUizhrDa6ze"
+  "note": "Waits on #1432. Then one lane per child: degen, home, joyous, mailaudit, q_max. Done: each child cites claude-settings instead of copying, and its checks pass. Waits on the merge of #1432 (coordinator, 14:31 CST Nov 7). Dead wait re-pointed 13:18 CST Nov 10 (step dead-pr-waits): #1106 closed unmerged; #1432 replaced it. Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose, first wave. Lane code-decisions started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Lane fan-code-decisions left it unstarted (11:22 CST Nov 12): it needs child repos degen, home, joyous, mailaudit and q_max attached, and the owner grant of 09:54 CST named only the merge-flow lane. No ask needed: decision session-tiers (owner 2026-11-02 15:43 CST) lets a coordinator run these lanes in any child repo with no per-repo grant; decision child-cites-not-copies rules the outcome. Ready for the coordinator to start one lane per child.",
+  "updatedAt": "2026-11-12T11:28:45-06:00",
+  "lane": ""
 }

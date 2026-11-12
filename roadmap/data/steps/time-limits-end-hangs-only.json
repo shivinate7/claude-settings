@@ -1,12 +1,12 @@
 {
   "title": "Runs stop on silence, not total time; a stop reads hung, never failed",
   "phase": "now",
-  "status": "queued",
+  "status": "ready",
   "order": 1018,
   "owner": "triage",
   "why": "Fixed total-time limits break as code grows and turn slow passing runs into red refusals; the owner ruled they serve no outcome except ending hung runs.",
-  "note": "Owner ruling 14:09 CST Nov 10, form confirmed 14:10 CST (\"yes, that three-part form matches what I meant\"), typed in the retrospective session, relayed by the coordinator 14:10 and 14:12 CST. (1) Stop on silence: a run ends only after it prints nothing for a while; a slow run that keeps printing is never cut. (2) A stop reads \"stopped, no output for N min\", never red and never a merge refusal; retry once, then report to the owner. (3) A total-time limit that must stay, such as CI's billing limit, is read from recent green runs each time, never stored as a number. Replaces merge/merge.py LINT_SECONDS 1200, lint/check_debt_retire.py TIMEOUT 600, hooks/mutate_guard.py and janitor/mutate_sweep.py 1200 each, lint/check_python_floor.py 300, and decision ci-job-caps' job limits. Open: the silence window N comes from measurement. Record: branch time-limits-end-hangs-only (new decision time-limits-end-hangs-only, ci-job-caps rewritten). Related: local-caps-interim-raise, capped-job-hides-red, retire-check-whole-suite.",
-  "updatedAt": "2026-11-10T14:12:00-06:00",
+  "note": "Owner ruling 14:09 CST Nov 10, form confirmed 14:10 CST (\"yes, that three-part form matches what I meant\"), typed in the retrospective session, relayed by the coordinator 14:10 and 14:12 CST. (1) Stop on silence: a run ends only after it prints nothing for a while; a slow run that keeps printing is never cut. (2) A stop reads \"stopped, no output for N min\", never red and never a merge refusal; retry once, then report to the owner. (3) A total-time limit that must stay, such as CI's billing limit, is read from recent green runs each time, never stored as a number. Replaces merge/merge.py LINT_SECONDS 1200, lint/check_debt_retire.py TIMEOUT 600, hooks/mutate_guard.py and janitor/mutate_sweep.py 1200 each, lint/check_python_floor.py 300, and decision ci-job-caps' job limits. Open: the silence window N comes from measurement. Record: branch time-limits-end-hangs-only (new decision time-limits-end-hangs-only, ci-job-caps rewritten). Related: local-caps-interim-raise, capped-job-hides-red, retire-check-whole-suite. R3 holds this step (coordinator 11:22 CST Nov 12): merge.deadlineMinutes is a total-time limit too, read from recent green runs under part (3). Lane fixed-number-limits-census hands its ~25 time limits here.",
+  "updatedAt": "2026-11-12T11:28:45-06:00",
   "lane": "",
   "blockedBy": []
 }
