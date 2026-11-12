@@ -26,8 +26,8 @@ share one definition of "the machine is loaded".
   every start and stops a running agent or lane session at its next shell or file write. An unread reading
   counts as normal, since Linux memory is always unread and the brake must not refuse every Linux start.
 - **`sim-lease`** (decision `sim-lease-tool`): a grant needs a machine that is not full. Slot 2 needs a normal
-  machine. An unread reading holds the grant, and `take` and `status` print it as unknown (coordinator,
-  2026-11-06 15:31 CST). Applying the "a check that cannot read its input fails" ruling (item 276 a, which on main is only
+  machine. An unread reading holds the grant, and `take` and `status` print it as unknown. That hold is this step's
+  reading, awaiting owner confirmation, and no step-record entry holds it. Applying the "a check that cannot read its input fails" ruling (item 276 a, which on main is only
   the page-check ruling in decision `page-check-at-export`) to `sim-lease` is this lane's reading, awaiting owner confirmation. "Slot 2 needs a normal machine" is this lane's mapping too. The queue order
   and the 18 Pro's slot rules are not load rules.
 - **Changed by this step.** The shared definition reads memory and disk only, and `sim-lease` drops its load-average bars. This is
