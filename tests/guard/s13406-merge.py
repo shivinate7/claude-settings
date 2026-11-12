@@ -1109,8 +1109,10 @@ def record_push_cost_case():
     (`origin main`, `HEAD:main`) adds one `git config` read, the remote's URL (rule push-main). A literal
     `HEAD:<branch>` adds no config or symbolic-ref read. A `--all` push (rule push-all-main) reads that URL the same way, then the current
     branch (`symbolic-ref`, the agent test), one `git for-each-ref` of the tracking refs, and, when those refs show no
-    update, one more `git for-each-ref` of the local branches (the all-agent test). A glob refspec reads the URL and
-    the same two for-each-ref reads, and no branch. A local-path origin stops after the URL read. No push spawns
+    update, one more `git for-each-ref` of the local branches (the all-agent test). A `--all` push also reads one
+    `git for-each-ref` of the branches its held-tip check needs (`push_moves`, rule push-batch-held). A glob refspec
+    reads the URL and the same two for-each-ref reads, and no branch. A local-path origin stops push-all-main's reads
+    after the URL read; the held-tip read still runs. No push spawns
     `ls-remote`, `fetch` or `push`. A stray push (rule push-stray-branch: an implied destination off the
     upstream) adds one `git rev-parse --verify -q` of the destination's remote-tracking ref. The octopus-push
     rule (decision octopus-push-refused) adds one `git rev-list` for each pushed ref whose destination is not
@@ -1170,16 +1172,18 @@ def record_push_cost_case():
         # rule push-all-main. push_ask_hit alone reads, for a --all push to a network remote, the remote's config, the
         # current branch (the agent test), one for-each-ref of the tracking refs, and one for-each-ref of the local
         # branches when the tracking refs show no update. A glob reads the config and the same two for-each-ref reads.
-        # A local-path origin stops after the config read. The guard's other checks add to those counts
+        # A local-path origin stops after the config read. The held-tip read of a --all push (push_moves, rule
+        # push-batch-held) adds one for-each-ref to either origin, so a network remote reads three and a local path one.
+        # The guard's other checks add to those counts
         # on the same call: record_writer_hit reads the bare destination of a push with no refspec (a --all push is one:
         # symbolic-ref and push.default), and the conflict-markers check reads its bases, three for a glob, which names
         # no tracking ref, with the default base's symbolic-ref and rev-parse.
         ("a --all push to a network remote", "push --all origin",
-         {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "for-each-ref": 2}),
+         {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "for-each-ref": 3}),
         ("a glob push to a network remote", "push origin refs/heads/*:refs/heads/*",
          {"rev-parse": 2, "symbolic-ref": 1, "config": 1, "for-each-ref": 2, "diff": 3, "rev-list": 1}),
         ("a --all push to a local-path origin", "push --all origin",
-         {"rev-parse": 1, "symbolic-ref": 1, "config": 2}, PUSHLOCALAHEAD),
+         {"rev-parse": 1, "symbolic-ref": 1, "config": 2, "for-each-ref": 1}, PUSHLOCALAHEAD),
     ):
         kinds, lines = spawn_kinds(VCS + " " + tail, cwd[0] if cwd else PUSHFEAT)
         if kinds != want:
