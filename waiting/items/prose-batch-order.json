@@ -30,11 +30,13 @@
     }
   ],
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "pick": "a",
   "rank": 1,
   "ref": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "reply": "Answered in the retrospective's chat at 20:24 CST: \"yes \u2014 i figure some prose has to wait behind some code changes otherwise it'd be confusing, but for a large part prose truly can all be done first \u2014 u can even work on readying that now!\" Reading: a, moved toward b. Prose-only steps go first, as their own batches, ahead of code. A prose step that describes code not yet on main waits behind that code. The one short round stays. The quote-match skip applies only to a PR of verbatim quotes and their times. The retrospective is sorting every open step into prose, prose-after-code and code now. Home: decision docs-only-prs-skip-review.",
   "repo": "shivinate7/claude-settings",
   "short": "prose merge order",
-  "status": "open",
+  "status": "closed",
   "title": "Should prose-only steps jump ahead of code?",
   "why": "You asked at 20:10 and 20:13 CST whether prose should go first as an express round (measured 2026-11-11, #2605 failed its prose round twice tonight)."
 }
