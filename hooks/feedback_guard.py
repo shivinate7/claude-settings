@@ -1018,8 +1018,10 @@ MARK = " repeats "  # appended to an item line, before the ref
 REF_KINDS = ("roadmap", "debt", "todo", "note", "inbox")  # the candidate ref prefixes
 # A mark the guard wrote: ` repeats <ref>` at the line tail, before an optional ` [closed]`. The item's
 # own words may hold "repeats", so a bare substring is not a mark.
-# An inbox ref is `inbox:<sid8>@<date> <hh:mm>`, so it holds one space (inbox_candidates).
-MARKED = re.compile(r"%s(?:%s):\S+(?: \d{2}:\d{2})?(?: \[closed\])?\s*$" % (re.escape(MARK), "|".join(REF_KINDS)))
+# An inbox ref is `inbox:<sid8>@<date> <hh:mm>`, so it holds one space, and a block stamped in the
+# same minute as another adds `#<block number>` after the time (inbox_refs).
+MARKED = re.compile(r"%s(?:%s):\S+(?: \d{2}:\d{2}(?:#\d+)?)?(?: \[closed\])?\s*$"
+                    % (re.escape(MARK), "|".join(REF_KINDS)))
 INBOX_SUFFIX = ".inbox.md"
 
 
