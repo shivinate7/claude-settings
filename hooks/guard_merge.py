@@ -2240,11 +2240,13 @@ def hook_bypass_hit(texts):
 # word are never read; a read is a ref argument of a read verb that is FETCH_HEAD, or a range or revision form of
 # it; a `--git-path FETCH_HEAD` reads no content and passes. The walk is `_hook_events`'s: segments in order, each
 # segment's `$( )` texts first (the shell runs them while it expands the words), then the texts a shell, `eval` or
-# runner hands on. A fetch clears only the reads after it in that order.
+# runner hands on. An unquoted `$( )` that holds a `;` or `|` is cut there into segments of its own, which the walk
+# reads in the same order. A fetch clears only the reads after it in that order.
 # Known limits (decision fetch-head-shared-race, debt fetch-head-read-gaps): `cat .git/FETCH_HEAD` is no git read and
-# passes; a fetch that fails before a `;` or `|` read still clears it; `git -C <other> fetch` clears a bare read here;
-# an attached `--source=FETCH_HEAD` or `--onto=FETCH_HEAD` is no word the check reads. `git pull` is no fetch for
-# this check, an over-refusal, not a miss.
+# passes; a fetch that fails before a `;` or `|` read still clears it; `git -C <other> fetch` clears a bare read here,
+# and so does a fetch before a `cd <other>`; an attached `--source=FETCH_HEAD` or `--onto=FETCH_HEAD` is no word the
+# check reads; a backtick text cut by a `;` hides its read; a `$( )` read in a heredoc body is cleared by any fetch in
+# the command. `git pull` is no fetch for this check, and a quoted `"FETCH_HEAD)"` reads as a ref: over-refusals.
 FETCH_HEAD_REASON = (
     "Rule (Git): this command reads git's shared fetch result, one file per checkout that every fetch there rewrites, "
     "so it can return the ref another agent fetched, not the one you did. "
@@ -2261,19 +2263,30 @@ _FETCH_HEAD_READ_VERBS = {
     "for-each-ref",
 }
 # `FETCH_HEAD` alone, or as a range end (`..`, `...` before it or `..` after it), or with a revision suffix. The dot
-# of `FETCH_HEAD.md` ends nothing: only a double dot does.
-_FETCH_HEAD_REF = re.compile(r"(?:^|\.\.\.?|\^)FETCH_HEAD(?:$|[:^~@{]|\.\.)")
+# of `FETCH_HEAD.md` ends nothing: only a double dot does. A `)` ends it too: shlex leaves a subshell's or a
+# substitution's closing paren glued to the last word, as in `(git show FETCH_HEAD)`.
+_FETCH_HEAD_REF = re.compile(r"(?:^|\.\.\.?|\^)FETCH_HEAD(?:$|[:^~@{)]|\.\.)")
 # Flags whose NEXT word is a pattern, a person, a date or a path, not a ref. `--pretty` and `--format` take their value
 # after `=` only, so a bare one is no value flag.
 _FETCH_HEAD_VALUE_FLAGS = {"--grep", "-S", "-G", "--author", "--committer", "--since", "--until", "--git-path", "-e"}
-# -m and -F take a value (a message, a file, a parent number) only in these verbs; in log and show -m is a boolean.
-_FETCH_HEAD_MESSAGE_VERBS = {"merge", "tag", "cherry-pick", "revert"}
+# Flags that take the next word as a value in one verb only. -m and -F take a message, a file or a parent number in
+# merge, tag, cherry-pick and revert; in log and show they are booleans. grep's context and count flags take a number,
+# and -f a pattern file.
+_MESSAGE_FLAGS = {"-m", "-F"}
+_FETCH_HEAD_VERB_VALUE_FLAGS = {
+    "merge": _MESSAGE_FLAGS, "tag": _MESSAGE_FLAGS, "cherry-pick": _MESSAGE_FLAGS, "revert": _MESSAGE_FLAGS,
+    "grep": {"-A", "-B", "-C", "-m", "-f", "--context", "--after-context", "--before-context", "--max-count", "--file"},
+}
+# Verbs whose words after `--` are paths, never refs. In merge, tag, branch, worktree and the rest, `--` only ends the
+# flags, so a word after it can still be a ref.
+_FETCH_HEAD_PATH_VERBS = {"log", "show", "diff", "grep", "restore", "checkout"}
 
 
 def _fetch_head_event(segment: str):
     """("fetch",) for a segment whose command word is `git fetch`, ("read", matched) for a read verb with a FETCH_HEAD
-    ref argument, else (). A segment shlex cannot parse judges nothing (the fail-open stance)."""
-    tokens = segment_tokens(segment)
+    ref argument, else (). A segment shlex cannot parse judges nothing (the fail-open stance). A redirect is cut first,
+    so `FETCH_HEAD>out` reads as the word bash passes, `FETCH_HEAD`."""
+    tokens = segment_tokens(type(segment)(strip_redirections(segment)))
     if not tokens:
         return ()
     index = resolve_command(tokens)
@@ -2287,13 +2300,16 @@ def _fetch_head_event(segment: str):
         return ("fetch",)
     if verb not in _FETCH_HEAD_READ_VERBS:
         return ()
-    value_flags = _FETCH_HEAD_VALUE_FLAGS | ({"-m", "-F"} if verb in _FETCH_HEAD_MESSAGE_VERBS else set())
+    value_flags = _FETCH_HEAD_VALUE_FLAGS | _FETCH_HEAD_VERB_VALUE_FLAGS.get(verb, set())
     args = tokens[cursor + 1:]
-    # `git grep <pattern> [<rev>]`: the first word that is no flag is the pattern, unless -e gives it.
-    pattern_next = verb == "grep" and not any(arg.startswith("-e") for arg in args)
+    # `git grep <pattern> [<rev>]`: the first word that is no flag is the pattern, unless -e or -f gives it.
+    pattern_next = verb == "grep" and not any(
+        arg.startswith(("-e", "-f", "--file=")) or arg == "--file" for arg in args)
     for at, arg in enumerate(args):
         if at and args[at - 1] in value_flags:
-            continue   # a pattern or a message, not a ref
+            continue   # a pattern, a message or a number, not a ref
+        if arg == "--" and verb in _FETCH_HEAD_PATH_VERBS:
+            break      # the rest are paths
         if arg.startswith("-"):
             continue
         if pattern_next:
