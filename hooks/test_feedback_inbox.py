@@ -4054,6 +4054,62 @@ def case_standing_grant_without_a_once_item_keeps_today_reason():
     check("standing control, no once: item: the reason is today's, pinned", want in out, out)
 
 
+# A one-shot grant can name a set bounded to this batch. "every open" is a standing scope word, so the bound is what
+# makes the set task-scope. The bounded grant is wanted accepted; the same grant without the bound stays refused.
+BATCH_TEXT = "approved, merge every open PR in this batch"
+BATCH_ONCE_HOME = "- fb-0958-1 [note] -> once:merge-batch-prs"
+MEASURED_TEXT = "approved, merge PR 12. Clean up every test PR."  # the sentence the lane measured
+MEASURED_ONCE_HOME = "- fb-0958-1 [note] -> once:merge-pr-12"
+UNBOUNDED_STANDING_TEXTS = (  # standing scope with no batch bound: each still refuses its once: home
+    "approved, merge every open PR",
+    "approved, merge every PR",
+    "approved, clean up every PR",
+)
+BOUNDED_STANDING_TEXTS = (  # a batch bound on one scope does not clear a standing word elsewhere in the message
+    "approved, merge every open PR in this batch, whenever green",
+    "approved, merge every open PR in this batch, each time a batch is ready",
+)
+
+
+def case_one_shot_grant_bounded_to_this_batch_passes():
+    """A one-shot grant whose act names a set bounded to this batch is task-scope, not standing, so its once: home
+    passes. Red today: "every open" is a standing scope word, so the home is barred and the message is refused with
+    "has no home"."""
+    mod = guard_module()
+    check("batch one-shot: the message is a grant", mod.is_grant(BATCH_TEXT), BATCH_TEXT)
+    out = mod.problems(mod.parse(render_block(BATCH_TEXT, items=(BATCH_ONCE_HOME,))), "")
+    check("batch one-shot: its once: home passes, not refused", not any("has no home" in s for s in out), out)
+
+
+def case_measured_one_shot_sentence_passes_control():
+    """Green control, passing on the head: the sentence the lane measured, "clean up every test PR", in a one-shot
+    grant with its once: home is accepted. No standing scope word sits by "every" in it, so the phrase alone does not
+    trigger the bar. This pins that it stays accepted."""
+    mod = guard_module()
+    out = mod.problems(mod.parse(render_block(MEASURED_TEXT, items=(MEASURED_ONCE_HOME,))), "")
+    check("measured one-shot sentence, once home: not refused", not any("has no home" in s for s in out), out)
+
+
+def case_unbounded_standing_scope_still_refuses_a_once_home():
+    """Green control, refusing on the head: a standing scope with no batch bound keeps refusing its once: home. The
+    bounded set passes only with its bound, so the bound alone changes the verdict."""
+    mod = guard_module()
+    for text in UNBOUNDED_STANDING_TEXTS:
+        out = mod.problems(mod.parse(render_block(text, items=(BATCH_ONCE_HOME,))), "")
+        check("unbounded standing %r: a once: home does not pass it" % text,
+              any("has no home" in s for s in out), out)
+
+
+def case_batch_bound_does_not_clear_a_standing_word_elsewhere():
+    """Green control, refusing on the head: a batch bound on one scope does not clear a standing word elsewhere in the
+    same message. Each text keeps its once: home barred."""
+    mod = guard_module()
+    for text in BOUNDED_STANDING_TEXTS:
+        out = mod.problems(mod.parse(render_block(text, items=(BATCH_ONCE_HOME,))), "")
+        check("bounded batch with a standing word %r: a once: home does not pass it" % text,
+              any("has no home" in s for s in out), out)
+
+
 # --------------------------------------------------------------------------- page-form-to-template cases
 # A waiting-page comment is answered by rewriting its item, never by a thread reply (ruling c164). So each
 # comment's item routes to the shared template, skills/waiting-page: a task homed to a step file that names it,
@@ -4520,6 +4576,10 @@ CASES = (
     case_standing_grant_reason_names_the_once_bar,
     case_one_shot_grant_reason_offers_the_once_home,
     case_standing_grant_without_a_once_item_keeps_today_reason,
+    case_one_shot_grant_bounded_to_this_batch_passes,
+    case_measured_one_shot_sentence_passes_control,
+    case_unbounded_standing_scope_still_refuses_a_once_home,
+    case_batch_bound_does_not_clear_a_standing_word_elsewhere,
     case_page_form_asked_comment_with_a_note_blocks,
     case_page_form_step_without_the_template_blocks,
     case_page_form_step_naming_the_template_passes,
