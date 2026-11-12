@@ -14,8 +14,9 @@ FAMILY = "records-page-ready"
 # call that names y/x names the checkout's own repo. git reads https://github.com/y/x.git as RPR_ORIGIN through
 # url.<path>.insteadOf, set in each case's environment by _rpr_urls. The other repo, y/child, has a bare origin of its own
 # (RPR_CHILD_ORIGIN) that holds its heads and no others. y/gone maps to a path that does not exist, so its read fails.
-# No case reaches GitHub. Caveat: `git remote get-url` expands insteadOf, so inside a case it prints the local path;
-# `git config --get remote.origin.url` prints the literal URL.
+# RPR_SSH's origin is the SSH name of y/x, which maps to RPR_ORIGIN. The https name of y/x maps to RPR_GONE in that case,
+# so a clone by that name reads nothing. No case reaches GitHub. Caveat: `git remote get-url` expands insteadOf, so inside a
+# case it prints the local path; `git config --get remote.origin.url` prints the literal URL.
 RPR = os.path.join(ROOT, "readypage")
 RPR_ORIGIN = os.path.join(RPR, "origin.git")
 RPR_SEED = os.path.join(RPR, "seed")
@@ -57,6 +58,8 @@ RPR_GONE = os.path.join(os.sep, "no-such-repo-%s.git" % uuid.uuid4().hex)
 GHREADY_CHILD_STALE = os.path.join(RPR, "gh-child-stale")      # y/child, head child-stale: a debt and no page
 GHREADY_CHILD_CURRENT = os.path.join(RPR, "gh-child-current")  # y/child, head child-current: a debt and the page the generator writes
 GHREADY_GONE = os.path.join(RPR, "gh-gone")                    # y/gone, head child-stale: the repo cannot be fetched
+RPR_SSH = os.path.join(RPR, "clone-ssh")                       # a checkout whose origin is the SSH name of y/x
+RPR_SSH_URL = "git@github.com:y/x.git"
 
 
 def _rpr_git(where, *args):
@@ -183,6 +186,18 @@ def _build_ready_page():
     listed_rc, listed = _rpr_ls_remote(RPR_REPO, [(RPR_X, RPR_ORIGIN)], RPR_X)
     _rpr_need(listed_rc == 0 and ("%s\trefs/heads/main" % head("main")) in listed,
               "y/x's URL does not read RPR_ORIGIN through the mapping: %r" % listed)
+    # The SSH checkout: its origin names y/x by SSH, and the https name of y/x reaches no repo. Scope first: both names read as
+    # the mapping says, so a read of this checkout's origin is the only read that reaches the heads.
+    _rpr_git(RPR, "clone", "-q", RPR_ORIGIN, RPR_SSH)
+    _rpr_git(RPR_SSH, "remote", "set-url", "origin", RPR_SSH_URL)
+    _rpr_need(_rpr_git(RPR_SSH, "config", "--get", "remote.origin.url") == RPR_SSH_URL,
+              "the SSH checkout's origin is not the SSH name of y/x")
+    ssh_rc, ssh_listed = _rpr_ls_remote(RPR_SSH, [(RPR_SSH_URL, RPR_ORIGIN)], RPR_SSH_URL)
+    _rpr_need(ssh_rc == 0 and ("%s\trefs/heads/main" % head("main")) in ssh_listed,
+              "the SSH name of y/x does not read RPR_ORIGIN through the mapping: %r" % ssh_listed)
+    https_rc, _ = _rpr_ls_remote(RPR_SSH, [(RPR_X, RPR_GONE)], RPR_X)
+    _rpr_need(https_rc != 0 and not os.path.exists(RPR_GONE),
+              "the https name of y/x reaches a repo, so a clone by that name would read the heads")
     _build_ready_child()
 
 
@@ -243,9 +258,11 @@ def _rpr_urls(*pairs):
     return env
 
 
-def rpr_bash(name, command, expected, fake, cwd=RPR_REPO, tool="Bash", carries=(), lacks=(), pairs=()):
+def rpr_bash(name, command, expected, fake, cwd=RPR_REPO, tool="Bash", carries=(), lacks=(), pairs=(), own=_RPR_BASE_PAIRS):
+    """`own` is the mapping of the case's own repo; each case's `pairs` add to it. A case whose checkout names its repo another way
+    passes its own mapping."""
     sh(name, command, expected, rule=RPR_RULE if expected == "deny" else None, tool=tool, cwd=cwd,
-       env_path=_rpr_env(fake), config=MERGECFG, carries=carries, lacks=lacks, env=_rpr_urls(*_RPR_BASE_PAIRS, *pairs))
+       env_path=_rpr_env(fake), config=MERGECFG, carries=carries, lacks=lacks, env=_rpr_urls(*own, *pairs))
 
 
 def rpr_mcp(name, expected, fake, carries=(), lacks=(), cwd=RPR_REPO, pairs=(), **tool_input):
@@ -319,6 +336,28 @@ rpr_mcp("records-page-ready: MCP draft false on a stale page of another repo is 
 rpr_mcp("records-page-ready: MCP draft false on a page of another repo that cannot be fetched is refused unknown", "deny",
         GHREADY_GONE, carries=("unknown",), lacks=RPR_UNKNOWN_LACKS, owner="y", repo="gone", pullNumber=12, draft=False,
         pairs=((RPR_GONE_URL, RPR_GONE),))
+# The bash forms of another repo's pull request. A URL, -R and GH_REPO each name y/child, so each reads y/child's origin through a
+# temporary clone, as the MCP form does. The checkout's own origin lacks y/child's heads, so a read there refuses unknown.
+rpr_bash("records-page-ready: gh pr ready by URL of another repo on a current page is allowed",
+         "gh pr ready https://github.com/y/child/pull/12", "allow", GHREADY_CHILD_CURRENT, pairs=CHILD_PAIRS)
+rpr_bash("records-page-ready: gh pr ready by URL of another repo on a stale page is refused",
+         "gh pr ready https://github.com/y/child/pull/12", "deny", GHREADY_CHILD_STALE,
+         carries=RPR_CARRY, lacks=RPR_STALE_LACKS, pairs=CHILD_PAIRS)
+rpr_bash("records-page-ready: gh pr ready 12 -R another repo on a current page is allowed",
+         "gh pr ready 12 -R y/child", "allow", GHREADY_CHILD_CURRENT, pairs=CHILD_PAIRS)
+rpr_bash("records-page-ready: gh pr ready 12 -R another repo on a stale page is refused",
+         "gh pr ready 12 -R y/child", "deny", GHREADY_CHILD_STALE,
+         carries=RPR_CARRY, lacks=RPR_STALE_LACKS, pairs=CHILD_PAIRS)
+rpr_bash("records-page-ready: GH_REPO naming another repo, gh pr ready 12 on a current page is allowed",
+         "GH_REPO=y/child gh pr ready 12", "allow", GHREADY_CHILD_CURRENT, pairs=CHILD_PAIRS)
+rpr_bash("records-page-ready: GH_REPO naming another repo, gh pr ready 12 on a stale page is refused",
+         "GH_REPO=y/child gh pr ready 12", "deny", GHREADY_CHILD_STALE,
+         carries=RPR_CARRY, lacks=RPR_STALE_LACKS, pairs=CHILD_PAIRS)
+# The same repo, named by -R, from a checkout whose origin is the SSH name of it. The read of y/x goes to the checkout's own origin.
+# A temporary clone of y/x would fetch the https name, which maps to no repo, so only the checkout's read reaches the stale page.
+rpr_bash("records-page-ready: gh pr ready 12 -R its own repo, from a checkout with the SSH origin, on a stale page is refused",
+         "gh pr ready 12 -R y/x", "deny", GHREADY_STALE, cwd=RPR_SSH,
+         carries=RPR_CARRY, lacks=RPR_STALE_LACKS, own=((RPR_SSH_URL, RPR_ORIGIN), (RPR_X, RPR_GONE)))
 
 
 def _rpr_no_read(tool_input):
