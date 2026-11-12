@@ -19269,6 +19269,38 @@ class BatchFreeze(CloudSession):
         self.assertEqual(rc, 1, "a split of a case in two lanes exited %s, not 1: %s" % (rc, out))
         self.assert_untouched(pr, snap, out)
 
+    def test_batch_split_whose_one_job_names_two_lanes_by_two_lines_drops_nothing(self):
+        self.case_lane(101, "test_one")
+        self.case_lane(102, "test_two")  # each line names one lane; the job's two lines name two lanes, so the job is unmapped
+        self.lane(103)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        url = self.split_run(7120, {"unit-tests": ["FAIL: test_one (__main__.C.test_one)", "FAIL: test_two (__main__.C.test_two)"]})
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        self.assertRegex(out, r"unmapped: its failing lines name #101 #102, not one lane",
+                         "a job whose two lines name two lanes is not refused with the cross-line cause: %s" % out)
+        self.assertEqual(rc, 1, "a split of a job whose two lines name two lanes exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
+    def test_batch_split_of_a_job_with_only_summary_lines_drops_nothing(self):
+        self.case_lane(101, "test_one")
+        self.case_lane(102, "test_two")
+        self.lane(103)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        url = self.split_run(7121, {"unit-tests": ["FAILED (failures=1)", "FAILED (failures=2, errors=1)"]})  # both lines are summaries: none names a lane
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        self.assertRegex(out, r"unmapped: it has no failing line that names a case or a file",
+                         "a job whose only failing lines are summaries is not refused with the no-named-line cause: %s" % out)
+        self.assertEqual(rc, 1, "a split of a job with only summary lines exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
     def test_batch_split_whose_log_cannot_be_read_drops_nothing(self):
         self.case_lane(101, "test_one")
         self.case_lane(102, "test_it")
