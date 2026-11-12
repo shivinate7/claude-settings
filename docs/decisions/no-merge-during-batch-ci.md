@@ -31,7 +31,7 @@ Not counted:
 Limits:
 
 - Pressing GitHub's own Merge button is not refused by a hook.
-- GitHub auto-merge is not covered: the MCP tool `enable_pr_auto_merge` is in no guard matcher and no guard branch. A batch that turns busy after auto-merge is on is missed too, because auto-merge fires later. Left for the owner's grant to cover it.
+- An auto-merge, even a guarded one, fires later. A batch that turns busy after the guard read the head is missed, because the guard reads once, when the call is made. Auto-merge switched on in GitHub's web page is not read at all.
 - An MCP file write to main (`create_or_update_file`, `push_files`, `delete_file`) is not judged: no guard reads its `branch` input. Debt `mcp-file-write-main-unjudged` holds it.
 - A GraphQL merge, sent with `gh api graphql`, is not refused.
 - A push of all branches or a mirror push that writes main is not braked: it names no single head. A forced push that names one head to main is not braked either: the force-push rule asks, and that ask skips the brake, so a busy batch does not deny it.
@@ -47,7 +47,7 @@ Limits:
 
 Cause of the Nov 8 merges (#2352 and #2350, during the run of #2361): the MCP merge tool had no guard matcher in `settings.json` before commit 625a87260. The form the local session used is unmeasured, because guard.log is not readable from the cloud.
 
-Routes the guard covers: `gh pr merge`, the MCP merge tool `merge_pull_request`, a raw `gh api -X PUT .../pulls/<n>/merge` (also `--method PUT`, and `-R`), and a `git push` that writes main. A push is refused when a ready PR on main is busy and its head does not hold the pushed head. An unreadable pushed head or compare counts as not held (unknown is red). A push of main's own tip moves nothing, and with no busy PR a push keeps its ask. Each refusal offers the owner's typed `override`, and its Remedy sentence names no act (rule git-remedy-never-names-target). Only the busy-PR refusal names the busy PR and its run; the head-check and unknown refusals name neither. The one reader is `Host.batch_read` in `merge/merge.py`, which calls the merge tool's own `batch_running`.
+Routes the guard covers: `gh pr merge`, the MCP merge tool `merge_pull_request`, the MCP `enable_pr_auto_merge` (owner pick a on page item 459, Nov 9 13:09 CST: the guard's tool list gains both GitHub merge calls), a raw `gh api -X PUT .../pulls/<n>/merge` (also `--method PUT`, and `-R`), and a `git push` that writes main. A push is refused when a ready PR on main is busy and its head does not hold the pushed head. An unreadable pushed head or compare counts as not held (unknown is red). A push of main's own tip moves nothing, and with no busy PR a push keeps its ask. Each refusal offers the owner's typed `override`, and its Remedy sentence names no act (rule git-remedy-never-names-target). Only the busy-PR refusal names the busy PR and its run; the head-check and unknown refusals name neither. The one reader is `Host.batch_read` in `merge/merge.py`, which calls the merge tool's own `batch_running`.
 
 Why: batch 13's lanes, roadmap steps c182 and c187 (PRs #777 and #778), each conflicted with batch 12 (PR #779). A merge to main under a running batch run moves the base that run tests. This rule is roadmap step c195.
 

@@ -104,7 +104,9 @@ def gh_call_of(segment: str):
 
 
 # ---- a merge made outside the merge tool
-MERGE_TOOLS = ("mcp__github__merge_pull_request",)
+# The auto-merge call queues the merge GitHub makes once the checks pass, so it lands a head on the base as a merge does.
+AUTO_MERGE_TOOL = "mcp__github__enable_pr_auto_merge"
+MERGE_TOOLS = ("mcp__github__merge_pull_request", AUTO_MERGE_TOOL)
 MERGE_VALUE_FLAGS = {"-R", "--repo", "-b", "--body", "-F", "--body-file", "-t", "--subject",
                      "--match-head-commit", "-A", "--author-email"}
 # Seconds for the WHOLE read, shared: Host.head_read makes 4 `gh` REST calls (5 with a branch selector, 1 more run-list read when the check runs link more than one run; a settled head adds the
@@ -301,7 +303,7 @@ MERGE_CHECK_REASON = (
 )
 
 
-# The head-check refusal of a raw API merge, which never goes through the merge tool. Its Remedy names no act
+# The head-check refusal of a raw API merge or an auto-merge call, which never go through the merge tool. Its Remedy names no act
 # (git-remedy-never-names-target), because the merge tool is not the way round for it: it would be Claude's copy of a named act.
 MERGE_CHECK_ROUTE_REASON = (
     "Rule (Git): this head is not settled: %s. A merge waits for every check and workflow run on "
@@ -353,7 +355,7 @@ def push_batch_hit(args, where: str, overrides=None) -> str:
 
 
 def merge_check_reason(verdict: str, detail: str, route: bool = False) -> str:
-    """The refusal text for a merge check. `route`: the call is a raw API PUT, so the head-check text names no merge tool."""
+    """The refusal text for a merge check. `route`: the call is a raw API PUT or an auto-merge call, so the head-check text names no merge tool."""
     if verdict == "batch":
         return MERGE_BATCH_REASON % cap_safe(detail, 160)
     return (MERGE_CHECK_ROUTE_REASON if route else MERGE_CHECK_REASON) % (verdict + (" (" + cap_safe(detail, 160) + ")" if detail else ""))

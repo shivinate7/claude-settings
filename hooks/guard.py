@@ -149,7 +149,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        heredoc body pass. (process-args-guard)
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
-                       A `gh api` PUT to a pull request's merge endpoint is judged the same way. A
+                       A `gh api` PUT to a pull request's merge endpoint and the MCP
+                       `enable_pr_auto_merge` are judged the same way. A
                        non-forced `git push` that writes main or master gets the batch read alone: a
                        deny in place of push-main's ask while a ready PR on that base runs CI (an
                        unreadable pushed head counts as not contained, and a failed read stays an ask).
@@ -576,7 +577,7 @@ while True:
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
-            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON,
+            AUTO_MERGE_TOOL, DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, is_api_merge, merge_call_of, merge_check, merge_check_reason, push_batch_hit, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
@@ -6220,7 +6221,8 @@ def judge(payload) -> None:
         repo = owner + "/" + name if isinstance(owner, str) and isinstance(name, str) else ""
         verdict, detail = merge_check("" if number is None else str(number), repo, cwd)
         if verdict != "green":
-            refuse(tool, "deny", "merge-checks", merge_check_reason(verdict, detail),
+            refuse(tool, "deny", "merge-checks",
+                   merge_check_reason(verdict, detail, tool == AUTO_MERGE_TOOL),
                    "merge tool " + verdict)
 
     # The MCP update tool marks a pull request ready with draft false (rule records-page-ready).
