@@ -46,7 +46,9 @@ SECTION_HEAD = re.compile(r"# section (\d+)\n")  # the loader's own pattern (hoo
 FINDING_LINE = re.compile(r"^(?P<file>.+?):(?P<line>\d+):\d+: (?P<code>[A-Z]\d+) (?:\[\*\] )?(?P<msg>.+)$")
 SYNTAX_LINE = re.compile(r"^(?P<file>.+?):(?P<line>\d+):\d+: invalid-syntax: (?P<msg>.+)$")
 UNDEFINED = re.compile(r"^Undefined name `([^`]+)`$")
-RUFF_TRAILER = ("Found ", "All checks passed", "[*] ")
+# Ruff prints a summary after its findings, then hints such as `1 unsafe fix available with ...`. A line after the
+# summary that is no finding is a hint; a line before it that is no finding is one this check does not read.
+RUFF_SUMMARY = ("Found ", "All checks passed")
 
 
 def split_lines(text):
@@ -133,12 +135,17 @@ def findings(runner_path, section_dir):
     if proc.returncode not in (0, 1):
         raise RuntimeError("ruff failed (exit %d): %s" % (proc.returncode, proc.stderr.strip()))
     out = []
+    summarized = False
     for line in proc.stdout.splitlines():
-        if not line.strip() or line.startswith(RUFF_TRAILER):
+        if not line.strip():
             continue
         m = FINDING_LINE.match(line) or SYNTAX_LINE.match(line)
         if not m:
-            raise RuntimeError("ruff printed a line this check does not read: %s" % line)
+            if line.startswith(RUFF_SUMMARY):
+                summarized = True
+            elif not summarized:
+                raise RuntimeError("ruff printed a line this check does not read: %s" % line)
+            continue
         code = m.groupdict().get("code") or "invalid-syntax"
         msg = m.group("msg")
         if code == "F821":
@@ -250,6 +257,16 @@ class JoinedOrderF821(unittest.TestCase):
         self.assertEqual(proc.returncode, 1, "the planted syntax error did not read as a finding: " + proc.stdout
                          + proc.stderr)
         self.assertIn("zz_planted.py:2: invalid-syntax", proc.stdout)
+
+    def test_planted_unused_local_in_a_section_is_reported_with_its_place(self):
+        """An unused local is F841, and ruff offers its fix only unsafe, so ruff prints a hint line after its summary. The
+        hint is no finding: the finding and its place are read, and the join is not refused."""
+        root = self.make_tree("unused-local", planted="def _planted():\n    unused = 1\n")
+        proc = subprocess.run([sys.executable, os.path.abspath(__file__), "--root", root],
+                              capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(proc.returncode, 1, "the planted unused local did not read as a finding: "
+                         + proc.stdout + proc.stderr)
+        self.assertIn("zz_planted.py:3: F841", proc.stdout, "the planted unused local is not reported where it sits")
 
     def fake_ruff_on_path(self, version):
         """A folder on PATH holding a `ruff` that reports `version`, and nothing else: no pipx."""
