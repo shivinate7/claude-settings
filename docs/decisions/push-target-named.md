@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Rule `push-target-named` in `hooks/guard.py` refuses an agent's `git push` unless the agent's own brief names the branch it sends to. Its home is `judge_shell` step 4, in the `_push_calls` loop, after the force verdict (`push_target_reason` in `hooks/guard_push_delete.py`). Lane: `brief-names-push-target`, 2026-11-12 CST.
+Rule `push-target-named` in `hooks/guard.py` refuses an agent's `git push` unless the agent's own brief names the branch it sends to. Its home is `judge_shell` step 4, in the `_push_calls` loop, after the force verdict (`push_target_kind` in `hooks/guard_push_delete.py`). Lane: `brief-names-push-target`, 2026-11-12 CST.
 
 - The mistake: in lane `writer-lists-awaiting-threads` a builder pushed to the lane branch before the review records were posted.
 - The harm: the early push breaks the pull request review record (`pr-review-record`) and lands unreviewed work on origin.
@@ -17,7 +17,7 @@ Rule `push-target-named` in `hooks/guard.py` refuses an agent's `git push` unles
 - Accepted limits: a bold or dash lead (`**Push to:**`, `- Push to:`) is not a line, so the push is refused with the remedy; a malformed `agent_id` is a top-level call and is not judged. Claude is unlikely to write a forged brief by mistake (`guard-guards-mistakes-only`).
 - Cost: one file read per agent push, stopped at the first user record, never raising, no file written, no process start. A call with no agent push reads nothing.
 
-Protected by the `push-target-named:` cases in `hooks/test_guard.py` (family `push-target-named`), red before the rule landed; `hooks/test_agent_brief.py` pins the standing push line each agent gets, and `lint/test_agent_push_form.py` pins `Push to:` in each writer role file.
+The `push-target-named:` cases in `hooks/test_guard.py` (family `push-target-named`) protect it. They were red before the rule landed. `hooks/test_agent_brief.py` pins the standing push line each agent gets, and `lint/test_agent_push_form.py` pins `Push to:` in each writer role file.
 
 Kind: process
 Home: hooks/guard.py

@@ -621,16 +621,16 @@ PUSH_FENCE = re.compile(r"^\s*(```|~~~)")
 PUSH_NONE = "none"   # the value of a Push to: line that lets the agent push nothing
 PUSH_NO_TARGET_REASON = (
     "Rule (Git): an agent pushes only where its brief's Push to: line says, and this brief holds no such line or "
-    "the line is empty or a placeholder (rule push-target-named). "
+    "the line is empty or a placeholder (decision push-target-named). "
     "Remedy: stop, push nothing, and report that the brief names no push target."
 )
 PUSH_NONE_REASON = (
-    "Rule (Git): the Push to: line of this agent's brief says none, so this agent pushes nothing (rule push-target-named). "
+    "Rule (Git): the Push to: line of this agent's brief says none, so this agent pushes nothing (decision push-target-named). "
     "Remedy: commit your work, push nothing, and report it as unpushed."
 )
 PUSH_OTHER_REASON = (
     "Rule (Git): this push goes to a branch, or to a destination that cannot be resolved, other than the one "
-    "the Push to: line of this agent's brief names (rule push-target-named). "
+    "the Push to: line of this agent's brief names (decision push-target-named). "
     "Remedy: push only with `git push origin HEAD:<branch>` to the branch that line names, or stop and report."
 )
 
@@ -652,18 +652,17 @@ def brief_push_target(brief):
     return ""
 
 
-def push_target_reason(brief, args, cwd, overrides=None):
-    """The refusal reason for an agent's push judged against its brief, else ''. No usable Push to: line, or none: refused.
-    A named branch: refused unless every destination of the push (`push_destinations`) is that branch. A destination
-    that cannot be resolved, or a glob, is not that branch. The reason never names the destination."""
+def push_target_kind(brief, args, cwd, overrides=None):
+    """How an agent's push fails its brief: '' when it passes, 'line' for no usable Push to: line, 'none' for a none
+    line, 'other' for a destination that is not the named branch. A named branch passes only when every destination of
+    the push (`push_destinations`) is that branch. A destination that cannot be resolved, or a glob, is not that
+    branch. The caller prints the reason of each kind: PUSH_NO_TARGET_REASON, PUSH_NONE_REASON or PUSH_OTHER_REASON."""
     target = brief_push_target(brief)
     if not target:
-        return PUSH_NO_TARGET_REASON
+        return "line"
     if target == PUSH_NONE:
-        return PUSH_NONE_REASON
-    if all(dest == target for dest in push_destinations(args, cwd, overrides)):
-        return ""
-    return PUSH_OTHER_REASON
+        return "none"
+    return "" if all(dest == target for dest in push_destinations(args, cwd, overrides)) else "other"
 
 
 def _colon_delete(delete, plain):

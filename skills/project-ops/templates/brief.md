@@ -38,7 +38,7 @@ Batch-join check (repos with claude-settings' `bin/ci-job`): before the lane han
 among them, and no full suite. A red lane does not hand off.
 Run `merge --lane-lint` from the main checkout, never from a session or agent isolated in a worktree: Claude Code's worktree check can refuse it there.
 
-Each brief the lane writes to a builder, test-author, designer or record-writer carries a `Push to: <branch>` line (or `Push to: none`), at a line start, outside a fence, with a real branch name and no placeholder (rule `push-target-named`: the guard refuses an agent's push to any other branch, and a push by an agent whose brief has no such line).
+Each brief the lane writes to a builder, test-author, designer or record-writer carries a `Push to: <branch>` line, or `Push to: none`. The line starts a line, sits outside a fence, and names a real branch, never a placeholder. Rule `push-target-named` refuses an agent's push to any other branch. It also refuses a push by an agent whose brief has no such line.
 
 A fix round is a fresh isolated spawn from the branch head (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own worktrees).
 

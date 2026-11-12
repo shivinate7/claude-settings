@@ -571,8 +571,9 @@ while True:
         _loading = "guard_push_delete"
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
-            PUSH_AGENT_REASON, PUSH_ALL_AGENT_REASON, PUSH_ALL_REASON, PUSH_REASON, PUSH_STRAY_REASON,
-            cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_ask_hit, push_target_reason, push_verdict,
+            PUSH_AGENT_REASON, PUSH_ALL_AGENT_REASON, PUSH_ALL_REASON, PUSH_NONE_REASON, PUSH_NO_TARGET_REASON,
+            PUSH_OTHER_REASON, PUSH_REASON, PUSH_STRAY_REASON,
+            cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_ask_hit, push_target_kind, push_verdict,
             rm_delete_hit,
         )
         _loading = "guard_merge"
@@ -4580,9 +4581,13 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 if not brief:
                     import own_session
                     brief.append(own_session.agent_brief_text(transcript, push_agent))
-                reason = push_target_reason(brief[0], args, where, overrides)
-                if reason:
-                    refuse(tool, "deny", "push-target-named", reason, "git push " + " ".join(args))
+                kind = push_target_kind(brief[0], args, where, overrides)
+                if kind == "none":
+                    refuse(tool, "deny", "push-target-named", PUSH_NONE_REASON, "git push " + " ".join(args))
+                elif kind == "other":
+                    refuse(tool, "deny", "push-target-named", PUSH_OTHER_REASON, "git push " + " ".join(args))
+                elif kind:
+                    refuse(tool, "deny", "push-target-named", PUSH_NO_TARGET_REASON, "git push " + " ".join(args))
 
     # 5. The environment file. This layer reads the command BEFORE normalization.
     refusal, logged = env_refusal(strip_heredoc_bodies(raw, per_body=True))   # a data body drops, a script body stays
