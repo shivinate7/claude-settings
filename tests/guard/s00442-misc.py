@@ -141,6 +141,9 @@ ARCHOPEN = os.path.join(ROOT, "archopen")      # the slug's pull request is open
 ARCHCLOSED = os.path.join(ROOT, "archclosed")  # the slug's pull request was closed as replaced
 ARCHMERGED = os.path.join(ROOT, "archmerged")  # the slug's pull request was merged
 ARCHPAGE = os.path.join(ROOT, "archpage")      # the slug's pull request is on page two of the open list
+ARCHSCOPE_OUT = os.path.join(ROOT, "archscope-out")  # the lane's repo is outside this session's GitHub scope: its open list answers 404
+ARCHSCOPE_IN = os.path.join(ROOT, "archscope-in")    # the lane's repo is in scope: its open list fails with a transient 500
+ARCHSCOPE_PROXY = os.path.join(ROOT, "archscope-proxy")  # the same out-of-scope repo, as the cloud proxy answers it: a 403 with its sentence
 ARCHNEAR_C10 = os.path.join(ROOT, "archnear-c10")      # an open head `c10`: contains the lane id `c1`, is not it
 ARCHNEAR_C10X = os.path.join(ROOT, "archnear-c10x")    # an open head `claude/c10-x1`: contains `c1`, is not it
 ARCHNEAR_CI = os.path.join(ROOT, "archnear-ci")        # an open head `claude/fix-ci-retry-x1`: contains `ci`, is not it
@@ -181,6 +184,8 @@ ARCHINC_REPO500 = os.path.join(ROOT, "archinc-repo-500")       # q_max's own rea
 ARCHINC_TRUNK = os.path.join(ROOT, "archinc-trunk")            # q_max's default branch is trunk: the branch is ahead of trunk
 ARCHINC_DIVERGED = os.path.join(ROOT, "archinc-diverged")      # the branch diverged from main in q_max, on no pull request
 ARCHINC_REPO404 = os.path.join(ROOT, "archinc-repo-404")       # q_max is named only by a source; its own read answers 404
+ARCHINC_COMPARE403 = os.path.join(ROOT, "archinc-compare-403") # the compare of the branch in q_max is the cloud proxy's 403, outside this session's scope
+ARCHINC_TIPMISSING = os.path.join(ROOT, "archinc-tip-missing") # the branch's tip read in q_max answers 404; q_max's own reads are in scope
 ARCHINC_SLOW = os.path.join(ROOT, "archinc-slow")              # two branches of q_max, behind main; each compare of q_max sleeps
 ARCHDRAFT_SLOW = os.path.join(ROOT, "archdraft-slow")          # an open draft of the slug in q_max, behind main, and a branch ahead there; each compare of q_max sleeps
 ARCHINC_CLOSEDALONE = os.path.join(ROOT, "archinc-closed-alone")  # the branch's pull request was closed, and no pull request replaced it
@@ -803,6 +808,17 @@ def api_error(code, message):
     sys.exit(1)
 
 
+def scope_denied():
+    """The cloud proxy's 403 for a repo outside this session's GitHub scope, as gh prints it: the status block with -i, then
+    the JSON body and gh's tail line. Every read that answers the scope sentence takes this one reply."""
+    sentence = "GitHub access to this repository is not enabled for this session."
+    if "-i" in flags:
+        sys.stdout.write("HTTP/1.1 403 Forbidden\nContent-Type: application/json\r\n\r\n")
+    sys.stdout.write(json.dumps({"message": sentence, "status": "403"}, separators=(",", ":")))
+    print("gh: %s (HTTP 403)" % sentence)
+    sys.exit(1)
+
+
 def listing(items, key, fields, flags, top=None, rel=""):
     """What gh prints for a list read: one page unless --paginate; array pages joined; object pages back to back; --slurp one array of pages.
     With -i the status line and headers come first, and a page that more pages follow carries the Link header GitHub sends, on the numeric route."""
@@ -847,7 +863,7 @@ if path:
             state.update(repo_mode=True, others=scope.get("others", []), compares=scope.get("compares", {}),
                          default_branch=scope.get("default_branch", "main"), repo_error=scope.get("repo_error"),
                          pulls_error=scope.get("pulls_error"), compare_delay_s=scope.get("compare_delay_s", 0),
-                         refs=scope.get("refs", []), tips=scope.get("tips", {}))
+                         refs=scope.get("refs", []), tips=scope.get("tips", {}), tips_missing=scope.get("tips_missing", []))
 while "-R" in args:
     i = args.index("-R")
     del args[i:i + 2]
@@ -881,6 +897,10 @@ else:
         if state.get("pulls_error") and fields.get("state") == state["pulls_error"][0]:  # a list read of that state fails
             if state["pulls_error"][1] == "server":
                 api_error(500, "pulls read broke")
+            if state["pulls_error"][1] == "missing":  # the repo is outside this token's scope: GitHub answers 404 for it
+                api_error(404, "Not Found")
+            if state["pulls_error"][1] == "scope":  # the cloud proxy's 403 for a repo outside this session's GitHub scope
+                scope_denied()
             print("<html>a page that is not JSON</html>")
             sys.exit(0)
         others = [dict(state["pr"], number=o["number"], draft=o.get("draft", False), head={"ref": o.get("ref", "feat%d" % o["number"]), "sha": o["head"]},
@@ -923,6 +943,8 @@ else:
             api_error(500, "compare read broke")
         if status == "missing":  # the branch is not in this repo: GitHub answers 404
             api_error(404, "Not Found")
+        if status == "scope":  # the cloud proxy's 403 for a repo outside this session's GitHub scope
+            scope_denied()
         if status == "network":  # no HTTP status at all: a refused connection
             print('Get "https://api.github.com/' + rel + '": dial tcp 140.82.112.6:443: connect: connection refused')
             sys.exit(1)
@@ -933,6 +955,8 @@ else:
                           for name in state["refs"] if name.startswith(prefix)]))
     elif re.fullmatch(r"branches/.+", rel):  # a branch's tip: its commit sha, at f * 40 unless the fixture names one
         name = rel[len("branches/"):]
+        if name in state.get("tips_missing", []):  # the branch's tip answers 404: the branch is named, its repo is in scope
+            api_error(404, "Not Found")
         print(json.dumps({"name": name, "commit": {"sha": state["tips"].get(name, "f" * 40)}}))
     else:
         api_error(404, "Not Found")
@@ -949,12 +973,15 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
     JSON), before it answers. Only a case that counts calls names one; every other fake writes nothing.
 
     `repos`, when given, maps each repo name ("owner/name") to that repo's own answers, for a case whose
-    lane spans repos: `compares` (its containment reads; "missing" is a 404, "network" a refused
+    lane spans repos: `compares` (its containment reads; "missing" is a 404, "server" a 500, "scope" the proxy's 403 and its
+    sentence, "network" a refused
     connection), `others` (its pull requests, rows as `others` takes them), `default_branch` (what its
     own read names; main when unset), `repo_error` ("server": its own read fails with 500; "missing": with 404), `compare_delay_s` (seconds each of its
     compare reads sleeps before it answers) and `pulls_error`
-    ([state, "server" or "junk"]: a list read of that state fails). A repo's answers replace the
-    top-level ones for the calls that name it. A call to a repo the map does not name is a broken tool.
+    ([state, "server", "junk", "missing" or "scope"]: a list read of that state fails: "server" with 500, "missing" with 404,
+    "scope" with the cloud proxy's 403 and its sentence, "junk" with a page that is not JSON). A repo's answers replace the
+    top-level ones for the calls that name it. `tips_missing` names the branches whose tip read answers 404 (the branch
+    is named, and its repo is in scope). A call to a repo the map does not name is a broken tool.
 
     MEASURED on Windows 2026-09-16: a call of "gh" through CreateProcess appends `.exe` and never
     reads PATHEXT, so a `gh.cmd` earlier on PATH was skipped and the real `gh.exe` further along
@@ -1249,6 +1276,11 @@ def build_fixtures():
         {"number": 13, "head": "1" * 40, "ref": "claude/other-lane-x1"},
         {"number": 14, "head": "2" * 40, "ref": "claude/other-lane-x2"},
         dict(slug_head, number=15, head="3" * 40)])
+    # The lane's repo answers 404 on its open pull request list: GitHub's answer for a repo this session's token cannot see,
+    # so a retry can never pass. The same read failing as a 500 is transient in scope, and a retry can pass it.
+    make_fake_gh(ARCHSCOPE_OUT, "main", repos={"o/r": {"pulls_error": ["open", "missing"]}})
+    make_fake_gh(ARCHSCOPE_IN, "main", repos={"o/r": {"pulls_error": ["open", "server"]}})
+    make_fake_gh(ARCHSCOPE_PROXY, "main", repos={"o/r": {"pulls_error": ["open", "scope"]}})
     # Open pull requests on a near-miss head, one per fake. Each holds a lane's id or slug as a substring only: an
     # exact read of the open list allows an archive of the lane named in the case beside it.
     make_fake_gh(ARCHNEAR_C10, "main", need=["o/r"], others=[dict(slug_head, number=13, ref="c10")])
@@ -1329,6 +1361,8 @@ def build_fixtures():
     make_fake_gh(ARCHINC_DIVERGED, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "diverged"}}))
     # q_max's own read answers 404: the repo is named only through a source, and it is not on GitHub.
     make_fake_gh(ARCHINC_REPO404, "main", repos=arch_pair(qmax={"repo_error": "missing"}))
+    make_fake_gh(ARCHINC_COMPARE403, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "scope"}}))
+    make_fake_gh(ARCHINC_TIPMISSING, "main", repos=arch_pair(qmax={"tips_missing": [ARCH_BRANCH]}))
     # Each compare of q_max sleeps 13s, under MERGE_READ_TIMEOUT (25s) alone. The two branches are behind main, so a
     # read that runs both sums past one budget. A delay on every call would stretch the run past a minute.
     make_fake_gh(ARCHINC_SLOW, "main", repos=arch_pair(qmax={

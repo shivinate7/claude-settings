@@ -9,6 +9,11 @@ FAMILY = "lane-closes-after-records"
 #   - a lane, with no record of the target in the transcript: refuse, and the remedy steers to get_session;
 #   - a lane: the guard reads the open pull requests of the lane's cs-repo. Any open one whose head names the
 #     cs-step slug refuses. None allows. A read that cannot run refuses: guards fail closed.
+#   - a lane whose repo is outside this session's GitHub scope (GitHub answers 404 on the open list): refuses, and the
+#     reason names the scope, the remedy add_repo (read access to the repo, or push access for a public repo, then run
+#     the archive again), and the runner
+#     that holds the repo, with no retry advice. A transient failure in scope (a 5xx) still says retry, and never names
+#     add_repo.
 #   - a lane whose record names branches (external_metadata.current_branches): each branch ahead of its repo's
 #     default branch, on no pull request in any state, refuses. A 404 on the branch's compare means the branch is not
 #     in that repo. Any other failed read refuses. A branch equal to the default, or behind it, or archive/..., is skipped.
@@ -85,6 +90,19 @@ archive_refuse("an own lane record with no record of the target is refused, and 
 archive_refuse("a lane whose open pull requests cannot be read is refused", role_path("archive-lane"),
                fake_gh_path(GHBROKEN))
 archive_refuse("a lane with no gh on the path is refused", role_path("archive-lane"), GHNONE_PATH)
+# A repo outside this session's GitHub scope answers 404 on its open list. Waiting never passes it, so the refusal names
+# the scope, the remedy add_repo, and the runner that holds the repo. The existing out-of-scope rows keep their no-retry
+# pins, so the reason words the second attempt without the word retry. `lacks` takes each retry word as its own string: a tuple in `lacks` is never matched.
+ARCHIVE_SCOPE_PIN = ("scope", "runner")
+archive_refuse("a lane whose repo is outside this session's GitHub scope (404 on its open list) is refused, and the reason names the scope and the runner, with no retry",
+               role_path("archive-lane"), fake_gh_path(ARCHSCOPE_OUT), carries=ARCHIVE_SCOPE_PIN, lacks=("retry", "Retry"))
+# The cloud proxy answers a repo outside the session's scope with its own 403 and sentence. The same refusal, with no retry.
+archive_refuse("a lane whose repo the cloud proxy refuses as outside this session's GitHub scope (403) is refused, and the reason names the scope and the runner, with no retry",
+               role_path("archive-lane"), fake_gh_path(ARCHSCOPE_PROXY), carries=ARCHIVE_SCOPE_PIN, lacks=("retry", "Retry"))
+# The control: the same read failing as a 500 in an in-scope repo is transient, so the refusal still says retry and
+# names neither the scope nor the runner.
+archive_refuse("a lane whose repo is in scope, with its open list failing as a transient 500, is refused, and the reason still says retry",
+               role_path("archive-lane"), fake_gh_path(ARCHSCOPE_IN), carries=(("retry", "Retry"),), lacks=ARCHIVE_SCOPE_PIN)
 # Every page of the open list is read: the slug's pull request sits on page two.
 archive_refuse("a lane whose slug pull request is on page two of the open list is refused",
                role_path("archive-lane"), fake_gh_path(ARCHPAGE))
@@ -214,6 +232,136 @@ archive_refuse("a source URL ending in .git names its repo: a branch ahead there
 archive_refuse("a sources-only repo whose own read answers 404 is refused, and the reason says the read failed",
                role_path("archive-inc-source-only"), fake_gh_path(ARCHINC_REPO404), carries=ARCHIVE_READ_PIN,
                lacks=ARCHIVE_READ_LACKS)
+# The branch phase, out of scope. A repo this session cannot reach answers 404 on its own read, or the cloud proxy answers a
+# compare with its 403 and sentence. The refusal names the scope, add_repo and the runner, and keeps the no-retry pins:
+# a retry cannot pass before add_repo.
+# Each word is its own string in lacks, since a tuple there is never matched.
+ARCHIVE_SCOPE_LACKS = ("retry", "Retry")
+archive_refuse("a sources-only repo whose own read answers 404 is out of this session's scope: refused, and the reason names the scope and the runner, with no retry and no no-PR text",
+               role_path("archive-inc-source-only"), fake_gh_path(ARCHINC_REPO404), carries=ARCHIVE_SCOPE_PIN,
+               lacks=ARCHIVE_SCOPE_LACKS + ARCHIVE_NOPR_PIN)
+archive_refuse("a lane whose branch compare in q_max is the cloud proxy's 403 for a repo outside this session's scope is refused, and the reason names the scope and the runner, with no retry",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_COMPARE403), carries=ARCHIVE_SCOPE_PIN,
+               lacks=ARCHIVE_SCOPE_LACKS + ARCHIVE_NOPR_PIN)
+# The reason names the repo that failed, by its slug, so the runner to route to is the one that holds it. A repo the
+# record names only through its sources is no cs-repo tag, so the reason never says a cs-repo tag names it.
+archive_refuse("a sources-only repo whose own read answers 404 names its slug, never says a cs-repo tag names it, and keeps the scope, runner and no retry",
+               role_path("archive-inc-source-only"), fake_gh_path(ARCHINC_REPO404), carries=ARCHIVE_SCOPE_PIN + (ARCH_REPO_QMAX,),
+               lacks=ARCHIVE_SCOPE_LACKS + ("cs-repo tag names it",))
+archive_refuse("a sources-only repo whose branch compare the cloud proxy refuses names its slug, never says a cs-repo tag names it, and keeps the scope, runner and no retry",
+               role_path("archive-inc-source-only"), fake_gh_path(ARCHINC_COMPARE403), carries=ARCHIVE_SCOPE_PIN + (ARCH_REPO_QMAX,),
+               lacks=ARCHIVE_SCOPE_LACKS + ("cs-repo tag names it",))
+# A cs-repo failure names its repo too: the lane's own cs-repo tag is o/r, and the reason carries that slug.
+archive_refuse("a lane whose cs-repo o/r answers 404 on its open list names o/r, with the scope, runner and no retry",
+               role_path("archive-lane"), fake_gh_path(ARCHSCOPE_OUT), carries=ARCHIVE_SCOPE_PIN + ("o/r",),
+               lacks=ARCHIVE_SCOPE_LACKS)
+archive_refuse("a lane whose cs-repo o/r the cloud proxy refuses with a 403 names o/r, with the scope, runner and no retry",
+               role_path("archive-lane"), fake_gh_path(ARCHSCOPE_PROXY), carries=ARCHIVE_SCOPE_PIN + ("o/r",),
+               lacks=ARCHIVE_SCOPE_LACKS)
+# The out-of-scope refusal names add_repo as the remedy that makes the repo readable from this session: add the repo with
+# add_repo (read access), then run the archive again. Each out-of-scope path has its own row, so a reason worded on one path
+# cannot stand for another. The scope and runner pins above still hold: the runner stays as the other remedy.
+ADD_REPO_PIN = ("add_repo",)
+archive_refuse("a lane whose cs-repo answers 404 on its open list, out of scope, names add_repo as a remedy",
+               role_path("archive-lane"), fake_gh_path(ARCHSCOPE_OUT), carries=ADD_REPO_PIN)
+archive_refuse("a lane whose cs-repo the cloud proxy refuses with a 403, out of scope, names add_repo as a remedy",
+               role_path("archive-lane"), fake_gh_path(ARCHSCOPE_PROXY), carries=ADD_REPO_PIN)
+archive_refuse("a sources-only repo whose own read answers 404, out of scope, names add_repo as a remedy",
+               role_path("archive-inc-source-only"), fake_gh_path(ARCHINC_REPO404), carries=ADD_REPO_PIN)
+archive_refuse("a lane whose branch compare in q_max is the cloud proxy's 403, out of scope, names add_repo as a remedy",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_COMPARE403), carries=ADD_REPO_PIN)
+archive_refuse("a sources-only repo whose own read answers 404 names its slug and add_repo as a remedy",
+               role_path("archive-inc-source-only"), fake_gh_path(ARCHINC_REPO404), carries=ADD_REPO_PIN + (ARCH_REPO_QMAX,))
+archive_refuse("a sources-only repo whose branch compare the cloud proxy refuses names its slug and add_repo as a remedy",
+               role_path("archive-inc-source-only"), fake_gh_path(ARCHINC_COMPARE403), carries=ADD_REPO_PIN + (ARCH_REPO_QMAX,))
+archive_refuse("a lane whose cs-repo o/r answers 404 names o/r and add_repo as a remedy",
+               role_path("archive-lane"), fake_gh_path(ARCHSCOPE_OUT), carries=ADD_REPO_PIN + ("o/r",))
+archive_refuse("a lane whose cs-repo o/r the cloud proxy refuses with a 403 names o/r and add_repo as a remedy",
+               role_path("archive-lane"), fake_gh_path(ARCHSCOPE_PROXY), carries=ADD_REPO_PIN + ("o/r",))
+# A read add attaches nothing for a public repo, so gh still cannot read its pull requests there. The remedy for a public
+# repo is add_repo with push access (access "push"). Each path has one row; the scope rows above keep the no-retry pins.
+PUBLIC_PUSH_PIN = (("push", "Push"), ("public repo", "Public repo"))
+archive_refuse("a lane whose cs-repo answers 404 on its open list, out of scope, names add_repo with push access for a public repo, and no retry",
+               role_path("archive-lane"), fake_gh_path(ARCHSCOPE_OUT), carries=ADD_REPO_PIN + PUBLIC_PUSH_PIN, lacks=ARCHIVE_SCOPE_LACKS)
+archive_refuse("a lane whose cs-repo the cloud proxy refuses with a 403, out of scope, names add_repo with push access for a public repo, and no retry",
+               role_path("archive-lane"), fake_gh_path(ARCHSCOPE_PROXY), carries=ADD_REPO_PIN + PUBLIC_PUSH_PIN, lacks=ARCHIVE_SCOPE_LACKS)
+archive_refuse("a sources-only repo whose own read answers 404, out of scope, names add_repo with push access for a public repo, and no retry",
+               role_path("archive-inc-source-only"), fake_gh_path(ARCHINC_REPO404), carries=ADD_REPO_PIN + PUBLIC_PUSH_PIN, lacks=ARCHIVE_SCOPE_LACKS)
+archive_refuse("a lane whose branch compare in q_max is the cloud proxy's 403, out of scope, names add_repo with push access for a public repo, and no retry",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_COMPARE403), carries=ADD_REPO_PIN + PUBLIC_PUSH_PIN, lacks=ARCHIVE_SCOPE_LACKS)
+# The controls. A transient failure in scope still says retry and names neither the scope nor the runner. A 404 on a
+# branch's own tip is missing, not out of scope: it refuses as unreadable, with the read reason.
+TRANSIENT_PIN = ARCHIVE_READ_PIN + (("retry", "Retry"),)
+archive_refuse("a lane whose q_max default branch read is a server error is refused as transient, with retry and no scope",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_REPO500), carries=TRANSIENT_PIN, lacks=ARCHIVE_SCOPE_PIN)
+archive_refuse("a lane whose branch compare in q_max is a server error is refused as transient, with retry and no scope",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_COMPARE500), carries=TRANSIENT_PIN, lacks=ARCHIVE_SCOPE_PIN)
+archive_refuse("a lane whose branch compare in q_max is a refused connection is refused as transient, with retry and no scope",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_NETWORK), carries=TRANSIENT_PIN, lacks=ARCHIVE_SCOPE_PIN)
+# The add_repo controls. A transient failure never names add_repo: read access is not what a 500 or a refused connection
+# lacks, so each transient path's reason omits it.
+ADD_REPO_LACKS = ("add_repo",)
+archive_refuse("a lane whose repo is in scope, with its open list a transient 500, is refused as transient and does not name add_repo",
+               role_path("archive-lane"), fake_gh_path(ARCHSCOPE_IN), carries=(("retry", "Retry"),), lacks=ADD_REPO_LACKS)
+archive_refuse("a lane whose q_max default branch read is a server error does not name add_repo",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_REPO500), carries=TRANSIENT_PIN, lacks=ADD_REPO_LACKS)
+archive_refuse("a lane whose branch compare in q_max is a server error does not name add_repo",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_COMPARE500), carries=TRANSIENT_PIN, lacks=ADD_REPO_LACKS)
+archive_refuse("a lane whose branch compare in q_max is a refused connection does not name add_repo",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_NETWORK), carries=TRANSIENT_PIN, lacks=ADD_REPO_LACKS)
+archive_refuse("a lane whose branch tip in q_max answers 404 is refused as unreadable, and the reason is not the scope one",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_TIPMISSING), carries=ARCHIVE_READ_PIN,
+               lacks=ARCHIVE_SCOPE_PIN + ARCHIVE_READ_LACKS)
+
+
+def archive_stale_tool_case():
+    """A merge tool with neither ScopeStop nor is_scope, whose page read raises, makes archive_hit refuse with the read
+    reason. The scope names are read with getattr, so a stale tool cannot turn a failed read into an allow; an error that
+    escaped archive_hit would send the archive to the guard-wide crash path, which allows it."""
+    guard = _load_guard_module()
+    archive_hit = guard.archive_hit
+    holder = archive_hit.__globals__["_MERGE_MODULE"]
+    reads = []
+
+    class Host:  # the one read archive_hit makes through the tool: pages(), which fails
+        def __init__(self, repo=None):
+            self.repo = repo
+
+        def pages(self, *args, **kwargs):
+            reads.append(self.repo)
+            raise RuntimeError("the read failed")
+
+    class StubTool:  # the merge tool's surface that archive_hit uses, with neither scope name
+        @staticmethod
+        def shared_deadline(seconds):
+            return contextlib.nullcontext()
+
+    StubTool.Host = Host
+    if hasattr(StubTool, "ScopeStop") or hasattr(StubTool, "is_scope"):
+        return False, "the stub has a scope name, so it does not model a merge tool without one"
+    materialize(role_path("archive-lane"))  # the transcripts are written on first use: before the call
+    saved = list(holder)
+    holder[:] = [StubTool]
+    try:
+        if archive_hit.__globals__["merge_module"]() is not StubTool:
+            return False, "merge_module() does not return the stub, so the read is not the stub's"
+        try:
+            hit = archive_hit(ARCHIVE_TOOL, {"session_id": ROLE_OTHER}, role_path("archive-lane"))
+        except Exception as error:
+            return False, "archive_hit raised %s on the failed read, where it should refuse: %s" % (type(error).__name__, error)
+    finally:
+        holder[:] = saved
+    if not reads:
+        return False, "archive_hit made no page read, so the failed read never ran: it returned %r" % (hit,)
+    if hit is None:
+        return False, "archive_hit allowed the archive after the page read failed"
+    read_reason = archive_hit.__globals__["ARCHIVE_READ_REASON"]
+    if not (isinstance(hit, tuple) and len(hit) == 2 and hit[1] == read_reason):
+        return False, "archive_hit refused, but not with the read reason: %r" % (hit,)
+    return True, "after the page read raised, archive_hit refused with the read reason"
+
+
+# The stale-tool check above is registered in section 22192: LOG_CHECKS_EXTRA is defined in section 21304.
 # Shape drift fails closed: a current_branches that is not a map is a shape the read does not know, so it refuses as unreadable.
 archive_refuse("a current_branches that is a list, not a map, is refused, and the reason says the read failed",
                role_path("archive-inc-list"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_READ_PIN, lacks=ARCHIVE_READ_LACKS)
