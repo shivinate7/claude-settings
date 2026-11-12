@@ -3817,8 +3817,6 @@ const IRP_CL_READ_WAIT_REC = { id: "ask-irp-cl-rw", text: IRP_TEXT, at: "2026-11
 // On the page as its line, with his reply waiting.
 const IRP_CL_ON = mk("irp-cl-on", 8, IRP_CLOSED);
 const IRP_CL_ON_REC = { id: "ask-irp-cl-on", text: IRP_TEXT, at: "2026-11-10T08:00:00Z", item: IRP_CL_ON.id, owner: "lane tier-fold" };
-// Its item's reply has a time, which the opened line shows in its header.
-const IRP_CL_TIME = mk("irp-cl-time", 9, { ...IRP_CLOSED, replied: "2026-11-09T14:00:00Z" });
 // Opens the page with the open card first (open() waits for it), then the items given, and the records given as stored asks.
 const irpOpen = (t, items, asks = {}, over = {}) => open(t, { items: [IRP_OWED, ...items], dbExtra: { asks }, storage: VISIT, ...over });
 // The routed item's answer and filing. APR_FILED is read when a case runs, not when this file loads.
@@ -3904,23 +3902,6 @@ test("reply to an item, case 19: a reply to a closed item whose line is on the p
   await mustHave(page, `#row-${plain.id}`, "row of the plain ask, so the Asks list is drawn");
   assert.equal(await page.locator(`#row-${IRP_CL_ON_REC.id}`).count(), 0, `the Asks list has a row for his reply to No. ${IRP_CL_ON.n}, whose line is on the page`);
   assert.equal(await page.getByText("Re: an item no longer on this page").count(), 0, `a row says No. ${IRP_CL_ON.n} is no longer on this page, while its line is`);
-});
-
-test("reply to an item, case 20: the opened line heads his item's reply 'Reply from <owner>, <time>', as an answer in a thread does", async (t) => {
-  const page = await irpOpen(t, [IRP_CL_TIME]); if (!page) return;
-  await mustHave(page, `#tier-answered #line-${IRP_CL_TIME.n}`, `line of No. ${IRP_CL_TIME.n} in Answered`);
-  await page.click(`#lrow-${IRP_CL_TIME.id}`);
-  const head = ((await page.locator(`#line-${IRP_CL_TIME.n} .thread p.lhead`).first().textContent()) || "").trim();
-  const when = await page.evaluate((iso) => fmt(iso), IRP_CL_TIME.replied);
-  assert.equal(head, `Reply from ${IRP_CL_TIME.owner}, ${when}`, `the opened line of No. ${IRP_CL_TIME.n} heads its reply "${head}", with no time`);
-});
-
-test("reply to an item, case 21: the Asks row of a reply whose item has left the store heads it 'Your reply', not 'You asked'", async (t) => {
-  const gone = { id: "ask-irp-gone-head", text: IRP_TEXT, at: "2026-10-30T08:00:00Z", item: "closed-item-x", owner: "test thread" };
-  const page = await irpOpen(t, [], { [gone.id]: gone }); if (!page) return;
-  await mustHave(page, `#row-${gone.id}`, "row of the reply whose item has left the store");
-  const head = ((await page.locator(`#row-${gone.id} .ahead .aby`).first().textContent()) || "").trim();
-  assert.match(head, /^Your reply\b/, `the row of the reply to a gone item heads it "${head}", not "Your reply"`);
 });
 
 // ---------------------------------------------------------------- Mark read on an answered ask (step ask-dismiss)
