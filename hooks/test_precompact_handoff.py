@@ -2310,7 +2310,7 @@ def case_nudge_sections_flags_an_empty_handoff():
 
 
 # --------------------------------------------------------------------------- owner waits
-# Decision precompact-handoff, item 14. A coordinator's handoff keeps every item
+# Decision precompact-handoff, item 16. A coordinator's handoff keeps every item
 # waiting on the owner in this session under OWNER_HEADING. The Stop nudge blocks once when that
 # heading is missing, or when a refused act has no later success and the section does not name
 # it. Each case runs the hook as a subprocess, the way the Stop hook runs it.
