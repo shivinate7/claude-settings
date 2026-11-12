@@ -183,6 +183,9 @@ jobs:
       - name: Question form option-key gap suite
         run: python3 hooks/test_question_form_option_gap.py
 
+      - name: Question form departs sentence suite
+        run: python3 hooks/test_question_form_departs_sentence.py
+
       - name: Remove-prompt answer fixture suite
         run: python3 hooks/test_rm_prompt_answer.py
 
@@ -1079,6 +1082,10 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_question_form_option_gap.py
 
+      - name: Question form departs sentence suite
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python3 hooks/test_question_form_departs_sentence.py
+
       - name: Remove-prompt answer fixture suite
         if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python3 hooks/test_rm_prompt_answer.py
@@ -1775,6 +1782,10 @@ jobs:
       - name: Question form option-key gap suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python hooks/test_question_form_option_gap.py
+
+      - name: Question form departs sentence suite
+        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
+        run: python hooks/test_question_form_departs_sentence.py
 
       - name: Remove-prompt answer fixture suite
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
