@@ -1264,7 +1264,7 @@ lb_add("a lane session's transcript is not opened at a normal reading, and the r
 
 def shard_split_check():
     """GUARD_SHARD: the n shards of a list are disjoint, hold every item, and differ in size by one at most;
-    "<i>-<n>" reads as "<i>/<n>", and a malformed value stops the run."""
+    "<i>-<n>" reads as "<i>/<n>" and picks the same items, and a malformed value stops the run."""
     for size in (0, 1, 7, 3900):
         items = list(range(size))
         for n in range(1, 6):
@@ -1278,8 +1278,16 @@ def shard_split_check():
             return False, "GUARD_SHARD=%r was refused, want %r" % (good, want)
         if got != want:
             return False, "GUARD_SHARD=%r read as %r, want %r" % (good, got, want)
+    sample = list(range(10))
+    for i in (1, 2, 3):
+        dash, slash = shard_of(sample, parse_shard("%d-3" % i)), shard_of(sample, parse_shard("%d/3" % i))
+        if dash != slash:
+            return False, "GUARD_SHARD=%d-3 picks %s, %d/3 picks %s" % (i, dash, i, slash)
+    if shard_of(sample, parse_shard("1-3")) != [0, 3, 6, 9]:
+        return False, "GUARD_SHARD=1-3 picks %s of range(10), want [0, 3, 6, 9]" % shard_of(sample, parse_shard("1-3"))
     for bad in ("0/2", "3/2", "1", "1/0", "a/b", "1/2/3", " 1/2", "01/2",
-                "0-2", "3-2", "1-0", "a-b", "1-2-3", " 1-2", "1-2 ", "1-", "-2", "1/2-3", "1-2/3", "01-2"):
+                "0-2", "3-2", "1-0", "a-b", "1-2-3", " 1-2", "1-2 ", "1-", "-2", "1/2-3", "1-2/3", "01-2",
+                "0-3", "4-3", "1_3"):
         try:
             parse_shard(bad)
         except SystemExit:
@@ -1287,7 +1295,7 @@ def shard_split_check():
         return False, "GUARD_SHARD=%r was accepted" % bad
     if parse_shard("") != (1, 1) or parse_shard("2/3") != (2, 3):
         return False, "parse_shard misread an empty or a well-formed value"
-    return True, "shards of 0 to 3900 items in 1 to 5 shards are disjoint and whole; i-n reads as i/n; bad values stop"
+    return True, "shards of 0 to 3900 items are disjoint and whole; i-n reads as i/n and picks the same items; bad values stop"
 
 
 LOG_CHECKS_EXTRA.append(("GUARD_SHARD: the shards are disjoint and hold every case", shard_split_check))
