@@ -12,7 +12,7 @@ BatchLintFlags runs the real bin/ci-job through merge.lane_lint on a batch's fou
 GuardSliceLint runs the same real ci-job on a pull request, and reads checks.yml's Windows guard slice (checks-windows-guard) as it reads the lint steps: one more ci-job run per case, about 0.5 s.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
-import ast, atexit, contextlib, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
+import ast, atexit, contextlib, io, json, os, platform, re, shlex, shutil, signal, socket, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -1758,9 +1758,10 @@ DOCS_FILE = "docs/lane-notes.md"  # a .md file: ci-scope.sh turns no flag on for
 GUARD_STUB = """import json, os, subprocess, sys
 with open(%r, 'a', encoding='utf-8') as f:
     print(json.dumps({'argv': sys.argv, 'head': subprocess.run(['git', 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip(),
-                      'GUARD_TESTS': os.environ.get('GUARD_TESTS'), 'GUARD_SHARD': os.environ.get('GUARD_SHARD')}), file=f)
+                      'GUARD_TESTS': os.environ.get('GUARD_TESTS'), 'GUARD_SHARD': os.environ.get('GUARD_SHARD'),
+                      'guard_env': {k: v for k, v in os.environ.items() if k.startswith(('GUARD_', 'MUTATE_ONLY'))}}), file=f)
 sys.exit(%d)
-"""  # logs its argv, the head it runs in, and the two env values a guard run reads; exits with the code given
+"""  # logs its argv, the head it runs in, the two env values a guard run reads, and every GUARD_* and MUTATE_ONLY env value; exits with the code given
 
 
 def guard_workflow_text(found):
@@ -1858,6 +1859,30 @@ class GuardSliceLint(BatchLintFixture):
         self.assertNotIsInstance(refusal, merge.Liftable, "a failing slice reads as unknown, not as FAIL: " + out.getvalue())
         self.assertIn(SLICE_STEP, str(refusal), "the refusal does not name the Windows slice: " + str(refusal))
         self.assertEqual(pass_lines(out.getvalue()), [], "a failing slice read as a pass: " + out.getvalue())
+
+    def test_the_slice_runs_with_checks_yml_guard_env_and_no_guard_env_of_the_callers_run(self):
+        caller = {"GUARD_FAMILY": "load-brake", "GUARD_UNDER_TEST": os.path.join(self.t, "guard.bak"),
+                  "GUARD_SECTION_DIR": os.path.join(self.t, "sections"), "MUTATE_ONLY": "1"}
+        with unittest.mock.patch.dict(os.environ, caller):
+            self.lane({GUARD_FILE: "# lane probe\n"})
+            rc, text = self.lint()
+        self.assertEqual(rc, 0, text)
+        slices = [c for c in self.stub_calls(GUARD_SCRIPT) if c["GUARD_TESTS"] == self.want_env["GUARD_TESTS"]]
+        self.assertEqual(len(slices), 1, "the Windows slice ran %d times for a lane touching %s, want once: %s" % (len(slices), GUARD_FILE, text))
+        leaked = sorted(k for k in slices[0]["guard_env"] if k not in self.want_env)
+        self.assertEqual(leaked, [], "the slice ran with %s from the caller's env; checks.yml gives only %s" % (leaked, sorted(self.want_env)))
+        self.assertEqual(slices[0]["guard_env"], self.want_env, "the slice's GUARD_* env is not the one checks.yml gives: " + text)
+
+    def test_the_pass_line_of_a_run_with_the_slice_names_the_host_it_ran_on(self):
+        self.lane({GUARD_FILE: "# lane probe\n"})
+        rc, text = self.lint()
+        self.assertEqual(rc, 0, text)
+        lines = pass_lines(text)
+        self.assertEqual(len(lines), 1, text)
+        self.assertIn(SLICE_STEP, lines[0], "precondition: the PASS line does not name the slice, so the case probes nothing else: " + text)
+        hosts = [h for h in (platform.system(), socket.gethostname()) if h]
+        self.assertTrue(any(re.search(r"\b%s\b" % re.escape(h), lines[0], re.IGNORECASE) for h in hosts),
+                        "the PASS line names the slice but not the host it ran on (%s): %s" % (" or ".join(hosts), lines[0]))
 
 
 class ReadyChecks(CiJobStub, tm.RecordsEnv):
