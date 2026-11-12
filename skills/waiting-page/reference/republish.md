@@ -18,8 +18,9 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
    `wait:` line per open item with `waits` (`ended`, `waiting` or `unknown`), and one `waiting` lane line per open item with
    `lane` and `lastAnswer` and no `waits`. Last, one `kept-answer:` line per closed item whose `answers/<id>` is still kept
    (never an open item, an arbiter ruling or a park answer). A closed item with `waits` gets a line that says it is closed with waits. The exit code stays the page's.
-   After the writer routes each ask and the holder replies ("Route an ask"), save the asks into one new folder with `ArtifactData list asks`
-   (`query.limit` 1000, follow `next_cursor` until it is empty), touching `.complete` in that folder ("Keep a copy in the repo" step 2 saves the same list).
+   After the writer routes each ask and answers the ones it holds, save the asks with `ArtifactData list asks`,
+   touching `.complete` only when no list call fails and no cursor is pending.
+   Save them into one new folder, with `query.limit` 1000, and follow `next_cursor` until it is empty ("Keep a copy in the repo" step 2 saves the same list). "Route an ask" says how the writer routes.
    Right after that, run the end check as its own run, apart from the plain run and never with `--write`:
    `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --asks <asks>` (`<asks>` is the folder saved in this step). It prints one
    `open-ask:` line per ask with no `reply`, a routed ask included. If an ask is listed or the asks list cannot be read, it also prints a `FAIL:` line.
