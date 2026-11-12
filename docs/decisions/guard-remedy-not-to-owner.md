@@ -14,7 +14,7 @@ Question: where does a Stop refusal's remedy live when the owner sees the refusa
 
 Incident: owner ask `ask-mw6pwif5wv`, 2026-11-07 12:09 CST. A past-ruling model call timed out. The Unvetted refusal reached the owner in chat, though its steps were for the session. Risk kind: named incident.
 
-Build: done in `lint/report_guard.py`. `owner_line()` is the one home of the owner line and the cite. The suite `lint/test_report_guard_remedy.py` checks each block path it has a fixture for. Its docstring lists the rest. Each refusal text holds facts only: which check, what is wrong, which Done line, which model. Exception: the Recovered guard's refusal may also carry a ready-to-paste draft of each missing carry line (`Recovered:`, `Handoff gave:`), each on its own line after the owner line.
+Build: done in `lint/report_guard.py`. `owner_line()` is the one home of the owner line and the cite. The suite `lint/test_report_guard_remedy.py` checks each block path it has a fixture for. Its docstring lists the rest. Each refusal text holds facts only: which check, what is wrong, which Done line, which model. Exception: the Recovered guard's refusal may also carry a ready-to-paste draft of each missing carry line (`Recovered:`, `Handoff gave:`), each on its own line after all other reasons, under the header "Draft of each missing line:".
 
 Cost: none at run time. No process starts, no file is written and no timer runs. Unmeasured: how often a session reads this record before it acts on a refusal.
 

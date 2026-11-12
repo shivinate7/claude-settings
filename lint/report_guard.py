@@ -25,7 +25,7 @@ guard: `step:<slug>`, the word debt, or a guard, check or hook word with a PR or
 
 Every refusal reaches the owner in chat (decision `guard-remedy-not-to-owner`). So each opens with one
 owner line from owner_line(): the check, what is wrong, and a cite of that decision. The steps to fix it live in
-that record, never in the reason.
+that record, never in the reason. Exception: the Recovered guard's reason also holds a draft of each missing line.
 
 On the same landed turns it also blocks (one block, all reasons joined) when a Done item lacks
 BUILT, RECORDED, or OTHER or a PR or commit ref (`reports-done-format`), or when the reply holds
@@ -33,7 +33,7 @@ a record id with no short gloss (`speak-cite-id-plus-gloss`), or when a builder,
 test-author or record-writer spawned since the last human message goes unnamed in Done, or a
 named "role model" pair matches no spawn of that role (`reports-done-names-models`), or when
 a turn that spawned a builder reports with no `Unstarted:` line (`reports-name-unstarted-items`).
-When the report is there, no refusal holds correction text; the step lives in decision guard-remedy-not-to-owner.
+When the report is there, no refusal holds correction text, except the Recovered guard's draft lines; the step lives in decision guard-remedy-not-to-owner.
 
 On any turn whose reply holds an Input Needed item that asks the owner a question (a pick with
 options, or a sentence ending in "?" outside quotes and backticks), it also blocks unless the turn
@@ -1049,15 +1049,16 @@ GIT_CALL_RE = re.compile(r"(?:^|[;&|(])\s*git\b")
 def sources_seen(records):
     """The carry sources the main-session tool calls in `records` show, in git, page, digest order: git is a Bash
     `git` call, page an Artifact read, digest a Read of a file under handoffs/. A call counts only when its result
-    (paired by tool_use_id) is not an error. Reads the records only."""
-    failed = {b.get("tool_use_id") for rec in records if not rec.get("isSidechain")
-              for b in tool_results(rec) if b.get("is_error")}
+    (paired by tool_use_id) exists and is not an error, as in success_route_flags. Reads the records only."""
+    results = [b for rec in records if not rec.get("isSidechain") for b in tool_results(rec)]
+    answered = {b.get("tool_use_id") for b in results}
+    failed = {b.get("tool_use_id") for b in results if b.get("is_error")}
     seen = set()
     for rec in records:
         if rec.get("isSidechain"):
             continue
         for use in tool_uses(rec):
-            if use.get("id") in failed:
+            if use.get("id") not in answered or use.get("id") in failed:
                 continue
             name, args = use.get("name"), use.get("input") or {}
             if name == "Bash" and GIT_CALL_RE.search(str(args.get("command", ""))):
