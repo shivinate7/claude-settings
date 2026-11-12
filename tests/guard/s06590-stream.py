@@ -442,9 +442,9 @@ verdict_pipe("a pipe with no verdict in it is allowed", "cat x.log | tail -3 && 
 verdict_pipe("verdict inside single quotes is not a call",
              "echo 'verdict a | tail -1 && b'", "allow")
 
-# Foreground: merge --lane-lint and merge --review-record piped to tail or head are refused. ci-job is
-# not refused in the foreground. A verdict call piped to tail is refused by verdict-pipe; with no pipe
-# after it, a verdict call is allowed.
+# Foreground: merge --lane-lint and merge --review-record piped to tail or head are refused. A bare ci-job piped to
+# tail in the foreground is bare-check's refusal (coordinator ruling, 11:23 CST), not check-tail's. A verdict call
+# piped to tail is refused by verdict-pipe; with no pipe after it, a verdict call is allowed.
 sh("check-tail: the incident line in the foreground is refused",
    "~/.claude/bin/merge --lane-lint 1476 2>&1 | tail -8", "deny", "check-tail", cwd=NOGIT)
 sh("check-tail: merge --lane-lint piped to tail in the foreground is refused",
@@ -452,10 +452,11 @@ sh("check-tail: merge --lane-lint piped to tail in the foreground is refused",
 sh("check-tail: merge --review-record piped to head in the foreground is refused",
    "~/.claude/bin/merge 12 --review-record --head 0123456789abcdef0123456789abcdef01234567 | head -20",
    "deny", "check-tail", cwd=NOGIT)
-sh("check-tail: ci-job piped to tail in the foreground is allowed",
-   "~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tail -20", "allow", cwd=NOGIT)
-sh("check-tail: ci-job checks --lint piped to tail in the foreground is allowed",
-   "~/.claude/bin/ci-job checks --lint 2>&1 | tail -20", "allow", cwd=NOGIT)
+sh("bare-check: ci-job piped to tail in the foreground is refused",
+   "~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tail -20", "deny", "bare-check", cwd=NOGIT,
+   carries="verdict <cmd>")
+sh("bare-check: ci-job checks --lint piped to tail in the foreground is refused",
+   "~/.claude/bin/ci-job checks --lint 2>&1 | tail -20", "deny", "bare-check", cwd=NOGIT, carries="verdict <cmd>")
 sh("verdict-pipe: a verdict call piped to tail in the foreground is refused",
    "verdict merge --lane-lint 1476 | tail -3", "deny", "verdict-pipe", cwd=NOGIT)
 sh("check-tail: a verdict call with no pipe in the foreground is allowed",
@@ -470,14 +471,15 @@ sh("check-tail: merge --release-check piped to head in the foreground is refused
    "merge --release-check 5 6 | head -1", "deny", "check-tail", cwd=NOGIT)
 sh("check-tail: the bin merge --release-check piped to tail in the foreground is refused",
    "~/.claude/bin/merge --release-check 5 6 | tail -3", "deny", "check-tail", cwd=NOGIT)
-sh("check-tail: merge --release-check with no pipe in the foreground is allowed (control)",
-   "merge --release-check 5 6", "allow", cwd=NOGIT)
+# The bare form is bare-check's refusal (its own row in the bare-check section). This control runs it under verdict.
+sh("check-tail: verdict merge --release-check with no pipe in the foreground is allowed (control)",
+   "verdict merge --release-check 5 6", "allow", cwd=NOGIT)
 add("check-tail: merge --release-check piped to tail, backgrounded, is refused", "deny",
     "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="merge --release-check 5 6 2>&1 | tail -3")
-add("check-tail: merge --release-check with no pipe, backgrounded, is allowed (control)", "allow",
+add("check-tail: verdict merge --release-check with no pipe, backgrounded, is allowed (control)", "allow",
     cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="merge --release-check 5 6")
+    command="verdict merge --release-check 5 6")
 
 # =========================================================================== 2c. waiter loops
 #
@@ -1184,12 +1186,13 @@ add("background-end: a PowerShell cd with a quoted backslash path before ; still
 
 # --- a roster command run bare, with no verdict wrapper (rule bare-check)
 #
-# The roster is the check-tail roster, run in the foreground: `merge --lane-lint`, `merge --review-record`,
-# `merge --release-check`, and `bin/ci-job`. A bare run prints the check's own output, so the agent reads
-# whatever ends the line. The incident form read `echo $?` as "lane lint passes". The remedy is
-# `verdict <cmd>` inline. A roster command under verdict, a merge preview, a grep that names the script
-# and a bare test run are no bare run. A pipe into tail or head stays check-tail's refusal, so those rows
-# assert check-tail and lack bare-check: the reason is printed once.
+# The roster is the check-tail roster, run in the foreground or the background (coordinator ruling, 11:23 CST):
+# `merge --lane-lint`, `merge --review-record`, `merge --release-check`, and `bin/ci-job`. A bare run prints the
+# check's own output, so the agent reads whatever ends the line. The incident form read `echo $?` as "lane lint
+# passes". The remedy is `verdict <cmd>` inline. A roster command under verdict, a merge preview, a grep that names
+# the script and a bare test run are no bare run. A background roster run piped into tail or head stays check-tail's
+# refusal: those rows assert check-tail and lack bare-check, so the reason is printed once. A bare ci-job piped into
+# tail in the foreground is bare-check's refusal.
 BARE_CHECK = "bare-check"
 BARE_REMEDY = "verdict <cmd>"
 
@@ -1250,10 +1253,28 @@ for _name, _command in (
 ):
     sh("bare-check: " + _name + " is no bare run, so it is allowed", _command, "allow", cwd=NOGIT)
 
-# Control: a background ci-job with no pipe is not a bare-check run (the rule covers the foreground, the
-# brief's roster). Its background end needs the until note, which TAIL_BG_UNTIL gives.
-add("bare-check: ci-job checks --lint backgrounded with an until note, no pipe, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL, command="bin/ci-job checks --lint")
+# Background (coordinator ruling, 11:23 CST): a bare roster run is refused in the background too. TAIL_BG_UNTIL gives
+# the until note, so background-end decides nothing. A run under verdict stays allowed in the background.
+for _name, _command in (
+    ("merge --lane-lint", "merge --lane-lint 7"),
+    ("merge --review-record", "merge --review-record 7"),
+    ("merge --release-check", "merge --release-check 5 6"),
+    ("ci-job checks --lint", "bin/ci-job checks --lint"),
+):
+    add("bare-check: " + _name + " with no verdict wrapper, backgrounded, is refused", "deny", BARE_CHECK,
+        cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL, command=_command, carries=BARE_REMEDY)
+for _name, _command in (
+    ("merge --lane-lint", "verdict merge --lane-lint 7"),
+    ("merge --review-record", "verdict merge --review-record 7"),
+    ("ci-job checks --lint", "verdict bin/ci-job checks --lint"),
+):
+    add("bare-check: " + _name + " under verdict, backgrounded, is allowed", "allow", cwd=NOGIT,
+        run_in_background=True, description=TAIL_BG_UNTIL, command=_command)
+
+# A background roster run piped into tail stays check-tail's refusal, and bare-check does not add a second.
+add("bare-check: merge --lane-lint piped to tail, backgrounded, stays check-tail, not refused twice", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 7 2>&1 | tail -8", lacks=BARE_CHECK)
 
 # The pipe forms stay check-tail's refusal, and the reason is printed once: bare-check does not add a second.
 sh("bare-check: merge --lane-lint piped to tail stays check-tail, not refused twice",

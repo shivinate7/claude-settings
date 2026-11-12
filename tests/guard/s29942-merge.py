@@ -140,10 +140,12 @@ repo_case("a -C naming another checkout inside bash -c is denied", "deny",
           f"bash -c '{MERGE_SHIM} -C {REPO_B} 5 --confirm'", LANE_REPO, TX_RUNNER)
 repo_case("a merge in a subshell inside the tagged checkout is allowed", "allow",
           f"({MERGE_SHIM} 5 --confirm)", LANE_REPO, TX_RUNNER)
-# Not judged: a merge named in quoted text, --lane-lint (no lock, no merge), and any session outside the cloud.
+# Not judged: a merge named in quoted text, --lane-lint under verdict (no lock, no merge), and any session outside the
+# cloud. The --lane-lint rows run through verdict: a bare roster run is bare-check's refusal, so these keep testing
+# that merge-confirm does not judge --lane-lint, and nothing else.
 repo_case("a merge named in a quoted echo is not judged", "allow", f"echo '{MERGE_SHIM} --repo-dir {REPO_B} 5 --confirm'", REPO_A, TX_A)
-repo_case("--lane-lint is not judged, whatever the record", "allow", f"{MERGE_SHIM} --lane-lint --repo-dir '{REPO_B}' 5", REPO_A, TX_NONE)
-repo_case("--lane-lint naming no git checkout is not judged", "allow", f"{MERGE_SHIM} --lane-lint --repo-dir '{NOGIT}' 5", REPO_A, TX_NONE)
+repo_case("--lane-lint is not judged, whatever the record", "allow", f"~/.claude/bin/verdict {MERGE_SHIM} --lane-lint --repo-dir '{REPO_B}' 5", REPO_A, TX_NONE)
+repo_case("--lane-lint naming no git checkout is not judged", "allow", f"~/.claude/bin/verdict {MERGE_SHIM} --lane-lint --repo-dir '{NOGIT}' 5", REPO_A, TX_NONE)
 repo_case("outside the cloud a merge is not judged", "allow", f"{MERGE_SHIM} --repo-dir '{REPO_B}' 5 --confirm", REPO_A, TX_A,
           env=ROLE_ENV)
 

@@ -121,8 +121,19 @@ for _n, (_form, _command) in enumerate(REAL_FORMS):
 pass_allow("cited as a list of text blocks, to @parent", "SendMessage", "Lint passed.", LIST_CITED, to=SEND_TO)
 pass_refuse("SKIP as a list of text blocks, to @parent", "SendMessage", "Lint passed.", LIST_SKIP, to=SEND_TO)
 
-# An agent sender with a cite in its own transcript is not pinned here. A real subagent transcript marks every record
-# sidechain, and the rule reads non-sidechain calls only, so that outcome is an open owner pick (Input Needed).
-add("pass-claim: an agent's claim with no cite in any transcript is refused", "deny", rule=PASS_RULE,
-    tool="SendMessage", cwd=NOGIT, transcript=PARENT, agent_id=NOCITE_AGENT_ID, to=SEND_TO,
+# Attributed claims pass: a builder's report of a pass is no claim of this session. Each has a red sibling.
+pass_allow("control, attributed to a builder, to @parent", "SendMessage", "The builder reports lint green.", UNCITED,
+           to=SEND_TO)
+pass_refuse("sibling, unattributed green, to @parent", "SendMessage", "Lint green.", UNCITED, to=SEND_TO)
+pass_allow("control, the builder reports green, to @parent", "SendMessage", "The builder reports green.", UNCITED,
+           to=SEND_TO)
+
+# A send that carries an agent_id is an agent's own report, not the session's claim, so the check does not judge it
+# (coordinator addendum, 11:23 CST). An agent's uncited "Lint passed." passes, over SendMessage and over the MCP send tool.
+# The session's own claims stay judged: the sidechain and Agent-result rows above refuse a session send whose only
+# verdict is an agent's.
+add("pass-claim: an agent's uncited claim to @parent is allowed, it is the agent's own report", "allow",
+    tool="SendMessage", cwd=NOGIT, transcript=PARENT, agent_id=NOCITE_AGENT_ID, silent=True, to=SEND_TO,
     message="Lint passed.")
+# The MCP send tool is no row here: an agent's call to it is refused by agent-no-remote-tools, another rule, so the
+# row would fail for that cause and never pass for this one.
