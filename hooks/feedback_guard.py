@@ -401,6 +401,8 @@ class Homes:
         self._filed = None  # (numbers or None, branch, folder), read once per Stop
         self._top = None  # (the cwd's repo top or None,), read once per Stop
         self._templated = {}  # (branch, slug) -> whether the step file holds TEMPLATE_DIR, read once per Stop
+        self.on_main = {}  # (kind, home path) -> whether main holds a ruling or task home the check passed: the close's proof
+        self.tried = set()  # the (kind, home path) keys problem() has run for
 
     def _root(self, where):
         run = ruling_home._run_git(where, ["rev-parse", "--show-toplevel"])
@@ -461,6 +463,7 @@ class Homes:
             import layout  # lint/layout.py, the one home of where each kind lives
         except ImportError as e:
             return self._stand_down(e)
+        self.tried.add((kind, home_path(rest) if home_word(rest) else ""))
         try:
             step = step_home(rest) if kind == "task" else None
             if step:  # steps hold tasks, so only a task may name one; the step file is the proof
@@ -475,7 +478,7 @@ class Homes:
             reasons, failed = [], None
             for root, rel in places:  # a repo whose read fails is skipped; a readable one still decides
                 try:
-                    reasons.append(self._judge(layout, item_id, kind, root, rel, grant))
+                    reasons.append(self._judge(layout, item_id, kind, root, rel, grant, (kind, home_path(rest))))
                 except (layout.LayoutError, ruling_home._GitFailure) as e:
                     failed = failed or e
             if not reasons:  # no repo could be read (or none resolved): stand down
@@ -484,9 +487,9 @@ class Homes:
         except (layout.LayoutError, ruling_home._GitFailure) as e:
             return self._stand_down(e)
 
-    @staticmethod
-    def _judge(layout, item_id, kind, root, rel, grant):
-        """None when the home `rel` is good in the repo at `root`, else the reason text."""
+    def _judge(self, layout, item_id, kind, root, rel, grant, key):
+        """None when the home `rel` is good in the repo at `root`, else the reason text. A good home records in
+        `on_main[key]` whether main holds it, from the same cat-file that proves it (no further process)."""
         if not (grant and kind == "ruling" and rel in GRANT_ROOT_HOMES):
             homes = kind_homes(layout, root, kind)
             keys = ", ".join(HOME_KINDS[kind])
@@ -497,8 +500,10 @@ class Homes:
                 return ("%s [%s]: %s is not a tracked %s home. %s homes: %s. The handoff and memory are no home%s"
                         % (item_id, kind, rel, kind, kind.capitalize(), ", ".join(homes),
                            ". A task may instead name `step:<slug>`" if kind == "task" else ""))
-        if not ruling_home.value_resolves(rel, root):
+        refs = ruling_home.value_refs(rel, root)
+        if not refs:
             return "%s [%s]: its home is not a file that git tracks on any branch" % (item_id, kind)
+        self.on_main[key] = self.on_main.get(key, False) or any(ref in ruling_home.MAIN_REFS for ref in refs)
         return None
 
     def closed_problem(self, item_id, rest):
@@ -997,7 +1002,7 @@ def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox="", sessio
                     out.append(found)
         for i in open_ids([b], ("[standing]",)):
             if not re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(i), handoff):
-                out.append("%s is not in the handoff" % i)
+                out.append("%s is not in the handoff: put it there, or end its line with [closed] once it is settled" % i)
     return out
 
 
@@ -1218,6 +1223,14 @@ def judge(homes, inbox, blocks, new):
     return list(hits.values()), None
 
 
+def write_inbox(inbox, text):
+    """The one rewrite of the inbox, for a repeat mark and for a close: through a temp file and os.replace."""
+    temp = inbox + ".tmp"
+    with open(temp, "wb") as f:
+        f.write(text.encode("utf-8"))
+    os.replace(temp, inbox)
+
+
 def mark_items(inbox, blocks, hits):
     """Appends ` repeats <ref>` to each hit item's line, before a trailing `[closed]`, in one rewrite
     through a temp file and os.replace. Returns the ids whose line carries a mark now. A line that is
@@ -1245,10 +1258,7 @@ def mark_items(inbox, blocks, hits):
         lines[n - 1] = body + MARK + ref + closed + tail
         changed = True
     if changed:
-        temp = inbox + ".tmp"
-        with open(temp, "wb") as f:
-            f.write("\n".join(lines).encode("utf-8"))
-        os.replace(temp, inbox)
+        write_inbox(inbox, "\n".join(lines))
     return placed
 
 
@@ -1275,6 +1285,60 @@ def judge_stop(homes, inbox, blocks, judged):
     except Exception as e:
         return [], not_checked(" ".join(str(e).split()) or type(e).__name__)
     return [flag_text(*h, h[0] in placed) for h in hits], (None if why is None else not_checked(why))
+
+
+# ---------------------------------------------------------------------------- closing (R27)
+SETTLING_PREFIXES = ("[ruling]", "[task]")
+
+
+def settle(homes, blocks):
+    """Runs the home check for each open ruling or task item that problems() has not run it for, so `homes.on_main`
+    holds the proof of each. Nothing new starts for an item the Stop's own check already judged."""
+    for b in blocks:
+        for ln in b["items"]:
+            it = item(ln)
+            if it and it[2] and not it[3] and it[1].startswith(SETTLING_PREFIXES) and home_word(it[1]):
+                kind = it[1][1:it[1].index("]")]
+                if (kind, home_path(it[1])) not in homes.tried:
+                    homes.problem(it[0], kind, it[1])
+
+
+def tend_text(homes, text):
+    """(rows, entry) for the inbox text: tend's verdict for each open item line, from the feedback-log entry of
+    lint/tending, with the proof the home check gathered. The one reading the close and the compaction note share.
+    A fenced line in an owner's text is never an item, so only the lines parse() reads as items are returned.
+    Raises when the layout or lint/tending cannot be read."""
+    import layout
+    import tending
+    entry = layout.tending()["feedback-log"]
+    blocks = parse(text)
+    settle(homes, blocks)
+    lines = {n for b in blocks for n in b["item_at"]}
+    rows = tending.tend(entry, text, homes.worked_in or homes.cwd or ".", homes.on_main)
+    return [r for r in rows if r[0] + 1 in lines], entry
+
+
+def settled_ids(homes, text):
+    """The ids of the item lines tending reads as stale: settled, so the compaction note leaves them out."""
+    return {ident for _, ident, verdict in tend_text(homes, text)[0] if verdict == "stale"}
+
+
+def close_settled(homes, inbox, blocks):
+    """Closes each open ruling or task item whose file home is held on main, through lint/tending.close, and
+    writes the inbox only when a line changed. Returns the systemMessage line when it could not run, else None."""
+    if blocks is None:
+        return None
+    try:
+        import tending
+        with open(inbox, encoding="utf-8", newline="") as f:
+            text = f.read()
+        rows, entry = tend_text(homes, text)
+        new = tending.close(entry, text, rows)
+        if new != text:
+            write_inbox(inbox, new)
+    except Exception as e:
+        return "Feedback guard: settled items not closed (%s)." % (" ".join(str(e).split()) or type(e).__name__)
+    return None
 
 
 def _ts(rec):
@@ -1426,7 +1490,8 @@ def inbox_stop(hook):
             ids = [it[0] for b in blocks for it in map(item, b["items"]) if it is not None and it[2]]
             write_state(turns, len(blocks), burst, list(dict.fromkeys((judged or []) + ids)))
         if hook.get("stop_hook_active"):
-            msg = " ".join(flags + ([note] if note else []))
+            closing = close_settled(homes, inbox, blocks)
+            msg = " ".join(flags + ([note] if note else []) + ([closing] if closing else []))
             return {"systemMessage": msg} if msg else {}
         if blocks is None:
             reasons = found = ["the inbox file %s cannot be read" % os.path.basename(inbox)]
@@ -1440,7 +1505,9 @@ def inbox_stop(hook):
             pages = Pages(hook.get("transcript_path"))
             found = problems(blocks, handoff, homes, burst, pages, inbox, hook.get("session_id"))
             reasons = found + flags
+            closing = close_settled(homes, inbox, blocks)
             notes = ([FAIL_OPEN % homes.skip] if homes.skip else []) + ([note] if note else []) + (
+                [closing] if closing else []) + (
                 [FAIL_OPEN_SENDS % (label, "; ".join(why)) for label, why in sorted(
                     pages.skip.items(), key=lambda kv: kv[0] != "page")])
             if homes.skip_closed:

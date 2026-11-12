@@ -10,6 +10,7 @@ Modes:
   (decision owner-override; hooks/override.py). It prints one more line.
 - --agent: At SubagentStart, gives the agent the time in US Central as context.
 - --page-note: After an ArtifactData read of one waiting-page answer, saves the owner's note on it to the session's inbox, like a chat message (decision owner-feedback-inbox). It prints no time line.
+- PostToolUse: After an AskUserQuestion call, saves the owner's answer to the session's inbox, like a chat message (decision owner-feedback-inbox). It prints no time line.
 
 Sessions speak times in US Central, 24-hour clock (decision local-time-central). Prints one line, for example "Local time: YYYY-MM-DD 21:40 CDT (UTC-05:00) Later times: run ~/.claude/bin/now-central, never from memory."
 The pointer follows the time line on the same line. The inbox stamp and `line()` carry no pointer. The helper bin/now-central prints later times from this module's clock.
@@ -27,6 +28,11 @@ After a save, capture writes `<session_id>.inbox.repo` once, when the payload cw
 repo (a `.git` found by walking up; no process starts): the real path of the cwd. The Stop guard reads
 it to find other sessions' inboxes of the same repo (decision owner-feedback-inbox, "Repeats"). Cost:
 one small file per session.
+A PostToolUse payload on stdin (hook_event_name PostToolUse, no flag) is the question box: for an AskUserQuestion
+call the tool's result, which holds the owner's answer, is saved as one block like a typed message (the same
+fence, stamp and repo sidecar), with no time line. An empty result and any other tool save nothing. A relay of the
+owner's words from another session is not saved: it arrives in the `<cross-session-message` frame a peer's own
+send uses, and no marker tells the two apart. Cost: no process start.
 `--agent` never reads stdin and never saves. The Stop guard that reads the inbox, and decides which
 messages need items, is feedback_guard.py. LOCAL_TIME_NOW (ISO-8601 with an offset) replaces the
 clock; tests set it.
@@ -337,6 +343,40 @@ def page_note(raw):
             "additionalContext": not_saved("page note", "; ".join(failures))}}))
 
 
+def question_answer(hook):
+    """PostToolUse on AskUserQuestion: saves the owner's answer as one inbox block, like a typed message
+    (decision owner-feedback-inbox, R27). The tool's result is the owner's words. An empty result saves nothing.
+    Prints one line when the save fails."""
+    paths = inbox_paths(hook.get("session_id"))
+    text = "\n".join(s.strip() for s in _strings(hook.get("tool_response")) if s.strip())
+    if paths is None or not text:
+        return
+    err = save_message(paths[0], line()[len("Local time: "):], text)
+    if err is not None:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse",
+                                                 "additionalContext": not_saved("question answer", err)}}))
+        return
+    try:
+        bind_repo(hook.get("session_id"), hook.get("cwd"))
+    except (OSError, ValueError) as e:
+        print("local_time: repo sidecar: %s" % e, file=sys.stderr)
+
+
+def tool_result(raw):
+    """The hook object of a PostToolUse payload in `raw`, else None: the payload alone says this is no prompt."""
+    try:
+        hook = json.loads(raw.decode("utf-8"))
+    except ValueError:
+        return None
+    return hook if isinstance(hook, dict) and hook.get("hook_event_name") == "PostToolUse" else None
+
+
+def question_box(hook):
+    """Saves the answer of an AskUserQuestion call; any other tool's result saves nothing."""
+    if hook.get("tool_name") == "AskUserQuestion":
+        question_answer(hook)
+
+
 def grant_override(raw, at):
     """Owner prompt `override`, `override <reason>`, `override <n>[m|h]`, `override off` or the Opus word
     (`opus <n>[m|h]`, `opus <role> <n>[m|h]`, `opus off`; decision owner-override): grants or ends
@@ -395,18 +435,22 @@ def main(argv):
         if "--page-note" in argv:
             page_note(sys.stdin.buffer.read())
             return 0
-        now = clock()
-        stamp = text = line(lambda: now)
-        text += NOW_CENTRAL_POINTER
         # `--subagent` is the flag's old name, kept until OLD_FLAG_ENDS for a session that read its
         # hook list before the rename. Delete it on that day.
         agent = "--agent" in argv or "--subagent" in argv
+        raw = b"" if agent else sys.stdin.buffer.read()
+        result = tool_result(raw)
+        if result is not None:  # a PostToolUse payload: the question box's answer, no time line
+            question_box(result)
+            return 0
+        now = clock()
+        stamp = text = line(lambda: now)
+        text += NOW_CENTRAL_POINTER
         if agent:
             text = json.dumps({"hookSpecificOutput": {"hookEventName": "SubagentStart",
                                                       "additionalContext": text}})
         print(text)
         if not agent:
-            raw = sys.stdin.buffer.read()
             try:
                 capture(raw, stamp[len("Local time: "):])
             except Exception as e:  # a capture error never stops the grant

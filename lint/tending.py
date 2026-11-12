@@ -6,12 +6,13 @@
 lint/layout.json, key "tending" (read by layout.tending()), holds one entry per prose store:
   where       a layout kind, or external:<name> for a store outside the repo
   item        a regex; group 1 is the item's id; it is matched against one line at a time
-  still-true  the name of one test in TESTS: home-held, until-date, cite-resolves or copy-matches-live
+  still-true  the name of one test in TESTS: home-held, until-date, cite-resolves, copy-matches-live or
+              open-until-home-on-main
   close       mark (append " [closed]" to a stale item's line), delete (drop the line) or none (report only)
   runs-from   a subset of POINTS: the call points that run the store
   state       live, or declared (named, but no call point runs it yet)
 
-tend(entry, text, root) gives one row per open item line, in order: (line index, id, verdict), the verdict "true",
+tend(entry, text, root, known=None) gives one row per open item line, in order: (line index, id, verdict), the verdict "true",
 "stale" or "unknown". A repeated id gives one row per line and never merges. A claim that cannot be read is
 "unknown", never "true" (rule verification-report-unknown-reads). A line that holds no claim the test reads is
 "unknown" too. An item already marked [closed] gets no verdict. A UTF-8 byte-order mark before a line is not part of
@@ -29,6 +30,12 @@ point does not read prints `skipped <store>: <why>` and does not fail the point.
 
 An external:<name> store is outside the repo, so the runner reads no file for it: the caller supplies the text to
 tend() and close(). Asked for by --store at a point with no text, it prints `unknown <store>: caller supplies text`.
+
+open-until-home-on-main reads a feedback-log item (`- <id> [<kind>] -> <home>`, hooks/feedback_guard.item): it is
+"true" (still needs work) until a ruling or task whose home is a file is held on main, then "stale". A step home,
+and any other kind, stay "true". The caller supplies the proof as `known`, {(kind, home path): held on main}, from
+the home check it already ran (feedback_guard.Homes), so the test starts no process. A home missing from `known`
+is "unknown". Without `known` the test is "unknown" for every ruling and task: the runner reads no external store.
 
 Reuse: the home test resolves a home as hooks/ruling_home.py does (its whole-value read, `_unwrap`, the refusal of an
 absolute or leaving path) and a step home as hooks/feedback_guard.py does (STEP_HOME, STEP_PATH). It calls the
@@ -85,8 +92,9 @@ def _hook(name):
 class _Reads:
     """What one tend() call has read, so no item repeats a read."""
 
-    def __init__(self, root):
+    def __init__(self, root, known=None):
         self.root = root
+        self.known = known  # {(kind, home path): held on main}, proved by the caller; None: no proof supplied
         self._refs = False  # False: not read yet. None: git cannot read the repo.
         self._held = {}
 
@@ -115,6 +123,10 @@ class _Reads:
                 except home._GitFailure:
                     self._held[git_path] = None
         return self._held[git_path]
+
+    def held_main(self, kind, path):
+        """True or False: the caller proved the home held on main or not. None: no proof for this home."""
+        return None if self.known is None else self.known.get((kind, path))
 
 
 def _clean(word):
@@ -187,11 +199,28 @@ def _copy_matches_live(line, reads):
     return TRUE if found.group(2) in [row.rstrip("\r") for row in live.split("\n")] else STALE
 
 
+SETTLING_KINDS = ("ruling", "task")  # the feedback-log kinds whose file home settles the item
+
+
+def _open_until_home_on_main(line, reads):
+    guard = _hook("feedback_guard")
+    found = guard.item(line)
+    if found is None or not found[2]:
+        return UNKNOWN
+    rest = found[1]
+    kind = rest[1:rest.index("]")]
+    if kind not in SETTLING_KINDS or guard.step_home(rest):
+        return TRUE  # a question, a standing item, a page, a repo, a note or a step home: the work is still open
+    held = reads.held_main(kind, guard.home_path(rest))
+    return UNKNOWN if held is None else STALE if held else TRUE
+
+
 TESTS = {
     "home-held": _home_held,
     "until-date": _until_date,
     "cite-resolves": _cite_resolves,
     "copy-matches-live": _copy_matches_live,
+    "open-until-home-on-main": _open_until_home_on_main,
 }
 BOM = "﻿"
 
@@ -212,12 +241,13 @@ def _match(item, line):
     return found.group(1), lead, body, cr
 
 
-def tend(entry, text, root):
-    """[(line index, id, verdict)] for each open item line of text, in order."""
+def tend(entry, text, root, known=None):
+    """[(line index, id, verdict)] for each open item line of text, in order. `known` is the caller's proof for
+    open-until-home-on-main: {(kind, home path): held on main}."""
     test = TESTS.get(entry["still-true"])
     if test is None:
         raise ValueError("no still-true test named %r" % (entry["still-true"],))
-    item, reads, closed, found = re.compile(entry["item"], re.M), _Reads(root), _closed(), []
+    item, reads, closed, found = re.compile(entry["item"], re.M), _Reads(root, known), _closed(), []
     for index, line in enumerate(text.split("\n")):
         hit = _match(item, line)
         if hit is not None and not closed.search(hit[2]):

@@ -130,10 +130,10 @@
     "feedback-log": {
       "where": "external:feedback-log",
       "item": "^- (\\S+) \\[[a-z]+\\] -> ",
-      "still-true": "home-held",
+      "still-true": "open-until-home-on-main",
       "close": "mark",
-      "runs-from": ["stop"],
-      "state": "declared"
+      "runs-from": ["stop", "compact"],
+      "state": "live"
     },
     "roadmap": {
       "where": "external:roadmap",
