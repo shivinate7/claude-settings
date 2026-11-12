@@ -15,9 +15,9 @@ BBTW_SCRIPT = "python3 scripts/make_checks.py"
 BBTW_PS_SCRIPT = "python scripts/make_checks.py"
 # The reason's undo route: restore each changed test to HEAD, delete each added one, and name the test-author.
 BBTW_UNDO = (("restore", "Restore"), "HEAD", ("delete", "Delete"), "test-author")
-BBTW_NO_ENTRY = "no PostToolUse entry with matcher Bash|PowerShell runs hooks/guard.py, so there is no gate to run"
+BBTW_NO_ENTRY = "no PostToolUse entry with matcher Bash|PowerShell runs hooks/guard.py, so the guard never runs"
 BBTW_GUARD_NEEDLE = '/hooks/guard.py"'
-NO_SH_GATE = "the gate is a POSIX shell line, and this Windows run has no python stand-in the line can find"
+NO_SH_ENTRY = "the settings entry is a POSIX shell line, and this Windows run has no python stand-in the line can find"
 
 
 def bbtw_body(cwd, command, agent="builder", tool="Bash"):
@@ -328,13 +328,13 @@ def _bbtw_rows(folder, rule):
     return [row for row in rows if len(row) > 3 and row[3] == rule]
 
 
-def bbtw_deny_line_case():
-    """A block writes one deny line for the rule. Pins the log: a block the log cannot show is no evidence."""
-    _got, _reason, folder, _ = _bbtw_judge("deny-line", _bbtw_raw(BBTW_UNTRACKED))
+def bbtw_refuse_line_case():
+    """A refusal writes one row for the rule, logged `deny`. Pins the log: a block the log cannot show is no evidence."""
+    _got, _reason, folder, _ = _bbtw_judge("refuse-line", _bbtw_raw(BBTW_UNTRACKED))
     rows = _bbtw_rows(folder, BBTW_RULE)
     if len(rows) != 1 or rows[0][2] != "deny":
-        return False, "want one deny line for %s in guard.log, got %r" % (BBTW_RULE, rows)
-    return True, "one deny line for %s in guard.log" % BBTW_RULE
+        return False, "want one row logged deny for %s in guard.log, got %r" % (BBTW_RULE, rows)
+    return True, "one row logged deny for %s in guard.log" % BBTW_RULE
 
 
 def _bbtw_unread_case(tag, where, env_path=None):
@@ -390,7 +390,7 @@ def bbtw_no_git_author_case():
 
 
 def bbtw_no_git_main_case():
-    """The main session's call runs no git at all: the check gates on the builder role before any read."""
+    """The main session's call runs no git at all: the guard checks for the builder role before any read."""
     materialize(BBTW_UNTRACKED)
     note = _bbtw_scope(BBTW_UNTRACKED, "tests/foo.py")
     if note:
@@ -456,7 +456,7 @@ def bbtw_entry_case():
     return True, "a PostToolUse hook for Bash|PowerShell runs hooks/guard.py"
 
 
-def _bbtw_gate_inputs():
+def _bbtw_entry_inputs():
     """(tag, payload text, payload dict): three builder payloads first, then the two that must not start the guard."""
     builder = bbtw_body(BBTW_UNTRACKED, BBTW_SCRIPT)
     ps = bbtw_body(BBTW_UNTRACKED, BBTW_PS_SCRIPT, tool="PowerShell")
@@ -469,10 +469,10 @@ def _bbtw_gate_inputs():
             ("test-author", json.dumps(author), author)]
 
 
-def _bbtw_gate_stdin(entry, tag, text):
+def _bbtw_entry_stdin(entry, tag, text):
     """Runs the entry's command with CLAUDE_CONFIG_DIR at a folder whose hooks/guard.py stub writes its stdin to
-    ran.txt. -> the stdin the stub read, or None when the gate never started the stub."""
-    cfg = os.path.join(ROOT, "bbtw-gate-" + tag)
+    ran.txt. -> the stdin the stub read, or None when the settings entry never started the stub."""
+    cfg = os.path.join(ROOT, "bbtw-entry-" + tag)
     write(os.path.join(cfg, "hooks", "guard.py"),
           "import os, sys\n"
           "with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ran.txt'), 'w', encoding='utf-8') as h:\n"
@@ -487,33 +487,33 @@ def _bbtw_gate_stdin(entry, tag, text):
         return handle.read()
 
 
-def bbtw_gate_passes_case():
-    """The gate lets each builder payload through to the guard, unchanged: compact and spaced JSON, and PowerShell."""
+def bbtw_entry_passes_case():
+    """The settings entry lets each builder payload through to the guard, unchanged: compact and spaced JSON, and PowerShell."""
     entry = _bbtw_entry(wrappers.load())
     if entry is None:
         return False, BBTW_NO_ENTRY
-    for tag, text, body in _bbtw_gate_inputs()[:3]:
-        got = _bbtw_gate_stdin(entry, tag, text)
+    for tag, text, body in _bbtw_entry_inputs()[:3]:
+        got = _bbtw_entry_stdin(entry, tag, text)
         if got is None:
-            return False, "the gate did not start the guard for the %s payload" % tag
+            return False, "the settings entry did not start the guard for the %s payload" % tag
         try:
             same = json.loads(got) == body
         except ValueError:
             same = False
         if not same:
             return False, "the guard read a payload other than the %s payload" % tag
-    return True, "the gate starts the guard for compact, spaced and PowerShell builder payloads, unchanged"
+    return True, "the settings entry starts the guard for compact, spaced and PowerShell builder payloads, unchanged"
 
 
-def bbtw_gate_stops_case():
-    """The gate starts no python for the main session or a test-author: their calls cost no process."""
+def bbtw_entry_stops_case():
+    """The settings entry starts no python for the main session or a test-author: their calls cost no process."""
     entry = _bbtw_entry(wrappers.load())
     if entry is None:
         return False, BBTW_NO_ENTRY
-    for tag, text, _body in _bbtw_gate_inputs()[3:]:
-        if _bbtw_gate_stdin(entry, tag, text) is not None:
-            return False, "the gate started the guard for the %s payload, which is not a builder's" % tag
-    return True, "the gate starts no guard for the main session or a test-author"
+    for tag, text, _body in _bbtw_entry_inputs()[3:]:
+        if _bbtw_entry_stdin(entry, tag, text) is not None:
+            return False, "the settings entry started the guard for the %s payload, which is not a builder's" % tag
+    return True, "the settings entry starts no guard for the main session or a test-author"
 
 
 def _bbtw_folder_scope(where, folder):
@@ -614,7 +614,7 @@ def bbtw_status_once_merge_case():
 
 
 BBTW_CHECKS = (
-    ("builder-bash-test-write: a block writes one deny line for the rule to guard.log", bbtw_deny_line_case),
+    ("builder-bash-test-write: a refusal writes one row, logged deny, for the rule to guard.log", bbtw_refuse_line_case),
     ("builder-bash-test-write: a call git cannot read because it is no repository logs builder-bash-test-write-unread, noted",
      bbtw_unread_no_repo_case),
     ("builder-bash-test-write: a call whose git status fails logs builder-bash-test-write-unread, noted",
@@ -627,10 +627,10 @@ BBTW_CHECKS = (
     ("builder-bash-test-write: a block is the PostToolUse {decision: block, reason} on stdout", bbtw_block_shape_case),
     ("builder-bash-test-write: settings.json has a PostToolUse entry for Bash|PowerShell that runs hooks/guard.py",
      bbtw_entry_case),
-    ("builder-bash-test-write: the settings entry's gate starts the guard for each builder payload, unchanged",
-     bbtw_gate_passes_case),
-    ("builder-bash-test-write: the settings entry's gate starts no guard for the main session or a test-author",
-     bbtw_gate_stops_case),
+    ("builder-bash-test-write: the settings entry starts the guard for each builder payload, unchanged",
+     bbtw_entry_passes_case),
+    ("builder-bash-test-write: the settings entry starts no guard for the main session or a test-author",
+     bbtw_entry_stops_case),
     ("builder-bash-test-write: a builder's test in a new untracked folder is blocked, and the reason names no path",
      bbtw_new_folder_case),
     ("builder-bash-test-write: a builder's call in a merge with a test conflict names the merge-abort step",
@@ -648,16 +648,16 @@ BBTW_CHECKS = (
     ("builder-bash-test-write: a builder call in a merge reads git status once and makes no other git call",
      bbtw_status_once_merge_case),
 )
-# A git stand-in is POSIX only. A gate runs the settings line under sh, which Windows cannot run here.
+# A git stand-in is POSIX only. A settings entry runs its command under sh, which Windows cannot run here.
 BBTW_STAND_IN_CHECKS = (bbtw_unread_git_fails_case, bbtw_status_once_test_case, bbtw_status_once_product_case,
                         bbtw_no_git_author_case, bbtw_no_git_main_case, bbtw_status_once_merge_case)
-BBTW_GATE_CHECKS = (bbtw_gate_passes_case, bbtw_gate_stops_case)
+BBTW_ENTRY_CHECKS = (bbtw_entry_passes_case, bbtw_entry_stops_case)
 for _label, _check in BBTW_CHECKS:
     LOG_FAMILY[_label] = FAMILY
     if os.name == "nt" and _check in BBTW_STAND_IN_CHECKS:
         skip_case(_label, NO_STAND_IN)
-    elif os.name == "nt" and _check in BBTW_GATE_CHECKS:
-        skip_case(_label, NO_SH_GATE)
+    elif os.name == "nt" and _check in BBTW_ENTRY_CHECKS:
+        skip_case(_label, NO_SH_ENTRY)
     else:
         LOG_CHECKS = LOG_CHECKS + ((_label, _check),)
     if _check is bbtw_entry_case:
