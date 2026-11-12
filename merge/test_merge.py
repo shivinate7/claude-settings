@@ -18835,6 +18835,7 @@ class BatchFreeze(CloudSession):
         with self.no_lint_or_ready_check(ready_state="pass") as mocks:
             rc, out = self.run_batch("--batch-build", "nightly", "101", "--ready")
         self.assertIn("#102 is frozen in batch nightly and is left out of this request", out, "the refusal does not name the frozen lane left out: %s" % out)
+        self.assertIn("decision batch-freeze-lane-set", out, "the freeze refusal does not cite decision batch-freeze-lane-set: %s" % out)
         self.assertIn("a frozen set never changes except by --batch-drop", out, "the refusal does not say the frozen set changes only by a drop: %s" % out)
         self.assertEqual(rc, 1, "--ready with a PR list other than the frozen set exited %s, not 1: %s" % (rc, out))
         self.assertEqual(self.lint_calls(mocks), [], "a refused --ready linted the batch head: %s" % out)
@@ -19065,10 +19066,6 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.host.readies, [pr], "the --ready after the drop did not mark the batch PR ready once: %s" % out)
         self.assertFalse(self.host.batch_pulls[pr]["draft"], "the batch PR is still a draft after the --ready that passed: %s" % out)
         self.assertEqual(rc, 0, "the --ready after the drop exited %s: %s" % (rc, out))
-
-    def test_freeze_refusals_cite_the_freeze_decision(self):
-        self.assertIn("decision batch-freeze-lane-set", merge.FREEZE_CITE, "FREEZE_CITE does not cite decision batch-freeze-lane-set")
-        self.assertNotIn("no-merge-during-batch-ci", merge.FREEZE_CITE, "FREEZE_CITE still cites the batch brake's decision")
 
     # Blame by route: a red run names the lane a drop may take off (decision batch-freeze-lane-set). The route is
     # `--batch-build NAME --blame N --run URL`. Each refusal case's first assert is one phrase of the refusal's own text, so its red

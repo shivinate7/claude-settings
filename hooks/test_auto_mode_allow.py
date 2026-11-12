@@ -709,7 +709,7 @@ class BatchBuildAndDropIsAllowed(unittest.TestCase):
     def test_never_covers_names_each_check_lifting_flag(self):
         clause = never_covers(self.entry())
         self.assertIsNotNone(clause, "need a 'Never covers' sentence")
-        for act in ("--confirm", "--base-red-ok", "--undo-check-unknown-ok"):
+        for act in ("--confirm", "--base-red-ok", "--undo-check-unknown-ok", "--lint-unknown-ok"):
             self.assertIn(act, clause, "Never covers does not name %s" % act)
 
 
