@@ -2542,6 +2542,69 @@ def case_past_ruling_rule_name_is_question_forms_rule():
     check("PAST_RULING_RULE_NAME equals question_form.PAST_RULING_RULE", bool(name) and name == rule, (name, rule))
 
 
+# ------------------------------------------------------------------ item 8 names the ruling sentences (S1 to S4)
+# Item 8 tells the judge which step lines are rulings: a line that says the owner ruled, answered, picked or granted, and
+# not a session's own call or an incident. Each sentence must be in the item-8 text verbatim. The text is one home,
+# call_judge.PAST_RULING_ITEM, and two calls send it: the chat box's judged call and the dedicated past-ruling call.
+ITEM8_SENTENCES = (
+    ("S1", "A step line is a ruling when it says the owner ruled, answered, picked or granted."),
+    ("S2", "A line where a session made the call, such as a recommended option, a proposed pick, or a lane's call, "
+           "is not a ruling."),
+    ("S3", "An incident or gripe line that only tells what went wrong is not a ruling."),
+    ("S4", "A ruling that mentions a risk, a defect or an incident is still a ruling."),
+)
+# An evidence clause on S1 would stop a step line with no words, page item or date from counting as a ruling.
+ITEM8_ABSENT = (
+    ("S1 evidence clause", "and gives his words, a page item, or a date"),
+)
+
+
+def item8_text(prompt):
+    """The item-8 text of a judged prompt: from its `8. ` line up to the candidate list, or to the end. None when the
+    prompt holds no item-8 line."""
+    parts = prompt.split("\n8. ", 1)
+    return parts[1].split("Past rulings (item 8)", 1)[0] if len(parts) == 2 else None
+
+
+def check_item8_sentences(label, item8):
+    sentences = re.split(r"(?<=[.!?;])\s+", item8)
+    check("%s: a sentence says a decision or debt record is a ruling by its kind" % label,
+          any("decision" in s and "debt" in s and "record" in s for s in sentences), item8[:300])
+    for name, sentence in ITEM8_SENTENCES:
+        check("%s: sentence %s is in the item-8 text verbatim" % (label, name), sentence in item8,
+              "missing: " + sentence)
+    for name, phrase in ITEM8_ABSENT:
+        check("%s: %s is not in the item-8 text" % (label, name), phrase not in item8, "present: " + phrase)
+
+
+def case_item8_prompt_names_record_kinds_and_owner_markers():
+    # The chat box's one judged call carries item 8, with the record-kind sentence and each ITEM8_SENTENCES sentence.
+    box = good_box(goal=CI_GOAL, problem=CI_PROBLEM, based=CI_BASED, options=CI_CHAT_OPTIONS)
+    r = run_hook(question_input(box=box), answer=ALLOW)
+    calls = form_calls(r)
+    check("item 8 chat: the question box makes one judged call", len(calls) == 1, detail(r))
+    if len(calls) != 1:
+        return
+    item8 = item8_text(calls[0]["prompt"])
+    check("item 8 chat: the judged call holds an item-8 line", item8 is not None, calls[0]["prompt"][-300:])
+    if item8 is not None:
+        check_item8_sentences("item 8 chat", item8)
+
+
+def case_item8_prompt_names_ruling_sentences_on_the_dedicated_call():
+    # A page item write's dedicated past-ruling call sends the same item-8 text, so the same sentences must be in it.
+    page_item_passes_the_form("S")
+    r = run_hook(page_input("set", WORKTREE_PAGE_ITEM, cwd=INCIDENT_REPO), answer=ALLOW)
+    calls = past_calls(r)
+    check("item 8 page: the page write makes one dedicated past-ruling call", len(calls) == 1, detail(r))
+    if len(calls) != 1:
+        return
+    item8 = item8_text(calls[0]["prompt"])
+    check("item 8 page: the dedicated call holds an item-8 line", item8 is not None, calls[0]["prompt"][-300:])
+    if item8 is not None:
+        check_item8_sentences("item 8 page", item8)
+
+
 def main():
     for case in (case_agent_refusal,case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -2593,7 +2656,9 @@ def main():
                  case_dedicated_and_form_failures_print_one_text,
                  case_capped_questions_starts_each_cut_unit_on_its_own_line,
                  case_unrun_fallback_prints_the_marker_remedy,
-                 case_past_ruling_rule_name_is_question_forms_rule):
+                 case_past_ruling_rule_name_is_question_forms_rule,
+                 case_item8_prompt_names_record_kinds_and_owner_markers,
+                 case_item8_prompt_names_ruling_sentences_on_the_dedicated_call):
         try:
             case()
         except Exception as exc:
