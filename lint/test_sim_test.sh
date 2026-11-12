@@ -8,7 +8,7 @@
 #  - Flags first, all double-dash: --device duo|pro (default duo), --hold, --for S. The first argument it does not know
 #    starts xcodebuild's own arguments, which pass through unchanged. Any other --device value: one usage line on stderr,
 #    exit 2, no lock, no boot.
-#  - A booted Duo (its name contains "iPhone Duo") is reused by UDID: no boot, no shutdown, no lease. With two, the first
+#  - A booted Duo (its name contains "iPhone Duo") is reused by UDID: no boot, no shutdown. With two, the first
 #    is used. An iPad is not an iPhone. pro reuses the first booted iPhone whose name does not contain "Duo".
 #  - Cross-role: a duo run with a non-Duo iPhone booted, or a pro run with a Duo booted, boots nothing, runs nothing,
 #    prints one stderr line naming the booted device, and exits 1. It shuts down no device it did not boot.
@@ -31,7 +31,11 @@
 #    over. A lock folder with no pid file counts as held for 60 s, then it is taken over.
 #  - Its own boot takes the lease for its role (`sim-lease take --device duo|pro --udid`) before simctl boot. At a 5-minute
 #    load of 100 or a 1-minute load of 60 it waits, then exits 1 with no boot. The lease is released on every exit, INT and
-#    TERM too. The reuse path takes no lease.
+#    TERM too.
+#  - A reused device holds the lease of its own slot for the whole run or hold: `sim-lease take --device <role>
+#    --for-udid <its UDID> --pid $$`. It gives that lease back on every exit, INT and TERM too. A run that granted a lease
+#    and then reuses a device gives the granted lease back first. A reused device in no slot prints one stderr line and
+#    runs with no lease.
 #  - Every xcodebuild call carries `-collect-test-diagnostics never`, so a failed UI test starts no simctl diagnose
 #    (up to 10 minutes). A caller's own `-collect-test-diagnostics VALUE` wins: its value stays, with no second copy.
 #  - A SpringBoard crash loop (3 new SpringBoard-*.ips reports during the run that name this run's UDID, or no device
@@ -198,6 +202,8 @@ if [ -d "$HOME/.claude/state/sim-test.lock" ]; then
   cat "$HOME/.claude/state/sim-test.lock/pid" > "$RUN/cmd_lock_pid" 2>/dev/null
   : > "$RUN/cmd_lock_seen"
 fi
+lease="$HOME/.claude/state/sim-lease/leases.json"
+[ -f "$lease" ] && cp "$lease" "$RUN/cmd_lease"
 exit 7
 SH
 chmod +x "$hold_cmd"
@@ -209,7 +215,7 @@ fresh() {
   : > "$calls"; : > "$booted_file"
   rm -f "$work/topcalls" "$work/started" "$work/xc_finished" "$work/watchdog_fired" "$work/lock_during" \
     "$work/lock_alive" "$work/lock_pid_seen" "$work/lock_simctl" "$work/devices.json" \
-    "$work/cmd_udid" "$work/cmd_args" "$work/cmd_lock_seen" "$work/cmd_lock_pid"
+    "$work/cmd_udid" "$work/cmd_args" "$work/cmd_lock_seen" "$work/cmd_lock_pid" "$work/cmd_lease"
   rm -rf "$work/home/.claude" "$crashdir" "$work/sweep_root"
   rm -f "$work/lease_at_boot" "$work/lease_at_xc" "$work/loadavg" "$work/load_reads" "$work/boot_started" "$work/boot_release"
   /bin/mkdir -p "$crashdir" "$work/home"
@@ -308,6 +314,9 @@ lease_slot() { python3 -I -c "$SLOT_CHECK" "$1" "$2" "$3"; }
 lease_at_boot_holds() { lease_holds "$work/lease_at_boot" "$tool_pid"; }
 lease_at_boot_slot() { lease_slot "$work/lease_at_boot" "$tool_pid" "$1"; }
 lease_at_xc_holds() { lease_holds "$work/lease_at_xc" "$tool_pid"; }
+lease_at_xc_slot() { lease_slot "$work/lease_at_xc" "$tool_pid" "$1"; }
+lease_at_xc_lacks_slot() { ! lease_slot "$work/lease_at_xc" "$tool_pid" "$1"; }
+lease_at_cmd_slot() { lease_slot "$work/cmd_lease" "$tool_pid" "$1"; }
 lease_not_held_at_xc() { ! lease_at_xc_holds; }
 # lease_released: the state after the run holds no lease of this tool. Exit 1 is the only pass, so a broken file fails.
 lease_released() { lease_holds "$lease_file" "$tool_pid"; [ $? -eq 1 ]; }
@@ -376,8 +385,9 @@ fresh; booted "iPhone Duo" $DUO1; run
 need "exit code" rc_is 0
 need "destination is the booted Duo" dest_is "$DUO1"
 need "steps are run only" steps_are "run "
-need "no lease taken" lease_not_held_at_xc
-end_case "1 booted Duo is reused by UDID: no boot, no shutdown, no lease"
+need "the lease held during xcodebuild is slot 1" lease_at_xc_slot 1
+need "lease released after the run" lease_released
+end_case "1 booted Duo is reused by UDID: no boot, no shutdown, slot 1's lease held during the run and released after"
 
 fresh; booted "iPhone Duo" $DUO2; run
 need "exit code" rc_is 0
@@ -734,8 +744,9 @@ end_case "49 TERM during an own-boot run: the lease is held during xcodebuild, a
 fresh; booted "iPhone Duo" $DUO1; run
 need "exit code" rc_is 0
 need "steps are run only" steps_are "run "
-need "no lease held during xcodebuild" lease_not_held_at_xc
-end_case "50 reuse path: takes no lease"
+need "the lease held during xcodebuild is slot 1" lease_at_xc_slot 1
+need "lease released after the run" lease_released
+end_case "50 reuse path: holds the Duo's slot lease during xcodebuild, and gives it back after"
 
 # Duo slot 2: a live holder has slot 1, so the real sim-lease grants this take slot 2. Its UDID is booted, tested and shut
 # down. The take waits 2 s at most, so a take refused on the old code fails fast.
@@ -797,12 +808,13 @@ need "shuts down nothing" no_shutdown
 need "stderr names the booted Duo" grep -Fq "iPhone Duo" "$work/run.err"
 end_case "60 pro run with a Duo booted: refused, boots and runs nothing, exit 1"
 
-# Control: the pro role reuses the booted 18 Pro, as it did before the role flag existed.
+# The pro role reuses the booted 18 Pro, as it did before the role flag existed, and holds the pro lease for the run.
 fresh; booted "iPhone 18 Pro" $PRO; ARGS=(--device pro -scheme X); run; ARGS=(-scheme X)
 need "exit code" rc_is 0
 need "steps are run only" steps_are "run "
-need "takes no lease" lease_not_held_at_xc
-end_case "61 control: pro run with the 18 Pro booted reuses it, with no boot"
+need "the lease held during xcodebuild is the pro slot" lease_at_xc_slot pro
+need "lease released after the run" lease_released
+end_case "61 pro run with the 18 Pro booted reuses it, with no boot, and holds the pro lease during the run"
 
 fresh; run CI=true
 need "exit 1" rc_is 1
@@ -978,15 +990,17 @@ need "shutdown of the Duo it booted, after the boot" has_call "simctl shutdown $
 need "the Duo's boot is recorded" record_names "$DUO1"
 end_case "77 TERM to the tool during a slow simctl boot: the Duo still comes up, and is shut down and recorded"
 
-# Case 78: a Duo booted during the wait, then the pro holder dies: the queued duo run reuses that Duo after its grant, and
-# gives the lease back before xcodebuild.
+# Case 78: a Duo booted during the wait, then the pro holder dies: the queued duo run is granted slot 1, then reuses the
+# Duo of slot 2, so it gives slot 1 back and holds slot 2 during xcodebuild.
 pro_dies_during_duo_wait duo
 need "exit code" rc_is 0
 need "steps are run only" steps_are "run "
 need "destination is the booted Duo" dest_is "$DUO2"
-need "lease not held during xcodebuild" lease_not_held_at_xc
+need "the lease held during xcodebuild is slot 2" lease_at_xc_slot 2
+need "the granted slot 1 is given back before xcodebuild" lease_at_xc_lacks_slot 1
+need "lease released after the run" lease_released
 need "no shutdown" no_shutdown
-end_case "78 a Duo booted during the wait, then the pro holder dies: the queued run reuses it, and the lease goes back before xcodebuild"
+end_case "78 a Duo booted during the wait, then the pro holder dies: the queued run gives back slot 1, holds slot 2 during xcodebuild, and releases it after"
 
 # Case 79: a failed own boot shuts nothing down. The boot fails, so the tool clears its boot mark before it exits, and its
 # cleanup has no simulator of its own to shut down.
@@ -1009,6 +1023,63 @@ need "steps are boot run shutdown" steps_are "boot run shutdown "
 need "no sim-test.lock.dead.* folder is left" no_dead_folder
 need "no rmdir error on stderr" no_rmdir_error
 end_case "80 dead holder's lock folder with take.out: taken over, no dead folder left, no rmdir error"
+
+# Reuse holds the lease of the reused device's slot. The real sim-lease runs beside the script, so the lease file shows the
+# slot while the run goes on, and the run gives it back on every exit.
+fresh; booted "iPhone Duo" $DUO2; run
+need "exit code" rc_is 0
+need "destination is the reused Duo of slot 2" dest_is "$DUO2"
+need "no boot of the reused Duo" no_boot
+need "the lease held during xcodebuild is slot 2" lease_at_xc_slot 2
+need "lease released after the run" lease_released
+end_case "81 reuse of the booted Duo of slot 2: no boot, and slot 2's lease is held during xcodebuild and released after"
+
+# --hold -- CMD on a reused Duo: the child reads the lease file, so it sees slot 1's lease held for the whole hold.
+fresh; booted "iPhone Duo" $DUO1; ARGS=(--hold -- "$hold_cmd" alpha beta); run; ARGS=(-scheme X)
+need "exit code is the child's, 7" rc_is 7
+need "the child got SIM_TEST_UDID for the reused Duo" test "$(cat "$work/cmd_udid" 2>/dev/null)" = "$DUO1"
+need "the child sees slot 1's lease held" lease_at_cmd_slot 1
+need "no boot" no_boot
+need "lease released after the child ends" lease_released
+end_case "82 --hold -- CMD on a reused Duo: the child runs under slot 1's lease, which is released after"
+
+# A failed xcodebuild on a reused Duo: the run exits with xcodebuild's code, and the lease is still given back.
+fresh; booted "iPhone Duo" $DUO1; run STUB_RC=5
+need "exit code is xcodebuild's, 5" rc_is 5
+need "the lease held during xcodebuild is slot 1" lease_at_xc_slot 1
+need "lease released after the failed run" lease_released
+end_case "83 reuse of the Duo of slot 1, xcodebuild exits 5: the exit code is kept, and the lease is held and given back"
+
+# TERM during a reused run: the lease is held while xcodebuild runs and given back on TERM. A device it did not boot is
+# never shut down.
+fresh; booted "iPhone Duo" $DUO1
+start_tool STUB_HANG=1 STUB_HANG_SECS=5
+for _ in $(seq 1 20); do
+  [[ -e $work/started ]] && break
+  "$REAL_SLEEP" 0.5
+done
+need "xcodebuild started" test -e "$work/started"
+kill -TERM -- "-$tool_pid" 2>/dev/null
+finish_tool
+need "exit is non-zero" test $rc -ne 0
+need "the lease held during xcodebuild is slot 1" lease_at_xc_slot 1
+need "lease released after TERM" lease_released
+need "no shutdown of a device it did not boot" no_shutdown
+end_case "84 TERM during a reused run: the lease is held during xcodebuild and given back, and nothing is shut down"
+
+# A Duo that is booted but in no slot: the run names it on stderr with exactly one line.
+UNSLOTTED_UDID=11111111-2222-4333-8444-555555555555
+fresh; booted "iPhone Duo" $UNSLOTTED_UDID; run
+need "exit code" rc_is 0
+need "one stderr line" test "$(wc -l < "$work/run.err" | tr -d ' ')" -eq 1
+end_case "85 reuse of a Duo in no slot: one stderr line"
+
+fresh; booted "iPhone Duo" $UNSLOTTED_UDID; run
+need "exit code" rc_is 0
+need "destination is that UDID" dest_is "$UNSLOTTED_UDID"
+need "steps are run only" steps_are "run "
+need "no lease held during xcodebuild" lease_not_held_at_xc
+end_case "86 control: a reused Duo in no slot runs with no lease"
 
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail
