@@ -169,7 +169,7 @@ def is_frozen(path: str, cwd: str) -> bool:
         literal = _literal_resolved(path, cwd)
         resolved = _resolved(path, cwd)
         literal_root = os.path.normcase(os.path.normpath(guard_core.config_dir()))
-        resolved_root = os.path.normcase(os.path.realpath(guard_core.config_dir()))
+        resolved_root = os.path.normcase(guard_core.real_config_dir())
     except Exception:
         return False
     if _in_live_pin(literal) or _in_live_pin(resolved):
@@ -1046,7 +1046,7 @@ def _holds_frozen(path: str, cwd: str) -> bool:
         return True
     try:
         readings = ((_literal_resolved(path, cwd), os.path.normpath(guard_core.config_dir())),
-                    (_resolved(path, cwd), os.path.realpath(guard_core.config_dir())))
+                    (_resolved(path, cwd), guard_core.real_config_dir()))
     except Exception:
         return False
     return any(os.path.normcase(root) == target or

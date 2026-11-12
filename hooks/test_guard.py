@@ -124,6 +124,7 @@ FAMILIES = {
     "cite": "cite by id",
     "scratchpad-message": "a git commit whose -F message file sits in a session scratchpad: an agent's call is refused in every flag form, through a link into the scratchpad, and an orchestrator's call, a heredoc, -m and a gh body file pass",
     "frozen": "frozen paths",
+    "slow-words": "a shell call of thousands of words: the path reads cost a bounded number of lstat calls per word, and the verdicts of the path reads (symlinks, dot leaves, missing leaves) stay the same",
     "model-cap": "the agent model cap",
     "ask-alone": "an ask command chained with other commands denies, except a leading cd, export or an output tail; a lone ask command still asks",
     "paths": "path rules, builders and the test-author",

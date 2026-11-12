@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shlex
+import stat
 import sys
 import time
 from datetime import datetime
@@ -1826,8 +1827,67 @@ def _expanded(path: str, cwd: str) -> str:
     return target
 
 
+# A call of thousands of words resolves each word as a path, and a plain realpath lstat-s every
+# component each time, so a slow filesystem ran the guard past its hook time limit. Words share
+# their folder, so a folder resolves once per process, and each leaf is read once per process.
+# One home for the three reads: `real_path` fills the folder and leaf caches, and the config
+# folder has its own (`real_config_dir`).
+_REAL_DIRS: dict = {}
+_REAL_LEAVES: dict = {}
+_REAL_CONFIG: dict = {}
+_REAL_DEPTH = 40  # folders a first read climbs one by one: a longer chain takes one full realpath
+
+
+def clear_real_cache() -> None:
+    """Forget the resolved folders and leaves, for a process that makes a symlink and reads it again."""
+    _REAL_DIRS.clear()
+    _REAL_LEAVES.clear()
+    _REAL_CONFIG.clear()
+
+
+def _is_link(full: str) -> bool:
+    """True when `full` is a symlink, read once per process. A missing path is no link. Any other
+    error, such as a NUL in the name, is raised, as `os.path.realpath` raises it, and is not cached."""
+    known = _REAL_LEAVES.get(full)
+    if known is None:
+        try:
+            known = stat.S_ISLNK(os.lstat(full).st_mode)
+        except OSError:
+            known = False
+        _REAL_LEAVES[full] = known
+    return known
+
+
+def real_path(path: str, _depth: int = 0) -> str:
+    """`os.path.realpath(path)` with the folder and leaf reads cached per process, so the same
+    spelling reads the same until `clear_real_cache`. The folder part resolves once, one folder at a
+    time, and each leaf is tested for a symlink once. A leaf that is a symlink, or is empty, `.` or
+    `..`, takes the full realpath. A NUL in the name raises, as realpath raises it. On Windows
+    every path takes the full realpath: a junction is no symlink to `islink`, and realpath follows it.
+    Not covered: a folder or leaf that changes after its first read in this process."""
+    if os.name == "nt":
+        return os.path.realpath(path)
+    head, leaf = os.path.split(path)
+    if not head or leaf in ("", ".", ".."):
+        return os.path.realpath(path)
+    real_head = _REAL_DIRS.get(head)
+    if real_head is None:
+        real_head = os.path.realpath(head) if _depth >= _REAL_DEPTH else real_path(head, _depth + 1)
+        _REAL_DIRS[head] = real_head
+    full = os.path.join(real_head, leaf)
+    return os.path.realpath(path) if _is_link(full) else full
+
+
+def real_config_dir() -> str:
+    """`os.path.realpath(config_dir())`, read once for each spelling of the config folder."""
+    spelling = config_dir()
+    if spelling not in _REAL_CONFIG:
+        _REAL_CONFIG[spelling] = os.path.realpath(spelling)
+    return _REAL_CONFIG[spelling]
+
+
 def _resolved(path: str, cwd: str) -> str:
-    return os.path.normcase(os.path.realpath(_expanded(path, cwd)))
+    return os.path.normcase(real_path(_expanded(path, cwd)))
 
 # What the printed reason may carry. A reason is read by a person under time pressure, and it is the
 # one reason in this file built from tool-supplied text, so the text is bounded and cleaned first.
