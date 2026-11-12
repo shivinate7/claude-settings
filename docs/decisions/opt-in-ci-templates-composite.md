@@ -32,6 +32,8 @@ The pre-commit hook reads the index. It refuses a staged environment file, which
 
 A CI alarm on a push to main wakes the batch runner and opens no issue (owner ruling R53, 13:07 CST Nov 12). `actions/ci-alarm/wake.sh` is the one home of that wake, and `test_wake.sh` tests it. Per the coordinator's pick (13:12 CST Nov 12), it comments on the earliest merged pull request into main that holds the commit. It needs `REPO`, `SHA`, `KEY`, `TEXT` and `GH_TOKEN`. The hidden marker `<!-- main-alarm:KEY -->` in that comment is the memory: a pull request that holds it gets no second comment. A commit with no pull request merged into main opens no issue. The script then exits non-zero with the message in the step summary, so the caller's job ends red. No job calls it yet.
 
+Cost: per alarm, `actions/ci-alarm/wake.sh` makes one read of the pull requests for the commit (unmeasured). It makes ceil(comments/100) reads of that pull request's comments (unmeasured). It writes at most one comment. It has no loop and no timer, and it starts no long-lived process. Time per alarm: (unmeasured).
+
 Each template ships a test that goes red on its defect (`test_action.sh`, `test_comment.py`, `test_readme_links.py`, `test_hook.sh`, `test_pre_commit.sh`, `skip-locally-fail-in-ci.test.mjs`).
 
 Kind: process
