@@ -25,6 +25,16 @@ Verdict, one line, then exit:
   unknown    a collection folder or its marker is missing, a file is not one JSON doc, a collection emptied, or the
              page has no or two designData blocks; nothing is written; exit 2
   unknown    the run crashed (one line, nothing written); exit 3
+Picture check, with --page: after the copy is written, each fetched item that carries a picture and that the page draws as an
+open decision (not closed, not a ruling, not answered) is run through check_designs.mjs, the page's own `pictureProblem` in
+Chromium (page_check.py is the one home). A miss prints `held item <n>: <the page's sentence>` after the verdict line, one
+per item, and the run exits 4: fix the item, export again, and do not republish while one is held. A check that cannot run
+(no node, no Playwright or Chromium), or an open pictured item with no page file, prints one `checks unknown: <why>` line
+before the verdict; the copy is written and the exit code is as without checks. The checker gets the fetched answers
+(`--answers`) and skips an item the page's own `isAnswered` draws as answered. One time budget (page_check.CHECK_BUDGET)
+spans the items of a run: items left unchecked when it runs out print `checks unknown: time budget spent, <k> item(s) not
+checked`, with the exit code as without checks. Under --all, a waiting-page entry whose own `collections` lacks `items` or
+`answers` runs no check: it prints `<id>: checks unknown: collections lack <name>`, its copy is written, and the exit is 2.
 Every doc is scanned, as parsed JSON, before the first write: each string value, each key, each doc id and each
 10 or 11 digit number (a phone). The page text and each supporting text file are scanned as text with the same
 shapes, except that a version pin such as `react@18.3.1` and a retina name such as `logo@2x.png` are not emails.
@@ -38,6 +48,14 @@ not count),
 A personal fact in plain words passes too. A postal address (street, PO box, "City, ST ZIP") is a shape.
 A doc is written with sorted keys, two-space indent and a final newline, so an unchanged doc is byte-identical. A doc no
 longer fetched is deleted from its collection folder; a truncated fetch deletes docs, and git history keeps them.
+
+Check, before a republish, writes nothing:
+
+    python3 ~/.claude/skills/waiting-page/export_page.py --check --fetched DIR --page FILE
+
+The same item checks. A miss prints its `held item` line, exit 4. Else `checks pass`, exit 0. Unknown: `checks unknown: <why>`,
+exit 3, which includes `checks unknown: time budget spent, <k> item(s) not checked`; a held item (4) wins over it. The writer
+holds the republish on any exit but 0: a check that cannot read its input fails, never passes.
 
 Rebuild, the recovery path. It reads only the repo copy, never the live page:
 
@@ -71,7 +89,8 @@ that no entry's account holds prints one line, `unknown - --account ... matches 
 nothing and exits 2. Without the flag every entry exports. A page-only entry whose fetched folder has no `page.html`
 prints `<id>: unknown - ...` that names `page.html`, writes nothing and counts as exit 2. Each other artifact prints one line `<id>: <verdict>`, and a find's lines start with `<id>:` too. One artifact's refusal or
 unknown leaves its own folder as it was and holds back no other. Exit: 0 when every artifact is changed or same; else
-the worst of 1 (refused), 2 (unknown: also a registry that is missing, empty or unreadable) and 3 (a crash).
+the worst of 1 (refused), 2 (unknown: also a registry that is missing, empty or unreadable) and 3 (a crash); 4 (a held
+item) only when none of those happened. The waiting-page entry prints each `held item` line after its verdict, prefixed `<id>: `.
 
 Merge, a second account's copy into a live page. It reads the repo copy and a fetch of the live page:
 
@@ -101,6 +120,7 @@ import sys
 HERE = os.path.dirname(os.path.realpath(__file__))
 sys.path.insert(0, HERE)
 import splice  # noqa: E402  the one home of the designData block's span
+import page_check  # noqa: E402  the one home that runs the page's picture check
 
 # The same five as lint/layout.py WAITING_COLLECTIONS. A copy, because a single export and the rebuild must run with no
 # lint/ beside them: the recovery path may not depend on the repo it recovers (verification-recovery-independent-of-state).
@@ -110,13 +130,29 @@ PAGE_FOLDER, DESIGN_FILE, PAGE_FILE, FILES_FOLDER = "page", "designData.json", "
 MARKER = ".complete"  # the session touches it in a collection folder after the last list page
 BATCH_SIZE = 50
 BATCH_BYTES = 900000  # one ArtifactData batch call stays under about 1 MB
-REFUSED, UNKNOWN, CRASH = 1, 2, 3
+REFUSED, UNKNOWN, CRASH, HELD = 1, 2, 3, 4
+CHECK_COLLECTIONS = ("items", "answers")  # what the picture check reads
 
 STREET_WORDS = ("Street", "St", "Avenue", "Ave", "Road", "Rd", "Drive", "Dr", "Lane", "Ln", "Boulevard", "Blvd", "Way",
                 "Court", "Ct", "Place", "Pl", "Circle", "Cir", "Terrace", "Ter", "Parkway", "Pkwy", "Park", "Trail", "Trl",
                 "Highway", "Hwy")
 STATE_CODES = ("AL|AK|AZ|AR|CA|CO|CT|DE|DC|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND"
                "|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY")
+# The user part of a URL credential holds no quote, bracket, paren or `|`, so minified code cannot start a match. Two
+# template forms are the exceptions, since a templated user is still a user: a braced field with no quote or blank in it
+# (`{user}`, `${USER}`, `{{user}}`, `{cfg.user}`, `{user!r}`, `{cfg[user]}`, `${var.db_user}`) and a percent field
+# (`%(user)s`).
+URL_USER = r"(?:[^/?#\s@:\"'`()\[\]{}|]|\{+[^{}\"'`\s/?#@]*\}+|%\(\w+\)[sd])+"
+# A password that starts with anything but a quote or backtick is a literal, even with a `+`, `|`, bracket, paren or a
+# later quote in it (`O'Neil2020`). The `@` after it is a credential, whatever follows, a quoted or templated host
+# included (`"postgres://u:pw@" + host`, `u:pw@{db_host}`).
+URL_PLAIN_PASSWORD = r"[^/?#\s@\"'`][^/?#\s@]*"
+# A password that starts with a quote or backtick is the join of two string literals (`"http://h:"+port+"@"`), so it is
+# a credential only when a host starts after its `@`.
+URL_QUOTED_PASSWORD = r"[\"'`][^/?#\s@]*"
+# What may follow the `@` of a quote-led password: a bracketed IPv6 host (`[::1]`), or anything but a quote, bracket or
+# `|`, which is code.
+URL_HOST_START = r"(?:(?=\[[0-9A-Fa-f.]*:)|(?![\"'`()\[\]{}|]))"
 # Everyday words that end in `key`. A lookbehind on the letters before `key` in each (`mon`, `whis`) makes a `key`
 # right after them no key word, so `monkey: Banana12345` passes. The stem must start the word (string start or a
 # non-letter before it): `commonKey` and `returnKey` hold the stems `mon` and `turn` but are credential names. Any
@@ -157,9 +193,16 @@ SECRET_SHAPES = (
     ("session-cookie", re.compile(r"(?<![A-Za-z0-9_.])connect\.sid=\S+")),
     ("url-secret", re.compile(r"[?&](?:access_token|key|sig|token)=[^&\s#]+", re.I)),
     # `scheme://user:password@host`, on any host: a version pin after the `@` is blanked, so an IP host is caught here.
-    ("url-credentials", re.compile(r"://[^/?#\s@:]+:[^/?#\s@]+@")),
+    # The user part holds no quote, bracket or `|`, except inside a template field: minified code runs
+    # `"https://a"})];x||y:z@` together. The password may hold them. A quote-led password is code when a quote, bracket
+    # or `|` follows the `@`, unless an IPv6 host opens there: `"http://h:"+port+"@"`. Any other password is a literal
+    # and always refuses.
+    ("url-credentials", re.compile(
+        r"://" + URL_USER + r":(?:" + URL_PLAIN_PASSWORD + r"@|" + URL_QUOTED_PASSWORD + r"@" + URL_HOST_START + r")")),
+    # The value is captured in a lookahead, so a match ends at the separator and a later password word on the same line
+    # (`password:!0};pwd=hunter2`) is a match of its own. found.end(2) is the end of the value.
     # The lookbehind takes `_` too, so a name starts at its run's first character and a long run is read once.
-    ("password", re.compile(r"(?<![A-Za-z0-9_])([A-Za-z0-9_]*(?:password|passwd|pwd))[ \t]*[=:][ \t]*(\S+)", re.I)),
+    ("password", re.compile(r"(?<![A-Za-z0-9_])([A-Za-z0-9_]*(?:password|passwd|pwd))[ \t]*[=:][ \t]*(?=(\S+))", re.I)),
     # The lookbehind starts the local part at its run's first character only: a start at each character re-reads a long run.
     ("email", re.compile(r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")),
     # Bare "Bearer <token>" or "Basic <credential>" with no header name: 20 or more token characters, so prose such as
@@ -175,11 +218,13 @@ SECRET_SHAPES = (
     # end the value (end of line, a closing quote, `,`, `;` or `}`) and have no camelCase hump (3 lower-case letters
     # then a capital; a hump after 1 or 2, as in `QwErTy`, is random), so `accessTokenValue`,
     # `localStorage.getItem(` and prose such as "Token: Authorization needed" pass. A letters-only value that reads as
-    # words (letters_are_words) passes too, after a `:` only.
+    # words (letters_are_words) passes too, after a `:` only. A 2-3 letter prefix, an environment word and a digit part
+    # (`sk-live-ab12`) is a key shape, so it is refused; plain hyphen words (`automations-v3-review`) are a name, so they pass.
     ("credential-name", re.compile(
         CREDENTIAL_NAME + r"(?:"
         r"(?=" + VALUE_CHARS + r"{0," + str(VALUE_LOOKAHEAD_MAX) + r"}[A-Za-z])"
-        r"(?=" + VALUE_CHARS + r"{0," + str(VALUE_LOOKAHEAD_MAX) + r"}\d)" + VALUE_CHARS + r"{8,}"
+        r"(?=" + VALUE_CHARS + r"{0," + str(VALUE_LOOKAHEAD_MAX) + r"}\d)"
+        r"(?P<mixed>" + VALUE_CHARS + r"{8,})"
         r"|(?!(?-i:[A-Za-z_-]*[a-z]{3}[A-Z]))(?P<letters>[A-Za-z_-]{12,})(?=[\"']?[ \t]*(?:[,;}\r\n]|\Z)))", re.I)),
     # A credential value longer than the lookaheads above read: refused when it has a letter and a digit anywhere.
     ("credential-name", LONG_CREDENTIAL_VALUE),
@@ -205,6 +250,13 @@ SECRET_SHAPES = (
 # then letter words, and after a `,` `;` or and/or/but/is/are only function words) may follow it on its line: another
 # word there may be the secret (`none hunter2`). Anything else is refused.
 PLAIN_VALUES = frozenset(("optional", "required", "none", "null", "empty", "unset", "hidden", "redacted", "omitted"))
+JS_BOOLEANS = frozenset(("!0", "!1"))  # minified `true` and `false`
+# `!0` or `!1` after a password word. It is code, no value, when what follows it is code-shaped (see boolean_run_is_code).
+JS_BOOLEAN_START = re.compile(r"!(?:0|1)")
+# The next member of a minified run: a `,` or `;`, then a name and its `:` or `=`.
+JS_RUN_NEXT = re.compile(r"[,;]\s*[\"']?[A-Za-z_$][\w$]*[\"']?\s*[:=]\s*")
+# A JS keyword then `-` and a number only: code after a `case "keyup":`, not a literal value.
+JS_KEYWORD_VALUE = re.compile(r"(?:return|void|typeof|throw)(?:-\d+)?")
 MASK_VALUE = re.compile(r"[*•#]{3,}|[xX]{3,}")
 # `<placeholder words>` has no digits. A variable reference has an ALL_CAPS name, so `$Tr0ub4dor` and `${hunter2}` refuse.
 PLACEHOLDER_VALUE = re.compile(
@@ -274,6 +326,29 @@ def bare_value(value):
     return value
 
 
+def boolean_run_is_code(found):
+    """True when the value after a password word is a minified boolean and everything after it on the line, up to a
+    closer (`}` `)` `]`) or the line end, is `,name:` / `;name=` members that each hold a boolean. A word after the
+    boolean (`!0,hunter2`, `!0 hunter2`) or a member with any other value (`!0,pwd:hunter2`) may be the secret, so it is
+    not code. Text after the closer is no part of this match: a later password word there is a match of its own."""
+    start = JS_BOOLEAN_START.match(found.group(2))
+    if not start:
+        return False
+    rest = found.group(2)[start.end():] + REST_OF_LINE.match(found.string, found.end(2)).group(0)
+    while True:
+        rest = rest.lstrip()
+        if not rest.strip(".,;") or rest[0] in "})]":
+            return True
+        member = JS_RUN_NEXT.match(rest)
+        if not member:
+            return False
+        rest = rest[member.end():]
+        start = JS_BOOLEAN_START.match(rest)
+        if not start:
+            return False
+        rest = rest[start.end():]
+
+
 def rest_is_prose(rest):
     """True when `rest` is plain prose after a password value and holds no second value after a separator."""
     if not PROSE_REST.fullmatch(rest):
@@ -290,14 +365,16 @@ def rest_is_prose(rest):
 
 def password_is_no_secret(found):
     """True when the value after a password word is a plain word, a mask or a placeholder, or `found` is
-    `PWD=<path>`, and nothing but blanks or plain prose follows it on its line."""
-    rest = REST_OF_LINE.match(found.string, found.end()).group(0)
+    `PWD=<path>`, or a minified boolean run is code; otherwise nothing but blanks or plain prose follows the value."""
+    if boolean_run_is_code(found):
+        return True
+    rest = REST_OF_LINE.match(found.string, found.end(2)).group(0)
     if rest.strip() and not rest_is_prose(rest):
         return False
     value = bare_value(found.group(2))
     if found.group(1) == SHELL_PWD and SHELL_PATH.fullmatch(value):
         return True
-    return (value.lower() in PLAIN_VALUES or bool(MASK_VALUE.fullmatch(value))
+    return (value.lower() in PLAIN_VALUES or value in JS_BOOLEANS or bool(MASK_VALUE.fullmatch(value))
             or bool(PLACEHOLDER_VALUE.fullmatch(value)))
 
 
@@ -346,14 +423,32 @@ def letters_are_words(value):
             and not CONSONANT_RUN.search(letters))
 
 
+# A name made of lower-case words joined by hyphens. A part holds a digit only as a version: one letter and one or two
+# digits (`automations-v3-review`). `ab12` and `abcdefgh1` read as random, so they are no part of a name.
+HYPHEN_WORDS = re.compile(r"(?:[a-z]+|[a-z]\d{1,2})(?:-(?:[a-z]+|[a-z]\d{1,2}))+")
+# A vendor-style key made of words: a 2 or 3 letter vendor prefix, an environment word, then a last part with a digit
+# (`sk-live-ab12`, `pk-test-ab12`). It is a key shape, so the hyphen-words path must not pass it.
+VENDOR_KEY = re.compile(r"[a-z]{2,3}-(?:live|test|prod|dev|stage|staging|sandbox)(?:-[a-z]+\d{0,2})*-[a-z]*\d\w*")
+VALUE_END = frozenset("\"'`,;)}] \t\r\n")
+
+
 def credential_is_no_secret(found):
     """True when `found` names no secret. A LONG_CREDENTIAL_VALUE match passes when its value lacks a letter or a
     digit. A match of the other `credential-name` shape passes when a `:` set a letters-only value that reads as
-    words; an `=` assigns, so it never passes."""
+    words (an `=` assigns, so it never passes there), or when any separator set a whole value of lower-case words
+    joined by hyphens, as a localStorage key name is."""
     if found.re is LONG_CREDENTIAL_VALUE:
         return long_value_is_no_secret(found)
     value = found.group("letters")
-    return found.group("sep") == ":" and bool(value) and letters_are_words(value)
+    if value:
+        return found.group("sep") == ":" and letters_are_words(value)
+    value = found.group("mixed")
+    if value and JS_KEYWORD_VALUE.fullmatch(value):
+        return True
+    return (bool(value) and HYPHEN_WORDS.fullmatch(value) is not None
+            and VENDOR_KEY.fullmatch(value) is None
+            and found.string[found.end():found.end() + 1] in VALUE_END | {""}
+            and letters_are_words(re.sub(r"\d", "", value)))
 
 
 # A match of these shapes can still name no secret and no person. Every other shape refuses on any match.
@@ -501,7 +596,8 @@ def existing(out, collections=COLLECTIONS):
     return found
 
 
-def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", design=True, files=None):
+def fetched_docs(fetched, collections):
+    """{collection: {doc id: data}} read from the fetched folder; Stop (unknown) when a folder or its marker is missing."""
     docs = {}
     for name in collections:
         folder = os.path.join(fetched, name)
@@ -510,6 +606,24 @@ def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", 
         if not os.path.isfile(os.path.join(folder, MARKER)):
             raise Stop("unknown - %s has no %s marker, so the fetch may have stopped early" % (name, MARKER), UNKNOWN)
         docs[name] = docs_in(folder, name)
+    return docs
+
+
+def picture_checks(page, docs):
+    """([held item lines], the `checks unknown: <why>` line or None) for the fetched docs against the page file `page`."""
+    held, why = page_check.check_items(page, docs["items"], docs.get("answers", {}))
+    return ["held item %s: %s" % (n, sentence) for n, sentence in held], ("checks unknown: " + why) if why else None
+
+
+def check_lacks(collections):
+    """The collections of `collections` that the picture check needs and that are missing (items, answers), in that order."""
+    return [name for name in CHECK_COLLECTIONS if name not in collections]
+
+
+def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", design=True, files=None):
+    """(verdict, `checks unknown` line or None, held item lines). The picture check runs after the copy is written, on the
+    waiting page's own export only (`design`), and never on a refused or unknown run."""
+    docs = fetched_docs(fetched, collections)
 
     have = existing(out, collections)
     for name in collections:
@@ -568,7 +682,16 @@ def export(fetched, out, page, allow_empty, collections=COLLECTIONS, prefix="", 
         if label not in want:
             os.remove(os.path.join(out, *label.split("/")))
             changed += 1
-    return "changed %d" % changed if changed else "same"
+    unknown, held = None, []
+    lacking = check_lacks(collections) if design else []
+    if lacking:  # the check needs both: with no answers it would hold an item the page draws as answered
+        unknown = "checks unknown: collections lack " + ", ".join(lacking)
+    elif design:
+        if page:
+            held, unknown = picture_checks(page, docs)
+        elif page_check.pictured_items(docs["items"])[0]:  # a pictured item and no page: the check cannot run
+            unknown = "checks unknown: no page file"
+    return ("changed %d" % changed if changed else "same"), unknown, held
 
 
 def export_all(root, fetched, worktree, allow_empty, account=None):
@@ -585,7 +708,7 @@ def export_all(root, fetched, worktree, allow_empty, account=None):
     if account is not None and account not in {entry["account"] for entry in entries}:
         # a mistyped or empty label would otherwise skip every entry and still exit 0, which reads as a clean copy
         raise Stop("unknown - --account %r matches no registry entry's account, so nothing was exported" % account, UNKNOWN)
-    worst = 0
+    worst, held_any = 0, False
     for entry in entries:
         name = entry["id"]
         if entry["export"] is False:  # held in the registry, never exported: no folder needed, nothing written
@@ -602,17 +725,38 @@ def export_all(root, fetched, worktree, allow_empty, account=None):
                 raise Stop("unknown - the fetched folder has no %s folder" % name, UNKNOWN)
             if not entry["collections"] and not os.path.isfile(page):  # a page-only entry has nothing else to export, so "same" would hide a failed fetch
                 raise Stop("unknown - the fetched folder has no %s, and this page-only entry exports nothing else" % PAGE_FILE, UNKNOWN)
-            verdict = export(folder, os.path.join(worktree, *entry["export"].split("/")),
+            verdict, unknown, held = export(folder, os.path.join(worktree, *entry["export"].split("/")),
                              page if os.path.isfile(page) else None, allow_empty, tuple(entry["collections"]), "%s: " % name,
                              entry["role"] == layout.WAITING_ROLE, supporting_files(files) if os.path.isdir(files) else None)
-            code = 0
+            code = UNKNOWN if entry["role"] == layout.WAITING_ROLE and check_lacks(entry["collections"]) else 0
         except Stop as stop:
-            verdict, code = str(stop), stop.code
+            verdict, unknown, held, code = str(stop), None, [], stop.code
         except Exception as err:  # one artifact's crash must not hide the verdict of the others
-            verdict, code = "unknown - the run crashed (%s)" % type(err).__name__, CRASH
+            verdict, unknown, held, code = "unknown - the run crashed (%s)" % type(err).__name__, None, [], CRASH
+        if unknown:  # before the verdict, so the verdict stays the last line of the artifact
+            print("%s: %s" % (name, unknown))
         print("%s: %s" % (name, verdict))
+        for line in held:
+            print("%s: %s" % (name, line))
+        held_any = held_any or bool(held)
         worst = max(worst, code)
-    return worst
+    return worst or (HELD if held_any else 0)  # a held item is 4 only when nothing worse (1, 2 or 3) happened
+
+
+def check_only(fetched, page):
+    """--check: the export's picture checks on the fetched items and the page file; nothing is written. The exit code."""
+    read_page(page)  # a page that is not one readable file is unknown, as in an export
+    held, unknown = picture_checks(page, fetched_docs(fetched, CHECK_COLLECTIONS))
+    for line in held:
+        print(line)
+    if unknown:
+        print(unknown)
+    if held:
+        return HELD
+    if unknown:
+        return CRASH  # exit 3: the checks could not run
+    print("checks pass")
+    return 0
 
 
 def entry_bytes(entry):
@@ -711,7 +855,7 @@ def renumber(fresh, entries, held):
             highest += 1
             numbers.setdefault(str(n), highest)
             n = highest
-            moved[entry["doc_id"]] = (n, entry["data"].get("id") if isinstance(entry["data"].get("id"), str) else entry["doc_id"])
+            moved[entry["doc_id"]] = (n, entry["doc_id"])
         taken.add(n)
     result = []
     for entry in fresh:
@@ -773,6 +917,7 @@ def main(argv):
                     help="a collection that really emptied, so its docs leave the copy")
     ap.add_argument("--all", help="the repo root whose artifacts registry lists each artifact to export")
     ap.add_argument("--worktree", help="with --all: the record branch worktree each artifact's export path is under")
+    ap.add_argument("--check", action="store_true", help="with --fetched and --page: run the picture checks only, write nothing")
     ap.add_argument("--account", help="with --all: export only the entries of this account label; skip the rest")
     ap.add_argument("--rebuild", help="the waiting-data folder to read batches from")
     ap.add_argument("--batches", help="the folder to write batch-NNN.json into")
@@ -798,17 +943,29 @@ def main(argv):
     if merge_mode and not (args.merge and args.live and args.batches):
         ap.error("--merge needs --live DIR and --batches DIR: --merge DIR --live DIR --batches DIR")
     if [all_mode, export_mode, rebuild_mode, merge_mode].count(True) != 1 or (all_mode and not (args.all and args.fetched and args.worktree)) \
-            or (export_mode and not (args.fetched and args.out)) or (rebuild_mode and not (args.rebuild and args.batches)):
+            or (export_mode and not (args.fetched and args.out) and not args.check) or (rebuild_mode and not (args.rebuild and args.batches)):
         ap.error("use --fetched DIR --out DIR [--page FILE], or --all ROOT --fetched DIR --worktree DIR, or --rebuild DIR --batches DIR, or --merge DIR --live DIR --batches DIR")
     if args.account is not None and not all_mode:
         ap.error("--account goes with --all")
+    if args.check:  # after the --account usage error, so a misused --account fails as it does without --check
+        if all_mode or rebuild_mode or args.out or not (args.fetched and args.page):
+            ap.error("--check takes --fetched DIR --page FILE and nothing else")
+        try:
+            return check_only(args.fetched, args.page)
+        except Stop as stop:
+            print(str(stop))
+            return stop.code
+        except Exception as err:
+            print("unknown - the run crashed (%s)" % type(err).__name__)
+            return CRASH
     if export_mode and any(name not in COLLECTIONS for name in args.allow_empty):
         ap.error("--allow-empty names one of: %s" % ", ".join(COLLECTIONS))
     try:
         if all_mode:
             return export_all(os.path.abspath(args.all), args.fetched, args.worktree, args.allow_empty, args.account)
+        unknown, held = None, []
         if export_mode:
-            verdict = export(args.fetched, args.out, args.page, args.allow_empty)
+            verdict, unknown, held = export(args.fetched, args.out, args.page, args.allow_empty)
         elif merge_mode:
             verdict = merge(args.merge, args.live, args.batches, tuple(args.collections or COLLECTIONS), args.live_page)
         else:
@@ -819,8 +976,12 @@ def main(argv):
     except Exception as err:  # a crash is unknown, never a silent pass or a traceback the reader scrolls past
         print("unknown - the run crashed (%s)" % type(err).__name__)
         return CRASH
+    if unknown:  # before the verdict, so the verdict stays the last line (hooks/feedback_guard.py reads `same` on any line)
+        print(unknown)
     print(verdict)
-    return 0
+    for line in held:
+        print(line)
+    return HELD if held else 0
 
 
 if __name__ == "__main__":

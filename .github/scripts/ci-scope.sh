@@ -29,7 +29,8 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       # settings.json: the same jobs, plus merge/test_merge.py (CloudAllow reads it).
       settings.json) on="$on $M $W $R $Z $X code guard sweep " ;;
       landed-dirs.txt) on="$on $W $R $Z $X $S code guard " ;;
-      hooks/test_guard.py|hooks/mutate_guard.py) on="$on $W $X code guard " ;;
+      # tests/guard/*: section files of hooks/test_guard.py, so the same flags (not under hooks/, so no shell_macos).
+      hooks/test_guard.py|hooks/mutate_guard.py|tests/guard/*) on="$on $W $X code guard " ;;
       # install.sh and session_start.sh: the checkout-detection suite and test_guard read them.
       hooks/test_install_src.sh|hooks/test_install_windows.sh) on="$on $W $X $S code guard " ;;
       # install.sh: also read by merge/test_merge.py (CloudAllow reads its settings step).
@@ -88,6 +89,19 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       # Docs: nothing runs on them but the lints in `checks`. (hooks/*.md, the precompact prompt, matches hooks/* above.)
       *.md) ;;
       *) on="$on $ALL " ;;
+    esac
+    # shoot also covers the files the waiting page export suite (skills/waiting-page/test_export_page.py) imports, lazy
+    # imports included: page_check.py reaches the guard family (guard_merge.py imports ci_wake.py), question_form.py, _nowindow.py, report_guard.py and its lint/_clause.py;
+    # the suite's run folder is lint/_test_temp.py; layout.artifacts reads lint/layout.json at run time; SKILL.md and every file in reference/ hold the steps it and the page suite read. This is a second case, so the
+    # flags each path sets above stay as they are, and guard_test_* (not imported) stays out. Chosen over one arm
+    # (hooks/*.py, lint/*.py): that would start the browser job on every hook and lint edit, 88 + 94 files, most of
+    # which the suite never reads, and the control cases pin hooks/mutate_shared.py and hooks/config_watch.py off.
+    # The list cannot drift silently: lint/test_ci_scope.py walks the suite's imports and fails on a file missing here.
+    # The cost per start: the suite ran 57 s, the browser install adds to it, the job cap is 10 min, and the job
+    # runs beside the others on its own runner, so it adds billed minutes and no wall time.
+    case "$f" in
+      hooks/guard_test_*) ;;
+      hooks/guard.py|hooks/guard_*.py|hooks/git_reads.py|hooks/own_session.py|hooks/precompact_handoff.py|hooks/shared_names.py|hooks/question_form.py|hooks/_nowindow.py|lint/report_guard.py|lint/_clause.py|lint/layout.py|lint/layout.json|lint/_test_temp.py|skills/waiting-page/SKILL.md|skills/waiting-page/reference/*|skills/waiting-page/export_page.py|hooks/call_judge.py|hooks/ci_wake.py|hooks/decision_watch.py|hooks/feedback_guard.py|hooks/local_time.py|hooks/override.py|hooks/proc_env.py|hooks/reply_judge.py|hooks/reread_check.py|hooks/route_match.py|hooks/ruling_home.py|janitor/sweep.py|janitor/temp_sweep.py|lint/_transcript.py|lint/guard_log_report.py|lint/rule_audit.py|hooks/mail.py|hooks/agent_brief.py|hooks/stall_watch.py) on="$on shoot " ;;
     esac
   done <<< "$files"
   # A new file under a landed dir (landed-dirs.txt, the one list) changes what test_install_src and

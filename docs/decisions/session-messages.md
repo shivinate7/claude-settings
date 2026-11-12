@@ -3,17 +3,45 @@
 Kind: build
 Plan: docs/decisions/session-messages.md#build-in-work-order (all)
 
-Status: draft. Q1 to Q3, page item 153 (the mailbox ruling) and page item 308 (the store) are answered.
-Q4 (a timed check-in) is open with the owner. The build is on main: PR #1371 (the mailbox build) merged
-2026-11-08 as merge commit f1488533f (integration batch batch-65g).
-Next step: build step 2, the Mac and Windows auth check for `ls-remote`. `MAILBOX_REPO` is still unset in
-settings.json; a session sets it in its env. Step 2 and the 20-message trial (step 5) need a Mac session.
-The settings.json default needs the owner's typed words.
+Status: draft until build step 2 and the 20-message trial run. Q1 to Q4, page item 153 (the mailbox ruling) and page item 308 (the store) are answered.
+The mailbox build is on main: PR #1371 merged 2026-11-08 inside batch-65g (PR #2236). Follow-up PR #2484 merged 2026-11-10 in batch 71.
+Next step: build step 2, the Mac and Windows auth check for `ls-remote`. Step 2 and the 20-message trial
+(step 5) need a Mac session. `MAILBOX_REPO` has no settings.json default until step 2 measures Mac and
+Windows auth. The default needs the owner's typed words. A session sets it in its env until then.
 
 ## Ruling
 
 Owner asks ask-mw5b3m9hl0 (2026-11-06 12:27 CST) and ask-mw5a0ekdlv (11:56 CST). Roadmap steps
 session-messaging-plan and peer-message-turn-cap.
+
+## One route (owner, 2026-11-10 09:33 CST)
+
+Ruling: every message between sessions goes through the git mailbox, cloud to cloud included.
+The doorbell is open (owner unsure, 2026-11-10 09:36 CST): a cloud-only doorbell would not reach every device, and no wake route is known for a local computer.
+The mailbox is read at turn start, so it cannot wake anyone.
+The design is device-neutral (owner, 2026-11-10 09:34 CST, "the device shouldn't matter"): local sessions are addressed `pc/<host>/<owner>-<repo>/<session id>` on any Mac or Windows computer.
+Local-computer checks: measured on a Mac only; Windows unmeasured.
+
+Why:
+
+- A `send_message` that shows "delivered" is not a read.
+- It leaves no copy.
+- It differs from local `SendMessage`.
+- Cloud to the owner's computer is refused (`elevated_session_untrusted_device`).
+
+Wake routes under study. All unmeasured.
+
+- (a) Doorbell (open, see above): `mail send` also fires a short `send_message`. Works cloud to cloud. Cloud to the owner's computer is refused.
+- (b) One long-lived pull request per session in shivinate7/session-mailbox. Each message is also a
+  comment. The receiver subscribes with `subscribe_pr_activity` (the tool that watches PR activity).
+- (c) A GitHub webhook to a session's `watch_url`. Likely blocked: the signing secret is sealed to the
+  artifact service.
+- Mac or Windows: no known wake route.
+
+Home of the measurement: roadmap step `mailbox-wake-routes` (the wake-route measurement, filed by triage).
+
+State: the code still sends cloud to cloud by `send_message` until a build lands. No build is started.
+Timed check-ins: Q4, see its bullet.
 
 ## The 10-message stop on the Mac
 
@@ -48,7 +76,7 @@ Unmeasured: whether the Mac build has the same values; whether a scheduled-task 
 - One convention, plain text, so any harness can carry it. First line of a mailbox message:
   `Msg <id> from <addr> to <addr> kind request|inform|reply re <id or -> try <n>`. The addresses are set
   out under Design. Id: 12 lowercase hex characters (`secrets.token_hex(6)` in `hooks/mail.py`).
-  A cloud `send_message` target is picked by all of its tags, in the forms of
+  If a doorbell is built (open), its cloud `send_message` target is picked by all of its tags, in the forms of
   skills/project-ops/templates/operating-model.md (`cs-repo:<owner>/<name>` plus `cs-build:<tier>` or
   `cs-step:<step id>`).
 - `try` counts push attempts inside one `mail send`. A push race keeps the id and raises `try` by one.
@@ -86,9 +114,9 @@ Mac test (task 294), 2026-11-06 13:57 CST, in the owner's Mac session: the Mac u
 account, so it cannot read a cloud account's artifact. So an artifact mailbox cannot reach the Mac.
 Desktop sessions have no `ArtifactComments` tool. An artifact watch wakes only cloud sessions.
 
-Ruling: git mailbox, read at turn start (owner, page item 153, pick a, 2026-11-06 15:24 CST). Cloud to
-cloud keeps `send_message`. The mailbox serves a sender or receiver on the owner's computers.
-Later additions, not built: a Mac doorbell (option B) and a local relay (option C). Owner note: "i think
+Ruling: every message goes through the git mailbox, read at turn start (owner, page item 153, pick a,
+2026-11-06 15:24 CST; cloud to cloud added 2026-11-10 09:33 CST, see One route above).
+Not built, doorbell open: a doorbell for a local computer (option B) and a local relay (option C). Owner note: "i think
 B and C can still work too though probably."
 Store: answered. Page item 308 (the store), owner pick a, relayed by triage 2026-11-06: a private repo,
 shivinate7/session-mailbox. The owner allowed Cloudflare if it is faster. Lane verdict: git.
@@ -115,6 +143,9 @@ Design:
   `bin/mail`, with `bin/mail.cmd` beside it. The cache is a bare clone: `MAILBOX_CACHE`, else
   `~/.claude/mail.git`. It uses plumbing only: read-tree into a temporary index, hash-object,
   update-index, write-tree, commit-tree, then push to refs/heads/mail. It never uses a working tree.
+  Each git call encodes its stdin as UTF-8 bytes, so Windows adds no CR to an index path. Before the push, it reads the new tree
+  back: each added path must hold the blob of its text. A git call that prints "Ignoring path" on stderr
+  is an error, because git then exits 0 and skips the path. Either failure prints "not sent".
   Push race: file names are unique. On a non-fast-forward push, it syncs and rebuilds on the new tip. It
   makes six tries in all: the first push and at most five retries. Any other refusal, such as a hook or
   ACL refusal, is not retried. On failure it prints "not sent: <reason>" and exits 1. On success it
@@ -135,39 +166,38 @@ Design:
 - Take and reply. `mail take [--addr <addr>] <id>` makes one commit that moves the file to
   `done/<addr>/<id>.md` and appends `Taken-by: <addr> <time> <token>`. It exits 0 and prints `taken <id>`
   after the push succeeds, and a session acts only then. In a take race, the loser finds the open path
-  gone and exits 1 with "taken by another". It does not act. A second take is refused the same way. A
+  gone and exits 1 with "taken by another". It does not act. A second take is refused the same way. A take whose read-back fails (the open file stays in the new tree, or the done file is missing) prints "mail unknown: message file missing from the commit" and exits 1. A
   request gets a reply file: `mail send --kind reply --re <id>`, sent to its Reply-to. An inform closes by
   the take alone.
 - Read. `mail read` lists the open messages under the session's own folders. `mail read [--addr <addr>] <id>`
   prints one message with its body. Without `--addr`, every folder of the session is read. Exit codes
   for all `mail` commands: 0 ok; 1 not sent, not taken, or "mail unknown"; 2 bad use or `MAILBOX_REPO`
   not set.
-- Failure classes: push race (retry); offline Mac (mail waits; "mail unknown"); stale clone (`ls-remote`
-  each turn); auth on the Mac ("mail unknown: auth", no prompt); dead session (exact-address mail stays;
+- Failure classes: push race (retry); offline computer (mail waits; "mail unknown"); stale clone (`ls-remote`
+  each turn); auth on a Mac or Windows PC ("mail unknown: auth", no prompt); dead session (exact-address mail stays;
   repo-address mail goes to the next session in that repo; age shown); a turn with no UserPromptSubmit
   (the skill says to run `mail read` on any peer or task wake); `done/` grows (a note).
 - Risks: how `janitor/sweep.py` treats a `mail` branch that never merges is unknown. The
   UserPromptSubmit time budget is shared with `local_time`.
 
-## Reach across GitHub accounts (plan, not built)
+## Reach across GitHub accounts
 
 - The store is the private repo shivinate7/session-mailbox. A cloud session under the owner's second
   account, ssemwal-cdc, reaches it only if that account can read and write it.
-- The owner's one act, as shivinate7: open https://github.com/shivinate7/session-mailbox/settings/access,
-  press "Add people", pick ssemwal-cdc, role Write, send the invite. Accepting is a second press: the same
-  person accepts at https://github.com/shivinate7/session-mailbox/invitations, signed in as ssemwal-cdc.
+- Done by the owner. Owner's words, 2026-11-10 10:19 CST: "ssemwal-cdc long has been invited and accepted."
+  The invite date is unknown.
 - Unmeasured: whether a cloud session under ssemwal-cdc reaches the store through the git proxy.
   The proxy served the store only after `add_repo` for the measuring session; such a session needs the
-  repo attached by that account's Claude GitHub connection. Measure with one `mail read` after the invite.
-- Nothing is changed until the owner presses, and this lane changed no access. No code change is expected.
+  repo attached by that account's Claude GitHub connection. Measure with one `mail read`.
+- No code change is expected.
 
 ## Build in work order
 
 1. Rewrite the record and skill text for this ruling. Add the GLOSSARY row "mailbox". Never "inbox":
    the owner feedback inbox uses that word.
-2. Measure: does UserPromptSubmit fire on task-notification and peer turns, cloud and Mac? Can a cloud
+2. Measure: does UserPromptSubmit fire on task-notification and peer turns, cloud and local computers? Can a cloud
    session push the mail ref through the proxy? Does `ls-remote` work with Mac and Windows auth? Does
-   the hostname match `list_computer_folders` `computer_name`? Can a Mac session call cloud
+   the hostname match `list_computer_folders` `computer_name`? Can a local session on a Mac or Windows PC call cloud
    `send_message`?
    Already measured: cloud UserPromptSubmit fires on task-notification turns. This lane's session,
    Claude Code 2.1.319, 2026-11-06 15:31 CST: the local_time hook line prints on each notification turn.
@@ -181,10 +211,10 @@ Design:
    Not yet measured: Mac and Windows auth for `ls-remote`.
 3. Test-author: red cases against a `file://` bare `MAILBOX_REPO`: round trip, push race, take race,
    inform close, offline, cost counts.
-4. Builder, merged as #1371 (f1488533f): `hooks/mail.py`, `bin/mail`, `bin/mail.cmd` and the
+4. Builder, PR #1371 merged 2026-11-08 inside batch-65g (PR #2236): `hooks/mail.py`, `bin/mail`, `bin/mail.cmd` and the
    `hooks/local_time.py` call. The `settings.json` env default stays unset until step 2 measures Mac and
    Windows auth for `ls-remote`.
-5. Skill section rewrite. Check: a two-session trial of 20 messages, cloud to Mac, none lost, none acted
+5. Skill section rewrite. Check: a two-session trial of 20 messages, cloud to a local computer, on a Mac and on a Windows PC, none lost, none acted
    on twice.
 
 ## Owner choices
@@ -194,10 +224,11 @@ Design:
   cannot: the desktop count reads a fixed constant, and both flag-override hooks in the public build return nothing
   (binary 2.1.319, read 2026-11-06 13:14 CST: `getEnvironmentOverrides(){return null}`, `readConfigOverrides(){return}`).
 - Q2, how a lost message is noticed: a session that waits on a reply checks for it. Coordinator pick,
-  2026-11-06 12:48 CST; it can be undone. How it checks waits on Q4. Until then it checks at its next
-  turn start.
-- Q4, open with the owner (sent through triage 2026-11-06 13:22 CST): may a cloud session that waits on a
-  reply set one `send_later` check-in? Rule `outcomes-mechanize-rules` bars tracking on a timer, and rule
-  `git-ci-wait-checks-in` allows a timed check-in. Cost: one one-shot scheduled task per waiting request;
-  it starts no process and writes no file. Recommended: allow it.
+  2026-11-06 12:48 CST; it can be undone. It checks at its next turn start, and a cloud session that waits
+  on a reply may set that one check-in (Q4).
+- Q4, answered by the owner, 2026-11-10 09:39 CST, in his words: "ok one check in is allowed, i just don't
+  think it'll be hollistic enough, but it's allowed that is enough". A cloud session that waits on a reply
+  may set one `send_later` check-in for that one reply. His note: one check-in alone will not cover
+  everything. The sentence in CLAUDE.md rule `outcomes-mechanize-rules` was written by sessions (commits
+  f966e26e4, 7f3d2d601, 0b8296e8e); his answer is what rules it.
 - Q3, scope: the debt fix (done, commit 7059961a) and the git-mailbox build steps 1 to 5. The parser for the message format was dropped 2026-11-06 13:15 CST and stays dropped (rule building-land-design-or-abandon). Coordinator pick, 2026-11-06 12:48 CST; it can be undone.

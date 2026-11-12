@@ -436,6 +436,19 @@ def case_batch():
 
 WHY_RULE = "task-why-cited"
 CAP = "Why yours: the cloud proxy refused the delete (403)"  # a capability reason: "refused" and "403"
+# Capability reasons with the widened words, one word each, so a red names its word alone. The rule reads each word as a
+# capability word, as it reads "refused" and "403" above.
+CAP_COULD_NOT = "Why yours: I could not push the delete from here"
+CAP_COULDNT = "Why yours: I couldn't push the delete from here"
+CAP_COULDNT_CURLY = "Why yours: I couldn’t push the delete from here"
+CAP_REJECTED = "Why yours: the remote rejected the delete"
+CAP_401 = "Why yours: the remote returned 401 to the delete"
+# The reject forms: "reject", "rejects" and "rejecting" are red on the old commit; "being rejected" holds "rejected", which
+# the old commit already reads.
+CAP_REJECT = "Why yours: the remote may reject the delete"
+CAP_REJECTS = "Why yours: the remote rejects the delete"
+CAP_REJECTING = "Why yours: the remote is rejecting the delete"
+CAP_REJECTED_BEING = "Why yours: the delete is being rejected"
 STEPS = ["Open Terminal"]
 BACKTICK_TOOL = "mcp__claude-code-remote__archive_session"
 # The rows the cases cite. The first three are on the local surface the cases pin; r-cloud-only is on the cloud one.
@@ -536,6 +549,31 @@ def case_task_why_cited_reds():
         why_guard("a plain edit that adds a works-row cite is refused", "str_replace",
                   {"collection": "items", "doc_id": DOC, "field": "context", "old_str": "Run the proxy check.",
                    "new_str": "Run the proxy check (route r-works)."}, (WHY_RULE, None))
+        # The widened words: a capability line with no cite is refused, as "refused" and "403" are.
+        why_guard("a could-not capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_COULD_NOT + ".")), (WHY_RULE, None))
+        why_guard("a couldn't capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_COULDNT + ".")), (WHY_RULE, None))
+        why_guard("a curly-apostrophe couldn't capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_COULDNT_CURLY + ".")), (WHY_RULE, None))
+        why_guard("a rejected capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_REJECTED + ".")), (WHY_RULE, None))
+        why_guard("a 401 capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_401 + ".")), (WHY_RULE, None))
+        why_guard("a str_replace that adds an uncited 401 capability line is refused", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": TASK_WHY,
+                   "new_str": CAP_401 + "."}, (WHY_RULE, None))
+        why_guard("a reject capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_REJECT + ".")), (WHY_RULE, None))
+        why_guard("a rejects capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_REJECTS + ".")), (WHY_RULE, None))
+        why_guard("a rejecting capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_REJECTING + ".")), (WHY_RULE, None))
+        why_guard("a being-rejected capability line with no cite is refused", "set",
+                  entry_of(task_item(STEPS, context=CAP_REJECTED_BEING + ".")), (WHY_RULE, None))
+        why_guard("a str_replace that adds an uncited rejects capability line is refused", "str_replace",
+                  {"collection": "items", "doc_id": DOC, "field": "context", "old_str": TASK_WHY,
+                   "new_str": CAP_REJECTS + "."}, (WHY_RULE, None))
     with local_rows(rows_at("why-rows-empty.json", [])):
         why_guard("a cite of an id in an empty rows file is refused", "set",
                   entry_of(task_item(STEPS, context=CAP + " (route r-refused).")), (WHY_RULE, None))
@@ -578,6 +616,20 @@ def case_task_why_cited_greens():
                   entry_of(task_item(STEPS, context="The cloud proxy refused the delete (403).\n" + TASK_WHY)), None)
         why_guard("a decision item with an uncited capability line passes, since the rule judges tasks", "set",
                   entry_of(page_item(tail="\n" + CAP + ".")), None)
+        # Controls for the widened words: a dated measured cite or a refused-row cite backs the line, a choice phrase
+        # keeps the act, and 401 inside a longer number is no status.
+        why_guard("a rejected capability line with a dated measured cite passes", "set",
+                  entry_of(task_item(STEPS, context=CAP_REJECTED + " (measured 2026-11-06, check_red_run exited 1).")),
+                  None)
+        why_guard("a 401 capability line with a refused-row cite passes", "set",
+                  entry_of(task_item(STEPS, context=CAP_401 + " (route r-refused).")), None)
+        why_guard("a could-not capability line with a refused-row cite passes", "set",
+                  entry_of(task_item(STEPS, context=CAP_COULD_NOT + " (route r-refused).")), None)
+        why_guard("a choice line with a widened word passes, since the owner keeps the act", "set",
+                  entry_of(task_item(STEPS, context="Why yours: it is your call, and I couldn't decide for you.")),
+                  None)
+        why_guard("a 4012 near miss passes, since 401 inside a longer number is no status", "set",
+                  entry_of(task_item(STEPS, context="Why yours: the lane on build 4012 needs the owner.")), None)
     with local_rows(rows_at("why-rows-cloud.json", [WHY_ROWS[3]])):
         why_guard("a row only on another surface passes", "set",
                   entry_of(task_item(STEPS, context=CAP + " (route r-cloud-only).")), None)
@@ -1753,6 +1805,88 @@ def case_item_51_stray_field():
          entry_of(page_item(focus="#fill")), ("item-field-rendered", "focus"))
 
 
+# ------------------------------------------------------------------ dismissed: the page's own Mark read
+
+def case_session_update_naming_dismissed_is_refused():
+    """`dismissed` is written by the page's Mark read only (step ask-phase-out). The page draws it, so its itemFields
+    block lists it, yet a session update that names it is refused on both surfaces. The control is a session update
+    that names only a field, which must pass: a refusal of every update would fail it too."""
+    for value in ("2026-11-10T18:00:00Z", None):
+        data = {"dismissed": value}
+        for surface, got in (("page item_hit", call("item_hit", "update", entry_of(data))),
+                             ("page guard", guard_hit("update", entry_of(data)))):
+            check("%s: a session update naming dismissed=%r is refused" % (surface, value),
+                  got[0] != "" and "dismissed" in str(got[1]).lower(),
+                  "want a refusal naming dismissed, got %r" % (got,))
+    verdict("control: a session update naming only the title passes",
+            call("item_hit", "update", entry_of({"title": "Pick a colour"})), None)
+
+
+# ------------------------------------------------------------------ dismissed: every route refuses it, and the reason names only Mark read
+#
+# Step ask-phase-out (owner pick 480 a): the page's Mark read writes `dismissed`, and no session write does. Each route is
+# refused at the guard, and the reason the guard prints says that only the page's Mark read writes dismissed. The generic
+# item-field reason tells a writer to draw the field on the page, which is wrong here: the page draws dismissed already.
+
+DISMISSED_AT = "2026-11-10T18:00:00Z"
+ONLY_MARK_READ = re.compile(r"\bonly\b[^.]*\bMark read\b[^.]*\bdismissed\b", re.IGNORECASE)
+
+
+def dismissed_routes():
+    """One write per route that names `dismissed`, each as ArtifactData sends it: a str_replace, a set, an update, an
+    update that deletes it, and a batch entry."""
+    base = {"url": PAGE_URL, "collection": "items", "doc_id": DOC}
+    return (
+        ("str_replace on dismissed", dict(base, action="str_replace", field="dismissed", old_str="null", new_str=DISMISSED_AT)),
+        ("set with dismissed", dict(base, action="set", data=page_item(dismissed=DISMISSED_AT))),
+        ("update with dismissed", dict(base, action="update", data={"dismissed": DISMISSED_AT})),
+        ("update deleting dismissed", dict(base, action="update", data={"dismissed": {"__delete__": True}})),
+        ("a batch entry with dismissed", {"url": PAGE_URL, "action": "batch", "writes": [
+            {"op": "update", "collection": "items", "doc_id": DOC, "data": {"dismissed": DISMISSED_AT}}]}),
+    )
+
+
+def dismissed_refused(name, tool_input):
+    """One write that names dismissed, at the guard. It is refused, and the reason it prints says only the page's Mark
+    read writes dismissed, with no generic item-field remedy."""
+    got = guard.data_tool_hit(tool_input, PAGE_REPO)
+    check("%s: refused, naming dismissed" % name, got[0] != "" and "dismissed" in str(got[1]).lower(),
+          "got %r" % (got,))
+    reason = printed_reason(tool_input)
+    check("%s: the reason says only the page's Mark read writes dismissed" % name,
+          bool(ONLY_MARK_READ.search(reason)), reason[:200])
+    check("%s: the reason gives no generic itemFields remedy" % name,
+          "add it to that block" not in reason, reason[:200])
+
+
+def case_dismissed_refused_on_every_route():
+    """A session's write that names `dismissed` is refused on each route, and each refusal's reason names only Mark read."""
+    for name, tool_input in dismissed_routes():
+        dismissed_refused(name, tool_input)
+
+
+def case_dismissed_refused_without_a_readable_field_list():
+    """The same routes with the page's itemFields block unreadable (fields is None). The refusal and its reason still hold."""
+    blank = os.path.join(RUN_FOLDER, "page-without-itemfields.html")
+    os.makedirs(RUN_FOLDER, exist_ok=True)
+    with open(blank, "w", encoding="utf-8") as f:
+        f.write("<!doctype html>\n<html><body><p>A page with no field list.</p></body></html>\n")
+    with mock.patch.dict(os.environ, {question_form.ITEM_FIELDS_SEAM: blank}):
+        check("control: the blank page reads as no field list (fields is None)",
+              question_form._item_fields(blank) is None, "the block read as a list")
+        for name, tool_input in dismissed_routes():
+            dismissed_refused(name + ", with no readable field list", tool_input)
+        verdict("control: an update naming only a title passes with no readable field list",
+                call("item_hit", "update", entry_of({"title": "Pick a colour"})), None)
+
+
+def case_dismissed_reason_keeps_the_generic_remedy_for_other_fields():
+    """Control: a stray top-level field that the page does not list still prints the generic item-field reason."""
+    stray = {"url": PAGE_URL, "action": "set", "collection": "items", "doc_id": DOC, "data": page_item(focus="#fill")}
+    check("control: a stray top-level field keeps the generic itemFields reason",
+          question_form.ITEM_FIELD_REASON in printed_reason(stray), printed_reason(stray)[:200])
+
+
 # ------------------------------------------------------------------ a press link that is not a list; a partial edit of the Why yours line
 #
 # Each case below is also a pytest test (the test_ wrappers after it). A check the case records as failed fails
@@ -2287,8 +2421,83 @@ def case_cross_repo_update_checked_with_needs_repo():
           {"repo": PAGE_REPO_NAME, "checked_with": CHECKED}, PAGE_REPO_NAME)
 
 
+# ------------------------------------------------------- judged_item_writes reads a file_path at the payload cwd
+#
+# An items write whose data is a file (`file_path`, no `data`) is read by _write_data against the cwd it is given. The
+# model review reads its writes through judged_item_writes, which must take the payload cwd as item_hit does. Each file
+# name is unique and absent from the process cwd, so a read that finds the file can only come from the cwd join.
+def judged_items(writes, cwd):
+    """judged_item_writes(writes, cwd). A build whose function takes no cwd is called with the writes alone, so its
+    relative write fails an assert, never a TypeError."""
+    if "cwd" in inspect.signature(question_form.judged_item_writes).parameters:
+        return question_form.judged_item_writes(writes, cwd)
+    return question_form.judged_item_writes(writes)
+
+
+def write_json_file(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+
+
+def judged_folder():
+    """The payload cwd of these cases: a folder in this run's temp root, swept with the run."""
+    folder = os.path.join(tcj.ROOT, "judged-cwd")
+    os.makedirs(folder, exist_ok=True)
+    return folder
+
+
+def case_judged_relative_file_path_read_at_cwd():
+    """(judged cwd) A set whose data is a file named by a relative file_path is returned when the payload cwd holds the
+    file. On main the path is read against the process cwd, finds nothing, and the write is dropped, so no model review
+    sees it."""
+    folder, item, name = judged_folder(), tcj.good_page_item(), "judged-relative-item.json"
+    write_json_file(os.path.join(folder, name), item)
+    check("judged cwd: the file is at the payload cwd", os.path.isfile(os.path.join(folder, name)), folder)
+    check("judged cwd: no file of that name at the process cwd, so only a join to the payload cwd finds it",
+          not os.path.exists(name), os.getcwd())
+    got = judged_items([("set", {"collection": tcj.PAGE_ITEMS, "doc_id": "p1", "file_path": name})], folder)
+    check("judged cwd: the relative write is returned, its data read from the payload cwd",
+          len(got) == 1 and got[0].get("doc_id") == "p1" and got[0].get("data") == item,
+          "got %r: the path was read against the process cwd, so the write was dropped" % (got,))
+
+
+def case_judged_absolute_and_empty_are_unchanged():
+    """(judged cwd, control) An absolute file_path is read and returned with no cwd, as on main, and no writes
+    judge to an empty list. Green before and after the fix."""
+    folder, item = judged_folder(), tcj.good_page_item()
+    path = os.path.join(folder, "judged-absolute-item.json")
+    write_json_file(path, item)
+    check("judged absolute: the file is at its absolute path", os.path.isabs(path) and os.path.isfile(path), path)
+    got = question_form.judged_item_writes([("set", {"collection": tcj.PAGE_ITEMS, "doc_id": "p2", "file_path": path})])
+    check("judged absolute: the write is returned, its data read from the absolute path",
+          len(got) == 1 and got[0].get("doc_id") == "p2" and got[0].get("data") == item, got)
+    empty = judged_items([], folder)
+    check("judged empty: no writes judge to an empty list", empty == [], empty)
+
+
+def case_judged_mixed_writes_all_returned():
+    """(judged cwd, full list) An inline write, a relative file_path and an absolute file_path come back together, in
+    order, from one call. On main the relative write, p4, is the one dropped."""
+    folder, item = judged_folder(), tcj.good_page_item()
+    name, abs_path = "judged-mixed-relative.json", os.path.join(folder, "judged-mixed-absolute.json")
+    write_json_file(os.path.join(folder, name), item)
+    write_json_file(abs_path, item)
+    check("judged mixed: no file of the relative name at the process cwd", not os.path.exists(name), os.getcwd())
+    c = tcj.PAGE_ITEMS
+    writes = [("set", {"collection": c, "doc_id": "p3", "data": item}),
+              ("set", {"collection": c, "doc_id": "p4", "file_path": name}),
+              ("set", {"collection": c, "doc_id": "p5", "file_path": abs_path})]
+    ids = [w.get("doc_id") for w in judged_items(writes, folder)]
+    check("judged mixed: the inline, relative and absolute writes all come back, in order",
+          ids == ["p3", "p4", "p5"],
+          "doc ids %r: the relative write p4 is read against the process cwd and dropped" % (ids,))
+
+
 def main():
-    for case in (case_item_92, case_item_51_stray_field, case_item_stray_field_refused_from_a_record_branch_checkout,
+    for case in (case_item_92, case_item_51_stray_field, case_session_update_naming_dismissed_is_refused,
+                 case_dismissed_refused_on_every_route, case_dismissed_refused_without_a_readable_field_list,
+                 case_dismissed_reason_keeps_the_generic_remedy_for_other_fields,
+                 case_item_stray_field_refused_from_a_record_branch_checkout,
                  case_form_lines, case_form_placeholders_on_edits,
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
@@ -2324,7 +2533,9 @@ def main():
                  case_cross_repo_malformed_repo_is_a_format_refusal, case_cross_repo_malformed_repo_controls,
                  case_cross_repo_writer_session_is_not_the_checker, case_cross_repo_writer_session_controls,
                  case_cross_repo_writer_guard_path, case_cross_repo_writer_page_item_hit,
-                 case_cross_repo_writer_call_judge, case_cross_repo_update_checked_with_needs_repo):
+                 case_cross_repo_writer_call_judge, case_cross_repo_update_checked_with_needs_repo,
+                 case_judged_relative_file_path_read_at_cwd, case_judged_absolute_and_empty_are_unchanged,
+                 case_judged_mixed_writes_all_returned):
         try:
             case()
         except Exception as exc:

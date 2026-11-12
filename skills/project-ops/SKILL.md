@@ -1,20 +1,21 @@
 ---
 name: project-ops
-description: Use when the owner asks to give a repo session tiers (coordinator, triage, batch runner), rotation of standing sessions, a roadmap record and briefs, or says "project-ops" or "adopt the way of working". Makes the record branch and gives the role, roster, brief and handoff templates. Not for ordinary code edits.
+description: Use when the owner asks to give a repo session roles (coordinator, triage, batch runner), compaction of standing sessions, a roadmap record and briefs, or says "project-ops" or "adopt the way of working". Makes the record branch and gives the role, roster, brief and handoff templates. Not for ordinary code edits.
 ---
 
 This skill packages the way the claude-settings project on claude.ai works, so another repo can
 adopt it. The owner decides when a repo adopts it. Never set it up in a repo without the owner's grant.
 
 The model assumes a claude.ai project: one coordinator session per repo starts every other
-session. It starts triage and the batch runner together, as a trio, before any lane session.
-Without a project, each tier is one Claude Code session, and the owner acts as the coordinator.
+session. It starts triage and the batch runner together, as a trio, before any lane.
+Without a project, each session holds one or more roles, and the owner acts as the coordinator.
 
 ## What it packages
 
-- **Session tiers.** The coordinator, triage, the batch runner and lane sessions.
-  `templates/operating-model.md` says what each tier owns, and how triage and the batch runner
-  rotate. The coordinator compacts in place and has no successor.
+- **Session roles.** The coordinator, triage, the batch runner, the arbiter and lanes.
+  `templates/operating-model.md` says what each role owns. Triage, the batch runner and the arbiter
+  compact in routine use and are not replaced. The coordinator rotates a standing session only when it
+  goes stale or breaks. The coordinator compacts in place and has no successor (owner, 2026-11-10 14:29 CST, G7, standing sessions compact).
 - **The roster.** One list of who holds each standing session now. `templates/roster.md`.
 - **Autopilot.** An act that needs the owner's answer gets a "Deferred" line and waits. All other
   work runs. `templates/operating-model.md`.
@@ -58,7 +59,13 @@ that triage or the batch runner writes for its successor.
    `python3 ~/.claude/skills/project-ops/scripts/protect.py --repo <owner>/<name> --check all-jobs-passed [--branch main]`,
    then the same with `--confirm`. It refuses no `--check`, any name but `all-jobs-passed`, and more than one, so no repo starts with none (decision `same-check-kinds`). merge reads the
    required checks from this protection, so keep `merge.requiredChecks` at `"protection"`.
-7. **Report** the record branch, the files written, the protection set, and each placeholder the owner must still fill.
+7. **Add the PR template.** If the adopting repo has no `.github/pull_request_template.md`, copy
+   `templates/pull_request_template.md` to that path. Put it in by a pull request on the repo's default
+   branch, never on the record branch. The template holds the two PR-body lines the merge tool reads:
+   `Retire-run:` (a debt close with no runnable check) and `Drops-lines:` (lines dropped on purpose).
+   The file sits twice on purpose: GitHub reads only the copy under `.github/`, and this skill ships the copy under `templates/`.
+   If the file exists, leave it, and report whether it holds both lines.
+8. **Report** the record branch, the files written, the protection set, each placeholder the owner must still fill, and whether the PR template was added or already present.
 
 ## The roadmap block
 

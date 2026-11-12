@@ -13,7 +13,7 @@ reports as not found, and that this account's Artifact list (scope all) holds no
 
 Verdict, one line per page, then a total line:
   current  the fetched page holds page.html (white space, the designData mockups, the roadmap block and the document <title> text ignored)
-  behind   the fetched page differs: republish it (SKILL.md, "Update a repo's pages")
+  behind   the fetched page differs: republish it (skill waiting-page, "Update a repo's pages")
   unknown  the page was not read: another account, a missing file, an empty file, an .unreadable marker
   not-found  the page has a .notfound marker: not found from this account (deleted, or another account's).
            The line says to re-file the repo's items on the claude-settings waiting page: the URL recorded in the
@@ -597,7 +597,7 @@ def single_page(argv):
     if args.items is not None:
         try:
             items, complete = load_docs(args.items, keyed=True)
-            lines = wait_lines([data for _, data in items], complete)
+            lines = wait_lines([dict(d, id=k) if k and isinstance(d, dict) else d for k, d in items], complete)
         except ValueError as err:
             items, lines = None, ["wait: the items cannot be read: unknown (%s)" % err]
         if args.answers is not None:

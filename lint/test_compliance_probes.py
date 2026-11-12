@@ -161,26 +161,46 @@ class Layout(unittest.TestCase):
             return
         self.assertEqual((done.returncode, out), (0, "layout: in shape"))
 
-    def test_this_repos_extras_name_real_folders_and_no_wildcard(self):
+    def this_extras(self):
+        """This checkout's extras file, as text."""
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         with open(os.path.join(root, *EXTRAS.split("/")), encoding="utf-8") as handle:
-            text = handle.read()
+            return handle.read()
+
+    def this_repo(self, text):
+        """A rolled-out fixture that holds `text` as its extras file, every core kind, and the waiting copy on its
+        record branch, so the probe reads the folders that extras file names."""
+        repo = Repo(self).core().write(EXTRAS, text)
+        # The waiting copy lives on the record branch, so the fixture holds it there (decision waiting-data-in-repo).
+        repo.commit("base").branch(layout.record_branch(repo.root)).write("waiting/items/a.json", '{"id": "a"}\n')
+        return repo.commit("waiting copy").git("checkout", "-q", "-")
+
+    def test_this_repos_extras_name_real_folders_and_no_wildcard(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        text = self.this_extras()
         kinds = json.loads(text)["kinds"]
         files = subprocess.run(["git", "-C", root, "ls-files"], capture_output=True, text=True, check=True).stdout.split("\n")
         for name, kind in kinds.items():
             where = kind["path"].strip("/")
             self.assertNotIn("*", where, name)
             self.assertTrue(any(f.startswith(where + "/") for f in files), "%s: no tracked file under %s" % (name, where))
-        repo = Repo(self).core().write(EXTRAS, text)
-        # The waiting copy lives on the record branch, so the fixture holds it there (decision waiting-data-in-repo).
-        repo.commit("base").branch(layout.record_branch(repo.root)).write("waiting/items/a.json", '{"id": "a"}\n')
-        repo.commit("waiting copy").git("checkout", "-q", "-")
+        repo = self.this_repo(text)
         for kind in kinds.values():
             repo.write(kind["path"].strip("/") + "/a.x")
         self.assertEqual(repo.run("layout")[1].strip(), "layout: in shape")
         code, out = repo.write("undeclared/a.x").run("layout")
         self.assertEqual(code, 1, out)
         self.assertIn("folder undeclared/: neither", out)
+
+    def test_tests_guard_folder_is_accepted_as_an_extra_of_this_repo(self):
+        code, out = self.this_repo(self.this_extras()).write("tests/guard/a.py").run("layout")
+        self.assertEqual((code, out.strip()), (0, "layout: in shape"),
+                         "tests/guard is not an extra of this repo\n" + out)
+
+    def test_other_tests_folder_is_still_flagged(self):
+        code, out = self.this_repo(self.this_extras()).write("tests/other/a.py").run("layout")
+        self.assertEqual(code, 1, out)
+        self.assertIn("folder tests/", out)
 
     def test_not_a_git_repo_is_unknown(self):
         root = tempfile.mkdtemp(prefix="probes-", dir=RUN_FOLDER)
@@ -609,6 +629,106 @@ class Ios(unittest.TestCase):
                 _, out = self.edit(self.gold(), flow, "run: make app-build", step).run("ios")  # slow tests is a gap here, by design
                 self.assertIn(self.DIAG_PASS, out)
                 self.assertNotIn("test diagnostics: gap", out)
+
+    # A command substitution in a quoted argument, `$(...)` or a backtick, is a command the shell runs in place. The shell
+    # reads the argument on past it, so the flag after it is in the run. Each scope line reads the same run with no flag.
+    SUBSTITUTIONS = ("$(cat id)", "`cat id`")
+
+    def substituted(self, sub, flag=" -collect-test-diagnostics never"):
+        return 'xcodebuild test -destination "id=%s"%s' % (sub, flag)
+
+    def test_a_substitution_in_a_makefile_recipe_keeps_the_flag(self):
+        self.diag_pass(self.make_run('xcodebuild test -destination "id=abc" -collect-test-diagnostics never'))  # control: no substitution
+        for sub in self.SUBSTITUTIONS:
+            with self.subTest(sub=sub):
+                self.assertEqual(self.grade(self.make_run(self.substituted(sub, "")), "test diagnostics"), "gap",
+                                 "scope: with no flag the run is read, and it gaps")
+                self.assertEqual(self.grade(self.make_run(self.substituted(sub)), "test diagnostics"), "pass",
+                                 "the flag after the substitution is in the run")
+
+    def test_an_unset_make_variable_in_a_recipe_keeps_the_flag(self):
+        # Make expands an unset `$(NAME)` to nothing, so the shell never sees a `$(`: the flag after it is in the run.
+        self.assertEqual(self.grade(self.flagged("", "xcodebuild test $(XCX_EXTRA)"), "test diagnostics"), "gap",
+                         "scope: with no flag the run is read, and it gaps")
+        self.assertEqual(self.grade(self.flagged("XCX_EXTRA = -collect-test-diagnostics never\n", "xcodebuild test $(XCX_EXTRA)"),
+                                    "test diagnostics"), "pass", "control: a variable that holds the flag passes")
+        self.assertEqual(self.grade(self.flagged("", "xcodebuild test $(XCX_EXTRA) -collect-test-diagnostics never"), "test diagnostics"),
+                         "pass", "the flag after an unset variable is in the run")
+
+    def test_a_substitution_in_a_shell_script_keeps_the_flag(self):
+        script = "tools/run-tests.sh"
+        self.diag_pass(self.gold().write(script, "#!/bin/sh\n%s\n" % self.substituted("abc")))  # control: no substitution
+        for sub in self.SUBSTITUTIONS:
+            with self.subTest(sub=sub):
+                repo = self.gold().write(script, "#!/bin/sh\n%s\n" % self.substituted(sub, ""))
+                self.assertEqual(self.grade(repo, "test diagnostics"), "gap", "scope: with no flag the run is read, and it gaps")
+                repo = self.gold().write(script, "#!/bin/sh\n%s\n" % self.substituted(sub))
+                self.assertEqual(self.grade(repo, "test diagnostics"), "pass", "the flag after the substitution is in the run")
+
+    def test_a_substitution_in_a_workflow_step_keeps_the_flag(self):
+        # control: no substitution. The step's UI-test run gaps its own item, so only this item is read.
+        self.assertEqual(self.grade(self.step(self.gold(), self.substituted("abc")), "test diagnostics"), "pass", "control: no substitution")
+        for sub in self.SUBSTITUTIONS:
+            with self.subTest(sub=sub):
+                self.assertEqual(self.grade(self.step(self.gold(), self.substituted(sub, "")), "test diagnostics"), "gap",
+                                 "scope: with no flag the run is read, and it gaps")
+                self.assertEqual(self.grade(self.step(self.gold(), self.substituted(sub)), "test diagnostics"), "pass",
+                                 "the flag after the substitution is in the run")
+
+    def test_a_lone_apostrophe_before_a_substitution_run_keeps_the_flag(self):
+        # `echo it's` opens no string, so the run after it is read whole.
+        for sub in self.SUBSTITUTIONS:
+            with self.subTest(sub=sub):
+                self.assertEqual(self.grade(self.step(self.gold(), "echo it's; " + self.substituted(sub, "")), "test diagnostics"), "gap",
+                                 "scope: with no flag the run is read, and it gaps")
+                self.assertEqual(self.grade(self.step(self.gold(), "echo it's; " + self.substituted(sub)), "test diagnostics"), "pass",
+                                 "the flag after the substitution is in the run")
+
+    def test_a_comment_opener_and_a_continuation_keep_the_flag_in_a_workflow_step(self):
+        # A `#` inside the quotes is text. A `\` continuation joins the flag's line to the run, so the flag still counts.
+        pairs = (
+            ('xcodebuild test -destination "name=iPhone #1,id=$(cat id)" -scheme X',
+             'xcodebuild test -destination "name=iPhone #1,id=$(cat id)" -collect-test-diagnostics never'),
+            ('|\n          xcodebuild test -destination "id=$(cat id)" \\\n            -scheme X',
+             '|\n          xcodebuild test -destination "id=$(cat id)" \\\n            -collect-test-diagnostics never'))
+        for scope, subject in pairs:
+            with self.subTest(command=subject):
+                self.assertEqual(self.grade(self.step(self.gold(), scope), "test diagnostics"), "gap",
+                                 "scope: with no flag the run is read, and it gaps")
+                self.assertEqual(self.grade(self.step(self.gold(), subject), "test diagnostics"), "pass",
+                                 "the flag after the substitution is in the run")
+
+    # `${XCB:-xcodebuild}` is xcodebuild when XCB is unset, so `test` is its action and the run needs the flag.
+    def test_a_parameter_default_naming_xcodebuild_gaps_in_a_shell_script(self):
+        script = "tools/run-tests.sh"
+        self.assertEqual(self.grade(self.gold().write(script, "#!/bin/sh\nxcodebuild test -scheme X\n"), "test diagnostics"), "gap",
+                         "scope: a plain xcodebuild test gaps, so the run is read")
+        self.assertEqual(self.grade(self.gold().write(script, "#!/bin/sh\n${XCB:-xcodebuild} test -scheme X\n"), "test diagnostics"), "gap",
+                         "the default names xcodebuild, so its test run with no flag gaps")
+
+    def test_a_parameter_default_naming_xcodebuild_gaps_in_a_workflow_step(self):
+        self.assertEqual(self.grade(self.step(self.gold(), "xcodebuild test -scheme X"), "test diagnostics"), "gap",
+                         "scope: a plain xcodebuild test gaps, so the run is read")
+        self.assertEqual(self.grade(self.step(self.gold(), "${XCB:-xcodebuild} test -scheme X"), "test diagnostics"), "gap",
+                         "the default names xcodebuild, so its test run with no flag gaps")
+        self.assertEqual(self.grade(self.step(self.gold(), "${XCB:-xcodebuild} test -scheme X -collect-test-diagnostics never"),
+                                    "test diagnostics"), "pass", "with the flag, the same run passes")
+
+    def test_a_parameter_default_naming_xcodebuild_gaps_in_a_makefile_recipe(self):
+        # Make reads `${...}` itself, so a recipe writes `$${...}` to hand the shell `${XCB:-xcodebuild}`.
+        self.assertEqual(self.grade(self.make_run("xcodebuild test -scheme X"), "test diagnostics"), "gap",
+                         "scope: a plain xcodebuild test gaps, so the run is read")
+        self.assertEqual(self.grade(self.make_run("$${XCB:-xcodebuild} test -scheme X"), "test diagnostics"), "gap",
+                         "the default names xcodebuild, so its test run with no flag gaps")
+
+    def test_a_recipe_prefix_on_a_parameter_default_naming_xcodebuild_gaps_in_a_makefile_recipe(self):
+        # Make strips a recipe line's `@`, `-` or `+` before the shell reads it, so a prefix is no part of the command's name.
+        for prefix in ("@", "-", "+"):
+            with self.subTest(prefix=prefix):
+                self.assertEqual(self.grade(self.make_run(prefix + "xcodebuild test -scheme X"), "test diagnostics"), "gap",
+                                 "scope: a prefixed plain xcodebuild test gaps, so the run is read")
+                self.assertEqual(self.grade(self.make_run(prefix + "$${XCB:-xcodebuild} test -scheme X"), "test diagnostics"), "gap",
+                                 "the default names xcodebuild behind the prefix, so its test run with no flag gaps")
 
     def test_account_ids_in_the_repo_are_red(self):
         repo = self.edit(self.gold(), "tools/ios-ship.json", '"repo_url"', '"team_id": "FAKE000000",\n  "repo_url"')

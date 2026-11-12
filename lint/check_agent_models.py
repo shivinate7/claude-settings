@@ -15,7 +15,7 @@ family than its role's row in the role table (pin_row_problem), each agent body 
 model in fixed text or gives a report header a model slot with no line that names the source (body_problems),
 each agent file that can reach the claude-code-remote server (session_tools_problem: frontmatter
 `disallowedTools` must name the whole server, or `tools` must be an allow-list with no entry for it), and the model record
-docs/decisions/agent-model-cap.md when its `lane session` row's effort cell does not start
+docs/decisions/agent-model-cap.md when its `lane` row's effort cell does not start
 with the guard's LANE_EFFORT.
 """
 import glob
@@ -37,7 +37,7 @@ HAIKU_ROLES = tuple(role.lower() for role in _guard.HAIKU_ROLES)
 LANE_EFFORT = _guard.LANE_EFFORT
 REMOTE_SERVER = _guard.REMOTE_SERVER
 LANE_RECORD = os.path.join(*layout.path(ROOT, "decisions").split("/"), "agent-model-cap.md")
-LANE_ROW = re.compile(r"^\|\s*lane session\b[^|]*\|[^|]*\|\s*([^|]*?)\s*\|\s*$", re.M)
+LANE_ROW = re.compile(r"^\|\s*lane\b[^|]*\|[^|]*\|\s*([^|]*?)\s*\|\s*$", re.M)
 MODEL_KEY = re.compile(r"^model\s*:\s*(.*)$", re.IGNORECASE)
 # The self-model rules. An agent runs the model its spawn names, so its body must not state a model as its own. A
 # sentence is a run of text up to `.`, `!` or `?` before a space, wrapped lines included. A chunk of sentences ends at
@@ -169,12 +169,12 @@ def is_lane_record(path: str) -> bool:
 
 
 def lane_effort_problem(text: str) -> str:
-    """Why the lane session row's effort cell is not the lane effort, or "" when it is."""
+    """Why the lane row's effort cell is not the lane effort, or "" when it is."""
     rows = LANE_ROW.findall(text)
     if len(rows) != 1:
-        return "needs one `lane session` row with a model and an effort cell, found %d" % len(rows)
+        return "needs one `lane` row with a model and an effort cell, found %d" % len(rows)
     if not rows[0].startswith(LANE_EFFORT):
-        return "the `lane session` row's effort cell must start with %r (the guard's LANE_EFFORT), found %r" % (
+        return "the `lane` row's effort cell must start with %r (the guard's LANE_EFFORT), found %r" % (
             LANE_EFFORT, rows[0])
     return ""
 

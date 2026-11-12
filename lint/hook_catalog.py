@@ -22,7 +22,8 @@ that holds overruled text (a line that opens with Superseded, Overruled, Previou
 Old ruling or "was:", or a "was:" after the word "old" in its block) is a problem, and so is an empty one. No page is written while a problem stands.
 The merge tool (merge/merge.py) writes the records page on the pull request head before it merges. So
 `--check` waives a stale or missing records page on a pull request run (GITHUB_BASE_REF set, or GITHUB_REF
-under refs/pull/), and fails on any other run.
+under refs/pull/) and on a dispatched run of a branch other than main (GITHUB_EVENT_NAME workflow_dispatch,
+GITHUB_REF under refs/heads/ with a branch name that is not empty and not main). It fails on any other run: a dispatch of main, a push to main, a bare run.
 
 Sources, all read from the root:
   settings.json `hooks`   one row per registration (event, matcher, `if`, command or prompt).
@@ -735,8 +736,12 @@ def render_records():
 
 
 def pull_request_run():
-    """True on a pull request run in Actions, as the stamp engine reads it (onDefaultBranch)."""
-    return bool(os.environ.get("GITHUB_BASE_REF")) or os.environ.get("GITHUB_REF", "").startswith("refs/pull/")
+    """True on a pull request run in Actions, as the stamp engine reads it (onDefaultBranch), or on a dispatched
+    run of any branch other than main. A lane's dispatched run needs the waiver for its retire run."""
+    ref = os.environ.get("GITHUB_REF", "")
+    branch = ref[len("refs/heads/"):] if ref.startswith("refs/heads/") else ""
+    dispatched_lane = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch" and branch not in ("", "main")
+    return bool(os.environ.get("GITHUB_BASE_REF")) or ref.startswith("refs/pull/") or dispatched_lane
 
 
 def has_catalog_parts():
@@ -777,7 +782,7 @@ def main(argv):
         if not problems and args.check:
             for rel, page in pages.items():
                 state = "missing" if not has_file(rel) else "stale" if read(rel) != page else ""
-                # The merge tool rewrites the records page on the pull request head, so a pull request run waives it.
+                # The merge tool rewrites the records page on the pull request head, so a pull request run or a dispatched lane run waives it.
                 if state and not (rel == RECORDS_PAGE and pull_request_run()):
                     problems.append("%s is %s: run %s" % (rel, state, REGEN))
         if problems:

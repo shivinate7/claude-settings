@@ -200,6 +200,31 @@ def diagnostic_lines(output: str) -> list:
     return found
 
 
+def print_saw(lines) -> None:
+    """Print the first WRONG_CAUSE_LINES_SHOWN of `lines` as `saw:` lines, then a count of the rest."""
+    for line in lines[:WRONG_CAUSE_LINES_SHOWN]:
+        print("            saw: %s" % line.strip(), flush=True)
+    if len(lines) > WRONG_CAUSE_LINES_SHOWN:
+        print("            saw: ... and %d more" % (len(lines) - WRONG_CAUSE_LINES_SHOWN), flush=True)
+
+
+def control_verdict(code, red, seen=(), ran=None):
+    """Judge one clean-layout control run. Return None when the suite is green on the unmutated layout,
+    else (reason, lines): why every mutant of that target reads UNKNOWN, and the first lines the control saw.
+
+    A mutant's FAIL lines prove a kill only when the same layout, unmutated, passes the suite. A layout that
+    crashes (a missing sibling module, a wrong path) makes every case red whatever was mutated, and that
+    reads as a kill. The exit code decides first: a crash leaves no FAIL line. A control that exits 0 but
+    ran no case (`ran` is an empty list) is the other crash signature: the suite never reached its cases, so
+    it proved nothing about the layout. `ran=None` means the caller has no case lines to read.
+    Report mode's `score_target` applies the same idea to its normalized clean source."""
+    if code != 0:
+        return "clean layout red (exit %s)" % code, list(red) + list(seen)
+    if ran is not None and not ran:
+        return "clean layout ran no case (exit 0)", list(seen)
+    return None
+
+
 def report_verdict(label: str, code, red, required: str, seen=()) -> str:
     """Classify and print one mutant's verdict. Returns "survived", "wrong_cause", or "killed".
 
@@ -217,12 +242,7 @@ def report_verdict(label: str, code, red, required: str, seen=()) -> str:
     if not any(required in line for line in red):
         print("WRONG CAUSE %-62s %2d red, missing %r" % (
             label, len(red), required), flush=True)
-        shown = list(red) + list(seen)
-        for line in shown[:WRONG_CAUSE_LINES_SHOWN]:
-            print("            saw: %s" % line.strip(), flush=True)
-        if len(shown) > WRONG_CAUSE_LINES_SHOWN:
-            print("            saw: ... and %d more" % (
-                len(shown) - WRONG_CAUSE_LINES_SHOWN), flush=True)
+        print_saw(list(red) + list(seen))
         return "wrong_cause"
     print("KILLED      %-62s %2d red" % (label, len(red)), flush=True)
     return "killed"
@@ -269,29 +289,71 @@ def staged_suite_seen(run, required: str):
     return code, red, list(last)
 
 
-def run_mutants(entries, run_one):
+def run_mutants(entries, run_one, controls=None, control_of=None):
     """Run every entry through `run_one`, in parallel, printing each mutant's verdict as it
     lands, then the tally line. Returns 0 when every mutant was killed (a caller's own `main`
     should return that, or 1 otherwise), so a caller can end with
     `return mutate_shared.run_mutants(MUTATIONS, run_one)`.
 
-    `run_one(entry) -> (label, code, red, required, skip[, seen])` is supplied by the caller: it applies
+    `run_one(entry) -> (label, code, red, required, skip[, seen[, unknown]])` is supplied by the caller: it applies
     one mutation and runs its suite however that caller lays a mutant out on disk (one file next
     to a shared work directory, or a whole per-mutant scaffold -- see this module's own
     docstring for why that part is not shared). This function owns only the parallel dispatch,
     the printed verdict, and the tally, which both callers ran through two copies of the same
     ThreadPoolExecutor loop before this extraction.
+
+    `unknown`, the optional seventh field, is a reason this mutant's verdict cannot be trusted (see
+    `control_verdict`). It prints `UNKNOWN <label> <reason>` with `seen` under it, counts in the tally, and
+    exits 1 (decision `ci-unknown-is-red`). It is not `skip`: a skip means the mutant does not apply here and exits 0.
+
+    `controls` is {key: function returning run_suite's (code, red, ran, seen)}: one clean-layout control per
+    key, and `control_of(entry)` names the key whose control judges that entry. The controls go into the same
+    pool as the mutants, ahead of them, so they count in the job cap and no worker ever waits on one. Results
+    are read in submission order, so every control's result is in hand before the first mutant's is read. A red
+    control, one that exits 0 with no case run, or one that raises, makes every mutant of its key read UNKNOWN. An entry whose key has no control
+    raises KeyError: it never reads KILLED unchecked. A skipped entry has no control to ask for.
     """
     jobs = job_count()
+    controls = controls or {}
+    keys = list(controls)
     print("%d mutations, %d at a time" % (len(entries), jobs))
     survivors = 0
     wrong_cause = 0
     skipped = 0
+    unknown = 0
+
+    def work(job):
+        kind, item = job
+        if kind == "mutant":
+            return run_one(item)
+        try:
+            return controls[item]()
+        except Exception as error:  # a control that crashes reads red for its key, never ends the run
+            return error
+
+    verdicts = {}
+    jobs_in_order = [("control", key) for key in keys] + [("mutant", entry) for entry in entries]
     with ThreadPoolExecutor(max_workers=jobs) as pool:
-        for label, code, red, required, skip, *more in pool.map(run_one, entries):
+        results = pool.map(work, jobs_in_order)
+        for key in keys:
+            result = next(results)
+            if isinstance(result, Exception):
+                verdicts[key] = ("clean layout raised %s: %s" % (type(result).__name__, result), [])
+            else:
+                code, red, ran, seen = result
+                verdicts[key] = control_verdict(code, red, seen, ran)
+        for entry, (label, code, red, required, skip, *more) in zip(entries, results):
             if skip:
                 skipped += 1
                 print("SKIPPED     %-62s %s" % (label, skip), flush=True)
+                continue
+            reason, lines = (more[1], list(more[0])) if len(more) > 1 and more[1] else (None, [])
+            if control_of is not None and not reason:
+                reason, lines = verdicts[control_of(entry)] or (None, [])
+            if reason:
+                unknown += 1
+                print("UNKNOWN     %-62s %s" % (label, reason), flush=True)
+                print_saw(lines)
                 continue
             status = report_verdict(label, code, red, required, more[0] if more else ())
             if status == "survived":
@@ -300,10 +362,10 @@ def run_mutants(entries, run_one):
                 wrong_cause += 1
     print()
     ran = len(entries) - skipped
-    killed = ran - survivors - wrong_cause
-    print("%d of %d mutations killed (%d survived, %d wrong cause, %d skipped)" % (
-        killed, ran, survivors, wrong_cause, skipped))
-    return 1 if (survivors or wrong_cause) else 0
+    killed = ran - survivors - wrong_cause - unknown
+    print("%d of %d mutations killed (%d survived, %d wrong cause, %d skipped%s)" % (
+        killed, ran, survivors, wrong_cause, skipped, ", %d unknown" % unknown if unknown else ""))
+    return 1 if (survivors or wrong_cause or unknown) else 0
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -993,6 +1055,9 @@ def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0
     file changed, "NO_TESTS" for product code with no suite changed), reason, made, killed, crashed,
     survived, not_run, survivors [(path, line, label)], unusable {suite: why}, skipped {file: why},
     notes [text]. `made` counts every mutant, so killed + crashed + survived + not_run == made.
+    `no_run_cause` is set only when no mutant ran because the run stopped first (the diff could not be read, no mutant
+    could be made of a file that does not parse, the checkout or the install was refused, or the replay raised): it
+    holds the cause, and `--changed` exits 1 on it.
     A mutant is not_run when no changed suite reaches its file (the profile's `select`), or when the
     `pr_budget` seconds, counted from the start of this call, had passed before it started. It is never
     a survivor. `progress(line)`, when given, gets one line as each mutant finishes.
@@ -1015,6 +1080,7 @@ def replay_pr(repo: str, sha: str, profile: dict, limit: int = 20, seed: int = 0
         files = _changed_files(repo, base, sha)
     except ValueError as error:
         row["reason"] = "cannot read the diff: %s" % error
+        row["no_run_cause"] = row["reason"]
         return row
     code = sorted(p for p, s in files.items() if s != "D" and code_re.search(p) and not (not_re and not_re.search(p)))
     suites = sorted(p for p, s in files.items() if s != "D" and tests_re.search(p))
@@ -1122,12 +1188,15 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
         reasons = sorted(set(parse_errors.values()))
         row["reason"] = ("%s; no mutant could be made" % "; ".join(reasons) if reasons
                          else "no mutant on the lines the pull request added")
+        if reasons:  # the files did not parse: no mutant ran because none could be made
+            row["no_run_cause"] = row["reason"]
         return row
     mutants = _sample(found, limit, seed)
 
     folder, why = _ensure_deps(repo, sha, profile, deps)
     if why:
         row["reason"] = why
+        row["no_run_cause"] = why
         return row
     cwd_rel = profile.get("cwd", "")
     classify = CLASSIFIERS[profile["classify"]]
@@ -1148,6 +1217,7 @@ def _replay_in(repo, sha, profile, row, code, suites, base, own, limit, seed, su
                 _make_checkout(repo, sha, dest, set(profile.get("sparse_skip", [])), clean, folder, profile)
             except (ValueError, OSError) as error:
                 row["reason"] = "checkout failed: %s" % error
+                row["no_run_cause"] = row["reason"]
                 return row
             spare.put(dest)
 
@@ -1321,6 +1391,7 @@ def replay_profile(repo: str, sha: str, profile: dict, **options) -> list:
             row = {"pr": 0, "sha": sha, "title": "", "status": "UNKNOWN", "made": 0, "killed": 0, "crashed": 0,
                    "survived": 0, "not_run": 0, "survivors": [], "unusable": {}, "skipped": {}, "notes": [],
                    "reason": "the replay raised %s: %s" % (type(error).__name__, error)}
+            row["no_run_cause"] = row["reason"]
             try:
                 row["pr"], row["title"] = _pr_of(repo, sha)
             except ValueError:

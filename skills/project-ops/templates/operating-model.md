@@ -5,17 +5,20 @@ from `roster.md`.
 
 ## Session tiers
 
-Every session that starts agents is an orchestrator. A session's tier is its identity.
+A spawner is a session that starts its own agents. Each session role is a set of jobs, worn as a hat.
 
 - **Coordinator.** One per repo. It is the one session that starts other sessions. It starts
-  triage and the batch runner together, as a trio, before any lane session. It holds lane state,
-  writes each lane brief, starts each lane session in roadmap order with the prompt `/effort medium` alone and then sends its brief, and talks with the owner. On a local session, the load
+  triage and the batch runner together, as a trio, before any lane. It holds lane state
+  and writes each lane brief. It starts each lane in roadmap order, with `model` (the lane row's),
+  `source_url` (the repo) and effort `medium`. It sets the tags `cs-repo`, `cs-build:lane`, `cs-step`
+  and `cs-topic`. Its whole brief is the first prompt, and it opens with the Grant line. It talks with the owner. Before a fix lane for a red CI case, it runs
+  `~/.claude/bin/merge --touches --run <run id>` and reads each open PR named (decision `session-tiers`, "Who starts which session"). On a local session, the load
   brake, not a number, decides how many lanes run at once. It does not rotate (see below).
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
-  A lane session also gets `cs-topic:<topic slug>`, its one topic, and a `cs-step:<step id>` for each step it takes, so triage can see each step is live.
+  A lane also gets `cs-topic:<topic slug>`, its one topic, and a `cs-step:<step id>` for each step it takes, so triage can see each step is live.
 - **Triage.** A standing session. It writes the roadmap. Only triage writes a new step,
-  merges two steps, changes the work order, or closes a step. Where triage runs, only triage writes the waiting page.
+  merges two steps, changes the work order, or closes a step. Triage always writes the waiting page; in a run with one lane the lane wears triage's hat and writes it.
   At triage start, when the repo has no waiting page, triage makes it, with no separate grant (skill
   `waiting-page`, "Make a repo's page").
   At each publish, triage builds the roadmap block from the head of the record branch, with `--block`
@@ -23,6 +26,8 @@ Every session that starts agents is an orchestrator. A session's tier is its ide
   `id`, `session_status` and `tags`. The roadmap build script reads it to list steps in progress with no live lane.
   Each pull row carries `createdAt`, so the roadmap build script can list a stale draft. Each item row carries
   `lane` when the page item has one, so it can list an item whose lane is gone.
+  The file also carries `landedPulls`: each pull request closed in the last 14 days whose base is the default
+  branch, with `number`, `branch`, `head` and `merged`. The build marks a step landed from it when no `Step:` trailer is on main.
   At each publish, triage also disposes each `stalled step:` line the build prints (the build exits 1 on one): a
   step with no live lane and no open PR becomes `todo` or `done`, or gets a `paused` field with who decides; an item
   is re-routed or closed. When triage marks a step `done`, its note gets the line
@@ -53,15 +58,18 @@ Every session that starts agents is an orchestrator. A session's tier is its ide
   N's. If N goes red, the batch runner rebuilds N+1 from the base without N, and N's lane is
   fixed in its own lane.
   When the repo holds a standing merge grant (claude-settings record `standing-merge-grant`), it
-  batches each PR whose review record is done, as `merge --reviewed` finds it at its wake, and merges the
-  integration PR on green. It asks the owner for no merge. It prints the merge output on the
-  terminal, never to a log only. It dispatches no deferred step.
-- **Lane session.** Runs one lane as an orchestrator, with its own builder and reviewer agents.
-  It reports up to the coordinator. Work that needs a local machine is a lane session whose brief
+  batches each PR whose review log is done, as `merge --reviewed` finds it at its wake. It merges
+  the integration PR on green. It asks the owner for no merge. It prints the merge output on the
+  terminal, never to a log only. A runner that merges a second checkout runs `~/.claude/bin/merge -C <checkout> <pr> --confirm`,
+  never `cd X && merge`, and only when its own record names that checkout's repo (claude-settings record
+  `merge-confirm-repo`). It runs the confirm in the foreground (Bash timeout up to 600000), never with
+  `run_in_background`: a background call misses the allow rule and the auto-mode classifier refuses it. It dispatches no deferred step.
+- **Lane.** Runs one line of work, with its own builder and reviewer agents.
+  It reports up to the coordinator. Work that needs a local machine is a lane whose brief
   names the machine. It may drive a Remote Control session on the owner's machine.
 
-When the owner names the wrong tier, or brings work that belongs to another tier, the session
-says so in one line: its own tier, the right tier, and why. It then handles the message or routes it.
+When the owner names the wrong session, or brings work that belongs to another session, the session
+says in one line whose job it is, then routes it.
 
 A coordinator's work in another repo is compliance only, by handoff or by its own lane PR in that repo
 (claude-settings decision `session-tiers`, bullet "A coordinator in another repo"). Before it acts,
@@ -72,9 +80,9 @@ If none is active, it proceeds. It does not wait for a reply.
 
 ## Rotation of standing sessions
 
-Read the use of each standing session: triage, the batch runner and the arbiter. Never wait for the owner to notice.
+Standing sessions compact in routine use, and none is replaced routinely: triage, the batch runner and the arbiter compact. Never wait for the owner to notice a stale one.
 
-The coordinator does not rotate. It writes its own handoffs and compacts in place. The coordinator
+The coordinator itself does not rotate. It writes its own handoffs and compacts in place. The coordinator
 never hands its own sessions to a successor: a session may refuse a new coordinator as not its
 parent, or miss a message while busy.
 
@@ -106,7 +114,9 @@ parent, or miss a message while busy.
      that reads the answer, so an item left with the old `owner` gets no reader. If it takes over
      the writer role, it also sets `writer` in `meta/page` to its own session title, as the roster
      gives it. It reads `meta/page` first, then updates `writer` pinned with `if_version`
-     (`ArtifactData`). For each ask with no `reply` whose `owner` is the old writer, it reads the
+     (`ArtifactData`). In a repo whose extras file holds the `page-writer` key, it also updates that
+     key to its own session id. The key sits in a committed file, so the update goes in a PR. For each
+     ask with no `reply` whose `owner` is the old writer, it reads the
      ask, then updates `owner` to itself, pinned with `if_version`. Only the incoming writer writes
      `writer`, since the outgoing one is archived at step 4.
 
