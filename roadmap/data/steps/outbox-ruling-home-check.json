@@ -5,8 +5,8 @@
   "order": 1025,
   "owner": "triage",
   "why": "Owner 15:22 CST Nov 10 (R6, relayed by the retrospective session): \"yes but it's tbd if an outbox is the right spot right? but for rn it only make senses that it is read\".",
-  "note": "A check run when triage reports status reads each owner ruling in the outbox and says whether its home on main holds its words. Whether the outbox stays the place for rulings is open. Home: decision owner-feedback-inbox. Lane prose-decisions started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
-  "updatedAt": "2026-11-12T07:29:00-06:00",
+  "note": "A check run when triage reports status reads each owner ruling in the outbox and says whether its home on main holds its words. Whether the outbox stays the place for rulings is open. Home: decision owner-feedback-inbox. Lane prose-decisions started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Follow-up for triage (lane ask 08:53 CST Nov 12): when this reader merges on main, triage drops the outbox count in roadmap/build.py on the record branch (the two lines after upkeep() in main()), so the outbox has one reader. The lane messages triage on merge.",
+  "updatedAt": "2026-11-12T08:52:00-06:00",
   "lane": "session_013NEJKytqADrBxakyssFEPg",
   "blockedBy": []
 }
