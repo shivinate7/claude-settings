@@ -11,7 +11,7 @@ Lane `map-tested-by-line`, 2026-11-05. Banchi's retired `docs/map.py` held `test
 - **The line.** `  - Tested by: ` + test paths from the repository root, each in backticks, joined by `, `. It sits under a map line directly in `## Code files`, with no deeper heading between. A tested-by line anywhere else fails MAP11. Paths only, never registry ids: a second form would go against decision `uniform-over-variants` (a repo matches a shared format).
 - **Optional.** A map line with no tested-by line passes. The line is a claim, and MAP11 checks claims only. Requiring it on every file would fail each repo's untested files.
 - **MAP11.** Each named test is a tracked file and loads the mapped file:
-  - It imports the file, through the import reader that MAP9 uses. A type-only import does not count.
+  - It imports the file, through the import reader that MAP9 uses. A type-only import does not count. An import resolves through the root `tsconfig.json` `paths`. Limits: no `extends`, and no tsconfig in a sub-folder.
   - Or it imports one `__init__.py` or `index.*` that re-exports the file (one hop).
   - Or a string in its code is the file's path, from the test's folder or the repository root. This covers a test that runs the file as a subprocess. Comments and docstrings never count (rule `building-scanner-respects-strings`).
   - A Python import of a package loads its `__init__.py`. MAP9 `uses` facts read the same way.
