@@ -95,8 +95,8 @@ read back, in answers.json order, then exit 1:
 `answer-unread <id> (item <n>, owner <owner>, answered <at>, before wake <woke>)`
 (`?` for a missing n or owner). The line names the sessions the answer wakes: an item with `wakes` (a non-empty list of
 session ids) gets `wakes <id> <id>` in place of `owner <owner>`, and the owner is named only when it is in the list; an
-item with no `wakes` (absent or null) wakes its owner. `wakes` that is not a non-empty list of one-word strings (a string,
-`[]`, a non-string or empty name) is unknown for that answer, never read as the owner or as nobody.
+item with no `wakes` (absent or null) wakes its owner. `wakes` that is not a non-empty list of entries that each match `session_[A-Za-z0-9_-]+` whole (a string,
+`[]`, a non-string, a bare word or a padded name) is unknown for that answer, never read as the owner or as nobody.
 An answer is listed when it is an item answer (not `park.<id>`, `parked: true` or act `park`), its item exists (open, or closed with the answer kept), its `at` is earlier than meta `woke` (the
 writer's previous wake) and no receipt with the answer's id has a `read` at or after `at`. A receipt with only `filed`
 does not clear it (the check reads `read` only, never `filed`). With no `woke` (absent or null) every answer with
@@ -128,6 +128,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
 sys.path.insert(1, os.path.join(os.path.expanduser("~"), ".claude", "lint"))
 sys.path.insert(2, os.path.join(HERE, "..", "..", "hooks"))
 sys.path.insert(3, os.path.join(os.path.expanduser("~"), ".claude", "hooks"))
+SESSION_ID = re.compile(r"session_[A-Za-z0-9_-]+")  # the one shape a `wakes` entry may take, matched whole (hooks/own_session.py)
 import splice  # noqa: E402  the one home of the roadmap block's markers (beside this script)
 
 TEMPLATE = os.path.join(HERE, "page.html")
@@ -793,7 +794,7 @@ def unread_mode(argv):
         wakes = item.get("wakes")
         if wakes is None:  # no wakes: the owner alone is woken
             who = "owner %s" % item.get("owner", "?")
-        elif isinstance(wakes, list) and wakes and all(isinstance(w, str) and len(w.split()) == 1 for w in wakes):
+        elif isinstance(wakes, list) and wakes and all(isinstance(w, str) and SESSION_ID.fullmatch(w) for w in wakes):
             who = "wakes %s" % " ".join(wakes)
         else:  # wakes that name no session are never read as "the owner" or "nobody"
             unknown.append("unknown: the item of answer %s has wakes that are not a non-empty list of session ids" % key)
