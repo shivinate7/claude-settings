@@ -1,0 +1,14 @@
+{
+ "id": "review-record-merge-main-line",
+ "title": "Decision pr-review-record line 82 takes one fix verifier after a merge of main",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator pick 16:06 CST Nov 12 (process-only, from lane post-batch-conflict-merge #2969): line 82 (\"a round read an older head\") asks a full review when the log has no Fix check line; line 76 (owner, restart-plan R1) gives one fix verifier after a conflicted merge of main; pr-ledger.md:63 and merge.py --fix-check take the fix verifier.",
+ "source": "coordinator 16:06 CST Nov 12; restart-plan R1 (owner Nov 10 14:07 CST)",
+ "note": "Record-writer: amend line 82 so a merge of main takes one fix verifier reading the conflict hunks, matching line 76, the ledger and the code. Settled by R1 (no owner item). Cite on #2969 plan step 8.",
+ "updatedAt": "2026-11-12T16:07:51-06:00"
+}

@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "merge --lane-lint FAILed batch #2814 at c63629c18 on merge-tree conflicts with later open PRs #2839, #2884, #2906, not with main, and \"No override lifts this refusal\": a green batch cannot merge until later lanes close. It holds main.",
  "source": "coordinator 14:30 CST Nov 12",
- "note": "Fix: on an integration PR, report other-PR conflicts to those later lanes and do not refuse. Red first on #2814 at c63629c18. Bandaid now (coordinator): runner 10 closes #2839, #2884, #2906, merges #2814, then reopens them. Rank with the stability fixes. Lane started 14:34 CST Nov 12. Bandaid ran 14:43 CST Nov 12: runner 10 closed #2839, #2884, #2906, merged #2814 (bcbeaa26a), reopened all three. Lane post-batch-conflict-merge 15:29 CST Nov 12 (#2969, head c7adf46c3).",
- "updatedAt": "2026-11-12T15:35:22-06:00"
+ "note": "Fix: on an integration PR, report other-PR conflicts to those later lanes and do not refuse. Red first on #2814 at c63629c18. Bandaid now (coordinator): runner 10 closes #2839, #2884, #2906, merges #2814, then reopens them. Rank with the stability fixes. Lane started 14:34 CST Nov 12. Bandaid ran 14:43 CST Nov 12: runner 10 closed #2839, #2884, #2906, merged #2814 (bcbeaa26a), reopened all three. Lane post-batch-conflict-merge 15:29 CST Nov 12 (#2969, head c7adf46c3). Coordinator relay 16:05 CST Nov 12: #2951 record posted at dc7896926 (round 1 sonnet PASS, net value zero). Left for follow-up: (1) decision lanes-run-no-full-ci-job still says the join always needs the comment and a counted clash always FAILs; (2) `merge --reviewed` and the release check still ask a lint on a green integration head (overlaps step merge-skips-lint-on-green-ci).",
+ "updatedAt": "2026-11-12T16:07:51-06:00"
 }
