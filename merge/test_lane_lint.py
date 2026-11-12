@@ -2241,25 +2241,18 @@ class LintCheckJoin(tm.CloudSession):
 GUARD_PATH = "lint/report_guard.py"  # a guard path: under lint/, one of stale_cites.RULE_DIRS
 DOCS_PATH = "docs/scratch-notes.md"  # on no guard path
 ALL_PASS = ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS", "Round 3: reviewer, opus, PASS")
-RECORD_TIME = "2026-10-02T00:00:00Z"
 
 
 class ReviewHost(tm.FakeHost):
-    """A FakeHost whose repo comments are scripted: `records` holds the review record comments of pull request 7, oldest first, as
-    (body, created_at, updated_at). Each review read goes through issue_comments, the one home of the comment read, and no lint comment is listed."""
+    """A FakeHost whose review log is scripted: `records` holds the review log comment bodies of pull request 7, oldest first.
+    review_comments is the one read lane lint makes of the comments, so it is the only read this fake answers."""
 
     def __init__(self, root, other):
         super().__init__(root, other)
         self.records = []
 
-    def issue_comments(self, since):
-        return {7: list(self.records)}, {}
-
-    def review_records(self, since):
-        return self.issue_comments(since)[0]
-
     def review_comments(self, since):
-        return {n: [row[0] for row in rows] for n, rows in self.review_records(since).items()}
+        return {7: list(self.records)}
 
 
 class PostReviewCommit(LaneFixture):
@@ -2278,9 +2271,8 @@ class PostReviewCommit(LaneFixture):
         self.assertFalse(DOCS_PATH.startswith(merge.GUARD_PATHS) or DOCS_PATH in merge.GUARD_FILES, "fixture: %s is on a guard path" % DOCS_PATH)
 
     def record(self, head, guard, rounds, net):
-        """Post the review record of `head` on pull request 7. It is the newest record from here on."""
-        body = tm.record_text(rounds=rounds, head=head, guard=guard, net=net)
-        self.host.records.append((body, RECORD_TIME, None))
+        """Post the review log of `head` on pull request 7. It is the newest log from here on."""
+        self.host.records.append(tm.record_text(rounds=rounds, head=head, guard=guard, net=net))
 
     def lint_pr(self):
         """-> (rc, output) of `merge --lane-lint 7` in the lane checkout, with the ci-job stub passing."""
@@ -2307,7 +2299,7 @@ class PostReviewCommit(LaneFixture):
         self.assertIn(guard[:7], out, "the refusal does not name the guard commit %s it refuses:\n%s" % (guard[:7], out))
         self.assertIn(GUARD_PATH, out, "the refusal does not name the guard path it refuses:\n" + out)
 
-    def test_a_review_record_that_names_the_guard_commit_lets_it_through(self):  # control: green on the old code
+    def test_a_review_log_that_names_the_guard_commit_lets_it_through(self):  # control: green on the old code
         guard = self.commit_on("feat", {GUARD_PATH: "a guard path, reviewed\n"}, "origin/feat")
         self.record(guard, "yes", ALL_PASS, "positive")
         rc, out = self.lint_pr()
@@ -2323,7 +2315,7 @@ class PostReviewCommit(LaneFixture):
         self.assertEqual(rc, 0, out)
         self.assertEqual(len(pass_lines(out)), 1, out)
 
-    def test_a_docs_commit_after_the_last_review_record_passes(self):  # control: green on the old code
+    def test_a_docs_commit_after_the_last_review_log_passes(self):  # control: green on the old code
         self.record(self.head("feat"), "no", tm.REVIEW_PASS, "not owed")
         self.commit_on("feat", {DOCS_PATH: "a docs note after the review\n"}, "origin/feat")
         rc, out = self.lint_pr()

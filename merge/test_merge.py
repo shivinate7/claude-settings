@@ -266,7 +266,7 @@ class FakeHost:
     def post_comment(self, n, body):  # the fake of Host.post_comment: a comment on pull request n, recorded for the case
         self.posted.append((n, body))
 
-    def review_records(self, since):  # no review record comment: lane lint has no record to measure a guard commit against
+    def review_comments(self, since):  # no review log comment: lane lint has no log to measure a guard commit against
         return {}
 
 MAILAUDIT_CHECK = "mailaudit-check"  # the required check a second checkout's stamp config names: a read of that config shows which checkout it came from
