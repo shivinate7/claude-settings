@@ -1293,6 +1293,32 @@ def _exported_write(inp, collections):
     return any(c in collections for c in named) or (not named and verb == "batch")
 
 
+class _LazyCollections:
+    """The waiting page's collection list, read by the first collection name a write is tested against. A transcript
+    with no ArtifactData write reads nothing, so a checkout with no skills/waiting-page folder gives no note on a turn
+    that wrote no page. With no folder there is no list: the one collection `items` is the fallback
+    (layout.WAITING_FALLBACK), so a stale items write still blocks as on main, and a write of any other collection
+    sets `unread_hit` (the caller says "not checked") instead of passing as clear."""
+
+    def __init__(self, layout):
+        self._layout = layout
+        self._names = None
+        self.error = ""
+        self.unread_hit = False
+
+    def __contains__(self, name):
+        if self._names is None:
+            try:
+                self._names = self._layout.WAITING_COLLECTIONS
+            except self._layout.LayoutError as e:
+                self.error = " ".join(str(e).split()) or type(e).__name__
+                self._names = self._layout.WAITING_FALLBACK
+        found = name in self._names
+        if not found and self.error:
+            self.unread_hit = True
+        return found
+
+
 def _scan_transcript(records, collections):
     """(writes, exports, results) of the non-sidechain records. `writes` is [(epoch, id, url)] for each
     ArtifactData write of an exported collection; `exports` is [(epoch, id)] for each shell call naming
@@ -1346,13 +1372,12 @@ def export_check(cwd, transcript_path, session_id):
         import layout
     except (OSError, TypeError, ValueError, ImportError):
         return None, None  # no transcript to read (a hook run with none is normal), or no layout
-    try:
-        collections = layout.WAITING_COLLECTIONS
-    except layout.LayoutError as e:
-        return None, FAIL_OPEN_EXPORT % (" ".join(str(e).split()) or type(e).__name__)
+    collections = _LazyCollections(layout)
     writes, exports, results = _scan_transcript(records, collections)
     writes = [w for w in writes if w[1] in results and not results[w[1]][0]]
     if not writes:
+        if collections.unread_hit:  # no skill folder, so a write of another collection was not told from the list
+            return None, FAIL_OPEN_EXPORT % collections.error
         return None, None  # nothing is read from the repo before a write is found
     writer = _transcript.page_writer_id(records)
     if writer:

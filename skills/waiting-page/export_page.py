@@ -122,9 +122,10 @@ sys.path.insert(0, HERE)
 import splice  # noqa: E402  the one home of the designData block's span
 import page_check  # noqa: E402  the one home that runs the page's picture check
 
-# The one home of the waiting page's collection list. lint/layout.py reads it as WAITING_COLLECTIONS. This file never
-# imports lint/: a single export and the rebuild must run with no lint/ beside them, because the recovery path may not
-# depend on the repo it recovers (verification-recovery-independent-of-state).
+# The one home of the waiting page's collection list. lint/layout.py reads it as WAITING_COLLECTIONS. A single export
+# and the rebuild never import lint/, so they run with no lint/ beside them: the recovery path may not depend on the
+# repo it recovers (verification-recovery-independent-of-state). Only `--all` (export_all) imports layout, to read the
+# registry of the repo it exports.
 COLLECTIONS = ("items", "answers", "groups", "asks", "meta", "receipts")
 COLLECTION_SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")  # copy of lint/layout.py COLLECTION, for the same reason
 PAGE_FOLDER, DESIGN_FILE, PAGE_FILE, FILES_FOLDER = "page", "designData.json", "page.html", "files"

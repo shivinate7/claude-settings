@@ -272,6 +272,9 @@ WAITING_ROLE = "waiting-page"  # the role of the registry entry that is the repo
 ARTIFACT_ID = re.compile(r"[A-Za-z0-9_-]{1,32}")  # a slug of 32 characters or fewer, as a record slug is (git-slug-then-claim-number)
 ROLE = re.compile(r"[a-z0-9][a-z0-9-]*")
 COLLECTION = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
+WAITING_FALLBACK = ("items",)  # the one collection a checkout with no skills/waiting-page folder still treats as the page's
+
+
 def _waiting_collections():
     """What the waiting page's database holds. The one home is skills/waiting-page/export_page.py COLLECTIONS, which never
     imports lint/ (recovery must not depend on the repo it recovers). The skill folder sits at the same place relative to
@@ -341,7 +344,13 @@ def _registry(root, found, where):
         elif no_export:
             names = []
         elif role == WAITING_ROLE:
-            names = list(_waiting_collections())
+            try:
+                names = list(_waiting_collections())
+            except LayoutError:
+                # No skill folder, so no list. A bare tree must still judge a page write by its items (the page-item
+                # rules read the registry through here), so it reads the one collection `items` and no other. This is
+                # not a copy of the list: a full checkout never reaches it.
+                names = list(WAITING_FALLBACK)
         else:
             raise LayoutError("%s: %s (id %s) has no collections to export" % (where, label, entry_id))
         if no_export:
