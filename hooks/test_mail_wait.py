@@ -16,17 +16,18 @@ Contract the builder codes against. The names are pinned in this block, and each
   line (new mail, not started, or ended) goes to stdout or stderr; the cases capture both. Defaults: interval 30 s,
   max_seconds 6600 s. pid_alive(pid) -> bool. start_time(pid) -> float or None, for the reuse check. pid and ppid
   are the waiter's own. run_git(args, env, cache=None, timeout=..., input_text=None) -> (code, out, err): when
-  given, every git call of the waiter goes through it.
+  given, every git call of the waiter goes through it. Default: git_bounded.
 - Exit codes: 0 new mail; 2 not started; 3 ended at max_seconds with no mail.
 - Lock: <cache>/wait-<address with / as _>.lock, created O_EXCL, JSON {pid, ppid, session, started, deadline}.
   started is start_time(pid) at creation. A lock is stale when its pid is dead, its deadline has passed, or its
   started differs from start_time(pid); a stale lock is replaced. The waiter exits when its lock is gone or its
   ppid is dead. It removes its lock on every exit, SIGTERM included. wait() itself installs and restores its
   SIGTERM handler, so an in-process call gets the same handler the CLI gets.
-- hooks/mail.py git(args, env, cache=None, timeout=TRANSFER_BOUND, input_text=None): a timeout kills the child and
-  raises MailError("timeout"). Its Windows branch runs when mail.WINDOWS is True, read at call time, and that branch
-  never calls communicate() after kill. Windows is unmeasured: on this Linux runner the cases drive that branch
-  through subprocess._mswindows and a fake child.
+- hooks/mail.py git(args, env, cache=None, timeout=TRANSFER_BOUND, input_text=None) keeps main's route on every
+  platform: its child starts through _nowindow.run. git_bounded takes the same arguments and raises
+  MailError("timeout") on a timeout. Its Windows branch runs when mail.WINDOWS is True, read at call time, and that
+  branch never calls communicate() after kill. wait() takes git_bounded as its default run_git. Windows is unmeasured:
+  on this Linux runner the cases drive that branch through subprocess._mswindows and a fake child.
 - Writes. The waiter creates its lock. Its baseline fetch writes the cache once, as the mailbox fetch always does.
   During a poll nothing is written, and no listing-*.json file is ever written.
 """
@@ -172,6 +173,14 @@ def diff(before, after):
 
 def git_names(argv):
     return [git_subcommand(args) for args in argv if program_name(args) == "git"]
+
+
+def named_route(case, name, cause):
+    """The mail.py function `name`. A missing name fails the case by assert that names the cause, never by a crash (P3)."""
+    route = getattr(mail_mod, name, None)
+    if route is None:
+        case.fail("mail.%s is missing: %s" % (name, cause))
+    return route
 
 
 class WaitCase(MailCase):
@@ -376,11 +385,13 @@ class Windows(MailCase):
     through CPython's own run() with a fake child that never blocks: each call is recorded, so the call after kill is
     the one that would block. Windows is unmeasured. On this Linux run only the branch is driven, by injection."""
 
-    def timed_out_git(self, windows):
-        """Runs mail.git on a child whose first communicate() times out. Returns (the MailError raised or None, the fake
-        children, the taskkill argvs run through the seam). The seam is _nowindow.run, the one home of a no-window child
-        start: the Windows tree kill goes through it, and the recorder answers it without a process start. Only the
-        Windows case patches it, since the POSIX path runs its git through the same function."""
+    def timed_out_git(self, windows, name="git"):
+        """Runs the named git route (mail.git_bounded for the Windows cases) on a child whose first communicate() times
+        out. Returns (the MailError raised or None, the fake children, the taskkill argvs run through the seam). The seam
+        is _nowindow.run, the one home of a no-window child start: the Windows tree kill goes through it, and the recorder
+        answers it without a process start. Only the Windows case patches it, since the POSIX path runs its git through
+        the same function."""
+        route = named_route(self, name, "the Windows timeout is not scoped to the wait")
         made, taskkills = [], []
 
         def factory(args, *rest, **kwargs):
@@ -400,13 +411,13 @@ class Windows(MailCase):
                 mock.patch.object(subprocess, "_mswindows", windows), \
                 mock.patch.object(mail_mod, "WINDOWS", windows, create=True), seam:
             try:
-                mail_mod.git(["ls-remote", "file:///nowhere", mail_mod.REF], fixture_env(self.case), timeout=3)
+                route(["ls-remote", "file:///nowhere", mail_mod.REF], fixture_env(self.case), timeout=3)
             except mail_mod.MailError as caught:
                 error = caught
         return error, made, taskkills
 
     def test_timed_out_git_on_windows_never_calls_communicate_after_kill(self):
-        error, made, _ = self.timed_out_git(windows=True)
+        error, made, _ = self.timed_out_git(windows=True, name="git_bounded")
         self.assertEqual(len(made), 1, "control: the helper started no child, so the timeout path never ran")
         events = made[0].events
         self.assertIn(("kill", None), events, "control: the timed-out child was never killed")
@@ -427,7 +438,7 @@ class Windows(MailCase):
                          % (error,))
 
     def test_timed_out_git_on_windows_kills_the_child_tree_before_a_bounded_wait(self):
-        error, made, taskkills = self.timed_out_git(windows=True)
+        error, made, taskkills = self.timed_out_git(windows=True, name="git_bounded")
         self.assertEqual(len(made), 1, "control: the helper started no child, so the timeout path never ran")
         self.assertEqual(taskkills, [["taskkill", "/F", "/T", "/PID", str(FAKE_PID)]],
                          "the timed-out Windows child's tree was not killed with taskkill /F /T /PID through the seam: %r"
@@ -439,10 +450,93 @@ class Windows(MailCase):
                         "after the tree kill the helper did not wait on the child with a bound: %r" % waits)
 
     def test_timed_out_git_on_windows_never_closes_the_child_pipes(self):
-        error, made, _ = self.timed_out_git(windows=True)
+        error, made, _ = self.timed_out_git(windows=True, name="git_bounded")
         self.assertEqual(len(made), 1, "control: the helper started no child, so the timeout path never ran")
         closed = [name for name in ("stdin", "stdout", "stderr") if getattr(made[0], name).closed]
         self.assertEqual(closed, [], "the helper closed the timed-out child's pipes: %r" % closed)
+
+
+class Routes(MailCase):
+    """The two git routes stay apart. mail.git keeps main's route on every platform, so the send path and the turn-start
+    read are unchanged: its child starts through _nowindow.run, the seam SshBatchDefault patches. The Windows-safe
+    timeout lives in mail.git_bounded alone, so its child starts through Popen on Windows, and the seam sees only a
+    tree kill after a timeout."""
+
+    def run_recorded(self, route, timeout=3):
+        """Calls the route with Windows on, a child that never blocks, and _nowindow.run recorded. Returns (argvs run
+        through the seam, argvs started through Popen)."""
+        runs, starts = [], []
+
+        def recorder(argv, *rest, **kwargs):
+            runs.append(list(argv))
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        def factory(args, *rest, **kwargs):
+            starts.append(list(args))
+            return FakeChild(args, *rest, **kwargs)
+
+        with mock.patch.object(subprocess, "Popen", factory), \
+                mock.patch.object(mail_mod, "WINDOWS", True, create=True), \
+                mock.patch.object(mail_mod._nowindow, "run", recorder):
+            try:
+                route(["ls-remote", "file:///nowhere", mail_mod.REF], fixture_env(self.case), timeout=timeout)
+            except mail_mod.MailError:
+                pass  # the fake child times out: the case reads what was started, not the result
+        return runs, starts
+
+    def test_on_windows_git_still_starts_its_child_through_the_seam_as_on_main(self):
+        route = named_route(self, "git", "the send path and the turn-start read no longer take main's route")
+        runs, starts = self.run_recorded(route)
+        self.assertTrue([argv for argv in runs if program_name(argv) == "git"],
+                        "mail.git with WINDOWS True did not start its git child through _nowindow.run, as on main: "
+                        "the seam saw %r, and Popen started %r" % (runs, starts))
+
+    def test_on_windows_git_bounded_starts_its_child_through_popen_not_the_seam(self):
+        route = named_route(self, "git_bounded", "the Windows timeout is not scoped to the wait")
+
+        class DoneChild(FakeChild):
+            def communicate(self, input=None, timeout=None):
+                self.events.append(("communicate", timeout))
+                self.returncode = 0
+                return b"ok\n", b""
+
+        runs, starts = [], []
+
+        def recorder(argv, *rest, **kwargs):
+            runs.append(list(argv))
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        def factory(args, *rest, **kwargs):
+            starts.append(list(args))
+            return DoneChild(args, *rest, **kwargs)
+
+        with mock.patch.object(subprocess, "Popen", factory), \
+                mock.patch.object(mail_mod, "WINDOWS", True, create=True), \
+                mock.patch.object(mail_mod._nowindow, "run", recorder):
+            route(["ls-remote", "file:///nowhere", mail_mod.REF], fixture_env(self.case), timeout=3)
+        self.assertEqual([argv for argv in runs if program_name(argv) == "git"], [],
+                         "mail.git_bounded on Windows ran its git child through _nowindow.run: %r" % runs)
+        self.assertTrue([argv for argv in starts if program_name(argv) == "git"],
+                        "mail.git_bounded on Windows started no git child through Popen: %r" % starts)
+
+
+class DefaultRoute(WaitCase):
+    def test_wait_without_run_git_takes_its_git_calls_from_git_bounded(self):
+        """With no run_git injected, wait() routes its git calls through git_bounded, the Windows-safe route. The spy keeps
+        the real route, so the waiter runs as it would. The waiter ends at its first sleep, so its baseline ls-remote is
+        the call under test."""
+        route = named_route(self, "git_bounded", "wait() has no git_bounded route to take by default")
+        store, machine = self.fixture()
+        calls = []
+
+        def spy(args, *rest, **kwargs):
+            calls.append(list(args))
+            return route(args, *rest, **kwargs)
+
+        with mock.patch.object(mail_mod, "git_bounded", spy):
+            run_wait(machine.env, FakeTime(end_at=0), Procs())
+        self.assertTrue(any(args[:1] == ["ls-remote"] for args in calls),
+                        "wait() with no run_git made no ls-remote through git_bounded: %r" % calls)
 
 
 class FakeChild:
