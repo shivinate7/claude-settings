@@ -160,15 +160,18 @@ class CommitHash:
     An id that an example word introduces ("e.g. `41ddef83`", "such as 41ddef83", "an id like 41ddef83") names
     no commit, so it is skipped. Ids listed after the first ("such as `aa11bb22`, `cc33dd44`") join it.
     Any other word before the id leaves it flagged, so "see" and "cut at" still hit.
-    A marker or a list join skips an id only when its clause has no history wording. So an id that a clause
-    with "reverted" or "in main" cites stays flagged, whether the marker comes before or after the verb.
-    "like" after a verb of comparison ("works like <id>") compares to a commit, so it is no marker."""
+    A marker or a list join skips an id only when its clause cites it as history: a past-tense verb right after
+    an id of the clause ("e.g. <id> reverted the guard"), or "in main" before the id ("kept in main, i.e. <id>").
+    A verb before the id or farther after it ("a fixed width id, e.g. <id>", "<id>, assigned when a row is
+    added") is prose and flags nothing by itself.
+    "like" after a verb of comparison, present or past ("works like <id>", "behaved like <id>"), compares to a
+    commit, so it is no marker."""
     HEX = re.compile(r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b")
     # The marker, in any letter case, is the last thing before the id, past any run of spaces, commas, colons
     # and open parens, then an optional backtick, single quote or double quote.
     # Each marker match ends where an id may start, so one pass over the line finds every marker end.
     EXAMPLE = re.compile(r"(?:\be\.g\.|\bi\.e\.|\bsuch\s+as|\bfor\s+(?:example|instance)|\b(?P<like>like))[\s,:(]*[`'\"]?", re.I)
-    COMPARE = re.compile(r"\b(?:works?|behaves?|acts?|looks?)\s+$", re.I)
+    COMPARE = re.compile(r"\b(?:works?|worked|behaves?|behaved|acts?|acted|looks?|looked)\s+$", re.I)
     # The text between one id of such a list and the next, in any letter case: an optional closing backtick,
     # single quote or double quote; then a comma with optional spaces around it and an optional "or" or "and"
     # plus spaces after it, or a lone "or" or "and" with spaces on both sides; then an optional opening quote of
@@ -177,17 +180,18 @@ class CommitHash:
     # A clause ends at ";", "!", "?" or a full stop before a space, except the stop that closes "e.g." or "i.e.".
     # A comma does not end it, so "reverted in main, i.e. <id>" is one clause.
     CLAUSE_END = re.compile(r"[;!?]|(?<!e\.g)(?<!i\.e)\.(?=\s)", re.I)
-    # A past-tense verb names history anywhere in the clause. "in main" and "since" name it only
-    # before the id. "after" is no history word here: "listed after the first (e.g. <id>)" is plain prose.
-    # "fixed-width" is a noun phrase.
-    HISTORY_VERB = re.compile(r"\b(?:reverted|fixed(?!-)|cut|introduced|merged|landed|added|removed|broke)\b", re.I)
-    HISTORY_BEFORE = re.compile(r"\bin\s+main\b|\bsince\b", re.I)
+    # A past-tense verb names history only right after an id (past an optional closing quote). "fixed-width" is a
+    # noun phrase. "in main" names it before the id. "since" is no history word: "stay short since the hash is long, e.g. <id>" gives a reason.
+    # "after" is no history word either: "listed after the first (e.g. <id>)" is plain prose.
+    HISTORY_VERB = re.compile(
+        HEX.pattern + r"[`'\"]?\s+(?i:reverted|fixed(?!-)|cut|introduced|merged|landed|added|removed|broke)\b")
+    HISTORY_BEFORE = re.compile(r"\bin\s+main\b", re.I)
 
     def finditer(self, text):
         marker_ends = {e.end() for e in self.EXAMPLE.finditer(text)
                        if not (e.group("like") and self.COMPARE.search(text[max(0, e.start() - 12):e.start()]))}
         starts = [0] + [c.end() for c in self.CLAUSE_END.finditer(text)]
-        clauses = {}  # clause index -> (a past verb is in it, where its first before-word starts or None)
+        clauses = {}  # clause index -> (a past verb follows an id in it, where its "in main" starts or None)
         prior = None  # the end of the id just before, when that id is skipped as an example
         for m in self.HEX.finditer(text):
             if m.start() in marker_ends or (prior is not None and self.JOIN.fullmatch(text, prior, m.start())):
