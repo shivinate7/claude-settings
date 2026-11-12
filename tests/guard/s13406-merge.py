@@ -98,9 +98,47 @@ for _name, _command in (
     ("an unquoted body a shell expands, fed to python",
      "\n".join(["python3 - <<EOF", 'x = "$(gh pr create -t x)"', "EOF"])),
     ("a bash -c wrapper with short flags", "bash -c 'gh pr create -t x'"),
+    # An unquoted body reads every `$( )` and backtick span live, whatever quotes surround it. Bash ends a body
+    # only at a line that is exactly the delimiter (under `<<-`, after leading tabs). The four rows below end
+    # their body early at a padded EOF line that bash keeps open, so the single-quoted `$( )` after it runs under
+    # bash, and the guard reads it as text. The rows after them are pins: green on the base, and each guards the
+    # shape or a scanner case in the body.
+    ("an unquoted python body, a tab-indented EOF line ahead of a single-quoted $( ) gh pr create",
+     "\n".join(["python3 - <<EOF", "\tEOF", "x = '$(gh pr create -t x)'", "EOF"])),
+    ("an unquoted python body, a space-indented EOF line ahead of a single-quoted $( ) gh pr create",
+     "\n".join(["python3 - <<EOF", "  EOF", "x = '$(gh pr create -t x)'", "EOF"])),
+    ("an unquoted python body, an EOF line with a trailing space ahead of a single-quoted $( ) gh pr create",
+     "\n".join(["python3 - <<EOF", "EOF ", "x = '$(gh pr create -t x)'", "EOF"])),
+    ("an unquoted python body under <<-, a space-indented EOF line ahead of a single-quoted $( ) gh pr create",
+     "\n".join(["python3 - <<-EOF", "  EOF", "x = '$(gh pr create -t x)'", "EOF"])),
+    ("an unquoted python body, a single-quoted $( ) gh pr create",
+     "\n".join(["python3 - <<EOF", "x = '$(gh pr create -t x)'", "EOF"])),
+    ("an unquoted python body, a single-quoted backtick gh pr create span",
+     "\n".join(["python3 - <<EOF", "x = '`gh pr create -t x`'", "EOF"])),
+    ("an unquoted cat body, a single-quoted $( ) gh pr create",
+     "\n".join(["cat > notes.txt <<EOF", "x = '$(gh pr create -t x)'", "EOF"])),
+    ("a python file from an unquoted heredoc, a single-quoted $( ) gh pr create, run by python3",
+     "\n".join(["cat > f.py <<EOF", "x = '$(gh pr create -t x)'", "EOF", "python3 f.py"])),
+    ("an unquoted python body, a lone apostrophe ahead of a single-quoted $( ) gh pr create",
+     "\n".join(["python3 - <<EOF", "# don't", "x = '$(gh pr create -t x)'", "EOF"])),
+    ("an unquoted python body, a comment opener inside a string ahead of a single-quoted $( ) gh pr create",
+     "\n".join(["python3 - <<EOF", "y = 'a # b'", "x = '$(gh pr create -t x)'", "EOF"])),
+    ("an unquoted python body, a multi-line triple-quoted string ahead of a single-quoted $( ) gh pr create",
+     "\n".join(["python3 - <<EOF", 'y = """', "line", '"""', "x = '$(gh pr create -t x)'", "EOF"])),
 ):
     sh("draft-pr: " + _name + " is refused", _command, "deny", "draft-pr", cwd=NOGIT,
        carries=DRAFT_REMEDY, lacks=DRAFT_LACKS)
+# Controls, green. Bash runs none of these, so each is allowed. A quoted heredoc keeps its `$( )` as text. A `<<-`
+# body ends at a tab-indented EOF line, so the single-quoted `$( )` after it is shell text. A backslash keeps the
+# `$(` literal in an unquoted body.
+sh("draft-pr: a quoted python heredoc, a single-quoted $( ) gh pr create, is allowed",
+   "\n".join(["python3 - <<'EOF'", "x = '$(gh pr create -t x)'", "EOF"]), "allow", cwd=NOGIT)
+sh("draft-pr: a quoted python heredoc, a space-indented EOF line ahead of a single-quoted $( ) gh pr create, is allowed",
+   "\n".join(["python3 - <<'EOF'", "  EOF", "x = '$(gh pr create -t x)'", "EOF"]), "allow", cwd=NOGIT)
+sh("draft-pr: an unquoted python body under <<-, a tab-indented EOF line that ends it, then a single-quoted $( ) gh pr create, is allowed",
+   "\n".join(["python3 - <<-EOF", "\tEOF", "x = '$(gh pr create -t x)'", "EOF"]), "allow", cwd=NOGIT)
+sh("draft-pr: an unquoted python body, a backslash before a single-quoted $( ) gh pr create, is allowed",
+   "\n".join(["python3 - <<EOF", "x = '\\$(gh pr create -t x)'", "EOF"]), "allow", cwd=NOGIT)
 # UNCERTAIN, kept as main has it. A wrapper word (`env`, `sudo`) before a python run is read as a possible
 # shell, so the body stays in view and the case is refused. Move it to allow only with a decision on wrappers.
 for _name, _command in (
