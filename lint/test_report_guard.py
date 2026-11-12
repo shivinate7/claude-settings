@@ -5871,6 +5871,21 @@ class PassClaimCitesVerdictTests(unittest.TestCase):
         calls = [self.call(self.CMD, self.PASS_LINE, "tu_v")]
         self.assert_passes(self.landed_report("lint passed."), calls=calls, landed=True)
 
+    # Full size: the cite and the later FAIL can sit far apart in one transcript. The rule reads all of it, so a
+    # cite early in a long transcript still counts, and a FAIL late in one still cancels it.
+
+    def long_body(self, turns):
+        calls = []
+        for n in range(turns):
+            calls += self.call("ls dir%d" % n, "ok", "tu_f%d" % n)
+        return calls
+
+    def test_control_cite_early_in_a_long_transcript_passes_and_a_late_fail_is_refused(self):
+        early = self.call(self.CMD, self.PASS_LINE, "tu_v")
+        late = self.call(self.CMD, self.FAIL_LINE, "tu_z")
+        self.assert_passes(self.report("lint passed."), calls=early + self.long_body(400))
+        self.assert_blocked(self.report("lint passed."), calls=early + self.long_body(400) + late)
+
     # Cost: the refusal is one stdout line, with no process started and no file written (decision
     # guard-remedy-not-to-owner, "Cost"). A fresh config folder must stay empty after the refused run.
 
