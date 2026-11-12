@@ -748,7 +748,7 @@ _bd_newer = diff_repo("bd-newer-main", _newer_main_merge)
 sh("builder-refuse: a builder that clean-merges a newer main and changes no test is allowed at commit",
    COMMIT, "allow", cwd=_bd_newer, agent_id="bld1", agent_type="builder")
 sh("builder-refuse: a builder that clean-merges a newer main and changes no test is allowed at push",
-   PUSH, "allow", cwd=_bd_newer, agent_id="bld1", agent_type="builder")
+   PUSH, "allow", cwd=_bd_newer, agent_id="bld1", agent_type="builder", transcript=PUSH_TARGET_REPOINT)
 
 # Rebase: a builder that rebases onto the lane tip is judged against that tip. A test file written back
 # to main's bytes differs from it, so it is refused. The clean rebase is checked with the log checks below.
@@ -1292,7 +1292,8 @@ _bd_m_main_merge_clean = diff_repo("bd-m-main-test-merge-clean", _main_test_merg
 sh("builder-refuse: a builder's merge commit that carries main's clean test change, with no builder edit, is allowed "
    "at commit", COMMIT, "allow", cwd=_bd_m_main_merge_clean, agent_id="bld1", agent_type="builder")
 sh("builder-refuse: a builder's merge commit that carries main's clean test change, with no builder edit, is allowed "
-   "at push", PUSH, "allow", cwd=_bd_m_main_merge_clean, agent_id="bld1", agent_type="builder")
+   "at push", PUSH, "allow", cwd=_bd_m_main_merge_clean, agent_id="bld1", agent_type="builder",
+   transcript=PUSH_TARGET_REPOINT)
 LOG_CHECKS_EXTRA.append(("builder-refuse: a builder's merge commit that carries main's clean test change, with no "
                          "builder edit, is allowed at commit, push and stop, and logs no builder-diff line",
                          clean_builder_case("bd-m-main-test-merge-clean")))

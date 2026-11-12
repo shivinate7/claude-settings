@@ -48,8 +48,9 @@ pt_fixture("pt-empty-file", [(PUSH_TARGET_AGENT, [])])
 pt_fixture("pt-no-agent-file", [])
 pt_fixture("pt-agent-folder", [(PUSH_TARGET_AGENT, None)])
 # The brief-names-push-target re-point: the existing agent pushes of s21304, s22868 and s23264 send `git push origin work`,
-# and each agent's brief names `work`, so they stay allowed once the rule is built. One file for the three agent ids.
-pt_fixture("pt-repoint", [("auth1", ["Push to: work"]), ("rw1", ["Push to: work"]), ("bld1", ["Push to: work"])])
+# and each agent's brief names `work`, so they stay allowed once the rule is built. One file for the four agent ids.
+pt_fixture("pt-repoint", [("auth1", ["Push to: work"]), ("rw1", ["Push to: work"]), ("bld1", ["Push to: work"]),
+                          ("dz1", ["Push to: work"])])
 PUSH_TARGET_REPOINT = role_path("pt-repoint")
 lazy_fixture([role_path(name) for name in PUSH_TARGET_FIXTURES], write_agent_transcripts)
 

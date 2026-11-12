@@ -46,8 +46,9 @@ for _name, _change in AUTHOR_RED:
     _repo = diff_repo("a-" + _name, _change)
     sh("author-diff: commit with a %s change is allowed and logged" % _name, COMMIT, "allow",
        cwd=_repo, agent_id="auth1", agent_type="test-author")
+    # The push names its target in the agent's brief (rule push-target-named, brief-names-push-target): the brief is PUSH_TARGET_REPOINT.
     sh("author-diff: push with a %s change is allowed and logged" % _name, PUSH, "allow",
-       cwd=_repo, agent_id="auth1", agent_type="test-author")
+       cwd=_repo, agent_id="auth1", agent_type="test-author", transcript=PUSH_TARGET_REPOINT)
     add("author-diff: stop with a %s change is allowed and logged" % _name, "allow",
         event="SubagentStop", cwd=_repo, agent_id="auth1", agent_type="test-author")
 for _name, _change in AUTHOR_GREEN:
@@ -260,7 +261,7 @@ for _name, _change in RW_RED:
     sh("record-writer-diff: commit with a %s change is allowed" % _name, COMMIT, "allow",
        cwd=_repo, agent_id="rw1", agent_type="record-writer")
     sh("record-writer-diff: push with a %s change is allowed" % _name, PUSH, "allow",
-       cwd=_repo, agent_id="rw1", agent_type="record-writer")
+       cwd=_repo, agent_id="rw1", agent_type="record-writer", transcript=PUSH_TARGET_REPOINT)
     add("record-writer-diff: stop with a %s change is allowed" % _name, "allow",
         event="SubagentStop", cwd=_repo, agent_id="rw1", agent_type="record-writer")
 for _name, _change in RW_GREEN:
@@ -268,7 +269,7 @@ for _name, _change in RW_GREEN:
     sh("record-writer-diff: commit with an all-.md change is allowed", COMMIT, "allow",
        cwd=_repo, agent_id="rw1", agent_type="record-writer", silent=True)
     sh("record-writer-diff: push with an all-.md change is allowed", PUSH, "allow",
-       cwd=_repo, agent_id="rw1", agent_type="record-writer", silent=True)
+       cwd=_repo, agent_id="rw1", agent_type="record-writer", silent=True, transcript=PUSH_TARGET_REPOINT)
     add("record-writer-diff: stop with an all-.md change is allowed", "allow",
         event="SubagentStop", cwd=_repo, agent_id="rw1", agent_type="record-writer", silent=True)
 

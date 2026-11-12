@@ -298,6 +298,11 @@ def _diff_log_run(folder, repo, agent_type, agent_id, commit=True):
                "agent_id": agent_id, "agent_type": agent_type} for c in ((COMMIT, PUSH) if commit else (PUSH,))]
     bodies.append({"hook_event_name": "SubagentStop", "cwd": repo, "agent_id": agent_id,
                    "agent_type": agent_type})
+    # The push names its target in the agent's brief (rule push-target-named, brief-names-push-target).
+    materialize(PUSH_TARGET_REPOINT)
+    for body in bodies:
+        if body.get("tool_input", {}).get("command") == PUSH:
+            body["transcript_path"] = PUSH_TARGET_REPOINT
     out = ""
     for body in bodies:
         got = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True,
