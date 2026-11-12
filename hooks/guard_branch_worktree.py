@@ -6,9 +6,10 @@ Other files reach these names through `guard`.
 import shlex
 
 from guard_core import (
-    basename, branch_is_empty, clone_worktrees, git_calls, long_flag_abbrev, path_is_inside,
+    _git, basename, branch_is_empty, clone_worktrees, git_calls, long_flag_abbrev, path_is_inside,
     resolve_default_base,
 )
+from guard_push_delete import push_destinations, push_refspecs
 
 
 BRANCH_DELETE_FLAGS = {"-d", "-D", "--delete"}
@@ -250,6 +251,144 @@ def two_worktrees_hit(segment: str, root: str) -> str:
         held = {ref for tree, ref in trees if ref and tree != own}
         if any("refs/heads/" + name in held for name in names):
             return matched
+    return ""
+
+
+# A new branch name never holds the word git. Claude Code's own worktree check refuses an agent's git
+# command that names such a branch, so a lane that made one could not run its own checkout or push.
+# The forms this rule reads, each one a creation of a name:
+#   `checkout -b|-B|--orphan <name>`, `switch -c|-C|--create|--force-create|--orphan <name>`,
+#   `branch <name>` (flags that only tune the create are skipped; any other flag is not read),
+#   `worktree add -b|-B <name>`, and `push <remote> <spec>` whose spec and destination hold the word
+#   and whose destination the clone holds no remote-tracking ref for.
+# A name that already exists keeps its name: a local branch for the first four forms, a remote-tracking
+# ref for the push. The word is the lowercase substring `git`, as the owner's check reads it. A read that
+# fails passes, since nothing then shows a creation. The remedy names no command of the refused form
+# (rule git-remedy-never-names-target).
+BRANCH_SLUG_RULE = "branch-slug-no-git"
+BRANCH_SLUG_REFUSE_REASON = (
+    "Rule (branch-slug-no-git): this call creates a branch whose name holds the word git. Claude Code's "
+    "own worktree check refuses any later command of yours that names such a branch, so the lane could "
+    "not run its own checkout or push. "
+    "Remedy: pick a slug without that word, such as the lane's topic in plain words, and create the branch "
+    "under that name. A branch that already exists keeps its name. "
+    "(rule branch-slug-no-git, a new branch name never holds the word)"
+)
+BRANCH_SLUG_WORD = "git"
+# `git branch` flags that tune a create and take no value. Any other flag makes the call one this rule
+# does not read: a delete, a rename, a copy, a list or an upstream edit.
+_BRANCH_CREATE_FLAGS = {"-f", "--force", "-t", "--track", "--no-track", "-q", "--quiet", "--create-reflog"}
+
+
+def new_branch_names(subcommand: str, args):
+    """The branch names a checkout, switch, branch or worktree-add call would create, else [].
+
+    The creates are the value of `-b`/`-B` (checkout, worktree add), `-c`/`-C`, `--create`,
+    `--force-create` (switch) and `--orphan` (checkout, switch); the first plain word of a `branch`
+    call that has no flag outside _BRANCH_CREATE_FLAGS. A short cluster ends at its first create
+    letter, whose value is the rest of the word or the next word. This reads only the creates, where
+    two_worktrees_form reads only the resets, so the two stay apart.
+    """
+    names = []
+    if subcommand in ("checkout", "switch", "worktree"):
+        if subcommand == "worktree":
+            if args[:1] != ["add"]:
+                return []
+            args, letters = args[1:], "bB"
+        else:
+            letters = "cC" if subcommand == "switch" else "bB"
+        take = skip = False
+        for arg in args:
+            if arg == "--":
+                break
+            if take:
+                names.append(arg)
+                take = False
+            elif skip:
+                skip = False
+            elif arg.startswith("--"):
+                flag = arg.split("=", 1)[0]
+                if (long_flag_abbrev(arg, "--orphan", "--orp") and subcommand != "worktree") or (
+                        subcommand == "switch" and (long_flag_abbrev(arg, "--create", "--cr")
+                                                    or long_flag_abbrev(arg, "--force-create", "--force-c"))):
+                    if "=" in arg:
+                        names.append(arg.split("=", 1)[1])
+                    else:
+                        take = True
+                elif subcommand == "worktree" and flag == "--reason":
+                    skip = "=" not in arg
+            elif arg.startswith("-") and arg != "-":
+                for offset, char in enumerate(arg[1:], start=2):
+                    if char in letters:
+                        if arg[offset:]:
+                            names.append(arg[offset:])
+                        else:
+                            take = True
+                        break
+        return names
+    if subcommand == "branch":
+        plain = []
+        for arg in args:
+            if arg.startswith("-"):
+                if arg.split("=", 1)[0] not in _BRANCH_CREATE_FLAGS:
+                    return []
+            else:
+                plain.append(arg)
+        return plain[:1]
+    return []
+
+
+def _local_branch_exists(root: str, name: str):
+    """True when `refs/heads/<name>` exists, False when it does not, None when git cannot say."""
+    answer = _git(root, "show-ref", "--verify", "-q", "refs/heads/" + name)
+    if answer is None or answer.returncode not in (0, 1):
+        return None
+    return answer.returncode == 0
+
+
+def _remote_ref_exists(root: str, remote: str, name: str):
+    """True when a remote-tracking ref holds `name`: under REMOTE when one is named, else under any
+    remote. None when git cannot say."""
+    if remote:
+        answer = _git(root, "show-ref", "--verify", "-q", "refs/remotes/%s/%s" % (remote, name))
+        if answer is None or answer.returncode not in (0, 1):
+            return None
+        return answer.returncode == 0
+    answer = _git(root, "for-each-ref", "--format=%(refname)", "refs/remotes")
+    if answer is None or answer.returncode != 0:
+        return None
+    return any(ref.split("/", 3)[-1] == name for ref in answer.stdout.splitlines())
+
+
+def _new_push_names(args, root: str):
+    """The destinations of a push whose spec and destination both hold the word, for each of which the
+    clone holds no remote-tracking ref. A push that names no refspec, a deletion, `--all`, `--mirror` and a
+    tags-only push return []: push_refspecs reads none of them, and none names a branch to create."""
+    named = push_refspecs(args)
+    if named is None or not named[1]:
+        return []
+    remote, specs = named
+    found = []
+    for spec, dest in zip(specs, push_destinations(args, root)):
+        if not dest or dest.startswith("refs/") or "*" in dest:
+            continue
+        if BRANCH_SLUG_WORD in spec and BRANCH_SLUG_WORD in dest and _remote_ref_exists(root, remote, dest) is False:
+            found.append(dest)
+    return found
+
+
+def branch_slug_hit(segment: str, root: str) -> str:
+    """Return the matched text when one segment creates a branch whose name holds the word git (see
+    BRANCH_SLUG_REFUSE_REASON), else ''. ROOT is the tree the call runs in. Git is asked only for a call
+    that names the word, once per name."""
+    for subcommand, args in git_calls(segment):
+        if subcommand == "push":
+            names = _new_push_names(args, root)
+        else:
+            names = [name for name in new_branch_names(subcommand, args)
+                     if BRANCH_SLUG_WORD in name and _local_branch_exists(root, name) is False]
+        if names:
+            return " ".join(["git", subcommand] + list(args)).strip()
     return ""
 
 
