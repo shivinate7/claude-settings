@@ -18279,6 +18279,10 @@ class BatchFreeze(CloudSession):
         self.heads = {}  # lane PR number -> its head sha on origin, as lane() and advance() leave it
         self.runs = {}  # run URL -> (conclusion, head sha): the answers the host's one run read gives
         self.host.cited_run = self.read_run  # the real Host.cited_run, scripted per case (as the cases at merge/test_merge.py's cited_run do)
+        self.run_jobs = {}  # run id (text) -> {job name: its failing lines} that Host.failed_jobs gives, or the exception its read raises
+        self.job_reads = []  # each run id whose jobs were read, in order: a refusal made before the read leaves it empty
+        self.host.failed_jobs = self.read_failed_jobs
+        self.host.failed_lines = self.read_failed_lines  # Host.failed_lines flattens failed_jobs, so the fake does too
 
     def lane(self, n, on=None):
         """Lane PR #n: a branch on origin with one commit of its own, off origin/main (or, with `on`, off lane #on, so its head contains
@@ -19138,6 +19142,440 @@ class BatchFreeze(CloudSession):
             rc, out = self.run_batch("--batch-build", "nightly", "--blame", "102", "--run", url)
         self.assertRegex(out, r"running|not completed|not finished|in progress|pending", "a blame from a run still running is not refused as one: %s" % out)
         self.assertEqual(rc, 1, "a blame from a run still running exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
+    # Split a red batch: `merge --batch-split NAME --run URL` reads the failing lines of each failed job of the run, maps each job to the one lane
+    # its case or file names, and drops that lane with its dependents (decision batch-freeze-lane-set: one lane per run). Each refusal's first
+    # assert names its cause: the parser knows the flag, then the refusal's own text.
+
+    def read_failed_jobs(self, run_id):
+        """Host.failed_jobs, scripted per run: {job name: failing lines}, or the exception the read raises. The run is named by its id or by its
+        URL, as a caller passes it. A run no case scripted is a Stop, as a failed read is: never a default answer."""
+        key = str(run_id).rstrip("/").rsplit("/", 1)[-1]
+        self.job_reads.append(key)
+        if key not in self.run_jobs:
+            raise merge.Stop(f"no jobs were scripted for run {key}")
+        got = self.run_jobs[key]
+        if isinstance(got, Exception):
+            raise got
+        return got
+
+    def read_failed_lines(self, run_id):
+        """Host.failed_lines: the failing lines of every failed job of the run, flattened, as the real Host gives them."""
+        return [line for lines in self.read_failed_jobs(run_id).values() for line in lines]
+
+    def case_lane(self, n, case, on=None):
+        """Lane #n with one commit that adds `def <case>(self):` to its own test file, so a failing log that names `case` maps to lane #n.
+        -> its head sha."""
+        self.lane(n, on=on)
+        return self.lane_commit(n, os.path.join("lanes", f"{n}-tests.txt"), f"def {case}(self):\n", f"lane {n}: {case}")
+
+    def split_run(self, n, jobs, conclusion="failure", sha=None):
+        """Run n, which concluded `conclusion` on batch-nightly's head (or on `sha`) and whose failing lines Host.failed_jobs gives as `jobs`. -> its URL."""
+        self.run_jobs[str(n)] = jobs
+        return self.scripted_run(n, conclusion, sha or self.head("batch-nightly"))
+
+    def record_body_writes(self):
+        """From here on each body the host is asked to write is kept, in order, in self.body_writes, and is written as it was."""
+        self.body_writes = []
+        real = self.host.set_body
+
+        def spy(n, body):
+            self.body_writes.append(body)
+            real(n, body)
+        self.host.set_body = spy
+
+    def main_holds(self, path, text):
+        """origin's main gets one commit that adds `path` with `text`, so the lanes made after it hold that file too. -> main's new head."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, path), text)
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", f"main: {path}")
+        sh(o, "git", "push", "-q", "origin", "main")
+        return self.head("main")
+
+    def assert_split_knows_the_flag(self, out, argv):
+        """The parser knows --batch-split: argparse's own refusal of the flag names it as unrecognized, and a case must not pass on that."""
+        self.assertNotRegex(out, r"unrecognized arguments: --batch-split", "the parser does not know --batch-split (argv %s): %s" % (argv, out))
+
+    def test_batch_split_drops_the_one_lane_whose_case_the_log_names_and_keeps_the_rest(self):
+        self.case_lane(101, "test_items")  # a near miss: test_it is not a whole word in test_items, so #101 is not named
+        self.case_lane(102, "test_it")
+        self.lane(103)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        self.assertEqual(self.frozen_lanes(pr), [101, 102, 103], "setup: batch-nightly does not hold lanes #101, #102 and #103")
+        url = self.split_run(7101, {"unit-tests": ["FAIL: test_it (__main__.C.test_it)", "FAILED (failures=1)"]})  # the summary line is skipped
+        self.record_body_writes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        self.assertEqual(rc, 0, "a split whose one case names #102 exited %s, not 0: %s" % (rc, out))
+        self.assertEqual(self.frozen_lanes(pr), [101, 103], "the split did not drop #102 alone, the lane the failing case names: %s" % out)
+        self.assertFalse(self.on_origin(self.heads[102], "batch-nightly"), "the split left lane #102 on batch-nightly: %s" % out)
+        self.assertTrue(self.on_origin(self.heads[101], "batch-nightly") and self.on_origin(self.heads[103], "batch-nightly"),
+                        "the split took a kept lane off batch-nightly: %s" % out)
+        for body in self.body_writes:
+            self.assertFalse(any(x.startswith("Blamed: #") for x in (block_lines(body) or [])),
+                             "the split wrote a Blamed line, though the drop of a proven lane needs none: %s" % out)
+
+    def test_batch_split_drops_the_named_lane_with_its_stacked_dependents_and_keeps_the_rest(self):
+        self.lane(101)
+        self.case_lane(102, "test_it")
+        self.case_lane(103, "test_later", on=102)  # stacked on #102: its head holds #102's
+        self.lane(104)
+        pr = self.frozen_batch("nightly", [101, 102, 103, 104])
+        self.assertEqual(self.frozen_lanes(pr), [101, 102, 103, 104], "setup: batch-nightly does not hold lanes #101 to #104")
+        url = self.split_run(7102, {"unit-tests": ["FAIL: test_it (__main__.C.test_it)"]})
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        self.assertEqual(rc, 0, "a split whose named lane has a dependent exited %s, not 0: %s" % (rc, out))
+        self.assertEqual(self.frozen_lanes(pr), [101, 104], "the split did not drop #102 with its dependent #103 and keep #101 and #104: %s" % out)
+        self.assertFalse(self.on_origin(self.heads[103], "batch-nightly"), "the split left the dependent #103 on batch-nightly: %s" % out)
+
+    def test_batch_split_maps_a_failing_line_with_no_case_to_its_lane_by_the_file_it_names(self):
+        self.lane(101)
+        self.lane(102)
+        self.lane(103)
+        self.lane_commit(103, os.path.join("lanes", "103_check.py"), "print('check')\n", "lane 103: a check script")
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        url = self.split_run(7103, {"lint": ["FAILED lanes/103_check.py - boom"]})  # no case: the file names the lane
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        self.assertEqual(rc, 0, "a split whose line names only #103's file exited %s, not 0: %s" % (rc, out))
+        self.assertEqual(self.frozen_lanes(pr), [101, 102], "the split did not drop #103 by the file its line names: %s" % out)
+
+    def test_batch_split_of_a_case_in_two_lanes_drops_nothing_and_names_the_job(self):
+        self.case_lane(101, "test_shared")
+        self.case_lane(102, "test_shared")  # the same case in two lanes' own diffs: the job maps to two lanes
+        self.lane(103)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        url = self.split_run(7104, {"unit-tests": ["FAIL: test_shared (__main__.C.test_shared)"]})
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        self.assertRegex(out, r"unmapped", "a job whose case is in two lanes is not refused as unmapped: %s" % out)
+        self.assertIn("unit-tests", out, "the refusal does not name the job whose case is in two lanes: %s" % out)
+        self.assertEqual(rc, 1, "a split of a case in two lanes exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
+    def test_batch_split_whose_log_cannot_be_read_drops_nothing(self):
+        self.case_lane(101, "test_one")
+        self.case_lane(102, "test_it")
+        self.lane(103)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        unread = merge.UnreadJobs("unknown: run 7105 has a job whose log was not read (unit-tests failure, its log gave no case or file)",
+                                  ["FAIL: test_it (__main__.C.test_it)"])  # the lines it carries name #102: the split must still drop nothing
+        url = self.split_run(7105, unread)
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        self.assertRegex(out, r"unknown", "a split whose log cannot be read is not refused as unknown: %s" % out)
+        self.assertEqual(rc, 1, "a split whose log cannot be read exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
+    def test_batch_split_naming_two_lanes_by_two_jobs_drops_nothing_and_names_both(self):
+        self.case_lane(101, "test_one")
+        self.case_lane(102, "test_two")
+        self.lane(103)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        url = self.split_run(7106, {"unit-tests": ["FAIL: test_one (__main__.C.test_one)"],
+                                    "lint": ["FAIL: test_two (__main__.C.test_two)"]})
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        self.assertRegex(out, r"one lane per run", "two lanes named by two jobs are not refused as one lane per run: %s" % out)
+        self.assertTrue("#101" in out and "#102" in out, "the refusal does not name both lanes #101 and #102: %s" % out)
+        self.assertEqual(rc, 1, "a split naming two lanes exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
+    def test_batch_split_naming_one_lane_by_two_jobs_drops_that_one_lane(self):
+        self.lane(101)
+        self.case_lane(102, "test_it")
+        self.lane(103)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        same = ["FAIL: test_it (__main__.C.test_it)"]
+        url = self.split_run(7107, {"unit-tests": same, "lint": same})  # two jobs, one lane: the union is one lane
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        self.assertEqual(rc, 0, "a split whose two jobs name one lane exited %s, not 0: %s" % (rc, out))
+        self.assertEqual(self.frozen_lanes(pr), [101, 103], "the split did not drop #102, the one lane both jobs name: %s" % out)
+
+    def test_batch_split_where_one_job_maps_and_another_does_not_drops_nothing(self):
+        self.case_lane(101, "test_one")
+        self.case_lane(102, "test_it")
+        self.lane(103)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        url = self.split_run(7108, {"unit-tests": ["FAIL: test_it (__main__.C.test_it)"],
+                                    "lint": ["FAIL: test_gone (__main__.C.test_gone)"]})  # no lane's own diff holds test_gone
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        self.assertRegex(out, r"unmapped", "a job that maps to no lane is not refused as unmapped: %s" % out)
+        self.assertIn("lint", out, "the refusal does not name the job that maps to no lane: %s" % out)
+        self.assertEqual(rc, 1, "a split with one unmapped job exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
+    def test_batch_split_of_a_case_that_a_lane_only_deletes_drops_nothing(self):
+        self.main_holds(os.path.join("lanes", "gone.txt"), "def test_gone(self):\n")  # main holds the case; no lane adds it
+        self.lane(101)
+        self.lane_commit(101, os.path.join("lanes", "gone.txt"), "", "lane 101: remove the case")  # a `-` line only
+        self.lane(102)
+        self.lane(103)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        url = self.split_run(7109, {"unit-tests": ["FAIL: test_gone (__main__.C.test_gone)"]})
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        self.assertRegex(out, r"unmapped", "a case that only a lane deletes is not refused as unmapped: %s" % out)
+        self.assertEqual(rc, 1, "a split whose case only a lane deletes exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
+    def test_batch_split_of_a_failed_job_with_a_line_that_names_neither_drops_nothing(self):
+        self.case_lane(101, "test_one")
+        self.case_lane(102, "test_it")
+        self.lane(103)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        url = self.split_run(7110, {"unit-tests": ["FAIL: test_it (__main__.C.test_it)", "FAIL boom happened"]})  # the second line names neither
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        self.assertRegex(out, r"unknown|unmapped", "a job with a line that names neither a case nor a file is not refused: %s" % out)
+        self.assertEqual(rc, 1, "a split with a line that names neither exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
+    def test_batch_split_whose_named_lane_with_its_dependents_is_every_lane_drops_nothing(self):
+        self.case_lane(101, "test_it")
+        self.case_lane(102, "test_other", on=101)  # stacked on #101: dropping #101 takes #102 too, which is every lane
+        pr = self.frozen_batch("nightly", [101, 102])
+        url = self.split_run(7111, {"unit-tests": ["FAIL: test_it (__main__.C.test_it)"]})
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        self.assertRegex(out, r"leaves batch nightly no lane", "a split that would leave batch-nightly no lane is not refused as one: %s" % out)
+        self.assertEqual(rc, 1, "a split that would leave no lane exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
+    def test_batch_split_whose_run_names_no_failed_job_drops_nothing(self):
+        self.lane(101)
+        self.lane(102)
+        pr = self.frozen_batch("nightly", [101, 102])
+        url = self.split_run(7112, {})  # only the rollup failed: no job names a lane
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        self.assertRegex(out, r"no lane", "a run that names no lane is not refused as one: %s" % out)
+        self.assertEqual(rc, 1, "a split of a run that names no lane exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
+    def test_batch_split_of_a_twelve_lane_batch_drops_the_one_lane_and_keeps_the_eleven(self):
+        numbers = [9, 10, 100, *range(101, 109)]  # twelve lanes; a text sort would put #10 and #100 before #9
+        for n in numbers:
+            if n == 100:
+                self.case_lane(n, "test_it")
+            else:
+                self.lane(n)
+        pr = self.frozen_batch("nightly", numbers)
+        self.assertEqual(self.frozen_lanes(pr), numbers, "setup: batch-nightly does not hold the twelve lanes")
+        url = self.split_run(7113, {"unit-tests": ["FAIL: test_it (__main__.C.test_it)"]})
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        self.assertEqual(rc, 0, "a split of a twelve-lane batch exited %s, not 0: %s" % (rc, out))
+        self.assertEqual(self.frozen_lanes(pr), [n for n in numbers if n != 100], "the split of a twelve-lane batch did not drop #100 alone: %s" % out)
+
+    def test_batch_split_of_a_green_run_drops_nothing_and_says_not_failure(self):
+        self.case_lane(101, "test_it")
+        self.lane(102)
+        pr = self.frozen_batch("nightly", [101, 102])
+        url = self.split_run(7114, {"unit-tests": ["FAIL: test_it (__main__.C.test_it)"]}, conclusion="success")
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        self.assertRegex(out, r"not failure|success|green|not (a )?failed", "a split of a green run is not refused as one that is not failed: %s" % out)
+        self.assertEqual(rc, 1, "a split of a green run exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
+    def test_batch_split_of_a_run_still_running_drops_nothing_and_says_so(self):
+        self.case_lane(101, "test_it")
+        self.lane(102)
+        pr = self.frozen_batch("nightly", [101, 102])
+        url = self.split_run(7115, {"unit-tests": ["FAIL: test_it (__main__.C.test_it)"]}, conclusion=None)  # no conclusion yet
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        self.assertRegex(out, r"running|not completed|not finished|in progress|pending", "a split of a run still running is not refused as one: %s" % out)
+        self.assertEqual(rc, 1, "a split of a run still running exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
+    def test_batch_split_of_a_run_on_an_older_head_drops_nothing_and_says_so(self):
+        self.case_lane(101, "test_it")
+        self.lane(102)
+        pr = self.frozen_batch("nightly", [101, 102])
+        older = self.head("batch-nightly")
+        self.bump("batch-nightly")  # the batch's head moves on: the red run below ran on `older`
+        url = self.split_run(7116, {"unit-tests": ["FAIL: test_it (__main__.C.test_it)"]}, sha=older)
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        self.assertRegex(out, r"current head|older head", "a split of a run on an older head is not refused as one: %s" % out)
+        self.assertEqual(rc, 1, "a split of a run on an older head exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
+    def test_batch_split_whose_batch_tip_moved_past_the_run_head_drops_nothing(self):
+        self.case_lane(101, "test_it")
+        self.lane(102)
+        pr = self.frozen_batch("nightly", [101, 102])
+        run_head = self.head("batch-nightly")
+        url = self.split_run(7117, {"unit-tests": ["FAIL: test_it (__main__.C.test_it)"]}, sha=run_head)
+        self.bump("batch-nightly")  # origin's batch moves on after the run
+        real = self.host.batch_pr
+
+        def read_at_the_run_head(branch):  # the pull request as a read from before the move gives it: its head is the run's
+            found = real(branch)
+            return None if found is None else (found[0], {**found[1], "head": run_head})
+        self.host.batch_pr = read_at_the_run_head
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        self.assertRegex(out, r"tip", "a split whose batch tip is not the run's head is not refused for its tip: %s" % out)
+        self.assertEqual(rc, 1, "a split whose batch tip moved exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
+    def test_batch_split_without_run_is_refused_and_names_the_run_flag(self):
+        self.case_lane(101, "test_it")
+        self.lane(102)
+        pr = self.frozen_batch("nightly", [101, 102])
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly")
+        self.assert_split_knows_the_flag(out, "--batch-split nightly")
+        self.assertIn("--run", out, "a split with no --run is not refused as one that needs --run: %s" % out)
+        self.assertEqual(rc, 2, "a split with no --run exited %s, not 2: %s" % (rc, out))
+        self.assertEqual((self.job_reads, self.host.batch_pr_calls), ([], []), "a split with no --run read the host before its refusal: %s" % out)
+        self.assert_untouched(pr, snap, out)
+
+    def test_batch_split_with_a_pr_number_after_its_name_is_refused_with_rc_2(self):
+        self.case_lane(101, "test_it")
+        self.lane(102)
+        pr = self.frozen_batch("nightly", [101, 102])
+        url = self.split_run(7118, {"unit-tests": ["FAIL: test_it (__main__.C.test_it)"]})
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url, "102")
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL 102")
+        self.assertEqual(rc, 2, "a split with a pull request number after its name exited %s, not 2: %s" % (rc, out))
+        self.assertEqual((self.job_reads, self.host.batch_pr_calls), ([], []), "the refused split read the host: %s" % out)
+        self.assert_untouched(pr, snap, out)
+
+    def test_batch_split_beside_another_batch_route_or_touches_is_refused_with_rc_2(self):
+        self.case_lane(101, "test_it")
+        self.lane(102)
+        pr = self.frozen_batch("nightly", [101, 102])
+        url = self.split_run(7119, {"unit-tests": ["FAIL: test_it (__main__.C.test_it)"]})
+        for extra in (("--batch-drop", "nightly", "102"), ("--batch-build", "nightly", "101"), ("--touches",)):
+            argv = ("--batch-split", "nightly", "--run", url, *extra)
+            snap = self.snapshot(pr)
+            self.record_pushes()
+            with self.no_lint_or_ready_check():
+                rc, out = self.run_batch(*argv)
+            self.assert_split_knows_the_flag(out, " ".join(argv))
+            self.assertRegex(out, r"stands? alone", "a split beside %s is not refused as one that stands alone: %s" % (extra, out))
+            self.assertEqual(rc, 2, "a split beside %s exited %s, not 2: %s" % (extra, rc, out))
+            self.assertEqual((self.job_reads, self.host.batch_pr_calls), ([], []), "a split beside %s read the host: %s" % (extra, out))
+            self.assert_untouched(pr, snap, out)
+
+    def test_batch_split_accepts_base_lint_unknown_ok_and_config_and_drops_the_lane(self):
+        for n in (101, 102, 103):
+            if n == 102:
+                self.case_lane(n, "test_it")
+            else:
+                self.lane(n)
+        for name, extra, run_n in (("alpha", ("--base", "main"), 7120),
+                                   ("beta", ("--lint-unknown-ok", "the lint is unknown on this box"), 7121),
+                                   ("gamma", ("--config", ".github/stamp.json"), 7122)):
+            pr = self.frozen_batch(name, [101, 102, 103])
+            url = self.split_run(run_n, {"unit-tests": ["FAIL: test_it (__main__.C.test_it)"]})
+            with self.no_lint_or_ready_check():
+                rc, out = self.run_batch("--batch-split", name, "--run", url, *extra)
+            self.assertNotRegex(out, r"unrecognized arguments: --batch-split", "the parser does not know --batch-split beside %s: %s" % (extra, out))
+            self.assertEqual(rc, 0, "a split beside %s exited %s, not 0: %s" % (extra, rc, out))
+            self.assertEqual(self.frozen_lanes(pr), [101, 103], "a split beside %s did not drop #102 alone: %s" % (extra, out))
+
+    def test_batch_split_from_a_cloud_session_without_the_batch_runner_role_is_refused_before_any_host_read(self):
+        self.case_lane(101, "test_it")
+        self.lane(102)
+        pr = self.frozen_batch("nightly", [101, 102])
+        url = self.split_run(7123, {"unit-tests": ["FAIL: test_it (__main__.C.test_it)"]})
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.cloud():
+            with self.no_lint_or_ready_check():
+                rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        self.assertIn("may not", out, "the cloud refusal of the split does not say the session may not merge: %s" % out)
+        self.assertEqual(rc, 1, "a cloud session with no batch-runner role was not refused the split with exit 1: %s" % out)
+        self.assertEqual((self.job_reads, self.host.pr_calls, self.host.batch_pr_calls), ([], [], []),
+                         "a refused cloud split read the host: %s" % out)
+        self.assert_untouched(pr, snap, out)
+
+    def test_batch_split_control_the_blame_route_drops_the_same_lane_on_this_fixture(self):
+        self.case_lane(101, "test_items")
+        self.case_lane(102, "test_it")
+        self.lane(103)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        url = self.split_run(7124, {"unit-tests": ["FAIL: test_it (__main__.C.test_it)"]})
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "--blame", "102", "--run", url)
+        self.assertEqual(rc, 0, "control: the blame of #102 on this fixture exited %s, not 0: %s" % (rc, out))
+        self.assertEqual(self.stored_blamed(pr), [102], "control: the blame route did not store #102 on this fixture: %s" % out)
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-drop", "nightly", "102")
+        self.assertEqual(rc, 0, "control: the drop of the blamed #102 exited %s, not 0: %s" % (rc, out))
+        self.assertEqual(self.frozen_lanes(pr), [101, 103], "control: the blame route and drop did not leave #101 and #103: %s" % out)
+
+    def test_blame_checks_membership_before_the_run_for_a_green_run(self):
+        for n in (101, 102, 103):
+            self.lane(n)
+        pr = self.frozen_batch("nightly", [101, 102])  # #103 is open, and not in the set
+        url = self.scripted_run(7125, "success", self.head("batch-nightly"))  # a green run: a run check would refuse it first
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "--blame", "103", "--run", url)
+        self.assertRegex(out, r"frozen lane set", "a blame of #103, which batch nightly does not hold, is not refused as outside the frozen set: %s" % out)
+        self.assertNotIn("concluded", out, "a blame of #103 reached the run check before the membership check: %s" % out)
+        self.assertEqual(rc, 1, "a blame of #103 with a green run exited %s, not 1: %s" % (rc, out))
         self.assert_untouched(pr, snap, out)
 
     def test_a_blame_with_no_run_is_refused_and_names_the_run_flag(self):
