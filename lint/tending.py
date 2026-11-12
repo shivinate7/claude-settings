@@ -11,17 +11,21 @@ lint/layout.json, key "tending" (read by layout.tending()), holds one entry per 
   runs-from   a subset of POINTS: the call points that run the store
   state       live, or declared (named, but no call point runs it yet)
 
-tend(entry, text, root) gives {id: "true" | "stale" | "unknown"}. A claim that cannot be read is "unknown", never
-"true" (rule verification-report-unknown-reads). A line that holds no claim the test reads is "unknown" too.
-An item already marked [closed] gets no verdict. close(entry, text, verdicts) gives the rewritten text; it marks by
-the verdict of an id, so a caller that must tell two lines of one id apart uses the command line's per-line close.
+tend(entry, text, root) gives one row per open item line, in order: (line index, id, verdict), the verdict "true",
+"stale" or "unknown". A repeated id gives one row per line and never merges. A claim that cannot be read is
+"unknown", never "true" (rule verification-report-unknown-reads). A line that holds no claim the test reads is
+"unknown" too. An item already marked [closed] gets no verdict. A UTF-8 byte-order mark before a line is not part of
+the item: the line is matched without it, and a close keeps it. close(entry, text, verdicts) gives the rewritten
+text. Given tend's rows for the same text, it closes each line whose own verdict is stale. Given {id: verdict}, it
+closes each line of a stale id. The command line runs tend and close, the same route an importer calls.
 
 The command line reads each live store that runs from the point. At merge-check it writes nothing and exits 1 for
 each stale item, whatever the close step. At stop, compact and triage-status it closes the stale items its close
 step can and writes a store file only when its text changed; it exits 1 for a stale item that close "none" cannot fix,
-for a live store whose file is missing, and for a malformed contract. A file it cannot read, an item that cannot be
-judged and a bullet line the item regex misses (`shape`) print as `unknown <store>: <why>` and never fail the point.
-A declared store is never read.
+for a live store whose file is missing, and for a malformed contract or layout, each as one `FAIL` line. A file it
+cannot read, an item that cannot be judged and a bullet line the item regex misses (`shape`) print as
+`unknown <store>: <why>` and never fail the point. A declared store is never read. A store named by --store that the
+point does not read prints `skipped <store>: <why>` and does not fail the point.
 
 An external:<name> store is outside the repo, so the runner reads no file for it: the caller supplies the text to
 tend() and close(). Asked for by --store at a point with no text, it prints `unknown <store>: caller supplies text`.
@@ -189,19 +193,26 @@ TESTS = {
     "cite-resolves": _cite_resolves,
     "copy-matches-live": _copy_matches_live,
 }
-RANK = {TRUE: 0, UNKNOWN: 1, STALE: 2}
+BOM = "﻿"
+
+
+def _body(line):
+    """(byte-order mark or "", body, carriage return): the line split so the body is what an item regex reads."""
+    lead, rest = (BOM, line[1:]) if line.startswith(BOM) else ("", line)
+    body, cr = (rest[:-1], "\r") if rest.endswith("\r") else (rest, "")
+    return lead, body, cr
 
 
 def _match(item, line):
-    """(id, body, carriage return) when the line holds an item, else None. The body is the line with "\\r" cut off."""
-    body, cr = (line[:-1], "\r") if line.endswith("\r") else (line, "")
+    """(id, lead, body, carriage return) when the line holds an item, else None. See _body."""
+    lead, body, cr = _body(line)
     found = item.search(body)
     if found is None or found.group(1) is None:
         return None
-    return found.group(1), body, cr
+    return found.group(1), lead, body, cr
 
 
-def _scan(entry, text, root):
+def tend(entry, text, root):
     """[(line index, id, verdict)] for each open item line of text, in order."""
     test = TESTS.get(entry["still-true"])
     if test is None:
@@ -209,17 +220,8 @@ def _scan(entry, text, root):
     item, reads, closed, found = re.compile(entry["item"], re.M), _Reads(root), _closed(), []
     for index, line in enumerate(text.split("\n")):
         hit = _match(item, line)
-        if hit is not None and not closed.search(hit[1]):
-            found.append((index, hit[0], test(hit[1], reads)))
-    return found
-
-
-def tend(entry, text, root):
-    """{item id: verdict} for each open item in text. An id that repeats keeps its worst verdict."""
-    found = {}
-    for _, ident, verdict in _scan(entry, text, root):
-        if ident not in found or RANK[verdict] > RANK[found[ident]]:
-            found[ident] = verdict
+        if hit is not None and not closed.search(hit[2]):
+            found.append((index, hit[0], test(hit[2], reads)))
     return found
 
 
@@ -236,15 +238,25 @@ def _rewrite(entry, text, wanted):
         if hit is not None and wanted(index, hit[0]):
             if mode == "delete":
                 continue
-            if not closed.search(hit[1]):
-                line = hit[1].rstrip() + " " + MARK + hit[2]
+            _, lead, body, cr = hit
+            if not closed.search(body):
+                line = lead + body.rstrip() + " " + MARK + cr
         out.append(line)
     return "\n".join(out)
 
 
+def _stale_wanted(verdicts):
+    """wanted(line index, id) for _rewrite: true for a stale line of tend's rows, or a stale id of {id: verdict}."""
+    if isinstance(verdicts, dict):
+        return lambda index, ident: verdicts.get(ident) == STALE
+    stale = {(index, ident) for index, ident, verdict in verdicts if verdict == STALE}
+    return lambda index, ident: (index, ident) in stale
+
+
 def close(entry, text, verdicts):
-    """text with each item whose id has a stale verdict closed the way entry["close"] says."""
-    return _rewrite(entry, text, lambda index, ident: verdicts.get(ident) == STALE)
+    """text with each stale item line closed the way entry["close"] says. verdicts is tend's rows for this same
+    text, which close line by line, or {id: verdict}, which closes every line of a stale id."""
+    return _rewrite(entry, text, _stale_wanted(verdicts))
 
 
 def contract_problems(entries):
@@ -294,8 +306,8 @@ def _shape_misses(entry, text):
     if not BULLET_ITEM.match(entry["item"]):
         return []
     item = re.compile(entry["item"], re.M)
-    return [number for number, line in enumerate(text.split("\n"), 1)
-            if BULLET.match(line) and not item.search(line.rstrip("\r"))]
+    bodies = [_body(line)[1] for line in text.split("\n")]
+    return [number for number, body in enumerate(bodies, 1) if BULLET.match(body) and not item.search(body)]
 
 
 def _tend_point(store, entry, root, point):
@@ -313,7 +325,7 @@ def _tend_point(store, entry, root, point):
         except (OSError, UnicodeDecodeError) as err:
             lines.append("tending: unknown %s: %s cannot be read: %s" % (store, shown, str(err).replace("\n", " ")))
             continue
-        rows = _scan(entry, text, root)
+        rows = tend(entry, text, root)
         stale = [(index, ident) for index, ident, verdict in rows if verdict == STALE]
         unread = sum(1 for row in rows if row[2] == UNKNOWN)
         if unread:
@@ -326,8 +338,7 @@ def _tend_point(store, entry, root, point):
             failed = failed or bool(stale)
             lines.extend("tending: FAIL: %s %s: stale %s" % (store, shown, ident) for _, ident in stale)
             continue
-        marked = {index for index, _ in stale}
-        new = _rewrite(entry, text, lambda index, ident: index in marked)
+        new = close(entry, text, rows)
         if new != text:
             with open(path, "w", encoding="utf-8", newline="") as handle:
                 handle.write(new)
@@ -358,17 +369,33 @@ def main(argv):
     for store, entry in entries.items():
         if args.store and store != args.store:
             continue
-        if entry["state"] != "live" or args.point not in entry["runs-from"]:
+        why = _skip_reason(entry, args.point)
+        if why:
+            if args.store:  # asked for by name: say why nothing was read, else the run is silent on it
+                print("tending: skipped %s: %s" % (store, why))
             continue
         if entry["where"].startswith(EXTERNAL):
-            if args.store:  # asked for by name: say why nothing was read, else the run is silent on it
+            if args.store:
                 print("tending: unknown %s: caller supplies text" % store)
             continue
-        lines, bad = _tend_point(store, entry, root, args.point)
+        try:
+            lines, bad = _tend_point(store, entry, root, args.point)
+        except (layout.LayoutError, ImportError) as err:  # a bad extras file or a missing hooks/ module
+            print("tending: FAIL: %s: %s" % (store, str(err).replace("\n", " ")))
+            return 1
         for line in lines:
             print(line)
         failed = failed or bad
     return 1 if failed else 0
+
+
+def _skip_reason(entry, point):
+    """Why the point does not read the store, or "" when it does."""
+    if entry["state"] != "live":
+        return "state %s, no call point runs it yet" % entry["state"]
+    if point not in entry["runs-from"]:
+        return "runs from %s, not %s" % (", ".join(entry["runs-from"]), point)
+    return ""
 
 
 if __name__ == "__main__":
