@@ -4626,7 +4626,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # roadmap-one-writer), then, for the triage session, a pushed head whose roadmap steps hold a bare artifact
     # link or an unregistered cite (rule roadmap-artifact-cites). Cost: one `git rev-parse` and one small file read
     # per push; when the push reaches the record branch, one transcript read, then `git ls-tree` and `git cat-file`
-    # (one when the head holds no step) per ref sent. A dry run or another branch reads none of them.
+    # (one when the head holds no step) per ref sent, and up to four `git show` of the registry on origin's default
+    # branch per ref (two reads, each trying origin/HEAD then origin/main), since a pushed cite counts only when that
+    # branch registers its page. A dry run or another branch reads none of them.
     kind, matched = record_push_hit(stripped, cwd, transcript, record_branch_of, read_verb)
     if kind == "writer":
         refuse(tool, "deny", "roadmap-one-writer", RECORD_REASON, matched)
