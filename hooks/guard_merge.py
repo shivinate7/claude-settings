@@ -2065,10 +2065,10 @@ def written_time_hit(tool: str, tool_input, cwd: str = ""):
 # step with an old bare wait and no slug stays editable. Cost: one read of the step file, only for a write to a step
 # file; no process, no log.
 DEAD_PR_WAIT_REASON = (
-    "Rule (roadmap): this step's text waits on {what} with no step in blockedBy. A pull request can close unmerged, "
+    "This step's text waits on {what} with no step in blockedBy. A pull request can close unmerged, "
     "and then nobody acts on the wait. "
     "Remedy: name the step slug it waits on in the step's blockedBy list, or drop the wait. "
-    "(step dead-pr-waits, owner 2026-11-10 13:10 CST: place a wait on a step slug, never a bare PR number)"
+    "Rule dead-pr-wait (decision dead-pr-waits, a step waits on a step slug, never a bare PR number)."
 )
 _JSON_STRING = re.compile(r'"((?:[^"\\]|\\.)*)"')
 _BLOCKED_BY_SLUG = re.compile(r'"blockedBy"\s*:\s*\[\s*"[^"\s]')
