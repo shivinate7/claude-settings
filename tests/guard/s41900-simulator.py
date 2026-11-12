@@ -943,12 +943,17 @@ def register_simulator_lease_cases():
     lease_launch("control: an own-boot slot 1 lease of Duo 1 still allows a launch of Duo 1 by name", "allow",
                  own1, device=duo1)
 
-    # A lease silent past SIM_LEASE_MAX is not live, so it allows nothing. The clock is SIM_LEASE_NOW, a fixed
+    # A lease expires only when its pid is gone. A live holder silent past SIM_LEASE_MAX keeps its slot and its boot,
+    # since a slow renew is not a crash. A dead holder's lease allows nothing. The clock is SIM_LEASE_NOW, a fixed
     # number, so the case reads no real time. The fresh lease beside it, silent for less, still allows.
     clock = {"SIM_LEASE_NOW": "1790000000", "SIM_LEASE_MAX": "1800"}
     silent = dict(lease_entry("1"), granted=1790000000 - 3600)
-    lease_launch("lease: a lease silent past SIM_LEASE_MAX does not allow a launch of Duo 1", "deny",
-                 lease_fixture("expired_slot1", rows, live, [silent]), device=duo1, rule=LEASE_RULE, env=clock)
+    lease_launch("lease allow: a live lease silent past SIM_LEASE_MAX still allows a launch of Duo 1", "allow",
+                 lease_fixture("silent_slot1", rows, live, [silent]), device=duo1, env=clock)
+    dead_silent = dict(lease_entry("1", pid=LEASE_DEAD_PID), granted=1790000000 - 3600)
+    lease_launch("lease: a dead lease silent past SIM_LEASE_MAX does not allow a launch of Duo 1", "deny",
+                 lease_fixture("dead_silent_slot1", rows, live, [dead_silent]), device=duo1, rule=LEASE_RULE,
+                 env=clock)
     fresh = dict(lease_entry("1"), granted=1790000000 - 60)
     lease_launch("control: a lease silent for 60 s, under SIM_LEASE_MAX, still allows a launch of Duo 1", "allow",
                  lease_fixture("fresh_slot1", rows, live, [fresh]), device=duo1, env=clock)
