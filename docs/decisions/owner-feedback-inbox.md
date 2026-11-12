@@ -145,8 +145,12 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   at most one candidate per item. Each item has its own candidate list: the judge drops the step,
   debt, todo or notes file the item's home names (every line of a todo or notes file) and the item's own
   owner-message block, even when two blocks share a minute (ruling 2026-11-11 13:03 CST,
-  restart plan R38). Another message of the same Stop, and the same text in another session's
-  inbox, stay candidates. An item with no candidate left is not asked. A hit appends ` repeats <ref>`
+  restart plan R38). It also drops every other block of the item's own inbox stamped within 30
+  minutes of the item's block, either direction, stamp to stamp, each stamp read with its UTC offset:
+  a message that close is a follow-up on the same thread, not a repeat. A block 31 minutes away, and
+  any block of another session's inbox, stay candidates. The prompt adds one sentence: a follow-up or
+  detail on the same topic is not a repeat. A candidate is named only when the new item asks again
+  for a change it already asked for and got an answer. An item with no candidate left is not asked. A hit appends ` repeats <ref>`
   to the item line (one inbox rewrite through a temp file) and prints one systemMessage line. A mark
   never blocks the turn. A line that cannot be found is reported as not marked. The session merges
   the work or drops the mark. A dropped mark is not judged again. A model error or odd answer marks nothing and adds one
