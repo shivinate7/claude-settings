@@ -9,8 +9,8 @@ Standard library only, and no test runner. The cap is a dated cache fact, not a 
 check-in that waits on CI waits at most cap_minutes() minutes, so its wake stays inside the prompt cache.
 The number lives in one data file, hooks/ci_wait_cap.json, which names its source and read date. The
 reader is hooks/ci_wait_cap.py: cap_minutes() reads the file on each call, through cap_path(). The CLAUDE.md
-rule git-ci-wait-checks-in and the decision ci-wait-reads-run-status state the cap in words, and the cases
-here hold each copy to the file.
+rule git-ci-wait-checks-in, its copy in skills/project-ops/templates/operating-model.md, and the decision
+ci-wait-reads-run-status state the cap in words, and the cases here hold each copy to the file.
 
 A case that fails names its cause in the message. A bad data file must make cap_minutes() raise: a
 return of None or 0 is a failure, not a quiet cap. ControlTests and ScannerTests show the readers work.
@@ -39,8 +39,11 @@ DATA_PATH = os.path.join(HERE, "ci_wait_cap.json")
 READER_PATH = os.path.join(HERE, "ci_wait_cap.py")
 CLAUDE_MD = os.path.join(ROOT, "CLAUDE.md")
 DECISION = os.path.join(ROOT, "docs", "decisions", "ci-wait-reads-run-status.md")
+TEMPLATE_REL = "skills/project-ops/templates/operating-model.md"
+TEMPLATE = os.path.join(ROOT, TEMPLATE_REL)
 RULE = "git-ci-wait-checks-in"
 FALLBACK_START = "- The fallback:"
+TEMPLATE_START = "- A session that waits on CI sets a one-time check-in"
 CAP_PHRASE = re.compile(r"never\s+past\s+(\d+)\s+minutes")
 INT_FIELDS = ("cache_lifetime_seconds", "overage_lifetime_seconds", "cap_minutes")
 
@@ -94,6 +97,29 @@ def load_reader(case):
     return module
 
 
+def read_template(case):
+    """The operating-model template's text. A missing file fails the case, named."""
+    case.assertTrue(os.path.isfile(TEMPLATE),
+                    "%s is missing: the CI-wait rule's copy has no file to read" % TEMPLATE_REL)
+    return read_text(TEMPLATE)
+
+
+def assert_each_raises(case, module, bad):
+    """Each label's file text must make cap_minutes() raise. A label whose call returns fails the case, named.
+    A None text leaves that label's file absent."""
+    for label, text in bad.items():
+        with case.subTest(file=label):
+            path = os.path.join(case.scratch, label.replace(" ", "-") + ".json")
+            if text is not None:
+                write_text(path, text)
+            with mock.patch.object(module, "cap_path", return_value=path):
+                try:
+                    value = module.cap_minutes()
+                except Exception:
+                    continue  # the loud failure the reader's docstring promises
+            case.fail("cap_minutes() returned %r for the '%s' file: it must raise" % (value, label))
+
+
 def rule_prose(text, slug):
     """The prose of rule `slug`: from the previous anchor to its own, or None unless the anchor occurs
     once. anchor_sentences is the one home of that read."""
@@ -110,21 +136,26 @@ def cap_in(prose):
     return int(found.group(1)) if found else None
 
 
-def fallback_bullets(text):
-    """Each bullet that starts with FALLBACK_START, with its wrapped lines joined. A line that is not
-    blank and does not start with -, * or # continues the bullet above it."""
+def bullets_starting(text, start):
+    """(line number, bullet) for each bullet whose first line starts with `start`, its wrapped lines joined.
+    A line that is not blank and does not start with -, * or # continues the bullet above it. Lines count from 1."""
     lines = text.splitlines()
-    bullets = []
+    found = []
     for index, line in enumerate(lines):
-        if not line.startswith(FALLBACK_START):
+        if not line.startswith(start):
             continue
         parts = [line]
         for follow in lines[index + 1:]:
             if not follow.strip() or follow.lstrip()[:1] in ("-", "*", "#"):
                 break
             parts.append(follow.strip())
-        bullets.append(" ".join(parts))
-    return bullets
+        found.append((index + 1, " ".join(parts)))
+    return found
+
+
+def fallback_bullets(text):
+    """Each bullet that starts with FALLBACK_START, with its wrapped lines joined."""
+    return [bullet for _, bullet in bullets_starting(text, FALLBACK_START)]
 
 
 class ScratchCase(unittest.TestCase):
@@ -201,17 +232,17 @@ class ReaderTests(ScratchCase):
             "no cap_minutes": "{}",
             "cap as text": json.dumps(record(cap="55")),
         }
-        for label, text in bad.items():
-            with self.subTest(file=label):
-                path = os.path.join(self.scratch, label.replace(" ", "-") + ".json")
-                if text is not None:
-                    write_text(path, text)
-                with mock.patch.object(module, "cap_path", return_value=path):
-                    try:
-                        value = module.cap_minutes()
-                    except Exception:
-                        continue  # the loud failure the reader's docstring promises
-                self.fail("cap_minutes() returned %r for the '%s' file: it must raise" % (value, label))
+        assert_each_raises(self, module, bad)
+
+    def test_a_cap_that_is_not_a_positive_whole_number_raises(self):
+        module = load_reader(self)
+        bad = {
+            "cap as true": json.dumps(record(True)),
+            "cap as 55.5": json.dumps(record(55.5)),
+            "cap as zero": json.dumps(record(0)),
+            "cap as negative": json.dumps(record(-5)),
+        }
+        assert_each_raises(self, module, bad)
 
 
 class RuleTests(unittest.TestCase):
@@ -256,7 +287,26 @@ class DecisionTests(unittest.TestCase):
                          % (bullet_minutes, expected))
 
 
+class TemplateTests(unittest.TestCase):
+    def test_operating_model_copy_states_the_cap_the_file_holds(self):
+        copies = bullets_starting(read_template(self), TEMPLATE_START)
+        self.assertEqual(len(copies), 1, "%s holds %d CI-wait bullets, not 1" % (TEMPLATE_REL, len(copies)))
+        line, bullet = copies[0]
+        copy_minutes = cap_in(bullet)
+        self.assertIsNotNone(copy_minutes, "%s:%d: the copy of rule %s does not say 'never past N minutes'"
+                             % (TEMPLATE_REL, line, RULE))
+        expected = load_reader(self).cap_minutes()
+        self.assertEqual(copy_minutes, expected, "%s:%d says %d minutes; cap_minutes() in hooks/ci_wait_cap.json is %r"
+                         % (TEMPLATE_REL, line, copy_minutes, expected))
+
+
 class ControlTests(unittest.TestCase):
+    def test_template_copy_still_says_each_wider_apart(self):
+        copies = bullets_starting(read_template(self), TEMPLATE_START)
+        self.assertEqual(len(copies), 1, "%s holds %d CI-wait bullets, not 1" % (TEMPLATE_REL, len(copies)))
+        line, bullet = copies[0]
+        self.assertIn("each wider apart", bullet, "%s:%d no longer says 'each wider apart'" % (TEMPLATE_REL, line))
+
     def test_rule_and_bullet_still_say_each_wider_apart(self):
         prose = rule_prose(read_text(CLAUDE_MD), RULE)
         self.assertIsNotNone(prose, "CLAUDE.md: the %s anchor is not found once" % RULE)
@@ -296,6 +346,14 @@ class ScannerTests(unittest.TestCase):
         bullets = fallback_bullets(text)
         self.assertEqual(len(bullets), 1, "a wrapped fallback bullet was not read as one bullet")
         self.assertIn("hooks/ci_wait_cap.json", bullets[0], "the wrapped line of a fallback bullet was dropped")
+
+    def test_a_bullet_with_a_comment_opener_and_a_lone_quote_is_read_whole(self):
+        text = ("- The fallback: a check-in.\n  Code `<!--` and Owner's \"done\" note, never past 55 minutes.\n\n"
+                "- Other bullet\n")
+        bullets = fallback_bullets(text)
+        self.assertEqual(len(bullets), 1,
+                         "a fallback bullet with a comment opener and a lone quote was not read as one bullet")
+        self.assertEqual(cap_in(bullets[0]), 55, "a comment opener or a lone quote hid the cap of a fallback bullet")
 
 
 def tearDownModule():
