@@ -3,7 +3,8 @@
 # issue. A green run of another group clears it only when that run is newer, is the newest of its group,
 # succeeded, and passed every job of the red run. Runs of an event not in events.json, and of a deleted
 # or absent workflow, are not judged. A failed read or write prints `unknown` and exits 0.
-# A cap end with no red run wakes the merged pull request once per cap-end run, through wake.sh, and opens no issue.
+# A cap end wakes the merged pull request once per cap-end run and attempt, through wake.sh. A cap end with no red run opens no
+# issue, and a red issue names no cap end.
 # The dropped-start cases (dropped.sh, the alarm for a pull request whose all-jobs-passed run never started)
 # come last. They use their own fake routes and fixtures, so the cases above read nothing new.
 set -u
@@ -296,23 +297,36 @@ run_alarm() {
 wake_n() { grep -c "^$1" "$tmp/wakelog"; }
 # alarm_body: the first posted body opens with the marker line, then the title line. The wake's TEXT opens with the title.
 alarm_body() {
-  sed -n '1p' "$tmp/wakebodies" | grep -qxE '<!-- main-alarm:cap:[0-9]+ -->' &&
+  sed -n '1p' "$tmp/wakebodies" | grep -qxE '<!-- main-alarm:cap:[0-9]+:[0-9]+ -->' &&
   sed -n '2p' "$tmp/wakebodies" | grep -qF 'CI job hit its time cap on main: '
 }
-# capmsg <run id> <job> <ran minutes> <cap minutes> [suffix]: the lines a cap-only wake posts for one job cancelled at its
-# cap: the marker for the run, the title, and the job's cap line. Each line must be in the posted body.
+# capmsg <run id> <job> <ran minutes> <cap minutes> [suffix] [attempt]: the lines a cap-only wake posts for one job cancelled at its
+# cap: the marker for the run and attempt (attempt 1 unless given), the title, and the job's cap line. Each line must be in the posted body.
 capmsg() {
-  printf '%s\n' "<!-- main-alarm:cap:$1 -->" "CI job hit its time cap on main: $2" "job $2 ran $3 min, cap $4 min, run $1${5:-}"
+  printf '%s\n' "<!-- main-alarm:cap:$1:${6:-1} -->" "CI job hit its time cap on main: $2" "job $2 ran $3 min, cap $4 min, run $1${5:-}"
 }
-# woke <label> <run id>: the last case woke PR 7 once for that cap-end run: one pulls read of its head commit, one comments
-# read of PR 7, and one post on PR 7 whose body holds the run's marker.
+# woke <label> <run id> [attempt] [text]: the last case woke PR 7 once for that cap-end run and attempt (attempt 1 unless given): one
+# pulls read of its head commit, one comments read of PR 7, and one post on PR 7 whose body holds the attempt's marker and the text.
 woke() {
-  local sha
+  local sha att="${3:-1}"
   sha="$(printf '%040x' "$2")"
-  if grep -qxF -- "pulls $sha" "$tmp/wakelog" && [ "$(wake_n pulls)" = 1 ] && grep -qxF -- "comments 7" "$tmp/wakelog" \
-    && [ "$(wake_n comments)" = 1 ] && grep -qxF -- "post 7 o/r" "$tmp/wakelog" && [ "$(wake_n post)" = 1 ] \
-    && grep -qF -- "<!-- main-alarm:cap:$2 -->" "$tmp/wakebodies"; then echo "ok   $1"
-  else echo "FAIL $1: the wake for run $2 was not one pulls read of its head, one comments read of PR 7 and one post on PR 7 with its marker (wake log: $(tr '\n' ' ' < "$tmp/wakelog"))"; bad=1; fi
+  if ! { grep -qxF -- "pulls $sha" "$tmp/wakelog" && [ "$(wake_n pulls)" = 1 ] && grep -qxF -- "comments 7" "$tmp/wakelog" \
+    && [ "$(wake_n comments)" = 1 ] && grep -qxF -- "post 7 o/r" "$tmp/wakelog" && [ "$(wake_n post)" = 1 ]; }; then
+    echo "FAIL $1: the wake for run $2 was not one pulls read of its head, one comments read of PR 7 and one post on PR 7 (wake log: $(tr '\n' ' ' < "$tmp/wakelog"))"; bad=1
+  elif ! grep -qF -- "<!-- main-alarm:cap:$2:$att -->" "$tmp/wakebodies"; then echo "FAIL $1: the post for run $2 lacks its marker cap:$2:$att"; bad=1
+  elif [ -n "${4:-}" ] && ! grep -qF -- "$4" "$tmp/wakebodies"; then echo "FAIL $1: the post for run $2 lacks '$4'"; bad=1
+  else echo "ok   $1"; fi
+}
+# body_has <label> <KEY> <text>: the post whose marker is <!-- main-alarm:KEY --> holds <text>. A text with a leading `!` must not be in
+# that post. A post's lines run from its marker line to the next marker line.
+body_has() {
+  local got
+  got="$(awk -v m="<!-- main-alarm:$2 -->" 'index($0, "<!-- main-alarm:") == 1 { f = ($0 == m); next } f' "$tmp/wakebodies")"
+  if [ -z "$got" ]; then echo "FAIL $1: no post carries $2"; bad=1
+  elif [[ "$3" == '!'* ]]; then
+    if grep -qF -- "${3#!}" <<<"$got"; then echo "FAIL $1: the post for $2 holds '${3#!}'"; bad=1; else echo "ok   $1"; fi
+  elif grep -qF -- "$3" <<<"$got"; then echo "ok   $1"
+  else echo "FAIL $1: the post for $2 lacks '$3'"; bad=1; fi
 }
 # wake_is <label> <pulls> <comments> <posts>: the last case read the wake's pulls and PR comments that many times and posted that many.
 wake_is() {
@@ -338,7 +352,8 @@ quiet_wake() {
 # t want label [FAIL glob] [EMPTY glob] [text ...] [jobs reads: "none", or the run paths read, in any order]. The wants:
 # alarm, a cap end with no red run: the verdict is alarm, no gh issue call is made, and the wake reads the PR once and posts once,
 # the body opening with the marker and the title; each text must be in that body. repeat: the same, but the PR already holds the
-# marker, so the wake posts nothing. A text is one line; each must be in the issue (the wake body for alarm and repeat).
+# marker, so the wake posts nothing. A text is one line; each must be in the issue (the wake body for alarm and repeat). A text
+# with a leading `!` must not be there, and `!re:` makes the rest an extended regex that must not match.
 t() {
   local why=""
   run_alarm "${3:-}" "${4:-}"
@@ -365,9 +380,14 @@ t() {
   [ "$code" = 0 ] || { ok=0; why="${why:-the exit was not 0}"; }
   target="$tmp/log"; what=issue
   case "$1" in alarm|repeat) target="$tmp/wakebodies"; what="wake body" ;; esac
-  miss=""
+  miss=""; hold=""
   while IFS= read -r want_text; do
-    [ -n "$want_text" ] && { grep -qF -- "$want_text" "$target" || { ok=0; miss="${miss:-$want_text}"; }; }
+    case "$want_text" in
+      '') ;;
+      '!re:'*) grep -qE -- "${want_text#'!re:'}" "$target" && { ok=0; hold="${hold:-$want_text}"; } ;;
+      '!'*) grep -qF -- "${want_text#!}" "$target" && { ok=0; hold="${hold:-$want_text}"; } ;;
+      *) grep -qF -- "$want_text" "$target" || { ok=0; miss="${miss:-$want_text}"; } ;;
+    esac
   done <<<"${5:-}"
   if [ -n "${6:-}" ]; then
     expect_reads="$(tr ' ' '\n' <<<"$6" | grep -v '^none$' | sort | tr '\n' ' ')"
@@ -376,12 +396,14 @@ t() {
   fi
   if [ "$ok" = 1 ]; then echo "ok   $2"
   elif [ -n "$why" ]; then echo "FAIL $2 ($why; verdict '$shown', exit $code)"; bad=1
+  elif [ -n "$hold" ]; then echo "FAIL $2 (verdict '$shown', exit $code; $what holds '$hold')"; bad=1
   elif [ -n "$miss" ]; then echo "FAIL $2 (verdict '$shown', exit $code; $what lacks '$miss')"; bad=1
   else echo "FAIL $2 (exit $code, got: $out; jobs reads: $(tr '\n' ' ' < "$tmp/reads"))"; bad=1; fi
 }
 runs_are "$(gh_run ci failure 2026-01-02 u1 push 1)" "$(gh_run ci success 2026-01-01 u0 push 2)"
 t red latest-red-opens-issue
 runs_are "$(gh_run ci success 2026-01-02 u1 push 1)" "$(gh_run ci failure 2026-01-01 u0 push 2)"
+jobs_of 2 checks:failure
 t green red-then-fixed-is-quiet
 runs_are "$(gh_run alarm failure 2026-01-02 u1 push 1)"
 t green own-workflow-is-ignored
@@ -567,16 +589,16 @@ jobs_of 5300 scope-guard:cancelled:40
 workflow_at 5300 scope-guard:37
 t alarm full-run-window-oldest-cancelled-cap-end-opens-the-cap-alarm "" "" "$(capmsg 5300 scope-guard 40 37)"
 cost full-run-window-oldest-cancelled-cap-end-reads-its-jobs-and-workflow-once 1 1 0 1
-# A failure run whose only red job was cancelled at its cap is red by its conclusion. The alarm names that job, its cap and its
-# minutes, as the cancelled-run path does. Only the issue is pinned here, not the verdict.
+# A failure run whose only red job was cancelled at its cap is red by its conclusion. Its cap end wakes the run, and the red issue
+# names no cap end. Only the issue is pinned here, not the verdict.
 runs_are "$(gh_run ci failure 2026-01-02 https://runs/fail-cap-4740 push 4740)"
 jobs_of 4740 scope-guard:cancelled:40
 workflow_at 4740 scope-guard:37
-t raised failure-run-with-its-only-red-job-cancelled-at-its-cap-names-the-job "" "" "job scope-guard ran 40 min, cap 37 min, run 4740"
-woke failure-run-cap-end-wakes-the-pr-beside-its-red-job 4740
+t raised failure-run-with-its-only-red-job-cancelled-at-its-cap-keeps-the-cap-end-out-of-the-issue "" "" "!re:ran [0-9]+ min, cap [0-9]+ min"
+woke failure-run-cap-end-wakes-the-pr-beside-its-red-job 4740 1 "job scope-guard ran 40 min, cap 37 min, run 4740"
 
 # A cap end with no red run is the alarm, not a red verdict: the verdict word is `alarm`. The control puts the same cap end (in ci)
-# beside a red failure run (in deploy) in one fixture, and the verdict stays `red`, with the cap end still named in the issue.
+# beside a red failure run (in deploy) in one fixture, and the verdict stays `red`, and the red issue names no cap end.
 runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/alarm-only-5020 push 5020)"
 jobs_of 5020 scope-guard:cancelled:40
 workflow_at 5020 scope-guard:37
@@ -585,8 +607,8 @@ runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/alarm-beside-red-5030 pu
 jobs_of 5030 scope-guard:cancelled:40
 jobs_of 5031 checks:failure
 workflow_at 5030 scope-guard:37
-t red red-run-beside-a-cap-end-still-prints-red "" "" "$(printf '%s\n' '--title CI red on main --body' 'job scope-guard ran 40 min, cap 37 min, run 5030')" "actions/runs/5030/jobs actions/runs/5031/jobs"
-woke red-run-beside-a-cap-end-still-wakes-for-the-cap-end 5030
+t red red-run-beside-a-cap-end-still-prints-red "" "" "$(printf '%s\n' '--title CI red on main --body' '!re:ran [0-9]+ min, cap [0-9]+ min')" "actions/runs/5030/jobs actions/runs/5031/jobs"
+woke red-run-beside-a-cap-end-still-wakes-for-the-cap-end 5030 1 "job scope-guard ran 40 min, cap 37 min, run 5030"
 
 # The cap-only alarm's title names its job: "CI job hit its time cap on <branch>: <job>". With several cap jobs the title names the
 # first in the run's job list and the body names the rest. Here scope-guard comes before build-guard in both the job list and the
@@ -599,12 +621,13 @@ runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-titles-5022 push 502
 jobs_of 5022 scope-guard:cancelled:40 build-guard:cancelled:50
 workflow_at 5022 scope-guard:37 build-guard:37
 t alarm cap-only-alarm-with-several-cap-jobs-titles-the-first-and-names-the-rest "" "" "$(capmsg 5022 scope-guard 40 37; echo 'job build-guard ran 50 min, cap 37 min, run 5022')" "actions/runs/5022/jobs"
-# A red job and a cap end in one failure run: the run is red, so the title stays "CI red on" and the cap end is named under it.
+# A red job and a cap end in one failure run: the run is red, so the title stays "CI red on", and the cap end wakes the run while the
+# red issue names no cap end.
 runs_are "$(gh_run ci failure 2026-01-02 https://runs/mixed-same-5040 push 5040)"
 jobs_of 5040 checks:failure scope-guard:cancelled:40
 workflow_at 5040 checks scope-guard:37
-t red mixed-run-with-a-red-job-and-a-cap-end-keeps-the-red-title "" "" "$(printf '%s\n' '--title CI red on main --body' 'job scope-guard ran 40 min, cap 37 min, run 5040')" "actions/runs/5040/jobs"
-woke mixed-run-cap-end-wakes-for-the-run 5040
+t red mixed-run-with-a-red-job-and-a-cap-end-keeps-the-red-title "" "" "$(printf '%s\n' '--title CI red on main --body' '!re:ran [0-9]+ min, cap [0-9]+ min')" "actions/runs/5040/jobs"
+woke mixed-run-cap-end-wakes-for-the-run 5040 1 "job scope-guard ran 40 min, cap 37 min, run 5040"
 
 # A job cancelled at its cap in attempt 1 of a run whose attempt 2 is green opens the cap-only alarm: the title names the job, and the
 # body names the run. Attempt 1's jobs come from the attempts endpoint; the latest attempt's jobs do not hold them.
@@ -640,17 +663,43 @@ attempt_jobs_of 6012 1 scope-guard:cancelled:2
 workflow_at 6012 scope-guard:37
 t green older-rerun-under-its-cap-under-a-newer-green-run-stays-silent "" ""
 count_is older-rerun-under-its-cap-reads-attempt-1-jobs-once "actions/runs/6012/attempts/1/jobs" 1
-# A failure run with a red job in its newest attempt and a cap end in attempt 1: the title stays "CI red on", and the body names the cap end.
+# A failure run with a red job in its newest attempt and a cap end in attempt 1: the title stays "CI red on", and the red issue
+# names no cap end while the wake does.
 runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-retry-cap-5230 push 5230 completed 2)"
 attempt_jobs_of 5230 1 scope-guard:cancelled:40
 jobs_of 5230 checks:failure scope-guard:success
 workflow_at 5230 checks scope-guard:37
-t red red-run-with-a-cap-end-in-attempt-1-names-it-under-the-red-title "" "" "$(printf '%s\n' '--title CI red on main --body' 'job scope-guard ran 40 min, cap 37 min, run 5230')"
-woke red-run-with-a-cap-end-in-attempt-1-wakes-for-the-cap-end 5230
+t red red-run-with-a-cap-end-in-attempt-1-keeps-the-cap-end-out-of-the-issue "" "" "$(printf '%s\n' '--title CI red on main --body' '!re:ran [0-9]+ min, cap [0-9]+ min')"
+woke red-run-with-a-cap-end-in-attempt-1-wakes-for-the-cap-end 5230 1 "job scope-guard ran 40 min, cap 37 min, run 5230"
 count_is red-run-with-a-cap-end-in-attempt-1-reads-attempt-1-jobs-once "actions/runs/5230/attempts/1/jobs" 1
 count_is red-run-with-a-cap-end-in-attempt-1-reads-its-newest-jobs-once "actions/runs/5230/jobs" 1
 count_is red-run-with-a-cap-end-in-attempt-1-reads-its-workflow-file-once "/contents/" 1
 
+# A failure run that a newer run of its group supersedes is judged for its cap end. A job cancelled at its cap wakes the PR for that
+# run, and the alarm opens no issue. Its jobs and its workflow file are each read once. The controls read its jobs once and wake nothing.
+runs_are "$(gh_run ci failure 2026-01-01 https://runs/stale-cap-7010 push 7010)" "$(gh_run ci success 2026-01-02 https://runs/stale-cap-green-7011 push 7011)"
+jobs_of 7010 scope-guard:cancelled:40
+workflow_at 7010 scope-guard:37
+t alarm failure-run-not-newest-with-a-cap-end-wakes-the-pr "" "" "$(capmsg 7010 scope-guard 40 37)" "actions/runs/7010/jobs"
+woke failure-run-not-newest-cap-end-wakes-for-that-run 7010
+cost failure-run-not-newest-cap-end-reads-its-jobs-and-workflow-once 1 1 0 1
+stale_window=(); for i in $(seq 1 99); do stale_window+=("$(gh_run ci success 2026-01-02 "https://runs/stale-window-green-$i" push $((7100 + i)))"); done
+runs_are "$(gh_run ci failure 2026-01-01 https://runs/stale-window-oldest-7100 push 7100)" "${stale_window[@]}"
+jobs_of 7100 scope-guard:cancelled:40
+workflow_at 7100 scope-guard:37
+t alarm failure-run-not-newest-in-a-full-window-wakes-the-pr "" "" "$(capmsg 7100 scope-guard 40 37)" "actions/runs/7100/jobs"
+woke failure-run-not-newest-in-a-full-window-wakes-for-that-run 7100
+runs_are "$(gh_run ci failure 2026-01-01 https://runs/stale-red-7020 push 7020)" "$(gh_run ci success 2026-01-02 https://runs/stale-red-green-7021 push 7021)"
+jobs_of 7020 checks:failure
+t green failure-run-not-newest-with-no-cap-end-stays-quiet
+quiet_wake failure-run-not-newest-with-no-cap-end-makes-no-wake
+count_is failure-run-not-newest-with-no-cap-end-reads-its-jobs-once "actions/runs/7020/jobs" 1
+runs_are "$(gh_run ci failure 2026-01-01 https://runs/stale-under-7030 push 7030)" "$(gh_run ci success 2026-01-02 https://runs/stale-under-green-7031 push 7031)"
+jobs_of 7030 scope-guard:cancelled:2
+workflow_at 7030 scope-guard:37
+t green failure-run-not-newest-with-a-cap-job-under-its-cap-stays-quiet
+quiet_wake failure-run-not-newest-with-a-cap-job-under-its-cap-makes-no-wake
+count_is failure-run-not-newest-with-a-cap-job-under-its-cap-reads-its-jobs-once "actions/runs/7030/jobs" 1
 # A re-run in flight is the group's newest run: its status is in_progress or queued and its attempt is above 1. The group is
 # UNKNOWN (main's judged rule, merge/merge.py base_state), so the alarm reads unknown with a warning and writes no issue. It never
 # reads green, and never falls back to an older run. A first attempt still in progress waits its turn, so the older run is judged (1d).
@@ -707,22 +756,22 @@ t alarm failure-run-cleared-by-a-newer-green-with-a-cap-end-wakes-the-pr "" "" "
 cost cleared-run-with-a-cap-end-reads-each-jobs-list-once-and-each-workflow-file-once 2 2 2 1
 count_is cleared-run-reads-its-jobs-once "actions/runs/4950/jobs" 1
 count_is clearing-run-reads-its-jobs-once "actions/runs/4951/jobs" 1
-# A cleared failure run's cap end is named when another run is red too: the title stays "CI red on", and the body names the cap end.
+# A cleared failure run's cap end wakes when another run is red too: the title stays "CI red on", and the red issue names no cap end.
 runs_are "$(gh_run ci success 2026-01-02 https://runs/cleared-beside-green-5060 schedule 5060)" "$(gh_run ci failure 2026-01-01 https://runs/cleared-beside-red-5061 push 5061)" "$(gh_run deploy failure 2026-01-02 https://runs/cleared-beside-deploy-5062 push 5062)"
 jobs_of 5061 checks:failure scope-guard:cancelled:40
 jobs_of 5060 checks:success scope-guard:success
 jobs_of 5062 checks:failure
 workflow_at 5061 checks scope-guard:37
 workflow_at 5060 checks scope-guard:37
-t red cleared-cap-run-beside-an-uncleared-red-run-names-the-cap-end "" "" "$(printf '%s\n' '--title CI red on main --body' 'job scope-guard ran 40 min, cap 37 min, run 5061')" "actions/runs/5060/jobs actions/runs/5061/jobs actions/runs/5062/jobs"
-woke cleared-cap-run-beside-an-uncleared-red-run-wakes-for-the-cap-end 5061
+t red cleared-cap-run-beside-an-uncleared-red-run-keeps-the-cap-end-out-of-the-issue "" "" "$(printf '%s\n' '--title CI red on main --body' '!re:ran [0-9]+ min, cap [0-9]+ min')" "actions/runs/5060/jobs actions/runs/5061/jobs actions/runs/5062/jobs"
+woke cleared-cap-run-beside-an-uncleared-red-run-wakes-for-the-cap-end 5061 1 "job scope-guard ran 40 min, cap 37 min, run 5061"
 # A red job the newer green run lacks stays red, so a cap end beside it keeps the red title. The green run passes checks and has no lint job.
 runs_are "$(gh_run ci success 2026-01-02 https://runs/partial-green-5043 schedule 5043)" "$(gh_run ci failure 2026-01-01 https://runs/partial-red-5042 push 5042)"
 jobs_of 5042 checks:failure lint:failure scope-guard:cancelled:40
 jobs_of 5043 checks:success scope-guard:success
 workflow_at 5042 checks scope-guard:37
-t red cap-end-beside-a-red-job-the-green-run-lacks-keeps-the-red-title "" "" "$(printf '%s\n' '--title CI red on main --body' 'job scope-guard ran 40 min, cap 37 min, run 5042')" "actions/runs/5042/jobs actions/runs/5043/jobs"
-woke cap-end-beside-a-red-job-wakes-for-the-cap-end 5042
+t red cap-end-beside-a-red-job-the-green-run-lacks-keeps-the-red-title "" "" "$(printf '%s\n' '--title CI red on main --body' '!re:ran [0-9]+ min, cap [0-9]+ min')" "actions/runs/5042/jobs actions/runs/5043/jobs"
+woke cap-end-beside-a-red-job-wakes-for-the-cap-end 5042 1 "job scope-guard ran 40 min, cap 37 min, run 5042"
 # Control: the same clear with the cap end under its cap is quiet. Its workflow file is still read once, for the cap.
 runs_are "$(gh_run ci success 2026-01-02 https://runs/cleared-under-green-4953 schedule 4953)" "$(gh_run ci failure 2026-01-01 https://runs/cleared-under-red-4952 push 4952)"
 jobs_of 4952 checks:failure scope-guard:cancelled:2
@@ -804,20 +853,20 @@ woke cap-only-wake-is-for-the-run-and-its-head-commit 5401
 runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/wake-repeat-5410 push 5410)"
 jobs_of 5410 scope-guard:cancelled:40
 workflow_at 5410 scope-guard:37
-wake_comments_on 7 '[{"body": "<!-- main-alarm:cap:5410 -->\nalready woken"}]'
+wake_comments_on 7 '[{"body": "<!-- main-alarm:cap:5410:1 -->\nalready woken"}]'
 t repeat cap-end-the-pr-already-holds-posts-nothing "" "" "" "actions/runs/5410/jobs"
 # The marker sits on comments page two, behind a full first page: the wake still reads every page and posts nothing.
 runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/wake-repeat-page-two-5411 push 5411)"
 jobs_of 5411 scope-guard:cancelled:40
 workflow_at 5411 scope-guard:37
 full_page="$(jq -cn '[range(30) | {body: "unrelated comment \(.)"}]')"
-wake_comments_on 7 "$full_page" '[{"body": "<!-- main-alarm:cap:5411 -->\nalready woken"}]'
+wake_comments_on 7 "$full_page" '[{"body": "<!-- main-alarm:cap:5411:1 -->\nalready woken"}]'
 t repeat cap-end-whose-marker-is-on-comments-page-two-posts-nothing "" "" "" "actions/runs/5411/jobs"
 # A marker for another cap end does not name this one: the wake posts.
 runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/wake-other-5420 push 5420)"
 jobs_of 5420 scope-guard:cancelled:40
 workflow_at 5420 scope-guard:37
-wake_comments_on 7 '[{"body": "<!-- main-alarm:cap:5419 -->\nan earlier cap end"}]'
+wake_comments_on 7 '[{"body": "<!-- main-alarm:cap:5419:1 -->\nan earlier cap end"}]'
 t alarm cap-end-the-pr-holds-only-another-run-still-wakes "" "" "$(capmsg 5420 scope-guard 40 37)" "actions/runs/5420/jobs"
 # Two cap-end runs, the older already named on the PR: each run reads the PR, and only the newer one posts.
 runs_are "$(gh_run ci cancelled 2026-01-01 https://runs/wake-named-5431 push 5431)" "$(gh_run ci cancelled 2026-01-02 https://runs/wake-new-5432 push 5432)"
@@ -825,12 +874,12 @@ jobs_of 5431 scope-guard:cancelled:40
 jobs_of 5432 build-guard:cancelled:41
 workflow_at 5431 scope-guard:37
 workflow_at 5432 build-guard:37
-wake_comments_on 7 '[{"body": "<!-- main-alarm:cap:5431 -->\nalready woken"}]'
+wake_comments_on 7 '[{"body": "<!-- main-alarm:cap:5431:1 -->\nalready woken"}]'
 run_alarm
 cap_quiet two-cap-runs-one-named-verdict-is-alarm-with-no-issue zero
 wake_is two-cap-runs-one-named-each-run-reads-the-pr-and-only-the-new-run-posts 2 2 1
 # The new run's title names its own first cap job (build-guard), not the older run's (scope-guard).
-if grep -qF -- "<!-- main-alarm:cap:5432 -->" "$tmp/wakebodies" && ! grep -qF -- "cap:5431" "$tmp/wakebodies"; then echo "ok   two-cap-runs-one-named-posts-the-new-run-only"
+if grep -qF -- "<!-- main-alarm:cap:5432:1 -->" "$tmp/wakebodies" && ! grep -qF -- "cap:5431" "$tmp/wakebodies"; then echo "ok   two-cap-runs-one-named-posts-the-new-run-only"
 else echo "FAIL two-cap-runs-one-named-posts-the-new-run-only: the posted bodies do not name run 5432 alone ($(tr '\n' ' ' < "$tmp/wakebodies"))"; bad=1; fi
 if sed -n '2p' "$tmp/wakebodies" | grep -qxF -- "CI job hit its time cap on main: build-guard"; then echo "ok   two-cap-runs-one-named-title-names-the-new-runs-own-job"
 else echo "FAIL two-cap-runs-one-named-title-names-the-new-runs-own-job: the posted title is not 'CI job hit its time cap on main: build-guard'"; bad=1; fi
@@ -844,11 +893,41 @@ workflow_at 5442 scope-guard:37
 wake_pulls_for 5441 '[]'
 run_alarm "" "" "$tmp/summary"
 cap_quiet cap-end-with-no-pr-exits-non-zero-with-verdict-alarm-and-no-issue nonzero
-if grep -qF -- "cap:5441" "$tmp/summary"; then echo "ok   cap-end-with-no-pr-names-its-run-in-the-step-summary"
+if grep -qF -- "cap:5441:1" "$tmp/summary"; then echo "ok   cap-end-with-no-pr-names-its-run-in-the-step-summary"
 else echo "FAIL cap-end-with-no-pr-names-its-run-in-the-step-summary (summary: $(tr '\n' ' ' < "$tmp/summary"))"; bad=1; fi
 wake_is cap-end-with-no-pr-the-other-cap-end-still-wakes 2 1 1
-if grep -qF -- "<!-- main-alarm:cap:5442 -->" "$tmp/wakebodies"; then echo "ok   cap-end-with-no-pr-the-other-run-posts"
+if grep -qF -- "<!-- main-alarm:cap:5442:1 -->" "$tmp/wakebodies"; then echo "ok   cap-end-with-no-pr-the-other-run-posts"
 else echo "FAIL cap-end-with-no-pr-the-other-run-posts: no post names run 5442 ($(tr '\n' ' ' < "$tmp/wakebodies"))"; bad=1; fi
+# One wake per cap-end run and attempt, each under its own KEY. A run whose attempt 1 is already named on the PR wakes for its
+# attempt 2 cap end, and that wake names only attempt 2's cap jobs. The PR holds attempt 1's marker, so attempt 1 posts nothing.
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/attempt-two-7040 push 7040 completed 2)"
+attempt_jobs_of 7040 1 scope-guard:cancelled:40
+jobs_of 7040 build-guard:cancelled:40
+workflow_at 7040 scope-guard:37 build-guard:37
+wake_comments_on 7 '[{"body": "<!-- main-alarm:cap:7040:1 -->\nalready woken"}]'
+run_alarm
+cap_quiet attempt-two-cap-end-after-attempt-one-was-named-is-alarm-with-no-issue zero
+wake_is attempt-two-cap-end-reads-the-pr-per-attempt-and-posts-once 2 2 1
+body_has attempt-two-wake-titles-its-own-first-job cap:7040:2 "CI job hit its time cap on main: build-guard"
+body_has attempt-two-wake-names-its-own-cap-job cap:7040:2 "job build-guard ran 40 min, cap 37 min, run 7040"
+body_has attempt-two-wake-names-no-attempt-one-job cap:7040:2 "!job scope-guard ran"
+# The same run polled again: both attempts' markers are on the PR, so both wakes read it and neither posts.
+wake_comments_on 7 '[{"body": "<!-- main-alarm:cap:7040:1 -->\nalready woken"}, {"body": "<!-- main-alarm:cap:7040:2 -->\nalready woken"}]'
+run_alarm
+cap_quiet attempt-two-cap-end-polled-with-both-markers-is-alarm-with-no-issue zero
+wake_is attempt-two-cap-end-polled-with-both-markers-posts-nothing 2 2 0
+# Two attempts, neither named yet: each attempt's cap end wakes the PR under its own KEY, one post per attempt.
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/two-attempts-7050 push 7050 completed 2)"
+attempt_jobs_of 7050 1 scope-guard:cancelled:40
+jobs_of 7050 build-guard:cancelled:40
+workflow_at 7050 scope-guard:37 build-guard:37
+wake_comments_on 7 '[]'
+run_alarm
+cap_quiet two-unreported-attempts-is-alarm-with-no-issue zero
+wake_is two-unreported-attempts-each-post-their-own-wake 2 2 2
+body_has two-unreported-attempts-attempt-one-wake-names-its-job cap:7050:1 "job scope-guard ran 40 min, cap 37 min, run 7050"
+body_has two-unreported-attempts-attempt-one-wake-names-no-attempt-two-job cap:7050:1 "!job build-guard ran"
+body_has two-unreported-attempts-attempt-two-wake-names-its-job cap:7050:2 "job build-guard ran 40 min, cap 37 min, run 7050"
 # Control: a red run with no cap end opens its issue and makes no wake call.
 runs_are "$(gh_run ci failure 2026-01-02 https://runs/wake-control-red-5450 push 5450)"
 jobs_of 5450 checks:failure
@@ -928,9 +1007,11 @@ quoted_cap_wf | workflow_file 5012
 t green job-with-a-single-quoted-cap-cancelled-under-its-cap-is-quiet "" "" ""
 
 runs_are "$(gh_run ci success 2026-01-02 u1 schedule 2)" "$(gh_run ci failure 2026-01-01 u0 schedule 1)"
-t green red-schedule-is-cleared-by-a-newer-green-schedule "" "" "" none
+jobs_of 1 checks:failure
+t green red-schedule-is-cleared-by-a-newer-green-schedule "" "" "" "actions/runs/1/jobs"
 runs_are "$(gh_run ci success 2026-01-02 u1 workflow_dispatch 2)" "$(gh_run ci failure 2026-01-01 u0 push 1)"
-t green red-push-is-cleared-by-a-newer-green-dispatch "" "" "" none
+jobs_of 1 checks:failure
+t green red-push-is-cleared-by-a-newer-green-dispatch "" "" "" "actions/runs/1/jobs"
 runs_are "$(gh_run pages failure 2026-01-02 u1 dynamic 1)"
 t green failed-pages-build-is-not-judged
 runs_are "$(gh_run old failure 2026-01-02 u1 push 1)"
