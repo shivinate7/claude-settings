@@ -29,7 +29,8 @@ if [ "${EVENT:-}" = pull_request ] && [ -n "$range" ] && files=$(git diff --name
       # settings.json: the same jobs, plus merge/test_merge.py (CloudAllow reads it).
       settings.json) on="$on $M $W $R $Z $X code guard sweep " ;;
       landed-dirs.txt) on="$on $W $R $Z $X $S code guard " ;;
-      hooks/test_guard.py|hooks/mutate_guard.py) on="$on $W $X code guard " ;;
+      # tests/guard/*: section files of hooks/test_guard.py, so the same flags (not under hooks/, so no shell_macos).
+      hooks/test_guard.py|hooks/mutate_guard.py|tests/guard/*) on="$on $W $X code guard " ;;
       # install.sh and session_start.sh: the checkout-detection suite and test_guard read them.
       hooks/test_install_src.sh|hooks/test_install_windows.sh) on="$on $W $X $S code guard " ;;
       # install.sh: also read by merge/test_merge.py (CloudAllow reads its settings step).
