@@ -3033,7 +3033,11 @@ class RevivedNote(NotesFixture, unittest.TestCase):
         head = self.merge_main()
         self.assertIn(self.NONSLUG_EDITED, self.notes_at(head), "premise: the branch's in-place edit is in the head")
         self.assertNotIn(self.NONSLUG, self.notes_at(head), "premise: the head holds no copy of the original text")
-        self.assertEqual(self.r.verdict(), [], "an in-place edit of a non-slug note was refused as a revival")
+        edits = [line for _, line in C.edited_notes(self.r.dir, "origin/main", head)]
+        self.assertEqual(len([e for e in edits if "AskUserQuestion" in e]), 1,
+                         "scope: the edit of the non-slug note is not a finding of the edit check: %r" % edits)
+        self.assertEqual(C.revived_notes(self.r.dir, "origin/main", head), [],
+                         "an in-place edit of a non-slug note was read as a revival")
 
     def test_a_deleted_non_slug_note_does_not_flag_a_different_note_with_the_same_start(self):  # control
         self.start(union=True, base=(self.UNTOUCHED, self.NONSLUG, self.SIBLING), branch=(self.UNTOUCHED, self.SIBLING),
