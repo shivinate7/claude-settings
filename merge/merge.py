@@ -116,8 +116,8 @@
                           batch) and its one integration PR, opened as a draft. The lane heads read now are the freeze:
                           they go in the pull request body between two marker lines. A second build of NAME is allowed only for that same
                           set and leaves the pull request as it is, draft or ready; a late PR, a moved head or a lane left out is refused,
-                          and nothing is pushed or edited. A first build of two or more lanes refuses a lane whose diff changes a guard or
-                          check (guard_hits; a test path is no guard change) and names its one-lane build; a rerun and --ready skip this. Runs no lane lint and no ready check, waits for no CI, takes no lock.
+                          and nothing is pushed or edited. A first build refuses a lane whose diff changes a guard or check (guard_hits; a test
+                          path is no guard change) when it has two or more lanes or takes --on, and names its one-lane build; a rerun and --ready skip this. Runs no lane lint and no ready check, waits for no CI, takes no lock.
                           A cloud run needs the batch-runner role.
   merge --batch-build NAME [PR ...] --ready [--lint-unknown-ok REASON]
                           lint the head of batch-NAME once (the lint of --lane-lint), run the repo's ready checks on it, and record the
@@ -1071,7 +1071,7 @@ class Host:
                 "state": "MERGED" if d.get("merged") else d["state"].upper(),
                 "mergeable": cls.MERGEABLE[d.get("mergeable")], "merge_state": (d.get("mergeable_state") or "unknown").upper(),
                 "draft": bool(d.get("draft")), "body": d.get("body") or "", "created": d.get("created_at"),
-                "changed_files": d.get("changed_files")}  # only --review-record reads the count; pr_files stops on a missing one
+                "changed_files": d.get("changed_files")}  # --review-record and the first batch build read the count; pr_files stops on a missing one
 
     def open_prs(self):
         """-> [(number, pr() fields)] of every open pull request, all pages. A failed read is a Stop, never an empty list."""
