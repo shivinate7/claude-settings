@@ -2,7 +2,7 @@
 """Verdict cases for the branch sweep (roadmap step cloud-branch-delete).
 
 A branch is deleted only when its last commit is on the default branch or on an archive/* branch (the standing grant
-of the Oct 30 session, .claude/CLAUDE.md). main, master, roadmap, archive/*, HEAD, and a branch that is the head or the
+of the Oct 30 session, .claude/CLAUDE.md). main, master, roadmap, stable, archive/*, HEAD, and a branch that is the head or the
 base of an open pull request are kept. A name with a character outside [A-Za-z0-9._/-], or one that starts with `-`, is kept too: the name goes raw
 into a DELETE URL, and `#` ends the path.
 
@@ -185,6 +185,15 @@ class Verdicts(unittest.TestCase):
         git(repo.root, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
         got = self.check(repo, {"main": "keep", "master": "keep"})
         self.assertNotIn("HEAD", got, "HEAD: origin/HEAD is no branch and got a verdict line")
+
+    def test_stable_merged_into_default_is_kept(self):
+        repo, m1, _ = self.main_chain()
+        repo.branch("stable", m1)  # on main's history: the plan moves stable with green main, so each main push would reach it
+        repo.branch("feature/merged", m1)  # control: merged and unprotected, so the sweep does delete it
+        self.check(repo, {"main": "keep", "stable": "keep", "feature/merged": "delete"})
+        out, _ = sweep(repo.root)
+        reasons = {line.split(" ", 2)[1]: line.split(" ", 2)[2] for line in out.splitlines() if len(line.split(" ", 2)) == 3}
+        self.assertIn("protected", reasons["stable"], "stable: the reason does not name it protected: %r" % reasons["stable"])
 
     def test_merged_name_outside_the_safe_set_is_kept(self):
         repo, m1, _ = self.main_chain()
