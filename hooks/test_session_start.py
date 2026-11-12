@@ -758,13 +758,37 @@ def differ_line(rel, ref):
                       r"%s:%s$" % (re.escape(rel), re.escape(ref), re.escape(ref), re.escape(rel)))
 
 
+# The ruled store's reads (lint/ruled_store.py) start `git -C <repo> ls-tree ... roadmap/rulings` and `git -C <repo>
+# cat-file --batch`. The grant check's starts never carry -C, so a -C ls-tree or cat-file is the store's, not the check's.
+STORE_READ = re.compile(r"^-C .* (ls-tree|cat-file)\b")
+
+
 def names_the_grant_check(argv):
     """True when a git start is one the grant check makes: it names a grant file, an origin ref, or a stdin read.
     The hook's own default-branch read (symbolic-ref, which names origin/HEAD) runs before the check, so it is not
-    counted."""
-    if argv.split()[0] == "symbolic-ref":
+    counted. Neither is a ruled-store read (STORE_READ)."""
+    if argv.split()[0] == "symbolic-ref" or STORE_READ.match(argv):
         return False
     return any(part in argv for part in ("CLAUDE.md", "origin", "--batch", "--stdin"))
+
+
+class GrantFilterTests(unittest.TestCase):
+    """names_the_grant_check counts the grant check's git starts only. The ruled store's reads (lint/ruled_store.py, run
+    as git -C <repo>) are not the grant check's, so they are not counted."""
+
+    def test_a_ruled_store_read_is_not_a_grant_check_start(self):
+        for start in ("-C /tmp/repo ls-tree -z --name-only origin/roadmap roadmap/rulings/",
+                      "-C /tmp/repo cat-file --batch"):
+            with self.subTest(start=start):
+                self.assertFalse(names_the_grant_check(start),
+                                 "a ruled-store read is counted as a grant-check start: %r" % start)
+
+    def test_a_grant_read_is_still_a_grant_check_start(self):
+        for start in ("show origin/main:CLAUDE.md",
+                      "rev-list --left-right --count refs/heads/main...refs/remotes/origin/main"):
+            with self.subTest(start=start):
+                self.assertTrue(names_the_grant_check(start),
+                                "a grant-check read is not counted: %r" % start)
 
 
 class GitFixtureMixin:
