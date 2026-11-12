@@ -424,6 +424,24 @@ mrf_case("40,000 PR words with no # are judged within 5 s, and are allowed", "al
          max_seconds=MRF_SPEED)
 # The control: a verdict that skips a long line fails it. The PR #8 after 4,000 PR words is judged, and refused.
 mrf_case("PR #8 after 4,000 PR words with no # is judged and refused", "deny", "PR " * 4000 + "#8", carries=("#8",))
+# Quadratic cost on one line (decision send-message-refs-resolve, "Cost"). The PR numbers are deduplicated by a list scan,
+# and each own ref's issue word is searched for in the whole text before it. Measured on this host on the built code, one
+# guard run as decide times it: 40,000 distinct PR #N take 5.12 s (4.77 s of it in the dedupe scan); 3,000 own refs o/r#N after
+# 66,700 characters take 11.60 s. The controls, 40,000 PR #7 and 3,000 PR #N after the same prefix, take 0.24 s and 0.17 s.
+# The bound is 2 s, and decide cuts the run at 3 s.
+MRF_QUAD_S = 2 if os.name != "nt" else None
+MRF_DISTINCT_40K = " ".join("PR #%d" % number for number in range(1, 40001))
+MRF_LONG_PREFIX = "lane note here, see the plan " * 2300   # 66,700 characters, no issue word
+mrf_case("40,000 distinct PR #N on one line are judged within 2 s, and PR #1 is refused", "deny", MRF_DISTINCT_40K,
+         carries=("#1",), max_seconds=MRF_QUAD_S)
+mrf_case("40,000 PR #7 on one line, one number, are judged within 2 s, and are allowed", "allow",
+         " ".join(["PR #7"] * 40000), max_seconds=MRF_QUAD_S)
+mrf_case("3,000 own refs o/r#N after a long prefix are judged within 2 s, and o/r#1 is refused", "deny",
+         MRF_LONG_PREFIX + " ".join("o/r#%d" % number for number in range(1, 3001)), carries=("#1",),
+         max_seconds=MRF_QUAD_S)
+mrf_case("3,000 PR #N after the same long prefix are judged within 2 s, and PR #1 is refused", "deny",
+         MRF_LONG_PREFIX + " ".join("PR #%d" % number for number in range(1, 3001)), carries=("#1",),
+         max_seconds=MRF_QUAD_S)
 
 # False alarms (decision send-message-refs-resolve, "What is judged"): a closing verb between a PR word and its number, or
 # before this repo's owner/repo#N, names an issue, not a pull request. The base allowed each line below. The controls are
