@@ -144,6 +144,17 @@ rbb_allow("reviewer-brief-blind: allowed: a reviewer brief whose Verdict: line n
           "Check the floor fix.\nVerdict: PASS or FAIL, then findings.\nFiles: hooks/guard.py.")
 rbb_allow("reviewer-brief-blind: allowed: a reviewer brief that asks for a Report with: list of the four labels, bare",
           "Check the floor fix.\nReport with:\n- Done\n- Deviations\n- Input Needed\n- Next\nFiles: hooks/guard.py.")
+# A verdict line that lists the verdict words as a choice, with commas, is the house phrase of a reviewer's own brief, not a
+# prior verdict. The controls keep a bare `Verdict: FAIL`, and one with a comma and findings after it, refused.
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a Verdict: line that lists PASS, FAIL, or PARTIAL",
+          "Check the floor fix.\nVerdict: PASS, FAIL, or PARTIAL.\nFiles: hooks/guard.py.")
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief with a line that asks for a verdict, PASS, FAIL or PARTIAL",
+          "Check the floor fix.\nEnd your report with a verdict: PASS, FAIL or PARTIAL.\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: control, a reviewer brief with a Verdict: FAIL line alone",
+           "Check the floor fix.\nVerdict: FAIL\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: control, a reviewer brief with a Verdict: FAIL, then findings",
+           "Check the floor fix.\nVerdict: FAIL, two findings below.\nFiles: hooks/guard.py.")
+
 # Known limit (note brief-done-next-task-lines-refused, decision reviewer-brief-blind). A Done: and a Next: line that
 # describe the task are read as a report's labels: telling them from a builder's lines takes a word rule, which the
 # decision rules out. So this brief is refused until a word rule is ruled.
