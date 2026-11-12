@@ -1806,6 +1806,22 @@ test("pending cite: --claim on a file that only an excludeGlobs entry covers say
     assert.doesNotMatch(out, /\bdrop\b/i, `--claim's fix for an excluded file says drop the entry, which also scans the folder's other files:\n${out}`);
   }));
 
+// Two cites on one line are one place in the file, so the refusal reports file:line once. A repeat of
+// that line in an "Also at line" note reads as a second place.
+test("pending cite: two pending cites on one line of an unscanned file print one report line, with no Also-at-line repeat", () =>
+  withTempDir((root) => {
+    const twice = "plugins/_shared/twice.block";
+    pendingCiteRepo(root, SCAN_MD, { [twice]: "See [[p]] and again [[p]].\n" });
+    assert.equal(read(root, twice).split("\n")[0], "See [[p]] and again [[p]].", "scope: the file must hold two cites on line 1");
+
+    const r = runStamp(root, ".github/stamp.json", "claim");
+    const out = outputOf(r);
+    assert.notEqual(r.status, 0, `--claim exited 0 with an unscanned pending cite:\n${out}`);
+    const reports = out.split("\n").filter((l) => l.includes(`${twice}:1`));
+    assert.equal(reports.length, 1, `--claim printed ${reports.length} report lines for ${twice}:1, not one:\n${out}`);
+    assert.doesNotMatch(out, /Also at line/, `--claim repeated line 1 in an "Also at line" note:\n${out}`);
+  }));
+
 // The cite scanner reads text, so the cases that break a naive scanner go in: a comment opener
 // inside a string, a multi-line template literal, and a lone quote in prose. Each cite sits outside
 // scanGlobs and must still refuse at its own line. The refusal reads a cite as the rewrite does, so
