@@ -77,7 +77,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   | `port` | A port or redesign question. |
   | `look` | A question about how something looks. |
   | `designs` | A list of `{slug, label, file}`: the mockups. An option names its picture with `design`. |
-  | `options` | A decision's list of `{key, label, how, gain, lose}`, plus optional `design`, `differs` and `widens`. |
+  | `options` | A decision's list of options (shape: see the option bullet below). |
   | `pick` | The key you recommend; a list of keys on a `multi` item. Never names a `widens` option. |
   | `why` | Why the pick. |
   | `multi` | The owner ticks any number of options. |

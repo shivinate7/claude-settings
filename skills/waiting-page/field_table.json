@@ -20,7 +20,7 @@
   "port": {"meaning": "A port or redesign question."},
   "look": {"meaning": "A question about how something looks."},
   "designs": {"meaning": "A list of `{slug, label, file}`: the mockups. An option names its picture with `design`."},
-  "options": {"meaning": "A decision's list of `{key, label, how, gain, lose}`, plus optional `design`, `differs` and `widens`."},
+  "options": {"meaning": "A decision's list of options (shape: see the option bullet below)."},
   "pick": {"meaning": "The key you recommend; a list of keys on a `multi` item. Never names a `widens` option."},
   "why": {"meaning": "Why the pick."},
   "multi": {"meaning": "The owner ticks any number of options."},
