@@ -8,7 +8,7 @@ Owner, 2026-11-10 12:11 CST, to triage: "i thought i'd already established to co
 
 So the stopgap covers the CI job caps raised here, and local tool caps too:
 
-- CI job caps: `checks` 52 to 75 min, `checks-macos` 55 to 75, `checks-mutate-guard` 45 to 75, `checks-windows-sweep` 40 to 75, and `merge.deadlineMinutes` 65 to 80 (the largest cap plus 5). The three Windows guard jobs, `checks-windows-guard`, `-2` and `-3`, rise from 20 to 75 min.
+- CI job caps: `checks-merge-install` 30 to 75 min (slowest step: the merge tool git-half suite, 677 s; no split needed), `checks` 52 to 75 min, `checks-macos` 55 to 75, `checks-mutate-guard` 45 to 75, `checks-windows-sweep` 40 to 75, and `merge.deadlineMinutes` 65 to 80 (the largest cap plus 5). The three Windows guard jobs, `checks-windows-guard`, `-2` and `-3`, rise from 20 to 75 min.
 - The merge tool's lane lint bound, `LINT_SECONDS` in `merge/merge.py`: 1200 s to 3600 s.
 - The Retire check's bound per suite, `TIMEOUT` in `lint/check_debt_retire.py`: 600 s to 1800 s.
 - The Python floor check's bound, `TIMEOUT` in `lint/check_python_floor.py`: 300 s to 900 s.
@@ -33,7 +33,7 @@ Window: each row names its own. A row marked "window of 2026-11-05" or "window o
 | Job | Runner | n | Median | Slowest | Cap before | Cap after | Slowest as % of cap after | Cap ends, no red step | Target met |
 |---|---|---|---|---|---|---|---|---|---|
 | checks (window of 2026-11-05) | ubuntu | 27 | 19.8 | 22.8 | 52 | 75 (interim, stopgap, owner 12:11 CST Nov 10) | 30 | 0 | yes |
-| checks-merge-install (split off checks; window of 2026-11-06) | ubuntu | 30 | 17.7 | 21.0 | 60 (provisional) | 30 | 70 | 0 | yes |
+| checks-merge-install (window of 2026-11-12: newest 30 push runs on main, to run 43164094808) | ubuntu | 29 green of 30 | 21.6 | 26.7 green (run 43148329817); 30.2 cap end (run 43164094808, cancelled) | 30 | 75 (interim, stopgap, owner 12:11 CST Nov 10) | 36 (26.7 green) | 1: run 43164094808, 30.2 min, no red step | yes |
 | checks-guard and checks-guard-2 (2 Linux shards of the guard suite; window of 2026-11-09) | ubuntu | 30 (unsplit suite) | 21.1 | 27.2 (run 42682869856, attempt 1, cap end) | 27 | 60 (provisional, each shard; rule 6 below) | unmeasured per shard; the unsplit slowest was 100% of 27 | 1: run 42682869856, attempt 1, 27.2 min (the re-run took 27.0) | no, until 5 green shard runs |
 | checks-windows-rest (window of 2026-11-09) | windows | 30 | 19.25 | 25.8 (run 42682869856, attempt 1) | 28 | 37 | 70 | 0 in window; 6 earlier runs ended attempt 1 at 33.0 min (42458595807, 41001319842, 40996271237, 40965609603, 40947283778, 40939155321), cap then unread | yes |
 | checks-windows-sweep (new; projected) | windows | 30 | 7.3 (projected) | 19.1 (projected: sum of two step maxima) | none | 75 (interim, stopgap, owner 12:11 CST Nov 10) | 26 (19.6 projected) | 0 | yes |
