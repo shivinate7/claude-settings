@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """PreToolUse judge for an Agent spawn, an AskUserQuestion call, an ArtifactData write of a
-waiting-page item and a coordinator's `mcp__claude-code-remote__send_message` that states a pick. One command hook replaces the settings.json `prompt` hook on Agent and the `agent`
+waiting-page item and a coordinator's send that states a pick (send_message, create_session or SendMessage). One command hook replaces the settings.json `prompt` hook on Agent and the `agent`
 hook on AskUserQuestion. A prompt hook sees only the call's JSON. An agent hook reads files with tools and
 returns ok. Neither has a command field, so neither runs guard_core.refuse, the one home of the owner
 override (decision owner-override).
@@ -38,9 +38,11 @@ run (a model error, a source that exists and cannot be read, or a refusal that c
 shown), the question is refused with the Unvetted remedy, unless its own text carries an `Unvetted:` line. An absent
 source allows, with one stderr line.
 
-A coordinator's pick (rule `pick-judge`, decision pick-cites-ruling-before-send): a `mcp__claude-code-remote__send_message`
-from a session tagged cs-build:coordinator (own_session.own_session_read, plus the add and remove of a later own
-set_session_tags call; unlike guard.lane_session_hit, another cs-build: tag does not void it) whose text holds a whole
+A coordinator's pick (rule `pick-judge`, decision pick-cites-ruling-before-send): a call of one of three tools
+(shared_names.PICK_TOOLS: `mcp__claude-code-remote__send_message`, `mcp__claude-code-remote__create_session` and
+`SendMessage`) from a session tagged cs-build:coordinator (own_session.own_session_read, plus the add and remove of a later own
+set_session_tags call; unlike guard.lane_session_hit, another cs-build: tag does not void it) whose text (the `message` of send_message and SendMessage, the `prompt` of create_session; a title or a summary
+alone is not judged) holds a whole
 word pick, picks, picked, hold, holds or held (not `hold on`, `pick up`, `on hold` or a hyphen id) must cite a ruling
 (a plan R-number, a decision, debt or step id, a `page item N`) or say `no ruling found: <what was searched>`.
 Neither is a code refusal with the remedy, no model call.
@@ -50,7 +52,7 @@ page item from origin/roadmap) refuses a pick the cited text contradicts or does
 a later ruling supersedes an older one, and to word a reason as a past ruling to weigh. Any other sender or text exits at
 once, with no model call. A ref or file that is missing is named in the prompt as not searched. A model error allows, with
 one stderr line.
-Cost: the matcher starts this script on every send_message (37 ms measured); a send with no pick or hold word, or from no
+Cost: the matcher starts this script on every call of the three tools (37 ms measured); a send with no pick or hold word, or from no
 coordinator, starts no process beyond the hook's own start and makes no model call. A pick with a cite or a no-ruling
 statement: one git process (question_form.past_rulings) and one Sonnet call, PAST_RULING_TIMEOUT s; a cited plan R-number or
 page item adds one more git process (one `cat-file --batch` for every ref read: no checkout, no fetch), so at most two.
@@ -85,7 +87,7 @@ if HERE not in sys.path:
 # shared_names is standard library only and adds about 2 ms.
 from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402
 from shared_names import DATA_TOOL  # noqa: E402  stdlib only: the one home of the tool name
-from shared_names import COORDINATOR_TAG, PICK_SEND_TOOL  # noqa: E402  stdlib only: the coordinator tag, the send tool
+from shared_names import COORDINATOR_TAG, CREATE_SESSION_TOOL, PICK_TOOLS  # noqa: E402  stdlib only: the coordinator tag, the judged tools
 
 OK_SHAPE = {"ok": (True, False)}
 SPAWN_RULE, QUESTION_RULE, PICK_RULE = "spawn-judge", "question-judge", "pick-judge"
@@ -428,7 +430,8 @@ PICK_WEIGH = "Treat it as a past ruling to weigh: a later ruling may supersede i
 PICK_WORD = re.compile(r"(?<![\w-])(?<!\bon[ \t])(?:pick|picks|picked|hold|holds|held)(?![\w-])(?![ \t]+(?:on|up)\b)", re.I)
 PICK_NO_RULING = re.compile(r"\bno ruling found[ \t*_`]*:[ \t*_`]*\w", re.I)  # markdown may wrap the label and the text
 PICK_PLAN_REF = re.compile(r"(?<![\w-])R(\d{1,3})(?!\w)")
-PICK_ITEM_REF = re.compile(r"\bpage[ \t]+items?[ \t]+#?(\d+)(?!\w)", re.I)  # a bare "item N" is no cite
+# A bare "item N" is no cite. One letter may follow the number (`556a`), unless a word character or hyphen follows it (`3d-x`).
+PICK_ITEM_REF = re.compile(r"\bpage[ \t]+items?[ \t]+#?(\d+)(?:[a-z](?![\w-]))?(?!\w)", re.I)
 PICK_RECORD_REF = re.compile(r"\b(?:decisions?|debts?|steps?)[ \t]+[`'\"]?(\w+(?:-\w+)+)", re.I)
 PICK_PATH_REF = re.compile(r"(?<![\w/-])(?:decisions|debts)/([\w.-]*\w)")
 PICK_PLAN_CAP = 6000
@@ -721,10 +724,10 @@ def _fenced(label, text):
 
 
 def judge_pick(payload, tool, args):
-    """A coordinator's pick or hold, sent by send_message, must cite a ruling that says it. Code refuses a pick with no
+    """A coordinator's pick or hold, sent by send_message, create_session or SendMessage, must cite a ruling that says it. Code refuses a pick with no
     cite and no `no ruling found:` line. One Sonnet call judges a cited one against the cited text. True when it
     refused, so a caller with another check on the same send runs that check after a pass."""
-    message = args.get("message")
+    message = args.get("prompt" if tool == CREATE_SESSION_TOOL else "message")  # create_session's text is its brief
     if not isinstance(message, str) or not PICK_WORD.search(message):
         return False  # the cheapest test first: most sends hold neither word
     try:
@@ -760,7 +763,7 @@ def main():
     try:
         payload = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
         tool, args = payload.get("tool_name"), payload.get("tool_input")
-        if tool == PICK_SEND_TOOL and isinstance(args, dict) and judge_pick(payload, tool, args):
+        if tool in PICK_TOOLS and isinstance(args, dict) and judge_pick(payload, tool, args):
             return 0  # refused; a pass falls through, so another check on the same send still runs
         if tool not in JUDGES:
             return 0

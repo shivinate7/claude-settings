@@ -98,6 +98,10 @@ COORDINATOR_TAG = BUILD_TAG + "coordinator"  # a coordinator session (hooks/call
 LANE_GRANT_MARKER = "Grant:"
 CREATE_SESSION_TOOL = REMOTE_SERVER + "__create_session"
 PICK_SEND_TOOL = REMOTE_SERVER + "__send_message"  # the send a coordinator's pick goes by (hooks/call_judge.py)
+PICK_AGENT_SEND_TOOL = "SendMessage"  # the Claude Code tool that messages an agent; its text is `message`
+# The three tools whose text a coordinator's pick is judged on (hooks/call_judge.py, judge_pick). One tuple, so each
+# reader takes the set from here. CREATE_SESSION_TOOL's text is `prompt`; the other two carry `message`.
+PICK_TOOLS = (PICK_SEND_TOOL, CREATE_SESSION_TOOL, PICK_AGENT_SEND_TOOL)
 
 
 def lane_tags(tool_input: dict[str, Any]) -> list[Any]:
