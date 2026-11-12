@@ -1,0 +1,41 @@
+{
+  "added": "2026-11-12T01:48:00Z",
+  "context": "Goal: a ruleset on every repo's main, with no repo's merges stopped.\nProblem (risk): the rewritten grant (built in your local session, no PR yet) lets a session remove main's old branch protection after it adds the ruleset. The merge tool reads only the old protection, so it would refuse every merge in that repo.\nBased on (measured): the merge tool checks main's old branch protection for the required check, and refuses to merge when that protection is missing. This repo's merge settings tell it to read the check from that protection (read on main, 19:47 CST Nov 11).\nDeparts from: main's grant, which covers old-style branch protection only \u2014 adds the move to one ruleset per main, and decides whether the old protection may then go.\nMeanwhile: the retrospective waits on this item only; the drain goes on.",
+  "holds": "Whether the ruleset grant lets a session remove main's old branch protection, and what keeps merges running.",
+  "home": ".claude/CLAUDE.md Standing grants (branch grant-shared-ruleset); step child-repo-gap",
+  "id": "ruleset-keeps-merges",
+  "kind": "decision",
+  "n": 519,
+  "options": [
+    {
+      "gain": "No merge stops, and no tool or repo changes.",
+      "how": "Drop the grant's remove-old-protection sentence. Each main keeps its old protection beside the ruleset, both requiring only the one all-jobs-passed check.",
+      "key": "a",
+      "label": "Keep both protections (Recommended)",
+      "lose": "Two settings per repo to keep in step."
+    },
+    {
+      "gain": "One protection per repo.",
+      "how": "Keep the sentence. Before its old protection goes, each repo names its one required check, all jobs passed, in its own merge settings file.",
+      "key": "b",
+      "label": "Each repo names its check",
+      "lose": "The merge tool stops checking that a repo's named check matches its protection."
+    },
+    {
+      "gain": "No repo setting to add.",
+      "how": "Keep the sentence, and the merge tool also reads rulesets. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "key": "c",
+      "label": "Merge tool reads rulesets",
+      "lose": "A second accepted form in a shared tool.",
+      "widens": true
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "rank": 1,
+  "ref": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "repo": "shivinate7/claude-settings",
+  "short": "ruleset vs merge tool",
+  "status": "open",
+  "title": "When main moves to a ruleset, may the old branch protection go?",
+  "why": "The ruleset grant you gave at 16:43 CST would let a sweep remove the protection the merge tool reads (measured 2026-11-11, the merge tool on main at 19:47 CST)."
+}
