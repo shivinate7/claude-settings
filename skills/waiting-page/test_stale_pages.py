@@ -5,6 +5,7 @@ same cases run red against a checkout that lacks it.
 """
 import contextlib
 import importlib.util
+from datetime import datetime, timedelta, timezone
 import io
 import json
 import os
@@ -1698,6 +1699,28 @@ class FolderCase(unittest.TestCase):
                     out[os.path.relpath(path, self.tmp.name)] = f.read()
         return out
 
+    def run_main(self, *argv):
+        """main(argv) in this process, with stdout captured. Each process start is refused and recorded, at the start itself, so
+        `starts` lists every one the run asked for. Returns (exit code, stdout, starts, error); error is the exception text when
+        the run raised instead of answering, else ""."""
+        stale = load_stale_pages()
+        starts = []
+
+        def refuse(*args, **kwargs):
+            starts.append(args[0] if args else kwargs.get("args"))
+            raise OSError("process start refused")
+
+        out, code, error = io.StringIO(), None, ""
+        with mock.patch.object(subprocess, "Popen", side_effect=refuse), mock.patch.object(os, "system", side_effect=refuse), \
+                contextlib.redirect_stdout(out):
+            try:
+                code = stale.main(list(argv))
+            except SystemExit as err:
+                code = err.code
+            except Exception as err:  # a run that raised answered nothing; the caller names it
+                error = repr(err)
+        return code, out.getvalue(), starts, error
+
 
 class ParkedStale(FolderCase):
     """The --parked mode. Each case writes its own three files, then runs the script on them."""
@@ -1891,28 +1914,6 @@ class UnreadStale(FolderCase):
         self.assert_mode_lines(r.stdout, r.stderr)
         self.assertIn(r.returncode, codes, "the --unread mode exited %d, want one of %s: %s" % (r.returncode, codes, r.stdout + r.stderr))
         return r.returncode, r.stdout
-
-    def run_main(self, *argv):
-        """main(argv) in this process, with stdout captured. Each process start is refused and recorded, at the start itself, so
-        `starts` lists every one the run asked for. Returns (exit code, stdout, starts, error); error is the exception text when
-        the run raised instead of answering, else ""."""
-        stale = load_stale_pages()
-        starts = []
-
-        def refuse(*args, **kwargs):
-            starts.append(args[0] if args else kwargs.get("args"))
-            raise OSError("process start refused")
-
-        out, code, error = io.StringIO(), None, ""
-        with mock.patch.object(subprocess, "Popen", side_effect=refuse), mock.patch.object(os, "system", side_effect=refuse), \
-                contextlib.redirect_stdout(out):
-            try:
-                code = stale.main(list(argv))
-            except SystemExit as err:
-                code = err.code
-            except Exception as err:  # a run that raised answered nothing; the caller names it
-                error = repr(err)
-        return code, out.getvalue(), starts, error
 
     def test_an_answer_long_before_the_wake_with_no_receipt_is_listed_with_its_exact_line_and_exits_1(self):
         self.store(items=[item_entry("colour-pick", "open", n=143, owner="ops")], answers=[pick_answer_entry("colour-pick", EARLY)])
@@ -2119,6 +2120,212 @@ class UnreadStale(FolderCase):
         code, out, _, error = self.run_main("--unread", self.folder)
         self.assert_mode_lines(out, error)
         self.assertEqual((code, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY)]), "main() did not send --unread to its mode: " + out)
+
+
+# --lag: how long each answer took to read back, and which answers are unread past a set age (waiting-page SKILL.md, the
+# wake; decision waiting-page-one-store, Mechanism step 3). It reads the folder the writer saves at each wake: answers/<id>.json
+# and receipts/<id>.json, one doc per file holding the doc's data, each folder with its .complete marker. It writes no file,
+# starts no process and reads no clock: --now sets the time, as --parked's does. Times print in US Central (hooks/local_time.py).
+#   read-delay <id> answered <at>, read <read>, delay <N>s       an answer with a receipt whose read is at or after its at
+#   unread-old <id> answered <at>, no read after it, age <N>s    an answer with no such receipt, older than --max-age (default 60 min)
+#   lag total: A answers, R read, U unread older than M min, Y unread within M min    the last line, always
+# An unread answer younger than the max age prints no line; the total counts it. Exit 0 when no unread-old line, 1 when there is
+# one, 2 when a folder or file cannot be read (`unknown: <what>`: never a clean or old line for the same cause).
+LAG_NOW = "2026-11-12T16:00:00Z"  # 10:00 CST: the clock of each case below, unless the case passes its own
+
+
+def lag_answer(at, item_id="colour-pick"):
+    """An item's answer as the writer saves it: the answer's data, with its `at` time."""
+    return {"item": item_id, "n": 27, "at": at, "choice": "a", "note": ""}
+
+
+def lag_receipt(read, filed=None):
+    """A receipt's data. `read` is ISO UTC with a trailing Z, as the skill writes it; `filed` is optional."""
+    data = {"read": read}
+    if filed is not None:
+        data["filed"] = filed
+    return data
+
+
+def lag_total(answers, read, old, young, minutes=60):
+    return "lag total: %d answers, %d read, %d unread older than %d min, %d unread within %d min" % (answers, read, old, minutes, young, minutes)
+
+
+def utc_text(when):
+    return when.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def cst_text(when):
+    """A UTC instant in the mode's print form, for a November case: US Central is CST (UTC-6) on 2026-11-12."""
+    return (when - timedelta(hours=6)).strftime("%Y-%m-%d %H:%M CST")
+
+
+class LagStale(FolderCase):
+    """The --lag mode. Each case saves its own answers/ and receipts/ folders, then runs the script on them."""
+    FOLDER = "lag"
+
+    def store(self, answers=(), receipts=()):
+        """Writes each (id, data) pair as <id>.json in answers/ or receipts/, with the .complete marker in each folder."""
+        for folder, docs in (("answers", answers), ("receipts", receipts)):
+            os.makedirs(os.path.join(self.folder, folder), exist_ok=True)
+            for doc_id, data in docs:
+                write_text(os.path.join(self.folder, folder, doc_id + ".json"), json.dumps(data))
+            write_text(os.path.join(self.folder, folder, ".complete"), "")
+
+    def run_lag(self, now=LAG_NOW, max_age=None, codes=(0, 1)):
+        """Runs the mode on the folder and returns (exit code, output lines). The total line is the mode's last line, so the run
+        is checked to be the mode's before any other line is read."""
+        argv = ["--lag", self.folder, "--now", now]
+        if max_age is not None:
+            argv += ["--max-age", str(max_age)]
+        r = Stale.run_script(self, *argv)
+        lines = output_lines(r.stdout)
+        self.assertTrue(lines and lines[-1].startswith("lag total: ") and r.stderr == "",
+                        "the --lag mode did not run: no total line last, or stderr is not empty: %r %r" % (r.stdout, r.stderr))
+        self.assertIn(r.returncode, codes, "the --lag mode exited %d, want one of %s: %s" % (r.returncode, codes, r.stdout + r.stderr))
+        return r.returncode, lines
+
+    def run_unknown(self):
+        """Runs the mode on the folder and returns (exit code, output). The unknown line is the mode's own, so it is checked first."""
+        r = Stale.run_script(self, "--lag", self.folder, "--now", LAG_NOW)
+        self.assertTrue(any(line.startswith("unknown: ") for line in output_lines(r.stdout)),
+                        "the --lag mode printed no unknown: line, so it did not run: %r %r" % (r.stdout, r.stderr))
+        return r.returncode, r.stdout
+
+    def assert_run(self, got, want_rc, want_lines, why):
+        """The exit code and the lines are as wanted, as sets: the mode's line order is not pinned here."""
+        rc, lines = got
+        self.assertEqual((rc, sorted(lines)), (want_rc, sorted(want_lines)), "%s: exit %d, lines %r" % (why, rc, lines))
+
+    def test_a_delayed_answer_prints_its_delay_from_at_to_read_and_exits_0(self):
+        self.store(answers=[("nine-hours", lag_answer("2026-11-12T12:00:00Z"))],
+                   receipts=[("nine-hours", lag_receipt("2026-11-12T15:00:00Z"))])
+        self.assert_run(self.run_lag(codes=(0,)), 0, [
+            "read-delay nine-hours answered 2026-11-12 06:00 CST, read 2026-11-12 09:00 CST, delay 10800s",
+            lag_total(1, 1, 0, 0)], "a read answer three hours late did not print its delay from at to read")
+
+    def test_an_answer_with_a_receipt_has_its_delay_to_read_and_not_to_filed(self):
+        self.store(answers=[("quick", lag_answer("2026-11-12T15:30:00Z"))],
+                   receipts=[("quick", lag_receipt("2026-11-12T15:30:20Z", filed="2026-11-12T15:31:00Z"))])
+        self.assert_run(self.run_lag(codes=(0,)), 0, [
+            "read-delay quick answered 2026-11-12 09:30 CST, read 2026-11-12 09:30 CST, delay 20s",
+            lag_total(1, 1, 0, 0)], "the delay did not run from at to read, or it ran to filed (80s)")
+
+    def test_an_unread_answer_older_than_the_max_age_is_named_and_exits_1(self):
+        self.store(answers=[("unread-early", lag_answer("2026-11-12T13:00:00Z"))])
+        self.assert_run(self.run_lag(), 1, [
+            "unread-old unread-early answered 2026-11-12 07:00 CST, no read after it, age 10800s",
+            lag_total(1, 0, 1, 0)], "an unread answer three hours old was not named as old")
+
+    def test_an_unread_answer_younger_than_the_max_age_is_counted_and_not_named(self):
+        self.store(answers=[("unread-young", lag_answer("2026-11-12T15:30:00Z"))])
+        self.assert_run(self.run_lag(codes=(0,)), 0, [lag_total(1, 0, 0, 1)],
+                        "an unread answer thirty minutes old was named, or it was not counted as unread within the age")
+
+    def test_a_receipt_read_before_its_answer_does_not_clear_it(self):
+        self.store(answers=[("re-answered", lag_answer("2026-11-12T14:00:00Z"))],
+                   receipts=[("re-answered", lag_receipt("2026-11-12T13:30:00Z"))])
+        self.assert_run(self.run_lag(), 1, [
+            "unread-old re-answered answered 2026-11-12 08:00 CST, no read after it, age 7200s",
+            lag_total(1, 0, 1, 0)], "a read from before the answer cleared it")
+
+    def test_a_missing_folder_or_subfolder_is_unknown_and_exits_2(self):
+        # The folder itself goes last: each case before it needs the folder to be there.
+        with self.subTest(case="no receipts folder"):
+            self.clear_store()
+            self.store(answers=[("quick", lag_answer("2026-11-12T15:30:00Z"))])
+            shutil.rmtree(os.path.join(self.folder, "receipts"))
+            rc, out = self.run_unknown()
+            self.assert_unknown(rc, out, "receipts")
+        with self.subTest(case="no answers folder"):
+            self.clear_store()
+            self.store(receipts=[("quick", lag_receipt("2026-11-12T15:31:00Z"))])
+            shutil.rmtree(os.path.join(self.folder, "answers"))
+            rc, out = self.run_unknown()
+            self.assert_unknown(rc, out, "answers")
+        with self.subTest(case="the folder itself"):
+            shutil.rmtree(self.folder)
+            rc, out = self.run_unknown()
+            self.assert_unknown(rc, out, self.folder)
+
+    def test_malformed_json_or_an_unreadable_field_is_unknown_and_exits_2(self):
+        with self.subTest(case="a receipt that is not JSON"):
+            self.clear_store()
+            self.store(answers=[("quick", lag_answer("2026-11-12T15:30:00Z"))],
+                       receipts=[("quick", lag_receipt("2026-11-12T15:30:20Z"))])
+            write_text(os.path.join(self.folder, "receipts", "quick.json"), "{ not json")
+            rc, out = self.run_unknown()
+            self.assert_unknown(rc, out, "quick")
+        with self.subTest(case="an answer that is not JSON"):
+            self.clear_store()
+            self.store(answers=[("quick", lag_answer("2026-11-12T15:30:00Z"))],
+                       receipts=[("quick", lag_receipt("2026-11-12T15:30:20Z"))])
+            write_text(os.path.join(self.folder, "answers", "quick.json"), "[")
+            rc, out = self.run_unknown()
+            self.assert_unknown(rc, out, "quick")
+        with self.subTest(case="an answer with no readable at"):
+            self.clear_store()
+            self.store(answers=[("quick", lag_answer("next tuesday"))])
+            rc, out = self.run_unknown()
+            self.assert_unknown(rc, out, "quick")
+        with self.subTest(case="a receipt with no readable read"):
+            self.clear_store()
+            self.store(answers=[("quick", lag_answer("2026-11-12T15:30:00Z"))],
+                       receipts=[("quick", {"filed": "2026-11-12T15:31:00Z"})])
+            rc, out = self.run_unknown()
+            self.assert_unknown(rc, out, "quick")
+
+    def test_an_empty_folder_totals_zero_and_exits_0(self):
+        self.store()
+        self.assert_run(self.run_lag(codes=(0,)), 0, [lag_total(0, 0, 0, 0)], "an empty folder did not total to zero with exit 0")
+
+    def test_a_full_size_folder_prints_one_line_per_answer_and_totals_every_one(self):
+        now = datetime(2026, 11, 12, 16, tzinfo=timezone.utc)
+        base = datetime(2026, 11, 12, 8, tzinfo=timezone.utc)
+        answers, receipts, want = [], [], []
+        for i in range(240):
+            doc_id = "a%03d" % i
+            if i % 3 == 0:  # read five minutes after it was answered
+                at = base + timedelta(seconds=i)
+                read = at + timedelta(minutes=5)
+                answers.append((doc_id, lag_answer(utc_text(at))))
+                receipts.append((doc_id, lag_receipt(utc_text(read))))
+                want.append("read-delay %s answered %s, read %s, delay 300s" % (doc_id, cst_text(at), cst_text(read)))
+            elif i % 3 == 1:  # unread, and more than an hour old
+                at = base + timedelta(seconds=i)
+                answers.append((doc_id, lag_answer(utc_text(at))))
+                want.append("unread-old %s answered %s, no read after it, age %ds" % (doc_id, cst_text(at), int((now - at).total_seconds())))
+            else:  # unread, and under an hour old
+                at = datetime(2026, 11, 12, 15, 30, tzinfo=timezone.utc) + timedelta(seconds=i)
+                answers.append((doc_id, lag_answer(utc_text(at))))
+        self.store(answers=answers, receipts=receipts)
+        self.assert_run(self.run_lag(), 1, want + [lag_total(240, 80, 80, 80)],
+                        "the full-size folder did not print one line per answer and the total")
+
+    def test_the_max_age_defaults_to_60_minutes_and_the_option_sets_it(self):
+        self.store(answers=[("sixty-two", lag_answer("2026-11-12T14:58:00Z")), ("fifty-nine", lag_answer("2026-11-12T15:01:00Z"))])
+        self.assert_run(self.run_lag(), 1, [
+            "unread-old sixty-two answered 2026-11-12 08:58 CST, no read after it, age 3720s",
+            lag_total(2, 0, 1, 1, minutes=60)], "the default max age is not 60 minutes")
+        self.assert_run(self.run_lag(max_age=90, codes=(0,)), 0, [lag_total(2, 0, 0, 2, minutes=90)],
+                        "--max-age 90 still names an answer 62 minutes old")
+
+    def test_times_print_in_central_time_with_the_zone_in_force_that_day(self):
+        self.store(answers=[("summer", lag_answer("2026-07-15T13:00:00Z"))],
+                   receipts=[("summer", lag_receipt("2026-07-15T14:00:00Z"))])
+        self.assert_run(self.run_lag(now="2026-07-15T16:00:00Z", codes=(0,)), 0, [
+            "read-delay summer answered 2026-07-15 08:00 CDT, read 2026-07-15 09:00 CDT, delay 3600s",
+            lag_total(1, 1, 0, 0)], "a July time did not print in CDT")
+
+    def test_the_mode_starts_no_process_and_writes_no_file(self):
+        self.store(answers=[("unread-early", lag_answer("2026-11-12T13:00:00Z"))])
+        before = self.tree()
+        code, out, starts, error = self.run_main("--lag", self.folder, "--now", LAG_NOW)
+        lines = output_lines(out)
+        self.assertTrue(lines and lines[-1].startswith("lag total: "), "the --lag mode did not run in process: %r %s" % (out, error))
+        self.assertEqual(starts, [], "the --lag mode asked for a process: %r" % starts)
+        self.assertEqual(self.tree(), before, "the --lag mode wrote or removed a file")
+        self.assertEqual((code, error), (1, ""), "the --lag mode exited %r with %r, want 1" % (code, error))
 
 
 if __name__ == "__main__":
