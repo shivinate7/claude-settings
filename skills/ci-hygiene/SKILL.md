@@ -92,8 +92,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    the new run is the re-run. A lone lane is its own integration PR and has no replacer.
    Other lane PRs stay draft. `merge --reviewed --root` lists each close as a line: `close as replaced`,
    `close as carried` or `reopen` (step `close-replaced-at-open`). The batch runner acts on each line.
-   It closes the PR with `gh api -X PATCH repos/OWNER/REPO/pulls/N -f state=closed` (or
-   `update_pull_request`) and posts the comment, or it reopens the PR. The tool posts and closes nothing.
+   It closes the PR with the GitHub MCP tool `update_pull_request` (state closed). Where gh writes are allowed
+   (local session), it may use `gh api -X PATCH repos/OWNER/REPO/pulls/N -f state=closed` instead. It then posts
+   the comment, or it reopens the PR. The tool posts and closes nothing.
    When an integration PR opens with a body line `Replaces #N`, the lane PR it names closes as
    replaced. The replacer and the replaced PR must share a base. A bulleted `- Replaces #N` does not
    count. The line must start with `Replaces #N`, outside a code fence and a quote. A loop of PRs
