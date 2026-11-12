@@ -523,6 +523,14 @@ FIXTURELESS_CHECKS.add(review_send_matcher_case)
 LOG_CHECKS_EXTRA.append((RR_REMEDY_LABEL, rr_remedy_case))
 LOG_FAMILY[RR_REMEDY_LABEL] = "review-record-after-round"
 FIXTURELESS_CHECKS.add(rr_remedy_case)
+# The resume-finished-reviewer checks are appended here too, for the same reason. Each builds its own
+# folders and reads no lazy fixture.
+LOG_CHECKS_EXTRA.append((RF_COST_LABEL, rf_cost_case))
+LOG_FAMILY[RF_COST_LABEL] = "resume-finished-reviewer"
+FIXTURELESS_CHECKS.add(rf_cost_case)
+LOG_CHECKS_EXTRA.append((RF_UNPARSED_LABEL, rf_unparsed_case))
+LOG_FAMILY[RF_UNPARSED_LABEL] = "resume-finished-reviewer"
+FIXTURELESS_CHECKS.add(rf_unparsed_case)
 
 
 # The two MCP updates that mark nothing ready, read by _rpr_no_read (records-page-ready). They sit here because

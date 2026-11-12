@@ -54,12 +54,17 @@ RR_AGENT_ONE = "a5e0c1d7b2f94e381"
 RR_AGENT_TWO = "b7d2f9e4a0c13658e"
 
 
-def rr_spawn(tool_id, subagent_type, tool="Agent", agent=None):
+def rr_spawn(tool_id, subagent_type, tool="Agent", agent=None, name=None, result=None):
     """A spawn of `subagent_type` and its result, as the transcript holds them. With `agent`, the spawn runs in the
-    background: its result is the launch notice that names `agent`, not the report."""
-    result = "Verdict: PASS." if agent is None else RR_LAUNCH % (agent, agent, agent)
-    return [role_use(tool_id, tool, {"subagent_type": subagent_type, "prompt": "Review PR #12.", "model": "sonnet"}),
-            role_result(tool_id, result)]
+    background: its result is the launch notice that names `agent`, not the report. `name` adds the spawn's name to
+    its input, and `result` (a line the caller built) replaces the plain text result."""
+    tool_input = {"subagent_type": subagent_type, "prompt": "Review PR #12.", "model": "sonnet"}
+    if name is not None:
+        tool_input["name"] = name
+    if result is None:
+        text = "Verdict: PASS." if agent is None else RR_LAUNCH % (agent, agent, agent)
+        result = role_result(tool_id, text)
+    return [role_use(tool_id, tool, tool_input), result]
 
 
 def rr_notice(tool_id, agent):
@@ -83,9 +88,10 @@ def rr_bash(tool_id, command):
     return [role_use(tool_id, "Bash", {"command": command}), role_result(tool_id, "")]
 
 
-def rr_spawn_error(tool_id, subagent_type):
-    """A spawn of `subagent_type` that another guard refused: the call's result is an error, and it never ran."""
-    return [rr_spawn(tool_id, subagent_type)[0],
+def rr_spawn_error(tool_id, subagent_type, name=None):
+    """A spawn of `subagent_type` that another guard refused: the call's result is an error, and it never ran.
+    `name` gives the spawn its name, for a case that resumes it by name."""
+    return [rr_spawn(tool_id, subagent_type, name=name)[0],
             role_result_block(tool_id, is_error=True, content=[{"type": "text", "text": "Refused before it ran."}])]
 
 
@@ -140,17 +146,23 @@ RR_TRANSCRIPTS = {
 }
 
 
-def write_rr_transcripts():
-    """Write each transcript as JSONL, with the merge tool's record marker where RR_MARK stands. `unreadable` is a
-    folder, so the guard's open() fails on it. `missing` is never written."""
+def write_transcripts(transcripts, folder):
+    """Write each transcript in `transcripts` as JSONL under `folder`, with the merge tool's record marker where
+    RR_MARK stands. One home for the marker: every review-record fixture is written here."""
     import guard_merge  # the merge tool's loader: the guard reads the marker through the same one
     tool = guard_merge.merge_module()
     if tool is None:
         raise RuntimeError("merge/merge.py does not load, so the record marker is unknown")
-    os.makedirs(RR_DIR, exist_ok=True)
-    for name, lines in RR_TRANSCRIPTS.items():
-        with open(rr_path(name), "w", encoding="utf-8") as handle:
+    os.makedirs(folder, exist_ok=True)
+    for name, lines in transcripts.items():
+        with open(os.path.join(folder, name + ".jsonl"), "w", encoding="utf-8") as handle:
             handle.write("\n".join(line.replace(RR_MARK, tool.REVIEW_MARKER) for line in lines) + "\n")
+
+
+def write_rr_transcripts():
+    """Write the review-record transcripts. `unreadable` is a folder, so the guard's open() fails on it. `missing` is
+    never written."""
+    write_transcripts(RR_TRANSCRIPTS, RR_DIR)
     os.makedirs(rr_path("unreadable"), exist_ok=True)
 
 
