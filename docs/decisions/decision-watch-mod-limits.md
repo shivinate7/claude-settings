@@ -28,7 +28,7 @@ Owner ruling 2026-10-21 16:28 CDT. The mod listens on `turn.complete`. It does n
   So the `classic.Stop` handler never ran. sec-default's README lists `turn.*` as events that pass. This is a read of the marketplace copy of
   sec-default. The installed app's copy is unchecked and may differ.
 - A turn with `agentId` set is an agent turn. The mod skips it, as the session-board mod does.
-- `turn.complete` has no transcript path. The mod finds the transcript from the session id and cwd, the way `/dw` does.
+- `turn.complete` has no transcript path. The mod finds the transcript from the session id and cwd, the way `/dw` does. The script does not look further when its given path fails. That fallback is decision `decision-watch-finds-transcript`: a build task, not built.
 - One judge runs at a time. A turn that finds one running logs "SKIP busy".
 - The handler returns `next(e)` after at most 500 ms (the wait for the "STOP seen" line). The lookup and the judge run in the background. It
   never refuses the turn. It has no `stop_hook_active` skip.
