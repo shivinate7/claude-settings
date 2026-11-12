@@ -19,6 +19,9 @@ Rules:
   tip          each DELETE call has a gh api read of a tip path that names the same branch variable earlier in the
                same loop; a comment or a quoted string is no call. It does not check the value, the read's exit
                handling or the compare
+  budget       the run block that deletes reads the request budget with gh api rate_limit before its delete loop, and
+               takes the reserve from sweep.py --budget-reserve; a comparison against a number literal is a copy of
+               the reserve. A comment or a quoted string, one that spans lines included, is no call
 
 The reader is line based, with no YAML library: CI installs none for lint. It needs only the block style this
 repo's workflows use. GitHub evaluates an expression in a quoted value, a plain value, or a run: block, even after a
@@ -329,6 +332,74 @@ def check_tip(runs, found):
                 scopes_read.append(set())
 
 
+BUDGET_READ = re.compile(r"\brate_limit\b")
+BUDGET_RESERVE_CALL = re.compile(r"\bsweep\.py\s+--budget-reserve\b")
+LITERAL_COMPARE = re.compile(r"-(?:lt|le|gt|ge)\s+\d+(?=\s|\]|;|$)")
+
+
+def mask_block(block):
+    """[(n, masked)] for a run block's lines: each shell comment cut and each quoted span blanked, like mask_shell,
+    but a quote left open at the end of a line stays open on the next, so text inside a multi-line string is no
+    command. A quote opens only where a word starts, so `don't` opens nothing. A backslash in double quotes skips
+    the next character."""
+    out, quote = [], None
+    for n, text in block:
+        chars, skip = [], False
+        for i, ch in enumerate(text):
+            if quote:
+                chars.append(" ")
+                if skip:
+                    skip = False
+                elif ch == "\\" and quote == '"':
+                    skip = True
+                elif ch == quote:
+                    quote = None
+            elif ch in "\"'" and (i == 0 or text[i - 1] in " \t=;&|(<>"):
+                quote = ch
+                chars.append(" ")
+            elif ch == "#" and (i == 0 or text[i - 1] in " \t;&|("):
+                break
+            else:
+                chars.append(ch)
+        out.append((n, "".join(chars)))
+    return out
+
+
+def check_budget(runs, found):
+    """The run block that deletes with gh api -X DELETE reads the budget before the loop that holds the first DELETE,
+    and gets the reserve from sweep.py, not from a literal. Without the read the loop spends the shared request
+    pool down to nothing, and other runs in the repo then fail."""
+    for block in run_blocks(runs):
+        masked = mask_block(block)
+        reads, reserves, first_delete = [], [], None
+        stack = []  # open loops' first lines
+        for n, text in logical_lines(masked):
+            one_line = bool(LOOP_OPEN.match(text) and LOOP_ONE_LINE.search(text))
+            if LOOP_CLOSE.match(text) and stack and not one_line:
+                stack.pop()
+            starts = [m.start() for m in GH_API.finditer(text)]
+            for k, start in enumerate(starts):
+                end = starts[k + 1] if k + 1 < len(starts) else len(text)
+                if DELETE_CALL.search(text[start:end]):
+                    if first_delete is None:
+                        first_delete = (n, stack[0] if stack else n)
+                elif BUDGET_READ.search(text[start:end]):
+                    reads.append(n)
+            if BUDGET_RESERVE_CALL.search(text):
+                reserves.append(n)
+            for m in LITERAL_COMPARE.finditer(text):
+                found.append((n, "budget", text.strip()))
+            if LOOP_OPEN.match(text) and not one_line:
+                stack.append(n)
+        if first_delete is None:
+            continue
+        n, loop_start = first_delete
+        if not any(r < loop_start for r in reads):
+            found.append((n, "budget", "no gh api rate_limit read before the delete loop"))
+        if not any(r < loop_start for r in reserves):
+            found.append((n, "budget", "the reserve does not come from sweep.py --budget-reserve before the delete loop"))
+
+
 def check(text):
     structure, evaluated, runs = read_lines(text)
     last = len(text.splitlines())
@@ -403,6 +474,7 @@ def check(text):
             found.append((n, "argv", line.strip()))
     check_read(structure, evaluated, runs, found, last)
     check_tip(runs, found)
+    check_budget(runs, found)
 
     return sorted(set(found))
 

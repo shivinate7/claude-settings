@@ -2,6 +2,7 @@
 """Prints a verdict per remote branch: delete only what the Oct 30 grant allows (.claude/CLAUDE.md, standing grants).
 
     python3 actions/branch-sweep/sweep.py --repo DIR [--default NAME] [--open-head NAME]...
+    python3 actions/branch-sweep/sweep.py --budget-reserve
 
 It reads refs/remotes/origin/*, the refs actions/checkout with fetch-depth 0 leaves, and prints one line per
 branch: `<delete|keep> <name> <reason>`. origin/HEAD is no branch and gets no line.
@@ -15,6 +16,8 @@ path and could delete another branch, and a leading "-" reads as an option.
 
 A repo it cannot read, or one with no origin/<default>, exits 2 before any line is printed. The sweep then
 deletes nothing, because a verdict made from partial refs could name an unmerged branch as merged.
+
+--budget-reserve prints BUDGET_RESERVE and exits. The workflow reads the reserve from here, so the number has one home.
 """
 import argparse
 import re
@@ -24,6 +27,9 @@ import sys
 REMOTE = "refs/remotes/origin/"
 # Names kept whatever their history. roadmap holds the roadmap record and is never merged into main. stable moves with green main (restart-plan R42 part 2), so its tip is always on main's history.
 PROTECTED = ("main", "master", "roadmap", "stable")
+# GitHub requests the delete step leaves unspent. The step reads the remaining budget once, counts two requests per branch (tip read,
+# DELETE), and before each delete stops green when the budget is below this. Other runs in the repo share the pool.
+BUDGET_RESERVE = 300
 SAFE_NAME = re.compile(r"[A-Za-z0-9._/-]+")
 
 
@@ -81,10 +87,16 @@ def verdicts(repo, default, open_heads):
 
 def main(argv):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--repo", required=True)
+    parser.add_argument("--repo")
+    parser.add_argument("--budget-reserve", action="store_true", dest="budget_reserve")
     parser.add_argument("--default", default="main")
     parser.add_argument("--open-head", action="append", default=[], dest="open_heads")
     args = parser.parse_args(argv)
+    if args.budget_reserve:
+        print(BUDGET_RESERVE)
+        return 0
+    if not args.repo:
+        parser.error("--repo is required")
     try:
         lines = list(verdicts(args.repo, args.default, set(args.open_heads)))
     except (RuntimeError, OSError) as err:

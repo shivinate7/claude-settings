@@ -48,6 +48,11 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         shell: bash
         run: |
+          # The delete step spends 2 requests a branch (tip read, DELETE) from the repo's shared hourly pool. One read
+          # of the pool now, then the loop counts down; below the reserve it stops green and the next run finishes.
+          # A budget that cannot be read stops the same way: the sweep cannot tell what is left.
+          reserve=$(python3 actions/branch-sweep/sweep.py --budget-reserve)
+          remaining=$(gh api rate_limit --jq .resources.core.remaining 2> "$RUNNER_TEMP/budget-err.txt" < /dev/null || true)
           args=()
           while IFS= read -r head; do
             if [ -n "$head" ]; then
@@ -56,9 +61,23 @@ jobs:
           done < "$RUNNER_TEMP/open-heads.txt"
           python3 actions/branch-sweep/sweep.py --repo . --default "$DEFAULT_BRANCH" "${args[@]}" > "$RUNNER_TEMP/verdicts.txt"
           cat "$RUNNER_TEMP/verdicts.txt"
+          total=$(grep -c '^delete ' "$RUNNER_TEMP/verdicts.txt" || true)
+          if ! [[ "$remaining" =~ ^[0-9]+$ ]]; then
+            cat "$RUNNER_TEMP/budget-err.txt" >&2
+            echo "::warning::request budget unknown; 0 deletes done, $total left. The next run deletes the rest."
+            exit 0
+          fi
           failed=0
+          done_n=0
           while read -r verb name reason; do
             if [ "$verb" = delete ]; then
+              if [ "$remaining" -lt "$reserve" ]; then
+                echo "::warning::request budget $remaining is below the reserve $reserve; $done_n deletes done, $((total - done_n)) left. The next run deletes the rest."
+                break
+              fi
+              # Spent before the tip read, so every path out of this branch has paid for both requests.
+              remaining=$((remaining - 2))
+              done_n=$((done_n + 1))
               # About 60 lanes push in parallel, so a branch can gain a commit after the checkout. The verdict
               # holds for the checkout's tip, so a branch whose tip moved is kept. The read narrows the race to one
               # API call; the delete has no sha condition, so a push in that gap still loses.
