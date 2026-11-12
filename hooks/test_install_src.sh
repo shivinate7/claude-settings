@@ -1034,7 +1034,7 @@ retired_checkout() {
 # One install of checkout $1 into home $2, config dir $3. $4 is local or cloud. Prints its output.
 retired_run() {
   if [ "$4" = cloud ]; then
-    ( cd "$1" && env -i PATH="$PATH" HOME="$2" CLAUDE_CONFIG_DIR="$3" bash ./install.sh --cloud 2>&1 )
+    ( cd "$1" && env -i PATH="$PATH" HOME="$2" CLAUDE_CONFIG_DIR="$3" CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" bash ./install.sh --cloud 2>&1 )
   else
     run_local_install "$1" "$2" "$3"
   fi
@@ -1928,7 +1928,7 @@ skills_case2() {
   mkdir -p "$cfg/skills/my-own"
   printf 'a person wrote this skill by hand\n' > "$cfg/skills/my-own/SKILL.md"
 
-  out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+  out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" \
         bash ./install.sh --cloud 2>&1); rc=$?
   bak=$(ls -d "$cfg/backups/skills/"fresh-prose.* 2>/dev/null | head -n1)
   own_content=$(cat "$cfg/skills/my-own/SKILL.md" 2>/dev/null)
@@ -2320,7 +2320,7 @@ skills_bak_setup() {
   printf 'v1\n' > "$co/skills/fresh-prose/SKILL.md"
 }
 skills_bak_run() {
-  out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" \
+  out=$(cd "$co" && env -i PATH="$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" \
         bash ./install.sh --cloud 2>&1); rc=$?
 }
 
@@ -3653,7 +3653,7 @@ EOF
 # when given, is the stall in seconds before the second guard landing. The caller sets $h (home) and
 # $swap_bin (the shim folder). Run it in the background to overlap two installs.
 run_cloud() {
-  ( cd "$1" && env HOME="$h" CLAUDE_CONFIG_DIR="$2" SWAP_EVENTS="$3" ${4:+SWAP_PAUSE="$4"} ${5:+SWAP_INSTALL_LOG="$5"} \
+  ( cd "$1" && env HOME="$h" CLAUDE_CONFIG_DIR="$2" SWAP_EVENTS="$3" CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" ${4:+SWAP_PAUSE="$4"} ${5:+SWAP_INSTALL_LOG="$5"} \
       PATH="$swap_bin:$PATH" $TMO bash ./install.sh --cloud )
 }
 
