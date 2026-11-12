@@ -331,6 +331,41 @@ sh("frozen amp: cp FROM a frozen hook to scratch with >& to a build log is still
 sh("frozen amp: cp onto a frozen hook with >& to a build log stays denied",
    "cp /tmp/x.py " + CFG_HOOK + " >& /tmp/l", "deny", "frozen-path", cwd=NOGIT)
 
+# --------------------------------------------------------------------------- frozen read form: read-only forms
+#
+# A read that only NAMES a frozen path writes nothing, so each ALLOW below is a false alarm that refuses today as
+# frozen-path. The shell scanner reads a mutating word (rm, mv, copy) anywhere before the frozen path as a write
+# to it: a sed -n whose pattern holds `rm`, a `git rm --cached` (the index only, the file stays on disk), and a
+# test run whose GUARD_UNDER_TEST path holds the word `copy`. Each CONTROL after them stays refused: a sed -i,
+# a redirect, a real delete, and a frozen file named as an xargs operand.
+# Run only this block: MUTATE_ONLY="read form:" python3 hooks/test_guard.py (the name filter).
+SCRATCH_COPY = slash(os.path.join(ROOT, "copy-of-main", "guard.py"))   # a scratchpad copy of main's guard.py
+READ_FORM_TEST_RUN = ("GUARD_UNDER_TEST=" + SCRATCH_COPY + " python3 "
+                      + slash(os.path.join(CFG, "hooks", "test_guard.py")))   # a read-only suite run
+sh("frozen read form: sed -n with rm in its pattern reads a frozen settings file and is allowed",
+   "sed -n '/rm x/p' " + CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen read form: sed -n with mv in its pattern reads a frozen hook and is allowed",
+   "sed -n '/mv x/p' " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen read form: git rm --cached of a frozen settings file, index only, is allowed",
+   VCS + " rm --cached " + CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen read form: git rm --cached of a frozen settings file, then cat of it, is allowed",
+   VCS + " rm --cached " + CFG_SETTINGS + " && cat " + CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen read form: a read-only test run whose GUARD_UNDER_TEST copy sits in a copy folder is allowed",
+   READ_FORM_TEST_RUN, "allow", cwd=NOGIT)
+sh("frozen read form: control, sed -n read then sed -i on the same frozen settings file stays denied",
+   "sed -n '/rm x/p' " + CFG_SETTINGS + " && sed -i '' s/a/b/ " + CFG_SETTINGS, "deny", "frozen-path",
+   cwd=NOGIT)
+sh("frozen read form: control, sed -i on a frozen hook stays denied", "sed -i '' s/a/b/ " + CFG_HOOK,
+   "deny", "frozen-path", cwd=NOGIT)
+sh("frozen read form: control, git rm of a frozen settings file, which deletes it, stays denied",
+   VCS + " rm " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen read form: control, rm of a frozen hook stays denied", "rm " + CFG_HOOK, "deny",
+   "frozen-path", cwd=NOGIT)
+sh("frozen read form: control, a redirect onto a frozen settings file after a test run stays denied",
+   READ_FORM_TEST_RUN + " > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen read form: control, xargs rm with a frozen settings file as its operand stays denied",
+   "xargs rm " + CFG_SETTINGS + " < /dev/null", "deny", "frozen-path", cwd=NOGIT)
+
 add("config-edit: Edit of a project local settings file is allowed", "allow", tool="Edit",
     cwd=NOGIT, file_path=PROJ_LOCAL)
 add("config-edit: Edit of a project hook is allowed", "allow", tool="Edit", cwd=NOGIT,

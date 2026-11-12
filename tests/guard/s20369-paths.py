@@ -87,6 +87,15 @@ add("builder-test: a session run with --agent builder (no agent_id) is not judge
 add("builder-test: a builder Write of a test file from no repository is refused by shape", "deny",
     rule=BT, tool="Write", file_path="src/test_app.py", carries=("test-author", "Report"),
     agent_id="bld1", agent_type="builder", cwd=NOGIT)
+# THE READ-ONLY LIST. `xargs rm < FILE` reads FILE as xargs's input: rm runs on the names the file lists, and FILE is
+# not written. The builder shell check reads the input file as an rm operand, so a list under tests/ refuses: a false
+# alarm. The operand form (`xargs rm FILE`) and a plain rm of a test file still refuse. Run only this block:
+# MUTATE_ONLY="read form:" python3 hooks/test_guard.py (the name filter).
+sh("builder read form: xargs rm with a test list as its input, read only, is allowed",
+   "xargs rm < tests/list.txt", "allow", **B)
+sh("builder read form: control, xargs rm with a test file as its operand stays refused",
+   "xargs rm tests/list.txt < /dev/null", "deny", rule=BT, **B)
+sh("builder read form: control, rm of a test file stays refused", "rm tests/x.py", "deny", rule=BT, **B)
 # THE JOIN WITH AN UNKNOWN HEAD. A builder's script joins a folder it cannot read (a temp folder from
 # tempfile.mkdtemp(), which is in no repository) to test-looking pieces. The unknown head drops out of the
 # join, so the pieces read as a repo test path: a false alarm. A join that resolves to the working folder
