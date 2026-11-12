@@ -555,7 +555,7 @@ def scope_condition_step_problems(name, job, scope_condition):
 def draft_guard_only(expr):
     """True when a job-level `if:` holds only the draft guard (ci-hygiene steps 11 and 19): it skips a draft PR, runs on a
     ready PR and on push, and reads no scope flag, so its answer does not change with the flags. Any other expression is False.
-    It also reads no other job's output: the answer must match for every gate value (GATE_VALUES)."""
+    It also reads no other job's output: the answer must match for every skip value (SKIP_VALUES)."""
     e = unwrap(expr)
     if not e:
         return False
@@ -1490,7 +1490,7 @@ NIGHTLY_TRUTH = (("push", False, "", True), ("pull_request", False, "", True), (
 def push_guard_only(expr):
     """True when a job-level `if:` is the push guard and nothing else: true on a pull_request (draft or not), a schedule and a
     workflow_dispatch, false on a push. It reads no scope flag, so its answer holds for every flag value, and it reads no other
-    job's output: the answer must match for every gate value (GATE_VALUES)."""
+    job's output: the answer must match for every skip value (SKIP_VALUES)."""
     e = unwrap(expr)
     if not e:
         return False
