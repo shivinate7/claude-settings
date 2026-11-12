@@ -78,6 +78,7 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 import mutate_guard  # noqa: E402  REPORT_TARGETS, and the mode entry points once built
 import mutate_shared  # noqa: E402
+import rule_audit  # noqa: E402  SECTION_DIR's one ast reader (lint/rule_audit.py)
 from test_mutate_js import git, unique_line  # noqa: E402  the one home of these helpers
 from test_mutate_replay import commit, pull_request, put, topic  # noqa: E402  the one home of the fixture writers
 
@@ -120,6 +121,18 @@ def show(repo, ref, path):
     if done.returncode != 0:
         raise AssertionError("%s has no %s: %s" % (ref, path, done.stderr.strip()))
     return done.stdout
+
+
+def guard_section_files(ref):
+    """{path: text} of the guard section files at `ref`. The folder is the runner's SECTION_DIR, read from the runner at
+    `ref` by rule_audit, so a section file is found whatever its name."""
+    runner = os.path.join(REPO, "hooks", "test_guard.py")
+    folder = rule_audit._section_dir(ast.parse(show(REPO, ref, "hooks/test_guard.py")), runner)
+    if not folder:
+        return {}
+    rel = os.path.relpath(os.path.normpath(folder), REPO).replace(os.sep, "/")
+    listed = git(REPO, "ls-tree", "--name-only", ref, rel + "/")
+    return {path: show(REPO, ref, path) for path in listed.split("\n") if path.endswith(".py")}
 
 
 def rev(repo, ref):
@@ -1687,14 +1700,17 @@ class TestsForTests(unittest.TestCase):
     def test_a_load_bound_inside_a_function_is_the_rm_var_family_line_for_guard_rm_var(self):
         target = "hooks/guard_rm_var.py"
         self.assertNotIn(target, dict(mutate_guard.REPORT_TARGETS), "the fixture: %s must be unlisted" % target)
-        loader = "hooks/test_guard.py"
-        self.assertRegex(show(REPO, "HEAD", loader), r'(?m)^    path = os\.path\.join\(.*"guard_rm_var\.py"\)$',
-                         "the fixture: %s binds the guard_rm_var path inside a function" % loader)
+        sections = guard_section_files("HEAD")
+        self.assertTrue(sections, "the fixture: no guard section file is read from the runner's SECTION_DIR at HEAD")
+        loaders = sorted(path for path, text in sections.items()
+                         if re.search(r'(?m)^    path = os\.path\.join\(.*"guard_rm_var\.py"\)$', text))
+        self.assertEqual(len(loaders), 1, "the fixture: one guard section file binds the guard_rm_var path inside a "
+                         "function, found %s" % loaders)
+        runner = "hooks/test_guard.py"
         code, out, err = run_cli(["--tests-for", target])
         self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
-        self.assertEqual(out.splitlines(), ["%s::rm-var" % loader],
-                         "guard_rm_var's only walk suite is the whole %s, which is dropped: its rm-var family line "
-                         "stands in for it" % loader)
+        self.assertEqual(out.splitlines(), ["%s::rm-var" % runner],
+                         "guard_rm_var's only walk suite is the rm-var family line of %s" % runner)
 
     def test_the_real_suites_that_load_a_module_through_a_parameter_are_printed(self):
         """Each suite passes the module's path to a function of its own, which loads it by that parameter. The call text is
