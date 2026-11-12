@@ -546,5 +546,16 @@ add("cap deadline: a model raise whose end is already passed still asks under ag
     "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_LOCAL,
     content=json.dumps({"env": {CAP_KEY: OPUS, CAP_FORCE: "1"}, EXPIRY_KEY: DEADLINE_PAST}),
     carries=(CAP_KEY + " = " + OPUS,))
+sh("cap deadline: a shell write that sets only the cap-lift end asks under agent-model-cap and names the end in CST",
+   "printf '%s' '" + json.dumps({EXPIRY_KEY: DEADLINE_WINTER}) + "' > " + PROJ_SETTINGS,
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(WANT_WINTER,))
+# The clock is pinned to an instant one hour before the deadline, so this end is near, not far: it asks
+# whatever the length ceiling is, and it is the control that a far-only row cannot be.
+NEAR_CLOCK = "2099-01-14T20:30:00+00:00"
+DEADLINE_NEAR = "2099-01-14T21:30:00Z"   # one hour after NEAR_CLOCK: 15:30 CST
+add("cap deadline: a Write that sets a cap-lift end one hour ahead asks under agent-model-cap and names the end in CST",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
+    content=json.dumps({EXPIRY_KEY: DEADLINE_NEAR}), carries=(_central_text(DEADLINE_NEAR),),
+    env={"LOCAL_TIME_NOW": NEAR_CLOCK})
 
 # =========================================================================== 6c. ask alone
