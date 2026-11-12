@@ -560,6 +560,160 @@ pointer_case6() {
   rm -rf "$h"
 }
 
+# ---- tempskip cases: the source search skips a candidate under a temp folder or a scratchpad ---------
+# CLAUDE_SETTINGS_TEMP_ROOTS (space-separated) replaces the production temp list for one run; unset means the
+# production list. Each case names its own temp folder, since its fixtures sit under $work, and $work is under
+# /tmp. The scratchpad component rule does not depend on the list.
+
+# under_root DIR ROOT: true when DIR's physical path sits under ROOT's. A case checks its fixture's place first.
+under_root() { ur_d=$(realpwd "$1"); ur_r=$(realpwd "$2"); case "$ur_d" in "$ur_r"/*) return 0 ;; esac; return 1; }
+
+# tempskip_fixed_clone NAME HOME WANT BIN SCRATCH: the last cloud install (rc, out) cloned the fixture at WANT
+# into HOME's fixed clone path, and its pointer names that clone. SCRATCH, when set, is the one checkout that
+# must not become the pointer target.
+tempskip_fixed_clone() {
+  tf_name="$1"; tf_h="$2"; tf_want="$3"; tf_bin="$4"; tf_scratch="$5"
+  tf_co="$tf_h/claude-settings"
+  tf_ptr=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$tf_h/.claude-cfg/CLAUDE.md" 2>/dev/null | head -n1)
+  case "$tf_ptr" in "~"/*) tf_ptr="$tf_h${tf_ptr#\~}";; esac
+  if [ $rc -ne 0 ]; then
+    bad "$tf_name" "install.sh exited $rc: $(install_problems)"
+  elif grep -q 'tar\.gz' "$tf_bin/calls" 2>/dev/null; then
+    bad "$tf_name" "install.sh fetched the tarball; the clone did not land at $tf_co"
+  elif [ -n "$tf_scratch" ] && [ "$(normalize_path "$tf_ptr")" = "$(normalize_path "$tf_scratch")" ]; then
+    bad "$tf_name" "scratch checkout [$tf_scratch] under the temp folder became the pointer target"
+  elif [ "$(normalize_path "$tf_ptr")" != "$(normalize_path "$tf_co")" ]; then
+    bad "$tf_name" "pointer target [$tf_ptr] != the fixed clone [$tf_co]"
+  elif [ ! -d "$tf_co/.git" ]; then
+    bad "$tf_name" "no clone at $tf_co/.git"
+  elif [ "$(git -C "$tf_co" rev-parse HEAD)" != "$tf_want" ]; then
+    bad "$tf_name" "clone HEAD is $(git -C "$tf_co" rev-parse HEAD), want the fixture main $tf_want"
+  elif [ "$(git -C "$tf_co" config --get claude-settings.cloudMirror)" != true ]; then
+    bad "$tf_name" "clone has no claude-settings.cloudMirror marker"
+  else
+    ok "$tf_name"
+  fi
+}
+
+# tempskip_picked_case NAME HOME CO: the pointer names the checkout CO (a control).
+tempskip_picked_case() {
+  tp_name="$1"; tp_h="$2"; tp_co="$3"
+  tp_ptr=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$tp_h/.claude-cfg/CLAUDE.md" 2>/dev/null | head -n1)
+  case "$tp_ptr" in "~"/*) tp_ptr="$tp_h${tp_ptr#\~}";; esac
+  if [ $rc -ne 0 ]; then
+    bad "$tp_name" "install.sh exited $rc: $(install_problems)"
+  elif [ "$(normalize_path "$tp_ptr")" != "$(normalize_path "$tp_co")" ]; then
+    bad "$tp_name" "pointer target [$tp_ptr] != checkout [$tp_co]: a clone outside the listed temp folder was skipped"
+  else
+    ok "$tp_name"
+  fi
+}
+
+# tempskip_fallback_case NAME HOME CO: the pointer names the fallback mirror, and the checkout CO was not the source.
+tempskip_fallback_case() {
+  tb_name="$1"; tb_h="$2"; tb_co="$3"
+  tb_ptr=$(sed -n 's|^@\(.*\)/CLAUDE\.md$|\1|p' "$tb_h/.claude-cfg/CLAUDE.md" 2>/dev/null | head -n1)
+  case "$tb_ptr" in "~"/*) tb_ptr="$tb_h${tb_ptr#\~}";; esac
+  tb_expect="$tb_h/claude-settings"
+  if [ $rc -ne 0 ]; then
+    bad "$tb_name" "install.sh exited $rc: $(install_problems)"
+  elif [ "$(normalize_path "$tb_ptr")" = "$(normalize_path "$tb_co")" ]; then
+    bad "$tb_name" "checkout [$tb_co] was taken as the source, not skipped"
+  elif [ "$(normalize_path "$tb_ptr")" != "$(normalize_path "$tb_expect")" ]; then
+    bad "$tb_name" "pointer target [$tb_ptr] != fallback mirror [$tb_expect]"
+  else
+    ok "$tb_name"
+  fi
+}
+
+# ---- tempskip_a: a pointer at a clone under a scratchpad folder is ignored ----------------------
+tempskip_a() {
+  name="tempskip_a: a pointer at a clone under a scratchpad folder is ignored"
+  h=$(new_home); cfg="$h/.claude-cfg"
+  co="$work/a-clone/scratchpad/claude-settings"   # no listed temp folder holds it: only the scratchpad component can skip it
+  make_checkout "$co" "# tempskip_a content"
+  seed_pointer "$cfg" "$co"
+  cwd="$work/cwd-a"; mkdir -p "$cwd" "$work/tr-a"
+  stub_bin="$work/bin-a"; make_curl_stub "$stub_bin"
+  case "/$(realpwd "$co")/" in */scratchpad/*) ;; *) bad "$name" "fixture $co has no scratchpad component"; rm -rf "$h"; return ;; esac
+  cloud_install "$h" "$cwd" "$stub_bin" "" CLAUDE_SETTINGS_TEMP_ROOTS="$work/tr-a"
+  tempskip_fallback_case "$name" "$h" "$co"
+  rm -rf "$h"
+}
+
+# ---- tempskip_b: a clone at PWD under a temp folder is not picked -------------------------------
+tempskip_b() {
+  name="tempskip_b: a clone at PWD under a temp folder is not picked"
+  h=$(new_home); tr="$work/tr-b"; co="$tr/pwd-clone"; mkdir -p "$tr"
+  make_checkout "$co" "# tempskip_b content"
+  stub_bin="$work/bin-b"; make_curl_stub "$stub_bin"
+  if ! under_root "$co" "$tr"; then bad "$name" "fixture $co is not under the temp folder $tr"; rm -rf "$h"; return; fi
+  cloud_install "$h" "$co" "$stub_bin" "" CLAUDE_SETTINGS_TEMP_ROOTS="$tr" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root"
+  tempskip_fallback_case "$name" "$h" "$co"
+  rm -rf "$h"
+}
+
+# ---- tempskip_c: a clone one level under a search root in a temp folder is not picked ------------
+tempskip_c() {
+  name="tempskip_c: a clone one level under a search root in a temp folder is not picked"
+  h=$(new_home); tr="$work/tr-c"; root="$tr/search"; co="$root/clone"; mkdir -p "$root"
+  make_checkout "$co" "# tempskip_c content"
+  cwd="$work/cwd-c"; mkdir -p "$cwd"
+  stub_bin="$work/bin-c"; make_curl_stub "$stub_bin"
+  if ! under_root "$co" "$tr"; then bad "$name" "fixture $co is not under the temp folder $tr"; rm -rf "$h"; return; fi
+  cloud_install "$h" "$cwd" "$stub_bin" "" CLAUDE_SETTINGS_TEMP_ROOTS="$tr" CLAUDE_SETTINGS_SEARCH_ROOTS="$root"
+  tempskip_fallback_case "$name" "$h" "$co"
+  rm -rf "$h"
+}
+
+# ---- tempskip_d1, tempskip_d2: controls, a clone outside the listed temp folder is still picked ---
+tempskip_d1() {
+  name="tempskip_d1: control, a clone at PWD outside the listed temp folder is still picked"
+  h=$(new_home); tr="$work/tr-d1"; co="$work/d1/pwd-clone"; mkdir -p "$tr"
+  make_checkout "$co" "# tempskip_d1 content"
+  stub_bin="$work/bin-d1"; make_curl_stub "$stub_bin"
+  cloud_install "$h" "$co" "$stub_bin" "" CLAUDE_SETTINGS_TEMP_ROOTS="$tr" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root"
+  tempskip_picked_case "$name" "$h" "$co"
+  rm -rf "$h"
+}
+
+tempskip_d2() {
+  name="tempskip_d2: control, a clone one level under a search root outside the listed temp folder is still picked"
+  h=$(new_home); tr="$work/tr-d2"; root="$work/d2/search"; co="$root/clone"; mkdir -p "$tr" "$root"
+  make_checkout "$co" "# tempskip_d2 content"
+  cwd="$work/cwd-d2"; mkdir -p "$cwd"
+  stub_bin="$work/bin-d2"; make_curl_stub "$stub_bin"
+  cloud_install "$h" "$cwd" "$stub_bin" "" CLAUDE_SETTINGS_TEMP_ROOTS="$tr" CLAUDE_SETTINGS_SEARCH_ROOTS="$root"
+  tempskip_picked_case "$name" "$h" "$co"
+  rm -rf "$h"
+}
+
+# ---- tempskip_p3: PWD and TMPDIR under a temp folder, a scratch checkout there, no eligible source ----
+tempskip_p3() {
+  name="tempskip_p3: PWD and TMPDIR under a temp folder with no eligible source: the clone lands at the fixed path"
+  h=$(new_home); fx="$work/p3-fx"; tr="$work/tr-p3"; scratch="$tr/scratch"; mkdir -p "$tr"
+  make_github_fixture "$fx"; want=$(fixture_sha "$fx")
+  write_redirect "$h" "$fx/bare.git"
+  make_checkout "$scratch" "# tempskip_p3 scratch checkout"
+  stub_bin="$work/bin-p3"; make_curl_stub "$stub_bin" fail-tarball
+  if ! under_root "$scratch" "$tr"; then bad "$name" "fixture $scratch is not under the temp folder $tr"; rm -rf "$h"; return; fi
+  cloud_install "$h" "$scratch" "$stub_bin" "" TMPDIR="$tr" CLAUDE_SETTINGS_TEMP_ROOTS="$tr" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root"
+  tempskip_fixed_clone "$name" "$h" "$want" "$stub_bin" "$scratch"
+  rm -rf "$h"
+}
+
+# ---- tempskip_p3c: control, the same temp PWD and TMPDIR with no checkout there lands the clone at the fixed path ----
+tempskip_p3c() {
+  name="tempskip_p3c: control, PWD and TMPDIR under a temp folder with no checkout there: the clone lands at the fixed path"
+  h=$(new_home); fx="$work/p3c-fx"; tr="$work/tr-p3c"; cwd="$tr/cwd"; mkdir -p "$cwd"
+  make_github_fixture "$fx"; want=$(fixture_sha "$fx")
+  write_redirect "$h" "$fx/bare.git"
+  stub_bin="$work/bin-p3c"; make_curl_stub "$stub_bin" fail-tarball
+  cloud_install "$h" "$cwd" "$stub_bin" "" TMPDIR="$tr" CLAUDE_SETTINGS_TEMP_ROOTS="$tr" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root"
+  tempskip_fixed_clone "$name" "$h" "$want" "$stub_bin" ""
+  rm -rf "$h"
+}
+
 # ---- Case 4/5/6: session_start.sh divergence check ----------------------------------------
 case4() {
   name="case4: session_start.sh with pointer == checkout prints no extra line"
@@ -5651,6 +5805,13 @@ run pointer_case3
 run pointer_case4
 run pointer_case5
 run pointer_case6
+run tempskip_a
+run tempskip_b
+run tempskip_c
+run tempskip_d1
+run tempskip_d2
+run tempskip_p3
+run tempskip_p3c
 run case4
 run case5
 run case6
