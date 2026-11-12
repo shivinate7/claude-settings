@@ -24,7 +24,7 @@
 # A job cancelled under its cap (a person, or an earlier failure) stays quiet. A cancelled job with no started_at, a non-integer cap
 # (an expression), no single job of that name in the file, a cancelled run or an earlier attempt of it with no jobs, or a failed read
 # is unknown, never red and never clear.
-# Verdict: "red" when a newest failure run with a red job, not cleared, is named. That run opens the issue "CI red on BRANCH" through
+# Verdict: "red" when a newest failure run, not cleared, is named. That run opens the issue "CI red on BRANCH" through
 # issue.sh. The issue names the red runs and no cap end: a cap end wakes and never appears in an issue. Else "alarm" (a cap end and no
 # red run), which opens no issue (owner R53, 13:07 CST Nov 12).
 # Each attempt with a cap end, in either verdict, is woken through wake.sh (coordinator pick, 13:12 CST): SHA is the run's head commit,

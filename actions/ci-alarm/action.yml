@@ -34,8 +34,8 @@ description: >
   Opt-in `dropped-start: 'true'` also flags an open, ready pull request, updated over 300 s ago, whose head
   commit has no real `all-jobs-passed` run (a dropped `pull_request` event; a skipped run counts as absent).
   It posts one comment per head sha, with the remedy: `gh pr ready N --undo`, then
-  `gh pr ready N`; never an empty commit. It needs `issues: write` (comments), `pull-requests: read` and
-  `checks: read` besides the above. Cost per call: one pulls read per 100 open PRs; per ready, settled PR one check-runs read;
+  `gh pr ready N`; never an empty commit. It needs `checks: read` besides the above.
+  Its comment write uses `issues: write`, and its pulls read uses `pull-requests`, which the wake's `write` already covers. Cost per call: one pulls read per 100 open PRs; per ready, settled PR one check-runs read;
   per PR with no run, one comments read per 100 comments and at most one comment write. It starts no long-lived
   process and writes no file or timer of its own: it runs inside the caller's existing scheduled workflow.
   The caller's `pull_request` trigger must include the `ready_for_review` type, or the remedy starts no run.
