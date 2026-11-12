@@ -84,7 +84,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    checks, then records the head that passed. When the head moved since the last lint, it lints again. It does not mark the PR ready:
    the tool sends no GraphQL, so it names the route, and the batch runner marks the PR ready. A FAIL of the lint or of a ready check
    stores the lanes it names (`Blamed:`). For a red CI run, `merge --batch-build NAME --blame PR --run <run URL>` stores the blame. It
-   refuses a run that is still running, a run that did not fail, a run on an older head, and a lane outside the batch.
+   takes a failed run, or a run still going that has a job already finished red (the red job shows the cause, so never wait for the slow macOS or
+   Windows jobs). It refuses a run still going with no red job, a run that did not fail, a run on an older head, and a lane outside the batch.
    `merge --batch-drop NAME PR` takes off only a stored-blamed lane and its dependents, rebuilds from the frozen set, runs no lane lint, and asks
    to return a ready PR to draft. Any other lane waits for the next batch. `--on BRANCH` stacks a batch on a running batch.
    Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.
