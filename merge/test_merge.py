@@ -27,6 +27,8 @@ from workflow_steps import job_block  # noqa: E402  the one workflow reader (lin
 import stale_cites  # noqa: E402  the guard's rule dirs, one home (lint/stale_cites.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "hooks"))  # append: no hook module shadows one this suite imports
 import guard as hook_guard  # noqa: E402  is_test_rel, the one home of what a test path is (hooks/guard.py)
+sys.path.append(os.path.join(os.path.dirname(HERE), "janitor"))  # append: no janitor module shadows one this suite imports
+import temp_sweep  # noqa: E402  the real temp-folder step (janitor/temp_sweep.py): a batch build's log must survive it
 CITE_HOMES = audit.cite_homes()  # read live from the repo when this run starts
 
 def printed(out, marker):
@@ -20102,6 +20104,175 @@ class BatchFreeze(CloudSession):
 
     def test_a_base_red_reason_is_accepted_beside_batch_build(self):
         self.assert_accepted_beside_build("--base-red-ok", "the batch carries the fix")
+
+    # The batch build log: state/batch-build/NAME.log under the config dir. A build opens it at its start and mirrors each line it prints; a
+    # --ready run also hands the lint's ci-job the log as its VERDICT_LOG. A session's temp folder is swept once its transcript is idle 24 hours
+    # (decision windows-temp-sweep), so a log kept there is lost with a timed-out run. Each case reads the log by its path, never through
+    # merge.batch_build_log_path, so a run on code without the log fails at the missing log, not at a missing name.
+    OLD_LOG_MTIME = 1_600_000_000  # 2020-09-13 UTC: the prune's fixture logs carry their own mtimes below this, far older than any real build
+    IDLE_TRANSCRIPT_SECONDS = 25 * 3600  # over the temp step's 24-hour limit, with a wide margin
+
+    def batch_log(self, name="nightly"):
+        """Where a build of batch NAME writes its log: <config dir>/state/batch-build/NAME.log, the config dir being this case's."""
+        return os.path.join(self.cfg, "state", "batch-build", name + ".log")
+
+    def read_text(self, path):
+        """The text of the file at `path`, or None when no such file is there."""
+        try:
+            with open(path, encoding="utf-8") as f:
+                return f.read()
+        except FileNotFoundError:
+            return None
+
+    def start_line(self, lines, name, numbers):
+        """The index of the first line that names batch `name` and each of `numbers`, the build's start line, or None."""
+        return next((i for i, line in enumerate(lines) if name in line and all(str(n) in line for n in numbers)), None)
+
+    @contextlib.contextmanager
+    def ci_job_stub(self, answer, temp_dir):
+        """The real --ready lint: lane_lint and ci_job_run run for real, and each bin/ci-job call is answered by `answer(args, env, timeout)`,
+        which returns (rc, stdout) or raises. Every other sh call runs for real. `temp_dir` is the folder tempfile uses, as a session's TMPDIR
+        is. The draft step is patched to fail the run, as no_lint_or_ready_check does. Yields the mock of merge.sh."""
+        real_sh = merge.sh
+
+        def sh_or_answer(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False):
+            if list(args[1:2]) == [merge.CI_JOB]:
+                return answer(args, env, timeout)
+            return real_sh(args, cwd=cwd, input=input, env=env, timeout=timeout, live_stderr=live_stderr)
+
+        with unittest.mock.patch.object(merge, "sh", side_effect=sh_or_answer) as sh_mock, \
+                unittest.mock.patch.object(merge, "draft_step", side_effect=AssertionError("merge.draft_step ran: a batch run runs no draft step")), \
+                unittest.mock.patch.object(tempfile, "tempdir", temp_dir):
+            yield sh_mock
+
+    def idle_session_temp(self):
+        """A session's temp folder under a fresh TEMP root, and its transcript idle over the step's limit under this case's config dir.
+        -> (the TEMP root, the session folder)."""
+        root = tempfile.mkdtemp(dir=self.run_dir)
+        self.addCleanup(shutil.rmtree, root, True)
+        session = os.path.join(root, "claude", "fixture-project", "00000000-0000-4000-8000-000000000201")
+        os.makedirs(session)
+        transcript = os.path.join(self.cfg, "projects", "fixture-project", "00000000-0000-4000-8000-000000000201.jsonl")
+        put(transcript, '{"type": "user"}\n')
+        stamp = time.time() - self.IDLE_TRANSCRIPT_SECONDS  # the fixture's age, on the clock the step reads
+        os.utime(transcript, (stamp, stamp))
+        return root, session
+
+    def sweep_temp(self, root):
+        """Runs the real janitor/temp_sweep.py run(confirm=True), with TEMP at `root` and this case's config dir. -> (its failure count, its printed text)."""
+        printed = io.StringIO()
+        with unittest.mock.patch.dict(os.environ, {"TEMP": root}), contextlib.redirect_stdout(printed), contextlib.redirect_stderr(printed):
+            failures = temp_sweep.run(confirm=True)
+        return failures, printed.getvalue()
+
+    def test_a_build_writes_its_log_with_the_start_line_and_each_line_it_prints(self):
+        for n in (101, 102):
+            self.lane(n)
+        log = self.batch_log()
+        put(log, "an earlier build's line\n")  # the log opens for append, so a line an earlier run left stays
+        seen_at_pr = []
+        real_create_pr = self.host.create_pr
+
+        def create_pr_and_look(*args, **kwargs):
+            seen_at_pr.append(self.read_text(log))  # what the log holds when the build opens its pull request
+            return real_create_pr(*args, **kwargs)
+        self.host.create_pr = create_pr_and_look
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+        text = self.read_text(log)
+        self.assertIsNotNone(text, "no batch build log at %s after a build: nothing wrote the log" % log)
+        lines = text.splitlines()
+        self.assertIn("an earlier build's line", lines, "the build truncated the log: an earlier run's line is gone: %r" % lines)
+        start = self.start_line(lines, "nightly", (101, 102))
+        self.assertIsNotNone(start, "the log holds no start line naming batch nightly and lanes 101 and 102: %r" % lines)
+        built = next((line for line in out.splitlines() if line.startswith("merge: batch nightly built:")), None)
+        self.assertIsNotNone(built, "setup: the build printed no built line: %s" % out)
+        self.assertIn(built, lines, "the line the build printed is not in the log, so say() does not mirror into it: %r" % lines)
+        self.assertLess(start, lines.index(built), "the built line comes before the start line in the log: %r" % lines)
+        before_pr = seen_at_pr[0] if seen_at_pr else None
+        self.assertIsNotNone(self.start_line((before_pr or "").splitlines(), "nightly", (101, 102)),
+                             "the log held no start line when the build opened its pull request, so the start line is not written first: %r" % (before_pr,))
+        named = getattr(merge, "batch_build_log_path", None)
+        self.assertIsNotNone(named, "merge names no batch_build_log_path(name), so the batch build log has no named path")
+        self.assertEqual(os.path.realpath(named("nightly")), os.path.realpath(log),
+                         "batch_build_log_path does not name <config dir>/state/batch-build/nightly.log")
+
+    def test_a_timed_out_lint_keeps_the_batch_log_through_the_temp_sweep(self):
+        for n in (101, 102):
+            self.lane(n)
+        self.frozen_batch("nightly", [101, 102], draft=True)
+        temp_root, session = self.idle_session_temp()
+        step_output = os.path.join(session, "ci-job-lint-probe.log")
+
+        def timed_out(args, env, timeout):  # ci-job writes its step output into its TMPDIR, then runs past the lint's limit
+            put(step_output, "=== verdict run 2026-11-12 10:00:00: a lint step\n")
+            raise subprocess.TimeoutExpired(args, timeout)
+
+        with self.ci_job_stub(timed_out, session):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertTrue(os.path.isfile(step_output), "setup: the timed-out lint wrote no step output into the session folder: %s" % out)
+        self.assertNotEqual(rc, 0, "a timed-out lint let --ready exit 0: %s" % out)
+        failures, swept = self.sweep_temp(temp_root)
+        self.assertEqual(failures, 0, "the temp-folder step failed: %s" % swept)
+        self.assertFalse(os.path.exists(session), "positive control: the idle session folder %s is still there after the step, so the step "
+                                                  "did not run on it: %s" % (session, swept))
+        log = self.batch_log()
+        text = self.read_text(log)
+        self.assertIsNotNone(text, "no batch build log at %s after the temp-folder step: a timed-out --ready leaves no log to read" % log)
+        lines = text.splitlines()
+        self.assertIsNotNone(self.start_line(lines, "nightly", (101, 102)), "the batch log holds no start line naming batch nightly and lanes 101 and 102: %r" % lines)
+        timeout_at = next((i for i, line in enumerate(lines) if f"ci-job did not finish in {merge.LINT_SECONDS} s" in line), None)
+        self.assertIsNotNone(timeout_at, "the batch log holds no line saying ci-job did not finish in %d s: %r" % (merge.LINT_SECONDS, lines))
+        self.assertLess(self.start_line(lines, "nightly", (101, 102)), timeout_at, "the timeout line comes before the start line: %r" % lines)
+        self.assertIn(log, out, "the timed-out --ready does not name the batch build log %s: %s" % (log, out))
+
+    def test_the_log_folder_keeps_its_newest_twenty_logs_including_this_builds(self):
+        folder = os.path.dirname(self.batch_log())
+        os.makedirs(folder)
+        for age in range(22):  # old-00 is the oldest: each fixture log has its own fixed mtime
+            path = os.path.join(folder, "old-%02d.log" % age)
+            put(path, "an old build\n")
+            os.utime(path, (self.OLD_LOG_MTIME + age, self.OLD_LOG_MTIME + age))
+        for n in (101, 102):
+            self.lane(n)
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+        kept = sorted(os.listdir(folder))
+        self.assertEqual(len(kept), 20, "%d logs remain in %s, not the newest 20: %s" % (len(kept), folder, kept))
+        self.assertIn("nightly.log", kept, "the build's own log was pruned: %s" % kept)
+        self.assertEqual([name for name in kept if name != "nightly.log"], ["old-%02d.log" % age for age in range(3, 22)],
+                         "the kept old logs are not the newest 19 of the 22: %s" % kept)
+
+    def test_a_log_that_cannot_be_opened_does_not_stop_the_build(self):
+        put(os.path.join(self.cfg, "state", "batch-build"), "a file where the log folder should be\n")  # the folder cannot be made, so the open fails (chmod would not, for root)
+        for n in (101, 102):
+            self.lane(n)
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(len(self.host.created), 1, "the build stopped before it opened its pull request: %s" % out)
+        self.assertTrue(self.head("batch-nightly"), "the build did not push batch-nightly: %s" % out)
+        self.assertIn("merge: batch nightly built:", out, "the build did not finish: %s" % out)
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+
+    def test_a_ready_lint_hands_ci_job_the_batch_log_as_its_verdict_log(self):
+        for n in (101, 102):
+            self.lane(n)
+        self.frozen_batch("nightly", [101, 102], draft=True)
+        seen = []
+
+        def passes(args, env, timeout):
+            seen.append((env or {}).get("VERDICT_LOG"))
+            return 0, ""
+        with unittest.mock.patch.dict(os.environ), self.ci_job_stub(passes, tempfile.mkdtemp(dir=self.run_dir)):
+            os.environ.pop("VERDICT_LOG", None)  # the run's own environment names no log: only merge may name one for ci-job
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertEqual(len(seen), 1, "the --ready lint ran ci-job %d times, not once: %s" % (len(seen), out))
+        log = self.batch_log()
+        self.assertEqual(os.path.realpath(seen[0]) if seen[0] else None, os.path.realpath(log),
+                         "ci-job's VERDICT_LOG is %r, not the batch build log %s: the lint's output goes nowhere a build log holds" % (seen[0], log))
+        self.assertEqual(rc, 0, "--ready with a passing lint exited %s: %s" % (rc, out))
 
 # `merge --touches [--run RUN_ID] [--case TEXT]... [--file PATH]...`: the open pull requests that already touch a failing case or a named file.
 # The incident's fixtures: red main run 42559512356 failed two brief-destructive-git cases, and open pull 2390 already fixes them.
