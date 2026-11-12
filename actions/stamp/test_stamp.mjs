@@ -1741,6 +1741,25 @@ test("pending cite: the printed scanGlobs fix lets --claim pass, though the fold
     assert.equal(fixed.status, 0, `the printed fix made --claim refuse the second file:\n${outputOf(fixed)}`);
   }));
 
+// The merge tool claims with the base branch's config, written to a temp file outside the worktree and
+// deleted after the claim. The refusal names the repo's own config path, never that temp file.
+test("pending cite: --claim with a config outside the root names the base branch's .github/stamp.json, and prints no temp path", () =>
+  withTempDir((root) => withTempDir((outside) => {
+    pendingCiteRepo(root, SCAN_MD, { [BLOCK]: BLOCK_TEXT });
+    const baseCfg = join(outside, "base-stamp.json");
+    writeFileSync(baseCfg, read(root, ".github/stamp.json"));
+    assert.equal(baseCfg.startsWith(root), false, "scope: the config must sit outside the root");
+
+    const r = runStamp(root, baseCfg, "claim");
+    const out = outputOf(r);
+    assert.notEqual(r.status, 0, `--claim exited 0 with an unscanned pending cite:\n${out}`);
+    assert.match(out, /plugins\/_shared\/fidelity\.block:3/, `--claim named no file and line for the unscanned cite:\n${out}`);
+    assert.equal(out.includes(baseCfg), false, `--claim printed the temp config path, which the merge tool deletes:\n${out}`);
+    assert.equal(out.includes("base-stamp.json"), false, `--claim printed the temp config's file name:\n${out}`);
+    assert.match(out, /base branch/, `--claim does not say the fix must land on the base branch first:\n${out}`);
+    assert.equal(out.includes(".github/stamp.json"), true, `--claim names no repo-relative .github/stamp.json:\n${out}`);
+  })));
+
 // The cite scanner reads text, so the cases that break a naive scanner go in: a comment opener
 // inside a string, a multi-line template literal, and a lone quote in prose. Each cite sits outside
 // scanGlobs and must still refuse at its own line. The refusal reads a cite as the rewrite does, so
