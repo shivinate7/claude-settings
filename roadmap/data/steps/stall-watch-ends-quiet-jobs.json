@@ -1,14 +1,14 @@
 {
  "id": "stall-watch-ends-quiet-jobs",
  "title": "The stall watch never ends a quiet job whose process tree is alive, nor a lone sleep followed by a command; when it ends one, it kills the whole tree",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL1GpGypoxH9ZdHDtEw",
  "owner": "triage",
  "blockedBy": [],
  "why": "hooks/stall_watch.py ends quiet-by-design background jobs and strands their processes: `merge --batch-build 104` ended twice with exit 3 while pid 27483 ran on under init; `sleep 420; gh api ...` ended before its read ran, though the waiter guard's own remedy allows one pause then a command; a piped `--batch-build` earlier (note no-pipe-long-merge).",
  "source": "batch runner 10, 10:13 CST Nov 12, via coordinator 10:13 CST; owner asked it be fixed",
  "note": "Debt, code. #2680 (step stall-watch-live-run) covers the live-CPU case only; this step holds the git-wait and lone-sleep cases and the whole-tree kill. Pairs with step kill-own-stranded-job. Ready, no lane.",
- "updatedAt": "2026-11-12T10:21:00-06:00"
+ "updatedAt": "2026-11-12T10:25:00-06:00"
 }

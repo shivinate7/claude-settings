@@ -1,14 +1,14 @@
 {
  "id": "stack-check-scales-open-prs",
  "title": "`stacked_without_base` reads each lane against the other heads in one pass",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJKzyf9coT5mUTctthpk",
  "owner": "triage",
  "blockedBy": [],
  "why": "merge/merge.py `stacked_without_base` makes one git read per lane and open PR pair. Batch 104's build (38 lanes, about 750 open PRs) ran 54 min with nothing pushed.",
  "source": "batch runner 10, 10:06 CST Nov 12, via coordinator 10:08 CST",
  "note": "Debt, code. Fix: fetch once, then one `git rev-list` per lane against the set of other heads. Hit in normal work. Ready, no lane.",
- "updatedAt": "2026-11-12T10:13:00-06:00"
+ "updatedAt": "2026-11-12T10:25:00-06:00"
 }
