@@ -150,7 +150,8 @@ async function dwRun($, stop, extra, who) {
     // The mod's own timer frees the slot if the host does not stop the child. It does not kill the child.
     deadline($.process.run([py, "-I", `${cfg}/hooks/decision_watch.py`, ...extra], {
       stdin: asciiJson(stop),
-      env: { CLAUDE_CONFIG_DIR: stateDir(cfg, who), DW_REAL_CONFIG_DIR: cfg },
+      // DW_EXPLICIT marks a /dw the owner asked for: the script shows each miss and keeps no once-per-session mark.
+      env: { CLAUDE_CONFIG_DIR: stateDir(cfg, who), DW_REAL_CONFIG_DIR: cfg, ...(who === "dw" ? { DW_EXPLICIT: "1" } : {}) },
       timeoutMs: PY_MS,
     }), PY_MS + 1000);
   let r;

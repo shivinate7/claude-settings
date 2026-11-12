@@ -836,14 +836,18 @@ def run(hook, model_call=invoke_model, expect_key=None):
     the evidence moved between the two phases, so the reply is not used and the answer is UNKNOWN
     (SAFETY HOLE 1 of decision decision-watch-mod-limits).
     """
+    # The mod's /dw sets DW_EXPLICIT=1. A /dw the owner asked for shows each miss, because a silent reply reads as
+    # clear (rule verification-report-unknown-reads). The once-per-session mark is for the background judge only.
+    explicit = os.environ.get("DW_EXPLICIT") == "1"
     path = find_transcript(hook)
     if path is None:
         given = hook.get("transcript_path")
         session_id = hook.get("session_id") or ""
         # With no session_id the store cannot dedupe, so the line is said every time rather than never.
-        if NO_TRANSCRIPT_SEEN_KEY in _load_seen(session_id):
-            return ""
-        _mark_seen(session_id, NO_TRANSCRIPT_SEEN_KEY)
+        if not explicit:
+            if NO_TRANSCRIPT_SEEN_KEY in _load_seen(session_id):
+                return ""
+            _mark_seen(session_id, NO_TRANSCRIPT_SEEN_KEY)
         return UNKNOWN_PREFIX + "transcript_path is missing or does not exist (tried: %s), and no transcript was found under session id %s." % (
             given if isinstance(given, str) and given else "no path given", session_id or "(none given)")
 
@@ -861,9 +865,10 @@ def run(hook, model_call=invoke_model, expect_key=None):
         # session_id the store cannot dedupe, so the line is said every time rather than never.
         if not is_git_work_tree(cwd):
             session_id = hook.get("session_id") or ""
-            if NO_REPO_SEEN_KEY in _load_seen(session_id):
-                return ""
-            _mark_seen(session_id, NO_REPO_SEEN_KEY)
+            if not explicit:
+                if NO_REPO_SEEN_KEY in _load_seen(session_id):
+                    return ""
+                _mark_seen(session_id, NO_REPO_SEEN_KEY)
             return NO_REPO_MESSAGE
         return UNKNOWN_PREFIX + "git status could not be read for this working directory."
 
