@@ -26,7 +26,6 @@
 - builder-patch-format-unread: `patch tests/x.py < d.diff`, `git checkout --theirs tests/x`, `ruff format tests/` and `black .` are not refused for a builder (hooks/guard.py builder_shell_test_hit) Fix: none — rare and harmless. Until: 2026-11-19
 - builder-path-forms-unread: `Path('tests').joinpath(...)`, string `+` paths, `dd of=`, `sort -o` and `touch` of a test path are not read (hooks/guard_frozen.py _py_paths, _shell_write_hit) Fix: none — rare and harmless. Until: 2026-11-20
 - shell-write-pipe-redirect: `cat x >| F` is not read as a write to F, so the frozen-path guard allows it (hooks/guard_frozen.py _shell_write_hit). Fix: none — Claude rarely writes `>|`, and plain `>` is refused. Until: 2026-11-22
-- shell-write-sed-w: `sed -n 'w F' x` writes F and is not read as a write (hooks/guard_frozen.py _shell_write_hit). Fix: none — a review finding with no incident. Until: 2026-11-22
 - shell-write-basetemp: `python3 -m pytest --basetemp=F` writes F and is not read as a write (hooks/guard_frozen.py _shell_write_hit). Fix: none — a review finding with no incident. Until: 2026-11-22
 - frozen-sed-pattern-refused: `sed -n '/rm x/p' F` only reads F, yet it is refused as a write to F (hooks/guard_frozen.py _shell_write_hit). Fix: none — a false alarm only refuses. Until: 2026-11-22
 - frozen-git-rm-cached-refused: `git rm --cached X && cat X` is refused as a write, because the cat segment names X (hooks/guard_frozen.py _shell_write_hit). Fix: none — rare, and the refusal is a minor false alarm. Until: 2026-11-21
