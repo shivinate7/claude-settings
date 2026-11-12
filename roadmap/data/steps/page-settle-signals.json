@@ -4,8 +4,8 @@
   "note": "Filed 10:17 CST Nov 8 from that lane; note time-pinned-sleeps-left. Fix: a page-side signal (for example scrollend) the tests wait on. Decision test-practices P5. Goal step: time-pinned-tests-go. Lane: timing-tests ([ended:lane:-timing-tests]), coordinator 10:18 CST. R55 express (owner 14:05 CST Nov 12, via retrospective, plan fbc11be: \"CI fixes need to be right up there in the express lane with the merging fixes\"; home decision no-merge-during-batch-ci).",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "archived, handoff at handoffs/session_013NEJL1jPC89ae6X6Pa4jmf.md on archive/session-handoffs-2026-11-10",
-  "status": "todo",
+  "lane": "session_013NEJKzPBydNwYKzUY8qGxB",
+  "status": "doing",
   "order": 726,
-  "updatedAt": "2026-11-12T14:09:06-06:00"
+  "updatedAt": "2026-11-12T14:12:38-06:00"
 }

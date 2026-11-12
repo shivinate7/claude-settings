@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Owner ruling R28: page data has one store, git first, no copy step, no lag (step page-data-one-store).",
  "source": "coordinator 11:53 and 11:54 CST Nov 12, from lane page-data-one-store (decision waiting-page-one-store, route D: the page on claude.ai, no database, git through a connector)",
- "note": "On the page database and on every git write tool. Red first. Lane started 11:54 CST Nov 12 (coordinator).",
- "updatedAt": "2026-11-12T12:07:43-06:00"
+ "note": "On the page database and on every git write tool. Red first. Lane started 11:54 CST Nov 12 (coordinator). Lane 14:11 CST Nov 12 (head 53e065d31, round 2 FAIL being fixed): owner items 635 (may a session delete an answer; lane recommends yes) and 636 (does the page rebuild need an override to write answers back). Stray branch answers-session-write archived; its delete mailed to the Windows helper.",
+ "updatedAt": "2026-11-12T14:12:38-06:00"
 }

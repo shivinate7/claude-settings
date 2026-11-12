@@ -897,3 +897,4 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - judge-timeout-retries-once 14:09 CST Nov 12: Served by draft #2910 (lane past-ruling-timeout, 14:05 CST Nov 12).
 - R55 express list 14:08 CST Nov 12 (owner 14:05): adds mutate-guard-split, timing-tests (+convert-time-pinned-tests), page-settle-signals, guard-pr-runs-windows-shards (+guard-shard-value-no-slash), rollup-needs-all-shards.
 - page-item-past-ruling 14:10 CST Nov 12: Second incident 14:08 CST Nov 12: triage posted item 634 (batch split drops by shared file) though decision batch-freeze-lane-set settles it; the page write passed and only the Stop hook caught it, 14:10 CST. Red first on item 634's first text.
+- grants-read-from-main 14:12 CST Nov 12: Coordinator 14:07 CST: lane grants-stale-on-windows archived, built nothing, pushed no branch. Step blocked, no lane, until the Windows helper replies to mail 66765d83781f.
