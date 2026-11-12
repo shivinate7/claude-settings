@@ -267,11 +267,13 @@ def unknown_lines(out):
     return [line for line in out.splitlines() if line.startswith("stale-cites: unknown, ")]
 
 
-def parser_script(flags, parents=(), table=(), rebound=False):
+def parser_script(flags, parents=(), table=(), rebound=False, starred=(), single=()):
     """A Python script that declares each of `flags` with add_argument, as a CLI does. Each name in `parents` is a
     parent parser that COMMON defines: the script imports it and takes it as `parents=[name()]`. Each row of `table`
     is a (flag, metavar, help) row of a CHECK_FLAGS tuple, which a loop declares, as a CLI's table does. `rebound`
-    binds CHECK_FLAGS a second time, with a plain assignment, so no reader takes its rows. Never run."""
+    binds CHECK_FLAGS a second time, with a plain assignment, so no reader takes its rows. `starred` is a list that
+    one `add_argument(*STARRED)` call declares. `single` is a list that a single-target loop, `for flag in SINGLE`,
+    declares one flag per row. Never run."""
     module = os.path.splitext(os.path.basename(COMMON))[0]
     imports = "".join("from %s import %s\n" % (module, name) for name in parents)
     takes = "parents=[%s]" % ", ".join(name + "()" for name in parents) if parents else ""
@@ -279,8 +281,11 @@ def parser_script(flags, parents=(), table=(), rebound=False):
     constant = ("CHECK_FLAGS = (%s\n)\n%s\n" % ("".join('\n    ("%s", "%s", "%s"),' % row for row in table), rebind)
                 if table else "")
     loop = "for flag, _, text in CHECK_FLAGS:\n    parser.add_argument(flag, help=text)\n" if table else ""
+    star = ("STARRED = [%s]\nparser.add_argument(*STARRED)\n" % ", ".join('"%s"' % f for f in starred)) if starred else ""
+    single_loop = ("SINGLE = [%s]\nfor flag in SINGLE:\n    parser.add_argument(flag)\n" % ", ".join('"%s"' % f for f in single)
+                   if single else "")
     return ("import argparse\n" + imports + "\n" + constant + "parser = argparse.ArgumentParser(%s)\n" % takes
-            + "".join('parser.add_argument("%s")\n' % flag for flag in flags) + loop)
+            + "".join('parser.add_argument("%s")\n' % flag for flag in flags) + loop + star + single_loop)
 
 
 def shared_parser(flags):
@@ -289,13 +294,15 @@ def shared_parser(flags):
             + "".join('    parser.add_argument("%s")\n' % flag for flag in flags) + "    return parser\n")
 
 
-def subparser_script(flags, window=False):
+def subparser_script(flags, window=False, keyword=False):
     """A Python script with two subcommands, `a` and `b`. Subcommand `a` declares each of `flags` with add_argument, as
-    a CLI does, or takes the helper `add_window` from COMMON when `window` is set. `b` always takes `add_window`. Never run."""
+    a CLI does, or takes the helper `add_window` from COMMON when `window` is set, passing `a` by keyword when `keyword`
+    is set. `b` always takes `add_window`. Never run."""
     module = os.path.splitext(os.path.basename(COMMON))[0]
     lines = ["import argparse", "from %s import add_window" % module, "", "parser = argparse.ArgumentParser()",
              "sub = parser.add_subparsers()", 'a = sub.add_parser("a")']
-    lines += ['a.add_argument("%s")' % flag for flag in flags] + (["add_window(a)"] if window else [])
+    call = ["add_window(parser=a)" if keyword else "add_window(a)"] if window else []
+    lines += ['a.add_argument("%s")' % flag for flag in flags] + call
     lines += ['b = sub.add_parser("b")', "add_window(b)"]
     return "\n".join(lines) + "\n"
 
@@ -1255,6 +1262,55 @@ class FlagTests(StaleCase):
         self.assertEqual(len(unknown), 1, "one cite, one unknown line:\n%s" % out)
         self.assertTrue(unknown[0].startswith("stale-cites: unknown, %s:3: " % NOTES), out)
 
+    def test_flag_declared_by_a_starred_list_is_not_flagged_while_a_removed_one_is(self):
+        base_src = parser_script([], starred=("--between", "--old"))
+        head_src = parser_script([], starred=("--between",))
+        self.assertIn('"--old"', base_src)  # scope: base declares --old through the starred list
+        self.assertIn("parser.add_argument(*STARRED)", head_src)  # scope: head declares through *STARRED
+        self.assertEqual(module_value(head_src, "STARRED"), ["--between"])  # scope: head's list keeps --between
+        notes = ("# Notes\n\n- report: `tools/report.py --between START END`\n"  # line 3: still declared
+                 "- report: `tools/report.py --old 5`\n")  # line 4: really removed
+
+        def change(repo):
+            write(repo, REPORT, head_src)
+            commit(repo)
+        self.assert_control_fires_and_subject_does_not(
+            self.make_range(base_files(notes, extra={REPORT: base_src}), change),
+            control=4, subject=3, flag="--between")
+
+    def test_flag_declared_by_a_single_target_loop_over_a_table_is_not_flagged_while_a_removed_one_is(self):
+        base_src = parser_script(["--between", "--old"])
+        head_src = parser_script([], single=("--between",))
+        self.assertEqual(argument_flags(base_src), {"--between", "--old"})  # scope: base declares both as literals
+        self.assertIn("for flag in SINGLE:", head_src)  # scope: head declares through a single-target loop
+        self.assertEqual(module_value(head_src, "SINGLE"), ["--between"])  # scope: head's table keeps --between
+        notes = ("# Notes\n\n- report: `tools/report.py --between START END`\n"  # line 3: still declared
+                 "- report: `tools/report.py --old 5`\n")  # line 4: really removed
+
+        def change(repo):
+            write(repo, REPORT, head_src)
+            commit(repo)
+        self.assert_control_fires_and_subject_does_not(
+            self.make_range(base_files(notes, extra={REPORT: base_src}), change),
+            control=4, subject=3, flag="--between")
+
+    def test_flag_declared_by_an_untouched_helper_passed_by_keyword_is_not_flagged(self):
+        base_src, head_src = subparser_script(["--between", "--old"]), subparser_script([], window=True, keyword=True)
+        helper_src = add_window_source(["--between"])  # COMMON, untouched by the range, declares --between
+        self.assertEqual(argument_flags(base_src), {"--between", "--old"})  # scope: base declares both as literals
+        self.assertEqual(argument_flags(head_src), set())  # scope: head declares no literal flag
+        self.assertIn("add_window(parser=a)", head_src)  # scope: head's subcommand a passes its parser by keyword
+        self.assertEqual(argument_flags(helper_src), {"--between"})  # scope: the untouched helper declares --between
+        notes = ("# Notes\n\n- report: `tools/report.py --between START END`\n"  # line 3: declared by the helper
+                 "- report: `tools/report.py --old 5`\n")  # line 4: really removed
+
+        def change(repo):
+            write(repo, REPORT, head_src)
+            commit(repo)
+        self.assert_control_fires_and_subject_does_not(
+            self.make_range(base_files(notes, extra={REPORT: base_src, COMMON: helper_src}), change),
+            control=4, subject=3, flag="--between")
+
 
 class StepTests(StaleCase):
     def test_code_only_pr_fails_the_step_on_the_stale_line(self):
@@ -1783,6 +1839,23 @@ class CostTests(StaleCase):
         self.assertNotIn("Traceback", out)
         self.assertLessEqual(len(subs), 5, subs)
         self.assertTrue(set(subs) <= {"rev-parse", "merge-base", "diff", "cat-file", "ls-tree"}, subs)
+
+    def test_a_flag_read_through_an_untouched_helper_starts_no_git_process_beyond_the_five(self):
+        notes = ("# Notes\n\n- report: `tools/report.py --between START END`\n"  # line 3: declared by the helper
+                 "- report: `tools/report.py --old 5`\n")  # line 4: really removed
+        base_src, head_src = subparser_script(["--between", "--old"]), subparser_script([], window=True)
+
+        def change(repo):
+            write(repo, REPORT, head_src)
+            commit(repo)
+        rng = self.make_range(base_files(notes, extra={REPORT: base_src, COMMON: add_window_source(["--between"])}), change)
+        rc, out, commands = self.run_traced_commands(rng)
+        self.assertNotIn("Traceback", out, out)
+        self.assertEqual(rc, 1, out)  # scope: line 4 is really removed, so the run fails on it
+        subs = [command.split()[0] for command in commands]
+        self.assertEqual(sorted(subs), ["cat-file", "diff", "ls-tree", "merge-base", "rev-parse"], commands)
+        listing = [command for command in commands if command.startswith("ls-tree")]
+        self.assertEqual(len(listing), 1, commands)  # the helper read reuses the one whole-tree listing
 
     def test_a_run_writes_no_file_in_the_repo_or_next_to_the_script(self):
         def change(repo):
