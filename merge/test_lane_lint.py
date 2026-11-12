@@ -19,7 +19,7 @@ count is unmeasured since the batch-head cases were added.
 BatchHeadMutation (class BatchHeadMutation) lints a batch head, `--batch-build NAME --ready`, and the same head by hand-off, `--lane-lint <sha>`,
 on one touched lane. Its pre-join cases run `--lane-lint <pr>` through the gh shim, in a cloud session with the batch-runner role or with none; the
 shim's comment list holds the hand-off PASS record. Cost per case: one run (the batch build or the lint), one ci-job stub start, and one mutate stub
-start where the run starts (the batch head's lint starts none). Measured: its 10 cases took 3.7 s to 3.8 s over two runs.
+start where the run starts (the batch head's lint starts none). Measured: its 10 cases took 3.7 s to 3.8 s over two runs; the 11th, the pre-join case that reads another pull request's PASS, is unmeasured.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
 import ast, atexit, contextlib, importlib.util, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
@@ -3065,7 +3065,7 @@ class BatchHeadMutation(LaneFixture):
     """The batch head's lint against the hand-off lint of one touched diff. `merge --lane-lint` on a head starts the mutation test run. The batch
     head (`--batch-build NAME --ready`) lints the same lane files and starts none: the lane's hand-off lint already ran it, and the batch head says
     so (MUTATE_SKIPPED). The batch runner's pre-join call, `merge --lane-lint <pr>` in a session that holds the batch-runner role, skips the run only
-    when a hand-off PASS names the live head (lint_state reads the lane-lint comments). Any other head starts it, and a hand-off session with no role
+    when a hand-off PASS on the linted pull request names the live head (lint_state reads that pull request's comments). Any other head starts it, and a hand-off session with no role
     always starts it. The caller decides, not the diff: the control cases lint the same head by hand-off and see the run start. Each case's scope
     comes first: the lint ran once, at the head the case names, and the lane's diff holds what the case claims."""
 
@@ -3244,6 +3244,19 @@ class BatchHeadMutation(LaneFixture):
         self.assert_touches_mutate_file(head)
         comment = lint_comment(501, head, by=NOT_OWNER)
         self.assertEqual(merge.lint_state([comment["body"]], head), "pass", "precondition: the comment is no PASS for the live head")
+        rc, text = self.pre_join([comment])
+        self.assert_run_starts_once_at(head, text)
+        self.assertEqual(rc, 0, text)
+
+    def test_the_batch_runners_pre_join_lint_with_a_hand_off_pass_on_another_pull_request_starts_the_mutation_test_run_once(self):  # the skip reads only the linted pull request's comments; the pre-join case above has the PASS on it
+        self.use_ci_job(PASSING, 0)
+        head = self.touched_lane()
+        self.fresh_run()
+        self.assert_touches_mutate_file(head)
+        comment = lint_comment(501, head, n=8)
+        self.assertTrue(comment["issue_url"].endswith("/issues/8"), "precondition: the PASS does not sit on pull request #8")
+        self.assertEqual(comment["author_association"], merge.LANE_LINT_AUTHOR, "precondition: the PASS is not the owner's")
+        self.assertEqual(merge.lint_state([comment["body"]], head), "pass", "precondition: the comment is not a PASS for the live head")
         rc, text = self.pre_join([comment])
         self.assert_run_starts_once_at(head, text)
         self.assertEqual(rc, 0, text)
