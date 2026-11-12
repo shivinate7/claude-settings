@@ -3125,8 +3125,9 @@ def _ruling_of_decision(slug, stamp, cwd):
     except Exception:
         pass
     for root in roots:
-        path = os.path.join(root, *layout.path(root, "decisions").split("/"), slug + ".md")
-        if os.path.isfile(path):
+        path = next((p for p in (os.path.join(root, *folder.split("/"), slug + ".md")
+                                 for folder in layout.candidates(root, "decisions")) if os.path.isfile(p)), "")
+        if path:
             try:
                 with open(path, encoding="utf-8") as handle:
                     return decision_excerpt(handle.read(), stamp), ""
