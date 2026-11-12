@@ -3918,8 +3918,8 @@ def run_lint_cli(text, suffix=".md"):
     return run.returncode, json.loads(run.stdout)
 
 
-class OneSentenceBudgetTests(unittest.TestCase):
-    """No sentence budget: a sentence of any length gives no STE001, procedural or descriptive.
+class OneSentenceLengthTests(unittest.TestCase):
+    """No sentence length limit: a sentence of any length gives no STE001, procedural or descriptive.
     The lint never counts words."""
 
     def lint(self, text, mode):
@@ -4080,6 +4080,16 @@ class SourceProseLintTests(unittest.TestCase):
                 "# this comment line says this step is not unsafe\n")
         lines = {f.line for f in self.check("sample.py", text) if f.code == "STE013"}
         self.assertEqual(lines, {3}, "the double negative is not reported on its own source line")
+
+    def test_78_a_sentence_split_across_comment_lines_is_one_sentence(self):
+        # Catches: the consecutive-comment join is off, so a double negative split across two
+        # comment lines is never read as one sentence and gives no STE013.
+        one_line = "x = 1\n# This step is not unsafe.\n"
+        self.assertIn(("STE013", 2), [(f.code, f.line) for f in self.check("sample.py", one_line)],
+                      "the control comment was not linted")
+        split = "x = 1\n# This step is not\n# unsafe.\n"
+        self.assertIn(("STE013", 2), [(f.code, f.line) for f in self.check("sample.py", split)],
+                      "the double negative split across two comment lines is not one sentence")
 
     def test_77_a_long_comment_sentence_gives_no_ste001(self):
         text = "\n".join("# " + w for w in ["word"] * 31) + "\n# This step is not unsafe.\n"

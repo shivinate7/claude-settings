@@ -455,7 +455,7 @@ class MoveTests(StaleCase):
     def test_disable_line_names_its_code_and_no_other(self):
         rows = [
             ("- refusal list in `hooks/lib.mjs` <!-- ste-disable-line STALE001 -->", False),
-            ("- refusal list in `hooks/lib.mjs` <!-- ste-disable-line STE001 -->", True),
+            ("- refusal list in `hooks/lib.mjs` <!-- ste-disable-line STE011 -->", True),
             ("- refusal list in `hooks/lib.mjs`", True),
         ]
         text, lines = rows_text(rows)
