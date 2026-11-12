@@ -132,17 +132,17 @@ def mrf_judge(cwd, message, agent=None, env_path=None, mode=None):
     })
 
 
-def mrf_case(name, expected, message, cwd=MRF_REPO, carries=(), mode=None, context=False, lacks=()):
+def mrf_case(name, expected, message, cwd=MRF_REPO, carries=(), mode=None, context=False, lacks=(), max_seconds=None):
     """One send_message case from the main session. An agent's send never reaches this check: the agent-remote-tools
     rule (agent-no-remote-tools) refuses it first, so an agent variant could only ever read that refusal.
     `context` asks for an allow whose output holds additionalContext and no permissionDecision key. `lacks` names
-    fragments the printed reason must not hold."""
+    fragments the printed reason must not hold. `max_seconds` bounds the guard run (see decide)."""
     env = {"FAKE_GH_LOG": MRF_GH_LOG}
     if mode:
         env["FAKE_GH_MODE"] = mode
     add("message-ref-missing: %s, main session" % name, expected, MRF_RULE if expected == "deny" else None,
         tool=SEND_MESSAGE, cwd=cwd, env_path=MRF_PATH, env=env, carries=carries, lacks=lacks,
-        no_permission_key=context, message=message)
+        no_permission_key=context, message=message, max_seconds=max_seconds)
 
 
 mrf_case("a made-up commit sha is refused", "deny", "Record link: commit 8c1f0e2a7 has the fix.",
@@ -405,3 +405,71 @@ mrf_case("a made-up sha as the link text of this repo's commit is refused", "den
 mrf_case("a made-up sha after a closed double-quoted span and a > mark is refused", "deny",
          '"x" > landed as 0123abc', carries=("0123abc",))
 mrf_case("a made-up sha after x and a > mark is refused", "deny", "x > landed as 0123abc", carries=("0123abc",))
+
+
+# Cost of one message (decision send-message-refs-resolve, "Cost"): the judge is linear in the message's length. The bound
+# is 5 s of wall time for one guard run, timed as the suite times it (decide with max_seconds, cut at 6 s). Measured on
+# this host, the base takes 0.20 s on each shape below. A Windows run has no limit, as the report-sha speed case has none.
+MRF_SPEED_S = 5
+MRF_SPEED = MRF_SPEED_S if os.name != "nt" else None
+MRF_DISTINCT = " ".join("PR #%d" % number for number in range(1, 4001))
+mrf_case("4,000 distinct PR #N on one line are judged within 5 s, and PR #1 is refused", "deny", MRF_DISTINCT,
+         carries=("#1",), max_seconds=MRF_SPEED)
+mrf_case("40,000 PR words with no # are judged within 5 s, and are allowed", "allow", "PR " * 40000,
+         max_seconds=MRF_SPEED)
+# The control: a verdict that skips a long line fails it. The PR #8 after 4,000 PR words is judged, and refused.
+mrf_case("PR #8 after 4,000 PR words with no # is judged and refused", "deny", "PR " * 4000 + "#8", carries=("#8",))
+
+# False alarms (decision send-message-refs-resolve, "What is judged"): a closing verb between a PR word and its number, or
+# before this repo's owner/repo#N, names an issue, not a pull request. The base allowed each line below. The controls are
+# made-up PRs with no closing verb, and they stay refused.
+mrf_case("This PR closed #8, a past-tense closing verb, is allowed", "allow", "This PR closed #8.")
+mrf_case("This PR closing #8, a gerund closing verb, is allowed", "allow", "This PR closing #8.")
+mrf_case("Fixes o/r#99999, this repo's issue after a closing verb, is allowed", "allow", "Fixes o/r#99999 when merged.")
+mrf_case("PR is #99999, a made-up PR, is refused and named", "deny", "PR is #99999", carries=("#99999",))
+mrf_case("PR opened: #99999, a made-up PR, is refused and named", "deny", "PR opened: #99999", carries=("#99999",))
+
+
+# The unchecked note names each ref once (decision send-message-refs-resolve, "Fail open"). Fifty distinct refs on one line
+# are unchecked with no origin, and with an origin that cannot be read, where the cap then leaves the rest unchecked. Each
+# ref is named once, and none is dropped. The third check names one ref twice on one line.
+MRF_FIFTY = " ".join("PR #%d" % number for number in range(1, 51))
+MRF_FIFTY_NUMBERS = list(range(1, 51))
+
+
+def mrf_note_once(cwd, label, message, numbers):
+    """(ok, reason): the note of an allow that left refs unchecked names each of `numbers` exactly once."""
+    materialize(cwd)
+    decision, note = mrf_judge(cwd, message)
+    if decision != "allow":
+        return False, "%s: %s, want allow with the refs named unchecked" % (label, decision)
+    found = re.search(r"could not check (.*?) \(no clear answer", note)
+    if not found:
+        return False, "%s: the note names no unchecked ref: %r" % (label, note[:120])
+    names = found.group(1).split(", ")
+    for number in numbers:
+        count = names.count("PR #%d" % number)
+        if count != 1:
+            return False, "%s: the note names PR #%d %d time(s), want once" % (label, number, count)
+    return True, "%s: the note names each of %d ref(s) once" % (label, len(numbers))
+
+
+def mrf_note_once_no_origin():
+    return mrf_note_once(MRF_NOORIGIN, "no origin", MRF_FIFTY, MRF_FIFTY_NUMBERS)
+
+
+def mrf_note_once_bad_remote():
+    return mrf_note_once(MRF_BADREMOTE, "origin unreachable", MRF_FIFTY, MRF_FIFTY_NUMBERS)
+
+
+def mrf_note_once_same_line():
+    return mrf_note_once(MRF_NOORIGIN, "no origin", "PR #8 and PR #8", [8])
+
+
+LOG_CHECKS_EXTRA.append(("message-ref-missing: fifty refs with no origin are each named once in the unchecked note",
+                         mrf_note_once_no_origin))
+LOG_CHECKS_EXTRA.append(("message-ref-missing: fifty refs with an unreachable origin are each named once in the note",
+                         mrf_note_once_bad_remote))
+LOG_CHECKS_EXTRA.append(("message-ref-missing: PR #8 twice on one line is named once in the unchecked note",
+                         mrf_note_once_same_line))
+FIXTURELESS_CHECKS.update((mrf_note_once_no_origin, mrf_note_once_bad_remote, mrf_note_once_same_line))
