@@ -6,11 +6,14 @@ SHA = "0123456789abcdef0123456789abcdef01234567"
 REMEDY = "retry with --force-with-lease --force-if-includes"
 
 
-def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash", rule=None, silent=False, lacks=(), word=VCS):
+def push_case(name, tail, expected, cwd=PUSHFEAT, tool="Bash", rule=None, silent=False, lacks=(), word=VCS,
+              form=None):
     """One `git push` case. An ask names `rule` when one is given (rulings 206 a and 207 a), else
     force-push. `silent` marks an allow that must print nothing. `word` is the command word the call
-    names: the plain `git`, or a form of it that the shell reads as git."""
-    sh("push: " + name, word + " push " + tail, expected,
+    names: the plain `git`, or a form of it that the shell reads as git. `form`, when given, is the whole
+    command typed in place of `word push tail`, such as an interpreter or shell body that runs git."""
+    command = form if form is not None else word + " push " + tail
+    sh("push: " + name, command, expected,
        rule or ("force-push" if expected != "allow" else None), cwd=cwd, tool=tool,
        carries=REMEDY if expected == "deny" else (), silent=silent, lacks=lacks)
 
@@ -167,6 +170,15 @@ push_case("a glued push option in a cluster then force denies", "-vofoo --force 
 push_case("a glued push option, other letters, then force denies", "-oyo --force origin feat", "deny")
 push_case("a push option with its value then force denies", "-o foo --force origin feat", "deny")
 
+# A SUBSHELL WORD IN THE PUSH ARGUMENTS. The shell runs `$(...)` before git reads the push. The guard cuts
+# the arguments at a word that ends in `)`, so a flag after that word is lost. A quoted word with a space in
+# it is blanked as text first, so the shapes below are the ones that reach the cut. The control names no flag.
+push_case("a $(...) refspec, unquoted, then -f, denies", "origin $(git branch --show-current) -f", "deny")
+push_case("a quoted $(...) refspec with no space, then --force, denies", 'origin "$(pwd)" --force', "deny")
+push_case("a $(...) refspec, unquoted, -u, then a lease naming a ref, denies",
+          "-u origin $(git rev-parse --abbrev-ref HEAD) --force-with-lease=x", "deny")
+push_case("a $(...) refspec, -u, no force, allows", '-u origin "$(git branch --show-current)"', "allow")
+
 # THE TARGET DIRECTORY. Config and the default branch are read where the push runs: a `git -C`,
 # a `cd` before it, a `-c` override on the call. The session's cwd here is never the answer.
 sh("push: lease with git -C naming the default branch's checkout asks",
@@ -207,6 +219,110 @@ for _word in SPLIT_ANSI_WORDS + SPLIT_SHELL_WORDS:
 sh("split word control: digit, a word with git inside, allows", "digit", "allow")
 sh("split word control: gitk-free, a word with git inside, allows", "gitk-free", "allow")
 sh("split word control: echo git, git as text, allows", "echo git", "allow")
+
+# A GIT ACT INSIDE AN INTERPRETER OR SHELL BODY. A call that runs git from inside `sh -c`, `bash -c`,
+# `python3 -c` or a PowerShell `&` is the same act as the plain push, so it gets the plain push's verdict.
+# A refused act is reported, never re-spelled (owner item 386). The controls name git only as text,
+# which runs nothing, so they stay allowed.
+push_case("interpreter: sh -c runs a forced push to main, asks", "", "ask",
+          form="sh -c 'git push --force origin main'")
+push_case("interpreter: bash -c runs a short forced push to main, asks", "", "ask",
+          form='bash -c "git push -f origin main"')
+push_case("interpreter: python3 subprocess.run list runs a forced push to main, asks", "", "ask",
+          form=r'''python3 -c "import subprocess; subprocess.run(['git','push','--force','origin','main'])"''')
+push_case("interpreter: python3 subprocess.run list with a split git word forces main, asks", "", "ask",
+          form=r'''python3 -c "import subprocess; subprocess.run(['gi'+'t','push','--force','origin','main'])"''')
+push_case("interpreter: python3 os.system string forces main, asks", "", "ask",
+          form=r'''python3 -c "import os; os.system('git push --force origin main')"''')
+push_case("interpreter: PowerShell call operator on 'git' forces main, asks", "", "ask", tool="PowerShell",
+          form="& ('git') push --force origin main")
+push_case("interpreter: PowerShell call operator on a split git word forces main, asks", "", "ask",
+          tool="PowerShell", form="& ('gi'+'t') push --force origin main")
+push_case("interpreter control: sh -c git status, allows", "", "allow", form="sh -c 'git status'")
+push_case("interpreter control: python3 print of git push --force as text, allows", "", "allow",
+          form=r'''python3 -c "print('git push --force')"''')
+push_case("interpreter control: bash -c echo hi, allows", "", "allow", form="bash -c 'echo hi'")
+
+# A GIT ACT RUN FROM A PYTHON BODY IN A FORM THE READER MISSES. `-W ignore` and `-I` sit before `-c` and
+# change no verdict. A string argument with shell=True, a bare `run` name and os.popen each run a shell
+# string. The controls run `ls`, or a git status list, which allow.
+push_case("interpreter: python3 -W ignore subprocess.run list forces main, asks", "", "ask",
+          form=r'''python3 -W ignore -c "import subprocess; subprocess.run(['git','push','--force','origin','main'])"''')
+push_case("interpreter: python -c subprocess.run list forces main, asks", "", "ask",
+          form=r'''python -c "import subprocess; subprocess.run(['git','push','--force','origin','main'])"''')
+push_case("interpreter: python3 -I subprocess.run list forces main, asks", "", "ask",
+          form=r'''python3 -I -c "import subprocess; subprocess.run(['git','push','--force','origin','main'])"''')
+push_case("interpreter: python3 subprocess.run string with shell=True forces main, asks", "", "ask",
+          form=r'''python3 -c "import subprocess; subprocess.run('git push --force origin main', shell=True)"''')
+push_case("interpreter: python3 bare run imported from subprocess forces main, asks", "", "ask",
+          form=r'''python3 -c "from subprocess import run; run(['git','push','--force','origin','main'])"''')
+push_case("interpreter: python3 os.popen string forces main, asks", "", "ask",
+          form=r'''python3 -c "import os; os.popen('git push --force origin main')"''')
+push_case("interpreter control: python3 subprocess.run shell string ls, allows", "", "allow",
+          form=r'''python3 -c "import subprocess; subprocess.run('ls', shell=True)"''')
+push_case("interpreter control: python3 subprocess.run list git status, allows", "", "allow",
+          form=r'''python3 -c "import subprocess; subprocess.run(['git','status'])"''')
+
+# A MODULE IMPORTED UNDER AN ALIAS. `import subprocess as sp` starts the same processes as the plain import, so
+# `sp.run([...])` and `o.system(...)` get the plain push's verdict. A bare name bound by `from subprocess import
+# run as r` already reads, because the reader keys on the name the call uses. The forms that run a push split the
+# word with `+`, so no reader but the python one can find the text. The controls run git status and ls through
+# the same alias, which allow.
+push_case("interpreter: python3 subprocess imported as sp, a list run of a forced push to main, asks", "", "ask",
+          form=r'''python3 -c "import subprocess as sp; sp.run(['git','push','--force','origin','main'])"''')
+push_case("interpreter: python3 os imported as o, os.system of a folded string forces main, asks", "", "ask",
+          form=r'''python3 -c "import os as o; o.system('git pu' + 'sh --force origin main')"''')
+push_case("interpreter: python3 run imported as r from subprocess, a list of a forced push to main, asks", "",
+          "ask", form=r'''python3 -c "from subprocess import run as r; r(['git','push','--force','origin','main'])"''')
+push_case("interpreter control: python3 subprocess imported as sp, git status, allows", "", "allow",
+          form=r'''python3 -c "import subprocess as sp; sp.run(['git','status'])"''')
+push_case("interpreter control: python3 subprocess imported as sp, ls, allows", "", "allow",
+          form=r'''python3 -c "import subprocess as sp; sp.run(['ls'])"''')
+
+# A RUN THAT TAKES A STRING WITHOUT shell=True. On Windows the string is the command line that CreateProcess runs,
+# so `subprocess.run("git ...")` starts git and asks like the list form. The push text is split with `+`, since a
+# whole-text match in the raw command already asks without the python reader. The controls start ls, echo or print,
+# which run no push, so they allow.
+push_case("interpreter: python3 subprocess.run string with no shell=True forces main, asks", "", "ask",
+          form="python3 -c 'import subprocess; subprocess.run(\"git \" + \"push --force origin main\")'")
+push_case("interpreter control: python3 subprocess.run echo list of a forced push text, allows", "", "allow",
+          form=r'''python3 -c "import subprocess; subprocess.run(['echo','git push --force origin main'])"''')
+push_case("interpreter control: python3 print of a forced push to main as text, allows", "", "allow",
+          form=r'''python3 -c "print('git push --force origin main')"''')
+push_case("interpreter control: python3 subprocess.run list of ls, allows", "", "allow",
+          form=r'''python3 -c "import subprocess; subprocess.run(['ls','-l'])"''')
+push_case("interpreter control: python3 os.system of echo, allows", "", "allow",
+          form=r'''python3 -c "import os; os.system('echo hi')"''')
+
+# A GIT WORD FOLDED FROM ABOUT 1200 `+` OPERANDS, chained with `rm -rf /`. The reader folds operands
+# recursively, and such a body must not reach RecursionError, where the guard fails open. The chained call
+# must deny, and the `rm -rf /` part must deny alone. The body is built here, not written as a literal.
+FOLD_GIT_OPERANDS = ["'git'"] + ["''"] * 1199
+FOLDED_PUSH_BODY = ("import subprocess; subprocess.run([" + "+".join(FOLD_GIT_OPERANDS)
+                    + ",'push','--force','origin','main'])")
+sh("interpreter: a 1200-operand folded git word forces main, chained with rm -rf /, denies",
+   'python3 -c "' + FOLDED_PUSH_BODY + '" && rm -rf /', "deny", "destructive-delete", cwd=PUSHFEAT)
+sh("interpreter control: rm -rf / alone, denies", "rm -rf /", "deny", "destructive-delete", cwd=PUSHFEAT)
+# THE SAME FOLDED BODY ALONE. The chained row above denies on `rm -rf /`, so it cannot show whether the git
+# part is read. This row has no other command: a fold that fails open lets the body through, and it asks.
+push_case("interpreter: a 1200-operand folded git word forces main, alone, asks", "", "ask",
+          form='python3 -c "' + FOLDED_PUSH_BODY + '"')
+
+# A POWERSHELL CALL OPERATOR NEXT TO A BLOCK COMMENT, A HERE-STRING OR A COMMENT. A block comment or a here-string
+# holds call text that runs nothing, so it allows. A call after a closed block comment, or a comment line with a
+# lone apostrophe, still runs. A call on the line after a closed here-string is a second command, so it is a
+# chained ask and denies alone. No quote row sits before a call on one line: the detached-launch reader denies
+# any `&` after a command word first, so such a row would not reach the fold.
+push_case("interpreter: PowerShell block comment holding the call, allows", "", "allow", tool="PowerShell",
+          form="<# & ('git') push --force origin main #>")
+push_case("interpreter: PowerShell call after a closed block comment, forces main, asks", "", "ask",
+          tool="PowerShell", form="<# a note #> & ('git') push --force origin main")
+push_case("interpreter: PowerShell here-string holding the call, allows", "", "allow", tool="PowerShell",
+          form="Write-Output @'\n& ('git') push --force origin main\n'@")
+chained_ask("interpreter: PowerShell call after a closed here-string, on the next line, denies alone",
+            "Write-Output @'\na note\n'@\n& ('git') push --force origin main", tool="PowerShell")
+push_case("interpreter: PowerShell call after a comment line with a lone apostrophe, forces main, asks", "",
+          "ask", tool="PowerShell", form="# don't rerun\n& ('git') push --force origin main")
 
 # FALSE ALARMS: a guard that cries wolf is spent.
 # Re-pointed from allow by ruling 207 a: a non-forced push of main asks.
