@@ -215,7 +215,7 @@ NIGHTLY_SKIP_JOB = "nightly-skip"
 SKIP_VALUES = ("", "true", "false")
 MAC_OWN = "(needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()"
 MAC_CODE = f"{MAC_OWN} && needs.scope.outputs.code == 'true'"
-MAC_SWEEP = f"{MAC_OWN} && github.event_name != 'pull_request' && needs.scope.outputs.sweep == 'true'"
+MAC_SWEEP = f"{MAC_OWN} && needs.scope.outputs.sweep == 'true'"
 MAC_MODS = f"{MAC_OWN} && needs.scope.outputs.mods == 'true'"
 MACOS_SUITES = {
     "python3 hooks/test_guard_load_os.py": (MAC_CODE, None),
@@ -398,9 +398,10 @@ def placement_problems(text):
 
 # Steps whose `shell:` is pinned. Any other REQUIRED step must set none.
 SHELL = {"sh hooks/test_install_windows.sh": "bash", "bash actions/stamp/test_action.sh": "bash"}
-# Steps whose own condition (the part after the scope condition) is pinned: the mutation test stays off pull_request and on its scope flag.
+# Steps whose own condition (the part after the scope condition) is pinned: the mutation test runs on every event, a ready
+# pull_request included, and on its scope flag.
 IF_PIN = {"python janitor/mutate_sweep.py":
-          "${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.sweep == 'true' }}",
+          "${{ !cancelled() && needs.scope.outputs.sweep == 'true' }}",
           # The full merge suite runs on every event but pull_request; the slice only on it.
           "python merge/test_merge.py":
           "${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.code == 'true' }}",
@@ -1732,6 +1733,59 @@ class MacOnceByBatch(unittest.TestCase):
         for label, text in scope_bad.items():
             with self.subTest(defect=label):
                 self.assertTrue(scope_skip_problems("jobs:\n" + text + nightly_skip), label)
+
+
+class SweepOnReadyPull(unittest.TestCase):
+    """Owner ruling R62 (the batch PR run carries the full sweep) on checks.yml. The two janitor sweep mutation steps (macOS and
+    Windows) run on a ready pull_request, as they do on push, schedule and dispatch, on their scope flag. Each case reads the
+    real file, so it is red until the change lands."""
+
+    def setUp(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            self.text = f.read()
+
+    def sweep_home(self, jobs, cmd):
+        # Scope first: the step must be in exactly one of the jobs before its condition is read.
+        homes = split_homes(self.text, jobs, cmd)
+        self.assertEqual(len(homes), 1, f"{cmd!r} runs {len(homes)} times in {jobs}, want once")
+        return homes[0]
+
+    def sweep_steps(self):
+        return [("macOS", MACOS_SPLIT, "python3 janitor/mutate_sweep.py"),
+                ("Windows", ["checks-windows-sweep"], "python janitor/mutate_sweep.py")]
+
+    def test_the_macos_sweep_mutation_runs_on_a_ready_pull_request(self):
+        # Named failure: the macOS sweep step's if still excludes pull_request, so a ready PR skips the mutation test.
+        _, cmd_jobs, cmd = self.sweep_steps()[0]
+        job, st = self.sweep_home(cmd_jobs, cmd)
+        expr = unwrap(step_key(st, "if"))
+        self.assertIsNotNone(expr, f"{job} sweep step has no if")
+        self.assertTrue(eval_if(expr, "pull_request", "true"), f"{job} sweep step does not run on a ready pull_request: {expr}")
+
+    def test_the_windows_sweep_mutation_runs_on_a_ready_pull_request(self):
+        # Named failure: the Windows sweep step's if still excludes pull_request, so a ready PR skips the mutation test.
+        _, cmd_jobs, cmd = self.sweep_steps()[1]
+        job, st = self.sweep_home(cmd_jobs, cmd)
+        expr = unwrap(step_key(st, "if"))
+        self.assertIsNotNone(expr, f"{job} sweep step has no if")
+        self.assertTrue(eval_if(expr, "pull_request", "true"), f"{job} sweep step does not run on a ready pull_request: {expr}")
+
+    def test_both_sweep_mutations_still_run_on_push_schedule_and_dispatch(self):
+        # Control, green on the old code: the change must keep the events the step already ran on.
+        for label, cmd_jobs, cmd in self.sweep_steps():
+            job, st = self.sweep_home(cmd_jobs, cmd)
+            expr = unwrap(step_key(st, "if"))
+            for event in ("push", "schedule", "workflow_dispatch"):
+                with self.subTest(job=job, event=event):
+                    self.assertTrue(eval_if(expr, event, "true"), f"{label} sweep step does not run on {event}: {expr}")
+
+    def test_both_sweep_mutations_run_the_full_suite_with_no_env(self):
+        # Control, green on the old code: the ready-PR run takes the full mutation test, not a slice with its own env.
+        for label, cmd_jobs, cmd in self.sweep_steps():
+            job, st = self.sweep_home(cmd_jobs, cmd)
+            with self.subTest(job=job):
+                self.assertEqual(step_env(st), {}, f"{label} sweep step has an env: {step_env(st)}")
+                self.assertEqual(run_lines(st), [cmd], f"{label} sweep step runs {run_lines(st)}, want {cmd}")
 
 
 class TopLevelOr(unittest.TestCase):
