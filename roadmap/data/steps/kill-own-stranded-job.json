@@ -1,0 +1,14 @@
+{
+ "id": "kill-own-stranded-job",
+ "title": "The kill guard lets a session stop its own background job after the job is stranded under init",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "hooks/guard_kill.py checks ownership with `pid_is_owned` (descends from the session root), so it refuses a session's own job once stranded under init. `pid_is_session_job`, which wait-pid uses, also accepts a stranded job carrying this session's CLAUDE_CODE_SESSION_ID. Hit: batch runner 10 could not stop its own batch 104 build (pid 27483).",
+ "source": "batch runner 10, 10:11 CST Nov 12, via coordinator 10:12 CST; possible false alarm",
+ "note": "Guard, code. Fix: the kill guard uses `pid_is_session_job`. Pairs with step stall-watch-ends-quiet-jobs. Ready, no lane.",
+ "updatedAt": "2026-11-12T10:21:00-06:00"
+}

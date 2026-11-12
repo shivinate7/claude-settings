@@ -3,10 +3,10 @@
  "status": "doing",
  "order": 982,
  "why": "The owner gets prompts for acts no answer should allow, such as an agent's push of its own branch name or a write in another agent's scratchpad.",
- "note": "Owner 09:08 CST Nov 10 (\"why do those prompts even show up for me\"; relayed by the coordinator, 09:11 CST). The rules push-agent-branch and scratchpad-owner ask the owner on an agent's call, but the act is always wrong there; refuse it to the agent with its remedy instead. The push-agent-branch half is step agent-branch-push-refuses (#2465, doing); this step is scratchpad-owner and any other ask that fires only on an agent's call. A guard's verdict changes, so a build lane with round 3. Same class (retrospective session, 16:31 CST Nov 10; owner 16:28 CST \"was i to accept this? why?\"): the scratchpad-owner refusal offered the owner `override 15m` about an agent's scratch-file write. The agent should get the remedy (write under its own name), and the owner gets no ask. R12 (step owner-override-one-route) covers the one-act override that cannot reach an agent's call. Lane code-agents started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
+ "note": "Owner 09:08 CST Nov 10 (\"why do those prompts even show up for me\"; relayed by the coordinator, 09:11 CST). The rules push-agent-branch and scratchpad-owner ask the owner on an agent's call, but the act is always wrong there; refuse it to the agent with its remedy instead. The push-agent-branch half is step agent-branch-push-refuses (#2465, doing); this step is scratchpad-owner and any other ask that fires only on an agent's call. A guard's verdict changes, so a build lane with round 3. Same class (retrospective session, 16:31 CST Nov 10; owner 16:28 CST \"was i to accept this? why?\"): the scratchpad-owner refusal offered the owner `override 15m` about an agent's scratch-file write. The agent should get the remedy (write under its own name), and the owner gets no ask. R12 (step owner-override-one-route) covers the one-act override that cannot reach an agent's call. Lane code-agents started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Lane fan-code-agents (10:19 CST Nov 12): the scratchpad half is on main (0782054ac); the rest names no target. Narrow or close.",
  "lane": "session_013NEJL1SnHytvPFQsRypupi",
  "blockedBy": [],
- "updatedAt": "2026-11-12T07:29:00-06:00",
+ "updatedAt": "2026-11-12T10:21:00-06:00",
  "owner": "claude-settings",
  "phase": "now"
 }
