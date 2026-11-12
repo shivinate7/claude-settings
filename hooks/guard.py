@@ -5045,15 +5045,16 @@ def _pwsh_reads_stdin(tokens) -> bool:
     or no command at all. A positional word, `-Command x`, `-File x` and `-EncodedCommand x` run something else."""
     args = iter(tokens[1:])
     for token in args:
-        name = token.lstrip("-").lower()
+        name, colon, glued = token.lstrip("-").lower().partition(":")   # `-ExecutionPolicy:Bypass` holds its value
         if token == "-":
             return True
         if not token.startswith("-"):
             return False
         if name in _PWSH_VALUE_SWITCHES or (len(name) > 1 and "executionpolicy".startswith(name)):
-            next(args, None)
+            if not colon:
+                next(args, None)
         elif re.fullmatch(r"c(?:ommand)?", name):
-            return next(args, None) == "-"
+            return (glued if colon else next(args, None)) == "-"
         elif re.match(r"[fe]", name):   # -File, -EncodedCommand and their short forms
             return False
     return True
