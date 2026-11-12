@@ -1183,7 +1183,7 @@ def mistake_problem(text):
 # "Added a step to the install script" or "The deploy step is filed under ops" is no claim. Claim forms:
 # "queued/filed <object> as a (roadmap) step"; "the step (for the guard) is queued", where only a determiner or a
 # roadmap word may sit before "step", so "the CI job step is queued" is no claim; "added" with roadmap or queue
-# in the sentence; "has a step" with roadmap, follow-up, guard or fix in the sentence. A merge queue is no queue
+# in the step's clause; "has a step" with roadmap, follow-up, guard or fix in its clause. A merge queue is no queue
 # here. "step-by-step", "step 3" and a `step:` slug are not the step noun.
 _STEP_NOUN = r"steps?\b(?![-:])(?!\s*\d)"
 _STEP_DET = r"(?:a|an|the|its|this|that|new|roadmap|follow-up|guard|fix)"
@@ -1210,16 +1210,24 @@ STEP_REASON = owner_line(
     "`step:<slug>`, and text in backticks makes no claim")
 
 
+STEP_CLAUSE_SPLIT_RE = re.compile(r"[,;:]|\band\b", re.I)
+
+
 def _step_claim(bare):
-    """True when a sentence with no slug claims a step is queued or filed (the forms above)."""
+    """True when a sentence with no slug claims a step is queued or filed (the forms above). The added and has forms
+    read their roadmap or guard word in the step noun's own clause, so "Added a CI step and rebuilt the roadmap
+    page" is no claim."""
     if STEP_CLAIM_RE.search(bare):
         return True
-    if not STEP_NOUN_RE.search(bare):
-        return False
-    roadmap = STEP_ROADMAP_RE.search(bare)
-    if roadmap and STEP_ADDED_RE.search(bare):
-        return True
-    return bool(STEP_HAS_RE.search(bare) and (roadmap or STEP_FOLLOW_UP_RE.search(bare)))
+    for clause in STEP_CLAUSE_SPLIT_RE.split(bare):
+        if not STEP_NOUN_RE.search(clause):
+            continue
+        roadmap = STEP_ROADMAP_RE.search(clause)
+        if roadmap and STEP_ADDED_RE.search(clause):
+            return True
+        if STEP_HAS_RE.search(clause) and (roadmap or STEP_FOLLOW_UP_RE.search(clause)):
+            return True
+    return False
 
 
 def _step_cites(text):
