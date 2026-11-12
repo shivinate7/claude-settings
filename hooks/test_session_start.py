@@ -423,8 +423,8 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         # Bare `merge` is not on a cloud session's PATH, so the sentence gives the shim's full path.
         self.assertIn("~/.claude/bin/merge --role", merge_role_sentence(hook_role_line()))
 
-    # G2 and G10 (owner 2026-11-10 14:23 and 14:33 CST): the merge role sentence names the batch-runner tag and a lane the owner
-    # started, which has no parent_session_id. It never names the coordinator. Re-pointed from the batch-runner tag alone.
+    # G2/G10 ruling, lone lane: the merge role sentence names the batch-runner tag and a lane the owner
+    # started, which has no parent_session_id. It never names the coordinator.
     def test_the_merge_role_sentence_names_the_batch_runner_tag_and_the_owner_started_lane(self):
         role = [s for s in sentences(hook_role_line()) if "merge role" in s.lower()]
         self.assertEqual(len(role), 1, role)

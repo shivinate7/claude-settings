@@ -140,7 +140,7 @@ repo_case("a -C naming another checkout inside bash -c is denied", "deny",
           f"bash -c '{MERGE_SHIM} -C {REPO_B} 5 --confirm'", LANE_REPO, TX_RUNNER)
 repo_case("a merge in a subshell inside the tagged checkout is allowed", "allow",
           f"({MERGE_SHIM} 5 --confirm)", LANE_REPO, TX_RUNNER)
-# A lane the owner started (G2, owner 2026-11-10 14:23 CST; G10, 14:33 CST) merges only in the repo its own record's sources name:
+# A lane the owner started (G2/G10 ruling, lone lane) merges only in the repo its own record's sources name:
 # claude-settings. The repo gate reads the cs-repo tags, and a lane can tag itself, so the scope is judged on the sources as well:
 # a merge in another repo is denied even when a tag names that repo. No refusal wording is pinned here.
 LONE_CS = role_path("lone-lane-repo")          # sources and cs-repo tag name claude-settings

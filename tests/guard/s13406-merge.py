@@ -557,7 +557,7 @@ def role_tag_call(tool_id, session=ROLE_OWN, add=("cs-build:coordinator",)):
             role_result(tool_id, "ok")]
 
 
-# A lane the owner started (decision session-tiers, Lane the owner starts; G2, owner 2026-11-10 14:23 CST, and G10, 14:33 CST):
+# A lane the owner started (decision session-tiers, Lane the owner starts; G2/G10 ruling, lone lane):
 # no parent_session_id, no cs-build:<role> tag, and sources that name the repo it may merge in. It records batch-runner, the existing role word.
 CS_SOURCES = [{"git_repository": {"url": "https://github.com/" + ARCH_REPO_SETTINGS}}]
 OTHER_SOURCES = [{"git_repository": {"url": "https://github.com/shivinate7/mailaudit"}}]
@@ -916,8 +916,8 @@ role_refuse("a batch runner that records coordinator is refused", MERGE_SHIM + "
 role_refuse("a coordinator that records batch-runner is refused", MERGE_SHIM + " --role batch-runner",
           role_path("coordinator"))
 # A lane is refused, and the reason steers it to hand off: get_session first, then list_sessions for the runner.
-# G2 and G10 (owner 2026-11-10 14:23 and 14:33 CST): a lane with a parent is still refused, and its refusal names the owner-started
-# lane and the batch runner it asks, not a runner it lacks for a lane the owner started. Re-pointed from the batch-runner-only remedy.
+# G2/G10 ruling, lone lane: a lane with a parent is still refused, and its refusal names the owner-started
+# lane and the batch runner it asks, not a runner it lacks for a lane the owner started.
 role_refuse("a lane that records batch-runner is refused, and the refusal steers it to hand off",
           MERGE_SHIM + " --role batch-runner", role_path("lane"),
           carries=("get_session", "list_sessions", "cs-build:batch-runner", "cs-repo", "branch", OWNER_LANE_ASK), lacks=LONE_LACKS)
@@ -934,7 +934,7 @@ role_refuse("a near-miss tag cs-build:batch-runner-old does not allow the runner
           MERGE_SHIM + " --role batch-runner", role_path("near-miss"))
 role_refuse("a user message that quotes cs-build:batch-runner is ignored", MERGE_SHIM + " --role batch-runner",
           role_path("quoted"))
-# A lane the owner started records batch-runner (G2, owner 2026-11-10 14:23 CST; G10, 14:33 CST). The guard admits it when its own
+# A lane the owner started records batch-runner (G2/G10 ruling, lone lane). The guard admits it when its own
 # newest record has no parent_session_id, no cs-build:<role> tag, no set_session_tags call after it, and sources that name
 # claude-settings. Each refusal below changes one of those four from the admitted shape.
 role_allow("a lane the owner started records batch-runner: no parent, no cs-build tag, claude-settings sources",
