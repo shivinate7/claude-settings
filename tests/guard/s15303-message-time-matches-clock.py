@@ -97,6 +97,57 @@ mtc_refuse("a header of 00:01 CST at 23:59 CST, 2 minutes ahead across midnight,
 mtc_refuse("a header 18 minutes off with a long body after it is refused, however long the message",
            "Coordinator, 13:40 CST: pick 1 taken\n" + MTC_BODY)
 
+# Bracket header: the form the coordinator used in the 2026-11-12 incident, `[label HH:MM CST]`, with no `,` or `:`
+# after the label. It is the same header stamp, so the same limits apply.
+# Refused: the incident, a bracket header 8 minutes ahead (13:30 at a clock of 13:22).
+mtc_refuse("a bracket header, [coordinator 13:30 CST], 8 minutes ahead is refused: the 2026-11-12 incident form",
+           "[coordinator 13:30 CST] pick 1 taken", carries=("13:22 CST",))
+# Refused: 12 minutes ahead, the largest gap of the incident.
+mtc_refuse("a bracket header 12 minutes ahead is refused",
+           "[coordinator 13:34 CST] pick 1 taken")
+# Refused: a bold bracket header is read past its markdown lead.
+mtc_refuse("a bold bracket header, **[coordinator 13:30 CST]**, is refused",
+           "**[coordinator 13:30 CST]** pick 1 taken")
+# Refused: a dated bracket header is judged as an instant.
+mtc_refuse("a dated bracket header, [coordinator 2026-11-07 13:30 CST], is refused",
+           "[coordinator 2026-11-07 13:30 CST] pick 1 taken")
+# Refused: the zone must be the clock's own in a bracket header too.
+mtc_refuse("a CDT bracket header in CST season is refused: the zone is wrong",
+           "[coordinator 14:22 CDT] pick 1 taken")
+# Refused: a time with seconds is read.
+mtc_refuse("a bracket header with seconds, [coordinator 13:30:15 CST], is refused",
+           "[coordinator 13:30:15 CST] pick 1 taken")
+# Passes: the clock's own minute, exactly 1 ahead, and behind.
+mtc_allow("a bracket header at the clock's own minute is allowed", "[coordinator 13:22 CST] pick 1 taken")
+mtc_allow("a bracket header exactly 1 minute ahead is allowed: the limit is inclusive",
+          "[coordinator 13:23 CST] pick 1 taken")
+mtc_allow("a bracket header 10 minutes behind is allowed: a stamp behind the clock passes",
+          "[coordinator 13:12 CST] pick 1 taken")
+# Passes: a bracket that holds no time, or a time quoted mid-line, is no header stamp.
+mtc_allow("a bracket label with no time is allowed", "[coordinator] pick 1 taken, due 13:40 CST")
+mtc_allow("a bracket header with a right stamp, then a later ETA mid-line, is allowed",
+          "[coordinator 13:22 CST] pick 1 taken, ETA 13:40 CST")
+# Round 2 of review: a label word may hold a digit, and a list bullet may lead, as the comma form allows.
+mtc_refuse("a bracket header with a numbered label, [triage 6 13:40 CST], is refused: a label word may hold a digit",
+           "[triage 6 13:40 CST] pick 1 taken")
+mtc_refuse("a bracket header with a lane number, [lane 3 13:40 CST], is refused",
+           "[lane 3 13:40 CST] pick 1 taken")
+mtc_refuse("a bullet bracket header, - [coordinator 13:40 CST], is refused: a list bullet leads like markdown",
+           "- [coordinator 13:40 CST] pick 1 taken")
+mtc_refuse("a lowercase bracket zone, [coordinator 13:40 cst], is refused",
+           "[coordinator 13:40 cst] pick 1 taken")
+mtc_allow("a numbered bracket header at the clock's own minute is allowed",
+          "[triage 6 13:22 CST] pick 1 taken")
+mtc_allow("a bullet bracket header 10 minutes behind is allowed",
+          "- [coordinator 13:12 CST] pick 1 taken")
+# Round 2 of review: a date after a bracket label is a date, not a label word, so it counts toward how far ahead.
+mtc_refuse("a dated bracket header 78 minutes ahead, [coordinator 2026-11-07 14:40 CST], is refused: the date is read",
+           "[coordinator 2026-11-07 14:40 CST] pick 1 taken")
+mtc_refuse("a bracket header dated the day after, [coordinator 2026-11-08 07:00 CST], is refused: a date counts",
+           "[coordinator 2026-11-08 07:00 CST] pick 1 taken")
+mtc_allow("a bracket header dated the day before, [coordinator 2026-11-06 13:40 CST], is allowed: a stamp behind passes",
+          "[coordinator 2026-11-06 13:40 CST] pick 1 taken")
+
 # Refused: the incident. A header 2 minutes ahead is past the 1-minute limit.
 mtc_refuse("a header 2 minutes ahead is refused: the incident, pick taken at 13:24 CST",
            "Coordinator, 13:24 CST: pick taken")

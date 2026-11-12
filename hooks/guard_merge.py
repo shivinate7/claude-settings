@@ -1832,12 +1832,21 @@ def brief_hit(tool: str, tool_input, transcript: str):
 # ---- send_message: a header stamp matches the clock (rule message-time-matches-clock)
 STAMP_LIMIT_MINUTES = 1  # a header stamp this far ahead of the clock passes; one more minute ahead is refused
 STAMP_QUOTE_MINUTES = 60  # an undated stamp more than this far ahead reads as a quote from an earlier day, and passes
-# A header is a label of 1 to 4 words, then `,` or `:` or a dash spaced on both sides, an optional date, then
+# A header is a label of 1 to 4 words, then `,` or `:` or a dash spaced on both sides (or the bracket form below), an optional date, then
 # `H:MM` or `HH:MM`, an optional `:SS`, and `CST` or `CDT` in any case. Anything may follow.
 _STAMP_HEADER = re.compile(
     _MARKDOWN_LEAD + r"[^\s,:]+(?:\s+[^\s,:]+){0,3}(?:[,:]|\s[-\u2014\u2013])\s*"
     r"(?:(?P<date>\d{4}-\d{2}-\d{2})\s+)?"
     r"(?P<hour>\d{1,2}):(?P<minute>\d{2})(?::\d{2})?\s+(?P<zone>CST|CDT)\b", re.IGNORECASE)
+# The bracket header, `[label HH:MM CST]`: a label of 1 to 4 words (a word may hold a digit, as in `triage 6`) with
+# no separator needed after it, the same stamp inside square brackets (the 2026-11-12 coordinator incident form).
+# A list bullet (`- ` or `+ `) may lead. It shares the group names above.
+_STAMP_BRACKET = re.compile(
+    _MARKDOWN_LEAD + r"(?:[-+]\s+[#*_>]*)?\[\s*"
+    # A date is never a label word, or the `date` group below would never capture after a label.
+    r"(?!\d{4}-\d{2}-\d{2}\s)[^\s\[\]]+(?:\s+(?!\d{4}-\d{2}-\d{2}\s)[^\s\[\]]+){0,3}\s+"
+    r"(?:(?P<date>\d{4}-\d{2}-\d{2})\s+)?"
+    r"(?P<hour>\d{1,2}):(?P<minute>\d{2})(?::\d{2})?\s+(?P<zone>CST|CDT)\s*\]", re.IGNORECASE)
 _STAMP_OFFSET_HOURS = {"CST": -6, "CDT": -5}
 STAMP_REASON = (
     "this message's header stamp is wrong for the clock: {why}. "
@@ -1872,7 +1881,8 @@ def stamp_hit(tool: str, tool_input):
         return None
     message = tool_input.get("message")
     first = next((ln.strip() for ln in message.splitlines() if ln.strip()), "") if isinstance(message, str) else ""
-    found = _STAMP_HEADER.match(first)
+    # The bracket form goes first: its seconds, `[x 13:30:15 CST]`, would else read as label `[x 13`, hour 30.
+    found = _STAMP_BRACKET.match(first) or _STAMP_HEADER.match(first)
     if not found:
         return None
     try:
