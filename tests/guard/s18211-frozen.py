@@ -951,6 +951,26 @@ sh("frozen shell: pwsh-c-text-mode, the PowerShell tool's smart-quoted config se
 sh("frozen shell: pwsh-c-text-mode, a Bash echo of an escaped quote with no PowerShell is allowed "
    "[pwsh-c-text-mode green]",
    "echo \"a \\\" b\"", "allow", cwd=NOGIT)
+# An ASCII apostrophe inside smart-quoted text pairs with a later `'`, so the text reads as one quoted string
+# and the Set-Content after it goes unseen. The config settings write after the pair still DENIES.
+sh("frozen shell: PowerShell tool, an apostrophe inside smart quotes pairs with a later quote, then a "
+   "Set-Content onto the config settings, denies [pwsh-followups red]",
+   "Set-Content docs/a.md “it's”; Set-Content -Path " + CFG_SETTINGS + " -Value 'y'", "deny", "frozen-path",
+   tool="PowerShell", cwd=NOGIT)
+# The same apostrophe pair ahead of a Remove-Item or a positional Set-Content of the config
+# settings, each path in smart quotes. Each DENIES on the frozen path. The control after them is a docs path.
+sh("frozen shell: PowerShell tool, an apostrophe inside smart quotes, then Remove-Item of the config settings "
+   "in smart quotes, denies [pwsh-followups red]",
+   "Set-Content docs/a.md “it's”; Remove-Item " + SMART_CFG_SETTINGS, "deny", "frozen-path",
+   tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, an apostrophe inside smart quotes, then a positional Set-Content of the config "
+   "settings in smart quotes, denies [pwsh-followups red]",
+   "Set-Content docs/a.md “it's”; Set-Content " + SMART_CFG_SETTINGS + " v", "deny", "frozen-path",
+   tool="PowerShell", cwd=NOGIT)
+sh("frozen shell: PowerShell tool, an apostrophe inside smart quotes, then a Set-Content of a docs file, "
+   "is allowed [pwsh-followups green]",
+   "Set-Content docs/a.md “it's”; Set-Content docs/b.md v", "allow", tool="PowerShell", cwd=NOGIT)
+
 # NESTED-SCRIPT PINS. `_shell_write_hit` judges the PowerShell text that `cmd /c` or `iex` runs by PowerShell's
 # rules, through `_powershell_scripts_of`. Each DENIES on that step alone. The `cmd /c` text is quoted: a bare `&`
 # in Bash backgrounds the first command, and detached-launch denies that before the write is read.
