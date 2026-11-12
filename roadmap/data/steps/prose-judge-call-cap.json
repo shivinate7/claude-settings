@@ -1,0 +1,14 @@
+{
+ "id": "prose-judge-call-cap",
+ "title": "The merge-time prose judge's call cap leaves no batch with lines unjudged",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A second batch ran into the prose judge call cap: batch 88 left 58 docs/debts/notes.md lines UNKNOWN (coordinator 23:52 CST Nov 11), batch 95 left 1552, and batch 102 left 30 (08:04 CST Nov 12). A merge that leaves lines unjudged reads as checked.",
+ "source": "coordinator 08:04 CST Nov 12 (file a step if none tracks the cap); outbox note prose-judge-call-cap",
+ "note": "Code, merge/merge.py prose_judge_run. Related: prose-judge-exception-count (an exception counts no lines), prose-judge-batch-noise (done). Unlaned: a merge.py lane.",
+ "updatedAt": "2026-11-12T08:04:00-06:00"
+}

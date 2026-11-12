@@ -1,0 +1,14 @@
+{
+ "id": "judge-flags-batch102",
+ "title": "Back or cut the lines the batch 102 prose judge flagged",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJKzimwz9GDpxMtjZrqi",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The batch 102 merge prose judge (2a7521db9) left 38 lines UNKNOWN: 8 unreadable and 30 past the call cap.",
+ "source": "coordinator 08:04 CST Nov 12",
+ "note": "On lane notes-keep-reverify with judge-flags-batch101. The 30 past-cap lines go with step prose-judge-call-cap.",
+ "updatedAt": "2026-11-12T08:04:00-06:00"
+}
