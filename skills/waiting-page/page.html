@@ -951,6 +951,30 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
   .askc.folded.withd.rline .frow .freply { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .askc.folded.withd.rline .frow .fhead .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 }
+/* The tier's order, said once under its head. Wide, it sits beside the head; on a phone it wraps under it. */
+.tier > header { flex-wrap: wrap; gap: 2px 14px; }
+.tier > header .tsub { flex: 1 1 24ch; margin: 0; font-size: 14px; color: var(--muted); max-width: 72ch; }
+/* What the answer stops, on a Blocking card and in a group head: ink and weight, so it reads beside the muted "waited". */
+.top .stops, .bundle > header .gst { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.bundle > header .gst { margin-left: 12px; font-size: 14px; white-space: nowrap; }
+/* A group member whose repo is not its sub-group's: the weight and colour of "goes with No. 4". */
+.top .inrepo { font-weight: 600; color: var(--acc); overflow-wrap: anywhere; }
+/* One sub-group per repo inside a tier: a neutral letter tile, the name, a count and a solid rule, unlike the seen divider's eye and dotted rule. */
+.subgrp { display: grid; gap: 12px; padding-top: 6px; min-width: 0; }
+.subhead { display: flex; align-items: center; gap: 8px; min-height: 28px; margin: 0; font: 700 15px/1.3 var(--body); color: var(--ink); }
+.subhead .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.subhead .ct { font: 600 12px var(--mono); color: var(--muted); }
+.subhead .rule { flex: 1 1 0; min-width: 24px; border-top: 1px solid var(--line); }
+.rmark { flex: none; width: 22px; height: 22px; border-radius: 6px; background: var(--chip); color: var(--ink); display: grid; place-items: center; font: 800 12px/1 var(--wm); }
+/* The rail: each repo's run of chips starts with the same tile and the name, and the run wraps as one so a phone row never ends on a lone tile. */
+.rrun { display: inline-flex; flex-wrap: wrap; gap: 6px; max-width: 100%; min-width: 0; }
+@media (min-width: 961px) { .rrun { display: flex; flex-direction: column; gap: 4px; } }
+.rrepo { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; color: var(--muted); font: 600 13px var(--body); }
+.rrepo .rmark { width: 20px; height: 20px; font-size: 11px; }
+/* The name shows at every size: two repos may share a first letter, so the tile alone never names a repo. */
+.rrepo .rn { min-width: 0; max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (pointer: coarse) { .rrepo { min-height: 44px; } }
+@media (min-width: 961px) { .rrepo { min-height: 26px; margin-top: 4px; } .chips-n > .rrun:first-child .rrepo { margin-top: 0; } .rrepo .rn { max-width: none; } }
 </style>
 
 <header class="hdr"><div class="in">
@@ -1011,7 +1035,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 
 <!-- The one list of top-level item fields. The page warns on a field outside it, and the guard (rule item-field-rendered) refuses a write of one.
      Add a field here when the page draws it. A key inside options or steps is not listed. -->
-<script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "replied", "lastAnswer", "lane", "waits", "repo", "checked_with", "closed", "dismissed"]</script>
+<script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "stops", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "replied", "lastAnswer", "lane", "waits", "repo", "checked_with", "closed", "dismissed"]</script>
 
 <!-- The roadmap build writes only this block (skills/roadmap/build.py --block). The page writer replaces it on each publish
      (splice.py) and keeps designData. Empty, the Status tab says the plan is unknown. -->
@@ -1202,8 +1226,8 @@ const foldOpen = (it) => (it.id in state.unfold ? !!state.unfold[it.id] : newRep
 // and a Send on the open page re-sorts no tier. A reload works it out again.
 // A group is seen only while every member is in the frozen set, so a member that arrives after load makes the whole group new.
 const isSeen = (it) => !!state.seen && mates(it).every((x) => state.seen.has(x.id));
-// feed.receipts only records that the receipts arrived (a test waits on it); no freeze reads it.
-const feed = { items: false, answers: false, receipts: false, all: [] };
+// feed.receipts only records that the receipts arrived (a test waits on it); no freeze reads it. feed.meta tells the repo heads that "this repo" is known.
+const feed = { items: false, answers: false, receipts: false, meta: false, all: [] };
 function freezeSeen() {
   if (state.seen || !feed.items || !feed.answers) return;
   // The last Send is the newest answer anywhere, a closed item's last answer included.
@@ -1231,24 +1255,95 @@ function sinkSent(it) {
   state.sunk.add(it.id); return true;
 }
 const unsinkSent = (w) => { if (w.sank && state.sunk) state.sunk.delete(w.it.id); };
+// What an answer stops: the entries of `stops`, each counted once. A group counts the union of its members' lists, so its head shows the number it sorts by.
+const stopsOf = (it) => (Array.isArray(it.stops) ? [...new Set(it.stops.filter((s) => typeof s === "string" && s.trim()).map((s) => s.trim()))] : []);
+const stopsUnion = (it, read) => [...new Set(mates(it).flatMap((x) => stopsOf(read(x))))];
+// The sort inputs of an item, kept from the first render after load (an arrival: from its first render), so a writer's update on the open page moves no card
+// (ux-order-holds-still). A reload works them out again. The tier stays live, as an item that gains `holds` must still change tier.
+const sortKeys = {};
+function freezeKeys() {
+  if (!state.known) return;
+  state.items.forEach((it) => { if (!(it.id in sortKeys)) sortKeys[it.id] = { rank: it.rank, stops: stopsOf(it), added: it.added, by: it.by, repo: it.repo }; });
+}
+const K = (it) => sortKeys[it.id] || { rank: it.rank, stops: stopsOf(it), added: it.added, by: it.by, repo: it.repo };
+// This repo: meta/page `repo` (owner/name) when set, else the repo whose name part is the page's identity name. An item with no `repo` is this repo's.
+const repoSlug = (s) => (typeof s === "string" && /^[\w.-]+\/[\w.-]+$/.test(s.trim()) ? s.trim() : "");
+const nameOfRepo = (r) => String(r).split("/").pop();
+const ownSlug = () => repoSlug(state.meta && state.meta.repo);
+const ownName = () => (ownSlug() ? nameOfRepo(ownSlug()) : state.meta && state.meta.identity && typeof state.meta.identity.name === "string" ? state.meta.identity.name.trim().slice(0, 40) : "");
+const isOwnRepo = (r) => {
+  const l = r.trim().toLowerCase(), own = ownSlug().toLowerCase(), name = ownName().toLowerCase();
+  if (own) return l === own || (!l.includes("/") && l === name);
+  return !!name && nameOfRepo(l) === name;
+};
+// "" is this repo; any other repo is its `owner/name` as written.
+const repoKey = (it) => { const r = K(it).repo; return typeof r !== "string" || !r.trim() || isOwnRepo(r) ? "" : r.trim(); };
+// A group sits once, under the repo of its member that stops the most, this repo on a tie, then A to Z.
+function groupRepo(it) {
+  const m = mates(it);
+  if (m.length < 2) return repoKey(it);
+  return m.map((x) => [repoKey(x), stopsOf(K(x)).length]).sort((a, b) => b[1] - a[1] || (a[0] === "" ? -1 : b[0] === "" ? 1 : 0) || a[0].localeCompare(b[0]))[0][0];
+}
+// How each repo on the page reads: its name part, or its whole slug when two repos share a name part.
+function repoLabels() {
+  const keys = [...new Set(state.items.filter((i) => !isRuling(i)).map(repoKey))];
+  const own = ownSlug() || (state.items.map((i) => i.repo).find((r) => typeof r === "string" && r.trim() && isOwnRepo(r)) || "").trim();
+  const names = keys.map((k) => (k ? nameOfRepo(k) : ownName() || (own ? nameOfRepo(own) : "this repo")));
+  const label = {};
+  keys.forEach((k, i) => { label[k] = names.filter((n) => n.toLowerCase() === names[i].toLowerCase()).length > 1 ? (k || own || names[i]) : names[i]; });
+  return label;
+}
+const repoLabel = (key) => repoLabels()[key] || (key ? nameOfRepo(key) : ownName() || "this repo");
+const repoTile = (label) => (nameOfRepo(label)[0] || "?").toUpperCase();
+// The repo a group member is about, when it is not the repo its group sits under.
+const aboutOf = (it) => (it.group && mates(it).length > 1 && repoKey(it) !== groupRepo(it) ? repoLabel(repoKey(it)) : "");
+// Heads are fixed at load: a tier that drew them keeps them until reload, as sorted order does, so a Send that empties one repo leaves the rest as they are.
+const headed = {};
+function headsOn(k, plan) {
+  const on = plan.length > 1 || (plan.length === 1 && plan[0].key !== "");
+  if (on && feed.meta) headed[k] = true;
+  return on || !!headed[k];
+}
+// The line under a tier head that names its key. It says "This repo first" only when the tier holds this repo and another.
+const TIER_KEY = { holds: "Most stopped work first, then triage's order, then oldest.", due: "Triage's order first, then nearest deadline, then oldest.", calm: "Triage's order first, then decisions, then oldest.", stands: "Triage's order first, then oldest." };
+const tierKey = (k, plan) => (plan.length > 1 && plan.some((g) => g.key === "") ? "This repo first. " : "") + TIER_KEY[k];
 function sorted() {
-  const by = { holds: [], due: [], calm: [], stands: [], answered: [] };
+  freezeKeys();
+  const by = { holds: [], due: [], calm: [], stands: [], answered: [], repos: {} };
   state.items.forEach((it) => { if (isSunk(it) && itemAway(it)) return; by[isSunk(it) ? "answered" : tierOf(it)].push(it); });
   // Newest answer first; a group sits at its newest member's time.
   const sentAt = (it) => Math.max(...mates(it).map((x) => Date.parse(sentOf(x).at) || 0));
   by.answered.sort((a, b) => sentAt(b) - sentAt(a) || a.n - b.n);
-  const age = (it) => Math.min(...mates(it).map((x) => ts(x.added)));
-  const dl = (it) => Math.min(...mates(it).map((x) => ts(x.by)));
-  const byAge = (a, b) => age(a) - age(b) || ts(a.added) - ts(b.added) || a.n - b.n;
+  const age = (it) => Math.min(...mates(it).map((x) => ts(K(x).added)));
+  const dl = (it) => Math.min(...mates(it).map((x) => ts(K(x).by)));
+  const byAge = (a, b) => age(a) - age(b) || ts(K(a).added) - ts(K(b).added) || a.n - b.n;
   // The writer's `rank` (lower first) orders items inside a tier; an unranked item follows the ranked ones. A group takes its best member's rank.
-  const rk = (it) => Math.min(...mates(it).map((x) => (Number.isFinite(x.rank) ? x.rank : Infinity)));
+  const rk = (it) => Math.min(...mates(it).map((x) => (Number.isFinite(K(x).rank) ? K(x).rank : Infinity)));
   const byRank = (a, b) => { const x = rk(a), y = rk(b); return x === y ? 0 : x < y ? -1 : 1; };
+  // Blocking puts what stops the most work first; the number is the group's union, the same one its head shows.
+  const byStops = (a, b) => stopsUnion(b, K).length - stopsUnion(a, K).length;
   // Inside a tier, an arrival after load comes first, then new items before seen ones; each part keeps the order above.
   const part = (f) => (a, b) => (isArrival(a) ? 0 : 1) - (isArrival(b) ? 0 : 1) || (isSeen(a) ? 1 : 0) - (isSeen(b) ? 1 : 0) || f(a, b);
-  by.holds.sort(part((a, b) => byRank(a, b) || byAge(a, b)));
-  by.due.sort(part((a, b) => byRank(a, b) || dl(a) - dl(b) || byAge(a, b)));
-  by.calm.sort(part((a, b) => byRank(a, b) || (a.kind === b.kind ? byAge(a, b) : a.kind === "decision" ? -1 : 1)));
-  by.stands.sort(part((a, b) => byRank(a, b) || byAge(a, b)));
+  const keys = {
+    holds: part((a, b) => byStops(a, b) || byRank(a, b) || byAge(a, b)),
+    due: part((a, b) => byRank(a, b) || dl(a) - dl(b) || byAge(a, b)),
+    calm: part((a, b) => byRank(a, b) || (a.kind === b.kind ? byAge(a, b) : a.kind === "decision" ? -1 : 1)),
+    stands: part((a, b) => byRank(a, b) || byAge(a, b)),
+  };
+  // One sub-group per repo: this repo first, then each other repo at its first item's place by the tier's key, A to Z on a tie. A group never splits.
+  Object.keys(keys).forEach((k) => {
+    const items = by[k].sort(keys[k]), taken = new Set(), repos = new Map();
+    items.forEach((it) => {
+      if (taken.has(it.id)) return;
+      const m = it.group ? items.filter((x) => x.group === it.group) : [it], r = groupRepo(it);
+      m.forEach((x) => taken.add(x.id));
+      if (!repos.has(r)) repos.set(r, []);
+      repos.get(r).push(...m);
+    });
+    by.repos[k] = [...repos.entries()].map(([key, list]) => ({ key, items: list }))
+      .sort((a, b) => (b.key === "") - (a.key === "") || keys[k](a.items[0], b.items[0]) || a.key.localeCompare(b.key));
+    by[k] = by.repos[k].flatMap((g) => g.items);
+  });
   return by;
 }
 
@@ -1277,7 +1372,7 @@ const isAnswered = (it) => isSaved(it) || isByWait(it);
 // The answer record that sets a card's place in the Answered section: its answers record, else (answered by its wait) lastAnswer.
 const sentOf = (it) => state.answers[it.id] || (answeredByWait(it) && lastOf(it)) || {};
 const waitUrl = (w) => "https://github.com/" + w.repo + (w.run ? "/actions/runs/" + w.run : "/pull/" + w.pr);
-// The page has no repo slug of its own, so the words never name the repo: the link's address holds it. A run reads as "a CI run", never by its id (ux-machine-text-hidden).
+// The words never name the repo: the link's address holds it. A run reads as "a CI run", never by its id (ux-machine-text-hidden).
 const waitWords = (w) => (w.pr ? "PR #" + w.pr : "a CI run");
 // The link holds the whole phrase after "waits on", so the words read as one link and its arrow and screen-reader words follow.
 const waitLink = (w, pre) => h("a", { href: waitUrl(w), target: "_blank", rel: "noopener" }, (pre || "") + waitWords(w), h("span", { "aria-hidden": "true" }, "↗"), h("span", { class: "sr" }, ", opens in a new tab"));
@@ -1715,6 +1810,9 @@ function replyMark(it) {
     : h("span", { class: "newmark dot", title: full }, h("span", { class: "sr" }, full));
 }
 const parkBtn = (it, d) => h("button", { class: "btn dash parkbtn", type: "button", id: "b-park-" + it.id, "aria-label": ACT_NAME.park + " No. " + it.n, "aria-pressed": String(d.act === "park"), onclick: () => pressPark(it, "park") }, ACT_NAME.park);
+const andList = (xs) => (xs.length < 2 ? xs.join("") : xs.slice(0, -1).join(", ") + " and " + xs[xs.length - 1]);
+// The count of what an answer stops. The names go to a screen reader and the title; the item's `holds` line says them in words.
+const stopsMark = (list, cls) => h("span", { class: "stops" + (cls ? " " + cls : ""), title: "Stops until you answer: " + andList(list) }, "stops " + list.length, h("span", { class: "sr" }, ": " + andList(list)));
 function buildCard(it) {
   if (isRuling(it)) return buildRuling(it);
   const T = tierOf(it), byWait = isByWait(it), saved = isSaved(it) || byWait, d = eff(it) || {}, rc = rcOf(it), sunk = isSunk(it);
@@ -1726,7 +1824,11 @@ function buildCard(it) {
     : saved ? h("span", { class: "ans" + (rc.filed ? " filed" : "") }, rc.filed ? (sunk ? "Filed in " : "Answered, filed in ") + it.home + " " : sunk ? "Filing pending, sent " : "Answered, filing pending ", h("span", { class: "t" }, rc.filed ? fmt(rc.filed) : fmt(savedOf(it).at))) : h("span", {}, waited(it.added)));
   if (newReply(it)) top.children[0].after(replyMark(it));
   if (it.minutes && !saved) top.append(h("span", {}, minutesText(it.minutes)));
+  // A Blocking card shows what its answer stops. A group member shows none: its group head counts the union once.
+  if (T === "holds" && !sunk && !saved && !(it.group && mates(it).length > 1)) { const n = stopsOf(it); if (n.length) top.append(" ", stopsMark(n)); }
   if (it.group) { const m = mates(it).filter((x) => x.id !== it.id); if (m.length) top.append(h("span", { class: "inbundle" }, "goes with No. " + m.map((x) => x.n).join(", No. "))); }
+  const about = aboutOf(it);
+  if (about) top.append(h("span", { class: "inrepo" }, "about " + about));
   // A lane and a wait share one span, so "waits on" is said once. The link is the wait only.
   const wt = waitsOf(it), lane = laneOf(it);
   if (lane && wt) top.append(h("span", { class: "onlane waits" }, "waits on lane " + lane + " and ", waitLink(wt)));
@@ -1886,7 +1988,7 @@ function holdView(ids, back) {
 const hourBucket = () => Math.floor(Date.now() / 36e5);
 function signature(it) {
   const d = eff(it) || {};
-  return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.act, d.auto, d.stood, state.more[it.id], state.moreReply[it.id], isSeen(it), isSunk(it), state.unfold[it.id], replyFirst(it), state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), hourBucket()]);
+  return JSON.stringify([it, tierOf(it), state.answers[it.id], state.changing[it.id], d.choice, d.done, d.act, d.auto, d.stood, state.more[it.id], state.moreReply[it.id], isSeen(it), isSunk(it), state.unfold[it.id], replyFirst(it), state.notice[it.id], state.receipts[it.id], mates(it).map((m) => m.n), aboutOf(it), hourBucket()]);
 }
 const copyAttrs = (to, from) => { [...to.attributes].forEach((a) => to.removeAttribute(a.name)); [...from.attributes].forEach((a) => to.setAttribute(a.name, a.value)); };
 // Replace old's children with nu's but leave each kept node ([old node, nu stand-in, optional sync]) in place: moving an iframe reloads it.
@@ -1939,7 +2041,7 @@ function reconcile(parent, want) {
   [...parent.children].forEach((c) => { if (!keep.has(c)) c.remove(); });
   want.forEach((n, i) => { if (parent.children[i] !== n) parent.insertBefore(n, parent.children[i] || null); });
 }
-const tierEls = {}, bundleEls = {}, seenHeads = {};
+const tierEls = {}, bundleEls = {}, seenHeads = {}, subEls = {};
 // Not "not answered": a seen card answered by a Send stays below the divider until reload.
 const SEEN_WORDS = "Asked before";
 // The line between a tier's new and seen items. The first one on the page shows the words; the others keep them for a screen reader (ux-label-once).
@@ -1956,19 +2058,28 @@ function seenHead(k, first) {
 }
 function tierEl(T) {
   if (!tierEls[T.k]) {
-    const count = h("span", { class: "ct" });
-    tierEls[T.k] = { el: h("section", { class: "tier", id: "tier-" + T.k, "aria-labelledby": "th-" + T.k }), count, head: h("header", {}, h("h2", { id: "th-" + T.k }, glyph(T.k), T.name, count)) };
+    const count = h("span", { class: "ct" }), line = h("p", { class: "tsub" });
+    tierEls[T.k] = { el: h("section", { class: "tier", id: "tier-" + T.k, "aria-labelledby": "th-" + T.k }), count, line, head: h("header", {}, h("h2", { id: "th-" + T.k }, glyph(T.k), T.name, count), line) };
   }
   return tierEls[T.k];
 }
+// One repo's sub-group inside a tier: a group labelled by its head (a letter tile, the repo name, the number of open cards). The tier key is in the id, as a repo shows in several tiers.
+function subEl(k, g, count) {
+  const id = "sh-" + k + "-" + (g.key ? "r-" + g.key : "own"), name = repoLabel(g.key);
+  if (!subEls[id]) subEls[id] = { el: h("section", { class: "subgrp", role: "group", "aria-labelledby": id }), head: h("p", { class: "subhead", id }) };
+  const e = subEls[id];
+  e.head.replaceChildren(h("span", { class: "rmark", "aria-hidden": "true" }, repoTile(name)), h("span", { class: "nm" }, name), h("span", { class: "ct" }, String(count)), h("span", { class: "rule", "aria-hidden": "true" }));
+  return e;
+}
 // The writer's title for a group, else the default words: a group that sank is answered, so it is not asked to be answered.
 const groupTitle = (slug, sunk) => (state.groups[slug] || {}).title || (sunk ? "Answered together" : "Answer these together");
-function bundleEl(slug, sunk) {
+// stops: the group's list, shown only in Blocking (a group in Answered or in another tier passes none).
+function bundleEl(slug, sunk, stops) {
   if (!bundleEls[slug]) bundleEls[slug] = { el: h("section", { class: "bundle", id: "group-" + slug }), head: h("header", {}) };
   const g = state.groups[slug] || {}, b = bundleEls[slug];
   const title = groupTitle(slug, sunk);
   b.el.setAttribute("aria-label", title);
-  b.head.replaceChildren(linkIcon(), h("b", {}, title), h("p", {}, g.why || ""));
+  b.head.replaceChildren(linkIcon(), h("b", {}, title, stops && stops.length ? [" ", stopsMark(stops, "gst")] : null), h("p", {}, g.why || ""));
   return b;
 }
 // A section after the open tiers: a disclosure head (glyph, name, count), a line of its own, and a list. One builder for the rulings and the Answered
@@ -2101,23 +2212,32 @@ function renderList() {
   const live = new Set();
   let wordsShown = false;
   // One card, or one group's frame with all its members, into body. A tier and the Answered section place their items the same way.
-  const place = (items, it, done, body) => {
+  const place = (items, it, done, body, blocking) => {
     const m = it.group ? items.filter((x) => x.group === it.group) : [it];
     if (m.length < 2) { done.add(it.id); body.push(entryFor(it)); return; }
     m.forEach((x) => done.add(x.id));
-    const b = bundleEl(it.group, isSunk(it)); live.add(it.group);
+    const b = bundleEl(it.group, isSunk(it), blocking ? stopsUnion(it, (x) => x) : null); live.add(it.group);
     reconcile(b.el, [b.head, ...m.map(entryFor)]);
     body.push(b.el);
   };
   TIERS.forEach((T) => {
     const items = by[T.k]; if (!items.length) return;
-    const te = tierEl(T), body = [], done = new Set();
+    const te = tierEl(T), body = [], plan = by.repos[T.k], heads = headsOn(T.k, plan);
     te.count.textContent = String(items.filter((i) => !isAnswered(i)).length);
-    let lined = false;
-    items.forEach((it) => {
-      if (done.has(it.id)) return;
-      if (!lined && isSeen(it)) { lined = true; body.push(seenHead(T.k, !wordsShown)); wordsShown = true; }
-      place(items, it, done, body);
+    te.line.textContent = tierKey(T.k, plan);
+    plan.forEach((g) => {
+      // The seen divider repeats inside each repo's sub-group; its words show on the first one of the page.
+      const part = [], done = new Set();
+      let lined = false;
+      g.items.forEach((it) => {
+        if (done.has(it.id)) return;
+        if (!lined && isSeen(it)) { lined = true; part.push(seenHead(T.k + "|" + g.key, !wordsShown)); wordsShown = true; }
+        place(g.items, it, done, part, T.k === "holds");
+      });
+      if (!heads) { body.push(...part); return; }
+      const sub = subEl(T.k, g, g.items.filter((i) => !isAnswered(i)).length);
+      reconcile(sub.el, [sub.head, ...part]);
+      body.push(sub.el);
     });
     reconcile(te.el, [te.head, ...body]);
     want.push(te.el);
@@ -2190,21 +2310,28 @@ function renderRail() {
     h("div", { class: "big" }, h("b", {}, String(sent)), "of " + total + " sent"),
     h("div", { class: "sub" + (ready ? "" : " none") }, h("i", { class: "sw" }), ready + " ready to send"),
     h("div", { class: "track", "aria-hidden": "true" }, h("i", { class: "s", style: "width:" + (total ? (sent / total) * 100 : 0) + "%" }), h("i", { class: "r", style: "width:" + (total ? (ready / total) * 100 : 0) + "%" })))];
-  const chip = (it) => h("button", { type: "button", id: "c-" + it.id, class: "nchip" + (it.status === "closed" ? " sent filed" : isSaved(it) ? " sent" + (rcOf(it).filed ? " filed" : "") : isByWait(it) ? " sent" : draftReady(it) ? " ready" : ""), "aria-label": "No. " + it.n + ", " + it.title + (it.status === "closed" ? ", closed" : isSaved(it) ? (rcOf(it).filed ? ", answered, filed" : ", answered, filing pending") : isByWait(it) ? ", answered, waits on " + waitWords(waitsOf(it)) : draftReady(it) ? ", ready to send" : ", open"), title: it.title, onclick: () => { if ((isSunk(it) || it.status === "closed") && !state.answeredOpen) { state.answeredOpen = true; render(); } jump($("item-" + it.id) ? "item-" + it.id : "line-" + it.n); } }, h("span", { class: "no" }, String(it.n)), h("span", { class: "nt" }, shortOf(it)));
+  const chip = (it) => h("button", { type: "button", id: "c-" + it.id, class: "nchip" + (it.status === "closed" ? " sent filed" : isSaved(it) ? " sent" + (rcOf(it).filed ? " filed" : "") : isByWait(it) ? " sent" : draftReady(it) ? " ready" : ""), "aria-label": "No. " + it.n + ", " + it.title + (it.status === "closed" ? ", closed" : isSaved(it) ? (rcOf(it).filed ? ", answered, filed" : ", answered, filing pending") : isByWait(it) ? ", answered, waits on " + waitWords(waitsOf(it)) : draftReady(it) ? ", ready to send" : ", open") + (repoKey(it) ? ", about " + repoLabel(repoKey(it)) : ""), title: it.title, onclick: () => { if ((isSunk(it) || it.status === "closed") && !state.answeredOpen) { state.answeredOpen = true; render(); } jump($("item-" + it.id) ? "item-" + it.id : "line-" + it.n); } }, h("span", { class: "no" }, String(it.n)), h("span", { class: "nt" }, shortOf(it)));
   // The chips of a tier or of the Answered section, a group's chips side by side.
-  const chipRow = (list) => {
-    const row = h("div", { class: "chips-n" }), seen = new Set();
+  const chipsOf = (list, into) => {
+    const seen = new Set();
     list.forEach((it) => {
       if (seen.has(it.id)) return;
       const m = it.group ? list.filter((x) => x.group === it.group) : [it];
       m.forEach((x) => seen.add(x.id));
-      row.append(m.length > 1 ? h("span", { class: "pairchips", title: groupTitle(it.group, isSunk(it)) }, m.map(chip)) : chip(it));
+      into.append(m.length > 1 ? h("span", { class: "pairchips", title: groupTitle(it.group, isSunk(it)) }, m.map(chip)) : chip(it));
     });
+    return into;
+  };
+  const chipRow = (list) => chipsOf(list, h("div", { class: "chips-n" }));
+  // A tier with repo sub-heads keeps its chips in the list's order, each repo's run starting with its tile and name. The run wraps as one.
+  const repoRuns = (plan) => {
+    const row = h("div", { class: "chips-n" });
+    plan.forEach((g) => { const name = repoLabel(g.key); row.append(chipsOf(g.items, h("span", { class: "rrun", role: "group", "aria-label": name }, h("span", { class: "rrepo", title: name }, h("span", { class: "rmark", "aria-hidden": "true" }, repoTile(name)), h("span", { class: "rn" }, name))))); });
     return row;
   };
   TIERS.forEach((T) => {
     const list = by[T.k]; if (!list.length) return;
-    const open = list.filter((i) => !isAnswered(i)).length, row = chipRow(list);
+    const open = list.filter((i) => !isAnswered(i)).length, row = headsOn(T.k, by.repos[T.k]) ? repoRuns(by.repos[T.k]) : chipRow(list);
     kids.push(h("div", { class: "ov-tier" }, h("a", { class: "ov-head", href: "#tier-" + T.k, "aria-label": open + " open, " + T.name, onclick: (e) => { e.preventDefault(); jump("tier-" + T.k); } }, glyph(T.k), T.name, h("span", { class: "ct" }, String(open))), row));
   });
   // The Answered row: the section's chips. Its count is the section's size, and a press opens a folded section before it jumps.
@@ -3189,7 +3316,7 @@ render(); renderAsks();
   db.collection("answers").onSnapshot((s) => { state.answers = map(s); feed.answers = true; freezeSeen(); freezeSunk(); render(); }, () => {});
   db.collection("groups").onSnapshot((s) => { state.groups = map(s); render(); }, () => {});
   db.collection("receipts").onSnapshot((s) => { state.receipts = map(s); feed.receipts = true; render(); }, () => {});
-  db.collection("meta").doc("page").onSnapshot((s) => { const was = state.meta; state.meta = s.exists ? s.data() : null; keepRouted(was, state.meta); applyIdentity(); render(); renderAsks(); }, () => {});
+  db.collection("meta").doc("page").onSnapshot((s) => { const was = state.meta; state.meta = s.exists ? s.data() : null; feed.meta = true; keepRouted(was, state.meta); applyIdentity(); render(); renderAsks(); }, () => {});
   db.collection("asks").onSnapshot((s) => { askState.map = map(s); askState.bad = false; renderAsks(); }, () => { askState.bad = true; renderAsks(); });
 })();
 </script>
