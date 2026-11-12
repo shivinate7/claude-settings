@@ -9,6 +9,7 @@ q_max's verbatim copy of a parent test with a header added, and the impeccable c
 ios-adblock, joyous and degen, which differ from the parent and from each other.
 FIND_COPIES_UNDER_TEST overrides the module path.
 """
+import importlib.util
 import json
 import os
 import shutil
@@ -39,6 +40,30 @@ TRAPS = (
     + "".join(f"const keep{i} = 'value number {i} for the trap file';\n" for i in range(10))
 )
 
+# A PR template the size of the real one: over MIN_BYTES and over MIN_LINES significant lines,
+# so a miss is a real miss and not boilerplate that a floor skips.
+PR_TEMPLATE = (
+    "## Summary\n\n"
+    + "".join(f"Summary line {i}: say what this pull request changes and why it matters.\n" for i in range(12))
+    + "\n## Test plan\n\n"
+    + "".join(f"Check {i}: name the command you ran and its verdict for this change.\n" for i in range(6))
+)
+OWN_TEMPLATE = ".github/pull_request_template.md"  # a child's own copy of the parent's PR template
+CONTROL = "vendor/whatever.mjs"  # a child copy of another parent file, reported in every run
+
+
+def module_under_test():
+    """The module under test, loaded to read its floors: MIN_BYTES, MIN_LINES, significant_lines."""
+    spec = importlib.util.spec_from_file_location("find_copies_under_test", MODULE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def text_reports(stdout, child):
+    """True when the text report has a file line for this child path."""
+    return any(line.startswith("file " + child + " ") for line in stdout.splitlines())
+
 
 def write(root, rel, text):
     path = os.path.join(root, rel)
@@ -56,6 +81,7 @@ def make_parent(root):
     write(root, "skills/plain-english-map/scripts/map-upgrade.mjs", HELPER.replace("helper", "upgrade"))
     write(root, "testing/skip-locally-fail-in-ci.test.mjs", TEST)
     write(root, "lint/traps.mjs", TRAPS)
+    write(root, OWN_TEMPLATE, PR_TEMPLATE)
     write(root, "LICENSE", "MIT License\n" * 30)
     write(root, "actions/stamp/examples/frontmatter.stamp.json", HELPER)
 
@@ -217,6 +243,72 @@ class FindCopiesTest(unittest.TestCase):
         proc = run(self.parent, os.path.join(self.tmp.name, "nowhere"))
         self.assertEqual(proc.returncode, 2)
         self.assertIn("unknown", proc.stdout + proc.stderr)
+
+    def own_template_run(self, text, *extra):
+        # Scope first (P7): the fixture clears the floors, and the control shows the scan reached the child.
+        mod = module_under_test()
+        self.assertGreaterEqual(len(PR_TEMPLATE.encode()), mod.MIN_BYTES, "fixture: the PR template is under MIN_BYTES")
+        self.assertGreaterEqual(len(mod.significant_lines(PR_TEMPLATE.encode())), mod.MIN_LINES,
+                                "fixture: the PR template is under MIN_LINES")
+        write(self.child, OWN_TEMPLATE, text)
+        write(self.child, CONTROL, TEST)
+        return run(self.parent, self.child, *extra)
+
+    def assert_own_template_not_reported(self, text, mode):
+        if mode == "json":
+            proc = self.own_template_run(text, "--json")
+            self.assertIn(proc.returncode, (0, 1), proc.stderr)
+            reported = [f["child"] for f in json.loads(proc.stdout)["files"]]
+            self.assertIn(CONTROL, reported, "control: the run did not report the other copy")
+            self.assertNotIn(OWN_TEMPLATE, reported, "the child's own PR template is reported as a copy")
+        else:
+            proc = self.own_template_run(text)
+            self.assertIn(proc.returncode, (0, 1), proc.stderr)
+            self.assertTrue(text_reports(proc.stdout, CONTROL), "control: the run did not report the other copy")
+            self.assertFalse(text_reports(proc.stdout, OWN_TEMPLATE), "the child's own PR template is reported as a copy")
+
+    def test_own_pr_template_copy_is_not_reported(self):
+        for mode in ("json", "text"):
+            with self.subTest(mode=mode):
+                self.assert_own_template_not_reported(PR_TEMPLATE, mode)
+
+    def test_own_pr_template_near_copy_is_not_reported(self):
+        edited = PR_TEMPLATE.replace("Check 0: name", "Check 0: this repo names", 1)
+        self.assertNotEqual(edited, PR_TEMPLATE, "fixture: the one-line edit did not change the template")
+        variants = {
+            "header added": "<!-- added in this repo -->\n" + PR_TEMPLATE,
+            "one line edited": edited,
+        }
+        for label, text in variants.items():
+            for mode in ("json", "text"):
+                with self.subTest(variant=label, mode=mode):
+                    self.assert_own_template_not_reported(text, mode)
+
+    def test_pr_template_copy_elsewhere_is_still_reported(self):
+        write(self.child, "docs/pr.md", PR_TEMPLATE)
+        code, out = self.findings()
+        self.assertEqual([(f["child"], f["parent"], f["kind"]) for f in out["files"]],
+                         [("docs/pr.md", OWN_TEMPLATE, "byte-equal")],
+                         "a copy of the parent's PR template outside .github/ is not reported")
+
+    def test_near_pr_template_copy_elsewhere_is_still_reported(self):
+        write(self.child, "docs/pr-draft.md", "<!-- draft header -->\n" + PR_TEMPLATE)
+        code, out = self.findings()
+        self.assertEqual([(f["child"], f["parent"], f["kind"]) for f in out["files"]],
+                         [("docs/pr-draft.md", OWN_TEMPLATE, "near-equal")],
+                         "a near copy of the parent's PR template outside .github/ is not reported")
+
+    def test_other_parent_copy_at_pr_template_path_is_still_reported(self):
+        write(self.child, OWN_TEMPLATE, TEST)
+        code, out = self.findings()
+        self.assertEqual([(f["child"], f["parent"], f["kind"]) for f in out["files"]],
+                         [(OWN_TEMPLATE, "testing/skip-locally-fail-in-ci.test.mjs", "byte-equal")],
+                         "a copy of another parent file at the PR template path is not reported")
+
+    def test_empty_own_pr_template_is_quiet(self):
+        write(self.child, OWN_TEMPLATE, "")
+        code, out = self.findings()
+        self.assertEqual((code, out["files"]), (0, []), "an empty child PR template is reported")
 
     def test_reads_only(self):
         write(self.child, "harness/tests/copy.test.mjs", TEST)
