@@ -9,7 +9,7 @@ import re
 import sys
 
 # The Linux jobs that hold the suites of the one old `checks` job, split for wall time. merge/merge.py reads suites from each.
-CHECKS_SUITE_JOBS = ("checks", "checks-merge-install")
+CHECKS_SUITE_JOBS = ("checks", "checks-merge-install", "checks-install-checkout", "checks-merge-git")
 
 
 def job_re(name):
