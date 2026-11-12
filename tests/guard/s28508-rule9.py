@@ -161,6 +161,29 @@ add("floor step-up: reviewer Round 2 of 3 (fix check) on haiku is denied", "deny
     tool="Agent", prompt=ROUND_TWO_FIX, model="haiku", subagent_type="reviewer")
 add("floor step-up: reviewer Round 2 of 3 (fix check) on sonnet is allowed", "allow",
     tool="Agent", prompt=ROUND_TWO_FIX, model="sonnet", subagent_type="reviewer")
+# The role is matched without case or surrounding space, as role_key reads it (decision agent-model-cap), and a blank
+# model is no model. Failure classes: a false allow (a reviewer spelled `Reviewer` or ` reviewer `, or with a blank
+# model, on a fix check or round 2 runs Haiku); a false refusal (a padded Sonnet model, or a builder spelled `Builder`,
+# is refused).
+add("floor step-up: reviewer spelled Reviewer, fix check with no model is denied, and names Sonnet", "deny", STEP_UP,
+    tool="Agent", prompt=FIX_BRIEF, subagent_type="Reviewer", carries=("Sonnet",), lacks=("Opus",))
+add("floor step-up: reviewer spelled with surrounding spaces, fix check with no model is denied, and names Sonnet",
+    "deny", STEP_UP, tool="Agent", prompt=FIX_BRIEF, subagent_type=" reviewer ", carries=("Sonnet",), lacks=("Opus",))
+add("floor step-up: reviewer spelled Reviewer, Round 2 of 3 with no model is denied, with the round-2 reason", "deny",
+    STEP_UP, tool="Agent", prompt="Round 2 of 3. Re-check the diff.", subagent_type="Reviewer",
+    carries=("Reviewer round 2 runs on Sonnet.",))
+add("floor step-up: reviewer fix check with a blank model is denied, and names Sonnet", "deny", STEP_UP,
+    tool="Agent", prompt=FIX_BRIEF, model="  ", subagent_type="reviewer", carries=("Sonnet",), lacks=("Opus",))
+add("floor step-up: reviewer spelled Reviewer, fix check on sonnet is allowed", "allow",
+    tool="Agent", prompt=FIX_BRIEF, model="sonnet", subagent_type="Reviewer")
+add("floor step-up: reviewer spelled with surrounding spaces, fix check on sonnet is allowed", "allow",
+    tool="Agent", prompt=FIX_BRIEF, model="sonnet", subagent_type=" reviewer ")
+add("floor step-up: reviewer spelled Reviewer, Round 2 of 3 on sonnet is allowed", "allow",
+    tool="Agent", prompt="Round 2 of 3. Re-check the diff.", model="sonnet", subagent_type="Reviewer")
+add("floor step-up: reviewer fix check with a padded sonnet model is allowed", "allow",
+    tool="Agent", prompt=FIX_BRIEF, model=" sonnet ", subagent_type="reviewer")
+add("floor step-up: builder spelled Builder, fix check with no model is allowed", "allow",
+    tool="Agent", prompt=FIX_BRIEF, subagent_type="Builder")
 # A Workflow agent() call steps up the same way, read statically. The prompt is the first argument
 # or a `prompt` key. A prompt, model or options object the scan cannot read as plain literals is
 # unseen and passes.
