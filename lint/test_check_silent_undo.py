@@ -394,6 +394,107 @@ class PrBodyEscape(unittest.TestCase):
                                      "Summary.\n\n%s\n\nNotes\n---\n%s\n" % (L, F),
                                      "Summary.\n\n%s\n\n%s\n" % (L, F)])  # no rule: not the posting footer
 
+    # Claude's session URL line follows the attribution: as its own paragraph, or on the attribution's next line. The URL is
+    # no prose, so the key line above the attribution still counts, as it does without the URL.
+    SESSION = "https://claude.ai/code/session_013NEJL2SdAA1CCG5eTFVFVr"
+
+    def assert_reads_as_without_url(self, pairs):
+        """Each (body without the URL, the same body with it): the first is excused (scope), and the second must be too."""
+        for plain, with_url in pairs:
+            with self.subTest(body=with_url):
+                ok, why = self.excused(plain)
+                self.assertTrue(ok, "scope: the body without the URL is not excused: %r" % (why,))
+                ok, why = self.excused(with_url)
+                self.assertTrue(ok, "a session URL line after the attribution hid the Drops-lines line: %r" % (why,))
+
+    def test_a_session_url_after_the_attribution_reads_as_no_url(self):
+        L, A, S, F = self.LINE, self.ATTR, self.SESSION, self.FOOT
+        self.assert_reads_as_without_url([
+            ("Summary.\n\n%s\n\n%s\n" % (L, A), "Summary.\n\n%s\n\n%s\n\n%s\n" % (L, A, S)),  # its own paragraph
+            ("Summary.\n\n%s\n\n%s\n" % (L, A), "Summary.\n\n%s\n\n%s\n%s\n" % (L, A, S)),  # the attribution's next line
+            ("Summary.\n\n%s\n\n%s\n" % (L, A), "Summary.\n\n%s\n\n%s\n\n  %s  \n\n\n" % (L, A, S)),  # padded, as the attribution case is
+            ("Summary.\n\n%s\n\n%s\n\n---\n%s\n" % (L, A, F), "Summary.\n\n%s\n\n%s\n\n%s\n\n---\n%s\n" % (L, A, S, F)),  # footer after it
+            ("Summary.\n\n%s\n\n%s\n\n---\n%s\n" % (L, A, F), "Summary.\n\n%s\n\n%s\n%s\n\n---\n%s\n" % (L, A, S, F)),  # next line, then footer
+            ("%s\n\n%s\n" % (L, A), "%s\n\n%s\n\n%s\n" % (L, A, S)),  # no Summary: the key line is the only paragraph left
+        ])
+
+    def test_a_session_url_after_the_attribution_reads_as_no_url_with_crlf(self):
+        L, A, S = self.LINE, self.ATTR, self.SESSION
+        self.assert_reads_as_without_url([
+            ("Summary.\r\n\r\n%s\r\n\r\n%s\r\n" % (L, A), "Summary.\r\n\r\n%s\r\n\r\n%s\r\n\r\n%s\r\n" % (L, A, S)),
+            ("Summary.\r\n\r\n%s\r\n\r\n%s\r\n" % (L, A), "Summary.\r\n\r\n%s\r\n\r\n%s\r\n%s\r\n" % (L, A, S)),
+        ])
+
+    # The key line can share its paragraph with the attribution, with the session URL as its own paragraph after it. The
+    # URL must not change the reading: the body without it is excused, so the body with it is too.
+    def test_a_session_url_paragraph_after_a_key_line_in_the_attribution_paragraph_reads_as_no_url(self):
+        L, S = self.LINE, self.SESSION
+        bare = self.ATTR.split(" ", 1)[1]  # the attribution without the emoji, as the reviewer's body wrote it
+        self.assert_reads_as_without_url([
+            ("Summary.\n\n%s\n%s\n" % (L, bare), "Summary.\n\n%s\n%s\n\n%s\n" % (L, bare, S)),
+            ("Summary.\n\n%s\n%s\n" % (L, self.ATTR), "Summary.\n\n%s\n%s\n\n%s\n" % (L, self.ATTR, S)),  # with the emoji
+        ])
+
+    def test_a_session_url_paragraph_after_a_key_line_in_the_attribution_paragraph_reads_as_no_url_with_crlf(self):
+        L, S = self.LINE, self.SESSION
+        bare = self.ATTR.split(" ", 1)[1]
+        self.assert_reads_as_without_url([
+            ("Summary.\r\n\r\n%s\r\n%s\r\n" % (L, bare), "Summary.\r\n\r\n%s\r\n%s\r\n\r\n%s\r\n" % (L, bare, S)),
+            ("Summary.\r\n\r\n%s\r\n%s\r\n" % (L, self.ATTR), "Summary.\r\n\r\n%s\r\n%s\r\n\r\n%s\r\n" % (L, self.ATTR, S)),
+        ])
+
+    def test_a_session_url_paragraph_after_a_key_line_in_the_attribution_paragraph_and_prose_excuses_nothing(self):  # control
+        L, S = self.LINE, self.SESSION
+        bare = self.ATTR.split(" ", 1)[1]
+        ok, why = self.excused("Summary.\n\n%s\n%s\n" % (L, bare))  # scope: the key line and attribution are read
+        self.assertTrue(ok, "scope: the body without the URL is not excused: %r" % (why,))
+        self.assert_nothing_excused(["Summary.\n\n%s\n%s\n\n%s\n\nClosing prose.\n" % (L, bare, S),
+                                     "Summary.\n\n%s\n%s\n\n%s\nClosing prose.\n" % (L, bare, S)])  # prose on the URL's next line
+
+    def test_a_session_url_paragraph_with_no_attribution_at_the_end_of_the_paragraph_above_is_prose(self):  # control
+        L, S = self.LINE, self.SESSION
+        bare = self.ATTR.split(" ", 1)[1]
+        ok, why = self.excused("Summary.\n\n%s\n%s\n" % (L, bare))  # scope: the key line and attribution are read
+        self.assertTrue(ok, "scope: the body without the URL is not excused: %r" % (why,))
+        self.assert_nothing_excused(["Summary.\n\n%s\n\n%s\n" % (L, S),  # the key line alone, then the URL paragraph
+                                     "Summary.\n\n%s\nSome other line\n\n%s\n" % (L, S),  # the paragraph above ends in other text
+                                     "Summary.\n\n%s\n%s extra\n\n%s\n" % (L, bare, S),  # the attribution line has text after it
+                                     "Summary.\n\n%s\n%s\nSome prose.\n\n%s\n" % (L, bare, S)])  # the paragraph above ends in prose
+
+    def test_a_session_url_with_no_key_line_excuses_nothing(self):  # control
+        L, A, S, F = self.LINE, self.ATTR, self.SESSION, self.FOOT
+        ok, why = self.excused("Summary.\n\n%s\n\n%s\n" % (L, A))  # scope: the key line and attribution are read
+        self.assertTrue(ok, "scope: the body with the key line and no URL is not excused: %r" % (why,))
+        self.assert_nothing_excused(["Summary.\n\n%s\n\n%s\n" % (A, S),
+                                     "Summary.\n\n%s\n%s\n" % (A, S),
+                                     "Summary.\n\nSome prose.\n\n%s\n\n%s\n" % (A, S),
+                                     "Summary.\n\n```\n%s\n```\n\n%s\n\n%s\n" % (L, A, S),  # a fenced key line is no key line
+                                     "Summary.\n\n%s\n\n%s\n\n---\n%s\n" % (A, S, F)])
+
+    def test_a_session_url_after_the_key_line_and_attribution_excuses_nothing_when_prose_follows(self):  # control
+        L, A, S = self.LINE, self.ATTR, self.SESSION
+        ok, why = self.excused("Summary.\n\n%s\n\n%s\n" % (L, A))  # scope: the key line and attribution are read
+        self.assertTrue(ok, "scope: the body without the URL is not excused: %r" % (why,))
+        self.assert_nothing_excused(["Summary.\n\n%s\n\n%s\n\n%s\n\nClosing prose.\n" % (L, A, S),
+                                     "Summary.\n\n%s\n\n%s\n%s\nClosing prose.\n" % (L, A, S),
+                                     "Summary.\n\n%s\n\n%s\nClosing prose.\n" % (L, A),  # prose on the attribution's next line
+                                     "Summary.\n\n%s\n\nSome prose.\n\n%s\n\n%s\n" % (L, A, S)])  # prose between the key line and it
+
+    def test_a_text_after_the_attribution_that_is_not_a_session_url_is_prose(self):  # control
+        L, A, S = self.LINE, self.ATTR, self.SESSION
+        ok, why = self.excused("Summary.\n\n%s\n\n%s\n" % (L, A))  # scope: the key line and attribution are read
+        self.assertTrue(ok, "scope: the body without the URL is not excused: %r" % (why,))
+        self.assert_nothing_excused(["Summary.\n\n%s\n\n%s\n\nhttps://example.com/code/session_013NEJL2SdAA1CCG5eTFVFVr\n" % (L, A),  # another host
+                                     "Summary.\n\n%s\n\n%s\n\nhttps://claude.ai/code/notes\n" % (L, A),  # this host, no session
+                                     "Summary.\n\n%s\n\n%s\n\nSee %s\n" % (L, A, S),  # text before the session URL
+                                     "Summary.\n\n%s\n\n%s\n\n%s extra\n" % (L, A, S),  # text after it
+                                     "Summary.\n\n%s\n\n%s\nhttps://example.com/\n" % (L, A)])  # the attribution's next line
+
+    def test_a_key_line_in_the_attribution_paragraph_with_the_url_still_excuses(self):  # control, current behaviour
+        L, A, S = self.LINE, self.ATTR, self.SESSION
+        ok, why = self.excused("Summary.\n\n%s\n%s\n%s\n" % (L, A, S))
+        self.assertTrue(ok, "a key line in the attribution's paragraph with the URL stopped excusing: %r" % (why,))
+
 
 BLOCK = "alpha one\nbeta two\ngamma three\ndelta four\nepsilon five\nzeta six\n"
 
@@ -3033,6 +3134,257 @@ class RevivedNote(unittest.TestCase):
         self.assertEqual(self.body(head), [self.UNTOUCHED, self.SIBLING, self.SIBLING_NEW],
                          "premise: the head holds the sibling and the new note, not the deleted one")
         self.assertEqual(self.r.verdict(), [], "a deleted non-slug note flagged a different note that shares its first 40 characters")
+
+
+class DefaultBase(unittest.TestCase):
+    """With no --upstream, a local run judges the branch against its base: the upstream the branch tracks, which for a
+    stacked branch is the branch it stacks on. Until then the default is origin/main. An explicit --upstream always wins.
+    With no base found, the run prints the base it used and falls back to origin/main. Each fixture sets its tracking with
+    --track or --no-track, so the answer does not depend on autoSetupMerge. The PR-base lookup (gh) is not fixtured here."""
+
+    T0, T1, T2, T3, T4 = ("2026-01-01T10:00:00", "2026-01-02T10:00:00", "2026-01-03T10:00:00",
+                          "2026-01-04T10:00:00", "2026-01-05T10:00:00")
+
+    def run_main(self, argv):
+        return PrintedFindings.run_main(self, argv, "utf-8")
+
+    @staticmethod
+    def findings(text):
+        """The FAIL lines and their bullet lines: what a run found, without any base line it prints."""
+        return [l for l in text.splitlines() if ": FAIL: " in l or l.startswith("      - ")]
+
+    @classmethod
+    def undoes_main_revert(cls, text):
+        """True when a finding says a change undoes a commit whose subject names Q (main's add, or main's revert of it)."""
+        return any("undoing" in l and "main adds Q" in l for l in cls.findings(text))
+
+    @staticmethod
+    def named_base(text):
+        """The printed lines that name origin/main as the base the run used. The one home of that reading."""
+        return [l for l in text.splitlines() if "origin/main" in l and "base" in l.lower()]
+
+    def stacked_revert(self):
+        """main adds Q. feat1, cut from main, reverts Q and is pushed. feat2 stacks on feat1 and tracks origin/feat1."""
+        r = Repo()
+        r.commit("base", date=self.T0, app_txt=BODY + "function Card() {}\n")
+        r.push()
+        q = r.commit("main adds Q", date=self.T1, app_txt=BODY + "function Card() {}\nQ1\n")
+        r.push()
+        r.sh("checkout", "-q", "-b", "feat1", "origin/main")
+        r.sh("revert", "--no-edit", q, date=self.T2)
+        r.sh("push", "-q", "origin", "feat1")
+        r.sh("checkout", "-q", "-b", "feat2", "--track", "origin/feat1")
+        r.commit("feat2 other", date=self.T3, other_txt="other v2\n")
+        return r
+
+    def stacked_merge_drop(self):
+        """feat1 adds P1 and is pushed. feat2 stacks on feat1. feat1 then adds P2 and is pushed. feat2 merges feat1 keeping
+        its own side, so P2 is dropped. P1 and P2 are on feat1 only: main never had them."""
+        r = Repo()
+        r.commit("base", date=self.T0, app_txt=BODY + "function Card() {}\n")
+        r.push()
+        r.sh("checkout", "-q", "-b", "feat1", "origin/main")
+        r.commit("feat1 adds P1", date=self.T1, app_txt=BODY + "function Card() {}\nP1\n")
+        r.sh("push", "-q", "origin", "feat1")
+        r.sh("checkout", "-q", "-b", "feat2", "--track", "origin/feat1")
+        r.commit("feat2 other", date=self.T2, other_txt="other v2\n")
+        r.sh("checkout", "-q", "feat1")
+        r.commit("feat1 adds P2", date=self.T3, app_txt=BODY + "function Card() {}\nP1\nP2\n")
+        r.sh("push", "-q", "origin", "feat1")
+        r.sh("checkout", "-q", "feat2")
+        r.sh("merge", "-q", "-s", "ours", "--no-edit", "origin/feat1", date=self.T4)
+        return r
+
+    def based_on_main(self):
+        """A branch cut from origin/main and tracking it. It merges main keeping its own side, so main's K1 is dropped."""
+        r = Repo()
+        r.commit("base", date=self.T0, app_txt=BODY + "function Card() {}\n")
+        r.push()
+        r.sh("checkout", "-q", "-b", "stale", "--track", "origin/main")
+        r.commit("stale work", date=self.T1, other_txt="other v2\n")
+        r.sh("checkout", "-q", "main")
+        r.commit("main adds K1", date=self.T2, app_txt=BODY + "function Card() {}\nK1\n")
+        r.push()
+        r.sh("checkout", "-q", "stale")
+        r.sh("merge", "-q", "-s", "ours", "--no-edit", "origin/main", date=self.T3)
+        return r
+
+    def no_base(self):
+        """A local branch with no upstream, cut from local main. No base is found, so the run falls back to origin/main."""
+        r = Repo()
+        r.commit("base", date=self.T0, app_txt=BODY + "function Card() {}\n")
+        r.push()
+        r.sh("checkout", "-q", "-b", "solo", "--no-track")
+        r.commit("solo work", date=self.T1, other_txt="other v2\n")
+        return r
+
+    def own_copy(self):
+        """A branch cut from origin/main and pushed with -u, so it tracks its own pushed copy. Its merge of main keeps its
+        own side and drops main's K1. The merge is pushed, so the branch's own copy holds the drop. main holds K1."""
+        r = Repo()
+        r.commit("base", date=self.T0, app_txt=BODY + "function Card() {}\n")
+        r.push()
+        r.sh("checkout", "-q", "-b", "selfb", "--no-track", "origin/main")
+        r.commit("selfb work", date=self.T1, other_txt="other v2\n")
+        r.sh("checkout", "-q", "main")
+        r.commit("main adds K1", date=self.T2, app_txt=BODY + "function Card() {}\nK1\n")
+        r.push()
+        r.sh("checkout", "-q", "selfb")
+        r.sh("merge", "-q", "-s", "ours", "--no-edit", "origin/main", date=self.T3)
+        r.sh("push", "-q", "-u", "origin", "selfb")
+        return r
+
+    def pushed_as_other_name(self, local, remote, publish=True):
+        """main adds Q. The branch `local` is cut at Q, gets one commit, and is pushed as `remote` with -u, so it tracks its
+        own old copy under that name (the same name when local == remote). Then main reverts Q. The branch merges main keeping
+        its own side, which puts Q back. That merge is pushed, unless publish is False: then it is a new local commit, ahead
+        of the branch's own copy. Landing the head on main undoes the revert."""
+        r = Repo()
+        r.commit("base", date=self.T0, app_txt=BODY + "function Card() {}\n")
+        r.push()
+        q = r.commit("main adds Q", date=self.T1, app_txt=BODY + "function Card() {}\nQ1\n")
+        r.push()
+        r.sh("checkout", "-q", "-b", local, "--no-track", q)
+        r.commit("%s work" % local, date=self.T2, other_txt="other v2\n")
+        spec = "refs/heads/%s:refs/heads/%s" % (local, remote)  # full refs: a tag of the same name makes a bare name ambiguous
+        r.sh("push", "-q", "-u", "origin", spec)
+        r.sh("checkout", "-q", "main")
+        r.sh("revert", "--no-edit", q, date=self.T3)
+        r.push()
+        r.sh("checkout", "-q", local)
+        r.sh("merge", "-q", "-s", "ours", "--no-ff", "--no-edit", "origin/main", date=self.T4)
+        if publish:
+            r.sh("push", "-q", "origin", spec)
+        return r
+
+    def gone_upstream(self):
+        """feat2 stacks on feat1 and tracks origin/feat1. feat1 is deleted on origin and pruned locally: the merge key stays,
+        the upstream is gone."""
+        r = self.stacked_revert()
+        r.sh("push", "-q", "origin", "--delete", "feat1")
+        r.sh("fetch", "-q", "--prune", "origin")
+        return r
+
+    def test_no_flag_judges_a_stacked_branch_against_its_base_not_main(self):
+        r = self.stacked_revert()
+        self.assertEqual(r.sh("rev-parse", "--abbrev-ref", "@{u}"), "origin/feat1",
+                         "premise: feat2 does not track its base origin/feat1")
+        _, text = self.run_main(["--repo", r.dir, "--upstream", "origin/main"])
+        self.assertTrue(any("undoing" in l and "main adds Q" in l for l in self.findings(text)),
+                        "premise: against main, feat1's revert of Q is a finding. Output: %r" % text)
+        rc, text = self.run_main(["--repo", r.dir])
+        self.assertEqual((rc, self.findings(text)), (0, []),
+                         "no --upstream: feat2 was judged against origin/main, not its base origin/feat1")
+        self.assertIn("silent-undo: base: origin/feat1 (the branch's tracked upstream)", text.splitlines(),
+                      "no --upstream: the printed base line is not feat2's tracked upstream. Output: %r" % text)
+
+    def test_an_explicit_upstream_prints_no_base_line(self):
+        r = self.stacked_revert()
+        self.assertEqual(r.sh("rev-parse", "--abbrev-ref", "@{u}"), "origin/feat1",
+                         "premise: feat2 tracks origin/feat1, so the flag alone decides the base")
+        rc, text = self.run_main(["--repo", r.dir, "--upstream", "origin/main"])
+        self.assertTrue(self.undoes_main_revert(text),
+                        "premise: --upstream origin/main still runs and finds the revert of Q. Output: %r" % text)
+        self.assertEqual([l for l in text.splitlines() if l.startswith("silent-undo: base:")], [],
+                         "--upstream origin/main printed a base line, so the base was not the flag's alone. Output: %r" % text)
+
+    def test_no_flag_reports_a_line_only_the_base_added_that_a_merge_drops(self):
+        r = self.stacked_merge_drop()
+        self.assertEqual(r.sh("rev-parse", "--abbrev-ref", "@{u}"), "origin/feat1",
+                         "premise: feat2 does not track its base origin/feat1")
+        _, text = self.run_main(["--repo", r.dir, "--upstream", "origin/feat1"])
+        self.assertIn("- P2", text, "premise: against its base origin/feat1, the merge drops P2. Output: %r" % text)
+        rc, text = self.run_main(["--repo", r.dir])
+        self.assertIn("- P2", text, "no --upstream: the merge dropped P2, a line only the base holds, and nothing reported it")
+        self.assertEqual(rc, 1, "no --upstream: the run did not exit 1 on the dropped P2. Output: %r" % text)
+
+    def test_explicit_upstream_main_still_judges_a_stacked_branch_against_main(self):  # control
+        r = self.stacked_revert()
+        self.assertEqual(r.sh("rev-parse", "--abbrev-ref", "@{u}"), "origin/feat1",
+                         "premise: feat2 tracks origin/feat1, so the flag alone decides the base")
+        rc, text = self.run_main(["--repo", r.dir, "--upstream", "origin/main"])
+        self.assertEqual(rc, 1, "--upstream origin/main: the run no longer fails on the revert of Q. Output: %r" % text)
+        self.assertTrue(any("undoing" in l and "main adds Q" in l for l in self.findings(text)),
+                        "--upstream origin/main: the revert of Q is no longer reported")
+
+    def test_no_flag_on_a_branch_based_on_main_reports_what_explicit_main_reports(self):  # control
+        r = self.based_on_main()
+        self.assertEqual(r.sh("rev-parse", "--abbrev-ref", "@{u}"), "origin/main",
+                         "premise: the branch tracks origin/main")
+        rc_flag, text_flag = self.run_main(["--repo", r.dir, "--upstream", "origin/main"])
+        self.assertIn("- K1", text_flag, "premise: against origin/main, the merge drops K1. Output: %r" % text_flag)
+        rc, text = self.run_main(["--repo", r.dir])
+        self.assertEqual((rc, self.findings(text)), (rc_flag, self.findings(text_flag)),
+                         "no --upstream on a branch based on main differs from --upstream origin/main")
+
+    def test_no_flag_with_no_base_found_prints_the_base_it_used(self):
+        r = self.no_base()
+        self.assertEqual(r.sh("config", "--get", "branch.solo.merge", ok=False), "",
+                         "premise: solo tracks no upstream")
+        rc, text = self.run_main(["--repo", r.dir])
+        self.assertEqual(rc, 0, "no base found: a clean branch exits %d. Output: %r" % (rc, text))
+        self.assertTrue(self.named_base(text), "no base found: the run did not print the base it used (origin/main). Output: %r" % text)
+
+    def test_a_branch_that_tracks_its_own_pushed_copy_is_judged_against_main(self):
+        r = self.own_copy()
+        self.assertEqual(r.sh("rev-parse", "--abbrev-ref", "@{u}"), "origin/selfb",
+                         "premise: selfb does not track its own pushed copy origin/selfb")
+        _, text = self.run_main(["--repo", r.dir, "--upstream", "origin/main"])
+        self.assertIn("- K1", text, "premise: against origin/main, the merge drops K1. Output: %r" % text)
+        rc, text = self.run_main(["--repo", r.dir])
+        self.assertIn("- K1", text, "no --upstream: the branch's own pushed copy was taken as its base, so K1's drop was not judged. "
+                                    "Output: %r" % text)
+        self.assertTrue(self.named_base(text), "no --upstream: no printed base line names origin/main. Output: %r" % text)
+
+    def test_a_branch_pushed_under_another_name_is_judged_against_main(self):
+        r = self.pushed_as_other_name("foo", "bar")
+        self.assertEqual(r.sh("rev-parse", "--abbrev-ref", "@{u}"), "origin/bar",
+                         "premise: foo does not track its pushed copy origin/bar")
+        _, text = self.run_main(["--repo", r.dir, "--upstream", "origin/main"])
+        self.assertTrue(self.undoes_main_revert(text),
+                        "premise: against origin/main, the pushed copy undoes main's revert of Q. Output: %r" % text)
+        _, text = self.run_main(["--repo", r.dir])
+        self.assertTrue(self.undoes_main_revert(text),
+                        "no --upstream: foo was judged against its old copy origin/bar, not origin/main. Output: %r" % text)
+
+    def test_a_tag_named_like_a_stacked_branch_does_not_hide_its_base(self):
+        r = self.stacked_merge_drop()
+        r.sh("tag", "feat2")  # a tag of the branch's own name, at its head
+        self.assertEqual(r.sh("rev-parse", "--abbrev-ref", "@{u}"), "origin/feat1",
+                         "premise: feat2 does not track its base origin/feat1")
+        self.assertNotEqual(r.sh("rev-parse", "--verify", "-q", "refs/tags/feat2", ok=False), "",
+                            "premise: the tag feat2 exists")
+        _, text = self.run_main(["--repo", r.dir, "--upstream", "origin/feat1"])
+        self.assertIn("- P2", text, "premise: against its base origin/feat1, the merge drops P2. Output: %r" % text)
+        rc, text = self.run_main(["--repo", r.dir])
+        self.assertIn("- P2", text, "no --upstream: with a tag named feat2, the base origin/feat1 was not used. Output: %r" % text)
+
+    def test_a_gone_upstream_is_named_as_gone_and_judged_against_main(self):
+        r = self.gone_upstream()
+        self.assertEqual(r.sh("config", "--get", "branch.feat2.merge"), "refs/heads/feat1",
+                         "premise: feat2 keeps its merge key")
+        self.assertEqual(r.sh("rev-parse", "--verify", "-q", "refs/remotes/origin/feat1", ok=False), "",
+                         "premise: origin/feat1 is pruned")
+        rc, text = self.run_main(["--repo", r.dir])
+        self.assertTrue([l for l in self.named_base(text) if "gone" in l],
+                        "no --upstream: the printed base line does not say the upstream is gone. Output: %r" % text)
+        self.assertTrue(self.undoes_main_revert(text),
+                        "no --upstream: a gone upstream was not judged against origin/main. Output: %r" % text)
+
+    def test_a_same_name_branch_ahead_of_its_own_copy_is_judged_against_main(self):
+        r = self.pushed_as_other_name("foo", "foo", publish=False)
+        self.assertEqual(r.sh("rev-parse", "--abbrev-ref", "@{u}"), "origin/foo",
+                         "premise: foo does not track its own copy origin/foo")
+        self.assertNotEqual(r.sh("rev-parse", "HEAD"), r.sh("rev-parse", "origin/foo"),
+                            "premise: foo's tip is not its own copy's tip, so the local merge is ahead of the copy")
+        _, text = self.run_main(["--repo", r.dir, "--upstream", "origin/main"])
+        self.assertTrue(self.undoes_main_revert(text),
+                        "premise: against origin/main, the local merge undoes main's revert of Q. Output: %r" % text)
+        _, text = self.run_main(["--repo", r.dir])
+        self.assertTrue(self.named_base(text),
+                        "no --upstream: the base is not origin/main, so the own copy was taken as the base. Output: %r" % text)
+        self.assertTrue(self.undoes_main_revert(text),
+                        "no --upstream: the revert of Q, undone by the local merge, was not caught. Output: %r" % text)
 
 
 if __name__ == "__main__":
