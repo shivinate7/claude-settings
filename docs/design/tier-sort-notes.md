@@ -20,6 +20,13 @@ Settled, not options here:
   page.html lists it in `itemFields`, but page.html never reads it. The answered-sink notes (point 5) called it
   a new field; it has landed since. This design is the first reader.
 
+## Rulings (coordinator, 11:48 CST Nov 12; undoable picks, no owner question)
+
+- Q1 "Most stopped work first". `holds` is one free sentence, not a list, so a length sort would guess.
+  The field `stops` is added. The question-form check refuses a `stops` entry that `holds` does not name,
+  and a `stops` on an item with no `holds`, so the two cannot drift.
+- Q2 The `meta/page` field `repo` is added, with the `identity.name` fallback.
+
 ## 1. The sort key in Blocking. Owner grant: yes
 
 What page.html has today: no count of what an item stops. Measured against the fields:
