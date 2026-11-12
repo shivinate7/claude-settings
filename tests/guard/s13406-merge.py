@@ -562,6 +562,9 @@ def role_tag_call(tool_id, session=ROLE_OWN, add=("cs-build:coordinator",)):
 CS_SOURCES = [{"git_repository": {"url": "https://github.com/" + ARCH_REPO_SETTINGS}}]
 OTHER_SOURCES = [{"git_repository": {"url": "https://github.com/shivinate7/mailaudit"}}]
 from shared_names import OWNER_LANE_ASK  # the one home of the sentence every merge refusal carries (hooks/shared_names.py)
+# The proof conditions of a lane the owner started. A refusal names the sentence and the batch runner, never these: naming them teaches
+# the session the record to make (rule git-remedy-never-names-target; decision guard-remedy-not-to-owner).
+LONE_LACKS = ("parent_session_id", "tagged_after", "no cs-build tag")
 
 
 def lone_call(tool_id, tags, sources=CS_SOURCES, session=ROLE_OWN):
@@ -886,10 +889,15 @@ def write_role_transcripts():
 lazy_fixture([role_path(name) for name in ROLE_LINES] + [role_path("unreadable")], write_role_transcripts)
 
 
-def role_refuse(name, command, transcript, env=ROLE_ENV, **kw):
-    """A `merge --role` the guard refuses. The reason names its rule, and never the role flag."""
-    sh("merge-role-proof: " + name, command, "deny", rule=ROLE_RULE, lacks=ROLE_FLAG,
+def role_refuse(name, command, transcript, env=ROLE_ENV, lacks=(), **kw):
+    """A `merge --role` the guard refuses. The reason names its rule, and never the role flag. `lacks` adds fragments it must not name."""
+    sh("merge-role-proof: " + name, command, "deny", rule=ROLE_RULE, lacks=ROLE_FLAG + tuple(lacks),
        transcript=transcript, env=env, cwd=NOGIT, **kw)
+
+
+def lone_refuse(name, transcript):
+    """A refusal of a lane the owner started: it carries the owner-started sentence and none of the proof conditions."""
+    role_refuse(name, MERGE_SHIM + " --role batch-runner", transcript, carries=OWNER_LANE_ASK, lacks=LONE_LACKS)
 
 
 def role_allow(name, command, transcript, env=ROLE_ENV, **kw):
@@ -912,7 +920,7 @@ role_refuse("a coordinator that records batch-runner is refused", MERGE_SHIM + "
 # lane and the batch runner it asks, not a runner it lacks for a lane the owner started. Re-pointed from the batch-runner-only remedy.
 role_refuse("a lane that records batch-runner is refused, and the refusal steers it to hand off",
           MERGE_SHIM + " --role batch-runner", role_path("lane"),
-          carries=("get_session", "list_sessions", "cs-build:batch-runner", "cs-repo", "branch", OWNER_LANE_ASK))
+          carries=("get_session", "list_sessions", "cs-build:batch-runner", "cs-repo", "branch", OWNER_LANE_ASK), lacks=LONE_LACKS)
 # Only the own record's tags count. A title, a foreign record, a list, a near miss and a quote do not.
 role_refuse("a lane whose title holds cs-build:batch-runner is refused", MERGE_SHIM + " --role batch-runner",
           role_path("lane-title"))
@@ -937,22 +945,19 @@ role_allow("a lane the owner started that tags itself and reads its record again
            MERGE_SHIM + " --role batch-runner", role_path("lone-self-tag-then-read"))
 role_allow("a set_session_tags call on another session leaves a lane the owner started current",
            MERGE_SHIM + " --role batch-runner", role_path("lone-tagged-after-other"))
-role_refuse("a record with a parent_session_id is refused even with no cs-build tag and claude-settings sources",
-            MERGE_SHIM + " --role batch-runner", role_path("lone-parent-untagged"), carries=OWNER_LANE_ASK)
-role_refuse("a lane the owner started with a cs-build:coordinator tag is refused: the tag decides, not the missing parent",
-            MERGE_SHIM + " --role batch-runner", role_path("lone-coordinator-tag"), carries=OWNER_LANE_ASK)
-role_refuse("a lane the owner started with a cs-build:triage tag is refused", MERGE_SHIM + " --role batch-runner",
-            role_path("lone-triage-tag"), carries=OWNER_LANE_ASK)
-role_refuse("a lane the owner started with a cs-build:lane tag is refused", MERGE_SHIM + " --role batch-runner",
-            role_path("lone-lane-tag"), carries=OWNER_LANE_ASK)
-role_refuse("a lane the owner started that set its own tags after its read is refused: the read is stale",
-            MERGE_SHIM + " --role batch-runner", role_path("lone-tagged-after"), carries=OWNER_LANE_ASK)
-role_refuse("a lane that tags itself and does not read its record again is refused: the tagged read is stale",
-            MERGE_SHIM + " --role batch-runner", role_path("lone-self-tag-no-reread"), carries=OWNER_LANE_ASK)
-role_refuse("a lane the owner started whose sources name another repo is refused: its scope is the sources' repo",
-            MERGE_SHIM + " --role batch-runner", role_path("lone-other-sources"), carries=OWNER_LANE_ASK)
-role_refuse("a lane the owner started whose record names no source is refused: no source names claude-settings",
-            MERGE_SHIM + " --role batch-runner", role_path("lone-no-sources"), carries=OWNER_LANE_ASK)
+lone_refuse("a record with a parent_session_id is refused even with no cs-build tag and claude-settings sources",
+            role_path("lone-parent-untagged"))
+lone_refuse("a lane the owner started with a cs-build:coordinator tag is refused: the tag decides, not the missing parent",
+            role_path("lone-coordinator-tag"))
+lone_refuse("a lane the owner started with a cs-build:triage tag is refused", role_path("lone-triage-tag"))
+lone_refuse("a lane the owner started with a cs-build:lane tag is refused", role_path("lone-lane-tag"))
+lone_refuse("a lane the owner started that set its own tags after its read is refused: the read is stale", role_path("lone-tagged-after"))
+lone_refuse("a lane that tags itself and does not read its record again is refused: the tagged read is stale",
+            role_path("lone-self-tag-no-reread"))
+lone_refuse("a lane the owner started whose sources name another repo is refused: its scope is the sources' repo",
+            role_path("lone-other-sources"))
+lone_refuse("a lane the owner started whose record names no source is refused: no source names claude-settings",
+            role_path("lone-no-sources"))
 # The other command forms, bare and after `cd somewhere &&`, judge as the shim does.
 for _role_prefix in ("", "cd somewhere && "):
     for _role_form in (MERGE_SHIM, "bin/merge", "python3 merge/merge.py", "python3 merge/launch.py"):
