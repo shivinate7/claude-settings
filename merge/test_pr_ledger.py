@@ -11,7 +11,8 @@ the output a reader reads. The clock is Host.now, held at NOW, so no case reads 
 THE OUTPUT CONTRACT these cases read (merge.py builds it):
   one line per open pull request, starting `#<n> <branch> <sha9> `. Its review state stays as it is today. Before `; CI` it carries
     `; next: <act>, owner <owner>, age <H>h` and `, RED` after the age when the act is red.
-    <act> is one of: batch | lane round <n> | fix check | fresh full review | waits on <item> | batch run | blocked on #<n> | none
+    <act> is one of: batch | lane round <n> | fix check | fresh full review | waits on <item> | batch run | blocked on #<n> | lane lint | none
+    `lane lint` (owner lane) is a done record with no lane-lint PASS at its head; `lane` is accepted too.
   after the lines, two numbers, each on its own line:
     `longest wait from a done record: <H>h`
     `open PRs with no next act: <N>`
@@ -123,12 +124,17 @@ class LedgerCase(tm.ReviewEnv):
         self.assertEqual(len(lines), 1, f"#{n} has no line of its own, so the output names no next act for it:\n{out}")
         return lines[0]
 
-    def next_act(self, out, n):
-        """-> (act, red) of pull request n, read from the `next:` part of its line."""
+    def next_part(self, out, n):
+        """-> (act, owner, red) of pull request n, read from the `next:` part of its line."""
         line = self.line_of(out, n)
         m = NEXT_PART.search(line)
         self.assertIsNotNone(m, f"#{n}'s line has no `next:` part, so it names no next act:\n{line}")
-        return m.group("act"), m.group("red") is not None
+        return m.group("act"), m.group("owner"), m.group("red") is not None
+
+    def next_act(self, out, n):
+        """-> (act, red) of pull request n, read from the `next:` part of its line."""
+        act, _owner, red = self.next_part(out, n)
+        return act, red
 
 
 class NextActReds(LedgerCase):
@@ -180,6 +186,48 @@ class NextActReds(LedgerCase):
         self.assertEqual(act, "lane round 1", f"#9 is a draft with no record, so its act is lane round 1:\n{out}")
         self.assertTrue(red, f"#9 has been a draft with no record for 80 h, past the 72 h limit, and its line does not read RED:\n{out}")
 
+    def test_a_body_line_naming_a_base_does_not_stack_the_pr_and_reads_none_red(self):
+        for body in ("Based on #5", "Stacked on #5"):
+            with self.subTest(body=body):
+                out = self.reviewed(LedgerHost([pull(7, body=f"{body}\n\nThe rest of the change.", hours_ago=5), pull(5, draft=True, hours_ago=2)]))
+                act, red = self.next_act(out, 7)
+                self.assertEqual(act, "none", f"#7 is based on main, and `{body}` in its body does not stack it; only its base ref does:\n{out}")
+                self.assertTrue(red, f"#7 has no next act, and its line does not read RED:\n{out}")
+
+    def test_a_fix_check_older_than_72_h_reads_red(self):
+        host = LedgerHost([pull(7)], comments=[record(7, 80, head=OLD)], commits={LIVE: [OLD]})
+        out = self.reviewed(host)
+        self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} stale: ", "control: #7's record does not read stale at the live head")
+        act, red = self.next_act(out, 7)
+        self.assertEqual(act, "fix check", f"control: #7's record is for {OLD[:9]} and has no Fix check line:\n{out}")
+        self.assertTrue(red, f"#7's fix check has waited 80 h, past the 72 h limit, and its line does not read RED:\n{out}")
+
+    def test_a_fresh_full_review_older_than_72_h_reads_red(self):
+        fix = tm.fix_verifier_line("FAIL", head=OTHER)
+        host = LedgerHost([pull(7)], comments=[record(7, 80, head=OLD, fix=(fix,))], commits={LIVE: [OLD]})
+        out = self.reviewed(host)
+        self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} stale: ", "control: #7's record does not read stale at the live head")
+        act, red = self.next_act(out, 7)
+        self.assertEqual(act, "fresh full review", f"control: #7's fix check failed, so one fresh full review is owed:\n{out}")
+        self.assertTrue(red, f"#7's fresh full review has waited 80 h, past the 72 h limit, and its line does not read RED:\n{out}")
+
+    def test_a_lane_round_2_or_later_older_than_72_h_reads_red(self):
+        fail1, fail2 = "Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"
+        for rounds, act_want in (((fail1,), "lane round 2"), ((fail1, fail2), "lane round 3")):
+            with self.subTest(act=act_want):
+                out = self.reviewed(LedgerHost([pull(7)], comments=[record(7, 80, rounds=rounds)]))
+                act, red = self.next_act(out, 7)
+                self.assertEqual(act, act_want, f"control: #7's record has {len(rounds)} failed round(s), so {act_want} is owed:\n{out}")
+                self.assertTrue(red, f"{act_want} has waited 80 h, past the 72 h limit, and its line does not read RED:\n{out}")
+
+    def test_a_done_record_with_no_lint_pass_reads_lane_not_batch(self):
+        out = self.reviewed(LedgerHost([pull(7)], comments=[record(7, 3)]))
+        self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} no lint: .*Run `merge --lane-lint 7`",
+                         "control: #7's line does not name merge --lane-lint 7 for a done record with no lint PASS")
+        act, owner, _red = self.next_part(out, 7)
+        self.assertIn(act, ("lane", "lane lint"), f"#7 is done at the live head, but no lane-lint PASS names that head, so its act is the lane's, not batch:\n{out}")
+        self.assertEqual(owner, "lane", f"#7's act is the lane's, so its owner is lane, not batch runner:\n{out}")
+
 
 class NextActShapes(LedgerCase):
     """The acts that read green: each rule's act and its age, with no red."""
@@ -204,13 +252,11 @@ class NextActShapes(LedgerCase):
         act, _red = self.next_act(out, 7)
         self.assertEqual(act, "fresh full review", f"#7's fix check failed, so one fresh full review at the live head is owed:\n{out}")
 
-    def test_a_stacked_pr_reads_blocked_on_its_base(self):
-        for body in ("Stacked on #5", "Based on #5"):
-            with self.subTest(body=body):
-                out = self.reviewed(LedgerHost([pull(7, body=f"{body}\n\nThe rest of the change."), pull(5, draft=True, hours_ago=2)]))
-                act, red = self.next_act(out, 7)
-                self.assertEqual(act, "blocked on #5", f"#7 says `{body}`, so it waits on #5:\n{out}")
-                self.assertFalse(red, f"#7 is blocked on #5, which has an act of its own, and its line reads RED:\n{out}")
+    def test_a_pr_whose_base_ref_is_an_open_pr_head_reads_blocked_on_it(self):
+        out = self.reviewed(LedgerHost([pull(7, base="feat5", hours_ago=5), pull(5, draft=True, hours_ago=2)]))
+        act, red = self.next_act(out, 7)
+        self.assertEqual(act, "blocked on #5", f"#7's base ref is feat5, the head branch of open #5, so it waits on #5:\n{out}")
+        self.assertFalse(red, f"#7 is blocked on #5, which has an act of its own, and its line reads RED:\n{out}")
 
     def test_a_held_pr_with_a_waits_line_reads_waits_on(self):
         for item in ("debt:merge-flake", "page:ask-mw6sd3zwp1"):
@@ -234,6 +280,36 @@ class NextActShapes(LedgerCase):
         self.assertEqual(act, "batch run", f"#7 carries the batch label, so its act is batch run:\n{out}")
         self.assertFalse(red, f"#7's batch label was last added 2 h ago, inside the 24 h limit, and its line reads RED:\n{out}")
 
+    def test_a_fix_check_under_72_h_is_not_red(self):
+        host = LedgerHost([pull(7)], comments=[record(7, 10, head=OLD)], commits={LIVE: [OLD]})
+        out = self.reviewed(host)
+        act, red = self.next_act(out, 7)
+        self.assertEqual(act, "fix check", f"#7's record is for {OLD[:9]} and has no Fix check line:\n{out}")
+        self.assertFalse(red, f"#7's fix check has waited 10 h, inside the 72 h limit, and its line reads RED:\n{out}")
+
+    def test_a_fresh_full_review_under_72_h_is_not_red(self):
+        fix = tm.fix_verifier_line("FAIL", head=OTHER)
+        host = LedgerHost([pull(7)], comments=[record(7, 10, head=OLD, fix=(fix,))], commits={LIVE: [OLD]})
+        out = self.reviewed(host)
+        act, red = self.next_act(out, 7)
+        self.assertEqual(act, "fresh full review", f"#7's fix check failed, so one fresh full review is owed:\n{out}")
+        self.assertFalse(red, f"#7's fresh full review has waited 10 h, inside the 72 h limit, and its line reads RED:\n{out}")
+
+    def test_a_waits_on_older_than_72_h_is_not_red(self):
+        host = LedgerHost([pull(7, labels=["held"])], comments=[note(7, "Waits on: debt:merge-flake")], events={7: [event("held", 500)]})
+        out = self.reviewed(host)
+        act, red = self.next_act(out, 7)
+        self.assertTrue(act.startswith("waits on"), f"control: #7 is held with `Waits on: debt:merge-flake`, so its act is waits on:\n{out}")
+        self.assertFalse(red, f"#7 waits on debt:merge-flake, which has no limit of its own, and its line reads RED at 500 h:\n{out}")
+
+    def test_a_done_record_with_a_lint_pass_reads_batch_for_the_batch_runner(self):
+        out = self.reviewed(LedgerHost([pull(7)], comments=[record(7, 3), lint(7)]))
+        self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} done: ", "control: #7's record does not read done at the live head")
+        act, owner, red = self.next_part(out, 7)
+        self.assertEqual(act, "batch", f"#7 is done at the live head with a lane-lint PASS, so its act is batch:\n{out}")
+        self.assertEqual(owner, "batch runner", f"#7's act is batch, so its owner is the batch runner:\n{out}")
+        self.assertFalse(red, f"#7 is done 3 h ago, inside the 24 h limit, and its line reads RED:\n{out}")
+
 
 class NumberLines(LedgerCase):
     """The two gold-0 numbers, each after a control line that the fixture still gives."""
@@ -250,6 +326,13 @@ class NumberLines(LedgerCase):
         m = NO_ACT_LINE.search(out)
         self.assertIsNotNone(m, f"merge --reviewed printed no `open PRs with no next act` line:\n{out}")
         self.assertEqual(int(m.group("count")), 2, f"#7 and #8 are non-drafts with no record, so two open PRs have no next act:\n{out}")
+
+    def test_the_count_names_a_pr_whose_body_names_a_base_but_whose_base_ref_does_not(self):
+        out = self.reviewed(LedgerHost([pull(7, body="Based on #5\n\nThe rest of the change.", hours_ago=5), pull(5, draft=True, hours_ago=2)]))
+        self.assertIn("; next: lane round 1, owner lane,", self.line_of(out, 5), "control: #5, a draft with no record, does not read lane round 1")
+        m = NO_ACT_LINE.search(out)
+        self.assertIsNotNone(m, f"merge --reviewed printed no `open PRs with no next act` line:\n{out}")
+        self.assertEqual(int(m.group("count")), 1, f"#7 is based on main, so its `Based on #5` body line does not stack it, and it has no next act:\n{out}")
 
     def test_the_count_covers_every_page_of_open_pulls(self):
         pulls = [pull(n, hours_ago=5) for n in range(1, 102)]  # 101 pulls: the pulls list reads in two pages of 100
