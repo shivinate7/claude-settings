@@ -2331,7 +2331,7 @@ MUTATIONS = [
      '            or is_mutation_test_rel(rel))', '            or False)', "guard",
      "test-author: Edit of mutation test hooks/mutate_guard.py is allowed"),
     ("builder-test: is_builder_test_rel drops the mutation tests",
-     '    return is_test_rel(rel) or is_mutation_test_rel(rel)', '    return is_test_rel(rel)', "guard",
+     '    return (is_test_rel(rel) or is_mutation_test_rel(rel)', '    return (is_test_rel(rel)', "guard",
      "builder-test: Edit of mutation test hooks/mutate_guard.py is refused"),
     ("builder-test: is_mutation_test_rel stops folding case",
      '    return norm(rel).lstrip("/").lower() in AUTHOR_MUTATION_TESTS', '    return norm(rel).lstrip("/") in AUTHOR_MUTATION_TESTS', "guard",
