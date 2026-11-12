@@ -29,7 +29,7 @@ Owner, 2026-11-01 16:30 CST, in chat to triage: "make it a standing thing that s
   - A shallow clone: red under `CI`.
   - A base that resolves but shares no history with the head (`merge-base` only): red under `CI`.
   - The first parent of a head that is a root commit (a first push to the default branch): clear under `CI` (lane call, 2026-11-12 08:29 CST, reversible). The range is empty by construction and no fetch can make a base, so there is nothing to check. It prints `stale-cites: no base, ...` and exits 0, not `UNKNOWN` and not `PASS`. A shallow clone is fetched first, because its head only looks like a root until it is unshallowed.
-  - Every other base that cannot be read is red after a fetch.
+- Every other base that cannot be read is red, with or without `CI`: exit 2 (case 2 above).
 - The base is a stem plus a first-parent suffix (`~`, `^`, `~1`, `^1`, a zero-padded `~01` too). The stem, read with `rev-parse`, must be the head's own commit.
   - Passes: `HEAD~1..HEAD`, `HEAD~1..<sha>`, `HEAD~1...<sha>`, `@~1..HEAD`, `HEAD~01..HEAD`.
   - Stays exit 2: `<another root>^1..HEAD`.
