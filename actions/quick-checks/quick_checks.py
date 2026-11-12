@@ -24,8 +24,10 @@ INLINE_LINK_START = re.compile(r"!?\[[^\]\n]*\]\(\s*")
 REFERENCE_LINK = re.compile(r"^ {0,3}\[(?!\^)[^\]\n]+\]:\s*(<[^>\n]*>|\S+)", re.M)
 CODE_SPAN = re.compile(r"(`+)(?:(?!\1).)+?\1")
 FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})")  # at any indent: a fence in a list item sits deeper than 3 spaces
-# The names tools read as JSON with comments: TypeScript and JavaScript configs, ESLint's, and the dev container's.
-JSONC_NAMES = ("tsconfig*.json", "jsconfig.json", ".eslintrc.json", "devcontainer.json")
+# The names tools read as JSON with comments: TypeScript and JavaScript configs, ESLint's, the dev container's, and the
+# VS Code files. A pattern with a slash matches the end of the path, since a bare settings.json is no VS Code file.
+JSONC_NAMES = ("tsconfig*.json", "jsconfig.json", ".eslintrc.json", "devcontainer.json", ".devcontainer.json",
+               ".vscode/settings.json", ".vscode/launch.json", ".vscode/tasks.json", ".vscode/extensions.json")
 EXTERNAL = re.compile(r"^(?:[a-zA-Z][a-zA-Z0-9+.-]*:|//|#)")  # a scheme, a protocol-relative URL, or a same-page anchor
 
 
@@ -132,10 +134,16 @@ def strip_comments(text):
     return "".join(out)
 
 
+def is_jsonc(path):
+    lowered = path.replace("\\", "/").lower()
+    return any(fnmatch.fnmatchcase("/" + lowered if "/" in pattern else os.path.basename(lowered),
+                                   "*/" + pattern if "/" in pattern else pattern) for pattern in JSONC_NAMES)
+
+
 def check_json(path, data):
     try:
         text = data.decode("utf-8-sig")  # a byte order mark is no part of the JSON
-        if any(fnmatch.fnmatchcase(os.path.basename(path).lower(), pattern) for pattern in JSONC_NAMES):
+        if is_jsonc(path):
             text = strip_comments(text)
         json.loads(text)
     except (ValueError, UnicodeDecodeError) as e:
