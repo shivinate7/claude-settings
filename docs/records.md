@@ -392,7 +392,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `map-py-base-name-match` | `py-facts.py` resolves an import by the module's last name. | [`docs/debts/map-py-base-name-match.md`](../docs/debts/map-py-base-name-match.md) |
 | `map-tested-by-no-shell` | MAP11 has no reader for a shell test. | [`docs/debts/map-tested-by-no-shell.md`](../docs/debts/map-tested-by-no-shell.md) |
 | `map-tested-by-path-pieces` | MAP11 counts only a whole path string. | [`docs/debts/map-tested-by-path-pieces.md`](../docs/debts/map-tested-by-path-pieces.md) |
-| `mcp-merge-no-repo-tag` | `mcp__github__merge_pull_request` is judged by green checks only (read hooks/guard.py judge; its clause calls `merge_check` in `hooks/guard_merge.py`). | [`docs/debts/mcp-merge-no-repo-tag.md`](../docs/debts/mcp-merge-no-repo-tag.md) |
+| `mcp-merge-no-repo-tag` | `mcp__github__merge_pull_request` has one merge test, the `MERGE_TOOLS` clause in `judge` (read `hooks/guard.py` `judge`). | [`docs/debts/mcp-merge-no-repo-tag.md`](../docs/debts/mcp-merge-no-repo-tag.md) |
 | `measured-time-table` | `bin/verdict` logs no kind, seconds and exit per run, and no table keeps measured times. | [`docs/debts/measured-time-table.md`](../docs/debts/measured-time-table.md) |
 | `merge-commit-skips-review` | While it resolved a merge of main into a lane branch, a builder pushed a logic change to `lint/report_guard.py`. | [`docs/debts/merge-commit-skips-review.md`](../docs/debts/merge-commit-skips-review.md) |
 | `merge-head-race-remains` | The race between a push and `gh pr ready` remains. | [`docs/debts/merge-head-race-remains.md`](../docs/debts/merge-head-race-remains.md) |
@@ -455,7 +455,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `upgrade-strips-name-port` | The version 1 to 2 upgrade removes `:N` after a name whose extension is in `codeExtensions`. | [`docs/debts/upgrade-strips-name-port.md`](../docs/debts/upgrade-strips-name-port.md) |
 | `verdict-rewritten-xcode-output` | `verdict` needs a sign of a test run to fail a run with no test count. | [`docs/debts/verdict-rewritten-xcode-output.md`](../docs/debts/verdict-rewritten-xcode-output.md) |
 | `windows-main-run-flakes` | Two main push runs went red on Windows only, and each blocked the next batch until a rerun went green. | [`docs/debts/windows-main-run-flakes.md`](../docs/debts/windows-main-run-flakes.md) |
-| `windows-shards-outgrow-caps` | Off pull_request, the guard suite runs in 3 Windows shards and the merge git-half suite in 5. | [`docs/debts/windows-shards-outgrow-caps.md`](../docs/debts/windows-shards-outgrow-caps.md) |
+| `windows-shards-outgrow-caps` | Off pull_request, the guard suite runs in 3 Windows shards (read .github/workflows/checks.yml:1453) and the merge git-half suite in 5 (read .github/workflows/checks.yml:1661). | [`docs/debts/windows-shards-outgrow-caps.md`](../docs/debts/windows-shards-outgrow-caps.md) |
 | `wp-batch-reads-installed-copy` | `stale_pages.py` batch mode (no `--page`) compares each live page with the `page.html` installed at session start, not with claude-settings main. | [`docs/debts/wp-batch-reads-installed-copy.md`](../docs/debts/wp-batch-reads-installed-copy.md) |
 
 ## Plans
