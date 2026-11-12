@@ -77,7 +77,7 @@ STAGED_KEY = "git diff --cached --stat"  # the stable fragment of the staged-dif
 WRITER_RULES = [
     "Standing rules for this agent:",
     STASH_LINE,
-    "- Push only with: git push origin HEAD:<branch>.",
+    "- Push only with: git push origin HEAD:<branch>, to the branch your brief's Push to: line names. Push to: none means never push.",
     "- Make no gh call unless your brief names it.",
     "- Report in 25 lines or fewer unless the brief sets a cap. Order: Done, Deviations, Input Needed, Next.",
     "- End each commit message with: Co-Authored-By: <model> <noreply@anthropic.com>",
@@ -287,6 +287,25 @@ RULES = [
 ]
 for _label, _parts in RULES:
     add(_label, "context", payload("builder"), rule_check(_parts))
+
+
+def push_line_check(parts):
+    """Build a check: the one push line holds every part, in the order given."""
+    def check(text):
+        found = [line for line in text.split("\n") if PUSH_KEY in line]
+        if len(found) != 1:
+            return "want one push line, got %d" % len(found)
+        if not has_line(found[0], *parts):
+            return "push line lacks %r in order: %r" % (parts, found[0][:120])
+        return None
+    return check
+
+
+# brief-names-push-target: the push line names the brief's Push to: line, and says that none means never push. The line
+# set above pins the exact wording; these two cases pin the words the rule depends on.
+add("push line: names the brief's Push to: line", "context", payload("builder"), push_line_check(("Push to:",)))
+add("push line: none means never push", "context", payload("builder"),
+    push_line_check(("Push to: none", "never push")))
 
 
 def line_set_check(expected, staged=False):
