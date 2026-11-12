@@ -97,11 +97,14 @@ CLEAN = [
     "rates valid until 2027-01-01", "skip previously seen keys", "cache the previously computed hash",
     "changed files only", "the user changed the value", "added to the queue after review of the input",
     "round 3 places", "used to compute the total",
-    # An example id names no commit, in a docstring or a comment. Each example marker before an id is its own case:
-    # dropping that marker from EXAMPLE flags its line. A list of ids after the marker joins it.
+    # An example id names no commit, in a docstring or a comment. Each example marker before an id is its own case,
+    # in any letter case: dropping that marker from EXAMPLE flags its line. A list of ids after the marker joins it,
+    # joined by commas, or, and or OR.
     "e.g. a short id such as `41ddef83`",
     "e.g. 41ddef83", "i.e. 41ddef83", "for example 41ddef83", "for instance 41ddef83", "like 41ddef83",
     "e.g. `aa11bb22`, 41ddef83",
+    "E.g. 41ddef83", "I.e. 41ddef83", "Such as 41ddef83", "For example 41ddef83", "For instance 41ddef83",
+    "Like 41ddef83", "LIKE 41ddef83", "e.g. 41ddef83 OR 03d62e85",
     "Effective date 2024-07-01 (per state rule)", "Effective: 2024-07-01", "Tax rule effective on 2024-07-01",
     "Expires 2027-01-01", "Keep the old behaviour for legacy accounts so existing invoices still match",
     "Skip when previously it was seen in this loop",
@@ -649,7 +652,12 @@ class ExampleIds(Case):
         ids = [self.example_id(i) for i in range(4000)]
         rc, out = self.scan_bounded("spaces.py", "e.g. " + " ".join(ids))
         self.assertNotIn("Traceback", out)
-        self.assertIn(rc, (0, 1), out)
+        self.assertEqual(rc, 1, "the list line is not flagged")
+        rows = [row for row in out.splitlines() if "commit hash:" in row]
+        self.assertEqual({row.split(": ", 1)[0] for row in rows}, {"spaces.py:2"}, "a hit is off the list line")
+        self.assertEqual(len(rows), 3999, "the first id is not skipped, or a later id is not flagged")
+        flagged = [row.split("commit hash: ", 1)[1].split(" ", 1)[0] for row in rows]
+        self.assertEqual(flagged, ids[1:], "the flagged ids are not the ids after the first")
 
 
 class Scanner(Case):
