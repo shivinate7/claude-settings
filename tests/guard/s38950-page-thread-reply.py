@@ -69,3 +69,11 @@ ptr_refuse("a reply on the waiting page at an http url is denied",
 # A reply with no url, in a repo that has a waiting page, is refused: nothing says which artifact it lands in.
 ptr_refuse("a reply with no url in a repo with a waiting page is denied",
            action="reply", thread_id=PTR_THREAD, text=PTR_TEXT)
+# A reply with no url, in a repo with no waiting page, names no page of this repo, so it is allowed. This pins the
+# has_waiting_page half of the no-url refusal: a mutant that refuses every no-url reply goes red here.
+add(PTR_NAME + "a reply with no url in a repo with no waiting page is allowed", "allow", None,
+    tool="ArtifactComments", cwd=NOGIT, action="reply", thread_id=PTR_THREAD, text=PTR_TEXT)
+# An empty url string names no artifact. It is a string, so the no-url branch does not see it: the page check must
+# refuse it on the url's own id, as a reply with no url is refused.
+ptr_refuse("a reply with an empty url in a repo with a waiting page is denied",
+           action="reply", url="", thread_id=PTR_THREAD, text=PTR_TEXT)
