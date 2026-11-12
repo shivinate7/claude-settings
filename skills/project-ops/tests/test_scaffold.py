@@ -775,6 +775,96 @@ class Protect(unittest.TestCase):
         self.assertEqual([(m, r) for m, r, _ in self.writes(calls)], [("PUT", REPO_RULESETS + "/101")],
                          "main's ruleset is on page 2: it is PUT, not POSTed as a second ruleset")
 
+    def test_a_ruleset_not_active_on_main_is_set_active(self):
+        for mode in ("disabled", "evaluate"):
+            with self.subTest(mode=mode):
+                stale = ruled_ruleset(9)
+                stale["enforcement"] = mode
+                code, out, calls = self.confirm(rulesets=[summary(9)], details={9: stale})
+                self.assertEqual(code, 0, out)
+                self.assertEqual([(m, r) for m, r, _ in self.writes(calls)], [("PUT", REPO_RULESETS + "/9")],
+                                 "a ruleset on main in %s mode is not in the ruled form, so it is PUT" % mode)
+                self.assertEqual(self.writes(calls)[0][2].get("enforcement"), "active", "the PUT sets the ruleset active")
+
+    def test_a_ruleset_requiring_other_checks_is_set_to_the_rollup_alone(self):
+        stale = ruled_ruleset(9)
+        stale["rules"][0] = {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": self.required()}, {"context": "lint"}]}}
+        code, out, calls = self.confirm(rulesets=[summary(9)], details={9: stale})
+        self.assertEqual(code, 0, out)
+        self.assertEqual([(m, r) for m, r, _ in self.writes(calls)], [("PUT", REPO_RULESETS + "/9")],
+                         "a ruleset that also requires lint is not in the ruled form, so it is PUT")
+        self.assertEqual(self.required_contexts(self.writes(calls)[0][2]), [self.required()], "the PUT requires the rollup alone")
+
+    def test_a_ruleset_missing_the_force_push_block_is_set(self):
+        stale = ruled_ruleset(9)
+        stale["rules"] = [r for r in stale["rules"] if r["type"] != "non_fast_forward"]
+        code, out, calls = self.confirm(rulesets=[summary(9)], details={9: stale})
+        self.assertEqual(code, 0, out)
+        self.assertEqual([(m, r) for m, r, _ in self.writes(calls)], [("PUT", REPO_RULESETS + "/9")],
+                         "a ruleset without the force-push block is not in the ruled form, so it is PUT")
+        self.assertIn("non_fast_forward", self.rule_types(self.writes(calls)[0][2]), "the PUT blocks force pushes to main")
+
+    def test_a_ruleset_with_another_bypass_is_set_to_the_admin_role_on_pull_requests(self):
+        wrong = {
+            "bypass on every push": [{"actor_type": "RepositoryRole", "actor_id": ADMIN_ROLE, "bypass_mode": "always"}],
+            "another role": [{"actor_type": "RepositoryRole", "actor_id": ADMIN_ROLE + 1, "bypass_mode": "pull_request"}],
+            "no bypass": [],
+        }
+        for name, actors in wrong.items():
+            with self.subTest(bypass=name):
+                stale = ruled_ruleset(9)
+                stale["bypass_actors"] = actors
+                code, out, calls = self.confirm(rulesets=[summary(9)], details={9: stale})
+                self.assertEqual(code, 0, out)
+                self.assertEqual([(m, r) for m, r, _ in self.writes(calls)], [("PUT", REPO_RULESETS + "/9")],
+                                 "a ruleset whose bypass is %s is not in the ruled form, so it is PUT" % name)
+                self.assertEqual(self.writes(calls)[0][2].get("bypass_actors"),
+                                 [{"actor_type": "RepositoryRole", "actor_id": ADMIN_ROLE, "bypass_mode": "pull_request"}],
+                                 "the PUT bypass is the Admin role on pull requests only")
+
+    def test_an_in_form_ruleset_with_extra_rules_is_left_alone(self):
+        ruled = ruled_ruleset(9)
+        ruled["rules"] += [{"type": "pull_request", "parameters": {"required_approving_review_count": 1}}, {"type": "required_signatures"}]
+        code, out, calls = self.confirm(rulesets=[summary(9)], details={9: ruled})
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.writes(calls), [], "a ruleset in the ruled form with rules the form does not name has nothing to set")
+
+    def test_a_put_keeps_the_other_rules_the_ruled_form_does_not_name(self):
+        stale = ruled_ruleset(9)
+        stale["rules"] = [r for r in stale["rules"] if r["type"] != "deletion"] + [{"type": "pull_request", "parameters": {"required_approving_review_count": 1}}]
+        code, out, calls = self.confirm(rulesets=[summary(9)], details={9: stale})
+        self.assertEqual(code, 0, out)
+        self.assertEqual([(m, r) for m, r, _ in self.writes(calls)], [("PUT", REPO_RULESETS + "/9")], "the stale ruleset is PUT in place")
+        self.assertIn("pull_request", self.rule_types(self.writes(calls)[0][2]), "the PUT keeps the held pull_request rule")
+
+    def test_a_put_keeps_the_strict_setting_of_the_held_required_checks(self):
+        stale = ruled_ruleset(9)
+        stale["rules"] = [r for r in stale["rules"] if r["type"] != "deletion"]
+        stale["rules"][0]["parameters"]["strict_required_status_checks_policy"] = True
+        code, out, calls = self.confirm(rulesets=[summary(9)], details={9: stale})
+        self.assertEqual(code, 0, out)
+        self.assertEqual([(m, r) for m, r, _ in self.writes(calls)], [("PUT", REPO_RULESETS + "/9")], "the stale ruleset is PUT in place")
+        strict = [r["parameters"].get("strict_required_status_checks_policy") for r in self.writes(calls)[0][2]["rules"] if r["type"] == "required_status_checks"]
+        self.assertEqual(strict, [True], "the PUT keeps the held strict setting")
+
+    def test_a_put_keeps_the_conditions_of_the_held_ruleset(self):
+        stale = ruled_ruleset(9)
+        stale["rules"] = [r for r in stale["rules"] if r["type"] != "deletion"]
+        stale["conditions"] = {"ref_name": {"include": ["refs/heads/main"], "exclude": ["refs/heads/hotfix-*"]}}
+        code, out, calls = self.confirm(rulesets=[summary(9)], details={9: stale})
+        self.assertEqual(code, 0, out)
+        self.assertEqual([(m, r) for m, r, _ in self.writes(calls)], [("PUT", REPO_RULESETS + "/9")], "the stale ruleset is PUT in place")
+        self.assertEqual(self.writes(calls)[0][2].get("conditions"), stale["conditions"], "the PUT keeps the held conditions")
+
+    def test_a_put_keeps_the_name_of_the_held_ruleset(self):
+        stale = ruled_ruleset(9)
+        stale["rules"] = [r for r in stale["rules"] if r["type"] != "deletion"]
+        stale["name"] = "main-guard"
+        code, out, calls = self.confirm(rulesets=[summary(9)], details={9: stale})
+        self.assertEqual(code, 0, out)
+        self.assertEqual([(m, r) for m, r, _ in self.writes(calls)], [("PUT", REPO_RULESETS + "/9")], "the stale ruleset is PUT in place")
+        self.assertEqual(self.writes(calls)[0][2].get("name"), "main-guard", "the PUT keeps the held ruleset's name")
+
     def test_a_ruleset_write_the_api_refuses_exits_1(self):
         code, out, calls = self.confirm(write_error=(1, "HTTP 422: Validation Failed"))
         self.assertEqual(code, 1, "a ruleset write the API refuses must exit 1\n" + out)
