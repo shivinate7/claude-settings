@@ -49,9 +49,11 @@ author date of the commit that last touched the line. A line whose blame commit 
 date: it is counted UNKNOWN and kept. A line not yet committed is seen today. The grammar and the window come from
 lint/check_record_slugs.py (repo `lint/`, installed `~/.claude/lint/`), the one home, loaded only in this mode. With
 `--confirm` it deletes the expired lines from the file and stops: it never commits, pushes or removes a branch, writes
-no run log, and refuses on the default branch and on a notes file with uncommitted changes. UNKNOWN lines do not change
-the exit code. Cost: one `git blame` per notes file, one rev-parse when a boundary line shows, a few ref reads and one
-git status with `--confirm`; no process left running and no log.
+no run log, and refuses on the default branch, on a detached HEAD, and on a notes file with uncommitted changes.
+UNKNOWN lines do not change the exit code. A notes file that HEAD does not hold counts its lines as seen today. Cost:
+one show-toplevel, one `git blame` per notes file, one rev-parse when a boundary line shows, one ls-tree when blame
+fails; with `--confirm`, the default-branch reads (a symbolic-ref and up to five rev-parse), one symbolic-ref of HEAD and
+one status of the notes file. No process left running and no log.
 
 With no ROOT and no `--discover`, the sweep reads `janitor.roots` from this repository's own
 settings.json. Absent, it discovers under every one of `~/Developer`, `~/Clones`, `~/src`,
@@ -3289,13 +3291,15 @@ def _notes_grammar():
 
 def _expire_refusal(root, notes_paths):
     """Why `--confirm` may not rewrite the notes files of the checkout `root`, else ''. It refuses on the default
-    branch, and on a notes file with uncommitted changes. A read that cannot run refuses too."""
+    branch, on a detached HEAD, and on a notes file with uncommitted changes. A read that cannot run refuses too."""
     base = git_reads.resolve_default_base(root)
     head = git_reads._git(root, "symbolic-ref", "-q", "--short", "HEAD")
-    if base is None or head is None:
+    if base is None or head is None or head.returncode not in (0, 1):
         return "git could not say which branch is the default or which is checked out"
-    branch = head.stdout.strip() if head.returncode == 0 else ""
-    if branch and branch == base.removeprefix("origin/"):
+    if head.returncode == 1:  # symbolic-ref -q exits 1 on a detached HEAD
+        return "HEAD is detached; no branch would merge the deletion"
+    branch = head.stdout.strip()
+    if branch == base.removeprefix("origin/"):
         return "HEAD is the default branch (%s); run it on a branch that will merge" % branch
     dirty = git_reads.porcelain(root, notes_paths)
     if dirty is None:
@@ -3323,7 +3327,7 @@ def expire_notes(root, confirm: bool, out=sys.stdout, err=sys.stderr) -> int:
     """The notes expiry of one checkout, decision notes-sightings-expiry. A preview lists each note whose last sighting is
     more than SEEN_EXPIRY_DAYS before today, and counts the UNKNOWN lines (a shallow clone cut their history). With
     `confirm` it also deletes the expired lines from the notes file and stops there: it never commits, pushes, or
-    removes a branch, and it writes no run log. It refuses on the default branch and on a dirty notes file.
+    removes a branch, and it writes no run log. It refuses on the default branch, on a detached HEAD and on a dirty notes file.
     UNKNOWN lines are never deleted and never change the exit code. Cost: one `git blame` per notes file, and one
     rev-parse when a boundary line shows. Returns the exit code."""
     grammar = _notes_grammar()
@@ -3416,8 +3420,8 @@ def main(argv=None) -> int:
     modes.add_argument("--expire-notes", action="store_true", dest="expire_notes",
                        help="only the notes' expiry: list each note in the checkout's notes file whose last "
                             "sighting is more than 30 days old; with --confirm, delete those lines from the file "
-                            "(never commits, pushes or removes a branch; refuses on the default branch and on a "
-                            "dirty notes file). Takes --root or ROOT, the checkout itself, never a discovered one")
+                            "(never commits, pushes or removes a branch; refuses on the default branch, on a "
+                            "detached HEAD and on a dirty notes file). Takes --root or ROOT, the checkout itself, never a discovered one")
     parser.add_argument("--settings-path", metavar="PATH",
                          help="testing only: overrides the settings.json read for janitor.roots")
     args = parser.parse_args(argv)
