@@ -4839,13 +4839,13 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", co
             raise Stop(f"--on {on}: {on} has no open pull request that holds a frozen block, so it is not a running batch. {FREEZE_CITE}")
     found = found or h.batch_pr(branch)
     if found is None:
-        if len(numbers) > 1:  # a first build only: on a rerun or --ready the batch exists, and a refusal would strand it
+        if len(numbers) > 1 or on:  # a first build only: on a rerun or --ready the batch exists, and a refusal would strand it. A lane stacked on a running batch is not alone
             guards = {n: hits for n in numbers if (hits := guard_hits([p for p, _, _ in h.pr_files(n, infos[n].get("changed_files"))]))}
             if guards:
                 raise Stop(f"a lane that changes a guard or check builds alone, so batch {name} is not built:\n"
                            + "\n".join(f"#{n} changes {', '.join(hits)}" for n, hits in sorted(guards.items()))
-                           + "\nBuild each of those lanes alone, one batch per lane:\n"
-                           + "\n".join(f"  merge --batch-build {name} {n}" for n in sorted(guards))
+                           + "\nBuild each of those lanes alone, one batch per lane, and not on a running batch:\n"
+                           + "\n".join(f"  merge --batch-build {name}-{n} {n}" + (f" --base {base}" if base != "main" else "") for n in sorted(guards))
                            + f"\nNothing was pushed or created. {FREEZE_CITE}")
         start = fetch_branch(root, on or base, FREEZE_CITE)
         for n in numbers:
