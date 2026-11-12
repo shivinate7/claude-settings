@@ -3,8 +3,8 @@ FAMILY = "rule9"  # the lane start cases keep rule 9's family, as the lane cases
 
 # ---- Lane start, open pull requests (rule lane-start-open-pr; step lane-start-checks-open-pr).
 # A create_session whose `tags` hold a `cs-step:<slug>` tag (`tags` may be one string) reads the open pull requests of
-# the calling checkout's repo ONCE, with exactly this argv:
-#     gh pr list --repo shivinate7/claude-settings --state open --json number,title,body,headRefName,isDraft --limit 100
+# the calling checkout's repo ONCE, as one REST page of 100 with exactly this argv:
+#     gh api -X GET repos/shivinate7/claude-settings/pulls -f state=open -f per_page=100
 # under a timeout of 10 s or less. A pull request HITS when the slug is a whole token in its title or its head branch
 # (the bare slug or `lane/<slug>`), or in a body line that is a step marker line: `Step: <slug>`, `Lane: <slug>` or
 # `cs-step:<slug>`, backticks allowed. A slug named elsewhere in a body is not a hit. A cited pull request (`#<n>` or
@@ -26,8 +26,7 @@ FAMILY = "rule9"  # the lane start cases keep rule 9's family, as the lane cases
 # `Step outbox-ruling-home-check (owner ...`, with no colon. #1552 names no step at all, so case 2 adds one marker
 # line naming its step, as the nearest shape the marker grammar reads. The synthetic holder in
 # the two-holder case is constructed.
-GH_ARGS = ["pr", "list", "--repo", "shivinate7/claude-settings", "--state", "open",
-           "--json", "number,title,body,headRefName,isDraft", "--limit", "100"]
+GH_ARGS = ["api", "-X", "GET", "repos/shivinate7/claude-settings/pulls", "-f", "state=open", "-f", "per_page=100"]
 GH_TIMEOUT_MAX = 10
 LOP_RULE = "lane-start-open-pr"
 LOP_STEP = "cs-step:"
@@ -94,6 +93,18 @@ PR_FULL_SIZE = [{"number": n, "title": "Unrelated %d" % n, "body": "", "headRefN
                 for n in range(1, 100)] + [
     {"number": 100, "title": "Holds the step", "body": "Step: " + SLUG_OUTBOX, "headRefName": "holds-step",
      "isDraft": False}]
+# A full page of 100 with no holder, and the same page with the holder at position 50.
+PR_FULL_UNRELATED = [{"number": n, "title": "Unrelated %d" % n, "body": "", "headRefName": "feat%d" % n,
+                      "isDraft": False} for n in range(1, 101)]
+PR_FULL_MID = [dict(row, title="Holds the step", body="Step: " + SLUG_OUTBOX, headRefName="holds-step")
+               if row["number"] == 50 else row for row in PR_FULL_UNRELATED]
+# Step markers that the body reader must take or leave: bold `Step:`, a heading, and bold `See` as prose.
+PR_MARK_BOLD = dict(PR_SYNTHETIC, number=2810, title="Constructed marker", body="**Step:** " + SLUG_OUTBOX,
+                    headRefName="feat2810")
+PR_MARK_HEAD = dict(PR_SYNTHETIC, number=2811, title="Constructed heading", body="## Step " + SLUG_OUTBOX,
+                    headRefName="feat2811")
+PR_MARK_SEE = dict(PR_SYNTHETIC, number=2812, title="Constructed prose",
+                   body="**See** " + SLUG_OUTBOX + " for the older attempt.", headRefName="feat2812")
 
 CITE_NUM = LANE_PROMPT + "\nThe brief cites PR #2767 and holds this start."
 CITE_URL = LANE_PROMPT + "\nThe brief cites https://github.com/shivinate7/claude-settings/pull/2767."
@@ -164,8 +175,11 @@ def lop_input(prompt=LANE_PROMPT, slug=SLUG_OUTBOX, lane=True, step=True, tags=N
 
 
 def lop_gh(prs):
-    """The stub's answer to the one gh read: the open pull requests, as gh prints them."""
-    return {"mode": "ok", "stdout": json.dumps(prs)}
+    """The stub's answer to the one gh read: the open pull requests as the REST list prints them (number, title, body,
+    head.ref, draft). The fixture rows keep their own field names; this reshapes them to the REST keys."""
+    rest = [{"number": pr.get("number"), "title": pr.get("title"), "body": pr.get("body"),
+             "head": {"ref": pr.get("headRefName")}, "draft": pr.get("isDraft")} for pr in prs]
+    return {"mode": "ok", "stdout": json.dumps(rest)}
 
 
 def lop_run(tool, tool_input, cwd, gh, override=False):
@@ -211,9 +225,15 @@ def lop_run(tool, tool_input, cwd, gh, override=False):
         shutil.rmtree(run, ignore_errors=True)
 
 
-def lop_check(run, want_calls, want_decision, reasons=(), absent=(), warn=False):
+def lop_git_children(run):
+    """The git child processes a run started, by the probe's own count."""
+    return [child for child in run["children"] if child.lstrip("[").lstrip("'\"").startswith("git")]
+
+
+def lop_check(run, want_calls, want_decision, reasons=(), absent=(), warn=False, files=None, git_children=None):
     """(ok, message) for one run. The scope first: the gh calls, their argv and their timeout. Then the decision, the
-    reason fragments, the absent fragments and the warning. Each failure names one cause."""
+    reason fragments, the absent fragments, the warning, the file names a run wrote (`files`, basenames) and the git
+    child count. Each failure names one cause."""
     if run["rc"] != 0:
         return False, "the guard exited %d: %s" % (run["rc"], run["stderr"].strip()[-160:])
     if want_calls is not None and len(run["calls"]) != want_calls:
@@ -236,13 +256,20 @@ def lop_check(run, want_calls, want_decision, reasons=(), absent=(), warn=False)
         lines = [line for line in run["stderr"].splitlines() if line.strip()]
         if len(lines) != 1 or LOP_RULE not in lines[0]:
             return False, "stderr holds %d line(s), want one warning line that names %s" % (len(lines), LOP_RULE)
+    if files is not None:
+        written = sorted(os.path.basename(path) for path in run["files"])
+        if written != sorted(files):
+            return False, "run wrote %s, want exactly %s" % (written, sorted(files))
+    if git_children is not None and len(lop_git_children(run)) != git_children:
+        return False, "%d git child process(es), want %d" % (len(lop_git_children(run)), git_children)
     return True, "gh called %d time(s), decided %s" % (len(run["calls"]), run["decision"])
 
 
 def lop_case(label, tool_input, gh, want_calls=1, want_decision="deny", reasons=(), absent=(), warn=False,
-             cwd=LANE_REPO, tool=LANE_TOOL):
+             cwd=LANE_REPO, tool=LANE_TOOL, files=None):
     def check():
-        return lop_check(lop_run(tool, tool_input, cwd, gh), want_calls, want_decision, reasons, absent, warn)
+        return lop_check(lop_run(tool, tool_input, cwd, gh), want_calls, want_decision, reasons, absent, warn,
+                         files=files)
     LOG_CHECKS_EXTRA.append((label, check))
 
 
@@ -288,16 +315,19 @@ lop_case("lane-start-open-pr: a longer head branch lane/<slug>-2 does not match 
 # ---- Fail open. Each failure kind passes, and prints one warning line that names the rule. #2767 would hit, so an
 # allow here proves the failure, not a missed hit, passed the start.
 # A missing gh may be found by which() and never run, so its scope is either no call or one call that raises.
-lop_case("lane-start-open-pr: gh missing fails open with one warning line",
-         lop_input(), {"mode": "missing"}, want_calls=None, want_decision="allow", warn=True)
-lop_case("lane-start-open-pr: gh exiting non-zero fails open with one warning line",
-         lop_input(), {"mode": "exit", "stdout": "", "stderr": "gh: boom"}, want_decision="allow", warn=True)
-lop_case("lane-start-open-pr: gh timing out fails open with one warning line",
-         lop_input(), {"mode": "timeout"}, want_decision="allow", warn=True)
-lop_case("lane-start-open-pr: gh printing bad JSON fails open with one warning line",
-         lop_input(), {"mode": "ok", "stdout": "not json"}, want_decision="allow", warn=True)
-lop_case("lane-start-open-pr: a checkout with no repo reads no gh and fails open with one warning line",
-         lop_input(), lop_gh([PR_2767]), want_calls=0, want_decision="allow", warn=True, cwd=LOP_NOORIGIN)
+# Each fail-open run writes exactly one new file, the guard's own log, which holds the line the pass leaves.
+lop_case("lane-start-open-pr: gh missing fails open with one warning line and one guard.log line",
+         lop_input(), {"mode": "missing"}, want_calls=None, want_decision="allow", warn=True, files=("guard.log",))
+lop_case("lane-start-open-pr: gh exiting non-zero fails open with one warning line and one guard.log line",
+         lop_input(), {"mode": "exit", "stdout": "", "stderr": "gh: boom"}, want_decision="allow", warn=True,
+         files=("guard.log",))
+lop_case("lane-start-open-pr: gh timing out fails open with one warning line and one guard.log line",
+         lop_input(), {"mode": "timeout"}, want_decision="allow", warn=True, files=("guard.log",))
+lop_case("lane-start-open-pr: gh printing bad JSON fails open with one warning line and one guard.log line",
+         lop_input(), {"mode": "ok", "stdout": "not json"}, want_decision="allow", warn=True, files=("guard.log",))
+lop_case("lane-start-open-pr: a checkout with no repo reads no gh and fails open with one warning and one guard.log line",
+         lop_input(), lop_gh([PR_2767]), want_calls=0, want_decision="allow", warn=True, cwd=LOP_NOORIGIN,
+         files=("guard.log",))
 
 # ---- Controls and scope. No step tag, or a call that is not create_session, never reads gh.
 lop_case("lane-start-open-pr: a lane start with no step tag never reads gh, and is allowed",
@@ -313,6 +343,27 @@ lop_case("lane-start-open-pr: with 100 open pull requests, the 100th naming the 
          lop_input(), lop_gh(PR_FULL_SIZE), reasons=("#100",))
 lop_case("lane-start-open-pr: two uncited holders are both named in the reason",
          lop_input(), lop_gh([PR_2767, PR_SYNTHETIC]), reasons=("#2767", "#2801"))
+lop_case("lane-start-open-pr: a full page of 100 open pull requests with no holder allows the start with one warning",
+         lop_input(), lop_gh(PR_FULL_UNRELATED), want_decision="allow", warn=True, files=("guard.log",))
+lop_case("lane-start-open-pr: a holder at position 50 of a full page of 100 still refuses the start",
+         lop_input(), lop_gh(PR_FULL_MID), reasons=("#50",))
+
+# ---- Step markers. A bold `Step:` and a heading `## Step` are markers; bold `See` before the slug is prose.
+lop_case("lane-start-open-pr: a body line `**Step:** <slug>` is a marker, so an uncited start is refused",
+         lop_input(), lop_gh([PR_MARK_BOLD]), reasons=("#2810",))
+lop_case("lane-start-open-pr: a heading `## Step <slug>` is a marker, so an uncited start is refused",
+         lop_input(), lop_gh([PR_MARK_HEAD]), reasons=("#2811",))
+lop_case("lane-start-open-pr: `**See** <slug>` is prose, not a marker, so the start is allowed",
+         lop_input(), lop_gh([PR_MARK_SEE]), want_decision="allow")
+
+
+def lop_git_check():
+    """A lane start with a step tag reads the checkout's repo once, so it starts one git child, not two."""
+    run = lop_run(LANE_TOOL, lop_input(prompt=CITE_NUM, step=True), LANE_REPO, lop_gh([PR_2767]))
+    return lop_check(run, 1, "allow", git_children=1)
+
+
+LOG_CHECKS_EXTRA.append(("lane-start-open-pr: a lane start with a step tag starts one git child, not two", lop_git_check))
 
 
 def lop_override_check():
