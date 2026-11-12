@@ -19,14 +19,19 @@ A `declared` store is named but no call point runs it yet.
 - Shared tests: `home-held` (the item's home is a tracked file or `step:<slug>` on some ref),
   `until-date` (a dated claim past its date), `cite-resolves` (an id cite still names a record),
   `copy-matches-live` (a copy equals its live source).
-- Command line: `python3 lint/tending.py --point <call point> [--store S] [--root R]`; exit 1 when a store
-  with `state: live` and `runs-from` naming the point holds a stale item that its close step cannot fix, or
-  when the contract itself is malformed.
+- Verdicts are per line, so a repeated id never merges two lines; `close` marks only a stale line.
+- Command line: `python3 lint/tending.py --point <call point> [--store S] [--root R]`. A store runs only
+  when its `state` is `live` and its `runs-from` names the point. Exit 1 when the contract is malformed, a
+  live store's file is missing, or (at `merge-check`) a live store holds a stale item. `merge-check` writes
+  nothing; `stop`, `compact` and `triage-status` close stale lines. A file that cannot be read (non-UTF-8)
+  or a bullet line whose shape the item regex misses prints `unknown <store>: <why>` and exits 0. A store
+  asked for by `--store` that does not run at the point prints `skipped <store>: <why>`. A store with
+  `where: external:<name>` has no file: the caller supplies the text.
 
 ## Cost (proved by a test)
 
 No new timer, watcher or process. Call points import the module in the process they already run.
-The merge check adds one step to an existing CI job. Files written: only the store's own file, and only by
+The merge check adds two steps (the fixture suite and the contract check) to the existing `checks` job. Files written: only the store's own file, and only by
 the close step, only when a verdict changed. Reads: the store file plus the reads its `home-held`
 test already makes.
 
