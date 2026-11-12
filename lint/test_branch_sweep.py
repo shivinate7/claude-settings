@@ -28,7 +28,7 @@ Cost model, which the fake follows: each tip read and each DELETE spends one req
 none. Branch k's delete is judged on the budget that stands before its own tip read, so it goes ahead when that budget
 is at least the reserve. The cases model only this route. A read of the X-RateLimit-Remaining header is not modeled.
 A stop prints a line that carries the deletes done and the deletes left as two numbers. The cases match the two
-numbers on one line and do not pin the words. An unreadable budget (an HTTP refusal, an empty body, no remaining
+numbers on one line, the deletes done first, and do not pin the words. A branch whose tip moved is kept, so it is left, not done. An unreadable budget (an HTTP refusal, an empty body, no remaining
 field, or a non-integer) stops green with a line that says unknown.
 Run: python3 lint/test_branch_sweep.py
 """
@@ -239,9 +239,10 @@ def expected_deletes(names, budget, reserve):
 
 
 def stop_line(done, deleted_n, left_n):
-    """The line of a step's output that carries both counts, the deletes done and the deletes left. "" when none does."""
+    """The line of a step's output that carries the deletes done, then the deletes left. "" when none does. The order
+    matters: with equal counts, or two counts that are each other's swap, a line with the numbers in another order passes."""
     for line in (done.stdout + done.stderr).splitlines():
-        if re.search(r"\b%d\b" % deleted_n, line) and re.search(r"\b%d\b" % left_n, line):
+        if re.search(r"\b%d\b.*\b%d\b" % (deleted_n, left_n), line):
             return line
     return ""
 
@@ -705,6 +706,51 @@ class DeleteStep(unittest.TestCase):
     def test_budget_stop_full_size_sweep(self):
         names = ["feature/" + chr(97 + i // 26) + chr(97 + i % 26) for i in range(60)]  # about one run's worth of lanes
         self.assert_budget_stop(names, RESERVE + 61)
+
+    def test_stop_line_counts_a_moved_tip_as_left(self):
+        # Budget RESERVE + 3. feature/a's tip moved, so it is kept, yet it spends two requests. feature/b is deleted,
+        # then the budget falls below the reserve before feature/c: one branch done, three left.
+        names = ["feature/a", "feature/b", "feature/c", "feature/d"]
+        done, log, verdict_text = self.run_workflow(names, [], tip_reads={"feature/a": "moved"}, budget=RESERVE + 3)
+        self.assertEqual(deletes(verdict_text), names, "scope: the sweep named other deletes")
+        self.assertEqual(deleted(delete_calls(log)), ["feature/b"],
+                         "a moved tip, then a budget stop: the DELETE calls were not feature/b alone")
+        self.assertTrue(stop_line(done, 1, 3),
+                        "a moved tip counted as done: no stop line names 1 deletes done and 3 left")
+
+    def test_stop_line_counts_a_branch_kept_mid_run_as_left(self):
+        # Budget RESERVE + 4. feature/a is deleted, feature/b's tip moved so it is kept, feature/c is deleted, then the
+        # budget falls below the reserve before feature/d: two done, two left.
+        names = ["feature/a", "feature/b", "feature/c", "feature/d"]
+        done, log, verdict_text = self.run_workflow(names, [], tip_reads={"feature/b": "moved"}, budget=RESERVE + 4)
+        self.assertEqual(deletes(verdict_text), names, "scope: the sweep named other deletes")
+        self.assertEqual(deleted(delete_calls(log)), ["feature/a", "feature/c"],
+                         "a branch kept mid-run: the DELETE calls were not feature/a and feature/c")
+        self.assertTrue(stop_line(done, 2, 2),
+                        "a branch kept mid-run counted as done: no stop line names 2 deletes done and 2 left")
+
+    def test_stop_line_full_size_counts_a_moved_tip_as_left(self):
+        names = ["feature/lane-%02d" % i for i in range(60)]  # about one run's worth of lanes
+        moved = "feature/lane-01"
+        # Branch k is judged on RESERVE + 59 - 2k, so branches 0 to 29 pass the budget check and branch 30 stops.
+        want = [name for name in names[:30] if name != moved]
+        done, log, verdict_text = self.run_workflow(names, [], tip_reads={moved: "moved"}, budget=RESERVE + 59)
+        self.assertEqual(deletes(verdict_text), names, "scope: the sweep named other deletes")
+        self.assertEqual(deleted(delete_calls(log)), want,
+                         "a moved tip in a full-size sweep: the DELETE calls were not the 29 lanes the budget allows")
+        self.assertTrue(stop_line(done, len(want), len(names) - len(want)),
+                        "a moved tip counted as done in a full-size sweep: no stop line names %d deletes done and %d left"
+                        % (len(want), len(names) - len(want)))
+
+    def test_kept_verdict_is_not_counted_as_left(self):
+        # Control, green on the old code. A keep verdict never enters the delete loop, so the stop line counts the
+        # deletes only: two done, one left.
+        names = ["feature/a", "feature/b", "feature/c"]
+        done, log, verdict_text = self.run_workflow(names, [], kept=["feature/k"], budget=RESERVE + 3)
+        self.assertEqual(deletes(verdict_text), names, "scope: the sweep named other deletes")
+        self.assertEqual(deleted(delete_calls(log)), ["feature/a", "feature/b"],
+                         "a budget of RESERVE + 3 with a keep verdict: the DELETE calls were not feature/a and feature/b")
+        self.assertTrue(stop_line(done, 2, 1), "a keep verdict: no stop line names 2 deletes done and 1 left")
 
     def test_budget_at_the_reserve_continues(self):
         done, log, verdict_text = self.run_workflow(["feature/a"], [], kept=["feature/k"], budget=RESERVE)
