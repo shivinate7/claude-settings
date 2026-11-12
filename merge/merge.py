@@ -21,9 +21,12 @@
                           sha. Posts nothing: the lane posts it as a PR comment. --fix-check adds the optional `Fix check:` line after
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
                           unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
-                          PR's issue comments since the PR opened; or (a fix after a merge of main) that record reads done with a PASS Fix check line and SHA is a merge commit whose first
+                          PR's issue comments since the PR opened; or the PR has no record at all and SHA holds HEAD (a PR opened after
+                          the review: HEAD may predate the PR; the record still owes its round); or (a fix after a merge of main) that record reads done with a PASS Fix check line and SHA is a merge commit whose first
                           parent is HEAD and whose second parent is on the base, with no edit beyond git's own merge (a merge that conflicts may edit its conflicted paths only).
-                          MODEL must be sonnet on every record (exit 2 otherwise).
+                          --fix-check MODEL must be sonnet (exit 2 otherwise). A reviewer's round 2 takes sonnet only; round 3, or a granted round 4,
+                          may take opus (decision agent-model-cap); round 1 takes any MODEL. `merge --reviewed` reads a Fix check PASS that has no
+                          round line beside it with the round of the earlier record on the same PR whose Head is the Fix check's HEAD.
                           A review log stays done when the live head differs from its Head only by clean merges of main: each
                           commit after Head is a merge with two parents, its second parent on main and its tree `git merge-tree --write-tree` of them.
                           Any commit with one parent ends the walk as stale. `merge --reviewed` proves it
@@ -3897,6 +3900,20 @@ def parse_review(text):
         return None
     return {"n": int(n), "head": head, "kind": kind, "guard": guard, "rounds": rounds, "net": net.group(1), "fix": fix, "grant": grant}
 
+def newest_review(bodies):
+    """-> the parsed newest record of `bodies` (one pull request's review record texts, oldest first), None when it does not parse. The one home of
+    that read, for `merge --reviewed`, the --root blocks and the lane Stop hook. A newest record with a Fix check line, no round and no Grant line
+    takes the rounds of the newest earlier record on the same pull request whose Head is the fix check's reviewed head and that has no Fix check
+    line: a lane may log the round and the fix check at different heads (step review-record-fix-check-reads). Its own Kind, Guard or check and Net
+    value stay. Cost: one parse per record, no read."""
+    recs = [parse_review(b) for b in bodies]
+    rec = recs[-1]
+    if rec and rec["fix"] and not rec["rounds"] and not rec["grant"]:
+        for old in reversed(recs[:-1]):
+            if old and old["n"] == rec["n"] and old["head"] == rec["fix"][0] and old["rounds"] and not old["fix"]:
+                return {**rec, "rounds": old["rounds"]}
+    return rec
+
 def review_state(rec, head):
     """-> (state, why) of a parsed record against the PR's live `head`. States: bad (rec is None), stale, held, done, open.
     The done rules follow roles-review-cap-three and the decision pr-review-record: the last round is all PASS, or a fix check PASS counts as that round
@@ -4076,7 +4093,7 @@ def reviewed_read(h):
         if not bodies:
             bare.append(f"#{n}")
             continue
-        rec = parse_review(bodies[-1])
+        rec = newest_review(bodies)
         rec = rec if rec and rec["n"] == n else None
         state, why = live_review_state(h, rec, sha, main)
         if state == "done":
@@ -4330,7 +4347,7 @@ def release_check(root, h, numbers, lints, root_why=None):
                 out.append("no review record")
             else:
                 body, created, updated = rows[-1]  # only the newest record counts
-                rec = parse_review(body)
+                rec = newest_review([r[0] for r in rows])
                 rec = rec if rec and rec["n"] == n else None
                 state, why = live_review_state(h, rec, i["head"], default) if default else review_state(rec, i["head"])  # no default branch read: no walk, the why of that read follows below
                 if state != "done":
@@ -5317,7 +5334,9 @@ def main(argv, host=None, lock=None, hosts=None):
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed
                 earlier = [parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
                 last = earlier[-1] if earlier else None
-                if not last or last["head"] != a.fix_check[0]:
+                if not earlier:  # a PR opened after the review has no record to name the verified head: it may predate the PR, so the new head must hold it
+                    ok = h.holds_head(a.fix_check[0], a.head)
+                elif not last or last["head"] != a.fix_check[0]:
                     ok = False
                 elif not last["fix"]:
                     ok = True

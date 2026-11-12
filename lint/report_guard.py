@@ -2643,7 +2643,7 @@ def _newest_record(n, comments, merge_mod):
     (None, None); a marked comment that does not parse is (None, its body), so the caller needs no second read."""
     bodies = [c.get("body") or "" for c in comments if isinstance(c, dict)]
     marked = [b for b in bodies if b.splitlines()[:1] == [merge_mod.REVIEW_MARKER]]
-    return (merge_mod.parse_review(marked[-1]), marked[-1]) if marked else (None, None)
+    return (merge_mod.newest_review(marked), marked[-1]) if marked else (None, None)  # newest_review: a fix check in a later log reads the earlier log's round
 
 
 def _text_after_ci_line(body, merge_mod):
