@@ -82,8 +82,9 @@ guard rule, so the watcher does the waiting and the session is told once.
   exec'd another command, `( git fetch & git fetch )`, reads as a waiter. A shebang script (`./deploy.sh`,
   `#!/bin/sh`) is a shell too: on Linux the interpreter in argv[0] decides (runs_shell), since the ps `comm`
   column gives the script's file name; elsewhere the comm decides alone. The check adds no process, and at
-  most one small read per process with a non-shell comm and a live child. Stop counts a waiter as life too, by the same check (has_waiter),
-  at the job's holder root as well as under it, so a job whose shell exec'd the waiter is not listed.
+  most one small read per process with a non-shell comm and a live child. Stop counts a waiter as life too,
+  by the same check (has_waiter). It looks at the job's holder root as well as under it, so a job whose
+  shell exec'd the waiter is not listed.
   Limit: a waiter over a hung child is never ended or reported.
   A lone pause is life until its command's first output: a job that is one `sleep N` and one command
   (`sleep 420; gh api ...`, joined by `;`, `&&` or a newline; the command a simple command or a pipeline) is
