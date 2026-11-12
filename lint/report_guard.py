@@ -707,14 +707,16 @@ def _claims_answered(plain):
 def _prose_lines(text, questions=False):
     """Each line of `text` that is the reply's own prose, as its body: no blockquote marker, outside fenced code, and not
     a line that ends in `?` (a question claims nothing), unless `questions` keeps those for a reader that judges a
-    sentence at a time. The one line reader of the answered and cannot-claim checks."""
+    sentence at a time. The one line reader of the answered, cannot-claim and promise checks. A fence marker with no
+    closing partner is a stray: it opens nothing, so it never hides the lines after it."""
+    bodies = [QUOTE_PREFIX.sub("", line, count=1).strip() for line in text.splitlines()]
     fence = ""
-    for line in text.splitlines():
-        body = QUOTE_PREFIX.sub("", line, count=1).strip()
+    for i, body in enumerate(bodies):
         marker = body[:3] if body[:3] in ("```", "~~~") else ""
-        if marker and (not fence or marker == fence):
-            fence = "" if fence else marker
-            continue
+        if marker and (fence or marker in (b[:3] for b in bodies[i + 1:])):
+            if not fence or marker == fence:
+                fence = "" if fence else marker
+                continue
         if fence or (not questions and body.rstrip("*_)\"' ").endswith("?")):
             continue
         yield body
@@ -752,22 +754,29 @@ PROMISE_REASON = (
     "or hook now and cite its PR or commit on the line, queue it as step:<slug>, or drop the promise. Lines: ")
 
 
+# A line that reports what someone else's handoff said ("The handoff file said from now on the page is exported")
+# makes no promise in this session; only that adjacent form is cut, so a promise later on the same line still counts.
+# "my handoff says ..." is the session's own promise written down, so a first-person subject is kept.
+PROMISE_REPORT_RE = re.compile(
+    r"(?<![\w-])((?:my|our)\s+)?handoff(?:\s+file)?\s+(?:said|says|wrote|writes|stated|states)\s+(?:that\s+)?"
+    r"from\s+now\s+on(?![\w-])", re.I)
+
+
+def _without_reports(text):
+    return PROMISE_REPORT_RE.sub(lambda m: m.group(0) if m.group(1) else " ", text)
+
+
 def promise_problem(text):
     """The refusal for reply lines that promise "from now on" with only a handoff as home, else ''."""
     if not PROMISE_RE.search(text):
         return ""
-    bad, fence = [], ""
-    for line in text.splitlines():
-        body = QUOTE_PREFIX.sub("", line, count=1).strip()
-        marker = body[:3] if body[:3] in ("```", "~~~") else ""
-        if marker and (not fence or marker == fence):
-            fence = "" if fence else marker
-            continue
-        if fence or body.rstrip("*_)\"' ").endswith("?"):
-            continue
-        unwrapped = CODE_SPAN.sub(lambda m: m.group(2), body)
-        named = PROMISE_LABEL_RE.sub(" ", QUOTED_RE.sub(" ", unwrapped))
-        if not (PROMISE_RE.search(QUOTED_RE.sub(" ", CODE_SPAN.sub(" ", body)))
+    bad = []
+    for body in _prose_lines(text):
+        body_own = _without_reports(body)
+        unwrapped = CODE_SPAN.sub(lambda m: m.group(2), body_own)
+        # A quoted "handoff" still names the home; only a quoted promise is someone else's words.
+        named = PROMISE_LABEL_RE.sub(" ", unwrapped)
+        if not (PROMISE_RE.search(QUOTED_RE.sub(" ", CODE_SPAN.sub(" ", body_own)))
                 and PROMISE_HANDOFF_RE.search(named)):
             continue
         kept = " ".join(t for t in unwrapped.split()
