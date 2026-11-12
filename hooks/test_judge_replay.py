@@ -10,8 +10,11 @@ The runner, as the builder writes it. This file is its interface.
   {"allow": ..., "deny": ...}}, for each name in NAMES. Each scope holds hooks/decision_watch.py, the one model seam, and
   the judge's own module file. Each answer is one model answer, in the judge's own shape, that reads every case as allow
   or as deny.
-- A corpus is a JSON list of cases {"id": str, "expect": "allow" or "deny", "source": str, "input": object}, with an
-  optional "agreement": str. Ids are unique in a file, and a corpus holds an allow case and a deny case.
+- A corpus is a JSON list of cases {"id": str, "expect": "allow" or "deny", "source": str, "input": object,
+  "agreement": str such as "3/3"}. Ids are unique in a file, and a corpus holds an allow case and a deny case. Each case
+  carries its recorded verdict: its expect, and its agreement from a recorded run.
+- The page judge has no corpus file while step judge-replay-page-cases is pending. Its row runs zero cases and reads
+  "no cases yet", and a judge with no corpus file reads the same way.
 - touched(paths): the sorted names whose scope holds a path, whose corpus is a path, or, for hooks/judge_replay.py, all.
 - replay(name, runs=1): one row per case, {"id", "expect", "got", "verdict"}. got is allow, deny or unknown. Each model
   call goes through decision_watch.invoke_model, looked up at call time, so this file replaces it. Every judge makes one
@@ -71,6 +74,19 @@ OWN_FILES = {
     "sendmessage_state": ("hooks/sendmessage_state.py",),
     "decision_watch": ("hooks/decision_watch.py",),
 }
+# The page judge has no corpus file until step judge-replay-page-cases adds its cases after a CI dispatch. Its row runs
+# zero cases and says so, while the other judges keep their corpora. These are the pinned numbers while that step is pending.
+PENDING_JUDGE = "call_judge.page"
+PENDING_TEXT = "pending step judge-replay-page-cases"
+NO_CASES = "no cases yet"
+JUDGE_COUNT = 11  # every JUDGES row, the pending judge's included
+CORPUS_JUDGES = 10  # the judges with a corpus file while the page judge is pending
+CORPUS_CASES = 53  # their cases: 7 + 4 + 6 + 7 + 4 + 4 + 5 + 6 + 4 + 6
+FEEDS_CALL_JUDGE = ("call_judge.opus_ask", "call_judge.opus_scope", "call_judge.page", "call_judge.question",
+                    "call_judge.spawn", "report_guard.past_ruling")  # the judges whose scope holds hooks/call_judge.py
+PROBE_JUDGE = "no_corpus_probe"  # a judge row added for one case, whose corpus path has no file
+ROW = re.compile(r"^  (PASS|MISS|UNKNOWN)\s")
+HEADER = re.compile(r"^(\S+) \(\d+ cases?, ")
 TOUCH = (
     ([], []),
     (["README.md"], []),
@@ -81,6 +97,7 @@ TOUCH = (
     (["hooks/shared_names.py"], "all"),
     (["hooks/guard.py"], "all"),
     (["hooks/_nowindow.py"], "all"),  # every judge's model call starts in it (decision_watch.run calls _nowindow.run)
+    (["hooks/call_judge.py"], list(FEEDS_CALL_JUDGE)),  # the page judge's module, with the judges it feeds
 )
 NO_AUTH = (None, "no auth")
 # lint/test_ci_scope.py pins the CI scope's judge_replay flag, so it names the runner by that flag. It wires nothing.
@@ -284,15 +301,21 @@ def case_corpora():
         if name not in judges:
             continue
         entry = judges[name] if isinstance(judges[name], dict) else {}
-        rel = "%s/%s.json" % (CORPUS_DIR, name)
+        rel = corpus_rel(name)
         check("corpus path is %s: %s" % (rel, name), entry.get("corpus") == rel,
               "corpus is %r" % (entry.get("corpus"),))
+        if name == PENDING_JUDGE:
+            check("corpus file absent while pending: %s" % name, not corpus_present(name),
+                  "%s exists; its cases are the pending step's to add" % rel)
+            continue
         cases, problem = load_corpus(name)
         check("corpus reads: %s" % name, cases is not None, problem)
         if cases is None:
             continue
         shape = shape_problem(cases)
         check("corpus cases well formed: %s" % name, not shape, shape)
+        recorded = recorded_problem(cases)
+        check("corpus cases carry a recorded verdict: %s" % name, not recorded, recorded)
         ids = [repr(case.get("id")) for case in cases if isinstance(case, dict)]
         repeated = sorted({i for i in ids if ids.count(i) > 1})
         check("corpus ids unique: %s" % name, not repeated, "repeated ids: %s" % ", ".join(repeated))
@@ -342,9 +365,15 @@ def case_scopes():
         need = [SEAM] + list(OWN_FILES[name])
         lacks = [p for p in need if p not in scope]
         check("scope holds the seam and its module: %s" % name, not lacks, "scope lacks %s" % ", ".join(lacks))
-        gone = [p for p in scope
-                if os.path.isabs(p) or ".." in p.split("/") or not os.path.exists(os.path.join(REPO, p))]
+        # The pending judge's corpus file is the step's to add, so its path may not exist yet. The path stays in its scope,
+        # so the file, once added, touches the judge.
+        absent_ok = corpus_rel(name) if name == PENDING_JUDGE else None
+        gone = [p for p in scope if p != absent_ok
+                and (os.path.isabs(p) or ".." in p.split("/") or not os.path.exists(os.path.join(REPO, p)))]
         check("scope paths exist: %s" % name, not gone, "no such path: %s" % ", ".join(gone))
+        if name == PENDING_JUDGE:
+            check("scope holds the pending corpus path: %s" % name, absent_ok in scope,
+                  "scope lacks %s" % absent_ok)
 
 
 def case_touched():
@@ -370,6 +399,8 @@ def case_no_auth_rows():
     if judges is None:
         return
     for name in NAMES:
+        if name == PENDING_JUDGE:
+            continue  # its zero-case row is pinned by case_pending_judge_reads_no_cases
         cases, problem = load_corpus(name)
         if cases is None:
             check("no-auth rows: %s" % name, False, problem)
@@ -633,6 +664,8 @@ def case_each_judge_answer_reads_as_its_own_verdict():
     if judges is None:
         return
     for name in sorted(judges):
+        if name == PENDING_JUDGE:
+            continue  # its zero-case rows are pinned by case_pending_judge_reads_no_cases
         row = judges[name] if isinstance(judges[name], dict) else {}
         answers = row.get("answers") if isinstance(row.get("answers"), dict) else {}
         cases, problem = load_corpus(name)
@@ -742,6 +775,168 @@ def case_replay_model_error_is_no_answer_for_its_run():
         judge_replay.load_corpus = saved_load
 
 
+def corpus_rel(name):
+    return "%s/%s.json" % (CORPUS_DIR, name)
+
+
+def corpus_present(name):
+    return os.path.isfile(os.path.join(REPO, *corpus_rel(name).split("/")))
+
+
+def recorded_problem(cases):
+    """The first case with no recorded verdict, or "" when every case has one: an expect of allow or deny, and an agreement
+    such as "3/3" from its recorded run."""
+    if not isinstance(cases, list):
+        return "not a list"
+    for index, case in enumerate(cases):
+        if not isinstance(case, dict):
+            return "case %d is not an object" % index
+        agreement = case.get("agreement")
+        if case.get("expect") in ("allow", "deny") and isinstance(agreement, str) and re.fullmatch(r"\d+/\d+", agreement):
+            continue
+        return "case %r has no recorded verdict" % (case.get("id"),)
+    return ""
+
+
+def runner_output(argv, answer=NO_AUTH):
+    """(exit code, output, model calls, error) of run_main(argv), with CI unset and the model faked as `answer`. error is the
+    text of an exception the runner raised, or None."""
+    code, error = None, None
+    with ci_env(None), faked_model(answer) as calls, contextlib.redirect_stdout(io.StringIO()) as out:
+        try:
+            code = run_main(argv)
+        except Exception as exc:  # a raise is a failed check, named by the caller
+            error = "raised %s: %s" % (type(exc).__name__, " ".join(str(exc).split()))
+    return code, out.getvalue(), calls, error
+
+
+def judge_block(text, name):
+    """The output lines of judge `name`: its header line, then the indented lines under it, up to the next header."""
+    block, inside = [], False
+    for line in text.splitlines():
+        if line.startswith(name + " ("):
+            block, inside = [line], True
+        elif inside and line.startswith(" "):
+            block.append(line)
+        else:
+            inside = False
+    return block
+
+
+def judges_headed(text):
+    """The sorted names of the judges whose header lines the runner printed."""
+    return sorted(m.group(1) for m in map(HEADER.match, text.splitlines()) if m)
+
+
+def check_pending_block(label, text):
+    """The page judge's row in runner output `text`: it runs zero cases, has no case rows, reads NO_CASES, and names the
+    pending step."""
+    block = judge_block(text, PENDING_JUDGE)
+    joined = "\n".join(block)
+    check("%s: the page row runs zero cases" % label, bool(block) and block[0].startswith(PENDING_JUDGE + " (0 cases,"),
+          joined or text[-200:])
+    rows = [line for line in block if ROW.match(line)]
+    check("%s: the page row has no case rows" % label, not rows, "%d case rows" % len(rows))
+    check("%s: the page row reads %r" % (label, NO_CASES), NO_CASES in joined, joined or text[-200:])
+    check("%s: the page row names %r" % (label, PENDING_TEXT), PENDING_TEXT in joined, joined or text[-200:])
+
+
+@contextlib.contextmanager
+def judge_row_added(name, row):
+    """JUDGES[name] = row for one case, removed after."""
+    judge_replay.JUDGES[name] = row
+    try:
+        yield
+    finally:
+        judge_replay.JUDGES.pop(name, None)
+
+
+def case_pending_judge_reads_no_cases():
+    """The page judge's corpus is the pending step's to add. Under either answer its row runs zero cases, names the step,
+    makes no model call, and exits 0: zero cases is no MISS and no UNKNOWN."""
+    label = "--judge %s" % PENDING_JUDGE
+    judges = judges_or_fail(label)
+    if judges is None:
+        return
+    answers = (judges.get(PENDING_JUDGE) or {}).get("answers") or {}
+    for key in ("allow", "deny"):
+        tag = "under the %s answer" % key
+        if key not in answers:
+            check("%s: JUDGES holds the %s answer" % (label, key), False, "no %r answer" % key)
+            continue
+        model_answer = json.loads(json.dumps(answers[key]))  # a copy, so the judge cannot change the table
+        code, text, calls, error = runner_output(["--judge", PENDING_JUDGE], answer=(model_answer, None))
+        check("%s: does not raise %s" % (label, tag), error is None, error or "")
+        check_pending_block("%s %s" % (label, tag), text)
+        check("%s: makes no model call %s" % (label, tag), not calls, "%d model calls" % len(calls))
+        check("%s: exits 0 %s" % (label, tag), code == 0, "exit %r" % (code,))
+
+
+def case_corpus_counts_while_page_pending():
+    """Ten judges hold a corpus file, with 53 cases between them. The runner's --all total reads 53 cases, lists all eleven
+    judges, and lists the page judge as pending."""
+    label = "corpus counts while %s is pending" % PENDING_JUDGE
+    if need_runner(label) is None:
+        return
+    have = [name for name in NAMES if corpus_present(name)]
+    check("%s: %d judges have a corpus file" % (label, CORPUS_JUDGES), len(have) == CORPUS_JUDGES,
+          "%d have one: %s" % (len(have), ", ".join(have)))
+    total = 0
+    for name in have:
+        cases, _ = load_corpus(name)
+        total += len(cases or [])
+    check("%s: the corpora hold %d cases" % (label, CORPUS_CASES), total == CORPUS_CASES, "%d cases" % total)
+    _, text, _, error = runner_output(["--all"])
+    check("--all: the runner does not raise", error is None, error or "")
+    found = re.search(r"^\d+ cases:.*$", text, re.MULTILINE)
+    check("--all totals %d cases" % CORPUS_CASES, bool(found) and found.group(0).startswith("%d cases:" % CORPUS_CASES),
+          found.group(0) if found else text[-200:])
+    listed = judges_headed(text)
+    check("--all lists %d judges" % JUDGE_COUNT, len(listed) == JUDGE_COUNT, "%d judges listed" % len(listed))
+    check_pending_block("--all", text)
+
+
+def case_judge_without_corpus_reads_no_cases():
+    """A judge whose corpus file is missing runs zero cases: the runner does not raise, its row reads NO_CASES, the scope
+    check still names it, and it makes no model call."""
+    label = "a judge with no corpus file"
+    judges = judges_or_fail(label)
+    if judges is None:
+        return
+    row = {"corpus": corpus_rel(PROBE_JUDGE), "scope": [SEAM], "adapter": judges["prose_judge"]["adapter"], "answers": {}}
+    check("%s: the probe's corpus file is absent (fixture)" % label, not corpus_present(PROBE_JUDGE),
+          "%s exists" % row["corpus"])
+    with judge_row_added(PROBE_JUDGE, row):
+        _, text, calls, error = runner_output(["--judge", PROBE_JUDGE])
+        scoped = judge_replay.touched([SEAM])
+    check("%s: the scope check names it" % label, PROBE_JUDGE in scoped, "touched gave %s" % ", ".join(scoped))
+    check("%s: the runner does not raise" % label, error is None, error or "")
+    block = judge_block(text, PROBE_JUDGE)
+    check("%s: its row reads %r" % (label, NO_CASES), any(NO_CASES in line for line in block),
+          "\n".join(block) or text[-200:])
+    check("%s: it makes no model call" % label, not calls, "%d model calls" % len(calls))
+
+
+def case_changed_page_judge_file_runs_no_page_cases():
+    """A change to hooks/call_judge.py replays the judges whose scope holds it. The page judge is one of them, and its row
+    runs zero cases and says so."""
+    label = "--changed on hooks/call_judge.py"
+    if need_runner(label) is None:
+        return
+    saved = judge_replay.changed_paths, judge_replay.pin_changed
+    judge_replay.changed_paths = lambda base: ["hooks/call_judge.py"]
+    judge_replay.pin_changed = lambda base: False  # the diff moves no pin, so the judges come from the scope lists
+    try:
+        _, text, _, error = runner_output(["--changed", "HEAD~1"])
+    finally:
+        judge_replay.changed_paths, judge_replay.pin_changed = saved
+    check("%s: the runner does not raise" % label, error is None, error or "")
+    fed = judges_headed(text)
+    check("%s: replays the judges whose scope holds it" % label, fed == sorted(FEEDS_CALL_JUDGE),
+          "replayed %s" % ", ".join(fed))
+    check_pending_block(label, text)
+
+
 CASES = (case_seam_control, case_corpora, case_corpus_not_under_hooks, case_scopes, case_touched, case_no_auth_rows,
          case_cli_exit_follows_ci, case_cli_changed_head, case_runner_named_nowhere_else,
          case_feedback_bad_entry_reads_unknown, case_feedback_clean_answer_reads_no_unknown,
@@ -749,7 +944,9 @@ CASES = (case_seam_control, case_corpora, case_corpus_not_under_hooks, case_scop
          case_wording_prompt_text_is_not_copied, case_pin_change_checks_yml_names_every_judge,
          case_pin_change_package_names_every_judge, case_probe_names_the_secret_and_the_item,
          case_each_judge_answer_reads_as_its_own_verdict, case_majority_takes_the_verdict_of_the_runs,
-         case_replay_model_error_is_no_answer_for_its_run)
+         case_replay_model_error_is_no_answer_for_its_run, case_pending_judge_reads_no_cases,
+         case_corpus_counts_while_page_pending, case_judge_without_corpus_reads_no_cases,
+         case_changed_page_judge_file_runs_no_page_cases)
 
 
 def main():

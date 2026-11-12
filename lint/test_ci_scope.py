@@ -671,6 +671,11 @@ class JudgeReplayFlag(unittest.TestCase):
         # Every judge's model call starts in this file (decision_watch.run calls _nowindow.run), so a change to it replays them.
         self.assertEqual(self.flag(run(["hooks/_nowindow.py"])), "true")
 
+    def test_a_page_judge_file_change_turns_it_on(self):
+        # hooks/call_judge.py feeds the page judge and its siblings. The page judge has no corpus file yet, and the change still
+        # replays the judges it feeds, so the flag stays on.
+        self.assertEqual(self.flag(run(["hooks/call_judge.py"])), "true")
+
 
 # The judge-replay job of checks.yml, read by the house parser (lint/workflow_steps.py).
 WORKFLOW = os.path.join(HERE, "..", ".github", "workflows", "checks.yml")
