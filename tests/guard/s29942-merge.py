@@ -177,6 +177,29 @@ scope_case("a lane the owner started that tags itself and does not read its reco
 sh("merge-confirm-repo: a lane the owner started with no cs-repo tag is denied, and its remedy names the owner-started lane",
    f"{MERGE_SHIM} 5 --confirm", "deny", rule=REPO_RULE, cwd=LANE_PROXY, transcript=LONE_UNTAGGED, env=CLOUD_ENV,
    carries=OWNER_LANE_ASK)
+# The same refusal tells the lane to tag itself: a lane has no cs-repo tag of its own until it sets one, and get_session only reads the
+# tags it has. The remedy names set_session_tags and the cs-repo tag, and the re-read of the record comes after the tag is set.
+LONE_UNTAGGED_NAME = "merge-confirm-repo: a lane the owner started with no cs-repo tag is refused, and its remedy tags the lane, then re-reads it"
+sh(LONE_UNTAGGED_NAME, f"{MERGE_SHIM} 5 --confirm", "deny", rule=REPO_RULE, cwd=LANE_PROXY, transcript=LONE_UNTAGGED, env=CLOUD_ENV,
+   carries=("set_session_tags", "cs-repo:"), lacks=LONE_LACKS)
+
+
+def lone_remedy_order_case():
+    """The printed refusal of the lone lane with no cs-repo tag names set_session_tags, and a get_session after it: the lane tags itself,
+    then re-reads its record. The case is the one registered above, decided again here so the order is read from the printed reason."""
+    named = [case for case in CASES if case["name"] == LONE_UNTAGGED_NAME]
+    if len(named) != 1:
+        return False, "the lone-lane case %r is registered %d times, want once" % (LONE_UNTAGGED_NAME, len(named))
+    _decision, reason = decide(named[0])
+    tag = reason.find("set_session_tags")
+    if tag < 0:
+        return False, "the lone-lane refusal names no set_session_tags, so the lane is not told to tag itself"
+    if reason.find("get_session", tag) < 0:
+        return False, "the lone-lane refusal names no get_session after set_session_tags, so the lane is not told to re-read its record"
+    return True, "the lone-lane refusal says the lane tags itself, then re-reads its record"
+
+
+LOG_CHECKS_EXTRA.append(("merge-confirm-repo: the lone-lane refusal tags the lane, then re-reads its record", lone_remedy_order_case))
 
 # The head check of a lane the owner started. Its confirm must name, with --head, a head that is the tip of a branch in the checkout the
 # merge acts in: the head it built and pushed. The merge tool requires --head for the batch-runner role and compares it with the PR's live

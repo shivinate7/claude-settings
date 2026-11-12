@@ -494,6 +494,37 @@ class SessionStartMergeRoleTests(unittest.TestCase):
     def test_the_hand_off_sentence_does_not_say_any_other_session(self):
         self.assertNotIn("any other session", self.hand_off_sentence().lower(), "the hand-off sentence says any other session hands off")
 
+    def lane_tag_sentence(self):
+        """The tier line's one sentence that tags a lane with its cs-repo tag: it names set_session_tags and cs-repo:. Asserts that scope."""
+        found = [s for s in sentences(hook_role_line()) if "set_session_tags" in s and "cs-repo:" in s]
+        self.assertEqual(len(found), 1, "expected one sentence that tags a lane with cs-repo: and set_session_tags, found %d: %r"
+                         % (len(found), found))
+        return found[0]
+
+    # A lane the owner started has no cs-repo tag until it sets one, and get_session reads only the tags it holds. The tier line tells it to
+    # tag itself on its own id, then re-read its record, in one sentence that names no condition of the lane (the parent, tagged_after, the
+    # cs-build tag): those stay out of the refusals, and the tier line says the same.
+    def test_the_tier_line_tells_a_lane_to_tag_itself_with_its_cs_repo_tag(self):
+        self.lane_tag_sentence()
+
+    def test_the_lane_tag_sentence_is_followed_by_a_re_read_of_the_record(self):
+        line = hook_role_line()
+        sentence = self.lane_tag_sentence()
+        after = line[line.index(sentence) + len(sentence):]
+        tail = sentence[sentence.index("set_session_tags"):] + after
+        self.assertIn("get_session", tail, "no get_session after the lane's set_session_tags: %r" % tail)
+
+    def test_the_lane_tag_sentence_names_no_parent(self):
+        self.assertNotIn("parent", self.lane_tag_sentence().lower(), "the lane tag sentence names a parent: %r" % self.lane_tag_sentence())
+
+    def test_the_lane_tag_sentence_names_no_tagged_after(self):
+        self.assertNotIn("tagged_after", self.lane_tag_sentence().lower(), "the lane tag sentence names tagged_after")
+
+    def test_the_lane_tag_sentence_names_no_cs_build_tag_condition(self):
+        sentence = self.lane_tag_sentence().lower()
+        for fragment in ("no cs-build tag", "no-cs-build-tag"):
+            self.assertNotIn(fragment, sentence, "the lane tag sentence names the condition %r: %r" % (fragment, sentence))
+
     def test_the_tier_line_says_the_role_is_recorded_again_after_a_resume(self):
         # A resumed session keeps its id, but the role file may be gone (a fresh container): the line must not say the call is a one-time act.
         sentence = merge_role_sentence(hook_role_line())
