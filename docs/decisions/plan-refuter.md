@@ -50,7 +50,7 @@ build against the brief and cannot catch it.
 
 ## Cost
 
-One Opus call per plan, at high effort. No file, timer, process or log.
+One Opus call per plan, at high effort (unmeasured). No file, timer, process or log.
 
 ## Done check
 
