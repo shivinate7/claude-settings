@@ -550,6 +550,48 @@ workflow_at 4953 checks scope-guard:37
 t green failure-run-cleared-by-a-newer-green-with-its-cap-end-under-the-cap-is-quiet "" "" ""
 cost failure-run-cleared-by-a-newer-green-with-its-cap-end-under-the-cap-reads-its-workflow-file 2 2 2
 
+# A cap end in an earlier attempt of a failure run that a newer green run clears still opens the cap-only alarm. The newest
+# attempt of the failed run does not hold that cap end; the attempts endpoint does. The control has the same shape with the
+# cancelled job under its cap, and stays quiet.
+runs_are "$(gh_run ci success 2026-01-02 https://runs/cleared-retry-green-5100 schedule 5100)" "$(gh_run ci failure 2026-01-01 https://runs/cleared-retry-red-5101 push 5101 completed 2)"
+attempt_jobs_of 5101 1 scope-guard:cancelled:40
+jobs_of 5101 checks:failure scope-guard:success
+jobs_of 5100 checks:success scope-guard:success
+workflow_at 5101 checks scope-guard:37
+workflow_at 5100 checks scope-guard:37
+t alarm cleared-failure-run-with-a-cap-end-in-attempt-1-opens-the-cap-alarm "" "" "$(printf '%s\n' '--title CI job hit its time cap on main: scope-guard --body' 'job scope-guard ran 40 min, cap 37 min, run 5101')"
+runs_are "$(gh_run ci success 2026-01-02 https://runs/cleared-retry-under-green-5110 schedule 5110)" "$(gh_run ci failure 2026-01-01 https://runs/cleared-retry-under-red-5111 push 5111 completed 2)"
+attempt_jobs_of 5111 1 scope-guard:cancelled:2
+jobs_of 5111 checks:failure scope-guard:success
+jobs_of 5110 checks:success scope-guard:success
+workflow_at 5111 checks scope-guard:37
+workflow_at 5110 checks scope-guard:37
+t green cleared-failure-run-with-attempt-1-cancelled-under-its-cap-is-quiet "" "" ""
+
+# A cleared failure run whose cap end cannot be judged is unknown: a warning and no issue, never green. Here the cancelled job
+# has no start time, so its run time cannot be read.
+runs_are "$(gh_run ci success 2026-01-02 https://runs/cleared-never-green-5120 schedule 5120)" "$(gh_run ci failure 2026-01-01 https://runs/cleared-never-red-5121 push 5121)"
+jobs_of 5121 checks:failure scope-guard:cancelled:never
+jobs_of 5120 checks:success scope-guard:success
+workflow_at 5121 checks scope-guard:37
+workflow_at 5120 checks scope-guard:37
+t unknown cleared-failure-run-with-a-cap-job-that-never-started-is-unknown-not-green "" "" ""
+# Here only the failed run's workflow file is unreadable. The fail glob matches that one contents read, so the clearing run's
+# file still reads and the clear is still judged, and the cap end is what cannot be.
+runs_are "$(gh_run ci success 2026-01-02 https://runs/cleared-nofile-green-5130 schedule 5130)" "$(gh_run ci failure 2026-01-01 https://runs/cleared-nofile-red-5131 push 5131)"
+jobs_of 5131 checks:failure scope-guard:cancelled:40
+jobs_of 5130 checks:success scope-guard:success
+workflow_at 5131 checks scope-guard:37
+workflow_at 5130 checks scope-guard:37
+t unknown cleared-failure-run-whose-workflow-file-is-unreadable-is-unknown-not-green "api *ref=$(printf '%040x' 5131)" "" ""
+# An earlier attempt that cannot be read may hold a cap end, so the cleared failure run is unknown, never green.
+runs_are "$(gh_run ci success 2026-01-02 https://runs/cleared-unread-green-5140 schedule 5140)" "$(gh_run ci failure 2026-01-01 https://runs/cleared-unread-red-5141 push 5141 completed 2)"
+jobs_of 5141 checks:failure scope-guard:success
+jobs_of 5140 checks:success scope-guard:success
+workflow_at 5141 checks scope-guard:37
+workflow_at 5140 checks scope-guard:37
+t unknown cleared-failure-run-with-attempt-1-unread-is-unknown-not-green "api *attempts/1/jobs*" "" ""
+
 # Reads per judged run, counted in the call log (the reads the alarm made, not the text of its description). One jobs read per
 # judged run. A failed run with a red job and no clear candidate starts no python3. A run cleared by a candidate reads the
 # candidate's jobs once and its workflow file once, and starts clear_rule.py twice (the red-stays step, then the clear step).
