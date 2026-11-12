@@ -178,6 +178,10 @@ class Workflow(unittest.TestCase):
         text = variant('> "$RUNNER_TEMP/open-heads.txt"\n', '> "$RUNNER_TEMP/open-heads.txt" || true\n')
         self.assertFinding(text, "read", "the open-PR read ends in || true, so a failed read passes")
 
+    def test_read_step_with_or_echo_is_flagged(self):
+        text = variant('> "$RUNNER_TEMP/open-heads.txt"\n', '> "$RUNNER_TEMP/open-heads.txt" || echo "the read failed"\n')
+        self.assertFinding(text, "read", "the open-PR read ends in || echo, so a failed read passes")
+
     def test_read_step_with_continue_on_error_is_flagged(self):
         text = variant("      - name: Read the heads of open pull requests\n",
                        "      - name: Read the heads of open pull requests\n        continue-on-error: true\n")
