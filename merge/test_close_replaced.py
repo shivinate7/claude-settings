@@ -20,6 +20,7 @@ from test_merge import PullsHost, batch_pull, batch_lines_of, green, running, re
 REPLACED, CARRIED, REOPENED = "close as replaced: ", "close as carried: ", "reopen: "
 CARRIED_UNKNOWN = "close as carried unknown "
 BATCH_HEAD = "batch-nightly"  # the head ref of an open batch: only a head `batch-*` holds a frozen block that counts (frozen_lanes)
+BATCH_LINE_KINDS = ("open batch now: ", "build next batch on the running head: ", "batch line unknown ")  # the three starts of the batch line
 
 
 def head_of(n):
@@ -392,7 +393,9 @@ class CarrySkipsFrozen(CloseEnv):
     """A done draft that an open batch's frozen block lists (`Lane: #N <head>`, as merge --batch-build writes it) is held by that batch, so it
     closes nothing, at the head the block lists. Only an open pull request whose head is a batch (`batch-*`) holds a block that counts: a body
     that quotes one, or a lone marker, on any other head is read as nothing. A done draft that no open batch lists still closes under its holder.
-    Batch #9 is a draft on head BATCH_HEAD in every case here, unless a case says otherwise."""
+    Batch #9 is a draft on head BATCH_HEAD in every case here, unless a case says otherwise.
+    A lane that open batches list at two heads is held at each of them, whatever the open list order. An unreadable block in an open batch
+    makes only the carried line unknown: the batch line still prints."""
 
     def wake_run(self, pulls, done, compares, closed=()):
         """-> (rc, output, err) of a wake over `pulls`. The numbers in `done` are done drafts: a record and a lane lint at their head, CI green."""
@@ -406,6 +409,23 @@ class CarrySkipsFrozen(CloseEnv):
         rc, out, err = self.wake_run(pulls, done, compares, closed)
         self.assertEqual(rc, 0, out + err)
         return block_of(self, out, "o/alpha")
+
+    def lane_held_by_ten(self):
+        """Control: lane #5 at NEW is in no open batch, and open ready #10 holds NEW. -> the carried lines, which name #10 when it closes #5."""
+        new = head_of(5)
+        return kind_lines(self.wake([named_pull(5, new, draft=True), named_pull(10, head_of(10))], [5], {(new, head_of(10)): "ahead"}), CARRIED)
+
+    def two_batch_lines(self, order, frozen=True):
+        """-> the carried lines of a wake over lane #5 (a done draft at NEW) and two open batch drafts, listed in `order` (e.g. (9, 8)).
+        Batch #9 (head BATCH_HEAD) freezes #5 at NEW, and #9 holds NEW. Batch #8 (head batch-older) freezes #5 at OLD, which is head_of(14).
+        With `frozen` False both bodies are empty, so no batch freezes #5 and #9 holds it on its own."""
+        new = head_of(5)
+        body9 = freeze_body(freeze_inner("nightly", [(5, new)])) if frozen else ""
+        body8 = freeze_body(freeze_inner("older", [(5, head_of(14))])) if frozen else ""
+        rows = {9: named_pull(9, head_of(9), body=body9, draft=True, head_ref=BATCH_HEAD),
+                8: named_pull(8, head_of(8), body=body8, draft=True, head_ref="batch-older")}
+        pulls = [named_pull(5, new, draft=True), *(rows[n] for n in order)]
+        return kind_lines(self.wake(pulls, [5], {(new, head_of(9)): "ahead"}), CARRIED)
 
     def test_a_done_draft_frozen_in_an_open_batch_closes_nothing(self):
         frozen = freeze_body(freeze_inner("nightly", [(5, head_of(5)), (6, head_of(6))]))
@@ -472,6 +492,22 @@ class CarrySkipsFrozen(CloseEnv):
         self.assertEqual(lines(new), [], "control: a lane frozen at its current head closed as carried")
         self.assertEqual(lines(head_of(14)), ["close as carried: o/alpha #5 by #10"], "a lane frozen at an older head is still held by the batch")
 
+    def test_a_lane_frozen_at_its_head_by_batch_nine_closes_nothing_with_open_list_nine_then_eight(self):
+        # Probe: lane #5 at NEW is frozen at NEW in open batch #9, and an older open batch #8 froze #5 at an old head. The open list is [#9, #8].
+        # frozen_lanes keeps one head per lane, so #8's head wins and #5 reads as moved: it closes under #9. The controls: a lane in no batch
+        # closes under ready #10, and with both bodies empty #9 holds #5 and closes it, so the freeze is what holds #5.
+        self.assertEqual(self.lane_held_by_ten(), ["close as carried: o/alpha #5 by #10"], "control: a lane in no open batch is not closed by ready #10")
+        self.assertEqual(self.two_batch_lines((9, 8), frozen=False), ["close as carried: o/alpha #5 by #9"], "control: with no freeze, #9 does not hold lane #5")
+        self.assertEqual(self.two_batch_lines((9, 8)), [],
+                         "a lane that open batch #9 freezes at its head closed as carried, with the open list [#9, #8] and an older batch #8 that froze it at an old head")
+
+    def test_a_lane_frozen_at_its_head_by_batch_nine_closes_nothing_with_open_list_eight_then_nine(self):
+        # The reverse open-list order of the case above. A fix that keeps the first head of a lane passes that case and fails this one.
+        self.assertEqual(self.lane_held_by_ten(), ["close as carried: o/alpha #5 by #10"], "control: a lane in no open batch is not closed by ready #10")
+        self.assertEqual(self.two_batch_lines((8, 9), frozen=False), ["close as carried: o/alpha #5 by #9"], "control: with no freeze, #9 does not hold lane #5")
+        self.assertEqual(self.two_batch_lines((8, 9)), [],
+                         "a lane that open batch #9 freezes at its head closed as carried, with the open list [#8, #9] and an older batch #8 that froze it at an old head")
+
     def test_a_non_batch_pull_request_that_quotes_a_block_freezes_nothing(self):
         # Probe: open #7 on head feat7 (not a batch) quotes a whole block that lists lane #5 at its head. #5 closes under ready #8.
         # Control: the same body on a batch head holds #5, so it closes nothing.
@@ -488,18 +524,44 @@ class CarrySkipsFrozen(CloseEnv):
     def test_a_malformed_block_in_an_open_batch_head_prints_carried_unknown_and_exits_one(self):
         # Pins the body source of `close as carried unknown`: a frozen block in an open batch head that this tool cannot read makes the carried
         # close unknown, with a reason that names the block, and the run exits 1. Control: the batch head with a readable block exits 0.
+        # The batch line stays as the readable control's: the unreadable block does not make it unknown.
         others = [named_pull(5, head_of(5), draft=True), named_pull(8, head_of(8))]
         compares = {(head_of(5), head_of(8)): "ahead"}
         readable = freeze_body(freeze_inner("nightly", [(5, head_of(5))]))
         rc, out, err = self.wake_run([*others, named_pull(9, head_of(9), body=readable, draft=True, head_ref=BATCH_HEAD)], [5], compares)
         self.assertEqual(rc, 0, "control: a readable block in open batch #9 exits 1:\n" + out + err)
+        control_batch = [l for l in block_of(self, out, "o/alpha") if l.startswith(BATCH_LINE_KINDS)]
         rc, out, err = self.wake_run([*others, named_pull(9, head_of(9), body=BATCH_BEGIN + "\n", draft=True, head_ref=BATCH_HEAD)], [5], compares)
         block = block_of(self, out, "o/alpha")
         unknown = kind_lines(block, CARRIED_UNKNOWN)
         self.assertEqual(len(unknown), 1, "no `close as carried unknown (...)` line for the malformed block in open batch #9:\n" + "\n".join(block))
         self.assertRegex(unknown[0], r"^close as carried unknown \(.*(marker|frozen block).*\)$", "the unknown line does not name the frozen block:\n" + unknown[0])
+        batch = [l for l in block if l.startswith(BATCH_LINE_KINDS)]
+        self.assertEqual(batch, control_batch, "a malformed block in open batch #9 changed the batch line from its readable control:\n" + "\n".join(block))
         self.assertEqual(rc, 1, "a malformed block in open batch #9 does not exit 1:\n" + out + err)
         self.assertEqual(kind_lines(block, CARRIED), [], "a close line printed while the block of open batch #9 is unknown:\n" + "\n".join(block))
+
+    def test_a_malformed_block_in_an_open_batch_keeps_the_batch_line_for_a_lane_with_no_holder(self):
+        # Cry-wolf cost: one unreadable block in an open batch must not make the whole batch line unknown. Done draft #5 has no holder, so the batch
+        # line still names it. Only the carried line is unknown, and the run exits 1. Control: an empty body in open batch #9 prints the batch line, exit 0.
+
+        def wake_with(body):
+            pulls = [named_pull(5, head_of(5), draft=True), named_pull(9, head_of(9), body=body, draft=True, head_ref=BATCH_HEAD)]
+            rc, out, err = self.wake_run(pulls, [5], {})
+            return rc, block_of(self, out, "o/alpha"), out + err
+
+        rc, block, text = wake_with("")
+        self.assertEqual(rc, 0, "control: an empty body in open batch #9 exits 1:\n" + text)
+        self.assertEqual(kind_lines(block, "open batch now: "), ["open batch now: o/alpha #5"], "control: the batch line does not name done draft #5:\n" + text)
+
+        rc, block, text = wake_with(BATCH_BEGIN + "\n")
+        unknown = kind_lines(block, CARRIED_UNKNOWN)
+        self.assertEqual(len(unknown), 1, "no `close as carried unknown (...)` line for the malformed block in open batch #9:\n" + text)
+        self.assertRegex(unknown[0], r"^close as carried unknown \(.*(marker|frozen block).*\)$", "the unknown line does not name the frozen block:\n" + unknown[0])
+        self.assertEqual(kind_lines(block, "batch line unknown "), [], "a malformed block in open batch #9 made the whole batch line unknown:\n" + text)
+        self.assertEqual(kind_lines(block, "open batch now: "), ["open batch now: o/alpha #5"], "a malformed block in open batch #9 changed the batch line for done draft #5:\n" + text)
+        self.assertEqual(rc, 1, "a malformed block in open batch #9 does not exit 1:\n" + text)
+        self.assertEqual(kind_lines(block, CARRIED), [], "a close line printed while the block of open batch #9 is unknown:\n" + text)
 
 
 class CloseThenBuild(CloseEnv, tm.CloudSession):
