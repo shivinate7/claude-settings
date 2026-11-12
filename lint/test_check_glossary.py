@@ -1148,7 +1148,7 @@ RETIRED = (r"(?i)sub-?agent|harness[-_ ]scope|HARNESS_SCOPE|mutation harness|AUT
            r"|ask-steps-run-alone|\b(?:ask|count|harmless|background)_steps?\b|\b(?:ask|harmless|chained) steps?\b"
            r"|roles-one-role-per-worker|output-never-echo-worker-report|worker_transcript"
            r"|WORKER_FOLDED_KEYS|(?i:red[- ]proof)")
-PLATFORM = (r"SubagentStop|SubagentStart|subagent_type|(?:\\u0043|C)LAUDE_CODE_\w+"
+PLATFORM = (r"SubagentStop|SubagentStart|SubagentHandback|subagent_type|(?:\\u0043|C)LAUDE_CODE_\w+"
             r"|[\"'/`]subagents(?=[\"'/`])|subagents/|SUBAGENT_MODEL")
 STAYS = {  # path: the one old name it may still hold, and why
     "hooks/local_time.py": "--subagent",            # read until OLD_FLAG_ENDS
