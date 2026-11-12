@@ -1,0 +1,35 @@
+{
+  "added": "2026-11-12T23:04:00Z",
+  "context": "Goal: a repeated message is marked once, and a failed check never marks a clean message.\nProblem (rule): the lane split checking from marking so a failure leaves every line unmarked; no ruling covers this.\nBased on (read): main marks each message inside the check step.\nDeparts from: main marks while checking \u2014 the change checks all first, then marks.",
+  "home": "step judge-replay-corpus",
+  "id": "repeat-judge-mark-split",
+  "kind": "decision",
+  "n": 666,
+  "options": [
+    {
+      "gain": "After a failed check, no repeated message is skipped and no clean message is flagged.",
+      "how": "The checker gets all answers, then marks the repeats in one pass.",
+      "id": "split-judge-mark",
+      "key": "a",
+      "label": "Check first, then mark (lane's pick)",
+      "lose": "Each stop takes slightly longer."
+    },
+    {
+      "gain": "Each stop runs a little faster.",
+      "how": "The checker marks each message as it checks it.",
+      "id": "one-step",
+      "key": "b",
+      "label": "One step, as main does",
+      "lose": "After a failed check, a repeated message can be skipped or a clean one flagged."
+    }
+  ],
+  "owner": "lane fan-code-workflows (session_013NEJL11UY3p6jnSXrTspmu)",
+  "pick": "a",
+  "ref": "draft PR #2737 (judge-replay corpus), hooks/feedback_guard.py judge_stop; lane 17:04 CST",
+  "repo": "shivinate7/claude-settings",
+  "short": "Repeat checker: check, then mark",
+  "stands": true,
+  "status": "open",
+  "title": "Should the repeat checker finish checking before it marks any message?",
+  "why": "The lane took this pick; it stands unless you choose b."
+}

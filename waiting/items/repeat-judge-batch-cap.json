@@ -1,0 +1,35 @@
+{
+  "added": "2026-11-12T23:04:00Z",
+  "context": "Goal: one stop never sends the model an unbounded prompt.\nProblem (rule): the lane picked 20 as a guess; the oldest 20 new messages go, the rest wait for the next stop; no ruling covers the number.\nBased on (read): main sends every new message in one call, with no cap.\nDeparts from: main has no cap \u2014 the change adds a cap of 20 messages per call.",
+  "home": "step judge-replay-corpus",
+  "id": "repeat-judge-batch-cap",
+  "kind": "decision",
+  "n": 665,
+  "options": [
+    {
+      "gain": "Each model call stays small and quick.",
+      "how": "Each stop sends the 20 oldest new messages; the rest wait.",
+      "id": "cap-20",
+      "key": "a",
+      "label": "Cap at 20 (lane's pick)",
+      "lose": "A long backlog takes several stops to clear."
+    },
+    {
+      "gain": "Every message is checked at once.",
+      "how": "Each stop sends every new message at once.",
+      "id": "no-cap",
+      "key": "b",
+      "label": "No cap, as main does",
+      "lose": "A big backlog makes one slow, costly call that may time out and check nothing."
+    }
+  ],
+  "owner": "lane fan-code-workflows (session_013NEJL11UY3p6jnSXrTspmu)",
+  "pick": "a",
+  "ref": "draft PR #2737 (judge-replay corpus), hooks/feedback_guard.py judge_stop; lane 17:04 CST",
+  "repo": "shivinate7/claude-settings",
+  "short": "Repeat checker: 20 per stop",
+  "stands": true,
+  "status": "open",
+  "title": "Should the repeat checker send at most 20 messages to the model per stop?",
+  "why": "The lane took this pick; it stands unless you choose b."
+}

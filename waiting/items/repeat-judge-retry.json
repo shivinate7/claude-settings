@@ -1,0 +1,35 @@
+{
+  "added": "2026-11-12T23:04:00Z",
+  "context": "Goal: a message you repeat is never missed by the repeat checker, and never blocks a session for nothing.\nProblem (rule): when the model errors or answers in the wrong shape, the lane keeps the message unchecked so the next stop sends it again; no ruling covers this.\nBased on (read): main marks a message checked after one try, answer or not.\nDeparts from: main checks each message once \u2014 the change checks again at each stop until the model gives a usable answer.",
+  "home": "step judge-replay-corpus",
+  "id": "repeat-judge-retry",
+  "kind": "decision",
+  "n": 664,
+  "options": [
+    {
+      "gain": "A model hiccup never hides a message you repeated.",
+      "how": "A message with no usable answer stays unchecked and goes to the model again at the next stop.",
+      "id": "retry-each-stop",
+      "key": "a",
+      "label": "Try again at each stop (lane's pick)",
+      "lose": "A message that keeps failing costs one more model call per stop until it works."
+    },
+    {
+      "gain": "Always one model call per message.",
+      "how": "A message is marked checked after one try, even with no answer.",
+      "id": "judge-once",
+      "key": "b",
+      "label": "Check once, as main does",
+      "lose": "A repeat is missed whenever the model hiccups."
+    }
+  ],
+  "owner": "lane fan-code-workflows (session_013NEJL11UY3p6jnSXrTspmu)",
+  "pick": "a",
+  "ref": "draft PR #2737 (judge-replay corpus), hooks/feedback_guard.py judge_stop; lane 17:04 CST",
+  "repo": "shivinate7/claude-settings",
+  "short": "Repeat checker: retry on no answer",
+  "stands": true,
+  "status": "open",
+  "title": "When the repeat checker gets no answer about a message, does it try again at the next stop?",
+  "why": "The lane took this pick; it stands unless you choose b."
+}
