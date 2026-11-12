@@ -16,7 +16,7 @@ def is_shallow(top):
 def fetch(top, refs=(), unshallow=False, timeout=None):
     """One `git fetch [--unshallow] <remote> [refs...]` in top. The remote is origin, else the first remote.
     Returns (ok, message): message is "" when ok, else the first stderr line that starts `fatal:` or `error:`, else
-    the whole short stderr, or why no fetch ran."""
+    all stderr lines joined with spaces, or why no fetch ran."""
     remotes = (_nowindow.run(["git", "remote"], cwd=top, capture_output=True, text=True).stdout or "").split()
     if not remotes:
         return False, "no remote to fetch from"
