@@ -1181,9 +1181,9 @@ def _solo_hat_holds(transcript: str, agent: bool = False) -> bool:
 
 
 def solo_hat_confirm_hit(stripped: str, cwd: str, transcript: str, agent: bool = False) -> str:
-    """Return a short label when a cloud session's `merge --confirm` has no hat behind it (see _solo_hat_holds), else ''. Fails closed
-    like role_proof_hit: an error in the reads is a refusal. Outside the cloud nothing is judged. Cost: none for a call that is no
-    merge confirm, else one transcript read."""
+    """Return a short label when a cloud session's `merge --confirm` has no hat behind it (see _solo_hat_holds), else ''. Fails open
+    (on_error=False): an error in the reads returns '' and the call goes on to merge-confirm-repo, which judges it. Outside the cloud
+    nothing is judged. Cost: none for a call that is no merge confirm, else one transcript read."""
     if not is_cloud():
         return ""
     return "merge --confirm" if _unproved_confirm(stripped, cwd, transcript, 0, lambda repo: _solo_hat_holds(transcript, agent), False) else ""
