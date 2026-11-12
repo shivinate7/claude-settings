@@ -742,7 +742,8 @@ def answered_problem(text):
 # - a failure word, "too", "also" or "as well", and "on" or "at" a sha or a base. A clause that starts with the
 #   ref ("..., on main too") takes the failure word from an earlier clause.
 # Quoted text and code spans are no claim. A negator in the same clause before the claim (the answered check's
-# list) exempts it. A clause ends at a conjunction, "as" and "which" as well as at the answered check's breaks.
+# list) exempts it. The sentences and clauses are the parser's (lint/_clause.py, see _pre_clauses); a clause also ends at
+# a lead-in word of the parser's lists and at "which".
 # A sentence that ends in `?` asks and claims nothing. Fenced blocks are skipped.
 PRE_EXISTING_RE = re.compile(r"(?<![\w-])pre[- ]?existing(?![\w-])", re.I)
 PRE_DESCRIBES_AFTER_RE = re.compile(
@@ -750,17 +751,21 @@ PRE_DESCRIBES_AFTER_RE = re.compile(
     r"|(?:[\w-]+\s+)?(?:failures?|errors?|regressions?|breakage|flakes?|flakiness|red)\b)", re.I)
 PRE_DESCRIBES_BEFORE_RE = re.compile(
     r"\b(?:is|was|are|were|be|been|it|them)\s+(?:(?!(?:an?|the|this|that|its|my|our)\b)\w+\s+)?$", re.I)
-ALREADY_RE = re.compile(r"\balready\s+(?:red|fail\w*|broken|there|present)\b", re.I)
+# The words "already" takes as its state: a failure word, or the word that says the failure sat there before the change.
+ALREADY_STATES = ("red", "broken", "there", "present")
+ALREADY_RE = re.compile(r"\balready\s+(?:%s|fail\w*)\b" % "|".join(ALREADY_STATES), re.I)
 FAILURE_RE = re.compile(r"\b(?:fail\w*|red|broken|breaks?|errors?|regress\w*|flak\w*)\b", re.I)
 SHA_WORD = r"\b(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"
 BASE_REF = r"(?:origin/\w[\w./-]*|main|master)"
 BASE_WORD_RE = re.compile(r"\b%s\b|\bbefore\s+(?:this|the|my)\s+change\b" % BASE_REF, re.I)
 FAIL_REF_RE = re.compile(r"\b(?:on|at)\s+(?:%s|%s)" % (BASE_REF, SHA_WORD), re.I)
 TOO_RE = re.compile(r"\b(?:too|also|as\s+well)\b", re.I)
-PRE_CLAUSE_BREAK_RE = re.compile(
-    ANSWERED_CLAUSE_BREAK_RE.pattern
-    + r"|\b(?:and|but|so|while|because|since|although|which)\b|\bas\b(?!\s+well\b)", re.I)
-SENTENCE_BREAK_RE = re.compile(r"(?<=[.!?])\s+")
+# _clause.clauses cuts a sentence at a stop, a comma, but and because. The lead-in words of _clause (joiners, reason links,
+# subordinators) and "which" cut each of those again. "as" is no lead-in in "as well", the word TOO_RE reads.
+_AS = "as"
+PRE_LEAD_RE = re.compile(
+    r"\b(?:%s)\b|\b%s\b(?!\s+well\b)" % (
+        "|".join(w for w in _clause.JOINERS + _clause.REASON_LINKS + _clause.SUBORDINATORS + ("which",) if w != _AS), _AS), re.I)
 MAIN_RUN_RE = re.compile(
     r"\bon\s+{b}\s+(?:at\s+(?:commit\s+)?{s}|\(\s*{s}\s*\))|\b{b}@{s}".format(b=BASE_REF, s=SHA_WORD), re.I)
 MAIN_RUN_URL_RE = re.compile(r"https?://\S*/actions/runs/\d+\S*", re.I)
@@ -778,6 +783,12 @@ def _pre_existing_describes_failure(clause, m):
                 or PRE_DESCRIBES_BEFORE_RE.search(clause[:m.start()]))
 
 
+def _pre_clauses(plain):
+    """The clauses of `plain` in order: the parser's clauses, each cut again at a lead-in word (PRE_LEAD_RE)."""
+    for c in _clause.clauses(plain, [False] * len(plain)):
+        yield from PRE_LEAD_RE.split(plain[c.start:c.end])
+
+
 def _unnegated(clause, pos):
     return not ANSWERED_NEGATOR_RE.search(clause[:pos])
 
@@ -789,7 +800,7 @@ def _claims_pre_existing(sentence):
         return False
     names_base = bool(BASE_WORD_RE.search(plain))
     earlier_fail = False
-    for clause in PRE_CLAUSE_BREAK_RE.split(plain):
+    for clause in _pre_clauses(plain):
         for m in PRE_EXISTING_RE.finditer(clause):
             if _pre_existing_describes_failure(clause, m) and _unnegated(clause, m.start()):
                 return True
@@ -823,7 +834,8 @@ def pre_existing_problem(text):
             continue
         if fence:
             continue
-        sentences = [s for s in SENTENCE_BREAK_RE.split(body) if not s.rstrip("*_)\"' ").endswith("?")]
+        sentences = [body[a:b] for a, b in _clause.sentences(body, [False] * len(body))
+                     if not body[a:b].rstrip("*_)\"' ").endswith("?")]
         if not any(_claims_pre_existing(s) for s in sentences):
             continue
         if _names_main_run(CODE_SPAN.sub(lambda m: m.group(2), body)):
