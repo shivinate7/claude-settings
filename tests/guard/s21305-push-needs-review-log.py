@@ -24,9 +24,9 @@ PFR_BRANCH = "notes-delete-pass"   # the lane's branch: a refusal never names it
 PFR_PUSH = VCS + " push origin HEAD:" + PFR_BRANCH
 PFR_MODEL = "claude-sonnet-5-5"
 PFR_FIX_SHA = "fedcba9876543210fedcba9876543210fedcba98"   # the reviewed head of a fix check, never the Head
-PFR_HEAD_A = "08462577333eefc425e50c60f85514b699c8bdf0"    # PR #2871: the Head of its round 1 record (haiku's FAIL)
-PFR_HEAD_B = "5b77f144394703c567bd335f63d6d887e3e71cf1"    # PR #2871: the later lane-lint head a round 2 report names
-PFR_MODEL_2871 = "claude-haiku-5-5"                        # PR #2871: the model that ran its round 1 reviewer
+PFR_HEAD_A = "08462577333eefc425e50c60f85514b699c8bdf0"    # a real lane's head: the Head its first-review FAIL record names
+PFR_HEAD_B = "5b77f144394703c567bd335f63d6d887e3e71cf1"    # the same lane's later head, which its second-review report names
+PFR_MODEL_2871 = "claude-haiku-5-5"                        # the model that ran that lane's first reviewer
 PFR_GH_ROOT = "gh -R shivinate7/claude-settings"           # a repo flag before the verb, as gh reads it
 PFR_GH_LONG = "gh --repo shivinate7/claude-settings"       # the long form of the same repo flag
 PFR_GH_GROUP = "gh pr -R shivinate7/claude-settings"       # the same flag after the group word `pr`
@@ -199,7 +199,7 @@ PFR_FIX_FAIL_RECORD = pfr_record(fix=(PFR_FIX_SHA, "reviewer", PFR_MODEL, "FAIL"
 PFR_ROUND_RECORD = pfr_record([(1, "reviewer", PFR_MODEL, "PASS")], n=PFR_FIX_PR)
 
 def pfr_fix_after_round1(report_head):
-    """A round 1 FAIL at head A, recorded at A. Then a fix check PASS whose report names `report_head`, and the fix
+    """A first-review FAIL, reviewed and recorded at head A. Then a fix check PASS whose report names `report_head`, and the fix
     record: Head B, with its Fix check line at A, where the fix diff starts. Only the fix report's head varies."""
     return (pfr_pr() + pfr_call("toolu_rev1", pfr_report(pfr_verdict("FAIL", 1), "Reviewed at head %s" % PFR_HEAD_A,
                                                        PFR_FINDING))
@@ -210,7 +210,7 @@ def pfr_fix_after_round1(report_head):
 
 
 def pfr_base_head_report(record_head):
-    """A round 1 FAIL whose text reads `Base: main head B, reviewed A`, then a record posted at `record_head`. Only the
+    """A first-review FAIL whose text reads `Base: main head B, reviewed A`, then a record posted at `record_head`. Only the
     record's head varies: the report's reviewed head is A either way."""
     return (pfr_pr() + pfr_call("toolu_rev1", pfr_report(pfr_verdict("FAIL", 1),
                                                          "Base: main head %s, reviewed %s" % (PFR_HEAD_B, PFR_HEAD_A),
@@ -280,18 +280,18 @@ PFR_LINES = {
     "round-head-a-record-head-a": pfr_pr() + pfr_call("toolu_rev1", pfr_report(
         pfr_verdict("FAIL", 1), "Reviewed at head %s" % PFR_HEAD_A, PFR_FINDING))
         + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL, "FAIL")], head=PFR_HEAD_A)),
-    # A round report and no record at all: PR #2921 has no comments.
+    # A review report and no record at all: the lane posted no comments.
     "round-no-record-2921": pfr_pr() + pfr_call("toolu_rev1", pfr_report(
         pfr_verdict("FAIL", 1), "Reviewed at head %s" % PFR_HEAD_A, PFR_FINDING)),
-    # PR #2871's real history: its round 1 record is posted at head A (haiku's FAIL), and a round 2 report names the
-    # later lane-lint head B. Round 2 has no record, so the push asks.
+    # A real lane's shape: its first-review record is posted at head A, and a second-review report names the later
+    # head B with no record, so the push asks.
     "2871-round2-unrecorded": pfr_pr() + pfr_call("toolu_rev1", pfr_report(
         pfr_verdict("FAIL", 1, PFR_MODEL_2871), "Reviewed at head %s" % PFR_HEAD_A, PFR_FINDING))
         + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL_2871, "FAIL")], head=PFR_HEAD_A))
         + pfr_call("toolu_rev2", pfr_report(pfr_verdict("FAIL", 2, PFR_MODEL_2871),
                                             "Reviewed at head %s" % PFR_HEAD_B, PFR_FINDING)),
     # A fix verifier is cleared by its reviewed head A, the sha of the record's Fix check line. The record's Head line
-    # (B) is another head, and the round 1 record at head B holds both lines.
+    # (B) is another head, and the first-review record at head B holds both lines.
     "round-head-b-fix-head-a": pfr_pr() + pfr_call("toolu_rev1", pfr_report(
         pfr_verdict("FAIL", 1), "Reviewed at head %s" % PFR_HEAD_B, PFR_FINDING))
         + pfr_call("toolu_rev2", pfr_report(pfr_fix_verdict("PASS"), "Reviewed at head %s" % PFR_HEAD_A, PFR_FINDING),
@@ -414,7 +414,7 @@ PFR_LINES = {
                                     + pfr_gh_post("toolu_c1", PFR_FAIL_RECORD, words=PFR_GH_ROOT + " pr comment"),
     "fail-gh-long-flag-pr-comment": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL)
                                     + pfr_gh_post("toolu_c1", PFR_FAIL_RECORD, words=PFR_GH_LONG + " pr comment"),
-    # A fix check PASS for PR 1464 is posted, then a round 2 FAIL with no record. The fix-branch refusal still denies.
+    # A fix check PASS for a fix PR is posted, then a second-review FAIL with no record. The fix-branch refusal still denies.
     "fix-pass-then-round2-fail": pfr_pr_open("toolu_pr1", PFR_FIX_PR, PFR_FIX_BRANCH)
                                  + pfr_post("toolu_c1", PFR_FIX_PASS_RECORD, n=PFR_FIX_PR)
                                  + pfr_call("toolu_rev2", pfr_report(pfr_verdict("FAIL", 2), PFR_FINDING)),
@@ -770,15 +770,15 @@ pfr_fix_refuse("a fix check PASS for PR 1464 posted, then a push to its head bra
                pfr_path("fix-pass-same"))
 pfr_fix_refuse("a fix check FAIL for PR 1464 posted, then a push to its head branch", PFR_FIX_PUSH,
                pfr_path("fix-fail-same"))
-# A round 2 report with no record, after the fix check, does not turn the fix-branch refusal into an ask.
+# A second-review report with no record, after the fix check, does not turn the fix-branch refusal into an ask.
 pfr_fix_refuse("a fix check PASS for PR 1464 posted, a round 2 FAIL unrecorded, then a push to its head branch",
                PFR_FIX_PUSH, pfr_path("fix-pass-then-round2-fail"))
-# A Fix check line on PR 1467 denies a push to its head branch, and the round 1 FAIL beside it stays uncleared. The
+# A Fix check line on a PR denies a push to its head branch, and the first-review FAIL beside it stays uncleared. The
 # deny comes before that FAIL's ask, so the push is denied, not asked (decision push-needs-review-record).
 pfr_fix_refuse("a FAIL round 1 with a Fix check record line for PR 1467, then a push to its head branch: deny, "
                "the fix-branch rule comes before the pending ask", PFR_PUSH, pfr_path("round-fail-fix-record"),
                lacks=PFR_BRANCH)
-# A round 1 FAIL unrecorded beside a record that holds only a Fix check line: a push to another branch still asks.
+# A first-review FAIL unrecorded beside a record that holds only a Fix check line: a push to another branch still asks.
 pfr_ask("a FAIL round 1 unrecorded beside a Fix check record line for PR 1467, then a push to another branch",
         PFR_NEXT_PUSH, pfr_path("round-fail-fix-record"))
 # A documented miss, pinned: a fix check whose PR head is unknown is allowed, so the next PR is never deadlocked.
@@ -796,7 +796,7 @@ pfr_allow("a round 1 FAIL reviewed at head A, then a FAIL record for head A post
           pfr_path("round-head-a-record-head-a"))
 pfr_ask("the #2921 shape: a round 1 FAIL report and no record at all, then the push", PFR_PUSH,
         pfr_path("round-no-record-2921"))
-# PR #2871's real history: the round 1 record is at head A, and a round 2 report names the later head B with no record.
+# A real lane's shape: the first-review record is at head A, and a second-review report names the later head B with no record.
 pfr_ask("the #2871 shape: a round 1 record at head A, then a round 2 FAIL at head B with no record, then the push",
         PFR_PUSH, pfr_path("2871-round2-unrecorded"))
 # A fix verifier is cleared by its reviewed head: here A, the sha of the Fix check line. The record's Head (B) does not match it.
