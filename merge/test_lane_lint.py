@@ -1521,6 +1521,11 @@ BATCH_PUSH_ONLY = "batch-lint-flags-push-only"  # a batch whose checks job adds 
 PUSH_ONLY = "Push-only lint"
 PUSH_ONLY_STEP = (PUSH_ONLY, "      - name: Push-only lint\n        if: ${{ github.event_name != 'pull_request' }}\n"
                              "        run: python3 lint/check_push_only.py\n")
+BATCH_FLOOR = "batch-lint-flags-floor"  # a batch whose checks job holds checks.yml's two Python 3.9 floor steps, read by name
+FLOOR_NAMES = ("Python 3.9 floor check", "Python 3.9 floor fixture suite")
+FLOOR_CHECK = "lint/check_python_floor.py"  # the script the floor check runs, and the file the suite reads: a lint tree lacked it in the incident
+FLOOR_SUITE = "lint/test_check_python_floor.py"  # the fixture suite that failed on FileNotFoundError for that file
+WORKFLOW_PATH = ".github/workflows/checks.yml"  # the file the lint reads its steps from: the other file a lint tree lacked in the incident
 SELECTOR = os.path.join(REPO, ".github", "scripts", "touched-tests.py")  # read at test time: its tables give the skip reasons, and the lint tree loads it
 LOAD_4 = "def load():\n    return 4\n"  # main's lint/load.py
 LOAD_8 = "def load():\n    return 8\n"  # lane-b's change to it
@@ -1989,11 +1994,11 @@ class TouchedTests(LaneFixture):
         self.assertTrue(pass_has_counts(lines[0], 1, 0), "the PASS line does not name 1 run and 0 skipped: " + lines[0])
 
 
-def real_ci_steps():
-    """(name, CI step text) of BATCH_CI_STEPS in checks.yml's checks job, in file order, read by the shared parser."""
+def real_ci_steps(names=BATCH_CI_STEPS):
+    """(name, CI step text) of `names` in checks.yml's checks job, in file order, read by the shared parser."""
     with open(CHECKS_YML, encoding="utf-8") as f:
         block = job_block(f.read(), "checks")
-    return [(step_key(st, "name"), st) for st in step_blocks(block) if step_key(st, "name") in BATCH_CI_STEPS]
+    return [(step_key(st, "name"), st) for st in step_blocks(block) if step_key(st, "name") in names]
 
 
 def workflow_text(found):
@@ -2098,23 +2103,34 @@ class BatchLintFlags(tm.Env):
 
     def push_batch(self, branch, skip=(), found=None):
         """Push `branch` to origin: one commit on main holding checks.yml's checks job (`found`, else the four lint CI steps) and a
-        logging stub for each check script of the four, except the scripts in `skip`. -> the branch's head sha."""
+        logging stub for each lint script of that job (a step that runs `lint/...`), except the scripts in `skip`. -> the branch's head sha."""
         o = self.other
         tm.sh(o, "git", "fetch", "-q", "origin")
         tm.sh(o, "git", "checkout", "-q", "-B", branch, "origin/" + BASE)
-        tm.put(os.path.join(o, ".github", "workflows", "checks.yml"), workflow_text(self.found if found is None else found))
-        for name, ci_step in self.found:
-            if name != STE and script_of(ci_step) not in skip:
+        job = self.found if found is None else found
+        tm.put(os.path.join(o, ".github", "workflows", "checks.yml"), workflow_text(job))
+        for name, ci_step in job:
+            if name != STE and script_of(ci_step).startswith("lint/") and script_of(ci_step) not in skip:
                 tm.put(os.path.join(o, script_of(ci_step)), CALL_STUB % self.call_log(script_of(ci_step)))
         tm.sh(o, "git", "add", "-A")
         tm.sh(o, "git", "commit", "-q", "-m", branch + ": the checks job's lint CI steps and their stubs")
         tm.sh(o, "git", "push", "-q", "origin", branch)
         return tm.sh(o, "git", "rev-parse", "HEAD")
 
-    def lane_lint(self, target, out):
-        """merge.lane_lint of `target` against BASE, in the lane checkout, through the copy of ci-job. Its output goes to `out`. A refusal raises."""
+    def lane_lint(self, target, out, missing=()):
+        """merge.lane_lint of `target` against BASE, in the lane checkout, through the copy of ci-job. Its output goes to `out`. A refusal raises.
+        `missing` names paths the lint tree lacks once it is made, as the incident's tree did: the branch holds them, the tree on disk does not."""
         env = {"VERDICT_LOG": os.path.join(self.t, "verdict.log")}  # one log for the run: no ci-job log lands in the system temp dir
+        made = merge.add_worktree
+
+        def add_worktree_without(root, head):
+            tmp, wt = made(root, head)
+            for rel in missing:
+                os.remove(os.path.join(wt, *rel.split("/")))
+            return tmp, wt
+
         with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER), unittest.mock.patch.object(merge, "CI_JOB", self.ci_job), \
+                unittest.mock.patch.object(merge, "add_worktree", add_worktree_without), \
                 unittest.mock.patch.dict(os.environ, env), contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
             return merge.lane_lint(self.co, target, self.host, base=BASE)
 
@@ -2164,6 +2180,55 @@ class BatchLintFlags(tm.Env):
         self.assertIn("FAILs:", str(raised.exception), "the refusal does not say the lint FAILs: " + out.getvalue())
         self.assertIn("Red-run trailer", str(raised.exception), "the refusal does not name the CI step whose script is missing: " + out.getvalue())
         self.assertEqual(pass_lines(out.getvalue()), [], "a lint with a check script missing read as a pass: " + out.getvalue())
+
+    def floor_steps(self):
+        """checks.yml's two Python 3.9 floor CI steps, read from the real file by name: each runs the script the batch stubs."""
+        found = real_ci_steps(FLOOR_NAMES)
+        self.assertEqual([name for name, _ in found], list(FLOOR_NAMES), "checks.yml does not hold the two floor steps in this order")
+        self.assertEqual([script_of(st) for _, st in found], [FLOOR_CHECK, FLOOR_SUITE], "checks.yml's floor steps run other scripts than this suite reads")
+        return found
+
+    def test_a_present_floor_pair_passes_and_each_step_runs_once(self):
+        self.push_batch(BATCH_FLOOR, found=self.floor_steps())
+        out = io.StringIO()
+        rc = self.lane_lint(BATCH_FLOOR, out)
+        text = out.getvalue()
+        self.assertEqual(rc, 0, text)
+        self.assertEqual(len(pass_lines(text)), 1, text)
+        for script in (FLOOR_CHECK, FLOOR_SUITE):
+            calls = self.stub_calls(script)
+            self.assertEqual(len(calls), 1, "%s ran %d times, want once: %s" % (script, len(calls), text))
+
+    def test_a_missing_check_file_in_the_lint_tree_refuses_as_a_fail_that_names_the_file(self):
+        head = self.push_batch(BATCH_FLOOR, found=self.floor_steps())
+        self.assertEqual(tm.sh(self.other, "git", "ls-tree", "--name-only", head, "--", FLOOR_CHECK), FLOOR_CHECK,
+                         "the branch does not hold the check file the lint tree is made without")
+        out = io.StringIO()
+        with self.assertRaises(merge.Stop) as raised:
+            self.lane_lint(BATCH_FLOOR, out, missing=(FLOOR_CHECK,))
+        self.assertNotIsInstance(raised.exception, merge.Liftable, "a missing check file reads as unknown, not as a FAIL: " + out.getvalue())
+        self.assertIn("FAILs:", str(raised.exception), "the refusal does not say the lint FAILs: " + out.getvalue())
+        self.assertIn(FLOOR_CHECK, str(raised.exception), "the refusal does not name the missing check file: " + out.getvalue())
+        self.assertEqual(pass_lines(out.getvalue()), [], "a lint of a tree missing its check file read as a pass: " + out.getvalue())
+
+    def test_a_missing_check_file_in_the_lint_tree_runs_no_later_floor_suite(self):
+        self.push_batch(BATCH_FLOOR, found=self.floor_steps())
+        out = io.StringIO()
+        with self.assertRaises(merge.Stop):
+            self.lane_lint(BATCH_FLOOR, out, missing=(FLOOR_CHECK,))
+        self.assertEqual(self.stub_calls(FLOOR_SUITE), [], "the floor suite ran after its check file was found missing: " + out.getvalue())
+
+    def test_a_missing_workflow_file_in_the_lint_tree_refuses_as_a_fail_that_names_the_file(self):
+        head = self.push_batch(BATCH_FLOOR, found=self.floor_steps())
+        self.assertEqual(tm.sh(self.other, "git", "ls-tree", "--name-only", head, "--", WORKFLOW_PATH), WORKFLOW_PATH,
+                         "the branch does not hold the workflow file the lint tree is made without")
+        out = io.StringIO()
+        with self.assertRaises(merge.Stop) as raised:
+            self.lane_lint(BATCH_FLOOR, out, missing=(WORKFLOW_PATH,))
+        self.assertNotIsInstance(raised.exception, merge.Liftable, "a missing workflow file reads as unknown, not as a FAIL: " + out.getvalue())
+        self.assertIn("FAILs:", str(raised.exception), "the refusal does not say the lint FAILs: " + out.getvalue())
+        self.assertIn(WORKFLOW_PATH, str(raised.exception), "the refusal does not name the missing workflow file: " + out.getvalue())
+        self.assertEqual(pass_lines(out.getvalue()), [], "a lint of a tree missing its workflow file read as a pass: " + out.getvalue())
 
     def test_a_batch_whose_checks_job_runs_no_lint_step_refuses_as_unknown_and_never_passes(self):
         self.push_batch(BATCH_NO_LINT, found=NO_LINT_STEPS)
