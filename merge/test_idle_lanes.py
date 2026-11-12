@@ -7,6 +7,10 @@ WHAT IT PROVES. The command prints one line per lane to archive, then one summar
 repo name from the checkout, as the roadmap build does. It stands alone: no other flag, and no merge role in a cloud
 session. A missing --live file exits 1 and prints no summary, so an unread list never reads as an empty one.
 
+A lane tagged cs-archive-ready:<slug> is printed with a HOLD marker when its handoff, roadmap/outbox/<slug>-handoff.md,
+is not on the record branch, and the summary counts the held lanes. A slug that is empty or has a `/` or `..` reads the
+lane unknown, never clear. The record branch is read from origin/roadmap, as a merge run from main reads it.
+
 Each case runs merge.py as a subprocess in a roadmap fixture checkout, the way bin/merge runs it. The fixture is the
 roadmap suite's make_repo (skills/roadmap/test_build.py), imported and not copied.
 """
@@ -33,6 +37,14 @@ SUMMARY_ONE = "merge: 1 lanes to archive. Run get_session on each alone, then ar
 SUMMARY_ZERO = "merge: 0 lanes to archive. Run get_session on each alone, then archive it."
 SUMMARY_LINE = re.compile(r"^merge: \d+ lanes to archive\b", re.M)
 ZERO_LINE = re.compile(r"^merge: 0 lanes to archive\.", re.M)
+HOLD = "HOLD: handoff %s is not on the record branch"
+HANDOFF = "roadmap/outbox/%s-handoff.md"
+HELD_ONE = re.compile(r"^merge: 2 lanes to archive, 1 held\b", re.M)
+HELD_ALL = re.compile(r"^merge: 2 lanes to archive, 2 held\b", re.M)
+# Each bad slug with the path a naive join would read on the record branch, so a builder that skips the check reads
+# the lane clean. The `..` path is written at the file it resolves to, since git refuses a `..` in a path.
+BAD_SLUGS = (("", "roadmap/outbox/-handoff.md"), ("a/b", "roadmap/outbox/a/b-handoff.md"),
+             ("../up", "roadmap/up-handoff.md"), ("a..b", "roadmap/outbox/a..b-handoff.md"))
 
 # Made in setUpModule, not at import, so a helper that imports this file leaks no folder.
 RUN_FOLDER = None
@@ -47,8 +59,13 @@ def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 
-def lane(sid, step, bucket=roadmap.BUCKET_COMPLETED, status="SESSION_STATUS_IDLE"):
-    return roadmap.session_row(sid, status, "cs-build:lane", "cs-step:" + step, REPO, status_bucket=bucket)
+def lane(sid, step, bucket=roadmap.BUCKET_COMPLETED, status="SESSION_STATUS_IDLE", tags=()):
+    return roadmap.session_row(sid, status, "cs-build:lane", "cs-step:" + step, REPO, *tags, status_bucket=bucket)
+
+
+def archived(sid, step, slug):
+    """A completed lane whose tags carry cs-archive-ready:<slug>."""
+    return lane(sid, step, tags=("cs-archive-ready:" + slug,))
 
 
 class IdleLanesCli(unittest.TestCase):
@@ -145,6 +162,98 @@ class IdleLanesCli(unittest.TestCase):
                                         extra_env={"CLAUDE_CODE_REMOTE": "true"})
         self.assertEqual(code, 0, err)
         self.assertEqual(out.splitlines()[-1:], [SUMMARY_ONE], out)
+
+    def record_from_origin(self, record=(), main=()):
+        """Read the record branch as a merge run from main does: origin/roadmap, with HEAD on main. `record` and `main`
+        are repo paths to commit on the record branch and on main. Origin's URL stays in GitHub form, so the repo name
+        still reads owner/fixture, and update-ref sets origin/roadmap with no remote to push to."""
+        roadmap.git(self.repo, "checkout", "-q", "roadmap")
+        self.commit_files(record, "handoffs on the record branch")
+        roadmap.git(self.repo, "update-ref", "refs/remotes/origin/roadmap", "roadmap")
+        roadmap.git(self.repo, "checkout", "-q", "main")
+        self.commit_files(main, "handoffs on main")
+
+    def commit_files(self, paths, message):
+        """Commit each path with one line of text on the checked-out branch. No paths, no commit."""
+        if not paths:
+            return
+        for path in paths:
+            full = self.repo / path
+            full.parent.mkdir(parents=True, exist_ok=True)
+            full.write_text("# handoff\n", encoding="utf-8")
+        roadmap.git(self.repo, "add", "-A")
+        roadmap.git(self.repo, "commit", "-q", "-m", message)
+
+    def run_idle(self):
+        """The output of --idle-lanes --live on the fixture, which must exit 0: its lanes are all readable."""
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertEqual(code, 0, err)
+        return out
+
+    def lane_line(self, out, sid):
+        """The one output line whose first word is `sid`. Asserts the lane is listed once, before its line is read."""
+        found = [line for line in out.splitlines() if line.split(" ", 1)[0] == sid]
+        self.assertEqual(len(found), 1, "lane %s is not listed once: out: %r" % (sid, out))
+        return found[0]
+
+    def test_tagged_lane_whose_handoff_is_not_on_the_record_branch_is_marked_held(self):
+        self.publish([archived("session_t", "c1", "alpha"), lane("session_u", "c2")])
+        self.record_from_origin()
+        out = self.run_idle()
+        self.assertIn(HOLD % "alpha", self.lane_line(out, "session_t"), out)
+        self.assertEqual(self.lane_line(out, "session_u"), "session_u (c2; topic -)", out)
+        self.assertRegex(out, HELD_ONE)
+
+    def test_tagged_lane_whose_handoff_is_on_the_record_branch_is_listed_clean(self):
+        # The held lane keeps this case red on the current code: a fixture with no held lane reads the same there.
+        self.publish([archived("session_f", "c1", "beta"), archived("session_t", "c2", "gamma")])
+        self.record_from_origin(record=[HANDOFF % "beta"])
+        out = self.run_idle()
+        self.assertEqual(self.lane_line(out, "session_f"), "session_f (c1; topic -)", out)
+        self.assertIn(HOLD % "gamma", self.lane_line(out, "session_t"), out)
+        self.assertRegex(out, HELD_ONE)
+
+    def test_untagged_lane_is_listed_with_no_marker_beside_a_held_lane(self):
+        # The held lane keeps this case red on the current code: a fixture with no held lane reads the same there.
+        self.publish([lane("session_u", "c1"), archived("session_t", "c2", "delta")])
+        self.record_from_origin()
+        out = self.run_idle()
+        self.assertEqual(self.lane_line(out, "session_u"), "session_u (c1; topic -)", out)
+        self.assertIn(HOLD % "delta", self.lane_line(out, "session_t"), out)
+        self.assertRegex(out, HELD_ONE)
+
+    def test_handoff_committed_only_on_main_is_not_on_the_record_branch(self):
+        # The file is on main's disk, so a check of the checkout's files reads the lane clean. Only the record branch
+        # counts.
+        self.publish([archived("session_t", "c1", "alpha"), lane("session_u", "c2")])
+        self.record_from_origin(main=[HANDOFF % "alpha"])
+        out = self.run_idle()
+        self.assertIn(HOLD % "alpha", self.lane_line(out, "session_t"), out)
+        self.assertEqual(self.lane_line(out, "session_u"), "session_u (c2; topic -)", out)
+        self.assertRegex(out, HELD_ONE)
+
+    def test_every_listed_lane_held_counts_them_all(self):
+        self.publish([archived("session_a", "c1", "alpha"), archived("session_b", "c2", "beta")])
+        self.record_from_origin()
+        out = self.run_idle()
+        self.assertIn(HOLD % "alpha", self.lane_line(out, "session_a"), out)
+        self.assertIn(HOLD % "beta", self.lane_line(out, "session_b"), out)
+        self.assertRegex(out, HELD_ALL)
+
+    def test_bad_archive_slug_flags_its_lane_unknown_never_clear(self):
+        # Each bad slug's naive path is on the record branch, so a builder that joins the slug unchecked reads it clean.
+        # The flag may sit on the lane's line or be an unknown entry that names the lane.
+        self.record_from_origin(record=[path for _, path in BAD_SLUGS])
+        for slug, _ in BAD_SLUGS:
+            with self.subTest(slug=slug):
+                self.publish([archived("session_x", "c1", slug), lane("session_u", "c2")])
+                _, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+                flagged = [line for line in out.splitlines() if "session_x" in line and "unknown (" in line]
+                self.assertTrue(flagged, "no unknown flag names session_x: out: %r, err: %r" % (out, err))
+                clear = [line for line in out.splitlines()
+                         if line.startswith("session_x ") and "unknown (" not in line]
+                self.assertEqual(clear, [], "session_x reads clear for slug %r: out: %r" % (slug, out))
+                self.assertEqual(self.lane_line(out, "session_u"), "session_u (c2; topic -)", out)
 
 
 if __name__ == "__main__":
