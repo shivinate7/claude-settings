@@ -2180,3 +2180,4 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
+- health-map-broad-family-glob: `lint/check_health_map.py` passes a row glob with a literal, like `hooks/*`, that names most parts, so a row can take every part and the table still reads exhaustive. Likely cap: about 20 parts per glob (widest today `hooks/guard*.py`, 15). Fix: none — a lazy path, not a mistake Claude is likely to make. Review round 2 of lane owner-health-tab.
