@@ -130,6 +130,10 @@ _GH_API_VAR = r"\$\{?\w+\}?"
 _GH_API_PART = r"(?:[^/{}\s]|\$\{\w+\})+"  # one path part; a bare `$NAME` already fits the first arm
 GH_API_MERGE_PATH = re.compile(r"/?(?:repos/(\{owner\}/\{repo\}|%s/%s|%s)/)?pulls/(\d+|%s)/merge/?(?:\?.*)?"
                                % (_GH_API_PART, _GH_API_PART, _GH_API_VAR, _GH_API_VAR))
+# Any endpoint that ends in a pull request's merge route, however its number, repo or host is spelled: a command substitution,
+# a `${PR:-1}` default, a placeholder owner with a named repo, an absolute URL. Such an endpoint that GH_API_MERGE_PATH cannot
+# read is still a merge, and its target is unknown.
+GH_API_MERGE_ROUTE = re.compile(r"(?:.*/)?pulls/.+/merge/?(?:\?.*)?", re.DOTALL)
 
 
 def api_merge_call_of(rest):
@@ -138,10 +142,11 @@ def api_merge_call_of(rest):
     A GET merges nothing.
     A POST merges nothing. It is the method gh picks once a field is given.
     Another endpoint merges nothing.
+    A merge endpoint whose number, repo or host cannot be read returns the endpoint as the selector: unknown, denied under merge-checks.
 
     The repo comes from the endpoint path, else from the root repo flag.
     """
-    method, endpoint, repo, index, args = "", "", "", 0, rest[1:]
+    method, words, repo, index, args = "", [], "", 0, rest[1:]
     while index < len(args):
         arg = args[index]
         index += 1
@@ -151,7 +156,7 @@ def api_merge_call_of(rest):
         elif arg.startswith("--method="):
             method = arg[len("--method="):]
         elif arg.startswith("-X") and not arg.startswith("--"):
-            method = arg[2:]
+            method = arg[2:].removeprefix("=")   # pflag drops the '=' of a shorthand (`-X=PUT`), as `-R=o/r` does
         elif arg in ("-R", "--repo"):
             repo = args[index] if index < len(args) else ""
             index += 1
@@ -161,11 +166,15 @@ def api_merge_call_of(rest):
             index += 1
         elif arg.startswith("-"):
             continue
-        elif not endpoint:
-            endpoint = arg
-    found = GH_API_MERGE_PATH.fullmatch(endpoint)
-    if method.upper() != "PUT" or not found:
+        else:
+            words.append(arg)   # gh takes one endpoint; an unquoted `$(echo 1)` splits into several tokens
+    if method.upper() != "PUT" or not words:
         return None
+    found = GH_API_MERGE_PATH.fullmatch(words[0])
+    if not found:
+        endpoint = " ".join(words)
+        # A merge route the reader cannot read: the endpoint as written is the selector, which names no pull request, so the read is unknown.
+        return (endpoint, repo) if GH_API_MERGE_ROUTE.fullmatch(endpoint) else None
     path_repo = found.group(1)
     return found.group(2), (path_repo if path_repo and path_repo != GH_API_PLACEHOLDER_REPO else repo)
 
