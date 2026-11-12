@@ -1,0 +1,16 @@
+{
+ "id": "override-docstring-later-line",
+ "title": "hooks/override.py's docstring drops the wrong later-line sentence that PR #2612 fixed in decision owner-override",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "test-guard-split-per-rule"
+ ],
+ "why": "The module docstring at hooks/override.py lines 17-18 still states the later-line rule that #2612 corrected in docs/decisions/owner-override.md line 30, so a reader of the code gets the old rule.",
+ "source": "coordinator 23:01 CST Nov 11, from lane owner-override-later-line-text (PR #2612)",
+ "note": "Code: rewrite the docstring to match the decision as #2612 leaves it.",
+ "updatedAt": "2026-11-11T23:05:00-06:00"
+}
