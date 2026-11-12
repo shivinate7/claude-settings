@@ -40,8 +40,51 @@
                           missing or unreadable, prints `repo DIR: unknown (REASON)`; a failed read for the batch line keeps the root's lines
                           and prints `batch line unknown (REASON)` in its place. Either way the other roots print in full, and the run exits 1.
                           Cost: the gh calls of one --reviewed per root; when the base has a done PR, plus the CI reads of each ready PR on
-                          the base, one compare per done PR and other open PR on the base, and one compare per done PR against the base; no
-                          new process, file or timer.
+                          the base, at most one compare per done PR and other open PR on the base, and at most one compare per done PR against the
+                          base. A done PR that is ready with CI running reads no compare, holder or not, as on main. Two PRs with one head read no
+                          compare between them. A done draft that an open batch (head `batch-*`) lists in its frozen block as `Lane: #N HEAD`,
+                          at the head it has now, is never carried, and is never closed as replaced by any open PR, a batch or not (a
+                          close would stall that batch); no new read.
+                          The carried close and the batch line share each compare, so no pair is read twice; no new process, file or timer.
+                          After the batch line, three kinds of line for the batch runner, which closes and reopens; the tool posts and closes nothing:
+                            close as replaced: OWNER/NAME #N by #R   open R holds a `Replaces #N` line, N is another open PR on R's base (lowest R wins;
+                                                                     a loop of any length closes none, nor a claim on a PR that
+                                                                     leads back to itself; a claim stands even from a PR itself replaced).
+                                                                     A claim on an N that an open batch's frozen block lists at N's
+                                                                     current head closes nothing; an N frozen at an older head, or
+                                                                     nowhere, still closes. If a frozen block cannot be read, the close
+                                                                     lines (this and the carried one) are replaced by one
+                                                                     `close as carried unknown (REASON)`, as below.
+                            close as carried: OWNER/NAME #A by #B    A is a draft with a done record, and another open PR B on A's base, draft or
+                                                                     ready, holds A's head (lowest B; two drafts with one head close only the higher
+                                                                     number). A ready PR is never carried: one that another holds is only left off
+                                                                     the batch line, as on main. A PR named replaced holds nothing,
+                                                                     so it carries no PR. A done PR whose head the base already holds is
+                                                                     not carried (it is off the batch line too, one shared compare).
+                                                                     If a compare fails, the line is `close as carried unknown (REASON)`, the
+                                                                     batch line is unknown too, and the run exits 1. If an open batch's frozen
+                                                                     block cannot be read, only the close lines are unknown: the batch line still
+                                                                     prints, read as if no batch froze a lane, and the run exits 1.
+                            reopen: OWNER/NAME #N (replacer #R dropped)               N is closed with a `Replaced by #R` or `Carried by #R` line
+                            reopen: OWNER/NAME #N (replacer #R no longer names it)    in a comment, and R is closed unmerged. A Replaced note also reopens
+                            reopen: OWNER/NAME #N (an open batch freezes it at its head)
+                                                                     N when R is open and its body lost `Replaces #N`. A closed R with its own note
+                                                                     extends the chain: only the last link counts (one PR per chain per wake; a loop
+                                                                     reopens each member). A Carried link with R open reopens none. A link that any
+                                                                     open PR names with `Replaces #N` reopens none, whatever R is (the next wake would
+                                                                     close it). The exception is a link that an open batch freezes at its current
+                                                                     head, as no wake closes it again: with R open it reopens with the third reason,
+                                                                     Replaced or Carried, even when R names it; with R closed unmerged, as dropped.
+                                                                     Limits: a merged R reopens nothing, frozen or not, and only the last link is
+                                                                     checked, so in #4 -> #6 -> open #7 a frozen #4 reopens nothing. The freeze is
+                                                                     read only when a done PR, a `Replaces` claim or a closing note exists. An
+                                                                     unread or unreadable freeze reopens no link.
+                          A `Replaces #N` or note line counts only at the start of a line (spaces allowed), outside a fenced code block (closed by
+                          the same character, a run at least as long as the opener) and not in a `>` quote. A PR on a close line is left off the batch line. Reads added: the same comment list and compares as above, so none
+                          for the close lines; the reopen lines read pulls/N once for each closed PR with such a note, and pulls/R when R is not open,
+                          once per wake however many candidates share R. A note older than every open PR is not read (the comment list starts at the oldest open PR). With no
+                          open PR the block is `no open pull requests.` and `reopen not checked (no open pull request)`, and no reopen read runs. A
+                          failed reopen read prints `reopen unknown (REASON)` and exits 1. No process, file or timer.
   merge --touches [--run RUN_ID|URL] [--case TEXT ...] [--file PATH ...]
                           one line per open PR that touches a named file (a changed file of that path) or holds a named case in a `+` line of its
                           patch: `#N HEADREF SHA9 draft|ready: file PATH; case TEXT`. With --run, the run's failing log lines name the cases
@@ -1112,21 +1155,18 @@ class Host:
         except (ValueError, KeyError, TypeError) as e:
             raise Stop(f"reading the run {url} from GitHub failed: {e} {DEBT_CITE}")
 
+    def issue_comment_rows(self, since):
+        """-> the repo's issue comments updated since `since`, oldest first: one list read. A failed read is a Stop. The one home of the comment read:
+        issue_comments, and the closing notes of a --reviewed run (closing_notes), each take their part of the rows."""
+        return self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"})
+
     def issue_comments(self, since):
-        """-> (records, lints): one list read of the repo's issue comments updated since `since`. The number comes from the comment's issue_url.
+        """-> (records, lints): one list read of the repo's issue comments updated since `since` (issue_comment_rows), split by split_comments.
         records is {PR number: [(body, created_at, updated_at) of each review record comment, oldest first]}: a body counts only when the review record
         marker is its whole first line. A timestamp the read did not give is None.
         lints is {PR number: [lane-lint comment bodies, oldest first]}: the lint marker is the whole first line and the author is the repo's owner.
         A failed read is a Stop. The one home of the comment read: review_records, review_comments and the lane-lint check each take their part."""
-        records, lints = {}, {}
-        for c in self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
-            body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
-            first = body.splitlines()[:1]
-            if m and first == [REVIEW_MARKER]:
-                records.setdefault(int(m.group(1)), []).append((body, c.get("created_at"), c.get("updated_at")))
-            elif m and first == [LANE_LINT_MARKER] and c.get("author_association") == LANE_LINT_AUTHOR:
-                lints.setdefault(int(m.group(1)), []).append(body)
-        return records, lints
+        return split_comments(self.issue_comment_rows(since))
 
     def review_records(self, since):
         """-> {PR number: [(body, created_at, updated_at) of each review record comment, oldest first]}: the records half of issue_comments."""
@@ -4055,10 +4095,199 @@ def lint_check(h, n, info, root, cfgrel):
 REVIEW_BATCH_OPEN = "open batch now: "  # the batch line of a --root block when no ready pull request on the base has CI running
 REVIEW_BATCH_BUILD = "build next batch on the running head: "  # ... and when one has
 REVIEW_BATCH_UNKNOWN = "batch line unknown "  # ... and when a read for the batch line stopped: the reason follows, in brackets
+CLOSE_REPLACED = "close as replaced: "  # a block line: an open pull request that an open one names with `Replaces #N`
+CLOSE_CARRIED = "close as carried: "  # ... and an open done one whose head another open pull request on its base holds
+CLOSE_CARRIED_UNKNOWN = "close as carried unknown "  # ... and when the compare that decides it could not run, or a batch body's frozen block could not be read (which leaves both close kinds unknown): the reason follows, in brackets
+REOPEN = "reopen: "  # ... and a closed pull request whose replacer or carrier was dropped
+REOPEN_UNKNOWN = "reopen unknown "  # ... and when a read for a reopen line stopped: the reason follows, in brackets
+REOPEN_UNCHECKED = "reopen not checked (no open pull request)"  # ... and the one line after the empty block: no open pull request fixes no comment window
+REPLACES = re.compile(r"[ \t]*Replaces #(\d+)")  # matched with .match on one line: Replaces starts it, so `Unreplaces #N`, Closes and Fixes name nothing
+CLOSING_NOTE = re.compile(r"[ \t]*(Replaced|Carried) by #(\d+)\b")  # the line the batch runner posts when it closes a pull request
+FENCE = re.compile(r"[ \t]*(`{3,}|~{3,})(.*)")  # group 1: the run of fence characters, group 2: the rest of the line
+
+def claim_lines(text, pattern):
+    """-> the matches of `pattern` (one line, matched from its start) in the markdown `text`, in order. A line in a fenced code block or in a `>` quote
+    is skipped: it shows a claim and does not make one. A fence closes on the same character, in a run at least as long as the opener's, with nothing
+    after it. A backtick run whose line holds another backtick (inline code such as ```x```) opens no fence."""
+    found, fence = [], None  # fence: (character, length) of the open block
+    for line in (text or "").splitlines():
+        f = FENCE.match(line)
+        if fence:
+            if f and f.group(1)[0] == fence[0] and len(f.group(1)) >= fence[1] and not f.group(2).strip():
+                fence = None
+        elif f and not (f.group(1)[0] == "`" and "`" in f.group(2)):
+            fence = (f.group(1)[0], len(f.group(1)))
+        elif not line.lstrip().startswith(">") and (m := pattern.match(line)):
+            found.append(m)
+    return found
+
+def split_comments(rows):
+    """-> (records, lints) from issue comment rows, oldest first: see Host.issue_comments. The number comes from the comment's issue_url."""
+    records, lints = {}, {}
+    for c in rows:
+        body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
+        first = body.splitlines()[:1]
+        if m and first == [REVIEW_MARKER]:
+            records.setdefault(int(m.group(1)), []).append((body, c.get("created_at"), c.get("updated_at")))
+        elif m and first == [LANE_LINT_MARKER] and c.get("author_association") == LANE_LINT_AUTHOR:
+            lints.setdefault(int(m.group(1)), []).append(body)
+    return records, lints
+
+def closing_notes(rows):
+    """-> {PR number: (kind, number of the replacer or carrier)} from issue comment rows, oldest first so the newest note of a pull request wins.
+    kind is Replaced or Carried. A note on itself counts for nothing."""
+    found = {}
+    for c in rows:
+        hits = claim_lines(c.get("body"), CLOSING_NOTE)
+        n = re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
+        if hits and n and int(n.group(1)) != int(hits[-1].group(2)):
+            found[int(n.group(1))] = (hits[-1].group(1), int(hits[-1].group(2)))
+    return found
+
+def replaced_closes(pulls, frozen=None):
+    """-> {N: R}: each open pull request N that an open pull request R on N's base names with a `Replaces #N` line (claim_lines), R the lowest-numbered
+    such. Reads only the open list, so it costs nothing. A pull request never replaces itself, a number that is not open names nothing, and a mutual
+    pair (R names N and N names R) closes neither: one would be closed for a claim the other can say back. The same holds for a longer loop, and
+    for a claim on any N that follows its replacers back to N: a cycle has no live end, so it closes none. A claim stands even when its R is itself
+    named replaced. `frozen` is frozen_lanes(pulls) ({PR: set of heads}): a claim on an N that an open batch's freeze holds at N's current head is
+    skipped, whoever R is, since closing N would stall that batch. It is skipped after the cycle test, so a loop through a frozen lane still closes
+    none. An N frozen at an older head, or at none, closes as before; the freeze is already read, so this adds no read."""
+    base = {d["number"]: d["base"]["ref"] for d in pulls}
+    claims = {(d["number"], int(m.group(1))) for d in pulls for m in claim_lines(d.get("body"), REPLACES)}
+    claims = {(r, n) for r, n in claims if r != n and base.get(n) == base[r]}
+    replacers = {}
+    for r, n in claims:
+        replacers.setdefault(n, set()).add(r)
+
+    def in_cycle(n):
+        seen, todo = set(), list(replacers.get(n, ()))
+        while todo:
+            x = todo.pop()
+            if x == n:
+                return True
+            if x not in seen:
+                seen.add(x)
+                todo.extend(replacers.get(x, ()))
+        return False
+
+    claims = {(r, n) for r, n in claims if not in_cycle(n)}
+    heads = {d["number"]: d["head"]["sha"] for d in pulls}
+    found = {}
+    for r, n in sorted(claims):
+        if heads[n] not in (frozen or {}).get(n, ()):
+            found.setdefault(n, r)
+    return found
+
+def pr_holds(h, held, head, other):
+    """True when `other` (a head sha or the base) holds `head` (Host.holds_head: ahead or identical, a Stop on a failed read). `held` memoizes
+    {(head, other): bool}, so the carried close and the batch line share each compare: at most one per pair per wake."""
+    if (head, other) not in held:
+        held[head, other] = h.holds_head(head, other)
+    return held[head, other]
+
+def carried_closes(h, heads, drafts, base, held):
+    """-> {A: B}: each pull request A of `drafts` (a draft with a done record, on the base) with the lowest-numbered other open pull request B on the
+    base whose head holds A's head (pr_holds, a Stop on a failed read). B may be a draft or ready. Only a draft is carried: closing a ready pull request
+    would end its CI run and its merge, so a ready one that another holds is only kept off the batch line (reviewed_block), as on main. `heads` is
+    {number: head sha} of the open pull requests on the base. Two pull requests with one head hold each other, so the lower number is the holder
+    and the higher one closes; that needs no compare read. The caller leaves a pull request named replaced out of `heads`: it is closing, so it
+    carries nothing. An A whose head `base` already holds is never carried: nothing of it is left to carry, and B's hold on it says nothing about
+    B. That compare runs only for an A that has a holder B. Each compare is memoized in `held`, shared with the batch line."""
+    found = {}
+    for a in drafts:
+        for b in sorted(heads):
+            if b != a and (b < a if heads[b] == heads[a] else pr_holds(h, held, heads[a], heads[b])):
+                if not pr_holds(h, held, heads[a], base):
+                    found[a] = b
+                break
+    return found
+
+def frozen_lanes(pulls):
+    """-> {PR: set of frozen heads}: each lane that an open batch lists as `Lane: #N <head>` in its frozen block (parse_freeze). A lane that two open
+    batches freeze at different heads keeps both heads, whatever the order of the list. Only an open pull request whose head branch starts `batch-`
+    is read: another pull request may only quote a block, so its body freezes nothing, and a body there that this tool cannot read is skipped, as
+    restack does. A closed or merged batch is not in `pulls`, so its lanes are not listed. No read: the bodies come with the pull request list that
+    reviewed_read already holds. A batch body whose block this tool cannot read is a Stop."""
+    frozen = {}
+    for d in pulls:
+        if d["head"]["ref"].startswith(BATCH_PREFIX):
+            for n, sha in (parse_freeze(d.get("body") or "") or {"lanes": {}})["lanes"].items():
+                frozen.setdefault(n, set()).add(sha)
+    return frozen
+
+def pull_read(h, n):
+    """-> (state, head sha) of pull request n, state open, closed or merged; None when n names no pull request (an issue: HTTP 404). One read,
+    pulls/<n>. Any other failed read is a Stop."""
+    c, out = h.api(f"pulls/{n}")
+    if c and not is_net(c, out) and re.search(r"\bHTTP 404\b", out):
+        return None
+    try:
+        if c:
+            raise ValueError(out)
+        d = json.loads(out)
+        return ("merged" if d.get("merged") else d["state"]), (d.get("head") or {}).get("sha")
+    except (ValueError, KeyError, TypeError) as e:
+        raise Stop(f"cannot read pull request {h.repo} #{n}: {e} {UNKNOWN_CITE}")
+
+def pull_state(h, n):
+    """-> open, closed or merged for pull request n, or None when n names no pull request: see pull_read. One read."""
+    r = pull_read(h, n)
+    return r and r[0]
+
+def reopen_lines(h, pulls, notes, frozen=None):
+    """-> the `reopen:` lines for the closing notes `notes` ({N: (kind, R)}), ascending by N. A note counts only for an N that is not open and reads
+    closed and unmerged (pull_state). The chain from N follows each closed R's own note (a link) until it reaches an open pull request, one with no
+    note, one that is merged or not a pull request, or a link already seen. Only the last link reopens, so a wake reopens one pull request per chain,
+    the one nearest the tail: with a tail closed unmerged, `replacer #R dropped`; with an open tail, a Replaced link whose tail's body no longer holds
+    `Replaces #link` (`no longer names it`). An open tail that names its link, a Carried link with an open tail, and a merged tail reopen nothing.
+    A link that any open pull request names with `Replaces #link` reopens nothing either: the next wake would close it again (replaced_closes).
+    A link that an open batch freezes at the head it has now (`frozen`, frozen_lanes) is the exception: replaced_closes skips it, so it would not close
+    again. With an open tail it reopens, Replaced or Carried, even when the tail names it (`an open batch freezes it at its head`); with a closed
+    unmerged tail it reopens as `replacer #R dropped`. A frozen link with a merged tail reopens nothing, and only the last link is checked: in a chain
+    #4 -> #6 -> open #7, a frozen #4 reopens nothing. `frozen` is {} when the freeze was not read or could not be, so a named link then stays closed. One more read field only: the head of the closed link, from its pull_read.
+    Cost: one pull_state read per distinct number, memoized, so a replacer shared by many candidates is read once; none for an open R.
+    A failed read raises Stop. `notes` holds only comments updated since the oldest open pull request was created, so an older note is never read."""
+    open_by = {d["number"]: d for d in pulls}
+    seen = {}
+
+    def read(x):
+        if x not in seen:
+            seen[x] = pull_read(h, x)
+        return seen[x]
+
+    def state(x):
+        return (read(x) or (None,))[0]
+
+    def frozen_now(x):  # an open batch lists x at the head x has now
+        return bool(read(x)) and read(x)[1] in (frozen or {}).get(x, ())
+
+    named = {int(m.group(1)) for d in pulls for m in claim_lines(d.get("body"), REPLACES)}  # a PR an open one still names would close again
+    last = {}  # {link: tail}: a link that reopens is named once, however many candidates reach it
+    for n in sorted(notes):
+        if n in open_by or state(n) != "closed":
+            continue
+        path, tail = [n], notes[n][1]
+        while tail not in open_by and tail not in path and tail in notes and state(tail) == "closed":
+            path.append(tail)
+            tail = notes[tail][1]
+        last[path[-1]] = tail
+    out = []
+    for link, tail in sorted(last.items()):
+        held = frozen_now(link)
+        if link in named and not held:
+            continue
+        if tail in open_by:
+            if held:
+                out.append(f"{REOPEN}{h.repo} #{link} (an open batch freezes it at its head)")
+            elif notes[link][0] == "Replaced" and link not in {int(m.group(1)) for m in claim_lines(open_by[tail].get("body"), REPLACES)}:
+                out.append(f"{REOPEN}{h.repo} #{link} (replacer #{tail} no longer names it)")
+        elif state(tail) == "closed":
+            out.append(f"{REOPEN}{h.repo} #{link} (replacer #{tail} dropped)")
+    return out
 
 def reviewed_read(h):
-    """-> (lines, done, pulls): the lines of `merge --reviewed`, built before any is printed so a failed read prints none; a (number, base) pair for
-    each pull request whose newest record reads done; and the open pull request rows. Two list reads (the open pull requests, then the
+    """-> (lines, done, pulls, notes): the lines of `merge --reviewed`, built before any is printed so a failed read prints none; a (number, base) pair for
+    each pull request whose newest record reads done; the open pull request rows; and the closing notes (`closing_notes`) of the same comment read. Two list reads (the open pull requests, then the
     repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and
     the branch protection (decision pr-review-record, the cost). The comment list pages every comment of the repo since the oldest open pull request.
     The same list holds the lane-lint comments: a done record counts as done only with a lane-lint PASS at the live head (lint_state), else its line
@@ -4067,9 +4296,10 @@ def reviewed_read(h):
     main = h.base
     pulls = h.pages("pulls", fields={"state": "open"})
     if not pulls:
-        return ["no open pull requests."], [], pulls
-    rows, lints = h.issue_comments(min(d["created_at"] for d in pulls))
-    records = {n: [r[0] for r in rs] for n, rs in rows.items()}  # reviewed_read needs the bodies only
+        return ["no open pull requests."], [], pulls, {}
+    rows = h.issue_comment_rows(min(d["created_at"] for d in pulls))
+    stamped, lints = split_comments(rows)
+    records = {n: [r[0] for r in rs] for n, rs in stamped.items()}  # reviewed_read needs the bodies only
     lines, bare, done = [], [], []
     for d in sorted(pulls, key=lambda d: d["number"]):
         n, sha, bodies = d["number"], d["head"]["sha"], records.get(d["number"])
@@ -4087,7 +4317,7 @@ def reviewed_read(h):
                 state, why = LINT_NOT_READY[lint][0], f"{LINT_NOT_READY[lint][1]}. Run `merge --lane-lint {n}`"
         ci = "draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
         lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}; CI {ci}")
-    return lines + ([f"no record: {', '.join(bare)}"] if bare else []), done, pulls
+    return lines + ([f"no record: {', '.join(bare)}"] if bare else []), done, pulls, closing_notes(rows)
 
 def reviewed_lines(h):
     """-> the lines of `merge --reviewed` (see reviewed_read, which holds the gh cost of one repo). `--root` runs this once per root, so the
@@ -4095,29 +4325,73 @@ def reviewed_lines(h):
     return reviewed_read(h)[0]
 
 def reviewed_block(h):
-    """-> (lines, ok) of one `--root` block: `repo OWNER/NAME:`, that repo's reviewed lines, then at most one batch line. The batch line names the
-    done pull requests on the host's base, ascending, except one whose head another open pull request on that base holds (Host.holds_head, drafts
-    included: the batch would merge it twice), one whose head the base already holds (ahead or identical: nothing is left to merge) and one that
-    is ready with CI running (Host.ready_busy). `open batch now` when no ready pull request on that base has CI running, else `build next batch on
-    the running head`. No pull request left, no batch line. A Stop in a read for the batch line keeps the reviewed lines, prints
-    `batch line unknown (reason)` in place of the batch line, and ok is False; a Stop in reviewed_read raises. Extra cost over reviewed_read:
-    only when a done pull request exists on the base, the branch protection read and each ready pull request's check runs, statuses and workflow
-    runs, then one compare per done pull request and other open pull request on the base, and one compare per done pull request against the base."""
-    lines, done, pulls = reviewed_read(h)
-    out = [f"repo {h.repo}:", *lines]
-    nums = sorted(n for n, base in done if base == h.base)
-    if not nums:
-        return out, True
-    try:
-        busy = h.ready_busy(pulls, h.base)
-        heads = {d["number"]: d["head"]["sha"] for d in pulls if d["base"]["ref"] == h.base}
-        nums = [n for n in nums if n not in busy and not any(h.holds_head(heads[n], sha) for m, sha in heads.items() if m != n)
-                and not h.holds_head(heads[n], h.base)]
-    except Stop as e:
-        return out + [f"{REVIEW_BATCH_UNKNOWN}({' '.join(str(e).split())})"], False
+    """-> (lines, ok) of one `--root` block: `repo OWNER/NAME:`, that repo's reviewed lines, at most one batch line, then the close and reopen lines.
+    The batch line names the done pull requests on the host's base, ascending, except one that another open pull request names as its replacer
+    (replaced_closes), one that closes as carried (carried_closes: drafts only), one whose head another open pull request on that base holds, the
+    holder a draft or ready (as on main: the batch would merge it twice; a carried pull request is closing, so it holds nothing, and one head is
+    held with no compare), one whose head the base already holds (ahead or identical: nothing is left to merge) and one that is ready with CI
+    running (Host.ready_busy, checked first, so it reads no compare). `open batch now` when no ready pull request on that base has CI running, else `build next batch on the running head`.
+    No pull request left, no batch line. With no open pull request the block ends with REOPEN_UNCHECKED and reads nothing more. The tool posts and closes nothing: the batch runner closes each pull request on a close line.
+    A Stop in a read for the batch line keeps the reviewed lines, prints `batch line unknown (reason)` in place of the batch line, and ok is False;
+    a Stop in the compares that decide a carried close also prints `close as carried unknown (reason)` and no carried line, but keeps each replaced close line. A malformed frozen block in an open batch
+    body prints only `close as carried unknown (reason)` and no close line, replaced or carried, and ok is False: the batch line is still read, as if
+    no open batch froze a lane, and `carried` still keeps each lane it names off that line. (A done lane B held only by a frozen done lane A can
+    then join the batch line on that wake; ok False flags it.) A Stop in a reopen read prints
+    `reopen unknown (reason)`; a Stop in reviewed_read raises. Extra cost over reviewed_read: only when a done pull request exists on the base, the
+    branch protection read and each ready pull request's check runs, statuses and workflow runs, then at most one compare per done pull request
+    and other open pull request on the base, and at most one compare per done pull request against the base, all memoized in `held` and shared
+    with the carried close (pr_holds), so a pull request whose head the base holds is on neither line. A done pull request that is ready with CI
+    running reads no compare, as on main; two pull requests with one head read no compare between them (an equal-head draft pair reads one
+    `<head>...main`). A done draft that an open batch (head branch `batch-*`) lists as `Lane: #N <head>` at the head it has now is never carried
+    (frozen_lanes), as its batch holds it, and no open pull request closes such a lane as replaced (replaced_closes), a batch or not: the close would
+    stall that batch. A lane that two open batches list at two heads is held at each of them; a lane that moved off every head a batch lists is
+    closed or carried as before, and one that no open batch lists, or whose batch closed or merged, is too. The freeze is read once, before the
+    replaced close, only when a done pull request, a `Replaces` claim or a closing note exists, as the close and reopen lines are its only readers. It
+    reads no new data, only the bodies already read for the batch line. The close lines read nothing more. The reopen lines
+    read pulls/N once for each closed pull request with a closing note, and pulls/R once when its replacer R is not open (reopen_lines)."""
+    lines, done, pulls, notes = reviewed_read(h)
+    out, ok, tail = [f"repo {h.repo}:", *lines], True, []
+    if not pulls:
+        return out + [REOPEN_UNCHECKED], ok
+    frozen, freeze_stop = {}, False
+    if done or notes or any(claim_lines(d.get("body"), REPLACES) for d in pulls):  # nothing else reads the freeze: an unreadable batch with none is no news
+        try:
+            frozen = frozen_lanes(pulls)
+        except Stop as e:  # only the close lines are unknown: the batch line is still read, as if no open batch froze a lane
+            frozen, freeze_stop, tail, ok = {}, True, [f"{CLOSE_CARRIED_UNKNOWN}({' '.join(str(e).split())})"], False
+    replaced = replaced_closes(pulls, frozen)
+    nums = sorted(n for n, base in done if base == h.base and n not in replaced)
+    carried, batch, held = {}, [], {}
     if nums:
-        out.append(f"{REVIEW_BATCH_BUILD if busy else REVIEW_BATCH_OPEN}{h.repo} " + " ".join(f"#{n}" for n in nums))
-    return out, True
+        heads = {d["number"]: d["head"]["sha"] for d in pulls if d["base"]["ref"] == h.base and d["number"] not in replaced}
+        try:
+            # a lane at a head an open batch froze is held by that batch; one that moved since is carried as before
+            drafts = {d["number"] for d in pulls if d.get("draft") and d["head"]["sha"] not in frozen.get(d["number"], ())}
+            carried = carried_closes(h, heads, [n for n in nums if n in drafts], h.base, held)
+        except Stop as e:
+            why = " ".join(str(e).split())
+            batch, tail, ok = [f"{REVIEW_BATCH_UNKNOWN}({why})"], tail or [f"{CLOSE_CARRIED_UNKNOWN}({why})"], False
+        else:
+            try:
+                busy = h.ready_busy(pulls, h.base)
+
+                def held_by_other(n):  # as on main, but a carried PR is closing, so it holds nothing; one head is held with no compare
+                    return any(m != n and m not in carried and (sha == heads[n] or pr_holds(h, held, heads[n], sha)) for m, sha in sorted(heads.items()))
+
+                left = [n for n in nums if n not in busy and n not in carried and not held_by_other(n) and not pr_holds(h, held, heads[n], h.base)]
+                if left:
+                    batch = [f"{REVIEW_BATCH_BUILD if busy else REVIEW_BATCH_OPEN}{h.repo} " + " ".join(f"#{n}" for n in left)]
+            except Stop as e:
+                batch, ok = [f"{REVIEW_BATCH_UNKNOWN}({' '.join(str(e).split())})"], False
+    try:
+        reopen = reopen_lines(h, pulls, notes, frozen)
+    except Stop as e:
+        reopen, ok = [f"{REOPEN_UNKNOWN}({' '.join(str(e).split())})"], False
+    # `replaced` and `carried` keep each lane they name off the batch line whatever prints. A freeze Stop leaves both close kinds unknown. A failed
+    # carried compare leaves only the carried kind unknown, so a replaced close, which reads no compare, still prints.
+    closes = [] if freeze_stop else [f"{CLOSE_REPLACED}{h.repo} #{n} by #{r}" for n, r in sorted(replaced.items())]
+    closes += [] if tail else [f"{CLOSE_CARRIED}{h.repo} #{n} by #{b}" for n, b in sorted(carried.items())]
+    return out + batch + closes + tail + reopen, ok
 
 LOG_PREFIX = re.compile(r"^﻿?(?:\d{4}-\d\d-\d\dT[\d:.]+Z\s+)?(?:\x1b\[[0-9;]*m)*")  # a log line's timestamp and colour codes, before its text
 FAILING_LINE = re.compile(r"(?:FAILED|FAIL|ERROR)\b[:\s]*(.*)")
@@ -4239,8 +4513,10 @@ def reviewed_roots(roots, hosts, config):
     is missing or unreadable, prints `repo ROOT: unknown (reason)` in its place, and ok is False; a stop in a read for its batch line keeps its
     lines with `batch line unknown (reason)` (reviewed_block), and ok is False; the other roots print in full. The notices a root's config read
     says are held with its block and follow it, so nothing prints until every root is read. Cost: reviewed_block's per root: the gh calls of one
-    --reviewed, plus, when the base has a done pull request, the CI reads of each ready pull request on the base, one compare per done pull
-    request and other open pull request on the base, and one compare per done pull request against the base; no new process, file or timer."""
+    --reviewed, plus, when the base has a done pull request, the CI reads of each ready pull request on the base, the compares of reviewed_block (at
+    most one per done pull request and other open pull request on the base, at most one per done pull request against the base, none for a done
+    pull request that is ready with CI running), plus the reopen reads of reviewed_block
+    (at most two per closed pull request with a closing note); no new process, file or timer."""
     lines, ok = [], True
     for r in roots:
         config_says, read_says = io.StringIO(), io.StringIO()  # two buffers: the config read, then the GitHub reads (a rate-limit wait says so)

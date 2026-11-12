@@ -89,8 +89,26 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    to return a ready PR to draft. Any other lane waits for the next batch. `--on BRANCH` stacks a batch on a running batch.
    Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.
    Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run, and
-   the new run is the re-run. A lone lane is its own integration PR. When the integration PR merges,
-   each lane PR closes as replaced.
+   the new run is the re-run. A lone lane is its own integration PR and has no replacer.
+   Other lane PRs stay draft. `merge --reviewed --root` lists each close as a line: `close as replaced`,
+   `close as carried` or `reopen` (step `close-replaced-at-open`). The batch runner acts on each line.
+   It closes the PR and posts the comment, or it reopens the PR. In a cloud session, the GitHub MCP
+   tools do each write: `update_pull_request` closes (state closed) or reopens (state open), and
+   `add_issue_comment` posts the note. Where gh writes are allowed (local session), it may use
+   `gh api -X PATCH repos/OWNER/REPO/pulls/N -f state=closed` (or `state=open`) and
+   `gh api -X POST repos/OWNER/REPO/issues/N/comments -f body=...` instead. The merge tool posts and closes nothing.
+   When an integration PR opens with a body line `Replaces #N` (N is the number of the lane PR it replaces), the lane PR it names closes as
+   replaced. The replacer and the replaced PR must share a base. A bulleted `- Replaces #N` does not
+   count. The line counts at a line start, indent allowed, outside a code fence and a `>` quote. A loop of PRs
+   that name each other with `Replaces` closes none, of any length. An open draft PR with a done review record closes as
+   carried when another open PR on the same base holds its head (GitHub compare read). The carrier may be any open PR. A lane that any open batch freezes, at the head the batch froze, is neither carried nor closed as replaced by any open PR, a batch or not. A ready PR is only kept off the batch line, as on main. With two equal heads, the higher number closes as carried. A PR closed
+   as replaced cannot carry another. Each close comment starts a line. It reads `Replaced by #R;
+   reopens if #R is dropped`, or `Carried by #R; reopens if #R is dropped`. A `reopen` line fires
+   when R closes unmerged. For a Replaced note, it also fires when R is open and no longer names N.
+   A Carried note with R open reopens nothing. The exception is a closed PR with a note that an open batch freezes at its current head. It reopens while R is open, even when R names it, as no wake closes it again (`reopen_lines` in `merge/merge.py`; test `test_a_carried_lane_that_the_only_open_batch_freezes_reopens`). Its limits: with R merged it reopens nothing. Only the last link of a chain counts, so in #4 -> #6 -> open #7 a frozen #4 reopens nothing. Only such a note reopens a PR: a PR closed by hand, with no note, stays closed.
+   Each closed PR keeps its branch.
+   Reopen reads repeat each wake while a close note is in the comment window. A closed candidate
+   gets at most two reads. A replacer's state is read once.
    When the integration run is red, read the failing job. Find the lane whose files it touches.
    Search one lane merge commit at a time: for each lane merge commit `M` on the integration branch,
    run `git diff --name-only M^1 M` or `git log -1 -m -S<text> M` as its own command, and print the
@@ -116,6 +134,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    `batch-freeze-lane-set`). Fix the dropped lane in its own lane. It joins the next batch after its fix. A held lane
    (rule `roles-review-cap-three`, three review rounds) is the exception. Drop it and park it. It
    gets no fix lane until the owner decides.
+   When the batch runner drops a lane whose PR body holds a `Replaces #N` line, it deletes that line from the body: in a cloud session, `update_pull_request` with the new body; in a local session, `gh api -X PATCH repos/OWNER/REPO/pulls/N -f body=...`. `freeze_rewrite` (in `merge/merge.py`) rewrites only the runner's own block and keeps the text outside it, so a drop leaves the line in place. Deleting it lets the replaced PR reopen while the dropped PR is still open.
    No merge to main while a batch's run is in progress. The owner is included. Decision
    `no-merge-during-batch-ci` (no merge while a batch runs) holds the rule. A merge needs a green
    run on the current base (decision `merge-needs-current-base`). A head that lacks the base tip is
