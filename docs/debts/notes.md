@@ -2180,3 +2180,4 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
+- plan-cite-nonindented-parts: `lint/check_plan_step_cites.py` judges only parts indented 2+ spaces, so a column-0 or tab-indented `1.` in a ruling is not checked (column-0 numbered lists in docs/plans prose are not rulings, so this is by design). Found in review round 1 of lane ruling-parts-cite-steps. Decision: roles-findings-are-debts-or-notes.

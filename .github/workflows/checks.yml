@@ -395,6 +395,9 @@ jobs:
       - name: Plan refuter fixture suite
         run: python3 lint/test_check_plan_refuter.py
 
+      - name: Plan step cite fixture suite
+        run: python3 lint/test_check_plan_step_cites.py
+
       - name: Copy finder fixture suite
         run: python3 lint/test_find_copies.py
 
@@ -431,6 +434,10 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: python3 lint/check_plan_refuter.py --base "origin/$BASE_REF"
+
+      # Push and pull request alike: it reads the working tree against origin/roadmap, which the full-depth checkout fetches.
+      - name: Plan step cites
+        run: python3 lint/check_plan_step_cites.py
 
       # No `if:`: ci-scope.sh turns no flag on for a docs/map/*.md path, and a map page changed alone must still be read.
       # The script says why it runs `npm ci` first.
