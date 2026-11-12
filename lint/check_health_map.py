@@ -23,7 +23,9 @@ part that does not exist yet, and is never checked.
 
 The map is {"rows": [{"n": int, "sees": str, "grade": str, "why": str, "covers": [glob, ...]}, ...]}. A grade
 is green, amber, red or grey. Each n is unique and each covers list is not empty, except a parked row. Other keys are kept as
-they are and never read. An empty rows list is valid: every part is then uncovered.
+they are; this check never reads them. The roadmap build (skills/roadmap/build.py) reads a top-level "read" text
+and, on a row, "gold" (one sentence of what good looks like) and "quiet" (true when its check breaks with no
+record). An empty rows list is valid: every part is then uncovered.
 
     python3 lint/check_health_map.py [--root DIR] [--map FILE]
 
@@ -72,7 +74,8 @@ def is_test_rel(rel):
     return guard.is_test_rel(rel)
 
 
-def read_map(path):
+def read_doc(path):
+    """The map's parsed top level, checked against the shape above. The roadmap build reads it too."""
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
@@ -112,7 +115,11 @@ def read_map(path):
         for g in covers:
             if not NON_LITERAL.sub("", BRACKET_CLASS.sub("", g)):
                 raise Unknown("%s: glob too broad: %s" % (label, g))
-    return rows
+    return data
+
+
+def read_map(path):
+    return read_doc(path)["rows"]
 
 
 def list_dir(root, folder):

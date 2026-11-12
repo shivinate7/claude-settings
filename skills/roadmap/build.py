@@ -228,6 +228,7 @@ from shared_names import (  # noqa: E402,F401  REPO_TAG: test_build pins build.R
 )
 sys.path.insert(0, str(LINT))
 try:
+    import check_health_map  # noqa: E402  the one home of the health map's shape and of what a part is (lint/check_health_map.py)
     from report_guard import DONE_REF_RE  # noqa: E402  the one home of a source ref in a Done line (lint/report_guard.py)
 finally:
     sys.path.remove(str(LINT))
@@ -644,6 +645,55 @@ def health(repo, extra, where, slug, branch):
             {"name": "Session board", "home": None, "read": BOARD_WHY}]
 
 
+HEALTH_MAP_REL = check_health_map.MAP_REL
+# Worst first on the page: a broken row comes before one with issues, one not measured, and a healthy one.
+HEALTH_ORDER = ("red", "amber", "grey", "green")
+HEALTH_KINDS = ("hook", "check", "skill")
+
+
+def part_name(glob):
+    """The name a row shows for one of its globs: the part's own name (hooks/guard_merge.py shows guard_merge.py,
+    skills/ci-hygiene shows ci-hygiene). A glob with a wildcard keeps it, so the row says what it names, not a guess."""
+    return glob.rstrip("/").rsplit("/", 1)[-1]
+
+
+def health_map(repo):
+    """window.ROADMAP_BUILD.healthMap: the graded rows of docs/health-map.json, worst first, and the coverage line, or
+    why unknown. None when the repo holds neither the map nor lint/check_health_map.py: it keeps no health map, so the
+    page draws no Health tab. Shape: {"read", "rows": [{"n", "grade", "sees", "why", "gold", "quiet", "mk"}] | None,
+    "counts": {grade: n}, "coverage": {"total", "named", "left": {kind: [path]}} | None, "why": None | "unknown (...)",
+    "coverageWhy"}. A map that does not read gives rows None and why; a parts list that does not read gives coverage None
+    and coverageWhy. Neither is ever 0 or clear. Cost: reads the map file and lists three folders of the checkout once."""
+    path = repo / HEALTH_MAP_REL
+    if not path.exists() and not (repo / "lint" / "check_health_map.py").exists():
+        return None
+    try:
+        doc = check_health_map.read_doc(str(path))
+    except check_health_map.Unknown as e:
+        return {"read": None, "rows": None, "counts": None, "coverage": None, "why": "unknown (%s)" % e,
+                "coverageWhy": "unknown (the map did not read)"}
+    rows = sorted(doc["rows"], key=lambda r: HEALTH_ORDER.index(r["grade"]))  # stable: draft order holds inside a grade
+    out = [{"n": r["n"], "grade": r["grade"], "sees": r["sees"], "why": r["why"],
+            "gold": r["gold"] if isinstance(r.get("gold"), str) and r["gold"] else None,
+            "quiet": r.get("quiet") is True, "mk": [part_name(g) for g in r["covers"]]} for r in rows]
+    coverage, coverage_why = None, None
+    try:
+        parts = check_health_map.find_parts(str(repo))
+        if not parts:
+            raise check_health_map.Unknown("no hooks, checks or skills under %s" % repo)
+        left = {k: [] for k in HEALTH_KINDS}
+        for part in parts:
+            if not check_health_map.covered(part, doc["rows"]):
+                left[part[0]].append(part[1])
+        coverage = {"total": len(parts), "named": len(parts) - sum(len(v) for v in left.values()), "left": left}
+    except check_health_map.Unknown as e:
+        coverage_why = "unknown (%s)" % e
+    read = doc.get("read")
+    return {"read": read if isinstance(read, str) and read else None, "rows": out,
+            "counts": {g: sum(1 for r in doc["rows"] if r["grade"] == g) for g in HEALTH_ORDER},
+            "coverage": coverage, "why": None, "coverageWhy": coverage_why}
+
+
 def live_work(path, steps, slug=None):
     """window.ROADMAP_BUILD.live: the publisher's threads, pull requests and branches, or why unknown.
 
@@ -926,6 +976,9 @@ def main(argv=None):
     slug, found = github_slug(repo, extra), homes(repo)
     info["records"] = records(repo, found, slug, args.main_branch)
     info["health"] = health(repo, extra, where, slug, args.main_branch)
+    hm = health_map(repo)
+    if hm is not None:
+        info["healthMap"] = hm
     info["live"] = live_work(args.live, data["steps"] if data else None, slug)
     marks = add_marks(marks, pull_landed_marks(repo, ref, data["steps"] if data else None, info["live"]))
     info["landed"] = marks

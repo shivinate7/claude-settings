@@ -951,6 +951,93 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
   .askc.folded.withd.rline .frow .freply { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .askc.folded.withd.rline .frow .fhead .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 }
+/* Health tab (read only): docs/design/health-tab.html is the mockup. Every rule is under .hv or a name only this tab uses, so nothing above reaches it. */
+/* Grade marks: four shapes, each in its own colour, drawn as inline SVG in currentColor so forced-colors mode keeps the shape. */
+.gr { flex: none; display: block; width: 16px; height: 16px; }
+.gr.ok { color: var(--good); }
+.gr.iss { color: var(--due); }
+.gr.bad { color: var(--holds); }
+.gr.unm { color: var(--muted); }
+.gr .cut { stroke: var(--surface); }
+/* The tab's cue: the broken mark and its count, in a fixed box so the tab never changes width. */
+.tabs .hcue { display: inline-flex; align-items: center; gap: 3px; min-width: 4.5ch; font: 600 12px/1 var(--mono); font-variant-numeric: tabular-nums; color: var(--holds); }
+.tabs .hcue:empty { display: none; }
+.tabs .hcue .gr { width: 13px; height: 13px; }
+.tabs .hcue.u { color: var(--muted); }
+.hv { display: grid; gap: 16px; min-width: 0; }
+.hv-top { display: grid; gap: 10px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.hv-top h2 { font: 700 18px/1.25 var(--body); }
+.hv-top .intro { font-size: 14.5px; color: var(--muted); max-width: 72ch; }
+/* The key: each grade word shows here once, with its mark and its count. Rows show the mark only. */
+.hv .gkey { display: flex; flex-wrap: wrap; gap: 4px 18px; margin: 0; padding: 0; list-style: none; font-size: 14.5px; }
+.hv .gkey li { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; }
+.hv .gkey b { font: 600 14px var(--mono); font-variant-numeric: tabular-nums; }
+.hv .gkey .zero { color: var(--muted); }
+.hv .gkey .zero b { font-weight: 400; }
+/* The column icons: their words show in the table head on a wide box, and here on a narrow one. */
+.hv .ikey { display: none; flex-wrap: wrap; gap: 4px 18px; font-size: 13.5px; color: var(--muted); }
+.hv .ikey span { display: inline-flex; align-items: center; gap: 6px; }
+.ci { flex: none; width: 14px; height: 14px; color: var(--muted); }
+/* The coverage line: does the table name every hook, check and skill? */
+.hv .cov { display: grid; gap: 2px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 14.5px; }
+.hv .cov .ln b { font: 600 14.5px var(--mono); font-variant-numeric: tabular-nums; }
+.hv .cov .ln.u { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: var(--due); font-weight: 600; }
+.hv .cov .ln.u .rg { flex: none; border-color: var(--muted); }
+.hv .cov details { font-size: 14px; color: var(--muted); }
+.hv .cov summary { cursor: pointer; min-height: 44px; display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--ink); }
+.hv .cov .left { display: grid; gap: 6px; margin: 0 0 8px; }
+.hv .cov .left div { display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); gap: 8px; }
+.hv .cov .left code, .hv .ht code { font: 12.5px/1.5 var(--mono); overflow-wrap: anywhere; }
+.hv .cov .left code { color: var(--ink); }
+.hv .cov pre { margin: 0 0 6px; font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.nob .hrg { flex: none; border-color: var(--muted); }
+.hv-top .readat { border-top: 1px solid var(--line); padding-top: 2px; }
+/* The fails-silently band: the rows whose check breaks with no record. */
+.hv .quiet { display: grid; gap: 6px; padding: 10px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: inset 4px 0 0 var(--muted); font-size: 14.5px; }
+.hv .quiet h3 { display: inline-flex; align-items: center; gap: 8px; font: 700 15px/1.3 var(--body); }
+.hv .quiet p { color: var(--muted); }
+.hv .quiet ul { display: flex; flex-wrap: wrap; gap: 0 16px; margin: 0; padding: 0; list-style: none; }
+.hv .quiet a { display: inline-flex; align-items: center; min-height: 32px; color: var(--acc); }
+@media (pointer: coarse) { .hv .quiet a { min-height: 44px; } }
+.fo { flex: none; display: inline-block; width: 15px; height: 15px; vertical-align: -2px; color: var(--muted); }
+/* The table is a real table with explicit roles: on a narrow box its rows become grids, and WebKit drops a table's roles when its display changes. */
+.ht { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; font-size: 14px; line-height: 1.45; }
+.ht th, .ht td { text-align: left; vertical-align: top; padding: 10px 12px; border-top: 1px solid var(--line); min-width: 0; }
+.ht thead th { border-top: 0; padding-block: 8px; font: 600 13px/1.3 var(--body); color: var(--muted); background: var(--chip); }
+.ht thead th.gch { width: 44px; }
+.ht thead th.whh { width: 18%; }
+.ht thead th.whyh { width: 30%; }
+.ht thead th.mkh { width: 21%; }
+.ht .gc { padding-top: 12px; }
+.ht .wh { font-weight: 700; color: var(--ink); }
+.ht .wh .fo { margin-left: 4px; }
+.ht .why, .ht .gold { color: var(--ink); }
+.ht .mk, .ht .mk code { color: var(--muted); }
+.ht .mk code { display: inline; }
+.ht .ci { display: none; }
+.ht tr:target { background: var(--acc-soft); }
+/* Tablet box: the grade and the name on the first line, the why under it, then makes and good side by side. */
+@container (max-width: 999px) {
+  .hv .ikey { display: flex; }
+  .ht, .ht tbody { display: block; }
+  .ht thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .ht tbody tr { display: grid; grid-template-columns: 20px minmax(0, 1fr) minmax(0, 1fr); gap: 4px 12px; padding: 10px 14px; border-top: 1px solid var(--line); }
+  .ht th, .ht td { padding: 0; border: 0; }
+  .ht .gc { grid-column: 1; grid-row: 1; padding-top: 4px; }
+  .ht .wh, .ht .why { grid-column: 2 / -1; }
+  .ht .mk, .ht .gold { display: flex; gap: 6px; align-items: flex-start; padding-top: 4px; }
+  .ht .mk { grid-column: 2; }
+  .ht .gold { grid-column: 3; }
+  .ht .ci { display: block; margin-top: 2px; }
+}
+/* Phone box: one column under the mark. */
+@container (max-width: 559px) {
+  .hv-top, .hv .quiet { padding-inline: 12px; }
+  .ht tbody tr { grid-template-columns: 18px minmax(0, 1fr); gap: 2px 10px; padding: 10px 12px; }
+  .ht .mk, .ht .gold { grid-column: 2; }
+  .hv .cov .left div { grid-template-columns: minmax(0, 1fr); gap: 0; }
+}
+@media (forced-colors: active) { .gr .cut { stroke: Canvas; } .hv .quiet { border-left: 4px solid CanvasText; } }
 </style>
 
 <header class="hdr"><div class="in">
@@ -958,13 +1045,14 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
   <div class="who"><h1 class="repo" id="repoName">Questions</h1></div>
 </div></header>
 
-<nav class="in tabs" id="tabs" aria-label="Page"><div class="tl" role="tablist" aria-label="Page parts"><a href="#" id="tabQ" role="tab" aria-selected="true" aria-controls="qView">Questions <span class="cnt" id="qCount"></span></a><a href="#" id="tabStatus" role="tab" aria-selected="false" aria-controls="sPanel" tabindex="-1">Status</a></div><a href="#" id="tabD" role="button" hidden>Designs <span class="cnt" id="dCount"></span></a></nav>
+<nav class="in tabs" id="tabs" aria-label="Page"><div class="tl" role="tablist" aria-label="Page parts"><a href="#" id="tabQ" role="tab" aria-selected="true" aria-controls="qView">Questions <span class="cnt" id="qCount"></span></a><a href="#" id="tabStatus" role="tab" aria-selected="false" aria-controls="sPanel" tabindex="-1">Status</a><a href="#" id="healthTab" role="tab" aria-selected="false" aria-controls="hPanel" tabindex="-1" hidden>Health <span class="hcue" id="hCue"></span></a></div><a href="#" id="tabD" role="button" hidden>Designs <span class="cnt" id="dCount"></span></a></nav>
 <div class="in main" id="qView" role="tabpanel" aria-labelledby="tabQ">
   <nav class="rail" id="rail" aria-label="Overview"></nav>
   <div class="list" id="list"><div class="empty">Loading the items waiting on you…</div></div>
 </div>
 
 <div class="in svwrap" id="sPanel" role="tabpanel" aria-labelledby="tabStatus" hidden><section class="sv" id="sView" aria-label="Status"></section></div>
+<div class="in svwrap" id="hPanel" role="tabpanel" aria-labelledby="healthTab" hidden><section class="sv" id="hView" aria-label="Health"></section></div>
 
 <section class="in asks" id="asks" aria-labelledby="asksH">
   <div class="asks-head"><h2 id="asksH"><span class="g wait" aria-hidden="true"></span>Ask<span class="ct" id="askCount" hidden></span></h2>
@@ -1154,7 +1242,7 @@ function applyIdentity() {
 // The title is "<repo> Cockpit" on both tabs; with no repo name it is "Cockpit". `part` names the tab in the header only.
 function setTitle() {
   const name = state.meta && state.meta.identity && typeof state.meta.identity.name === "string" ? state.meta.identity.name.trim().slice(0, 40) : "";
-  const part = state.tab === "s" ? "Status" : "Questions";
+  const part = { s: "Status", h: "Health" }[state.tab] || "Questions";
   document.title = (name ? name + " " : "") + "Cockpit";
   // With no name the tab row already shows the part's name, so the header shows the mark only; the h1 stays for a screen reader.
   $("repoName").textContent = name || part;
@@ -3129,21 +3217,24 @@ function closeDesign(toItem) {
 $("dPrev").onclick = () => showDesign(dAt - 1); $("dNext").onclick = () => showDesign(dAt + 1);
 $("dClose").onclick = () => closeDesign(); $("dBack").onclick = () => closeDesign(dList[dAt].it);
 $("tabD").onclick = (e) => { e.preventDefault(); openDesign(""); };
-// Status hides #qView and never removes it, so a note typed on a card survives a switch. A load always opens Questions.
+// Status and Health hide #qView and never remove it, so a note typed on a card survives a switch. A load always opens Questions.
+const TABS = { q: ["tabQ", "qView"], s: ["tabStatus", "sPanel"], h: ["healthTab", "hPanel"] };
 function showTab(which) {
   state.tab = which;
-  const q = which === "q";
-  $("qView").hidden = !q; $("sPanel").hidden = q;
-  [["tabQ", q], ["tabStatus", !q]].forEach(([id, on]) => { $(id).setAttribute("aria-selected", String(on)); $(id).tabIndex = on ? 0 : -1; });
+  Object.entries(TABS).forEach(([k, [tab, panel]]) => { const on = k === which; $(panel).hidden = !on; $(tab).setAttribute("aria-selected", String(on)); $(tab).tabIndex = on ? 0 : -1; });
   setTitle();
-  if (!q) document.dispatchEvent(new Event("statusshown"));
+  if (which === "s") document.dispatchEvent(new Event("statusshown"));
 }
 $("tabQ").onclick = (e) => { e.preventDefault(); showTab("q"); };
 $("tabStatus").onclick = (e) => { e.preventDefault(); showTab("s"); };
+$("healthTab").onclick = (e) => { e.preventDefault(); showTab("h"); };
 $("tabs").addEventListener("keydown", (e) => {
   if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
   if (!e.target.closest || !e.target.closest('[role="tab"]')) return;
-  e.preventDefault(); const to = state.tab === "q" ? "s" : "q"; showTab(to); $(to === "q" ? "tabQ" : "tabStatus").focus();
+  e.preventDefault();
+  const shown = Object.keys(TABS).filter((k) => !$(TABS[k][0]).hidden), at = shown.indexOf(state.tab);
+  const to = shown[(at + (e.key === "ArrowRight" ? 1 : shown.length - 1)) % shown.length];
+  showTab(to); $(TABS[to][0]).focus();
 });
 
 /* ---------- Keys: A to C pick on the focused card, Ctrl or Cmd+Enter sends. Nothing on screen teaches them. ---------- */
@@ -3805,5 +3896,99 @@ window.addEventListener("resize", () => {
     measureRows(); const n = pageSize(); if (n === lastSize) return; lastSize = n; ui.page = phaseMap(); renderPlan();
   }, 150);
 });
+})();
+</script>
+
+<script>
+/* Health tab (read only). It reads window.ROADMAP_BUILD.healthMap, which the roadmap build bakes into the block above, and
+   never the artifact database. No healthMap key: the repo keeps no health map, so the tab stays out. The rows arrive worst
+   first from the build and are drawn in that order. The tab cue shows the broken count from every tab, so it draws at load. */
+(() => {
+const B = window.ROADMAP_BUILD, H = B && typeof B === "object" && B.healthMap && typeof B.healthMap === "object" ? B.healthMap : null;
+if (!H) return;
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const reason = (r) => { const m = /^unknown \(([\s\S]*)\)$/.exec(String(r == null ? "" : r)); return m ? m[1] : String(r == null ? "" : r); };
+const rows = Array.isArray(H.rows) ? H.rows : null;
+// The build's grade words (red, amber, grey, green) and the mark class each one draws.
+const GRADES = [["red", "bad", "Broken"], ["amber", "iss", "Has issues"], ["grey", "unm", "Not measured"], ["green", "ok", "Healthy"]];
+const CLS = Object.fromEntries(GRADES.map(([g, c]) => [g, c])), WORD = Object.fromEntries(GRADES.map(([g, , w]) => [g, w]));
+const KIND = { hook: "Hooks", check: "Checks", skill: "Skills" };
+const base = (p) => String(p).replace(/\/$/, "").split("/").pop();
+
+/* The four marks. Healthy: a filled ring with a check. Has issues: a ring half filled. Broken: a filled octagon with a cross.
+   Not measured: a dashed ring, the page's unknown shape. */
+function mark(c) {
+  const a = ` class="gr ${c}" viewBox="0 0 16 16" aria-hidden="true" focusable="false"`;
+  if (c === "ok") return `<svg${a}><circle cx="8" cy="8" r="7.5" fill="currentColor"/><path class="cut" d="M4.6 8.3l2.2 2.2 4.6-4.8" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  if (c === "iss") return `<svg${a}><circle cx="8" cy="8" r="6.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 1.4a6.6 6.6 0 0 0 0 13.2z" fill="currentColor"/></svg>`;
+  if (c === "bad") return `<svg${a}><path d="M5.2 0.6h5.6l4.6 4.6v5.6l-4.6 4.6H5.2L0.6 10.8V5.2z" fill="currentColor"/><path class="cut" d="M5.4 5.4l5.2 5.2M10.6 5.4l-5.2 5.2" stroke-width="2" stroke-linecap="round"/></svg>`;
+  return `<svg${a}><circle cx="8" cy="8" r="6.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-dasharray="2.6 2.1"/></svg>`;
+}
+const GEAR = '<svg class="ci" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="2.6" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8 1v2.4M8 12.6V15M1 8h2.4M12.6 8H15M3 3l1.7 1.7M11.3 11.3L13 13M3 13l1.7-1.7M11.3 4.7L13 3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+const TARGET = '<svg class="ci" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="3.4" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="1.2" fill="currentColor"/></svg>';
+const EYE = '<svg class="fo" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M1.2 8s2.6-4.6 6.8-4.6S14.8 8 14.8 8s-2.6 4.6-6.8 4.6S1.2 8 1.2 8z" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="2" fill="currentColor"/><path d="M2.5 13.5l11-11" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+
+/* The tab's cue: the broken mark and its count, or the dashed ring when the map did not read. With nothing broken it is empty. */
+const red = rows ? rows.filter((r) => r.grade === "red").length : 0;
+$("hCue").innerHTML = !rows ? `${mark("unm")}<span class="sr">, unknown</span>` : red ? `${mark("bad")}<span aria-hidden="true">${red}</span><span class="sr">, ${red} broken</span>` : "";
+$("hCue").classList.toggle("u", !rows);
+$("healthTab").hidden = false;
+
+function row(r) {
+  return `<tr role="row" id="hr${esc(r.n)}"><td role="cell" class="gc">${mark(CLS[r.grade] || "unm")}<span class="sr">${esc(WORD[r.grade] || "Not measured")}</span></td>`
+    + `<th role="rowheader" scope="row" class="wh">${esc(r.sees)}${r.quiet ? EYE + '<span class="sr">, fails with no record</span>' : ""}</th>`
+    + `<td role="cell" class="why">${esc(r.why)}</td>`
+    + `<td role="cell" class="mk">${GEAR}<span>${(r.mk || []).map((m) => `<code>${esc(m)}</code>`).join(", ")}</span></td>`
+    + `<td role="cell" class="gold">${TARGET}<span>${r.gold ? esc(r.gold) : "Not written yet."}</span></td></tr>`;
+}
+function table() {
+  const head = '<thead role="rowgroup"><tr role="row"><th role="columnheader" scope="col" class="gch"><span class="sr">Grade</span></th><th role="columnheader" scope="col" class="whh">What you see</th><th role="columnheader" scope="col" class="whyh">Why this grade</th><th role="columnheader" scope="col" class="mkh">What makes it happen</th><th role="columnheader" scope="col">What good looks like</th></tr></thead>';
+  return `<table class="ht" role="table" id="healthTable" aria-label="Health, one row per thing you see, worst first">${head}<tbody role="rowgroup">${rows.map(row).join("")}</tbody></table>`;
+}
+function coverage() {
+  const c = H.coverage;
+  if (!c) return `<div class="cov" id="healthCover"><p class="ln u"><span class="rg unk" aria-hidden="true"></span>Coverage: unknown. The build could not read the list of hooks, checks and skills, so no one can tell if a part is missing here.</p>
+    <details><summary>What the build said</summary><pre>${esc(reason(H.coverageWhy || "no reason given"))}</pre></details></div>`;
+  const left = Object.keys(KIND).map((k) => [k, (c.left && c.left[k]) || []]);
+  const n = left.reduce((s, [, xs]) => s + xs.length, 0);
+  return `<div class="cov" id="healthCover"><p class="ln">The rows name <b>${esc(c.named)}</b> of <b>${esc(c.total)}</b> hooks, checks and skills.</p>`
+    + (n ? `<details><summary>Named by no row: ${n}</summary><div class="left">${left.filter(([, xs]) => xs.length).map(([k, xs]) => `<div><span>${KIND[k]} ${xs.length}</span><span>${xs.map((x) => `<code>${esc(base(x))}</code>`).join(", ")}</span></div>`).join("")}</div></details>` : "")
+    + "</div>";
+}
+function top() {
+  const count = (g) => rows.filter((r) => r.grade === g).length;
+  const read = H.read ? `Graded at ${esc(H.read)}` : '<span class="unk">Graded at an unknown time</span>';
+  return `<section class="hv-top" aria-labelledby="hvH"><h2 id="hvH">How well each part works</h2>
+    <p class="intro">Each row is one thing you see when you work. Its mark says how well it works now. The last column says what good looks like, so each row shows its gap. Those targets are proposals, not agreed yet.</p>
+    <ul class="gkey" aria-label="Grades">${GRADES.map(([g, c, w]) => { const k = count(g); return `<li${k ? "" : ' class="zero"'}>${mark(c)}<span>${w}</span><b>${k}</b></li>`; }).join("")}</ul>
+    <p class="ikey" aria-hidden="true"><span>${GEAR}What makes it happen</span><span>${TARGET}What good looks like</span></p>
+    ${coverage()}
+    <details class="readat" id="healthRead"><summary>${read}</summary><ul><li>The grades and the lines under them are as the health map held them then.</li><li>The build counts the parts the rows name each time it builds, and takes no other reading.</li></ul></details></section>`;
+}
+function quiet() {
+  const q = rows.filter((r) => r.quiet);
+  if (!q.length) return "";
+  return `<section class="quiet" aria-labelledby="qH"><h3 id="qH">${EYE}Fails with no record: ${q.length}</h3><p>When these checks break, nothing says so.</p>
+    <ul>${q.map((r) => `<li><a href="#hr${esc(r.n)}">${esc(r.sees)}</a></li>`).join("")}</ul></section>`;
+}
+function noMap() {
+  return `<section class="box nob"><h3><span class="rg unk hrg" aria-hidden="true"></span>Health: unknown</h3>
+    <p>This page cannot read the health map, so no row can be graded. Your questions are not affected.</p>
+    <details><summary>What the build said</summary><pre>${esc(reason(H.why || "no reason given"))}</pre></details>
+    <button type="button" class="btn alt" id="hAsk">Copy the ask to fix the health map</button>
+    <textarea id="hAskText" rows="4" readonly hidden aria-label="The ask to fix the health map"></textarea></section>`;
+}
+// The ask names the repo as the page does (meta/page identity); with none, "this repo".
+const askText = () => {
+  const id = (typeof state !== "undefined" && state.meta && state.meta.identity) || {}, name = typeof id.name === "string" ? id.name.trim().slice(0, 40) : "";
+  return "Fix the health map for " + (name || "this repo") + ": the page build could not read docs/health-map.json (" + reason(H.why || "no reason given") + "). Then have the page writer put the rebuilt roadmap block on this repo's waiting page.";
+};
+$("hView").innerHTML = rows ? `<div class="hv">${top()}${quiet()}${table()}</div>` : noMap();
+const ask = $("hAsk");
+if (ask) ask.onclick = () => {
+  const text = askText(), box = $("hAskText"), label = ask.textContent;
+  const fallback = () => { box.value = text; box.hidden = false; box.select(); };
+  try { navigator.clipboard.writeText(text).then(() => { ask.textContent = "Copied"; setTimeout(() => { ask.textContent = label; }, 1400); }, fallback); } catch (e) { fallback(); }
+};
 })();
 </script>
