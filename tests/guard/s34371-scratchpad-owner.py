@@ -1254,6 +1254,32 @@ spo_register("scratchpad-owner: folder move 2, agent B's mv of agent A's file ou
                                      lambda s: "mv %s %s" % (os.path.join(s, "sub", "a.txt"),
                                                              os.path.join(s, "mine.txt")),
                                      "agent B's mv of agent A's file out of its folder is refused"))
+# Agent B's one call moves its own file into agent A's folder `sub`, and another word of the same call names that folder
+# too. A folder is walked, not dropped, when another word names it: each of these calls is refused, since it removes or
+# moves A's folder or A's file. Each form is a plain mistake, a move and a clean-up typed as one line.
+SPO_MOVE_INTO_FORMS = (
+    ("folder-move-3", "folder move 3, agent B's mv of its own file into agent A's folder, then rm -rf of that folder",
+     lambda s: "mv %s %s/ && rm -rf %s" % (os.path.join(s, "own.txt"), os.path.join(s, "sub"),
+                                            os.path.join(s, "sub"))),
+    ("folder-move-4", "folder move 4, agent B's mv of its own file into agent A's folder, then a mv of that folder",
+     lambda s: "mv %s %s/; mv %s %s" % (os.path.join(s, "own.txt"), os.path.join(s, "sub"),
+                                        os.path.join(s, "sub"), os.path.join(s, "moved"))),
+    ("folder-move-5", "folder move 5, agent B's mv -t of its own file into agent A's folder, then rm -rf of that folder",
+     lambda s: "mv -t %s %s && rm -rf %s/" % (os.path.join(s, "sub"), os.path.join(s, "own.txt"),
+                                              os.path.join(s, "sub"))),
+    ("folder-move-6", "folder move 6, agent B's rm -rf of agent A's folder, then a mv of its own file into it",
+     lambda s: "rm -rf %s && mv %s %s/" % (os.path.join(s, "sub"), os.path.join(s, "own.txt"),
+                                           os.path.join(s, "sub"))),
+    ("folder-move-7", "folder move 7, agent B's mv of its own file into a brace list naming agent A's folder",
+     lambda s: "mv %s %s/{sub,own1}/" % (os.path.join(s, "own.txt"), s)),
+    ("folder-move-8", "folder move 8, agent B's sudo mv of agent A's folder, then a mv of its own file into it",
+     lambda s: "sudo mv %s %s; mv %s %s/" % (os.path.join(s, "sub"), os.path.join(s, "x"),
+                                             os.path.join(s, "own.txt"), os.path.join(s, "sub"))),
+)
+for _tag, _label, _command_of in SPO_MOVE_INTO_FORMS:
+    spo_register("scratchpad-owner: %s: refused" % _label,
+                 lambda t=_tag, n=_label, c=_command_of: spo_folder_case(t, n, SPO_FOLDER_MOVE_OWN, SPO_OTHER, c,
+                                                                         "%s is refused" % n))
 # The walk's limits: the cap at its boundary (over a real folder, as the guard runs in its own process), and the symlinks.
 spo_register("scratchpad-owner: folder rm walk cap 1, agent B's rm -rf of a folder's entries, agent A's file the last "
              "entry inside the walk cap: refused",

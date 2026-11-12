@@ -2162,6 +2162,16 @@ MUTATIONS = [
      "if os.path.islink(top):",
      "if top != root and os.path.islink(top):",
      "guard", "folder rm walk link 3,"),
+    # Rule scratchpad-owner, an mv destination that is a folder of the call: the folder is dropped from the walk only when
+    # no other word of the call names it. The rows are the exception removed, and the brace or glob exclusion removed.
+    ("scratchpad-owner: an mv into a folder is dropped from the walk even when another word of the call names it",
+     'into if into and names.get(os.path.normpath(into)) == intos[os.path.normpath(into)] else ""',
+     'into if into else ""',
+     "guard", "folder move 3,"),
+    ("scratchpad-owner: an mv into a brace list or a glob drops the folder as if its name were one folder",
+     ' and expand_shell_braces(dest) == [dest] and not SCRATCHPAD_GLOB_MAGIC.search(dest)):',
+     '):',
+     "guard", "folder move 7,"),
     ("write-target deny loop judges only the first path field, so a later field's deny is skipped",
      '    for target in targets:\n        # 0b.',
      '    for target in targets[:1]:\n        # 0b.',
