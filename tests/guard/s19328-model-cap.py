@@ -550,12 +550,108 @@ sh("cap deadline: a shell write that sets only the cap-lift end asks under agent
    "printf '%s' '" + json.dumps({EXPIRY_KEY: DEADLINE_WINTER}) + "' > " + PROJ_SETTINGS,
    "ask", "agent-model-cap", cwd=NOGIT, carries=(WANT_WINTER,))
 # The clock is pinned to an instant one hour before the deadline, so this end is near, not far: it asks
-# whatever the length ceiling is, and it is the control that a far-only row cannot be.
+# at any length, and it is the control that a far-only row cannot be.
 NEAR_CLOCK = "2099-01-14T20:30:00+00:00"
 DEADLINE_NEAR = "2099-01-14T21:30:00Z"   # one hour after NEAR_CLOCK: 15:30 CST
 add("cap deadline: a Write that sets a cap-lift end one hour ahead asks under agent-model-cap and names the end in CST",
     "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
     content=json.dumps({EXPIRY_KEY: DEADLINE_NEAR}), carries=(_central_text(DEADLINE_NEAR),),
     env={"LOCAL_TIME_NOW": NEAR_CLOCK})
+
+# ----------------------------------------------------------- the end an edit leaves on disk
+#
+# An Edit or MultiEdit asks with the end the FILE ARRIVES AT: the file on disk with the edit applied.
+# The edit's own strings can hide that end. A value-only edit names no field, so the end it leaves is
+# not in its strings at all. A deletion's old text names an end the file no longer holds. A second
+# edit moves an end the first one set. Each on-disk file below holds the old text its edit replaces,
+# under this run folder, one folder per case.
+DEADLINE_DIR = os.path.join(ROOT, "deadline")
+CLOCK_FOR_DISK_CASES = "2026-11-12T13:47:00-06:00"   # Central, the clock the guard's LOCAL_TIME_NOW reads
+DISK_CLOCK = {"LOCAL_TIME_NOW": CLOCK_FOR_DISK_CASES}
+OLD_END_2026 = "2026-11-12T10:00:00Z"
+CAP_END_2030 = "2030-01-01T00:00:00Z"
+WANT_2030 = _central_text(CAP_END_2030)   # "18:00 CST", on the 31st of December 2029
+MULTI_START_2099 = "2099-03-01T00:00:00Z"
+
+
+def disk_settings(tag, text):
+    """Write one project settings file under this run folder, for an edit case to read from disk."""
+    path = os.path.join(DEADLINE_DIR, tag, ".claude", "settings.local.json")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    return slash(path)
+
+
+OPUS_LIFT_2026 = json.dumps({"env": {CAP_KEY: OPUS, CAP_FORCE: "1"}, EXPIRY_KEY: OLD_END_2026})
+OPUS_LIFT_WINTER = json.dumps({"env": {CAP_KEY: OPUS, CAP_FORCE: "1"}, EXPIRY_KEY: DEADLINE_WINTER})
+SONNET_UNTIL_WINTER = json.dumps({"env": {CAP_KEY: "sonnet"}, EXPIRY_KEY: DEADLINE_WINTER})
+OPUS_UNTIL_MULTI = json.dumps({"env": {CAP_KEY: OPUS, CAP_FORCE: "1"}, EXPIRY_KEY: MULTI_START_2099})
+
+add("cap deadline: an Edit that changes only the end's value, with no field name in its strings, "
+    "asks under agent-model-cap and names the end in CST",
+    "ask", "agent-model-cap", tool="Edit", cwd=NOGIT,
+    file_path=disk_settings("value-only-2030", OPUS_LIFT_2026),
+    old_string='"%s"' % OLD_END_2026, new_string='"%s"' % CAP_END_2030,
+    carries=(WANT_2030,), env=DISK_CLOCK)
+sh("cap deadline: a sed that changes only the end's value in a settings file asks under agent-model-cap "
+   "and names the end in CST",
+   "sed -i 's/%s/%s/' %s" % (OLD_END_2026, CAP_END_2030, disk_settings("sed-2030", OPUS_LIFT_2026)),
+   "ask", "agent-model-cap", cwd=NOGIT, carries=(WANT_2030,), env=DISK_CLOCK)
+add("cap deadline: an Edit that moves only the end's value from winter to summer asks under "
+    "agent-model-cap and names the end in CDT",
+    "ask", "agent-model-cap", tool="Edit", cwd=NOGIT,
+    file_path=disk_settings("winter-to-summer", OPUS_LIFT_WINTER),
+    old_string='"%s"' % DEADLINE_WINTER, new_string='"%s"' % DEADLINE_SUMMER,
+    carries=(WANT_SUMMER,), env=DISK_CLOCK)
+add("cap deadline: a MultiEdit whose second edit moves only the end's value asks with the end the file "
+    "arrives at, in CDT, and not the end the first edit set",
+    "ask", "agent-model-cap", tool="MultiEdit", cwd=NOGIT,
+    file_path=disk_settings("multi-edit", OPUS_UNTIL_MULTI),
+    edits=[{"old_string": '"%s": "%s"' % (EXPIRY_KEY, MULTI_START_2099),
+            "new_string": '"%s": "%s"' % (EXPIRY_KEY, DEADLINE_WINTER)},
+           {"old_string": '"%s"' % DEADLINE_WINTER, "new_string": '"%s"' % DEADLINE_SUMMER}],
+    carries=(WANT_SUMMER,), lacks=(WANT_WINTER,), env=DISK_CLOCK)
+add("cap deadline: a MultiEdit with one edit that sets the cap-lift end to summer asks and names it in CDT",
+    "ask", "agent-model-cap", tool="MultiEdit", cwd=NOGIT,
+    file_path=disk_settings("multi-edit-one", OPUS_UNTIL_MULTI),
+    edits=[{"old_string": '"%s": "%s"' % (EXPIRY_KEY, MULTI_START_2099),
+            "new_string": '"%s": "%s"' % (EXPIRY_KEY, DEADLINE_SUMMER)}],
+    carries=(WANT_SUMMER,), env=DISK_CLOCK)
+add("cap deadline: an Edit that raises the model and deletes the cap-lift end asks under agent-model-cap "
+    "and shows no end, as the raise alone does",
+    "ask", "agent-model-cap", tool="Edit", cwd=NOGIT,
+    file_path=disk_settings("raise-deletes-end", SONNET_UNTIL_WINTER),
+    old_string='"%s": "sonnet"}, "%s": "%s"' % (CAP_KEY, EXPIRY_KEY, DEADLINE_WINTER),
+    new_string='"%s": "%s"}' % (CAP_KEY, OPUS),
+    carries=(CAP_KEY + " = " + OPUS,), lacks=(" CST", " CDT"), env=DISK_CLOCK)
+add("cap deadline: an Edit that only deletes the cap-lift end stays silent, as on main",
+    "allow", tool="Edit", cwd=NOGIT, file_path=disk_settings("deletes-end-only", SONNET_UNTIL_WINTER),
+    old_string=', "%s": "%s"' % (EXPIRY_KEY, DEADLINE_WINTER), new_string="",
+    silent=True, env=DISK_CLOCK)
+add("cap deadline: an Edit that moves only the end's value to a passed time stays silent",
+    "allow", tool="Edit", cwd=NOGIT, file_path=disk_settings("value-passed", OPUS_LIFT_WINTER),
+    old_string='"%s"' % DEADLINE_WINTER, new_string='"2000-01-01T00:00:00Z"',
+    silent=True, env=DISK_CLOCK)
+add("cap deadline: an Edit that moves only the end's value to an unparseable time stays silent",
+    "allow", tool="Edit", cwd=NOGIT, file_path=disk_settings("value-malformed", OPUS_LIFT_WINTER),
+    old_string='"%s"' % DEADLINE_WINTER, new_string='"next Tuesday"',
+    silent=True, env=DISK_CLOCK)
+
+# ----------------------------------------------------- one reading of each offset form of the end
+#
+# The same instant, 03:30 UTC on 15 January 2099 (21:30 CST on the 14th), written in each form. The
+# watch reads a form with no offset as UTC. The guard must show the same end for every form. The Z form
+# is the row above, "a Write that sets only the cap-lift end asks ... in CST".
+OFFSET_FORMS = {
+    "-05:00": "2099-01-14T22:30:00-05:00",
+    "space": "2099-01-15 03:30:00",
+    "naive": "2099-01-15T03:30:00",
+}
+for _form, _text in sorted(OFFSET_FORMS.items()):
+    add("cap deadline: a Write that sets the cap-lift end in the %s form asks under agent-model-cap and "
+        "names the end in CST" % _form,
+        "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
+        content=json.dumps({EXPIRY_KEY: _text}), carries=(WANT_WINTER,), env=DISK_CLOCK)
 
 # =========================================================================== 6c. ask alone
