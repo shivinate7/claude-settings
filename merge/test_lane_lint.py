@@ -10,9 +10,8 @@ fixture come from merge/test_merge.py: a case extends that fixture, it does not 
 The SIGTERM case and the slot cases run merge in a subprocess through HARNESS, which names the same stub; they do not patch CI_JOB
 in this process. The slot cases (lint slots: a lane lint waits for one of merge.lint_slots() slots) set the slot count and the bound
 (merge.LINT_SECONDS) in that subprocess, and read the order of the stub's starts and ends, never the clock.
-BatchLintFlags runs the real bin/ci-job through merge.lane_lint on a batch's four checks.yml lint CI steps, each script logged once with its argv; cost per case: one ci-job copy and run, one worktree, four CI step runs, 0.5 s measured (3 runs of 2 cases). Its two lint-set cases (no lint step; a step that runs only off a pull request) run the same way with their own checks job.
-Its two slot-hold cases hold every lane-lint slot, or none, in the default config folder of a scratch home (HOME moved there), and
-run the same ci-job once; the lint runs in this run's config folder (BatchLintFlags.cfg). No case sleeps: FirstPollStops stops a wait at its first poll.
+BatchLintFlags runs the real bin/ci-job through merge.lane_lint on a batch's four checks.yml lint CI steps, each script logged once with its argv. Its lint-set cases (no lint step; a step that runs only off a pull request) run the same way with their own checks job.
+Its slot-hold cases hold every lane-lint slot, or none, in the default config folder of a scratch home (HOME moved there), and run the ci-job once; the lint runs in this run's config folder (self.cfg). Its unlock case runs no ci-job: it drives merge.lint_slot and probes the slot file. No case sleeps: FirstPollStops stops a wait at its first poll.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
 import ast, atexit, contextlib, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
