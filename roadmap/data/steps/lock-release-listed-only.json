@@ -1,11 +1,11 @@
 {
   "title": "Merge lock: Lock.release leases its delete on the ls-remote listing only",
   "phase": "next",
-  "status": "doing",
+  "status": "ready",
   "order": 643,
   "owner": "coordinator",
-  "lane": "session_013NEJL2sZ68ECc62SiwfqPk",
+  "lane": "",
   "why": "A fetch failure that is not a network failure can leave a live merge lock behind, because Lock.release leases its delete on more than the ls-remote listing (lane merge-lock-expired-delete-race, 07:09 CST Nov 8).",
-  "note": "Done check: a red test where a non-network fetch failure during release leaves no live lock. Merge after: #1657. Doing in lane merge-lock-expired-delete-race (session_013NEJL2sZ68ECc62SiwfqPk). Slug from the lane; title by triage. Built as PR #2000, with runner 8 (lane, 07:51 CST Nov 8). Done when #2000 merges. Reviewed and with runner 8 as #2000 (1e39cb099) (lane merge-lock-expired-delete-race, 08:28 CST Nov 8). Doing 05:58 CST Nov 10: open PR #2000 on branch lock-release-listed-only (triage live build).",
-  "updatedAt": "2026-11-10T05:57:00-06:00"
+  "note": "Done check: a red test where a non-network fetch failure during release leaves no live lock. Merge after: #1657. Doing in lane merge-lock-expired-delete-race (session_013NEJL2sZ68ECc62SiwfqPk). Slug from the lane; title by triage. Built as PR #2000, with runner 8 (lane, 07:51 CST Nov 8). Done when #2000 merges. Reviewed and with runner 8 as #2000 (1e39cb099) (lane merge-lock-expired-delete-race, 08:28 CST Nov 8). Doing 05:58 CST Nov 10: open PR #2000 on branch lock-release-listed-only (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL2sZ68ECc62SiwfqPk).",
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

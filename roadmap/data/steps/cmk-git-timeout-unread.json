@@ -1,11 +1,11 @@
 {
   "title": "The conflict-markers guard asks when its git read cannot run",
   "why": "A git read that times out or fails left the conflict-markers check silent, so a commit with markers could pass unread.",
-  "note": "Filed 09:49 CST Nov 8 from the coordinator's ask of 07:56 CST. Doing in lane commit-refuses-conflict-markers as #2083; round 1 FAIL, fixes in build (lane, 09:48 CST).",
+  "note": "Filed 09:49 CST Nov 8 from the coordinator's ask of 07:56 CST. Doing in lane commit-refuses-conflict-markers as #2083; round 1 FAIL, fixes in build (lane, 09:48 CST). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJKzXJPDWrSRe3i1fGJd.md on archive/session-handoffs-2026-11-10).",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "archived, handoff at handoffs/session_013NEJKzXJPDWrSRe3i1fGJd.md on archive/session-handoffs-2026-11-10",
-  "status": "doing",
+  "lane": "",
+  "status": "ready",
   "order": 708,
-  "updatedAt": "2026-11-10T11:20:00-06:00"
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

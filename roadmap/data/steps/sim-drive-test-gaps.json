@@ -1,11 +1,11 @@
 {
   "title": "The simulator-drive guard's two untested hold arms and the simctl verbs get cases and mutants",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 55,
   "owner": "coordinator",
-  "lane": "session_013NEJKzSDXuw4rJESuzdw1Y",
+  "lane": "",
   "why": "Two hold arms and the simctl verbs in the simulator-drive guard have no test case or mutant.",
-  "note": "Lane sim-lease-gaps (session_013NEJKzSDXuw4rJESuzdw1Y). #1692 is reverted to its round-3 tree with its record posted; #1699 is stacked on it. Coordinator 19:06 CST Nov 7. Kept doing on: #1692 and #1699 open drafts (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10).",
-  "updatedAt": "2026-11-10T06:03:00-06:00"
+  "note": "Lane sim-lease-gaps (session_013NEJKzSDXuw4rJESuzdw1Y). #1692 is reverted to its round-3 tree with its record posted; #1699 is stacked on it. Coordinator 19:06 CST Nov 7. Kept doing on: #1692 and #1699 open drafts (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJKzSDXuw4rJESuzdw1Y).",
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

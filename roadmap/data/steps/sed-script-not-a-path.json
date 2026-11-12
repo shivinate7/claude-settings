@@ -1,11 +1,11 @@
 {
   "title": "The guard does not read a sed script as a path",
   "why": "A guard reads the script argument of a sed command as a file path, so a harmless edit is judged as a write to a path it names (coordinator, 02:47 CST Nov 8; lane test-dirs-include-testing, 03:22 CST Nov 8).",
-  "note": "Fix: the guard skips a sed script argument (the first non-option word, or each -e value) when it collects paths, and still reads each file operand. Red case first: a sed command whose script text looks like a path is refused or asked today; control: a sed -i on a guarded file still refuses. In build in lane session_013NEJKyqF79t9UigCgm3qjb; its PR carries Merge after: #1858. Queue fix (owner 13:20 CST Nov 7). Filed 03:23 CST Nov 8. Ready as #1947, head 2c5e6fb0c, Merge after: #1858, with runner 8. It files debts sed-in-place-flag-forms (sed -ni / -Ei / --in-place on a test file pass the builder check, true on main too) and sed-operand-two-readers (two readers of sed operands); on merge, check each names a Fix (owner 13:20 CST Nov 7) (lane, 06:01 CST Nov 8). Doing 05:58 CST Nov 10: open PR #1947 on branch sed-script-not-a-path (triage live build).",
+  "note": "Fix: the guard skips a sed script argument (the first non-option word, or each -e value) when it collects paths, and still reads each file operand. Red case first: a sed command whose script text looks like a path is refused or asked today; control: a sed -i on a guarded file still refuses. In build in lane session_013NEJKyqF79t9UigCgm3qjb; its PR carries Merge after: #1858. Queue fix (owner 13:20 CST Nov 7). Filed 03:23 CST Nov 8. Ready as #1947, head 2c5e6fb0c, Merge after: #1858, with runner 8. It files debts sed-in-place-flag-forms (sed -ni / -Ei / --in-place on a test file pass the builder check, true on main too) and sed-operand-two-readers (two readers of sed operands); on merge, check each names a Fix (owner 13:20 CST Nov 7) (lane, 06:01 CST Nov 8). Doing 05:58 CST Nov 10: open PR #1947 on branch sed-script-not-a-path (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJKyqF79t9UigCgm3qjb).",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 582,
   "owner": "triage",
-  "lane": "session_013NEJKyqF79t9UigCgm3qjb",
-  "updatedAt": "2026-11-10T05:57:00-06:00"
+  "lane": "",
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

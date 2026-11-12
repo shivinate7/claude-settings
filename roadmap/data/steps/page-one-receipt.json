@@ -1,16 +1,16 @@
 {
   "title": "Page: one receipt line, and no ready line when the bar already says it",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 103.362,
   "why": "Owner ask ask-mw5ax2zb2j: improve the page as it grew.",
-  "note": "Coordinator 12:37 CST, from page-growth-review (Sonnet Explore audit): S. Coordinator picks, 13:56 CST Nov 7 (undoable): (1a) the rail's \"N ready to send\" goes, and the bar keeps the count. (2) receipt() and lastAnswerEl() share one home for the \"what you chose\" words, with the \"no longer listed\" wording.",
-  "updatedAt": "2026-11-07T13:56:00-06:00",
+  "note": "Coordinator 12:37 CST, from page-growth-review (Sonnet Explore audit): S. Coordinator picks, 13:56 CST Nov 7 (undoable): (1a) the rail's \"N ready to send\" goes, and the bar keeps the count. (2) receipt() and lastAnswerEl() share one home for the \"what you chose\" words, with the \"no longer listed\" wording. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL1fQaNp75QW37StZfW).",
+  "updatedAt": "2026-11-12T07:22:00-06:00",
   "paused": {
     "why": "Waits on step page-reply-uncollapse to merge.",
     "decides": "coordinator",
     "at": "2026-11-06T14:39:00-06:00",
     "by": "triage"
   },
-  "lane": "session_013NEJL1fQaNp75QW37StZfW"
+  "lane": ""
 }

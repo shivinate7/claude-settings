@@ -1,11 +1,11 @@
 {
   "title": "The stall watch lists an agent whose foreground tool call has been open more than 900 s",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 52,
   "owner": "coordinator",
-  "lane": "session_013NEJKzPiiVLh3Sr1Jdoj76",
+  "lane": "",
   "why": "An agent stuck inside one open tool call never goes quiet in its transcript, so the stall watch misses it.",
-  "note": "Coordinator pick, 18:38 CST, can be undone: 900 s, foreground calls only; background calls are skipped. Second of three. Stacked on #1682. Filed from lane stall-watch-agents, 18:38 CST Nov 7. Built as draft #1718, stacked on #1682, reviewed; it waits on the coordinator's call about its review record before it goes to runner 8 (19:37 CST). Round 3 PASS, review record at 576efb3; with runner 8 (19:43 CST). Doing 05:58 CST Nov 10: open PR #1718 on branch stall-watch-open-call-cap (triage live build).",
-  "updatedAt": "2026-11-10T05:57:00-06:00"
+  "note": "Coordinator pick, 18:38 CST, can be undone: 900 s, foreground calls only; background calls are skipped. Second of three. Stacked on #1682. Filed from lane stall-watch-agents, 18:38 CST Nov 7. Built as draft #1718, stacked on #1682, reviewed; it waits on the coordinator's call about its review record before it goes to runner 8 (19:37 CST). Round 3 PASS, review record at 576efb3; with runner 8 (19:43 CST). Doing 05:58 CST Nov 10: open PR #1718 on branch stall-watch-open-call-cap (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJKzPiiVLh3Sr1Jdoj76).",
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

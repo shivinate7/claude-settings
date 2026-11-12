@@ -1,11 +1,11 @@
 {
   "title": "Report-guard follow-ups to the Next waiver: one task-tag home, one terminal-status list, and a stopped agent read as finished",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 60.25,
   "owner": "coordinator",
-  "lane": "session_013NEJL4HFe7Gz9VNMNryxaZ",
+  "lane": "",
   "why": "Two copies of the task tag and of the finished-status list drift apart, and a stopped background agent still reads as running.",
-  "note": "Scope: report_guard imports TASK_NOTIFICATION_TAG and shares stall_watch's terminal-status list; it covers or drops the branch where no tool_result means running; a TaskStop'd background agent reads as finished (shape measured first); note mask-spans-gloss-escapes is deleted. Branch stacked on #1721. Lane report-model-from-role, at the coordinator's 19:48 CST ask; filed 19:48 CST Nov 7. Kept doing on: #1727 open draft (step/next-waiver-followups), stacked on #1721 open (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10).",
-  "updatedAt": "2026-11-10T06:03:00-06:00"
+  "note": "Scope: report_guard imports TASK_NOTIFICATION_TAG and shares stall_watch's terminal-status list; it covers or drops the branch where no tool_result means running; a TaskStop'd background agent reads as finished (shape measured first); note mask-spans-gloss-escapes is deleted. Branch stacked on #1721. Lane report-model-from-role, at the coordinator's 19:48 CST ask; filed 19:48 CST Nov 7. Kept doing on: #1727 open draft (step/next-waiver-followups), stacked on #1721 open (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL4HFe7Gz9VNMNryxaZ).",
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

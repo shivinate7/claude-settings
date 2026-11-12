@@ -1,11 +1,11 @@
 {
   "title": "The prose judge reads a line that quotes an exact test title, found once in the cited file, as backed",
   "why": "Coordinator 14:57 CST Nov 8, confirmed a false alarm by lane qmax-totals-in-thousands: hooks/prose_judge.py flagged q_max D-632 (money-shows-in-thousands.md) line 68 as stale twice, at runner 9's merges of PR 1143 and PR 1146. The line quotes the test title \"every table whose cells render Thousands has exactly one money head that carries the unit\", which appears exactly once, at thousands-marker.test.mjs:103 on q_max e62f52b42. Red case: that line against that file reads as backed.",
-  "note": "",
+  "note": " Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJKyxnHZUhFjmTh4XbJa.md on archive/session-handoffs-2026-11-10).",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "archived, handoff at handoffs/session_013NEJKyxnHZUhFjmTh4XbJa.md on archive/session-handoffs-2026-11-10",
-  "status": "doing",
+  "lane": "",
+  "status": "ready",
   "order": 820,
-  "updatedAt": "2026-11-10T11:20:00-06:00"
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

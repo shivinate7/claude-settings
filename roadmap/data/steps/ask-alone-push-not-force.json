@@ -1,11 +1,11 @@
 {
   "title": "Guard ask-alone refuses a plain git push only when the push carries a force flag",
   "why": "Triage 13:31 CST Nov 8, in normal work: ask-alone refused a call that ran a python heredoc of step-note edits, then roadmap/build.py, then git add and a commit, then a plain `git push origin roadmap` with no force flag. Refusal line: \"ask-alone: this shell call chains a command that needs the owner's answer (force-push, forced push) with other commands. Run that command alone, in its own call, or drop it. (decision ask-commands-run-alone, a command that asks the owner runs alone)\". Run alone, the same push passed. A refusal that names the wrong cause is spent (verification-cry-wolf-guard-is-spent). Check first whether #2209 (review-record-before-any-push, with runner 8), which touches chained commit-then-push, already explains it. Reproduce before the fix.",
-  "note": "",
+  "note": " Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJL48TK8WDdmrKwyXguu.md on archive/session-handoffs-2026-11-10).",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "archived, handoff at handoffs/session_013NEJL48TK8WDdmrKwyXguu.md on archive/session-handoffs-2026-11-10",
-  "status": "doing",
+  "lane": "",
+  "status": "ready",
   "order": 810,
-  "updatedAt": "2026-11-10T11:20:00-06:00"
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

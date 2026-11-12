@@ -1,11 +1,11 @@
 {
   "title": "A lane's findings ride in its own PR, or one follow-up PR per topic",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 103.51,
   "owner": "coordinator",
-  "lane": "archived, handoff at handoffs/session_013NEJKyuRd6zdQhuiRC27g9.md on archive/session-handoffs-2026-11-10",
+  "lane": "",
   "why": "Owner pick on item 386, a+b+c (page save, 22:25 CST Nov 7). Each finding became its own step and lane, so lanes made lanes (coordinator, 21:45 CST).",
-  "note": "A finding joins the lane's next commit, or one follow-up PR per topic. A queue-fix lane: the owner's hold lets it start. Title from item 386 option b. Lane session_013NEJKyuRd6zdQhuiRC27g9 started (coordinator, 22:29 CST Nov 7). Owner item 394 a (06:08 CST Nov 8): a short fix check passes a push whose diff only adds the round's findings to the debt store or the notes file. The owner picked the widening option over the recommended b.",
-  "updatedAt": "2026-11-10T11:20:00-06:00"
+  "note": "A finding joins the lane's next commit, or one follow-up PR per topic. A queue-fix lane: the owner's hold lets it start. Title from item 386 option b. Lane session_013NEJKyuRd6zdQhuiRC27g9 started (coordinator, 22:29 CST Nov 7). Owner item 394 a (06:08 CST Nov 8): a short fix check passes a push whose diff only adds the round's findings to the debt store or the notes file. The owner picked the widening option over the recommended b. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJKyuRd6zdQhuiRC27g9.md on archive/session-handoffs-2026-11-10).",
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

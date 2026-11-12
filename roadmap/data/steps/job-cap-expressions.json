@@ -1,11 +1,11 @@
 {
   "title": "The merge tool reads a job cap written as an expression, so the merge-lock floor is not too low",
   "why": "merge.py base_job_caps skips a cap such as `timeout-minutes: ${{ matrix.cap }}`. Measured on q_max: the matrix maximum is 42, so the floor should be 47, but the tool reads 40 (lane qmax-merge-deadline, session_013NEJKz6tCDukV1yMoiPQ83, 03:30 CST Nov 8; coordinator 03:30 CST).",
-  "note": "Fix: resolve a matrix expression to the maximum of its values; when it cannot be resolved, read it as unknown and fail closed to the largest cap found. Red case first: a matrix fixture whose largest cap is an expression gives too low a floor today; control: a plain numeric cap reads as today. Related done step c34 (the merge tool waits for CI to finish). q_max #1037 closes unmerged (premise gone); its step qmax-merge-deadline lives in q_max's records, not this roadmap. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 03:31 CST Nov 8. Lane session_013NEJL2mzycmcUKim3G7RkZ started it (coordinator, 03:31 CST Nov 8).",
+  "note": "Fix: resolve a matrix expression to the maximum of its values; when it cannot be resolved, read it as unknown and fail closed to the largest cap found. Red case first: a matrix fixture whose largest cap is an expression gives too low a floor today; control: a plain numeric cap reads as today. Related done step c34 (the merge tool waits for CI to finish). q_max #1037 closes unmerged (premise gone); its step qmax-merge-deadline lives in q_max's records, not this roadmap. Queue fix (owner 13:20 CST Nov 7). Slug from the coordinator. Filed 03:31 CST Nov 8. Lane session_013NEJL2mzycmcUKim3G7RkZ started it (coordinator, 03:31 CST Nov 8). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL2mzycmcUKim3G7RkZ).",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 583,
   "owner": "triage",
-  "lane": "session_013NEJL2mzycmcUKim3G7RkZ",
-  "updatedAt": "2026-11-08T03:31:00-06:00"
+  "lane": "",
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

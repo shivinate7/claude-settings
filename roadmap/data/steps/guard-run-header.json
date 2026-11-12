@@ -1,11 +1,11 @@
 {
   "title": "The guard reads a workflow `run: | # comment` as a run block, through lint/workflow_steps.py",
   "why": "hooks/guard.py WORKFLOW_RUN_BLOCK does not treat `run: | # c` as a block; follow-up of #1417 (step ready-checks-use-pinned-tools), coordinator 04:28 CST Nov 8.",
-  "note": "Fix: WORKFLOW_RUN_BLOCK reads run blocks through lint/workflow_steps.py run_header, so `run: | # c` is a block; plus a test of a real `uses:` after a `| # c` block in settings_pins. Doing (lane session_013NEJL1MUZiHTf89ikYeMTX, 04:28 CST Nov 8), branch guard-run-header, Merge after: #1417. Queue fix. Filed 04:35 CST Nov 8. Ready as #1924, head c7fe35444, reviewed, with runner 8, Merge after: #1417 (lane, 05:57 CST Nov 8). Doing 05:58 CST Nov 10: open PR #1924 on branch guard-run-header (triage live build).",
+  "note": "Fix: WORKFLOW_RUN_BLOCK reads run blocks through lint/workflow_steps.py run_header, so `run: | # c` is a block; plus a test of a real `uses:` after a `| # c` block in settings_pins. Doing (lane session_013NEJL1MUZiHTf89ikYeMTX, 04:28 CST Nov 8), branch guard-run-header, Merge after: #1417. Queue fix. Filed 04:35 CST Nov 8. Ready as #1924, head c7fe35444, reviewed, with runner 8, Merge after: #1417 (lane, 05:57 CST Nov 8). Doing 05:58 CST Nov 10: open PR #1924 on branch guard-run-header (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL1MUZiHTf89ikYeMTX).",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 599,
   "owner": "triage",
-  "lane": "session_013NEJL1MUZiHTf89ikYeMTX",
-  "updatedAt": "2026-11-10T05:57:00-06:00"
+  "lane": "",
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

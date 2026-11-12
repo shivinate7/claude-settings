@@ -1,13 +1,13 @@
 {
   "id": "cloud-artifactdata-allow",
   "title": "Cloud page writes: allow the cloud page tool, or keep page writes local",
-  "status": "doing",
+  "status": "ready",
   "repo": "shivinate7/claude-settings",
-  "lane": "branch artifactdata-allow, PR #2608",
+  "lane": "",
   "blockedBy": [],
   "why": "A cloud session's page writes can stall on an approval nobody sees, because the settings allow list names only the desktop connector's page tool.",
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
   "source": "Coordinator 20:07 and 20:08 CST Nov 11, page item 520",
-  "note": "The settings allow list names only mcp__claude-artifacts__db_write (coordinator's read, 20:06 CST); cloud sessions use ArtifactData. A Degen cloud session saw page writes refused with reason mcpServerPolicy. Page item 520 asks the owner: a (recommended) keep page writes in a local session; b add ArtifactData to the allow list as a test (widens a shared tool). Under b, after the respawn a lane adds the one line and one cloud page write proves it. Waits for the fan-out (owner 13:51). Same name split as step page-tool-every-name. Owner 20:08 CST in the coordinator's chat: \"add artifactdata to the allowlist please\" (item 520 b), and every name the page tool goes by is allowed. A builder adds them on branch artifactdata-allow (#2608). Home triage's exact tool name is unmeasured; the allow list's mcp__claude-artifacts__db_write is the only full name in hand.",
-  "updatedAt": "2026-11-11T20:15:00-06:00"
+  "note": "The settings allow list names only mcp__claude-artifacts__db_write (coordinator's read, 20:06 CST); cloud sessions use ArtifactData. A Degen cloud session saw page writes refused with reason mcpServerPolicy. Page item 520 asks the owner: a (recommended) keep page writes in a local session; b add ArtifactData to the allow list as a test (widens a shared tool). Under b, after the respawn a lane adds the one line and one cloud page write proves it. Waits for the fan-out (owner 13:51). Same name split as step page-tool-every-name. Owner 20:08 CST in the coordinator's chat: \"add artifactdata to the allowlist please\" (item 520 b), and every name the page tool goes by is allowed. A builder adds them on branch artifactdata-allow (#2608). Home triage's exact tool name is unmeasured; the allow list's mcp__claude-artifacts__db_write is the only full name in hand. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was branch artifactdata-allow, PR #2608).",
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

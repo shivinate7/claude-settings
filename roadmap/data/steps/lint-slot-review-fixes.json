@@ -1,11 +1,11 @@
 {
   "title": "The lint slot cap gets its review fixes, and test_install_src.sh stops failing under load",
   "why": "Lane lane-lint-parallel-cap (PR #1843) left five review findings unfiled (lane, 02:35 CST Nov 8): (1) merge/test_lane_lint.py:621-640 checks that the hung stub died, not that its slot freed; (2) merge/test_lane_lint.py:35 says a case skips on Windows, but none does; (3) note lint-slot-windows-hung-pipe in docs/debts/notes.md should say the wait is forever only once every slot holds a hung run; (4) debt lint-slot-scope-unpinned should add that the merge's own lint (merge.py:1843) runs beside N lane lints; (5) hooks/guard_core.py try_lock_fd names two lock copies but gives no reason they stay. Also measured: with 8 lints at once on 4 CPUs, 3 of 8 FAIL falsely in hooks/test_install_src.sh caseF4/F6.",
-  "note": "Fix: (1) assert the slot frees; (2) make the comment true or add the skip; (3) and (4) rewrite the note and the debt in place; (5) give the reason or keep one copy (rule building-one-home-per-capability); find why caseF4/F6 fail under load and fix the cause, never by a longer wait alone. Built as a follow-up from #1843's head in lane lane-lint-parallel-cap (coordinator, 02:36 CST Nov 8). Queue fix (owner 13:20 CST Nov 7). Title and slug by triage. Filed 02:37 CST Nov 8. Ready as #1888 (f7cd74df6), Merge after: #1843, with runner 8 (lane, 04:28 CST Nov 8). Cause of the caseF4/F6 false FAILs: hooks/test_install_src.sh wrote stderr to fixed /tmp paths shared by parallel runs; 8 copies at once failed 1 of 8 before and 0 of 8 after (one run each). Doing 05:58 CST Nov 10: open PR #1888 on branch lint-slot-review-fixes (triage live build).",
+  "note": "Fix: (1) assert the slot frees; (2) make the comment true or add the skip; (3) and (4) rewrite the note and the debt in place; (5) give the reason or keep one copy (rule building-one-home-per-capability); find why caseF4/F6 fail under load and fix the cause, never by a longer wait alone. Built as a follow-up from #1843's head in lane lane-lint-parallel-cap (coordinator, 02:36 CST Nov 8). Queue fix (owner 13:20 CST Nov 7). Title and slug by triage. Filed 02:37 CST Nov 8. Ready as #1888 (f7cd74df6), Merge after: #1843, with runner 8 (lane, 04:28 CST Nov 8). Cause of the caseF4/F6 false FAILs: hooks/test_install_src.sh wrote stderr to fixed /tmp paths shared by parallel runs; 8 copies at once failed 1 of 8 before and 0 of 8 after (one run each). Doing 05:58 CST Nov 10: open PR #1888 on branch lint-slot-review-fixes (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJKzstsLQzGsUXajpze5).",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 574,
   "owner": "triage",
-  "lane": "session_013NEJKzstsLQzGsUXajpze5",
-  "updatedAt": "2026-11-10T05:57:00-06:00"
+  "lane": "",
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

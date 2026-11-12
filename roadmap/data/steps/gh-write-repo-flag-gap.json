@@ -1,11 +1,11 @@
 {
   "title": "The gh-write guard reads a gh command whose repo flag comes before the subcommand",
   "why": "Coordinator 10:04 CST Nov 9, from #2444 (gh-write-cloud guard, step gh-search-only): `gh pr -R o/r comment` is allowed, because gh_call_of stops at the -R flag. Harm: a cloud session can post a PR comment outside the merge tool, which the guard is meant to refuse.",
-  "note": "Fix: gh_call_of skips -R/--repo and its value before the subcommand. It changes the local verdict too, so it runs in its own lane, with a red row first. The coordinator starts the lane after batch 68 merges. Source note gh-write-repo-flag-gap in roadmap/outbox/triage.md. Batch 68 merged (#2449, 11:55 CST Nov 9): free to start. Lane session_013NEJL27bB3sjZacDv3K9e4 started 12:13 CST Nov 9 (coordinator).",
+  "note": "Fix: gh_call_of skips -R/--repo and its value before the subcommand. It changes the local verdict too, so it runs in its own lane, with a red row first. The coordinator starts the lane after batch 68 merges. Source note gh-write-repo-flag-gap in roadmap/outbox/triage.md. Batch 68 merged (#2449, 11:55 CST Nov 9): free to start. Lane session_013NEJL27bB3sjZacDv3K9e4 started 12:13 CST Nov 9 (coordinator). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJL27bB3sjZacDv3K9e4.md on archive/session-handoffs-2026-11-10).",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "archived, handoff at handoffs/session_013NEJL27bB3sjZacDv3K9e4.md on archive/session-handoffs-2026-11-10",
-  "status": "doing",
+  "lane": "",
+  "status": "ready",
   "order": 915,
-  "updatedAt": "2026-11-10T11:20:00-06:00"
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

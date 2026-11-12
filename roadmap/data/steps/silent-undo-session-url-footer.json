@@ -1,11 +1,11 @@
 {
   "title": "The silent-undo check reads key lines when the PR body ends with the session URL after the Generated-with line",
-  "status": "doing",
+  "status": "ready",
   "order": 264.7,
-  "lane": "archived, handoff at handoffs/session_013NEJL2t7akPLp9rbWSVEeF.md on archive/session-handoffs-2026-11-10",
+  "lane": "",
   "why": "Coordinator, 15:03 CST, topic merge-checks: lint/check_silent_undo.py last_paragraph ignores key lines when the PR body ends with the Generated-with line and then a paragraph holding only the claude.ai/code/session_ URL, the shape every PR body now has.",
-  "note": "Skip that URL paragraph when it follows the Generated-with line. Red test first.",
+  "note": "Skip that URL paragraph when it follows the Generated-with line. Red test first. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJL2t7akPLp9rbWSVEeF.md on archive/session-handoffs-2026-11-10).",
   "owner": "coordinator",
   "phase": "now",
-  "updatedAt": "2026-11-10T11:20:00-06:00"
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

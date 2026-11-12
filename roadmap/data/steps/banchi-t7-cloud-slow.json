@@ -1,11 +1,11 @@
 {
   "title": "banchi: T7 prints a progress line for each check and refuses a non-loopback network call",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 50,
   "owner": "coordinator",
-  "lane": "session_013NEJL2iYsBGsEeEAggnRjE",
+  "lane": "",
   "why": "A cloud run of T7 takes 681-728 s (4 runs, lane banchi-t7-cloud-slow), against 3-4 min per CI shard, with no line to show which check is slow. The earlier \"over 25 min\" figure came from a runner script with no __main__ guard (lane banchi-t7-root-ipv6-skip's own mistake), not from T7.",
-  "note": "From lane banchi-t7-root-ipv6-skip via the coordinator, 19:08 CST Nov 7; the coordinator is starting a lane. Lane session_013NEJL2iYsBGsEeEAggnRjE has had it since 19:08 CST (coordinator, 19:17 CST). Rescoped by the coordinator, 20:33 CST Nov 7: a per-check progress line and a refusal of non-loopback network. The trap line goes in a banchi docs PR from lane banchi-t7-root-ipv6-skip. Revised 20:34 CST Nov 7. Unclear: banchi repo; not readable from claude-settings (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10).",
-  "updatedAt": "2026-11-10T06:03:00-06:00"
+  "note": "From lane banchi-t7-root-ipv6-skip via the coordinator, 19:08 CST Nov 7; the coordinator is starting a lane. Lane session_013NEJL2iYsBGsEeEAggnRjE has had it since 19:08 CST (coordinator, 19:17 CST). Rescoped by the coordinator, 20:33 CST Nov 7: a per-check progress line and a refusal of non-loopback network. The trap line goes in a banchi docs PR from lane banchi-t7-root-ipv6-skip. Revised 20:34 CST Nov 7. Unclear: banchi repo; not readable from claude-settings (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL2iYsBGsEeEAggnRjE).",
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

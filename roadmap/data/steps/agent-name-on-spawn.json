@@ -1,11 +1,11 @@
 {
   "title": "A lane messages its agents by a name given at spawn, never a bare id",
   "phase": "guards",
-  "status": "doing",
+  "status": "ready",
   "order": 665,
   "owner": "coordinator",
-  "lane": "session_013NEJL1Aq6pKaCrB1kxda68",
+  "lane": "",
   "why": "Lane notes-fix-page sent three overlap lists to the wrong agents, because it messaged them by bare id (lane notes-fix-page (session_013NEJKzjkypcToggneCjJN8), 08:12 CST Nov 8).",
-  "note": "Done check: a red test where a SendMessage to a bare agent id from a lane is refused or asked, and a spawn with no name is flagged. Build lane. Filed by triage 08:14 CST Nov 8. Started by the coordinator 08:16 CST Nov 8 in lane session_013NEJL1Aq6pKaCrB1kxda68. Kept doing on: #2122 open draft (agent-name-on-spawn-2) (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10).",
-  "updatedAt": "2026-11-10T06:03:00-06:00"
+  "note": "Done check: a red test where a SendMessage to a bare agent id from a lane is refused or asked, and a spawn with no name is flagged. Build lane. Filed by triage 08:14 CST Nov 8. Started by the coordinator 08:16 CST Nov 8 in lane session_013NEJL1Aq6pKaCrB1kxda68. Kept doing on: #2122 open draft (agent-name-on-spawn-2) (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL1Aq6pKaCrB1kxda68).",
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

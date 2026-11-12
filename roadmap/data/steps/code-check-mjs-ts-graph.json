@@ -1,10 +1,10 @@
 {
   "title": "code-check mjs-imports: cover tsx roots, bare packages and the .ts graph depth",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 103.3594,
   "why": "The shared check must cover q_max's harness/load-files.mjs before q_max can delete its copy.",
-  "note": "Nov 6 14:50 CST (triage audit): status to doing; open PR #1325.\nCoordinator 12:39 CST: extend claude-settings actions/code-check mjs-imports for three gaps: tsx roots, bare packages, and .ts graph depth. The coordinator starts the lane. Step qmax-load-files-dedupe waits on it. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1325.",
-  "updatedAt": "2026-11-10T03:45:00-06:00",
-  "lane": "open PR #1325"
+  "note": "Nov 6 14:50 CST (triage audit): status to doing; open PR #1325.\nCoordinator 12:39 CST: extend claude-settings actions/code-check mjs-imports for three gaps: tsx roots, bare packages, and .ts graph depth. The coordinator starts the lane. Step qmax-load-files-dedupe waits on it. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1325. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was open PR #1325).",
+  "updatedAt": "2026-11-12T07:22:00-06:00",
+  "lane": ""
 }

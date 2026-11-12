@@ -1,11 +1,11 @@
 {
   "title": "ci-scope reads the guard's import closure from its one home, not a copy",
   "why": "Coordinator 13:05 CST Nov 8, found by lane lint-config-guard-paths (session_013NEJL1f9CA1PTZPYsRhFQV, #2205): .github/scripts/ci-scope.sh keeps its own copy of guard.py's import list. Its janitor/* arm has no guard flag, so a janitor/sweep.py edit skips test_guard and the guard mutation test. Fix: ci-scope reads merge/merge.py guard_import_closure (added in #2205) instead of a copy (rule building-allow-list-is-the-constant). Merge after #2205.",
-  "note": "Coordinator 13:53 CST Nov 8: #2238 handed to runner 8 after round 3 at be1ccfa. Doing 05:58 CST Nov 10: open PR #2238 on branch ci-scope-reads-guard-closure (triage live build).",
+  "note": "Coordinator 13:53 CST Nov 8: #2238 handed to runner 8 after round 3 at be1ccfa. Doing 05:58 CST Nov 10: open PR #2238 on branch ci-scope-reads-guard-closure (triage live build). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL1f9CA1PTZPYsRhFQV).",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "session_013NEJL1f9CA1PTZPYsRhFQV",
-  "status": "doing",
+  "lane": "",
+  "status": "ready",
   "order": 799,
-  "updatedAt": "2026-11-10T05:57:00-06:00"
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

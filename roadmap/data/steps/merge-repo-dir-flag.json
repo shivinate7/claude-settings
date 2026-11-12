@@ -1,10 +1,10 @@
 {
   "title": "The merge tool takes a repo-dir flag, so a cloud runner can merge a second repo",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 496,
   "why": "Coordinator, Nov 3 16:15 CST: a cloud batch runner holds one checkout and cannot run the merge tool against a child repo.",
-  "note": "Nov 6 14:50 CST (triage audit): status to doing; open PR #1166.\nNov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): HELD until foundations F1-F3 (guard files) land.\nAdd a repo-dir flag to merge/merge.py. Changes the merge tool: net-value test after round 3. Lane session_013NEJL19PYKPFXLekGuTmnX, started by the coordinator Nov 3. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1166.",
-  "updatedAt": "2026-11-10T03:45:00-06:00",
-  "lane": "open PR #1166"
+  "note": "Nov 6 14:50 CST (triage audit): status to doing; open PR #1166.\nNov 6 12:01 CST (coordinator replan: Opus plan and critic, main 7975f6d8, roadmap 01995020): HELD until foundations F1-F3 (guard files) land.\nAdd a repo-dir flag to merge/merge.py. Changes the merge tool: net-value test after round 3. Lane session_013NEJL19PYKPFXLekGuTmnX, started by the coordinator Nov 3. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1166. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was open PR #1166).",
+  "updatedAt": "2026-11-12T07:22:00-06:00",
+  "lane": ""
 }

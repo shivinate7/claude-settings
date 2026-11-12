@@ -1,11 +1,11 @@
 {
   "title": "The page writer's wake lists every owner ask with no reply, so a routed ask is also closed on the page",
   "why": "Triage 12:36 CST Nov 8, its own mistake: ask ask-mw8321blnx (11:05 CST) was routed to step stray-push-ask-source but never closed on the page, so the owner saw no answer for 90 minutes. The feedback-inbox Stop hook surfaced it. Fix: the waiting-page skill's wake query lists asks with no status or reply, and the Stop check refuses while one is older than the last wake.",
-  "note": "Coordinator 12:37 CST Nov 8: a lane starts now. Coordinator 14:42 CST Nov 8: #2268 with runner 8; #2246 closed as superseded. Ruling (owner chat 11:26 CST Nov 10, relayed by the coordinator 11:31 CST): \"sessions like triage are not being archived right? so it can be doing work via agents in its session/lane -- i just said no new spawns at this time\". The freeze bars new sessions only; triage builds this step with agents in its own session (page item 492 closed). This note is the ruling's home until a decision holds it. #2268 (list asks with no reply at wake) is open and conflicts with main (mergeable_state dirty, 11:33 CST); triage brings it up to date with main, reviews it and hands it to runner 8.",
+  "note": "Coordinator 12:37 CST Nov 8: a lane starts now. Coordinator 14:42 CST Nov 8: #2268 with runner 8; #2246 closed as superseded. Ruling (owner chat 11:26 CST Nov 10, relayed by the coordinator 11:31 CST): \"sessions like triage are not being archived right? so it can be doing work via agents in its session/lane -- i just said no new spawns at this time\". The freeze bars new sessions only; triage builds this step with agents in its own session (page item 492 closed). This note is the ruling's home until a decision holds it. #2268 (list asks with no reply at wake) is open and conflicts with main (mergeable_state dirty, 11:33 CST); triage brings it up to date with main, reviews it and hands it to runner 8. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was triage session_013NEJL42Sv3tJkjpzY7bExj (agents)).",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "triage session_013NEJL42Sv3tJkjpzY7bExj (agents)",
-  "status": "doing",
+  "lane": "",
+  "status": "ready",
   "order": 788,
-  "updatedAt": "2026-11-10T11:28:00-06:00"
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

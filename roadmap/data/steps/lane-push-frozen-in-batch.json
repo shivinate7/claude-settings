@@ -1,11 +1,11 @@
 {
   "title": "A lane's push to its own branch is refused while that branch is in an open, ready integration PR",
   "why": "Lane push-head-upstream-name (session_013NEJL1YxsYqim39RK6JeZP), 05:12-05:25 CST Nov 9: it pushed main merges to #2199 and #2327 (heads 39432db98, 63d71001a) while runner 8's batch 68 (#2426), built from their earlier heads, was running CI. A lane in a running batch holds its head, but no check stopped the push. Harm: the batch confirm sees a moved head, and work is redone.",
-  "note": "#2378 (step batch-freeze-lane-set-enforce) does not refuse it: it only detects a moved head at the next `--batch-build`, and nothing in guard.py, guard_push_delete.py or guard_merge.py refuses it (coordinator, 05:47 CST Nov 9, from #2378's lane). The lane proposed lane-head-holds-in-batch, an ask or a read of open batch PRs before a push; the coordinator chose a refusal. It touches the push guard, so it starts after batch 68 merges. Filed 05:48 CST Nov 9. Batch 68 merged (#2449, 11:55 CST Nov 9): free to start. Lane session_013NEJL24NSUGQwdDXK4sqrb started 12:13 CST Nov 9 (coordinator).",
+  "note": "#2378 (step batch-freeze-lane-set-enforce) does not refuse it: it only detects a moved head at the next `--batch-build`, and nothing in guard.py, guard_push_delete.py or guard_merge.py refuses it (coordinator, 05:47 CST Nov 9, from #2378's lane). The lane proposed lane-head-holds-in-batch, an ask or a read of open batch PRs before a push; the coordinator chose a refusal. It touches the push guard, so it starts after batch 68 merges. Filed 05:48 CST Nov 9. Batch 68 merged (#2449, 11:55 CST Nov 9): free to start. Lane session_013NEJL24NSUGQwdDXK4sqrb started 12:13 CST Nov 9 (coordinator). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL24NSUGQwdDXK4sqrb).",
   "phase": "now",
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
-  "lane": "session_013NEJL24NSUGQwdDXK4sqrb",
-  "status": "doing",
+  "lane": "",
+  "status": "ready",
   "order": 907,
-  "updatedAt": "2026-11-09T12:11:00-06:00"
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

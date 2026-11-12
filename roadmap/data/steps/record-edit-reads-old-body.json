@@ -1,11 +1,11 @@
 {
   "title": "A review-record edit reads the old body before it rewrites it",
   "why": "Coordinator 11:03 CST Nov 8: lane review-record-provenance builds it as #2161.",
-  "note": "",
+  "note": " Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived (review-record-provenance), handoff at handoffs/session_013NEJKzUe9U19voH62VbCNA.md on archive/session-handoffs-2026-11-10).",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "archived (review-record-provenance), handoff at handoffs/session_013NEJKzUe9U19voH62VbCNA.md on archive/session-handoffs-2026-11-10",
-  "status": "doing",
+  "lane": "",
+  "status": "ready",
   "order": 743,
-  "updatedAt": "2026-11-10T11:20:00-06:00"
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

@@ -1,11 +1,11 @@
 {
   "title": "Every path named in docs/debts/notes.md resolves",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 400.0,
   "owner": "coordinator",
   "why": "Item-355 best-practices agent, sent by the coordinator 13:58 CST Nov 7: 24 of 149 paths named in notes do not resolve, and 5 of them live in sibling repos.",
-  "note": "Also revisit the expiry sweep on 2026-12-16.",
-  "updatedAt": "2026-11-10T11:20:00-06:00",
-  "lane": "archived, handoff at handoffs/session_013NEJL2pjRytKQdMCgTwxa6.md on archive/session-handoffs-2026-11-10"
+  "note": "Also revisit the expiry sweep on 2026-12-16. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJL2pjRytKQdMCgTwxa6.md on archive/session-handoffs-2026-11-10).",
+  "updatedAt": "2026-11-12T07:22:00-06:00",
+  "lane": ""
 }

@@ -1,11 +1,11 @@
 {
   "title": "A new lane's branch name never contains \"git\", and a check refuses one that does",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 263.4,
   "owner": "coordinator",
   "why": "Claude Code's own worktree check (CLI 2.1.319) refuses agent git commands that name a branch containing \"git\": a switch to, a fetch of, or a PR opened from branch git-push-after-failed-commit. Seen three or more times in that lane on 2026-11-07.",
-  "note": "Coordinator pick a, 14:51 CST: the false alarm is in the CLI, not a repo hook, so the fix is on our side: a new branch slug never holds \"git\", checked where branch names are read. Branches that exist keep their names. Red case first, then the check. A report upstream to Anthropic was not sent; that is the owner's call. Incident 01:42 CST Nov 10 (coordinator; lane git-dash-c-other-checkout, #2494): a push naming the lane branch was refused because the slug holds \"git\" twice; route used: `git push origin HEAD`.",
-  "lane": "session_013NEJL4T4kkeqmaqeHiWDLJ",
-  "updatedAt": "2026-11-10T01:43:00-06:00"
+  "note": "Coordinator pick a, 14:51 CST: the false alarm is in the CLI, not a repo hook, so the fix is on our side: a new branch slug never holds \"git\", checked where branch names are read. Branches that exist keep their names. Red case first, then the check. A report upstream to Anthropic was not sent; that is the owner's call. Incident 01:42 CST Nov 10 (coordinator; lane git-dash-c-other-checkout, #2494): a push naming the lane branch was refused because the slug holds \"git\" twice; route used: `git push origin HEAD`. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL4T4kkeqmaqeHiWDLJ).",
+  "lane": "",
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

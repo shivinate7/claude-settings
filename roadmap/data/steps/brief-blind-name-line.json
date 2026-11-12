@@ -1,11 +1,11 @@
 {
   "title": "Blind-brief refusal names the line it refused",
   "phase": "next",
-  "status": "doing",
+  "status": "ready",
   "order": 648,
   "owner": "lane verdict-format-line",
-  "lane": "archived, handoff at handoffs/session_013NEJL1BCgLVUACYU5ujv9A.md on archive/session-handoffs-2026-11-10",
+  "lane": "",
   "why": "The refusal prints a fixed reason, so on a false alarm the author guesses which line to reword (lane verdict-format-line, 07:20 CST Nov 8).",
-  "note": "Done check: a test case shows the refusal text holds the matched sentence; notes verdict-quoted-label-refused and verdict-format-run-on drop their Fix step. Follow-up PR after #1968, in lane verdict-format-line (coordinator, 07:20 CST Nov 8; items 386 and 410 a).",
-  "updatedAt": "2026-11-10T11:20:00-06:00"
+  "note": "Done check: a test case shows the refusal text holds the matched sentence; notes verdict-quoted-label-refused and verdict-format-run-on drop their Fix step. Follow-up PR after #1968, in lane verdict-format-line (coordinator, 07:20 CST Nov 8; items 386 and 410 a). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJL1BCgLVUACYU5ujv9A.md on archive/session-handoffs-2026-11-10).",
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

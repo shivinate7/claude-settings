@@ -1,11 +1,11 @@
 {
   "title": "Four fix-check findings on the write guard get fixed, stacked on #1613",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 268.2,
   "owner": "coordinator",
-  "lane": "archived, handoff at handoffs/session_013NEJL4DPEKRiC91yHkQV7m.md on archive/session-handoffs-2026-11-10",
+  "lane": "",
   "why": "The fix check on the fed-write-followups work left four findings (coordinator, 17:04 CST Nov 7).",
-  "note": "Stacked on #1613. (1) The empty-string skip after cd. (2) The # and quote cases for the sed script scanner. (3) A 2>/dev/null read as a pathspec. (4) git ls-files '*.py' | xargs sed -i is allowed. Red tests first; the guard's verdict changes. Branch fed-write-followups-2, stacked on #1613 at 6e863627c.",
-  "updatedAt": "2026-11-10T11:20:00-06:00"
+  "note": "Stacked on #1613. (1) The empty-string skip after cd. (2) The # and quote cases for the sed script scanner. (3) A 2>/dev/null read as a pathspec. (4) git ls-files '*.py' | xargs sed -i is allowed. Red tests first; the guard's verdict changes. Branch fed-write-followups-2, stacked on #1613 at 6e863627c. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJL4DPEKRiC91yHkQV7m.md on archive/session-handoffs-2026-11-10).",
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

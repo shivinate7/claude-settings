@@ -1,11 +1,11 @@
 {
   "title": "Find why the export Stop check (#1288) let a page writer skip exports all day",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 7,
   "owner": "lane (hooks)",
   "why": "Owner 19:02 CST Nov 6: a session wrote 'From now on, every wake that changes the page ends with an export. That step is in my handoff.' The owner: such a promise must be a mechanical change, not a line in a handoff (rule building-mistake-names-its-guard). Incident: a page writer changed items all day but exported only before a republish (decision waiting-data-in-repo says export after each wake).",
-  "note": "The check already exists: step waiting-export-check, done in #1288 (a Stop hook refuses when this turn wrote the page and no later commit touched waiting/). Yet a page writer changed items all day without exporting and answered with a handoff promise. Lane: find which session and repo (likely a child repo, or a page not registered in layout-extras, or writes made outside the hooked turn), make the check fire there, red test first. Also flag a 'from now on' promise whose only home is a handoff (rule building-mistake-names-its-guard). Lane session_013NEJL1JwGYbs71pjwKZCfb started as an owner ask under item 387 a (coordinator, 22:33 CST Nov 7).",
-  "updatedAt": "2026-11-10T11:20:00-06:00",
-  "lane": "archived, handoff at handoffs/session_013NEJL1JwGYbs71pjwKZCfb.md on archive/session-handoffs-2026-11-10"
+  "note": "The check already exists: step waiting-export-check, done in #1288 (a Stop hook refuses when this turn wrote the page and no later commit touched waiting/). Yet a page writer changed items all day without exporting and answered with a handoff promise. Lane: find which session and repo (likely a child repo, or a page not registered in layout-extras, or writes made outside the hooked turn), make the check fire there, red test first. Also flag a 'from now on' promise whose only home is a handoff (rule building-mistake-names-its-guard). Lane session_013NEJL1JwGYbs71pjwKZCfb started as an owner ask under item 387 a (coordinator, 22:33 CST Nov 7). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJL1JwGYbs71pjwKZCfb.md on archive/session-handoffs-2026-11-10).",
+  "updatedAt": "2026-11-12T07:22:00-06:00",
+  "lane": ""
 }

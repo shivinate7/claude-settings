@@ -1,11 +1,11 @@
 {
   "title": "The lane session installs the pinned Chromium once per session, so lane lint runs the guard suite's browser deny cases",
   "phase": "next",
-  "status": "doing",
+  "status": "ready",
   "order": 644,
   "owner": "lane lane-lint-guard-suite-install",
-  "lane": "archived, handoff at handoffs/session_013NEJKzoJ3vzUKGDk62Hr6K.md on archive/session-handoffs-2026-11-10",
+  "lane": "",
   "why": "Lane lint now runs hooks/test_guard.py with no browser download (decision playwright-install-once: one Playwright install, never from an agent). When the pinned Chromium (playwright 1.64.1, build 1248) cannot launch, the page-item-design deny cases are skipped; debt lane-lint-guard-browser-skip records that.",
-  "note": "Topic lane-lint. A follow-up PR with Merge after: this lane's lane-lint-guard-suite-install PR (which merges after #1916). The lane session does the install, never an agent. A cloud box lasts one session, so once per box means once per session. The record says how a session finds the browser already installed. Filed as doing on the coordinator's word (07:18 CST Nov 8; items 386 and 410 a). Slug and title from the lane.",
-  "updatedAt": "2026-11-10T11:20:00-06:00"
+  "note": "Topic lane-lint. A follow-up PR with Merge after: this lane's lane-lint-guard-suite-install PR (which merges after #1916). The lane session does the install, never an agent. A cloud box lasts one session, so once per box means once per session. The record says how a session finds the browser already installed. Filed as doing on the coordinator's word (07:18 CST Nov 8; items 386 and 410 a). Slug and title from the lane. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJKzoJ3vzUKGDk62Hr6K.md on archive/session-handoffs-2026-11-10).",
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

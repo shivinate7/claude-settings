@@ -1,11 +1,11 @@
 {
   "title": "q_max's narrow checks also run the comment-narration check on the changed files",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 60.02,
   "owner": "coordinator",
-  "lane": "archived, handoff at handoffs/session_013NEJL2KhBtBKhdyNpyv8c6.md on archive/session-handoffs-2026-11-10",
+  "lane": "",
   "why": "Lane checks skip the narration check, so a batch refuses a lane late: batch 1107s refused #1101 and #974 over 77 narrating comments.",
-  "note": "Run claude-settings lint/check_comment_narration.py --base origin/main in the narrow-check command, beside the STE lint. Follow-up to qmax-ste-lint-in-narrow-checks, which is already built as q_max #1109; filed as its own step so #1109's reviewed scope does not grow. From lane qmax-revive-idle (session_013NEJL2DBWxESS5TMW5cCFW), 20:22 CST Nov 7. Doing in lane qmax-ste-pin-to-main (coordinator 20:23 CST). Unclear: q_max repo; q_max #1109 not readable here (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10).",
-  "updatedAt": "2026-11-10T11:20:00-06:00"
+  "note": "Run claude-settings lint/check_comment_narration.py --base origin/main in the narrow-check command, beside the STE lint. Follow-up to qmax-ste-lint-in-narrow-checks, which is already built as q_max #1109; filed as its own step so #1109's reviewed scope does not grow. From lane qmax-revive-idle (session_013NEJL2DBWxESS5TMW5cCFW), 20:22 CST Nov 7. Doing in lane qmax-ste-pin-to-main (coordinator 20:23 CST). Unclear: q_max repo; q_max #1109 not readable here (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJL2KhBtBKhdyNpyv8c6.md on archive/session-handoffs-2026-11-10).",
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

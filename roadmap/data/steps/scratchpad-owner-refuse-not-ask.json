@@ -1,14 +1,14 @@
 {
  "id": "scratchpad-owner-refuse-not-ask",
  "title": "Guard rule scratchpad-owner refuses, with a fresh-name remedy, where it asks today",
- "status": "doing",
+ "status": "ready",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
- "lane": "scratchpad-owner-refuse",
+ "lane": "",
  "why": "At 10:00 and 10:01 CST Nov 11 the rule's ask reached the owner as permission boxes (he allowed them): triage agents reused fixed scratch names (pr, base, m1, m2, main_merge.py) and wrote or removed another agent's files. The same ask stalled lanes 2YRQ and 4VY5 for hours on 11-10. The owner has said he never wants to be asked. A refusal is stricter than an ask, so it opens no safety hole.",
- "note": "Coordinator pick 10:01 CST: turn each ask (overwrite, rm/mv, run of another agent's script) into a refusal whose remedy names a fresh file name under the agent's own name; a refused write does not move the record (closes debt scratchpad-owner-record-flip). A fix to a landed guard, allowed under the freeze. Test-author red first, builder, decision scratchpad-owner rewritten, full rounds with the net-value test, record, lint, PR to the coordinator. Stopgap 10:05 CST: every triage brief names its own scratch folder $S/<label>-<short sha>/.",
+ "note": "Coordinator pick 10:01 CST: turn each ask (overwrite, rm/mv, run of another agent's script) into a refusal whose remedy names a fresh file name under the agent's own name; a refused write does not move the record (closes debt scratchpad-owner-record-flip). A fix to a landed guard, allowed under the freeze. Test-author red first, builder, decision scratchpad-owner rewritten, full rounds with the net-value test, record, lint, PR to the coordinator. Stopgap 10:05 CST: every triage brief names its own scratch folder $S/<label>-<short sha>/. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was scratchpad-owner-refuse).",
  "source": "owner permission boxes 2026-11-11 10:00 and 10:01 CST; coordinator 10:01 and 10:08 CST",
  "owner": "triage",
- "updatedAt": "2026-11-11T10:09:00-06:00",
+ "updatedAt": "2026-11-12T07:22:00-06:00",
  "blockedBy": []
 }

@@ -1,11 +1,11 @@
 {
   "title": "Five wording notes on the guard marker get fixed",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 267.8,
   "owner": "coordinator",
   "why": "Follow-up of step review-rounds-rework.",
-  "note": "Named by lane review-rounds-rework in PR #1552 (coordinator, 16:33 CST Nov 7). The five notes are in PR #1552.",
-  "updatedAt": "2026-11-10T11:20:00-06:00",
-  "lane": "archived, handoff at handoffs/session_013NEJL2Vu74Q9bbbrv5anAi.md on archive/session-handoffs-2026-11-10"
+  "note": "Named by lane review-rounds-rework in PR #1552 (coordinator, 16:33 CST Nov 7). The five notes are in PR #1552. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJL2Vu74Q9bbbrv5anAi.md on archive/session-handoffs-2026-11-10).",
+  "updatedAt": "2026-11-12T07:22:00-06:00",
+  "lane": ""
 }

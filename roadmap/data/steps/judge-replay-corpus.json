@@ -1,10 +1,10 @@
 {
   "title": "Replay known allow and deny cases in CI when a judge changes",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 103.3655,
   "why": "A judge that drifts toward allowing is caught before merge.",
-  "note": "Owner added the secret, 13:08 CST (item 283 done, \"test please\"); the lane tests it.\nNov 6 13:02 CST: CI job needs repo secret CLAUDE_CODE_OAUTH_TOKEN, owner task page item 283. Cases from step guard-log-judge-export.\nNov 6 12:53 CST (coordinator): lane session_013NEJL3zaJYqXCK4XMrELwY. Agents write \"challenger\" in one constant until item 282 picks the word.\nOwner picked b on item 279, 12:43 CST. Debate audit 12:40 CST. feedback_guard leaves items unjudged on a model error. Cost: calls only in CI. Waits on owner item 279. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1327.",
-  "updatedAt": "2026-11-10T03:45:00-06:00",
-  "lane": "open PR #1327"
+  "note": "Owner added the secret, 13:08 CST (item 283 done, \"test please\"); the lane tests it.\nNov 6 13:02 CST: CI job needs repo secret CLAUDE_CODE_OAUTH_TOKEN, owner task page item 283. Cases from step guard-log-judge-export.\nNov 6 12:53 CST (coordinator): lane session_013NEJL3zaJYqXCK4XMrELwY. Agents write \"challenger\" in one constant until item 282 picks the word.\nOwner picked b on item 279, 12:43 CST. Debate audit 12:40 CST. feedback_guard leaves items unjudged on a model error. Cost: calls only in CI. Waits on owner item 279. Triage sweep 03:45 CST Nov 10: stays doing; no lane session named, open PR #1327. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was open PR #1327).",
+  "updatedAt": "2026-11-12T07:22:00-06:00",
+  "lane": ""
 }

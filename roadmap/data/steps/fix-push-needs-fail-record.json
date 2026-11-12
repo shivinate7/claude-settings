@@ -1,11 +1,11 @@
 {
   "title": "Refuse a lane push on a PR whose FAIL round has no posted record",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 1.31,
   "owner": "coordinator",
   "why": "Coordinator, 14:32 CST Nov 7.",
-  "note": "Title read from the slug; the coordinator was asked for a one-line goal. Goal line (timing lane, as fail-record-before-fix, via coordinator 12:38 CST Nov 9): before a lane pushes a fix after a FAIL, it posts the FAIL record at the reviewed head, or the merge tool refuses the later fix check. Fix: the merge tool, or the review brief guard, refuses a push after a FAIL round with no record at that head. Related: step review-record-before-any-push (any round, any push). 02:33 CST Nov 10: #1538 dropped from batch 71 (test_shared_names case (g), a literal tag copy); back to its lane session_013NEJL3KhxJ9MV6PvgDun3P for a fix; #2359 waits on it.",
-  "lane": "session_013NEJL3KhxJ9MV6PvgDun3P",
-  "updatedAt": "2026-11-10T02:34:00-06:00"
+  "note": "Title read from the slug; the coordinator was asked for a one-line goal. Goal line (timing lane, as fail-record-before-fix, via coordinator 12:38 CST Nov 9): before a lane pushes a fix after a FAIL, it posts the FAIL record at the reviewed head, or the merge tool refuses the later fix check. Fix: the merge tool, or the review brief guard, refuses a push after a FAIL round with no record at that head. Related: step review-record-before-any-push (any round, any push). 02:33 CST Nov 10: #1538 dropped from batch 71 (test_shared_names case (g), a literal tag copy); back to its lane session_013NEJL3KhxJ9MV6PvgDun3P for a fix; #2359 waits on it. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL3KhxJ9MV6PvgDun3P).",
+  "lane": "",
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

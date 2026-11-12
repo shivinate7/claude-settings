@@ -1,12 +1,12 @@
 {
  "title": "mutate_guard --changed fails when the change has mutants and none of them ran",
  "phase": "now",
- "status": "doing",
+ "status": "ready",
  "order": 1038,
  "owner": "triage",
  "why": "Owner, in this triage session's chat, 16:47 CST Nov 10: \"Do this task here: 'Fail mutate_guard --changed when no mutant runs'\".",
- "note": "Today hooks/mutate_guard.py changed_main exits 0 whatever the share, so a run where every mutant is not_run (no suite reaches the file, or the budget ran out) reads 0/0 and passes. Fix: exit 1 with a 'no mutant ran' line when made > 0 and ran == 0. A change with no mutable line (made == 0, such as docs only) still exits 0, so docs-only PRs get no false alarm. actions/mutation-report/action.yml shows that line in the job summary instead of 'did not run'. Test-author first (hooks/test_mutate_ci.py), then builder.",
- "updatedAt": "2026-11-10T16:52:00-06:00",
- "lane": "mutate-changed-no-mutant",
+ "note": "Today hooks/mutate_guard.py changed_main exits 0 whatever the share, so a run where every mutant is not_run (no suite reaches the file, or the budget ran out) reads 0/0 and passes. Fix: exit 1 with a 'no mutant ran' line when made > 0 and ran == 0. A change with no mutable line (made == 0, such as docs only) still exits 0, so docs-only PRs get no false alarm. actions/mutation-report/action.yml shows that line in the job summary instead of 'did not run'. Test-author first (hooks/test_mutate_ci.py), then builder. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was mutate-changed-no-mutant).",
+ "updatedAt": "2026-11-12T07:22:00-06:00",
+ "lane": "",
  "blockedBy": []
 }

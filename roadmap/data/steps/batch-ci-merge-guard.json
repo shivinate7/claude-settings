@@ -1,11 +1,11 @@
 {
   "title": "The merge tool and the guard refuse a merge or push to main while an open integration PR's CI run is in progress",
   "why": "Rule git-no-merge-during-batch-ci held no one on Nov 8: #2352 (19:19 CST) and #2350 (19:53 CST) were merged from the owner's account by a local session while #2361's CI ran, and each cancelled a run about 30 minutes in (coordinator 20:26 CST Nov 8).",
-  "note": "Filed by triage, Nov 8 20:28 CST. A queue-landing fix. First check what main already enforces and why it did not fire. The refusal names the run and offers the owner's `override`. Lane session_013NEJKynokbBE1W2BNcp7hX (coordinator 20:29 CST Nov 8); its brief covers what main enforces and why it did not fire on #2352 and #2350. Owner 20:31 CST Nov 8, \"that too ASAP\" (feedback item fb-2031-2). Measured cause (coordinator 01:02 CST Nov 9): `mcp__github__merge_pull_request` was in no guard matcher on main. PR #2401. Blocked on page item 459 (01:27 CST Nov 9): #2401's one settings.json matcher line needs the owner's word. It also waits for batch 67 and #1521 (merge conflict). Owner pick on the waiting page (13:09 CST Nov 9): item 459 a. #2401 lands with the two GitHub merge calls added to the guard's tool list in settings.json. Kept doing on: #2513 open draft (batch-ci-merge-guard-2); #2401 closed unmerged; no in-progress-CI refusal in guard_merge.py on main (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10).",
+  "note": "Filed by triage, Nov 8 20:28 CST. A queue-landing fix. First check what main already enforces and why it did not fire. The refusal names the run and offers the owner's `override`. Lane session_013NEJKynokbBE1W2BNcp7hX (coordinator 20:29 CST Nov 8); its brief covers what main enforces and why it did not fire on #2352 and #2350. Owner 20:31 CST Nov 8, \"that too ASAP\" (feedback item fb-2031-2). Measured cause (coordinator 01:02 CST Nov 9): `mcp__github__merge_pull_request` was in no guard matcher on main. PR #2401. Blocked on page item 459 (01:27 CST Nov 9): #2401's one settings.json matcher line needs the owner's word. It also waits for batch 67 and #1521 (merge conflict). Owner pick on the waiting page (13:09 CST Nov 9): item 459 a. #2401 lands with the two GitHub merge calls added to the guard's tool list in settings.json. Kept doing on: #2513 open draft (batch-ci-merge-guard-2); #2401 closed unmerged; no in-progress-CI refusal in guard_merge.py on main (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJKynokbBE1W2BNcp7hX).",
   "phase": "now",
   "owner": "coordinator",
-  "lane": "session_013NEJKynokbBE1W2BNcp7hX",
-  "status": "doing",
+  "lane": "",
+  "status": "ready",
   "order": 862,
-  "updatedAt": "2026-11-10T06:03:00-06:00"
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

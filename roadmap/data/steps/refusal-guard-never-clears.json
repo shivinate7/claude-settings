@@ -1,12 +1,12 @@
 {
   "title": "The refusal guard's message names the form that clears it",
   "phase": "build",
-  "status": "doing",
+  "status": "ready",
   "order": 970,
   "owner": null,
   "why": "Debt refusal-guard-never-clears (lane notes-fix-page, 05:42 CST Nov 10; decision refusals-reach-the-owner). One auto-mode refusal blocked every later reply for 8 turns, even after a coordinator ruling.",
-  "note": "Coordinator started lane session_013NEJL3fy7PDPhWER5r89ep at 05:43 CST Nov 10. Lane notes-fix-page, 05:46 CST Nov 10: not a false alarm. The guard clears a row only when the reply names the refused tool in backticks under Input Needed, or writes \"`Bash` refusal was right\"; its message never says so. The scope shrinks to the message text.",
-  "updatedAt": "2026-11-10T11:20:00-06:00",
-  "lane": "archived, handoff at handoffs/session_013NEJL3fy7PDPhWER5r89ep.md on archive/session-handoffs-2026-11-10",
+  "note": "Coordinator started lane session_013NEJL3fy7PDPhWER5r89ep at 05:43 CST Nov 10. Lane notes-fix-page, 05:46 CST Nov 10: not a false alarm. The guard clears a row only when the reply names the refused tool in backticks under Input Needed, or writes \"`Bash` refusal was right\"; its message never says so. The scope shrinks to the message text. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJL3fy7PDPhWER5r89ep.md on archive/session-handoffs-2026-11-10).",
+  "updatedAt": "2026-11-12T07:22:00-06:00",
+  "lane": "",
   "blockedBy": []
 }

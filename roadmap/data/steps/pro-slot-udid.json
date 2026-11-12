@@ -1,11 +1,11 @@
 {
   "title": "#1709 goes into the next batch",
   "why": "Owner chat ask at 06:19 CST Nov 8 to get #1709 into the next batch (coordinator, 06:25 CST).",
-  "note": "Doing in lane session_013NEJL3qFTVRyGAJWFkrALJ (coordinator, 06:25 CST Nov 8). Owner ask, so it starts under item 410 a. #1709 is replaced by closed #1961 (same tree, red-run trailer added); runner 8 closes #1709 when closed #1961 is handed over (coordinator, 06:33 CST Nov 8). Wait on closed #1961 is void 13:18 CST Nov 10 (step dead-pr-waits): #1961 landed in batch 65 (6f421308d).",
+  "note": "Doing in lane session_013NEJL3qFTVRyGAJWFkrALJ (coordinator, 06:25 CST Nov 8). Owner ask, so it starts under item 410 a. #1709 is replaced by closed #1961 (same tree, red-run trailer added); runner 8 closes #1709 when closed #1961 is handed over (coordinator, 06:33 CST Nov 8). Wait on closed #1961 is void 13:18 CST Nov 10 (step dead-pr-waits): #1961 landed in batch 65 (6f421308d). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL3qFTVRyGAJWFkrALJ).",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 630,
   "owner": "triage",
-  "lane": "session_013NEJL3qFTVRyGAJWFkrALJ",
-  "updatedAt": "2026-11-10T13:18:00-06:00"
+  "lane": "",
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

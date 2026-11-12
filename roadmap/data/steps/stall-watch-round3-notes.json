@@ -1,11 +1,11 @@
 {
   "title": "Decision stall-watch drops its hard-coded step count, and the beat debt note names the fetch window",
   "why": "Round 3 of lane stall-watch-quiet-lint (PR #1823) left two findings unfixed: docs/decisions/stall-watch.md says \"about 78 steps\", which will drift; debt note lane-lint-worktree-add-no-beat does not name the unshallow fetch window (lane, 01:47 CST Nov 8).",
-  "note": "Fix: replace the count with a pointer to what reads it, or drop it; name the unshallow fetch window in the note. Built in lane stall-watch-quiet-lint, stacked on #1823 (coordinator, 02:11 CST Nov 8). Queue fix (owner 13:20 CST Nov 7). Title and slug by triage. Filed 02:10 CST Nov 8. Built as PR #1835, head 4358599a6, with runner 8, merging after #1823 (lane, 02:05 CST Nov 8). Doing 05:58 CST Nov 10: open PR #1835 on branch stall-watch-round3-notes (triage live build). Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose after code; it waits behind the code it describes.",
+  "note": "Fix: replace the count with a pointer to what reads it, or drop it; name the unshallow fetch window in the note. Built in lane stall-watch-quiet-lint, stacked on #1823 (coordinator, 02:11 CST Nov 8). Queue fix (owner 13:20 CST Nov 7). Title and slug by triage. Filed 02:10 CST Nov 8. Built as PR #1835, head 4358599a6, with runner 8, merging after #1823 (lane, 02:05 CST Nov 8). Doing 05:58 CST Nov 10: open PR #1835 on branch stall-watch-round3-notes (triage live build). Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose after code; it waits behind the code it describes. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL2LYXQpmabnoQqYgNv).",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 566,
   "owner": "triage",
-  "lane": "session_013NEJL2LYXQpmabnoQqYgNv",
-  "updatedAt": "2026-11-11T20:42:00-06:00"
+  "lane": "",
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

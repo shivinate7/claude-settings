@@ -1,11 +1,11 @@
 {
   "title": "The pre-existing guard reads \"a pre-existing issue\" as a claim, and stops its false alarms",
   "why": "#1911's round 3 findings (lane silent-undo-reads-retire-run, 04:45 CST Nov 8). Missed claim: \"The test fails due to a pre-existing issue.\" passes with no run. False alarms: \"pre-existing error handling\", \"the pre-existing failure mode\", \"Pre-existing failures: none.\", \"The guard refuses a line that calls a failure pre-existing.\" and \"the main job is already failing\" are refused. A run named as \"pre-existing (main tip <sha>)\" is refused.",
-  "note": "Fix: red cases first for each form above; the guard reads \"pre-existing issue/bug/problem\" as a claim, lets the listed non-claims pass, and accepts a run named as \"pre-existing (main tip <sha>)\". Branch pe-guard-false-alarms from #1911's head db10b8d6b; its PR merges after #1911. Queue fix (owner 13:20 CST Nov 7). Slug from the lane. Filed 04:47 CST Nov 8; red cases started (lane, 04:45 CST). Its base #1911 is replaced by #1911, same tree (lane, 04:50 CST Nov 8). Coordinator ruling 05:28 CST Nov 8: #1935 narrows to the incident form plus \"pre-existing <failure word>\", with debts whose Fix points at step clause-parser-claims. Dead wait re-pointed 13:18 CST Nov 10 (step dead-pr-waits): #1907 closed unmerged; #1911 holds the same tree.",
+  "note": "Fix: red cases first for each form above; the guard reads \"pre-existing issue/bug/problem\" as a claim, lets the listed non-claims pass, and accepts a run named as \"pre-existing (main tip <sha>)\". Branch pe-guard-false-alarms from #1911's head db10b8d6b; its PR merges after #1911. Queue fix (owner 13:20 CST Nov 7). Slug from the lane. Filed 04:47 CST Nov 8; red cases started (lane, 04:45 CST). Its base #1911 is replaced by #1911, same tree (lane, 04:50 CST Nov 8). Coordinator ruling 05:28 CST Nov 8: #1935 narrows to the incident form plus \"pre-existing <failure word>\", with debts whose Fix points at step clause-parser-claims. Dead wait re-pointed 13:18 CST Nov 10 (step dead-pr-waits): #1907 closed unmerged; #1911 holds the same tree. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJL4TDRWqka4aSU2Bv7L.md on archive/session-handoffs-2026-11-10).",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 609,
   "owner": "triage",
-  "lane": "archived, handoff at handoffs/session_013NEJL4TDRWqka4aSU2Bv7L.md on archive/session-handoffs-2026-11-10",
-  "updatedAt": "2026-11-10T13:18:00-06:00"
+  "lane": "",
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

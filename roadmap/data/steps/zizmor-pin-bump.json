@@ -1,10 +1,10 @@
 {
   "title": "Move the house zizmor pin from 1.30.1 to 1.31.1",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 103.35,
   "why": "Keeps the shared workflow scanner on the newest version that passes.",
-  "note": "13:30 CST Nov 7 (coordinator): duplicates #1348 (owner picked zizmor 1.31.1, item 302). The lane posts the missing review record. The 1.32.0 bump is step zizmor-1-32-bump.\nCoordinator 12:09 CST: found by lane ci-hygiene-refresh (PR #1302). Edit actions/zizmor/run.sh. Read the changelog first (rule verification-newest-that-passes).",
-  "updatedAt": "2026-11-10T11:20:00-06:00",
-  "lane": "archived, handoff at handoffs/session_013NEJL1MjgTgHAgcXw66Gsk.md on archive/session-handoffs-2026-11-10"
+  "note": "13:30 CST Nov 7 (coordinator): duplicates #1348 (owner picked zizmor 1.31.1, item 302). The lane posts the missing review record. The 1.32.0 bump is step zizmor-1-32-bump.\nCoordinator 12:09 CST: found by lane ci-hygiene-refresh (PR #1302). Edit actions/zizmor/run.sh. Read the changelog first (rule verification-newest-that-passes). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJL1MjgTgHAgcXw66Gsk.md on archive/session-handoffs-2026-11-10).",
+  "updatedAt": "2026-11-12T07:22:00-06:00",
+  "lane": ""
 }

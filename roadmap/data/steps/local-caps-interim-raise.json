@@ -1,12 +1,12 @@
 {
   "title": "Local tool time limits rise generously until time-pinned tests are gone, so no check reads unknown or red off time",
   "phase": "cleanup",
-  "status": "doing",
+  "status": "ready",
   "order": 993,
   "why": "Owner chat 12:11 CST Nov 10: \"all time related tests need to be deprecating (that's prob alrdy recorded) but also to generously raise time limits in the interim so that tests dont fail off time\". Decision ci-job-caps (owner Nov 1 18:44 CST) raised only CI job caps; the local tools kept fixed caps, and they failed off time today.",
-  "note": "Measured today: lane lint read unknown on #2268 (12:08 CST), #2164 and #2276 at LINT_SECONDS = 1200 (merge/merge.py:1664); #2551 was refused at merge for #2119's Retire checks at TIMEOUT = 600 (lint/check_debt_retire.py:35). Other fixed caps: hooks/mutate_guard.py:3810 and janitor/mutate_sweep.py:1540 (1200), lint/check_python_floor.py:70 (300). Done when: each cap a lane or merge check runs under rises generously (about 3x), the outer waits that hold them (the lane-lint 6000 s wait, the merge lock) still cover them, and ci-job-caps' ruling text names local tool caps too. The end state stays step time-pinned-tests-go. Related: lane-lint-load-timeout, lane-lint-bg-timeout, retire-check-whole-suite, cloud-heavy-check-brake.",
-  "updatedAt": "2026-11-10T12:12:00-06:00",
+  "note": "Measured today: lane lint read unknown on #2268 (12:08 CST), #2164 and #2276 at LINT_SECONDS = 1200 (merge/merge.py:1664); #2551 was refused at merge for #2119's Retire checks at TIMEOUT = 600 (lint/check_debt_retire.py:35). Other fixed caps: hooks/mutate_guard.py:3810 and janitor/mutate_sweep.py:1540 (1200), lint/check_python_floor.py:70 (300). Done when: each cap a lane or merge check runs under rises generously (about 3x), the outer waits that hold them (the lane-lint 6000 s wait, the merge lock) still cover them, and ci-job-caps' ruling text names local tool caps too. The end state stays step time-pinned-tests-go. Related: lane-lint-load-timeout, lane-lint-bg-timeout, retire-check-whole-suite, cloud-heavy-check-brake. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was triage session_013NEJL42Sv3tJkjpzY7bExj (agents)).",
+  "updatedAt": "2026-11-12T07:22:00-06:00",
   "owner": "triage",
-  "lane": "triage session_013NEJL42Sv3tJkjpzY7bExj (agents)",
+  "lane": "",
   "blockedBy": []
 }

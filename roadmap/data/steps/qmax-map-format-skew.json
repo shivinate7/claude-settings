@@ -1,11 +1,11 @@
 {
   "title": "q_max map formatVersion matches the plain-english-map skill",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 0.6,
   "owner": "coordinator",
   "why": "Coordinator, 13:45 CST Nov 7: q_max main fails invariants MAP1-MAP10, because the map has formatVersion 4 and the skill reads 5.",
-  "note": "Done check: `node harness/check-invariants.mjs` on q_max passes MAP1-MAP10. Unclear: q_max repo; not readable from claude-settings (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10).",
-  "updatedAt": "2026-11-10T06:03:00-06:00",
-  "lane": "session_013NEJL1dp5Gks9NWgNMJ7Jw"
+  "note": "Done check: `node harness/check-invariants.mjs` on q_max passes MAP1-MAP10. Unclear: q_max repo; not readable from claude-settings (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL1dp5Gks9NWgNMJ7Jw).",
+  "updatedAt": "2026-11-12T07:22:00-06:00",
+  "lane": ""
 }

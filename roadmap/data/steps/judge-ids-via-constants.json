@@ -1,11 +1,11 @@
 {
   "title": "The past-ruling judge reads its rule ids through constants",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 0.15,
   "owner": "coordinator",
   "why": "Coordinator, 14:15 CST Nov 7.",
-  "note": "Follows step rule-audit-constant-ids (#1446).",
-  "lane": "judge-timeout-retries-once",
-  "updatedAt": "2026-11-07T14:14:00-06:00"
+  "note": "Follows step rule-audit-constant-ids (#1446). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was judge-timeout-retries-once).",
+  "lane": "",
+  "updatedAt": "2026-11-12T07:22:00-06:00"
 }

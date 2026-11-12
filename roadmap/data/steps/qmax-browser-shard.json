@@ -1,11 +1,11 @@
 {
   "title": "q_max browser runs in parallel shards",
   "phase": "now",
-  "status": "doing",
+  "status": "ready",
   "order": 2,
   "why": "q_max's browser run is one job; its last finished run took 3 h 15 min.",
-  "note": "Owner, 16:52 CST Nov 6 (chat, to the coordinator): why are q_max's browser runs still long? Lane session_013NEJL2G7t13GZshXoFjnqu splits browser.yml into parallel shards balanced by measured check times, and reports the wall-clock before and after. Owner ruling 12:27 CST Nov 7 (runner 9 chat): a lane may start q_max browser.yml as a debug run, audited for efficiency by a debater agent; home is a scoped exception to D-542 in q_max, written by lane qmax-browser-debug-run (session_013NEJL1hanvkquCBRfwoFQV). Page item 329 closed by it. Unclear: q_max repo; not readable from claude-settings (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10).",
+  "note": "Owner, 16:52 CST Nov 6 (chat, to the coordinator): why are q_max's browser runs still long? Lane session_013NEJL2G7t13GZshXoFjnqu splits browser.yml into parallel shards balanced by measured check times, and reports the wall-clock before and after. Owner ruling 12:27 CST Nov 7 (runner 9 chat): a lane may start q_max browser.yml as a debug run, audited for efficiency by a debater agent; home is a scoped exception to D-542 in q_max, written by lane qmax-browser-debug-run (session_013NEJL1hanvkquCBRfwoFQV). Page item 329 closed by it. Unclear: q_max repo; not readable from claude-settings (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was session_013NEJL1hanvkquCBRfwoFQV).",
   "owner": "coordinator",
-  "updatedAt": "2026-11-10T06:03:00-06:00",
-  "lane": "session_013NEJL1hanvkquCBRfwoFQV"
+  "updatedAt": "2026-11-12T07:22:00-06:00",
+  "lane": ""
 }
