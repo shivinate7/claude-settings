@@ -760,11 +760,12 @@ class KeptNameTests(Fixture):
 
 
 class MovedLineTests(Fixture):
-    """A line the diff moves is not new. A line counts as moved only when the same diff deletes that exact text.
+    """A line the diff moves is not new. A line counts as moved only when the same diff deletes that exact text,
+    from a file this check scans. A file the check skips (SKIP_CODE) is no source of a move.
 
-    Each case writes the base files, then the change: hooks/x.py is rewritten to `keep` (None deletes it) and the
-    pieces are added. The change first proves its own state: each piece is a new file, not a rename, and each
-    line of hooks/x.py that the change takes out is deleted. Only then does the check run."""
+    Each case writes the base files, then the change: `source` (hooks/x.py by default) is rewritten to `keep`
+    (None deletes it) and the pieces are added. The change first proves its own state: each piece is a new file,
+    not a rename, and each line of `source` that the change takes out is deleted. Only then does the check run."""
 
     KEEP = "def keep_it():\n    pass\n"
     MOVED = "def bundle_old():\n    pass\n"
@@ -774,14 +775,14 @@ class MovedLineTests(Fixture):
         super().setUp()
         self.put("GLOSSARY.md", HEAD + ROWS + CodeNameTests.EXTRA)
 
-    def split(self, base, pieces, keep=None):
+    def split(self, base, pieces, keep=None, source="hooks/x.py"):
         for rel, text in base.items():
             self.put(rel, text)
         self.base_repo()
         if keep is None:
-            os.remove(os.path.join(self.tree, "hooks", "x.py"))
+            os.remove(os.path.join(self.tree, *source.split("/")))
         else:
-            self.put("hooks/x.py", keep)
+            self.put(source, keep)
         for rel, text in pieces.items():
             self.put(rel, text)
         self.commit()
@@ -790,7 +791,7 @@ class MovedLineTests(Fixture):
             self.assertIn("A\t%s\n" % rel, status, "fixture state: %s is not a new file\n%s" % (rel, status))
         patch = self.git("diff", "-U0", "-M", "origin/main")
         kept = (keep or "").splitlines()
-        for row in base["hooks/x.py"].splitlines():
+        for row in base[source].splitlines():
             if row.strip() and row not in kept:
                 self.assertIn("\n-" + row + "\n", patch, "fixture state: the base line is not deleted: " + row)
         return self.run_check()
@@ -822,6 +823,12 @@ class MovedLineTests(Fixture):
                                keep=self.KEEP)
         self.assertEqual(code, 1, out)
         self.assertIn("tests/guard/x.py:1", out)
+
+    def test_name_deleted_from_a_skipped_file_and_added_in_code_still_fails(self):
+        code, out = self.split({"docs/records.md": self.MOVED + "\n\n" + self.KEEP},
+                               {"tests/guard/x.py": self.MOVED}, keep=self.KEEP, source="docs/records.md")
+        self.assertEqual(code, 1, "a name deleted from a file the check skips excused its copy in code\n" + out)
+        self.assertIn("tests/guard/x.py:1", out, "the copy in code was not flagged\n" + out)
 
 
 class UncommittedTests(Fixture):

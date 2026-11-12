@@ -417,7 +417,9 @@ class Ratchet(Case):
 
 
 class MovedLines(Case):
-    """A line the diff moves is not new. A line counts as moved only when the same diff deletes that exact text.
+    """A line the diff moves is not new. A line counts as moved only when the same diff deletes that exact text,
+    from a file this check scans. Each deleted copy excuses at most one added copy, and the first add in diff
+    order takes it, whatever file that add is in.
 
     Each case cuts one base file into pieces. The change first proves its own state: each piece is a new file,
     not a rename of the cut file, and each comment the pieces take is deleted from the base file. Only then does
@@ -427,11 +429,11 @@ class MovedLines(Case):
     BLOCK_B = "def b():\n    y = 2\n    # fixed in round 2\n    return y\n"
     BLOCK_C = "def c():\n    z = 3\n    # MEASURED 40 ms\n    return z\n"
 
-    def cut(self, pieces, keep=None):
-        """Base: old.py holds BLOCK_A, BLOCK_B and BLOCK_C. The change keeps `keep` in old.py (None deletes it) and
+    def cut(self, pieces, keep=None, source="old.py"):
+        """Base: `source` holds BLOCK_A, BLOCK_B and BLOCK_C. The change keeps `keep` in it (None deletes it) and
         adds `pieces`. Returns the check's (exit code, output)."""
-        self.base({"old.py": "\n\n".join((self.BLOCK_A, self.BLOCK_B, self.BLOCK_C))})
-        self.change({"old.py": keep, **pieces})
+        self.base({source: "\n\n".join((self.BLOCK_A, self.BLOCK_B, self.BLOCK_C))})
+        self.change({source: keep, **pieces})
         status = self.git("diff", "-M", "--name-status", "origin/main")
         for path in pieces:
             self.assertIn("A\t%s\n" % path, status, "fixture state: %s is not a new file\n%s" % (path, status))
@@ -468,6 +470,25 @@ class MovedLines(Case):
                             "parts/new.py": "x = 1\n# owner ruling is new here\n"})
         self.assertEqual(rc, 1, out)
         self.assertHit(out, "parts/new.py", 2)
+
+    def test_second_copy_beside_a_scanned_copy_still_fails(self):
+        keep = self.BLOCK_B + "\n\n" + self.BLOCK_C
+        rc, out = self.cut({"parts/a.py": self.BLOCK_A, "parts/b.py": self.BLOCK_A}, keep=keep)
+        self.assertEqual(rc, 1, "one deleted copy excused two added copies\n" + out)
+        self.assertHit(out, "parts/b.py", 3)
+        self.assertNoHit(out, "parts/a.py", 3)
+
+    def test_second_copy_still_fails_when_an_unscanned_copy_comes_first(self):
+        keep = self.BLOCK_B + "\n\n" + self.BLOCK_C
+        rc, out = self.cut({"a.md": self.BLOCK_A, "parts/b.py": self.BLOCK_A}, keep=keep)
+        self.assertEqual(rc, 1, "a copy in an unscanned file did not use up the deleted copy\n" + out)
+        self.assertHit(out, "parts/b.py", 3)
+
+    def test_comment_deleted_from_a_doc_and_added_in_code_still_fails(self):
+        keep = self.BLOCK_B + "\n\n" + self.BLOCK_C
+        rc, out = self.cut({"lint/x.py": self.BLOCK_A}, keep=keep, source="docs/notes.md")
+        self.assertEqual(rc, 1, "a comment deleted from a file the check never reads excused its copy in code\n" + out)
+        self.assertHit(out, "lint/x.py", 3)
 
 
 class Quiet(Case):
