@@ -2884,13 +2884,14 @@ def stop_diff_block(payload, role: str, where: str):
 # digit and a letter a-f. It is not one when it touches - _ / # @ = or a period (a file name, a URL, an agent id,
 # a colour, key=value), or when it sits inside a double-quoted span that closes on the same line or on a `> ` line.
 # Two forms that touch a period are judged: each sha side of a range (`a..b`, `a...b`, and `main..a` or `a..HEAD`
-# with a ref on one side), and a token followed by sentence marks up to a space or the end of the text. A word that
-# holds :// is skipped whole, and so is a line that starts with `index ` (a pasted diff header of blob ids).
+# with a ref on one side), and a token followed by sentence marks up to a space or the end of the text. A URL is
+# skipped from its scheme on, so text glued before it (a sha as link text) is judged. A line that starts with
+# `index ` (a pasted diff header of blob ids) is skipped.
 HANDBACK_TOOL = "SubagentHandback"
 REPORT_HEX_RUN = re.compile(r"(?<![0-9A-Za-z])[0-9a-f]+(?![0-9A-Za-z])")
 REPORT_RANGE_BEFORE = re.compile(r"[0-9A-Za-z_/~^]\.{2,3}$")
 REPORT_RANGE_AFTER = re.compile(r"\.{2,3}[0-9A-Za-z_/~^]")
-REPORT_URL_WORD = re.compile(r"\S*://\S*")
+REPORT_URL_WORD = re.compile(r"[A-Za-z][\w+.-]*://\S*")
 REPORT_MARKS_END = re.compile(r"[.,;:)\]*\"`]*(?:\s|$)")
 REPORT_TOUCH = "-_/#@="
 REPORT_QUOTED = re.compile(r'"[^"\n]*"')
@@ -3017,7 +3018,8 @@ def report_sha_missing(tool: str, payload, text, where: str) -> list:
 MESSAGE_REF_TOOL = "mcp__claude-code-remote__send_message"
 MESSAGE_REF_REASON = (
     "Your message names refs this repo does not hold: %s. Check each with git or gh before you send it, and "
-    "name only what exists. Then send it again. (decision send-message-refs-resolve)"
+    "name only what exists. A commit that exists on origin may not be fetched into this checkout yet: run "
+    "`git fetch origin`, then send it again. (decision send-message-refs-resolve)"
 )
 MESSAGE_REF_LIMIT = 5   # seconds, for each git (config, cat-file, rev-parse, ls-remote) and gh read
 MESSAGE_REF_MAX = 20    # pull requests, and shas, judged in one message; the rest are named unchecked
