@@ -17,7 +17,9 @@ writes, so a session cannot grant itself an override. It is valid only while now
   nothing on this route (an intended "off" must never become a grant). A later line starting with the word grants
   nothing, except the last non-blank line when the prompt's start is no override word: a status block the app puts
   before the owner's words does not hide it. That line grants only as the bare word, `off` or a length, with no
-  reason and no Opus word. Pasted and machine blocks are dropped first (BLOCKS); the owner never types pasted text.
+  reason and no Opus word. Pasted blocks and closed machine blocks are dropped first (CLOSED_BLOCKS); the owner never
+  types pasted text. An unclosed machine block before the form does not hide it; an unclosed code fence does. That
+  line obeys the plain ask's gates but the notice start (_owner_ask): payload `source`, a fired-task body, a cloud seed.
   A plain ask (`yes override that`, `override that for 15 minutes please`) writes the same file when a model judges the
   prompt to be the owner's own present request to override a refusal (grant_override_ask, call_judge.override_ask). Cost:
   one model call, only for an owner prompt that holds the whole word `override` outside backtick code spans and
@@ -119,11 +121,15 @@ OPUS_WORD = re.compile(r"\bopus\b", re.I)
 PASTED = r"<pasted_content\b[^>]*>.*?</pasted_content>|<pasted_content\b.*"  # an unclosed block runs to the end
 # One block per tag name in NOTICE_TAGS, so the lists stay the one home; an unclosed block, or a bracket line, runs
 # to the end.
+MACHINE_NAMES = sorted({m for tag in NOTICE_TAGS for m in re.findall(r"<([\w-]+)", tag)})
 MACHINE_BLOCKS = "|".join(
-    [r"<{0}[\s>].*?(?:</{0}>|$)".format(name)
-     for name in sorted({m for tag in NOTICE_TAGS for m in re.findall(r"<([\w-]+)", tag)})]
+    [r"<{0}[\s>].*?(?:</{0}>|$)".format(name) for name in MACHINE_NAMES]
     + [re.escape(tag) + ".*" for tag in NOTICE_TAGS if not tag.startswith("<")])
 BLOCKS = re.compile(PASTED + "|" + MACHINE_BLOCKS, re.I | re.S)
+# The last-line read cuts pasted blocks, and only the machine blocks that close: an unclosed one before the form is
+# the app's status block of any shape, so its last line stays readable.
+CLOSED_BLOCKS = re.compile("|".join([PASTED] + [r"<{0}[\s>].*?</{0}>".format(name) for name in MACHINE_NAMES]),
+                           re.I | re.S)
 OPUS_ASK_SOURCES = (None, "user")  # the payload `source` values a plain ask may carry: absent, null or the owner
 ROLE_WORDS = re.compile(r"[A-Za-z][\w\u2019'-]*")
 NEGATIONS = {"not", "no", "never", "except", "without", "dont", "don't", "don\u2019t",
@@ -277,22 +283,28 @@ def _strip_blocks(prompt):
     return BLOCKS.sub("[pasted text]", prompt)
 
 
-def _override_rest(prompt):
+def _override_rest(prompt, source=None, transcript=None):
     """The text after the word `override` for one owner prompt, or None when the prompt holds no override word.
     A machine block (a status block the app puts before the owner's words) is not the owner's, so the word may follow
     one. Two reads, in order: the raw start; the last non-blank line alone, which grants only as a bare word, `off` or
-    a length, so a reason or the Opus word there grants nothing. That read drops pasted and machine blocks first, so
-    their text never supplies the line. With no machine tags known, BLOCKS matches everywhere: no last-line read."""
+    a length, so a reason or the Opus word there grants nothing. The last-line read cuts pasted blocks and closed
+    machine blocks first (CLOSED_BLOCKS), so their text never supplies the line, and an unclosed machine block before
+    the form does not hide it. An unclosed code fence before the form grants nothing: that line is quoted. The
+    last-line read also obeys the plain ask's gates (_owner_ask) except the notice start, since a status block starts
+    with a notice tag: `source`, a fired-task body, a promptSource `system` record and a cloud seed prompt grant
+    nothing. With no machine tags known there is no last-line read."""
     said = PROMPT.match(prompt)
     if said:
         return said.group(1)
-    if not MACHINE_BLOCKS:
+    if not MACHINE_NAMES:
         return None
-    lines = [line.strip() for line in _strip_blocks(prompt).splitlines() if line.strip()]
+    lines = [line.strip() for line in CLOSED_BLOCKS.sub("[pasted text]", prompt).splitlines() if line.strip()]
     said = PROMPT.match(lines[-1]) if lines else None
-    if said and (not said.group(1).strip() or WORD.fullmatch(" ".join(said.group(1).split()))):
-        return said.group(1)
-    return None
+    if not said or not (not said.group(1).strip() or WORD.fullmatch(" ".join(said.group(1).split()))):
+        return None
+    if "\n".join(lines[:-1]).count("```") % 2:
+        return None
+    return said.group(1) if _owner_ask(prompt, source, transcript, lambda text: True, notice_start=False) else None
 
 
 def _keyword_rest(rest):
@@ -466,8 +478,9 @@ def _scoped_roles(scope_judge, text, context):
     return sorted({w.strip().lower() for w in named if isinstance(w, str)} & set(ASK_ROLES))
 
 
-def _owner_ask(prompt, source, transcript, wanted):
-    """The gates of the plain asks (grant_opus_ask, grant_override_ask), the one home. Returns (text, found, seed) for a
+def _owner_ask(prompt, source, transcript, wanted, notice_start=True):
+    """The gates of the plain asks (grant_opus_ask, grant_override_ask) and of the override's last-line read
+    (_override_rest, with `notice_start` False: its prompt starts with a status block), the one home. Returns (text, found, seed) for a
     prompt that may go to a judge, else None. `text` is the prompt less its pasted and notice blocks. `found` is the
     tail read (_tail_prompts). `seed` is a cloud session's seed record offset, else None. `wanted(text)` is the route's
     own test of the words, run before the transcript is read. None for: a non-string, a `source` outside
@@ -476,7 +489,7 @@ def _owner_ask(prompt, source, transcript, wanted):
     session (env LANE_ENV set) a prompt with no earlier owner turn (the seed prompt)."""
     if not isinstance(prompt, str) or source not in OPUS_ASK_SOURCES:
         return None
-    if not NOTICE_TAGS or prompt.lstrip().startswith(NOTICE_TAGS) or FIRED_TASK.search(prompt):
+    if not NOTICE_TAGS or (notice_start and prompt.lstrip().startswith(NOTICE_TAGS)) or FIRED_TASK.search(prompt):
         return None  # a stored task, a notice or no tag list: not typed words
     text = _strip_blocks(prompt)
     if not wanted(text):
@@ -540,18 +553,19 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=N
     return _write_opus(session_id, path, at, length, _file_role(roles), said)
 
 
-def grant(session_id, prompt, at, defer=True):
+def grant(session_id, prompt, at, defer=True, transcript=None, source=None):
     """Write, replace or remove the session's override for one owner prompt. Returns (kind, until) for a
     new override, ("off", None) when `override off` removed one, the _grant_opus result for the Opus word,
     else None: the prompt is not a word. The word `override` counts at the start of the prompt, or
-    alone on the last non-blank line (_override_rest); only the first form may carry a reason or the Opus word.
+    alone on the last non-blank line (_override_rest, which takes `transcript` and `source` for the plain ask's
+    gates); only the first form may carry a reason or the Opus word.
     With `defer`, a first word `override` whose rest is no whole keyword form and
     holds a length returns None too, so the plain ask (grant_override_ask) judges it; grant_override_ask calls again
     with `defer` False for main's result."""
     opus = OPUS_PROMPT.match(prompt) if isinstance(prompt, str) else None
     if opus:
         return _grant_opus(session_id, opus.group(1), at)
-    rest = _override_rest(prompt) if isinstance(prompt, str) else None
+    rest = _override_rest(prompt, source, transcript) if isinstance(prompt, str) else None
     path = _path(session_id)
     if rest is None or path is None:
         return None
