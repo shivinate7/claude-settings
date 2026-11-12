@@ -27,6 +27,8 @@ from workflow_steps import job_block  # noqa: E402  the one workflow reader (lin
 import stale_cites  # noqa: E402  the guard's rule dirs, one home (lint/stale_cites.py)
 sys.path.append(os.path.join(os.path.dirname(HERE), "hooks"))  # append: no hook module shadows one this suite imports
 import guard as hook_guard  # noqa: E402  is_test_rel, the one home of what a test path is (hooks/guard.py)
+sys.path.append(os.path.join(os.path.dirname(HERE), "skills", "roadmap"))  # append: no roadmap module shadows one this suite imports
+import test_build as roadmap  # noqa: E402  the roadmap fixture: make_repo, session_row, iso_ago (one home, skills/roadmap/test_build.py)
 CITE_HOMES = audit.cite_homes()  # read live from the repo when this run starts
 
 def printed(out, marker):
@@ -435,14 +437,18 @@ class Env(unittest.TestCase):
         self.lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)  # a retry pause is a no-op: a test never sleeps
         self.addCleanup(lambda: os.environ.pop("MERGE_TEST_HOOK", None))
 
-    def run_merge(self, *args, host=None, lock=None, stdout=None, stderr=None, hosts=None, cwd=None):
+    def run_merge(self, *args, host=None, lock=None, stdout=None, stderr=None, hosts=None, cwd=None, live=None):
         """-> (rc, stdout + stderr). Pass a StringIO as stderr to read the error stream on its own afterwards. `hosts` is the --root seam, one
         Host per --root string. It is passed only when merge.main takes it: on a main without it, argparse refuses --root first.
+        `live` is the batch's live-work file (the idle-lane list), passed as merge.main's `live=` only when main takes it: on a main
+        without it the merge runs with no list, and the case's own assert names the missing archive.
         `cwd` is the clone merge runs in; self.co when not given."""
         out, err = stdout or io.StringIO(), stderr or io.StringIO()
         prior = os.getcwd()
         os.chdir(cwd or self.co)
         seam = {"hosts": hosts} if hosts is not None and "hosts" in inspect.signature(merge.main).parameters else {}
+        if live is not None and "live" in inspect.signature(merge.main).parameters:
+            seam["live"] = live
         try:
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
                 rc = merge.main(list(args), host=host or self.host, lock=lock or self.lock, **seam)
@@ -2279,6 +2285,14 @@ class LaneHost(FakeHost):
     def __init__(self, *a, **k):
         super().__init__(*a, **k)
         self.open_calls = 0
+        self.archived = []  # each archive_session call: {"id", "refs" (the archive/ refs on origin then), "main" (origin's main then)}
+
+    def archive_session(self, sid):
+        """The fake of the session-archive route, the only outward call the archive makes besides git. It records what origin
+        holds at this moment, so a case reads the pushes that came before the archive and that the merge had landed."""
+        listing = {ref: sha for sha, ref in (line.split("\t") for line in sh(self.root, "git", "ls-remote", "origin").splitlines())}
+        self.archived.append({"id": sid, "refs": {r: s for r, s in listing.items() if r.startswith("refs/heads/archive/")},
+                              "main": listing.get("refs/heads/main")})
 
     def open_heads(self):
         self.open_calls += 1
@@ -3231,6 +3245,136 @@ class CutLanesHome(unittest.TestCase):
             with self.subTest(source=source):
                 got = [line for line, _ in raw_tab_strings(source.replace("<TAB>", "\t"))]
                 self.assertEqual(got, want)
+
+@unittest.skipIf(os.name == "nt", "the idle-lane list reads the roadmap build, which only the Linux suites run (lint/test_windows_split.py)")
+class IdleLaneArchive(Env):
+    """After a batch merge, merge.py archives each idle lane: the lanes `merge --idle-lanes` lists (skills/roadmap/build.py
+    idle_lanes), read from the live file the batch passes as `live=`. A lane's unmerged branch is pushed to archive/<branch>
+    before its session is archived, and a failed push stops that lane's archive only. Driven end to end through merge.main,
+    as CutLanes is. Each negative case also holds an idle control lane that must be archived, so an archive step that does
+    nothing fails the control, never only the negative."""
+    STEPS = {"c1": "done", "c2": "done", "c3": "doing", "c4": "done", "c5": "done", "c6": "done"}  # c3 is still doing: its lane is never idle
+
+    def setUp(self):
+        super().setUp()
+        self.host = LaneHost(self.co, self.other)
+        self.live = os.path.join(self.t, "live.json")
+        steps = {name: dict(roadmap.STEP, order=n, status=status) for n, (name, status) in enumerate(self.STEPS.items(), 1)}
+        record = roadmap.make_repo(self.t, steps=steps)  # the record branch, with roadmap/data/steps; HEAD is left on it
+        put(os.path.join(record, "roadmap", "extras.json"), json.dumps({"github": "owner/fixture"}))  # the repo's GitHub name, which the build reads
+        roadmap.git(record, "add", "-A")
+        roadmap.git(record, "commit", "-q", "-m", "extras")
+        sh(record, "git", "push", "-q", self.bare, "roadmap:refs/heads/roadmap")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.pre_main = self.head("main")
+
+    def lane(self, sid, step, bucket=roadmap.BUCKET_COMPLETED, status="SESSION_STATUS_IDLE"):
+        return roadmap.session_row(sid, status, "cs-build:lane", "cs-repo:owner/fixture", "cs-step:" + step, status_bucket=bucket)
+
+    def publish(self, *sessions, pulls=()):
+        """The live file the batch reads: readAt five minutes old, with the sessions and open pull rows a case names."""
+        value = {"readAt": roadmap.iso_ago(5), "threads": [], "pulls": list(pulls), "items": [], "sessions": list(sessions)}
+        put(self.live, json.dumps(value))
+
+    def lane_branch(self, name, merged=False):
+        """Pushes branch `name` to origin: one commit past main, unmerged, or at main itself when `merged`. -> its tip."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", name, "origin/main")
+        if not merged:
+            put(os.path.join(o, name + ".txt"), name + "\n")
+            sh(o, "git", "add", "-A")
+            sh(o, "git", "commit", "-q", "-m", f"lane {name}")
+        sh(o, "git", "push", "-q", "origin", name)
+        return sh(o, "git", "rev-parse", "HEAD")
+
+    def refuse_archive_of(self, name):
+        """A pre-receive hook on origin that refuses the push of archive/<name> and takes every other ref."""
+        hook = os.path.join(self.bare, "hooks", "pre-receive")
+        put(hook, "#!/bin/sh\nwhile read old new ref; do\n  case \"$ref\" in\n    refs/heads/archive/%s) echo 'archive refused' >&2; exit 1 ;;\n  esac\ndone\nexit 0\n" % name)
+        os.chmod(hook, 0o755)
+
+    def batch(self):
+        """The batch merge of PR 7 with the live file. -> the printed output. The merge must land first: an archive read on a base
+        the merge never reached proves nothing."""
+        rc, out = self.run_merge("7", "--confirm", live=self.live)
+        self.assertEqual(rc, 0, out)
+        self.assertRegex(out, r"merge: #7 merged as")
+        return out
+
+    def archived(self):
+        return [e["id"] for e in self.host.archived]
+
+    def archive_of(self, sid):
+        return next((e for e in self.host.archived if e["id"] == sid), None)
+
+    def test_with_no_idle_lane_nothing_is_archived(self):
+        # The green control: no lane is idle, so the batch archives nothing. It passes on the old code too, and shows the harness
+        # reaches the batch merge and reads the archive calls.
+        self.publish(self.lane("session_live", "c6", bucket=roadmap.BUCKET_WORKING, status="SESSION_STATUS_RUNNING"))
+        self.batch()
+        self.assertEqual(self.archived(), [], "a lane that is not idle was archived")
+
+    def test_an_idle_lane_is_archived_after_the_batch_merge(self):
+        self.publish(self.lane("session_a", "c1"))
+        self.batch()
+        self.assertIsNotNone(self.archive_of("session_a"), "the idle lane session_a is not archived after the batch merge")
+        self.assertNotEqual(self.archive_of("session_a")["main"], self.pre_main, "session_a was archived before the merge reached main")
+
+    def test_an_unmerged_branch_is_pushed_to_archive_before_its_session_is_archived(self):
+        tip = self.lane_branch("c1")
+        self.publish(self.lane("session_a", "c1"))
+        self.batch()
+        entry = self.archive_of("session_a")
+        self.assertIsNotNone(entry, "the idle lane session_a is not archived")
+        self.assertEqual(entry["refs"].get("refs/heads/archive/c1"), tip,
+                         "archive/c1 was not on origin, at the tip, when session_a was archived")
+
+    def test_a_live_lane_is_not_archived(self):
+        self.publish(self.lane("session_a", "c1"),
+                     self.lane("session_live", "c6", bucket=roadmap.BUCKET_WORKING, status="SESSION_STATUS_RUNNING"))
+        self.batch()
+        ids = self.archived()
+        self.assertIn("session_a", ids, "the control lane session_a is not archived")
+        self.assertNotIn("session_live", ids, "a live lane (status running) is archived")
+
+    def test_a_lane_with_an_open_pull_is_not_archived(self):
+        self.publish(self.lane("session_a", "c1"), self.lane("session_pr", "c2"),
+                     pulls=[{"number": 21, "title": "lane c2", "branch": "c2", "draft": False}])
+        self.batch()
+        ids = self.archived()
+        self.assertIn("session_a", ids, "the control lane session_a is not archived")
+        self.assertNotIn("session_pr", ids, "a lane with an open pull on its step branch is archived")
+
+    def test_a_lane_with_a_doing_step_is_not_archived(self):
+        self.publish(self.lane("session_a", "c1"), self.lane("session_doing", "c3"))
+        self.batch()
+        ids = self.archived()
+        self.assertIn("session_a", ids, "the control lane session_a is not archived")
+        self.assertNotIn("session_doing", ids, "a lane whose step is still doing is archived")
+
+    def test_a_failed_archive_push_stops_only_that_lanes_archive(self):
+        tip = self.lane_branch("c4")
+        self.lane_branch("c1")
+        self.refuse_archive_of("c4")
+        self.publish(self.lane("session_a", "c1"), self.lane("session_push", "c4"))
+        self.batch()
+        ids = self.archived()
+        self.assertIn("session_a", ids, "the control lane session_a is not archived when another lane's push fails")
+        self.assertNotIn("session_push", ids, "a lane whose archive push was refused is archived anyway")
+        self.assertEqual(self.head("c4"), tip, "the unmerged branch c4 is no longer on origin")
+        self.assertEqual(self.head("archive/c4"), "", "the refused archive/c4 is on origin")
+
+    def test_a_merged_lane_branch_is_archived_without_a_push(self):
+        self.lane_branch("c5", merged=True)
+        self.lane_branch("c1")
+        self.publish(self.lane("session_a", "c1"), self.lane("session_done", "c5"))
+        self.batch()
+        ids = self.archived()
+        self.assertIn("session_a", ids, "the control lane session_a is not archived")
+        self.assertIn("session_done", ids, "a lane whose branch is merged is not archived")
+        self.assertEqual(self.head("archive/c5"), "", "the merged branch c5 was pushed to archive/")
+
 
 class AfterPush(Env):
     """A crash between the claim push and the merge must stop cleanly: claim reverted, lock released."""
