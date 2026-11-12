@@ -3593,7 +3593,7 @@ BRIEF_BLIND_ITEM = re.compile(BRIEF_BLIND_OPEN + BRIEF_BLIND_DONE + r"(?:BUILT|R
 # a dash. A choice list (`Verdict: PASS or FAIL`) is a request, not a verdict. Or a report's leading verdict, `FAIL, round <n>
 # of 3, ...`, bare or after `Done:`. A line that opens with a verdict word and a colon (`FAIL: test_x`) is a quote.
 BRIEF_BLIND_ROUND = r"(?:\w+[ \t]+){0,2}[Rr]ound\b(?:[ \t]+\d+(?:[ \t]+of[ \t]+\d+)?)?(?:[^\n:]*?\b[Rr]esult\b[^\n:]*?)?"
-BRIEF_BLIND_VERDICT_TAIL = r"[ \t]*[*_`\"'(]*(?:%s)\b(?![ \t]+or[ \t]+(?:%s)\b)" % (BRIEF_BLIND_VERDICT_WORDS, BRIEF_BLIND_VERDICT_WORDS)
+BRIEF_BLIND_VERDICT_TAIL = r"[ \t]*[*_`\"'(]*(?:%s)\b(?![ \t]+or[ \t]+(?:%s)\b)(?![ \t]*[,/][ \t]*(?:or[ \t]+)?(?:%s)\b)" % (BRIEF_BLIND_VERDICT_WORDS, BRIEF_BLIND_VERDICT_WORDS, BRIEF_BLIND_VERDICT_WORDS)
 BRIEF_BLIND_VERDICT = re.compile(
     BRIEF_BLIND_OPEN + r"(?:[^\n:]*?\b[Vv]erdict\b[^\n:]*?[*_]*[ \t]*:[*_]*" + BRIEF_BLIND_VERDICT_TAIL
     + r"|" + BRIEF_BLIND_ROUND + r"[*_]*[ \t]*(?::[*_]*|[\u2014\u2013-]+)" + BRIEF_BLIND_VERDICT_TAIL
