@@ -5708,16 +5708,17 @@ class MistakeNamesGuardTests(unittest.TestCase):
 class PassClaimCitesVerdictTests(unittest.TestCase):
     """The pass-claim check, in report_guard.py's Stop hook (step pass-claim-cites-verdict). Incident: a session
     read its own `echo $?` as "lane lint passes". A "passed", "green", "clean" or "passes" claim, tied to a check
-    noun (lint, CI, tests, checks, suite, ci-job, build), inside the report blockquote, must cite a verdict line
+    noun (lint, tests, checks, suite, ci-job), inside the report blockquote, must cite a verdict line
     from this transcript: the verbatim `PASS <cmd> (<secs>s)` line in the result of a non-sidechain Bash call whose
     program is verdict. Each control has a red sibling that differs only in the probed feature, so a control
     passes for that feature and not for the lack of a rule."""
 
     RULE = "pass-claim-cites-verdict"
-    CMD = "verdict python3 lint/test_x.py"
-    PASS_LINE = "PASS python3 lint/test_x.py (1.2s)"
-    SKIP_LINE = "SKIP python3 lint/test_x.py, 3 skipped (1.2s)"
-    FAIL_LINE = "FAIL python3 lint/test_x.py rc=1 (1.2s) log=/tmp/verdict-x.log"
+    # A lint or checks claim needs a roster command (rule 4), so the cite here is merge --lane-lint.
+    CMD = "verdict merge --lane-lint 7"
+    PASS_LINE = "PASS merge --lane-lint 7 (1.2s)"
+    SKIP_LINE = "SKIP merge --lane-lint 7, 3 skipped (1.2s)"
+    FAIL_LINE = "FAIL merge --lane-lint 7 rc=1 (1.2s) log=/tmp/verdict-x.log"
 
     def call(self, command, result, tool_id, tool="Bash", sidechain=False):
         """One tool call and its result, as the transcript stores them."""
@@ -5770,7 +5771,7 @@ class PassClaimCitesVerdictTests(unittest.TestCase):
     # Red: a claim with no cite is refused, on each check noun and each claim word.
 
     def test_red_claim_with_no_cite_is_refused_for_each_noun_and_word(self):
-        rows = ["Lint passed.", "CI is green.", "Tests are clean.", "The build passed.", "The suite is green.",
+        rows = ["Lint passed.", "Checks are green.", "Tests are clean.", "The lint build passed.", "The suite is green.",
                 "ci-job passed.", "Checks passed.", "LINT PASSED.", "The lane lint passes.",
                 "Today's lane lint passes.", "Lint is clean."]
         for item in rows:
@@ -5803,13 +5804,79 @@ class PassClaimCitesVerdictTests(unittest.TestCase):
 
     def test_red_pass_text_from_a_bare_run_is_refused(self):
         # A bare run prints the text, but no verdict program printed it, so it is no cite.
-        calls = [self.call("python3 lint/test_x.py", self.PASS_LINE, "tu_b")]
+        calls = [self.call("merge --lane-lint 7", self.PASS_LINE, "tu_b")]
         self.assert_blocked(self.report("lint passed."), calls=calls)
 
     def test_red_pass_line_for_another_command_is_refused(self):
         # The cite is verbatim: the name in the PASS line must be the command verdict ran.
         calls = [self.call(self.CMD, "PASS python3 lint/test_y.py (1.2s)", "tu_o")]
         self.assert_blocked(self.report("lint passed."), calls=calls)
+
+    # Rules 1-3: negation reaches only its own clause, a number erases a claim only as a count, and the claim forms
+    # count. Each red row is a claim the old rule let through. Each control is the form that must still pass.
+
+    def test_red_negation_reaches_only_its_own_clause(self):
+        self.assert_blocked(self.report("No failures, lint passed."))
+        self.assert_passes(self.report("Lint did not pass."))
+
+    def test_red_a_number_erases_a_claim_only_as_a_count(self):
+        for item in ("PR 7 lint passed.", "CI run 4321 lint passed."):
+            with self.subTest(item=item):
+                self.assert_blocked(self.report(item))
+        self.assert_passes(self.report("3/5 tests passed."))
+
+    def test_red_claim_forms_are_claims(self):
+        for item in ("Lint: PASS.", "All checks pass.", "Lint `passed`."):
+            with self.subTest(item=item):
+                self.assert_blocked(self.report(item))
+
+    def test_control_claim_wholly_in_backticks_passes(self):
+        self.assert_passes(self.report("`Lint passed.`"))
+
+    # Rule 4: a cite backs a claim only when its check matches. A lint or checks claim needs a roster command, a
+    # tests claim needs a command that names a test, and `verdict true` backs nothing.
+
+    def test_red_a_cite_of_verdict_true_backs_no_claim(self):
+        calls = [self.call("verdict true", "PASS true (1.2s)", "tu_t")]
+        self.assert_blocked(self.report("Lint passed."), calls=calls)
+
+    def test_red_a_lint_cite_does_not_back_a_tests_claim(self):
+        self.assert_blocked(self.report("Tests passed."), calls=[self.call(self.CMD, self.PASS_LINE, "tu_v")])
+
+    def test_red_a_test_file_cite_does_not_back_a_lint_claim(self):
+        calls = [self.call("verdict python3 lint/test_x.py", "PASS python3 lint/test_x.py (1.2s)", "tu_x")]
+        self.assert_blocked(self.report("Lint passed."), calls=calls)
+
+    def test_control_a_test_file_cite_backs_a_tests_claim(self):
+        calls = [self.call("verdict python3 lint/test_x.py", "PASS python3 lint/test_x.py (1.2s)", "tu_x")]
+        self.assert_passes(self.report("Tests passed."), calls=calls)
+
+    def test_control_a_roster_cite_backs_lint_and_checks_claims(self):
+        for item in ("Lint passed.", "Checks passed."):
+            with self.subTest(item=item):
+                self.assert_passes(self.report(item), calls=[self.call(self.CMD, self.PASS_LINE, "tu_v")])
+
+    # Rule 5: a cite in each shell form backs its claim. The PASS line names the command as the shell passed it on.
+
+    def test_red_a_cite_with_the_shell_expanded_path_backs_its_claim(self):
+        calls = [self.call("~/.claude/bin/verdict ~/.claude/bin/merge --lane-lint 7",
+                           "PASS /root/.claude/bin/merge --lane-lint 7 (1.2s)", "tu_e")]
+        self.assert_passes(self.report("Lint passed."), calls=calls)
+
+    def test_red_a_uv_run_verdict_cite_backs_its_claim(self):
+        calls = [self.call("uv run verdict merge --lane-lint 7", self.PASS_LINE, "tu_u")]
+        self.assert_passes(self.report("Lint passed."), calls=calls)
+
+    def test_control_an_env_prefixed_verdict_cite_backs_its_claim(self):
+        calls = [self.call("VERDICT_LOG=x verdict merge --lane-lint 7", self.PASS_LINE, "tu_g")]
+        self.assert_passes(self.report("Lint passed."), calls=calls)
+
+    # Rule 6: CI and build are no check noun. No verdict run can cite a GitHub CI result, so these pass.
+
+    def test_red_ci_and_build_are_not_check_nouns(self):
+        for item in ("Done: PR 12 merged, CI green.", "Clean merge, CI still running.", "The build is clean."):
+            with self.subTest(item=item):
+                self.assert_passes(self.report(item))
 
     # Controls: each false-alarm form passes, and its red sibling below it is refused.
 
@@ -5824,7 +5891,7 @@ class PassClaimCitesVerdictTests(unittest.TestCase):
 
     def test_control_negation_passes_and_its_positive_sibling_is_refused(self):
         for negated, positive in (("Lint is not green.", "Lint is green."),
-                                  ("CI hasn't passed.", "CI has passed."),
+                                  ("Lint hasn't passed.", "Lint has passed."),
                                   ("Tests never passed.", "Tests passed.")):
             with self.subTest(negated=negated):
                 self.assert_passes(self.report(negated))
@@ -5845,9 +5912,9 @@ class PassClaimCitesVerdictTests(unittest.TestCase):
                 self.assert_blocked(self.report(plain))
 
     def test_control_clean_without_a_check_noun_passes_and_its_noun_sibling_is_refused(self):
-        for clean, with_noun in (("The merge is clean.", "The build is clean."),
-                                 ("Clean-merge read: ok.", "Clean-build read: ok."),
-                                 ("Working tree clean.", "Working tree and CI clean."),
+        for clean, with_noun in (("The merge is clean.", "The lint is clean."),
+                                 ("Clean-merge read: ok.", "Clean-lint read: ok."),
+                                 ("Working tree clean.", "Working tree and lint clean."),
                                  ("Clean up the branch.", "Clean up the lint.")):
             with self.subTest(clean=clean):
                 self.assert_passes(self.report(clean))
@@ -5891,9 +5958,9 @@ class PassClaimCitesVerdictTests(unittest.TestCase):
     # Real call forms: a cite through the full verdict path, after a cd, or through the repo's own runner. Each control
     # has a red sibling with the same call and a SKIP-only result, so the form is what passes.
 
-    VERDICT_FORMS = ("~/.claude/bin/verdict python3 lint/test_x.py",
-                     "cd x && ~/.claude/bin/verdict python3 lint/test_x.py",
-                     "python3 bin/verdict python3 lint/test_x.py")
+    VERDICT_FORMS = ("~/.claude/bin/verdict merge --lane-lint 7",
+                     "cd x && ~/.claude/bin/verdict merge --lane-lint 7",
+                     "python3 bin/verdict merge --lane-lint 7")
 
     def test_control_cite_in_each_real_verdict_form_passes_and_its_skip_sibling_is_refused(self):
         for n, form in enumerate(self.VERDICT_FORMS):

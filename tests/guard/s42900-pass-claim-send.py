@@ -12,10 +12,11 @@ FAMILY = "sendmessage-session-id"
 # The family is sendmessage-session-id: a new family name would fail the run on a checkout that predates it.
 PASS_RULE = "pass-claim-cites-verdict"
 PASS_DIR = os.path.join(ROOT, "passclaim")
-PASS_CMD = "verdict python3 lint/test_x.py"
-PASS_LINE = "PASS python3 lint/test_x.py (1.2s)"
-SKIP_LINE = "SKIP python3 lint/test_x.py, 3 skipped (1.2s)"
-FAIL_LINE = "FAIL python3 lint/test_x.py rc=1 (1.2s) log=/tmp/verdict-x.log"
+# A lint or checks claim needs a roster command (rule 4), so the cite here is merge --lane-lint.
+PASS_CMD = "verdict merge --lane-lint 7"
+PASS_LINE = "PASS merge --lane-lint 7 (1.2s)"
+SKIP_LINE = "SKIP merge --lane-lint 7, 3 skipped (1.2s)"
+FAIL_LINE = "FAIL merge --lane-lint 7 rc=1 (1.2s) log=/tmp/verdict-x.log"
 PARENT_ID = "sess-passclaim-parent"
 NOCITE_AGENT_ID = "pc9z8y7x6w5v4u3t2"  # an agent with no transcript at all
 SEND_TO = "@parent"
@@ -49,15 +50,15 @@ PASS_THEN_FAIL = transcript_file("failed.jsonl", [HUMAN] + call_records(PASS_CMD
 AGENT_RESULT = transcript_file("agent-result.jsonl", [HUMAN] + call_records(
     "run the lint", PASS_LINE, "tu_a", tool="Agent"))
 SIDECHAIN = transcript_file("sidechain.jsonl", [HUMAN] + call_records(PASS_CMD, PASS_LINE, "tu_s", sidechain=True))
-BARE_RUN = transcript_file("bare.jsonl", [HUMAN] + call_records("python3 lint/test_x.py", PASS_LINE, "tu_b"))
+BARE_RUN = transcript_file("bare.jsonl", [HUMAN] + call_records("merge --lane-lint 7", PASS_LINE, "tu_b"))
 OTHER_CMD = transcript_file("other-cmd.jsonl", [HUMAN] + call_records(
     PASS_CMD, "PASS python3 lint/test_y.py (1.2s)", "tu_o"))
 # The parent's transcript holds no cite.
 PARENT = transcript_file(PARENT_ID + ".jsonl", [HUMAN])
 # The real call forms, and a result that comes as a list of text blocks. Each cite has a SKIP-only sibling.
-REAL_FORMS = (("the full verdict path", "~/.claude/bin/verdict python3 lint/test_x.py"),
-              ("after a cd", "cd x && ~/.claude/bin/verdict python3 lint/test_x.py"),
-              ("through the repo's bin/verdict", "python3 bin/verdict python3 lint/test_x.py"))
+REAL_FORMS = (("the full verdict path", "~/.claude/bin/verdict merge --lane-lint 7"),
+              ("after a cd", "cd x && ~/.claude/bin/verdict merge --lane-lint 7"),
+              ("through the repo's bin/verdict", "python3 bin/verdict merge --lane-lint 7"))
 LIST_CITED = transcript_file("list-cited.jsonl", [HUMAN] + call_records(
     PASS_CMD, [{"type": "text", "text": PASS_LINE}], "tu_l"))
 LIST_SKIP = transcript_file("list-skip.jsonl", [HUMAN] + call_records(
@@ -77,7 +78,7 @@ def pass_allow(name, tool, message, transcript, **target):
 
 
 # Each claim form, sent to @parent over SendMessage and to a session over the MCP send tool, with no cite.
-for _claim in ("Lint passed. Status: done.", "CI is green.", "The build is clean.", "The lane lint passes."):
+for _claim in ("Lint passed. Status: done.", "Checks are green.", "The suite is clean.", "The lane lint passes."):
     pass_refuse("no cite, to @parent: " + _claim, "SendMessage", _claim, UNCITED, to=SEND_TO)
     pass_refuse("no cite, to a session: " + _claim, MCP_TOOL, _claim, UNCITED, session_id=SEND_SESSION)
 
@@ -103,7 +104,7 @@ for _name, _allowed, _refused in (
     ("negated", "Lint is not green.", "Lint is green."),
     ("attributed to a reviewer", "Reviewer: lint passed.", "Lint passed."),
     ("a statistic", "Tests: 12 passed, 2 failed.", "Tests passed, 2 failed."),
-    ("clean with no check noun", "The merge is clean.", "The build is clean."),
+    ("clean with no check noun", "The merge is clean.", "The lint is clean."),
     ("passed the brief to a peer", "I passed the brief to the builder.", "I passed the brief, and lint passed."),
 ):
     pass_allow("control, " + _name + ", to @parent", "SendMessage", _allowed, UNCITED, to=SEND_TO)
@@ -137,3 +138,41 @@ add("pass-claim: an agent's uncited claim to @parent is allowed, it is the agent
     message="Lint passed.")
 # The MCP send tool is no row here: an agent's call to it is refused by agent-no-remote-tools, another rule, so the
 # row would fail for that cause and never pass for this one.
+
+# Rules 1-3: negation reaches only its own clause, a number erases a claim only as a count, and the claim forms count.
+for _claim in ("Lint: PASS.", "All checks pass.", "Lint `passed`.", "No failures, lint passed.", "PR 7 lint passed.",
+               "CI run 4321 lint passed."):
+    pass_refuse("claim form, uncited, to @parent: " + _claim, "SendMessage", _claim, UNCITED, to=SEND_TO)
+pass_allow("control, negation reaches only its clause, to @parent", "SendMessage", "Lint did not pass.", UNCITED,
+           to=SEND_TO)
+pass_allow("control, a count is no claim, to @parent", "SendMessage", "3/5 tests passed.", UNCITED, to=SEND_TO)
+pass_allow("control, a claim wholly in backticks, to @parent", "SendMessage", "`Lint passed.`", UNCITED, to=SEND_TO)
+
+# Rule 4: a cite backs a claim only when its check matches. verdict true backs no claim, and a test-file cite backs
+# no lint claim. Each refusal has an allowed sibling that differs only in the check.
+TRUE_CITE = transcript_file("true-cite.jsonl", [HUMAN] + call_records("verdict true", "PASS true (1.2s)", "tu_t"))
+TEST_CITE = transcript_file("test-cite.jsonl", [HUMAN] + call_records(
+    "verdict python3 lint/test_x.py", "PASS python3 lint/test_x.py (1.2s)", "tu_tc"))
+pass_refuse("cite matches the check, verdict true backs no lint claim, to @parent", "SendMessage", "Lint passed.",
+            TRUE_CITE, to=SEND_TO)
+pass_refuse("cite matches the check, a lint cite backs no tests claim, to @parent", "SendMessage", "Tests passed.",
+            CITED, to=SEND_TO)
+pass_refuse("cite matches the check, a test-file cite backs no lint claim, to @parent", "SendMessage", "Lint passed.",
+            TEST_CITE, to=SEND_TO)
+pass_allow("control, a test-file cite backs a tests claim, to @parent", "SendMessage", "Tests passed.", TEST_CITE,
+           to=SEND_TO)
+pass_allow("control, a roster cite backs a checks claim, to @parent", "SendMessage", "Checks passed.", CITED,
+           to=SEND_TO)
+
+# Rule 5: a cite in its shell-expanded form backs its claim. The PASS line names the command as the shell passed it on.
+EXPANDED_CITE = transcript_file("expanded-cite.jsonl", [HUMAN] + call_records(
+    "~/.claude/bin/verdict ~/.claude/bin/merge --lane-lint 7", "PASS /root/.claude/bin/merge --lane-lint 7 (1.2s)",
+    "tu_e"))
+pass_allow("cite form, the shell-expanded path backs its claim, to @parent", "SendMessage", "Lint passed.",
+           EXPANDED_CITE, to=SEND_TO)
+
+# Rule 6: CI and build are no check noun, so these pass uncited, to @parent and to a session.
+for _msg in ("Done: PR 12 merged, CI green.", "Clean merge, CI still running.", "The build is clean."):
+    pass_allow("CI or build is no check noun, to @parent: " + _msg, "SendMessage", _msg, UNCITED, to=SEND_TO)
+pass_allow("CI is no check noun, to a session", MCP_TOOL, "Done: PR 12 merged, CI green.", UNCITED,
+           session_id=SEND_SESSION)
