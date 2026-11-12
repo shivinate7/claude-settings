@@ -18221,7 +18221,7 @@ def controls(text):
     return C0_CONTROL.findall(text)
 
 
-BATCH_BEGIN, BATCH_END ="<!-- batch-freeze:begin -->", "<!-- batch-freeze:end -->"  # the marker lines of a batch pull request's frozen block
+BATCH_BEGIN, BATCH_END = "<!-- batch-freeze:begin -->", "<!-- batch-freeze:end -->"  # the marker lines of a batch pull request's frozen block
 
 def passed_to(spy, real, name):
     """The value a patched function was called with for its parameter `name`, read through the real function's signature, however the caller
