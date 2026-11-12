@@ -1738,7 +1738,7 @@ def A10_full_size_each_quiet_agent_is_listed_once():
 # record is the time it was last written, so each case sets the agent's idle to its last record's age. The
 # cap is the module's OPEN_CALL_CAP, read once when this file loads. Until the module defines it, the ruled
 # value stands, so the cases fail by assert on a module with no cap.
-RULED_OPEN_CAP = 900  # ruling 2026-11-07 18:38 CST: Bash's 600 s maximum plus a margin
+RULED_OPEN_CAP = 900  # Bash's 600 s maximum plus a margin
 
 
 def module_open_cap():
