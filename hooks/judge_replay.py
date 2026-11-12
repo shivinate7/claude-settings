@@ -390,7 +390,7 @@ def touched(paths):
 
 
 def load_corpus(name):
-    """The cases of a judge's corpus file. A missing file is no cases: the judge's row says so and makes no call."""
+    """The cases of a judge's corpus file. A missing file is no cases; the runner exits 1 on that unless PENDING_STEPS names the judge."""
     try:
         with open(os.path.join(REPO, *JUDGES[name]["corpus"].split("/")), encoding="utf-8") as f:
             return json.load(f)
@@ -522,15 +522,19 @@ def main(argv):
             return 0
     elif mode is None:
         return usage()
-    misses = unknowns = 0
+    misses = unknowns = unreadable = 0
     asked = answered = 0
     for name in names:
         rows = replay(name, runs)
         print("%s (%d cases, %d run%s each)" % (name, len(rows), runs, "" if runs == 1 else "s"))
-        if not rows:
+        if not rows and name in PENDING_STEPS:
             print("  %s" % NO_CASES)
-            if name in PENDING_STEPS:
-                print("  %s" % PENDING_STEPS[name])
+            print("  %s" % PENDING_STEPS[name])
+        elif not rows:
+            unreadable += 1
+            path = JUDGES[name]["corpus"]
+            gap = "no cases in" if os.path.exists(os.path.join(REPO, *path.split("/"))) else "no corpus file"
+            print("  %s: %s %s" % (name, gap, path))
         for r in rows:
             note = "  %s" % r["error"] if r.get("error") else ""
             print("  %-7s %s expect=%s got=%s agreement=%s%s" % (r["verdict"], r["id"], r["expect"], r["got"],
@@ -544,7 +548,7 @@ def main(argv):
         print(UNKNOWN_AUTH_LINE)
     elif unknowns:
         print("UNKNOWN: %d cases got no answer from the model." % unknowns)
-    if misses:
+    if misses or unreadable:
         return 1
     return 1 if unknowns and os.environ.get("CI") else 0
 

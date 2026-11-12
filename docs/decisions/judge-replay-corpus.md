@@ -13,8 +13,8 @@ The per-source caps of 400 candidates in all and 200 roadmap, 100 backlog and 10
 ## The shape
 
 - The runner is `hooks/judge_replay.py`. Its modes: `--changed BASE` (the judges whose scope the committed diff BASE...HEAD touches, or every judge when the diff moves the claude CLI pin), `--judge NAME`, `--all`, `--paths` (names the touched judges from paths on stdin), `--probe` (one small call, to prove the sign-in) and `--runs N` (default 1).
-- Eleven judges, one corpus each, in `.github/judge-replay/corpus/<name>.json`, except the page judge, which has none yet: `call_judge.spawn`, `call_judge.question`, `call_judge.page`, `call_judge.opus_ask`, `call_judge.opus_scope`, `prose_judge`, `reply_judge`, `feedback_guard` (the repeat check), `report_guard.past_ruling`, `sendmessage_state` (the state judge and the wording judge) and `decision_watch`.
-- The page judge's 5 cases are pending step `judge-replay-page-cases`. Their expected verdicts can only be recorded by a CI run with the secret, and no unrecorded verdict enters a batch (coordinator, 2026-11-12 07:41 and 08:35 CST). Until then the page judge has no corpus file, its row runs zero cases and reads `no cases yet` and `pending step judge-replay-page-cases`, and it exits 0. A judge with no corpus file reads `no cases yet` too.
+- Eleven judges. Each has one corpus in `.github/judge-replay/corpus/<name>.json`, except the page judge, which has none yet. The judges are `call_judge.spawn`, `call_judge.question`, `call_judge.page`, `call_judge.opus_ask`, `call_judge.opus_scope`, `prose_judge`, `reply_judge`, `feedback_guard` (the repeat check), `report_guard.past_ruling`, `sendmessage_state` (the state judge and the wording judge) and `decision_watch`.
+- The page judge's 5 cases are pending step `judge-replay-page-cases`. The coordinator ruled (2026-11-12 07:41 and 08:35 CST) that they return in a follow-up, after a CI dispatch records their verdicts. The cloud run of 2026-11-06 (see Measured) is evidence, not the CI record. Until then the page judge has no corpus file. Its row runs zero cases, reads `no cases yet` and `pending step judge-replay-page-cases`, and exits 0. The exemption is the membership of `PENDING_STEPS` in `hooks/judge_replay.py`. Any other judge with a missing or empty corpus exits 1, and one indented line names the judge and its corpus path.
 - A case is `{id, expect, source, input, agreement}`. `expect` is `allow` or `deny`. `source` names the fixture case or record it came from. `input` is the judge's own input. The runner holds no prompt: one adapter per judge turns `input` into the arguments of the judge's real entry function, and the entry builds its own prompt and calls `decision_watch.invoke_model`, the one model seam.
 - The adapter reads what the entry did. A refusal, a finding or a flag is `deny`. An entry that ran and said nothing is `allow`. No model call, or a model error, is `unknown`: an entry that fails open prints no verdict, so the adapter reads the model's own answer to tell the two apart.
 - The runner replaces `guard_core.refuse` and `record` while an entry runs, so a replay writes no `guard.log` line and no override file lifts a refusal. `question_form.past_rulings` is replaced by the case's own `rulings`, so a prompt does not move with this repo's records. A `decision_watch` case builds a temp git repo and a transcript, and removes both.
@@ -34,13 +34,13 @@ A replay that cannot get an answer is UNKNOWN, and under `CI` it exits 1 (decisi
 
 ## Measured
 
-2026-11-06, in a cloud container, the real models, 3 runs of each case through `replay(name, runs=3)`. The table counts the 53 cases of the corpus: 159 calls, 159 answers equal to the expected answer. The page judge's 5 cases are not in it (pending step `judge-replay-page-cases`).
+2026-11-06, in a cloud container, the real models, 3 runs of each case through `replay(name, runs=3)`. The table counts the 53 cases of the corpus: 159 calls (derived: the 174 measured calls minus the page judge's 15), 159 answers equal to the expected answer. The page judge's 5 cases are not in the corpus (pending step `judge-replay-page-cases`).
 
 | Judge | Allow | Deny | Agreement |
 |---|---|---|---|
 | `call_judge.spawn` | 3 | 4 | 3/3 each |
 | `call_judge.question` | 3 | 3 | 3/3 each |
-| `call_judge.page` | pending | pending | pending step `judge-replay-page-cases` |
+| `call_judge.page` | 2 | 3 | 3/3 each (measured 2026-11-06, cloud container, not CI; not in this PR's corpus: pending step `judge-replay-page-cases`) |
 | `call_judge.opus_ask` | 3 | 4 | 3/3 each |
 | `call_judge.opus_scope` | 2 | 2 | 3/3 each |
 | `prose_judge` | 2 | 3 | 3/3 each |
@@ -62,7 +62,7 @@ One serial `--all` run, one run per case, made before the page judge's cases lef
 ## Cost
 
 - Normal use: no call and no process. The runner is not named in `settings.json` or in any hook.
-- A CI run that touches a judge: N calls, N being the cases of each touched judge times 3 (`--runs 3`; a case needs a strict majority of all 3 runs, so 2 agreeing answers and 1 error pass at 2/3, and 1 answer and 2 errors read UNKNOWN). `--all`, and a change that touches every judge, is 159 calls and the probe (about 9 min, unmeasured in CI: 3 x the 201 s local run, scaled from 58 to 53 cases). The job runs only with the secret `CLAUDE_CODE_OAUTH_TOKEN` and skips a pull request from a fork, so a fork costs no call. The job reads the diff with the `--paths` call of the scope step (one Python start, no call) and starts one `claude -p` process per call. A `decision_watch` case also starts the git processes of its temp repo and of the judge's own status, diff and log reads, and removes the folder after.
+- A CI run that touches a judge: N calls, N being the cases of each touched judge times 3 (`--runs 3`). A case needs a strict majority of all 3 runs, so 2 agreeing answers and 1 error pass at 2/3, and 1 answer and 2 errors read UNKNOWN. `--all`, and a change that touches every judge, is 159 calls and the probe. That is about 9 min, unmeasured in CI: 3 x the 201 s local run, scaled from 58 to 53 cases. The job runs only with the secret `CLAUDE_CODE_OAUTH_TOKEN` and skips a pull request from a fork, so a fork costs no call. The job reads the diff with the `--paths` call of the scope step (one Python start, no call) and starts one `claude -p` process per call. A `decision_watch` case also starts the git processes of its temp repo and of the judge's own status, diff and log reads, and removes the folder after.
 - Files written: none in the repo. The CI job writes one token file (`state/hook-token`) in a runner temp folder.
 - Job cap (decision `ci-job-caps`): 75 minutes, the interim stopgap (owner, 2026-11-10 12:11 CST). The 53 cases' timeouts add up to 2122 s. If every call hung to its timeout, the replay would run 3 x 2122 s (6366 s, about 106 min), and the cap would cancel the job. `all-jobs-passed` reads a cancelled job as not passed, so the run still fails, but with no red step. A step-level timeout is not added. The figure at 75 is unmeasured; the first CI run on a pull request that touches a judge replaces it.
 
