@@ -9,6 +9,8 @@ How lanes were cut: steps of one repo and one kind (code or prose) that name the
 1. A step with an old open PR is carried forward on a fresh branch from main, not rebuilt.
 2. A lane builds a step of the other kind too and hands it in under its true kind; kind splits batches, not lanes.
 3. A step already done on main is closed, not built.
+4. A base PR that no live lane holds is carried by the lane that needs it; that lane tells triage the step, and triage sets its lane field (07:35 CST).
+5. Before carrying a base PR, a lane looks it up in plans/open-pr-owners-2026-11-12.md (07:33 CST).
 
 ## code-agents
 
