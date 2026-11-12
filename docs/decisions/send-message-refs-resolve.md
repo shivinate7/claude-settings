@@ -60,7 +60,7 @@ Per send, at most:
 - One `gh api repos/<owner>/<repo>/issues/comments/<id>` runs per comment link, up to 5. It is a network read.
 - Each git and gh read has a 5 s limit.
 
-The limits add to 45 s: `git config`, `git cat-file`, `git rev-parse`, `git ls-remote` and five `gh` reads, at 5 s each. The URL-word pattern runs at most twice on a line. One 64 KiB unbroken line took 10.3 s (measured once). The guard's PreToolUse hook timeout is 60 s (`settings.json`). The pattern has no cap in the code, so a line long enough to pass that timeout is possible; this is unmeasured. Whether a timeout allows the call is the harness's rule, not this code's.
+The limits add to 45 s: `git config`, `git cat-file`, `git rev-parse`, `git ls-remote` and five `gh` reads, at 5 s each. The URL-word pattern runs at most twice on a line. One 64,000-letter unbroken line took 13.9 s with the new pattern, against 4.1 s with the old, on one machine (measured once). The guard's PreToolUse hook timeout is 60 s (`settings.json`). The pattern has no cap in the code, so a line long enough to pass that timeout is possible; this is unmeasured. Whether a timeout allows the call is the harness's rule, not this code's.
 
 A message with no sha, no PR number and no `github.com` link of the kinds above starts no process. A message whose only ref is a sha on a line with no mark starts only the `git cat-file`, and on a miss the `git rev-parse`. A guard.log line is written only for a refusal, or for `report-sha-shallow` on a shallow clone. The check writes no file of its own, and starts no timer or long-lived process.
 
@@ -75,8 +75,9 @@ A message with no sha, no PR number and no `github.com` link of the kinds above 
 - With no origin, a commit URL of this repo is not judged. A payload with no `cwd` is judged in the hook's own directory, with no notice.
 - A repo with a capital letter, marked only by `:` or `PR` (`Acme/Widgets: PR #5`), is judged against this repo and can refuse.
 - A PR list split across a line break is judged on its first line only.
-- The sha forms that `agent-report-shas-resolve` skips are skipped here too: `key=<sha>`, a URL word (this repo's compare URLs included) and a line starting `index `.
+- The sha forms that `agent-report-shas-resolve` skips are skipped here too: `key=<sha>`, a URL from its scheme on (this repo's compare URLs included) and a line starting `index `.
+- A hex run glued straight onto a scheme, such as `8c1f0e2a7https://…`, is not judged. The URL match takes the run from its first letter on, and digits alone are no sha.
 - Another repo's PR or sha named with no `owner/repo` on its line is judged against this repo and can refuse. In a full clone, a foreign sha is missing and is refused. In a shallow clone it is allowed and named unchecked.
-- The URL-word pattern takes time that grows with the square of a long unbroken token: 1.7 s at 32,000 characters (measured once). On a timeout, the code writes nothing.
+- The URL-word pattern takes time that grows with the square of a long unbroken token: 3.4 s at 32,000 characters, against 1.0 s for the old pattern (measured once, one machine). On a timeout, the code writes nothing.
 - A PR named as `owner/repo#N`, with no `PR` word, is not judged. The function `message_line_prs` in `hooks/guard.py` finds a PR only by a PR word or `#N (PR)`, so `shivinate7/claude-settings#99999` passes. Fix: judge that form, as the follow-up PR #2265 (branch `msg-ref-pr-forms`, `MESSAGE_OWN_REF`) does. That PR is not on this branch.
 - A scheduled send, `send_later`, is not judged, and is not built. `MESSAGE_REF_TOOL` names only `send_message`, and the field that holds its text is unverified here. An agent's `send_later` is still refused first, by rule `agent-no-remote-tools`, which bars an agent's remote tools.
