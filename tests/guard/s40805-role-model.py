@@ -519,22 +519,22 @@ def role_opus_role_lift_check():
     return True, "the test-author grant lifted a test-author on opus, and not a builder on opus"
 
 
-def role_override_no_model_fix_check():
+def role_override_no_model_fix_verifier():
     """A reviewer's fix check with no model is never-lifted: its refusal keeps ROLE_NO_MODEL_MATCH, which never_lifted
     reads, so an override neither lifts it nor spends."""
-    fix_check = role_input("reviewer", None, FIX_MARKER + ". Re-run the cases.")
-    return role_override_never_lifted_story("ov-fix-no-model", fix_check, ROLE_OV_UNSET,
+    fix_verifier = role_input("reviewer", None, FIX_MARKER + ". Re-run the cases.")
+    return role_override_never_lifted_story("ov-fix-no-model", fix_verifier, ROLE_OV_UNSET,
                                             "a reviewer fix check with no model")
 
 
-def role_override_haiku_fix_check():
+def role_override_haiku_fix_verifier():
     """A reviewer's fix check that names haiku is refused with ROLE_FIX_VERIFIER_MATCH, which the general override
     lifts. One override lifts it once, then it refuses again."""
-    fix_check = role_input("reviewer", "haiku", FIX_MARKER + ". Re-run the cases.")
-    return role_override_lift_story("ov-fix-haiku", fix_check, "a reviewer fix check on haiku")
+    fix_verifier = role_input("reviewer", "haiku", FIX_MARKER + ". Re-run the cases.")
+    return role_override_lift_story("ov-fix-haiku", fix_verifier, "a reviewer fix check on haiku")
 
 
-def role_override_workflow_haiku_fix_check():
+def role_override_workflow_haiku_fix_verifier():
     """A Workflow agent() call that names haiku on a fix check is lifted by one override, then refused again."""
     script = _step_flow("'%s. Re-run the cases.'" % FIX_MARKER, "agentType: 'reviewer', model: 'haiku'")
     return role_override_lift_story("ov-fix-workflow-haiku", {"script": script},
@@ -547,11 +547,11 @@ ROLE_OVERRIDE_CHECKS = (
     ("role-model: the no-model refusal stays under an owner override, and spends none",
      role_override_no_model_check),
     ("role-model: the no-model fix check reviewer stays refused under an owner override, and spends none",
-     role_override_no_model_fix_check),
+     role_override_no_model_fix_verifier),
     ("role-model: a haiku-named fix check reviewer is lifted by an owner override once, then refused again",
-     role_override_haiku_fix_check),
+     role_override_haiku_fix_verifier),
     ("role-model: a haiku-named fix check reviewer in a Workflow is lifted by an owner override once, then refused again",
-     role_override_workflow_haiku_fix_check),
+     role_override_workflow_haiku_fix_verifier),
     ("role-model: opus 2h lifts an Explore on opus with no Audit: marker (item 137)", role_opus_explore_lift_check),
     ("role-model: opus test-authors 2h lifts a test-author on opus, and no builder", role_opus_role_lift_check),
     ("role-model: the typed override lifts a Workflow builder on opus with a variable brief, once",
@@ -1074,9 +1074,9 @@ role_model_refuse("role-model: served-model: fix check, Round 1 of 3 after the m
                   env=SONNET_DEFAULT, carries=SERVED_REMEDY)
 role_model_refuse("role-model: served-model: fix check, reviewer on haiku with the marker is denied under agent-role-model",
                   "reviewer", "haiku", FIX_MARKER + ". Re-run the cases.", carries=SERVED_REMEDY)
-# The round form of the same ruling. Its first line is a round 2 marker, so the step-up holds a reviewer on it to Sonnet, and
-# Haiku is denied. Green on the base by design: the step-up already denies round 2 on Haiku. It guards the form: a build that
-# skips the step-up for a fix check would let Haiku through here.
+# The round-line form of the same ruling. Its first line is a round marker, then the fix check words. The step-up
+# reads that line and holds a reviewer on it to Sonnet, so Haiku is denied. The step-up alone decides this case.
+# The case guards the form: a build that skips the step-up for a fix check would let Haiku through here.
 add("role-model: served-model: fix check, Round 2 of 3 (fix check) on haiku is denied under the step-up, as a round 2 brief",
     "deny", STEP_UP, tool="Agent", prompt="Round 2 of 3 (fix check). Re-run the cases.", model="haiku",
     subagent_type="reviewer")
@@ -1085,9 +1085,10 @@ workflow_refuse("role-model: served-model: fix check, Workflow reviewer on haiku
                 "agent-role-model, and the denial names sonnet",
                 _step_flow("'%s. Re-run the cases.'" % FIX_MARKER, "agentType: 'reviewer', model: 'haiku'"),
                 rule=ROLE_RULE, carries=SERVED_REMEDY, lacks=ROLE_LACKS)
-# Controls, green on the base too. A reviewer's first round with no marker runs on its row, with no model or on Haiku, and a
-# record-writer with no model runs on its file's pin. A builder with no model and the marker passes the default, since the
-# refusals lift a reviewer only. A reviewer on Sonnet with the marker passes its lift, and the below-Sonnet test stops at Sonnet.
+# Controls for the refusals above, each of which must stay allowed. A reviewer brief with no marker runs on its
+# row, with no model or on Haiku, and a record-writer with no model runs on its file's pin. A builder with no model
+# and the marker passes the default, since the refusals lift a reviewer only. A reviewer on Sonnet with the marker
+# passes its lift, and the below-Sonnet test stops at Sonnet.
 role_model_allow("role-model: served-model: reviewer with no marker and no model is allowed when the default is sonnet",
                  "reviewer", None, "Check the diff for typos.", env=SONNET_DEFAULT)
 role_model_allow("role-model: served-model: reviewer with no marker on haiku is allowed, at its own row",
