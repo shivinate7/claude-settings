@@ -351,10 +351,15 @@ ROUTE_UNREAD_DENIALS = (
     ("a repo with a placeholder owner and a named repo", "gh api -X PUT repos/{owner}/r/pulls/1/merge"),
     ("a pr number with a default value", "gh api -X PUT repos/y/x/pulls/${PR:-1}/merge"),
     ("an absolute https URL", "gh api -X PUT https://api.github.com/repos/y/x/pulls/1/merge"),
+    ("a pr number from a command substitution, with a query", "gh api -X PUT repos/y/x/pulls/$(echo 1)/merge?sha=abc"),
 )
 for _label, _command in ROUTE_UNREAD_DENIALS:
     sh("merge-route: unread form: %s is refused" % _label, _command, "deny", "merge-checks",
        cwd=NOGIT, env_path=ROUTE_ON, config=MERGECFG)
+# With no busy pr on main the head is green, so a merge read as known would allow. An unread form is unknown: it denies.
+sh("merge-route: unread form: an absolute https URL, no busy pr on main is refused",
+   "gh api -X PUT https://api.github.com/repos/y/x/pulls/1/merge", "deny", "merge-checks",
+   cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH, config=MERGECFG)
 sh("merge-route: git push origin main with no busy pr on main still asks", VCS + " push origin main", "ask", PUSH_MAIN_RULE,
    cwd=NOGIT, env_path=GHMAIN + os.pathsep + PY_PATH)
 sh("merge-route: git push origin some-branch is allowed while another ready pr's required check is pending",
@@ -369,6 +374,9 @@ for _label, _fixture, _command in (
     ("a busy pr whose head holds this head", GHBATCHCONTAIN, GH_API_MERGE),
     ("a GET of the merge endpoint", ROUTE_ON, "gh api repos/y/x/pulls/1/merge"),
     ("a PUT to another pull request endpoint", ROUTE_ON, "gh api -X PUT repos/y/x/pulls/1/requested_reviewers"),
+    ("a PUT to a pull request endpoint with an unread number", ROUTE_ON, "gh api -X PUT repos/y/x/pulls/$(echo 1)/labels"),
+    ("a PUT to an endpoint that starts like the merge route", ROUTE_ON, "gh api -X PUT repos/y/x/pulls/1/mergeable"),
+    ("limit: a method in a shell variable", ROUTE_ON, 'gh api -X "$M" repos/y/x/pulls/1/merge'),
 ):
     sh("merge-route: gh api, %s, is allowed: %s" % (_label, _command), _command, "allow", silent=True, cwd=NOGIT,
        env_path=_fixture + os.pathsep + PY_PATH, config=MERGECFG)
