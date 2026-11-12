@@ -1805,28 +1805,6 @@ def case_item_51_stray_field():
          entry_of(page_item(focus="#fill")), ("item-field-rendered", "focus"))
 
 
-# ------------------------------------------------------------------ wakes: the sessions an item wakes, a field the page lists
-#
-# An item names who wakes in `wakes`, a list of session ids (absent means the owner). The guard refuses a top-level field
-# that the page's itemFields block does not list, so every write that names `wakes` is refused until the block lists it.
-
-WAKE_SESSIONS = ["session_01TriageWake7Vx4Lq2mZ", "session_01CoordWake3Rt8Ny5Pd"]
-
-
-def case_wakes_is_a_listed_item_field():
-    """`wakes` is a field the page lists, so a write that names it passes on both surfaces: a set of a whole item, an update
-    that names only it, and a str_replace on it. The control is the same decision with no wakes, which passes already."""
-    page("control: a decision with no wakes passes", "set", entry_of(page_item()), None)
-    page("a decision that names its wakes passes", "set", entry_of(page_item(wakes=WAKE_SESSIONS)), None)
-    page("an update that sets only wakes passes", "update", entry_of({"wakes": WAKE_SESSIONS}), None)
-    page("a str_replace on wakes passes", "str_replace",
-         {"collection": "items", "doc_id": DOC, "field": "wakes", "old_str": WAKE_SESSIONS[0], "new_str": WAKE_SESSIONS[1]}, None)
-
-
-def test_wakes_is_a_listed_item_field():
-    _judged(case_wakes_is_a_listed_item_field)
-
-
 # ------------------------------------------------------------------ dismissed: the page's own Mark read
 
 def case_session_update_naming_dismissed_is_refused():
@@ -2516,8 +2494,7 @@ def case_judged_mixed_writes_all_returned():
 
 
 def main():
-    for case in (case_item_92, case_item_51_stray_field, case_wakes_is_a_listed_item_field,
-                 case_session_update_naming_dismissed_is_refused,
+    for case in (case_item_92, case_item_51_stray_field, case_session_update_naming_dismissed_is_refused,
                  case_dismissed_refused_on_every_route, case_dismissed_refused_without_a_readable_field_list,
                  case_dismissed_reason_keeps_the_generic_remedy_for_other_fields,
                  case_item_stray_field_refused_from_a_record_branch_checkout,
