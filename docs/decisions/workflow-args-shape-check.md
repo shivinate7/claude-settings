@@ -9,7 +9,7 @@ The guard refuses a `Workflow` call whose `args` is a placeholder (rule `workflo
 
 The refusal names the placeholder and says to replace it with the real value.
 
-These pass: a call with no `args` and empty `args`. A sentence that holds a placeholder (`MAILBOX_REPO is off`) passes. So do a short all-caps word with no underscore (`OK`) and a path that holds a dunder (`hooks/__init__.py`).
+These pass: a call with no `args` and empty `args`. A sentence that holds a placeholder (`MAILBOX_REPO is off`) passes. So do a short all-caps word with no underscore (`OK`) and a path that holds a dunder (`__init__.py` in a `hooks` folder).
 
 Known false alarm: a real value can have the shape, such as a bare env var name (`MAILBOX_REPO`) as the whole value. The guard refuses it. The owner's override lifts it (decision `guard-guards-mistakes-only`, guards stop Claude's mistakes).
 

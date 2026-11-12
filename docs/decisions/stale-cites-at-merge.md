@@ -15,7 +15,7 @@ Owner, 2026-11-01 16:30 CST, in chat to triage: "make it a standing thing that s
 - Coordinator pick, 2026-11-07 13:32 CST, process-only: a cite whose head value is no literal prints unknown, never a finding.
 - Readers: `scan()` runs a list of readers (`READERS` in `lint/stale_cites.py`), one per check. The later lane `stale-flags` adds one entry. The report follows the findings.
 - Only names the range removed count. A line already stale at base, for a name the range did not touch, never fires. So the check is never red on work the PR did not do.
-- A path matches only at a path boundary. `mods/session-board/hooks/lib.mjs` does not match `hooks/lib.mjs`.
+- A path matches only at a path boundary. The mod file `mods/session-board/hooks/lib.mjs` does not match a cite of `lib.mjs` in a `hooks` folder.
 - Left out: `docs/records.md` (generated at merge), each file `.ste-lint-exclude` names, and a line marked `<!-- ste-disable-line STALE001 -->` `STALE002` or `STALE008`. A record that names a removed file on purpose takes the mark.
 - Each Markdown file is read as committed at head, never from the working tree, through the same `git cat-file --batch` process. A byte that is not UTF-8 reads as a replacement character and the file is still checked.
 - A base that does not resolve (a shallow clone with no history: the head resolves, the history does not) is unknown, not a finding. The check prints `stale-cites: unknown, ...`, names fetch-depth 0, and exits 0, so a repo that pins the action and checks out shallow is not red at its pin move (owner-lane call, 2026-11-01).
