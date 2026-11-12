@@ -154,8 +154,8 @@ present, not which model.
 Kind of risk: likely. Landed 2026-11-08.
 
 **The lane start open pull request check.** Guard rule `lane-start-open-pr` refuses a `create_session` call tagged
-`cs-step:<slug>` while an open pull request of the calling checkout's repo already holds that step, unless the prompt
-cites the pull request (`#<n>` or `/pull/<n>`). A pull request holds the step when the slug is a whole token in its
+`cs-step:<slug>` while an open pull request of the calling checkout's repo already holds that step. The refusal does not
+apply when the prompt cites that pull request (`#<n>` or `/pull/<n>`). A pull request holds the step when the slug is a whole token in its
 title or head branch, or opens a body marker line (`Step`, `Lane` or `cs-step`, with heading, list or quote marks,
 `*` or `_` emphasis, a colon and backticks allowed, at a line start or after a sentence's full stop). Not lane-only.
 The reason names each uncited number. The read is one REST page of 100 open pull requests (`gh api`; the cloud proxy
@@ -165,7 +165,7 @@ words is not read, and a hit beyond a full page is unseen. Kind of risk: inciden
 an open draft already held). Landed 2026-11-12.
 
 Cost: per tagged start, at most one `git` process for the repo, shared with `lane-repo-tag` and none when the extras
-file names it, at most one `gh` process with a 10 s cap, no timer, and no file except the guard.log line on a pass
+file names it. At most one `gh` process with a 10 s cap. No timer, and no file except the guard.log line on a pass
 with no verdict.
 
 **The step-up.** Guard rule `roles-third-round-steps-up` reads the `Round N of 3` marker in
