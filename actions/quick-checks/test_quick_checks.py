@@ -10,7 +10,8 @@ passes (no such file is a pass), 1 when a file fails, and names each failing fil
 One clean repo is built once. Each defect case copies it and adds one defect, committed, so each case reads one cause and
 the other two modes pass the same tree. The traps (a link in a code fence, a `#` in a Python string, a `//` in a JSON
 string, a lone quote in text, an external link) each sit in a small repo of their own and must pass. The empty and the
-full-size repos are the P8 states.
+full-size repos are the P8 states. Conventional JSONC names (tsconfig*.json, jsconfig.json, .eslintrc.json,
+devcontainer.json) may hold comments; every other .json may not, and the controls keep that gate.
 Temp files: this run's folder (lint/_test_temp.py, decision test-temp-standard).
 """
 import os
@@ -168,6 +169,54 @@ class Traps(QuickChecks):
 
     def test_a_lone_quote_in_markdown_is_text(self):
         self.assert_passes(make_repo({"docs/apostrophe.md": "Don't break a link here.\n"}))
+
+
+JSONC = '// compiler options\n{\n  /* the strict set */\n  "strict": true\n}\n'
+
+
+class FalseAlarms(QuickChecks):
+    """Each case is a clean repo of one valid layout the checks must pass (a false alarm, when it fails)."""
+
+    def test_a_tsconfig_with_line_and_block_comments_passes_each_check(self):
+        self.assert_passes(make_repo({"tsconfig.json": JSONC}))
+
+    def test_each_conventional_jsonc_name_with_comments_passes_json(self):
+        for name in ("tsconfig.base.json", "jsconfig.json", ".eslintrc.json", "devcontainer.json"):
+            with self.subTest(file=name):
+                self.assert_passes(make_repo({name: JSONC}), ["json"])
+
+    def test_a_comment_opener_inside_a_string_and_a_lone_quote_in_a_comment_are_text(self):
+        text = '// don\'t edit by hand\n{"home": "https://example.invalid/x", "note": "/* not a comment */"}\n'
+        self.assert_passes(make_repo({"tsconfig.json": text}), ["json"])
+
+    def test_a_json_file_with_a_byte_order_mark_passes_json(self):
+        self.assert_passes(make_repo({"config/bom.json": "﻿" + '{"name": "widgets"}\n'}), ["json"])
+
+    def test_a_footnote_definition_is_not_a_link(self):
+        self.assert_passes(make_repo({"README.md": "# A\n\nA claim.[^1]\n\n[^1]: See the RFC\n"}), ["links"])
+
+    def test_a_link_target_with_balanced_parens_resolves(self):
+        self.assert_passes(make_repo({"README.md": "# A\n\nSee [the note](foo_(bar).md).\n", "foo_(bar).md": "# Note\n"}), ["links"])
+
+    def test_a_link_in_a_fence_indented_in_a_list_item_is_not_a_link(self):
+        self.assert_passes(make_repo({"README.md": "# A\n\n- Run it:\n\n    ```\n    [gone](missing.md)\n    ```\n"}), ["links"])
+
+
+class FalseAlarmControls(QuickChecks):
+    """The gates the false-alarm fixes must keep: a non-conventional .json with comments, broken JSON in a JSONC name, and
+    a broken reference definition still fail, each named."""
+
+    def test_a_plain_json_file_with_comments_still_fails_json(self):
+        root = defect_repo({"config/notes.json": '// a note\n{"name": "widgets"}\n'})
+        self.assert_one_cause(root, "json", ["config/notes.json"])
+
+    def test_broken_json_in_a_conventional_jsonc_file_still_fails_json(self):
+        root = defect_repo({"tsconfig.json": '// options\n{"strict": }\n'})
+        self.assert_one_cause(root, "json", ["tsconfig.json"])
+
+    def test_a_broken_reference_definition_still_fails_links(self):
+        root = defect_repo({"docs/guide.md": "# Guide\n\nSee [the rfc][rfc].\n\n[rfc]: missing.md\n"})
+        self.assert_one_cause(root, "links", ["docs/guide.md", "missing.md"])
 
 
 if __name__ == "__main__":
