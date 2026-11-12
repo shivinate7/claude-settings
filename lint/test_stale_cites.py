@@ -2430,7 +2430,7 @@ class RouteClaimTests(StaleCase):
             ("```", False),
             ("The cloud cannot push to main, after the fence.", True),  # prose again after the closing fence
             ("- `The cloud cannot push to main.`", False),  # a code span holds the whole claim
-            ("- Use `cannot` and `cloud` only in code.", False),  # a verb in a span is a mention (lane ruling)
+            ("- Use `cannot` and `cloud` only in code.", False),  # a verb in a span is a mention (lane ruling 12:47 CST)
             ("- The cloud cannot push to main; see `hooks/guard.py`.", True),  # the words sit outside the span
             ("- Open a fence with `` ``` `` and the cloud cannot push to main.", True),  # no fence opens in a span
             ("- Open a comment with `<!--`. The cloud cannot push to main.", True),  # a comment opener in a span
@@ -2452,7 +2452,7 @@ class RouteClaimTests(StaleCase):
     def test_route_claim_is_silent_on_a_local_branch_because_local_alone_is_no_route_word(self):
         rows = [
             ("- A local branch cannot hold the record.", False),  # `local` alone names no route
-            ("- Local runs cannot push to main.", False),  # `local runs` is no route word (lane ruling)
+            ("- Local runs cannot push to main.", False),  # `local runs` is no route word (lane ruling 12:47 CST)
             ("- The cloud cannot hold the record.", True),  # the same verb with a route word fires
         ]
         rng, flagged = self.route_range(rows)
@@ -3224,9 +3224,9 @@ class ValueCiteTests(StaleCase):
         self.assertEqual(rc, 1, out)
 
     def test_an_added_value_cite_led_outside_the_repo_prints_one_unknown_line_and_no_stop(self):
-        """A value cite whose path leads with `../`, `~/` or `/` names a file outside the repo. No reader asks git for it,
+        """A value cite whose path leads with `../` or `~/` names a file outside the repo. No reader asks git for it,
         so the added line prints one unknown line: the run neither stops nor flags the line, and the exit is 0."""
-        for path in ("../x.py", "~/x.py", "/x.py"):
+        for path in ("../x.py", "~/x.py"):
             with self.subTest(path=path):
                 rng = self.added_cite_range(LIMIT_BASE, "%s: LIMIT = 4" % path)  # scope: the cite is an added line
                 rc, out = self.run_check(rng)
@@ -3237,6 +3237,20 @@ class ValueCiteTests(StaleCase):
                 self.assertEqual(len(unknowns), 1, "a value cite led by %s must print one unknown line\n%s" % (path, out))
                 self.assertIn("%s:3: " % NOTES, unknowns[0], out)
                 self.assertIn(path, unknowns[0], out)
+
+    def test_an_added_value_cite_led_by_a_slash_that_quotes_a_wrong_value_is_flagged_on_its_line(self):
+        """A value cite whose path leads with `/` and names the tracked file, where head binds the name to another value,
+        is flagged on its line, and the run exits 1. The case asserts the flag and that the finding names the cited path.
+        It does not pin the wording: what a leading `/` means is not settled."""
+        rng = self.added_cite_range(LIMIT_HEAD, "/%s: LIMIT = 4" % CONFIG)  # scope: the cite is an added line led by a slash
+        self.assertIn("LIMIT = 5", git(rng.repo, "show", "%s:%s" % (rng.head, CONFIG)))  # scope: head holds LIMIT = 5
+        self.assertEqual(module_value(LIMIT_HEAD, "LIMIT"), 5)  # scope: head binds LIMIT to 5; the cite's 4 is wrong
+        rc, out = self.run_check(rng)
+        found = parse(out)
+        self.assertEqual([(p, n, c) for p, n, c, _ in found], [(NOTES, 3, "STALE008")],
+                         "a value cite led by a slash that quotes 4 where head has 5 must be flagged on its own line\n%s" % out)
+        self.assertIn("/%s" % CONFIG, found[0][3], "the finding must name the cited path\n%s" % out)
+        self.assertEqual(rc, 1, out)
 
     def test_an_added_python_cite_naming_no_tracked_file_is_flagged_on_its_own_line(self):
         for path in UNTRACKED_CITES:  # scope: no tracked file has the path
