@@ -90,8 +90,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   lane-by-slug         deny. A commit message or PR text that names a lane by a session number.
                        (lane-by-slug)
   scratchpad-commit-msg-owner  deny. A commit from an agent's call whose -F message file resolves
-                       into any session's scratchpad. `-F -`, `-m`, an orchestrator's call and a file
-                       elsewhere pass. (scratchpad-commit-msg-owner)
+                       into any session's scratchpad, also when a wrapper runs it (`bash -c`, `sh -lc`).
+                       `-F -`, `-m`, an orchestrator's call and a file elsewhere pass.
+                       (scratchpad-commit-msg-owner)
   machine-wide-kill   deny. A kill by name or pattern, or of a pid that is not a descendant of
                        this session. (a-kill-by-pid-needs-an-owned-pid)
   detached-launch      deny. A command that starts a process and detaches it from the session.
@@ -1737,26 +1738,35 @@ def scratchpad_commit_file(segments, number: int, cwd: str, ends, scope: str) ->
     file it resolves to. A relative path is read from the directory the shell is in when the segment
     runs (`dir_before_segment`, then the call's own `-C`); a name `scope` binds to literals is
     expanded (`_rm_values`), and any other variable stays as the environment gives it. When that
-    directory cannot be told, only an absolute path is judged."""
+    directory cannot be told, only an absolute path is judged. A command the segment hands on
+    (`bash -c`, `sh -lc`, `sudo`; `inner_commands`) is judged the same way, from the directory the
+    wrapper runs in, so a `cd` inside it sets the folder for a relative path."""
     segment = segments[number]
-    call = git_call_of(segment)
-    if call is None or call[0] != "commit":
-        return ""
     where = dir_before_segment(segments, number, cwd, ends)
     tokens = segment_tokens(segment)
-    named = _segment_git_c_target(tokens) if tokens else None
-    if named is not None:
-        where = None if _unexpanded(named) else shell_abs(named, where)
-    values = _rm_values(scope)
-    for name in message_sources(call[1], "commit")[1]:
-        names = sorted({a or b for a, b in _SCRATCH_EXPANSION.findall(name) if values.get(a or b)})
-        picks = list(itertools.product(*(values[n] for n in names)))[:64]
-        for pick in picks or [()]:
-            mapping = dict(zip(names, pick))
-            path = _SCRATCH_EXPANSION.sub(lambda m: mapping.get(m.group(1) or m.group(2), m.group(0)), name)
-            absolute = _absolute(path, where)
-            if os.path.isabs(absolute) and in_any_session_scratchpad(os.path.normpath(absolute)):
-                return name
+    call = git_call_of(segment)
+    if call is not None and call[0] == "commit":
+        here = where
+        named = _segment_git_c_target(tokens) if tokens else None
+        if named is not None:
+            here = None if _unexpanded(named) else shell_abs(named, where)
+        values = _rm_values(scope)
+        for name in message_sources(call[1], "commit")[1]:
+            names = sorted({a or b for a, b in _SCRATCH_EXPANSION.findall(name) if values.get(a or b)})
+            picks = list(itertools.product(*(values[n] for n in names)))[:64]
+            for pick in picks or [()]:
+                mapping = dict(zip(names, pick))
+                path = _SCRATCH_EXPANSION.sub(lambda m: mapping.get(m.group(1) or m.group(2), m.group(0)), name)
+                absolute = _absolute(path, here)
+                if os.path.isabs(absolute) and in_any_session_scratchpad(os.path.normpath(absolute)):
+                    return name
+    for text in inner_commands(tokens) if tokens else ():
+        inner_ends = []
+        inner = split_segments(text, inner_ends)
+        for index in range(len(inner)):
+            found = scratchpad_commit_file(inner, index, where or "", inner_ends, scope)
+            if found:
+                return found
     return ""
 
 
