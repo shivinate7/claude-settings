@@ -79,7 +79,7 @@ cause and the base's sha with exit 1, when the fetch fails or the base still sha
 and checks out shallow is red at its pin move until it checks out with fetch-depth 0, or its origin can be
 fetched. A first push, whose base is the first parent of a root commit (spelled `HEAD~1`, `HEAD^1`, `@~1` or
 `<head sha>~01`), has no base and no fetch can make one: under CI it prints `stale-cites: no base, ...` and
-exits 0 (decision ci-unknown-is-red); with CI unset it is the gap above.
+exits 0 (decision stale-cites-at-merge); with CI unset it is the gap above.
 Other unknown lines print `stale-cites: unknown, ...` and exit 0, or
 1 with a final `stale-cites: UNKNOWN` line when env CI is set and nothing else failed (decision ci-unknown-is-red).
 Those lines are: a touched .py that does not parse at base or head, a malformed rule_mechanisms.json, and a report
