@@ -9,6 +9,10 @@ check reads that debt's Retire paragraph from the base and runs what it names, o
   runnable  a backticked span that is a test file the head tracks (test_*.py, *_test.py, *.test.mjs, test_*.mjs,
             test_*.sh) runs as one argv, with no shell, from the head folder, under a timeout. Non-zero is red.
             A missing interpreter, a failed start, or a timeout is unknown.
+  birth     a test that passes when run on the PR head must also fail on the commit that added the debt, with the head's copy of
+            the test laid over that commit: a test that passes there catches nothing and refuses the close. A test that
+            cannot load there (an import or syntax error) or a debt with no birth commit in this checkout is unknown.
+            A named test file the head does not track is refused. A cite never clears either refusal.
   prose     a Retire that names no runnable check holds the close, unless the PR body cites a run:
             `Retire-run: <slug> -- <run URL>`, read as the Drops-lines line of check_silent_undo is. The run must be
             green and on the PR head or a commit above it. A cite also clears a check that could not run here (unknown);
@@ -36,6 +40,7 @@ TIMEOUT = 1800  # per suite; interim stopgap (owner 12:11 CST Nov 10, decision c
 # Each runnable suffix with the argv that starts it. The check never runs anything else.
 INTERPRETERS = {".py": ["python3"], ".mjs": ["node", "--test"], ".sh": ["bash"]}
 TEST_NAME = re.compile(r"^(?:test_[^/]+\.(?:py|mjs|sh)|[^/]+_test\.py|[^/]+\.test\.mjs)$")
+LOAD_ERROR = re.compile(r"ModuleNotFoundError|ImportError|Failed to import test module|SyntaxError|Cannot find module|ERR_MODULE_NOT_FOUND")
 SPAN = re.compile(r"`([^`\s]+)`")  # no space inside: a lone backtick in prose never swallows the real span after it
 CITE_LINE = re.compile(r"\s*(\S+)\s+--\s+(\S+)\s*$")
 
@@ -70,11 +75,27 @@ def spans(text, tracked):
     return found
 
 
+def named_missing(text, tracked):
+    """The backticked test-file names of `text` that the head does not track, in order, each once."""
+    found = []
+    for s in SPAN.findall(text):
+        s = s[2:] if s.startswith("./") else s
+        if s not in tracked and TEST_NAME.match(os.path.basename(s)) and os.path.splitext(s)[1] in INTERPRETERS and s not in found:
+            found.append(s)
+    return found
+
+
+def birth_commit(wt, head, old):
+    """The oldest commit in `head`'s history that added the debt file `old`, or None when the history holds none. Raises Unknown."""
+    shas = records.git_names(wt, "log", "-z", "--no-renames", "--diff-filter=A", "--format=%H", head, "--", old)
+    return shas[-1] if shas else None
+
+
 @contextlib.contextmanager
-def scratch(wt, head):
+def scratch(wt, head, prefix="debt-retire-"):
     """A detached worktree of `head` under the temp dir, removed after: what a Retire test writes stays there and never reaches `wt`.
     A tree that cannot be made yields None, and the test is unknown."""
-    tmp = tempfile.mkdtemp(prefix="debt-retire-")
+    tmp = tempfile.mkdtemp(prefix=prefix)
     tree = os.path.join(tmp, "tree")
     try:
         made = _nowindow.run(["git", "-C", wt, "worktree", "add", "-q", "--detach", tree, head], capture_output=True).returncode == 0
@@ -84,8 +105,8 @@ def scratch(wt, head):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def run_span(wt, span, timeout):
-    """(kind, text) for one test: red on a non-zero exit, unknown when it could not run, else None."""
+def run_span(wt, span, timeout, keep=5):
+    """(kind, text) for one test: red on a non-zero exit, unknown when it could not run, else None. The red text holds the last `keep` output lines."""
     argv = list(INTERPRETERS[os.path.splitext(span)[1]])
     exe = shutil.which(argv[0])
     if not exe:
@@ -98,8 +119,30 @@ def run_span(wt, span, timeout):
     except OSError as e:
         return "unknown", "%s did not start: %s" % (span, e)
     if r.returncode:
-        tail = " | ".join((r.stdout + r.stderr).strip().splitlines()[-5:])
-        return "red", "%s exited %d%s" % (span, r.returncode, ": " + tail[:400] if tail else "")
+        tail = " | ".join((r.stdout + r.stderr).strip().splitlines()[-keep:])
+        return "red", "%s exited %d%s" % (span, r.returncode, ": " + tail[:400 if keep == 5 else None] if tail else "")
+    return None
+
+
+def run_on_birth(wt, head, birth, span, timeout):
+    """(kind, text) for one test run on the debt's birth commit with the head's copy laid over it, or None when it fails there,
+    as a test that catches the defect does. Red when it passes there; unknown when it could not load or run."""
+    with scratch(wt, birth, "debt-retire-birth-") as tree:
+        if not tree:
+            return "unknown", "no scratch worktree of the birth commit %s for %s" % (birth[:9], span)
+        shown = _nowindow.run(["git", "-C", wt, "show", "%s:%s" % (head, span)], capture_output=True)
+        if shown.returncode:
+            return "unknown", "%s could not be read from the head" % span
+        os.makedirs(os.path.dirname(os.path.join(tree, span)), exist_ok=True)
+        with open(os.path.join(tree, span), "wb") as f:
+            f.write(shown.stdout)
+        one = run_span(tree, span, timeout, keep=10**6)  # the whole output: a node load error prints first
+    if one is None:
+        return "red", "%s passes on the birth commit %s (the commit that added the debt), so it catches nothing" % (span, birth[:9])
+    if one[0] == "unknown":
+        return one
+    if LOAD_ERROR.search(one[1]):
+        return "unknown", "%s could not load on the birth commit %s: %s" % (span, birth[:9], one[1][:400])
     return None
 
 
@@ -161,12 +204,25 @@ def judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_stat
     text = retire_text(lines)
     if new != old and debt(new) and text == retire_text(records.show(wt, head, new)):
         return SKIP
+    gone = named_missing(text, tracked)
+    if gone:  # a cite cannot clear a test that does not exist
+        return Finding(slug, "red", "debt %s: its Retire names %s, which the head does not track. Retire: %s" % (slug, ", ".join(gone), text))
     todo = spans(text, tracked)
     if todo:
         got = None
+        birth = None
         for span in todo:
             with scratch(wt, head) if isolate else contextlib.nullcontext(wt) as tree:
                 one = run_span(tree, span, timeout) if tree else ("unknown", "no scratch worktree for %s" % span)
+            if one is None:  # it must also fail on the birth commit
+                try:
+                    birth = birth or birth_commit(wt, head, old)
+                except Unknown as e:
+                    birth, one = None, ("unknown", "the birth commit of the debt could not be read: %s" % e)
+                else:
+                    one = run_on_birth(wt, head, birth, span, timeout) if birth else ("unknown", "no commit in this checkout added the debt, so its birth run is unknown")
+                if one and one[0] == "red":
+                    return Finding(slug, "red", "debt %s: its Retire check %s. Retire: %s" % (slug, one[1], text))
             if one and one[0] == "red":
                 got = one
                 break

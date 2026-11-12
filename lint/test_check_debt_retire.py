@@ -25,12 +25,15 @@ MARKED = ("import os, sys\n"
           "with open(os.environ['RETIRE_MARKS'], 'a', encoding='utf-8') as f:\n"
           "    f.write(os.path.basename(__file__) + ' ' + os.getcwd() + '\\n')\n"
           "sys.exit(%d)\n")
+# A fixture test that passes only once `fixed.flag` exists: the base commit adds the flag after the debts are born, so the test
+# fails on the birth commit and passes in the head tree, as a real Retire test does.
+FIXABLE = MARKED.replace("sys.exit(%d)", "sys.exit(0 if os.path.exists('fixed.flag') else 1)")
 EXTRAS = {"kinds": {}, "rolled-out": True}  # a rolled-out repo keeps debts at docs/debts
 BASE = {
     ".claude/layout-extras.json": json.dumps(EXTRAS) + "\n",
     "docs/debts/README.md": "# Debts\n\n- **Retire.** Run `tests/test_fail.py`.\n",  # a README is not a debt, even with a Retire line
     "docs/debts/notes.md": "# Notes\n\n- **Retire.** Run `tests/test_fail.py`.\n",
-    "tests/test_pass.py": MARKED % 0,
+    "tests/test_pass.py": FIXABLE,
     "tests/test_fail.py": MARKED % 1,
     "tests/test_pass.mjs": "export {};\n",
 }
@@ -86,9 +89,10 @@ class Case(unittest.TestCase):
         self.addCleanup(patch.stop)
         self.dir = self.base = self.head = None
 
-    def repo(self, debts=None, folder="docs/debts", extras=None, rolled=True):
+    def repo(self, debts=None, folder="docs/debts", extras=None, rolled=True, born_fixed=False, birth_files=None):
         """A repo whose base commit holds BASE, the debts ({name: Retire text}) in `folder`, and `extras` as its layout file.
-        `rolled=False` drops the layout file, so the repo keeps its debts where the legacy map puts them."""
+        `rolled=False` drops the layout file, so the repo keeps its debts where the legacy map puts them.
+        The debts are born in their own commit, before the base commit adds `fixed.flag`; `born_fixed=True` adds the flag in the birth commit."""
         self.dir = tempfile.mkdtemp(prefix="repo-", dir=self.folder)
         sh(self.dir, "git", "init", "-q", "-b", "main")
         files = dict(BASE)
@@ -98,10 +102,17 @@ class Case(unittest.TestCase):
             files["%s/%s.md" % (folder, name)] = debt(retire)
         if extras is not None:
             files[".claude/layout-extras.json"] = json.dumps(extras) + "\n"
+        files.update(birth_files or {})
+        if born_fixed:
+            files["fixed.flag"] = "\n"
         for path, text in files.items():
             put(os.path.join(self.dir, path), text)
         sh(self.dir, "git", "add", "-A")
-        sh(self.dir, "git", "commit", "-q", "-m", "base")
+        sh(self.dir, "git", "commit", "-q", "-m", "birth")
+        self.birth = sh(self.dir, "git", "rev-parse", "HEAD")
+        put(os.path.join(self.dir, "fixed.flag"), "\n")
+        sh(self.dir, "git", "add", "-A")
+        sh(self.dir, "git", "commit", "-q", "--allow-empty", "-m", "base")
         self.base = self.head = sh(self.dir, "git", "rev-parse", "HEAD")
 
     def change(self, write=None, rm=(), mv=()):
@@ -120,13 +131,20 @@ class Case(unittest.TestCase):
     def findings(self, head=None, pr_body="", run_state=None):
         return D.check(self.dir, self.base, head=head or self.head, pr_body=pr_body, run_state=run_state)
 
-    def ran(self):
-        """(script name, working folder) for each fixture script that ran, in the order it ran."""
+    def marks_all(self):
         try:
             with open(self.marks, encoding="utf-8") as f:
                 return [tuple(line.split(" ", 1)) for line in f.read().splitlines()]
         except FileNotFoundError:
             return []
+
+    def ran(self):
+        """(script name, working folder) for each fixture script that ran on the head, in the order it ran."""
+        return [m for m in self.marks_all() if "debt-retire-birth-" not in m[1]]
+
+    def ran_on_birth(self):
+        """The names of the fixture scripts that ran on a birth tree, in the order they ran."""
+        return [m[0] for m in self.marks_all() if "debt-retire-birth-" in m[1]]
 
     def layout_elsewhere(self):
         """The layout as a repo whose origin is fixture/elsewhere sees it: legacy-repos keeps its debts in records/debts."""
@@ -208,12 +226,13 @@ class Closes(Case):
         self.assertEqual(self.ran(), [], "a non-test path ran")
         self.assertEqual(pairs(found), [("d-config", "prose")])
 
-    def test_4c_a_retire_naming_a_test_the_pr_deletes_is_prose(self):
+    def test_4c_a_retire_naming_a_test_the_pr_deletes_is_refused(self):
         self.repo(debts={"d-gone": PASS})
         self.change(rm=["docs/debts/d-gone.md", "tests/test_pass.py"])
         found = self.findings()
         self.assertEqual(self.ran(), [], "a test the head no longer tracks ran")
-        self.assertEqual(pairs(found), [("d-gone", "prose")])
+        self.assertEqual(pairs(found), [("d-gone", "red")], "a Retire naming a test file the head lacks was not refused")
+        self.assertIn("test_pass.py", found[0].text)
 
     def test_4d_a_lone_backtick_in_retire_prose_does_not_swallow_the_real_span(self):
         self.repo(debts={"d-tick": "Mind the lone ` mark. Check: `tests/test_pass.py`."})
@@ -328,6 +347,77 @@ class Closes(Case):
         found = self.findings()
         self.assertEqual(self.ran(), [("test_fail.py", self.dir)], "the Retire of the base tip did not run")
         self.assertEqual(pairs(found), [("d-moved", "red")], "the Retire of the fork point was read, not the base tip's")
+
+
+class RedOnBirth(Case):
+    """A Retire test must fail on the commit that added the debt, with the head's copy of the test laid over it."""
+
+    def close(self, retire, **repo_kw):
+        self.repo(debts={"d-b": retire}, **repo_kw)
+        self.change(rm=["docs/debts/d-b.md"])
+
+    def test_b1_a_retire_test_that_passes_on_the_birth_commit_is_refused(self):
+        self.close(PASS, born_fixed=True)
+        found = self.findings()
+        self.assertEqual(self.ran_on_birth(), ["test_pass.py"], "the Retire test did not run on the birth commit")
+        self.assertEqual(pairs(found), [("d-b", "red")], "a test that already passed at birth caught nothing, yet the close was allowed")
+        self.assertIn("birth", found[0].text)
+
+    def test_b2_a_retire_test_that_fails_on_the_birth_commit_and_passes_on_the_head_holds(self):
+        self.close(PASS)
+        self.assertEqual(pairs(self.findings()), [])
+        self.assertEqual(self.ran_on_birth(), ["test_pass.py"], "the birth run did not happen")
+
+    def test_b3_the_heads_copy_of_the_test_is_laid_over_the_birth_commit(self):
+        self.repo(debts={"d-b": PASS}, birth_files={"tests/test_pass.py": MARKED % 0})  # the test at birth always passed
+        self.change(write={"tests/test_pass.py": FIXABLE}, rm=["docs/debts/d-b.md"])  # the head's test needs fixed.flag
+        self.assertEqual(pairs(self.findings()), [], "the birth's own copy of the test ran, not the head's")
+
+    def test_b4_an_import_error_on_the_birth_commit_is_unknown(self):
+        self.repo(debts={"d-b": "Delete the old helper. Check: `tests/test_new.py`."})
+        self.change(write={"tests/test_new.py": "import newmod\n", "tests/newmod.py": "\n"}, rm=["docs/debts/d-b.md"])
+        self.assertEqual(pairs(self.findings()), [("d-b", "unknown")], "a test that could not even load at birth read as a catch")
+
+    def test_b5_a_green_cited_run_clears_an_unknown_birth_run(self):
+        self.repo(debts={"d-b": "Delete the old helper. Check: `tests/test_new.py`."})
+        self.change(write={"tests/test_new.py": "import newmod\n", "tests/newmod.py": "\n"}, rm=["docs/debts/d-b.md"])
+        body = "Done.\n\nRetire-run: d-b -- %s\n" % RUN_URL
+        found = self.findings(pr_body=body, run_state=Runs(("success", self.head)))
+        self.assertEqual(pairs(found), [], "a green cite did not clear an unknown birth run")
+
+    def test_b6_a_green_cited_run_does_not_clear_a_test_that_passed_on_birth(self):
+        self.close(PASS, born_fixed=True)
+        body = "Done.\n\nRetire-run: d-b -- %s\n" % RUN_URL
+        found = self.findings(pr_body=body, run_state=Runs(("success", self.head)))
+        self.assertEqual(pairs(found), [("d-b", "red")])
+
+    def test_b7_a_named_test_file_that_no_commit_tracks_is_refused(self):
+        self.close("Delete the old helper. Check: `tests/test_gone.py`.")
+        found = self.findings()
+        self.assertEqual(pairs(found), [("d-b", "red")], "a named test file that does not exist was not refused")
+        self.assertIn("test_gone.py", found[0].text)
+
+    def test_b8_a_prose_retire_runs_nothing_on_the_birth_commit(self):
+        self.close(PROSE)
+        self.findings()
+        self.assertEqual(self.ran_on_birth(), [])
+
+    def test_b9_a_debt_with_no_birth_commit_in_the_history_is_unknown(self):
+        self.close(PASS)
+        with unittest.mock.patch.object(D, "birth_commit", lambda wt, head, old: None):
+            self.assertEqual(pairs(self.findings()), [("d-b", "unknown")], "no birth commit read as a catch")
+
+    def test_b10_a_green_cite_does_not_clear_a_missing_named_test(self):
+        self.close("Delete the old helper. Check: `tests/test_gone.py`.")
+        body = "Done.\n\nRetire-run: d-b -- %s\n" % RUN_URL
+        found = self.findings(pr_body=body, run_state=Runs(("success", self.head)))
+        self.assertEqual(pairs(found), [("d-b", "red")], "a cite cleared a test file that does not exist")
+
+    @unittest.skipUnless(shutil.which("node"), "node is not on PATH")
+    def test_b11_a_mjs_test_that_cannot_load_on_the_birth_commit_is_unknown(self):
+        self.repo(debts={"d-b": "Delete the old helper. Check: `tests/test_new.mjs`."})
+        self.change(write={"tests/test_new.mjs": "import './newmod.mjs';\n", "tests/newmod.mjs": "export {};\n"}, rm=["docs/debts/d-b.md"])
+        self.assertEqual(pairs(self.findings()), [("d-b", "unknown")], "a node load error at birth read as a catch")
 
 
 class RetireRun(Case):
