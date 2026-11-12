@@ -447,6 +447,27 @@ if os.name != "nt":   # a Windows drive letter's colon would end the sed delimit
 # Here the path ends at a space, so it is a word of its own, and the flag follows a pipe.
 sh("frozen form: sed s with an e flag after a pipe, the frozen settings file as its own word, is refused",
    "sed 's|a|rm " + CFG_SETTINGS + " |e' x", "deny", "frozen-path", cwd=NOGIT)
+# THE SCRIPT GLUED TO -e, OR GIVEN AS --expression=. The script is then the text of that one word, so the e flag
+# after a pipe, or an e command, runs the rm the same as a script in a word of its own.
+sh("frozen form: sed -e glued to a script, an e flag after a pipe that runs rm of the frozen settings is refused",
+   "sed -e's|a|rm " + CFG_SETTINGS + " |e' x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed -ne glued to a script, an e flag after a pipe that runs rm of the frozen settings is refused",
+   "sed -ne's|a|rm " + CFG_SETTINGS + " |e' x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed -E -e glued to a script, an e flag after a pipe that runs rm of the frozen settings is refused",
+   "sed -E -e's|a|rm " + CFG_SETTINGS + " |e' x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed -i -e glued to a script, an e flag after a pipe that runs rm of the frozen settings is refused",
+   "sed -i -e's|a|rm " + CFG_SETTINGS + " |e' x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed --expression= with an e flag after a pipe that runs rm of the frozen settings is refused",
+   "sed --expression='s|a|rm " + CFG_SETTINGS + " |e' x", "deny", "frozen-path", cwd=NOGIT)
+sh("frozen form: sed --expression= with an e command that runs rm of the frozen settings is refused",
+   "sed --expression='e rm " + CFG_SETTINGS + "' x", "deny", "frozen-path", cwd=NOGIT)
+# Controls: a glued or --expression script that only reads a line, and a plain s script, stay allowed.
+sh("frozen form: control, sed -n -e glued to a script that reads a rm line of the frozen settings is allowed",
+   "sed -n -e'/rm x/p' " + CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen form: control, sed --expression= reading a rm line of the frozen settings is allowed",
+   "sed --expression='/rm x/p' " + CFG_SETTINGS, "allow", cwd=NOGIT)
+sh("frozen form: control, sed -e with a plain s script reading the frozen settings is allowed",
+   "sed -e 's|a|b|' x " + CFG_SETTINGS, "allow", cwd=NOGIT)
 # Controls: a comma or a bang delimiter already refuses the glued path, and must keep refusing it.
 sh("frozen form: control, sed s with a comma that runs rm of a frozen hook is refused",
    "sed 's,a,rm " + CFG_HOOK + ",e' x", "deny", "frozen-path", cwd=NOGIT)
