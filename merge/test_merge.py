@@ -19525,7 +19525,7 @@ class BatchFreeze(CloudSession):
                                    ("beta", ("--lint-unknown-ok", "the lint is unknown on this box"), 7121),
                                    ("gamma", ("--config", ".github/stamp.json"), 7122)):
             pr = self.frozen_batch(name, [101, 102, 103])
-            url = self.split_run(run_n, {"unit-tests": ["FAIL: test_it (__main__.C.test_it)"]})
+            url = self.split_run(run_n, {"unit-tests": ["FAIL: test_it (__main__.C.test_it)"]}, sha=self.head(f"batch-{name}"))
             with self.no_lint_or_ready_check():
                 rc, out = self.run_batch("--batch-split", name, "--run", url, *extra)
             self.assertNotRegex(out, r"unrecognized arguments: --batch-split", "the parser does not know --batch-split beside %s: %s" % (extra, out))
