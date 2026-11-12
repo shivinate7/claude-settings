@@ -31,12 +31,12 @@ session transcripts, not a repo.
 | Outcomes | `grep -c "rule:" CLAUDE.md`; look for a check per local rule | each local rule has a hook, test, or CI step |
 | Outcomes | `$PY $P/lint/compliance_probes.py supersede .` reads the child's `CLAUDE.md` files, `AGENTS.md` and `.claude/**/*.md` for text that departs from a shared rule (Supersede, below); read each hit in its file | exit 0. A departure passes when its paragraph or list item says "known exemption" and names a live `rule:<id>` |
 | Roles | `git log --oneline -40 origin/main` and `git branch -r` | test commits or `tests/*` branches land before product commits |
-| Roles | `cat .claude/settings.local.json` | no stale model raise; any raise has `_agentCapUntil` in the future |
+| Roles | `cat` the child's `settings.local.json`, under `.claude` | no stale model raise; any raise has `_agentCapUntil` in the future |
 | Parallelism | `git worktree list`; `grep -n worktrees .gitignore` | work runs in worktrees; `.claude/worktrees` is ignored |
 | Parallelism | `$PY $P/lint/compliance_probes.py lanecap .` reads each brief and plan for a lane cap (rule parallelism-no-guessed-lane-cap); read each hit in its file | exit 0. A cap the owner named passes: the probe passes a line that cites its source, `(owner, ...)` or the owner and a date, and a cap inside a pair of quotes |
 | Shared trees | `git stash list` | no output (0 entries) |
 | Shared trees | `$PY $P/lint/compliance_probes.py hooks $P` prints the diff of the live `settings.json` hooks (`$CLAUDE_CONFIG_DIR/settings.json` when set and not empty, else `~/.claude/settings.json`) against the parent clone's (Hooks, below); a clone with no `settings.json` is n/a. For in shape and out, the line after the verdict names the trusted copy and the live file read: `trusts: clone (<root>/settings.json); live (~/.claude/settings.json) is the copy checked`, or `live (<dir>/settings.json)` when the variable is set | exit 0. The live hooks equal the clone's, less `SessionStart` |
-| Shared trees | `.claude/launch.json`, dev scripts, `git ls-files '*playwright*.config.*'`, dev server config | each checkout can set its own port and data; each `webServer` has reuse off or absent, or on (any value that can be true, such as `!process.env.CI`) with a wired `globalSetup` that refuses another checkout; port strict (`--strictPort` or `strictPort: true`); no Playwright config: n/a |
+| Shared trees | the child's `launch.json`, under `.claude`, dev scripts, `git ls-files '*playwright*.config.*'`, dev server config | each checkout can set its own port and data; each `webServer` has reuse off or absent, or on (any value that can be true, such as `!process.env.CI`) with a wired `globalSetup` that refuses another checkout; port strict (`--strictPort` or `strictPort: true`); no Playwright config: n/a |
 | Git | `gh pr list --state merged --limit 20` and `git log --first-parent --no-merges --oneline -20 origin/main` | main moves only by PR |
 | Git | `gh api repos/{owner}/{repo}/branches/main/protection`, and `merge.requiredChecks` in `.github/stamp.json` | the answer is known. A 404 is a known answer: no protection. `"protection"` is the right value (decision main-branch-protection, the protection holds the one list): no comparison. When `requiredChecks` is a list, the protection's `required_status_checks.contexts` equal it, else `merge` refuses. No `stamp.json`: no comparison |
 | Git | records folders, and `$PY $P/lint/compliance_probes.py slugs <child root>` | one file per record, one folder per kind, no added slug over 32 characters |
@@ -78,7 +78,7 @@ The probe reads tracked files only, so an untracked folder is not there.
 
 | Item | Pass when |
 | --- | --- |
-| screens named | `.claude/shoot.json` lists its routes, and `bin/shoot` would accept the file |
+| screens named | the child's `shoot.json`, under `.claude`, lists its routes, and `bin/shoot` would accept the file |
 | sizes named, themes named | `shoot.json` names them, or takes shoot's default (1440, 820 and 390; light and dark), the house sizes |
 | screenshot command | `shoot.json` exists, so the shared `bin/shoot` runs (decision shoot-is-one-shared-command, one shared screenshot command). The repo's own command is `partial` |
 | token file | one token source (`tokens.*`, `design-tokens.*`). A test file, and a file that says it is generated, do not count |
@@ -103,7 +103,7 @@ Comments do not count. Exit 0: in shape or n/a. Exit 1: a gap or a partial.
 | ci checks | a pull-request workflow runs the package tests (when a package exists) and compiles the app. `xcodebuild -showsdks`, `-list`, `-showBuildSettings`, `-help` and `-version` compile nothing. A valid, tracked `IOS_CI_EXEMPTION` form waives the app compile only, and the item passes as `exempt: <sdk> (app compile waived)` only when the app compile is actually missing, else with its normal detail; the package tests and the pull-request workflow stay required. A broken, untracked or unreadable form is a gap |
 | slow tests | no workflow runs `make ui-test`, `make native-check`, `sim-test` or an `xcodebuild test` that covers a UI-test bundle (`-only-testing:`, or the scheme's test targets). A run the probe cannot resolve is a gap. UI tests run once per batch on the Mac |
 | test diagnostics | each `xcodebuild test` or `test-without-building` run in a workflow, the Makefile or a tracked `*.sh` sets `-collect-test-diagnostics never`, so a failed test starts no `simctl diagnose` of up to 10 minutes. `sim-test` adds it; `build-for-testing` is no run. Named incident, landed 2026-10-29: Restyle and Duo each patched it alone |
-| account ids | no `DEVELOPMENT_TEAM` in a project file, Makefile or workflow. An account key of `bin/ios-ship` in `tools/ios-ship.json` is an allowed override: `partial` |
+| account ids | no `DEVELOPMENT_TEAM` in a project file, Makefile or workflow. An account key of `bin/ios-ship` in the child's `ios-ship.json`, under `tools`, is an allowed override: `partial` |
 
 The lowest iOS, the tokens and the test style are read by hand in a repo visit.
 
