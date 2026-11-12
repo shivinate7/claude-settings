@@ -21,23 +21,23 @@ Lane pr-backlog-clear, read 12:47 CST Nov 12. Acts for claude-settings come from
 | PR | Branch | Next act | Owner | Age and ledger state |
 |---|---|---|---|---|
 | #1034 | prose-homes-shivpedia | fix by lane prose-homes-shivpedia: lane round 1 | lane | 239.8h RED / ledger: no record |
-| #1099 | no-undo-lane-commits | keep open: 19 of 19 files hold added lines found in neither main nor #2734 (replacer #2734); next: the lane that owns #2734 reads each gap and closes this PR only when none is a real loss, after pushing archive/no-undo-lane-commits. Gap files: CLAUDE.md (1 lines), agents/builder.md (1 lines), docs/debts/notes.md (18 lines), docs/debts/orchestrator-rule-half-guarded.md (5 lines), docs/debts/sed-wrapped-inplace-missed.md (5 lines), docs/decisions/session-tiers.md (25 lines), docs/decisions/silent-undo-check-design.md (30 lines), docs/todo.md (1 lines), hooks/guard.py (302 lines), hooks/guard_frozen.py (91 lines), hooks/guard_merge.py (7 lines), hooks/own_session.py (19 lines), hooks/test_guard.py (930 lines), hooks/test_shared_names.py (17 lines), lint/check_silent_undo.py (166 lines), lint/rule_mechanisms.json (1 lines), lint/test_check_silent_undo.py (207 lines), merge/merge.py (17 lines), skills/project-ops/templates/brief.md (1 lines) | lane | 27.8h RED / ledger: done |
+| #1099 | no-undo-lane-commits | closed as replaced by #2734 (owner pick 605 a, 15:46 CST: replacing PR is open); branch kept, copy at archive/<branch> | none | 27.8h RED / ledger: done |
 | #1147 | lane/timing-tests | fix by lane lane/timing-tests: lane lint | lane | 72.6h RED / ledger: no lint |
 | #1314 | mcp-merge-unguarded | fix by lane mcp-merge-unguarded: lane lint | lane | 96.3h RED / ledger: no lint |
 | #1315 | ste-lint-diff-fail-closed | fix by lane ste-lint-diff-fail-closed: lane round 1 | lane | 143.4h RED / ledger: no record |
-| #1337 | widening-rule-guideline | keep open: 9 of 18 files hold added lines found in neither main nor #2705 (replacer #2705); next: the lane that owns #2705 reads each gap and closes this PR only when none is a real loss, after pushing archive/widening-rule-guideline. Gap files: docs/debts/notes.md (1 lines), docs/decisions/question-form.md (1 lines), hooks/call_judge.py (6 lines), hooks/question_form.py (9 lines), hooks/reply_judge.py (3 lines), hooks/test_call_judge.py (9 lines), hooks/test_guard.py (2 lines), hooks/test_question_form.py (4 lines), hooks/test_reply_judge.py (13 lines) | lane | 142.9h RED / ledger: no record |
+| #1337 | widening-rule-guideline | closed as replaced by #2705 (owner pick 605 a, 15:46 CST: replacing PR is open); branch kept, copy at archive/<branch> | none | 142.9h RED / ledger: no record |
 | #1349 | lane/watchers-one-rule | fix by lane lane/watchers-one-rule: lane round 1 | lane | 140.0h RED / ledger: no record |
-| #1366 | reviewer-brief-blind-build | keep open: 12 of 17 files hold added lines found in neither main nor #2780 (replacer #2780); next: the lane that owns #2780 reads each gap and closes this PR only when none is a real loss, after pushing archive/reviewer-brief-blind-build. Gap files: CLAUDE.md (2 lines), GLOSSARY.md (1 lines), agents/refuter.md (1 lines), agents/reviewer.md (1 lines), docs/debts/notes.md (2 lines), docs/debts/verdict-instruction-false-alarm.md (5 lines), docs/decisions/reviewer-brief-blind.md (12 lines), hooks/guard.py (22 lines), hooks/mutate_guard.py (14 lines), hooks/test_agent_brief.py (2 lines), hooks/test_guard.py (250 lines), lint/rule_mechanisms.json (2 lines) | lane | 104.8h RED / ledger: no record |
+| #1366 | reviewer-brief-blind-build | closed as replaced by #2780 (owner pick 605 a, 15:46 CST: replacing PR is open); branch kept, copy at archive/<branch> | none | 104.8h RED / ledger: no record |
 | #1377 | challenger-page-against | fix by lane challenger-page-against: lane round 1 | lane | 139.5h RED / ledger: no record |
 | #1382 | override-strips-status-block | closed as replaced by #2666 (done, comment posted, branch kept) | none |  |
 | #1386 | export-after-page-write | fix by lane export-after-page-write: lane round 1 | lane | 136.9h RED / ledger: no record |
 | #1417 | ready-checks-use-pinned-tools | fix by lane ready-checks-use-pinned-tools: lane lint | lane | 104.3h RED / ledger: no lint |
 | #1432 | one-home-check | fix by lane one-home-check: lane round 3 | lane | 104.4h RED / ledger: open |
-| #1443 | waiting-export-receipts | keep open: 9 of 10 files hold added lines found in neither main nor #2721 (replacer #2721); next: the lane that owns #2721 reads each gap and closes this PR only when none is a real loss, after pushing archive/waiting-export-receipts. Gap files: docs/debts/notes.md (4 lines), docs/decisions/waiting-data-in-repo.md (1 lines), hooks/feedback_guard.py (2 lines), hooks/test_waiting_export.py (6 lines), lint/test_layout.py (5 lines), skills/waiting-page/SKILL.md (5 lines), skills/waiting-page/export_page.py (4 lines), skills/waiting-page/test_export_page.py (202 lines), skills/waiting-page/tests/page.test.mjs (12 lines) | lane | 118.6h RED / ledger: no record |
+| #1443 | waiting-export-receipts | closed as replaced by #2721 (owner pick 605 a, 15:46 CST: replacing PR is open); branch kept, copy at archive/<branch> | none | 118.6h RED / ledger: no record |
 | #1461 | lint-uses-pinned-tools | fix by lane lint-uses-pinned-tools: lane lint | lane | 103.8h RED / ledger: no lint |
 | #1479 | notes-agent-shells-reap | closed as replaced by #2712 (done, comment posted, branch kept) | none |  |
 | #1509 | script-file-test-write | fix by lane script-file-test-write: lane lint | lane | 116.8h RED / ledger: no lint |
-| #1516 | notes-name-their-fix | keep open: 2 of 10 files hold added lines found in neither main nor #2735 (replacer #2735); next: the lane that owns #2735 reads each gap and closes this PR only when none is a real loss, after pushing archive/notes-name-their-fix. Gap files: docs/debts/notes.md (4 lines), skills/roadmap/build.py (2 lines) | lane | 96.6h RED / ledger: no record |
+| #1516 | notes-name-their-fix | closed as replaced by #2735 (owner pick 605 a, 15:46 CST: replacing PR is open); branch kept, copy at archive/<branch> | none | 96.6h RED / ledger: no record |
 | #1517 | notes-guard2-tmpdir | fix by lane notes-guard2-tmpdir: lane lint | lane | 97.1h RED / ledger: no lint |
 | #1520 | ruling-record-kind | fix by lane ruling-record-kind: lane lint | lane | 117.4h RED / ledger: no lint |
 | #1536 | nfp-rg-forms | fix by lane nfp-rg-forms: lane lint | lane | 117.1h RED / ledger: no lint |
@@ -53,18 +53,18 @@ Lane pr-backlog-clear, read 12:47 CST Nov 12. Acts for claude-settings come from
 | #1631 | pr-ready-guard-2 | fix by lane pr-ready-guard-2: lane round 3 | lane | 115.9h RED / ledger: open |
 | #1632 | npm-alias-gaps-2 | fix by lane npm-alias-gaps-2: lane round 3 | lane | 115.7h RED / ledger: open |
 | #1636 | guard-path-expand-forms | fix by lane guard-path-expand-forms: lane round 1 | lane | 113.6h RED / ledger: bad |
-| #1642 | draft-pr-python-run-body | keep open: 5 of 5 files hold added lines found in neither main nor #2750 (replacer #2750); next: the lane that owns #2750 reads each gap and closes this PR only when none is a real loss, after pushing archive/draft-pr-python-run-body. Gap files: docs/decisions/draft-until-reviewed.md (4 lines), hooks/guard.py (3 lines), hooks/guard_core.py (12 lines), hooks/mutate_guard.py (3 lines), hooks/test_guard.py (87 lines) | lane | 101.7h RED / ledger: stale |
+| #1642 | draft-pr-python-run-body | closed as replaced by #2750 (owner pick 605 a, 15:46 CST: replacing PR is open); branch kept, copy at archive/<branch> | none | 101.7h RED / ledger: stale |
 | #1647 | script-glued-input | fix by lane script-glued-input: lane round 3 | lane | 114.9h RED / ledger: open |
-| #1653 | replay-block-failed-imports | keep open: 4 of 9 files hold added lines found in neither main nor #2696 (replacer #2696); next: the lane that owns #2696 reads each gap and closes this PR only when none is a real loss, after pushing archive/replay-block-failed-imports. Gap files: docs/debts/notes.md (2 lines), hooks/mutate_shared.py (1 lines), hooks/test_known_defects_fallback.py (2 lines), hooks/test_mutate_ci.py (3 lines) | lane | 115.2h RED / ledger: no record |
-| #1658 | fed-write-followups-2 | keep open: 5 of 7 files hold added lines found in neither main nor #2774 (replacer #2774); next: the lane that owns #2774 reads each gap and closes this PR only when none is a real loss, after pushing archive/fed-write-followups-2. Gap files: docs/debts/notes.md (5 lines), docs/decisions/builders-cannot-edit-tests.md (4 lines), hooks/guard.py (1 lines), hooks/guard_frozen.py (109 lines), hooks/test_guard.py (282 lines) | lane | 103.7h RED / ledger: stale |
+| #1653 | replay-block-failed-imports | closed as replaced by #2696 (owner pick 605 a, 15:46 CST: replacing PR is open); branch kept, copy at archive/<branch> | none | 115.2h RED / ledger: no record |
+| #1658 | fed-write-followups-2 | closed as replaced by #2774 (owner pick 605 a, 15:46 CST: replacing PR is open); branch kept, copy at archive/<branch> | none | 103.7h RED / ledger: stale |
 | #1678 | record-after-each-round-build | closed as replaced by #2771 (done, comment posted, branch kept) | none |  |
-| #1684 | fed-write-followups-3 | keep open: 5 of 8 files hold added lines found in neither main nor #2774 (replacer #2774); next: the lane that owns #2774 reads each gap and closes this PR only when none is a real loss, after pushing archive/fed-write-followups-3. Gap files: docs/debts/notes.md (5 lines), docs/decisions/builders-cannot-edit-tests.md (4 lines), hooks/guard.py (1 lines), hooks/guard_frozen.py (111 lines), hooks/test_guard.py (339 lines) | lane | 103.7h RED / ledger: stale |
+| #1684 | fed-write-followups-3 | closed as replaced by #2774 (owner pick 605 a, 15:46 CST: replacing PR is open); branch kept, copy at archive/<branch> | none | 103.7h RED / ledger: stale |
 | #1687 | mcp-safety-gaps | fix by lane mcp-safety-gaps: lane round 3 | lane | 94.0h RED / ledger: open |
 | #1692 | claude/sim-drive-lease | fix by lane claude/sim-drive-lease: lane lint | lane | 101.2h RED / ledger: no lint |
 | #1706 | record-post-parses-2 | fix by lane record-post-parses-2: lane lint | lane | 98.1h RED / ledger: no lint |
 | #1707 | record-drop-edit-2 | fix by lane record-drop-edit-2: lane lint | lane | 56.4h / ledger: no lint |
 | #1708 | lock-listed-stdout-only | fix by lane lock-listed-stdout-only: lane round 3 | lane | 96.1h RED / ledger: open |
-| #1713 | draft-pr-backtick-span-dotall | keep open: 6 of 6 files hold added lines found in neither main nor #2750 (replacer #2750); next: the lane that owns #2750 reads each gap and closes this PR only when none is a real loss, after pushing archive/draft-pr-backtick-span-dotall. Gap files: docs/debts/notes.md (1 lines), docs/decisions/draft-until-reviewed.md (4 lines), hooks/guard.py (3 lines), hooks/guard_core.py (19 lines), hooks/mutate_guard.py (1 lines), hooks/test_guard.py (167 lines) | lane | 101.7h RED / ledger: no lint |
+| #1713 | draft-pr-backtick-span-dotall | closed as replaced by #2750 (owner pick 605 a, 15:46 CST: replacing PR is open); branch kept, copy at archive/<branch> | none | 101.7h RED / ledger: no lint |
 | #1714 | lane/handoff-bash-redirect | fix by lane lane/handoff-bash-redirect: lane round 3 | lane | 108.2h RED / ledger: open |
 | #1715 | claude/mutate-sweep-ctl | fix by lane claude/mutate-sweep-ctl: lane round 2 | lane | 104.6h RED / ledger: open |
 | #1718 | stall-watch-open-call-cap | closed as replaced by #2697 (done, comment posted, branch kept) | none |  |
@@ -96,18 +96,18 @@ Lane pr-backlog-clear, read 12:47 CST Nov 12. Acts for claude-settings come from
 | #1844 | lane-lint-hook-suites | fix by lane lane-lint-hook-suites: lane lint | lane | 95.5h RED / ledger: no lint |
 | #1848 | roots-cover-repo-tags | fix by lane roots-cover-repo-tags: lane lint | lane | 105.0h RED / ledger: no lint |
 | #1849 | msg-role-fa | fix by lane msg-role-fa: lane lint | lane | 51.1h / ledger: no lint |
-| #1858 | test-dirs-include-testing | keep open: 1 of 3 files hold added lines found in neither main nor #2686 (replacer #2686); next: the lane that owns #2686 reads each gap and closes this PR only when none is a real loss, after pushing archive/test-dirs-include-testing. Gap files: hooks/test_guard.py (21 lines) | lane | 105.5h RED / ledger: no record |
+| #1858 | test-dirs-include-testing | already closed; replacer #2686 merged | none | 105.5h RED / ledger: no record |
 | #1861 | idle-lane-fu3 | fix by lane idle-lane-fu3: lane lint | lane | 97.3h RED / ledger: no lint |
 | #1863 | heredoc-keep-gap-cases | fix by lane heredoc-keep-gap-cases: lane round 3 | lane | 103.8h RED / ledger: open |
 | #1869 | silent-undo-checks-pr-base | fix by lane silent-undo-checks-pr-base: lane round 1 | lane | 96.1h RED / ledger: bad |
 | #1871 | merge-unreviewed-final | fix by lane merge-unreviewed-final: lane lint | lane | 100.1h RED / ledger: no lint |
-| #1872 | lease-remedy-fix | keep open: 3 of 4 files hold added lines found in neither main nor #2724 (replacer #2724); next: the lane that owns #2724 reads each gap and closes this PR only when none is a real loss, after pushing archive/lease-remedy-fix. Gap files: docs/decisions/stale-safe-force-push.md (2 lines), hooks/guard_push_delete.py (1 lines), hooks/test_guard.py (73 lines) | lane | 103.8h RED / ledger: no lint |
+| #1872 | lease-remedy-fix | closed as replaced by #2724 (owner pick 605 a, 15:46 CST: replacing PR is open); branch kept, copy at archive/<branch> | none | 103.8h RED / ledger: no lint |
 | #1873 | fix-check-freeze-label | fix by lane fix-check-freeze-label: lane lint | lane | 104.8h RED / ledger: no lint |
 | #1881 | fix-check-remedy-text | fix by lane fix-check-remedy-text: lane round 3 | lane | 102.0h RED / ledger: open |
 | #1892 | fix-check-round-lines | fix by lane fix-check-round-lines: lane lint | lane | 102.0h RED / ledger: no lint |
 | #1897 | lane-lint-mutant-anchors | fix by lane lane-lint-mutant-anchors: lane lint | lane | 103.8h RED / ledger: no lint |
 | #1900 | roots-guard-forms | fix by lane roots-guard-forms: lane lint | lane | 101.9h RED / ledger: no lint |
-| #1906 | other-checkout-heredoc-text-v2 | keep open: 6 of 7 files hold added lines found in neither main nor #2789 (replacer #2789); next: the lane that owns #2789 reads each gap and closes this PR only when none is a real loss, after pushing archive/other-checkout-heredoc-text-v2. Gap files: docs/decisions/an-agent-outside-its-home-tree-must-stop.md (2 lines), docs/decisions/frozen-path-resolves-shell-vars.md (1 lines), hooks/guard.py (2 lines), hooks/guard_core.py (4 lines), hooks/guard_frozen.py (27 lines), hooks/test_guard.py (163 lines) | lane | 82.3h RED / ledger: no lint |
+| #1906 | other-checkout-heredoc-text-v2 | closed as replaced by #2789 (owner pick 605 a, 15:46 CST: replacing PR is open); branch kept, copy at archive/<branch> | none | 82.3h RED / ledger: no lint |
 | #1916 | lane-lint-other-jobs | fix by lane lane-lint-other-jobs: lane lint | lane | 100.6h RED / ledger: no lint |
 | #1917 | resume-finished-reviewer | closed as replaced by #2771 (done, comment posted, branch kept) | none |  |
 | #1935 | pe-guard-false-alarms-r3-build | fix by lane pe-guard-false-alarms-r3-build: lane round 1 | lane | 103.0h RED / ledger: bad |
@@ -120,10 +120,10 @@ Lane pr-backlog-clear, read 12:47 CST Nov 12. Acts for claude-settings come from
 | #1974 | resume-any-finished-agent | closed as replaced by #2771 (done, comment posted, branch kept) | none |  |
 | #1975 | narrated-tee-tail | fix by lane narrated-tee-tail: lane lint | lane | 45.9h / ledger: no lint |
 | #1981 | cost-line-pinned | fix by lane cost-line-pinned: lane lint | lane | 80.9h RED / ledger: no lint |
-| #1984 | guard-relative-write-escape | keep open: 5 of 7 files hold added lines found in neither main nor #2691 (replacer #2691); next: the lane that owns #2691 reads each gap and closes this PR only when none is a real loss, after pushing archive/guard-relative-write-escape. Gap files: docs/debts/relative-write-absolute-cd.md (5 lines), docs/decisions/an-agent-outside-its-home-tree-must-stop.md (2 lines), hooks/guard.py (2 lines), hooks/guard_frozen.py (3 lines), hooks/test_guard.py (186 lines) | lane | 98.0h RED / ledger: no record |
+| #1984 | guard-relative-write-escape | closed as replaced by #2691 (owner pick 605 a, 15:46 CST: replacing PR is open); branch kept, copy at archive/<branch> | none | 98.0h RED / ledger: no record |
 | #1987 | builder-amend-msg-only | fix by lane builder-amend-msg-only: lane lint | lane | 99.9h RED / ledger: no lint |
 | #1992 | cost-pins-gaps | fix by lane cost-pins-gaps: lane lint | lane | 80.9h RED / ledger: no lint |
-| #1993 | cmk-interp-body-git | keep open: 2 of 3 files hold added lines found in neither main nor #2813 (replacer #2813); next: the lane that owns #2813 reads each gap and closes this PR only when none is a real loss, after pushing archive/cmk-interp-body-git. Gap files: hooks/guard_core.py (18 lines), hooks/test_guard.py (64 lines) | lane | 84.9h RED / ledger: stale |
+| #1993 | cmk-interp-body-git | closed as replaced by #2813 (owner pick 605 a, 15:46 CST: replacing PR is open); branch kept, copy at archive/<branch> | none | 84.9h RED / ledger: stale |
 | #1995 | merge-glued-paren | blocked on #1900 (stacked) | lane | 99.8h RED / ledger: no record |
 | #2001 | lane-lint-guard-suite-install | fix by lane lane-lint-guard-suite-install: lane round 1 | lane | 101.1h RED / ledger: no record |
 | #2002 | lane/timing-tests-4 | fix by lane lane/timing-tests-4: lane lint | lane | 72.6h RED / ledger: no lint |
@@ -142,11 +142,11 @@ Lane pr-backlog-clear, read 12:47 CST Nov 12. Acts for claude-settings come from
 | #2071 | split-and-in-subst | blocked on #1995 (stacked) | lane | 96.1h RED / ledger: no record |
 | #2081 | lane/time-pinned-plan-refresh | merge in the next batch | batch runner | 71.7h RED / ledger: done |
 | #2083 | cmk-git-timeout-unread | fix by lane cmk-git-timeout-unread: lane lint | lane | 59.2h / ledger: no lint |
-| #2087 | draft-pr-ps-herestring-r2 | keep open: 6 of 6 files hold added lines found in neither main nor #2750 (replacer #2750); next: the lane that owns #2750 reads each gap and closes this PR only when none is a real loss, after pushing archive/draft-pr-ps-herestring-r2. Gap files: docs/debts/notes.md (1 lines), docs/decisions/draft-until-reviewed.md (4 lines), hooks/guard.py (3 lines), hooks/guard_core.py (19 lines), hooks/mutate_guard.py (1 lines), hooks/test_guard.py (284 lines) | lane | 97.8h RED / ledger: no lint |
+| #2087 | draft-pr-ps-herestring-r2 | closed as replaced by #2750 (owner pick 605 a, 15:46 CST: replacing PR is open); branch kept, copy at archive/<branch> | none | 97.8h RED / ledger: no lint |
 | #2097 | guard-sibling-write-forms | fix by lane guard-sibling-write-forms: lane round 1 | lane | 99.3h RED / ledger: no record |
 | #2099 | after-cd-errexit | fix by lane after-cd-errexit: fix check | lane | 96.8h RED / ledger: stale |
 | #2115 | review-cite-followups | fix by lane review-cite-followups: lane lint | lane | 98.0h RED / ledger: no lint |
-| #2119 | scratchpad-owner-follow-ups | keep open: 6 of 11 files hold added lines found in neither main nor #2830 (replacer #2830); next: the lane that owns #2830 reads each gap and closes this PR only when none is a real loss, after pushing archive/scratchpad-owner-follow-ups. Gap files: docs/debts/notes.md (8 lines), docs/decisions/scratchpad-owner.md (4 lines), hooks/guard.py (20 lines), hooks/guard_shared_tree.py (20 lines), hooks/mutate_guard.py (38 lines), hooks/test_guard.py (259 lines) | lane | 59.0h / ledger: no lint |
+| #2119 | scratchpad-owner-follow-ups | closed as replaced by #2830 (owner pick 605 a, 15:46 CST: replacing PR is open); branch kept, copy at archive/<branch> | none | 59.0h / ledger: no lint |
 | #2123 | coord-tier-self-tag | fix by lane coord-tier-self-tag: lane lint | lane | 56.3h / ledger: no lint |
 | #2129 | push-report-followups | fix by lane push-report-followups: lane lint | lane | 97.8h RED / ledger: no lint |
 | #2144 | push-after-check-semicolon | fix by lane push-after-check-semicolon: lane lint | lane | 58.3h / ledger: no lint |
@@ -167,7 +167,7 @@ Lane pr-backlog-clear, read 12:47 CST Nov 12. Acts for claude-settings come from
 | #2234 | quoted-args-unresolved | fix by lane quoted-args-unresolved: lane lint | lane | 91.4h RED / ledger: no lint |
 | #2262 | ste-lint-run-exit-codes | fix by lane ste-lint-run-exit-codes: lane lint | lane | 94.6h RED / ledger: no lint |
 | #2265 | msg-ref-pr-forms | fix by lane msg-ref-pr-forms: lane lint | lane | 93.5h RED / ledger: no lint |
-| #2268 | open-asks-at-wake-v3 | keep open: 3 of 3 files hold added lines found in neither main nor #2699 (replacer #2699); next: the lane that owns #2699 reads each gap and closes this PR only when none is a real loss, after pushing archive/open-asks-at-wake-v3. Gap files: skills/waiting-page/SKILL.md (15 lines), skills/waiting-page/stale_pages.py (9 lines), skills/waiting-page/test_stale_pages.py (9 lines) | lane | 48.9h / ledger: stale |
+| #2268 | open-asks-at-wake-v3 | closed as replaced by #2699 (owner pick 605 a, 15:46 CST: replacing PR is open); branch kept, copy at archive/<branch> | none | 48.9h / ledger: stale |
 | #2276 | guard-set-gap-pins-2 | fix by lane guard-set-gap-pins-2: lane lint | lane | 46.1h / ledger: no lint |
 | #2277 | record-rounds-name-own-head | fix by lane record-rounds-name-own-head: lane lint | lane | 59.3h / ledger: no lint |
 | #2297 | live-stream-monitor-remedy | fix by lane live-stream-monitor-remedy: lane round 1 | lane | 93.4h RED / ledger: no record |
@@ -182,7 +182,7 @@ Lane pr-backlog-clear, read 12:47 CST Nov 12. Acts for claude-settings come from
 | #2440 | record-guard-wrapper-forms | fix by lane record-guard-wrapper-forms: lane lint | lane | 71.7h / ledger: no lint |
 | #2463 | lane/lane-push-frozen-in-batch | fix by lane lane/lane-push-frozen-in-batch: lane lint | lane | 51.6h / ledger: no lint |
 | #2483 | cloud-allow-rules | fix by lane cloud-allow-rules: lane round 2 | lane | 41.7h / ledger: open |
-| #2486 | agent-served-model-check-build-2 | keep open: 4 of 9 files hold added lines found in neither main nor #2722 (replacer #2722); next: the lane that owns #2722 reads each gap and closes this PR only when none is a real loss, after pushing archive/agent-served-model-check-build-2. Gap files: docs/decisions/agent-model-cap.md (2 lines), hooks/guard.py (7 lines), hooks/mutate_guard.py (8 lines), hooks/test_guard.py (108 lines) | lane | 59.2h / ledger: no lint |
+| #2486 | agent-served-model-check-build-2 | closed as replaced by #2722 (owner pick 605 a, 15:46 CST: replacing PR is open); branch kept, copy at archive/<branch> | none | 59.2h / ledger: no lint |
 | #2491 | worktree-merge-route-author-paths | fix by lane worktree-merge-route-author-paths: lane round 1 | lane | 63.6h / ledger: no record |
 | #2500 | close-replaced-at-open | fix by lane close-replaced-at-open: lane lint | lane | 59.3h / ledger: no lint |
 | #2520 | artifact-lane | closed as replaced by #2684 (done, comment posted, branch kept) | none |  |
