@@ -4662,23 +4662,38 @@ def busy_file_lanes(root, name, heads, base, config, start):
     base's config): lanes that edit one busy file in one build collide at merge time, so the later ones go in a stacked batch (--on). Per-lane
     files come from git (`git diff --no-renames -z --name-only START...HEAD`, with no host read): `start` is the head the build starts from, the base
     tip or the running batch it stacks on, so a change the running batch holds is not the lane's. --no-renames names a moved file's old path too.
-    Two lanes whose heads contain one another (one stacks on the other) share a file only through the stack and do not collide. The config is
-    read first, so a bad merge.busyFiles stops the build before any push."""
+    Two lanes whose heads contain one another (one stacks on the other) share a file only through the stack and do not collide. Two other lanes
+    collide on a file only when each also changes it past their merge-base (`B...A` both ways, the same flags): siblings stacked on one lane share
+    that lane's change through it, and change the file only if they edit it themselves. The config is read first, so a bad merge.busyFiles stops
+    the build before any push."""
     globs = load_config(root, base, config, " " + FREEZE_CITE)["merge"].get("busyFiles", [])
     if not globs:
         return
+    def busy(frm, n, what):
+        c, out = git(root, "diff", "--no-renames", "-z", "--name-only", f"{frm}...{heads[n]}")
+        if c:
+            raise Stop(f"cannot read the files #{n} changes against {what}: {out} Nothing was pushed. {FREEZE_CITE}")
+        return {f for f in out.split("\0") if f and any(fnmatch.fnmatchcase(f, g) for g in globs)}
     touched = {}
     for n in sorted(heads):
-        c, out = git(root, "diff", "--no-renames", "-z", "--name-only", f"{start}...{heads[n]}")
-        if c:
-            raise Stop(f"cannot read the files #{n} changes against {base}: {out} Nothing was pushed. {FREEZE_CITE}")
-        for f in out.split("\0"):
-            if f and any(fnmatch.fnmatchcase(f, g) for g in globs):
-                touched.setdefault(f, []).append(n)
-    stacked = lambda a, b: git(root, "merge-base", "--is-ancestor", heads[a], heads[b])[0] == 0 or git(root, "merge-base", "--is-ancestor", heads[b], heads[a])[0] == 0
+        for f in busy(start, n, base):
+            touched.setdefault(f, []).append(n)
+    @functools.lru_cache(maxsize=None)
+    def stacked(a, b):
+        seen = [ancestor(root, heads[a], heads[b]), ancestor(root, heads[b], heads[a])]
+        if True in seen:
+            return True
+        if None in seen:
+            raise Stop(f"cannot read whether #{a} and #{b} stack on one another: git could not tell. Nothing was pushed. {FREEZE_CITE}")
+        return False
+    past = {}  # (a, b) -> (busy files a changes past the pair's merge-base, those b changes), read once per pair
+    def own(a, b):
+        if (a, b) not in past:
+            past[(a, b)] = (busy(heads[b], a, f"#{b}"), busy(heads[a], b, f"#{a}"))
+        return past[(a, b)]
     shared = {}
     for f, ns in sorted(touched.items()):
-        hit = sorted({n for i, a in enumerate(ns) for b in ns[i + 1:] if not stacked(a, b) for n in (a, b)})
+        hit = sorted({n for i, a in enumerate(ns) for b in ns[i + 1:] if not stacked(a, b) and all(f in s for s in own(a, b)) for n in (a, b)})
         if hit:
             shared[f] = hit
     if shared:
