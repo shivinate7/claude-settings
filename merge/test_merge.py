@@ -20859,6 +20859,20 @@ class HandedLaneCheck(RecordsEnv):
         self.assert_handed(120, 121)
         self.assert_passes(12, 2)
 
+    def test_handed_lane_check_compares_a_named_lane_off_the_head_twice(self):
+        """The cost the decision states: one compare per handed pull request against the base, one against the integration head, and one more
+        against the head for each Lanes-named pull request that is not in the batch, so #15 is compared against the head twice."""
+        self.fixture("Lanes: #12 #15", handed=[12, 15], held=[12])  # #12 is in the batch head; #15 is named on Lanes and missing from the head
+        self.assert_handed(12, 15)
+        feat = self.head("feat")
+        self.host.holds_calls.clear()  # the scope read above is not the check's cost
+        try:
+            merge.handed_check(self.host, 7, {"body": self.host.body, "base": "main", "head": feat})
+        except merge.Unnamed:
+            pass  # the refusal of #15 is another case's subject; only the compares are counted here
+        expected = [(handed_sha(12), "main"), (handed_sha(15), "main"), (handed_sha(12), feat), (handed_sha(15), feat), (handed_sha(15), feat)]
+        self.assertEqual(sorted(self.host.holds_calls), sorted(expected), f"the handed-lane check's compares are not the decision's count:\n{self.host.holds_calls}")
+
     def test_handed_lane_refuses_the_ready_merge_before_any_lock_claim_or_merge(self):
         self.on("feat", {"docs/records.md": page()})  # a current page: a stale one is refused for its own reason
         self.fixture("Lanes: #12", handed=[9, 12], held=[12], draft=False)  # #9 is handed, not in the batch, and named nowhere
@@ -20966,6 +20980,30 @@ class HandedLaneCheck(RecordsEnv):
         self.assert_line_names(out, 9, "in the batch head but not on the Lanes line")
         self.assert_line_names(out, 9, "on a left-out line with no reason")
 
+    def frozen_body(self, *lines, dropped=(20,)):
+        """`lines`, then a batch's frozen block: the lane #12 and a `Dropped: #N` line for each of `dropped`, as freeze_lines writes them. -> the body."""
+        body = "\n".join([*lines, *merge.freeze_lines("b9", {12: handed_sha(12)}, dropped=list(dropped))])
+        self.assertEqual(merge.parse_freeze(body)["dropped"], list(dropped), "the fixture's block does not read back as a frozen block with those drops")
+        return body
+
+    def test_handed_lane_frozen_block_drop_line_is_skipped_when_the_body_names_the_lane(self):
+        self.fixture(self.frozen_body("Lanes: #12", "Dropped from #9: #20 (macOS CI red)"), handed=[12, 20], held=[12])  # #20 is handed and left out with a reason in the body; the block's own `Dropped: #20` line must not count
+        self.assert_handed(12, 20)
+        self.assert_passes(1, 1)
+
+    def test_handed_lane_frozen_block_drop_line_alone_does_not_name_a_handed_lane(self):
+        self.fixture(self.frozen_body("Lanes: #12"), handed=[12, 20], held=[12])  # #20 is handed and named in the body nowhere: the block's `Dropped: #20` line is no body line
+        self.assert_handed(12, 20)
+        out = self.assert_refused(20)
+        self.assert_line_names(out, 20, "is handed but not named in the body")
+        self.assertFalse(any("#20" in l and "no reason" in l for l in out.splitlines()), f"the block's Dropped line was read as a left-out line with no reason:\n{out}")
+
+    def test_handed_lane_frozen_block_drop_of_an_unhanded_lane_passes_a_named_batch(self):
+        self.fixture(self.frozen_body("Lanes: #12"), handed=[12], held=[12])  # the batch's own drop of #20, which no open pull request hands in
+        self.assert_handed(12)
+        self.assertNotIn((20, "main"), merge.reviewed_read(self.host)[1], "the fixture makes #20 a handed pull request")
+        self.assert_passes(1, 0)
+
     def test_handed_lane_no_lanes_head_merging_a_lane_is_refused(self):
         lane_batch(self, "lane-a")  # the head merges lane-a's tip; the fixture below clears the Lanes line lane_batch gave the body
         self.fixture("", handed=[])
@@ -21001,6 +21039,8 @@ class HandedLaneCheck(RecordsEnv):
         self.assertIn("could not read the merge commits", out, f"the failed read's stop is not printed:\n{out}")
         self.assert_refused_untouched(rc, out, refs)
         self.assertEqual(self.host.readies, [], out)
+        self.assertIn(merge.UNDO_FLAG, out, f"the refusal does not name the reason flag that lifts it:\n{out}")
+        self.assertNotIn("No override lifts this refusal", out, f"the refusal is printed as one that no override lifts:\n{out}")
 
     def test_handed_lane_no_lanes_release_head_merging_main_is_not_a_lane(self):
         self.release_base()
@@ -21106,6 +21146,8 @@ class HandedLaneCheck(RecordsEnv):
         rc, out = self.run_merge("7", "--confirm")
         self.assertIn("git fetch origin main failed", out, f"the failed default-branch fetch's stop is not printed:\n{out}")
         self.assert_refused_untouched(rc, out, refs)
+        self.assertIn(merge.UNDO_FLAG, out, f"the refusal does not name the reason flag that lifts it:\n{out}")
+        self.assertNotIn("No override lifts this refusal", out, f"the refusal is printed as one that no override lifts:\n{out}")
 
     def test_handed_lane_no_lanes_failed_default_ref_read_with_the_flag_goes_on_with_one_line(self):
         self.failed_default_ref_fixture()
@@ -21137,6 +21179,30 @@ class HandedLaneCheck(RecordsEnv):
 
     def test_handed_lane_placeholder_one_letter_reason_is_refused(self):
         self.assert_placeholder_refused("Dropped earlier: #15 (x)", 15)
+
+    def test_handed_lane_placeholder_na_reason_is_refused(self):  # n/a reads as na: the punctuation is stripped before the word is tested
+        self.assert_placeholder_refused("Dropped (n/a): #15", 15)
+
+    def test_handed_lane_placeholder_na_after_the_number_is_refused(self):
+        self.assert_placeholder_refused("Dropped from #7: #15 (n/a)", 15)
+
+    def test_handed_lane_placeholder_none_reason_is_refused(self):
+        self.assert_placeholder_refused("Dropped (none): #15", 15)
+
+    def test_handed_lane_placeholder_capitalised_none_reason_is_refused(self):
+        self.assert_placeholder_refused("Dropped (None): #15", 15)
+
+    def test_handed_lane_placeholder_unknown_reason_is_refused(self):
+        self.assert_placeholder_refused("Dropped (unknown): #15", 15)
+
+    def test_handed_lane_placeholder_todo_reason_is_refused(self):
+        self.assert_placeholder_refused("Dropped (todo): #15", 15)
+
+    def test_handed_lane_placeholder_tba_reason_is_refused(self):
+        self.assert_placeholder_refused("Dropped (TBA): #15", 15)
+
+    def test_handed_lane_placeholder_nothing_reason_is_refused(self):
+        self.assert_placeholder_refused("Dropped (nothing): #15", 15)
 
     def assert_left_out_with_a_reason_passes(self, line, n):
         """`line` is a left-out line with a real reason for handed PR `n`: the check reads it, so the draft step passes with the count line."""
