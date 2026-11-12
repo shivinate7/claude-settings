@@ -55,13 +55,13 @@ Per send, at most:
   - an `owner/repo#N` of any repo, with or without a PR word;
   - a `github.com` pull, issues or commit URL, of any repo. An issue link starts it too, though nothing in it is judged;
   - a markdown link to a `github.com/<owner>/<repo>/` path, of any repo;
-  - a sha on a line that holds `owner/repo` followed by `#`, `@`, `:` or `PR`. The mark test runs before the other-repo test, so a sha beside a path such as `hooks/guard.py:3099` also starts it.
-- One `git cat-file --batch-check` runs for all shas, and one `git rev-parse --is-shallow-repository` on a miss.
-- One `git ls-remote origin` runs for all PR numbers. Measured once: about 0.6 s, from a cloud container.
+  - a sha on a line that holds `owner/repo` followed by `#`, `@`, `:` or `PR`. The mark test runs before the other-repo test, so a sha beside a path followed by a colon and a line number also starts it.
+- A `git cat-file --batch-check` call runs for all the shas a message names, and a `git rev-parse --is-shallow-repository` call runs only when a sha is missing.
+- A `git ls-remote origin` call runs for all the PR numbers. Measured from a cloud container as a lone sample, it took about 0.6 s.
 - One `gh api repos/<owner>/<repo>/issues/comments/<id>` runs per comment link, up to 5. It is a network read.
 - Each git and gh read has a 5 s limit.
 
-The limits add to 45 s: `git config`, `git cat-file`, `git rev-parse`, `git ls-remote` and five `gh` reads, at 5 s each. The URL-word pattern runs at most twice on a line. Its time is linear in the line's length: 64,000 letters took 0.002 to 0.12 s across runs, and 256,000 took 0.008 s in one run, on one machine. The guard's PreToolUse hook timeout is 60 s (`settings.json`). The pattern has no cap in the code, so a line long enough to pass that timeout is possible; that line's time is unmeasured. Whether a timeout allows the call is the harness's rule, not this code's. On a timeout, the code writes nothing.
+The reads add to at most 45 s: `git config`, `git cat-file`, `git rev-parse`, `git ls-remote` and each `gh` read, up to the cap above, at 5 s each. The URL-word pattern runs on each unquoted line, and may run again on a line that names a sha or a PR beside a marked owner/repo. Its time is linear in the line's length: 64,000 letters took 0.002 to 0.12 s across runs, and 256,000 took 0.008 s in a lone run, on the same machine. The guard's PreToolUse hook timeout, set in the settings file, is 60 s. The pattern has no cap in the code, so a line long enough to pass that timeout is possible; that line's time is unmeasured. Whether a timeout allows the call is the harness's rule, not this code's. On a timeout, the code writes nothing.
 
 The PR gap scan reads at most 200 characters after each PR word, so its time is linear in the line's length. Measured once, by a test-author and a reviewer: 4,000 distinct `PR #N` and 40,000 `PR ` words on one line each took about 0.2 s. Before the cap they took 12 s and 30 s. The suite bounds each case at 5 s, except on Windows.
 
