@@ -101,7 +101,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    replaced. The replacer and the replaced PR must share a base. A bulleted `- Replaces #N` does not
    count. The line counts at a line start, indent allowed, outside a code fence and a `>` quote. A loop of PRs
    that name each other with `Replaces` closes none, of any length. An open draft PR with a done review record closes as
-   carried when another open PR on the same base holds its head (GitHub compare read). The carrier may be any open PR. A draft that an open batch freezes, at the head the batch froze, is not carried. A ready PR is only kept off the batch line, as on main. With two equal heads, the higher number closes as carried. A PR closed
+   carried when another open PR on the same base holds its head (GitHub compare read). The carrier may be any open PR. A lane that any open batch freezes, at the head the batch froze, is neither carried nor closed as replaced by any open PR, a batch or not. A ready PR is only kept off the batch line, as on main. With two equal heads, the higher number closes as carried. A PR closed
    as replaced cannot carry another. Each close comment starts a line. It reads `Replaced by #R;
    reopens if #R is dropped`, or `Carried by #R; reopens if #R is dropped`. A `reopen` line fires
    when R closes unmerged. For a Replaced note, it also fires when R is open and no longer names N.
