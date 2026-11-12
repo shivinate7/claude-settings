@@ -3044,7 +3044,7 @@ MESSAGE_PR_GAP = re.compile(r"([^#\d.;!?]{0,200}?)#(?!(?:\d{6}|\d{8})(?!\d))(\d+
 MESSAGE_PR_GAP_WORDS = 6   # most words between the PR word and its `#N`; a longer gap is a different sentence
 # A word that says the `#N` is an issue or another item, so `PR merged, see issue #3` names no PR. A verb that closes
 # an issue (`This PR closes #8`, `Fixed #8`) says the same.
-MESSAGE_ISSUE_WORDS = r"issues?|tickets?|bugs?|items?|findings?|debts?"
+MESSAGE_ISSUE_WORDS = r"issues?|tickets?|bugs?|items?|findings?|debts?"  # glossary-ok: the words a message uses for an issue, matched as text, not names this repo uses
 MESSAGE_CLOSING_WORDS = r"closes|closed|closing|fixes|fixed|fixing|resolves|resolved|resolving"
 MESSAGE_PR_GAP_NOT = re.compile(
     r"\b(?:%s|%s)\b" % (MESSAGE_ISSUE_WORDS, MESSAGE_CLOSING_WORDS), re.IGNORECASE)
