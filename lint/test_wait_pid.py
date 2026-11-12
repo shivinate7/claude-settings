@@ -162,7 +162,7 @@ def strand(stub_tag, job_tag, with_stub=True):
         found = [p for p, parent in ps_parents().items() if parent == stub]
         if found:
             return Strand(found[0], stub)
-        time.sleep(0.05)
+        time.sleep(0.05)  # poll interval of a condition wait; the try count is the deadline
     stop(stub)
     return None
 

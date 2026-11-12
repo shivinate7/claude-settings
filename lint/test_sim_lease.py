@@ -158,7 +158,7 @@ class LeaseCase(unittest.TestCase):
         for _ in range(100):
             if mentions(self.status().stdout, pid):
                 return p
-            time.sleep(0.05)
+            time.sleep(0.05)  # poll interval of a condition wait; the try count is the deadline
         self.fail("the waiting %s take is not on the queue in status" % device)
 
 

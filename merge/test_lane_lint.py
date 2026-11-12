@@ -740,7 +740,7 @@ class LaneLint(LaneFixture):
 
         deadline = time.time() + 60
         while not self.lint_calls() and proc.poll() is None and time.time() < deadline:
-            time.sleep(0.05)
+            time.sleep(0.05)  # poll interval of a condition wait; the 60 s deadline is the bound
         self.assertIsNone(proc.poll(), "the run ended before its lint started: " + run_text())
         self.assertTrue(self.lint_calls(), "the lint did not start within 60 s: " + run_text())
         lint_tree = self.lint_calls()[0]["cwd"]
