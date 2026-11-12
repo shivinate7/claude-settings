@@ -13241,6 +13241,11 @@ class MergeRoleCheck(CloudSession):
         err = self.assert_writer_refused("--role", "lane")
         self.assertIn("merge --lane-lint", err, "the --role refusal does not name merge --lane-lint")
 
+    def test_the_role_refusal_says_this_sessions_role(self):
+        # The refusal speaks of the session's role, the word the rest of the tool uses for a session's merge role.
+        err = self.assert_writer_refused("--role", "lane")
+        self.assertIn("this session's role may not record a merge role.", err, "the --role refusal does not say this session's role: " + err)
+
     def test_a_refused_role_leaves_an_earlier_role_file_as_it_was(self):
         self.put_role("batch-runner")  # decision session-tiers: re-pointed from coordinator to batch-runner
         self.assert_writer_refused("--role", "lane")
@@ -13919,8 +13924,8 @@ def list_line(test, out, n):
     return lines[0]
 
 def no_record_numbers(out):
-    """The pull request numbers named on the `no record:` line."""
-    return {int(m) for l in out.splitlines() if l.startswith("no record:") for m in re.findall(r"#(\d+)", l)}
+    """The pull request numbers named on the `no review log:` line."""
+    return {int(m) for l in out.splitlines() if l.startswith("no review log:") for m in re.findall(r"#(\d+)", l)}
 
 REVIEW_FIX_PASS = (REVIEW_OLD_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "PASS")  # the parsed fix check tuple: reviewed head, role, model, verdict; every fix check runs on that model (owner item 444 a)
 REVIEW_FIX_FAIL = (REVIEW_OLD_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "FAIL")
@@ -14646,6 +14651,8 @@ class ReviewArgs(ReviewEnv):
         self.assertEqual(rc, 0, out + err)
         self.assertIn("with their review log state", out, out)
         self.assertNotIn("review record", out, out)
+        flat = " ".join(out.split())  # argparse wraps the help line, so the phrase is matched on one line
+        self.assertIn("then the PRs with no review log.", flat, out)
 
     def test_review_record_needs_a_pr_number(self):
         self.assert_usage_error("--review-record", *self.flags())
@@ -14748,6 +14755,14 @@ class ReviewRecordWrite(ReviewEnv):
         rc, out, err = self.run_args("7", "--review-record", *REVIEW_FLAGS, "--head", "f" * 40)
         self.assertEqual(rc, 0, out + err)
         self.assertEqual(parse_text(self, posted_body(self, out))["head"], "f" * 40)
+
+    def test_a_push_after_the_review_says_to_write_its_review_log(self):
+        # The refusal tells the reviewer to write the review log for the new head, the same word the rest of the tool uses.
+        old = self.head()
+        self.host.head_override = "f" * 40
+        rc, out, err = self.run_args("7", "--review-record", *REVIEW_FLAGS, "--head", old)
+        self.assertEqual(rc, 1, out + err)
+        self.assertIn("then write its review log.", err, "the head mismatch does not say to write its review log: " + err)
 
     def test_a_push_after_the_review_stops_with_exit_one(self):
         # The rounds were read on the old head. A push moves the live head, so the old rounds never print as the current record.
@@ -15776,10 +15791,10 @@ class ReleaseCheck(ReviewEnv):
 
     def test_check_2_a_record_not_done_at_the_live_head_fails_with_its_state_why(self):
         bad = {
-            "stale": (self.review(7, head=REVIEW_OLD_HEAD), "#7 FAIL: the record is for head 0f0f0f0f0"),  # REVIEW_OLD_HEAD's first 9 characters
+            "stale": (self.review(7, head=REVIEW_OLD_HEAD), "#7 FAIL: the review log is for head 0f0f0f0f0"),  # REVIEW_OLD_HEAD's first 9 characters
             "open": (self.review(7, rounds=("Round 1: reviewer, sonnet, FAIL",)), "#7 FAIL: round 1 is not passed"),
             "held": (self.review(7, guard="yes", net="negative"), "#7 FAIL: net value is negative"),
-            "bad": (self.review(7, rounds=("Round 1: reviewer, sonnet, MAYBE",)), "#7 FAIL: the newest record does not parse"),
+            "bad": (self.review(7, rounds=("Round 1: reviewer, sonnet, MAYBE",)), "#7 FAIL: the newest review log does not parse"),
         }
         for state, (comment, want) in bad.items():
             with self.subTest(state=state):
@@ -15801,7 +15816,7 @@ class ReleaseCheck(ReviewEnv):
         # Control: the walk's commit read fails, so the stale line keeps its state and adds the unknown why, the one the walk gives.
         rc, lines, err, _ = self.release([7], comments=[self.review(7, head=REVIEW_OLD_HEAD)])
         line = self.line_of(lines, 7)
-        self.assertTrue(line.startswith("#7 FAIL: the record is for head 0f0f0f0f0; "), line)
+        self.assertTrue(line.startswith("#7 FAIL: the review log is for head 0f0f0f0f0; "), line)
         self.assertIn(f"; {merge.REVIEW_SURVIVAL_UNKNOWN} (", line, "the stale line lacks the unknown walk's why: " + line)
         self.assertEqual(rc, 1, err)
 
@@ -15827,7 +15842,7 @@ class ReleaseCheck(ReviewEnv):
         rc, lines, err, _ = self.release([8, 7], pulls=pulls(fx.stacked), comments=comments, **reads)
         self.assertFalse(self.line_of(lines, 8).startswith("#8 PASS"),
                          "a stacked pull request whose head merges its own base after review passed the release check:\n" + err)
-        self.assert_fails_alone(self.line_of(lines, 8), 8, rf"the record is for head {fx.fixed[:9]}")
+        self.assert_fails_alone(self.line_of(lines, 8), 8, rf"the review log is for head {fx.fixed[:9]}")
         self.assertEqual(self.line_of(lines, 7), "#7 PASS", err)
         self.assertEqual(rc, 1, err)
 
@@ -16046,7 +16061,7 @@ class ReleaseCheck(ReviewEnv):
         self.base_tip(fx.main2)
         rc, lines, err = self.release_at(fx, fx.plain, fx.fixed)
         self.assertEqual(rc, 1, err)
-        self.assert_fails_alone(self.line_of(lines, 7), 7, rf"the record is for head {fx.fixed[:9]}")
+        self.assert_fails_alone(self.line_of(lines, 7), 7, rf"the review log is for head {fx.fixed[:9]}")
 
     def two_bases(self, fx):
         """Pull request 7 on main, at fx.clean with its record done at fx.fixed, and pull request 8 on feat-base, at fx.stacked. -> the two pull requests.
@@ -16570,7 +16585,7 @@ class ReviewGuardCost(ReviewEnv):
 # from each --root string, exactly as given, to that root's Host. A root's header is the `repo` of its host, and its config is read by
 # load_config on that root. A test host keeps its own checks, as `host` does.
 OPEN_ROUNDS = ("Round 1: reviewer, sonnet, FAIL",)  # a failed round: the pull request is open
-REVIEWED_LINE_STARTS = ("#", "no record:", "no open pull requests.", "open batch now: ", "build next batch on the running head: ")  # what --reviewed prints per repo
+REVIEWED_LINE_STARTS = ("#", "no review log:", "no open pull requests.", "open batch now: ", "build next batch on the running head: ")  # what --reviewed prints per repo
 BATCH_LINE_STARTS = ("open batch now: ", "build next batch on the running head: ")
 
 def hex_head(c):
