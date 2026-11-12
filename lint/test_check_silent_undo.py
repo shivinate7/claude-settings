@@ -394,6 +394,71 @@ class PrBodyEscape(unittest.TestCase):
                                      "Summary.\n\n%s\n\nNotes\n---\n%s\n" % (L, F),
                                      "Summary.\n\n%s\n\n%s\n" % (L, F)])  # no rule: not the posting footer
 
+    # Claude's session URL line follows the attribution: as its own paragraph, or on the attribution's next line. The URL is
+    # no prose, so the key line above the attribution still counts, as it does without the URL.
+    SESSION = "https://claude.ai/code/session_013NEJL2SdAA1CCG5eTFVFVr"
+
+    def assert_reads_as_without_url(self, pairs):
+        """Each (body without the URL, the same body with it): the first is excused (scope), and the second must be too."""
+        for plain, with_url in pairs:
+            with self.subTest(body=with_url):
+                ok, why = self.excused(plain)
+                self.assertTrue(ok, "scope: the body without the URL is not excused: %r" % (why,))
+                ok, why = self.excused(with_url)
+                self.assertTrue(ok, "a session URL line after the attribution hid the Drops-lines line: %r" % (why,))
+
+    def test_a_session_url_after_the_attribution_reads_as_no_url(self):
+        L, A, S, F = self.LINE, self.ATTR, self.SESSION, self.FOOT
+        self.assert_reads_as_without_url([
+            ("Summary.\n\n%s\n\n%s\n" % (L, A), "Summary.\n\n%s\n\n%s\n\n%s\n" % (L, A, S)),  # its own paragraph
+            ("Summary.\n\n%s\n\n%s\n" % (L, A), "Summary.\n\n%s\n\n%s\n%s\n" % (L, A, S)),  # the attribution's next line
+            ("Summary.\n\n%s\n\n%s\n" % (L, A), "Summary.\n\n%s\n\n%s\n\n  %s  \n\n\n" % (L, A, S)),  # padded, as the attribution case is
+            ("Summary.\n\n%s\n\n%s\n\n---\n%s\n" % (L, A, F), "Summary.\n\n%s\n\n%s\n\n%s\n\n---\n%s\n" % (L, A, S, F)),  # footer after it
+            ("Summary.\n\n%s\n\n%s\n\n---\n%s\n" % (L, A, F), "Summary.\n\n%s\n\n%s\n%s\n\n---\n%s\n" % (L, A, S, F)),  # next line, then footer
+            ("%s\n\n%s\n" % (L, A), "%s\n\n%s\n\n%s\n" % (L, A, S)),  # no Summary: the key line is the only paragraph left
+        ])
+
+    def test_a_session_url_after_the_attribution_reads_as_no_url_with_crlf(self):
+        L, A, S = self.LINE, self.ATTR, self.SESSION
+        self.assert_reads_as_without_url([
+            ("Summary.\r\n\r\n%s\r\n\r\n%s\r\n" % (L, A), "Summary.\r\n\r\n%s\r\n\r\n%s\r\n\r\n%s\r\n" % (L, A, S)),
+            ("Summary.\r\n\r\n%s\r\n\r\n%s\r\n" % (L, A), "Summary.\r\n\r\n%s\r\n\r\n%s\r\n%s\r\n" % (L, A, S)),
+        ])
+
+    def test_a_session_url_with_no_key_line_excuses_nothing(self):  # control
+        L, A, S, F = self.LINE, self.ATTR, self.SESSION, self.FOOT
+        ok, why = self.excused("Summary.\n\n%s\n\n%s\n" % (L, A))  # scope: the key line and attribution are read
+        self.assertTrue(ok, "scope: the body with the key line and no URL is not excused: %r" % (why,))
+        self.assert_nothing_excused(["Summary.\n\n%s\n\n%s\n" % (A, S),
+                                     "Summary.\n\n%s\n%s\n" % (A, S),
+                                     "Summary.\n\nSome prose.\n\n%s\n\n%s\n" % (A, S),
+                                     "Summary.\n\n```\n%s\n```\n\n%s\n\n%s\n" % (L, A, S),  # a fenced key line is no key line
+                                     "Summary.\n\n%s\n\n%s\n\n---\n%s\n" % (A, S, F)])
+
+    def test_a_session_url_after_the_key_line_and_attribution_excuses_nothing_when_prose_follows(self):  # control
+        L, A, S = self.LINE, self.ATTR, self.SESSION
+        ok, why = self.excused("Summary.\n\n%s\n\n%s\n" % (L, A))  # scope: the key line and attribution are read
+        self.assertTrue(ok, "scope: the body without the URL is not excused: %r" % (why,))
+        self.assert_nothing_excused(["Summary.\n\n%s\n\n%s\n\n%s\n\nClosing prose.\n" % (L, A, S),
+                                     "Summary.\n\n%s\n\n%s\n%s\nClosing prose.\n" % (L, A, S),
+                                     "Summary.\n\n%s\n\n%s\nClosing prose.\n" % (L, A),  # prose on the attribution's next line
+                                     "Summary.\n\n%s\n\nSome prose.\n\n%s\n\n%s\n" % (L, A, S)])  # prose between the key line and it
+
+    def test_a_text_after_the_attribution_that_is_not_a_session_url_is_prose(self):  # control
+        L, A, S = self.LINE, self.ATTR, self.SESSION
+        ok, why = self.excused("Summary.\n\n%s\n\n%s\n" % (L, A))  # scope: the key line and attribution are read
+        self.assertTrue(ok, "scope: the body without the URL is not excused: %r" % (why,))
+        self.assert_nothing_excused(["Summary.\n\n%s\n\n%s\n\nhttps://example.com/code/session_013NEJL2SdAA1CCG5eTFVFVr\n" % (L, A),  # another host
+                                     "Summary.\n\n%s\n\n%s\n\nhttps://claude.ai/code/notes\n" % (L, A),  # this host, no session
+                                     "Summary.\n\n%s\n\n%s\n\nSee %s\n" % (L, A, S),  # text before the session URL
+                                     "Summary.\n\n%s\n\n%s\n\n%s extra\n" % (L, A, S),  # text after it
+                                     "Summary.\n\n%s\n\n%s\nhttps://example.com/\n" % (L, A)])  # the attribution's next line
+
+    def test_a_key_line_in_the_attribution_paragraph_with_the_url_still_excuses(self):  # control, current behaviour
+        L, A, S = self.LINE, self.ATTR, self.SESSION
+        ok, why = self.excused("Summary.\n\n%s\n%s\n%s\n" % (L, A, S))
+        self.assertTrue(ok, "a key line in the attribution's paragraph with the URL stopped excusing: %r" % (why,))
+
 
 BLOCK = "alpha one\nbeta two\ngamma three\ndelta four\nepsilon five\nzeta six\n"
 
