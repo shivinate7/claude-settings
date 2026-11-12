@@ -4622,16 +4622,34 @@ def fetch_heads(root, shas):
             git(root, "fetch", "-q", "origin", s)
     return [s for s in dict.fromkeys(shas) if missing(s)]
 
-def holds_commit_of(root, lane, other, kept, frozen=()):
-    """True when commit `lane` holds a commit of `other` that no commit of `kept` holds and that is not one of `frozen`, the request's own lane heads. A pull
-    request whose head holds the whole lane (one stacked on it) brings nothing of its own into it, so that is False. A common commit that is a requested lane's
-    head is already frozen in the request: an outside pull request stacked on that lane shares it, and brings none of its own commits in."""
-    if holds(root, lane, other):
+def commits_outside(root, tips, kept):
+    """-> {commit: parents} for each commit that `tips` reach and no commit of `kept` holds, from one git read, so the checks on it cost no more git."""
+    holds(root, tips[0], kept[0])  # a shallow clone cuts the history and so this graph: that read fetches it in full first
+    c, out = git(root, "rev-list", "--parents", *tips, "--not", *kept)
+    if c:
+        raise Stop(f"cannot read the commits of the request and of the open pull requests: {out} {FREEZE_CITE}")
+    return {parts[0]: parts[1:] for parts in (line.split() for line in out.splitlines())}
+
+def reach(graph, tip):
+    """-> the commits of `graph` that `tip` holds, itself included."""
+    seen, todo = set(), [tip]
+    while todo:
+        c = todo.pop()
+        if c in graph and c not in seen:
+            seen.add(c)
+            todo += graph[c]
+    return seen
+
+def holds_commit_of(graph, lane, other, frozen=()):
+    """True when commit `lane` holds a commit of `other` that is in `graph` (no commit of `kept` holds it) and is not one of `frozen`, the request's own lane
+    heads. A pull request whose head holds the whole lane (one stacked on it) brings nothing of its own into it, so that is False. A common commit that is a
+    requested lane's head is already frozen in the request: an outside pull request stacked on that lane shares it, and brings none of its own commits in.
+    Only the newest common commits count, as `git merge-base --all` reads them: a common commit under another one is not read."""
+    theirs = reach(graph, other)
+    if lane in theirs:
         return False
-    c, out = git(root, "merge-base", "--all", lane, other)
-    if c and out:
-        raise Stop(f"cannot read the common commits of {lane[:9]} and {other[:9]}: {out} {FREEZE_CITE}")
-    return any(b not in frozen and not any(holds(root, b, k) for k in kept) for b in out.split())
+    common = reach(graph, lane) & theirs
+    return any(b not in frozen for b in common - {p for c in common for p in graph[c]})
 
 def stacked_without_base(root, h, base, heads, running, own=None, remedy="Add the missing pull request, or leave the stacked lane out."):
     """Refuse (Stop) a request in which a lane holds a commit of another open pull request on `base` that the request leaves out: merging the lane
@@ -4643,12 +4661,14 @@ def stacked_without_base(root, h, base, heads, running, own=None, remedy="Add th
     frozen = set(heads.values())
     others = [(n, info["head"]) for n, info in h.open_prs() if n not in heads and n != own and info["base"] == base]
     unread = fetch_heads(root, [s for _, s in others])
-    found, named = [], set()
     for n, head in others:
         if head in unread:
             say(f"merge: #{n}'s head {head[:9] or '(none)'} cannot be fetched from origin, so this request was not checked against its commits.")
-            continue
-        hit = [m for m in sorted(heads) if holds_commit_of(root, heads[m], head, kept, frozen)]
+    others = [(n, head) for n, head in others if head not in unread]
+    graph = commits_outside(root, [*heads.values(), *(head for _, head in others)], kept) if others and heads else {}
+    found, named = [], set()
+    for n, head in others:
+        hit = [m for m in sorted(heads) if holds_commit_of(graph, heads[m], head, frozen)]
         found += [f"#{m} holds a commit of #{n}, which is not in this request" for m in hit]
         named.update(hit)
     if found:
