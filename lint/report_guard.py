@@ -1179,23 +1179,47 @@ def mistake_problem(text):
 # (rule building-mistake-names-its-guard; decision mistake-means-missing-guard). A report once called a guard queued
 # as a step no one had filed. A queued step is a blob on origin/roadmap, so a step on a lane branch only is not queued. Cost: one `git fetch origin roadmap` and one tree read per report that cites a
 # step; a report that cites none starts nothing. A failed read prints "unknown" and refuses nothing.
-# A claim ties the claim word to the step noun: "queued as a roadmap step", "filed as step:x", "has a step",
-# "the step is queued". "Queued, and the next step is the merge" is no claim.
-_STEP_LINK = r"(?:(?:it|this|that|them|as|to|on|in|into|the|a|an|roadmap|queue|new|its)\s+)*"
+# A sentence with no slug claims a step only when a roadmap word ties to the step noun, so coding text such as
+# "Added a step to the install script" or "The deploy step is filed under ops" is no claim. Claim forms:
+# "queued/filed <object> as a (roadmap) step"; "the step (for the guard) is queued", where only a determiner or a
+# roadmap word may sit before "step", so "the CI job step is queued" is no claim; "added" with roadmap or queue
+# in the sentence; "has a step" with roadmap, follow-up, guard or fix in the sentence. A merge queue is no queue
+# here. "step-by-step", "step 3" and a `step:` slug are not the step noun.
+_STEP_NOUN = r"steps?\b(?![-:])(?!\s*\d)"
+_STEP_DET = r"(?:a|an|the|its|this|that|new|roadmap|follow-up|guard|fix)"
 STEP_CLAIM_RE = re.compile(
-    r"\b(?:queued|filed|added)\s+" + _STEP_LINK + r"step\b(?!-)"
-    r"|\b(?:has|have|had)\s+(?:a|its|the)\s+(?:roadmap\s+)?step\b(?!-)"
-    r"|\bstep(?::\S+)?\s+(?:is\s+|was\s+|has\s+been\s+|now\s+)?(?:queued|filed)\b", re.I)
-# "queued" in another sense: a CI run, a job, a merge queue, a runner. Such a sentence with no slug makes no claim.
-STEP_OTHER_SENSE_RE = re.compile(
-    r"\bCI\b|\b(?:runs?|jobs?|workflows?|checks?|merge[- ]queue|runners?|pipelines?|builds?|actions?)\b", re.I)
-# A slug the writer says is not filed is no claim that it is.
-STEP_PROPOSAL_RE = re.compile(
-    r"\b(?:not\s+(?:yet\s+)?(?:filed|queued)|unfiled|propos\w+|will\s+(?:file|queue)|to\s+(?:file|queue)"
-    r"|should\s+(?:file|queue))\b", re.I)
+    r"\b(?:queued|filed)\s+(?:[^\s.;:]+\s+){0,6}?as\s+(?:" + _STEP_DET + r"\s+)*" + _STEP_NOUN
+    + r"|\b" + _STEP_DET + r"\s+" + _STEP_NOUN + r"(?:\s+(?:for|of)\s+(?:(?:the|a|this)\s+)?[\w-]+)?"
+    r"\s+(?:(?:is|was|are|were|has\s+been|have\s+been|now)\s+)?(?:queued|filed)\b", re.I)
+STEP_NOUN_RE = re.compile(r"\b" + _STEP_NOUN, re.I)
+STEP_ADDED_RE = re.compile(r"\badd(?:ed|s)?\b", re.I)
+STEP_ROADMAP_RE = re.compile(r"\broadmap\b|(?<!merge\s)(?<!merge-)\bqueue\b", re.I)
+STEP_HAS_RE = re.compile(r"\b(?:has|have|had)\s+(?:a|an|its|the|one)\s+(?:new\s+)?(?:roadmap\s+)?" + _STEP_NOUN
+                         + r"(?!\s+(?:that|which|where|to|of|list)\b)", re.I)
+STEP_FOLLOW_UP_RE = re.compile(r"\b(?:follow-ups?|guards?|fix(?:es)?)\b", re.I)
+# A slug in a negated or future claim ("not yet filed", "Triage will file", "File step:x", "Should I file") is no
+# claim that it is filed. A proposal word alone skips nothing: "the proposed guard is queued as step:x" is read.
+STEP_NOT_FILED_RE = re.compile(
+    r"\b(?:not|never)\s+(?:yet\s+)?(?:been\s+)?(?:file[ds]?|queue[ds]?)\b"
+    r"|n't\s+(?:yet\s+)?(?:been\s+)?(?:file[ds]?|queue[ds]?)\b|\bunfiled\b"
+    r"|\b(?:will|can|could|would|should|shall|may|might)\s+(?:[\w-]+\s+)?(?:file|queue)\b|\bto\s+(?:file|queue)\b|^\W*(?:file|queue)\b"
+    r"|\b(?:missing\s+from|not\s+(?:yet\s+)?on)\s+(?:the\s+|origin/)?roadmap\b", re.I)
 STEP_REASON = owner_line(
     "Step-cite guard (rule building-mistake-names-its-guard)",
-    "the report cites a step, but %s")
+    "the report cites a step, but %s; a cite clears once triage files the step and the sentence names it as "
+    "`step:<slug>`, and text in backticks makes no claim")
+
+
+def _step_claim(bare):
+    """True when a sentence with no slug claims a step is queued or filed (the forms above)."""
+    if STEP_CLAIM_RE.search(bare):
+        return True
+    if not STEP_NOUN_RE.search(bare):
+        return False
+    roadmap = STEP_ROADMAP_RE.search(bare)
+    if roadmap and STEP_ADDED_RE.search(bare):
+        return True
+    return bool(STEP_HAS_RE.search(bare) and (roadmap or STEP_FOLLOW_UP_RE.search(bare)))
 
 
 def _step_cites(text):
@@ -1208,22 +1232,26 @@ def _step_cites(text):
         plain = MISTAKE_URL_RE.sub(" ", FENCE_RE.sub(" ", section))
         for sentence in _sentences(plain):
             found = MISTAKE_STEP_RE.findall(sentence)
-            if found and not STEP_PROPOSAL_RE.search(sentence):
+            if found and not STEP_NOT_FILED_RE.search(sentence):
                 slugs += found
-            elif not found:
-                bare = QUOTED_RE.sub(" ", sentence)
-                if STEP_CLAIM_RE.search(bare) and not STEP_OTHER_SENSE_RE.search(bare):
-                    unbacked = unbacked or sentence.strip()
+            elif not found and _step_claim(QUOTED_RE.sub(" ", sentence)):
+                unbacked = unbacked or sentence.strip()
     return list(dict.fromkeys(s[len("step:"):] for s in slugs)), unbacked
 
 
 def step_cite_problem(text, cwd):
-    """The refusal text for a report whose step claim git does not back (see above), else ''."""
+    """The refusal text for a report whose step claim git does not back (see above), else ''. An unbacked
+    sentence and a missing slug share one refusal, so neither hides the other."""
     slugs, unbacked = _step_cites(text)
-    if unbacked:
-        return STEP_REASON % ("the sentence %r names no `step:<slug>`" % unbacked[:80])
-    if not slugs:
-        return ""
+    problems = ["the sentence %r names no `step:<slug>`" % unbacked[:80]] if unbacked else []
+    missing = _missing_steps(slugs, cwd) if slugs else []
+    if missing:
+        problems.append("origin/roadmap holds no step file for `step:%s`" % missing[0])
+    return STEP_REASON % ", and ".join(problems) if problems else ""
+
+
+def _missing_steps(slugs, cwd):
+    """The slugs with no step file on origin/roadmap after one fetch. A failed read prints unknown and returns []."""
     _hooks_on_path()
     import override
     import ruling_home
@@ -1234,10 +1262,8 @@ def step_cite_problem(text, cwd):
         missing = [s for s in slugs if not ruling_home.step_filed(s, cwd, override.STEP_REF)]
     except (ruling_home._GitFailure, OSError) as exc:
         print("step cite unknown: %s" % exc, file=sys.stderr)
-        return ""
-    if missing:
-        return STEP_REASON % ("origin/roadmap holds no step file for `step:%s`" % missing[0])
-    return ""
+        return []
+    return missing
 
 
 def _own_lane_read(path, own_id):

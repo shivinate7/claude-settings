@@ -85,7 +85,8 @@ Text: the miss from `departs_hit` in `hooks/question_form.py`, in the owner line
 Text: `STEP_REASON`. Rule `building-mistake-names-its-guard` (a mistake names the guard that would have stopped it).
 
 - A report that says a step is queued names it as `step:<slug>`, and that step is a file on `origin/roadmap`.
-- The refusal quotes the sentence with no slug, or names the slug with no file. A step only on a lane branch is not queued: ask triage to file it, then cite it.
+- The refusal quotes the sentence with no slug, names the slug with no file, or both. A step only on a lane branch is not queued: ask triage to file it, then cite it.
+- To clear it, name the filed step as `step:<slug>` in the sentence, or put a quoted phrase in backticks: text in backticks makes no claim.
 - A read that could not run prints `unknown` and refuses nothing.
 
 ### Mistake guard (landed turns with a valid report)
