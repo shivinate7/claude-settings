@@ -1,6 +1,17 @@
-# No batch merges onto a red main
+# No merges onto a red main, except its revert
 
 ## The ruling
+
+Owner ruling Q4 g, recorded 2026-11-12 15:27 CST: a revert is an ordinary lane PR, merged with `--base-red-ok`. There is no `merge --revert`.
+
+Terms:
+
+- A breaking merge is a merge after which main's newest finished run is red.
+- A revert PR is the lane PR that undoes the commit of a breaking merge. It merges as an ordinary lane PR with `--base-red-ok`.
+
+State: the red-main check below is live. The revert route is target, not live. The code still has `merge --revert` and its trailer guards. The target removes them (refuter, 2026-11-11 22:58 CST, simpler route (a)), in the removal act of R42 part 2.
+
+PICK PENDING OWNER: a red main stops merges only until the revert's run on main is green. Owner question Q3 i is open. Its options are (a) the revert's run on main is green, which is this wording, or (b) the revert merge itself lifts the brake. This record does not choose between them until the owner answers.
 
 The red-main check: the merge tool refuses `merge <pr> --confirm` while the base branch's latest completed run has a red job. The preview prints the same verdict on its `<base> run:` line.
 
@@ -18,7 +29,7 @@ The red-main check: the merge tool refuses `merge <pr> --confirm` while the base
 - A run that did not succeed and has no red job: a timed-out job explains it, so it is not red. A cancelled run is UNKNOWN, unless the cross-group clear above clears it. The refusal, the unknown detail and the preview line name the run. They name its own re-run, `gh run rerun <id>`, only when its `head_sha` is the head_sha of the newest run on the page read (any status, any judged event). Runs on the base start at its head, and a re-run tests the run's own commit. A cancelled run on an older commit keeps its line with no remedy. A red verdict names a cancelled run beside it the same way. A run with a red job and a re-run in flight get no remedy. It is never swapped for an older run: on the base, `judge_runs`'s twin rule would reach across commits. Any other conclusion is red, such as `startup_failure` from a broken workflow file that runs no job. The tool sees a failed run and no reason for it, so it treats the run as red.
 - The refusal names each red job, the run id, its head and its URL.
 - Unknown: a read of the workflow files, the runs or the jobs that fails is UNKNOWN, never green or red. Unknown refuses, as the silent-undo check does.
-- The way out is `--base-red-ok "<reason>"`. It is a reason flag, like `--undo-check-unknown-ok`, not the owner's `override`. Claude may type it with no owner present (owner ruling, Cockpit item 178 a, 2026-11-03 22:31 CST: "Claude may type both, with a logged reason"). Use it only for the batch that carries the fix, or for an unknown read whose cause the reason names. Rule git-never-merge-failing-ci holds for every other batch. The tool prints the verdict and `--base-red-ok, reason: <reason>`, and writes `Reason flag: --base-red-ok: <reason>` to the merge commit message. A blank reason lifts nothing.
+- The way out is `--base-red-ok "<reason>"`. It is a reason flag, like `--undo-check-unknown-ok`, not the owner's `override`. Claude may type it with no owner present (owner ruling, Cockpit item 178 a, 2026-11-03 22:31 CST: "Claude may type both, with a logged reason"). Use it only for the revert PR of a breaking merge, or for an unknown read whose cause the reason names. Rule git-never-merge-failing-ci holds for every other PR. The tool prints the verdict and `--base-red-ok, reason: <reason>`, and writes `Reason flag: --base-red-ok: <reason>` to the merge commit message. A blank reason lifts nothing.
 
 Why: Oct 13 to 14, 14 main runs in a row were red, and batch merges kept landing on top. Main's latest run was not green for 311 of 366 hours. Each merge onto a red main hides the next defect and makes the repair lane longer (roadmap step c166, from plan c95-step2-escapes, option C's brake).
 
