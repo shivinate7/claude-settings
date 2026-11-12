@@ -79,6 +79,9 @@ class HealthMapTests(unittest.TestCase):
             f.write(text)
         return path
 
+    def mkdir(self, rel):
+        os.makedirs(os.path.join(self.root, *rel.split("/")), exist_ok=True)
+
     def write_map(self, rows):
         self.write(MAP, json.dumps({"rows": rows}, indent=2) + "\n")
 
@@ -112,6 +115,16 @@ class HealthMapTests(unittest.TestCase):
         self.assertEqual(rc, 1, "an uncovered part must exit 1\n" + out)
         self.assertCountEqual(self.uncovered(out), expected,
                               "the uncovered lines are not the parts with no covering row\n" + out)
+        self.assertNotIn(CLEAR, out, "a run with an uncovered part printed the clear line\n" + out)
+
+    def uncovered_paths(self, out):
+        return sorted(ln.split(": ", 1)[1] for ln in self.uncovered(out) if ": " in ln)
+
+    def assert_named(self, rc, out, paths):
+        """The uncovered parts are exactly these paths. The kind label is not pinned here."""
+        self.assertEqual(rc, 1, "an uncovered part must exit 1\n" + out)
+        self.assertEqual(self.uncovered_paths(out), sorted(paths),
+                         "the uncovered parts named are not the expected paths\n" + out)
         self.assertNotIn(CLEAR, out, "a run with an uncovered part printed the clear line\n" + out)
 
     def assert_unknown(self, rc, out, token):
@@ -167,6 +180,8 @@ class HealthMapTests(unittest.TestCase):
         self.write("skills/gamma/SKILL.md")
         self.write("skills/gamma/notes.md")  # a file inside a skill directory is not a part
         self.write("skills/README.md")
+        self.mkdir("hooks")  # the folders the check reads must exist; these two hold no parts
+        self.mkdir("lint")
         self.write_map(rows_for([["skills/ga*"]]))
         rc, out = self.check()
         self.assert_clear(rc, out, 1)
@@ -244,15 +259,92 @@ class HealthMapTests(unittest.TestCase):
         for i in range(300):
             self.write("hooks/hook_%03d.py" % i)
         self.write("hooks/zz_late.py")
+        self.mkdir("lint")  # the folders the check reads must exist; these two hold no parts
+        self.mkdir("skills")
         self.write_map(rows_for([["hooks/hook_*.py"]]))
         rc, out = self.check()
         self.assert_uncovered(rc, out, ["uncovered hook: hooks/zz_late.py"])
 
     def test_18_root_with_no_parts_exits_2(self):
-        # A valid map over a root with no hooks, checks or skills. Zero parts is a wrong root, not a clear run.
-        self.write_map(rows_for(NARROW_COVERS))
+        # The three parts folders exist and hold nothing, and no row is set. Zero parts is a wrong root, not a
+        # clear run. A root with no folders at all is the folder-missing case below.
+        for rel in ("hooks", "lint", "skills"):
+            self.mkdir(rel)
+        self.write_map([])
         rc, out = self.check()
         self.assert_unknown(rc, out, "no parts")
+
+    def test_19_janitor_and_merge_parts_are_named(self):
+        # janitor/*.py and merge/*.sh|*.py are parts. A janitor .sh is not a part, so it must not be named.
+        self.fixture(["janitor/extra.py", "janitor/extra.sh", "merge/extra.sh", "merge/extra.py"])
+        rc, out = self.check()
+        self.assert_named(rc, out, ["janitor/extra.py", "merge/extra.py", "merge/extra.sh"])
+
+    def test_20_test_files_in_janitor_and_merge_are_not_parts(self):
+        # The one real uncovered janitor part proves the scan reached janitor/. The test files must not join it.
+        self.fixture(["janitor/extra.py", "janitor/test_sweep.py", "merge/test_launch.py", "merge/_test_helpers.py"])
+        rc, out = self.check()
+        self.assert_named(rc, out, ["janitor/extra.py"])
+
+    def test_21_report_guard_is_a_part(self):
+        self.fixture(["lint/report_guard.py", "lint/test_report_guard.py"])
+        rc, out = self.check()
+        self.assert_named(rc, out, ["lint/report_guard.py"])
+
+    def test_22_too_broad_covers_glob_exits_2(self):
+        # A glob with no literal character matches by shape alone, so it covers every part. It must not pass.
+        self.write_parts()
+        for glob in ("*", "*/*", "?", "*.*"):
+            with self.subTest(glob=glob):
+                self.write_map(rows_for(NARROW_COVERS + [[glob]]))
+                rc, out = self.check()
+                self.assert_unknown(rc, out, "too broad")
+
+    def test_23_dead_glob_exits_1_and_names_its_row(self):
+        self.fixture()
+        self.write_map(rows_for(NARROW_COVERS + [["hooks/nothere*.py"]]))  # row 6 matches no file
+        rc, out = self.check()
+        self.assertEqual(rc, 1, "a dead glob must exit 1\n" + out)
+        self.assertIn("dead glob: row 6: hooks/nothere*.py", out.splitlines(),
+                      "the dead glob line for row 6 is missing\n" + out)
+        self.assertEqual(self.uncovered(out), [], "all parts are covered, so no uncovered line may print\n" + out)
+        self.assertNotIn(CLEAR, out, "a dead glob printed the clear line\n" + out)
+
+    def test_24_no_part_row_with_empty_covers_is_valid(self):
+        self.fixture()
+        parked = row(6, [])
+        parked["no_part"] = "a part not built yet"
+        self.write_map(rows_for(NARROW_COVERS) + [parked])
+        rc, out = self.check()
+        self.assert_clear(rc, out, 5)
+
+    def test_25_glob_matching_a_non_part_file_is_not_dead(self):
+        # A glob that matches a file, even one that is not a part, is not dead.
+        self.fixture(["docs/notes.md"])
+        self.write_map(rows_for(NARROW_COVERS + [["docs/*.md"]]))
+        rc, out = self.check()
+        self.assert_clear(rc, out, 5)
+
+    def missing_folder_case(self, folder, covers):
+        self.fixture()
+        shutil.rmtree(os.path.join(self.root, folder))
+        self.write_map(rows_for(covers))
+        rc, out = self.check()
+        self.assert_unknown(rc, out, "folder missing")
+
+    def test_26_missing_hooks_folder_exits_2(self):
+        self.missing_folder_case("hooks", [["lint/check_alpha*.py"], ["skills/alpha*"]])
+
+    def test_27_missing_lint_folder_exits_2(self):
+        self.missing_folder_case("lint", [["hooks/guard*.py"], ["hooks/notify*.mjs"], ["hooks/stop*.sh"], ["skills/alpha*"]])
+
+    def test_28_missing_skills_folder_exits_2(self):
+        self.missing_folder_case("skills", [["hooks/guard*.py"], ["hooks/notify*.mjs"], ["hooks/stop*.sh"], ["lint/check_alpha*.py"]])
+
+    def test_29_missing_janitor_and_merge_folders_are_optional(self):
+        self.fixture()  # the base fixture has no janitor/ and no merge/ folder
+        rc, out = self.check()
+        self.assert_clear(rc, out, 5)
 
 
 if __name__ == "__main__":
