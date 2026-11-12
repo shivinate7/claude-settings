@@ -1,0 +1,16 @@
+{
+ "id": "r64",
+ "at": "2026-11-12T16:01:00-06:00",
+ "ruling": "- **R64. The once-per-batch CI rule goes into skill ci-hygiene now; child repos adopt it later.** Owner 16:01 CST: \"just update the ci-hygiene skill for now, ill bring other repos in compliance only if there's free time on the runners\". Step ci-hygiene-once-per-batch starts now. Step child-ci-once-per-batch is held until runners have free time.",
+ "quote": "just update the ci-hygiene skill for now, ill bring other repos in compliance only if there's free time on the runners",
+ "source": "plans/restart-plan.md@restart-plan d5a8c832, R64; owner chat 16:01 CST relayed by the retrospective 16:02 CST",
+ "status": "open",
+ "supersedes": [
+  {
+   "kind": "skill",
+   "ref": "ci-hygiene: no rule that each suite runs once per batch"
+  }
+ ],
+ "title": "The once-per-batch CI rule goes into skill ci-hygiene now; child repos adopt it later.",
+ "step": "ci-hygiene-once-per-batch"
+}

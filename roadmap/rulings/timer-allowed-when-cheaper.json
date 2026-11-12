@@ -8,7 +8,7 @@
  "supersedes": [
   {
    "kind": "main-sentence",
-   "ref": "outcomes-mechanize-rules: \"reads on demand inside a process already running, never on a timer or on every tool call, and starts no new long-lived process.\""
+   "ref": "outcomes-mechanize-rules: \"never on a timer\" (the rest of the sentence stands; triage narrow wording, 15:55 CST Nov 12)"
   }
  ],
  "lands_in": {

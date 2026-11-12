@@ -4,6 +4,11 @@
   "home": "decision test-strategy-reset; skill ci-hygiene",
   "id": "ci-windows-rest-split",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T21:55:00Z",
+    "choice": "b",
+    "note": ""
+  },
   "n": 654,
   "options": [
     {
@@ -42,9 +47,10 @@
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
   "pick": "a",
   "ref": "retrospective 15:53 CST Nov 12, Linux and Windows CI audit (runs 43288661492, 43234925158)",
+  "reply": "Closed 16:03 CST: you answered in the retrospective's chat at 15:55 CST (ruling R62): split the Windows job and fetch less history (a), and skip the main run when it matches the batch (b); dropping the full Windows shards (c) is held, since b keeps them once per batch. Lane ci-linux-windows-once does it.",
   "repo": "shivinate7/claude-settings",
   "short": "Shorter batch gate after the macOS cuts",
-  "status": "open",
+  "status": "closed",
   "title": "Split the longest Windows check job and fetch less history for touched-tests",
   "why": "Each option trades CI time against coverage on main, which is your call."
 }

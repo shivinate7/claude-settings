@@ -1,0 +1,15 @@
+{
+ "id": "ci-hygiene-once-per-batch",
+ "title": "Skill ci-hygiene gains the once-per-batch CI rule",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "session_013NEJL3MapHQTT2ptee4wkg",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "R64, owner 16:01 CST Nov 12: \"just update the ci-hygiene skill for now\".",
+ "source": "retrospective 16:02 CST Nov 12; store r64",
+ "note": "Skill text only: each suite runs once per batch, on the batch PR, only on the OS whose behaviour it tests; the push to main skips a tree the green batch PR already ran (R61-R63). Scopes the skill part of step ci-hygiene-refresh.",
+ "updatedAt": "2026-11-12T16:05:45-06:00",
+ "order": -293
+}

@@ -4,6 +4,11 @@
   "home": "decision test-strategy-reset, line 23",
   "id": "install-sh-linux-run",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T21:55:00Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 655,
   "options": [
     {
@@ -26,9 +31,10 @@
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
   "pick": "a",
   "ref": "retrospective 15:53 CST Nov 12, CI audit; protocol outcomes-stale-decision-protocol",
+  "reply": "Closed 16:03 CST: you picked a in the retrospective's chat at 15:55 CST (ruling R63): both runs stay and the decision line is rewritten to Linux and macOS.",
   "repo": "shivinate7/claude-settings",
   "short": "Install test: Linux and macOS",
-  "status": "open",
+  "status": "closed",
   "title": "The install script is tested on Linux too, though a decision says macOS only",
   "why": "The record says one thing and CI does another; only you can change the record."
 }

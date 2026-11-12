@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-12T22:04:00Z",
+  "context": "Goal: a session can tap the iPhone simulator only while it holds that device, so it never acts on a device another session uses.\nProblem (risk): the new guard passed every cloud test, but no one has tried it on a real simulator, where a lane once kept tapping after its hold ended.\nBased on (read): the cloud session has no Xcode tools, so it cannot boot a simulator.\nDeparts from: main lets any session tap a booted simulator \u2014 the change refuses a tap from a session that does not hold the device.\nWhy yours: the test needs the simulator on your Mac, and no Mac folder is shared with any session (checked 2026-11-12 16:05 CST: the computer folder list is empty), so no session can reach it.",
+  "home": "step sim-tool-lease-check",
+  "id": "sim-lease-mac-test",
+  "kind": "task",
+  "n": 661,
+  "options": [
+    {
+      "gain": "The guard can merge with its live check done.",
+      "how": "Paste into Claude Code on your Mac: \"In the claude-settings checkout, run `git fetch origin sim-tool-lease-check-2` and check out commit 235e69606c in a new worktree, then install its hooks for this session only. 1. Run `sim-test --hold --for 900` through the Monitor tool and wait for its \"sim-test: holding <UDID>\" line. 2. Tap and screenshot that device with the simulator tool; both must work. 3. End the hold, then tap again; the guard must refuse it with rule simulator-device-lease. 4. Confirm the device shut down, the lease was given back and the lock is free. Reply with one line per step: PASS or FAIL and what you saw.\" Pick this if every line says PASS.",
+      "id": "all-pass",
+      "key": "a",
+      "label": "All four steps passed",
+      "lose": "About 15 minutes of your Mac's simulator time."
+    },
+    {
+      "gain": "The lane fixes the failure before merge.",
+      "how": "Same paste; pick this and put the FAIL lines in the note box.",
+      "id": "some-fail",
+      "key": "b",
+      "label": "A step failed",
+      "lose": "About 15 minutes of your Mac's simulator time."
+    }
+  ],
+  "owner": "lane sim-tool-lease-check (session_013NEJL2VvLJhuXxraazzfNX)",
+  "ref": "draft PR #3000 (simulator tool needs the caller's own lease), head 235e69606c",
+  "repo": "shivinate7/claude-settings",
+  "short": "Mac simulator lease test",
+  "status": "open",
+  "title": "On your Mac: check that the simulator tool works only while a session holds the device",
+  "why": "It needs Xcode's simulator, which only your Mac has."
+}

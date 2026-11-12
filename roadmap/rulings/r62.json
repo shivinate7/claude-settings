@@ -1,0 +1,16 @@
+{
+ "id": "r62",
+ "at": "2026-11-12T15:55:00-06:00",
+ "ruling": "- **R62. Linux and Windows CI: each suite runs once per batch, on the batch PR.** Measured: an Explore Sonnet audit found checks-windows-rest at 30.1-31.7 min on batch PR runs, the longest job once the Linux splits and R61 land. The push to main re-tested the batch PR's exact tree in 8 of 8 merges. Owner 15:55 CST: \"A for sure, B seems good too\". 1. checks-windows-rest splits into 2-3 parallel jobs. This is a bandaid; the cause is Windows process start cost. 2. lane-touched-tests fetches shallow history. 3. The push-to-main run skips when its tree equals a batch PR head that ran green, and the Windows full guard and merge shards move into the batch PR run. R61's nightly skip and the no-merge-onto-red-main gate then read that PR run. 4. Held: dropping the Windows full shards (option c). The owner worried that untagged cases may act differently on Windows. Part 3 keeps the full shards once per batch, so it answers that worry. A later measure may lift the hold: count runs where a full Windows shard went red while the Windows slice was green. Home decision: test-strategy-reset. Step: ci-linux-windows-once.",
+ "quote": "for q1: c seems best but im worried a lot of tests may have been windows but never knew to tag that way? A for sure, B seems good too.",
+ "source": "plans/restart-plan.md@restart-plan e75db7b4, R62; owner chat 15:55 CST relayed by the retrospective 15:56 CST",
+ "status": "open",
+ "supersedes": [
+  {
+   "kind": "decision",
+   "ref": "test-strategy-reset: the push to main re-runs every Linux and Windows suite; checks-windows-rest runs as one job; lane-touched-tests fetches full history"
+  }
+ ],
+ "title": "Linux and Windows CI: each suite runs once per batch, on the batch PR.",
+ "step": "ci-linux-windows-once"
+}

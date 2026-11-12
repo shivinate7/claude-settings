@@ -1,0 +1,16 @@
+{
+ "id": "r63",
+ "at": "2026-11-12T15:55:00-06:00",
+ "ruling": "- **R63. The install.sh tests run on Linux and macOS.** Read: decision test-strategy-reset says they run once, on shell-macos; CI runs them on Linux too (683-897 s), and cloud sessions install on Linux. Owner pick a, 15:55 CST: keep both runs and rewrite the decision line to match. Step: ci-linux-windows-once carries the record edit.",
+ "quote": "q2: A",
+ "source": "plans/restart-plan.md@restart-plan e75db7b4, R63; owner chat 15:55 CST relayed by the retrospective 15:56 CST",
+ "status": "open",
+ "supersedes": [
+  {
+   "kind": "decision",
+   "ref": "test-strategy-reset line 23: the install.sh tests run once, on shell-macos"
+  }
+ ],
+ "title": "The install.sh tests run on Linux and macOS.",
+ "step": "ci-linux-windows-once"
+}

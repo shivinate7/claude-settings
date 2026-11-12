@@ -1,0 +1,16 @@
+{
+ "id": "child-ci-once-per-batch",
+ "title": "Child repos run each CI suite once per batch",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "later",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "ci-hygiene-once-per-batch"
+ ],
+ "why": "R64, owner 16:01 CST Nov 12: \"ill bring other repos in compliance only if there's free time on the runners\". Read 15:52 CST: q_max reruns its 12-shard test tier on push (harness/ci-changes.mjs:8-9, :131-132); degen reruns server and 4 app shards on push.",
+ "source": "retrospective 15:59 and 16:02 CST Nov 12; store r64",
+ "note": "Held: start only when runners have free time (owner 16:01 CST). Compliance lanes per decision session-tiers \"Child repos\"; coordinator checks q_max and degen for an active coordinator first.",
+ "updatedAt": "2026-11-12T16:05:45-06:00"
+}

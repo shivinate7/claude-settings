@@ -1,15 +1,15 @@
 {
  "id": "unknown-reads-lint-linux-only",
  "title": "The unknown-reads contract lint runs on Linux only",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
- "lane": "",
+ "lane": "session_013NEJL1FmGQvNLgjrnoxD7B",
  "owner": "triage",
  "blockedBy": [],
  "why": "Retrospective CI audit 15:53 CST Nov 12: lint/check_unknown_reads_contract.py runs on Linux, macOS and Windows (checks.yml:551, :1183, :1896), against decision test-strategy-reset line 20 (\"pure lints run on ubuntu only\").",
  "source": "retrospective 15:53 CST Nov 12",
  "note": "Drop the Windows run of the lint (the macOS run goes in step ci-mac-once-per-batch). Express under R55 (CI fixes).",
- "updatedAt": "2026-11-12T15:56:59-06:00",
+ "updatedAt": "2026-11-12T16:05:45-06:00",
  "order": -294
 }
