@@ -1889,11 +1889,12 @@ def rsha_noted(folder, rule):
     return False
 
 
-def rsha_stand_in_sees(log, path):
-    """True when the stand-in logs a git call made on its PATH, so a count of zero means no call was made."""
+def rsha_stand_in_sees(log, path, cwd=None):
+    """True when the stand-in logs a git call made on its PATH, so a count of zero means no call was made.
+    The probe runs in RSHA_LANE unless `cwd` names another checkout."""
     if os.path.exists(log):
         os.remove(log)
-    subprocess.run([VCS, "rev-parse", "--is-inside-work-tree"], cwd=RSHA_LANE,
+    subprocess.run([VCS, "rev-parse", "--is-inside-work-tree"], cwd=cwd or RSHA_LANE,
                    env=dict(os.environ, PATH=path), capture_output=True)
     return os.path.exists(log)
 
@@ -2040,6 +2041,20 @@ add("report-sha-missing: a hex run after = is not a sha",
 add("report-sha-missing: a 13-character hex token is not a sha",
     "allow", tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
     message="Token 6c2e9a0f4b7d1 is in the log.")
+# Decision agent-report-shas-resolve, What counts as a sha: a sha on one side of a range is judged, the blob ids of an
+# index line are skipped, and a word that holds :// is skipped whole.
+add("report-sha-missing: a made-up sha on the far side of main.. is refused",
+    "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Diff main..8c1f0e2a7 is open.", carries=("8c1f0e2a7",))
+add("report-sha-missing: a made-up sha before ..HEAD is refused",
+    "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Diff 8c1f0e2a7..HEAD is open.", carries=("8c1f0e2a7",))
+add("report-sha-missing: the blob ids of an index line are not commits",
+    "allow", tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Diff:\nindex 054535674..3e943ee3c\nDone.")
+add("report-sha-missing: the two shas of a compare link to another repo are not judged",
+    "allow", tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="See https://github.com/other/repo/compare/abc1234...def5678 for the diff.")
 
 
 # --- the cases that need a real sha, read at run time: log checks, so the fixtures are built by the check.
