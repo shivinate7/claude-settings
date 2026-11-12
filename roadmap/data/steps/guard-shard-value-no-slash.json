@@ -1,11 +1,11 @@
 {
   "title": "test_guard.py and CI accept a shard value with no slash, so a builder in a worktree can shard",
   "why": "The Claude Code harness's worktree isolation refuses `GUARD_SHARD=i/n python3 bin/verdict python3 hooks/test_guard.py` in a builder worktree as \"too complex to verify that it stays inside the worktree\" (lane notes-fix-large-1, 06:35 CST Nov 9), so test_guard.py ran unsharded, 1390 s.",
-  "note": "Bandaid: the cause is the harness check (step harness-worktree-git-probe, raised upstream through owner page item 462). Accept a form with no slash, for example GUARD_SHARD=1-3, in hooks/test_guard.py (the parser near line 200) and keep CI's i/n values working (.github/workflows/checks.yml). Red case first. The coordinator starts its lane when filed (06:38 CST Nov 9).",
+  "note": "Bandaid: the cause is the harness check (step harness-worktree-git-probe, raised upstream through owner page item 462). Accept a form with no slash, for example GUARD_SHARD=1-3, in hooks/test_guard.py (the parser near line 200) and keep CI's i/n values working (.github/workflows/checks.yml). Red case first. The coordinator starts its lane when filed (06:38 CST Nov 9). R55 express (owner 14:05 CST Nov 12, via retrospective, plan fbc11be: \"CI fixes need to be right up there in the express lane with the merging fixes\"; home decision no-merge-during-batch-ci). Folded into the guard-pr-runs-windows-shards lane (coordinator 14:07).",
   "phase": "now",
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB) to route",
   "lane": "",
-  "status": "todo",
+  "status": "ready",
   "order": 908,
-  "updatedAt": "2026-11-09T06:37:00-06:00"
+  "updatedAt": "2026-11-12T14:09:06-06:00"
 }

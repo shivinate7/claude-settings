@@ -5,7 +5,7 @@
   "order": 0.11,
   "owner": "coordinator",
   "why": "Coordinator, 13:52 CST Nov 7: main red at 174b005c1, Windows guard shard 2.",
-  "note": "Cause of main-red-conflict-markers-windows: the PR run of #1402 did not run the Windows guard shards, so the red showed only on main. Related, 23:23 CST Nov 7: step windows-tests-for-touched-files widens the Windows run to every test file a lane touches, building on this step's trigger (#1543). Kept doing on: #1543 open draft (lane/guard-pr-windows-shards); no trigger on main yet (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-guard-pr-runs-windows-shards]).",
+  "note": "Cause of main-red-conflict-markers-windows: the PR run of #1402 did not run the Windows guard shards, so the red showed only on main. Related, 23:23 CST Nov 7: step windows-tests-for-touched-files widens the Windows run to every test file a lane touches, building on this step's trigger (#1543). Kept doing on: #1543 open draft (lane/guard-pr-windows-shards); no trigger on main yet (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-guard-pr-runs-windows-shards]). R55 express (owner 14:05 CST Nov 12, via retrospective, plan fbc11be: \"CI fixes need to be right up there in the express lane with the merging fixes\"; home decision no-merge-during-batch-ci). Coordinator 14:07: one lane with guard-shard-value-no-slash.",
   "lane": "",
-  "updatedAt": "2026-11-12T07:22:00-06:00"
+  "updatedAt": "2026-11-12T14:09:06-06:00"
 }
