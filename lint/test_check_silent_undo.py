@@ -425,6 +425,42 @@ class PrBodyEscape(unittest.TestCase):
             ("Summary.\r\n\r\n%s\r\n\r\n%s\r\n" % (L, A), "Summary.\r\n\r\n%s\r\n\r\n%s\r\n%s\r\n" % (L, A, S)),
         ])
 
+    # The key line can share its paragraph with the attribution, with the session URL as its own paragraph after it. The
+    # URL must not change the reading: the body without it is excused, so the body with it is too.
+    def test_a_session_url_paragraph_after_a_key_line_in_the_attribution_paragraph_reads_as_no_url(self):
+        L, S = self.LINE, self.SESSION
+        bare = self.ATTR.split(" ", 1)[1]  # the attribution without the emoji, as the reviewer's body wrote it
+        self.assert_reads_as_without_url([
+            ("Summary.\n\n%s\n%s\n" % (L, bare), "Summary.\n\n%s\n%s\n\n%s\n" % (L, bare, S)),
+            ("Summary.\n\n%s\n%s\n" % (L, self.ATTR), "Summary.\n\n%s\n%s\n\n%s\n" % (L, self.ATTR, S)),  # with the emoji
+        ])
+
+    def test_a_session_url_paragraph_after_a_key_line_in_the_attribution_paragraph_reads_as_no_url_with_crlf(self):
+        L, S = self.LINE, self.SESSION
+        bare = self.ATTR.split(" ", 1)[1]
+        self.assert_reads_as_without_url([
+            ("Summary.\r\n\r\n%s\r\n%s\r\n" % (L, bare), "Summary.\r\n\r\n%s\r\n%s\r\n\r\n%s\r\n" % (L, bare, S)),
+            ("Summary.\r\n\r\n%s\r\n%s\r\n" % (L, self.ATTR), "Summary.\r\n\r\n%s\r\n%s\r\n\r\n%s\r\n" % (L, self.ATTR, S)),
+        ])
+
+    def test_a_session_url_paragraph_after_a_key_line_in_the_attribution_paragraph_and_prose_excuses_nothing(self):  # control
+        L, S = self.LINE, self.SESSION
+        bare = self.ATTR.split(" ", 1)[1]
+        ok, why = self.excused("Summary.\n\n%s\n%s\n" % (L, bare))  # scope: the key line and attribution are read
+        self.assertTrue(ok, "scope: the body without the URL is not excused: %r" % (why,))
+        self.assert_nothing_excused(["Summary.\n\n%s\n%s\n\n%s\n\nClosing prose.\n" % (L, bare, S),
+                                     "Summary.\n\n%s\n%s\n\n%s\nClosing prose.\n" % (L, bare, S)])  # prose on the URL's next line
+
+    def test_a_session_url_paragraph_with_no_attribution_at_the_end_of_the_paragraph_above_is_prose(self):  # control
+        L, S = self.LINE, self.SESSION
+        bare = self.ATTR.split(" ", 1)[1]
+        ok, why = self.excused("Summary.\n\n%s\n%s\n" % (L, bare))  # scope: the key line and attribution are read
+        self.assertTrue(ok, "scope: the body without the URL is not excused: %r" % (why,))
+        self.assert_nothing_excused(["Summary.\n\n%s\n\n%s\n" % (L, S),  # the key line alone, then the URL paragraph
+                                     "Summary.\n\n%s\nSome other line\n\n%s\n" % (L, S),  # the paragraph above ends in other text
+                                     "Summary.\n\n%s\n%s extra\n\n%s\n" % (L, bare, S),  # the attribution line has text after it
+                                     "Summary.\n\n%s\n%s\nSome prose.\n\n%s\n" % (L, bare, S)])  # the paragraph above ends in prose
+
     def test_a_session_url_with_no_key_line_excuses_nothing(self):  # control
         L, A, S, F = self.LINE, self.ATTR, self.SESSION, self.FOOT
         ok, why = self.excused("Summary.\n\n%s\n\n%s\n" % (L, A))  # scope: the key line and attribution are read
