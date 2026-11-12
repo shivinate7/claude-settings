@@ -69,6 +69,7 @@ FLAGGED = [
     "from PR #509", "PR 1234", "PR#4567",
     "reverted in 2ff288b3", "see 03d62e85", "added by 4a1b2c3", "cut at 9f8e7d6c5b",
     "fixed in 41ddef83", "since commit 41ddef83", "fixed in `41ddef83`", "fixed in 41ddef83, 03d62e85",
+    "e.g. 41ddef83 fixed 03d62e85",
     "MEASURED 40 ms", "CORRECTED from the old value", "ADDED 2026 for the batch",
     "since 2026-10-18", "dated 2025-01-03",
     "owner ruling", "Owner's order", "owner request", "Owner ask",
@@ -619,7 +620,7 @@ def f():
 
 class ExampleIds(Case):
     """A comma list of ids after an example marker is clean. An id joined after a flagged id is flagged too.
-    A long list of ids, comma or space separated, finishes."""
+    An id past one word after an example id is flagged. A long list of ids, comma or space separated, finishes."""
     # The bound is a hang guard on the run, not a timed assert. A run past it fails with the bound named.
     # The 4000-id run takes about 1 s here, so 10 s leaves room for a loaded CI runner and still catches a hang.
     BOUND = 10  # seconds
@@ -662,14 +663,22 @@ class ExampleIds(Case):
         flagged = [row.split("commit hash: ", 1)[1].split(" ", 1)[0] for row in rows]
         self.assertEqual(flagged, ids[1:], "the flagged ids are not the ids after the first")
 
-    def test_id_joined_after_a_flagged_id_is_flagged_too(self):
-        rc, out = self.scan({"flagged.py": "x = 1\n# fixed in 41ddef83, 03d62e85\ny = 2\n"})
+    def test_ids_after_a_flagged_id_or_one_word_pin_their_verdicts(self):
+        cases = {
+            "joined.py": ("x = 1\n# fixed in 41ddef83, 03d62e85\ny = 2\n", ["41ddef83", "03d62e85"]),
+            "gap.py": ("x = 1\n# e.g. 41ddef83 fixed 03d62e85\ny = 2\n", ["03d62e85"]),
+        }
+        rc, out = self.scan({path: src for path, (src, _) in cases.items()})
         self.assertNotIn("Traceback", out)
         self.assertEqual(rc, 1, out)
         rows = [row for row in out.splitlines() if "commit hash:" in row]
-        self.assertEqual({row.split(": ", 1)[0] for row in rows}, {"flagged.py:2"}, "a hit is off the comment line")
-        flagged = [row.split("commit hash: ", 1)[1].split(" ", 1)[0] for row in rows]
-        self.assertEqual(flagged, ["41ddef83", "03d62e85"], "the id after a flagged id is not flagged")
+        scope = {row.split(": ", 1)[0] for row in rows}
+        self.assertTrue(scope <= {"joined.py:2", "gap.py:2"}, "a hit is off a comment line: %s" % sorted(scope))
+        for path, (_, expected) in cases.items():
+            with self.subTest(path):
+                on_path = [row for row in rows if row.startswith(path + ":")]
+                flagged = [row.split("commit hash: ", 1)[1].split(" ", 1)[0] for row in on_path]
+                self.assertEqual(flagged, expected, "the ids flagged on %s are not the ids the verdict names" % path)
 
 
 class Scanner(Case):
