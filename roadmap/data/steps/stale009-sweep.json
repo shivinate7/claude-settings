@@ -5,6 +5,6 @@
   "order": 266.0,
   "owner": "coordinator",
   "why": "Lane record-claim-cites-code measured 226 STALE009 hits on the full tree. A sample of 10 found 8 real, 1 borderline and 1 false (coordinator, 15:28 CST Nov 7).",
-  "note": "Waits on #1893. The coordinator starts the lane when #1893 merges. The sweep fixes the real cites only, and lists the false ones for the check's lane. Dead wait re-pointed 13:18 CST Nov 10 (step dead-pr-waits): #1539 closed unmerged; #1893 holds every #1539 commit.",
-  "updatedAt": "2026-11-10T13:18:00-06:00"
+  "note": "Waits on #1893. The coordinator starts the lane when #1893 merges. The sweep fixes the real cites only, and lists the false ones for the check's lane. Dead wait re-pointed 13:18 CST Nov 10 (step dead-pr-waits): #1539 closed unmerged; #1893 holds every #1539 commit. Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose after code; it waits behind the code it describes.",
+  "updatedAt": "2026-11-11T20:42:00-06:00"
 }

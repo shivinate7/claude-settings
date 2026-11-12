@@ -1,10 +1,10 @@
 {
   "title": "Decision owner-override's later-line sentence matches the code",
   "why": "#1463's round 3 (coordinator 21:07 CST Nov 8): docs/decisions/owner-override.md says a later line that starts with the keyword grants nothing, but the code asks the judge, so `thanks\\noverride 15m` grants 15m. An accuracy edit to the sentence.",
-  "note": "Starts after #1463 and #2220 merge. Points to decision owner-override. Lane override-plain-ask (12:51 CST Nov 9, #1463 round 3): section \"The plain override ask\" says a later line that starts with the keyword grants nothing, but the code asks the judge, so `thanks\\noverride 15m` grants 15m. #1463 is on main.",
+  "note": "Starts after #1463 and #2220 merge. Points to decision owner-override. Lane override-plain-ask (12:51 CST Nov 9, #1463 round 3): section \"The plain override ask\" says a later line that starts with the keyword grants nothing, but the code asks the judge, so `thanks\\noverride 15m` grants 15m. #1463 is on main. Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose, first wave.",
   "phase": "next",
   "owner": "coordinator",
   "status": "todo",
-  "order": 867,
-  "updatedAt": "2026-11-09T12:52:00-06:00"
+  "order": 0.112,
+  "updatedAt": "2026-11-11T20:42:00-06:00"
 }

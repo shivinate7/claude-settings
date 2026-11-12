@@ -2,10 +2,10 @@
   "title": "q_max #970's 36 rule and spec files are redone",
   "phase": "now",
   "status": "doing",
-  "order": 0.19,
+  "order": 0.12,
   "owner": "coordinator",
   "why": "Coordinator, 14:22 CST Nov 7: follows qmax-stale-rulings-redo.",
-  "note": "Coordinator, 14:25 CST: no owner questions on q_max D-557 and D-155; main stands (past-ruling guard).",
+  "note": "Coordinator, 14:25 CST: no owner questions on q_max D-557 and D-155; main stands (past-ruling guard). Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose, first wave.",
   "lane": "qmax-stale-rulings-redo",
-  "updatedAt": "2026-11-07T14:24:00-06:00"
+  "updatedAt": "2026-11-11T20:42:00-06:00"
 }

@@ -2,9 +2,9 @@
   "title": "One cleanup lane per child repo removes copies that decision child-cites-not-copies replaces with cites",
   "phase": "next",
   "status": "todo",
-  "order": 12.5,
+  "order": 0.117,
   "owner": "coordinator",
   "why": "Coordinator queue, 13:18 CST Nov 7: after #1432 lands (decision child-cites-not-copies), each child repo still holds copies of claude-settings text.",
-  "note": "Waits on #1432. Then one lane per child: degen, home, joyous, mailaudit, q_max. Done: each child cites claude-settings instead of copying, and its checks pass. Waits on the merge of #1432 (coordinator, 14:31 CST Nov 7). Dead wait re-pointed 13:18 CST Nov 10 (step dead-pr-waits): #1106 closed unmerged; #1432 replaced it.",
-  "updatedAt": "2026-11-10T13:18:00-06:00"
+  "note": "Waits on #1432. Then one lane per child: degen, home, joyous, mailaudit, q_max. Done: each child cites claude-settings instead of copying, and its checks pass. Waits on the merge of #1432 (coordinator, 14:31 CST Nov 7). Dead wait re-pointed 13:18 CST Nov 10 (step dead-pr-waits): #1106 closed unmerged; #1432 replaced it. Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose, first wave.",
+  "updatedAt": "2026-11-11T20:42:00-06:00"
 }
