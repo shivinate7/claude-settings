@@ -6,6 +6,7 @@ Other files reach these names through `guard`.
 """
 import os
 import re
+import shlex
 
 from guard_core import (
     DURATION, PLAYWRIGHT_PS_SHELLS, PowerShellScript, _absolute, _pwsh_script, _skip_assignments_and_keywords, basename,
@@ -69,7 +70,8 @@ LIVE_STREAM_REASON = (
     "this command follows a stream and never ends on its own, so it outlives the turn "
     "and the agent that started it. "
     "Remedy: run the command in the foreground with a timeout, or in the background and "
-    "wait for its completion notice. To wait on a pid, use `wait-pid PID [--timeout SECS]`."
+    "wait for its completion notice. To wait on a pid, use `bin/wait-pid PID [--timeout SECS]`. "
+    "To wait until a clock time, use `bin/wait-until TIME [--timeout SECS]`."
 )
 
 
@@ -83,6 +85,7 @@ LIVE_STREAM_REASON = (
 NARRATING_COMMANDS = ("merge", "merge.cmd")
 NARRATING_SCRIPT_TAILS = ("merge/merge.py", "merge/launch.py")
 TRUNCATING_FILTERS = ("tail", "head")
+SCRIPT_INTERPRETER = re.compile(r"(?:python[\d.]*w?|py)$")
 
 
 def narrating_stage(segment: str) -> str:
@@ -93,9 +96,57 @@ def narrating_stage(segment: str) -> str:
     index = resolve_command(tokens)
     if index is None:
         return ""
+    return _roster_word(tokens, index)
+
+
+# The interpreter flags that take the next word as their value, so `python -W ignore run.py` skips `ignore`.
+INTERPRETER_VALUE_FLAGS = ("-W", "-X")
+
+
+def _script_operand(tokens, index: int) -> str:
+    """The script an interpreter at `index` runs: its first word that is no flag. '' for `-m <module>`
+    and `-c <code>`, which run no script, so what follows them is an argument of theirs."""
+    at = index + 1
+    while at < len(tokens) and tokens[at].startswith("-"):
+        flag = tokens[at]
+        if flag in ("-m", "-c"):
+            return ""
+        at += 2 if flag in INTERPRETER_VALUE_FLAGS else 1
+    return _whole_word(tokens, at) if at < len(tokens) else ""
+
+
+def _whole_word(tokens, at: int) -> str:
+    """The word at `at`, joined across the tokens an unquoted substitution split. A `$(` or a backtick
+    opens a substitution that reads as several tokens, so the word reads on to the token that closes it
+    and the roster tail is judged on the joined word. A quoted substitution is one token and joins nothing."""
+    word = tokens[at]
+    depth = word.count("$(") - word.count(")")
+    ticks = word.count("`") % 2
+    while (depth > 0 or ticks) and at + 1 < len(tokens):
+        at += 1
+        word += " " + tokens[at]
+        depth += tokens[at].count("$(") - tokens[at].count(")")
+        ticks = (ticks + tokens[at].count("`")) % 2
+    return word
+
+
+def _roster_word(tokens, index: int, interpreter_only: bool = False) -> str:
+    """The roster spelling the command at `index` runs (`merge`, `merge.cmd`, or a script run through
+    a runner, `python merge.py`), else ''. The one reader of NARRATING_COMMANDS and
+    NARRATING_SCRIPT_TAILS. A word carrying a script path counts, so `python3.11` and `uv run python`
+    both match. `interpreter_only` keeps the word to an interpreter (SCRIPT_INTERPRETER) and the path
+    to its script operand: the check rule needs it, so `grep -n x merge/merge.py` and
+    `python3 -m pytest -k merge/merge.py` are no run of the script."""
     word = basename(tokens[index])
     if word in NARRATING_COMMANDS:
         return word
+    if interpreter_only:
+        script = _script_operand(tokens, index) if SCRIPT_INTERPRETER.match(word.removesuffix(".exe")) else ""
+        if not script and word.endswith(".py"):
+            script = tokens[index]  # `uv run merge/merge.py`: uv runs the script, so it is the command word
+        if script.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
+            return word + " " + basename(script)
+        return ""
     for token in tokens[index:]:
         if token.replace("\\", "/").endswith(NARRATING_SCRIPT_TAILS):
             return word + " " + basename(token)
@@ -127,6 +178,119 @@ NARRATED_TAIL_REASON = (
     "like a hang. "
     "Remedy: run the command with nothing after it and read its output as it arrives, or "
     "redirect to a file you read back afterwards, or use tee to keep a full copy."
+)
+
+
+# A CHECK piped into `tail` or `head` (decision background-check-through-verdict). A filter that keeps
+# one end holds every byte until the command exits, then prints a few lines, so the one useful line, the
+# verdict, can be cut off or never read. `verdict <cmd>` keeps the whole log and prints the verdict
+# itself. Only named checks count, one entry per incident, because refusing every `| tail` is the
+# cry-wolf guard (docs/decisions/guard-that-cries-wolf-is-spent.md). The merge tool's verdict calls
+# (`--lane-lint`, `--review-record`, `--release-check`) are refused in the foreground too. They count as `merge`,
+# `merge.cmd`, or `merge/merge.py` or `merge/launch.py` run by `python`, a `python3.N`, `pythonw` or
+# `py`, behind a wrapper or `uv run`. A call through `verdict` is verdict-pipe's, never read here.
+# `merge --confirm` is narrated_tail_hit's, so it is left out here and never refused twice.
+# `ci-job` is refused in the background only.
+CHECK_COMMANDS = ("ci-job", "ci-job.cmd")
+CHECK_FLAGS = ("--lane-lint", "--review-record", "--release-check")
+CHECK_SCRIPT_TAIL = "bin/ci-job"
+# The `uv` and `uv run` flags that take the next word as their value (`uv run --help`, uv 0.11), so
+# `uv run -w pytest python x.py` skips `pytest`. The global flags that sit before `run` are in this list too.
+UV_VALUE_FLAGS = frozenset((
+    "--allow-insecure-host", "--cache-dir", "--color", "--config-file", "--config-setting",
+    "--config-settings-package", "--default-index", "--directory", "--env-file", "--exclude-newer",
+    "--exclude-newer-package", "--extra", "--extra-index-url", "--find-links", "--fork-strategy",
+    "--group", "--index", "--index-strategy", "--index-url", "--keyring-provider", "--link-mode",
+    "--no-binary-package", "--no-build-isolation-package", "--no-build-package",
+    "--no-editable-package", "--no-extra", "--no-group", "--no-sources-package", "--only-group",
+    "--package", "--prerelease", "--project", "--python", "--python-platform",
+    "--refresh-package", "--reinstall-package", "--resolution", "--upgrade-group",
+    "--upgrade-package", "--with", "--with-editable", "--with-requirements",
+    "-C", "-P", "-f", "-i", "-p", "-w",
+))
+
+
+def _skip_uv_run(tokens, index: int) -> int:
+    """The index of the command `uv [flags] run [flags] ...` starts, read through `resolve_command`
+    again, else `index`. `uv` is no entry of COMMAND_WRAPPERS: adding it would move every rule that
+    reads the command word, and only the check rule needs it."""
+    while index < len(tokens) and basename(tokens[index]) == "uv":
+        run = index + 1
+        while run < len(tokens) and tokens[run].startswith("-"):
+            run += 2 if tokens[run] in UV_VALUE_FLAGS else 1
+        if tokens[run:run + 1] != ["run"]:
+            break
+        start = run + 1
+        while start < len(tokens) and tokens[start].startswith("-"):
+            start += 2 if tokens[start] in UV_VALUE_FLAGS else 1
+        at = resolve_command(tokens[start:])
+        if at is None:
+            break
+        index = start + at
+    return index
+
+
+def check_stage(segment: str, background: bool) -> str:
+    """The command word when one segment runs a named check, else ''. `ci-job` counts
+    only in the background."""
+    tokens = segment_tokens(segment)
+    if not tokens:
+        return ""
+    index = resolve_command(tokens)
+    if index is None:
+        return ""
+    index = _skip_uv_run(tokens, index)
+    if basename(tokens[index]) in CHECK_COMMANDS:
+        return basename(tokens[index]) if background else ""
+    if SCRIPT_INTERPRETER.match(basename(tokens[index]).removesuffix(".exe")) and _script_operand(
+            tokens, index).replace("\\", "/").endswith(CHECK_SCRIPT_TAIL):
+        return CHECK_COMMANDS[0] if background else ""
+    if "--confirm" in tokens or not any(flag in tokens for flag in CHECK_FLAGS):
+        return ""
+    return _roster_word(tokens, index, interpreter_only=True)
+
+
+def _pipeline_hit(stages, background: bool) -> str:
+    """The matched text when a named check in one pipeline's stages reaches `tail`/`head`. A `tee`
+    between them does not end the reach, since the filter after it still cuts what the agent reads. A
+    `tee` with no `tail` or `head` after it is not a hit."""
+    for first, segment in enumerate(stages):
+        stage = check_stage(segment, background)
+        if not stage:
+            continue
+        for later in stages[first + 1:]:
+            tokens = segment_tokens(later)
+            at = resolve_command(tokens) if tokens else None
+            if at is None:
+                continue
+            word = basename(tokens[at])
+            if word in TRUNCATING_FILTERS:
+                return stage + " | " + word
+    return ""
+
+
+def check_tail_hit(stripped: str, background: bool) -> str:
+    """The matched text when a call pipes a named check into `tail`/`head`, directly or through other
+    filters. A pipeline ends at any separator other than `|`."""
+    ends = []
+    segments = split_segments(stripped, ends)
+    stages = []
+    for segment, end in zip(segments, ends):
+        stages.append(segment)
+        if end != "|":
+            hit = _pipeline_hit(stages, background)
+            if hit:
+                return hit
+            stages = []
+    return _pipeline_hit(stages, background)
+
+
+CHECK_TAIL_REASON = (
+    "this check's output goes into a filter that keeps one end, so the filter holds everything "
+    "until the check exits and the verdict can be lost "
+    "(decision background-check-through-verdict). "
+    "Remedy: run the check through verdict, as `verdict <cmd>` with nothing after it. It keeps the "
+    "full log and prints the verdict itself."
 )
 
 
@@ -162,7 +326,8 @@ def _verdict_pipe_in(text: str) -> str:
         at = resolve_command(tokens)
         if at is None and _is_lookup(tokens):
             continue
-        reach = tokens if at is None else tokens[:at + 1]
+        # `uv` is no wrapper, so `uv run verdict x` names `uv`; _skip_uv_run reads on to the program.
+        reach = tokens if at is None else tokens[:_skip_uv_run(tokens, at) + 1]
         if any(basename(token.lstrip("(")) in VERDICT_WORDS for token in reach):
             return "verdict |"
     # A shell's script (`bash -c '...'`) is its own command text, read the way the live-stream rule reads it.
@@ -271,24 +436,97 @@ def watch_flag(args) -> bool:
     return False
 
 
+# A loop ends at a clock time only when its one test orders a `date` read against a literal time of the same
+# kind, in the direction that turns the test at that time. Two shapes do: a `+%s` read ordered with -gt, -ge,
+# -lt or -le against an epoch number, and an ISO date-time read ordered with `>` or `<` against a full ISO
+# date-time. `until` takes the later-than operators and `while` the earlier-than ones. Any other pairing never
+# turns: a numeric order of a text read is an error, and a text order of epoch digits never meets an ISO time.
+# The read is the clock only with no flag but -u: `-d` and `-r` read a fixed time, and a format outside
+# CLOCK_FORMATS is not ordered like the ISO literal.
+CLOCK_LITERAL = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2})?$|\d{9,}$")
+CLOCK_READ = re.compile(r"\$\(date(?:\s[^;&|<>$`()]*)?\)$|`date(?:\s[^;&|<>$`()]*)?`$")
+TEST_CLOSER = {"[": "]", "[[": "]]", "test": None}   # the only commands a clock loop's test may use
+LATER_THAN = {">", "-gt", "-ge"}     # ends an `until` loop once the clock is past the literal
+EARLIER_THAN = {"<", "-lt", "-le"}   # ends a `while` loop when the clock reaches the literal
+CLOCK_FLAGS = ("-u", "--utc")        # the only flags a clock read may carry
+# The formats a clock read may use: the epoch, and the ISO date-time with or without its `Z`.
+CLOCK_FORMATS = ("+%s", "+%Y-%m-%dT%H:%M:%S", "+%Y-%m-%dT%H:%M:%SZ", "+%FT%T", "+%FT%TZ")
+
+
+def clock_test(head) -> bool:
+    """True when the loop header `head` (tokens, `while` or `until` first) is one `[ ]`, `[[ ]]` or `test`
+    whose operands are exactly a `date` read, an ordering that ends the loop, and a literal time, with the
+    read's format, the ordering and the literal all of one kind (epoch or ISO date-time)."""
+    opener = head[1] if len(head) > 1 else ""
+    if opener not in TEST_CLOSER:
+        return False
+    rest, closer = head[2:], TEST_CLOSER[opener]
+    if closer:
+        if not rest or rest[-1] != closer:
+            return False
+        rest = rest[:-1]
+    # An unquoted `$(date -u +%s)` is split on its spaces: take the words up to the one that closes it.
+    cut = next((n for n in range(1, len(rest) + 1) if CLOCK_READ.match(" ".join(rest[:n]))), 0)
+    if not cut:
+        return False
+    form = date_format(" ".join(rest[:cut]))
+    rest = rest[cut:]
+    ends_loop = LATER_THAN if head[0].lower() == "until" else EARLIER_THAN
+    if not (len(rest) == 2 and rest[0] in ends_loop and bool(CLOCK_LITERAL.match(rest[1]))):
+        return False
+    # CLOCK_LITERAL has matched, so a `:` marks the ISO form and all digits the epoch form.
+    if rest[0].startswith("-"):
+        return form == "+%s" and ":" not in rest[1]
+    return form is not None and "%s" not in form and not rest[1].isdigit()
+
+
+def date_format(read: str):
+    """The `+FORMAT` argument of a `$(date ...)` or backtick `date` read, unquoted, when it is one of
+    CLOCK_FORMATS and every other argument is one of CLOCK_FLAGS; else None, as for a read that cannot be split."""
+    inner = read[2:-1] if read.startswith("$(") else read[1:-1]
+    try:
+        words = shlex.split(inner)
+    except ValueError:
+        return None
+    forms = [word for word in words[1:] if word.startswith("+")]
+    flags = [word for word in words[1:] if not word.startswith("+")]
+    if len(forms) != 1 or forms[0] not in CLOCK_FORMATS or any(flag not in CLOCK_FLAGS for flag in flags):
+        return None
+    return forms[0]
+
+
+def clock_loop(token_rows) -> bool:
+    """True when the command's one loop is a `while`/`until` whose own test (no `&&` or `||` clause after
+    it) is a `clock_test`, and no other loop. A quoted word is one token, so `grep -q "date"` names no clock."""
+    words = [re.match(r"[\w%-]*", row[0]).group().lower() for row in token_rows]
+    heads = [i for i, word in enumerate(words) if word in ("while", "until")]
+    if len(heads) != 1 or any(w in LOOP_WORDS and w not in ("while", "until", "do") for w in words):
+        return False
+    return words[heads[0] + 1:heads[0] + 2] == ["do"] and clock_test(token_rows[heads[0]])
+
+
 def waiter_verdict(segments, background: bool) -> str:
     """Return the matched text when a command waits by looping, else ''.
 
     Refused: a loop around a sleep, two or more sleeps, one sleep of SLEEP_LIMIT seconds or
     more, `timeout /t`, `gh run watch` (foreground or background), and a foreground
-    `gh pr checks --watch`. Allowed: one short sleep, and `gh pr checks --watch` with
-    run_in_background."""
-    sleeps, loop, watcher, run_watch = [], False, "", ""
+    `gh pr checks --watch`. Allowed: one short sleep, `gh pr checks --watch` with
+    run_in_background, and, with run_in_background, one sleep of any length followed by a command
+    and a `clock_loop`: a `+%s` read ordered against an epoch, or an ISO read ordered against an ISO time."""
+    sleeps, loop, watcher, run_watch, followed = [], False, "", "", False
+    token_rows = []
     for segment in segments:
         # Braces get their own token, so a compact `while(1){Start-Sleep 1}` reads like a spaced one.
         tokens = segment_tokens(re.sub(r"([{}])", r" \1 ", segment))
         if not tokens:
             continue
+        token_rows.append(tokens)
         loop = loop or re.match(r"[\w%-]*", tokens[0]).group().lower() in LOOP_WORDS
         index = resolve_command(tokens)
         if index is None:
             continue
         word = basename(tokens[index]).lower()
+        followed = followed or bool(sleeps) and word not in WAITER_COMMANDS
         # A PowerShell loop keeps its sleep in a `{ ... }` block inside the same segment.
         for at in sorted({index, *(i + 1 for i, t in enumerate(tokens[:-1]) if t == "{")}):
             if basename(tokens[at]).lower() in WAITER_COMMANDS:
@@ -302,9 +540,14 @@ def waiter_verdict(segments, background: bool) -> str:
                 run_watch = run_watch or found
         elif waiter_hit(segment):
             return waiter_hit(segment)
+    if background and clock_loop(token_rows):
+        # A `+%s` read ordered against an epoch, or an ISO read ordered against an ISO time, ends the loop at
+        # that time, so only its pauses are judged.
+        loop = False
     if sleeps and loop:
         return sleeps[0][0]
-    if len(sleeps) > 1 or any(seconds >= SLEEP_LIMIT for _, seconds in sleeps):
+    long_ok = background and followed
+    if len(sleeps) > 1 or (any(seconds >= SLEEP_LIMIT for _, seconds in sleeps) and not long_ok):
         return sleeps[0][0]
     return run_watch or ("" if background else watcher)
 
@@ -312,11 +555,15 @@ def waiter_verdict(segments, background: bool) -> str:
 WAITER_REASON = (
     "a pause between polls turns waiting into a loop of turns that each print a word. "
     "Remedy: wait for the CI-wake notice that follows gh pr ready. "
-    "To wait for another condition, use the Monitor tool once, or run the long command in the background and wait for its completion notice. "
-    "To wait on one pid, use `wait-pid PID [--timeout SECS]`. "
-    "A single pause under 25 seconds is allowed. Avoid "
-    "gh pr checks --watch in the foreground, which serves a cached status. For a server warm-up, use a "
-    "readiness check such as curl --retry."
+    "To wait until a clock time, use `bin/wait-until TIME [--timeout SECS]`, with TIME an ISO-8601 instant "
+    "that has a zone. To wait on one pid, use `bin/wait-pid PID [--timeout SECS]`. "
+    "To wait for another condition, run the long command in the background and wait for its completion "
+    "notice. In the background, one pause of any length followed by a command is allowed, and so is a "
+    "loop whose test orders the date output against a literal time of the same kind: date +%s against an "
+    "epoch with -gt or -ge, or an ISO date-time read against an ISO time with \\>. "
+    "A single pause under 25 seconds is allowed in the foreground. Avoid gh pr checks --watch in the "
+    "foreground, which serves a cached status. For a server warm-up, use a "
+    "readiness check such as `curl --retry 5 --retry-connrefused http://localhost:3000`."
 )
 
 
@@ -478,8 +725,9 @@ PATTERN_POLLER_REASON = (
     "the loop's own condition polls for a process by name or by pattern. That pattern can match "
     "every process whose command line names it, including this session's own wrapper for the "
     "same wait, so the condition can stay true long after the work is done. "
-    "Remedy: wait on one pid with `wait-pid PID [--timeout SECS]`, which also takes a job a stall "
-    "left behind. To wait for CI, wait for the CI-wake notice that follows gh pr ready."
+    "Remedy: wait on one pid with `bin/wait-pid PID [--timeout SECS]`, which also takes a job a stall "
+    "left behind. To wait until a clock time, use `bin/wait-until TIME [--timeout SECS]`. "
+    "To wait for CI, wait for the CI-wake notice that follows gh pr ready."
 )
 
 

@@ -360,24 +360,55 @@ cloud_git() {
 }
 
 # Resume: a clone this script made (marker set) follows the ref. A clone without the marker is a
-# person's own: this block never moves it, and the block below moves it only when clean and detached. mirrorSha is the sha this script last set main to: a main that
-# differs holds a local commit, and moving main would drop it. A clone with no mirrorSha counts as
-# unchanged, because only this script writes the marker. The fetch is depth 1, so a resume pulls the
-# new tip only, never the history under it. A failed fetch keeps the clone as it was. The live pin skips it.
+# person's own: this block never moves it, and the block below moves it only when clean and detached. The clone keeps its
+# main only when main holds a commit the fetched ref lacks, because moving main would drop that commit. Only this script
+# writes mirrorSha, so a main still at mirrorSha holds no local commit and needs no check; a check there would fetch full
+# history on nearly every refresh, since a depth-1 tip never holds the old main. A main that moved off mirrorSha without a
+# local commit can be told from one with a local commit only on the ref's full history, so that check fetches it. The
+# depth-1 fetch after it only shortens the clone; main moves to the tip the check ran on, since origin may have moved
+# since. A clone the check cannot decide is kept with a WARN. The live pin skips it.
 # mirror_refresh DIR does the refresh; use_main_mirror below also calls it. A failed refresh keeps the clone at
 # its older main, with a WARN: older reviewed files are safer than a checkout's branch.
 mirror_refresh() {
   mr_dir="$1"
-  mr_sha=$(git -C "$mr_dir" config --get claude-settings.mirrorSha 2>/dev/null)
-  if [ -n "$mr_sha" ] && [ "$(git -C "$mr_dir" rev-parse -q --verify main 2>/dev/null)" != "$mr_sha" ]; then
-    log "WARN: the clone $mr_dir has local commits on main that $REF lacks; keeping it as it is"
-  elif ! cloud_git -C "$mr_dir" fetch -q --depth 1 origin "$REF"; then
+  if ! cloud_git -C "$mr_dir" fetch -q --depth 1 origin "$REF"; then
     log "WARN: could not refresh the clone $mr_dir to $REF; keeping it as it is"
-  elif git -C "$mr_dir" checkout -q -B main FETCH_HEAD \
-       && git -C "$mr_dir" config claude-settings.mirrorSha "$(git -C "$mr_dir" rev-parse main)"; then
+    return
+  fi
+  mr_tip=$(git -C "$mr_dir" rev-parse -q --verify FETCH_HEAD 2>/dev/null)
+  mr_main=$(git -C "$mr_dir" rev-parse -q --verify refs/heads/main 2>/dev/null)
+  if [ -z "$mr_tip" ]; then
+    log "WARN: could not refresh the clone $mr_dir to $REF; keeping it as it is"
+    return
+  fi
+  mr_sha=$(git -C "$mr_dir" config --get claude-settings.mirrorSha 2>/dev/null)
+  if [ -n "$mr_main" ] && [ "$mr_main" != "$mr_tip" ] && [ "$mr_main" != "$mr_sha" ] \
+     && ! git -C "$mr_dir" merge-base --is-ancestor "$mr_main" "$mr_tip" 2>/dev/null; then
+    if ! cloud_git -C "$mr_dir" fetch -q --depth=2147483647 origin "$REF"; then
+      log "WARN: could not tell whether the clone $mr_dir holds local commits on main that $REF lacks; keeping it as it is"
+      return
+    fi
+    mr_tip=$(git -C "$mr_dir" rev-parse -q --verify FETCH_HEAD 2>/dev/null)
+    git -C "$mr_dir" merge-base --is-ancestor "$mr_main" "$mr_tip" 2>/dev/null
+    case $? in
+      0)
+        # Shorten the history again; a failed fetch leaves the deeper history, which is harmless.
+        cloud_git -C "$mr_dir" fetch -q --depth 1 origin "$REF" || : ;;
+      1)
+        mr_n=$(git -C "$mr_dir" rev-list --count "$mr_tip..$mr_main" 2>/dev/null)
+        log "WARN: the clone $mr_dir has ${mr_n:-some} local commits on main that $REF lacks; keeping it as it is"
+        return ;;
+      *)
+        log "WARN: could not tell whether the clone $mr_dir holds local commits on main that $REF lacks; keeping it as it is"
+        return ;;
+    esac
+  fi
+  if ! git -C "$mr_dir" checkout -q -B main "$mr_tip"; then
+    log "WARN: could not refresh the clone $mr_dir to $REF; keeping it as it is"
+  elif git -C "$mr_dir" config claude-settings.mirrorSha "$(git -C "$mr_dir" rev-parse main)"; then
     log "refreshed the clone $mr_dir to $REF"
   else
-    log "WARN: could not refresh the clone $mr_dir to $REF; keeping it as it is"
+    log "WARN: moved main in the clone $mr_dir to $REF, but could not record it in claude-settings.mirrorSha"
   fi
 }
 if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ "$(git -C "$SRC" config --get claude-settings.cloudMirror 2>/dev/null)" = true ]; then
@@ -977,13 +1008,13 @@ if [ "$CLOUD" = 1 ]; then
   # The refresh hook hands its stdin to install.sh, which reads the session source from it.
   # Locals get no refresh hook: their settings.json is a symlink into the clone.
   HOOK_CMD='i=$(cat); curl -fsSL '"${RAW}"'/install.sh | CS_HOOK_INPUT="$i" bash -s -- --cloud'
+  SRC_SHA=$(git -C "$SRC" rev-parse --short HEAD 2>/dev/null) || SRC_SHA="no git"
   if command -v jq >/dev/null 2>&1; then
     # merge/cloud_allow.json: the `merge --confirm` and `merge --role` allow rules only a cloud session gets (a local settings.json links to the repo's, which has none).
     # Read from the source checkout, never from main: launch.py's fallback and --dev run the checkout's own merge.py, and
     # the file landed in the same commit as that merge.py's role check. A checkout without the file gets no rules.
     ALLOW_FILE="$SRC/merge/cloud_allow.json"
     [ -f "$ALLOW_FILE" ] || ALLOW_FILE=/dev/null   # a source without the file adds no rules
-    SRC_SHA=$(git -C "$SRC" rev-parse --short HEAD 2>/dev/null) || SRC_SHA="no git"
     if jq --arg cmd "$HOOK_CMD" --slurpfile extra "$ALLOW_FILE" \
       "$FIRES_JQ"'.hooks.SessionStart = ([(.hooks.SessionStart // [])[] | select(fires("startup") | not)] + [{"matcher":"startup|resume","hooks":[{"type":"command","command":$cmd,"timeout":60}]}])
        | .permissions.allow = ((.permissions.allow // []) + ($extra[0].permissions.allow // []))' \
@@ -1000,7 +1031,7 @@ if [ "$CLOUD" = 1 ]; then
     fi
   else
     cp "$SRC/settings.json" "$TARGET_JSON"
-    log "wrote $TARGET_JSON (jq missing, no refresh hook and no merge/cloud_allow.json rules added)"
+    log "wrote $TARGET_JSON (jq missing, no refresh hook and no merge/cloud_allow.json rules added) from $SRC at $SRC_SHA"
   fi
 else
   # Local: symlink, so `git pull` in the clone is the whole update.
@@ -1028,11 +1059,37 @@ else
   fi
 fi
 
-# ~/.claude/bin on PATH, once, in the rc file of the login shell.
+# ~/.claude/bin on PATH, once, in the rc file of the login shell. Cloud too: a cloud container
+# does not have ~/.claude/bin on PATH, so a printed remedy naming wait-pid or verdict fails with rc 127.
+# In cloud the block goes at the TOP of the rc: a Debian ~/.bashrc opens with `[ -z "$PS1" ] && return`,
+# so a non-interactive `source ~/.bashrc` returns before an appended block. The new rc is built beside the
+# old one (cp -p keeps its mode) and moved over it, so a failed step leaves the rc as it was. A symlinked
+# rc is written through to its target, so the link stays. Off cloud the block is appended at the end.
 case "${SHELL:-}" in *zsh) RC="$HOME/.zshrc" ;; *) RC="$HOME/.bashrc" ;; esac
-if [ "$CLOUD" != 1 ] && ! grep -qsF '# claude-settings: ~/.claude/bin on PATH' "$RC"; then
-  printf '\n# claude-settings: ~/.claude/bin on PATH\nexport PATH="$HOME/.claude/bin:$PATH"\n' >> "$RC"
-  log "added ~/.claude/bin to PATH in $RC; a new session picks it up"
+PATH_MARK='# claude-settings: ~/.claude/bin on PATH'
+PATH_BLOCK=$(printf '%s\n%s' "$PATH_MARK" 'export PATH="$HOME/.claude/bin:$PATH"')
+if ! grep -qsF "$PATH_MARK" "$RC"; then
+  if [ "$CLOUD" = 1 ]; then
+    rc_file=$RC
+    [ ! -L "$RC" ] || rc_file=$(readlink -f "$RC" 2>/dev/null) || rc_file=
+    rc_new="$rc_file.cs-new"
+    if [ -n "$rc_file" ] && rm -f "$rc_new" \
+      && { [ ! -e "$rc_file" ] || cp -p "$rc_file" "$rc_new"; } \
+      && { printf '%s\n\n' "$PATH_BLOCK" && { [ ! -e "$rc_file" ] || cat "$rc_file"; }; } > "$rc_new" \
+      && mv_retry "$rc_new" "$rc_file"; then
+      rc_written=1
+    else
+      [ -z "$rc_file" ] || rm -f "$rc_new" 2>/dev/null; rc_written=0
+    fi
+  else
+    rc_written=0
+    printf '\n%s\n' "$PATH_BLOCK" >> "$RC" 2>/dev/null && rc_written=1
+  fi
+  if [ "$rc_written" = 1 ]; then
+    log "added ~/.claude/bin to PATH in $RC; a new session picks it up"
+  else
+    log "could not write $RC; ~/.claude/bin is not on PATH"
+  fi
 fi
 
 # Runs one startup entry bounded to $1 seconds where there is no `timeout` binary (macOS). The entry and a

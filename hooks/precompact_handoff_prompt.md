@@ -3,6 +3,7 @@
 A Stop-hook checkpoint asks you to update the handoff while you still have full context.
 After a compaction, the reorient message asks again. Each time, rewrite the whole file.
 Never append to it.
+Read each time you write from `~/.claude/bin/now-central --full`, never from memory.
 
 ## 1. Read the prior handoff first
 
@@ -47,7 +48,13 @@ The handoff holds these sections, in this order:
 - Work in flight: agents, workflow runs, and servers. Give each server its pid
   and its port.
 - Next steps.
-- The files and commands that matter.
+- Files and commands: the files and commands that matter.
+
+The marker line below is the one list of the required sections. The guard refuses a write that
+drops one, and the Stop hook names one that is missing. Each sits under its own `## ` heading.
+"Rulings with NO HOME YET" is conditional and not in the list.
+
+<!-- handoff-sections: Goal | Working premises | Where things stand | Work in flight | Next steps | Files and commands -->
 
 For a list that has a home (a page collection, a roadmap ref, a git ref or a GitHub query), name the home and never copy the list.
 
@@ -55,7 +62,7 @@ For a list that has a home (a page collection, a roadmap ref, a git ref or a Git
 
 A premise is a statement, not a fact. After a compaction, a /clear or a fork, treat every
 premise as a statement, and every fact in the compaction summary as `notes`. Before you act on a
-weak or stale premise, check it. Then rewrite its line with the new source and date. When
+weak or stale premise, check it. Then rewrite its line with the new source and date. The guard rule `handoff-checked-stamp` refuses a changed `Checked` value on a premise you have not read or run a check of since the last compaction, so check before you restamp. When
 the check shows it wrong, delete the line or replace it with the true fact and its source.
 Keep no "was wrong" note. Fix the wrong fact in any brief, decision or plan that holds it. If
 work already rested on it, say so under Deviations in the next report. The way to check each

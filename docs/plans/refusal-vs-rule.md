@@ -31,7 +31,7 @@ batch ahead of it) holds that fix. This sweep cites it and does not redo it.
 - **uncited:** no rule or decision holds the refusal. Most are fail-closed stops on a failed read.
 - **unverified:** no rule sentence could be quoted.
 
-142 rows: exact 88, looser 10, stricter 11, uncited 32, unverified 1. The Gold column is the target for every row. A row whose Verdict is not
+143 rows: exact 88, looser 11, stricter 11, uncited 32, unverified 1. The Gold column is the target for every row. A row whose Verdict is not
 exact has a gap.
 
 
@@ -51,7 +51,7 @@ exact has a gap.
 | `ln-over-directory` | none | - | uncited | exact | `ln -sf /tmp/x existing_dir` is denied; the comment says only "ported from banchi" and names no risk kind | rule rewrite: land a decision with its risk kind and date, or cull it (building-guard-needs-incident) |
 | `destructive-delete` | rm-path-wrapper | "Also a root, a home, or a glob of one (`rm -r /`, `rm -r ~/*`, `rm -r ../*`)." | looser | exact | a recursive delete of `$(pwd)/*` passes, though the same delete of `./*` is denied. So do a delete inside `$(...)` in an unquoted heredoc and a python heredoc that calls shutil.rmtree (step refusal-looser-fixes) | tool fix: read `$(pwd)` and `$PWD` as `.`; read command substitutions in an unquoted heredoc |
 | `linked-node-modules` | guard-linked-node-modules | "A recursive delete into a linked `node_modules` is refused." | exact | exact | `npm ci` in a linked folder is denied; the open holes are the decision's debts | - |
-| `env-file` | none | - | uncited | exact | `cat .env` is denied; `grep -r --exclude=.env foo .` is denied too (debt env-file-rule-false-alarms) | rule rewrite: write an env-file decision; tool fix: skip --exclude and -t values |
+| `env-file` | none | - | uncited | exact | `cat .env` is denied; `grep -r --exclude=.env foo .` is allowed (its value is a glob that excludes) | rule rewrite: write an env-file decision; tool fix: done for --exclude and -t values (decision env-file-stays-unread) |
 | `frozen-path` | frozen-path-resolves-shell-vars | "A write whose resolved target is frozen is refused." | exact | exact | a write to the settings file under `$HOME/.claude` through a variable is denied | rule rewrite: the guard index lists 3 frozen kinds; the code freezes 11 |
 | `config-edit` | none | - | uncited | exact | a write to `.claude/settings.local.json` is allowed and noted; the code cites "Decision 7", which has no file | rule rewrite: land the "project config edits: allow and report" decision |
 | `records-page` | records-index-at-merge | "refuses a lane commit whose staged `docs/records.md` differs from the page on the lane's base." | exact | exact | `python3 lint/hook_catalog.py && git add -A && git commit` is denied even when the page would be unchanged. An accepted limit: the guard runs before the generator, so it cannot read the page the command will stage (triage, step refusal-stricter-fixes) | - |
@@ -70,6 +70,7 @@ Notes: the shared-tree gaps `git update-ref -d`, `git rm -rf .` and `git read-tr
 | `live-stream` | none | - | uncited | exact | `tail -f x` is denied, and so is `timeout 5 tail -f x`, which the remedy itself suggests | tool fix: pass a `timeout N` wrapper; rule rewrite: write a live-stream decision |
 | `waiter` | agents-wait-with-monitor | "refuses only real waste: a loop that pauses... two or more pauses... one pause of 25 s or more" | exact | exact | `sleep 30` is denied; `sleep 3` passes | - |
 | `background-end` | background-needs-end-note | "refuses the call when the note is missing or its condition is empty" | exact | exact | `npm run dev` with no end note is denied | - |
+| `check-tail` | background-check-through-verdict | "A pipeline that holds a named check and a later `tail` or `head` stage is refused." | looser | exact | `merge --lane-lint 7 \| tail -3` is denied, foreground or background; the same call through `verdict` with no pipe after it passes (`verdict <cmd> \| tail` is denied by verdict-pipe-refused), as does a `tee` with no filter after it (`tee x | tail` is denied); `ci-job` is denied in the background only. A PowerShell `Select-Object -Last` passes, as the record's known gaps say | tool fix: read `Select-Object -First/-Last` as `head`/`tail` |
 | `playwright-browsers-path` | playwright-browsers-path | "refuses a Bash or PowerShell command that sets the variable." | exact | exact | an export is denied; echo and unset pass | - |
 | `playwright-install` | playwright-install-once | "An agent never runs a Playwright browser install, in any form." | exact | exact | `npx playwright install` is denied | - |
 | `simulator-boot-cap` | sweep-shuts-down-idle-simulators | "refuses a session's boot when 2 devices are already booted, and names them" | exact | exact | a third boot is denied | - |
@@ -97,7 +98,8 @@ Notes: create_session is not a start tool for load-brake, so a lane session star
 | `agent-model-floor` | agent-model-cap | "Guard rule `agent-model-floor` refuses an Agent, Task, Workflow agent() or start_session call whose model holds haiku." | looser | exact | create_session with model haiku passes: the floor reads start_session only | tool fix: read create_session in floor_hit too |
 | `roles-third-round-steps-up` | roles-third-round-steps-up | "Third try: Opus. A builder's third try ... its brief carries `Round 3 of 3`." | exact | exact | a builder's round 3 on sonnet is denied | - |
 | `agent-model-cap` | agent-model-cap | "Any other spawn runs Opus only when the owner names it." | looser | exact | Explore with model opus and no `Audit:` marker passes unasked; the table gives plain Explore haiku | tool fix: exempt Explore only with the `Audit:` marker |
-| `lane-effort-pin` | agent-model-cap | "A lane session runs at medium effort" | exact | exact | a lane create_session whose prompt is not `/effort medium` is denied | - |
+| `lane-effort-pin` | agent-model-cap | "A lane runs at medium effort" | exact | exact | a lane create_session whose effort is not `medium`, or whose prompt has no Grant line, is denied | - |
+| `lane-start-settings` | agent-model-cap | "The coordinator passes both on every lane start" | exact | exact | a lane create_session with no model, or no source_url, is denied | - |
 | `builder-test-edit` | builders-cannot-edit-tests | "A builder that cannot pass a test must not delete, skip or rewrite it." | stricter | exact | a builder Write to `<scratchpad>/test_probe.py` or `docs/spec/api.md` is denied: the test-path check reads paths outside the repo, and `spec` counts as a test folder | tool fix: skip paths outside the repo; count `spec` only for code files |
 | `test-author-scope` | builders-cannot-edit-tests | "`test-author`: the inverse." | exact | exact | a test-author write to product code is denied; scratchpad passes | - |
 | `record-writer-scope` | builders-cannot-edit-tests | "`record-writer`: may change only `*.md` files" | exact | exact | a .txt note in its own scratchpad is denied; the literal rule holds | - |

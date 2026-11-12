@@ -25,7 +25,7 @@ WCAG level, is not taken on by choice (owner, 2026-11-01 12:23 CST, by triage).
   - `ux-canvas-has-words` (P): a canvas that informs has a name, text and keyboard acts.
   - `ux-scroll-stays-native` (P): the page scrolls by its usual steps.
   - `ux-forced-colors-hold` (P): controls, edges, focus and state show in forced colours.
-  - `ux-full-height-fits` (P): each `vh` value has an `svh` or `dvh` fallback after it.
+  - `ux-full-height-fits` (P): each `vh` or `lvh` value has an `svh` or `dvh` fallback after it.
   - `ux-vitals-measured` (P): LCP, INP and CLS are measured "good".
   - `ux-feature-baseline-or-fallback` (P): a new browser feature sits behind a test, with a fallback.
   - `ux-unknown-is-not-empty` (P): loading, failed, unknown, empty and loaded differ; an empty state
@@ -40,7 +40,7 @@ WCAG level, is not taken on by choice (owner, 2026-11-01 12:23 CST, by triage).
   - `ux-variant-extends-home` (L): a variant extends its shared component, never copies it.
   - `ux-fluid-tokens` (L): sizes that grow with the box come from tokens.
 - Guidance, not house rules: `ux-order-holds-still`, `ux-statements-are-true`, `ux-no-dead-end`,
-  `ux-machine-text-hidden`, `ux-a11y-floor` (P) and `ux-control-beside-area` (L). Each entry says
+  `ux-machine-text-hidden`, `ux-a11y-floor`, `ux-text-zooms` (P) and `ux-control-beside-area` (L). Each entry says
   "Guidance", and a miss is advice, not a finding.
 - Not adopted: `ux-press-moves-nothing` (P), item 183 option b (owner, 2026-11-06 13:11 CST). A lane checks
   `ux-swift-same-intent` (L), roadmap step ux-swift-same-intent-check.
