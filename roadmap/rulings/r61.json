@@ -1,0 +1,16 @@
+{
+ "id": "r61",
+ "at": "2026-11-12T15:29:00-06:00",
+ "ruling": "- **R61. macOS CI runs once per batch, and only where the OS differs.** Measured: an Explore Sonnet audit read 19 push runs at bcbeaa26a. A macOS job ended last in 12. The 5-slot macOS pool queued a job up to 26 min four times. Each batch ran its macOS suites twice, on the batch PR and on the push to main, about 85 macOS min each time. Owner pick b, 15:29 CST Nov 12. 1. No macOS jobs on the push to main; the batch PR run is the macOS proof. 2. checks-macos and checks-macos-b drop their full guard shards for a mac-tagged slice, as Windows has. 3. The 03:17 nightly skips when main's head already has a green push run; first check that the no-merge-onto-red-main gate still reads a run. 4. The lane-touched-tests macOS leg runs only for files whose subject is macOS. Home decision: test-strategy-reset. Step: ci-mac-once-per-batch.",
+ "quote": "b: a, plus two more cuts. Skip the nightly run when main's latest commit is already green. Run the draft Mac test only when the files touch Mac code.",
+ "source": "plans/restart-plan.md@restart-plan 06ca3304, R61; owner pick b 15:29 CST relayed by the retrospective 15:30 CST",
+ "status": "open",
+ "supersedes": [
+  {
+   "kind": "decision",
+   "ref": "test-strategy-reset: macOS runs on the batch PR, the push to main and nightly; checks-macos and checks-macos-b run full guard shards"
+  }
+ ],
+ "title": "macOS CI runs once per batch, and only where the OS differs.",
+ "step": "ci-mac-once-per-batch"
+}

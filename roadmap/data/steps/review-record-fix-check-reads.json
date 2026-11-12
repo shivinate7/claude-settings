@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Incidents (coordinator 13:59 CST Nov 12): the records on #2860 and #2904 were unreadable by --reviewed.",
  "source": "coordinator 13:59 CST Nov 12 (pick)",
- "note": "R55 express (merge flow). The lane also takes step review-record-usage-line. Lane id: the session tagged cs-topic:review-record-fix-check-reads; set when it shows. Owner act item 631 (14:05 CST Nov 12): runner 10's express build of #2860 and the cancel of #2814's run were refused by the auto-mode check at 13:24 CST; the owner types his yes in runner 10. Lane 14:20 CST Nov 12 (commit 71b7cf24b): --fix-check HEAD accepted when the PR head holds HEAD, round written in the same record; --reviewed reads the round from an earlier log at the fix check's HEAD. Covers #2904 and #2860 shapes of record-before-fix-push.",
- "updatedAt": "2026-11-12T14:23:17-06:00"
+ "note": "R55 express (merge flow). The lane also takes step review-record-usage-line. Lane id: the session tagged cs-topic:review-record-fix-check-reads; set when it shows. Owner act item 631 (14:05 CST Nov 12): runner 10's express build of #2860 and the cancel of #2814's run were refused by the auto-mode check at 13:24 CST; the owner types his yes in runner 10. Lane 14:20 CST Nov 12 (commit 71b7cf24b): --fix-check HEAD accepted when the PR head holds HEAD, round written in the same record; --reviewed reads the round from an earlier log at the fix check's HEAD. Covers #2904 and #2860 shapes of record-before-fix-push. Lane 15:31 CST Nov 12: #2940 (head 664aafccd) handed in. Open gap: a PR with an unrelated record at another head still refuses a --fix-check line.",
+ "updatedAt": "2026-11-12T15:35:22-06:00"
 }

@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Lane busy-file-stacked-batches 15:08 CST Nov 12 (#2972): the check compares lanes within one batch request only; express batches now run beside ordinary ones (R55), so two batches built from main can both touch a file unseen.",
  "source": "lane busy-file-stacked-batches via coordinator 15:08 CST Nov 12",
- "note": "Extend the busy-file check to read the other open batch PRs' lane sets and compare touched files across them; red first on two batches from one main that touch one file. After #2972 merges.",
- "updatedAt": "2026-11-12T15:10:29-06:00"
+ "note": "Extend the busy-file check to read the other open batch PRs' lane sets and compare touched files across them; red first on two batches from one main that touch one file. After #2972 merges. Coordinator 15:22 CST Nov 12: batch 108 stacked on 107 holds #2793, #2818, #2902, #2905 as one batch (replaces the 14:07 one-per-batch pick); #2916 and #2671 conflict on 107's head and merge main after 107 merges.",
+ "updatedAt": "2026-11-12T15:35:22-06:00"
 }

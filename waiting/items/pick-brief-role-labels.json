@@ -54,7 +54,7 @@
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
   "pick": "a",
   "ref": "coordinator pick, Nov 12, 12:39 CST",
-  "reply": "Closed 15:25 CST: kept a for now; your doubt about refusing a session id is sent to the retrospective for its context. If it finds a reason against, this item reopens with that reason.",
+  "reply": "Closed with a. The retrospective checked PR #2709: it refuses a brief that lacks the role names Coordinator, Triage and Batch runner, and it never refuses a session id. An id in a brief is allowed, not required, and ids come from the roster triage keeps. So your doubt matches the PR: nothing refuses an id.",
   "repo": "shivinate7/claude-settings",
   "short": "Briefs name roles, not session ids",
   "stands": true,
