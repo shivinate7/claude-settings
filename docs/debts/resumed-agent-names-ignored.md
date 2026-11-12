@@ -1,6 +1,6 @@
 # A resumed agent's later names are ignored
 
-**What.** `brief_text` reads only the first user message of an agent's transcript as its brief. A later message adds no names. So when a resumed agent changes an existing file that only its resume message names, the guard refuses the change at commit, push and stop. The refusal is final, and no override lifts it, so the resumed task cannot finish. The rule `roles-resume-by-name` resumes a dead agent by name, so Claude hits this in normal work.
+**What.** `brief_text` reads only the first user message of an agent's transcript as its brief. A later message adds no names. So when a resumed agent changes an existing file that only its resume message names, the guard refuses the change at commit, push and the first stop, with no override. A second stop is released (`brief-scope-unresolved`), so the agent can end, but its change cannot be committed or pushed. The rule `roles-resume-by-name` resumes a dead agent by name, so Claude hits this in normal work.
 
 **Where.** `hooks/guard.py`, `brief_text` (reads the first user record only) and `brief_scope_hit` (judges the change against those names).
 
