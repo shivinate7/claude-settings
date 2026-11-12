@@ -2285,6 +2285,86 @@ class LiveStatusPhase(UpkeepFixture):
         self.assertEqual(compares, [], "an == comparison with doing or active is at these lines of build.py")
 
 
+class StagedNoteCap(Fixture):
+    """The pre-commit note cap, `build.py --check-staged`. It reads the step files staged in the index, from the checkout
+    the process stands in, and exits 1 with each refused step named when the commit adds or grows an open step's note past
+    build.NOTE_WORDS words. It exits 0 otherwise, prints nothing for a pass, and writes no page. A case stages its own
+    files on the record branch and runs the check from the checkout's folder, as the pre-commit hook does."""
+
+    def run_check(self):
+        """(exit code, stdout and stderr) of the check, run from the fixture checkout."""
+        r = subprocess.run([sys.executable, str(HERE / "build.py"), "--check-staged"], cwd=str(self.repo),
+                           capture_output=True, text=True)
+        return r.returncode, r.stdout + r.stderr
+
+    def words(self, n):
+        return " ".join("w%d" % i for i in range(n))
+
+    def stage_step(self, sid, n):
+        """Write an open step whose note has n words, and stage it."""
+        self.write_step(sid, dict(STEP, status="todo", note=self.words(n)))
+        git(self.repo, "add", "-A")
+
+    def seed_step(self, sid, n):
+        """Commit an open step whose note has n words, so a later commit can leave it alone or grow it."""
+        self.stage_step(sid, n)
+        git(self.repo, "commit", "-q", "-m", "seed " + sid)
+
+    def test_a_staged_note_over_the_cap_is_refused_and_its_step_named(self):
+        over = build.NOTE_WORDS + 1
+        self.stage_step("c2", over)
+        code, out = self.run_check()
+        self.assertIn("c2 (%d words)" % over, out, "the staged note over the cap is not refused, so its step is not named")
+        self.assertEqual(code, 1, "a refused commit exits 1: " + out)
+
+    def test_a_staged_note_at_the_cap_passes_and_writes_no_page(self):
+        self.stage_step("c2", build.NOTE_WORDS)
+        code, out = self.run_check()
+        self.assertEqual(code, 0, "a staged note at the cap passes the check: " + out)
+        self.assertFalse((self.repo / "roadmap" / "roadmap.html").exists(), "the check writes no page")
+
+    def test_a_non_step_file_over_the_cap_is_ignored(self):
+        meta = self.data / "meta" / "cull.json"
+        meta.write_text(json.dumps({"stopRule": "s", "note": self.words(build.NOTE_WORDS + 50)}), encoding="utf-8")
+        git(self.repo, "add", "-A")
+        code, out = self.run_check()
+        self.assertEqual(code, 0, "a file outside the steps folder is not counted: " + out)
+
+    def test_a_deleted_step_over_the_cap_is_ignored(self):
+        self.seed_step("c2", build.NOTE_WORDS + 40)
+        git(self.repo, "rm", "-q", "roadmap/data/steps/c2.json")
+        code, out = self.run_check()
+        self.assertEqual(code, 0, "a deleted step is not counted: " + out)
+
+    def test_an_over_cap_note_the_commit_leaves_alone_passes(self):
+        self.seed_step("c2", build.NOTE_WORDS + 40)
+        self.stage_step("c1", 10)
+        code, out = self.run_check()
+        self.assertEqual(code, 0, "an over-cap note this commit does not grow passes: " + out)
+
+    def test_growing_an_over_cap_note_is_refused_and_named(self):
+        grown = build.NOTE_WORDS + 41
+        self.seed_step("c2", build.NOTE_WORDS + 40)
+        self.stage_step("c2", grown)
+        code, out = self.run_check()
+        self.assertIn("c2 (%d words)" % grown, out, "the grown over-cap note is not refused, so its step is not named")
+        self.assertEqual(code, 1, "a refused commit exits 1: " + out)
+
+    def test_the_check_reads_the_staged_note_not_the_working_copy(self):
+        over = build.NOTE_WORDS + 1
+        self.stage_step("c2", over)
+        self.write_step("c2", dict(STEP, status="todo", note="short"))  # an unstaged edit to a short note
+        code, out = self.run_check()
+        self.assertIn("c2 (%d words)" % over, out, "the staged over-cap note is not refused when the working copy is short")
+        self.assertEqual(code, 1, "a refused commit exits 1: " + out)
+
+    def test_a_short_staged_note_passes_when_the_working_copy_is_over_the_cap(self):
+        self.stage_step("c2", 10)
+        self.write_step("c2", dict(STEP, status="todo", note=self.words(build.NOTE_WORDS + 1)))  # an unstaged edit
+        code, out = self.run_check()
+        self.assertEqual(code, 0, "the staged note is short, so it passes whatever the working copy holds: " + out)
+
+
 class PageRulings(UpkeepFixture):
     """The upkeep row for each closed waiting-page item whose home step is open and cites the item nowhere.
     The step's note, why or ask cites an item with `item <n>` (any case, an optional #). The row reads
