@@ -1325,10 +1325,22 @@ for _name, _command in (
        carries=("test-author",), **DR)
 # A listing that drops the tests folder names product files only: the pathspec `:!tests`, and the -not -path
 # that drops tests/, leave xargs no test to feed sed -i. The same listing with no exclusion is refused.
+# DOTROOT holds hooks/ and merge/ tests, which these two listings would name. They read WALKROOT instead,
+# whose one test is tests/test_a.py, so each listing leaves product files only.
+WALKROOT = os.path.join(ROOT, "walkroot")
+
+
+def _build_walkroot():
+    make_repo(WALKROOT, {"tests/test_a.py": "def test_a():\n    assert True\n",
+                         "src/app.py": "x = 1\n", "README.md": "base\n"})
+
+
+lazy_fixture([WALKROOT], _build_walkroot)
+WR = dict(B, cwd=WALKROOT)
 sh("builder-test: shell write, git ls-files :!tests piped to xargs, sed -i, is allowed",
-   "git ls-files ':!tests' | xargs sed -i s/a/b/", "allow", **DR)
+   "git ls-files ':!tests' | xargs sed -i s/a/b/", "allow", **WR)
 sh("builder-test: shell write, find . excluding tests by -not -path, piped to xargs, sed -i, is allowed",
-   "find . -name '*.py' -not -path './tests/*' | xargs sed -i s/a/b/", "allow", **DR)
+   "find . -name '*.py' -not -path './tests/*' | xargs sed -i s/a/b/", "allow", **WR)
 sh("builder-test: shell write, find . for *.py with no exclusion, piped to xargs, sed -i, is refused",
    "find . -name '*.py' | xargs sed -i s/a/b/", "deny", rule=BT, carries=("test-author",), **DR)
 # sed -n only prints. The pattern names --in-place, which is no flag of this sed run, so nothing is written.
