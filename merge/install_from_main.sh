@@ -185,7 +185,36 @@ move_pin() {
   fi
 }
 
+# A fetch never moves local main, so the pin would install a main that a merge on GitHub left behind. This brings local main
+# to origin's: a main that is an ancestor of it fast-forwards; a main that holds a commit origin lacks is refused, because the
+# install would put unpushed work live. When origin cannot be reached, local main is the source as before, with one WARN line.
+# A branch checked out on main moves with merge --ff-only, so its files and index follow; update-ref would leave them behind.
+sync_main() {
+  git remote get-url origin >/dev/null 2>&1 || return 0
+  tmo=""; command -v timeout >/dev/null 2>&1 && tmo="timeout 30"
+  if ! GIT_TERMINAL_PROMPT=0 $tmo git fetch -q origin "+refs/heads/main:refs/remotes/origin/main" >/dev/null 2>&1; then
+    echo "install_from_main.sh: WARN: could not fetch origin main; installing local main as it is" >&2
+    return 0
+  fi
+  have=$(git rev-parse --verify -q refs/heads/main) || fail "$no_main"
+  want=$(git rev-parse --verify -q refs/remotes/origin/main) || return 0
+  [ "$have" != "$want" ] || return 0
+  if ! git merge-base --is-ancestor "$have" "$want" 2>/dev/null; then
+    n=$(git rev-list --count "$want..$have" 2>/dev/null)
+    fail "local main has ${n:-some} commit(s) origin/main lacks, so nothing was installed; push them or move main back to origin/main (git log origin/main..main), then run merge/install_from_main.sh"
+  fi
+  held=$(git worktree list --porcelain | awk '/^worktree /{w=substr($0,10)} /^branch refs\/heads\/main$/{print w; exit}')
+  if [ -n "$held" ]; then
+    git -C "$held" merge -q --ff-only "$want" >/dev/null 2>&1 \
+      || fail "cannot fast-forward main in $held to origin/main; fix that (git -C \"$held\" status), then run merge/install_from_main.sh"
+  else
+    git update-ref refs/heads/main "$want" "$have" \
+      || fail "cannot fast-forward local main to origin/main; fix that, then run merge/install_from_main.sh"
+  fi
+}
+
 take_lock
+sync_main
 commit=$(git rev-parse --verify -q refs/heads/main) || fail "$no_main"   # read under the lock
 if [ -L "$pin" ] && [ ! -e "$pin" ]; then rm -f "$pin"; fi   # a link whose tree is gone
 if [ ! -e "$pin" ]; then
@@ -203,10 +232,10 @@ fi
 case "$(uname)" in
   MINGW*|MSYS*|CYGWIN*)
     [ -f "$pin/install.ps1" ] || fail "$pin has no install.ps1"
-    echo "Installing from $pin"
+    echo "Installing from $pin at $(git -C "$pin" rev-parse --short HEAD)"
     CLAUDE_SETTINGS_LOCK_TOKEN="$INSTALL_ID" powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(cygpath -w "$pin/install.ps1")" ;;
   *)
     [ -f "$pin/install.sh" ] || fail "$pin has no install.sh"
-    echo "Installing from $pin"
+    echo "Installing from $pin at $(git -C "$pin" rev-parse --short HEAD)"
     CLAUDE_SETTINGS_LOCK_TOKEN="$INSTALL_ID" bash "$pin/install.sh" ;;
 esac
