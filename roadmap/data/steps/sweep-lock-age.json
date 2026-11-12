@@ -1,0 +1,14 @@
+{
+ "id": "sweep-lock-age",
+ "title": "Sweep drops a lock whose holder started after the lock was written",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJKytJu8HptjTzNqopMT",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "On Windows, sweep.py keeps finished agent worktrees forever when the OS reuses the lock's pid. The owner says disk space is a real problem.",
+ "source": "owner chat 11:02 CST Nov 12 via retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ) and coordinator 11:04 CST; plan docs/plans/agent-handoff-lock-report.md on branch agent-handoff-lock-report (5328b4e70)",
+ "note": "Plan part 2. Fix: compare the holder process's start time with the lock's write time; a holder that started later is not the lock's owner. Red test on main first. Debt note no-start-lock-has-no-pid-check (docs/debts/notes.md, rated \"rare and harmless\") becomes a debt after this excel-ui-kit incident (rule roles-findings-are-debts-or-notes), or retires if the fix closes it. Lane sweep-lock-age started 11:03 CST Nov 12 (coordinator).",
+ "updatedAt": "2026-11-12T11:05:05-06:00"
+}
