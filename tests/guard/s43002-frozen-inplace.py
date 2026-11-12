@@ -23,3 +23,28 @@ sh("frozen inplace: perl -n reads a frozen hook and is allowed (control)",
    "perl -n -e 'print' " + CFG_HOOK, "allow", cwd=NOGIT)
 sh("frozen inplace: perl -pi -e on a project settings file is allowed (control)",
    "perl -pi -e 's/a/b/' " + PROJ_SETTINGS, "allow", cwd=NOGIT)
+
+# A `-i` that is no perl or ruby in-place flag: a search pattern, an echo, a quoted print string or a
+# comment. None of these writes the frozen file, so each allows.
+for _name, _command in (
+    ("grep -n perl -i naming a frozen hook", "grep -n perl -i " + CFG_HOOK),
+    ("rg -n perl -i naming a frozen hook", "rg -n perl -i " + CFG_HOOK),
+    ("echo perl -i naming a frozen hook", "echo perl -i " + CFG_HOOK),
+    ("perl -ne whose print string holds -i, on a frozen hook", "perl -ne 'print \" -i \"' " + CFG_HOOK),
+    ("perl -ne whose body comment ends in -i, on a frozen hook", "perl -ne 'print; # edit in -i' " + CFG_HOOK),
+):
+    sh("frozen inplace: " + _name + " allows", _command, "allow", cwd=NOGIT)
+
+# An include directory whose name ends in i is no in-place flag: perl reads the frozen file and writes nothing.
+sh("frozen inplace: perl -Iui -ne on a frozen hook is allowed",
+   "perl -Iui -ne 'print' " + CFG_HOOK, "allow", cwd=NOGIT)
+
+# Controls for the include and library flags beside it. An include dir that is no in-place flag stays allowed.
+sh("frozen inplace: perl -Ilib -ne on a frozen hook is allowed (control)",
+   "perl -Ilib -ne 'print' " + CFG_HOOK, "allow", cwd=NOGIT)
+sh("frozen inplace: ruby -rtime -ne on a frozen hook is allowed (control)",
+   "ruby -rtime -ne 'print' " + CFG_HOOK, "allow", cwd=NOGIT)
+
+# A real in-place flag still denies when an include dir comes before it.
+sh("frozen inplace: perl -Iui -pi -e on a frozen hook denies",
+   "perl -Iui -pi -e 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
