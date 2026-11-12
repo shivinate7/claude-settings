@@ -39,8 +39,10 @@ Interface the module must match (the lane's form contract):
   dated `(measured <date>, ...)`. The page reads no refusals file. Cases: case_task_why_cited_reds and _greens.
 - question_form.cross_repo_hit(op, data, page_repo, session_id=None) -> reason or None (rule
   question-checked-with-repo). An open decision or task set (a missing kind is a decision, and any status but closed
-  is open), or an update carrying `repo`, that names a repo other than the page's needs a session-shaped
-  `checked_with`. A `checked_with` equal to the session id in `owner`, or to the writer's `session_id`, is refused.
+  is open), or an update carrying `repo`, that names a repo other than the page's needs a `checked_with` that is a
+  role (coordinator, triage, owner's-computer) or a lane slug. A `checked_with` that is a session id (`session_` plus
+  id) is refused in any write, and its reason names a role or a lane slug with no session id as the remedy (R22
+  point 3). A `checked_with` equal to the session id in `owner`, or to the writer's `session_id`, is refused too.
   A `repo` that is not owner/name is refused with the format reason. `repo` is required on the set: a direct call
   with page_repo None refuses a missing one, but item_hit does not judge it when the page repo is unknown, since no
   compare can run. A str_replace on `repo` or `checked_with` is refused as this rule. An update that
@@ -2005,8 +2007,8 @@ def case_item_stray_field_refused_from_a_record_branch_checkout():
 # ------------------------------------------------------------------ a decision on another repo is checked with that repo
 #
 # Rule question-checked-with-repo (CROSS_REPO_RULE). An open decision or task set that names a `repo` other than the
-# page's repo needs a session-shaped `checked_with`, and a `checked_with` equal to the session id in `owner` is refused.
-# `repo` is required on an open decision or task set: a set with no repo is refused. The page's repo is the origin of
+# page's repo needs a `checked_with` that is a role or a lane slug (R22 point 3). A session id in `checked_with` is
+# refused, with a reason that names a role or a lane slug and gives no session id as the remedy. `repo` is required on an open decision or task set: a set with no repo is refused. The page's repo is the origin of
 # the checkout the write is judged at (cwd). With no cwd, or no origin, it is None: there is nothing to compare, so a
 # foreign repo passes, but a set with no repo is still refused.
 # The fixture is the incident item ma144-tab-bar (mailaudit #144) as it was written, opened, with the repo field.
@@ -2015,6 +2017,12 @@ CROSS_REPO_RULE = "question-checked-with-repo"
 PAGE_REPO_NAME = "shivinate7/claude-settings"  # the page's repo: the origin of tcj.origin_page_repo()
 OTHER_REPO = "shivinate7/mailaudit"
 CHECKED = "session_013ABCdefGHI"
+# R22 point 3: checked_with takes a role or a lane slug. The roles are hard-coded here, so a missing product constant
+# shows red by name instead of a MISSING verdict.
+ROLES = ("coordinator", "triage", "owner's-computer")
+LANE_SLUG = "duo-tab-bar-place"  # a lane's branch slug, the name a lane takes in checked_with
+LANE_SLUG_MAX = "mailaudit-duo-tab-bar-place-slug"  # 32 characters, the longest slug (rule git-slug-then-claim-number)
+OTHER_LANE = "mailaudit-duo-round2"  # another lane's slug, a checked_with the rule passes
 MA144_ID = "ma144-tab-bar"
 MA144_OWNER_SESSION = "session_013NEJKymmzw37seAr3Qq5nv"  # the session id in MA144's owner field
 VI_FRAGMENTS = (r"\brepo\b", r"shivinate7/claude-settings")
@@ -2074,9 +2082,10 @@ def case_cross_repo_missing_checked_with():
 
 
 def case_cross_repo_checked_with_passes():
-    """(ii) A session-shaped checked_with on another repo's decision passes."""
-    cross("(ii) session-shaped checked_with", "set", ma144(checked=CHECKED), PAGE_REPO_NAME)
-    at_page("(ii) session-shaped checked_with", "set", ma144_write(checked=CHECKED), tcj.origin_page_repo())
+    """(ii) A role or a lane slug in checked_with on another repo's decision passes on both page surfaces, item_hit and the
+    guard. A session id is refused on the same surfaces (case (3)). The direct call is (1) and (2)."""
+    for value in ("triage", LANE_SLUG):
+        at_page("(ii) checked_with is %s" % value, "set", ma144_write(checked=value), tcj.origin_page_repo())
 
 
 def case_cross_repo_same_repo_passes():
@@ -2152,7 +2161,7 @@ def case_cross_repo_task_names_checked_with():
 
 
 def case_cross_repo_malformed_checked_with():
-    """(xii) A checked_with that is not session-shaped is refused, and the reason names checked_with."""
+    """(xii) A checked_with that is neither a role nor a lane slug is refused, and the reason names checked_with."""
     cross("(xii) checked_with is not a session id", "set", ma144(checked="batch runner 9"), PAGE_REPO_NAME,
           ("checked_with",))
     at_page("(xii) checked_with is not a session id", "set", ma144_write(checked="batch runner 9"),
@@ -2198,6 +2207,162 @@ def cross_format(name, data, page_repo=PAGE_REPO_NAME):
     got = call("cross_repo_hit", "set", data, page_repo)
     ok = isinstance(got, str) and re.search(r"owner/name", got) is not None and re.search(r"checked_with", got) is None
     check("cross_repo_hit: " + name, ok, "want a format reason naming owner/name and not checked_with, got %r" % (got,))
+
+
+# Two detectors of a refusal reason, for R22 point 3. ROLE_OR_SLUG: the reason names a role or a lane slug.
+# SESSION_REMEDY: the reason tells the writer to supply a session id. It matches a verb that asks for one ("write its
+# session id", "send the session id", "needs `checked_with`: the session id of"). It does not match a reason that only
+# says what the form is ("`checked_with` holds a session id, which no page item stores. Write a role ..."), nor "write a
+# role, not a session id". It does not match `session_` plus an id: echoing the offending value diagnoses the write, it
+# gives no remedy. Calibrated on fixed strings in case_cross_repo_remedy_detector_is_calibrated.
+ROLE_OR_SLUG = re.compile(r"\brole\b|lane slug", re.I)
+SESSION_REMEDY = re.compile(
+    r"\b(?:write|put|send|use|give|supply|enter|set|needs?)\s+(?:(?:its|the|a|an|that|this|your)\s+)?"
+    r"(?:[\w'-]+\s+){0,2}?session[ _]?id\b"
+    r"|:\s*(?:the|its)\s+session[ _]?id\b", re.I)
+
+
+def names_role_or_slug(reason):
+    """R22 point 3: the reason names a role or a lane slug."""
+    return isinstance(reason, str) and ROLE_OR_SLUG.search(reason) is not None
+
+
+def no_session_id_remedy(reason):
+    """R22 point 3: the reason gives no session id as the remedy. A reason that is not a string gives none, so a pass is
+    judged by the refusal check, not here."""
+    return not (isinstance(reason, str) and SESSION_REMEDY.search(reason))
+
+
+def scope_open_foreign_item(name):
+    """Scope before subject (P7): an open decision on another repo with no checked_with is refused, naming checked_with.
+    A case that probes a checked_with value asserts this first, so the value is judged where the rule applies."""
+    cross("scope %s: open decision on another repo, no checked_with" % name, "set", ma144(), PAGE_REPO_NAME,
+          ("checked_with",))
+
+
+def cross_refusal_checks(name, op, data, page_repo=PAGE_REPO_NAME):
+    """cross_repo_hit refuses the write, its reason names a role or a lane slug, and it gives no session id as the remedy.
+    Three checks, one cause each: no refusal, a reason with no role or slug, a reason that asks for a session id."""
+    got = call("cross_repo_hit", op, data, page_repo)
+    check("cross_repo_hit refuses: " + name, isinstance(got, str), "want a refusal, got %r" % (got,))
+    check("cross_repo_hit reason names a role or lane slug: " + name, names_role_or_slug(got),
+          "want the reason to name a role or a lane slug, got %r" % (got,))
+    check("cross_repo_hit reason gives no session id as the remedy: " + name, no_session_id_remedy(got),
+          "want no instruction to write a session id, got %r" % (got,))
+
+
+def at_page_refusal_checks(name, op, entry, cwd):
+    """One page write refused by the rule on both page surfaces, item_hit and the guard, with the three checks of
+    cross_refusal_checks on each surface."""
+    tool_input = dict(entry, url=PAGE_URL, action=op)
+    surfaces = (("item_hit", call("item_hit", op, entry, cwd)), ("guard", guard.data_tool_hit(tool_input, cwd)))
+    for surface, got in surfaces:
+        rule, reason = got if isinstance(got, tuple) and len(got) == 2 else ("", None)
+        label = "%s at cwd: %s" % (surface, name)
+        check(label + " refuses", rule == CROSS_REPO_RULE, "want %s, got %r" % (CROSS_REPO_RULE, got))
+        check(label + " reason names a role or lane slug", names_role_or_slug(reason),
+              "want a role or a lane slug in the reason, got %r" % (reason,))
+        check(label + " reason gives no session id as the remedy", no_session_id_remedy(reason),
+              "want no instruction to write a session id, got %r" % (reason,))
+
+
+def guard_refusal_checks(name, tool_input, lane_env):
+    """guard.judge refuses one ArtifactData write, and the reason it prints names a role or a lane slug and gives no
+    session id as the remedy. The three checks of cross_refusal_checks, on the printed reason."""
+    reason = guard_refusal(tool_input, lane_env)
+    check("guard refuses: " + name, isinstance(reason, str) and CROSS_REPO_RULE in reason,
+          "want %s, got %r" % (CROSS_REPO_RULE, reason))
+    check("guard reason names a role or lane slug: " + name, names_role_or_slug(reason),
+          "want a role or a lane slug in the printed reason, got %r" % (reason,))
+    check("guard reason gives no session id as the remedy: " + name, no_session_id_remedy(reason),
+          "want no instruction to write a session id, got %r" % (reason,))
+
+
+def case_cross_repo_remedy_detector_is_calibrated():
+    """(3 detector) The remedy detector flags the three ways a refusal asks for a session id: the reason main prints for
+    the form, the remedy main prints for a missing one, and the remedy for the writer's own session. It passes four
+    reasons a builder can write for the form: one that names the form and the role, one that refuses it, one that says
+    write a role, and one that says use the role. Green on main: it reads the detector, on fixed strings, not the rule."""
+    flagged = (
+        "A repo other than the page's own needs `checked_with`: the session id of that repo's triage, coordinator or "
+        "owner's-computer session that said the owner has not ruled.",
+        "Ask that repo's triage, coordinator or owner's-computer session whether the owner has ruled, then write its "
+        "session id in `checked_with`.",
+        "`checked_with` is the session that files this item. Write the session id of the mailaudit session that checked, "
+        "not the one that files the item.",
+    )
+    passed = (
+        "`checked_with` holds a session id, which no page item stores. Write a role (coordinator, triage, "
+        "owner's-computer) or a lane slug.",
+        "`checked_with` takes a role or a lane slug, never a session id.",
+        "Write a role, not a session id.",
+        "Use the role or the lane slug; a session id is refused.",
+    )
+    for text in flagged:
+        check("(3 detector) flags the session-id remedy: %.50s" % text, SESSION_REMEDY.search(text) is not None,
+              "the detector does not flag this remedy")
+    for text in passed:
+        check("(3 detector) passes a reason that names the form: %.50s" % text, SESSION_REMEDY.search(text) is None,
+              "the detector flags a reason that gives no session id as the remedy")
+
+
+def case_cross_repo_role_checked_with_passes():
+    """(1) R22 point 3: a role in checked_with on another repo's open decision passes. The roles are coordinator, triage
+    and owner's-computer. Control, green on main: the same role on the page's own repo passes, since the compare is
+    skipped there."""
+    scope_open_foreign_item("(1)")
+    for role in ROLES:
+        cross("(1) checked_with is the role %s" % role, "set", ma144(checked=role), PAGE_REPO_NAME)
+    cross("(1 control) the role triage on the page's own repo passes", "set",
+          ma144(repo=PAGE_REPO_NAME, checked="triage"), PAGE_REPO_NAME)
+
+
+def case_cross_repo_lane_slug_checked_with_passes():
+    """(2) R22 point 3: a lane slug in checked_with on another repo's open decision passes, the longest slug (32
+    characters) too. Control, green on main: a lane slug on the page's own repo passes."""
+    scope_open_foreign_item("(2)")
+    check("(2) fixture: the longest lane slug is 32 characters", len(LANE_SLUG_MAX) == 32,
+          "got %d characters" % len(LANE_SLUG_MAX))
+    cross("(2) checked_with is the lane slug %s" % LANE_SLUG, "set", ma144(checked=LANE_SLUG), PAGE_REPO_NAME)
+    cross("(2) checked_with is a 32-character lane slug", "set", ma144(checked=LANE_SLUG_MAX), PAGE_REPO_NAME)
+    cross("(2 control) a lane slug on the page's own repo passes", "set",
+          ma144(repo=PAGE_REPO_NAME, checked=LANE_SLUG), PAGE_REPO_NAME)
+
+
+def case_cross_repo_session_id_is_refused():
+    """(3) R22 point 3: a session id (`session_` plus id) in checked_with on another repo's open decision is refused. The
+    reason names a role or a lane slug and gives no session id as the remedy. The refusal holds at the cross check, on
+    both page surfaces, and on the guard in a cloud session and in a local one (env unset): the stored form is refused
+    whatever the session kind. Control, green on main: 'batch runner 9' is neither a role nor a lane slug, and is still
+    refused, naming checked_with."""
+    scope_open_foreign_item("(3)")
+    cross_refusal_checks("(3) checked_with is the session id %s" % CHECKED, "set", ma144(checked=CHECKED))
+    at_page_refusal_checks("(3) checked_with is the session id %s" % CHECKED, "set", ma144_write(checked=CHECKED),
+                           tcj.origin_page_repo())
+    guard_refusal_checks("(3) cloud session, checked_with is the session id %s" % CLOUD_RECORD,
+                         writer_input(checked=CLOUD_RECORD, owner="coordinator"), CLOUD_LANE)
+    guard_refusal_checks("(3) local session, checked_with is the session id %s" % CLOUD_RECORD,
+                         writer_input(checked=CLOUD_RECORD, owner="coordinator"), None)
+    # guard.judge prints this static reason on every refusal of the rule, so a build that changes the reason changes it here.
+    static_reason = (getattr(question_form, "PAGE_REASONS", None) or {}).get(CROSS_REPO_RULE)
+    check("(3) PAGE_REASONS: the reason the guard prints for this rule names a role or lane slug",
+          names_role_or_slug(static_reason), "want a role or a lane slug, got %r" % (static_reason,))
+    check("(3) PAGE_REASONS: the reason the guard prints gives no session id as the remedy",
+          no_session_id_remedy(static_reason), "want no instruction to write a session id, got %r" % (static_reason,))
+    cross("(3 control) checked_with is 'batch runner 9', still refused, naming checked_with", "set",
+          ma144(checked="batch runner 9"), PAGE_REPO_NAME, ("checked_with",))
+
+
+def case_cross_repo_missing_checked_with_names_role_or_slug():
+    """(4) A missing or empty checked_with on another repo's open decision is still refused (case (i) holds the refusal).
+    Its reason names a role or a lane slug and gives no session id as the remedy. On main the reason asks the writer to
+    write a session id, so this case is red on the reason, not on the refusal. Control, green on main: the same item with
+    no checked_with on the page's own repo passes."""
+    cross_refusal_checks("(4) checked_with missing", "set", ma144())
+    cross_refusal_checks("(4) checked_with empty", "set", ma144(checked=""))
+    at_page_refusal_checks("(4) checked_with missing", "set", ma144_write(), tcj.origin_page_repo())
+    cross("(4 control) the same item with no checked_with on the page's own repo passes", "set",
+          ma144(repo=PAGE_REPO_NAME), PAGE_REPO_NAME)
 
 
 def case_cross_repo_open_filter_is_the_one_home():
@@ -2267,8 +2432,8 @@ def case_cross_repo_malformed_repo_is_a_format_refusal():
     repo-name pattern, so it is judged as a repo off the page's own and asks for checked_with."""
     cross_format("(xvi) repo shivinate7/claude-settings.git, no checked_with",
                  ma144(repo="shivinate7/claude-settings.git"))
-    cross_format("(xvi) repo shivinate7/claude-settings.git, a session-shaped checked_with",
-                 ma144(repo="shivinate7/claude-settings.git", checked=CHECKED))
+    cross_format("(xvi) repo shivinate7/claude-settings.git, a lane slug checked_with",
+                 ma144(repo="shivinate7/claude-settings.git", checked=LANE_SLUG))
     at_page("(xvi) repo shivinate7/claude-settings.git, at the page's checkout", "set",
             ma144_write(repo="shivinate7/claude-settings.git"), tcj.origin_page_repo(), (r"owner/name",))
 
@@ -2290,12 +2455,12 @@ def case_cross_repo_writer_session_is_not_the_checker():
 
 
 def case_cross_repo_writer_session_controls():
-    """(xvii controls) A checked_with that differs from the writer's session passes. With no session id, a checked_with
-    equal to a session id passes, since the writer's refusal does not apply. Both hold with or without the fix."""
-    cross_as_writer("(xvii control) checked_with is another session, the writer is WRITER_SESSION",
-                    ma144(checked=CHECKED, owner="coordinator"), WRITER_SESSION)
-    cross_as_writer("(xvii control) no session id, checked_with equal to WRITER_SESSION passes",
-                    ma144(checked=WRITER_SESSION, owner="coordinator"), None)
+    """(xvii controls) A checked_with that is another lane's slug passes with the writer's session set, and with no writer's
+    session a role passes. A session id is refused in any write (case (3))."""
+    cross_as_writer("(xvii control) checked_with is another lane's slug, the writer is WRITER_SESSION",
+                    ma144(checked=OTHER_LANE, owner="coordinator"), WRITER_SESSION)
+    cross_as_writer("(xvii control) no writer session id, checked_with is the role triage",
+                    ma144(checked="triage", owner="coordinator"), None)
 
 
 # ------------------------------------------------------------------ the writer's session, through the guard's dispatch
@@ -2310,7 +2475,6 @@ def case_cross_repo_writer_session_controls():
 LANE_ENV = "CLAUDE_CODE_REMOTE_SESSION_ID"
 CLOUD_LANE = "cse_013TESTabc"  # this cloud session's env value
 CLOUD_RECORD = "session_013TESTabc"  # the same session's record id: the writer's session id in checked_with
-OTHER_SESSION = "session_013OTHERxyz"  # another session's record id
 LOCAL_UUID = "60f6df14-79ff-4a1e-9c2b-5d7e8f901a2b"  # the hook payload's session_id: a UUID, not a record id
 
 
@@ -2356,14 +2520,15 @@ def case_cross_repo_writer_guard_path():
     """(xviii) guard.judge refuses a checked_with equal to the writer's own session. The cloud session's record id comes
     from CLAUDE_CODE_REMOTE_SESSION_ID (cse_<x> read as session_<x>), not from the payload's UUID. The red: on the
     build that reads the payload's UUID, the writer's session is never the record id, so the refusal does not fire.
-    The controls: another session passes; a local session (env unset) has no writer's session to refuse; a missing
-    checked_with is refused end to end (green on the build that has this rule: it shows the guard dispatches it)."""
+    The controls: a lane slug passes in a cloud session; a role passes in a local session (env unset), whose writer's
+    session is never a record id; a missing checked_with is refused end to end (green on the build that has this rule: it
+    shows the guard dispatches it). A session id is refused in any write (case (3))."""
     writer_verdict("(xviii) guard: checked_with is this cloud session's record id, env cse_013TESTabc",
                    guard_refusal(writer_input(checked=CLOUD_RECORD, owner="coordinator"), CLOUD_LANE), refused=True)
-    writer_verdict("(xviii control) guard: checked_with is another session, env cse_013TESTabc",
-                   guard_refusal(writer_input(checked=OTHER_SESSION, owner="coordinator"), CLOUD_LANE), refused=False)
-    writer_verdict("(xviii control) guard: local session, env unset, checked_with is the record id",
-                   guard_refusal(writer_input(checked=CLOUD_RECORD, owner="coordinator"), None), refused=False)
+    writer_verdict("(xviii control) guard: checked_with is another lane's slug, env cse_013TESTabc",
+                   guard_refusal(writer_input(checked=OTHER_LANE, owner="coordinator"), CLOUD_LANE), refused=False)
+    writer_verdict("(xviii control) guard: local session, env unset, checked_with is the role triage",
+                   guard_refusal(writer_input(checked="triage", owner="coordinator"), None), refused=False)
     writer_verdict("(xviii control) guard: no checked_with is refused, env cse_013TESTabc",
                    guard_refusal(writer_input(owner="coordinator"), CLOUD_LANE), refused=True)
 
@@ -2378,10 +2543,10 @@ def case_cross_repo_writer_page_item_hit():
     ok = isinstance(hit, tuple) and len(hit) == 2 and hit[0] == CROSS_REPO_RULE and "checked_with" in str(hit[1])
     check("page_item_hit: checked_with equal to the writer's session is refused, naming checked_with", ok,
           "want %s naming checked_with, got %r" % (CROSS_REPO_RULE, hit))
-    got = call("page_item_hit", writer_input(checked=OTHER_SESSION, owner="coordinator"), tcj.origin_page_repo(),
+    got = call("page_item_hit", writer_input(checked=OTHER_LANE, owner="coordinator"), tcj.origin_page_repo(),
                CLOUD_RECORD)
     hit = got[0] if isinstance(got, tuple) and got else got
-    check("control: page_item_hit, checked_with another session passes", hit == ("", ""),
+    check("control: page_item_hit, checked_with another lane's slug passes", hit == ("", ""),
           "want a pass, got %r" % (hit,))
 
 
@@ -2398,27 +2563,26 @@ def model_calls_of_call_judge(checked):
 def case_cross_repo_writer_call_judge():
     """(xxi) call_judge.py reads the writer's session the way guard.py does. A checked_with equal to the cloud session's
     record id is a hit, so call_judge asks no model about the write. The red: on a build that passes the payload's UUID,
-    the write is no hit there and the model is asked. The control, another session's checked_with, is asked, so the
-    model call is seen."""
+    the write is no hit there and the model is asked. The control, another lane's slug, is not refused, so the model is
+    asked and the model call is seen. A session id is refused before any model call (case (3))."""
     refused = model_calls_of_call_judge(CLOUD_RECORD)
     check("(xxi) call_judge: checked_with is this cloud session's record id, no model call", refused == 0,
           "want no model call for a write the rule refuses, got %d call(s)" % refused)
-    asked = model_calls_of_call_judge(OTHER_SESSION)
-    check("(xxi control) call_judge: checked_with is another session, the model is asked", asked > 0,
+    asked = model_calls_of_call_judge(OTHER_LANE)
+    check("(xxi control) call_judge: checked_with is another lane's slug, the model is asked", asked > 0,
           "want a model call for a write no rule refuses, got %d" % asked)
 
 
 def case_cross_repo_update_checked_with_needs_repo():
-    """(xviii) An update that carries checked_with but no repo is refused, and the reason names `repo`. The stored repo
-    is unseen, so a checked_with alone cannot be judged against it. The controls carry repo, so they hold with or
-    without this refusal."""
+    """(xx) An update that carries checked_with but no repo is refused, and the reason names `repo`. The stored repo
+    is unseen, so a checked_with alone cannot be judged against it. The controls carry repo and a lane slug."""
     cross("(xx) update with checked_with, no repo", "update", {"checked_with": CHECKED}, PAGE_REPO_NAME, ("`repo`",))
     at_page("(xx) update with checked_with, no repo", "update", entry_of({"checked_with": CHECKED}, doc_id=MA144_ID),
             tcj.origin_page_repo(), ("`repo`",))
-    cross("(xx control) update with a foreign repo and checked_with", "update",
-          {"repo": OTHER_REPO, "checked_with": CHECKED}, PAGE_REPO_NAME)
-    cross("(xx control) update with the page's own repo and checked_with", "update",
-          {"repo": PAGE_REPO_NAME, "checked_with": CHECKED}, PAGE_REPO_NAME)
+    cross("(xx control) update with a foreign repo and a lane slug", "update",
+          {"repo": OTHER_REPO, "checked_with": LANE_SLUG}, PAGE_REPO_NAME)
+    cross("(xx control) update with the page's own repo and a lane slug", "update",
+          {"repo": PAGE_REPO_NAME, "checked_with": LANE_SLUG}, PAGE_REPO_NAME)
 
 
 # ------------------------------------------------------- judged_item_writes reads a file_path at the payload cwd
@@ -2534,6 +2698,9 @@ def main():
                  case_cross_repo_writer_session_is_not_the_checker, case_cross_repo_writer_session_controls,
                  case_cross_repo_writer_guard_path, case_cross_repo_writer_page_item_hit,
                  case_cross_repo_writer_call_judge, case_cross_repo_update_checked_with_needs_repo,
+                 case_cross_repo_remedy_detector_is_calibrated, case_cross_repo_role_checked_with_passes,
+                 case_cross_repo_lane_slug_checked_with_passes, case_cross_repo_session_id_is_refused,
+                 case_cross_repo_missing_checked_with_names_role_or_slug,
                  case_judged_relative_file_path_read_at_cwd, case_judged_absolute_and_empty_are_unchanged,
                  case_judged_mixed_writes_all_returned):
         try:
