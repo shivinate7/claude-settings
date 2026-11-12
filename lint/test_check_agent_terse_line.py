@@ -150,6 +150,30 @@ class BodyCases:
         self.assertEqual(self.verdict("Write ``` to open a fence.\n\n" + TERSE_LINE), (0, ""),
                          "a fence marker in the middle of a line hid the line")
 
+    def test_a_fence_marker_inside_a_comment_opens_no_fence(self):
+        self.assertEqual(self.verdict("<!--\n```\n-->\n\n" + TERSE_LINE), (0, ""),
+                         "a fence marker inside an HTML comment opened a fence that hid the line after the comment")
+
+    def test_a_line_inside_a_comment_with_a_fence_marker_does_not_count(self):
+        self.assertEqual(self.verdict("<!--\n```\n%s\n-->" % TERSE_LINE)[0], 1,
+                         "a line inside a comment that holds a fence marker counts as holding the line")
+
+    def test_a_fence_closed_by_a_shorter_marker_stays_open(self):
+        self.assertEqual(self.verdict("````\nAn example.\n```\n%s\n````" % TERSE_LINE)[0], 1,
+                         "a three-backtick line closed a four-backtick fence, so the line after it counted")
+        self.assertEqual(self.verdict("````\nAn example.\n````\n\n" + TERSE_LINE), (0, ""),
+                         "control: a four-backtick fence closed by four backticks hid the line after it")
+
+    def test_a_fence_closed_by_a_longer_marker_closes(self):
+        self.assertEqual(self.verdict("```\nAn example.\n````\n\n" + TERSE_LINE), (0, ""),
+                         "a four-backtick line did not close a three-backtick fence, so the line after it was hidden")
+
+    def test_a_line_named_only_inside_a_code_span_does_not_count(self):
+        self.assertEqual(self.verdict("Quote the rule `%s` here." % TERSE_LINE)[0], 1,
+                         "a line inside a code span counts as holding the line")
+        self.assertEqual(self.verdict("Quote the rule here.\n\n" + TERSE_LINE), (0, ""),
+                         "control: the line outside a code span is flagged")
+
     def test_a_lone_quote_in_prose_hides_nothing(self):
         self.assertEqual(self.verdict("Don't stop early. Say \"no.\n\n" + TERSE_LINE), (0, ""),
                          "a lone quote in prose hid the line")
@@ -215,6 +239,21 @@ class NoArgumentRun(unittest.TestCase):
         code, out = run_tree(root)
         self.assertEqual(code, 1, "an agents/*.md file with no line passed: %r" % out)
         self.assertTrue(names(out, "extra.md"), "the finding does not name extra.md: %r" % out)
+
+
+class MixedRun(unittest.TestCase):
+    def test_a_missing_line_and_an_unreadable_file_exit_1_and_name_both(self):
+        root = make_tree(fixture_root(), bare=("builder",))
+        unreadable = os.path.join(root, "agents", "designer.md")
+        os.remove(unreadable)
+        os.makedirs(unreadable)  # a folder where the file should be: open() fails on it for every reader
+        code, out = run_tree(root)
+        self.assertEqual(code, 1, "a run with a missing line and an unreadable file exited %r, not 1: %r" % (code, out))
+        self.assertTrue(names(out, "builder.md"), "the missing line is not named: %r" % out)
+        self.assertTrue(names(out, "designer.md"), "the unreadable file is not named: %r" % out)
+        self.assertIn("unknown", " ".join(names(out, "designer.md")).lower(),
+                      "the unreadable file is not reported as unknown: %r" % out)
+        self.assertEqual(len(out.splitlines()), 2, "the mixed run gave a finding count other than two: %r" % out)
 
 
 class RealTree(unittest.TestCase):
