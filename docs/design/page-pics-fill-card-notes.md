@@ -90,7 +90,7 @@ Owner grant: yes. Not drawn, and outside this lane. Filling the card does little
 - `MIN_PIC` stays as a number (check_designs.mjs and the write guard read it); fitFrame stops using it as a width floor. `PHONE_H` stays, in F. The 5B width cap min(221.8, …) goes.
 - In both branches, the measured one and the declared-size one, set the width and height from the column, so the first paint already has the size.
 - The c204 acceptance check ("a picture that fits looks as today") turns false by design. Re-point it: a picture that fits is floor(column) wide, or 2 × its width when that is less.
-- The sizing rule's home is `reference/designs.md` (skill `waiting-page`), section "Add a design": step 1, and the `focus` bullet of step 4."
+- The sizing rule's home is `reference/designs.md` (skill `waiting-page`), section "Add a design": step 1, and the `focus` bullet of step 4.
 
 ## 9. Card pictures for the waiting page
 
