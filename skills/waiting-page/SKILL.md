@@ -462,14 +462,15 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
    in the same update. Then delete `answers/<id>`, so the answer cannot count for a later item. The page shows a closed
    item as one line, with its home and its reply, until the owner marks it read. The page shows `lastAnswer` as the answer on the opened line, and on an item left open (steps 3, 4 and a busy lane).
 3. If the answer is `none` with no clear direction, and you write the new `options`, `pick` and `why` from the
-   note in this same turn (a `multi` item's new `pick` is a list), set `added` to now. Write `lastAnswer` from
+   note in this same turn (a `multi` item's new `pick` is a list), set `added` to now. Carry `kind: decision` and `context` again, with a
+   fresh "Against the pick (sonnet): <case>" line for the new pick (the old case argues against the old pick). Write `lastAnswer` from
    the answer in the same update, without `choice`, because the new `options` replace the old keys. Then delete
    `answers/<id>` (pinned to its version), and
    leave the item open. Say in the terminal that the item has new options. If you cannot write them in this turn,
    close the item (step 2) with a home that names the rework, and add a fresh item when the options are
    ready. A `none` answer with a clear direction never takes this fallback: the busy-lane rule sorts it. An open item never says it is being reworked (guard rule `rework-off-page`). If the note is not
    enough to write the options, ask in the terminal what the owner wants.
-4. If any other answer is not clear, rewrite the item's `context`, write `lastAnswer` from the answer, delete
+4. If any other answer is not clear, rewrite the item's `context` (keep its Against the pick line), write `lastAnswer` from the answer, delete
    `answers/<id>` (pinned to its version), and leave the item open. Say in the terminal what was not clear.
 5. An `overturn` answer: the item's `owner` session reopens the ruling's item in one update to `items/<id>`:
    - `kind` `decision`, `status` `open`, `arbiter` false (the page tests `=== true`; an update merges and cannot drop a field), and `added` now.

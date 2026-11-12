@@ -31,6 +31,7 @@ Owner ruling, item 284 a, row `refuter-page-against` in `docs/plans/debate-model
 - The writer gives the refuter only the item's Goal, Problem, Based on lines, options and pick, never `why`, and copies its case into the line (skill `waiting-page`, "Add an item").
 - Judged: an open decision with a `pick`, on a `set` or on an update that carries `kind: decision`, `pick` and `context`. A `str_replace` on `context` whose old or new text holds the line must leave a valid one.
 - Not judged: a closed item, a task, a note, an item with no `pick`, `stands: true`, `port: true`, and the chat question box.
+- Departs from the ruling's words "each page decision with a pick": the exemptions above stay, since a stood pick is the owner's own ruling and the guard cannot read stored fields. An update that carries no `pick` is not judged; the SKILL steps tell the session to keep or refresh the line.
 - Cost: one Sonnet call per decision item written. No process and no file.
 - Known limit: code reads that the line is there and well formed. It cannot read whether the agent was blind, ran at all, or argued well. The owner reads the case.
 
