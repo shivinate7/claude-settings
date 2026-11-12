@@ -1694,8 +1694,9 @@ jobs:
   checks-windows-rest:
     runs-on: windows-latest
     needs: scope
-    # n30 green, median 19.25, slowest 25.8 min (run 42682869856, attempt 1): cap 37 = slowest / 0.7, rounded up (decision ci-job-caps).
-    timeout-minutes: 37
+    # 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). Newest 29 completed push runs on main (run 42445434802 on; run 43184587111 was still running):
+    # 29 green, slowest 30.4 min (run 43070476960). Slowest step: Guard wrappers fixture suite, 277 s. The stopgap ends with roadmap step time-pinned-tests-go.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: ${{ needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request' }}
