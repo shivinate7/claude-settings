@@ -6185,6 +6185,8 @@ def scratchpad_script(word, args):
         if at is None:
             return [], "", False
         at += start
+        # A wrapper as the script word hands on its command (`uv run timeout 60 python3 F`, `uv run env X=1 ...`).
+        at += resolve_command(args[at:]) or 0
         files = [args[at]]
         if SCRATCHPAD_RUNNER(basename(args[at])):
             inner = scratchpad_script(args[at], args[at + 1:] + (["<", stdin] if stdin else []))
