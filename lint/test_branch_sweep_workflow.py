@@ -362,7 +362,7 @@ class Workflow(unittest.TestCase):
                                  "a -gt 0 compare in the pulls step, which has no delete, is a budget finding")
 
     def test_literal_compare_in_the_delete_block_still_flags_beside_a_pulls_compare(self):
-        # Control, green on the old code. The pulls-step compare above must not hide the delete loop's literal.
+        # Control: the pulls-step compare must not hide the delete loop's literal.
         text = variant(OLD_READ, NEW_READ).replace('"$remaining" -lt "$reserve"', '"$remaining" -lt 300')
         self.assertRuleFinding(text, "budget", "the delete loop compares against 300 beside a pulls-step compare",
                                line_of(text, '"$remaining" -lt 300'))
@@ -378,17 +378,17 @@ class Workflow(unittest.TestCase):
                                line_of(text, '-lt "300"'))
 
     def test_arithmetic_compare_against_the_reserve_is_clean(self):
-        # Control, green on the old code: the reserve is read from sweep.py, so no literal is compared.
+        # Control: the reserve is read from sweep.py, so no literal is compared.
         self.assertNoRuleFinding(variant(DELETE_COMPARE, '              if (( remaining < reserve )); then\n'), "budget",
                                  "an arithmetic compare against the reserve variable is a budget finding")
 
     def test_literal_in_a_quoted_echo_is_clean(self):
-        # Control, green on the old code: a quoted string is text, not a compare.
+        # Control: a quoted string is text, not a compare.
         text = variant(DELETE_COMPARE, DELETE_COMPARE + '              echo "-lt 300 is a literal compare"\n')
         self.assertNoRuleFinding(text, "budget", "a -lt 300 inside an echo string is a budget finding")
 
     def test_literal_in_a_shell_comment_is_clean(self):
-        # Control, green on the old code: a shell comment is no command.
+        # Control: a shell comment is no command.
         text = variant(DELETE_COMPARE, DELETE_COMPARE + '              # if [ "$remaining" -lt 300 ]; then\n')
         self.assertNoRuleFinding(text, "budget", "a -lt 300 in a shell comment is a budget finding")
 

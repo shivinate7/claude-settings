@@ -239,8 +239,8 @@ def expected_deletes(names, budget, reserve):
 
 
 def stop_line(done, deleted_n, left_n):
-    """The line of a step's output that carries the deletes done, then the deletes left. "" when none does. The order
-    matters: with equal counts, or two counts that are each other's swap, a line with the numbers in another order passes."""
+    """The line of a step's output that carries the deletes done, then the deletes left. "" when none does. Order counts:
+    a line that holds the two numbers the other way round, or equal numbers in a pair that differs, is no match."""
     for line in (done.stdout + done.stderr).splitlines():
         if re.search(r"\b%d\b.*\b%d\b" % (deleted_n, left_n), line):
             return line
@@ -743,8 +743,8 @@ class DeleteStep(unittest.TestCase):
                         % (len(want), len(names) - len(want)))
 
     def test_kept_verdict_is_not_counted_as_left(self):
-        # Control, green on the old code. A keep verdict never enters the delete loop, so the stop line counts the
-        # deletes only: two done, one left.
+        # Control: a keep verdict never enters the delete loop, so the stop line counts the deletes only: two done,
+        # one left.
         names = ["feature/a", "feature/b", "feature/c"]
         done, log, verdict_text = self.run_workflow(names, [], kept=["feature/k"], budget=RESERVE + 3)
         self.assertEqual(deletes(verdict_text), names, "scope: the sweep named other deletes")
