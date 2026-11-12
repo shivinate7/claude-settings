@@ -4,7 +4,7 @@
     python3 lint/check_silent_undo.py [--upstream origin/main] [--head HEAD] [--strict]
     python3 lint/check_silent_undo.py --history [REV] [--window 60]   # audit, always exit 0
 
-Four reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
+Four reads, one verdict. Three of them (lost lines, reversal, revived) fail the run; the lane undo read only reports. Design: docs/decisions/silent-undo-check-design.md.
 
   lost lines  A merge commit M (in upstream..head) loses a line one parent added since the
               merge base: the line is absent from every base, M holds fewer copies than that
@@ -20,7 +20,8 @@ Four reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
               first-parent line left main, up, that commit included. Catches
               `git revert`, a stale copy, and a rebase that took its own side (caught
               when the lost work is the rebase-base commit or later).
-  lane undo   A non-merge commit C of the branch undoes an earlier non-merge commit E of the same branch, in two shapes
+  lane undo   (report-only: its findings print marked `report-only`, and never set the exit code or refuse a merge.)
+              A non-merge commit C of the branch undoes an earlier non-merge commit E of the same branch, in two shapes
               only. (1) C puts a file, or a -U0 hunk, back to the text E's parent held, when E changed BLOCK_LINES (6)
               lines or more there: the whole file within one non-blank line, or one hunk on all but one line. Off a
               test path it needs the file on both sides. (2) On a test path (hooks/guard.py is_test_rel), a hunk of C
@@ -28,7 +29,7 @@ Four reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
               lines C takes out that E added count: in (1) while head still holds fewer of them than C's parent did,
               in (2) only a line with no copy left in the whole file at head. A file E or C renames is read across
               the rename, so a move adds and puts back nothing. Not read here: merges, and a file renamed by a third
-              commit between E and C. The FAIL names the path, C and E.
+              commit between E and C. The line names the path, C and E; a Drops-lines trailer still excuses it.
   revived     A note the branch deleted is back at head. The notes file merges by union (decision
               notes-merge-union), so a merge of the base can put a deleted note back with no conflict. A note is
               its slug (`- <slug>:` at line start), so a reworded copy counts; a `- ` line with no slug form is its
@@ -58,7 +59,7 @@ in the body, and CI's way out is a Drops-lines commit trailer. Each use prints
 the commit, plus the branch it merged for a reversal.
 
 A read that cannot run prints UNKNOWN. Exit 0 locally, exit 1 when env CI is set or with
---strict, and exit 1 always when the UNKNOWN carries a finding (ruling: unknown in CI is red).
+--strict, and exit 1 always when the UNKNOWN carries a finding other than a report-only lane undo line (ruling: unknown in CI is red).
 """
 import argparse
 import collections
@@ -78,6 +79,7 @@ except ImportError:  # a hook loads this file; a missing helper never stops that
 TRAILER = "Drops-lines"
 ZERO = "0" * 40
 WORD = re.compile(r"[A-Za-z0-9]")
+REPORT_ONLY = "lane undo (report-only),"  # the start of every lane undo line: check() keeps it in its list, and main() and merge's undo_check read it to leave it out of the verdict
 BLOCK_LINES = 6  # a lane commit that changed this many lines in a file, or in one hunk, is a block: putting it back is an undo
 
 
@@ -713,7 +715,7 @@ def lane_undos(cwd, upstream, head):
 
 
 def fmt_lane(path, how, e, c):
-    return "lane undo, %s: %s by %s, undoing %s %s; excuse with a \"%s: %s -- <why>\" trailer" % (path, how, c.sha[:9], e.sha[:9], e.subject[:60], TRAILER, path)
+    return REPORT_ONLY + " %s: %s by %s, undoing %s %s; excuse with a \"%s: %s -- <why>\" trailer" % (path, how, c.sha[:9], e.sha[:9], e.subject[:60], TRAILER, path)
 
 
 # --------------------------------------------------------------------- revived
@@ -918,11 +920,24 @@ def history(cwd, rev, window):
     return len(line), out
 
 
+def failing(problems):
+    """The problem lines that fail the run: every line but a report-only lane undo one."""
+    return [p for p in problems if not p.startswith(REPORT_ONLY)]
+
+
 def say(line):
     """The one home for printed output. A non-UTF-8 name holds surrogates, which a strict stream cannot encode:
     write them as backslash escapes, so the finding prints and the exit code holds."""
     enc = getattr(sys.stdout, "encoding", None) or "utf-8"
     print(line.encode(enc, "backslashreplace").decode(enc))
+
+
+def emit(problems):
+    """Print each problem line: FAIL for a failing one, the bare line for a report-only one; the remedy follows only when a FAIL printed."""
+    for p in problems:
+        say("silent-undo: " + ("" if p.startswith(REPORT_ONLY) else "FAIL: ") + p)
+    if failing(problems):
+        say("silent-undo: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message." % TRAILER)
 
 
 def main(argv):
@@ -944,19 +959,13 @@ def main(argv):
     except Unknown as e:
         for n in e.notes:
             say("silent-undo: " + n)
-        for p in e.problems:
-            say("silent-undo: FAIL: " + p)
-        if e.problems:
-            say("silent-undo: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message." % TRAILER)
+        emit(e.problems)
         say("silent-undo: UNKNOWN: %s" % e)
-        return 1 if (e.problems or a.strict or os.environ.get("CI")) else 0
+        return 1 if (failing(e.problems) or a.strict or os.environ.get("CI")) else 0
     for n in notes:
         say("silent-undo: " + n)
-    for p in problems:
-        say("silent-undo: FAIL: " + p)
-    if problems:
-        say("silent-undo: put the work back, or add the trailer `%s: <path> -- <reason>` to a commit message." % TRAILER)
-    return 1 if problems else 0
+    emit(problems)
+    return 1 if failing(problems) else 0
 
 
 if __name__ == "__main__":
