@@ -22,6 +22,15 @@ HC_BADBYTE = os.path.join(ROOT, "hc-badbyte")     # a handoff with one byte that
 HC_BADBYTE_TEXT = b"# Handoff\n\nWaiting on the STRAY build.\n\n## Next\n\nCheck the page.\n"
 
 
+HC_TAIL = "".join("\n## %s\n\nx\n" % n for n in (
+    "Goal", "Working premises", "Where things stand", "Work in flight", "Next steps", "Files and commands"))
+
+
+def hc_full(text):
+    """`text` with every section the handoff-sections check requires, so only the cite check can refuse it."""
+    return text + HC_TAIL
+
+
 def hc_handoff(config):
     """The session's handoff under `config`, from precompact_handoff, the one home of the path."""
     return hu_paths(config, HC_SID)[0]
@@ -81,21 +90,21 @@ for _label, _content, _bare in (
         ("a bare waiting-page item 46", "Open: waiting-page item 46.\n", "46"),
         ("a bare item 46 first and a named one later", "Open item 46. Later, item 46 (search pill clear).\n", "46")):
     hc_add("handoff-cite: a Write of the handoff with %s is refused" % _label, "deny", HC_CLEAN, "Write",
-           {"file_path": hc_handoff(HC_CLEAN), "content": _content}, carries=_bare)
+           {"file_path": hc_handoff(HC_CLEAN), "content": hc_full(_content)}, carries=_bare)
 hc_add("handoff-cite: a Write that replaces a handoff naming item 46 with a bare item 46 is refused", "deny", HC_NAMED,
-       "Write", {"file_path": hc_handoff(HC_NAMED), "content": "Open: item 46.\n"}, carries="46")
+       "Write", {"file_path": hc_handoff(HC_NAMED), "content": hc_full("Open: item 46.\n")}, carries="46")
 hc_add("handoff-cite: a Write of the ~/.claude/handoffs spelling of the handoff with a bare item 46 is refused", "deny",
        HC_CLEAN, "Write", {"file_path": os.path.join(HC_HOME, ".claude", "handoffs", HC_SID + ".md"),
-                           "content": "Open: item 46.\n"}, carries="46",
+                           "content": hc_full("Open: item 46.\n")}, carries="46",
        env={"HOME": HC_HOME, "USERPROFILE": HC_HOME})
 for _label, _content in (
         ("a named item 46", "Open: item 46 (search pill clear).\n"),
         ("a named page item 382", "Open: page item 382 (merge-unreviewed-head).\n"),
         ("an item 46 in code", "Use `item 46` as the label.\n")):
     hc_add("handoff-cite: a Write of the handoff with %s is allowed" % _label, "allow", HC_CLEAN, "Write",
-           {"file_path": hc_handoff(HC_CLEAN), "content": _content}, silent=True)
+           {"file_path": hc_handoff(HC_CLEAN), "content": hc_full(_content)}, silent=True)
 hc_add("handoff-cite: a Write of another path with a bare item 46 is not refused by this check", "allow", HC_CLEAN,
-       "Write", {"file_path": os.path.join(NOGIT, "notes.md"), "content": "Open: item 46.\n"}, silent=True)
+       "Write", {"file_path": os.path.join(NOGIT, "notes.md"), "content": hc_full("Open: item 46.\n")}, silent=True)
 
 # An Edit is judged on the file after the edit, so the named cite earlier in the file is what counts.
 hc_add("handoff-cite: an Edit that adds a bare item 46 after a named one is allowed", "allow", HC_NAMED, "Edit",
@@ -118,7 +127,7 @@ hc_add("handoff-cite: an Edit at the end of a long handoff that adds bare items 
 # second edit, and an Edit whose replace_all strips the name from a bare item 46 (the name is on the second of two
 # matches, so a single replace would leave it named) are green on the old code; each has a mutant that must flip it.
 hc_add("handoff-cite: a Write of the handoff with a capital Item 46 is refused", "deny", HC_CLEAN, "Write",
-       {"file_path": hc_handoff(HC_CLEAN), "content": "Item 46 is open.\n"}, carries="46")
+       {"file_path": hc_handoff(HC_CLEAN), "content": hc_full("Item 46 is open.\n")}, carries="46")
 hc_add("handoff-cite: a MultiEdit whose bare item 46 is in its second edit is refused", "deny", HC_BARE, "MultiEdit",
        {"file_path": hc_handoff(HC_BARE), "edits": [
            {"old_string": "Waiting on the build.", "new_string": "Waiting on the build, then the page."},
