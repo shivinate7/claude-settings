@@ -228,8 +228,11 @@ def departs_hit(text) -> str:
         added = PORT_NEW_THING.fullmatch(change)
         if is_placeholder(main) or is_placeholder(change) or (added and is_placeholder(added.group(1))):
             return "Departs from line with a side that is only a placeholder" + PLACEHOLDER_HINT
-        # With no separator the first word may be a no-change word ("same as main"), so the whole line is read.
-        word = NO_CHANGE.search((change if split else rest).split(";", 1)[0])
+        # With no separator the first word may be a no-change word ("same as main"), so the main side is read too.
+        # The change side is cut at its own first ";", so a ";" after the first word ("main; no change") hides
+        # nothing.
+        first = change.split(";", 1)[0]
+        word = NO_CHANGE.search(first if split else main + " " + first)
         if word:
             return "Departs from line whose change side says no change (%r): it restates main" % word.group(0)
     return ""
