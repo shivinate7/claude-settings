@@ -43,8 +43,9 @@ SHARED_NAMES = os.environ.get("SHARED_NAMES_UNDER_TEST") or os.path.join(
 
 
 def remote_outward_tools():
-    """REMOTE_OUTWARD_TOOLS of hooks/shared_names.py, the one home of the claude-code-remote tools an agent may not
-    call. SHARED_NAMES_UNDER_TEST points the test at another copy (a red run on a stand-in list)."""
+    """REMOTE_OUTWARD_TOOLS of hooks/shared_names.py, the one home of the outward tools an agent may not call. Its names
+    carry more than one server prefix (claude-code-remote, and the session server's start_session).
+    SHARED_NAMES_UNDER_TEST points the test at another copy (a red run on a stand-in list)."""
     import importlib.util
     spec = importlib.util.spec_from_file_location("shared_names_under_test", SHARED_NAMES)
     module = importlib.util.module_from_spec(spec)
@@ -62,8 +63,8 @@ class RemoteOutwardMatcher(unittest.TestCase):
         self.assertTrue(matchers, "no guard.py entry in settings.json PreToolUse")
         for tool in tools:
             with self.subTest(tool=tool):
-                self.assertTrue(tool.startswith("mcp__claude-code-remote__"),
-                                "%r is not a full claude-code-remote tool name" % tool)
+                # A full MCP tool name, whichever server it belongs to: the check reads no one prefix.
+                self.assertTrue(re.fullmatch(r"mcp__[\w-]+__\w+", tool), "%r is not a full MCP tool name" % tool)
                 self.assertTrue(any(re.fullmatch(m, tool) for m in matchers),
                                 "no guard matcher covers %s" % tool)
 
