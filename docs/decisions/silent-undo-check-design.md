@@ -3,7 +3,7 @@
 ## The ruling
 
 `lint/check_silent_undo.py` is the one home. CI runs it on each pull request with `--strict`.
-`merge/merge.py` calls it through `undo_check` before it pushes or merges. It reads three things.
+`merge/merge.py` calls it through `undo_check` before it pushes or merges. It reads four things.
 
 - **Reversal.** Landing the branch on upstream puts a file back as an earlier first-parent commit of
   upstream had it: the exact blob, a `-U0` hunk reversed on all but one line, or lines main only added
@@ -15,6 +15,14 @@
   commit added on the branch alone is the branch's. A merge of three or more parents is not read, and the
   check reports it as UNKNOWN only after the other reads finish. The merge tool refuses an UNKNOWN that
   carries a finding, and the reason flag cannot lift it (step notes-union-batch-revival).
+- **Lane undo.** A non-merge commit of the branch undoes an earlier non-merge commit of the same branch. Two
+  shapes only (owner ruling, Cockpit item 167 a, 2026-11-04). One: the commit puts a file, or a `-U0` hunk, back
+  to the text the earlier commit's parent held, when the earlier commit changed six lines or more there. The
+  file counts within one non-blank line, the hunk on all but one line. Off a test path, the file must exist on
+  both sides. Two: on a test path (`is_test_rel`, `hooks/guard.py`), a hunk takes out more of the lines the
+  earlier commit added than it adds back, and not every one is a rewrite. Only lines the earlier commit added
+  count, and only while head holds fewer of them than the undoing commit's parent did, so a later restore clears
+  it. A lane of one commit has nothing to read. Not read here: moves, renames, merges.
 - **Revived note.** A note the branch deleted is back at head, because a union merge of main put it back
   (decision `notes-merge-union`). The check replays the branch's own commits and counts copies per note.
   A note is its slug, or its whole line when it has no slug form. A rebase leaves no merge, so it is not read

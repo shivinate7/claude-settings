@@ -4,7 +4,7 @@
     python3 lint/check_silent_undo.py [--upstream origin/main] [--head HEAD] [--strict]
     python3 lint/check_silent_undo.py --history [REV] [--window 60]   # audit, always exit 0
 
-Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
+Four reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
 
   lost lines  A merge commit M (in upstream..head) loses a line one parent added since the
               merge base: the line is absent from every base, M holds fewer copies than that
@@ -20,6 +20,13 @@ Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
               first-parent line left main, up, that commit included. Catches
               `git revert`, a stale copy, and a rebase that took its own side (caught
               when the lost work is the rebase-base commit or later).
+  lane undo   A non-merge commit C of the branch undoes an earlier non-merge commit E of the same branch, in two shapes
+              only. (1) C puts a file, or a -U0 hunk, back to the text E's parent held, when E changed BLOCK_LINES (6)
+              lines or more there: the whole file within one non-blank line, or one hunk on all but one line. Off a
+              test path it needs the file on both sides. (2) On a test path (hooks/guard.py is_test_rel), a hunk of C
+              takes out more of the lines E added than it adds back, and not every one is a rewrite (`rewritten`). Only
+              lines C takes out that E added count, and only while head still holds fewer of them than C's parent did.
+              Not read here: moves, renames, merges. The FAIL names the path, C and E.
   revived     A note the branch deleted is back at head. The notes file merges by union (decision
               notes-merge-union), so a merge of the base can put a deleted note back with no conflict. A note is
               its slug (`- <slug>:` at line start), so a reworded copy counts; a `- ` line with no slug form is its
@@ -69,6 +76,7 @@ except ImportError:  # a hook loads this file; a missing helper never stops that
 TRAILER = "Drops-lines"
 ZERO = "0" * 40
 WORD = re.compile(r"[A-Za-z0-9]")
+BLOCK_LINES = 6  # a lane commit that changed this many lines in a file, or in one hunk, is a block: putting it back is an undo
 
 
 class Unknown(Exception):
@@ -510,8 +518,10 @@ class Commit:
         return self._files
 
 
-def first_parent(cwd, rev, limit=0):
-    a = ["log", "--first-parent", "--format=%H %P%x02%s"] + (["-n%d" % limit] if limit else []) + [rev]
+def first_parent(cwd, rev, limit=0, walk="--first-parent"):
+    """The commits of rev, newest first, each with its first parent. walk is the log's own selector: the first-parent
+    line by default, `--no-merges` for every non-merge commit (the lane undo read)."""
+    a = ["log", walk, "--format=%H %P%x02%s"] + (["-n%d" % limit] if limit else []) + [rev]
     _, out = git(cwd, *a)
     res = []
     for line in out.splitlines():
@@ -591,6 +601,88 @@ def fmt_rev(path, how, e):
 def fmt_lost(m, path, p, lost):
     shown = "".join("\n      - " + l for l in lost)
     return "%s: merge %s drops %d line(s) that parent %s added%s" % (path, m[:9], len(lost), p[:9], shown)
+
+
+# ------------------------------------------------------------------- lane undo
+
+_is_test = None
+
+
+def is_test(path):
+    """True for a test path, by the one rule of the guard (hooks/guard.py is_test_rel). A rule that cannot be read is Unknown."""
+    global _is_test
+    if _is_test is None:
+        try:
+            import guard
+            _is_test = guard.is_test_rel
+        except Exception as e:
+            raise Unknown("the test-path rule (hooks/guard.py is_test_rel) cannot be read: %s" % e)
+    return _is_test(path)
+
+
+_texts = {}
+
+
+def text_counts(cwd, rev, path):
+    if (cwd, rev, path) not in _texts:
+        _texts[cwd, rev, path] = counts(blob(cwd, rev, path))
+    return _texts[cwd, rev, path]
+
+
+def distance(x, y):
+    """How far two texts (line counters) are apart: the larger of the lines x has more of and the lines y has more of."""
+    return max(sum((x - y).values()), sum((y - x).values()))
+
+
+def lane_reads(cwd, e, c, path):
+    """(how, lines of e that c takes out) for each way commit c undoes earlier commit e in path, before the head check."""
+    theirs, mine = hunks(cwd, e.parent, e.sha, path), hunks(cwd, c.parent, c.sha, path)
+    added = collections.Counter(l for _, n in theirs for l in n)
+    test = is_test(path)
+    want, now = text_counts(cwd, e.parent, path), text_counts(cwd, c.sha, path)
+    if (test or (want and now)) and sum(len(o) + len(n) for o, n in theirs) >= BLOCK_LINES:
+        d = distance(now, want)
+        lost = collections.Counter(l for o, _ in mine for l in o) & added
+        if lost and d <= 1 and d < distance(text_counts(cwd, c.parent, path), want):
+            yield "whole file put back", lost
+    if test or (want and now):
+        for o, n in theirs:
+            for co, cn in mine:
+                lost = collections.Counter(co) & collections.Counter(n)
+                if len(o) + len(n) >= BLOCK_LINES and lost and misses(n, co) + distance(collections.Counter(o), collections.Counter(cn)) <= 1:
+                    yield "hunk put back", lost
+    if test:
+        for co, cn in mine:
+            lost = collections.Counter(co) & added
+            if sum(lost.values()) > len(cn) and any(not rewritten(l, [(co, cn)], modified=True) for l in lost):
+                yield "lane lines lost", lost
+
+
+def lane_undos(cwd, upstream, head):
+    """[(path, how, earlier commit, undoing commit)]: a non-merge commit of upstream..head that undoes an earlier non-merge
+    commit of the same range (see lane_reads), while head still holds fewer of the lines than the undoing commit's parent did.
+    One finding per undoing commit and path, naming the newest earlier commit it undoes. A lane of one commit has nothing to read."""
+    lane = [c for c in first_parent(cwd, "%s..%s" % (upstream, head), walk="--no-merges") if c.parent]
+    touched = collections.Counter(p for c in lane for p in c.files)
+    found = []
+    for c in lane:
+        paths = sorted(p for p in c.files if touched[p] > 1)
+        if not paths:
+            continue
+        ancestors = set(git(cwd, "rev-list", "--no-merges", "%s..%s" % (upstream, c.parent))[1].split())
+        earlier = [e for e in lane if e.sha in ancestors]
+        for path in paths:
+            for e in (e for e in earlier if path in e.files):
+                pre, at_head = text_counts(cwd, c.parent, path), text_counts(cwd, head, path)
+                how = next((how for how, lost in lane_reads(cwd, e, c, path) if not all(at_head[l] >= pre[l] for l in lost)), None)
+                if how:
+                    found.append((path, how, e, c))
+                    break
+    return found
+
+
+def fmt_lane(path, how, e, c):
+    return "lane undo, %s: %s by %s, undoing %s %s" % (path, how, c.sha[:9], e.sha[:9], e.subject[:60])
 
 
 # --------------------------------------------------------------------- revived
@@ -758,6 +850,7 @@ def check(cwd, upstream, head, default=None, tool=None, pr_body="", run_state=No
     n = int(git(cwd, "rev-list", "--count", "--first-parent", "%s..%s" % (base, upstream))[1]) + 1  # +1: the fork commit
     earlier = first_parent(cwd, upstream, n)
     items += [(x[0], fmt_rev(*x)) for x in reversals(cwd, old, new, files, earlier)]
+    items += [(x[0], fmt_lane(*x)) for x in lane_undos(cwd, upstream, h)]
     page, same = generated_page(cwd, h, {p for p, _ in items if p not in ok}, upstream, tool)
     if same:
         ok = dict(ok, **{page: "the page is the generator's output for the head"})
