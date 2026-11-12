@@ -4,9 +4,13 @@
 
 Owner, 2026-11-11 11:55 CST, relayed by the retrospective session. Exact words: "spend should also be logged if literally free to do so since it gives us more data about how we do things".
 
-At each batch merge, the batch runner reads the `get_session` cost of each session. It writes one line per session to the record branch.
+Ruling: log each session's spend at each batch merge, if literally free.
 
-The restart plan, section 3.15 ("Spend fewer tokens, measured first"), says `get_session` already returns each session's cost. This record does not call `get_session`. That claim is unmeasured here.
+Duty: the batch runner logs only if the reads are literally free. Whether they are: unmeasured.
+
+Plan design (restart plan 3.15), unruled: at each batch merge, the batch runner reads the `get_session` cost of each session and writes one line per session to the record branch.
+
+The restart plan, section 3.15 ("Spend fewer tokens, measured first"), says `get_session` already returns each session's cost. This record did not run `get_session` to check that. That claim is unmeasured here.
 
 ## Readers
 
@@ -34,7 +38,7 @@ The line's format and file: unruled; the builder proposes it.
 
 ## Where the duty is written
 
-The batch runner's merge duties are written in `docs/decisions/session-tiers.md`, in the "Batch runner" bullet. That bullet says what the batch runner does after each merge. `skills/project-ops/templates/operating-model.md` repeats the bullet for other repos' project instructions. It is a template, so the decision record is the home.
+The build writes this duty in the "Batch runner" bullet of `docs/decisions/session-tiers.md`. That bullet says what the batch runner does after each merge. `skills/project-ops/templates/operating-model.md` restates a shorter version of the bullet for other repos' project instructions. It is a template, so `docs/decisions/session-tiers.md` is the home.
 
 ## Dated by
 
