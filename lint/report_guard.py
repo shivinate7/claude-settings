@@ -754,16 +754,18 @@ PROMISE_REASON = (
     "or hook now and cite its PR or commit on the line, queue it as step:<slug>, or drop the promise. Lines: ")
 
 
-# A line that reports what someone else's handoff said ("The handoff file said from now on the page is exported")
-# makes no promise in this session; only that adjacent form is cut, so a promise later on the same line still counts.
-# "my handoff says ..." is the session's own promise written down, so a first-person subject is kept.
+# A line that reports what a handoff said ("The handoff file said from now on the page is exported") makes no
+# promise of its own. The cut applies only when the subject is "the" or "that" handoff, optionally "previous":
+# any other subject ("my", "my own", "this session's", "the session") is the session writing its own promise.
+# The cut removes only the reported "from now on" and keeps the word "handoff", so a later promise on the same
+# line still meets the handoff trigger.
 PROMISE_REPORT_RE = re.compile(
-    r"(?<![\w-])((?:my|our)\s+)?handoff(?:\s+file)?\s+(?:said|says|wrote|writes|stated|states)\s+(?:that\s+)?"
-    r"from\s+now\s+on(?![\w-])", re.I)
+    r"(?<![\w-])((?:the|that)\s+(?:previous\s+)?handoff(?:\s+file)?\s+"
+    r"(?:said|says|wrote|writes|stated|states)\s+(?:that\s+)?)from\s+now\s+on(?![\w-])", re.I)
 
 
 def _without_reports(text):
-    return PROMISE_REPORT_RE.sub(lambda m: m.group(0) if m.group(1) else " ", text)
+    return PROMISE_REPORT_RE.sub(lambda m: m.group(1) + " ", text)
 
 
 def promise_problem(text):
