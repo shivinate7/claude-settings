@@ -14811,6 +14811,24 @@ class ReviewFixFlag(ReviewEnv):
         rc, out, err = self.run_args("7")
         self.assertEqual(rc, 0, out + err)
 
+    def test_a_fix_check_with_no_round_is_refused_or_filled_and_never_printed_open(self):
+        # A record with a fix check and no round reads open ("no round is recorded"), and four were posted that way. The tool refuses it with a plain
+        # message that names --round, or fills the round in, so the record it prints carries a round. The control, the same argv with --round, exits 0.
+        argv = ("7", "--review-record", "--kind", "normal", "--guard", "no", "--head", self.head())
+        for verdict in ("PASS", "FAIL"):
+            with self.subTest(verdict=verdict):
+                rc, out, err = self.run_args(*argv, "--round", "1:reviewer:sonnet:PASS", "--fix-check", self.fix_value(verdict=verdict),
+                                             host=self.earlier_host())
+                self.assertEqual(rc, 0, "the control, with --round, was refused:\n" + out + err)
+                rc, out, err = self.run_args(*argv, "--fix-check", self.fix_value(verdict=verdict), host=self.earlier_host())
+                if rc == 0:  # filled: the printed record carries a round line
+                    self.assertTrue(parse_text(self, posted_body(self, out))["rounds"],
+                                    "a fix check printed with no --round has no round line, so it reads open:\n" + out)
+                else:  # refused: no record, and a plain message that names --round
+                    self.assertEqual(rc, 2, "a fix check with no --round exits neither 0 nor 2:\n" + out + err)
+                    self.assertNotIn(REVIEW_MARKER, out, "a refused fix check with no --round still printed a record")
+                    self.assertIn("--round", err, "the refusal of a fix check with no --round does not name --round:\n" + err)
+
     def test_a_fix_check_naming_a_model_other_than_sonnet_is_refused(self):
         # A fix check runs sonnet (agent-model-cap, the reviewer row; owner item 444 a, the fix check on every pull request). The merge tool refuses the
         # record that names another model: exit 2, no record, and an error that names the fix check and sonnet. Each refusal has the sonnet

@@ -5220,6 +5220,8 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--kind docs-only means no guard or check, so --guard must be no")
         if a.grant and grant_pr(a.grant)[0] != int(a.pr):
             p.error("--grant: the PR in the grant must be the pull request number")
+        if a.fix_check and not a.round:  # with no round the record reads open ("no round is recorded"), whatever the fix check says
+            p.error("--fix-check: give the rounds the fix check follows with --round, or the record reads open")
         if a.fix_check and a.fix_check[0] == a.head:
             p.error("--fix-check: the reviewed head must differ from --head, or the fix diff is empty")
         # The reviewer row (decision agent-model-cap): every fix check runs Sonnet (owner item 444 a), and a later-round reviewer runs Sonnet;
