@@ -69,7 +69,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   names the machine. It may drive a Remote Control session on the owner's machine.
 
 When the owner names the wrong session, or brings work that belongs to another session, the session
-says in one line whose job it is, then routes it.
+says in one line which session has the job, then routes the work (rule `style-wrong-session-one-line`).
 
 A coordinator's work in another repo is compliance only, by handoff or by its own lane PR in that repo
 (claude-settings decision `session-tiers`, bullet "A coordinator in another repo"). Before it acts,
@@ -136,10 +136,10 @@ parent, or miss a message while busy.
   `pr-review-record`). That push makes the record stale, so the lane posts a new review record for the
   new head. When the repo holds a standing merge grant, the batch runner merges under it. The owner is
   not asked.
-- A session that waits on CI sets a one-time check-in when it starts to wait, and again after each red job, each wider apart.
+- A session that waits on CI sets a one-time check-in (rule `git-ci-wait-checks-in`): once when it starts to wait, then again after each red job, spaced further apart each time.
 - Stall check: at each wake, a standing session asks whether any lane, PR or batch moved since its last
   turn. When none moved and work is ready, it finds why and acts, or tells the owner what blocks it.
-  A turn that ends waiting on a named event sets a one-time check-in for that event. It sets the next one only when a new named event arrives, such as a red job, never on a wake from anything else.
+  A turn that ends waiting on a named event sets a one-time check-in for that event. The next check-in is set only on a new named event (rule `outcomes-mechanize-rules`: a red job is one), never on another wake.
 - A check-in's message names the home of each list it reads (a page collection, a roadmap ref, a git
   ref or a GitHub query), never a copy.
 

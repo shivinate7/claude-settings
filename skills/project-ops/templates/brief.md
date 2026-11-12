@@ -13,7 +13,7 @@ Run `git fetch origin +refs/heads/roadmap:refs/remotes/origin/roadmap` before th
 
 ## Task
 
-<What to build, and the outcome for the person the software serves.>
+<What to build, and its outcome for the person served (rule `outcomes-judge-by-outcome`).>
 
 ## Sources
 
@@ -44,6 +44,6 @@ The test-author and the builder each get their own isolated worktree (decision `
 
 ## Report
 
-Read each time you write from `~/.claude/bin/now-central`, never from memory.
+Read each time you write from `~/.claude/bin/now-central` (rule `style-time-central-24h`: never from memory).
 Cap <N> lines: Done, Deviations, Input Needed, Next. Add one line: "Port to other repos: yes or
 no, and why". Send the green, reviewed head and branch to the coordinator. Do not merge.

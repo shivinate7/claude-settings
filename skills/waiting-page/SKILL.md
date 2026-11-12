@@ -94,12 +94,11 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     whose text uses the word port for another meaning. Such an item needs a line in `context` that starts
     "Departs from: <file>:<symbol> — <what changes>" and never has `holds`. The writer refuses it otherwise
     (guard rule `port-question`). The existing app answers every other question: read it, never ask.
-  - `widens: true` on an option marks one that widens what a shared tool accepts: a second accepted form,
-    an allow-list entry or a per-repo exception. Its card shows "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo": a repo
+  - `widens: true` on an option marks one that widens what a shared tool accepts (rule `style-question-form`: a second form, an allow list entry, a per-repo exception). Its card shows that rule's "Goes against your ruling" line, and a repo
     that differs from a shared format changes to match it. `pick` never names such an option, and a list `pick` never holds its key. The writer refuses
     it (guard rule `uniform-pick`). An update that sets `pick` carries `options` again: the guard cannot see the stored field.
   - An option may carry `links` (a list of `{label, url}`): its card shows them, and each opens in a new tab. An option that
-    asks the owner to press in a web app carries a link to that exact page (for a pull request or an issue, its number in the url).
+    presses in a web app takes a link to that exact page (rule `style-press-has-link`; for a pull request or an issue, its number in the url).
     The writer refuses it otherwise (guard rule `press-link`). An update that sets `options` carries each option's `links` again,
     and an update that sets `steps` carries `links` again: the guard cannot see the stored fields.
   - `look: true` marks a question about how something looks. Every option card with no picture then
@@ -127,8 +126,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     `<<`, `<<<`, `/dev/null` or `export`. `mac` is bash or zsh. Never mix shells in one. The item shows each in a closed disclosure with a Copy
     button that works while it is closed, PowerShell first on Windows. A stored one-string `command` shows as one block
     with no shell label. A step that presses in a web app needs a link in `links` (guard rule `press-link`).
-    A step never sends the owner to a file for a command and never holds one: put it in `command` and say "paste the
-    command below". The writer refuses a step with a shell line in backticks, and a `command` without both shells
+    A step keeps its command in `command`, never in a file, and says "paste the command below" (rule `style-command-in-item`). The writer refuses a step with a shell line in backticks, and a `command` without both shells
     (guard rule `command-in-item`). Each shell in `command` opens with the gh login switch of rule `output-never-hand-off-doable-step`, before any other gh line (guard rule `gh-login-switch`). A `str_replace` on `command` that adds a gh line carries the switch in its `new_str`.
   - A task carries a line in `context` that starts "Why yours: <why only the owner can do it, and the check that showed it>".
     When the cloud refused the act, the session first asks a session on the owner's computer
@@ -244,8 +242,8 @@ it with `ArtifactData get meta/page`. With no `writer`, the session that makes t
 into `meta/page`. The writer watches the page ("Read the answers"). A repo may name the writer's session id in its
 extras key `page-writer`; the pick guard uses it when the transcript has no `meta/page` read. The key send counts only on a delivered result. A rotation updates it.
 
-- Every other session sends its question to the writer, which writes the item. A lane sends its question
-  to its parent in the same turn, and triage writes the item ("Add an item", step 0). Not built: the route from a lane to triage.
+- Every other session sends its question to the writer, which writes the item. A lane sends its question up
+  to its parent in that same turn (rule `questions-go-to-owner`), and triage writes the item ("Add an item", step 0). Not built: the route from a lane to triage.
   `owner` stays the session that asked. It reads its own answer at its wake, so nobody relays answers.
 - The writer ranks. The fact tiers are the base: Blocking, Upcoming, Whenever and Pick stands. Never
   write a tier. Inside a tier the writer sets `rank` on each item, judged against every open item on
@@ -321,7 +319,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
      open: choosing another option is the only way out. A `multi` item stands with its list `pick`: the owner's ticks replace it. A question that touches a rule starts blank.
 3. Once the item exists, name it in the reply in one line, with the page URL for an open item only
    (a closed item is one line on the page, with no card to open). Open no question box (`questions-go-to-owner`).
-4. Keep working on what does not depend on the answer.
+4. Keep going on work that does not depend on the answer (rule `questions-go-to-owner`).
 
 ## Read the answers
 

@@ -1476,4 +1476,83 @@ rc, out = run("all", base=STALE_TREE_BASE, change=edit_a, TREE_CITES="true")
 check("tree-cites on, scope all: the step checks the whole tree",
       rc == 1 and "docs/old.md:3: STALE003 " in out, out)
 
+
+# One-home check in the step (plan part c). A child that pins this action runs `find_copies.py --in-repo` against the
+# claude-settings checkout the action sits in, its own ../... The clone below stands for that checkout: its CLAUDE.md
+# holds one anchored rule sentence, and its own run.sh runs, so the rule text is this case's, never the real CLAUDE.md.
+ONE_HOME_RULE = "Don't pad a brief: keep it to the task, the files, the governing rulings and the check that proves it done."
+
+
+def one_home_clone(d):
+    """A claude-settings clone under d, its CLAUDE.md holding one anchored rule sentence."""
+    cs = os.path.join(d, "cs")
+    scratch_clone(cs)
+    write(cs, "CLAUDE.md", "**Briefs.** %s<!-- rule:brief-contents -->\n" % ONE_HOME_RULE)
+    write(cs, "skills/README.md", "# Skills\n")
+    git(cs, "add", "-A")
+    git(cs, "commit", "-qm", "rules")  # a rule reader that reads HEAD sees the sentence, not the fixture's first line
+    return cs
+
+
+def child_with_brief(d, name, text):
+    """A child repo under d/name whose topic branch adds agents/brief.md with `text`."""
+    folder = os.path.join(d, name)
+    os.makedirs(folder)
+
+    def change(work):
+        write(work, "agents/brief.md", text)
+        git(work, "add", "-A")
+        git(work, "commit", "-qm", "brief")
+    return make_repo(folder, {"a.md": "Short line.\n"}, change)
+
+
+def run_clone_step(d, work, cs):
+    """The step script of the clone at cs, run in the child at work with the variables CI sets."""
+    env = dict(os.environ, EVENT_NAME="pull_request", BASE_REF="main", DEFAULT_BRANCH="main", REF_NAME="topic",
+               SCOPE="changed", FAIL="true", PATHS_GLOB="**/*.md", EXCLUDE="", CHANGED_PATHS_GLOB="*.md",
+               DECISIONS_DIR="", GITHUB_STEP_SUMMARY=os.path.join(d, "sum"))
+    p = subprocess.run([BASH, os.path.join(cs, "actions", "ste-lint", "run.sh")], cwd=work, env=env,
+                       capture_output=True, text=True)
+    return p.returncode, p.stdout + p.stderr
+
+
+with scratch("one-home-step") as d:
+    cs = one_home_clone(d)
+    rc, out = run_clone_step(d, child_with_brief(d, "copy", "# Brief\n\n%s\n" % ONE_HOME_RULE), cs)
+    check("one-home step: a child copy of a rule sentence prints COPY001 on its line and does not fail the step yet",
+          rc == 0 and "agents/brief.md:3: COPY001 brief-contents copied" in out and "copies: FAIL" in out, out)
+    rc, out = run_clone_step(d, child_with_brief(d, "clean", "# Brief\n\nKeep briefs short.\n"), cs)
+    check("one-home step, control: a child with no copy passes the step with no COPY001",
+          rc == 0 and "COPY001" not in out, out)
+
+# In claude-settings itself the step runs the copy check too, and a copy fails the step. A child
+# still only prints (above). So the parent gate sits in this same step, with no new CI step.
+def own_step(d, brief):
+    """A claude-settings clone under d whose tracked agents/brief.md holds `brief`."""
+    cs = one_home_clone(d)
+    write(cs, "agents/brief.md", brief)
+    git(cs, "add", "-A")
+    git(cs, "commit", "-qm", "brief")
+    return cs
+
+
+with scratch("one-home-own-copy") as d:
+    cs = own_step(d, "# Brief\n\n%s\n" % ONE_HOME_RULE)
+    direct = subprocess.run([sys.executable, os.path.join(cs, "lint", "find_copies.py"), "--in-repo"], cwd=cs,
+                            capture_output=True, text=True)
+    check("one-home own step, fixture: the finder run in the clone prints the COPY001 line and copies: FAIL",
+          direct.returncode == 1 and "agents/brief.md:3: COPY001 brief-contents copied" in direct.stdout
+          and "copies: FAIL" in direct.stdout, direct.stdout + direct.stderr)
+    rc, out = run_clone_step(d, cs, cs)
+    check("one-home own step: a copy of a rule sentence in claude-settings fails the step (rc != 0)",
+          rc != 0, out)
+    check("one-home own step: the step prints the COPY001 line and the verdict copies: FAIL",
+          "agents/brief.md:3: COPY001 brief-contents copied" in out and "copies: FAIL" in out, out)
+
+with scratch("one-home-own-clean") as d:
+    cs = own_step(d, "# Brief\n\nKeep briefs short.\n")
+    rc, out = run_clone_step(d, cs, cs)
+    check("one-home own step, control: a copy-free claude-settings passes the step and prints copies: PASS",
+          rc == 0 and "copies: PASS" in out, out)
+
 sys.exit(1 if failed else 0)

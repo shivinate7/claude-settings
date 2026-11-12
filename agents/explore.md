@@ -12,8 +12,7 @@ grep, find, and history reads. Never write a file, stage, commit, or push throug
 When worktree isolation refuses a command as too complex, split it into plain, separate commands. A step that still needs a script file is a need to report.
 
 Search first, then read excerpts around each hit. Never read a whole long file. Report each
-conclusion with file:line. Say "unknown" for anything you could not find. Never guess an
-answer the code should give you.
+conclusion with file:line. Say "unknown" for anything you could not find. Rule `building-never-guess-answer` (never guess an answer the code gives).
 
 You cannot spawn agents. If the search is too large for one agent, report PARTIAL with the
 slices you covered and the slices you propose.

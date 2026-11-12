@@ -93,6 +93,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "hooks"))
 import layout  # noqa: E402  the one home of every kind's path
 import rule_audit  # noqa: E402  the one home of the live rule anchors
+import word_runs  # noqa: E402  the one home of word normalizing and word-run matching (lint/word_runs.py)
 import _nowindow  # noqa: E402  the one home of a no-window child start
 from ui_suffixes import UI_SUFFIXES  # noqa: E402  the files ste_lint reads as front-end copy
 
@@ -401,7 +402,9 @@ RULE_WORD = re.compile(r"\b(?:rules?|rulings?|designations?|tiers?|claude-settin
 SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 KNOWN_EXEMPTION = re.compile(r"\bknown exemptions?\b", re.I)
 RULE_REF = re.compile(r"\brule:([a-z0-9][a-z0-9-]*)")
-ANCHOR_COMMENT = re.compile(r"<!--.*?-->", re.S)
+ANCHOR_COMMENT = word_runs.COMMENT
+# Not word_runs.FENCE: that one reads a fence indented up to 3 spaces, and this one any indent, so a fence nested in a list
+# item still opens. Folding them would change which rows count as fenced.
 FENCE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
 # Each of these lines starts a unit of its own, so one bullet's exemption never passes another bullet's departure.
 LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d{1,9}[.)])\s")
@@ -530,10 +533,8 @@ def probe_supersede(root):
 # checkout, so the probe keeps no copy (decision child-cites-not-copies).
 HEADING_LINE = re.compile(r"^\s{0,3}#{1,6}(?:\s|$)")
 META_LINE = re.compile(r"^\s*(?:Kind|Plan|Home):")
-# One pass, left to right, so a mark inside one span never opens another: a code span (the closer is a run of the same
-# length) or an HTML comment. An opener with no closer is plain text. Quoted text is read: a copy in quotes is a copy.
-STRIPPED = re.compile(r"(?P<tick>`+)(?!`).*?(?<!`)(?P=tick)(?!`)|<!--.*?-->")
-NUMBERED = re.compile(r"\S*\d\S*")
+# The normalizer and the word-run matcher live in lint/word_runs.py, shared with the copy finder. Quoted text is read:
+# a copy in quotes is a copy.
 TIME_ZONES = {"utc", "gmt", "cst", "cdt", "est", "edt", "pst", "pdt", "mst", "mdt"}
 SHARED_RUN = 5  # words in a row that a unit and a record hold
 SHARED_MIN = 12  # shared words that refuse a unit, and at least RESTATES_SHARE of its words
@@ -545,8 +546,7 @@ def plain_words(unit):
     number or time zone."""
     if HEADING_LINE.match(unit) or META_LINE.match(unit):
         return []
-    words = re.findall(r"[a-z]+", NUMBERED.sub(" ", STRIPPED.sub(" ", unit)).lower())
-    return [w for w in words if w not in TIME_ZONES]
+    return [w for w in word_runs.words(unit) if w not in TIME_ZONES]
 
 
 def record_index():
@@ -560,30 +560,20 @@ def record_index():
         raise CannotRun("the records folder cannot be read: %s" % type(err).__name__)
     if not names:
         raise CannotRun("the records folder holds no record")
-    runs = {}
+    owners = {}
     for name in names:
         slug = name[:-len(".md")]
         text = read(folder, name)
         if text is None:
             raise CannotRun("cannot read record %s" % slug)
-        for _, unit in paragraphs(text, slug):
-            words = plain_words(unit)
-            for at in range(len(words) - SHARED_RUN + 1):
-                holders = runs.setdefault(tuple(words[at:at + SHARED_RUN]), [])
-                if slug not in holders:
-                    holders.append(slug)
-    return runs
+        owners[slug] = [plain_words(unit) for _, unit in paragraphs(text, slug)]
+    return word_runs.run_index(owners, SHARED_RUN)
 
 
 def shared_with_records(words, runs):
     """({slug: number of `words` in a run of SHARED_RUN words that record holds}, the number of `words` in such a run
     of any record)."""
-    per_record, anywhere = {}, set()
-    for at in range(len(words) - SHARED_RUN + 1):
-        for slug in runs.get(tuple(words[at:at + SHARED_RUN]), ()):
-            per_record.setdefault(slug, set()).update(range(at, at + SHARED_RUN))
-            anywhere.update(range(at, at + SHARED_RUN))
-    return {slug: len(hit) for slug, hit in per_record.items()}, len(anywhere)
+    return word_runs.shared(words, runs, SHARED_RUN)
 
 
 def probe_restates(root):

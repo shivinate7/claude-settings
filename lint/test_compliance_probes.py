@@ -2303,6 +2303,12 @@ class Restates(unittest.TestCase):
     def test_a_copied_record_line_is_refused(self):
         self.assert_refused(self.child("- " + grant_line()), "CLAUDE.md:1")
 
+    def test_a_copied_record_line_inside_a_two_line_comment_passes(self):
+        # A comment is no prose in either form, and a comment over two lines is one comment, so the
+        # record line on its middle line is comment text and passes.
+        unit = "<!-- a note about the grant\n%s\nand its check -->" % grant_line()
+        self.assert_passes(self.child(unit))
+
     def test_a_named_record_with_its_ruling_time_passes(self):
         # A citation: it names the record and its ruling time, and copies no run of the record's words.
         unit = "- Merge grant (owner, %s): see claude-settings %s. Batch runner details here." % (grant_time(), GRANT)

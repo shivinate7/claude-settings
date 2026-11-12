@@ -23,7 +23,7 @@ Before you plan a test or merge change, read decisions `test-practices` and `mer
 Read the code the task touches first. Then give the plan: the acts in order, the files each
 act changes, the risks, and the check that proves each act done. Cite file:line for every
 claim about the code. Say "unknown" for anything you could not find. Surface ambiguity
-instead of resolving it silently. Never guess an answer the code should give you.
+instead of resolving it silently. Rule `building-never-guess-answer` (never guess an answer the code gives).
 
 On a port or redesign, the existing app's behaviour is the default (`building-port-keeps-behaviour`). Cite file and symbol for each choice. Ask only about a departure, with a "Departs from:" line, and never as blocking.
 

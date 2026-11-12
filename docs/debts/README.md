@@ -21,7 +21,7 @@ after an optional leading `- `:
 
 An owner ruling a debt holds goes under an H2 `## Ruling` in its file. No hook reads that section for a question now. A ruling under any other heading, or in `notes.md`, is not read either. Put such a ruling in a debt, or in its decision.
 
-A finding becomes a debt only when Claude is likely to hit it in normal work. Any other finding is one line in `notes.md`, with no red test and no decision edit (owner ruling 2026-10-17 11:56 CDT).
+A finding becomes a debt under rule `roles-findings-are-debts-or-notes` (only where Claude is likely to hit it in normal work). Any other finding is one line in `notes.md`, with no red test and no decision edit (owner ruling 2026-10-17 11:56 CDT).
 
 ## Closing a debt
 

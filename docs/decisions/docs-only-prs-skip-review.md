@@ -10,7 +10,7 @@ Why: a full review of a change that simple is wasted. A record that files an own
 
 ## The round
 
-When the brief says the change files an owner ruling, round 1 checks two things only. It checks that the record matches the ruling's words, and that it contradicts no older ruling on the same question. The report stays under about 10 lines (the coordinator's brief for waiting-page item 205 b).
+Rule `roles-solo-reviews-logic-diffs-only` sets this: when the brief says the change files an owner ruling, round 1 checks two things only. It checks that the record matches the ruling's words, and that it contradicts no older ruling on the same question. The report stays under about 10 lines (the coordinator's brief for waiting-page item 205 b).
 
 The review record is `Kind: normal`, `Guard or check: no`, with one `Round` line. It is never `docs-only`.
 
@@ -20,7 +20,7 @@ Not taken: "skip the reviewer, flag a clash"; "as today" (no round for a record 
 
 ## The cost
 
-One reviewer run per record that files an owner ruling. No new process, file or timer. Round 1 runs the reviewer's round-1 model, haiku today (the reviewer row of decision `agent-model-cap`, the model-per-role table).
+One reviewer run per record that files an owner ruling. No new process, file or timer. Round 1 runs the reviewer's round-1 model, haiku today (the reviewer row of decision `agent-model-cap`, rule `roles-model-per-role-table`).
 
 Kind: process
 Home: rule:roles-solo-reviews-logic-diffs-only

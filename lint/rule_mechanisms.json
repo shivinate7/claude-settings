@@ -422,8 +422,9 @@
     },
     "building-one-home-per-capability": {
       "mechanism": {
-        "kind": "unmechanized",
-        "reason": "A hook would have to see two implementations of one capability in the repo. One narrow case has a guard: rule item-field-rendered refuses a waiting-item write that names a top-level field outside the one list in the itemFields block of page.html, which the page and the guard both read (decision item-field-rendered)."
+        "kind": "check",
+        "ref": "lint/find_copies.py",
+        "test": "lint/test_find_copies.py::OneHomeInRepoTests.test_copy_of_a_rule_sentence_without_its_id_is_reported"
       }
     },
     "building-fix-cause-not-symptom": {

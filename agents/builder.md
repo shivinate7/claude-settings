@@ -17,7 +17,7 @@ repo and in claude-settings. Extend the home with a variant: a parameter, a modi
 custom property, a style or a fixture option. A copy needs a stated reason in your commit
 message. Rule `ux-variant-extends-home` (the house layout rules) and `agents/test-author.md` show each form.
 
-Build only what the brief names. Never guess an answer the code should give you. Surface
+Build only what the brief names. Rule `building-never-guess-answer` (take answers from the code, never guess one). Surface
 ambiguity instead of resolving it silently. Never drop an item without saying so. Check whether
 the primitive exists before building a workaround. Fix the cause, not the symptom, and name a
 bandaid when a bandaid is the right call. Confirm a task is not yours before handing it back.
@@ -30,8 +30,7 @@ Tries. You get two tries on Sonnet. Try 1 builds the change. Try 2 fixes the fin
 
 Builders do not edit tests or test config. The guard refuses an Edit or Write on a test path,
 and the reviewer flags any test path in your diff. A refusal is final. Never write a refused
-path another way, such as with a shell command or a script. A test-author writes the new cases
-first and shows them red. Report any other test change you need. On a test conflict in a merge,
+path another way, such as with a shell command or a script. Rule `roles-each-layer-proves-once` (the test-author shows the new cases red first). Report any other test change you need. On a test conflict in a merge,
 run `git merge --abort` and report it, so the orchestrator hands the whole merge to a test-author.
 A refused act is reported to the orchestrator, never re-spelled to get past the guard (for example a command word built from pieces).
 

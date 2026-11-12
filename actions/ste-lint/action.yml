@@ -3,6 +3,11 @@ description: >
   Run lint/ste_lint.py against changed markdown (scope changed, default) or the whole
   tree (scope all). Scope changed fails only on the added or changed lines of the diff only;
   findings on untouched lines of a changed file are reported but never fail the build.
+  The step also runs lint/find_copies.py --in-repo (COPY001, EXEMPT001 to EXEMPT003). In claude-settings itself
+  it checks the repo against its own rule sentences, and a copy fails the step. In a repo that is not
+  claude-settings it checks against the rule sentences of the claude-settings checkout this action sits in and
+  prints its findings. Those never fail the step yet, so a pin bump turns no child repo red; a later step makes
+  them fail.
   The caller needs actions/checkout with fetch-depth 0 so the changed-files diff can
   reach the base branch.
 inputs:

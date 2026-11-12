@@ -58,7 +58,9 @@ Some groups read the tree, not a rule prefix. Each comes after the rule groups:
 
 Run each probe in `probes.md` from the child's root. Run the copy probe in `copies.md` too. One bounded command per probe, and keep
 its verdict, not its stream. Some probes cannot run, for example with no `gh` login or no
-network. Mark each of them `unknown`, never pass or fail. Defer CI shape to the `ci-hygiene`
+network. Mark each of them `unknown`, never pass or fail. Run the paraphrase pass once, report-only: `python3 <parent>/lint/find_copies.py --paraphrase . --parent <parent>`. A model
+judges it, so it is advisory and never runs in CI. List each `PARA001` line under Copies as a finding to read, with no change
+to the score. If it prints `UNKNOWN` (exit 2), list it as `unknown` under Copies, never as a pass. Defer CI shape to the `ci-hygiene`
 skill and docs staleness to the `fresh-prose` skill. Name the skill and its top finding, and do
 not repeat its steps.
 

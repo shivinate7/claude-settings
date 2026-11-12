@@ -7,7 +7,7 @@ it.
 
 - Write for the person the software serves. The first screen answers three questions: what
   is this, who is it for, and how do I get the first result.
-- Use plain, short words. Explain each technical term in everyday words, or drop it.
+- Apply rule `style-plain-words` (plain, short words; explain or drop each technical term).
 - Include only what a new user or contributor needs in their first hour. Everything else gets
   one link to its real home: the docs, `--help`, the config schema, CHANGELOG, or the decision
   records.

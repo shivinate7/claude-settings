@@ -8,7 +8,7 @@ The rule `scratchpad-owner` in `hooks/guard.py` refuses when an agent runs or ov
 - The overwrite incident: a test-author took its commit message from a shared scratchpad file that another agent had overwritten. No guard stopped it (PR #1931, a pull request, 2026-11-08).
 - The harm: an agent runs code it never read, or uses text another agent wrote, with effects its brief never named. An overwrite can also replace another agent's work.
 - Why the scratchpad is shared: the guard keys a scratchpad by session id, and an agent carries its parent's session id. So every agent of one session shares one scratchpad (note `scratchpad-shared-per-session`).
-- Test: could Claude run or overwrite another agent's file by mistake? Yes, as both incidents show. So the guard covers it (`guard-guards-mistakes-only`, guards stop Claude's mistakes, never an attacker).
+- Test: could Claude run or overwrite another agent's file by mistake? Yes, as both incidents show. So the guard covers it (decision `guard-guards-mistakes-only`; under rule `roles-review-cap-three`, guards cover mistakes, not attacks).
 
 ## The check
 
@@ -23,7 +23,7 @@ The rule `scratchpad-owner` in `hooks/guard.py` refuses when an agent runs or ov
   - a rewrite of the agent's own file, where the record names the same `agent_id`;
   - a call with no `agent_id`, since the top-level session may hand a script to its agent on purpose;
   - a read, which runs no code.
-- Ceiling: a file written by a route the guard cannot see (`python -c`) has no record, so it passes. The same holds for an overwrite by such a route. A refusal there would be a false alarm. A `cp` or `mv` destination, a `touch`, `dd of=`, `curl -o` or `>|` target is not recorded yet either (debt `scratchpad-owner-cp-mv-dest`, the copy and move destinations). The scratchpad false alarm in trial `other-checkout-scratch-false-alarm` is the precedent: a guard refused a session's own scratchpad. A guard that goes red when nothing is wrong is spent (`guard-that-cries-wolf-is-spent`).
+- Ceiling: a file written by a route the guard cannot see (`python -c`) has no record, so it passes. The same holds for an overwrite by such a route. A refusal there would be a false alarm. A `cp` or `mv` destination, a `touch`, `dd of=`, `curl -o` or `>|` target is not recorded yet either (debt `scratchpad-owner-cp-mv-dest`, the copy and move destinations). The scratchpad false alarm in trial `other-checkout-scratch-false-alarm` is the precedent: a guard refused a session's own scratchpad. A guard that cries wolf is spent (rule `verification-cry-wolf-guard-is-spent`; decision `guard-that-cries-wolf-is-spent`).
 - Why a guard, not one scratch folder per agent: an agent cannot know its own `agent_id` to name a folder, and a folder rule in a brief has no check.
 
 ## Cost
