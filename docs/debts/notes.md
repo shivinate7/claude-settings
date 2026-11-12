@@ -2215,3 +2215,6 @@
 - item-cite-name-forms: `` item 9 `search-pill` ``, `page item 9 [search pill clear](url)` and `item 9 "a b"` refuse, though each carries a name (lint/report_guard.py `ITEM_SLUG_AFTER_RE`). Rule: speak-cite-id-plus-gloss.
 - handoff-cite-whole-file: an Edit to the handoff refuses when a stale bare cite sits elsewhere in the file (hooks/guard.py `handoff_cite_hit`). Rule: speak-cite-id-plus-gloss.
 - item-cite-weak-lead: `` `foo.py` fails, item 3 `` passes, as the lead reads "py fails," (lint/report_guard.py `ITEM_RECORD_RE`, shared with the record-id reader). Rule: speak-cite-id-plus-gloss.
+- handoff-cite-unscoped-read: `handoff_cite_hit` reads unscoped, so `Next: fix list item 3 in the table.` refuses a handoff Write (hooks/guard.py `handoff_cite_hit`; unmeasured on real handoffs). Rule: speak-cite-id-plus-gloss.
+- item-cite-weak-name-passes: a weak name passes, as in `item 46 is waiting on you` and `item 46 (see above)` (lint/report_guard.py `bare_item_cite`). Rule: speak-cite-id-plus-gloss.
+- item-cite-hash-and-no-form: `item #46` and `Item No. 46` are not read as cites, so they pass (lint/report_guard.py `bare_item_cite`). Rule: speak-cite-id-plus-gloss.
