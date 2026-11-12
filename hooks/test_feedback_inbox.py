@@ -3119,9 +3119,23 @@ ANSWER_NONE = json.dumps({"repeats": []})
 # up subprocess.Popen when it runs, so a subclass installed here sees every start. Each git start
 # appends its argv to GIT_START_LOG when that variable is set. Python does the logging, so the count
 # is the same on every OS.
-PROBE_SOURCE = r"""import json, os, runpy, subprocess, sys
+PROBE_SOURCE = r"""import json, os, re, runpy, subprocess, sys
 sys.path.insert(0, sys.argv[1])
 import decision_watch
+
+
+# FG_STUB_PICK is a JSON list of [item id, phrase]. The answer names, for each pair, the first candidate line of
+# the prompt whose text holds the phrase, so a case names a candidate by its words, not by its ref.
+def pick(prompt):
+    part = prompt.split("\nCANDIDATES\n", 1)[1] if "\nCANDIDATES\n" in prompt else ""
+    repeats = []
+    for item_id, phrase in json.loads(os.environ["FG_STUB_PICK"]):
+        for ln in part.split("\n"):
+            m = re.match(r"\[(.+?)\] (.*)$", ln)
+            if m and phrase in m.group(2):
+                repeats.append({"id": item_id, "ref": m.group(1)})
+                break
+    return {"repeats": repeats}
 
 
 def stub(prompt, model=decision_watch.MODEL, timeout=decision_watch.MODEL_TIMEOUT, shape=None,
@@ -3137,6 +3151,8 @@ def stub(prompt, model=decision_watch.MODEL, timeout=decision_watch.MODEL_TIMEOU
             f.write("\n".join(kept))
     if os.environ.get("FG_STUB_ERROR"):
         return None, os.environ["FG_STUB_ERROR"]
+    if os.environ.get("FG_STUB_PICK"):
+        return pick(prompt), None
     return json.loads(os.environ.get("FG_STUB_ANSWER", '{"repeats": []}')), None
 
 
@@ -3204,10 +3220,11 @@ def repeat_answer(*item_ids):
     return json.dumps({"repeats": [{"id": i, "ref": REPEAT_REF} for i in item_ids]})
 
 
-def stop(cfg, sid, cwd, answer=None, error=None, stop_active=False, extra_env=None, drop=None):
+def stop(cfg, sid, cwd, answer=None, error=None, stop_active=False, extra_env=None, drop=None, pick=None):
     """One Stop of the guard, run the way the Stop hook runs it, with the model stubbed by the probe.
     Returns (Proc, calls). Each call is a dict the stub logged: prompt, model, timeout, effort.
-    `drop` = (file, line prefix): the stub removes those lines from the file while the model runs."""
+    `drop` = (file, line prefix): the stub removes those lines from the file while the model runs.
+    `pick` = [[item id, phrase], ...]: the stub names each item the candidate whose text holds the phrase."""
     JUDGE_RUNS[0] += 1
     log = os.path.join(os.path.dirname(cfg), "model-calls-%d.log" % JUDGE_RUNS[0])
     env = dict(extra_env or {}, FG_STUB_LOG=log)
@@ -3217,6 +3234,8 @@ def stop(cfg, sid, cwd, answer=None, error=None, stop_active=False, extra_env=No
         env["FG_STUB_ERROR"] = error
     if drop is not None:
         env["FG_STUB_DROP"] = json.dumps(list(drop))
+    if pick is not None:
+        env["FG_STUB_PICK"] = json.dumps(pick)
     obj = {"hook_event_name": "Stop", "session_id": sid, "stop_hook_active": stop_active, "cwd": cwd}
     p = run(probe_path(), payload(obj), cfg, args=(HERE, GUARD_PATH), extra_env=env)
     return p, [json.loads(ln) for ln in read_or_empty(log).splitlines()]
@@ -3524,10 +3543,23 @@ def case_repeat_cost_one_call_one_grep_and_two_files():
           extra <= 1, "judging=%d quiet=%d grep=%d" % (len(lines1), len(lines2), grep_starts(lines1)))
 
 
+def candidates_part(prompt):
+    """The text under the prompt's CANDIDATES heading."""
+    return prompt.split("\nCANDIDATES\n", 1)[1] if "\nCANDIDATES\n" in prompt else ""
+
+
 def candidate_refs(prompt):
     """The ref of each candidate line: the lines under the prompt's CANDIDATES heading."""
-    part = prompt.split("\nCANDIDATES\n", 1)[1] if "\nCANDIDATES\n" in prompt else ""
-    return re.findall(r"^\[([^\]]+)\] ", part, re.M)
+    return re.findall(r"^\[([^\]]+)\] ", candidates_part(prompt), re.M)
+
+
+def candidate_ref_of(prompt, phrase):
+    """The ref of the first candidate line whose text holds `phrase`, or "" when no candidate does."""
+    for ln in candidates_part(prompt).split("\n"):
+        m = re.match(r"\[(.+?)\] (.*)$", ln)
+        if m and phrase in m.group(2):
+            return m.group(1)
+    return ""
 
 
 def cap_counts(prompt):
@@ -3838,6 +3870,125 @@ def case_repeat_each_item_is_judged_against_the_other_messages():
           inbox_line(cfg, NEW_SID, "fb-1009-1") == late_line + MARK_EARLY, inbox_line(cfg, NEW_SID, "fb-1009-1"))
     check("per item: the earlier item is not marked against its own message",
           inbox_line(cfg, NEW_SID, "fb-1004-1") == early_line, inbox_line(cfg, NEW_SID, "fb-1004-1"))
+
+
+# The backlog cases name candidates by fixed refs: a todo or notes line is `todo:<line>` or `note:<line>`, and a
+# debt is `debt:<slug>`. Each file below puts its one item on line 3.
+EARLY_PHRASE = "the carousel spins too slow"  # the first words of MSG_ONE
+SECOND_DEBT_SLUG = "spin-rate-floor"
+SECOND_DEBT_TEXT = "# Spin rate floor\n\nThe spin rate may not drop below six degrees per frame.\n"
+BACKLOG_TODO = "# Todo\n\n- Wheel speed cap: raise the spin limit\n"
+BACKLOG_NOTES = "# Notes\n\n- keep the wheel speed setting in the reader\n"
+TODO_REF, NOTE_REF, DEBT_REF = "todo:3", "note:3", "debt:" + DEBT_SLUG
+
+
+def backlog_repo(name):
+    """A rolled-out repo whose backlog holds each candidate kind, untracked: the todo file, the notes file and
+    two debts. A case names one of them as its item's home."""
+    root = repeat_repo(name, debt=True)
+    write_file(os.path.join(root, "docs", "todo.md"), BACKLOG_TODO)
+    write_file(os.path.join(root, "docs", "debts", "notes.md"), BACKLOG_NOTES)
+    write_file(os.path.join(root, "docs", "debts", SECOND_DEBT_SLUG + ".md"), SECOND_DEBT_TEXT)
+    return root
+
+
+def case_repeat_same_minute_blocks_keep_their_own_candidates():
+    """R38 (restart plan, owner 13:03 CST Nov 11): two messages stamped in the same minute share the inbox ref
+    inbox:<sid8>@<hh:mm>, so dropping the item's own block also dropped the other message. The later item repeats
+    the earlier message: that message stays its candidate and gets the mark. Control: the earlier item names its
+    own message and gets no mark. Both items name their candidate by its words, so the case holds whatever ref a
+    fix gives each message."""
+    root = repeat_repo("repeat-same-minute", step=True)
+    cfg = new_cfg()
+    early_line, late_line = "- fb-1004-1 [note] -> noted", "- fb-1009-1 [note] -> noted"
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [early_line]), (EARLY_HEADER, MSG_TWO, [late_line])])
+    p, calls = stop(cfg, NEW_SID, root, pick=[["fb-1009-1", EARLY_PHRASE], ["fb-1004-1", EARLY_PHRASE]])
+    check("same minute: one model call covers both messages", len(calls) == 1, p.desc())
+    prompt = calls[0]["prompt"] if len(calls) == 1 else ""
+    ref = candidate_ref_of(prompt, EARLY_PHRASE)
+    check("same minute: the earlier message is a candidate for the later item", ref != "", prompt[-300:])
+    check("same minute: the later item is marked against the earlier message",
+          ref != "" and inbox_line(cfg, NEW_SID, "fb-1009-1") == late_line + " repeats " + ref,
+          inbox_line(cfg, NEW_SID, "fb-1009-1"))
+    check("same minute control: the earlier item names its own message and gets no mark",
+          inbox_line(cfg, NEW_SID, "fb-1004-1") == early_line, inbox_line(cfg, NEW_SID, "fb-1004-1"))
+
+
+def case_repeat_todo_home_is_never_a_candidate_for_its_item():
+    """R38 (owner 13:03 CST Nov 11): an item's own home is never a candidate for it. A todo home dropped only its
+    block, so the item was marked against a line of its own file (todo:3). Control: a notes line of another file
+    still marks the item."""
+    root = backlog_repo("repeat-todo-home")
+    cfg = new_cfg()
+    home_line, other_line = "- fb-1101-1 [task] -> docs/todo.md", "- fb-1101-2 [task] -> docs/todo.md"
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [home_line, other_line])])
+    answer = json.dumps({"repeats": [{"id": "fb-1101-1", "ref": TODO_REF}, {"id": "fb-1101-2", "ref": NOTE_REF}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    check("todo home: one model call for both items", len(calls) == 1, p.desc())
+    check("todo home: the item homed to docs/todo.md is not marked against its own todo line",
+          inbox_line(cfg, NEW_SID, "fb-1101-1") == home_line, inbox_line(cfg, NEW_SID, "fb-1101-1"))
+    check("todo home control: the item still marks against a notes line of another file",
+          inbox_line(cfg, NEW_SID, "fb-1101-2") == other_line + " repeats " + NOTE_REF,
+          inbox_line(cfg, NEW_SID, "fb-1101-2"))
+
+
+def case_repeat_notes_home_is_never_a_candidate_for_its_item():
+    """R38 (owner 13:03 CST Nov 11): an item's own home is never a candidate for it. The notes file is a home
+    too, so its item is never marked against a notes line (note:3). Control: a todo line of another file still
+    marks the item."""
+    root = backlog_repo("repeat-notes-home")
+    cfg = new_cfg()
+    home_line, other_line = ("- fb-1102-1 [task] -> docs/debts/notes.md",
+                             "- fb-1102-2 [task] -> docs/debts/notes.md")
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [home_line, other_line])])
+    answer = json.dumps({"repeats": [{"id": "fb-1102-1", "ref": NOTE_REF}, {"id": "fb-1102-2", "ref": TODO_REF}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    check("notes home: one model call for both items", len(calls) == 1, p.desc())
+    check("notes home: the item homed to docs/debts/notes.md is not marked against its own notes line",
+          inbox_line(cfg, NEW_SID, "fb-1102-1") == home_line, inbox_line(cfg, NEW_SID, "fb-1102-1"))
+    check("notes home control: the item still marks against a todo line of another file",
+          inbox_line(cfg, NEW_SID, "fb-1102-2") == other_line + " repeats " + TODO_REF,
+          inbox_line(cfg, NEW_SID, "fb-1102-2"))
+
+
+def case_repeat_dot_slash_debt_home_is_never_a_candidate_for_its_item():
+    """R38 (owner 13:03 CST Nov 11): an item's debt home is its own home, written `./docs/debts/x.md` or
+    `docs/debts/x.md`. The ./ form kept its debt as a candidate. Controls: the plain form drops the same debt, and
+    a [note] with no debt home still marks against it."""
+    root = backlog_repo("repeat-dot-slash-home")
+    cfg = new_cfg()
+    dot_line = "- fb-1103-1 [task] -> ./docs/debts/wheel-speed-cap.md"
+    plain_line = "- fb-1103-2 [task] -> docs/debts/wheel-speed-cap.md"
+    note_line = "- fb-1103-3 [note] -> noted"
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [dot_line, plain_line, note_line])])
+    answer = json.dumps({"repeats": [{"id": i, "ref": DEBT_REF} for i in ("fb-1103-1", "fb-1103-2", "fb-1103-3")]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    check("dot slash home: one model call for the three items", len(calls) == 1, p.desc())
+    check("dot slash home: the ./ form is not marked against its own debt",
+          inbox_line(cfg, NEW_SID, "fb-1103-1") == dot_line, inbox_line(cfg, NEW_SID, "fb-1103-1"))
+    check("dot slash home control: the plain form is not marked against its own debt",
+          inbox_line(cfg, NEW_SID, "fb-1103-2") == plain_line, inbox_line(cfg, NEW_SID, "fb-1103-2"))
+    check("dot slash home control: a note with no debt home still marks against the debt",
+          inbox_line(cfg, NEW_SID, "fb-1103-3") == note_line + " repeats " + DEBT_REF,
+          inbox_line(cfg, NEW_SID, "fb-1103-3"))
+
+
+def case_repeat_debt_home_is_never_a_candidate_for_its_item():
+    """R38 (owner 13:03 CST Nov 11): an item homed to a debt file is never marked against that debt. A different
+    debt stays a candidate for it."""
+    root = backlog_repo("repeat-debt-home")
+    cfg = new_cfg()
+    own_line = "- fb-1104-1 [task] -> docs/debts/wheel-speed-cap.md"
+    other_line = "- fb-1104-2 [task] -> docs/debts/spin-rate-floor.md"
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [own_line, other_line])])
+    answer = json.dumps({"repeats": [{"id": "fb-1104-1", "ref": DEBT_REF}, {"id": "fb-1104-2", "ref": DEBT_REF}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    check("debt home: one model call for both items", len(calls) == 1, p.desc())
+    check("debt home: the item homed to a debt is not marked against that debt",
+          inbox_line(cfg, NEW_SID, "fb-1104-1") == own_line, inbox_line(cfg, NEW_SID, "fb-1104-1"))
+    check("debt home control: the item homed to another debt still marks against this debt",
+          inbox_line(cfg, NEW_SID, "fb-1104-2") == other_line + " repeats " + DEBT_REF,
+          inbox_line(cfg, NEW_SID, "fb-1104-2"))
 
 
 def case_one_shot_grant_passes_with_its_home_and_blocks_without_one():
@@ -4518,6 +4669,11 @@ CASES = (
     case_repeat_repo_item_is_never_judged_as_a_repeat,
     case_repeat_own_home_is_never_a_candidate_for_its_item,
     case_repeat_each_item_is_judged_against_the_other_messages,
+    case_repeat_same_minute_blocks_keep_their_own_candidates,
+    case_repeat_todo_home_is_never_a_candidate_for_its_item,
+    case_repeat_notes_home_is_never_a_candidate_for_its_item,
+    case_repeat_dot_slash_debt_home_is_never_a_candidate_for_its_item,
+    case_repeat_debt_home_is_never_a_candidate_for_its_item,
     case_one_shot_grant_passes_with_its_home_and_blocks_without_one,
     case_guard_ruling_home_is_judged_in_the_repo_the_session_worked_in,
     case_step_path_is_derived_from_override_step_dir,
