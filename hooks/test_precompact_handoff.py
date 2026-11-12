@@ -2398,9 +2398,9 @@ def refused_act(tu, command, description=None):
     return [bash_call(tu, command, description), tool_result(REFUSED_TEXT, OWNER_TS, tool_use_id=tu)]
 
 
-def coord_refusal(c):
-    """A coordinator's transcript with one unanswered refused Bash call."""
-    return as_coordinator(c, [COORD_TAG]) + refused_act("tu-r", REFUSED_CMD)
+def coord_refusal(c, command=REFUSED_CMD):
+    """A coordinator's transcript with one unanswered refused Bash call of this command."""
+    return as_coordinator(c, [COORD_TAG]) + refused_act("tu-r", command)
 
 
 def owner_handoff(section, rest=None):
@@ -3037,6 +3037,41 @@ def case_owner_waits_substring_act_blocks():
         c.cleanup()
 
 
+# --- owner waits: a command alone on its line -----------------------------------------------------
+# A section line that holds only the refused command, with no backticks, names it: the whole line,
+# with its list marker removed, is one entry. The same words as prose name no act, since the line is
+# not the command.
+PROSE_PUSH_LINE = "- git push waits for the owner's yes"
+
+
+def case_owner_waits_alone_on_line_names_act():
+    coordinator_scope(coord_refusal)
+    for label, section in (("no marker", REFUSED_CMD), ("list marker", "- " + REFUSED_CMD)):
+        c = Case("ow_alone_" + label.replace(" ", "_"))
+        try:
+            proc = owner_stop(c, coord_refusal(c), handoff=owner_handoff(section))
+            check("owner waits alone on its line (%s): a section line that holds only the refused command names "
+                  "it, so the Stop passes" % label,
+                  stop_reason(proc) is None and proc.returncode == 0,
+                  "rc=%r reason: %r" % (proc.returncode, stop_reason(proc)))
+        finally:
+            c.cleanup()
+
+
+def case_owner_waits_prose_line_names_no_act():
+    coordinator_scope(lambda c: coord_refusal(c, PUSH_PLAIN))
+    c = Case("ow_prose_line")
+    try:
+        proc = owner_stop(c, coord_refusal(c, PUSH_PLAIN), handoff=owner_handoff(PROSE_PUSH_LINE))
+        reason = stop_reason(proc)
+        check("owner waits prose line (control): a section line of prose that holds `git push` as text does not "
+              "name it, so the Stop blocks on the plain push",
+              reason is not None and "Bash `%s`" % PUSH_PLAIN in reason,
+              "rc=%r reason: %r" % (proc.returncode, reason))
+    finally:
+        c.cleanup()
+
+
 def main() -> int:
     case_prompt_names_audit_agent()
     case_precompact_writes_digest_and_state()
@@ -3128,6 +3163,8 @@ def main() -> int:
     case_owner_waits_tag_spelling_set_tags_blocks()
     case_owner_waits_near_miss_tag_stays_quiet()
     case_owner_waits_substring_act_blocks()
+    case_owner_waits_alone_on_line_names_act()
+    case_owner_waits_prose_line_names_no_act()
 
     if FAILED:
         print()
