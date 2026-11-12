@@ -12464,11 +12464,12 @@ class RedMainBrake(Env):
     # Pins: these pass on the code as it is. The red run gets no re-run remedy, a re-run still going keeps its wait, and a re-run that
     # passes reads green. Each is the green control beside the red cases above.
 
-    def test_a_red_newest_run_alone_is_refused_with_no_rerun_remedy(self):
+    def test_a_lone_first_red_with_no_green_parent_names_no_rerun(self):
+        # a first red is offered its re-run only with a green parent on the page: a lone one has none, so nothing is named as its way out
         rc, out, before = self.go([main_run(1421, "failure")], {1421: [main_job("checks", "failure", 20)]})
         self.refused(rc, out, before)
         self.assertIn("run 1421", out)
-        self.assertNotIn("gh run rerun", out, "a red run is never offered a re-run")
+        self.assertNotIn("gh run rerun", out, "a lone first red with no green parent is offered a re-run, though nothing is known of its parent")
 
     def test_a_re_run_in_flight_keeps_its_wait_text_and_names_no_rerun(self):
         rc, out, before = self.re_run_over_green("in_progress")
@@ -12567,12 +12568,83 @@ class RedMainBrake(Env):
         self.refused(rc, out, before)
         self.assertIn("#2650", out, "run 903 is red again on its re-run, and the refusal does not blame its pull request")
 
-    def test_the_refusal_names_base_red_ok_as_the_route_for_the_revert_pr(self):
+    def test_a_run_still_going_below_a_red_run_stops_the_walk_and_names_no_breaking_merge(self):
+        # run 904 is a re-run in flight between red 905 and green 903: the walk stops at it, so no run is blamed
+        runs = [self.merge_run(905, "failure", 2652, run_attempt=2),
+                main_run(904, None, status="in_progress", run_attempt=2, sha=self.sha_of(904), message="Merge pull request #2651 from o/lane-2651"),
+                self.merge_run(903, "success", 2650)]
+        rc, out, before = self.go(runs, self.page_jobs(runs))
+        self.refused(rc, out, before)
+        self.assertNotIn("breaking merge", out, "the refusal blames a breaking merge past a run still going")
+        self.assertNotIn("#2652", out, "the refusal names the pull request of run 905, past a run still going")
+
+    def test_a_run_still_going_below_a_red_run_says_the_breaking_run_is_unknown(self):
+        runs = [self.merge_run(905, "failure", 2652, run_attempt=2),
+                main_run(904, None, status="in_progress", run_attempt=2, sha=self.sha_of(904), message="Merge pull request #2651 from o/lane-2651"),
+                self.merge_run(903, "success", 2650)]
+        rc, out, before = self.go(runs, self.page_jobs(runs))
+        self.refused(rc, out, before)
+        detail = out.split("No batch merges onto a red", 1)[0]  # the route line already says "the unknown read", so only the detail above it counts
+        self.assertIn("unknown", detail.lower(), "the refusal's detail does not say the breaking run is unknown while run 904 is still going")
+
+    def test_a_scheduled_red_run_is_never_blamed_on_the_commit_it_tested(self):
+        # a schedule run tests its head at run time, which is not the commit that broke main: no commit or pull request is named for it
+        runs = [main_run(909, "failure", event="schedule", run_attempt=2, sha=self.sha_of(909), message="Merge pull request #2790 from o/lane-2790"),
+                main_run(908, "success", event="schedule", sha=self.sha_of(908)),
+                self.merge_run(907, "success", 2789)]
+        rc, out, before = self.go(runs, self.page_jobs(runs))
+        self.refused(rc, out, before)
+        self.assertNotIn("breaking merge", out, "the refusal names a breaking merge for a scheduled run, which tests its head at run time")
+        self.assertNotIn("#2790", out, "the refusal names the pull request of a scheduled run's head commit")
+
+    def test_a_page_red_to_its_end_names_no_breaking_merge(self):
+        # a full page of fifty red runs has no green parent on it: the walk reaches the page's end and blames no run
+        runs = [self.merge_run(i, "failure", i + 1000) for i in range(1060, 1010, -1)]
+        self.assertEqual(len(runs), 50, "the fixture is not a full page of fifty runs")
+        rc, out, before = self.go(runs, self.page_jobs(runs))
+        self.refused(rc, out, before)
+        self.assertNotIn("breaking merge", out, "a page red to its end names a breaking merge, though no green parent is on the page")
+        self.assertNotRegex(out, r"pull request #10[0-6]\d\b", "a page red to its end names a pull request as the breaking one")
+
+    def test_a_revert_run_still_going_over_the_breaking_run_refuses_and_says_so(self):
+        # the revert's own run, 906, is pending on main: base_state skips a first-attempt run still going, so breaking run 905 stays the newest red
+        runs = [main_run(906, None, status="in_progress", sha=self.sha_of(906), message="Merge pull request #2653 from o/lane-2653"),
+                self.merge_run(905, "failure", 2650, run_attempt=2), self.merge_run(904, "success", 2649)]
+        rc, out, before = self.go(runs, self.page_jobs(runs))
+        self.refused(rc, out, before)
+        self.assertIn("#2650", out, "the refusal does not name breaking run 905's pull request while the revert's run is pending")
+        self.assertIn("run on main is green", out, "the refusal does not say merges resume once the revert's run on main is green")
+
+    def revert_route_refusal(self):
+        """-> (rc, out, before) of a red main whose breaking run 903 is red again on its re-run: the refusal that names the revert route."""
         runs = [self.merge_run(903, "failure", 2650, run_attempt=2), self.merge_run(902, "success", 2649)]
         rc, out, before = self.go(runs, self.page_jobs(runs))
         self.refused(rc, out, before)
+        return rc, out, before
+
+    def test_the_refusal_names_base_red_ok_as_the_route_for_the_revert_pr(self):
+        _, out, _ = self.revert_route_refusal()
         self.assertRegex(out, r"(?i)revert[^.\n]*--base-red-ok|--base-red-ok[^.\n]*revert", "the refusal does not name --base-red-ok as the route for the revert PR")
-        self.assertRegex(out, r"(?i)merges? resumes? once the revert merges", "the refusal does not say merges resume once the revert merges")
+
+    def test_the_revert_route_says_merges_resume_once_the_revert_run_on_main_is_green(self):
+        # the revert's own run is pending after the revert merges: merges resume when that run is green, not when the revert merges
+        _, out, _ = self.revert_route_refusal()
+        self.assertIn("run on main is green", out, "the refusal does not say merges resume once the revert's run on main is green")
+        self.assertNotIn("merges resume once the revert merges", out, "the refusal says merges resume once the revert merges, which is false while the revert's run is pending")
+
+    def test_the_revert_route_does_not_say_drops_lines_is_needed_only_for_deleted_files(self):
+        # the silent-undo check flags a revert of a merge for each file it deletes and for each file it restores
+        _, out, _ = self.revert_route_refusal()
+        self.assertNotIn("for each file it deletes", out, "the refusal says a Drops-lines trailer is needed only for each file a revert deletes")
+
+    def test_the_revert_route_does_not_say_a_revert_of_a_revert_needs_no_drops_lines(self):
+        # a re-land restores a file the silent-undo check names as whole file restored, so it needs a trailer for that file
+        _, out, _ = self.revert_route_refusal()
+        self.assertNotIn("needs none", out, "the refusal says a revert of a revert needs no Drops-lines trailer, though a re-land restores files the check flags")
+
+    def test_the_revert_route_names_git_revert_m_1_for_a_merge_commit(self):
+        _, out, _ = self.revert_route_refusal()
+        self.assertIn("git revert -m 1", out, "the refusal does not name `git revert -m 1`, the way to revert a merge commit")
 
     def pr_head_after(self, *steps, drops=""):
         """Push feat, the PR head, on top of its own head. Each step is a sha to revert, "HEAD" to revert the commit before it, or "fix" to add a file.
@@ -12602,14 +12674,42 @@ class RedMainBrake(Env):
         self.assertNotIn("silently undoes", out, "the silent-undo check refuses the revert PR, and --base-red-ok does not lift that finding")
         self.merged(rc, out)
 
-    def test_a_revert_of_a_revert_pr_is_not_refused_on_a_red_main_under_base_red_ok(self):
-        # a revert of the revert, plus the fix: the re-land shape. It deletes no file, and red_base refuses nothing for it.
+    def reland_after_revert(self, drops=""):
+        """Main reverts the lane's commit, `base files`, which adds lane.txt. A fresh branch from main then reverts that revert and adds a fix: the
+        re-land. It restores lane.txt, which the silent-undo check names as a whole file restored. The re-land is pushed over feat by force, since it
+        is a fresh branch and not feat's history. `drops` is a Drops-lines line for the head commit: the escape for the file the re-land restores."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        sh(o, "git", "revert", "--no-edit", "HEAD")
+        sh(o, "git", "push", "-q", "origin", "main")
+        revert = sh(o, "git", "rev-parse", "HEAD")
+        sh(o, "git", "checkout", "-q", "-B", "feat", revert)
+        sh(o, "git", "revert", "--no-edit", revert)
+        put(os.path.join(o, "fix.txt"), "fix\n")
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", "Fix the lane")
+        if drops:
+            sh(o, "git", "commit", "--amend", "-q", "-m", f"{sh(o, 'git', 'log', '-1', '--format=%B')}\n\n{drops}")
+        sh(o, "git", "push", "-q", "-f", "origin", "feat")
+
+    def test_a_reland_with_a_drops_line_for_the_file_it_restores_is_not_refused_under_base_red_ok(self):
+        # the re-land restores lane.txt, which the silent-undo check names: its Drops-lines line excuses that file, and --base-red-ok lifts only red main
         push_base(self, {"lane.txt": "lane work\n"})
-        self.pr_head_after(self.main_head(), "HEAD", "fix")
+        self.reland_after_revert(drops="Drops-lines: lane.txt -- the re-land restores the lane's file")
         runs = [self.merge_run(903, "failure", 2650, run_attempt=2), self.merge_run(902, "success", 2649)]
         rc, out, _ = self.go(runs, self.page_jobs(runs), "--base-red-ok", "re-land the lane with its fix")
-        self.assertNotIn("silently undoes", out, "the silent-undo check refuses the revert of a revert, and --base-red-ok does not lift that finding")
+        self.assertNotIn("silently undoes", out, "the silent-undo check refuses the re-land, though its Drops-lines line excuses the file it restores")
         self.merged(rc, out)
+
+    def test_a_reland_without_a_drops_line_for_the_file_it_restores_is_refused_by_the_silent_undo_check(self):
+        push_base(self, {"lane.txt": "lane work\n"})
+        self.reland_after_revert()
+        runs = [self.merge_run(903, "failure", 2650, run_attempt=2), self.merge_run(902, "success", 2649)]
+        rc, out, before = self.go(runs, self.page_jobs(runs), "--base-red-ok", "re-land the lane with its fix")
+        self.refused(rc, out, before)
+        self.assertIn("silently undoes", out, "the silent-undo check does not refuse a re-land that restores lane.txt with no Drops-lines line")
+        self.assertIn("lane.txt: whole file restored", out, "the silent-undo check does not name the restored file as a whole file restored")
 
     def main_head(self):
         """Main's head, as the other clone reads it after a fetch: the commit the PR head reverts."""
