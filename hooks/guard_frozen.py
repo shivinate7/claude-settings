@@ -946,14 +946,18 @@ def _runs_stored_text(segment: str, words, plain: str) -> bool:
 # file joins the written words. A script with an `e` command (it runs one) stays text too. `_sed_scan`
 # reads the script as sed does, one command at a time, so a `w` counts only where sed reads a command:
 # never inside an `s` or `y` part, nor after the `a`, `i` or `c` text. A script it cannot place (an
-# unfinished `s`, an unknown letter) keeps the old text match (`_SED_WRITE`, `_SED_RUNS`), which
-# over-reads and so fails closed.
-# ponytail: `find -exec sed -ni` and a pipe inside a `sh -c` script are missed.
+# unfinished `s`, an unknown letter) keeps the text match (`_SED_WRITE`, `_SED_RUNS`), which over-reads
+# and so fails closed, plus each file a `w` placed before that point names: sed opens a `w` file as it
+# reads the script, so a later error still leaves that file emptied. A label (`:`, `b`, `t`, `T`, and the version of `v`) skips the blanks
+# before it and ends at a blank, `;`, `}`, `#` or a line end, as in GNU sed 4.9, so `:a w F` writes F.
+# ponytail: a feeder behind a second pipe stage, a script quoted twice and a glued `wFILE` are missed.
 _SED_START = r"(?:^|[\s;{}!$0-9=,]|/[gpiImMe0-9]*|^-[A-Za-z]*[ef])"
 _SED_RUNS = re.compile(_SED_START + r"[wWe](?:\s|$)")
 _SED_WRITE = re.compile(_SED_START + r"[wW][ \t]+([^\n]*)")
 _SED_ONE = frozenset("=dDgGhHnNpPxzF")          # a command with no argument
-_SED_LABEL = frozenset("btT:lLqQv")             # an argument that ends at `;` or a line end
+_SED_LABEL = frozenset("btT:v")                 # a label: blanks before it skipped, then up to `_SED_LABEL_END`
+_SED_LABEL_END = " \t\n;}#"
+_SED_NUMBER = frozenset("lLqQ")                 # an argument that ends at `;` or a line end
 _SED_LINE = frozenset("rR")                     # an argument that is the rest of the line
 _SED_TEXT = frozenset("aic")                    # text to the end of the line, a `\` continues it
 
@@ -983,8 +987,8 @@ def _sed_line_end(text, at, continued=False):
 
 
 def _sed_scan(text):
-    """(files the `w` commands of a sed script write, whether it has an `e` command), read command by
-    command, or None when a command cannot be placed."""
+    """(files the `w` commands of a sed script write, whether it has an `e` command, whether each command
+    was placed), read command by command. When a command cannot be placed, the files are those before it."""
     files, runs, at, end = [], False, 0, len(text)
     while at < end:
         letter = text[at]
@@ -994,12 +998,18 @@ def _sed_scan(text):
             delimiter = text[at + 1] if letter == "\\" and at + 1 < end else letter
             at = _sed_part(text, at + (2 if letter == "\\" else 1), delimiter)
             if at < 0:
-                return None
+                return files, runs, False
         elif letter == "#":
             at = _sed_line_end(text, at)
         elif letter in _SED_ONE:
             at += 1
         elif letter in _SED_LABEL:
+            at += 1
+            while at < end and text[at] in " \t":
+                at += 1
+            while at < end and text[at] not in _SED_LABEL_END:
+                at += 1
+        elif letter in _SED_NUMBER:
             while at < end and text[at] not in ";\n":
                 at += 1
         elif letter in _SED_LINE:
@@ -1017,11 +1027,11 @@ def _sed_scan(text):
         elif letter in "sy":
             delimiter = text[at + 1] if at + 1 < end else ""
             if not delimiter or delimiter in "\\\n":
-                return None
+                return files, runs, False
             at = _sed_part(text, at + 2, delimiter)
             at = _sed_part(text, at, delimiter) if at >= 0 else -1
             if at < 0:
-                return None
+                return files, runs, False
             while letter == "s" and at < end and text[at] not in ";}\n#":
                 flag = text[at]
                 if flag == "e":
@@ -1034,8 +1044,8 @@ def _sed_scan(text):
                     continue
                 at += 1
         else:
-            return None
-    return files, runs
+            return files, runs, False
+    return files, runs, True
 
 
 _SED_LONG = ("expression", "file", "in-place", "line-length")
@@ -1122,12 +1132,10 @@ def _sed_operands(raw):
     wrote, texts = set(), set()
     for at in scripts - from_file:
         text = _unquoted(raw[at])[offset.get(at, 0):] if at < len(raw) else ""
-        read = _sed_scan(text)
-        if read is None:   # a script the scan cannot place: the over-reading text match
-            names = [m.group(1) for m in _SED_WRITE.finditer(text)]
-            has_run = bool(_SED_RUNS.search(text))
-        else:
-            names, has_run = read[0], read[1]
+        names, has_run, placed = _sed_scan(text)
+        if not placed:   # a script the scan cannot place: the over-reading text match too
+            names = names + [m.group(1) for m in _SED_WRITE.finditer(text)]
+            has_run = has_run or bool(_SED_RUNS.search(text))
         if has_run or names:   # a script with a `w` or `e` command stays text
             texts.add(at)
         for name in names:
@@ -1320,10 +1328,10 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
     quiet = all(kind in ("printer", "cd") or not words for kind, words in zip(kinds, parsed))
     # A segment with no `sed` in its text runs none, so it is never parsed for one. A script keeps its quoted
-    # newlines: a line break ends an `a` text, so the command after it is read as one.
-    seds = [None if closed or "sed" not in segment
-            else _sed_operands([_typed(word, segment) for word in _quoted_words(segment, True)])
-            for segment in segments]
+    # newlines, here and in a `sh -c` script: a line break ends an `a` text, so the command after it is read as one.
+    lined = [None if closed or "sed" not in segment
+             else [_typed(word, segment) for word in _quoted_words(segment, True)] for segment in segments]
+    seds = [words and _sed_operands(words) for words in lined]
     fed = {number - 1 for number, read in enumerate(seds) if number and read and read[4] and ends[number - 1] == "|"}
     inner = []
     for number, raw in enumerate(parsed):
@@ -1331,7 +1339,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
         if linked:
             return linked
         data = set() if closed else _copy_reads(raw, predicate, cwd)
-        written = set() if closed or "sed" not in segments[number] else _sed_nested_writes(raw)
+        written = _sed_nested_writes(lined[number]) if lined[number] else set()
         if seds[number]:
             data = data | seds[number][0]   # a sed script is code: it names no path
             written |= _sed_written(seds[number], raw)
