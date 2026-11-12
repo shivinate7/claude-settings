@@ -61,8 +61,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    ready. Each lane PR stays a draft until the integration PR merges. A lane runs
    `~/.claude/bin/merge --lane-lint <pr>` once, before it hands off. The batch runner runs no lint: the join reads that
    hand-off PASS comment at the live head, and a red lane does not join. The batch's CI run starts with a `lint` job
-   that runs beside the other jobs and, when it goes red, posts the red comment and cancels the run
-   (owner ruling R4, 14:56 CST Nov 10; decision `lanes-run-no-full-ci-job`). The red files name the lane to drop, and the next run is the one that merges.
+   that runs beside the other jobs and, when it goes red, posts the red comment at once; the run is not cancelled, so
+   `--blame` still reads a failed run (owner ruling R4, 14:56 CST Nov 10; decision `lanes-run-no-full-ci-job`). The red files name the lane to drop, and the next run is the one that merges.
    The lint counts a clash between two heads only when both
    merge clean with their base. A hand list of checks never stands in for that run: `bin/ci-job`
    reads its steps from the workflow, so it cannot miss one. A lane never runs a whole CI job

@@ -73,8 +73,8 @@ jobs:
         run: bash .github/scripts/ci-scope.sh
 
   # The lane lint (`bin/ci-job checks --lint`, the one home of the lint steps) runs beside the heavy jobs, never before them, so a green
-  # run waits no longer (owner ruling R4, 14:56 CST Nov 10; decision lanes-run-no-full-ci-job). A red lint ends the run through
-  # cancel-on-red-lint. The lint steps stay in `checks` too: the full suite is still the final check (roles-each-layer-proves-once).
+  # run waits no longer (owner ruling R4, 14:56 CST Nov 10; decision lanes-run-no-full-ci-job). A red lint posts its comment early through
+  # red-lint-comment. The lint steps stay in `checks` too: the full suite is still the final check (roles-each-layer-proves-once).
   lint:
     runs-on: ubuntu-latest
     needs: scope
@@ -95,16 +95,17 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: bin/ci-job checks --lint --base "origin/$BASE_REF"
 
-  # Posts the red comment first, then cancels the run: a cancelled run skips ci-done, so nothing else wakes a waiting session. The cancel
-  # ends this job, so the comment must come before it. Only this job holds the write permission for runs. Its job-level if is always() and not a draft (a draft run skips every job): without it GitHub skips the job when lint
-  # fails (actions/all-jobs-passed/action.yml). Each step reads the red lint itself, and a green lint skips them all. A failed post skips the cancel.
-  cancel-on-red-lint:
+  # Posts the red comment as soon as lint ends red, so a waiting session wakes before the heavy jobs end. It does not cancel the run: a cancelled
+  # run concludes `cancelled`, which `merge --blame` refuses, and the tool takes no second accepted form (coordinator, 13:55 CST Nov 12;
+  # decision uniform-over-variants). So no job holds a write permission for runs. Its job-level if is always() and not a draft (a draft run skips
+  # every job): without always() GitHub skips the job when lint fails (actions/all-jobs-passed/action.yml). Each step reads the red lint itself,
+  # and a green lint skips them all.
+  red-lint-comment:
     runs-on: ubuntu-latest
     needs: lint
     if: ${{ always() && !github.event.pull_request.draft }}
     timeout-minutes: 5
     permissions:
-      actions: write
       contents: read
       pull-requests: write
     steps:
@@ -114,20 +115,10 @@ jobs:
           persist-credentials: false
 
       - name: Comment that lint ended red
-        id: comment
         if: ${{ needs.lint.result == 'failure' }}
         uses: $/actions/ci-done-comment
         with:
           needs: ${{ toJSON(needs) }}
-          strict: "true"
-
-      - name: Cancel the run
-        if: ${{ needs.lint.result == 'failure' && steps.comment.outcome == 'success' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RUN_ID: ${{ github.run_id }}
-          REPO: ${{ github.repository }}
-        run: gh run cancel "$RUN_ID" --repo "$REPO"
 
   checks:
     runs-on: ubuntu-latest
@@ -396,7 +387,7 @@ jobs:
       - name: all-jobs-passed needs every pull-request job
         run: python3 lint/test_all_jobs_passed.py
 
-      - name: Lint job runs first and a red lint cancels the run
+      - name: Lint job runs beside the heavy jobs and a red lint comments early
         run: python3 lint/test_lint_first_cancel.py
 
       - name: Scope detector fixture suite
@@ -1986,7 +1977,7 @@ jobs:
     needs:
       - scope
       - lint
-      - cancel-on-red-lint
+      - red-lint-comment
       - checks
       - checks-merge-install
       - checks-guard
@@ -2024,7 +2015,7 @@ jobs:
     needs:
       - scope
       - lint
-      - cancel-on-red-lint
+      - red-lint-comment
       - checks
       - checks-merge-install
       - checks-guard

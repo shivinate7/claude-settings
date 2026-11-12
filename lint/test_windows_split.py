@@ -331,7 +331,7 @@ FLAG_OF = {GUARD_JOB: "guard", MUTATE_JOB: "guard", SHOOT_JOB: "shoot", "checks-
 FLAG_OF[WAITING_PAGE_JOB] = "shoot"
 # The lint jobs run on every PR with no scope condition: the Linux pair, read from its one home CHECKS_SUITE_JOBS.
 LINT_JOBS = CHECKS_SUITE_JOBS + ("lint",)  # lint: the lane-lint job (step lane-lint-once-fail-fast), no scope condition either
-CANCEL_JOB = "cancel-on-red-lint"  # needs lint, not scope: its steps carry the red-lint condition, checked in lint/test_lint_first_cancel.py
+CANCEL_JOB = "red-lint-comment"  # needs lint, not scope: its steps carry the red-lint condition, checked in lint/test_lint_first_cancel.py
 # all-jobs-passed is the one required check. Its needs are checked in lint/test_all_jobs_passed.py.
 ALL_JOBS_PASSED_JOB = "all-jobs-passed"
 
