@@ -341,6 +341,43 @@ mrf_case("an archive/ branch with a colon names sha 8c1f0e2a7 and is refused", "
 # What is judged (decision send-message-refs-resolve, "What is judged"): a number after PR with no # is no PR.
 mrf_case("PR: 2500 lines changed, with no #, is no PR and is allowed", "allow", "PR: 2500 lines changed.")
 mrf_case("PR (2500 lines) is big, with no #, is no PR and is allowed", "allow", "PR (2500 lines) is big.")
+# A PR or pull word judges the first #N after it when other words or marks stand between them (decision
+# send-message-refs-resolve, "What is judged"). A bare #N with no PR word is not judged; the controls keep that line.
+mrf_case("PR opened: #8 is refused and names 8", "deny", "PR opened: #8", carries=("#8",))
+mrf_case("PR is #8 is refused and names 8", "deny", "PR is #8", carries=("#8",))
+mrf_case("PR - #8 is refused and names 8", "deny", "PR - #8", carries=("#8",))
+mrf_case("PR, #8 is open is refused and names 8", "deny", "PR, #8 is open", carries=("#8",))
+mrf_case("Opened the PR as #8 is refused and names 8", "deny", "Opened the PR as #8", carries=("#8",))
+mrf_case("the PR for this lane is #8 is refused and names 8", "deny", "the PR for this lane is #8", carries=("#8",))
+mrf_case("pull #8 is open is refused and names 8", "deny", "pull #8 is open", carries=("#8",))
+mrf_case("PR [#8] is open is refused and names 8", "deny", "PR [#8] is open", carries=("#8",))
+mrf_case("this repo's owner/repo#8 is open is refused and names 8", "deny", "o/r#8 is open", carries=("#8",))
+mrf_case("Issue #8 is open. is allowed, with no PR word", "allow", "Issue #8 is open.")
+mrf_case("PR #7 is open. is allowed", "allow", "PR #7 is open.")
+mrf_case("acme/widgets#8 is open. names another repo and is allowed", "allow", "acme/widgets#8 is open.")
+mrf_case("PR #7, 12 files is allowed, and 12 is not judged", "allow", "PR #7, 12 files")
+# Each #N after a PR word is judged, so the second number of `PR #7 is #8` is refused. A PR word inside a name, a
+# `pull` not right before its number, a closing or issue word between the word and the number, and an issue's
+# owner/repo#N are no PR.
+mrf_case("PR #7 is #8, the second number after a found PR, is refused and names 8", "deny", "PR #7 is #8.",
+         carries=("#8",))
+mrf_case("a PR word inside branch msg-ref-pr-forms is no PR word, so #8 is allowed", "allow",
+         "branch msg-ref-pr-forms, see #8")
+mrf_case("pull with words before its number is no PR, so #8 is allowed", "allow", "pull the list at #8")
+mrf_case("an issue's owner/repo#8 is no PR, so it is allowed", "allow", "Issue o/r#8 is open.")
+mrf_case("PR closes #8 is no PR, so #8 is allowed", "allow", "This PR closes #8.")
+mrf_case("PR fixes #8 is no PR, so #8 is allowed", "allow", "The PR fixes #8.")
+# A pull request word still judges its number, and a digit, an issue word or a gap of more than six words keeps a
+# number unjudged.
+mrf_case("the pull request for this lane is #8 is refused and names 8", "deny",
+         "the pull request for this lane is #8", carries=("#8",))
+mrf_case("PR for step 2 is #8 is allowed, a digit in the gap", "allow", "PR for step 2 is #8")
+mrf_case("PR for this bug is #8 is allowed, an issue word in the gap", "allow", "PR for this bug is #8")
+mrf_case("PR for the lock in the cache today is #8 is allowed, more than six words in the gap", "allow",
+         "PR for the lock in the cache today is #8")
+# A hex colour after a PR word is a colour, not a PR number, so its digits are not judged.
+mrf_case("PR #7 sets the background to #0b0f14 is allowed", "allow", "PR #7 sets the background to #0b0f14.")
+mrf_case("The PR changes the border to #000000 is allowed", "allow", "The PR changes the border to #000000.")
 # Fail open (decision send-message-refs-resolve, "Fail open"): twenty-one made-up shas in a shallow clone, where none
 # resolves, so each is unchecked. The twenty-first is named by the twenty-sha cap, not dropped.
 MRF_TWENTY_ONE_SHAS = "Shas: " + " ".join("d1e%04x" % number for number in range(1, 22))
