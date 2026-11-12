@@ -98,9 +98,11 @@ Sources:
 
 Cost: no new long-lived process or file. The reads run per push, in the guard's own run.
 - Whole-guard counts per call, all checks included. Source: `record_push_cost_case` in `tests/guard/s13406-merge.py`.
-  - `--all` to a named network remote: config 2, symbolic-ref 2, for-each-ref 2, rev-parse 1. The second
-    `for-each-ref` lists the local branches. It runs only when no tracking ref shows an update.
-  - `--all` to a local-path remote: config 2, symbolic-ref 1, rev-parse 1.
+  - `--all` to a named network remote: config 2, symbolic-ref 2, for-each-ref 3, rev-parse 1. The second
+    `for-each-ref` lists the local branches. It runs only when no tracking ref shows an update. The third is
+    rule `push-batch-held`'s read of each local branch and its tracking ref.
+  - `--all` to a local-path remote: config 2, symbolic-ref 1, for-each-ref 1, rev-parse 1. The one
+    `for-each-ref` is rule `push-batch-held`'s.
   - A glob refspec: config 1, for-each-ref 2, rev-parse 2, symbolic-ref 1, diff 3, rev-list 1. The second
     `for-each-ref` runs under the same condition.
   - Nothing contacts the remote. No `ls-remote`, `fetch` or `push` runs.
@@ -108,6 +110,13 @@ Cost: no new long-lived process or file. The reads run per push, in the guard's 
   one `config`. A HEAD push or a bare push adds one `symbolic-ref` and one `config`. A refspec push such
   as `origin lane/foo` adds one `symbolic-ref`. One whose destination differs from its upstream adds one
   `rev-parse`, a local read of the remote-tracking ref. A remote given as a URL or path reads nothing.
+- Rule `push-batch-held` (decision `batch-freeze-lane-set`, the batch freeze) reads the destination's remote-tracking
+  tip again. It runs on each non-forced push to a branch other than main or master. A push to a lane branch now
+  spawns three `rev-parse` where it spawned one. A push with no tracking ref and no upstream, and a stray push,
+  spawn three where they spawned two. The `symbolic-ref` and `config` reads and the `origin main` and `HEAD:main`
+  forms are unchanged. The tip reads are local. A push that moves a lane's tip also makes GitHub reads, counted in
+  decision `batch-freeze-lane-set`. `record_push_cost_case` in `tests/guard/s13406-merge.py` proves the
+  `rev-parse`, `symbolic-ref` and `config` counts, and the `push-batch-held` family proves the GitHub call counts.
 - The octopus-push check (decision `octopus-push-refused`) adds one `rev-list` for each pushed ref other
   than main or master. `--all` and `--branches` name no ref.
 

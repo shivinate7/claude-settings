@@ -139,6 +139,14 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (`main HEAD:agent-<hex>`, `main agent-<hex>`), from any checkout. It also holds
                        for `--all` or `--branches` from an agent checkout, to a network remote, because
                        that push sends the agent branch too. A delete, a mirror and a dry run pass.
+  push-batch-held      deny. A non-forced push that moves a lane branch whose remote tip
+                       (refs/remotes/<remote>/<branch>) an open, ready pull request on the default
+                       base holds in its head, from another head branch. Wins over push-agent-branch.
+                       No remote tip, a push that moves nothing, a draft holder, another base, a dry run
+                       and a push of main pass, and so does a tip the default branch already holds. A
+                       delete part of a push is no move; `--all` judges each branch. A list or compare
+                       that cannot be read, or a `$NAME` destination, allows the push and
+                       logs `push-batch-unread`. (decision batch-freeze-lane-set)
   env-file             deny. Any read or write of an environment file.
   process-args         deny. A command that prints other processes' full arguments, which can hold a
                        secret: `ps` with an args column (`aux`, `-ef`, `-f`, `-o args|command|cmd`),
@@ -572,8 +580,8 @@ while True:
         _loading = "guard_merge"
         from guard_merge import (
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
-            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON,
-            HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
+            DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, PUSH_BATCH_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON,
+            HOOK_BYPASS_REASON, batch_held_hit, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
@@ -842,6 +850,19 @@ FETCH_VALUE_FLAGS = {"--depth", "-j", "--jobs", "--upload-pack", "--refmap", "-o
                      "--deepen", "--shallow-since", "--shallow-exclude"}
 
 
+def _short_dry_run(token: str) -> bool:
+    """True for a push short-flag word that holds `n`, alone or in a cluster (`-nu`). A letter `o` takes the rest of
+    the word as its value, so nothing after it is a flag."""
+    if not token.startswith("-") or token.startswith("--"):
+        return False
+    for letter in token[1:]:
+        if letter == "n":
+            return True
+        if letter == "o":
+            return False
+    return False
+
+
 def read_verb(subcommand: str, args) -> bool:
     """True when the call's own argv names a read: help, a dry run, a tag listing, a dry-run
     push. Argv tokens only, never the value of `-m` or `-F`, and nothing after `--`."""
@@ -851,7 +872,7 @@ def read_verb(subcommand: str, args) -> bool:
             skip = False
         elif token == "--":
             return False
-        elif token in ("--help", "-h", "--dry-run") or (subcommand == "push" and token == "-n") or (
+        elif token in ("--help", "-h", "--dry-run") or (subcommand == "push" and _short_dry_run(token)) or (
                 subcommand == "tag" and (token == "--list" or LISTING.fullmatch(token))):
             return True
         elif takes_next(subcommand, token):
@@ -4552,7 +4573,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 # branch (rule push-all-main, refuses), one
                 # that writes main or master by name (rule push-main, asks), an agent-worktree
                 # branch name (rule push-agent-branch, refuses), or an implied destination off the branch's
-                # upstream (rule push-stray-branch, asks). A dry run writes nothing.
+                # upstream (rule push-stray-branch, asks). A dry run writes nothing. A lane branch the
+                # integration PR holds is refused first, so the deny wins over the agent-branch refusal (rule push-batch-held).
+                holder = batch_held_hit(args, where, tool, overrides)
+                if holder:
+                    refuse(tool, "deny", "push-batch-held", PUSH_BATCH_REASON % holder, "git push " + " ".join(args))
                 kind = push_ask_hit(args, where, overrides)
                 if kind == "main":
                     ask_command("push-main", PUSH_MAIN_REASON, "git push " + " ".join(args),

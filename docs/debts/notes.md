@@ -2180,3 +2180,14 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
+## Push-batch-held follow-up 1 (lane lane-push-frozen-in-batch, rounds 1 and 2 notes)
+- push-batch-url-remote: `git push https://github.com/<org>/<repo> HEAD:lane/x` reads the tip as `refs/remotes/<url>/...` and so allows. Fix: none — a lane pushes by remote name in normal work. Until: 2026-11-21.
+- push-batch-detached-switch: from a detached HEAD, `git switch lane/x && git push` reads the bare destination before the switch runs and allows. Fix: none — no incident yet, low harm. Until: 2026-11-21.
+- push-batch-second-holder: a lane fix after a drop, or a manual push to the integration branch, is refused while a second ready PR built on the old integration head holds the tip. The rule exempts only the integration PR itself. Fix: none — wait for the next batch, which is the remedy. Until: 2026-11-21.
+- push-batch-lease-glob: a pinned lease push and a glob refspec allow, as the decision excludes forced pushes. Whether git accepts a glob push refspec is unverified. Fix: none — no incident yet, low harm. Until: 2026-11-21.
+- push-batch-no-origin-default: with `origin/HEAD` unset the defaults read as main and master, a few more reads (8 processes, not 7). A lane with no tracking ref is not judged, and logs nothing when defaults are None. Fix: none — unmeasured, low harm. Until: 2026-11-21.
+- push-batch-stale-origin-main: a stale local `origin/main` defeats the merged-tip skip, so a merged lane branch can be refused. A `git fetch` clears it. Fix: none — reasoned from code, not run. Until: 2026-11-21.
+- push-batch-roadmap-compare: a push to the orphan `roadmap` branch pays a list and one compare per ready PR, and GitHub's reply to a compare of unrelated histories is unmeasured. Fix: none — the triage session pushes it. Until: 2026-11-21.
+- push-batch-agent-branch-untested: no case pushes an agent-hex branch with a held tip, so "the deny wins over the agent-branch ask" is untested. Fix: none — no incident yet. Until: 2026-11-21.
+- push-batch-deadline-chained: the 25 s deadline is per push, so three chained pushes with a hung gh pass the 60 s hook limit and fail open with no unread line. Fix: none — unmeasured. Until: 2026-11-21.
+- push-batch-non-push-routes: `gh pr update-branch`, the MCP `update_pull_request_branch` and `push_files` move a held branch with no `git push`. Fix: none — out of scope for the push guard. Until: 2026-11-21.
