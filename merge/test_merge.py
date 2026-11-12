@@ -16561,6 +16561,7 @@ SEND_BACK_HOUR = 3600  # seconds
 LANE_ID = "01SendBackLaneQm7x"  # the id of the lane session a pull request body names as https://claude.ai/code/session_<id>
 LANE_SESSION = f"session_{LANE_ID}"  # the token a send back line prints for it, whole
 LANE_BODY = f"Change summary.\n\nhttps://claude.ai/code/{LANE_SESSION}\n"
+KNOWN_STALE = {REVIEW_HEAD: [REVIEW_OLD_HEAD]}  # the live head is one commit on REVIEW_OLD_HEAD, so a record for REVIEW_OLD_HEAD is stale for certain; unscripted, its commit read fails and the survival is unknown
 
 def utc_before(seconds):
     """The ISO time `seconds` before the send-back clock, as the pull list's created_at gives it."""
@@ -16595,8 +16596,12 @@ class ReviewedSendBack(ReviewEnv):
     """`merge --reviewed` over scripted reads at SEND_BACK_NOW. The cases send a draft back, and the controls keep the lines a draft under 12 hours,
     a done draft, a ready pull request and a draft at exactly 12 hours already print."""
 
-    def read(self, pulls, comments=(), now=SEND_BACK_NOW):
-        return read_at(PullsHost(pulls, {}, comments=list(comments)), now)
+    def read(self, pulls, comments=(), now=SEND_BACK_NOW, cwd=None, **reads):
+        """-> the lines at `now`. `reads` are PullsHost's other scripted reads, and `cwd` is the checkout merge_state runs git in. The host stays
+        in self.host, so a case can read what the walk asked of it."""
+        self.host = PullsHost(pulls, {}, comments=list(comments), **reads)
+        self.host.cwd = cwd
+        return read_at(self.host, now)
 
     def test_a_draft_over_12_hours_with_no_record_is_sent_back(self):
         lines = self.read([aged_pull(7, REVIEW_HEAD, 13 * SEND_BACK_HOUR)])
@@ -16605,7 +16610,7 @@ class ReviewedSendBack(ReviewEnv):
 
     def test_a_draft_over_12_hours_with_a_stale_record_is_sent_back(self):
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS, head=REVIEW_OLD_HEAD))]
-        lines = self.read([aged_pull(7, REVIEW_HEAD, 13 * SEND_BACK_HOUR)], comments)
+        lines = self.read([aged_pull(7, REVIEW_HEAD, 13 * SEND_BACK_HOUR)], comments, commits=KNOWN_STALE)
         assert_off_the_list(self, lines, 7)
         send_back_line(self, lines, 7, f"stale: the record is for head {REVIEW_OLD_HEAD[:9]}")
 
@@ -16647,7 +16652,7 @@ class ReviewedSendBack(ReviewEnv):
         pulls = [aged_pull(7, REVIEW_HEAD, 13 * SEND_BACK_HOUR), aged_pull(8, REVIEW_HEAD, 11 * SEND_BACK_HOUR),
                  aged_pull(9, REVIEW_HEAD, 13 * SEND_BACK_HOUR)]
         comments = [review_comment(1, 9, record_text(n=9, head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))]
-        lines = self.read(pulls, comments)
+        lines = self.read(pulls, comments, commits=KNOWN_STALE)
         assert_off_the_list(self, lines, 7)
         assert_off_the_list(self, lines, 9)
         self.assertIn("no record: #8", lines)
