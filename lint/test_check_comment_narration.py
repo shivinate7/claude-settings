@@ -68,7 +68,7 @@ FLAGGED = [
     "fixed in round 2", "Round3 of changes", "after review round", "a review finding", "review points",
     "from PR #509", "PR 1234", "PR#4567",
     "reverted in 2ff288b3", "see 03d62e85", "added by 4a1b2c3", "cut at 9f8e7d6c5b",
-    "fixed in 41ddef83", "since commit 41ddef83", "fixed in `41ddef83`",
+    "fixed in 41ddef83", "since commit 41ddef83", "fixed in `41ddef83`", "fixed in 41ddef83, 03d62e85",
     "MEASURED 40 ms", "CORRECTED from the old value", "ADDED 2026 for the batch",
     "since 2026-10-18", "dated 2025-01-03",
     "owner ruling", "Owner's order", "owner request", "Owner ask",
@@ -105,6 +105,7 @@ CLEAN = [
     "e.g. `aa11bb22`, 41ddef83",
     "E.g. 41ddef83", "I.e. 41ddef83", "Such as 41ddef83", "For example 41ddef83", "For instance 41ddef83",
     "Like 41ddef83", "LIKE 41ddef83", "e.g. 41ddef83 OR 03d62e85",
+    "e.g. 41ddef83 and 03d62e85", "e.g. 41ddef83 AND 03d62e85", "e.g. 41ddef83, and 03d62e85",
     "Effective date 2024-07-01 (per state rule)", "Effective: 2024-07-01", "Tax rule effective on 2024-07-01",
     "Expires 2027-01-01", "Keep the old behaviour for legacy accounts so existing invoices still match",
     "Skip when previously it was seen in this loop",
@@ -617,9 +618,11 @@ def f():
 
 
 class ExampleIds(Case):
-    """A comma list of ids after an example marker is clean. A long list of ids, comma or space separated, finishes."""
+    """A comma list of ids after an example marker is clean. An id joined after a flagged id is flagged too.
+    A long list of ids, comma or space separated, finishes."""
     # The bound is a hang guard on the run, not a timed assert. A run past it fails with the bound named.
-    BOUND = 2  # seconds
+    # The 4000-id run takes about 1 s here, so 10 s leaves room for a loaded CI runner and still catches a hang.
+    BOUND = 10  # seconds
 
     @staticmethod
     def example_id(i):
@@ -658,6 +661,15 @@ class ExampleIds(Case):
         self.assertEqual(len(rows), 3999, "the first id is not skipped, or a later id is not flagged")
         flagged = [row.split("commit hash: ", 1)[1].split(" ", 1)[0] for row in rows]
         self.assertEqual(flagged, ids[1:], "the flagged ids are not the ids after the first")
+
+    def test_id_joined_after_a_flagged_id_is_flagged_too(self):
+        rc, out = self.scan({"flagged.py": "x = 1\n# fixed in 41ddef83, 03d62e85\ny = 2\n"})
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(rc, 1, out)
+        rows = [row for row in out.splitlines() if "commit hash:" in row]
+        self.assertEqual({row.split(": ", 1)[0] for row in rows}, {"flagged.py:2"}, "a hit is off the comment line")
+        flagged = [row.split("commit hash: ", 1)[1].split(" ", 1)[0] for row in rows]
+        self.assertEqual(flagged, ["41ddef83", "03d62e85"], "the id after a flagged id is not flagged")
 
 
 class Scanner(Case):
