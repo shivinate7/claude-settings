@@ -1156,12 +1156,20 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
 
 # ---- merge --confirm: the checkout it acts in must be a repo the own record names (rule merge-confirm-repo)
 REPO_REASON = (
-    "merge-confirm-repo: this session's own record does not prove it may merge in the checkout this command acts in. "
+    "this session's own record does not prove it may merge in the checkout this command acts in. "
     "A merge is allowed only in a repo that a cs-repo tag of the session's own get_session record names. "
     "If that repo is this session's own: run get_session (no argument) alone in its own turn, then retry. "
     "Otherwise hand the pull request to a batch runner whose cs-repo tags name the repo "
     "(list_sessions, tag cs-build:batch-runner). "
     "(decision merge-confirm-repo, a cloud merge acts only in a repo its own record names)"
+)
+CONFIRM_HIT = "merge --confirm"  # the label of a merge --confirm the own record does not prove
+# The same refusal when --head holds a command substitution: the guard cannot read the sha, and the fault is the value, not the checkout.
+HEAD_SUBST_HIT = "merge --confirm --head substitution"
+HEAD_SUBST_REASON = (
+    "--head is filled by a command substitution ($(...) or backticks), and the guard cannot read a sha from it, so the merge is refused. "
+    "Run the command first and pass its literal 40-hex sha: `merge <n> --confirm --head <sha>`. "
+    "(decision merge-confirm-repo, a cloud merge acts only in a repo its own record names; the merge tool takes --head as a literal sha)"
 )
 
 
@@ -1218,14 +1226,30 @@ def repo_proof_hit(stripped: str, cwd: str, transcript: str) -> str:
     tokenizes once they are gone (a quote left open), the merge is denied, never skipped."""
     if not is_cloud():
         return ""
-    return "merge --confirm" if _unproved_confirm(stripped, cwd, transcript, 0) else ""
+    return _unproved_confirm(stripped, cwd, transcript, 0)
 
 
 MERGE_NEST_DEPTH = 4  # `bash -c` inside `bash -c` is followed this far; a deeper script is judged as a refusal
 
 
-def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
-    """True when a `merge --confirm` in `text` acts in a checkout the own record does not prove. `text` is the command, or a script a
+def _head_is_substitution(segment: str) -> bool:
+    """True when the segment's --head value (`--head V` or `--head=V`) starts a command substitution, `$(` or a backtick, quoted or bare.
+    A segment that does not tokenize says no, so the refusal keeps the repo remedy."""
+    tokens = segment_tokens(segment) or []
+    for number, token in enumerate(tokens):
+        if token.startswith("--head="):
+            value = token[len("--head="):]
+        elif token == "--head" and number + 1 < len(tokens):
+            value = tokens[number + 1]
+        else:
+            continue
+        if value.startswith(("$(", "`")):
+            return True
+    return False
+
+
+def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> str:
+    """The label of a `merge --confirm` in `text` that acts in a checkout the own record does not prove, else ''. `text` is the command, or a script a
     segment hands on (`bash -c`, `sh -c`, `eval`: inner_commands, the one reader of those wrappers), which runs in the directory its own
     segment is in. A `)` or `&` glued to the last word ends the merge's arguments (_command_words), so a merge closing a subshell is read."""
     ends = []
@@ -1238,11 +1262,13 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
         if scripts:
             if depth >= MERGE_NEST_DEPTH:
                 if any("--confirm" in script for script in scripts):
-                    return True
+                    return CONFIRM_HIT
             else:
                 where = dir_before_segment(segments, number, cwd, ends) or ""
-                if any(_unproved_confirm(script, where, transcript, depth + 1) for script in scripts):
-                    return True
+                for script in scripts:
+                    hit = _unproved_confirm(script, where, transcript, depth + 1)
+                    if hit:
+                        return hit
         if merge_tool_args(segment) is None:
             continue
         try:
@@ -1265,9 +1291,10 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
                 if tags is not None and not tagged_after and any(repo_tag_names(tag, repo) for tag in tags):
                     continue
         except Exception:
-            pass
-        return True
-    return False
+            if _head_is_substitution(segment):
+                return HEAD_SUBST_HIT
+        return CONFIRM_HIT
+    return ""
 
 
 # ---- the record branch's one writer: only the triage session pushes to it (rule roadmap-one-writer)
