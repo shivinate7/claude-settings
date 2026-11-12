@@ -1,0 +1,14 @@
+{
+ "id": "trial-brief-triage-by-role",
+ "title": "The trial brief questions-reach-page cites triage by role and the roster, not a session id",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJKzfH6ZvGHiANaTszuk",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "docs/plans/trial-briefs/questions-reach-page.md on main names the archived triage session_013NEJL1qEunLpTi68de3Jrv; a lane that reads it writes to a session that no longer answers.",
+ "source": "coordinator 07:43 CST Nov 12 (R22 point 3: cite a role, not a session id)",
+ "note": "Prose. Put on lane fan-prose-find-copies by triage 07:43 CST Nov 12.",
+ "updatedAt": "$T"
+}
