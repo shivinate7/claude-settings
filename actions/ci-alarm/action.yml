@@ -1,29 +1,32 @@
 name: CI alarm
 description: >
   Opens (or comments on) one issue when the newest run of any workflow on a branch is
-  red, judged per workflow and per event group (events.json: push and dispatch together, schedule
+  red, and wakes the merged pull request of each run that holds a cap end. Red is judged per workflow and per event group (events.json: push and dispatch together, schedule
   apart). A failed run with a red job is cleared across groups only by a newer green run of the other
   group that is its group's newest and passed every job of the failed run (exact names), so a green nightly that ran
   other jobs never hides a red push. A job the failed run did not fail is left out of that need when its job-level `if:` has a
   top-level `&&` conjunct `github.event_name == 'X'` for another event than the green run's (`all-jobs-passed` and `ci-done` run on
   pull_request only), so a newer green push run clears a red nightly. Cost: per clear candidate one read of the workflow file at the green
   run's head (contents API, once), besides the jobs reads; the step needs python3 and runs `clear_rule.py` from the action path.
-  A job cancelled at its own job-level `timeout-minutes` (a cap end) opens an issue wherever it sits in the 100-run window: in any
+  A job cancelled at its own job-level `timeout-minutes` (a cap end) wakes its run's merged pull request, and opens no issue, wherever it sits in the 100-run window: in any
   cancelled run (not only the newest of its group), in any earlier attempt of a cancelled, failed or succeeded re-run, and in a
   failure run whether or not a newer green run clears it. A failure run that no newer green run clears is red by its conclusion,
   and the cap end is named under it. The job ran at least the cap, read from the
-  workflow file at the run's head; a job with no job-level cap has GitHub's default, 360 minutes. The issue line names the job,
+  workflow file at the run's head; a job with no job-level cap has GitHub's default, 360 minutes. The line for a cap end names the job,
   the cap, the minutes and the run id (and the attempt, for an earlier one). The step prints `alarm` when only a cap end is named and `red`
-  when a failure run that no newer green run clears is named. A cap-only issue is titled "CI job hit its time cap on <branch>: <job>"
-  (the first cap job; the body names the rest), and an issue with a red run keeps "CI red on <branch>". A failure run that the merge
-  tool calls clear opens no issue unless it holds a cap end. A job cancelled under its cap stays quiet. An unreadable cap, a null
+  when a failure run that no newer green run clears is named. The wake is `wake.sh`, called once per run with a cap end (KEY `cap:<run id>`, SHA the run's head commit). Its text opens with
+  "CI job hit its time cap on <branch>: <job>" (the first cap job of that run; the text names the rest). The hidden marker
+  `<!-- main-alarm:KEY -->` in its comment is the memory, so a cap end already reported is not reported again. A run whose commit has no pull
+  request merged into main cannot be woken: the step prints its verdict, then exits 1, naming the run id. A red run opens the issue "CI red on
+  <branch>", and its cap ends still wake. A failure run that the merge tool calls clear raises nothing unless it holds a cap end. A job cancelled under its cap stays quiet. An unreadable cap, a null
   `started_at`, or a cancelled run or one of its earlier attempts with no jobs is "unknown". The merge gate leaves a run with no red
   job and a job timed out at a job-level cap it finds out of red and out of unknown; the alarm is the signal. A group whose newest
-  run is a re-run still going (attempt above 1) is "unknown" and opens no issue unless a cap end is named elsewhere; a first
+  run is a re-run still going (attempt above 1) is "unknown" and raises nothing unless a cap end or a red run is named elsewhere; a first
   attempt still going is skipped.
   Cost: one runs read and the workflows-list read. One jobs read per judged run (each cancelled run of the window, and the newest
   failed run of a group), one per earlier attempt of a cancelled, failed or succeeded re-run, and one contents read of its workflow
-  file when a job of it was cancelled. No long-lived process starts (short jq, awk and gh processes run), and the only files written are
+  file when a job of it was cancelled. Each woken run adds one pulls read, one comments read of its pull request and at most one comment
+  write. No long-lived process starts (short jq, awk and gh processes run), and the only files written are
   temp cache files that the step removes before it ends.
   Runs of other events, and of deleted workflows, are not judged. A failed read or write is "unknown", never red. Call it from a scheduled
   workflow with `permissions: {actions: read, contents: read, issues: write}` (contents: the clear reads the workflow file); it needs no checkout. A merge-triggered failure shows on no PR, so main can sit red unnoticed.
