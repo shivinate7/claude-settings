@@ -1,0 +1,14 @@
+{
+ "id": "notes-key-unique-check",
+ "title": "A check refuses docs/debts/notes.md with more than one row for a note key",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A union merge of notes-keep-reverify's waves (PRs 2623-2629, batch 95) left 273 keys on more than one row on main 2a7521db9 (coordinator count; a triage parse of the same file counts 274).",
+ "source": "coordinator 08:07 CST Nov 12",
+ "note": "Code, a check. Ready, no lane; joins the next wave of check lanes. The cleanup itself is on lane notes-keep-reverify.",
+ "updatedAt": "2026-11-12T08:06:00-06:00"
+}
