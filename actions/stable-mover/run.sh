@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # The stable mover's one step. Run in a checkout whose origin is the repo. HEAD_SHA is the commit of a
 # finished main run and RUN_CONCLUSION is that run's conclusion. It moves origin's stable branch to
-# HEAD_SHA only when the run succeeded and HEAD_SHA descends from stable (a fast-forward). GH_TOKEN,
-# when set, authenticates the push; a local origin needs none.
+# HEAD_SHA only when the run succeeded, HEAD_SHA is on origin's main, and HEAD_SHA descends from stable (a
+# fast-forward). GH_TOKEN, when set, authenticates the push; a local origin needs none.
 set -u
 head="${HEAD_SHA:-}"
 conclusion="${RUN_CONCLUSION:-}"
@@ -27,6 +27,13 @@ if [ -n "$remote_stable" ]; then
     echo "stable-mover: refused: $head does not descend from stable ($stable); stable stays where it is" >&2
     exit 1
   fi
+fi
+
+# Only a commit that origin's main holds may become stable. An unreadable main is UNKNOWN, never a pass.
+git fetch origin "+refs/heads/main:refs/remotes/origin/main" || { echo "stable-mover: UNKNOWN: fetch of main failed" >&2; exit 2; }
+if ! git merge-base --is-ancestor "$head" "refs/remotes/origin/main"; then
+  echo "stable-mover: refused: $head is not on origin's main; stable stays where it is" >&2
+  exit 1
 fi
 
 # No --force: git refuses a non-fast-forward even if the check above raced another move.

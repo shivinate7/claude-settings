@@ -14,15 +14,13 @@ on:
 
 permissions: {}
 
-# One move at a time. When a newer run queues, GitHub cancels the older pending one, and that is
-# safe: the move goes to the newest green head, and the mover refuses a head that stable already
-# passed.
-concurrency:
-  group: stable
-  cancel-in-progress: false
-
 jobs:
   move:
+    # One move at a time. The group is at job level, so a run whose `if:` skips (a pull request or red
+    # run) never enters it and cannot cancel a pending green move. Nothing cancels a running move.
+    concurrency:
+      group: stable
+      cancel-in-progress: false
     if: >-
       ${{ github.event.workflow_run.conclusion == 'success'
       && github.event.workflow_run.event == 'push'
