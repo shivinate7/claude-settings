@@ -52,7 +52,7 @@ def checks_jobs(text):
             for i, m in enumerate(marks)}
 
 
-SCHEDULE_ONLY_IF = re.compile(r"^    if:\s*\$\{\{\s*github\.event_name == 'schedule'\s*\}\}\s*$", re.M)
+SCHEDULE_ONLY_IF = re.compile(r"^    if:\s*\$\{\{\s*github\.event_name == 'schedule'\s*\}\}[ \t]*(?:#[^\n]*)?$", re.M)
 
 
 def ci_done_problems(text):
@@ -129,6 +129,16 @@ class ScheduledGate(unittest.TestCase):
     def test_a_schedule_only_gate_named_in_ci_done_is_accepted(self):
         text = GOOD.replace("  ci-done:", self.GATE + "  ci-done:", 1).replace("    needs:\n      - a\n", "    needs:\n      - a\n      - nightly-gate\n")
         self.assertEqual(ci_done_problems(text), [])
+
+    def test_a_trailing_comment_on_the_gates_if_keeps_the_exemption(self):
+        # A trailing comment on the if: line is text to YAML, so the gate is still a schedule-only job that ci-done need not name.
+        gate = self.GATE.replace("'schedule' }}\n", "'schedule' }}  # nightly only\n")
+        self.assertEqual(ci_done_problems(GOOD.replace("  ci-done:", gate + "  ci-done:", 1)), [])
+
+    def test_a_hash_inside_a_quoted_step_of_the_gate_keeps_the_exemption(self):
+        # A `#` inside quotes is text, not a comment: the gate's step still reads, and the gate stays exempt.
+        gate = self.GATE + "    steps:\n      - run: echo \"skip=false # not a comment\" >> \"$GITHUB_OUTPUT\"\n"
+        self.assertEqual(ci_done_problems(GOOD.replace("  ci-done:", gate + "  ci-done:", 1)), [])
 
     def test_a_pull_request_job_left_out_beside_the_gate_is_still_flagged(self):
         text = GOOD.replace("  ci-done:", "  b:\n    runs-on: x\n" + self.GATE + "  ci-done:", 1)
