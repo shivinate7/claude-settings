@@ -21,6 +21,7 @@ sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no te
 import _test_temp  # noqa: E402  test-temp-standard: this run's folder (lint/_test_temp.py)
 import test_merge as tm  # noqa: E402  the git half's fixture and fakes; importing it runs none of its cases
 from test_merge import LANE_LINT_MARKER, NOT_OWNER, lint_comment  # noqa: E402  the lint comment's one form, in test_merge.py (decision lanes-run-no-full-ci-job)
+from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 import merge  # noqa: E402
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
@@ -100,6 +101,11 @@ jobs:
 
 def pass_lines(text):
     return [line for line in text.splitlines() if line.startswith("PASS:")]
+
+
+def rollup_skip_lines(text):
+    """-> the `merge:` lines that say the lane lint was skipped. One line carries the words, so a case reads its keywords off one line."""
+    return [line for line in text.splitlines() if line.startswith("merge:") and re.search(r"(?i)\blint\b", line) and re.search(r"(?i)\bskip", line)]
 
 
 class NoLock:
@@ -1549,6 +1555,34 @@ class CrossMeasure(LaneFixture):
         self.assertNotIn("FAIL", "\n".join(report), "the report line for PR #8 reads as a FAIL: " + text)
         self.assertEqual(lints, 1, "the ci-job lint did not run once on the passing integration PR: " + text)
 
+    def freeze_only_body(self):
+        """The body batch_build writes on an integration PR: its freeze block and nothing else, so no session line names a lane."""
+        base = tm.sh(self.other, "git", "rev-parse", "origin/main")
+        return "\n".join(merge.freeze_lines(INTEGRATION_NAME, {6: base})) + "\n"
+
+    def test_a_batch_integration_pr_with_a_freeze_only_body_passes_and_reports_a_clash_with_pr_8(self):
+        """Why: batch_build writes the integration PR's body as the freeze block alone. Without a session line the lane set is empty, so PR #8 is
+        named by --with, and the clash is still a report line, not a FAIL, since the lanes rebase after the merge. Green on the old code."""
+        head = self.commit_on(merge.integration_branch(INTEGRATION_NAME), {"shared-a.txt": "integration 7\n"}, "origin/main")
+        sib = self.pr_writes(8, {"shared-a.txt": "lane 8\n"}, lane_body(OWN))
+        self.host.branch, self.host.body = merge.integration_branch(INTEGRATION_NAME), self.freeze_only_body()
+        self.assert_integration_scope()
+        self.assertIsNone(session_of(self.host.body), "precondition: PR 7's body names a session, so it is not the freeze-only body")
+        self.assertEqual(self.clash(head, "origin/main"), "clean", "precondition: the integration head does not merge clean with main")
+        self.assertEqual(self.clash(sib, "origin/main"), "clean", "precondition: PR 8 does not merge clean with main, so the clash is not the pair the case names")
+        self.assertEqual(self.clash(head, sib), "conflict", "precondition: the integration head and PR 8 do not clash, so the case probes nothing")
+        self.use_ci_job(PASSING, 0)
+        rc, text, lints, _, _ = self.measured("--lane-lint", "7", "--with", "8")
+        self.assertEqual(rc, 0, "a freeze-only batch integration PR with a clash on PR #8 refused the lane: " + text)
+        self.assertEqual(len(pass_lines(text)), 1, "the lane did not print one PASS line: " + text)
+        lines = text.splitlines()
+        pass_at = next(i for i, line in enumerate(lines) if line.startswith("PASS:"))
+        report = [line for line in lines[pass_at + 1:] if names_pr(line, 8)]
+        self.assertTrue(report, "no report line after the PASS names the clashing PR #8: " + text)
+        self.assertNotIn("FAIL", "\n".join(report), "the report line for PR #8 reads as a FAIL: " + text)
+        self.assertRegex("\n".join(report), r"(?i)rebase[^\n]*after[^\n]*merge", "the report line for PR #8 does not say the lanes rebase after the merge: " + text)
+        self.assertEqual(lints, 1, "the ci-job lint did not run once on the passing integration PR: " + text)
+
     def test_an_integration_pr_whose_head_conflicts_with_main_still_fails_and_names_main(self):
         """The integration rule lifts only a clash with a PR's head. A batch head that conflicts with main still FAILs, names main, and runs no ci-job."""
         head = self.commit_on(merge.integration_branch(INTEGRATION_NAME), {"shared-a.txt": "integration 7\n"}, "origin/main")
@@ -2253,6 +2287,47 @@ class LintCheckJoin(tm.CloudSession):
         self.assertNotIn("since the owner's yes was relayed", out, "the refusal is HEAD_MOVED, so the lane-lint head check did not refuse:\n" + out)
 
 
+    def test_a_join_with_all_jobs_passed_green_on_the_live_head_skips_the_lane_lint_and_says_so(self):
+        """Why: the join needs a lane-lint PASS only to prove the head was checked. When the all-jobs-passed rollup is green on the exact head
+        the merge takes, CI already proved it on that head (rule roles-each-layer-proves-once), so the join skips the local lane lint and its
+        merge line names the skip, the rollup and the head. Red on the old code: lint_check refuses the head for its missing lane-lint PASS,
+        whatever CI shows."""
+        head = self.head("feat")
+        rc, out = self.join([], checks_seq=[[("checks", "pass", ""), (REQUIRED_CHECK, "pass", "")]])
+        self.assertEqual(rc, 0, "a join with all-jobs-passed green on the live head was refused for the lane lint, not merged:\n" + out)
+        self.assertIn("PUT pulls/7/merge", tm.GhHalf.calls(self), "a join with all-jobs-passed green on the live head did not merge #7:\n" + out)
+        skips = rollup_skip_lines(out)
+        self.assertTrue(skips, "the merge printed no line that says the lane lint was skipped:\n" + out)
+        self.assertIn(REQUIRED_CHECK, skips[0], "the skip line does not name the all-jobs-passed rollup:\n" + out)
+        self.assertIn("green", skips[0], "the skip line does not say the rollup is green:\n" + out)
+        self.assertIn(head[:9], skips[0], "the skip line does not name the head it skipped:\n" + out)
+
+    def test_a_join_with_all_jobs_passed_not_green_on_the_live_head_still_needs_the_lane_lint(self):
+        """Why: only a green rollup on the live head replaces the lane lint. A red, pending or skipped rollup (a draft run skips it), or no rollup
+        at all, keeps the refusal: the join names `merge --lane-lint 7` and merges and pushes nothing. Green on the old code: the refusal has
+        never depended on CI."""
+        states = {
+            "absent": [[("checks", "pass", "")]],
+            "red": [[("checks", "pass", ""), (REQUIRED_CHECK, "fail", "https://x/y")]],
+            "pending": [[("checks", "pass", ""), (REQUIRED_CHECK, "pending", "")]],
+            "skipped": [[("checks", "pass", ""), (REQUIRED_CHECK, "skipping", "")]],
+        }
+        for name, seq in states.items():
+            with self.subTest(rollup=name):
+                out = self.assert_refused([], f"all-jobs-passed {name} on the live head", checks_seq=seq)
+                self.assertEqual(rollup_skip_lines(out), [], f"all-jobs-passed {name} on the live head printed a line that says the lane lint was skipped:\n{out}")
+
+    def test_a_head_that_moves_after_a_green_rollup_skip_is_refused_before_the_merge(self):
+        """Why: a skip on a green rollup must still hand the head it read to confirm, which sets `checked` from it. A head that moves before the
+        lock is then refused by the linted-head check, before any merge call. Red on the old code: the lint refusal comes first, so no
+        moved-head refusal is printed at all, and the skip that must keep it does not exist yet."""
+        linted = self.head("feat")
+        self.competitor_push()
+        rc, out = self.join([], ran_on=linted, lag={"n": 1, "prior": linted}, checks_seq=[[("checks", "pass", ""), (REQUIRED_CHECK, "pass", "")]])
+        self.assertEqual(rc, 1, "a head that moved after a green-rollup skip went ahead:\n" + out)
+        self.assertIn("after its lane-lint was read", out, "the moved head was not refused by the linted-head check (the refusal is another one):\n" + out)
+        self.assertNotIn("PUT pulls/7/merge", tm.GhHalf.calls(self), "a head that moved after a green-rollup skip was merged:\n" + out)
+
     def feat_commit(self, files, subject, trailer=None):
         """One commit on feat, pushed from the second clone: `files` maps a path to its text, and `trailer` (a Record-claim line, or None) ends
         the message. -> its sha."""
@@ -2316,6 +2391,25 @@ class LintCheckJoin(tm.CloudSession):
         side = self.side_commit()
         self.feat_commit({"docs/decisions/d906.md": "# D906\n"}, "Claim record numbers", "Record-claim: D-906")
         self.assert_refused([lint_comment(2, side)], "a lint PASS for a head that is not an ancestor of the live head")
+
+
+class LintCheckRollup(unittest.TestCase):
+    """lint_check's rollup read is per head. The host is the real Host, with its check runs read per sha from tm.PullsHost, so no gh shim
+    answers for the live head: one head is green, and the live head has no check run."""
+
+    def test_a_green_rollup_on_an_older_head_does_not_clear_the_live_head(self):
+        """Why: when the head moved, the live head's lane lint is still owed. Green on the old head proves nothing about the new head, which has
+        its own run. Green on the old code too: lint_check refuses every head with no lane-lint PASS, and reads no rollup."""
+        old, live = "1" * 40, "2" * 40
+        host = tm.PullsHost([], {old: [tm.batch_run(REQUIRED_CHECK, status="completed", conclusion="success")], live: []})
+        self.assertEqual(len(host.pages(f"commits/{old}/check-runs", "check_runs")), 1, "precondition: the older head has no green rollup row, so the case probes nothing")
+        self.assertEqual(host.pages(f"commits/{live}/check-runs", "check_runs"), [], "precondition: the live head has a check run, so the case probes nothing")
+        info = {"head": live, "branch": "feat", "base": "main", "created": None}
+        root = tempfile.mkdtemp(prefix="lint-rollup-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, root, True)
+        with self.assertRaises(merge.Stop) as cm:
+            merge.lint_check(host, 7, info, root, ".claude/merge.json")
+        self.assertIn("merge --lane-lint 7", str(cm.exception), "a green rollup on an older head cleared the live head's lane lint: %s" % cm.exception)
 
 
 if __name__ == "__main__":
