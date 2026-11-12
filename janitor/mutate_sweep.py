@@ -1034,6 +1034,18 @@ MUTATIONS = [
      '        if locked_at_ms is None:\n            return False\n',
      '        if locked_at_ms is None:\n            return True\n',
      "test_no_start_lock_with_an_unreadable_write_time_keeps"),
+    # The two call sites that pass a lock's write time on (`_lock_unlockable`, `_restore_cut_short`). Each
+    # call with the write time dropped keeps a reused pid's lock, and its named case must go red.
+    ("stale lock: the unlock re-read drops the write time, so a reused pid's lock is kept",
+     "sweep",
+     '            and (stale_agent_lock_verdict(reason, written) is True',
+     '            and (stale_agent_lock_verdict(reason, None) is True',
+     "test_unlock_for_removal_passes_the_write_time_to_the_lock_re_read"),
+    ("stale lock: the cut-short write-back drops the write time, so a reused pid's lock is kept",
+     "sweep",
+     '            entry.get("locked_at_ms")) is not True):',
+     '            None) is not True):',
+     "test_restore_cut_short_passes_the_write_time_of_a_reused_pid_lock"),
     ("stale lock: --confirm removes without unlocking first",
      "sweep",
      '        unlocked = git_reads._git(root, "worktree", "unlock", path)',
@@ -1468,6 +1480,23 @@ MUTATIONS = [
      "test_a_25_second_deadline_gives_a_12_second_budget"),
 ]
 
+# Mutants for the Linux route and the darwin rule (the `worktree` argument of stale_agent_lock_verdict).
+# No anchor can be checked until the built code exists, so these stay PENDING: main() names each and
+# runs none. When the built code is in, give each its anchor and replacement and move it into MUTATIONS.
+# Each row: (label, target, the case that must go red on it).
+PENDING_MUTATIONS = [
+    ("linux route: the cwd-outside test is flipped, so a holder inside its tree frees",
+     "sweep", "test_linux_no_start_lock_whose_holder_works_inside_its_tree_keeps_despite_a_write_time_gap"),
+    ("linux route: the cmdline test is dropped, so a holder whose argv names claude or agent frees",
+     "sweep", "test_linux_no_start_lock_whose_holder_names_claude_or_agent_keeps_despite_a_write_time_gap"),
+    ("linux route: fail-closed is flipped, so an unreadable /proc read frees",
+     "sweep", "test_linux_no_start_lock_with_an_unreadable_proc_read_keeps_despite_a_write_time_gap"),
+    ("linux route: Linux reads the write time again, so a write-time gap frees a live holder",
+     "sweep", "test_linux_no_start_lock_whose_holder_works_inside_its_tree_keeps_despite_a_write_time_gap"),
+    ("darwin: a live no-start holder is freed on its write time",
+     "sweep", "test_darwin_keeps_a_live_no_start_holder_whatever_the_write_time"),
+]
+
 
 def mutation_parts(entry):
     """Return (label, target, old, new, required, only_on) for one mutation, enforcing the
@@ -1626,6 +1655,13 @@ def main() -> int:
         if not required:
             print("ERROR mutation carries no required case name: %s" % label)
             return 1
+
+    # A pending row has no anchor to check yet, so it runs nothing. Its named case must still exist.
+    for label, _target, required in PENDING_MUTATIONS:
+        if ("def %s(" % required) not in sources["test_sweep"]:
+            print("ERROR pending mutation names no case in test_sweep.py: %s" % label)
+            return 1
+        print("PENDING (no anchor until the built code exists, not run): %s" % label)
 
     # MUTATE_ONLY=<fragment>[,<fragment>...] runs only the mutants whose label holds a fragment.
     # Every anchor is still checked above. Unset, every mutant runs.
