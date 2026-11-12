@@ -2,8 +2,8 @@
 """Verdict cases for the branch sweep (roadmap step cloud-branch-delete).
 
 A branch is deleted only when its last commit is on the default branch or on an archive/* branch (the standing grant
-of the Oct 30 session, .claude/CLAUDE.md). main, master, roadmap, archive/*, HEAD, and a branch with an open pull request
-are kept. A name with a character outside [A-Za-z0-9._/-], or one that starts with `-`, is kept too: the name goes raw
+of the Oct 30 session, .claude/CLAUDE.md). main, master, roadmap, archive/*, HEAD, and a branch that is the head or the
+base of an open pull request are kept. A name with a character outside [A-Za-z0-9._/-], or one that starts with `-`, is kept too: the name goes raw
 into a DELETE URL, and `#` ends the path.
 
 CLI the builder provides (actions/branch-sweep/sweep.py):
@@ -13,11 +13,14 @@ branch (main when not given). Each --open-head names a branch with an open pull 
 `<delete|keep> <name> <reason>`. origin/HEAD is no branch and gets no line. A repo it cannot read exits nonzero and
 prints no delete line.
 
-The DeleteStep cases run the delete step's run block from .github/workflows/branch-sweep.yml under bash -eo pipefail,
-as GitHub runs `shell: bash`, with a fake gh that refuses or accepts each DELETE.
+The DeleteStep cases run the open-PR read step, then the delete step, from .github/workflows/branch-sweep.yml, each under
+bash -eo pipefail as GitHub runs `shell: bash`. A fake gh serves the open pull requests through the workflow's own --jq
+filter (jq) and refuses or accepts each DELETE.
 Run: python3 lint/test_branch_sweep.py
 """
+import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -37,10 +40,24 @@ ENV = _test_git.apply(dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_
                            GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@t", GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@t"))
 RUN_FOLDER = _test_temp.run_folder()
 
-# Stands in for gh: logs each call, and refuses a DELETE with the HTTP status named in FAKE_GH_REFUSE.
+# Stands in for gh: logs each call. A pulls call prints FAKE_GH_PULLS through the --jq filter the call names.
+# A DELETE is refused with the HTTP status named in FAKE_GH_REFUSE.
 FAKE_GH = """#!/bin/sh
 printf '%s\\n' "$*" >> "$FAKE_GH_LOG"
 case "$*" in
+  *"/pulls?"*)
+    filter=""
+    take=""
+    for arg in "$@"; do
+      if [ -n "$take" ]; then
+        filter="$arg"
+        take=""
+      elif [ "$arg" = "--jq" ]; then
+        take=1
+      fi
+    done
+    jq -r "$filter" < "$FAKE_GH_PULLS"
+    exit $? ;;
   *DELETE*)
     if [ -n "$FAKE_GH_REFUSE" ]; then
       echo "gh: refused (HTTP $FAKE_GH_REFUSE)" >&2
@@ -99,6 +116,11 @@ def verdicts(out):
 def deletes(verdict_text):
     """Sorted names that a verdict text marks delete."""
     return sorted(line.split(" ", 2)[1] for line in verdict_text.splitlines() if line.startswith("delete "))
+
+
+def deleted(calls):
+    """Sorted names of the branches that DELETE calls name."""
+    return sorted(call.split("/heads/", 1)[1] for call in calls if "/heads/" in call)
 
 
 def read_text(path):
@@ -243,10 +265,11 @@ class Verdicts(unittest.TestCase):
 
 
 class DeleteStep(unittest.TestCase):
-    """The delete step of the workflow, run as GitHub runs it, on a fixture repo whose branches are merged into main."""
+    """The open-PR read step and the delete step of the workflow, run as GitHub runs them, on a fixture repo whose
+    branches are merged into main."""
 
-    def run_block(self):
-        """The body of the run: block that runs sweep.py, dedented, from the real workflow file."""
+    def run_block(self, *markers):
+        """The body of the first run: | block of the real workflow file that holds every marker, dedented."""
         with open(WORKFLOW, encoding="utf-8") as f:
             lines = f.read().splitlines()
         for i, line in enumerate(lines):
@@ -259,12 +282,14 @@ class DeleteStep(unittest.TestCase):
                     break
                 body.append(raw)
             text = textwrap.dedent("\n".join(body)) + "\n"
-            if "sweep.py" in text:
+            if all(marker in text for marker in markers):
                 return text
-        self.fail("the workflow has no run: block that runs sweep.py")
+        self.fail("the workflow has no run: block that holds %s" % " and ".join(markers))
 
-    def run_step(self, merged, open_heads, refuse=None):
-        """(CompletedProcess, DELETE calls, verdict text) of one run of the step."""
+    def run_step(self, merged, open_prs, refuse=None):
+        """(CompletedProcess of the delete step, DELETE calls, verdict text) of one run of both steps. The open-PR
+        read runs first, as the workflow runs it, on pull requests that are (head, base) pairs in open_prs."""
+        self.assertIsNotNone(shutil.which("jq"), "jq is not on PATH, so the open-PR read step cannot run")
         repo = Repo(self)
         m1 = repo.commit("main 1")
         repo.branch("main", m1)
@@ -279,17 +304,25 @@ class DeleteStep(unittest.TestCase):
         with open(gh, "w", encoding="utf-8") as f:
             f.write(FAKE_GH)
         os.chmod(gh, 0o755)
-        with open(os.path.join(runner, "open-heads.txt"), "w", encoding="utf-8") as f:
-            f.write("".join(head + "\n" for head in open_heads))
-        script = os.path.join(runner, "delete-step.sh")
-        with open(script, "w", encoding="utf-8") as f:
-            f.write(self.run_block())
+        pulls = os.path.join(runner, "pulls.json")
+        with open(pulls, "w", encoding="utf-8") as f:
+            json.dump([{"head": {"ref": head}, "base": {"ref": base}} for head, base in open_prs], f)
         log = os.path.join(runner, "gh.log")
         env = dict(ENV, GH_TOKEN="t", REPO="owner/repo", DEFAULT_BRANCH="main", RUNNER_TEMP=runner,
-                   FAKE_GH_LOG=log, PATH=bin_dir + os.pathsep + ENV["PATH"])
+                   FAKE_GH_LOG=log, FAKE_GH_PULLS=pulls, PATH=bin_dir + os.pathsep + ENV["PATH"])
         if refuse:
             env["FAKE_GH_REFUSE"] = refuse
-        done = subprocess.run(["bash", "--noprofile", "--norc", "-eo", "pipefail", script], cwd=repo.root,
+        steps = []
+        for name, markers in (("read-step.sh", ("gh api", "pulls")), ("delete-step.sh", ("sweep.py",))):
+            path = os.path.join(runner, name)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(self.run_block(*markers))
+            steps.append(path)
+        read = subprocess.run(["bash", "--noprofile", "--norc", "-eo", "pipefail", steps[0]], cwd=repo.root,
+                              capture_output=True, text=True, env=env)
+        self.assertEqual(read.returncode, 0, "the open-PR read step exited %d: %s"
+                         % (read.returncode, read.stderr.strip()))
+        done = subprocess.run(["bash", "--noprofile", "--norc", "-eo", "pipefail", steps[1]], cwd=repo.root,
                               capture_output=True, text=True, env=env)
         calls = [line for line in read_text(log).splitlines() if "DELETE" in line]
         return done, calls, read_text(os.path.join(runner, "verdicts.txt"))
@@ -310,10 +343,57 @@ class DeleteStep(unittest.TestCase):
                                  "scope: the sweep named other deletes")
                 self.assertEqual(len(calls), 1, "an HTTP %s refusal: the loop made %d delete calls, want 1"
                                  % (status, len(calls)))
-                self.assertNotEqual(done.returncode, 0, "an HTTP %s refusal: the step exited 0" % status)
+                self.assertEqual(done.returncode, 0, "an HTTP %s refusal: the step exited %d, want 0"
+                                 % (status, done.returncode))
+                lines = (done.stdout + done.stderr).splitlines()
+                self.assertTrue(any(line.startswith("::warning::") for line in lines),
+                                "an HTTP %s refusal: the step printed no ::warning:: line" % status)
+                self.assertFalse(any(line.startswith("::error::") for line in lines),
+                                 "an HTTP %s refusal: the step printed an ::error:: line, which reads red" % status)
+
+    def test_gone_ref_counts_as_done(self):
+        for status in ("422", "404"):
+            with self.subTest(status=status):
+                done, calls, verdict_text = self.run_step(["feature/a", "feature/b", "feature/c"], [], refuse=status)
+                self.assertEqual(deletes(verdict_text), ["feature/a", "feature/b", "feature/c"],
+                                 "scope: the sweep named other deletes")
+                self.assertEqual(len(calls), 3, "an already-gone ref (HTTP %s): the loop made %d delete calls, want 3"
+                                 % (status, len(calls)))
+                self.assertEqual(done.returncode, 0, "an already-gone ref (HTTP %s): the step exited %d, want 0"
+                                 % (status, done.returncode))
+                annotations = [line for line in (done.stdout + done.stderr).splitlines()
+                               if line.startswith(("::warning::", "::error::"))]
+                self.assertEqual(annotations, [], "an already-gone ref (HTTP %s): the step printed an annotation"
+                                 % status)
+
+    def test_other_delete_failure_still_fails_the_job(self):
+        done, _, verdict_text = self.run_step(["feature/a", "feature/b", "feature/c"], [], refuse="500")
+        self.assertEqual(deletes(verdict_text), ["feature/a", "feature/b", "feature/c"],
+                         "scope: the sweep named other deletes")
+        self.assertNotEqual(done.returncode, 0, "an HTTP 500 delete failure: the step exited 0")
+
+    def test_base_of_an_open_pull_request_is_kept(self):
+        # lane-b is based on lane-a, which is merged. Deleting lane-a would close lane-b's pull request.
+        done, calls, _ = self.run_step(["feature/lane-a", "feature/lane-b", "feature/merged"],
+                                       [("feature/lane-b", "feature/lane-a")])
+        self.assertIn("feature/merged", deleted(calls), "scope: the loop made no delete for the merged control branch")
+        self.assertNotIn("feature/lane-a", deleted(calls), "the base of an open pull request was deleted")
+
+    def test_open_head_with_a_safe_name_is_kept(self):
+        done, calls, _ = self.run_step(["feature/a", "feature/open"], [("feature/open", "main")])
+        self.assertIn("feature/a", deleted(calls), "scope: the loop made no delete for the merged control branch")
+        self.assertNotIn("feature/open", deleted(calls), "the open head of a pull request was deleted")
+
+    def test_full_page_of_open_pull_requests_keeps_every_base(self):
+        bases = ["feature/base-%03d" % i for i in range(100)]
+        open_prs = [("feature/head-%03d" % i, base) for i, base in enumerate(bases)]
+        done, calls, _ = self.run_step(bases + ["feature/free"], open_prs)
+        self.assertIn("feature/free", deleted(calls), "scope: the loop made no delete for the free branch")
+        wrong = set(bases) & set(deleted(calls))
+        self.assertEqual(len(wrong), 0, "%d bases of open pull requests were deleted" % len(wrong))
 
     def test_open_head_named_dash_x_does_not_stop_the_step(self):
-        done, calls, _ = self.run_step(["feature/a", "-x"], ["-x"])
+        done, calls, _ = self.run_step(["feature/a", "-x"], [("-x", "main")])
         self.assertEqual(done.returncode, 0, "an open head named -x: the step exited %d: %s"
                          % (done.returncode, done.stderr.strip()))
         self.assertTrue(any("heads/feature/a" in call for call in calls),
