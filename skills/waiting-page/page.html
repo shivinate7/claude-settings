@@ -2081,11 +2081,12 @@ function lineEl(it, dl) {
     h("p", { class: "sline", role: "status" }, glyph("done"), h("span", {}, h("b", {}, "Marked read."), " ", h("span", { class: "dt" }, itemName(it))), itemPress(it, true)), markRowLine(g));
   const open = state.lineOpen[k] === true, mark = newReply(it) ? h("span", { class: "newmark" }, "New reply") : null;
   const toggle = () => { state.lineOpen[k] = !open; render(); const f = $("lrow-" + k) || $("lfold-" + k); if (f) f.focus({ preventScroll: true }); };
-  if (!open) return h("article", { class: "askc folded withd rline", id: "line-" + n, "aria-labelledby": "lt-" + n },
+  const side = lineSide(it, dl, true);
+  if (!open) return h("article", { class: "askc folded rline" + (side.length ? " withd" : ""), id: "line-" + n, "aria-labelledby": "lt-" + n },
     h("button", { class: "frow", type: "button", id: "lrow-" + k, "aria-expanded": "false", onclick: toggle }, glyph("done"),
       h("span", { class: "fhead" }, h("span", { class: "fno" }, "No. " + n), h("span", { class: "ftext", id: "lt-" + n }, shortOf(it)), mark, homeTag(it.home)),
       h("span", { class: "freply" }, lineReply(it)), h("span", { class: "fgo" }, "Show answer", h("span", { class: "sr" }, " for No. " + n))),
-    ...lineSide(it, dl, true), ...itemFolded(it, { show: "Show answer" }), markRowLine(g));
+    ...side, ...itemFolded(it, { show: "Show answer" }), markRowLine(g));
   // Opened in place, as an open ask: the answer, the reply and where it went. An open item keeps Change on its answer line.
   const rp = replyOf(it), answer = it.status === "closed" ? (lastOf(it) ? lastAnswerEl(it) : null) : receipt(it, false);
   return h("article", { class: "askc rline ropen", id: "line-" + n, "aria-labelledby": "lt-" + n },
@@ -2601,7 +2602,7 @@ function syncReplyForm(form) {
     const it = itemOfKey(k);
     // On an item the session that asked is its owner, not the one that answered. An owed item stays open: only its answer closes it.
     kids = words((typed ? "" : "Send reply turns on once you type. ") + "Your reply goes to " + askWriter() + ", which passes it to the session that " + (it ? "asked No. " + it.n : "answered") + ", or answers here."
-      + (it && it.status !== "closed" && !isAnswered(it) ? " No. " + it.n + " stays open: " + (it.kind === "task" ? "Mark done" : "Your pick") + " below answers it." : ""));
+      + (it && it.status !== "closed" && !isAnswered(it) ? " No. " + it.n + " stays open" + (it.kind === "task" ? ": Mark done below answers it." : ".") : ""));
   }
   const sig = cls + "|" + kids.map((x) => (x && x.nodeType ? x.textContent : x)).join("");
   if (hint.dataset.sig !== sig) { hint.dataset.sig = sig; hint.className = cls; hint.replaceChildren(...kids); }

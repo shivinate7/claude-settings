@@ -207,7 +207,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   Ask <id> on item No. <n>, owned by <owner of the item>: <text>." The page shows an item reply in its item's card, or in its line when the
   item is one (a closed item, or an answered and filed one), and never in the Asks list or its count, while the item or its line is on
   the page. While a reply waits, the line's Mark read is off, and an answer to a reply later than the Mark read brings the line back.
-  Once the item's record has left the store, the reply is its own Asks row, "Re: an item no longer on this page",
+  Once the item is no longer on the page, the reply is its own Asks row, "Re: an item no longer on this page",
   and it counts while it has no `reply`. The asks
   of one Send share one `at`, and their ids rise in the order the owner typed them, so the id breaks the tie: the highest
   id is the last typed. One Undo (8 seconds) deletes every ask of that Send; it checks the 8 seconds before each delete, and a Send waits until the Undo ends. One wake comment tells of the whole Send: "N asks:
@@ -459,9 +459,9 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
    you read (`if_version`). If the close conflicts, the owner marked the item read in the meantime: read it again and retry the close. Copy the answer's `choice` or `done`, its `note` and its `at` into the item's `lastAnswer`
    in the same update. Then delete `answers/<id>`, so the answer cannot count for a later item. The page shows a closed
    item as one line, with its home and its reply, until the owner marks it read. The page shows `lastAnswer` as the answer on the opened line, and on an item left open (steps 3, 4 and a busy lane).
-   The writer holds this close while a record in `asks/` with `item` set to this item has no `reply`: the hold keeps that reply on its item's
-   card, next to what it answers. It holds for at most 7 days from that record's `at` (unmeasured). After that it closes the item, and the page shows
-   the reply as an Asks row.
+   The session that closes the item holds this close while a record in `asks/` with `item` set to this item has no `reply`: the hold keeps that reply on its item's
+   card, next to what it answers. It holds for at most 7 days from that record's `at` (unmeasured). After that it closes the item, and the page keeps the reply
+   on the closed line. The reply is an Asks row only once the item is no longer on the page.
 3. If the answer is `none` with no clear direction, and you write the new `options`, `pick` and `why` from the
    note in this same turn (a `multi` item's new `pick` is a list), set `added` to now. Write `lastAnswer` from
    the answer in the same update, without `choice`, because the new `options` replace the old keys. Then delete

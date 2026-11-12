@@ -164,7 +164,7 @@ on this page", while the item's line still sits in Answered. `lineEl` draws no r
   - While a reply waits, Mark read is off: absent on the folded row, off with `ASK_DIS_OFF` beside it when opened (`dismissBtns`, `askWaitsIn`).
     Otherwise a read line would hide a waiting reply behind "Show N read items".
   - Builder: `isRead` checks only `it.replied`. An `answered` on a reply record later than `dismissed` must bring the line back too.
-  - The Asks row "Re: an item no longer on this page" stays for an item whose record has left the store.
+  - The Asks row "Re: an item no longer on this page" stays for an item that is no longer on the page.
   - Gain: one conversation in one place; the words never say "gone" about an item on the page. Lose: `lineEl` grows a thread end and a fold line.
 - Option "In the Asks list" (the branch today; `#s=line-asks`, focus `#pick-asksrow`).
   - Gain: no new code. Lose: the conversation splits in two places, and "no longer on this page" is false while the line shows.
