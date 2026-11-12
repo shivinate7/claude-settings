@@ -124,3 +124,92 @@ for _cull_script, _cull_why in (
     sh("builder run: a join on %s is allowed" % _cull_why,
        "verdict python3 " + os.path.join(CULL_NAME_DIR, _cull_script).replace(os.sep, "/"), "allow",
        **CULL_BUILDER)
+
+# THE SHADOW FORMS. hooks/guard_frozen.py reads a bare `run_folder()` as lint/_test_temp.py's helper only while the
+# script binds that name nowhere else. Each script below imports run_folder, then rebinds the name a different way: a
+# nested def, a global assignment, a try/except fallback, a lambda argument, a walrus. Its join on run_folder() to a
+# test path is then the script's own folder, so the run is refused. Each form has its own clause in
+# _py_run_folder_is_helper, and each case below pins that clause. The control keeps the plain import and no rebind,
+# with the call inside a function, and stays allowed.
+CULL_SHADOW_DIR = os.path.join(ROOT, "cull-43518-shadow")
+write(os.path.join(CULL_SHADOW_DIR, "nested_def.py"), '''import os
+
+from _test_temp import run_folder
+
+
+def f():
+    def run_folder():
+        return os.getcwd()
+
+    with open(os.path.join(run_folder(), "hooks/test_guard.py"), "w") as handle:
+        handle.write("pass\\n")
+
+
+f()
+''')
+write(os.path.join(CULL_SHADOW_DIR, "global_assign.py"), '''import os
+
+from _test_temp import run_folder
+
+
+def f():
+    global run_folder
+    run_folder = lambda: os.getcwd()
+
+
+f()
+with open(os.path.join(run_folder(), "hooks/test_guard.py"), "w") as handle:
+    handle.write("pass\\n")
+''')
+write(os.path.join(CULL_SHADOW_DIR, "try_fallback.py"), '''import os
+
+try:
+    from _test_temp import run_folder
+except ImportError:
+    run_folder = lambda: os.getcwd()
+
+with open(os.path.join(run_folder(), "hooks/test_guard.py"), "w") as handle:
+    handle.write("pass\\n")
+''')
+write(os.path.join(CULL_SHADOW_DIR, "lambda_arg.py"), '''import os
+
+from _test_temp import run_folder
+
+pick = lambda run_folder: os.getcwd()
+
+with open(os.path.join(run_folder(), "hooks/test_guard.py"), "w") as handle:
+    handle.write("pass\\n")
+''')
+write(os.path.join(CULL_SHADOW_DIR, "walrus.py"), '''import os
+
+from _test_temp import run_folder
+
+(run_folder := lambda: os.getcwd())
+
+with open(os.path.join(run_folder(), "hooks/test_guard.py"), "w") as handle:
+    handle.write("pass\\n")
+''')
+write(os.path.join(CULL_SHADOW_DIR, "control_inner.py"), '''import os
+
+from _test_temp import run_folder
+
+
+def f():
+    with open(os.path.join(run_folder(), "hooks/test_guard.py"), "w") as handle:
+        handle.write("pass\\n")
+
+
+f()
+''')
+for _cull_script, _cull_why in (
+        ("nested_def.py", "a nested def of run_folder"),
+        ("global_assign.py", "a global run_folder with an assignment"),
+        ("try_fallback.py", "a try/except fallback that assigns run_folder"),
+        ("lambda_arg.py", "a lambda argument named run_folder"),
+        ("walrus.py", "a walrus that binds run_folder")):
+    sh("builder run: shadowed run_folder, %s, is refused" % _cull_why,
+       "verdict python3 " + os.path.join(CULL_SHADOW_DIR, _cull_script).replace(os.sep, "/"), "deny",
+       rule=BT, carries=("test-author",), **CULL_BUILDER)
+sh("builder run: shadowed run_folder control, a helper call inside a function with no rebind, is allowed",
+   "verdict python3 " + os.path.join(CULL_SHADOW_DIR, "control_inner.py").replace(os.sep, "/"), "allow",
+   **CULL_BUILDER)
