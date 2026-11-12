@@ -9,3 +9,6 @@ Owner, 2026-11-10 13:09 CST and 13:10 CST (chat): a roadmap step that waits on a
 - The remedy is the step's `blockedBy` slug, or dropping the wait.
 
 Risk kind: likely risk. A session writes "waits on #N" in a step note in normal work. Known limits are filed as notes under step `dead-pr-waits` in `docs/debts/notes.md`.
+
+Kind: process
+Home: hooks/guard_merge.py
