@@ -55,7 +55,8 @@ The handoff holds these sections, in this order:
   open permission prompt (allow once or always allow) with the exact command or tool it
   holds, a refusal that printed an override line, and a grant that needs his typed words
   here. Name a page item by its number only (its home is the page), and write `none` when
-  empty. A coordinator's Stop blocks until each unanswered refused act is named here.
+  empty. A coordinator's Stop blocks until each unanswered refused act is named here. Put each
+  refused or waiting act in backticks, one line per item, with what it unblocks.
 - Goal: one line, the owner's goal in the owner's words, with its source (the owner
   message and its date).
 - Working premises: the facts the next steps lean on, at most about 15, under the heading
