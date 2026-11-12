@@ -1,0 +1,14 @@
+{
+ "id": "post-batch-conflict-merge",
+ "title": "After a batch merges, each handed-in lane PR that conflicts with the new main gets one main merge and a review of the resolved hunks only",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 14:59 CST Nov 12: batch 104 (#2814) left #2733, #2737, #2770, #2875, #2920 and #2748, #2833, #2913 in conflict with main; each needed the same pick (merge main in, fresh review of the resolved hunks as a fix check).",
+ "source": "coordinator 14:59 CST Nov 12",
+ "note": "Write the route in skill ci-hygiene step 8 (Batch lanes): at a batch merge, the runner lists handed-in PRs that now conflict with main; each lane merges main once (no rebase, no force push) and a fresh reviewer reads only the resolved hunks, recorded as a fix check chained to the prior record; a refused chain means a full review. Then the per-PR coordinator pick is not needed. Relates to lane-lint-batch-pr-conflicts and record-before-fix-push.",
+ "updatedAt": "2026-11-12T15:01:11-06:00"
+}
