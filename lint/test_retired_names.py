@@ -194,8 +194,8 @@ class LineScope(unittest.TestCase):
 # scan names the listed files that still hold a retired word. Only the listed paths are read. A kept name (a flag, a
 # slug, a file path) is no hit, and docs/ is not listed: its records keep their words.
 PROSE_PATHS = ("README.md", "agents/reviewer.md", "settings.json", "skills/project-ops", "skills/waiting-page")
-RENAMED_PROSE = re.compile(r"\breview record\b|\binbox file\b|\bfeedback inbox\b|\bper-session inbox\b"
-                           r"|(?<![-./\w])inbox(?![-_\w]|\.\w)", re.I)  # a sentence's period ends it; `.inbox.md` is a path
+RENAMED_PROSE = re.compile(r"\breview records?\b|\binbox file\b|\bfeedback inbox\b|\bper-session inbox\b"
+                           r"|(?<![-./\w])inbox(?:es)?(?![-_\w]|\.\w)", re.I)  # a sentence's period ends it; `.inbox.md` is a path
 
 
 def renamed_term(line):
