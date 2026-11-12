@@ -586,8 +586,8 @@ while True:
         )
         _loading = "guard_env"
         from guard_env import (
-            ENV_ADVICE, ENV_TOOL_REASON, _substitutions, env_heredoc_refusal, env_refusal, is_env,
-            substitution_commands,
+            ENV_ADVICE, ENV_RUNNER_VALUE_FLAGS, ENV_TOOL_REASON, _substitutions, env_heredoc_refusal, env_refusal,
+            is_env, substitution_commands,
         )
         _loading = "guard_kill"
         from guard_kill import (
@@ -601,7 +601,7 @@ while True:
         _loading = "guard_stream"
         from guard_stream import (
             BACKGROUND_END_REASON, CHECK_TAIL_REASON, LIVE_STREAM_REASON, LN_DESCENDS_REASON,
-            NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, VERDICT_PIPE_REASON, WAITER_REASON,
+            NARRATED_TAIL_REASON, PATTERN_POLLER_REASON, UV_VALUE_FLAGS, VERDICT_PIPE_REASON, WAITER_REASON,
             background_end_hit, check_tail_hit, live_stream_hit, ln_descends_hit,
             loop_condition_polls_a_pattern, narrated_tail_hit, verdict_pipe_hit, waiter_verdict,
         )
@@ -6094,6 +6094,37 @@ SCRATCHPAD_RUNNER = re.compile(
 # Runners that take test or script files anywhere in their arguments (`pytest -n 2 F`, `uv run --with x F`):
 # a flag's value cannot be told from a file, so every argument after the verb is judged.
 SCRATCHPAD_FILES_ANYWHERE = ("pytest", "py.test")
+# The flags of a verb runner, after its verb, that take the next word as their value (`uv run --with x F`), so
+# `scratchpad_verb_run` skips that word. A flag missing here is read as taking no value. Each entry costs a miss
+# when wrong: a listed flag that takes none skips the script, and a missing one that takes one makes its value the
+# judged word.
+#   uv: guard_stream's table, which matches `uv run --help` (uv 0.11.32) entry for entry.
+#   bun: `bun run --help` (bun 1.4.4), each `--flag=<val>` probed as `bun run FLAG a.js`; the ones that still ran
+#     a.js (`--inspect`, `-c`, `--config`) take a value only after `=`. `--inspect-wait` and `--inspect-brk` wait
+#     for a debugger, so the probe could not tell; they are left out, as `--inspect` is.
+#   deno: deno is not installed here, so the list is short: the `deno run` flags that need a value in deno 2.
+#     A flag with an optional value (`--env-file`, `-r`, `--allow-read`, `--watch`, `--inspect`) takes it only
+#     after `=`, so it is left out.
+#   npx: `tsx` and `ts-node` take node's flags (guard_env's runner table) and add their own. Inline code
+#     (`-e`, `-p`) is left out: unlisted, the code is the judged word, which is no scratchpad file.
+SCRATCHPAD_VERB_VALUE_FLAGS = {
+    "uv": UV_VALUE_FLAGS,
+    "bun": frozenset((
+        "--elide-lines", "-F", "--filter", "--shell", "--watch-kill-signal", "-r", "--preload", "--require",
+        "--import", "--cpu-prof-name", "--cpu-prof-dir", "--cpu-prof-interval", "--heap-prof-name",
+        "--heap-prof-dir", "--heap-prof-interval", "--install", "--port", "--conditions", "--fetch-preconnect",
+        "--max-http-header-size", "--dns-result-order", "--redirect-warnings", "--disable-warning", "--title",
+        "--unhandled-rejections", "--console-depth", "--user-agent", "--cron-title", "--cron-period",
+        "--main-fields", "--extension-order", "--tsconfig-override", "-d", "--define", "--drop", "--feature",
+        "-l", "--loader", "--jsx-factory", "--jsx-fragment", "--jsx-import-source", "--jsx-runtime",
+        "--env-file", "--cwd",
+    )),
+    "deno": frozenset(("-c", "--config", "--import-map", "--cert", "--location", "--seed", "-L", "--log-level",
+                       "--ext")),
+    "npx": frozenset(ENV_RUNNER_VALUE_FLAGS + ("--title", "--tsconfig", "-P", "--project", "-O",
+                                               "--compiler-options", "--compiler", "-I", "--ignore", "--cwd",
+                                               "--scope-dir")),
+}
 
 
 def scratchpad_files_start(name, args):
@@ -6111,22 +6142,26 @@ def scratchpad_files_start(name, args):
     return None
 
 
-def scratchpad_verb_run(args):
-    """The plain words of `args` (the words after a runner's verb) that may be the file it runs: up to and
-    including the first one that no flag stands directly before. A plain word right after a flag may be that
-    flag's value (`uv run --with x F`), so the next is judged too; a word after a plain one is an argument of the
-    command that runs (`uv run ruff check F`, F is ruff's). A flag with no value (`uv run --no-sync F`) costs
-    nothing: its next word is judged either way. A flag with two values reads the file as an argument: a miss."""
-    found, after_flag = [], False
-    for arg in args:
-        if arg.startswith("-"):
-            after_flag = True
-            continue
-        found.append(arg)
-        if not after_flag:
+def scratchpad_verb_run(name, args):
+    """The index in `args` (the words after the verb of runner `name`) of the script word, the one file the
+    runner runs, else None. A flag in the verb's table (`SCRATCHPAD_VERB_VALUE_FLAGS`) skips itself and its value
+    (`uv run --with x F`, `uv run --env-file D python F`); every other flag skips only itself: a `--flag=value`, a
+    glued `-p3.12`, a flag that takes none (`uv run -q F`, `deno run -A F`) and an unknown flag
+    (`uv run --unknown-flag F` judges F). `--` ends the flags. The first plain word is the script word, and every
+    word after it is an argument of the command that runs (`uv run -q mine.py D`, `uv run ruff check F`), so it
+    is not judged. An unknown flag that takes a value, or a short cluster that ends in one (`-qp 3.12`), makes
+    its value the script word: the real script is a miss."""
+    takes = SCRATCHPAD_VERB_VALUE_FLAGS.get(name, frozenset())
+    at = 0
+    while at < len(args):
+        arg = args[at]
+        if arg == "--":
+            at += 1
             break
-        after_flag = False
-    return found
+        if not arg.startswith("-"):
+            break
+        at += 2 if arg in takes else 1
+    return at if at < len(args) else None
 
 
 def scratchpad_script(word, args):
@@ -6134,7 +6169,9 @@ def scratchpad_script(word, args):
     script from stdin). A run is an interpreter or runner word (`SCRATCHPAD_RUNNER`) with the file as its first
     plain argument (past the flags and words `workflow_script_index` reads), or the file as the command word.
     A runner that takes files anywhere in its arguments (`scratchpad_files_start`) names each plain argument
-    it has; a verb runner (`uv run`, `npx tsx`) names its first, the rest being arguments of the command it runs. A runner word that starts another command (`uv run python F`) is read again for that command."""
+    it has; a verb runner (`uv run`, `npx tsx`) names its script word (`scratchpad_verb_run`), the rest being
+    arguments of the command it runs. A script word that is a runner (`uv run python F`) is read again for that
+    command."""
     name = basename(word)
     if not SCRATCHPAD_RUNNER(name):
         word = re.sub(r"^(?:\$?\()+", "", word).rstrip(")`")   # a glued group mark is no part of the path
@@ -6142,13 +6179,16 @@ def scratchpad_script(word, args):
     args, stdin = scratchpad_stdin(args)
     start = scratchpad_files_start(name, args)
     if start is not None:
-        files = [arg for arg in args[start:] if not arg.startswith("-")]
-        if name in WORKFLOW_RUNNER_VERBS:
-            files = scratchpad_verb_run(args[start:])
-        for at in range(start, len(args)):
-            if SCRATCHPAD_RUNNER(basename(args[at])) and name in WORKFLOW_RUNNER_VERBS:
-                inner = scratchpad_script(args[at], args[at + 1:] + (["<", stdin] if stdin else []))
-                files += inner[0] + ([inner[1]] if inner[1] else [])
+        if name not in WORKFLOW_RUNNER_VERBS:
+            return [arg for arg in args[start:] if not arg.startswith("-")], "", False
+        at = scratchpad_verb_run(name, args[start:])
+        if at is None:
+            return [], "", False
+        at += start
+        files = [args[at]]
+        if SCRATCHPAD_RUNNER(basename(args[at])):
+            inner = scratchpad_script(args[at], args[at + 1:] + (["<", stdin] if stdin else []))
+            files += inner[0] + ([inner[1]] if inner[1] else [])
         return files, "", False
     at = workflow_script_index(args, name)   # past the interpreter's flags and their values
     # A lone `-` before the script position reads the script from stdin, so no scratchpad file runs.
