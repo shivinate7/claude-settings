@@ -69,7 +69,7 @@ CAMEL_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")  # batchBranch reads as batch b
 SKIP_CODE = ("GLOSSARY.md", "docs/records.md", "lint/test_retired_names.py", "lint/test_check_glossary.py",
              "skills/impeccable/")
 # GLOSSARY.md, the retired-names test and this check's own cases name the old words on purpose; records.md is generated; impeccable is vendored.
-PLATFORM_NAMES = {"deny", "block", "SubagentStop", "SubagentStart", "subagent_type", "subagents"}  # Claude Code's own
+PLATFORM_NAMES = {"deny", "block", "SubagentStop", "SubagentStart", "subagent_type", "subagents", "workflow-subagent"}  # Claude Code's own
 PLATFORM_PREFIXES = ("CLAUDE_CODE_",)  # Claude Code's own settings keys
 YAML_ONLY = {"issues"}  # GitHub's own permission key
 OPT_OUT = "glossary-ok"
