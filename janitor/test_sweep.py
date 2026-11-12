@@ -5998,6 +5998,114 @@ class AgentEndFailSafeSettleTests(_AgentEndFixture):
         self.assertKept(tree)
 
 
+@unittest.skipUnless(sys.platform.startswith("linux"),
+                     "the live lock's start ticks are read from /proc, which is Linux only")
+class AgentEndDeadHostLockTests(_AgentEndFixture):
+    """A finished agent's tree locked by a host that is dead. Decision `when-a-worktree-may-be-removed`,
+    its finished-agent section: a live-form lock `claude agent agent-<id> (pid N start S)` names no live
+    host when N is dead, so no process can be shown to be the host's, and the tree is kept unless the
+    agent's finish is proven by the same proof as any other finished-agent tree (its own SubagentStop row,
+    and its transcript idle 30 min). The date-form lock with a dead pid is stale on its own and still goes.
+    Each case runs beside a clean control tree that the same run removes, so a keep cannot pass on a hook
+    that deletes nothing."""
+
+    @staticmethod
+    def dead_ticks_lock(name):
+        """The live form, naming a host with no process: no start ticks can match a dead pid."""
+        return "claude agent agent-%s (pid %d start 236)" % (name, temp_dead_pid())
+
+    @staticmethod
+    def dead_date_lock(name):
+        """The date form, naming a host with no process: the Agent tool's own lock, stale on its own."""
+        stamp = time.strftime("%a %b %e %H:%M:%S %Y", time.gmtime())
+        return "claude agent agent-%s (pid %d start %s)" % (name, temp_dead_pid(), stamp)
+
+    def finished_case(self, name, lock, stop_row):
+        """One finished tree locked by LOCK, clean, pushed, idle 31 min and with no process inside, beside a
+        control tree that another agent's end must remove. STOP_ROW True writes the agent's own SubagentStop
+        row and ages its transcript 31 min, the proof of the finish. Returns the tree's path."""
+        ending = name + "end"
+        own = self.add(ending)
+        control = self.control_tree(name + "ctl")
+        tree = self.finished_tree(name, lock=lock)
+        if stop_row:
+            self.write_stop_row(name, tree)
+            then = self.age_agent_transcript(name, 31)
+        self.age_control(control)
+        with self.subTest(precondition="the tree is locked, and no process is inside it"):
+            self.assertTrue(guard.worktree_locked(self.primary, tree), "the lock did not take")
+            inside, _unreadable = sweep.processes_in(tree)
+            self.assertEqual(inside, [], "a process is inside the finished tree")
+        if stop_row:
+            with self.subTest(precondition="the agent transcript is 31 min idle"):
+                self.assertAlmostEqual(os.path.getmtime(self.agent_transcript(name)), then, delta=2,
+                                       msg="the agent transcript did not take its age")
+        self.fire_under_host(ending, own, extra=self.payload_extra(self.running_elsewhere()))
+        with self.subTest(control="another agent's clean pushed tree idle 31 min is removed"):
+            self.assertRemoved(control)
+        return tree
+
+    def test_a_dead_host_live_lock_with_no_stop_row_keeps_the_tree(self):
+        """The red case: the lock names a dead host and no SubagentStop row proves the finish, so the tree
+        stays. The hook removes it today, as a stale lock."""
+        tree = self.finished_case("deadnor", self.dead_ticks_lock("deadnor"), stop_row=False)
+        with self.subTest(arm="a tree locked by a dead host, with no proof of the finish, is kept"):
+            self.assertTrue(os.path.isdir(tree), "the tree was removed; %s" % self.reason_for(tree))
+            self.assertKept(tree)
+
+    def test_a_dead_host_live_lock_with_a_stop_row_and_idle_transcript_is_removed(self):
+        """The green control: the same dead-host lock is removed once the finish is proven."""
+        tree = self.finished_case("deadproof", self.dead_ticks_lock("deadproof"), stop_row=True)
+        with self.subTest(arm="a proven finished tree locked by a dead host is removed"):
+            self.assertRemoved(tree, "; " + self.reason_for(tree))
+
+    def test_a_live_host_live_lock_with_no_stop_row_keeps_the_tree(self):
+        """The green control: a lock that names this live host keeps the tree while no SubagentStop row
+        proves the finish."""
+        lock = self.live_host_lock("livenor")
+        if lock is None:
+            self.skipTest("the live lock's start is read from /proc, which this box has")
+        with self.subTest(precondition="the lock names a live host, so it is not stale"):
+            self.assertIs(sweep.stale_agent_lock_verdict(lock), False, "the live lock reads as stale: %r" % lock)
+        tree = self.finished_case("livenor", lock, stop_row=False)
+        with self.subTest(arm="a tree locked by a live host, with no proof of the finish, is kept"):
+            self.assertKept(tree)
+
+    def test_a_dead_host_date_lock_with_no_stop_row_is_still_removed(self):
+        """The green control: the Agent tool's date-form lock with a dead host is stale on its own, so the
+        tree is removed without a finish proof, as before."""
+        lock = self.dead_date_lock("deaddate")
+        with self.subTest(precondition="the date-form lock names a dead host, so it reads stale"):
+            self.assertIs(sweep.stale_agent_lock_verdict(lock), True, "the date-form lock is not stale: %r" % lock)
+        tree = self.finished_case("deaddate", lock, stop_row=False)
+        with self.subTest(arm="a date-form lock with a dead host is removed"):
+            self.assertRemoved(tree, "; " + self.reason_for(tree))
+
+    def test_a_general_sweep_keeps_a_dead_host_live_lock_without_a_finish_proof(self):
+        """The red case for a general sweep, which reaches decide_worktree with no finish proof: the
+        dead-host live-form lock keeps its tree. The date-form lock beside it is reaped, as before."""
+        subject = self.add("sweepdead")
+        self.lock(subject, self.dead_ticks_lock("sweepdead"))
+        control = self.add("sweepdate")
+        self.lock(control, self.dead_date_lock("sweepdate"))
+        _age_admin_files(subject, 31 * 60)
+        _age_admin_files(control, 31 * 60)
+        entries = {_norm_path(e["path"]): e for e in sweep.parse_worktree_list(self.primary) or []}
+        with self.subTest(precondition="both trees are listed and locked, and the subject is clean and pushed"):
+            self.assertIn(_norm_path(subject), entries, "the subject is not listed as a worktree")
+            self.assertIn(_norm_path(control), entries, "the control is not listed as a worktree")
+            self.assertIsNotNone(entries[_norm_path(subject)].get("locked_reason"), "the subject is not locked")
+            self.assertFalse(guard.porcelain(subject), "the subject has an uncommitted file")
+            self.assertIs(sweep.fully_pushed(subject), True, "the subject is not pushed")
+        with self.subTest(control="a date-form lock with a dead host is reaped by the same call"):
+            decision = sweep.decide_worktree(self.primary, entries[_norm_path(control)], attended=True)
+            self.assertEqual(decision["action"], "reap", "kept the date-form control: %s" % decision["reason"])
+        with self.subTest(arm="a live-form lock with a dead host and no finish proof keeps its tree"):
+            decision = sweep.decide_worktree(self.primary, entries[_norm_path(subject)], attended=True)
+            self.assertEqual(decision["action"], "keep",
+                             "reaped a dead-host lock with no finish proof: %s" % decision["reason"])
+
+
 class AgentEndOtherWorktreeTests(_AgentEndFixture):
     """The same SubagentStop run also removes ANOTHER finished agent's tree under
     `.claude/worktrees/agent-*`, but only when that tree is clean, has HEAD on a remote-tracking
