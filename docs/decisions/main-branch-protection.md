@@ -10,7 +10,7 @@ Owner ruling r (2026-11-11 16:43 CST) puts that check in a ruleset on `main`. Se
 `.github/stamp.json` `merge.requiredChecks` is `"protection"`. The `merge` tool reads the check names
 from `main`'s ruleset first, then from classic branch protection (see Built, not yet live). Changing a repo's protection is the owner's to do, unless a grant covers it (see the
 temporary grant below).
-Built-today lines in this record were not re-read by the edit of 2026-11-12 11:00 CST. No live setting was read.
+Built-today lines in this record were not re-read by the edit of 2026-11-12 11:27 CST. No live setting was read.
 
 - `all-jobs-passed` needs every job that runs on a pull request, except `ci-done`, which needs it. It fails
   when a needed job failed, was cancelled or was skipped. `lint/test_all_jobs_passed.py` goes red when such a
@@ -46,16 +46,15 @@ Reason: agent rules alone did not stop red merges.
 
 ## Built, not yet live
 
-Built on the branch lane-ruleset-read (commit 12ff226a9). This record merges with that code. Live is still classic protection only: no repo has a ruleset yet (lane brief; not re-read by this edit).
+Built in `ruleset_names` and `protection_names` (`merge/merge.py`), and in `main` and `ruled_body` (`skills/project-ops/scripts/protect.py`). This record merges with that code. Live is still classic protection only: no repo has a ruleset yet (lane brief; not re-read by this edit).
 
-- Merge tool, owner ruling c (2026-11-11 19:49 CST, "c is prob best"). The merge tool reads `main`'s ruleset first (`ruleset_names`, one read of `rules/branches/<base>`) and classic protection second (`protection_names`). The owner chose c over the ruling that a repo changes to fit a shared tool, never the tool to fit a repo. The step lands before any sweep removes old protection.
-  - A ruleset with no check rule hands the names to classic protection.
-  - An HTTP 404 reads as no ruleset.
-  - Any other failed ruleset read stops the merge, and does not fall back to classic protection (test `RulesetFirst`). With a pinned list, the failure is said aloud instead (see above).
+- Merge tool, owner ruling c (2026-11-11 19:49 CST, "c is prob best"). The merge tool reads `main`'s ruleset first (`ruleset_names`, one read of `rules/branches/<base>`). Classic protection is read second (`protection_names`), and only when the ruleset names no check. The owner chose c over the ruling that a repo changes to fit a shared tool, never the tool to fit a repo. The step lands before any sweep removes old protection.
+  - A ruleset with no check rule, or no ruleset (an empty list), hands the names to classic protection.
+  - Any failed ruleset read stops the merge, an HTTP 404 included. It does not fall back to classic protection (class `RulesetFirst`: `test_an_http_404_on_the_ruleset_read_stops_the_merge`, `test_a_failed_ruleset_read_stops_and_does_not_fall_back_to_the_classic_list`). With a pinned list, it does not stop the merge: `refuse_pinned_mismatch` says so aloud, and the pinned list stays in force.
 - Protect script, owner ruling r (2026-11-11 16:43 CST) and its bypass (2026-11-11 16:49 CST, "yes with bypass"). `protect.py` writes the ruled form: active, on the named branch, `all-jobs-passed` as its one required check, deletion and non_fast_forward (force-push) blocked, and the Admin role as its one bypass actor, on pull requests only. On update it keeps the held ruleset's name, conditions, strict value and other rules.
   - Not set: no pull-request rule, no approval count, no strict policy of its own. Those are planned, not ruled.
   - The Admin role's actor id is 5 (`ADMIN_ROLE_ID`). UNKNOWN: not confirmed against a live ruleset. No ruleset exists on any repo yet. Verify when the sweep applies the first one.
-- `merge.requiredChecks` stays `"protection"` in `.github/stamp.json`. That is the lane's pick, not an owner ruling. The merge tool reads the ruleset first, so `"protection"` names both sets.
+- `merge.requiredChecks` stays `"protection"` in `.github/stamp.json`. That is the lane's pick, not an owner ruling. The merge tool names the ruleset's checks when it names any, and classic protection's only when it names none. So `"protection"` names one set, never both.
 
 ## Ruled, not yet built
 

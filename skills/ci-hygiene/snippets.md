@@ -101,7 +101,7 @@ python3 ~/.claude/skills/project-ops/scripts/protect.py --repo <owner>/<repo> --
 
 With no ruleset on the branch, the script creates one (POST): the one check, deletion and force-push
 blocked, and the Admin role able to bypass on pull requests only. A ruleset that differs from that
-form is updated in place (PUT): its other rules, its conditions and its strict value stay. A ruleset
+form is updated in place (PUT): its other rules, its conditions and its strict value stay. The PUT sets the bypass list to the Admin role alone, so any other bypass actor is dropped. A ruleset
 already in the form is left alone. The script never reads or writes classic protection.
 `merge.requiredChecks` in `.github/stamp.json` says `"protection"` and needs no edit. A repo that
 pins a list there edits it too. The write needs an admin login. Push rights are not enough on the
