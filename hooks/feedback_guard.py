@@ -84,13 +84,15 @@ a turn end in these cases:
     incident. F47 (an all-repos grant left in chat) and F31 (a grant homed to the handoff), same
     audit. Cost: two regexes on text already in memory;
   - page-form-to-template (roadmap step page-feedback-to-template; ruling c164: a waiting-page comment is never
-    answered with a thread reply, the item is rewritten). In the claude-settings repo (layout.repo_name equals
-    shared_names.SETTINGS_REPO) and in the page writer's session (the transcript's newest meta/page get names the
-    hook's session id: _transcript.page_writer_id), a block that starts with the "[Artifact comment sent to
-    Claude]" banner, whose `Artifact:` url passes layout.is_waiting_page_url, and whose quoted wake is not a Saved
-    or Undone wake with no note in parentheses after `Items:`, needs one item line of two forms: `[task] -> step:<slug>`
-    whose step file at origin/<record branch> holds shared_names.TEMPLATE_DIR, or `[note] -> not-page-form`. The
-    remedy names both. Risk kind: likely risk. Incident: owner, Nov 10 09:13 CST (every page feedback goes into the
+    answered with a thread reply, the item is rewritten). In the page writer's session (the transcript's newest
+    meta/page get names the hook's session id: _transcript.page_writer_id), a block that starts with the "[Artifact
+    comment sent to Claude]" banner, whose `Artifact:` url passes layout.is_waiting_page_url for the cwd's repo, and
+    whose quoted wake is not a Saved or Undone wake with no note in parentheses after `Items:`, needs one item line.
+    In the claude-settings repo (layout.repo_name equals shared_names.SETTINGS_REPO) it takes two forms:
+    `[task] -> step:<slug>` whose step file at origin/<record branch> holds shared_names.TEMPLATE_DIR, or `[note] ->
+    not-page-form`. In any other repo the template is not there, so the forms are `[repo] -> repo:` plus
+    shared_names.SETTINGS_REPO (its send is proved by the repo-item check, not here) or `[note] -> not-page-form`.
+    The remedy names the forms of that repo. Risk kind: likely risk. Incident: owner, Nov 10 09:13 CST (every page feedback goes into the
     shared template). Cost: one regex per block plus the transcript read the guard already makes, and one
     cat-file per step home, inside the Stop process. No process, timer or file. A repo, layout or git read that
     fails passes the block;
@@ -540,18 +542,18 @@ class Homes:
         return self._templated[key]
 
     def page_form_scope(self, url):
-        """(root, branch) when the cwd is the claude-settings repo and `url` is its waiting page; else None. The
-        layout or git failing stands the rule down: None."""
+        """(root, branch) when `url` is the waiting page of the cwd's repo, else None. `branch` is the record branch
+        in the claude-settings repo, and None in any other repo, which reads no branch. The layout or git failing
+        stands the rule down: None."""
         try:
             import layout
         except ImportError:
             return None
         try:
             root = self._cwd_root()
-            if root is None or layout.repo_name(root) != SETTINGS_REPO.lower() or not layout.is_waiting_page_url(
-                    root, url):
+            if root is None or not layout.is_waiting_page_url(root, url):
                 return None
-            return root, layout.record_branch(root)
+            return root, layout.record_branch(root) if layout.repo_name(root) == SETTINGS_REPO.lower() else None
         except (layout.LayoutError, ruling_home._GitFailure):
             return None
 
@@ -947,6 +949,11 @@ def page_form_problem(text, items, homes, pages, session):
                 continue
             if it[1].startswith("[note]") and home_word(it[1]) == NOT_PAGE_FORM:
                 return None
+            if scope[1] is None:  # another repo: the route out to claude-settings
+                route = REPO_HOME.fullmatch(home_path(it[1])) if it[1].startswith("[repo]") and home_word(it[1]) else None
+                if route and ("%s/%s" % route.groups()).lower() == SETTINGS_REPO.lower():
+                    return None
+                continue
             step = step_home(it[1]) if it[1].startswith("[task]") else None
             if step:
                 named = homes.step_names_template(scope[0], scope[1], step.group(1))
@@ -954,6 +961,10 @@ def page_form_problem(text, items, homes, pages, session):
                     return None
     except ruling_home._GitFailure:
         return None
+    if scope[1] is None:
+        return ("this is a waiting-page comment, and a page comment is never answered with a thread reply (ruling c164):"
+                " the template lives in %s, so add `[repo] -> repo:%s` with its send, or `[note] -> %s` when the"
+                " comment is not page form (rule page-form-to-template)" % (SETTINGS_REPO, SETTINGS_REPO, NOT_PAGE_FORM))
     return ("this is a waiting-page comment, and a page comment is never answered with a thread reply (ruling c164):"
             " the item is rewritten into the shared template, %s. Add `[task] -> step:<slug>` for a step whose file"
             " on origin/%s names %s, or `[note] -> %s` when the comment is not page form (rule page-form-to-template)"
