@@ -1,0 +1,7 @@
+# A catcher with an import fallback can read CAUGHT after a failed install
+
+- **What.** A defect claimed only by a part that installed runs even when its catcher imports a package of a failed part. If the catcher passes its clean run without that package (an optional-import fallback) and the fallback asserts on the plant, it reads CAUGHT where it would read MISS with the package. No live entry reaches it today (`.github/known-defects.json`).
+- **Where.** `hooks/mutate_shared.py` `run_known_defects` (the failed-install check before `_known_defect`) and `_needed_parts` (routing by regex only, not by what the catcher imports).
+- **Decision.** mutation-ci-report-and-replay (a defect needs a part's install by its `code` and `tests` regexes).
+- **Fix.** step:replay-block-failed-imports (during the replay, an import of a failed part's package raises, so a fallback catcher reads UNKNOWN, never CAUGHT).
+- **Retire.** Route by what the catcher loads, or make a fallback read UNKNOWN. Closed when `hooks/test_known_defects_fallback.py` exists and holds a cross-part case that goes red on the code before the fix and green after it. The file does not exist yet.
