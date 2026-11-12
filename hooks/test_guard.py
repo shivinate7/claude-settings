@@ -394,9 +394,10 @@ def chained_ask(name, command, **kw):
 SECTION_DIR = os.path.join(HERE, "..", "tests", "guard")
 
 
-def family_names(text):
-    """The family names a section file sets: each `FAMILIES["<name>"] = ...` row, read from the file's syntax tree."""
-    return {node.slice.value for node in ast.walk(ast.parse(text))
+def family_names(text, path):
+    """The family names a section file sets: each `FAMILIES["<name>"] = ...` row, read from the file's syntax tree.
+    A syntax error names `path`, as the loader's compile does."""
+    return {node.slice.value for node in ast.walk(ast.parse(text, filename=path))
             if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Store)
             and isinstance(node.value, ast.Name) and node.value.id == "FAMILIES"
             and isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str)}
@@ -425,7 +426,7 @@ def load_sections(section_dir):
     # (the kill section's sleep), and a refusal after the sections would leave it running. The names are read from
     # the files' FAMILIES rows, the rows the sections set when they run.
     family = os.environ.get("GUARD_FAMILY", "")
-    known = set(FAMILIES).union(*(family_names(text) for _, _, text in found))
+    known = set(FAMILIES).union(*(family_names(text, path) for _, path, text in found))
     if family and family not in known:
         sys.exit("GUARD_FAMILY=%r is not a family. Want one of: %s" % (family, ", ".join(sorted(known))))
     for _, path, text in sorted(found):
