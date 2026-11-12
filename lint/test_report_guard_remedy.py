@@ -39,6 +39,7 @@ HOOKS = os.path.join(HERE, "..", "hooks")
 sys.path.insert(0, HERE)
 sys.path.insert(0, HOOKS)
 import report_guard as RG  # noqa: E402  session_wording, the detector for an order to the session (one home)
+import guard_log_report as glr  # noqa: E402  parse_line, the one reader of guard.log lines (lint/guard_log_report.py)
 import test_report_guard as trg  # noqa: E402  the transcript records, the guard runner and the run folder (one home)
 import test_call_judge as tcj  # noqa: E402  the repo fixtures, the waiting-page url and the ruling (one home)
 import test_report_guard_stalled as trs  # noqa: E402  the triage wake's build run and own record (one home)
@@ -569,6 +570,142 @@ for _name in FIXTURES:
     setattr(RemedyReasons, "test_1b_%s_cites_record" % _name, _case_1b(_name))
     setattr(RemedyReasons, "test_1c_%s_first_sentence_names_check" % _name, _case_1c(_name))
     setattr(RemedyReasons, "test_2_%s_still_blocks" % _name, _case_2(_name))
+
+
+# The past-ruling model call's guard.log line: one per call, rule past-ruling-run, decision measured, and matched
+# holds the four fields below and nothing else (report_guard past_ruling_problem, after decision_watch.invoke_model).
+PAST_RULE = "past-ruling-run"
+PAST_MARK = "Judge only item 8"  # the past-ruling prompt's own words, read from the stub's call record
+PAST_FIELDS = re.compile(r"ms=(\d+) chars=(\d+) candidates=(\d+) outcome=(ok|refused|timeout|error)")
+CANDIDATE_HEAD = "Past rulings (item 8), one per line as `<id>: <text>`:\n"  # question_form.candidates_block's head
+NONE_FOUND = "(none found)"
+NOT_SEARCHED = "Not searched:"
+# Asked or ruling text that the line must never carry: the question's words and the ruling the refusal cites.
+PRIVATE_TEXT = ("keep their access", "GitHub apps", tcj.APPS_SLUG, "apps-7b1e")
+
+
+def candidate_count(prompt):
+    """How many candidate rulings the past-ruling prompt lists: the lines after its head, up to the sources not searched."""
+    rows = []
+    for line in prompt.split(CANDIDATE_HEAD, 1)[1].splitlines():
+        if line.startswith(NOT_SEARCHED):
+            break
+        if line and line != NONE_FOUND:
+            rows.append(line)
+    return len(rows)
+
+
+class PastRulingRunLogTests(trg.SameTurnWriter, unittest.TestCase):
+    """One guard.log line per past-ruling model call, written by report_guard past_ruling_problem. Each case runs
+    report_guard as the Stop hook through the claude stub, with its own config folder and call record. The Stop run,
+    the same-turn send and the unreadable repo are RemedyReasons' own, so they are shared here, not copied."""
+
+    PAGE = tcj.PAGE_URL  # the waiting page the same-turn writer read cites
+    sent_to_writer = RemedyReasons.sent_to_writer
+    run_stop = RemedyReasons.run_stop
+    unreadable_repo = RemedyReasons.unreadable_repo
+
+    def question_case(self, env=None, cwd=None):
+        """The owner's question relayed on a decided repo, unless `cwd` names another repo."""
+        repo = cwd or tcj.make_repo("past-run-decided", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+        return case([trg.human("decide"), *self.sent_to_writer(), trg.assistant_text(trg.RELAY)], "past-ruling",
+                    repo, env=env)
+
+    def run_logged(self, env=None, cwd=None, config=None):
+        """Run the question case with its own call record and config folder (`config` when given). Return what the
+        hook printed and the folder the call record and guard.log are read from."""
+        folder = tempfile.mkdtemp(dir=trg.RUN_FOLDER)
+        c = self.question_case(env=env, cwd=cwd)
+        c["env"].update(CLAUDE_CONFIG_DIR=config or folder, CJ_RECORD=os.path.join(folder, "calls.jsonl"))
+        return self.run_stop(c), folder
+
+    def stub_prompts(self, folder):
+        """The prompts the claude stub was sent that judge item 8: one per past-ruling model call."""
+        path = os.path.join(folder, "calls.jsonl")
+        if not os.path.exists(path):
+            return []
+        with open(path, encoding="utf-8") as handle:
+            prompts = [json.loads(line)["prompt"] for line in handle if line.strip()]
+        return [p for p in prompts if PAST_MARK in p]
+
+    def run_rows(self, folder):
+        """The past-ruling rows of guard.log, read through the one reader, glr.parse_line."""
+        path = os.path.join(folder, "guard.log")
+        if not os.path.exists(path):
+            return []
+        with open(path, encoding="utf-8") as handle:
+            rows = [glr.parse_line(line) for line in handle]
+        return [row for row in rows if row is not None and row.rule == PAST_RULE]
+
+    def fields_of(self, row):
+        """The four matched fields of a past-ruling row, as the regex's groups: ms, chars, candidates, outcome."""
+        found = PAST_FIELDS.fullmatch(row.matched)
+        self.assertIsNotNone(found, "matched is not `ms= chars= candidates= outcome=`: %r" % row.matched)
+        return found.groups()
+
+    def test_one_line_per_call_with_tool_decision_and_the_four_fields(self):
+        _, folder = self.run_logged(env={"CJ_ANSWER": tcj.ALLOW})
+        prompts = self.stub_prompts(folder)
+        self.assertEqual(len(prompts), 1, "scope: the past-ruling check made %d model calls, not one" % len(prompts))
+        self.assertGreaterEqual(candidate_count(prompts[0]), 1, "scope: the decided repo lists no past ruling")
+        rows = self.run_rows(folder)
+        self.assertEqual(len(rows), 1, "one past-ruling-run line per model call: %d line(s) for 1 call" % len(rows))
+        row = rows[0]
+        self.assertEqual((row.tool, row.decision), ("Stop", "measured"), "the line is not Stop measured: %r" % row.line)
+        _, chars, candidates, outcome = self.fields_of(row)
+        self.assertEqual(int(chars), len(prompts[0]), "chars is not the length of the prompt sent")
+        self.assertEqual(int(candidates), candidate_count(prompts[0]), "candidates is not the count the prompt lists")
+        self.assertEqual(outcome, "ok", "a verdict of ok is outcome ok, got %r" % outcome)
+
+    def test_outcome_names_what_the_model_call_returned(self):
+        cases = {
+            "refused": {"CJ_ANSWER": trg.REFUSE_APPS},
+            "timeout": {"CJ_MODEL_TIMEOUT": "1"},
+            "error": {"CJ_MODEL_FAIL": "1"},
+        }
+        for outcome, env in cases.items():
+            with self.subTest(outcome=outcome):
+                _, folder = self.run_logged(env=dict(env))
+                prompts = self.stub_prompts(folder)
+                self.assertEqual(len(prompts), 1, "scope: the %s case made %d model calls" % (outcome, len(prompts)))
+                rows = self.run_rows(folder)
+                self.assertEqual(len(rows), 1, "one past-ruling-run line for the %s call: %d" % (outcome, len(rows)))
+                self.assertEqual(self.fields_of(rows[0])[3], outcome, "the call returned %s, not that outcome" % outcome)
+
+    def test_zero_candidates_still_writes_one_line_with_candidates_zero(self):
+        bare = tcj.make_repo("past-run-bare")
+        _, folder = self.run_logged(env={"CJ_ANSWER": tcj.ALLOW}, cwd=bare)
+        prompts = self.stub_prompts(folder)
+        self.assertEqual(len(prompts), 1, "scope: the bare repo made %d model calls, not one" % len(prompts))
+        self.assertEqual(candidate_count(prompts[0]), 0, "scope: the bare repo lists a past ruling")
+        rows = self.run_rows(folder)
+        self.assertEqual(len(rows), 1, "one past-ruling-run line for the zero-candidate call: %d" % len(rows))
+        self.assertEqual(self.fields_of(rows[0])[2], "0", "candidates is not 0 for a prompt with none listed")
+
+    def test_unreadable_source_makes_no_call_and_writes_no_line(self):
+        out, folder = self.run_logged(cwd=self.unreadable_repo())
+        self.assertEqual(out.get("decision"), "block", "scope: the unreadable source did not refuse: %r" % out)
+        self.assertIn("Unvetted", out.get("reason", ""), "scope: the refusal is not the Unvetted one: %r" % out)
+        self.assertEqual(self.stub_prompts(folder), [], "an unreadable source still made a model call")
+        self.assertEqual(self.run_rows(folder), [], "a past-ruling-run line for a check that made no model call")
+
+    def test_a_log_write_failure_never_changes_the_verdict(self):
+        out, _ = self.run_logged(env={"CJ_ANSWER": trg.REFUSE_APPS})
+        self.assertEqual(out.get("decision"), "block", "scope: the refusal did not fire with a writable log: %r" % out)
+        blocked = os.path.join(tempfile.mkdtemp(dir=trg.RUN_FOLDER), "not-a-folder")
+        with open(blocked, "w", encoding="utf-8") as handle:
+            handle.write("a file where the config folder should be\n")  # the log folder cannot be made
+        unlogged, _ = self.run_logged(env={"CJ_ANSWER": trg.REFUSE_APPS}, config=blocked)
+        self.assertEqual((unlogged.get("decision"), unlogged.get("reason")), (out.get("decision"), out.get("reason")),
+                         "a log that cannot be written changed the verdict: %r" % unlogged)
+
+    def test_the_line_holds_the_four_fields_and_no_asked_or_ruling_text(self):
+        _, folder = self.run_logged(env={"CJ_ANSWER": trg.REFUSE_APPS})
+        rows = self.run_rows(folder)
+        self.assertEqual(len(rows), 1, "one past-ruling-run line to check for privacy: %d" % len(rows))
+        self.fields_of(rows[0])
+        for private in PRIVATE_TEXT:
+            self.assertNotIn(private, rows[0].line, "the log line holds asked or ruling text: %r" % private)
 
 
 if __name__ == "__main__":

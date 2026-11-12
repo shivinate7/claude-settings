@@ -227,6 +227,8 @@ def _fake_run(argv, **kwargs):
     prompt = prompt.decode("utf-8", "replace") if isinstance(prompt, bytes) else str(prompt)
     with open(os.environ["CJ_RECORD"], "a", encoding="utf-8") as f:
         f.write(json.dumps({"argv": list(argv), "prompt": prompt}) + "\n")
+    if os.environ.get("CJ_MODEL_TIMEOUT"):
+        raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))  # a model call that runs out of time
     if os.environ.get("CJ_MODEL_FAIL"):
         return subprocess.CompletedProcess(argv, 1, stdout="", stderr="stub model failure")
     return subprocess.CompletedProcess(argv, 0, stdout=json.dumps({"result": os.environ["CJ_ANSWER"]}), stderr="")

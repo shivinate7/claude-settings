@@ -1330,6 +1330,92 @@ class AllRulesTests(unittest.TestCase):
         self.assertNotIn("git-env-set", out)
 
 
+PAST_RULE = "past-ruling-run"
+
+
+def past_run(when, ms, chars, outcome, candidates=1):
+    """A past-ruling-run line as report_guard writes it: tool Stop, decision measured, four matched fields."""
+    return "%s\tStop\tmeasured\t%s\tms=%d chars=%d candidates=%d outcome=%s" % (
+        when, PAST_RULE, ms, chars, candidates, outcome)
+
+
+def summary_fields(out):
+    """The `label: value` lines of a --rule summary, as a dict of label to the value's text."""
+    fields = {}
+    for line in out.splitlines():
+        label, sep, value = line.partition(": ")
+        if sep:
+            fields[label] = value.strip()
+    return fields
+
+
+class PastRulingRunSummaryTests(unittest.TestCase):
+    """`guard_log_report.py --rule past-ruling-run --days N` prints one summary of the past-ruling model calls in the
+    window: one `label: value` line each for count, median ms, max ms, max chars and timeouts. --days counts calendar
+    dates ending today, as it does in every other read of this reader."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+        self.path = os.path.join(self.folder, "guard.log")
+        now = datetime.now().astimezone()
+        self.today = now.isoformat(timespec="seconds")
+        self.old = (now - timedelta(days=3)).isoformat(timespec="seconds")
+
+    def write(self, lines):
+        with open(self.path, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+
+    def summary(self, days):
+        rc, out = run_main(["--log", self.path, "--days", str(days), "--rule", PAST_RULE])
+        self.assertEqual(rc, 0, "the read exited %d" % rc)
+        return summary_fields(out)
+
+    def test_rule_alone_prints_the_summary_of_the_window(self):
+        self.write([
+            past_run(self.today, 100, 500, "ok"),
+            past_run(self.today, 300, 900, "refused", candidates=3),
+            past_run(self.today, 200, 700, "timeout"),
+            self.today + "\tStop\tdeny\tshared-tree\tgit stash",  # another rule: not a past-ruling run
+            past_run(self.old, 9999, 9999, "timeout"),  # outside --days 1
+        ])
+        fields = self.summary(1)
+        self.assertEqual(fields.get("count"), "3", "summary field count: %r" % fields)
+        self.assertEqual(fields.get("median ms"), "200", "summary field median ms: %r" % fields)
+        self.assertEqual(fields.get("max ms"), "300", "summary field max ms: %r" % fields)
+        self.assertEqual(fields.get("max chars"), "900", "summary field max chars: %r" % fields)
+        self.assertEqual(fields.get("timeouts"), "1", "summary field timeouts: %r" % fields)
+
+    def test_runs_older_than_the_days_window_are_not_counted(self):
+        self.write([past_run(self.today, 100, 500, "ok"), past_run(self.old, 9999, 9999, "timeout")])
+        fields = self.summary(1)
+        self.assertEqual(fields.get("count"), "1", "a run three days back counted in --days 1: %r" % fields)
+        self.assertEqual(fields.get("max ms"), "100", "a run three days back set max ms: %r" % fields)
+        self.assertEqual(fields.get("timeouts"), "0", "a run three days back counted as a timeout: %r" % fields)
+
+    def test_a_wider_days_window_takes_the_older_runs_in(self):
+        self.write([past_run(self.today, 100, 500, "ok"), past_run(self.old, 9999, 9999, "timeout")])
+        fields = self.summary(7)
+        self.assertEqual(fields.get("count"), "2", "--days 7 did not take the run three days back: %r" % fields)
+        self.assertEqual(fields.get("max ms"), "9999", "--days 7 lost the run three days back: %r" % fields)
+        self.assertEqual(fields.get("timeouts"), "1", "--days 7 lost its timeout: %r" % fields)
+
+    def test_no_run_in_the_window_counts_zero(self):
+        self.write([self.today + "\tStop\tdeny\tshared-tree\tgit stash", past_run(self.old, 50, 60, "ok")])
+        fields = self.summary(1)
+        self.assertEqual(fields.get("count"), "0", "an empty window did not count zero runs: %r" % fields)
+        self.assertEqual(fields.get("timeouts"), "0", "an empty window counted a timeout: %r" % fields)
+
+    def test_full_size_log_counts_every_run(self):
+        self.write([past_run(self.today, ms, 100 + ms, "timeout" if ms % 100 == 0 else "ok")
+                    for ms in range(1, 1000)])
+        fields = self.summary(1)
+        self.assertEqual(fields.get("count"), "999", "a 999-run log did not count every run: %r" % fields)
+        self.assertEqual(fields.get("median ms"), "500", "median of 1..999 is 500: %r" % fields)
+        self.assertEqual(fields.get("max ms"), "999", "summary field max ms: %r" % fields)
+        self.assertEqual(fields.get("max chars"), "1099", "summary field max chars: %r" % fields)
+        self.assertEqual(fields.get("timeouts"), "9", "timeouts at 100..900 are nine: %r" % fields)
+
+
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
