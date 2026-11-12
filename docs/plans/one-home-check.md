@@ -7,6 +7,11 @@ this repo, reworded rule text, and child repos that carry their own nuance.
 The work ships as one lane, branch `one-home-check`. This file is deleted when that lane merges.
 Before then, the rules are the working text here.
 
+Owner picks 337-341 (2026-11-07 12:34 CST, decision `one-home-check`) replace parts of this plan.
+The child check runs inside the shared `ste-lint` action that children already pin, with no new CI
+step. A child's marker is `exempt`, not `override`. The meaning (paraphrase) pass is built now, not
+left as a note. Plan question 5 is moot. Where the text below says otherwise, the decision wins.
+
 ## Problem
 
 ### The incident
@@ -101,7 +106,7 @@ Each part names its home. Nothing copies a list. Each part reads one place.
 
 ### b) Reword check: removed rule text
 
-- Home: `lint/stale_cites.py`, as a new code STALE003 (the reword code). The stale-cites check
+- Home: `lint/stale_cites.py`, as a new code STALE006 (the reword code). The stale-cites check
   already reads a range. It handles a shallow base. It reads each tracked `.md` only when a name
   was removed. A second range reader in the copy finder would be a second home.
 - Trigger: a rule sentence present at base and absent or changed at head.
@@ -165,7 +170,7 @@ a timer.
 
 - `find_copies.py --in-repo`: one python start, one `git ls-files`, one read of each tracked
   `.md` file (381 on origin/main), no writes, no process left running.
-- STALE003: runs only when a rule sentence changed in the range. It adds one `git cat-file
+- STALE006: runs only when a rule sentence changed in the range. It adds one `git cat-file
   --batch` read of each tracked `.md` file. The existing stale-cites starts still apply.
 - The cost tests count the process starts, the reads and the writes. They follow the pattern of
   `CostTests` in `lint/test_stale_cites.py`. A test proves each count
