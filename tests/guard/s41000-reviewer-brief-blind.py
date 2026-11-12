@@ -257,8 +257,8 @@ add("reviewer-brief-blind: refused: a Workflow agent() reviewer, the same plain 
 add("reviewer-brief-blind: allowed: a Workflow agent() builder whose prompt is a variable holding a report",
     "allow", tool="Workflow", script=RBB_REPORT_PROMPT + _step_flow("prompt", "agentType: 'builder', model: 'sonnet'"))
 
-# THE REPLACES MARKER. A fresh reviewer that replaces a finished one gets the prior report (owner ruling, waiting-page item 409 a,
-# 2026-11-08).
+# THE REPLACES MARKER. A fresh reviewer that replaces a finished one needs the prior report, so the marker lets that
+# brief through.
 # The guard cannot see which agent finished, so a brief's first non-blank line may name the one it replaces: `Replaces: <name>`
 # with a name after the colon. Such a brief is not read for a report or a verdict. Each allow has a control on the same spawn
 # with the report lines removed, so a refusal from another rule cannot pass as the marker's lift. Each refusal below is a brief
