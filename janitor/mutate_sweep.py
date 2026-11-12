@@ -263,9 +263,10 @@ MUTATIONS = [
      '    own_lock = False\n'
      '    if entry.get("locked_reason") is not None:\n'
      '        holder = entry.get("locked_reason") or "locked"\n'
-     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock)\n'
+     '        written = entry.get("locked_at_ms")\n'
+     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock, written)\n'
      '        if stale_agent_lock is not True:\n'
-     '            own_lock = (own_lock_rule and own_agent_lock_verdict(holder) is True\n'
+     '            own_lock = (own_lock_rule and own_agent_lock_verdict(holder, written) is True\n'
      '                        and (not fast or batch is not None)\n'
      '                        and _own_lock_ready(where, path, batch, lock_idle))\n'
      '            if not own_lock:\n'
@@ -289,9 +290,10 @@ MUTATIONS = [
      '    own_lock = False\n'
      '    if entry.get("locked_reason") is not None:\n'
      '        holder = entry.get("locked_reason") or "locked"\n'
-     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock)\n'
+     '        written = entry.get("locked_at_ms")\n'
+     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock, written)\n'
      '        if stale_agent_lock is not True:\n'
-     '            own_lock = (own_lock_rule and own_agent_lock_verdict(holder) is True\n'
+     '            own_lock = (own_lock_rule and own_agent_lock_verdict(holder, written) is True\n'
      '                        and (not fast or batch is not None)\n'
      '                        and _own_lock_ready(where, path, batch, lock_idle))\n'
      '            if not own_lock:\n'
@@ -311,8 +313,8 @@ MUTATIONS = [
     # and a general sweep reaps the tree with a shell the agent may have left inside.
     ("finish gate: a dead host's live lock frees its tree with no finish proof (ungated verdict)",
      "sweep",
-     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock)\n',
-     '        stale_agent_lock = stale_agent_lock_verdict(holder)\n',
+     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock, written)\n',
+     '        stale_agent_lock = stale_agent_lock_verdict(holder, written)\n',
      "test_a_dead_host_live_lock_with_no_stop_row_keeps_the_tree"),
 
     # ---- the keep rule, both directions (plan, "Phase 2") ----
@@ -667,8 +669,8 @@ MUTATIONS = [
     # such tree as unproven, so the half-removed tree is never restored and stays dirty.
     ("cut-short restore: a finished dead-host tree is not restored (the finish proof is read as absent)",
      "sweep",
-     '            entry.get("locked_reason") or "", bool(entry.get("finished"))) is not True):\n',
-     '            entry.get("locked_reason") or "", False) is not True):\n',
+     '            entry.get("locked_reason") or "", bool(entry.get("finished")),\n',
+     '            entry.get("locked_reason") or "", False,\n',
      "test_a_cut_short_finished_dead_host_tree_is_restored_by_the_next_end"),
     # `decide_listener`'s own three refusals, same shape as the branch/worktree refusals
     # above: each one is a keep this sweep must never lose, proven by mutating it out and
@@ -1011,11 +1013,27 @@ MUTATIONS = [
      "test_unreadable_lock_start_keeps"),
     ("stale lock: a lock with no start time counts as stale, even when its host runs",
      "sweep",
-     '    if locked_ms is None:\n'
-     '        return False\n',
-     '    if locked_ms is None:\n'
-     '        return True\n',
+     '        if locked_at_ms is None:\n',
+     '        return True\n'
+     '        if locked_at_ms is None:\n',
      "test_a_sibling_agent_tree_locked_by_the_same_host_pid_is_kept"),
+    # The write-time arm of a no-start lock (`stale_agent_lock_verdict`). Two entries, one per
+    # required case: each named case must be the one that kills the mutant (`required` is one name).
+    ("stale lock: a no-start lock whose holder started after its write is never freed (the reused-pid arm off)",
+     "sweep",
+     '        return actual - locked_at_ms > git_reads.SESSION_LIVE_TOLERANCE_MS',
+     '        return False',
+     "test_no_start_lock_held_by_a_reused_pid_is_stale"),
+    ("stale lock: a no-start lock whose holder started after its write is never freed end to end (the reused-pid arm off)",
+     "sweep",
+     '        return actual - locked_at_ms > git_reads.SESSION_LIVE_TOLERANCE_MS',
+     '        return False',
+     "test_no_start_lock_whose_holder_started_after_the_write_is_freed"),
+    ("stale lock: a no-start lock with an unreadable write time is freed",
+     "sweep",
+     '        if locked_at_ms is None:\n            return False\n',
+     '        if locked_at_ms is None:\n            return True\n',
+     "test_no_start_lock_with_an_unreadable_write_time_keeps"),
     ("stale lock: --confirm removes without unlocking first",
      "sweep",
      '        unlocked = git_reads._git(root, "worktree", "unlock", path)',
