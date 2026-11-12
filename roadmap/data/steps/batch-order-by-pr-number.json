@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "merge/merge.py `build_integration_branch` merges in PR-number order (`sorted(heads.items())`), so skill ci-hygiene step 8's \"a conflict drops the later lane\" reads \"later\" by PR number. Clearest case: #2681, handed in before #2659, merged after it.",
  "source": "batch runner 10, 10:06 CST Nov 12, via coordinator 10:08 CST; case from lane fan-prose-decisions 10:09 CST",
- "note": "Debt, code or record: fix the code or the record. Hit in normal work. Ready, no lane. Lane cleared 13:38 CST Nov 12 (retrospective 13:36 CST sweep): its session (\"Lane merge-batch-speed\") is idle and completed with no branch for this step. Lane started 13:59 CST Nov 12 (Sonnet, medium) with stack-check-scales-open-prs folded in (same file).",
- "updatedAt": "2026-11-12T14:00:48-06:00"
+ "note": "Debt, code or record: fix the code or the record. Hit in normal work. Ready, no lane. Lane cleared 13:38 CST Nov 12 (retrospective 13:36 CST sweep): its session (\"Lane merge-batch-speed\") is idle and completed with no branch for this step. Lane started 13:59 CST Nov 12 (Sonnet, medium) with stack-check-scales-open-prs folded in (same file). Coordinator pick a 14:58 CST Nov 12 (#2939): a fresh Sonnet round 1 over the whole diff at 3cfbac88a, because round 1 (Haiku, FAIL) posted no record at 0a3d91f60 before the fix push, so --fix-check has nothing to chain to. Settled by the review-rounds rules (a round counts from its record; rule roles-review-cap-three); no page item.",
+ "updatedAt": "2026-11-12T14:59:48-06:00"
 }
