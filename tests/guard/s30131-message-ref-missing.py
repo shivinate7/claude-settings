@@ -286,7 +286,8 @@ LOG_CHECKS_EXTRA.append(("message-ref-missing: six comment links make five gh ca
                          mrf_six_links_case))
 FIXTURELESS_CHECKS.add(mrf_six_links_case)
 
-# Pins of built behaviour, one per guard line that decides a ref's repo or its list. Each goes red under its mutant.
+# Pins of built behaviour for the guard lines that decide a ref's repo or the PR list. Each is green on the built code.
+# hooks/mutate_guard.py has one mutant for this rule, on its deny line, so these pins have none.
 mrf_case("o/r: PR #8 names this repo, so PR 8 is judged and refused", "deny",
          "o/r: PR #8 has the fix.", carries=("#8",))
 mrf_case("PR #7, 12 files: a singular PR reads one number, so 12 is not judged", "allow",
