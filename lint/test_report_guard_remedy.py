@@ -68,6 +68,13 @@ PHRASE_ONLY = "The fix would reach the owner before the review."
 PHRASE_PIN = "would reach the owner"
 # The order the past-ruling judge wrote into its reason in the boundary case, which must not reach the owner.
 JUDGE_ORDER = "Drop the question and send it again."
+# The on-the-page reason (page_form). Its check name opens it, and the form words and the owner ruling it cites stay in it.
+PAGE_FORM_CHECK = "Pick guard"
+PAGE_FORM_FORM = "on the page, item"
+PAGE_FORM_STAMP = "2026-11-10 16:57 CST"
+# The words of the fix-step clause the reason carried: an instruction to the session on what its reply holds. None may
+# come back. Each is a phrase the clause alone uses, so a correct fact sentence never contains one.
+PAGE_FORM_CLAUSE = ("holds only", "carries no options", "no question text", "is the number of the item")
 # A comma list of backticked words is a fact. Each span's word is in SESSION_IMPERATIVES, so the split at a comma must
 # not read the span as an order.
 TWO_TOOL_LIST = "The phrase list holds `add`, `send` and `post`."
@@ -405,6 +412,33 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
                 reason = self.assert_past_ruling_verdict(self.run_stop(c), tcj.APPS_SLUG)
                 self.assertNotIn(order, reason, "the judge's mid-clause order reached the owner: %r" % reason)
                 self.assertEqual(RG.session_wording(reason), "", "the reason holds an order: %r" % reason)
+
+    def page_form_reason(self):
+        """The page_form path's reason. Scope first: it opens with the check's name and names the on-the-page form, so an
+        empty or other reason cannot pass the pins below by accident."""
+        reason, _ = self.refusal_for("page_form")
+        self.assertTrue(reason.startswith(PAGE_FORM_CHECK), "scope: the reason does not open with %r: %r"
+                        % (PAGE_FORM_CHECK, reason))
+        self.assertIn(PAGE_FORM_FORM, reason, "scope: the reason does not name the on-the-page form: %r" % reason)
+        return reason
+
+    def test_page_form_reason_holds_no_fix_step_clause(self):
+        # Catches: the reason telling the session what its chat reply holds, an order that the check's fact does not need.
+        reason = self.page_form_reason()
+        for phrase in PAGE_FORM_CLAUSE:
+            with self.subTest(phrase=phrase):
+                self.assertNotIn(phrase, reason, "the reason tells the session what its reply holds: %r" % reason)
+
+    def test_page_form_reason_keeps_the_owner_ruling_it_cites(self):
+        # Control: the stamp of the owner ruling sits at the end of the clause, so a cut that takes the clause must keep it.
+        reason = self.page_form_reason()
+        self.assertIn(PAGE_FORM_STAMP, reason, "the reason drops the owner ruling it cites: %r" % reason)
+
+    def test_page_form_reason_passes_the_order_detector(self):
+        # Control: the detector reads no order in the reason. The fix-step clause is missed by it, so the phrase pins above
+        # are what catch the clause.
+        reason = self.page_form_reason()
+        self.assertEqual(RG.session_wording(reason), "", "the reason holds an order to the session: %r" % reason)
 
     def test_1a_control_fact_sentences_are_not_flagged(self):
         for fact in FACT_SENTENCES:
