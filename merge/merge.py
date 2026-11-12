@@ -3161,10 +3161,9 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
     report_lines = ["merge: clashes with other PRs that this lint does not count (report only):", *reports] if reports else []
     if state == "pass":
         named = f" ({len(lines)} CI step{'s' if len(lines) != 1 else ''} skipped: {', '.join(lines)})" if lines else ""
-        if sliced is not None:
-            named += f" The Windows guard slice ({SLICE_STEP}) ran and passed on this {platform.system() or 'unknown'} host ({socket.gethostname()}), so it is no proof of a Windows run unless that host is Windows."
+        host_note = f" The Windows guard slice ({SLICE_STEP}) ran and passed on this {platform.system() or 'unknown'} host ({socket.gethostname()}), so it is no proof of a Windows run unless that host is Windows." if sliced is not None else ""
         tail = "The batch runner may take this head, or join it to a batch." if target.isdigit() else "No comment is posted for a ref or commit, so this does not satisfy the join."
-        say(f"PASS: lint of {short} against {base} passes{named}. {tail}", *pin_notes, *report_lines)
+        say(f"PASS: lint of {short} against {base} passes{named}.{host_note} {tail}", *pin_notes, *report_lines)
         if target.isdigit():  # a ref or commit has no pull request to carry the comment
             n = int(target)
             try:
