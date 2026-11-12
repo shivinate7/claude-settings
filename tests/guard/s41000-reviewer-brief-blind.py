@@ -257,18 +257,72 @@ add("reviewer-brief-blind: refused: a Workflow agent() reviewer, the same plain 
 add("reviewer-brief-blind: allowed: a Workflow agent() builder whose prompt is a variable holding a report",
     "allow", tool="Workflow", script=RBB_REPORT_PROMPT + _step_flow("prompt", "agentType: 'builder', model: 'sonnet'"))
 
+# THE REPLACES MARKER. A fresh reviewer that replaces a finished one gets the prior report (owner ruling, waiting-page item 409 a,
+# 2026-11-08).
+# The guard cannot see which agent finished, so a brief's first non-blank line may name the one it replaces: `Replaces: <name>`
+# with a name after the colon. Such a brief is not read for a report or a verdict. Each allow has a control on the same spawn
+# with the report lines removed, so a refusal from another rule cannot pass as the marker's lift. Each refusal below is a brief
+# the marker does not cover, and it stays refused.
+rbb_allow("reviewer-brief-blind: allowed: a reviewer brief whose first line is Replaces: <name>, with a prior report and verdict",
+          "Replaces: reviewer-3f9c\nRe-check the floor fix in hooks/guard.py.\nDone: the floor fix is in.\nDeviations: none.\n"
+          "Verdict: CHANGES\nFiles: hooks/guard.py.")
+rbb_allow("reviewer-brief-blind: allowed: control, a reviewer brief whose first line is Replaces: <name>, with no report",
+          "Replaces: reviewer-3f9c\nRe-check the floor fix in hooks/guard.py.\nFiles: hooks/guard.py.")
+rbb_allow("reviewer-brief-blind: allowed: a refuter brief whose first line is Replaces: <name>, with a prior report and verdict",
+          "Replaces: refuter-7a21\nArgue the floor fix in hooks/guard.py.\nDone: the floor fix is in.\nDeviations: none.\n"
+          "Verdict: PASS\nFiles: hooks/guard.py.", role=REFUTER, model="sonnet")
+rbb_allow("reviewer-brief-blind: allowed: control, a refuter brief whose first line is Replaces: <name>, with no report",
+          "Replaces: refuter-7a21\nArgue the floor fix in hooks/guard.py.\nFiles: hooks/guard.py.", role=REFUTER, model="sonnet")
+add("reviewer-brief-blind: allowed: a Workflow agent() reviewer whose literal prompt opens with Replaces: <name>, with a prior report",
+    "allow", tool="Workflow",
+    script="const r = await agent(`Replaces: reviewer-3f9c\nRe-check the floor fix in hooks/guard.py.\nDone: the floor fix is in.\n"
+           "Deviations: none.\nVerdict: CHANGES\nFiles: hooks/guard.py.`, {agentType: 'reviewer', model: 'haiku'}); return r")
+add("reviewer-brief-blind: allowed: control, a Workflow agent() reviewer whose literal prompt opens with Replaces: <name>, no report",
+    "allow", tool="Workflow",
+    script="const r = await agent(`Replaces: reviewer-3f9c\nRe-check the floor fix in hooks/guard.py.\nFiles: hooks/guard.py.`, "
+           "{agentType: 'reviewer', model: 'haiku'}); return r")
+# A builder is outside the guarded roles, so the marker changes nothing for its brief.
+rbb_allow("reviewer-brief-blind: allowed: a builder brief whose first line is Replaces: <name>, with a report and verdict",
+          "Replaces: builder-5c04\nFix the floor.\nDone: the floor fix is in.\nDeviations: none.\nVerdict: CHANGES\n"
+          "Files: hooks/guard.py.", role="builder", model="sonnet")
+# The controls. The same report with no marker, with the marker on line two, or with an empty or blank name stays refused.
+rbb_refuse("reviewer-brief-blind: refused: control, a reviewer brief with the prior report and verdict and no Replaces: line",
+           "Re-check the floor fix in hooks/guard.py.\nDone: the floor fix is in.\nDeviations: none.\nVerdict: CHANGES\n"
+           "Files: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: control, a reviewer brief with Replaces: on line two, not the first line",
+           "Re-check the floor fix in hooks/guard.py.\nReplaces: reviewer-3f9c\nDone: the floor fix is in.\nDeviations: none.\n"
+           "Verdict: CHANGES\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: control, a reviewer brief whose Replaces: line has an empty name",
+           "Replaces:\nRe-check the floor fix in hooks/guard.py.\nDone: the floor fix is in.\nDeviations: none.\n"
+           "Verdict: CHANGES\nFiles: hooks/guard.py.")
+rbb_refuse("reviewer-brief-blind: refused: control, a reviewer brief whose Replaces: line has a blank name",
+           "Replaces:   \nRe-check the floor fix in hooks/guard.py.\nDone: the floor fix is in.\nDeviations: none.\n"
+           "Verdict: CHANGES\nFiles: hooks/guard.py.")
+# A Workflow template whose marker is interpolated is unread, so it stays refused. A literal marker does not lift a template
+# whose report is interpolated: the scan cannot read the report, so the marker does not make the brief readable.
+rbb_unread_refuse("reviewer-brief-blind: refused: control, a Workflow agent() reviewer whose Replaces: name is interpolated",
+                  _step_flow("`Replaces: ${name}\nRe-check the floor fix in hooks/guard.py.`", "agentType: 'reviewer'"))
+rbb_unread_refuse("reviewer-brief-blind: refused: a Workflow agent() reviewer with a literal Replaces: line and an interpolated report",
+                  RBB_REPORT_VAR + _step_flow("`Replaces: reviewer-3f9c\nRe-check the floor fix in hooks/guard.py.\nReview ${builderReport}`",
+                                              "agentType: 'reviewer'"))
+
 # The owner override lifts the refusal, as it lifts the role-model refusal (role_override_lift_check copied here).
-RBB_SPAWN = {"prompt": "Check the floor fix.\nDone: BUILT c204a1f.\nDeviations: none.", "subagent_type": "reviewer",
+RBB_SPAWN ={"prompt": "Check the floor fix.\nDone: BUILT c204a1f.\nDeviations: none.", "subagent_type": "reviewer",
              "model": "haiku"}
 
 
-def reviewer_brief_override_check():
+# A Replaces: brief with no name is refused like any brief the marker does not cover, so the override story holds for it too.
+RBB_EMPTY_SPAWN = {"prompt": "Replaces:\nCheck the floor fix in hooks/guard.py.\nDone: the floor fix is in.\nDeviations: none.",
+                   "subagent_type": "reviewer", "model": "haiku"}
+
+
+def reviewer_brief_override_check(spawn=RBB_SPAWN, config_name="reviewer-brief-blind", session="rbb-override"):
     """One override lifts the reviewer-brief-blind refusal once, and the spent override refuses again. The first step
     makes the call with no override and wants the refusal, so a guard that refuses nothing cannot turn this green."""
-    config, session = ov_config("reviewer-brief-blind"), "rbb-override"
+    config = ov_config(config_name)
 
     def call(seconds):
-        return ov_call("Agent", dict(RBB_SPAWN), NOGIT, config, session, seconds)
+        return ov_call("Agent", dict(spawn), NOGIT, config, session, seconds)
 
     ok, why = ov_story([("no override", lambda: call(0), "deny", RBB)])
     if not ok:
@@ -289,5 +343,17 @@ FIXTURELESS_CHECKS.add(reviewer_brief_override_check)  # its folders are its own
 # the simulator section's override checks do.
 LOG_FAMILY[RBB_OVERRIDE_LABEL] = FAMILY
 LOG_CHECKS = LOG_CHECKS + ((RBB_OVERRIDE_LABEL, reviewer_brief_override_check),)
+
+
+def reviewer_brief_empty_override_check():
+    """The override story for a Replaces: brief with an empty name: refused, lifted once by an override, refused again."""
+    return reviewer_brief_override_check(RBB_EMPTY_SPAWN, "reviewer-brief-blind-empty", "rbb-override-empty")
+
+
+RBB_EMPTY_OVERRIDE_LABEL = ("reviewer-brief-blind: an owner override lifts the refusal of a Replaces: brief with an empty name "
+                            "once, then refuses again")
+FIXTURELESS_CHECKS.add(reviewer_brief_empty_override_check)
+LOG_FAMILY[RBB_EMPTY_OVERRIDE_LABEL] = FAMILY
+LOG_CHECKS = LOG_CHECKS + ((RBB_EMPTY_OVERRIDE_LABEL, reviewer_brief_empty_override_check),)
 
 
