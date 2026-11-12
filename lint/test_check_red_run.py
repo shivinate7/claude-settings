@@ -456,8 +456,8 @@ class CheckCase(Fixture):
 
 class RulingCiteCase(CheckCase):
     """A commit message that cites a ruling names a home and a time. The incident message, a claim with a home and no
-    time, and a claim with a time and no home are red on main, where the check does not read ruling claims. Each assert
-    names its cause. The controls pass on main as well."""
+    time, and a claim with a time and no home are red where the check does not read ruling claims. Each assert
+    names its cause. The controls pass there as well."""
 
     def assertRulingFlagged(self, sha, subject, cause):
         rc, out = self.lint()
