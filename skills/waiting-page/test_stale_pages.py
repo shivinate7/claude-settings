@@ -4,6 +4,7 @@ STALE_PAGES_UNDER_TEST names the command to run (default: stale_pages.py beside 
 same cases run red against a checkout that lacks it.
 """
 import contextlib
+import datetime
 import importlib.util
 import io
 import json
@@ -1613,15 +1614,26 @@ class Stale(unittest.TestCase):
                     self.assertEqual(self.listed_ask_ids(r.stdout), ["ask-blank", "ask-open"],
                                      "%s: the ask with no non-blank reply is not listed:\n%s" % (label, r.stdout + r.stderr))
 
-    def test_open_ask_dismissed_by_the_owner_is_not_listed(self):
+    def test_open_ask_marked_read_with_no_reply_is_still_listed(self):
+        # Mark read is the owner's dismiss, not an answer: page.html askDismissed keeps a thread shown while any member has no reply.
         current, _ = self.current_and_behind()
         for label, dismissed in (("dismissed true", True), ("dismissed at a time", "2026-11-07T10:00:00Z")):
             for as_folder in (False, True):
                 with self.subTest(case=label, folder=as_folder):
-                    gone = ask_doc("ask-dismissed", "2026-11-07T08:00:00Z", dismissed=dismissed)
-                    r = self.asks_run(current, self.asks_shaped([ASK_OPEN, gone], as_folder))
+                    read = ask_doc("ask-dismissed", "2026-11-07T08:00:00Z", dismissed=dismissed)
+                    r = self.asks_run(current, self.asks_shaped([ASK_OPEN, read], as_folder))
                     self.assertIn(open_ask_line(ASK_OPEN), r.stdout.splitlines(), "the open ask is not listed, so the run read no asks:\n" + r.stdout + r.stderr)
-                    self.assertNotIn("ask-dismissed", self.listed_ask_ids(r.stdout), "%s: a dismissed ask is listed:\n%s" % (label, r.stdout + r.stderr))
+                    self.assertEqual(self.listed_ask_ids(r.stdout), ["ask-dismissed", "ask-open"],
+                                     "%s: the ask marked read with no reply is not listed, oldest first:\n%s" % (label, r.stdout + r.stderr))
+
+    def test_open_ask_marked_read_with_a_reply_is_not_listed(self):
+        current, _ = self.current_and_behind()
+        answered = ask_doc("ask-answered-read", "2026-11-07T08:00:00Z", dismissed="2026-11-07T10:00:00Z", reply="Yes, ship it.")
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                r = self.asks_run(current, self.asks_shaped([ASK_OPEN, answered], as_folder))
+                self.assertIn(open_ask_line(ASK_OPEN), r.stdout.splitlines(), "the open ask is not listed, so the run read no asks:\n" + r.stdout + r.stderr)
+                self.assertNotIn("ask-answered-read", self.listed_ask_ids(r.stdout), "a marked-read ask with a reply is listed:\n" + r.stdout + r.stderr)
 
     def test_open_ask_with_dismissed_null_or_false_is_listed(self):
         current, _ = self.current_and_behind()
@@ -1651,22 +1663,22 @@ class Stale(unittest.TestCase):
         self.assertEqual(self.listed_ask_ids(r.stdout), ["ask-file", "ask-open"],
                          "a folder ask with no id field is not listed by its file name:\n" + r.stdout + r.stderr)
 
-    def test_open_ask_full_size_lists_only_the_open_ones_oldest_first(self):
+    def test_open_ask_full_size_lists_the_open_and_marked_read_asks_oldest_first(self):
         current, _ = self.current_and_behind()
         order = [(k * 17) % 40 for k in range(40)]  # a permutation of 0..39: the file order differs from the `at` order
         open_asks = [ask_doc("open-%02d" % k, "2026-11-07T00:%02d:00Z" % k) for k in order]
         replied = [ask_doc("replied-%02d" % k, "2026-11-07T01:%02d:00Z" % k, reply="Done.") for k in range(40)]
         dismissed = [ask_doc("dismissed-%02d" % k, "2026-11-07T02:%02d:00Z" % k, dismissed=True) for k in range(40)]
-        want = ["open-%02d" % k for k in range(40)]
+        want = ["open-%02d" % k for k in range(40)] + ["dismissed-%02d" % k for k in range(40)]  # marked read with no reply is open
         for as_folder in (False, True):
             with self.subTest("folder of <id>.json files" if as_folder else "list file"):
                 r = self.asks_run(current, self.asks_shaped(open_asks + replied + dismissed, as_folder))
-                self.assertEqual(self.listed_ask_ids(r.stdout), want, "the 40 open asks are not listed oldest first, alone:\n" + r.stdout + r.stderr)
+                self.assertEqual(self.listed_ask_ids(r.stdout), want, "the 40 open and 40 marked-read asks are not listed oldest first, the replied ones out:\n" + r.stdout + r.stderr)
                 self.assert_page_word(r, "current", 1)
 
     def test_open_ask_run_with_nothing_open_prints_only_the_verdict_line(self):
         current, _ = self.current_and_behind()
-        quiet = [ASK_REPLIED, ask_doc("ask-dismissed", "2026-11-07T07:00:00Z", dismissed=True)]
+        quiet = [ASK_REPLIED, ask_doc("ask-answered-read", "2026-11-07T07:00:00Z", dismissed=True, reply="Done.")]
         for as_folder in (False, True):
             with self.subTest("folder of <id>.json files" if as_folder else "list file"):
                 anchor = self.asks_run(current, self.asks_shaped([ASK_OPEN], as_folder))
@@ -2002,7 +2014,6 @@ class Stale(unittest.TestCase):
         valid_answer = answer_for("lane-valid-time", 455, at=LATER_AT)
         cases = (("a lastAnswer.at that is not a time", {"lane": LANE, "lastAnswer": {"choice": "a", "note": "", "at": "soon"}}, LATER_AT),
                  ("a lastAnswer.at that is a number", {"lane": LANE, "lastAnswer": {"choice": "a", "note": "", "at": 1762509600}}, LATER_AT),
-                 ("a kept answer whose at is not a time", {"lane": LANE, "lastAnswer": {"choice": "a", "note": "", "at": HANDLED_AT}}, "not a time"),
                  ("a replied that is not a time", {"reply": "Ship it.", "replied": "yesterday"}, LATER_AT),
                  ("a replied that is an impossible date", {"reply": "Ship it.", "replied": "2026-13-45T99:00:00Z"}, LATER_AT))
         for as_folder in (False, True):
@@ -2017,6 +2028,21 @@ class Stale(unittest.TestCase):
                     named = sorted(named_id for _, named_id in self.open_item_names(r.stdout))
                     self.assertEqual(named, sorted([OPEN_ID, valid["id"]]),
                                      "%s: the named open items differ from the expected ones:\n%s" % (label, r.stdout + r.stderr))
+
+    def test_open_item_whose_kept_answer_time_is_unreadable_is_unknown_and_exits_2(self):
+        # The kept answer's time is the only clock the item's reply is checked against. Unreadable, it cannot show the owner
+        # answered after the reply, so the item is unknown: never listed as handled, never read as clear.
+        current, _ = self.current_and_behind()
+        item = decision_item(457, "unreadable-kept-at", status="open", reply="Done.", replied="2026-11-07T09:00:00Z")
+        for as_folder in (False, True):
+            with self.subTest(folder=as_folder):
+                r = self.open_item_run(current, [OPEN_ITEM, item],
+                                       [(OPEN_ID, OPEN_ANSWER), (item["id"], answer_for(item["id"], item["n"], at="not-a-time"))], as_folder)
+                named = sorted(item_id for _, item_id in self.open_item_names(r.stdout))
+                self.assertIn(OPEN_ID, named, "the open item is not named, so the run read no item and answer:\n" + r.stdout + r.stderr)
+                self.assert_one_unknown(r, "open-item")
+                self.assertEqual(named, [OPEN_ID], "the item with an unreadable kept-answer time is named as an open item:\n" + r.stdout + r.stderr)
+                self.assertEqual(r.returncode, 2, "exit %d, want 2 for an unknown open item:\n%s" % (r.returncode, r.stdout + r.stderr))
 
 
 # Fixtures for the --items cases: a repo, a run that ended completed/failure, and the PR that run checked.
@@ -2632,6 +2658,16 @@ class UnreadStale(FolderCase):
         self.assert_unknown(rc, out, "woke")
         self.assert_no_listed_line(out, "an answer was listed against an unreadable woke")
 
+    def test_an_int_woke_20261112_gates_the_answers_as_main_does_and_is_not_unknown(self):
+        # main reads the int 20261112 as the date 2026-11-12: an answer before that day is listed (exit 1), one after it is not (exit 0).
+        cases = ((EARLY, [unread_line("colour-pick", 143, "ops", EARLY, woke=20261112)], 1), ("2026-11-13T12:00:00Z", ["unread: clean"], 0))
+        for at, want, code in cases:
+            with self.subTest(answered=at):
+                self.store(meta={"writer": "triage", "woke": 20261112}, items=[item_entry("colour-pick", "open", n=143, owner="ops")],
+                           answers=[pick_answer_entry("colour-pick", at)])
+                rc, out = self.run_unread(codes=(0, 1, 2))
+                self.assertEqual((rc, output_lines(out)), (code, want), "meta woke 20261112 did not gate the answer as main does: %s" % out)
+
     def test_a_missing_file_is_unknown_and_exits_2(self):
         for name in ("meta", "items", "answers", "receipts"):
             with self.subTest(missing=name):
@@ -2688,6 +2724,16 @@ class UnreadStale(FolderCase):
         code, out, _, error = self.run_main("--unread", self.folder)
         self.assert_mode_lines(out, error)
         self.assertEqual((code, output_lines(out)), (1, [unread_line("colour-pick", 143, "ops", EARLY)]), "main() did not send --unread to its mode: " + out)
+
+
+class ParseUtcTime(unittest.TestCase):
+    """parse_utc reads an int date as main does: 20261112 is the midnight of 2026-11-12, not None. Main reads it through fromisoformat
+    on str(text), which takes the basic form from Python 3.11, the CI version."""
+
+    def test_an_int_date_reads_as_its_midnight_timestamp_as_main_reads_it(self):
+        stale = load_stale_pages()
+        got = stale.parse_utc(20261112)
+        self.assertEqual(got, datetime.datetime(2026, 11, 12).timestamp(), "parse_utc(20261112) is not main's timestamp for 2026-11-12: %r" % (got,))
 
 
 if __name__ == "__main__":
