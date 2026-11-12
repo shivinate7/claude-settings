@@ -59,6 +59,7 @@ Check for:
   a model above the role's row in `agent-model-cap` (the model-per-role table) that no owner override,
   owner grant or standing grant covers.
 - Tests: check each new or changed test against the practices in decision `test-practices`. If the red run is missing or in doubt, make a mutant on a scratch copy outside every repository and see the named case go red (P10). Make the copy without `.git`, such as with `git archive`, never a plain `cp -r`, and with no `.git` above it. Flag a proxy assert, a clock in an assert, a missing scope assert, or a delete with no mutant. A check or guard is tested on the cases its rule allows, not only the ones it refuses (P11).
+- Code claims in a record: read each cited code symbol against the claim it backs. A cite proves the name exists, not that the claim is true.
 - Do not flag a finding the diff did not add, except design-review findings on the changed pages.
   Do not flag a style problem a linter catches. Do not flag a nitpick a senior engineer would skip.
 - A refused act is reported to the orchestrator, never re-spelled to get past the guard (for example a command word built from pieces).
