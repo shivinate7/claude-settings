@@ -3174,6 +3174,18 @@ class DefaultBase(unittest.TestCase):
         rc, text = self.run_main(["--repo", r.dir])
         self.assertEqual((rc, self.findings(text)), (0, []),
                          "no --upstream: feat2 was judged against origin/main, not its base origin/feat1")
+        self.assertIn("silent-undo: base: origin/feat1 (the branch's tracked upstream)", text.splitlines(),
+                      "no --upstream: the printed base line is not feat2's tracked upstream. Output: %r" % text)
+
+    def test_an_explicit_upstream_prints_no_base_line(self):
+        r = self.stacked_revert()
+        self.assertEqual(r.sh("rev-parse", "--abbrev-ref", "@{u}"), "origin/feat1",
+                         "premise: feat2 tracks origin/feat1, so the flag alone decides the base")
+        rc, text = self.run_main(["--repo", r.dir, "--upstream", "origin/main"])
+        self.assertTrue(self.undoes_main_revert(text),
+                        "premise: --upstream origin/main still runs and finds the revert of Q. Output: %r" % text)
+        self.assertEqual([l for l in text.splitlines() if l.startswith("silent-undo: base:")], [],
+                         "--upstream origin/main printed a base line, so the base was not the flag's alone. Output: %r" % text)
 
     def test_no_flag_reports_a_line_only_the_base_added_that_a_merge_drops(self):
         r = self.stacked_merge_drop()
