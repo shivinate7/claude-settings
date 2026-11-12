@@ -28,7 +28,7 @@ Measured on 2026-11-02, on home 428d8fe, degen a2ae7ba and ios-adblock 519ccf8: 
 
 Risk kind: named incident, above. Landed 2026-11-02.
 
-Cost: one python start per child CI run, and one per run of skill `compliance-check`. It reads files and writes none. It starts no timer and no long-lived process.
+Cost: one python start per child CI run, and one per run of skill `compliance-check` (unmeasured). It reads files and writes none. It starts no timer and no long-lived process.
 
 ## Not mechanized
 
