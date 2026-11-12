@@ -1034,7 +1034,7 @@ need "no sim-test.lock.dead.* folder is left" no_dead_folder
 need "no rmdir error on stderr" no_rmdir_error
 end_case "80 dead holder's lock folder with take.out: taken over, no dead folder left, no rmdir error"
 
-# ---- Cases 81 to 85: the first-frame check after its own boot (owner ruling, 2026-11-08 12:00 CST). It runs
+# ---- Cases 81 to 85: the first-frame check after its own boot. It runs
 # `sim_boot_record.py --check UDID` once, after the record call. A failed check stops the run before any test or hold.
 check_ran_on() { grep -Fxq "simctl bootstatus $1" "$calls" && grep -Fq "simctl io $1 screenshot " "$calls"; }
 no_check_call() { ! grep -Eq '^simctl (bootstatus|io) ' "$calls"; }
@@ -1060,7 +1060,7 @@ need "steps are boot run shutdown" steps_are "boot run shutdown "
 need "no first-frame failure on stderr" no_check_msg
 end_case "82 own boot, live first frame: the check runs and the tests run as before"
 
-# Control: a reuse runs no check. The base code runs none either, so this case is green on base.
+# Control: a reuse runs no check. It guards that a reuse stays unchecked.
 fresh; booted "iPhone Duo" $DUO1; set_frame black; run
 need "reuses the Duo booted before the run" dest_is "$DUO1"
 need "steps are run only" steps_are "run "
@@ -1079,7 +1079,7 @@ need "lease given" lease_released
 need "lock freed" lock_gone
 end_case "84 --hold own boot, one-colour first frame: no hold child, exit 1, the Duo shut down"
 
-# Case 85: the first-frame check exits 2, which is not the check's own fail code 1. Owner ruling (item 433 a): only exit 1
+# Case 85: the first-frame check exits 2, which is not the check's own fail code 1. Only exit 1
 # stops the run, so this run passes: it boots, tests and shuts down with xcodebuild's exit code. A python3 shim exits 2 on
 # every `--check` call and runs the real python3 for the rest (the record call), so bin/sim-test runs as it is.
 pyshim_check() {

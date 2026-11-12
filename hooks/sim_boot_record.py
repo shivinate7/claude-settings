@@ -20,8 +20,8 @@ Record mode: `sim_boot_record.py --record <UDID>`, which bin/sim-test calls afte
 one record line for that device, read with the same devices() and launchd(). It prints nothing and
 exits 0. It writes no line when the device is not listed or its launchd_sim is unclear.
 
-Check mode: `sim_boot_record.py --check <UDID>`, which bin/sim-test calls after `--record` on its own boot (owner
-ruling, page item 433 pick a, 2026-11-08 12:00 CST; decision sim-boot-is-verified). It runs sim_ok(UDID) once, the
+Check mode: `sim_boot_record.py --check <UDID>`, which bin/sim-test calls after `--record` on its own boot
+(decision sim-boot-is-verified). It runs sim_ok(UDID) once, the
 same first-frame check as the hook modes, the one home of it. A pass prints nothing and exits 0. A fail prints one
 stderr line naming the UDID and exits 1. It retries, shuts down and boots nothing. With no UDID it exits 2 and
 calls no simctl. Cost: one bootstatus (up to 90 s) and one screenshot.

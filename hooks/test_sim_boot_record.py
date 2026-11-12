@@ -42,7 +42,7 @@ The contract pinned here (hooks/sim_boot_record.py must match it):
     and launchd_sim read as the hook mode. bin/sim-test calls it after its own boot. It prints nothing
     and exits 0. It writes no line when the device is not listed or its launchd_sim is unclear.
   - check mode: `--check <UDID>` runs sim_ok(UDID) once, the first-frame check bin/sim-test runs after its own
-    boot (owner ruling, 2026-11-08 12:00 CST). A pass prints nothing and exits 0. A fail prints one stderr line
+    boot. A pass prints nothing and exits 0. A fail prints one stderr line
     naming the UDID and exits 1. It retries, shuts down and boots nothing. With no UDID it exits non-zero and
     calls no simctl.
 
@@ -915,8 +915,8 @@ class SimBootRecordTests(unittest.TestCase):
         self.assertEqual(self.read_records(), [], "a device was recorded from an unreadable list")
 
     # ------------------------------------------------------------------ check mode (`--check <UDID>`)
-    # bin/sim-test runs the hook as `sim_boot_record.py --check <UDID>` after its own boot (owner ruling,
-    # 2026-11-08 12:00 CST). The mode runs sim_ok(UDID) once: a pass prints nothing and exits 0; a fail prints one
+    # bin/sim-test runs the hook as `sim_boot_record.py --check <UDID>` after its own boot.
+    # The mode runs sim_ok(UDID) once: a pass prints nothing and exits 0; a fail prints one
     # stderr line naming the UDID and exits 1. It never retries, shuts down or boots the device. The fake xcrun logs
     # each bootstatus and screenshot call in order, and copies the scripted frame to the screenshot path.
 
