@@ -2493,6 +2493,99 @@ def case_judged_mixed_writes_all_returned():
           "doc ids %r: the relative write p4 is read against the process cwd and dropped" % (ids,))
 
 
+# ------------------------------------------------------------------ stops: the entries Blocking counts are named in holds
+#
+# Design notes docs/design/tier-sort-notes.md, ruling Q1 and point 1: `stops` is a list of what an answer stops, each entry a
+# lane slug, a PR number or a step id. holds names them in words, so the two cannot drift. The rule id is not fixed by the
+# brief, so each case takes any refusal, other than item-field-rendered, that names the entry it refuses.
+
+STOPS_HOLDS = "Lane fix-proxy and PR #1201 wait on your word."
+STOPS_NOT_A_REFUSAL = ("", "MISSING", "RAISED", "item-field-rendered")
+_STOPS_PAGE = []
+
+
+def stops_fields_page():
+    """A page whose itemFields block is the real page's list plus `stops`. The list is read from the page, never copied, and
+    the seam GUARD_ITEM_FIELDS_PAGE points the check at it, so a stops write is judged by the stops rule, not by
+    item-field-rendered (the page does not list stops yet)."""
+    if not _STOPS_PAGE:
+        fields = question_form._item_fields(question_form.ITEM_FIELDS_PAGE)
+        check("stops: the page's itemFields list reads", fields is not None, "no itemFields list in the page")
+        path = os.path.join(RUN_FOLDER, "stops_fields_page.html")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write('<script type="application/json" id="itemFields">%s</script>' % json.dumps((fields or []) + ["stops"]))
+        _STOPS_PAGE.append(path)
+    return _STOPS_PAGE[0]
+
+
+def stops_item(holds=None, stops=None):
+    """A decision in the form. `holds` and `stops` are set when given and left out when None."""
+    item = page_item(holds=holds, stops=stops)
+    return {k: v for k, v in item.items() if not (k in ("holds", "stops") and v is None)}
+
+
+def stops_refused(name, got, fragment):
+    ok = got[0] not in STOPS_NOT_A_REFUSAL and fragment.lower() in str(got[1]).lower()
+    check(name, ok, "want a refusal naming %r, got %r" % (fragment, got))
+
+
+def stops_page(name, data, fragment=None):
+    """One page write judged by item_hit and by the guard, with the stops seam. A fragment is a refusal that names it;
+    None is a pass."""
+    with mock.patch.dict(os.environ, {question_form.ITEM_FIELDS_SEAM: stops_fields_page()}):
+        for surface, got in (("page item_hit", call("item_hit", "set", entry_of(data))),
+                             ("page guard", guard_hit("set", entry_of(data)))):
+            if fragment is None:
+                check("%s: %s passes" % (surface, name), got == ("", ""), "want a pass, got %r" % (got,))
+            else:
+                stops_refused("%s: %s" % (surface, name), got, fragment)
+
+
+def case_stops_names_each_entry_in_holds():
+    """A lane is named by its slug in the words, a PR by "#N" or "PR N". A PR number is not named by a longer one that
+    starts with it (#12 is not #1201), nor a lane slug by a longer slug (fix is not fix-proxy)."""
+    stops_page("a lane entry that holds does not name", stops_item(holds="PR #1201 waits on your word.", stops=["lane fix-proxy"]), "fix-proxy")
+    stops_page("a PR entry that holds does not name", stops_item(holds="Lane fix-proxy waits on your word.", stops=["PR #1201"]), "1201")
+    stops_page("a second entry that holds does not name", stops_item(holds="Lane fix-proxy waits on your word.", stops=["lane fix-proxy", "PR #1201"]), "1201")
+    stops_page("a PR number that is the start of the one holds names", stops_item(holds="Waits on PR #1201.", stops=["PR #12"]), "PR #12")
+    stops_page("a lane slug that is the start of the one holds names", stops_item(holds="Lane fix-proxy waits on your word.", stops=["lane fix"]), "fix")
+
+
+def case_stops_consistent_items_pass():
+    """Controls: an item whose holds names every entry passes, with the PR written either way, and so does an item with
+    neither field, or an empty list."""
+    stops_page("holds names both entries", stops_item(holds=STOPS_HOLDS, stops=["lane fix-proxy", "PR #1201"]), None)
+    stops_page("holds writes the PR as PR N", stops_item(holds="Lane fix-proxy and PR 1201 wait on your word.", stops=["lane fix-proxy", "PR #1201"]), None)
+    stops_page("holds writes the PR as #N", stops_item(holds="Lane fix-proxy waits on #1201.", stops=["PR #1201"]), None)
+    stops_page("an empty stops list with holds", stops_item(holds=STOPS_HOLDS, stops=[]), None)
+    stops_page("neither holds nor stops", stops_item(), None)
+
+
+def case_stops_needs_holds_and_a_list():
+    """stops with no holds, a stops that is not a list, and a repeated entry are each refused, naming the stops or the entry."""
+    stops_page("stops with no holds", stops_item(stops=["lane fix-proxy"]), "stops")
+    stops_page("stops that is a string, not a list", stops_item(holds=STOPS_HOLDS, stops="lane fix-proxy"), "stops")
+    stops_page("a repeated entry", stops_item(holds=STOPS_HOLDS, stops=["lane fix-proxy", "lane fix-proxy"]), "fix-proxy")
+
+
+def case_stops_refusal_prints_its_table_text():
+    """A stops refusal prints its rule's text from question_form.PAGE_REASONS, the one table guard.py prints from (as
+    case_page_reasons_are_one_table checks the other page rules)."""
+    table = getattr(question_form, "PAGE_REASONS", None)
+    if table is None:
+        check("stops reason: question_form.PAGE_REASONS is the table of page reasons", False, MISSING)
+        return
+    tool_input = {"url": PAGE_URL, "action": "set", "collection": "items", "doc_id": DOC,
+                  "data": stops_item(holds="PR #1201 waits on your word.", stops=["lane fix-proxy"])}
+    with mock.patch.dict(os.environ, {question_form.ITEM_FIELDS_SEAM: stops_fields_page()}):
+        rule = guard.data_tool_hit(tool_input, PAGE_REPO)[0]
+        check("stops reason: the refused entry has a rule that is in the page reasons table",
+              rule in table and rule not in STOPS_NOT_A_REFUSAL, "rule %r" % (rule,))
+        if rule in table:
+            printed = printed_reason(tool_input)
+            check("stops reason: the refusal prints its rule's table text", table[rule] in printed, printed[:200])
+
+
 def main():
     for case in (case_item_92, case_item_51_stray_field, case_session_update_naming_dismissed_is_refused,
                  case_dismissed_refused_on_every_route, case_dismissed_refused_without_a_readable_field_list,
@@ -2535,7 +2628,9 @@ def main():
                  case_cross_repo_writer_guard_path, case_cross_repo_writer_page_item_hit,
                  case_cross_repo_writer_call_judge, case_cross_repo_update_checked_with_needs_repo,
                  case_judged_relative_file_path_read_at_cwd, case_judged_absolute_and_empty_are_unchanged,
-                 case_judged_mixed_writes_all_returned):
+                 case_judged_mixed_writes_all_returned,
+                 case_stops_names_each_entry_in_holds, case_stops_consistent_items_pass,
+                 case_stops_needs_holds_and_a_list, case_stops_refusal_prints_its_table_text):
         try:
             case()
         except Exception as exc:
