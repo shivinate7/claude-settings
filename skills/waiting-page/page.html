@@ -1731,15 +1731,17 @@ function replyMark(it) {
 // AGAINST_LINE copies CHALLENGED_LINE in hooks/question_form.py, one line at a time; a test holds the two to the same table (against_lines.json).
 // The page draws every line the pattern matches, with a model word or none, so an old item hides no case; the write-time guard refuses those separately.
 const AGAINST_LINE = /^[ \t]*(?:[-*+][ \t]+)?(?:\*\*)?Against the pick(?:\*\*)?[ \t]*(?:\(([^()\n]*)\))?[ \t]*(?:\*\*)?:(?:\*\*)?([^\n]*)/i;
-// A matched line with no case text stays in the context, so no text the writer wrote is dropped. The 220-character fold counts what is left.
-function splitAgainst(text) {
-  const ctx = [], cases = [];
-  String(text || "").split(/\r?\n/).forEach((ln) => { const m = AGAINST_LINE.exec(ln); if (m && m[2].trim()) cases.push({ model: (m[1] || "").trim(), text: m[2].trim() }); else ctx.push(ln); });
-  return { ctx: ctx.join("\n").replace(/\n{3,}/g, "\n\n").trim(), cases };
+// Only a decision splits; a task's line stays in its context. A matched line with no case text stays in the context, so no text the writer wrote is dropped. The 220-character fold counts what is left.
+// An item with no case line keeps its context exactly as written, with no trim or newline change; only a context that lost a case line is tidied.
+function splitAgainst(it) {
+  const text = it.context || "", ctx = [], cases = [];
+  if (it.kind !== "decision") return { ctx: text, cases };
+  String(text).split(/\r?\n/).forEach((ln) => { const m = AGAINST_LINE.exec(ln); if (m && m[2].trim()) cases.push({ model: (m[1] || "").trim(), text: m[2].trim() }); else ctx.push(ln); });
+  return cases.length ? { ctx: ctx.join("\n").replace(/\n{3,}/g, "\n\n").trim(), cases } : { ctx: text, cases };
 }
 // The guard's test (_challenged_judged): a pick that is not a stood pick or a port item. The page also needs a pick it shows.
 const owesCase = (it) => it.kind === "decision" && it.stands !== true && !it.port && !!pickKeys(it);
-const againstDrawn = (it) => it.kind === "decision" && !isRuling(it) && !isSaved(it) && !isByWait(it) && splitAgainst(it.context).cases.length > 0;
+const againstDrawn = (it) => it.kind === "decision" && !isRuling(it) && !isSaved(it) && !isByWait(it) && splitAgainst(it).cases.length > 0;
 // The words "Against the pick" show on the first block in page order only; each later block keeps them for screen readers (ux-label-once).
 function againstFirst(it) {
   if (!againstDrawn(it)) return false;
@@ -1807,7 +1809,7 @@ function buildCard(it) {
   }
   const thread = threadEl(it);
   if (thread) card.append(thread);
-  const more = !!state.more[it.id], sp = splitAgainst(it.context), ctxText = sp.ctx;
+  const more = !!state.more[it.id], sp = splitAgainst(it), ctxText = sp.ctx;
   const against = it.kind === "decision" ? againstEl(it, sp.cases) : null;
   card.append(h("p", { class: "ctx" + (more || ctxText.length <= 220 ? "" : " clamp"), id: "ctx-" + it.id }, ctxText));
   if (ctxText.length > 220) card.append(h("button", { class: "morebtn", id: "b-more-" + it.id, type: "button", "aria-expanded": String(more), "aria-controls": "ctx-" + it.id, onclick: () => { state.more[it.id] = !more; repaint(it); } }, more ? "Less" : "More context"));
