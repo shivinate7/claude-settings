@@ -62,6 +62,32 @@ def agent_transcript_path(transcript, agent_id):
     return os.path.join(agent_transcript_dir(transcript), "agent-" + agent_id + ".jsonl")
 
 
+def agent_brief_text(transcript, agent_id):
+    """The brief of an agent: the text of the first user record of its own transcript, else ''. Cost: one file read per
+    call, stopped at that record, no file written. Never raises, because the guard's checks must not crash on any
+    input: no path, a missing file, a folder, bad text and a record with no text are all '' (no brief)."""
+    if not isinstance(transcript, str) or not transcript or not isinstance(agent_id, str) or not agent_id:
+        return ""
+    try:
+        with open(agent_transcript_path(transcript, agent_id), encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    record = json.loads(line)
+                    message = record["message"] if record["type"] == "user" else None
+                except (ValueError, KeyError, TypeError):
+                    continue
+                if not isinstance(message, dict):
+                    continue
+                content = message.get("content")
+                if isinstance(content, list):
+                    content = "\n".join(b["text"] for b in content
+                                        if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str))
+                return content if isinstance(content, str) else ""
+    except (OSError, ValueError, RecursionError):
+        pass
+    return ""
+
+
 def own_session_read(transcript, own_id, created=False):
     """(tags, tagged_after, parent): the tags and parent_session_id of the newest get_session result
     whose ccr.id is own_id, else None for each, and whether a set_session_tags call follows that

@@ -20,7 +20,7 @@ Run the tests you write. Each new case fails on the old code for the right reaso
 the commit that adds it: `Red-run: <command> -> <N> failed on <sha>` (N is 1 or more, sha is 7 or more hex digits).
 Use `Red-run: none: <reason>` only for a change that adds no new claim, such as a re-pointed fixture.
 `lint/check_red_run.py` reads the trailer. Before you push to the brief's branch, run `python3 ~/.claude/lint/check_red_run.py --base origin/main`. It reads the repo you are in.
-Before you stop for any reason, commit your work. Push only to the branch the brief names, as `git push origin HEAD:<branch>`, never your worktree's own branch. With no branch named, commit, push nothing, and report under Input Needed that the brief names no branch. Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
+Before you stop for any reason, commit your work. Push only to the branch the brief's `Push to:` line names (`none` means push nothing), as `git push origin HEAD:<branch>`, never your worktree's own branch. With no `Push to:` line, commit, push nothing, and report under Input Needed that the brief names no push target (the guard refuses the push otherwise). Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it.
 Run PowerShell with the PowerShell tool, never powershell.exe from Bash (agent-powershell-tool).
 When worktree isolation refuses a command as too complex, split it into plain, separate commands. A step that still needs a script file is a need to report.
 

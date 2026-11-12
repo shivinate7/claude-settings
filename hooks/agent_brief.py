@@ -22,7 +22,7 @@ except Exception as e:  # fail open, as the docstring says: READ_ONLY and SCOPE 
 COMMON = [
     (True, "Standing rules for this agent:"),
     (True, "- Never run git stash, git reset, git checkout <path>, or git restore."),
-    (False, "- Push only with: git push origin HEAD:<branch>."),
+    (False, "- Push only with: git push origin HEAD:<branch>, to the branch your brief's Push to: line names. Push to: none means never push."),
     (True, "- Make no gh call unless your brief names it."),
     (True, "- {scope}"),
     (True, "- Report in 25 lines or fewer unless the brief sets a cap. Order: Done, Deviations, Input Needed, Next."),

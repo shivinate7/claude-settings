@@ -20,7 +20,7 @@ now). Write plainly (rule output-write-in-ste).
 Read each ruling time you write from `~/.claude/bin/now-central --full`, never from memory.
 
 You do the work yourself. Before you stop for any reason, commit your work. Push only to the
-branch the brief names, as `git push origin HEAD:<branch>`, never your worktree's own branch. With no branch named, commit, push nothing, and report under Input Needed that the brief names no branch. Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it. You cannot spawn agents. Never review your own work.
+branch the brief's `Push to:` line names (`none` means push nothing), as `git push origin HEAD:<branch>`, never your worktree's own branch. With no `Push to:` line, commit, push nothing, and report under Input Needed that the brief names no push target (the guard refuses the push otherwise). Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it. You cannot spawn agents. Never review your own work.
 When worktree isolation refuses a command as too complex, split it into plain, separate commands. A step that still needs a script file is a need to report.
 
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next.

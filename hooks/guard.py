@@ -114,6 +114,12 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   force-push           deny or ask. A lease with --force-if-includes passes. --force or a `+`
                        refspec refuses. A push that reaches the default branch asks.
                        (stale-safe-force-push)
+  push-target-named    deny. An agent's (valid agent_id) non-dry `git push` whose brief, the first user record of
+                       its own transcript, has no `Push to:` line (outside fences and backticks, after markdown
+                       lead characters; the first line decides), a `<placeholder>` or empty one, or a none one,
+                       or whose destinations are not all the branch that line names. A forced push keeps
+                       force-push. An unreadable brief is no line. The remedy never names the destination.
+                       Cost: one file read per agent push, no file written. (push-target-named)
   push-all-main        deny. A non-forced `--all`, `--branches` or glob refspec (`refs/heads/*:refs/heads/*`)
                        to a network remote that may update main or master there: local main or master
                        exists and `refs/remotes/<remote>/<name>` is missing or differs from it. A
@@ -566,7 +572,7 @@ while True:
         from guard_push_delete import (
             DELETE_REASON, DESTRUCTIVE_DELETE, LINKED_NM_REASON, PUSH_ASK_REASON, PUSH_MAIN_REASON,
             PUSH_AGENT_REASON, PUSH_ALL_AGENT_REASON, PUSH_ALL_REASON, PUSH_REASON, PUSH_STRAY_REASON,
-            cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_ask_hit, push_verdict,
+            cmd_exe_delete_hit, delete_text, linked_nm_hit, parent_delete_hit, push_ask_hit, push_target_reason, push_verdict,
             rm_delete_hit,
         )
         _loading = "guard_merge"
@@ -4540,6 +4546,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     hits = [] if POWERSHELL_CALL[0] else rm_after_cd_hits(stripped)
     if hits:
         refuse(tool, "deny", "rm-after-cd", rm_after_cd_reason(hits), "; ".join(hits))
+    push_agent = scratchpad_agent(payload)   # the agent's push is judged against its own brief
+    brief = []                               # the brief, read once per call and only for an agent's push
     for segment in (part for text in texts for part in split_segments(text)):
         for args, where, overrides in _push_calls(segment, stripped, cwd):
             verdict = push_verdict(args, where, overrides)
@@ -4566,6 +4574,15 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
                 elif kind == "stray":
                     ask_command("push-stray-branch", PUSH_STRAY_REASON, "git push " + " ".join(args),
                                 "push to a stray branch")
+            # Rule push-target-named: an agent's push goes only where its brief's Push to: line says. After the
+            # force verdict, so a forced push keeps its own refusal; a dry run writes nothing.
+            if push_agent and not verdict and not read_verb("push", args):
+                if not brief:
+                    import own_session
+                    brief.append(own_session.agent_brief_text(transcript, push_agent))
+                reason = push_target_reason(brief[0], args, where, overrides)
+                if reason:
+                    refuse(tool, "deny", "push-target-named", reason, "git push " + " ".join(args))
 
     # 5. The environment file. This layer reads the command BEFORE normalization.
     refusal, logged = env_refusal(strip_heredoc_bodies(raw, per_body=True))   # a data body drops, a script body stays

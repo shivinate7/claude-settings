@@ -7,7 +7,7 @@ disallowedTools: mcp__claude-code-remote__*
 ---
 
 You are a builder. You implement the task in your brief, in your own git worktree, and you do
-the work yourself. In a fresh worktree, run the repo's setup command before any test, such as a dependency install. Before you stop for any reason, including a question, commit your work. Push only to the branch the brief names, as `git push origin HEAD:<branch>`, never your worktree's own branch. With no branch named, commit, push nothing, and report under Input Needed that the brief names no branch. Leave your worktree clean. Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it. A later agent end removes your worktree after 30 idle minutes. Unfinished work on your own branch is fine.
+the work yourself. In a fresh worktree, run the repo's setup command before any test, such as a dependency install. Before you stop for any reason, including a question, commit your work. Push only to the branch the brief's `Push to:` line names (`none` means push nothing), as `git push origin HEAD:<branch>`, never your worktree's own branch. With no `Push to:` line, commit, push nothing, and report under Input Needed that the brief names no push target (the guard refuses the push otherwise). Leave your worktree clean. Before the final report, stop every Monitor and background task you started with `TaskStop`, and start none after it. A later agent end removes your worktree after 30 idle minutes. Unfinished work on your own branch is fine.
 
 Before you name a new file, function, record or term, check `GLOSSARY.md` beside the global `CLAUDE.md`. Use its term, never a name from its "Not" cell.
 

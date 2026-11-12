@@ -616,6 +616,56 @@ def push_destinations(args, cwd: str, overrides=None):
     return _DESTINATIONS[key]
 
 
+PUSH_LINE = re.compile(r"^[#*_>\s]*Push to:(.*)$")
+PUSH_FENCE = re.compile(r"^\s*(```|~~~)")
+PUSH_NONE = "none"   # the value of a Push to: line that lets the agent push nothing
+PUSH_NO_TARGET_REASON = (
+    "Rule (Git): an agent pushes only where its brief's Push to: line says, and this brief holds no such line or "
+    "the line is empty or a placeholder (rule push-target-named). "
+    "Remedy: stop, push nothing, and report that the brief names no push target."
+)
+PUSH_NONE_REASON = (
+    "Rule (Git): the Push to: line of this agent's brief says none, so this agent pushes nothing (rule push-target-named). "
+    "Remedy: commit your work, push nothing, and report it as unpushed."
+)
+PUSH_OTHER_REASON = (
+    "Rule (Git): this push goes to a branch, or to a destination that cannot be resolved, other than the one "
+    "the Push to: line of this agent's brief names (rule push-target-named). "
+    "Remedy: push only with `git push origin HEAD:<branch>` to the branch that line names, or stop and report."
+)
+
+
+def brief_push_target(brief):
+    """The branch the brief's first `Push to:` line names, `none` for a none line, else '' (no usable line). A line
+    counts when it starts, after markdown lead characters (`#*_>`) and spaces, with `Push to:`, outside a fence and
+    not in backticks, which cannot start such a line. The first line decides: an empty value or a `<placeholder>`
+    on it is no target, never a reason to read a later line. An `origin/` prefix is cut off."""
+    fenced = False
+    for line in brief.split("\n") if isinstance(brief, str) else []:
+        if PUSH_FENCE.match(line):
+            fenced = not fenced
+        elif not fenced and (found := PUSH_LINE.match(line)):
+            value = found.group(1).strip()
+            if not value or (value.startswith("<") and value.endswith(">")):
+                return ""
+            return PUSH_NONE if value.lower() == PUSH_NONE else value.removeprefix("origin/")
+    return ""
+
+
+def push_target_reason(brief, args, cwd, overrides=None):
+    """The refusal reason for an agent's push judged against its brief, else ''. No usable Push to: line, or none: refused.
+    A named branch: refused unless every destination of the push (`push_destinations`) is that branch. A destination
+    that cannot be resolved, or a glob, is not that branch. The reason never names the destination."""
+    target = brief_push_target(brief)
+    if not target:
+        return PUSH_NO_TARGET_REASON
+    if target == PUSH_NONE:
+        return PUSH_NONE_REASON
+    if all(dest == target for dest in push_destinations(args, cwd, overrides)):
+        return ""
+    return PUSH_OTHER_REASON
+
+
 def _colon_delete(delete, plain):
     """True for a push that deletes: a delete flag, or a refspec with no source (`:ref`)."""
     return delete or any(spec.startswith(":") for spec in plain)
