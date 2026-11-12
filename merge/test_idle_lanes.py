@@ -255,6 +255,21 @@ class IdleLanesCli(unittest.TestCase):
                 self.assertEqual(clear, [], "session_x reads clear for slug %r: out: %r" % (slug, out))
                 self.assertEqual(self.lane_line(out, "session_u"), "session_u (c2; topic -)", out)
 
+    def test_unreadable_record_branch_after_a_held_lane_reads_unknown_exit_1_no_summary(self):
+        # A pin of today's whole-list unknown: an unreadable record branch exits 1 and prints no summary. The HOLD check
+        # first shows the lane was read from the record branch, so the unknown comes from the branch going missing.
+        self.publish([archived("session_t", "c1", "alpha")])
+        self.record_from_origin()
+        out = self.run_idle()
+        self.assertIn(HOLD % "alpha", self.lane_line(out, "session_t"), out)
+        roadmap.git(self.repo, "update-ref", "-d", "refs/remotes/origin/roadmap")
+        roadmap.git(self.repo, "branch", "-m", "roadmap", "roadmap-gone")
+        code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
+        self.assertTrue(any(line.startswith("unknown (") for line in out.splitlines()),
+                        "no unknown line: out: %r, err: %r" % (out, err))
+        self.assertEqual(code, 1, "an unreadable record branch exits %d, so a caller reads the list as read" % code)
+        self.assertNotRegex(out, SUMMARY_LINE)
+
 
 if __name__ == "__main__":
     unittest.main()
