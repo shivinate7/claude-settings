@@ -675,22 +675,28 @@ def bare_record_cite(text):
 # (`precompact-handoff, item 9`, `x.md item 3`, a record name in backticks counts). A later cite of a named number
 # needs none. Each number of a list is judged on its own; a list tail joins numbers only after a plural `items`.
 # A lead gloss ends at a comma or dash, not a colon: `Open: item 46` is a label, not a name.
-# Scope: `scoped=False` reads every item cite (a handoff). `scoped=True` (a reply) reads a bare `item <n>` only when
-# the text holds the whole word page or triage outside skipped text; `page item <n>` always holds that word.
+# A lead is read on the cite's own line: a heading or a bullet above it is no gloss. Emphasis marks around the cite
+# (`**Item 46**`, CANNOT_EMPHASIS_RE) are no part of its name. A slug starts with a letter, so a date names nothing.
+# Scope: `scoped=False` reads every item cite (a handoff). `scoped=True` (a reply) reads a cite only in scope: after
+# `page` or `waiting-page` on its line, as a plural comma list (`items 46, 47`), or in a sentence that names waiting page,
+# waiting-page or triage outside skipped text (_clause.sentences: `;`, `:` and `,` end no sentence). A bare `page` is
+# no scope word. An out-of-scope cite that carries its name still names its number for a later cite.
 ITEM_HEAD_RE = re.compile(r"(?<![\w/.#:$-])(items?)\s+(\d{1,4})(?![\w]|\.\d)", re.I)
 ITEM_NEXT_RE = re.compile(r"(?:\s*\([^)\n]*\))?\s*(?:,\s*(?:and\s+)?|\band\s+|&\s*)(\d{1,4})(?![\w]|\.\d)")
-ITEM_SLUG_AFTER_RE = re.compile(r"^\s*\(\s*\w+(?:-\w+)+\s*\)")
+ITEM_COMMA_NEXT_RE = re.compile(r"(?:\s*\([^)\n]*\))?\s*,")
+ITEM_SLUG = r"[A-Za-z]\w*(?:-\w+)+"  # a record slug: a digit-led token (2026-11-06, 11-08) is a date, not a slug
+ITEM_SLUG_AFTER_RE = re.compile(r"^\s*\(\s*%s\s*\)" % ITEM_SLUG)
 # an item name after the number also follows a table-cell bar or an opening quote (a record id does not take them: `D12 | x y |`
 # is a table cell, not a gloss)
 ITEM_GLOSS_AFTER_RE = _gloss_after_re(",:;(=|—–-", '["“]?')
-ITEM_PAGE_PREFIX_RE = re.compile(r"(?:waiting[- ])?page\s+$", re.I)
-ITEM_SCOPE_RE = re.compile(r"\b(?:page|triage)\b", re.I)
-# a markdown link keeps its text for the scope read: `see [the waiting page](url)` holds the word page
+ITEM_PAGE_PREFIX_RE = re.compile(r"\b(?:waiting[- ])?page\s+$", re.I)
+ITEM_SCOPE_RE = re.compile(r"\bwaiting[- ]page\b|\btriage\b", re.I)
+# a markdown link keeps its text for the scope read: `see [the waiting page](url)` names the waiting page
 ITEM_LINK_RE = re.compile(r"\[([^\]\n]*)\]\([^)\n]*\)")
 # a record before the item: a path or file name with an extension, or a hyphenated slug (a comma after it is optional)
-ITEM_RECORD_RE = re.compile(r"(?:[\w.-]+/)*\w[\w-]*\.[A-Za-z]{1,5}\s*,?\s*$|(?<![\w-])(?!waiting-page\b)\w+(?:-\w+)+\s*,?\s*$")
+ITEM_RECORD_RE = re.compile(r"(?:[\w.-]+/)*\w[\w-]*\.[A-Za-z]{1,5}\s*,?\s*$|(?<![\w-])(?!waiting-page\b)%s\s*,?\s*$" % ITEM_SLUG)
 # a code span that is a record name: a path or file name with an extension, or a hyphenated slug
-ITEM_RECORD_SPAN_RE = re.compile(r"(?:[\w.-]+/)*\w[\w-]*\.[A-Za-z]{1,5}|\w+(?:-\w+)+")
+ITEM_RECORD_SPAN_RE = re.compile(r"(?:[\w.-]+/)*\w[\w-]*\.[A-Za-z]{1,5}|%s" % ITEM_SLUG)
 
 
 def gloss_lead(before, label_ok=True):
@@ -701,51 +707,66 @@ def gloss_lead(before, label_ok=True):
 
 
 def _item_skip(match):
-    """CITE_SKIP_RE replacement for an item cite: a backticked record name stays as the record, other skipped text goes."""
+    """CITE_SKIP_RE replacement for an item cite: a backticked record name stays as the record, other skipped text goes.
+    The result keeps the match's length and newlines, so a place in the clean text is the same place in the reply."""
     text = match.group(0)
     if len(text) > 2 and text[0] == "`" and text[-1] == "`" and not text.startswith("```") \
             and ITEM_RECORD_SPAN_RE.fullmatch(text[1:-1]):
-        return text[1:-1]
-    return " "
+        return " " + text[1:-1] + " "
+    return re.sub(r"[^\n]", " ", text)
 
 
 def _item_named(before, after):
     """True when an item number has its short name after it, or (`before` given, the head of a list) before it."""
+    after = CANNOT_EMPHASIS_RE.sub("", after)
     if ITEM_SLUG_AFTER_RE.match(after) or ITEM_GLOSS_AFTER_RE.match(after) or GLOSS_POSSESSIVE_RE.match(after):
         return True
-    before = ITEM_PAGE_PREFIX_RE.sub("", before)
+    before = ITEM_PAGE_PREFIX_RE.sub("", CANNOT_EMPHASIS_RE.sub("", before))
     if GLOSS_BEFORE_RE.search(before) and after.lstrip().startswith(")"):
         return True
     return bool(before and (gloss_lead(before, label_ok=False) or ITEM_RECORD_RE.search(before)))
 
 
+def _item_scope_sentences(text, clean):
+    """[(start, end)] of each sentence of `text` that names waiting page, waiting-page or triage outside skipped text.
+    `clean` is `text` with skipped text blanked at the same places, so a dot in code or a URL ends no sentence."""
+    return [(a, b) for a, b in _clause.sentences(clean, ())
+            if ITEM_SCOPE_RE.search(CITE_SKIP_RE.sub(" ", ITEM_LINK_RE.sub(r"\1", text[a:b])))]
+
+
 def bare_item_cite(text, scoped=False):
     """Return the first page item number in `text` cited with no short name, else ''. A number named at
-    an earlier cite needs none later. `scoped` limits the read to text that holds page or triage."""
-    if scoped and not ITEM_SCOPE_RE.search(CITE_SKIP_RE.sub(" ", ITEM_LINK_RE.sub(r"\1", text))):
-        return ""
+    an earlier cite needs none later. `scoped` refuses a cite only in scope (the comment above ITEM_HEAD_RE)."""
     clean = CITE_SKIP_RE.sub(_item_skip, text)
+    in_scope = None
     named = set()
     pos = 0
     while True:
         head = ITEM_HEAD_RE.search(clean, pos)
         if not head:
             return ""
-        before = clean[max(0, head.start() - 80):head.start()]
+        before = clean[max(0, head.start() - 80):head.start()].rsplit("\n", 1)[-1]
+        plural = head.group(1).lower() == "items"
         cites = [(head.group(2), head.end(), before)]
         end = head.end()
-        while head.group(1).lower() == "items":
+        while plural:
             nxt = ITEM_NEXT_RE.match(clean, end)
             if not nxt:
                 break
             cites.append((nxt.group(1), nxt.end(), ""))
             end = nxt.end()
+        refuse = not scoped or bool(ITEM_PAGE_PREFIX_RE.search(before)) \
+            or (plural and len(cites) > 1 and bool(ITEM_COMMA_NEXT_RE.match(clean, head.end())))
+        if not refuse:
+            if in_scope is None:
+                in_scope = _item_scope_sentences(text, clean)
+            refuse = any(a <= head.start() < b for a, b in in_scope)
         for number, stop, lead_before in cites:
             if number in named:
                 continue
             if _item_named(lead_before, clean[stop:stop + 80]):
                 named.add(number)
-            else:
+            elif refuse:
                 return number
         pos = end
 
