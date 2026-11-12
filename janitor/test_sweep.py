@@ -1867,6 +1867,46 @@ class StaleAgentLockTests(unittest.TestCase):
             self.assertIs(sweep.own_agent_lock_verdict(reason, None, path), False,
                           "a holder outside the ancestry is this session's own lock")
 
+    # The ancestry walk's two stops that keep. Each control arm is the same holder, outside the chain, with
+    # the walk intact: it frees (stale True). The subject arm breaks the walk, and the verdict must keep.
+
+    @unittest.skipIf(not sys.platform.startswith("linux"), "the /proc route is Linux only")
+    def test_linux_no_start_lock_whose_parent_read_fails_keeps(self):
+        # Red on 7d0d0e84f: that commit has no ancestry walk, so the holder frees whatever the parent reads say.
+        # The subject arm makes every parent read return None, so the walk cannot rule out an ancestor: keep.
+        holder = self.live_holder(argv=["sleep", "300"] if shutil.which("sleep") else None)
+        path = self.no_start_tree("nsparent", holder)
+        self.assert_no_start_scope("nsparent", path, holder)
+        reason = self.fresh_entry(path)["locked_reason"]
+        with self.subTest(arm="control: the walk reads the parents"):
+            self.assertIs(sweep.stale_agent_lock_verdict(reason, None, path), True,
+                          "scope: a plain-argv holder outside the chain does not free with the walk intact")
+        with mock.patch.object(sweep, "_parent_pid", return_value=None) as read:
+            got = sweep.stale_agent_lock_verdict(reason, None, path)
+        with self.subTest(arm="subject: the parent read was made"):
+            self.assertTrue(read.called, "scope: the parent read was never made")
+        with self.subTest(arm="subject: an unreadable parent read keeps"):
+            self.assertIs(got, False, "an unreadable parent read freed a live holder: stale %r" % got)
+
+    @unittest.skipIf(not sys.platform.startswith("linux"), "the /proc route is Linux only")
+    def test_linux_no_start_lock_whose_ancestry_walk_exhausts_its_bound_keeps(self):
+        # Red on 7d0d0e84f: that commit has no ancestry walk, so the holder frees. The subject arm makes every
+        # parent read return the walk's own pid, a cycle that never reaches the holder or PID 1. The walk runs
+        # out of MAX_CLIMB steps, and an exhausted bound keeps.
+        holder = self.live_holder(argv=["sleep", "300"] if shutil.which("sleep") else None)
+        path = self.no_start_tree("nsbound", holder)
+        self.assert_no_start_scope("nsbound", path, holder)
+        reason = self.fresh_entry(path)["locked_reason"]
+        with self.subTest(arm="control: the walk reads the parents"):
+            self.assertIs(sweep.stale_agent_lock_verdict(reason, None, path), True,
+                          "scope: a plain-argv holder outside the chain does not free with the walk intact")
+        with mock.patch.object(sweep, "_parent_pid", side_effect=lambda pid: pid) as read:
+            got = sweep.stale_agent_lock_verdict(reason, None, path)
+        with self.subTest(arm="subject: the walk ran out of its bound"):
+            self.assertEqual(read.call_count, sweep.MAX_CLIMB, "scope: the walk did not run to its bound")
+        with self.subTest(arm="subject: an exhausted bound keeps"):
+            self.assertIs(got, False, "an exhausted ancestry bound freed a live holder: stale %r" % got)
+
     @unittest.skipIf(not sys.platform.startswith("linux"), "the /proc route is Linux only")
     def test_linux_no_start_lock_whose_holder_works_inside_its_tree_keeps_despite_a_write_time_gap(self):
         # Red on the unchanged code: the write time reads a reused pid, so the old verdict frees the tree.

@@ -1546,6 +1546,36 @@ MUTATIONS = [
      '            return _no_start_holder_is_foreign_linux(pid, worktree)\n'
      '        return True\n',
      "test_darwin_keeps_a_live_no_start_holder_whatever_the_write_time"),
+
+    # ---- the ancestry walk in `_no_start_holder_is_foreign_linux`: this process or an ancestor keeps, and
+    # so does an unreadable parent read or an exhausted MAX_CLIMB bound ----
+    ("ancestry walk: the ancestor match is dropped, so a live plain-argv ancestor frees",
+     "sweep",
+     '        if current == pid:\n'
+     '            return False\n',
+     '        if False:\n'
+     '            return False\n',
+     "test_linux_no_start_lock_held_by_a_plain_argv_ancestor_reads_live"),
+    ("ancestry walk: an unreadable parent read is flipped to free",
+     "sweep",
+     '        current = _parent_pid(current)\n'
+     '        if current is None:\n'
+     '            return False\n',
+     '        current = _parent_pid(current)\n'
+     '        if current is None:\n'
+     '            return True\n',
+     "test_linux_no_start_lock_whose_parent_read_fails_keeps"),
+    ("ancestry walk: an exhausted MAX_CLIMB bound is flipped to free",
+     "sweep",
+     '        if current is None:\n'
+     '            return False\n'
+     '    else:\n'
+     '        return False\n',
+     '        if current is None:\n'
+     '            return False\n'
+     '    else:\n'
+     '        return True\n',
+     "test_linux_no_start_lock_whose_ancestry_walk_exhausts_its_bound_keeps"),
 ]
 
 
