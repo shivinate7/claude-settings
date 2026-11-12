@@ -150,13 +150,14 @@ def pointer_edit_hit(targets, cwd: str) -> str:
 GIT_DIR_RE = re.compile(r"--git-dir(?:=|\s+)(['\"]?)([^'\";&|\s]+)\1")
 
 
-def head_root(cmd: str, shell_cwd: str) -> str:
+def head_root(cmd: str, shell_cwd: str, run_cmd: str = "") -> str:
     """Return the directory whose HEAD the command would move.
 
     A `--git-dir` on the line names that HEAD directly, wherever the call runs from. With none,
-    the HEAD that moves belongs to the tree the call RUNS in.
+    the HEAD that moves belongs to the tree the call RUNS in. `run_cmd` is the command as typed
+    when `cmd` is stripped of heredoc bodies: the folder is read off it (see `command_root`).
     """
-    run_dir = _run_dir(cmd, shell_cwd)
+    run_dir = _run_dir(run_cmd or cmd, shell_cwd)
     match = GIT_DIR_RE.search(cmd)
     if not match:
         # NOT `command_root`. A `--work-tree` retargets the FILES and leaves HEAD where the call

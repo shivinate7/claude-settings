@@ -364,6 +364,28 @@ sh("run-dir bypass: a `cd` inside an interpreter heredoc body never moves the ou
 sh("run-dir r3-bd: a body cd after a stray EOF line, a reset after the closer, denies as on main",
    "cat <<'EOF-1' > x.sh\nEOF\ncd " + slash(SUBJDIRTY) + "\nEOF-1\n" + VCS + " reset --hard HEAD",
    "deny", "shared-tree", cwd=SUBJCLEAN)
+# UNCLOSED TAIL. The guard strips heredoc bodies and closers once, before it reads the folder. Read again, the header
+# line then looks like a heredoc with no closer, and the walk drops every line after it, so a `cd` after a closed heredoc
+# never moved the folder the reset was judged in. The cwd is clean and the `cd` names the dirty tree, so each must deny.
+sh("run-dir unclosed-tail: a cat heredoc, closed, then cd dirty and reset, from a clean cwd, denies",
+   "cat > notes.md <<'EOF'\nx\nEOF\ncd " + slash(SUBJDIRTY) + " && " + VCS + " reset --hard HEAD",
+   "deny", "shared-tree", cwd=SUBJCLEAN)
+sh("run-dir unclosed-tail: two closed heredocs, then cd dirty and reset, from a clean cwd, denies",
+   "cat > a.md <<'EOF'\nx\nEOF\ncat > b.md <<'EOF'\ny\nEOF\ncd " + slash(SUBJDIRTY) + " && " + VCS + " reset --hard HEAD",
+   "deny", "shared-tree", cwd=SUBJCLEAN)
+# CONTROLS. A heredoc that never closes holds every later line as body, so bash runs no `cd` and no reset there.
+sh("run-dir unclosed-tail: a heredoc that never closes holds the cd and reset as body, allowed",
+   "cat > notes.md <<'EOF'\ncd " + slash(SUBJDIRTY) + " && " + VCS + " reset --hard HEAD",
+   "allow", cwd=SUBJCLEAN)
+sh("run-dir unclosed-tail: a heredoc body that names --work-tree at the dirty tree is text, a reset from a clean cwd, allowed",
+   "cat > notes.md <<'EOF'\nuse --work-tree " + slash(SUBJDIRTY) + "\nEOF\n" + VCS + " reset --hard HEAD",
+   "allow", cwd=SUBJCLEAN)
+sh("run-dir unclosed-tail: a closed heredoc, then cd to the pointer checkout and a branch switch, from elsewhere, denies",
+   "cat > notes.md <<'EOF'\nx\nEOF\ncd " + slash(PTRMAIN) + " && " + VCS + " switch somebranch",
+   "deny", "pointer-head", cwd=NOGIT, config=PTRCFG)
+sh("run-dir unclosed-tail: a closed heredoc, then a reset with no cd, from a clean cwd, allowed",
+   "cat > notes.md <<'EOF'\nx\nEOF\n" + VCS + " reset --hard HEAD",
+   "allow", cwd=SUBJCLEAN)
 # PER PATH for `restore` and `checkout <path>`: the pathspec goes to git, and an empty answer
 # proves the write changes nothing. Both named paths sit in the SAME dirty tree.
 sh("subject: restoring a clean path inside a dirty tree changes nothing",

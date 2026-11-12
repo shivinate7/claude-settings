@@ -4248,7 +4248,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         for segment in split_segments(stripped):
             for subcommand, _ in git_calls(segment):
                 if subcommand in ("commit", "push"):
-                    diff_refusal(tool, role, command_root(stripped, cwd))
+                    diff_refusal(tool, role, command_root(stripped, cwd, raw))
 
     # 0c. A command that sets a git location variable (q_max incident, 2026-10-14). Placed before
     # rule 1 on purpose: the deny wins where the shared-tree guard would only ask (arbiter ruling).
@@ -4270,7 +4270,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             # a `--work-tree` beside the `-C` moves the files the call discards to that tree
             root = command_root(segment, cwd) if GIT_WORK_TREE_RE.search(segment) else _absolute(own_c, cwd)
         else:
-            whole_root = whole_root or [command_root(stripped, cwd)]
+            whole_root = whole_root or [command_root(stripped, cwd, raw)]
             root = whole_root[0]
         match = shared_tree_match(segment, root)
         if match is None:
@@ -4333,7 +4333,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 1b. The pointer checkout's HEAD. Placed AFTER rule 1 on purpose: a `git checkout` that
     # names a path is a path operation, rule 1 already judges it, and this rule never sees it, so
     # the shared-tree clause keeps governing those calls unchanged.
-    head_where = head_root(stripped, cwd)
+    head_where = head_root(stripped, cwd, raw)
     for segment in split_segments(stripped):
         if not segment.strip():
             continue
@@ -4399,7 +4399,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "impeccable-review-only", IMPECCABLE_REASON, matched)
 
     # 1d. A commit message or PR body that cites a record by its path.
-    cite_where = command_root(stripped, cwd)
+    cite_where = command_root(stripped, cwd, raw)
     # each segment takes its own bodies: heredoc_offsets counts the headers ahead of it (1c's split)
     number = 0
 
@@ -4507,7 +4507,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # 3b. A trap ported from banchi's `scripts/guard-shell.py`: `ln -s` onto a directory that is
     # already there. It reads the segment's own command word, never a substring, and reads the
     # filesystem rather than the text.
-    run_in = _run_dir(stripped, cwd)
+    run_in = _run_dir(raw, cwd)
     ends = []
     nm_segments = split_segments(stripped, ends)
     for number, segment in enumerate(nm_segments):

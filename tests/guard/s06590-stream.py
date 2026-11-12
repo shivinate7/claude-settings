@@ -207,6 +207,14 @@ sh("ln: a trailing slash says the destination is a directory",
    "ln -s /opt/tool/x realdir/", "allow", cwd=TRAPLN)
 sh("ln: a hard link over a directory name is not symbolic", "ln /opt/tool/x realdir", "allow",
    cwd=TRAPLN)
+# A closed heredoc, then a `cd` into the folder that holds the link directory, then `ln -sf` onto it. The
+# folder is read off the command as typed: the guard strips the heredoc first, and reads the folder off
+# that text, where a closed heredoc's header reads as one that never closes and drops the `cd`. From
+# NOGIT, where no `linkdir` exists, the `ln` is harmless, so only the `cd` makes it a deny.
+if LINKS_MADE:
+    sh("ln: a closed heredoc, then cd into a folder whose link directory -sf would descend into, denies",
+       "cat > notes.md <<'EOF'\nx\nEOF\ncd " + slash(TRAPLN) + " && ln -sf /opt/tool/linkdir linkdir",
+       "deny", "ln-over-directory", cwd=NOGIT)
 
 # --- a roster command piped into tail or head (rule check-tail)
 #

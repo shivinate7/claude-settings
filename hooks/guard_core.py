@@ -1724,17 +1724,21 @@ def _run_dir(cmd: str, shell_cwd: str) -> str:
     return where or shell_cwd or ""
 
 
-def command_root(cmd: str, shell_cwd: str) -> str:
+def command_root(cmd: str, shell_cwd: str, run_cmd: str = "") -> str:
     """Return the WORKING TREE the command acts on.
 
     This answers "whose files does this call write or discard". It is NOT the answer to "whose
     HEAD does this call move": a git directory and a work tree are set separately and can name
     two different checkouts. `head_root` answers that second question.
+
+    `run_cmd` is the command as typed, when `cmd` has had its heredoc bodies and closers
+    stripped. `_run_dir` strips again, and it reads a header whose closer is gone as a heredoc
+    that never closes, so it drops the `cd` after it. The folder is read off `run_cmd`; the
+    `--work-tree` match stays on `cmd`, so a body that names the flag is still only text.
     """
+    run_dir = _run_dir(run_cmd or cmd, shell_cwd)
     match = GIT_WORK_TREE_RE.search(cmd)
-    if match:
-        return _absolute(match.group(2), _run_dir(cmd, shell_cwd))
-    return _run_dir(cmd, shell_cwd)
+    return _absolute(match.group(2), run_dir) if match else run_dir
 
 
 # ------------------------------------------------------------------ a removed or pruned worktree

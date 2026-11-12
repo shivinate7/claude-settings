@@ -157,6 +157,13 @@ sh("builder-diff: git -C hooks commit with an edit to mutate_guard.py is refused
    VCS + " -C hooks commit -m x", "deny", rule=BDIFF, cwd=_guard_changed, agent_id="bld1", agent_type="builder")
 add("builder-diff: stop from hooks/ with an edit to mutate_guard.py is blocked", "deny", rule=BDIFF,
     event="SubagentStop", cwd=os.path.join(_guard_changed, "hooks"), agent_id="bld1", agent_type="builder")
+# A closed heredoc, then a `cd` into a dirty worktree, then a commit from a clean cwd. The diff is the one the
+# commit runs in, so the `cd` decides it: the folder is read off the command as typed, not the stripped text.
+_heredoc_dirty = diff_repo("b-unclosed-tail", _put("tests/test_a.py", "pass\n"))
+_heredoc_clean = diff_repo("g-unclosed-tail-clean", lambda w: None)
+sh("builder-diff: a closed heredoc, then cd into a dirty worktree and commit, from a clean cwd, is denied",
+   "cat > notes.md <<'EOF'\nx\nEOF\ncd " + slash(_heredoc_dirty) + " && " + COMMIT,
+   "deny", rule=BDIFF, cwd=_heredoc_clean, agent_id="bld1", agent_type="builder")
 # The empty state is no exception: HEAD holds an empty MUTATIONS list, and a builder's first entry is refused too.
 _empty_mut = diff_repo("b-mutants-empty", _put("hooks/mutate_guard.py", 'MUTATIONS = [\n    ("x", 1),\n]\n'),
                        files={**BASE_FILES, "hooks/mutate_guard.py": "MUTATIONS = [\n]\n"})
