@@ -32,8 +32,9 @@ Based on line whose text is only an angle-bracket placeholder (the template copi
 text passes). A Problem line that is
 bare, or whose stake is outside OWNER_STAKES, refuses as `owner-judge`. When all of those pass, a missing
 or empty `Departs from:` line (a bullet or bold label is read), a line with no separator (" — ", an unspaced
-"—", " - " or " -- ") or an empty or placeholder side, and a change side whose first clause (before ";") says
-nothing changes (a restatement of main) refuse as `question-departs`: the rule building-port-keeps-behaviour,
+"—", " - " or " -- ") and no sentence end (". ", "! " or "? " before a capital letter), or an empty or
+placeholder side, and a change side whose first clause (before ";") says nothing changes, or a sentence-form
+main side that is only a subject and a no-change word (a restatement of main) refuse as `question-departs`: the rule building-port-keeps-behaviour,
 in decision port-keeps-behaviour. departs_hit is its one predicate; lint/report_guard.py calls it too.
 The page writer's last two rules run after the form: `option-letter-keys` (an option's key is its
 position's letter, and a label that opens with a letter tag names that letter) and `rework-off-page` (an open item never says it is being reworked).
@@ -177,13 +178,14 @@ DEPARTS_RULE = "question-departs"
 DEPARTS_LINE = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?(?:\*\*)?Departs from(?:\*\*)?:(?:\*\*)?([^\n]*)", re.I | re.M)
 # The separator: an em dash, spaced or not, or " - " or " -- ". The first one splits the line.
 DEPARTS_SEPARATOR = re.compile(r"\s*\u2014\s*|\s+--?\s+")
-# With no dash, the first sentence end splits the line: a ".", "!" or "?" and the space after it. The first
-# sentence (less its end mark) is the main side and the rest is the change side.
-DEPARTS_SENTENCE_END = re.compile(r"[.!?]\s+")
+# With no dash, the first sentence end splits the line: a ".", "!" or "?", the space after it, and a capital
+# letter that starts the next sentence ("e.g. the guard" does not end one). The first sentence (less its end
+# mark) is the main side and the rest is the change side.
+DEPARTS_SENTENCE_END = re.compile(r"[.!?]\s+(?=[A-Z])")
 # Whole words and phrases that say the change side restates main. "stay", "remain" and "kept" are not
 # here: "Suspense cards stay in Suspense" is a port change that names where a thing goes.
 NO_CHANGE = re.compile(r"(?<![\w/-])(?:none|nothing|n/a|no changes?|no difference|unchanged|stays|keeps|as today"
-                       r"|as on main|as before|same as|identical to|already)(?![\w/-])", re.I)
+                       r"|as on main|as before|same as|identical to|already|same behaviou?r|behaves? the same)(?![\w/-])", re.I)
 # The new-thing change side, "adds <X>": group 1 is X.
 PORT_NEW_THING = re.compile(r"adds\b\s*(.*\S)", re.I)
 DEPARTS_REASON = ("A question to the owner says how the work departs from main, in a line that starts "
@@ -209,6 +211,16 @@ def departs_sides(rest):
     return rest.strip(), "", ""
 
 
+def bare_restatement(main):
+    """The no-change word when a sentence-form main side is only a bare subject (up to two words, no comma)
+    and that word ("main stays"), else "". A word inside a longer clause describes main and passes."""
+    main = main.strip().rstrip(".!?").strip()
+    for word in NO_CHANGE.finditer(main):
+        if word.end() == len(main) and "," not in main[:word.start()] and len(main[:word.start()].split()) <= 2:
+            return word.group(0)
+    return ""
+
+
 def departs_hit(text) -> str:
     """The miss reason when `text` lacks a valid Departs from line, else "". Every such line must hold a
     non-empty side on each side of the first separator (see DEPARTS_SEPARATOR), neither side only a
@@ -231,6 +243,9 @@ def departs_hit(text) -> str:
         word = NO_CHANGE.search(change.split(";", 1)[0])
         if word:
             return "Departs from line whose change side says no change (%r): it restates main" % word.group(0)
+        word = bare_restatement(main) if split == "sentence" else ""
+        if word:
+            return "Departs from line whose main side is only a subject and a no-change word (%r): it restates main" % word
     return ""
 
 
@@ -271,6 +286,9 @@ def port_departs_miss(text) -> str:
                     continue
             elif PORT_MAIN_SIDE.fullmatch(main):
                 continue
+        if how == "sentence" and PORT_MAIN_SIDE.search(main):
+            return ("port item whose Departs from line is a sentence: a port needs the dash form "
+                    "\"Departs from: <file>:<symbol> \u2014 <what changes>\"")
         return "port item whose Departs from line names no <file>:<symbol> on main"
     return ""
 
