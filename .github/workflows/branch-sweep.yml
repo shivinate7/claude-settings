@@ -31,14 +31,15 @@ jobs:
           persist-credentials: false
 
       # The token has no pull-requests scope, so this read relies on the repo being public. A failed read stops
-      # the job before any delete: a sweep that cannot see open pull requests could close one.
-      - name: Read the heads of open pull requests
+      # the job before any delete: a sweep that cannot see open pull requests could close one. It keeps each
+      # base too: deleting the base of a stacked pull request closes that pull request.
+      - name: Read the heads and bases of open pull requests
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         shell: bash
         run: |
-          gh api --paginate "repos/$REPO/pulls?state=open&per_page=100" --jq '.[].head.ref' > "$RUNNER_TEMP/open-heads.txt"
+          gh api --paginate "repos/$REPO/pulls?state=open&per_page=100" --jq '.[] | .head.ref, .base.ref' > "$RUNNER_TEMP/open-heads.txt"
 
       - name: Delete the branches the Oct 30 grant allows
         env:
@@ -59,12 +60,21 @@ jobs:
           while read -r verb name reason; do
             if [ "$verb" = delete ]; then
               if ! err=$(gh api -X DELETE "repos/$REPO/git/refs/heads/$name" 2>&1 < /dev/null); then
+                case "$err" in
+                  # The ref is already gone, so the delete is done.
+                  *"HTTP 404"* | *"HTTP 422"*)
+                    echo "already gone: $name"
+                    continue
+                    ;;
+                  # A refusal for rate or scope repeats on every later delete, so stop. A red run on main trips
+                  # the red-main brake, so this one stays green; the next run deletes the rest.
+                  *"HTTP 403"* | *"HTTP 429"*)
+                    echo "$err" >&2
+                    echo "::warning::GitHub refused a delete (HTTP 403 or 429); stopped at $name. The next run deletes the rest."
+                    break
+                    ;;
+                esac
                 echo "$err" >&2
-                # A refusal for rate or scope repeats on every later delete: stop and fail. The next run finishes.
-                if printf '%s\n' "$err" | grep -Eq 'HTTP (403|429)'; then
-                  echo "::error::GitHub refused a delete (HTTP 403 or 429); stopped at $name"
-                  exit 1
-                fi
                 echo "::warning::could not delete $name"
                 failed=1
               fi

@@ -11,7 +11,7 @@ Rules:
   pin          each uses: is pinned by a full commit SHA, except a ./ local action
   checkout     each actions/checkout step sets persist-credentials: false under its with:
   timeout      each job sets timeout-minutes
-  read         the step that reads open pull requests cannot fail silently: no || true, no continue-on-error
+  read         the step that reads open pull requests cannot fail silently: no || true, || echo, or continue-on-error
   injection    no ${{ }} expression inside a run block, comments of the block included
   concurrency  a concurrency block is set at the top level
   condition    each job has an if: that limits it to refs/heads/main
@@ -30,7 +30,7 @@ KEY = re.compile(r"^(-\s+)?([A-Za-z0-9_.\"'-]+):(?:\s+(.*))?$")
 BLOCK_SCALAR = re.compile(r"^[|>][+-]?\d*$")
 EXPR = re.compile(r"\$\{\{(.*?)\}\}")
 SECRETS = re.compile(r"(?<![\w.-])secrets(?![\w-])")
-SILENT_FAIL = re.compile(r"\|\|\s*(true|:|exit\s+0)\b|\bset\s+\+e\b")
+SILENT_FAIL = re.compile(r"\|\|\s*(true|:|exit\s+0|echo)\b|\bset\s+\+e\b")
 MAIN_ONLY = re.compile(r"^(\$\{\{\s*)?github\.ref\s*==\s*['\"]refs/heads/main['\"](\s*\}\})?$")
 SPLIT_ARG = re.compile(r"--open-head(?!=)")
 SHA_PIN = re.compile(r"@[0-9a-f]{40}$")
