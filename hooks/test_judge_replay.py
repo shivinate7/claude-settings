@@ -266,7 +266,7 @@ def run_main(argv):
 
 
 def case_seam_control():
-    """Green on main: the seam the fake replaces is real, and the fake is undone when its block ends."""
+    """Control: the seam the fake replaces is real, and the fake is undone when its block ends."""
     real = decision_watch.invoke_model
     check("seam: decision_watch.invoke_model is a function", callable(real), "decision_watch has no invoke_model")
     with faked_model(NO_AUTH):
