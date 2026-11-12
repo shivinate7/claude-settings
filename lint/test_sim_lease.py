@@ -10,6 +10,7 @@ passes through to the real ps except for a start time that a case sets. CI and G
 A holder is a live `sleep` child or a child already reaped, so no case depends on a pid being free.
 Temp files follow decisions/test-temp-standard.md: one run folder from lint/_test_temp.py per run, removed at the end.
 """
+import ast
 import importlib.machinery
 import importlib.util
 import json
@@ -396,6 +397,39 @@ class RealReader(unittest.TestCase):
                 verdict = self.guard_load.load_verdict(reading)
                 self.assertEqual(verdict["unread"], ["memory"], "the verdict does not name memory as unread")
                 self.assertEqual(verdict["level"], level, "the level is not the disk's level")
+
+
+class LoadImports(unittest.TestCase):
+    """hooks/guard_load.py imports the standard library only. bin/sim-lease loads it from hooks/ alone, so a guard_*
+    module or _nowindow in its imports would break sim-lease. The imports are read from the parsed tree, including
+    the ones inside functions."""
+
+    def imported_names(self, source):
+        """The top-level module names that the source imports."""
+        names = set()
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.Import):
+                names.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                if node.module:
+                    names.add(node.module.split(".")[0])
+                if node.level:
+                    names.update(alias.name for alias in node.names)
+        return names
+
+    def test_guard_load_imports_no_guard_module_and_no_nowindow(self):
+        with open(GUARD_LOAD_PATH, encoding="utf-8") as handle:
+            names = self.imported_names(handle.read())
+        self.assertTrue({"os", "sys"} <= names, "the walk found %s, not os and sys: it reads no imports"
+                        % sorted(names))
+        bad = sorted(name for name in names if name.startswith("guard_") or name == "_nowindow")
+        self.assertEqual(bad, [], "hooks/guard_load.py imports %s: it must import the standard library only" % bad)
+
+    def test_the_walk_reads_a_function_level_import_and_not_one_in_a_string_or_comment(self):
+        source = ('import os\n# import guard_core\ntext = """\nimport _nowindow\n\' a lone quote\n"""\n'
+                  'def read():\n    import guard_shared\n')
+        self.assertEqual(self.imported_names(source), {"os", "guard_shared"},
+                         "the walk misses a function-level import, or reads one in a string or comment")
 
 
 class Give(LeaseCase):
