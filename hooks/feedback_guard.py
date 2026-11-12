@@ -49,14 +49,15 @@ a turn end in these cases:
     owner's message, an ArtifactData get, list or query of collection `items` of the waiting page
     (layout.artifact_id), with no out_dir, whose tool_result is no error and returns a document whose data n
     equals the number (Pages.read_back; local_time._documents reads the result). No read-back blocks, whatever
-    the git copy of the waiting page holds: that copy is a backup the check never reads, and the remedy says to
+    the backup copy of the waiting page holds: the check never reads it, and the remedy says to
     read the item back. Only in a repo that names a waiting page. A layout or git that cannot be read stands the
-    check down with a systemMessage (FAIL_OPEN_FILING), and the send check decides alone. The check runs only
+    check down with a systemMessage (FAIL_OPEN_FILING), and the send check decides alone. A failure of
+    layout._default_branch_extras passes silently (debt default-branch-page-only). The check runs only
     after a proved send: a send the check stood down on skips it. Risk kind: likely risk. Owner, 12:40 CST
     Nov 12 (decision waiting-page-one-store); earlier rulings fb-1312-1 and fb-1313-1 (one grant at 13:12 and
     13:13 CST) and fb-1311-3 (verify each filing). Limit: it proves item n exists on the page, not that this
-    answer was filed on it. Cost: no process start; the read-back uses the transcript the send check read. No
-    file written;
+    answer was filed on it. Cost: one git rev-parse per Stop with a proved page send (the cwd's repo root); the
+    read-back uses the transcript the send check read, and the check reads no backup copy. No file written;
   - page-chat-answer-lands. An owner block whose whole text is a chat answer to a page item
     (ANSWER: `<n> <letter>` with letters a to h, as `143 b`, `143b`, `143: b` or `143 b.`, an optional
     parenthetical, answers separated by commas or lines), in a repo whose extras name a waiting page
@@ -210,7 +211,7 @@ HOME_KINDS = {"ruling": ("decisions", "rules", "claude-md", "agents-md"),
 FAIL_OPEN = "Feedback guard: ruling and task homes not checked (%s)."
 FAIL_OPEN_SENDS = "Feedback guard: %s sends not checked (%s)."  # label: page or repo
 FAIL_OPEN_CLOSED = "Feedback guard: closed note homes not checked (%s)."
-FAIL_OPEN_FILING = "Feedback guard: waiting page not known, so the read-back is not required (%s)."
+FAIL_OPEN_FILING = "Feedback guard: page filing not checked: waiting page not known (%s)"
 FAIL_OPEN_FORM = "Feedback guard: page form not checked (%s)."
 FAIL_OPEN_EXPORT = "Feedback guard: waiting copy export not checked (%s)."
 EXPORT_SCRIPT = "export_page.py"
@@ -736,7 +737,7 @@ def _returns_n(result, n):
 def page_problem(item_id, rest, text, k, stamp, pages, homes=None):
     """None when the page item's home is page:<n>, the send is proved and the transcript reads n back from the
     waiting page (Pages.read_back), or the check stood down. The send check decides first; the filing check runs
-    only for a proved send. The waiting copy is a backup the check never reads."""
+    only for a proved send. The backup copy is never read by this check."""
     m = PAGE_HOME.fullmatch(home_word(rest))
     if m is None:
         return "%s [page] has a malformed page home: it needs `page:<digits>`" % item_id
