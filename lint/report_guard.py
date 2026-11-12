@@ -1043,6 +1043,39 @@ def unsourced_recovered_item(block):
     return ""
 
 
+GIT_CALL_RE = re.compile(r"(?:^|[;&|(])\s*git\b")
+
+
+def sources_seen(records):
+    """The carry sources the main-session tool calls in `records` show, in git, page, digest order: git is a Bash
+    `git` call, page an Artifact read, digest a Read of a file under handoffs/. Reads the records only."""
+    seen = set()
+    for rec in records:
+        if rec.get("isSidechain"):
+            continue
+        for use in tool_uses(rec):
+            name, args = use.get("name"), use.get("input") or {}
+            if name == "Bash" and GIT_CALL_RE.search(str(args.get("command", ""))):
+                seen.add("git")
+            elif name == "Artifact" and args.get("action") == "read":
+                seen.add("page")
+            elif name == "Read" and "handoffs/" in str(args.get("file_path", "")).replace("\\", "/"):
+                seen.add("digest")
+    return [source for source in ("git", "page", "digest") if source in seen]
+
+
+def carry_drafts(records, missing):
+    """A paste-ready draft line for each carry line in `missing`, built from the records after the compaction."""
+    drafts = []
+    if "Recovered" in missing:
+        seen = sources_seen(records)
+        drafts.append("Recovered: <what you recovered> (sources seen: %s)" % ", ".join(seen) if seen
+                      else "Recovered: none")
+    if "Handoff gave" in missing:
+        drafts.append("Handoff gave: <facts the handoff supplied that the summary did not, or none>")
+    return drafts
+
+
 def recovered_problem(records, text):
     """The Recovered guard's refusal when a compaction came before `text` and a carry line is missing
     since, or a Recovered item of `text` names no source while no earlier reply has met the Recovered
@@ -1079,7 +1112,11 @@ def recovered_problem(records, text):
     bad = unsourced_recovered_item(block) if "Recovered" in pending else ""
     if bad:
         reasons.append("the Recovered item %r names no source (git, page or digest)" % bad)
-    return owner_line("Recovered guard", "; ".join(reasons)) if reasons else ""
+    if not reasons:
+        return ""
+    refusal = owner_line("Recovered guard", "; ".join(reasons))
+    drafts = carry_drafts(records[boundary + 1:], missing)
+    return refusal + "\nDraft of each missing line:\n" + "\n".join(drafts) if drafts else refusal
 
 
 def repo_root(cwd):
