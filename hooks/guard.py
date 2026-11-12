@@ -556,7 +556,7 @@ while True:
             PUSH_DENY_REASON, STACK_DENY_REASON, TREE_ASK_REASON, TREE_DENY_REASON,
             checkout_conflict_resolve, clean_deletes_files, names_only_files, one_place, session_id_of, shared_tree_match,
             SESSION_ID_RE, STASH_READ_ACTIONS, in_any_session_scratchpad, stash_action, stash_takes_the_stack, subject_state, under_session_scratchpad,
-            scratchpad_clear_writer, scratchpad_record_writer, scratchpad_writer_of,
+            scratchpad_clear_writer, scratchpad_folder_writer, scratchpad_record_writer, scratchpad_writer_of,
         )
         _loading = "guard_pointer"
         from guard_pointer import (
@@ -5890,6 +5890,12 @@ SCRATCHPAD_OVERWRITE_REASON = (
     "Remedy: write your own file under a fresh file name of your own. "
     "(decision scratchpad-owner, an agent runs only its own read copy of a scratchpad file, and never overwrites another agent's)"
 )
+SCRATCHPAD_FOLDER_REASON = (
+    "Rule (scratchpad-owner): this folder holds a file written by another agent of this session, and removing or "
+    "moving it destroys work that agent may still need. "
+    "Remedy: remove only the files you wrote, each by its own name, and leave the rest. "
+    "(decision scratchpad-owner, an agent runs only its own read copy of a scratchpad file, and never overwrites another agent's)"
+)
 # Shell verbs that remove or move a file: a write the rule judges, but the file stays no agent's text, so no record.
 SCRATCHPAD_REMOVERS = ("rm", "mv")
 SCRATCHPAD_WRITE_PASSES = 8   # shell write targets listed from one call, at most
@@ -6027,11 +6033,18 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
             else:
                 scratchpad_clear_writer(full, session)
         return
-    taken = ""
+    taken, reason = "", SCRATCHPAD_OVERWRITE_REASON
     for full in files:
         writer = scratchpad_writer_of(full, session)
         if writer and writer != agent and not taken:
             taken = "agent %s writes over a scratchpad file agent %s wrote: %s" % (agent, writer, full)
+        elif full in removed and not taken:
+            # An `rm` or `mv` that names a folder, the scratchpad itself or a glob removes each file under it, and
+            # only a file has a record: read the files (`scratchpad_folder_writer`).
+            held = scratchpad_folder_writer(full, session, agent)
+            if held:
+                taken = "agent %s removes a scratchpad folder holding a file agent %s wrote: %s" % (agent, held[1], held[0])
+                reason = SCRATCHPAD_FOLDER_REASON
 
     def record_writers():
         for full in files:
@@ -6040,7 +6053,7 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
 
     if taken:
         # A refused write lands nothing, so the record stays with the first writer; an override that lifts it moves it.
-        refuse(tool, "deny", "scratchpad-owner", SCRATCHPAD_OVERWRITE_REASON, taken, on_lift=record_writers)
+        refuse(tool, "deny", "scratchpad-owner", reason, taken, on_lift=record_writers)
     record_writers()
 
 

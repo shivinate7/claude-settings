@@ -635,6 +635,49 @@ def scratchpad_writer_of(where: str, session_id: str) -> str:
         return ""
 
 
+SCRATCHPAD_WALK_CAP = 5000   # entries one folder check reads, at most
+SCRATCHPAD_GLOB_MAGIC = re.compile(r"[*?\[]")
+
+
+def scratchpad_folder_writer(where: str, session_id: str, agent_id: str, cap: int = SCRATCHPAD_WALK_CAP):
+    """(path, writer) of the first file under `where` whose record names an agent other than `agent_id`, else
+    None. `where` is a folder, the scratchpad root, or a glob pattern that the shell would expand
+    (`S/sub/*`): a glob is read against the real folder now, as the shell will. The walk reads every level
+    and skips the record folder. It stops after `cap` entries, and then the rest is unread: a folder past the
+    cap passes unless a file in the first `cap` entries already names another agent. That favours the agent that
+    clears its own large folder (a checkout, a build output) over a rare miss, and an entry that cannot be read
+    passes the same way. The records are the ones `scratchpad_writer_of` reads: no second format."""
+    left = [cap]
+    skip = os.path.join(session_scratchpad_root(where, session_id) or "\0", SCRATCHPAD_WRITERS)
+    try:
+        if SCRATCHPAD_GLOB_MAGIC.search(where) and not os.path.lexists(where):
+            import glob   # lazy: only a pattern needs it
+            roots = sorted(glob.glob(where))
+        else:
+            roots = [where]
+        for root in roots:
+            tops = [root]
+            while tops:
+                top = tops.pop()
+                if os.path.normcase(os.path.realpath(top)) == os.path.normcase(skip):
+                    continue
+                if left[0] <= 0:
+                    return None
+                left[0] -= 1
+                if top != root and os.path.islink(top):
+                    continue   # an `rm` or `mv` of a link leaves its target alone
+                if os.path.isdir(top):
+                    with os.scandir(top) as entries:
+                        tops.extend(entry.path for entry in entries)
+                    continue
+                writer = scratchpad_writer_of(top, session_id)
+                if writer and writer != agent_id:
+                    return top, writer
+    except Exception:
+        return None   # an unreadable entry is not judged, as a write the guard cannot read is not
+    return None
+
+
 def scratchpad_clear_writer(where: str, session_id: str) -> None:
     """Delete the record of the scratchpad file `where`, when a call with no `agent_id` has written it. No
     record, or a record that cannot be deleted, leaves things as they are."""
