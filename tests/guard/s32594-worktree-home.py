@@ -757,6 +757,184 @@ LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads the last env -C f
                                       "with an env -C on every git segment, the first env -C folder was read, not the last")))
 
 
+def worktree_home_cross_checkout_heredoc_text_case():
+    """Rule 0, `other-checkout`, a quoted interpreter body that only quotes a path in another
+    checkout, beside `worktree_home_cross_checkout_copy_case`. Roadmap step other-checkout-heredoc-text.
+    A quoted python body that only quotes the path is text, so it passes. A body that runs the write
+    through os, subprocess, shutil, exec, eval or __import__, under any alias, is refused, and so is a
+    body that does not parse. A perl or ruby body that writes into another checkout is refused, and so
+    is a perl in-place edit of a file there. A comment opener, a quote or a write word inside a perl or
+    ruby string is text, so a body that only quotes a write passes. Why:
+    docs/decisions/an-agent-outside-its-home-tree-must-stop.md.
+    """
+    primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcoheredoc")
+    other = slash(lane_b)
+    problems = []
+
+    def check(label, expect, tool, cwd, **tool_input):
+        got, reason = _decide_full(tool, cwd, **tool_input)
+        if got != expect:
+            problems.append("%s: expected %s, got %s (%s)" % (label, expect, got, reason[:120]))
+        elif expect == "deny" and ("other-checkout" not in reason or primary in reason):
+            problems.append("%s: the refusal must name other-checkout and no path: %s" % (
+                label, reason[:160]))
+
+    # A quoted python body that only quotes a path in another checkout is text, not a write.
+    check("quoted python body whose string quotes a copy into another checkout", "allow", "Bash",
+          lane_a, command="python3 - <<'PY'\nnote = \"cp %s/x $f\"\nprint(note)\nPY" % other)
+    check("quoted python body that writes its own file and quotes a copy in a string", "allow",
+          "Bash", lane_a,
+          command="python3 - <<'PY'\nimport json\nopen('roadmap.json','w').write("
+                  "json.dumps({'n': 'cp a %s/x $f'}))\nPY" % other)
+    check("quoted python body that prints a shell line naming another checkout", "allow", "Bash",
+          lane_a, command="python3 - <<'PY'\nprint(\"os.system('cp a %s/x')\")\nPY" % other)
+    # A cd into a folder of this checkout, then a relative write: the write lands in its own checkout.
+    os.makedirs(os.path.join(lane_a, "src"), exist_ok=True)
+    check("mkdir and cd within its own checkout, then a python write to ../out.txt", "allow", "Bash",
+          lane_a, command="mkdir -p src && cd src && python3 - <<'PY'\nopen('../out.txt','w').write('1')\nPY")
+    # Scanner traps: a perl or ruby body reads a comment opener, a quote or a write word in a string as text.
+    check("perl body with a comment opener and a write word inside its strings", "allow", "Bash",
+          lane_a, command="perl - <<'PL'\nprint \"# not a comment\"; print \"File.write %s/x\";\nPL" % other)
+    check("ruby body with a write inside a single-quoted string", "allow", "Bash", lane_a,
+          command="ruby - <<'RB'\nputs 'File.write(\"%s/x\")'\nRB" % other)
+    check("ruby body with a multi-line string that quotes a write", "allow", "Bash", lane_a,
+          command="ruby - <<'RB'\ns = \"a\nFile.write('%s/x')\nb\"\nputs s\nRB" % other)
+    check("perl body with a lone quote in a comment", "allow", "Bash", lane_a,
+          command="perl - <<'PL'\n# don't\nprint 1;\nPL")
+    check("ruby body with a lone quote in a string", "allow", "Bash", lane_a,
+          command="ruby - <<'RB'\nputs \"it's\"\nRB")
+    check("perl body that prints an open-for-write line naming another checkout", "allow", "Bash",
+          lane_a, command="perl - <<'PL'\nprint \"open(F, '>', '%s/x')\";\nPL" % other)
+
+    # Controls: each write into another checkout, run by an interpreter body, stays refused.
+    check("control: python f-string os.system copies into another checkout", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport os; os.system(f'cp a %s/x')\nPY" % other)
+    check("control: python os.system with a concatenated path", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport os; os.system('cp a ' + '%s/x')\nPY" % other)
+    check("control: python subprocess.run with cwd in another checkout", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport subprocess; subprocess.run(['cp','a','x'], cwd='%s')\nPY"
+                  % other)
+    check("control: python os.system that cds into another checkout", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport os; os.system('cd %s && cp a x')\nPY" % other)
+    check("control: python subprocess list built in a variable", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport subprocess; cmd=['cp','a','%s/x']; subprocess.run(cmd)\nPY"
+                  % other)
+    check("control: python os imported under an alias", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport os as o; o.system('cp a %s/x')\nPY" % other)
+    check("control: python shutil imported under an alias", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport shutil as s; s.copy('a','%s/x')\nPY" % other)
+    check("control: node child_process execSync copies into another checkout", "deny", "Bash",
+          lane_a, command="node - <<'JS'\nrequire('child_process').execSync('cp a %s/x')\nJS" % other)
+    check("control: python body that does not parse, holding a copy into another checkout", "deny",
+          "Bash", lane_a, command="python3 - <<'PY'\nimport os; os.system('cp a %s/x'\nPY" % other)
+    check("control: python exec of a string that copies into another checkout", "deny", "Bash",
+          lane_a, command="python3 - <<'PY'\nexec(\"import os; os.system('cp a %s/x')\")\nPY" % other)
+    check("control: python __import__ of os copies into another checkout", "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\n__import__('os').system('cp a %s/x')\nPY" % other)
+
+    # New denies: a perl or ruby body, and a perl in-place edit, that write into another checkout.
+    check("perl heredoc body opens a file in another checkout for writing", "deny", "Bash", lane_a,
+          command="perl - <<'PL'\nopen(F, \">\", \"%s/x\");\nPL" % other)
+    check("ruby heredoc body writes a file in another checkout", "deny", "Bash", lane_a,
+          command="ruby - <<'RB'\nFile.write(\"%s/x\", \"1\")\nRB" % other)
+    check("perl -pi edits a file in another checkout in place", "deny", "Bash", lane_a,
+          command="perl -pi -e 's/a/b/' %s/x" % other)
+    # A python body writes a script that names a copy into another checkout; a command then runs it.
+    check("python body writes a script that copies into another checkout, then sh runs it", "deny",
+          "Bash", lane_a,
+          command="python3 - <<'PY'\nopen('x.sh','w').write('cp a %s/x')\nPY\nsh x.sh" % other)
+    # A relative write that climbs out of a folder of this checkout into lane-b is judged from that folder.
+    check("control: cd into a folder of its own checkout, then a python write up into lane-b", "deny",
+          "Bash", lane_a, command="cd src && python3 - <<'PY'\nopen('../../lane-b/x','w').write('1')\nPY")
+    # Controls for each scanner trap above: the same body with a real write after the trap stays refused.
+    check("control: perl comment opener in a string, then an open for write into another checkout",
+          "deny", "Bash", lane_a,
+          command="perl - <<'PL'\nprint \"# not a comment\"; open(F, \">\", \"%s/x\");\nPL" % other)
+    check("control: ruby write in a string, then a File.write into another checkout", "deny", "Bash",
+          lane_a, command="ruby - <<'RB'\nputs 'File.write(\"%s/x\")'\nFile.write(\"%s/x\", \"1\")\nRB"
+                          % (other, other))
+    check("control: ruby multi-line string, then a File.write into another checkout", "deny", "Bash",
+          lane_a, command="ruby - <<'RB'\ns = \"a\nFile.write('%s/x')\nb\"\nFile.write(\"%s/x\", \"1\")\nRB"
+                          % (other, other))
+    check("control: perl lone quote in a comment, then an open for write into another checkout",
+          "deny", "Bash", lane_a,
+          command="perl - <<'PL'\n# don't\nopen(F, \">\", \"%s/x\");\nPL" % other)
+    check("control: ruby lone quote in a string, then a File.write into another checkout", "deny",
+          "Bash", lane_a, command="ruby - <<'RB'\nputs \"it's\"\nFile.write(\"%s/x\", \"1\")\nRB" % other)
+
+    # A python heredoc's printed text is a command once a shell runs it, so a copy it names into
+    # another checkout is refused. The shell may run it through sh -c, eval, a substitution, or a
+    # script that the same command runs or globs.
+    check("sh -c runs the output of a python heredoc that prints a copy into another checkout",
+          "deny", "Bash", lane_a,
+          command="sh -c \"$(\npython3 - <<'PY'\nprint('cp x %s/y')\nPY\n)\"" % other)
+    check("eval runs the output of a python heredoc that prints a copy into another checkout",
+          "deny", "Bash", lane_a,
+          command="eval \"$(\npython3 - <<'PY'\nprint('cp x %s/y')\nPY\n)\"" % other)
+    check("a variable holds the output of a python heredoc that prints a copy, then sh -c runs it",
+          "deny", "Bash", lane_a,
+          command="x=$(\npython3 - <<'PY'\nprint('cp x %s/y')\nPY\n)\nsh -c \"$x\"" % other)
+    check("sh -c runs the output of a python heredoc that writes a copy with sys.stdout",
+          "deny", "Bash", lane_a,
+          command="sh -c \"$(\npython3 - <<'PY'\nimport sys; sys.stdout.write('cp x %s/y')\nPY\n)\""
+                  % other)
+    # A python heredoc that writes a script naming a copy into another checkout: a shell that runs
+    # the script in the same call, by name or by glob, is a run of the copy. The script alone, with
+    # no run in this call, is refused too, since a later call may run it.
+    check("python heredoc writes a script that copies into another checkout, then sh runs it by glob",
+          "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nopen('gen.sh','w').write('cp x %s/y\\n')\nPY\nsh *.sh" % other)
+    check("python heredoc writes a script that copies into another checkout, with no run in the call",
+          "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nopen('gen.sh','w').write('cp x %s/y\\n')\nPY" % other)
+    # Control: a python body that writes a JSON file that names a copy, and never runs it, is allowed.
+    check("control: python heredoc writes a JSON file that names a copy into another checkout",
+          "allow", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport json\nopen('notes.json','w').write(json.dumps("
+                  "{'n': 'cp x %s/y'}))\nPY" % other)
+
+    # A shell runs a python heredoc's printed copy when the text reaches it through a pipe, a brace group,
+    # a loop, a function, or a subshell that writes it to a script the same call runs. The heredoc's own
+    # header can pipe its output to a shell too. A lone quote in a comment before the form does not hide it.
+    py_print = "python3 - <<'PY'\nprint('cp x %s/y')\nPY" % other
+    check("a lone quote in a comment, then sh -c runs what a python heredoc prints into another checkout",
+          "deny", "Bash", lane_a, command="# don't\nsh -c \"$(\n%s\n)\"" % py_print)
+    check("a brace group pipes what a python heredoc prints into another checkout to sh", "deny",
+          "Bash", lane_a, command="{\n%s\n} | sh" % py_print)
+    check("a subshell writes what a python heredoc prints into another checkout to gen.sh, then sh runs it",
+          "deny", "Bash", lane_a, command="(\n%s\n) > gen.sh; sh gen.sh" % py_print)
+    check("a for loop pipes what a python heredoc prints into another checkout to sh", "deny", "Bash",
+          lane_a, command="for i in 1; do\n%s\ndone | sh" % py_print)
+    check("a shell function pipes what a python heredoc prints into another checkout, then runs it",
+          "deny", "Bash", lane_a, command="f() {\n%s\n}; f | sh" % py_print)
+    check("a python heredoc whose header pipes its output to sh, and prints a copy into another checkout",
+          "deny", "Bash", lane_a, command="python3 - <<'PY' | sh\nprint('cp x %s/y')\nPY" % other)
+    # A python body that writes a runnable file holding a copy into another checkout is refused. The file
+    # name does not matter: a .js, a .py and an extensionless file each count, with a run or without one.
+    check("a python heredoc writes gen.js holding a copy into another checkout, then node runs it by glob",
+          "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nopen('gen.js','w').write(\"require('child_process')"
+                  ".execSync('cp x %s/y')\")\nPY\nnode *.js" % other)
+    check("a python heredoc writes gen.py holding a copy into another checkout, with no run in the call",
+          "deny", "Bash", lane_a,
+          command="python3 - <<'PY'\nopen('gen.py','w').write(\"import os; os.system('cp x %s/y')\")\nPY"
+                  % other)
+    check("a python heredoc writes an extensionless gen holding a copy into another checkout, alone",
+          "deny", "Bash", lane_a, command="python3 - <<'PY'\nopen('gen','w').write('cp x %s/y')\nPY" % other)
+
+    if problems:
+        return False, "; ".join(problems)
+    return True, "quoted python text passes; interpreter, perl and ruby writes into another checkout refused"
+
+
+# A quoted python body that only quotes a path in another checkout is text. A perl or ruby write into
+# another checkout, or an interpreter body that runs one, is refused. Roadmap step other-checkout-heredoc-text.
+LOG_CHECKS_EXTRA.append(("worktree-home: a quoted python body that only quotes a path in another checkout is "
+                         "allowed; a perl or ruby write into another checkout, or an interpreter body that runs "
+                         "one, is refused",
+                         worktree_home_cross_checkout_heredoc_text_case))
+
+
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
 # literal count drifts the moment a case is added, and a suite that miscounts its own cases is a
 # suite a reader stops trusting.
