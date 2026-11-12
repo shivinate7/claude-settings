@@ -15,7 +15,7 @@ BBTW_SCRIPT = "python3 scripts/make_checks.py"
 BBTW_PS_SCRIPT = "python scripts/make_checks.py"
 # The reason's undo route: restore each changed test to HEAD, delete each added one, and name the test-author.
 BBTW_UNDO = (("restore", "Restore"), "HEAD", ("delete", "Delete"), "test-author")
-BBTW_NO_ENTRY = "no PostToolUse entry with matcher Bash|PowerShell runs hooks/guard.py, so the guard never runs"
+BBTW_NO_ENTRY = "no PostToolUse entry with matcher Bash|PowerShell runs hooks/guard.py, so nothing checks a shell call after it runs"
 BBTW_GUARD_NEEDLE = '/hooks/guard.py"'
 NO_SH_ENTRY = "the settings entry is a POSIX shell line, and this Windows run has no python stand-in the line can find"
 
