@@ -2809,12 +2809,19 @@ def diff_rule(role: str) -> str:
             DESIGNER_ROLE: "designer-diff"}.get(role, "builder-diff")
 
 
+# The undo route of a builder's test change, shared by the diff refusal and the shell-write block.
+BUILDER_UNDO_ROUTE = (
+    "Undo it: restore each test file you changed to its text at HEAD, and delete each test file "
+    "you added. "
+)
+
+
 def builder_diff_reason() -> str:
     """The refusal text for a builder's test change. It names no path: it gives the undo route."""
     return (
         BUILDER_TEST_REASON + " The guard refuses a test change you made, at commit, push and stop. "
-        "Undo it: restore each test file you changed to its text at HEAD, and delete each test file "
-        "you added. If a commit of yours holds the change, stop and report it. "
+        + BUILDER_UNDO_ROUTE +
+        "If a commit of yours holds the change, stop and report it. "
         "If a merge is in progress and the refusal is about a test conflict, run `git merge --abort` "
         "and report it, so the orchestrator hands the whole merge to a test-author. "
         "This refusal is final: never write the files another way. (decision builders-cannot-edit-tests)"
@@ -2863,6 +2870,61 @@ def judge_stop(payload) -> None:
         sys.exit(0)
     elif found or noted:
         record("SubagentStop", "noted", diff_rule(role), found or noted[0])
+
+
+def builder_shell_write_reason() -> str:
+    """The block text for a test change a builder's shell call left in its worktree. It names no path."""
+    return (
+        BUILDER_TEST_REASON + " Your shell call left a test change in your worktree. " + BUILDER_UNDO_ROUTE
+        + "Then report the needed test change, so the orchestrator hands it to a test-author. "
+        "This refusal is final: never write the files another way. (decision builders-cannot-edit-tests)"
+    )
+
+
+def status_paths(raw: str):
+    """The paths a `git status --porcelain -z` answer names. A rename or copy names both ends: the old path
+    is a change too, so a test moved out of a test path counts."""
+    records = raw.split("\0")
+    paths, index = [], 0
+    while index < len(records):
+        entry = records[index]
+        index += 1
+        if len(entry) < 4:
+            continue
+        paths.append(entry[3:])
+        if entry[0] in "RC" or entry[1] in "RC":
+            if index < len(records) and records[index]:
+                paths.append(records[index])
+            index += 1
+    return paths
+
+
+def judge_shell_write(payload) -> None:
+    """PostToolUse, a builder's Bash or PowerShell call (rule `builder-bash-test-write`). The PreToolUse shell
+    check reads command text, so a script that computes its paths passes it. This reads the result: one
+    `git status --porcelain` in the call's cwd, each changed path tested with `is_builder_test_rel`. A hit blocks
+    the call's result, with the undo route. A status git cannot answer logs `builder-bash-test-write-unread`
+    and allows. Any other session, and any other tool, returns before a git call."""
+    if agent_role(payload) != BUILDER_ROLE:
+        return
+    tool = payload.get("tool_name", "") or ""
+    if tool not in ("Bash", "PowerShell"):
+        return
+    where = payload.get("cwd", "") or os.getcwd() or ""
+    # -z: paths arrive unquoted, so a name with a space or a non-ASCII letter is read as written.
+    # --untracked-files=all: a new folder is listed by its files, so a test inside it is seen.
+    answer = guard_core._git(where, "status", "--porcelain", "-z", "--untracked-files=all") if where else None
+    if answer is None or answer.returncode != 0:
+        record(tool, "noted", "builder-bash-test-write-unread", where)
+        return
+    found = next((rel for rel in status_paths(answer.stdout) if is_builder_test_rel(rel)), "")
+    if not found:
+        return
+    # A role guard stays outside every override (decision owner-override): a block is final.
+    guard_core.set_override_veto(lambda: True)
+    record(tool, "deny", "builder-bash-test-write", found)
+    print(json.dumps({"decision": "block", "reason": "builder-bash-test-write: " + builder_shell_write_reason()}))
+    sys.exit(0)
 
 
 SPAWN_TOOLS = ("Agent", "Task")
@@ -6044,6 +6106,9 @@ def workflow_args_hit(tool: str, tool_input: dict) -> str:
 def judge(payload) -> None:
     if payload.get("hook_event_name") == "SubagentStop":
         judge_stop(payload)
+        return
+    if payload.get("hook_event_name") == "PostToolUse":
+        judge_shell_write(payload)
         return
     tool = payload.get("tool_name", "") or ""
     tool_input = payload.get("tool_input", {}) or {}
