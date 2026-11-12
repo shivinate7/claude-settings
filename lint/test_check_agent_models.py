@@ -7,6 +7,7 @@ Failure classes: false deny (a listed role fails), false allow (another file pas
 collision, case or alias), unreadable frontmatter.
 One case reads the real agents/plan.md: its "Premises first" paragraph cites the premise record.
 The lane session row of docs/decisions/agent-model-cap.md must start its effort cell with medium.
+A renamed lane row fails the check, which names the missing `lane` row: the guard reads the lane model from the row's first cell.
 A drift between the guard's role lists and the role table fails the check (the guard's role_list_drift).
 An agent file's `model:` pin must equal its role's row in the role table. The role is the frontmatter `name:`,
 as the guard keys it. A file with no pin, or a name with no row, is not flagged by that rule.
@@ -209,6 +210,43 @@ class LaneEffort(unittest.TestCase):
         # The check must read the record when the path is relative, as a run from the repository root gives it.
         code, out = verdict(RECORD_RELPATH, text=LANE_RECORD % "default", relative=True)
         self.assertEqual(code, 1, "a relative record path with a default lane row passes: %r" % out)
+
+
+class LaneRowName(unittest.TestCase):
+    # The guard reads the lane model from the record's `lane` row by its first cell (role_model_table). A renamed row drops
+    # out of that table, so the lane family check judges nothing. The check fails on such a record and names the row.
+    def scratch_record(self, text):
+        """The path of a scratch repository root holding only the decision record, with `text` as that record."""
+        tmp = tempfile.TemporaryDirectory(dir=RUN_FOLDER)
+        self.addCleanup(tmp.cleanup)
+        path = os.path.join(tmp.name, RECORD_RELPATH)
+        os.makedirs(os.path.dirname(path))
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        return tmp.name
+
+    def test_renamed_lane_row_fails_the_check_and_names_the_row(self):
+        with open(os.path.join(ROOT, RECORD_RELPATH), encoding="utf-8") as handle:
+            real = handle.read()
+        renamed = real.replace("| lane (decision `session-tiers`) |", "| lane session (decision `session-tiers`) |", 1)
+        self.assertNotEqual(renamed, real, "the fixture did not rename the lane row")
+        root = self.scratch_record(renamed)
+        table = C._guard.role_model_table(root)
+        self.assertIsNotNone(table, "the renamed record reads as no role table at all")
+        self.assertNotIn("lane", table, "the renamed lane row still reads as a `lane` key")  # the scope, before the check
+        out = io.StringIO()
+        with mock.patch.object(C, "ROOT", root), contextlib.redirect_stdout(out):
+            code = C.main([os.path.join(root, RECORD_RELPATH)])
+        self.assertEqual(code, 1, "a renamed lane row passes the check: %r" % out.getvalue())
+        self.assertIn("`lane`", out.getvalue(), "the check fails but does not name the missing `lane` row: %r" % out.getvalue())
+
+    def test_real_lane_row_passes_the_check(self):
+        # The green control: the same check on the real record, whose lane row the reader still reads.
+        self.assertIn("lane", C._guard.role_model_table(ROOT), "the real record's role table has no `lane` key")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = C.main([os.path.join(ROOT, RECORD_RELPATH)])
+        self.assertEqual((code, out.getvalue()), (0, ""), "the real lane row fails the check: %r" % out.getvalue())
 
 
 class RoleListDrift(unittest.TestCase):
