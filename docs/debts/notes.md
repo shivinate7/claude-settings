@@ -38,6 +38,7 @@
 - catalog-mode-detect-flags: hook catalog finds modes only from a "$g" --flag argument; a script registered twice with a positional arg or -x looks like one mode (lint/hook_catalog.py) Fix: none — rare and harmless. Until: 2026-11-21
 - cite-by-id-skips-merge-subject: the cite-by-id rule does not read a gh pr merge subject; the lane-by-slug rule does (hooks/guard.py)
 - cites-lack-gloss-unchecked: some cites of record ids in decisions and debts carry no gloss and no check requires one (decisions, debts)
+- stamp-teardown-after-cap-unbounded: the watchdog cases in actions/stamp/test_stamp.mjs do not bound teardown after the cap; a 26 s post-cap stall passes them, and main's elapsed assert reds on it (suite_watchdog.mjs stopTree). Fix: none — test-practices P5 bars a real-clock bound here; the review round accepted the loss.
 - cmd-c-quote-count-bash-reader: bash reader treats \" as an escape but cmd does not, so a cmd /c string can end where the guard disagrees (hooks/guard_core.py) Fix: none — needs a Windows run. Until: 2026-11-22
 - debt-decision-link-unchecked: no check confirms that a debt's decision still names its finding (docs/debts/, the decisions' safety-hole sections)
 - debts-no-check-reads-parts: no check reads the four parts of a debt file; check_record_slugs checks only the slug length (lint/check_record_slugs.py) Fix: none — rare and harmless. Until: 2026-11-23
