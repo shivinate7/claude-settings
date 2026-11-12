@@ -50,14 +50,16 @@ bounded_git() {
   return "$fetch_rc"
 }
 
-# bounded_fetch <dir>: one quiet, bounded `git fetch` in <dir> of origin/main, plus origin/HEAD's target when that is
-# another branch, both in the one fetch. It names refs and never prunes or fetches all of origin, so its cost does not
-# grow with the remote's branch count (a prune fetch of a 429-branch remote did not finish in 20 s; this one ref takes
-# well under a second). Returns the fetch's status: 0 ran, else not. The one home for every freshness check below.
-# The first call per checkout runs the fetch; a later call for the same checkout (resolved with pwd -P) returns that
-# status again, so a session start fetches each checkout once, however many checks ask. The target is read from <dir>'s
-# own origin/HEAD, because the pointer-clone check passes another checkout. The caller must not run it in $( ), or
-# the memo is lost with the subshell.
+# bounded_fetch <dir>: one quiet, bounded `git fetch` in <dir> that names refs and never prunes or fetches all of
+# origin, so its cost does not grow with the remote's branch count (a prune fetch of a 429-branch remote did not finish
+# in 20 s; one ref takes well under a second). The refs: origin/HEAD's target when that is another branch, and
+# origin/main when origin/HEAD is unset or main, or when <dir> already has origin/main (a trunk repo that also has main
+# refreshes both). A remote with no main branch and origin/HEAD on another branch fetches that branch only, because
+# git fails the whole fetch on a refspec the remote lacks. Returns the fetch's status: 0 ran, else not. The one home
+# for every freshness check below. The first call per checkout runs the fetch; a later call for the same checkout
+# (resolved with pwd -P) returns that status again, so a session start fetches each checkout once, however many checks
+# ask. The refs are read from <dir>'s own origin/HEAD, because the pointer-clone check passes another checkout. The
+# caller must not run it in $( ), or the memo is lost with the subshell.
 fetch_memo=""
 fetch_reported=""
 bounded_fetch() {
@@ -72,11 +74,13 @@ EOF
   [ -n "$bf_hit" ] && return "$bf_hit"
   bf_head=$(cd "$1" 2>/dev/null && git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
   bf_head="${bf_head#origin/}"
-  if [ -n "$bf_head" ] && [ "$bf_head" != main ]; then
+  if [ -z "$bf_head" ] || [ "$bf_head" = main ]; then
+    bounded_git "$1" /dev/null fetch --quiet --no-tags origin +refs/heads/main:refs/remotes/origin/main
+  elif (cd "$1" 2>/dev/null && git rev-parse --verify -q refs/remotes/origin/main >/dev/null 2>&1); then
     bounded_git "$1" /dev/null fetch --quiet --no-tags origin \
       +refs/heads/main:refs/remotes/origin/main "+refs/heads/$bf_head:refs/remotes/origin/$bf_head"
   else
-    bounded_git "$1" /dev/null fetch --quiet --no-tags origin +refs/heads/main:refs/remotes/origin/main
+    bounded_git "$1" /dev/null fetch --quiet --no-tags origin "+refs/heads/$bf_head:refs/remotes/origin/$bf_head"
   fi
   bf_rc=$?
   fetch_memo="$fetch_memo
