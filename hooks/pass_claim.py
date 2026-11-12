@@ -49,7 +49,7 @@ CLEAN_VERB_PARTICLES = frozenset(("up", "out"))
 LEAD_CONNECTORS = frozenset(("please", "then", "and", "also", "so", "now", "first", "next", "just"))
 ATTRIBUTIONS = frozenset((
     "reviewer", "reviewers", "builder", "builders", "testauthor", "recordwriter", "refuter", "designer", "agent",
-    "agents", "subagent", "reports", "reported", "says", "said", "claims", "claimed", "according"))
+    "agents", "subagent", "reports", "reported", "says", "said", "claims", "claimed", "according"))  # glossary-ok: the word speakers write
 BOUNDARY = "|"  # a comma, semicolon, colon, slash, pipe, parenthesis or dash ends a clause
 
 FENCE_RE = re.compile(r"```.*?```", re.S)

@@ -231,7 +231,7 @@ def _skip_uv_run(tokens, index: int) -> int:
     return index
 
 
-# The test runs the bare roster adds (rule bare-check; coordinator, owner R20 part 2, 2026-11-12 12:55 CST). Only
+# The test runs the bare roster adds (rule bare-check). Only
 # the bare run reads them: a test piped into tail is bare-check's refusal, so check-tail never sees them. A script
 # operand counts by its file name, so `python3 -m py_compile hooks/test_guard.py` and `grep -n x hooks/test_guard.py`
 # run no test.
@@ -441,13 +441,12 @@ VERDICT_PIPE_REASON = (
 # A NAMED CHECK RUN BARE (rule bare-check, decision background-check-through-verdict). The roster is
 # check_stage's, so the spellings and wrappers match check-tail's, with `ci-job` counted in the foreground
 # too, `merge --review-record` left out (its output is a record to post), and test runs added
-# (`_test_run_word`; coordinator, owner R20 part 2, 2026-11-12 12:55 CST). A bare run prints the check's own
+# (`_test_run_word`). A bare run prints the check's own
 # output and the agent reads whatever ends the line: `merge --lane-lint 7; echo $?` read as "lane lint
 # passes". The run is refused unless `verdict` stands in the call ahead of the program (`verdict merge
 # --lane-lint 7`, `timeout 60 verdict bin/ci-job checks`). A named check piped into tail or head is
 # check-tail's refusal, judged first, so it is never refused twice; a test piped into tail is this rule's,
-# since check-tail does not read tests. A background run is refused too (coordinator ruling, 2026-11-12
-# 11:23 CST). Not read: `make test`, `./gradlew test`, `./test_x.py`, and a bare run followed by a read.
+# since check-tail does not read tests. A background run is refused too. Not read: `make test`, `./gradlew test`, `./test_x.py`, and a bare run followed by a read.
 def bare_check_hit(stripped: str, background: bool) -> str:
     """The matched text when a segment, foreground or background, runs a named check with no `verdict`
     ahead of the program, else ''."""

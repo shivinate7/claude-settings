@@ -42,7 +42,7 @@ Known gaps:
 - A speaker word within five words before the claim word exempts it even from another clause ("Builder done, lint passed.").
 - Other check nouns ("test", "check" in the singular, "build", "CI") are not on the list.
 
-Cost: none at run time. No file is written and no process starts. The transcript is read once, and only when a claim is found.
+Cost: none at run time. No file is written and no process starts. The transcript is read at most once, and only when a claim is found.
 
 Kind: process
 Home: hooks/pass_claim.py
