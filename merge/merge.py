@@ -81,8 +81,8 @@
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
                           commit or ref is linted against --base (default main). A PR on a base other than main also FAILs when its head lacks that base's head (never lifted). A FAIL step refuses. An unknown refuses unless
-                          --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. A head with no workflow, or none with a `checks` job, is a
-                          refusal that names the project-ops starter CI step and no flag lifts. A lint that ran no lint
+                          --lint-unknown-ok gives a reason; it is then logged and no `PASS:` line prints. A head with no workflow file is a
+                          refusal that names the project-ops starter CI step, and no flag lifts it. A head with workflows but no `checks` job is an unknown that --lint-unknown-ok lifts. A lint that ran no lint
                           CI step is an unknown. The `PASS:` line names the CI steps skipped, as a count and names. Takes no lock, merges
                           and pushes nothing, except that a PASS on a PR number posts one comment on it, as the account that runs it
                           (the join and --reviewed count only an owner's); any session may run it, cloud included. Cost per call: one
