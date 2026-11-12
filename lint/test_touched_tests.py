@@ -486,6 +486,35 @@ class Selector(unittest.TestCase):
         _, macos, _ = self.per_os(with_checks(base, self.MAC_BOTH_CI), {"janitor/install_launchd.py": "new\n"})
         self.assertEqual(macos, [mac], "a change to the macOS installer does not list its macOS test alone")
 
+    # A hooks test is a macOS subject, whatever its name, when its own text names a macOS thing (darwin, macos,
+    # launchd, uname -s, Darwin or xcrun). The selector reads the file to tell.
+    MAC_HOOK_CI = dedent("""\
+        name: fixture checks
+        on: pull_request
+        jobs:
+          macos:
+            runs-on: macos-latest
+            steps:
+              - run: python3 hooks/test_wrappers.py
+              - run: python3 hooks/test_pure_helpers.py
+        """)
+
+    def test_a_hooks_test_that_fakes_a_darwin_uname_stays_in_files_macos(self):
+        """hooks/test_wrappers.py fakes a Darwin uname for install.sh. Its own text names uname -s and Darwin, so it is a
+        macOS subject whatever its name, and it stays in files_macos."""
+        wrappers = "hooks/test_wrappers.py"
+        base = {wrappers: "old\n", "hooks/test_pure_helpers.py": "old\n"}
+        _, macos, _ = self.per_os(with_checks(base, self.MAC_HOOK_CI),
+                                  {wrappers: 'uname_stub=$(uname -s)  # fakes Darwin for install.sh\n'})
+        self.assertIn(wrappers, macos, f"{wrappers} fakes a Darwin uname, so it is a macOS subject, and is not in files_macos")
+
+    def test_a_plain_pure_python_hooks_test_is_left_off_the_macos_leg(self):
+        """hooks/test_pure_helpers.py has no macOS word in its text, so it is a shared suite: files_macos does not list it."""
+        plain = "hooks/test_pure_helpers.py"
+        base = {plain: "old\n", "hooks/test_wrappers.py": "old\n"}
+        _, macos, _ = self.per_os(with_checks(base, self.MAC_HOOK_CI), {plain: "def test_add():\n    assert 1 + 1 == 2\n"})
+        self.assertNotIn(plain, macos, f"{plain} has no macOS word, yet files_macos lists it")
+
     # Row 2: a .ps1 source maps to its own .test.ps1 and install-*.test.ps1 beside it.
     def test_a_ps1_source_lists_its_test_and_its_dash_tests(self):
         base = {"install.ps1": "old\n", "install.test.ps1": "old\n", "install-no-gap.test.ps1": "old\n"}
