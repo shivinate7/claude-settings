@@ -4956,6 +4956,37 @@ caseP3() {
   fi
 }
 
+# ---- caseP4 (characterization, for a reviewer's ruling on the fallback): with no origin/stable, a local install pins local main ----
+# install.sh's pin_commit falls back to the clone's local main when origin holds no stable branch. Local main is made one
+# commit ahead of origin's main, so a pin at origin/main would differ from the pin at local main.
+caseP4() {
+  name="caseP4 (characterization of the no-stable fallback): with no origin/stable, a local install pins the clone's local main, not origin/main"
+  fx="$work/p4-fx"; h="$work/p4-home"; co="$work/p4-co"; cfg="$work/p4-cfg"
+  mkdir -p "$h"
+  make_github_fixture "$fx"
+  main_sha=$(fixture_sha "$fx")
+  write_redirect "$h" "$fx/bare.git"
+  local_stable_clone "$co" "$fx"
+  if git -C "$co" rev-parse -q --verify refs/remotes/origin/stable >/dev/null; then
+    bad "$name" "FIXTURE origin has a stable branch, so the no-stable fallback is not what runs"
+    return
+  fi
+  git -C "$co" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m "local only"
+  local_main=$(git -C "$co" rev-parse refs/heads/main)
+  if [ "$local_main" = "$main_sha" ]; then
+    bad "$name" "FIXTURE local main and origin's main are both $main_sha; the case cannot tell them apart"
+    return
+  fi
+  out=$(cd "$co" && env -i PATH="$work/npm-stub:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" bash ./install.sh 2>&1)
+  rc=$?
+  pin_head=$(git -C "$co-live" rev-parse HEAD 2>/dev/null)
+  if [ "$pin_head" != "$local_main" ]; then
+    bad "$name" "the pinned checkout is at ${pin_head:-nothing}, want local main $local_main, not origin/main $main_sha (install exit $rc: $(install_problems))"
+  else
+    ok "$name"
+  fi
+}
+
 # ---- caseL: the merge allow rules come from the source checkout, and the log says what was written ----
 # The log names `merge allow rules`, not `merge --confirm allow rules`: the file holds the role rules as well as the confirm rules.
 # allow_case NAME HAS [SETTINGS]: a session's own checkout at $work/NAME-co with settings.json `{}`. HAS=1 adds this repo's
@@ -5964,6 +5995,7 @@ run caseK14
 run caseP1
 run caseP2
 run caseP3
+run caseP4
 run caseL1
 run caseL2
 run caseL3
