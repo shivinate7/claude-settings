@@ -219,7 +219,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        "clean" within four words of lint, CI, tests, checks, suite, ci-job or build) with no verbatim
                        `PASS <cmd> (<secs>s)` line in a non-sidechain Bash call's result, from a `verdict` call of this
                        session's transcript. Backticks, a fence, a question, a negation or condition, a named speaker
-                       and a count ("12 passed") are no claim. An unreadable transcript passes. An override lifts it.
+                       and a count ("12 passed") are no claim. A call with a non-empty agent_id (an agent's own report)
+                       and an unreadable transcript pass. An override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   gh-write-cloud       deny. In a cloud session, a gh write: `gh pr` create, merge, comment, edit, close, review or
                        ready; `gh issue` create, comment, edit or close; `gh api` with a write method, or with a field
@@ -6240,7 +6241,8 @@ def judge(payload) -> None:
             refuse(tool, "deny", "sendmessage-session-id", SENDMESSAGE_REASON, target[:120])
 
     # A send that says a check passed with no verdict line in this session's transcript (rule pass-claim-cites-verdict).
-    if tool in ("SendMessage", BRIEF_TOOL):
+    # A call from an agent (non-empty agent_id) is the agent's own report, not the session's claim, so it is not judged.
+    if tool in ("SendMessage", BRIEF_TOOL) and not payload.get("agent_id"):
         import pass_claim
         claimed = pass_claim.send_problem(tool_input.get("message"), payload.get("transcript_path"))
         if claimed:
