@@ -6,4 +6,4 @@
 
 **Decision.** `builders-cannot-edit-tests`, builders cannot edit tests (the shell check).
 
-**Retire.** Exempt the cache folders `__pycache__` and `.pytest_cache` from the builder test predicate. Keep every other path under a test folder as a test path. Closed when a case allows both `rm -rf` forms above for a builder, and `rm -rf tests/test_x.py` stays refused.
+**Retire.** Exempt the cache folders `__pycache__` and `.pytest_cache` from the builder test predicate. Keep every other path under a test folder as a test path. Closed when a case allows both `rm -rf` forms above for a builder, and `rm -rf` on a test file in the tests folder, such as `test_x.py`, stays refused.

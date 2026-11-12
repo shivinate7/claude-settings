@@ -43,7 +43,7 @@ Then empty each list. Pass when it shows one sentence and one control. With no d
 are hidden. When a filter emptied it, the filters show and the control clears the filter.
 Source: q_max D-255 (never assert an unreached state) and D-233 (a failed history read says so);
 ios-adblock `ios/App/AdBlockApp.swift` (`BlockerRow` has its own error and unknown states);
-banchi `CLAUDE.md` "Register" and `docs/DESIGN.md` `EmptyState`; q_max `specs/ux-plan-b.md` B2
+banchi `CLAUDE.md` "Register" and `DESIGN.md` `EmptyState`; q_max `specs/ux-plan-b.md` B2
 (owner confirmed, 2026-09-29).
 
 ## ux-statements-are-true
@@ -51,9 +51,9 @@ banchi `CLAUDE.md` "Register" and `docs/DESIGN.md` `EmptyState`; q_max `specs/ux
 Guidance, not a house rule: a miss is advice, not a finding (record ux-house-rules).
 Screen copy claims only what the product does and what the owner confirmed.
 Check: pass when each promise (a search scope, a feature, a figure, a trust line) is true now.
-Source: joyous `docs/design-brief.md` move 6 (no unsourced claim); sillage
-`docs/product/screens.md` (search copy promises notes that search does not read); q_max
-`docs/rules/ui-primitives.md` W1 (the weights screen's claim matches whether the blend runs).
+Source: joyous `design-brief.md` move 6 (no unsourced claim); sillage
+`screens.md` (search copy promises notes that search does not read); q_max
+`ui-primitives.md` W1 (the weights screen's claim matches whether the blend runs).
 
 ## ux-machine-text-hidden
 
@@ -71,7 +71,7 @@ Each refusal, error and end page has a control on that screen that leads on: a f
 way such as a phone number.
 Check: pass when each one has that control. Prose that names a place is not a control.
 Source: q_max D-261 (a refusal names a reachable fix) and D-226 (offer the destination, not
-prose); joyous `docs/design-brief.md` move 4 (no dead end, offer a call) and record
+prose); joyous `design-brief.md` move 4 (no dead end, offer a call) and record
 custom-tour-booking (an unknown link shows Book a tour and the phone).
 
 ## ux-keep-what-was-made
@@ -80,8 +80,8 @@ Input that a person made and that no server can return survives leaving and comi
 Check: type, then close, go back, change tabs and leave the app. Pass when the input is still
 there on return.
 Source: q_max D-399 (a screen with unrecoverable input stays mounted); sillage
-`docs/product/screens.md` (Close discards the review, so `ReviewDraft` keeps it) and
-`docs/design/system.md` (edit mode keeps the other answers).
+`screens.md` (Close discards the review, so `ReviewDraft` keeps it) and
+`system.md` (edit mode keeps the other answers).
 
 ## ux-control-earns-place
 
@@ -89,7 +89,7 @@ A control that changes nothing on a view is absent, and an expected control that
 Check: pass when each control changes something on its view, and each disabled control gives
 its reason on hover and on focus.
 Source: q_max D-675 (a filter shows only where it changes something). q_max `specs/ux-plan-b.md`
-B2 (a disabled button says why; owner confirmed, 2026-09-29). banchi `docs/DESIGN.md` (the spend
+B2 (a disabled button says why; owner confirmed, 2026-09-29). banchi `DESIGN.md` (the spend
 button is absent, not disabled, until its preflight answers).
 
 ## ux-one-plain-name
@@ -97,9 +97,9 @@ button is absent, not disabled, until its preflight answers).
 Each screen and each act has one plain name, and each icon has one meaning.
 Check: the nav label is the page title. An act keeps one name on every screen. An icon keeps one
 meaning. Each enum value shows a label. Pass when all four hold.
-Source: q_max D-582 (one plain name for each screen) and `docs/rules/ui-primitives.md` NAME1
+Source: q_max D-582 (one plain name for each screen) and `ui-primitives.md` NAME1
 (one act gets one name).
-banchi `docs/DESIGN.md` UX-118 (one icon, one meaning) and `CLAUDE.md` "Register".
+banchi `DESIGN.md` UX-118 (one icon, one meaning) and `CLAUDE.md` "Register".
 
 ## ux-label-once
 
@@ -145,7 +145,7 @@ Source: home `SPEC.md`.
 On a phone layout, the main input and the main action sit in reach of the thumb.
 Check: phone layouts only. Pass when a reviewer who holds the phone in one hand reaches the main
 input and the main action with the thumb.
-Source: sillage `docs/design/system.md`.
+Source: sillage `system.md`.
 
 ## ux-haptics-feel-substantial
 
