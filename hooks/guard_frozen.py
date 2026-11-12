@@ -1216,13 +1216,16 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             else:
                 # An unquoted `)` or backtick glued to the path (`( echo > F)`, `$(... > F)`) is not
                 # part of it. A quoted word ends in its quote, so it is never cut here.
+                closing = ")" * (len(word) - len(word.rstrip(")"))) if word.rstrip(")`") else ""
                 word = _typed(word.rstrip(")`") or word, word)   # keeps the PowerShell type of the word
                 pieces = _words_of(word) if _has_quote(word) else [word]
                 # `_words_of` cuts a quote's text at a paren but not at a backtick: a `bash -c` script that
                 # holds a backtick substitution ends its path word with one.
                 pieces = [_typed(piece.rstrip("`") or piece, piece) for piece in pieces]
                 words.extend(pieces)
-                shown.extend(pieces)
+                # The text keeps a closing paren: `param($p) ni F` runs `ni` as a command after the paren
+                # (`_ALIAS_POSITION`); the judged word is still the path without it.
+                shown.extend(pieces[:-1] + [pieces[-1] + closing] if closing and pieces else pieces)
                 kept = (read_scripts if from_reads else scripts)[number][index]
                 script.extend(_words_of(kept) if _has_quote(kept) else [kept])
         text = " ".join(shown)
