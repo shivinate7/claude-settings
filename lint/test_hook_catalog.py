@@ -158,6 +158,7 @@ sys.path.insert(0, HERE)
 from test_settings_matcher import SETTINGS, JUDGE_TYPES, judge_hooks  # noqa: E402  one home for settings.json, the judge walk and its hook types
 from check_skill_model_rows import skill_names  # noqa: E402  one home for "a skill is a folder with SKILL.md"
 from hook_catalog import pull_request_run  # noqa: E402  one home for the records waiver: the generator's own rule for a waived run
+import rule_audit  # noqa: E402  the rule file list, one home (lint/rule_audit.py RULE_FILES)
 
 
 def read(path, encoding="utf-8-sig"):
@@ -1616,11 +1617,12 @@ class RealRecords(unittest.TestCase):
                 problems.append("%s %s: link %r does not resolve" % (r["section"], r["slug"], r["link"]))
         self.assertFalse(problems, "\n".join(problems))
 
-    def test_r11_every_rule_marker_in_claude_md_has_one_mandate_row_in_order(self):
+    def test_r11_every_rule_marker_in_a_rule_file_has_one_mandate_row_in_order(self):
         ids = []
-        for line in unfenced_lines(read(os.path.join(ROOT, "CLAUDE.md"))):
-            ids += [i for i in RULE_MARK.findall(line) if i not in ids]
-        self.assertTrue(ids, "no rule marker in CLAUDE.md, so the scan proves nothing")
+        for rel in rule_audit.RULE_FILES:  # the files the page reads, in the same order (the one home: lint/rule_audit.py)
+            for line in unfenced_lines(read(os.path.join(ROOT, rel))):
+                ids += [i for i in RULE_MARK.findall(line) if i not in ids]
+        self.assertTrue(ids, "no rule marker in the rule files, so the scan proves nothing")
         self.assertEqual([r["slug"] for r in self.rows() if r["section"] == "Mandates"], ids)
 
     def test_r12_every_gist_is_filled_in(self):
