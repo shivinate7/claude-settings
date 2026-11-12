@@ -525,6 +525,21 @@ print("KEEP " + keep)
 print("OWN " + _test_temp.run_folder(root))
 PY
 
+# ---- v: with no CLAUDE_SETTINGS_RAW, the raw install.sh is fetched from the stable branch, not main ----
+caseV() {
+  name="v: with no CLAUDE_SETTINGS_RAW, the raw install.sh is fetched from the stable branch, not main"
+  c=$(new_case caseV)
+  add_checkout "$c"
+  fake_curl "$c" fail
+  # An empty CLAUDE_SETTINGS_RAW is unset for the script's ${VAR:-default}, so the default RAW applies.
+  run_setup "$c" v "CLAUDE_SETTINGS_RAW="
+  if ! grep -qF "raw.githubusercontent.com/shivinate7/claude-settings/stable/install.sh" "$c/curl.log" 2>/dev/null; then
+    bad "$name" "the raw install.sh was not fetched from the stable branch; curl was called with: $(brief "$c/curl.log")"
+  else
+    ok "$name"
+  fi
+}
+
 caseSweep() {
   name="sweep: the first request of a run removes an old sibling run folder and keeps a new one"
   sroot="$RUN/sweep-root"
@@ -571,6 +586,7 @@ run caseIII
 run caseIVa
 run caseIVb
 run caseIVc
+run caseV
 run caseSweep
 
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"

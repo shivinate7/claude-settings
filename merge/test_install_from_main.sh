@@ -1550,7 +1550,35 @@ case45() {
   else ok "$name"; fi
 }
 
-ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31 case32 case33 case34 case35 case36 case37 case38 case39 case40 case41 case42 case43 case44 case45"
+# ---- Case 46: the helper pins origin's stable commit, not local main, when stable is behind main ----
+# The stable branch is what sessions install from (restart-plan R42 part 2). Origin's main moves one commit on, and
+# the pinned checkout must stay at stable. The pin starts at stable, so an install that moved it to main is a change.
+case46() {
+  name="case46: the helper pins origin's stable commit, not local main, when stable is behind main"
+  d="$work/case46"; h="$d/home"; SHIM="$d/shim"; mkdir -p "$h"; make_shim "$SHIM"
+  live_clone "$d/clone" stub
+  git init -q --bare -b main "$d/origin.git"
+  git -C "$d/clone" remote add origin "$d/origin.git"
+  git -C "$d/clone" push -q origin main
+  s0=$(git -C "$d/clone" rev-parse main)
+  git -C "$d/clone" push -q origin main:refs/heads/stable
+  git -C "$d/clone" commit -q --allow-empty -m "main moves on"
+  git -C "$d/clone" push -q origin main
+  c1=$(git -C "$d/clone" rev-parse main)
+  git -C "$d/clone" worktree add -q --detach --lock --reason "claude-settings live pin" "$d/clone-live" "$s0"
+  if [ "$(git -C "$d/origin.git" rev-parse refs/heads/stable)" != "$s0" ] || [ "$c1" = "$s0" ]; then
+    bad "$name" "FIXTURE origin's stable is not $s0, or main $c1 did not move past it"
+    return
+  fi
+
+  run_live "$d/clone"
+  if [ "$rc" -ne 0 ]; then bad "$name" "helper exited $rc: $out"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$s0" ]; then
+    bad "$name" "the pinned checkout is at $(git -C "$d/clone-live" rev-parse HEAD), want origin's stable $s0 (main is $c1)"
+  else ok "$name"; fi
+}
+
+ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31 case32 case33 case34 case35 case36 case37 case38 case39 case40 case41 case42 case43 case44 case45 case46"
 if [ $# -gt 0 ]; then WANT="$*"; else WANT="$ALL"; fi
 for c in $WANT; do "$c"; done
 

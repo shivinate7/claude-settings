@@ -128,6 +128,16 @@ class Launch(unittest.TestCase):
         self.assertIn(self.head(self.work)[:12], err)  # prints the SHA it ran
         self.assertNotIn("WARNING", err)
 
+    def test_runs_origin_stable_not_main(self):
+        # The launcher runs the stable branch, the commit sessions install from (restart-plan R42 part 2).
+        v1 = self.head(self.work)
+        sh(self.work, "git", "push", "-q", "origin", "main:refs/heads/stable", env=self.env)
+        self.release("v2")  # main moves on; stable stays at v1
+        self.assertEqual(sh(self.bare, "git", "rev-parse", "refs/heads/stable"), v1, "FIXTURE stable is not v1")
+        rc, out, err = self.merge()
+        self.assertEqual((rc, out.strip()), (0, "RAN v1"), err)
+        self.assertIn(v1[:12], err)  # prints the SHA of stable it ran
+
     def test_dirty_checkout_untouched(self):
         self.release("v2")
         before = self.head(self.co)
