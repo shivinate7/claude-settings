@@ -2180,3 +2180,5 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
+- fetch-head-lock-fetch-twice: `relayed_head_holds` and `fetch_pr_head` repeat the fetch and rev-parse that `fetch_branch` homes in merge/merge.py. Found in round 3 of lane fetch-head-shared-race. Decision: fetch-head-shared-race (building-one-home-per-capability).
+- fetch-head-allow-gaps-untested: no allow case for a fetch followed by a glued-paren or redirect read (`git fetch x && (git show FETCH_HEAD)`). Found in round 3 of lane fetch-head-shared-race. Decision: fetch-head-shared-race.
