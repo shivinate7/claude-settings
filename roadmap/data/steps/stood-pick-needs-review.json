@@ -1,0 +1,14 @@
+{
+ "id": "stood-pick-needs-review",
+ "title": "A stood pick goes with Send only after the owner has opened its card",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 12:25 CST Nov 12: \"a lot of the keep the picks were pre selected and i didn't realize that before reviewing and so i never got to see them before i hit send answers on them\".",
+ "source": "owner chat 12:25 CST Nov 12",
+ "note": "Mistake: the page sends a `stands` item's pick with the owner's next Send (skill waiting-page, \"Add an item\"), so 25 coordinator picks posted 12:13-12:22 CST rode one Send at 12:24 CST unseen; triage closed them, then reopened all 25 at 12:26 CST. Fix: a stood pick is sent only once its card was opened or expanded, or the Send shows a count of unseen stood picks and leaves them out. Red first on a page test. Until it lands, triage closes no stands item from a Send that carries more than its own visible picks.",
+ "updatedAt": "2026-11-12T12:26:18-06:00"
+}
