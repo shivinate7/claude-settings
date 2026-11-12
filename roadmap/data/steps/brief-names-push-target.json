@@ -1,14 +1,14 @@
 {
  "id": "brief-names-push-target",
  "title": "A brief names its push target, and a builder push is refused when it says none",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL371TsKz9QxefdQQgz",
  "owner": "triage",
  "blockedBy": [],
  "why": "Incident: a builder pushed the lane branch before the review records were posted (lane writer-lists-awaiting-threads).",
- "source": "coordinator 12:57 CST Nov 12 (its clock), from lane writer-lists-awaiting-threads hand-in to runner 10",
+ "source": "coordinator 12:51 CST Nov 12, from lane writer-lists-awaiting-threads hand-in to runner 10",
  "note": "Mistake: a builder agent pushes when its brief did not mean it to. Harm: a branch moves before review records post. Fix: a brief carries \"Push to: <branch> or none\"; a builder agent's push is refused when its brief says none. Red first on the incident. Coordinator follow-up (undoable), start when ready.",
- "updatedAt": "2026-11-12T12:53:38-06:00"
+ "updatedAt": "2026-11-12T12:58:46-06:00"
 }

@@ -7,10 +7,10 @@
  "lane": "",
  "owner": "triage",
  "blockedBy": [
-  "page-one-store-answers"
+  "page-data-one-store"
  ],
  "why": "Owner ruling R28: page data has one store, git first, no copy step, no lag (step page-data-one-store).",
  "source": "coordinator 11:53 and 11:54 CST Nov 12, from lane page-data-one-store (decision waiting-page-one-store, route D: the page on claude.ai, no database, git through a connector)",
- "note": "Rules now in hooks/guard.py, question_form.py, call_judge.py and local_time.py --page-note. Runs on PreToolUse for a commit or push touching waiting/, plus record-branch CI. Red first. Route B order (coordinator 12:28 CST Nov 12).",
- "updatedAt": "2026-11-12T12:29:13-06:00"
+ "note": "Rules now in hooks/guard.py, question_form.py, call_judge.py and local_time.py --page-note. Runs on PreToolUse for a commit or push touching waiting/, plus record-branch CI. Red first. Route B order (coordinator 12:28 CST Nov 12). Parked 12:57 CST Nov 12: returns only if a route B trigger fires (same-account lag measured) (coordinator 12:53 CST, lane page-data-one-store re-cut).",
+ "updatedAt": "2026-11-12T12:58:46-06:00"
 }
