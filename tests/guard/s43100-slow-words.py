@@ -28,6 +28,7 @@ SLOW_HOOKS_DIR = os.path.join(SLOW_CFG, "hooks")
 SLOW_LEAF_LINK = os.path.join(SLOW_PROJ, "leaf-link")   # a symlink to SLOW_GUARD_FILE
 SLOW_DIR_LINK = os.path.join(SLOW_PROJ, "hooks-link")   # a symlink to SLOW_HOOKS_DIR
 SLOW_ECHO = "echo " + " ".join("word%d" % n for n in range(SLOW_RUN_WORDS))
+NOT_LSTAT_PATH = "Windows resolves a path with one call, not one lstat per component, so this count does not measure the path reads here"
 NO_TEMP = {"TMPDIR": None, "TEMP": None, "TMP": None}  # the full run reads the default temp folder
 os.makedirs(SLOW_BULK, exist_ok=True)
 
@@ -94,6 +95,8 @@ def resolved_lstat_bound_check():
     lstat calls per word, on average. Each word is a missing leaf in an empty folder, so the count is the
     cost of the path reads and nothing else.
     """
+    if os.name == "nt":
+        return SKIP, NOT_LSTAT_PATH
     core, _ = slow_modules()
     if not hasattr(core, "_resolved"):
         return False, "guard_core has no _resolved to read the words with"
@@ -154,6 +157,8 @@ def slow_full_run_lstat_check():
     """The guard run on the SLOW_RUN_WORDS-word echo makes at most LSTAT_PER_WORD lstat calls per word,
     on average, plus LSTAT_FIXED for the guard's own reads.
     """
+    if os.name == "nt":
+        return SKIP, NOT_LSTAT_PATH
     done = slow_full_run()
     if done.returncode != 0:
         return False, "the guard exited %d on the echo: %s" % (done.returncode, done.stderr.strip()[-120:])
