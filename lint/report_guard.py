@@ -25,7 +25,7 @@ guard: `step:<slug>`, the word debt, or a guard, check or hook word with a PR or
 
 Every refusal reaches the owner in chat (decision `guard-remedy-not-to-owner`). So each opens with one
 owner line from owner_line(): the check, what is wrong, and a cite of that decision. The steps to fix it live in
-that record, never in the reason.
+that record, never in the reason. Exception: the Recovered guard's reason also holds a draft of each missing line.
 
 On the same landed turns it also blocks (one block, all reasons joined) when a Done item lacks
 BUILT, RECORDED, or OTHER or a PR or commit ref (`reports-done-format`), or when the reply holds
@@ -33,7 +33,7 @@ a record id with no short gloss (`speak-cite-id-plus-gloss`), or when a builder,
 test-author or record-writer spawned since the last human message goes unnamed in Done, or a
 named "role model" pair matches no spawn of that role (`reports-done-names-models`), or when
 a turn that spawned a builder reports with no `Unstarted:` line (`reports-name-unstarted-items`).
-When the report is there, no refusal holds correction text; the step lives in decision guard-remedy-not-to-owner.
+When the report is there, no refusal holds correction text, except the Recovered guard's draft lines; the step lives in decision guard-remedy-not-to-owner.
 
 On any turn whose reply holds an Input Needed item that asks the owner a question (a pick with
 options, or a sentence ending in "?" outside quotes and backticks), it also blocks unless the turn
@@ -1043,6 +1043,61 @@ def unsourced_recovered_item(block):
     return ""
 
 
+GIT_CALL_RE = re.compile(r"(?:^|[;&|(])\s*git\b")
+
+
+def sources_seen(records):
+    """The carry sources the main-session tool calls in `records` show, in git, page, digest order: git is a Bash
+    `git` call, page an Artifact read, digest a Read of a file under handoffs/. A call counts only when its result
+    (paired by tool_use_id) exists and is not an error, as in success_route_flags. Reads the records only."""
+    results = [b for rec in records if not rec.get("isSidechain") for b in tool_results(rec)]
+    answered = {b.get("tool_use_id") for b in results}
+    failed = {b.get("tool_use_id") for b in results if b.get("is_error")}
+    seen = set()
+    for rec in records:
+        if rec.get("isSidechain"):
+            continue
+        for use in tool_uses(rec):
+            if use.get("id") not in answered or use.get("id") in failed:
+                continue
+            name, args = use.get("name"), use.get("input") or {}
+            if name == "Bash" and GIT_CALL_RE.search(str(args.get("command", ""))):
+                seen.add("git")
+            elif name == "Artifact" and args.get("action") == "read":
+                seen.add("page")
+            elif name == "Read" and "handoffs/" in str(args.get("file_path", "")).replace("\\", "/"):
+                seen.add("digest")
+    return [source for source in ("git", "page", "digest") if source in seen]
+
+
+DRAFT_HEADER = "\nDraft of each missing line:\n"
+
+
+def join_reasons(reasons):
+    """The reasons joined by spaces with the rule suffix, then each carry draft on its own line after all of them,
+    so a pasted draft line carries no other text."""
+    heads, drafts = [], []
+    for reason in reasons:
+        head, _, tail = reason.partition(DRAFT_HEADER)
+        heads.append(head)
+        if tail:
+            drafts.append(tail)
+    joined = " ".join(heads) + " (rule reports-order-of-labels)"
+    return joined + DRAFT_HEADER + "\n".join(drafts) if drafts else joined
+
+
+def carry_drafts(records, missing):
+    """A paste-ready draft line for each carry line in `missing`, built from the records after the compaction."""
+    drafts = []
+    if "Recovered" in missing:
+        seen = sources_seen(records)
+        drafts.append("Recovered: <what you recovered> (sources seen: %s)" % ", ".join(seen) if seen
+                      else "Recovered: none")
+    if "Handoff gave" in missing:
+        drafts.append("Handoff gave: <facts the handoff supplied that the summary did not, or none>")
+    return drafts
+
+
 def recovered_problem(records, text):
     """The Recovered guard's refusal when a compaction came before `text` and a carry line is missing
     since, or a Recovered item of `text` names no source while no earlier reply has met the Recovered
@@ -1079,7 +1134,11 @@ def recovered_problem(records, text):
     bad = unsourced_recovered_item(block) if "Recovered" in pending else ""
     if bad:
         reasons.append("the Recovered item %r names no source (git, page or digest)" % bad)
-    return owner_line("Recovered guard", "; ".join(reasons)) if reasons else ""
+    if not reasons:
+        return ""
+    refusal = owner_line("Recovered guard", "; ".join(reasons))
+    drafts = carry_drafts(records[boundary + 1:], missing)
+    return refusal + DRAFT_HEADER + "\n".join(drafts) if drafts else refusal
 
 
 def repo_root(cwd):
@@ -3124,7 +3183,7 @@ def main():
         if hold:
             reasons.insert(0, hold_reason(hold))
         if reasons:
-            print(json.dumps({"decision": "block", "reason": " ".join(reasons) + " (rule reports-order-of-labels)"}))
+            print(json.dumps({"decision": "block", "reason": join_reasons(reasons)}))
         return
     # A marker left by a rewrite that never ran must not reach a later turn: only the Stop
     # straight after a missing-report block may consume one.
@@ -3241,7 +3300,7 @@ def main():
             pick.append(refusal)
             pick = [r for r in pick if r]
             if pick:
-                reason = " ".join(pick) + " (rule reports-order-of-labels)"
+                reason = join_reasons(pick)
                 finish({"decision": "block", "reason": reason})
             else:
                 finish({"systemMessage": note} if note else None)
@@ -3304,7 +3363,7 @@ def main():
     if refusal:
         reasons.append(refusal)
     if reasons:
-        reason = " ".join(reasons) + " (rule reports-order-of-labels)"
+        reason = join_reasons(reasons)
         if not shape_ok:
             write_marker(hook, last_human_idx)
         finish({"decision": "block", "reason": reason})
