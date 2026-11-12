@@ -253,6 +253,14 @@ class CodeNameTests(Fixture):
         code, out = self.change(rel, text)
         self.assertEqual(code, 0, out)
 
+    RECORD_ROW = "| mailbox | A git store for messages. | `rule:one-rule` | `inbox (this sense)` |\n"
+
+    def base_with_record(self):
+        """Commit a tree whose decision record has an id that holds a tagged "not" word."""
+        self.put("GLOSSARY.md", HEAD + ROWS + self.EXTRA + self.RECORD_ROW)
+        self.put("docs/decisions/owner-feedback-inbox.md", "# Feedback\n")
+        self.base_repo()
+
     # Identifiers
 
     def test_python_identifier_with_not_name_fails(self):
@@ -373,6 +381,37 @@ class CodeNameTests(Fixture):
 
     def test_unticked_hyphen_prose_passes(self):
         self.green("docs/notes.md", "A bundle-of-lanes phrase, and a handover-style note.\n")
+
+    def test_cite_of_a_record_id_the_base_holds_is_not_flagged(self):
+        """A prose line that cites a record by its id passes when the base holds that record: the id names it."""
+        self.base_with_record()
+        self.assertIn("docs/decisions/owner-feedback-inbox.md", self.git("ls-tree", "-r", "--name-only", "origin/main"))
+        self.put("docs/notes.md", "The feedback log is cited as `owner-feedback-inbox`.\n")
+        self.commit()
+        code, out = self.run_check()
+        self.assertNotIn("slug owner-feedback-inbox", out, out)
+        self.assertEqual(code, 0, out)
+
+    def test_cite_of_an_id_with_no_record_is_still_flagged(self):
+        """The same cite with no record on the base is a new name, so it stays flagged."""
+        self.put("GLOSSARY.md", HEAD + ROWS + self.EXTRA + self.RECORD_ROW)
+        self.base_repo()
+        self.assertNotIn("owner-feedback-inbox", self.git("ls-tree", "-r", "--name-only", "origin/main"))
+        self.put("docs/notes.md", "The feedback log is cited as `owner-feedback-inbox`.\n")
+        self.commit()
+        code, out = self.run_check()
+        self.assertEqual(code, 1, out)
+        self.assertIn("slug owner-feedback-inbox uses 'inbox'", out)
+
+    def test_a_non_record_slug_beside_a_record_cite_is_still_flagged(self):
+        """The pass is per id: a line that also cites a slug with no record keeps that slug flagged."""
+        self.base_with_record()
+        self.assertIn("docs/decisions/owner-feedback-inbox.md", self.git("ls-tree", "-r", "--name-only", "origin/main"))
+        self.put("docs/notes.md", "The feedback log is cited as `owner-feedback-inbox`, see `handover-notes-record`.\n")
+        self.commit()
+        code, out = self.run_check()
+        self.assertEqual(code, 1, out)
+        self.assertIn("slug handover-notes-record uses 'handover'", out)
 
     # Hook messages
 
