@@ -7,7 +7,7 @@ No owner ruling yet. The coordinator asked for this guard rule after the inciden
 - A pipeline that holds a named check and a later `tail` or `head` stage is refused. The rule id is `check-tail`, in `hooks/guard_stream.py`.
 - The merge tool's verdict calls are `merge --lane-lint` and `merge --review-record`. They are refused in the foreground and in the background.
 - `merge --confirm` stays with the narrated-tail rule (`live-stream`, in the same file), so it is never refused twice. A plain `merge <pr>` preview, which returns in seconds, passes.
-- `ci-job` is refused only in a call with `run_in_background`. In the foreground it passes.
+- `ci-job` is check-tail's refusal only in a call with `run_in_background`. In the foreground it is `bare-check`'s (section below): refused with no `verdict`, never refused twice.
 - Filters between the check and the `tail` or `head` do not hide it: `merge --lane-lint 7 | grep -v DEBUG | tail -8` is refused.
 - A `tee` stage between them does not end the check's reach: `merge --lane-lint 7 | tee x | tail -3` is refused, because `tail` still cuts what the agent reads, which is the incident's form (coordinator ruling, 2026-11-08 05:15 CST). A `tee` with no `tail` or `head` after it passes. `verdict` keeps the full log, so the remedy names it. A pipeline ends at any separator other than `|`.
 - The remedy is `verdict <cmd>` with nothing after it (decision verdict-pipe-refused refuses a pipe out of it). It keeps the full log and prints the verdict itself.
@@ -36,6 +36,16 @@ The rule stops a mistake Claude made in normal work (`guard-guards-mistakes-only
 ## What check-tail reads
 
 For an interpreter, check-tail reads the script operand only: the first word that is no flag. `grep -n x merge/merge.py` and `python3 -m pytest -k merge/merge.py` run no roster script, so they pass. An unquoted `$(` or backtick substitution splits into several words. So the operand reads on to the word that closes it. The roster tail is judged on the joined word (`_whole_word` in `hooks/guard_stream.py`).
+
+## The bare run (rule `bare-check`)
+
+Incident: a lane read `echo $?` after a bare `merge --lane-lint 7` and said "lane lint passes". The agent reads whatever the output ends on, and an exit code is no verdict. Coordinator ruling, pick A (2026-11-12 11:23 CST).
+
+- A roster command run in the foreground with no `verdict` ahead of its program is refused. The rule id is `bare-check`, in `hooks/guard_stream.py` (`bare_check_hit`). The remedy is `verdict <cmd>`, said in the refusal.
+- The roster is check-tail's, read by the same `check_stage` with the same spellings and wrappers: `merge --lane-lint`, `merge --review-record`, `merge --release-check`, and `ci-job`. Here `ci-job` counts in the foreground too (a parameter of `check_stage`, no second roster).
+- `verdict <cmd>` passes, behind any wrapper or `uv run`. A pipe into `tail` or `head` stays check-tail's refusal, judged first, so a call is never refused twice. A background run is out: the end note and a file read back cover it.
+- Not built: a test command (`pytest`, `python3 <test file>`) run bare. Reason: no incident names a test command, and refusing every bare test run is the guard that cries wolf (`guard-that-cries-wolf-is-spent`).
+- Cost: none at run time beyond the string read the guard already does for each Bash call. It starts no process and writes no file.
 
 ## Known gaps
 

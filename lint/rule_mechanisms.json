@@ -359,10 +359,10 @@
     "tokens-run-through-verdict": {
       "mechanism": {
         "kind": "guard",
-        "ref": "check-tail",
-        "reason": "Partly mechanized. The guard (check-tail, hooks/guard_stream.py check_tail_hit) refuses `merge --lane-lint`, `merge --review-record` or `merge --release-check` piped into tail or head, foreground or background, and a backgrounded `ci-job` piped into them, with or without a tee between them (a tee with no tail or head after it passes), and it reads the check through `uv run`, a versioned python such as `python3.11`, and an `env` or python wrapper. A call through verdict is not a check-tail refusal, but `verdict <cmd> | tail` is refused first by verdict-pipe. It does not see any other verification command, a PowerShell Select-Object -First or -Last, or a command run outside verdict with no pipe."
+        "ref": "bare-check",
+        "reason": "Partly mechanized. Two guards read the roster. bare-check (hooks/guard_stream.py bare_check_hit) refuses `merge --lane-lint`, `merge --review-record`, `merge --release-check` and a foreground `ci-job` run with no verdict ahead of the program. The guard (check-tail, hooks/guard_stream.py check_tail_hit) refuses `merge --lane-lint`, `merge --review-record` or `merge --release-check` piped into tail or head, foreground or background, and a backgrounded `ci-job` piped into them, with or without a tee between them (a tee with no tail or head after it passes), and it reads the check through `uv run`, a versioned python such as `python3.11`, and an `env` or python wrapper. A call through verdict is not a check-tail refusal, but `verdict <cmd> | tail` is refused first by verdict-pipe. It does not see any other verification command, a PowerShell Select-Object -First or -Last, or a test command run outside verdict (not built: no incident names one)."
       },
-      "test": "hooks/test_guard.py::check-tail: the incident line, backgrounded, is refused"
+      "test": "hooks/test_guard.py::bare-check: the incident form, merge --lane-lint then echo $?, with no verdict wrapper is refused"
     },
     "tokens-point-brief-at-files": {
       "mechanism": {
