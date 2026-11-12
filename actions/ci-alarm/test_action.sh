@@ -311,16 +311,16 @@ done
 runs_are "$(gh_run ci null 2026-01-02 https://runs/green-2 workflow_dispatch 2 in_progress)" "$(gh_run ci failure 2026-01-01 https://runs/red-1 schedule 1)"
 jobs_of 1 checks:failure
 jobs_of 2 checks:success
-t red green-run-still-going-clears-nothing "" "" https://runs/red-1 none
+t red green-run-still-going-clears-nothing "" "" https://runs/red-1 "actions/runs/1/jobs"
 runs_are "$(gh_run ci failure 2026-01-03 https://runs/red-3 schedule 3)" "$(gh_run ci success 2026-01-02 https://runs/green-2 schedule 2)" "$(gh_run ci failure 2026-01-01 https://runs/red-1 push 1)"
 jobs_of 1 checks:failure
 jobs_of 2 checks:success
 jobs_of 3 checks:failure
-t red green-run-that-is-not-the-newest-of-its-group-clears-nothing "" "" https://runs/red-1 none
+t red green-run-that-is-not-the-newest-of-its-group-clears-nothing "" "" https://runs/red-1 "actions/runs/1/jobs actions/runs/3/jobs"
 runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)" "$(gh_run ci success 2026-01-01 https://runs/green-2 schedule 2)"
 jobs_of 1 checks:failure
 jobs_of 2 checks:success
-t red green-run-older-than-the-red-run-clears-nothing "" "" https://runs/red-1 none
+t red green-run-older-than-the-red-run-clears-nothing "" "" https://runs/red-1 "actions/runs/1/jobs"
 runs_are "$(gh_run ci startup_failure 2026-01-02 https://runs/red-1 push 1)" "$(gh_run ci success 2026-01-03 https://runs/green-2 schedule 2)"
 jobs_of 1
 jobs_of 2 checks:success
@@ -344,7 +344,7 @@ jobs_of 2 checks:success
 t unknown green-runs-jobs-read-fails-is-unknown "api *actions/runs/2/jobs*"
 runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)"
 jobs_of 1 checks:failure
-t red red-run-with-no-candidate-reads-no-jobs "" "" https://runs/red-1 none
+t red red-run-with-no-candidate-reads-its-jobs-once "" "" https://runs/red-1 "actions/runs/1/jobs"
 # A cancelled run raises the alarm only through a job cancelled at its own job-level cap. Its jobs and its workflow file are each read once.
 runs_are "$(gh_run ci cancelled 2026-01-02 u1 push 1)"
 jobs_of 1 checks:cancelled:2
@@ -435,7 +435,8 @@ named green green-run-with-no-cap-end-in-any-attempt-stays-silent "!cap end name
 
 # The cancelled-path cost sentence in action.yml: the one that starts "Cost of that check", in the first paragraph of the description.
 # Scope first: the sentence must be found. Then it may not claim that no process starts or no file is written, must say
-# "no long-lived process", and must keep its three read counts.
+# "no long-lived process", and must count its reads: one jobs read per judged run (failed or cancelled), the workflow read
+# only when a job was cancelled, and the workflows-list read.
 action_yml="$root/actions/ci-alarm/action.yml"
 cost_sentence="$(awk '/^description: >/ { f = 1; next } f && /^[ \t]*$/ { exit } f' "$action_yml" | sed 's/^[ \t]*//' | tr '\n' ' ' | sed -n 's/.*\(Cost of that check.*\)/\1/p' | sed 's/\. .*$//')"
 if [ -z "$cost_sentence" ]; then echo "FAIL action-yml-cancelled-cost-sentence-not-found"; bad=1
@@ -445,8 +446,8 @@ else
   else echo "ok   action-yml-cost-line-claims-no-process-start-or-file-write"; fi
   if grep -qF 'no long-lived process' <<<"$cost_sentence"; then echo "ok   action-yml-cost-line-says-no-long-lived-process"
   else echo "FAIL action-yml-cost-line-does-not-say-no-long-lived-process"; bad=1; fi
-  if grep -qF 'jobs read' <<<"$cost_sentence"; then echo "ok   action-yml-cost-line-keeps-the-jobs-read"
-  else echo "FAIL action-yml-cost-line-drops-the-jobs-read"; bad=1; fi
+  if grep -qF 'one jobs read per judged run (failed or cancelled)' <<<"$cost_sentence"; then echo "ok   action-yml-cost-line-counts-one-jobs-read-per-judged-run"
+  else echo "FAIL action-yml-cost-line-drops-the-jobs-read-per-judged-run"; bad=1; fi
   if grep -Eq 'workflow[- ](file )?read (only )?when a job' <<<"$cost_sentence"; then echo "ok   action-yml-cost-line-keeps-the-workflow-read-when-a-job-was-cancelled"
   else echo "FAIL action-yml-cost-line-drops-the-workflow-read-when-a-job-was-cancelled"; bad=1; fi
   if grep -qF 'workflows-list read' <<<"$cost_sentence"; then echo "ok   action-yml-cost-line-keeps-the-workflows-list-read"
@@ -484,7 +485,7 @@ t raised scanner-a-comment-after-the-cap-is-stripped "" "" "$(printf 'build\n20\
 runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/scan-unknown push 4723)"
 jobs_of 4723 lint:cancelled:5
 scanner_wf | workflow_file 4723
-t unknown scanner-a-quoted-timeout-in-a-run-line-is-not-a-cap "" "" "" "actions/runs/4723/jobs"
+t green scanner-a-quoted-timeout-in-a-run-line-is-not-a-cap "" "" "" "actions/runs/4723/jobs"
 
 runs_are "$(gh_run ci success 2026-01-02 u1 schedule 2)" "$(gh_run ci failure 2026-01-01 u0 schedule 1)"
 t green red-schedule-is-cleared-by-a-newer-green-schedule "" "" "" none
