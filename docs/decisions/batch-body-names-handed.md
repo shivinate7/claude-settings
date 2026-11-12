@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner, 2026-11-08 11:57 CST, typed in degen lane session_013NEJKzoN2eD5oih2K39Be8, answering where the lane-drop guard goes: "2. it would go in claude-settings".
+Owner, 2026-11-08 11:57 CST, typed in the degen lane, session_013NEJKzoN2eD5oih2K39Be8, answering where the lane-drop guard goes: "2. it would go in claude-settings".
 
 The merge tool as the home, and the refusal at the merge confirm as well as at the draft step, are this lane's design. They come from the degen lane's suggestion, relayed by the coordinator. They are not the owner's words. A PR marked ready by hand skips the draft step, so the merge confirm checks again.
 
