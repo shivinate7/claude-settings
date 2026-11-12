@@ -158,28 +158,51 @@ class CommitHash:
     """The `commit hash` group: a bare hex id of 7 to 40 characters with a letter and a digit.
 
     An id that an example word introduces ("e.g. `41ddef83`", "such as 41ddef83", "an id like 41ddef83") names
-    no commit, so it is skipped. Ids listed after the first ("such as `aa11bb22`, `cc33dd44`") join it. Any
-    other word before the id leaves it flagged, so "fixed in", "see" and "cut at" still hit."""
+    no commit, so it is skipped. Ids listed after the first ("such as `aa11bb22`, `cc33dd44`") join it.
+    Any other word before the id leaves it flagged, so "see" and "cut at" still hit.
+    A marker or a list join skips an id only when its clause has no history wording. So an id that a clause
+    with "reverted" or "in main" cites stays flagged, whether the marker comes before or after the verb.
+    "like" after a verb of comparison ("works like <id>") compares to a commit, so it is no marker."""
     HEX = re.compile(r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b")
     # The marker, in any letter case, is the last thing before the id, past any run of spaces, commas, colons
     # and open parens, then an optional backtick, single quote or double quote.
     # Each marker match ends where an id may start, so one pass over the line finds every marker end.
-    EXAMPLE = re.compile(r"(?:\be\.g\.|\bi\.e\.|\bsuch\s+as|\bfor\s+(?:example|instance)|\blike)[\s,:(]*[`'\"]?", re.I)
+    EXAMPLE = re.compile(r"(?:\be\.g\.|\bi\.e\.|\bsuch\s+as|\bfor\s+(?:example|instance)|\b(?P<like>like))[\s,:(]*[`'\"]?", re.I)
+    COMPARE = re.compile(r"\b(?:works?|behaves?|acts?|looks?)\s+$", re.I)
     # The text between one id of such a list and the next, in any letter case: an optional closing backtick,
     # single quote or double quote; then a comma with optional spaces around it and an optional "or" or "and"
     # plus spaces after it, or a lone "or" or "and" with spaces on both sides; then an optional opening quote of
     # the same three kinds. Spaces alone do not join, so "e.g. <id> <id>" flags the second id.
     JOIN = re.compile(r"[`'\"]?(?:\s*,\s*(?:or\s+|and\s+)?|\s+(?:or|and)\s+)[`'\"]?", re.I)
+    # A clause ends at ";", "!", "?" or a full stop before a space, except the stop that closes "e.g." or "i.e.".
+    # A comma does not end it, so "reverted in main, i.e. <id>" is one clause.
+    CLAUSE_END = re.compile(r"[;!?]|(?<!e\.g)(?<!i\.e)\.(?=\s)", re.I)
+    # A past-tense verb names history anywhere in the clause. "in main" and "since" name it only
+    # before the id. "after" is no history word here: "listed after the first (e.g. <id>)" is plain prose.
+    # "fixed-width" is a noun phrase.
+    HISTORY_VERB = re.compile(r"\b(?:reverted|fixed(?!-)|cut|introduced|merged|landed|added|removed|broke)\b", re.I)
+    HISTORY_BEFORE = re.compile(r"\bin\s+main\b|\bsince\b", re.I)
 
     def finditer(self, text):
-        marker_ends = {e.end() for e in self.EXAMPLE.finditer(text)}
+        marker_ends = {e.end() for e in self.EXAMPLE.finditer(text)
+                       if not (e.group("like") and self.COMPARE.search(text[max(0, e.start() - 12):e.start()]))}
+        starts = [0] + [c.end() for c in self.CLAUSE_END.finditer(text)]
+        clauses = {}  # clause index -> (a past verb is in it, where its first before-word starts or None)
         prior = None  # the end of the id just before, when that id is skipped as an example
         for m in self.HEX.finditer(text):
             if m.start() in marker_ends or (prior is not None and self.JOIN.fullmatch(text, prior, m.start())):
-                prior = m.end()
-            else:
-                prior = None
-                yield m
+                i = bisect.bisect_right(starts, m.start()) - 1
+                if i not in clauses:  # once per clause, so a long id list stays linear
+                    end = starts[i + 1] if i + 1 < len(starts) else len(text)
+                    before = self.HISTORY_BEFORE.search(text, starts[i], end)
+                    clauses[i] = (self.HISTORY_VERB.search(text, starts[i], end) is not None,
+                                  before.start() if before else None)
+                verb, before = clauses[i]
+                if not (verb or (before is not None and before < m.start())):
+                    prior = m.end()
+                    continue
+            prior = None
+            yield m
 
 
 PATTERNS = {
