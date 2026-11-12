@@ -34,13 +34,12 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(REPO_ROOT, "lint"))
-import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run (lint/_test_temp.py)
 sys.path.insert(0, HERE)
-import test_widening_words as twords  # noqa: E402  the widening sentences the judge tests pin (one home, whole sentences)
+import test_call_judge as tcj  # noqa: E402  the widening sentences and in_text (one home)
 
 MODULE_PATH = os.environ.get("REPLY_JUDGE_UNDER_TEST") or os.path.join(HERE, "reply_judge.py")
 SETTINGS_PATH = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(REPO_ROOT, "settings.json")
-ROOT = _test_temp.run_folder()
+ROOT = tcj.ROOT  # the run folder the shared harness made, so this process has one
 STUB_DIR = os.path.join(ROOT, "stub")
 FAILED = []
 RED_CASES = []
@@ -1344,7 +1343,7 @@ def case_prompt_says_a_same_change_for_every_repo_is_not_widening():
     # so a sentence that drops the motive clause fails.
     run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
     check("prompt: a sentence says a change made the same way for every repo, for every repo's sake, is not widening",
-          twords.in_text(twords.SAME_CHANGE_IS_NOT_WIDENING, run.prompt()),
+          tcj.in_text(tcj.SAME_CHANGE_IS_NOT_WIDENING, run.prompt()),
           "the prompt lacks the same-change sentence")
 
 
@@ -1360,7 +1359,7 @@ def case_prompt_scopes_widening_to_one_repos_sake():
     # The definition holds its motive clause, "for that repo's sake". Pinned whole in the prompt.
     run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
     check("prompt: a sentence defines widening whole, with its one repo's sake",
-          twords.in_text(twords.REPLY_DEFINITION, run.prompt()), "the prompt lacks the definition sentence")
+          tcj.in_text(tcj.REPLY_DEFINITION, run.prompt()), "the prompt lacks the definition sentence")
 
 
 def case_prompt_says_an_unmarked_allow_list_option_is_widening():
@@ -1369,7 +1368,7 @@ def case_prompt_says_an_unmarked_allow_list_option_is_widening():
     run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
     check("prompt: a sentence says an unmarked allow-list or second-form option is widening unless it says it applies "
           "to every repo",
-          twords.in_text(twords.UNMARKED_OPTION_IS_WIDENING, run.prompt()),
+          tcj.in_text(tcj.UNMARKED_OPTION_IS_WIDENING, run.prompt()),
           "the prompt lacks the owner's sentence on unmarked options")
 
 
@@ -1386,7 +1385,7 @@ def case_prompt_judges_a_recommended_unmarked_allow_list_option():
     check("prompt: one model call, and the judge sees the Recommended allow-list option",
           len(run.calls) == 1 and ALLOW_LIST_ASK in prompt, prompt[:300])
     check("prompt: the judge is told an unmarked allow-list option is widening",
-          twords.in_text(twords.UNMARKED_OPTION_IS_WIDENING, prompt),
+          tcj.in_text(tcj.UNMARKED_OPTION_IS_WIDENING, prompt),
           "the prompt lacks the owner's sentence on unmarked options")
 
 
