@@ -637,9 +637,16 @@ def done_format_problem(text):
 # (`short titles (D12)`).
 CITE_ID_RE = re.compile(r"(?<![\w/.#:$-])(?:D\d{1,4}|[Dd]ecisions?\s+#?\d{1,4})(?!\w|\.\d|:[A-Z]\d)")
 CITE_SKIP_RE = re.compile(r"```.*?```|`[^`\n]*`|https?://\S+|\[[^\]\n]*\]\([^)\n]*\)", re.S)
-GLOSS_AFTER_RE = re.compile(
-    r"""^["')\]]*\s*(?:[,:;(=|—–-]|\s-{1,2}\s)\s*\(?["“]?[A-Za-z][\w'-]*\s+[\w'-]+"""
-    r"""|^["')\]]*\s+(?:says|means|is|covers|rules)\s+[A-Za-z][\w'-]*\s+[\w'-]+""")
+
+
+def _gloss_after_re(seps, quote=""):
+    """The pattern for a short gloss right after an id or item number. An item number also takes `|` and a quote."""
+    return re.compile(
+        r"""^["')\]]*\s*(?:[%s]|\s-{1,2}\s)\s*\(?%s[A-Za-z][\w'-]*\s+[\w'-]+""" % (seps, quote)
+        + r"""|^["')\]]*\s+(?:says|means|is|covers|rules)\s+[A-Za-z][\w'-]*\s+[\w'-]+""")
+
+
+GLOSS_AFTER_RE = _gloss_after_re(",:;(=—–-")
 GLOSS_POSSESSIVE_RE = re.compile(r"^['’]s\s+[A-Za-z][\w'-]*\s+[\w'-]+")
 GLOSS_BEFORE_RE = re.compile(r"[A-Za-z]{2,}[^\n(]{0,60}\(\s*$")
 # a gloss before the id: two words, then a comma, colon, or dash, then the id
@@ -673,10 +680,15 @@ def bare_record_cite(text):
 ITEM_HEAD_RE = re.compile(r"(?<![\w/.#:$-])(items?)\s+(\d{1,4})(?![\w]|\.\d)", re.I)
 ITEM_NEXT_RE = re.compile(r"(?:\s*\([^)\n]*\))?\s*(?:,\s*(?:and\s+)?|\band\s+|&\s*)(\d{1,4})(?![\w]|\.\d)")
 ITEM_SLUG_AFTER_RE = re.compile(r"^\s*\(\s*\w+(?:-\w+)+\s*\)")
+# an item name after the number also follows a table-cell bar or an opening quote (a record id does not take them: `D12 | x y |`
+# is a table cell, not a gloss)
+ITEM_GLOSS_AFTER_RE = _gloss_after_re(",:;(=|—–-", '["“]?')
 ITEM_PAGE_PREFIX_RE = re.compile(r"(?:waiting[- ])?page\s+$", re.I)
 ITEM_SCOPE_RE = re.compile(r"\b(?:page|triage)\b", re.I)
-# a record before the item: a path or file name with an extension, or a hyphenated slug and a comma
-ITEM_RECORD_RE = re.compile(r"(?:[\w.-]+/)*\w[\w-]*\.[A-Za-z]{1,5}\s*,?\s*$|(?<![\w-])(?!waiting-page\b)\w+(?:-\w+)+\s*,\s*$")
+# a markdown link keeps its text for the scope read: `see [the waiting page](url)` holds the word page
+ITEM_LINK_RE = re.compile(r"\[([^\]\n]*)\]\([^)\n]*\)")
+# a record before the item: a path or file name with an extension, or a hyphenated slug (a comma after it is optional)
+ITEM_RECORD_RE = re.compile(r"(?:[\w.-]+/)*\w[\w-]*\.[A-Za-z]{1,5}\s*,?\s*$|(?<![\w-])(?!waiting-page\b)\w+(?:-\w+)+\s*,?\s*$")
 # a code span that is a record name: a path or file name with an extension, or a hyphenated slug
 ITEM_RECORD_SPAN_RE = re.compile(r"(?:[\w.-]+/)*\w[\w-]*\.[A-Za-z]{1,5}|\w+(?:-\w+)+")
 
@@ -699,7 +711,7 @@ def _item_skip(match):
 
 def _item_named(before, after):
     """True when an item number has its short name after it, or (`before` given, the head of a list) before it."""
-    if ITEM_SLUG_AFTER_RE.match(after) or GLOSS_AFTER_RE.match(after) or GLOSS_POSSESSIVE_RE.match(after):
+    if ITEM_SLUG_AFTER_RE.match(after) or ITEM_GLOSS_AFTER_RE.match(after) or GLOSS_POSSESSIVE_RE.match(after):
         return True
     before = ITEM_PAGE_PREFIX_RE.sub("", before)
     if GLOSS_BEFORE_RE.search(before) and after.lstrip().startswith(")"):
@@ -710,7 +722,7 @@ def _item_named(before, after):
 def bare_item_cite(text, scoped=False):
     """Return the first page item number in `text` cited with no short name, else ''. A number named at
     an earlier cite needs none later. `scoped` limits the read to text that holds page or triage."""
-    if scoped and not ITEM_SCOPE_RE.search(CITE_SKIP_RE.sub(" ", text)):
+    if scoped and not ITEM_SCOPE_RE.search(CITE_SKIP_RE.sub(" ", ITEM_LINK_RE.sub(r"\1", text))):
         return ""
     clean = CITE_SKIP_RE.sub(_item_skip, text)
     named = set()
