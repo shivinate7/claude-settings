@@ -1207,7 +1207,7 @@ const foldOpen = (it) => (it.id in state.unfold ? !!state.unfold[it.id] : newRep
 // and a Send on the open page re-sorts no tier. A reload works it out again.
 // A group is seen only while every member is in the frozen set, so a member that arrives after load makes the whole group new.
 const isSeen = (it) => !!state.seen && mates(it).every((x) => state.seen.has(x.id));
-// feed.receipts only records that the receipts arrived (a test waits on it); no freeze reads it.
+// feed.receipts records that the receipts arrived (a test waits on it); freezeSunk waits for it before it decides whether the Answered section opens.
 const feed = { items: false, answers: false, receipts: false, all: [] };
 function freezeSeen() {
   if (state.seen || !feed.items || !feed.answers) return;
@@ -1227,10 +1227,12 @@ const isArrival = (it) => !!state.known && !mates(it).every((x) => state.known.h
 // A group sinks only when every member is in the set, so it never splits.
 const isSunk = (it) => !!state.sunk && mates(it).every((x) => state.sunk.has(x.id));
 function freezeSunk() {
-  if (state.sunk || !feed.items || !feed.answers) return;
-  state.sunk = new Set(state.items.filter((it) => !isRuling(it) && (isSaved(it) || answeredByWait(it))).map((it) => it.id));
-  // The Answered section opens on load only with a New reply in it, decided here once and never read live: a reply that lands later, or a Send that sinks a card, opens nothing.
-  state.answeredOpen = state.items.some((it) => isSunk(it) && newReply(it)) || state.lines.some(newReply);
+  if (!state.sunk && feed.items && feed.answers) state.sunk = new Set(state.items.filter((it) => !isRuling(it) && (isSaved(it) || answeredByWait(it))).map((it) => it.id));
+  // The open-or-closed decision waits for the receipts: whether a routed item is a line behind Show read items (itemAway) reads its filing receipt.
+  if (state.replySeen || !state.sunk || !feed.receipts) return;
+  // The Answered section opens on load only with a New reply in it that the owner has not already read, decided here once and never read live: a reply that lands later, or a Send that sinks a card, opens nothing.
+  // A press on the head before this runs keeps the section open.
+  state.answeredOpen = state.answeredOpen || state.items.some((it) => isSunk(it) && newReply(it) && !itemAway(it)) || state.lines.some((it) => newReply(it) && !itemAway(it));
   // Each item's reply as the owner has seen it: every item's at load (an open card shows its reply), then each card's when the open section shows it
   // or a Send sinks it. Kept by the reply's time, so a second reply is unseen again.
   state.replySeen = Object.fromEntries([...state.items, ...state.lines].map((it) => [it.id, it.replied]));
@@ -3237,7 +3239,7 @@ render(); renderAsks();
   }, () => {});
   db.collection("answers").onSnapshot((s) => { state.answers = map(s); feed.answers = true; freezeSeen(); freezeSunk(); render(); }, () => {});
   db.collection("groups").onSnapshot((s) => { state.groups = map(s); render(); }, () => {});
-  db.collection("receipts").onSnapshot((s) => { state.receipts = map(s); feed.receipts = true; render(); }, () => {});
+  db.collection("receipts").onSnapshot((s) => { state.receipts = map(s); feed.receipts = true; freezeSunk(); render(); }, () => {});
   db.collection("meta").doc("page").onSnapshot((s) => { const was = state.meta; state.meta = s.exists ? s.data() : null; keepRouted(was, state.meta); applyIdentity(); render(); renderAsks(); }, () => {});
   db.collection("asks").onSnapshot((s) => { askState.map = map(s); askState.bad = false; renderAsks(); }, () => { askState.bad = true; renderAsks(); });
 })();
