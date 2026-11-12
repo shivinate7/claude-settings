@@ -231,15 +231,18 @@ t() { # want label [FAIL glob] [EMPTY glob] [text the issue must name] [jobs rea
     unknown) [ "$shown" = unknown ] && [ ! -s "$tmp/log" ] && grep -q '::warning::' <<<"$out"$'\n'"$(cat "$tmp/err")" && ok=1 ;;
   esac
   [ "$code" = 0 ] || ok=0
+  miss=""
   while IFS= read -r want_text; do # one text per line; each must be in the issue
-    [ -n "$want_text" ] && { grep -qF -- "$want_text" "$tmp/log" || ok=0; }
+    [ -n "$want_text" ] && { grep -qF -- "$want_text" "$tmp/log" || { ok=0; miss="${miss:-$want_text}"; }; }
   done <<<"${5:-}"
   if [ -n "${6:-}" ]; then
     expect_reads="$(tr ' ' '\n' <<<"$6" | grep -v '^none$' | sort | tr '\n' ' ')"
     got_reads="$(grep -o 'actions/runs/[0-9]*/jobs' "$tmp/reads" | sort | tr '\n' ' ')"
     [ "$expect_reads" = "$got_reads" ] || ok=0
   fi
-  if [ "$ok" = 1 ]; then echo "ok   $2"; else echo "FAIL $2 (exit $code, got: $out; jobs reads: $(tr '\n' ' ' < "$tmp/reads"))"; bad=1; fi
+  if [ "$ok" = 1 ]; then echo "ok   $2"
+  elif [ -n "$miss" ]; then echo "FAIL $2 (verdict '$shown', exit $code; issue lacks '$miss')"; bad=1
+  else echo "FAIL $2 (exit $code, got: $out; jobs reads: $(tr '\n' ' ' < "$tmp/reads"))"; bad=1; fi
 }
 runs_are "$(gh_run ci failure 2026-01-02 u1 push 1)" "$(gh_run ci success 2026-01-01 u0 push 2)"
 t red latest-red-opens-issue
@@ -426,7 +429,24 @@ runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/alarm-beside-red-5030 pu
 jobs_of 5030 scope-guard:cancelled:40
 jobs_of 5031 checks:failure
 workflow_at 5030 scope-guard:37
-t red red-run-beside-a-cap-end-still-prints-red "" "" "job scope-guard ran 40 min, cap 37 min, run 5030" "actions/runs/5030/jobs actions/runs/5031/jobs"
+t red red-run-beside-a-cap-end-still-prints-red "" "" "$(printf '%s\n' '--title CI red on main --body' 'job scope-guard ran 40 min, cap 37 min, run 5030')" "actions/runs/5030/jobs actions/runs/5031/jobs"
+
+# The cap-only alarm's title names its job: "CI job hit its time cap on <branch>: <job>". With several cap jobs the title names the
+# first in the run's job list and the body names the rest. Here scope-guard comes before build-guard in both the job list and the
+# workflow file, and build-guard sorts first, so the title pins list order, not alphabetical order.
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-title-5021 push 5021)"
+jobs_of 5021 scope-guard:cancelled:40
+workflow_at 5021 scope-guard:37
+t alarm cap-only-alarm-title-names-its-job "" "" "$(printf '%s\n' '--title CI job hit its time cap on main: scope-guard --body' 'job scope-guard ran 40 min, cap 37 min, run 5021')" "actions/runs/5021/jobs"
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-titles-5022 push 5022)"
+jobs_of 5022 scope-guard:cancelled:40 build-guard:cancelled:50
+workflow_at 5022 scope-guard:37 build-guard:37
+t alarm cap-only-alarm-with-several-cap-jobs-titles-the-first-and-names-the-rest "" "" "$(printf '%s\n' '--title CI job hit its time cap on main: scope-guard --body' 'job build-guard ran 50 min, cap 37 min, run 5022')" "actions/runs/5022/jobs"
+# A red job and a cap end in one failure run: the run is red, so the title stays "CI red on" and the cap end is named under it.
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/mixed-same-5040 push 5040)"
+jobs_of 5040 checks:failure scope-guard:cancelled:40
+workflow_at 5040 checks scope-guard:37
+t red mixed-run-with-a-red-job-and-a-cap-end-keeps-the-red-title "" "" "$(printf '%s\n' '--title CI red on main --body' 'job scope-guard ran 40 min, cap 37 min, run 5040')" "actions/runs/5040/jobs"
 
 # A job cancelled at its cap in attempt 1 of a run whose attempt 2 is green: the alarm names it on a "cap end named" line, the
 # verdict is not red, and no issue opens. Attempt 1's jobs come from the attempts endpoint; the latest attempt's jobs do not hold them.
@@ -496,23 +516,39 @@ jobs_of 4943 scope-guard:cancelled:2
 workflow_at 4943 scope-guard:37
 t unknown cancelled-rerun-with-attempt-1-without-jobs-is-unknown-not-green "" "" ""
 
-# A failed run that a newer green run of the other group clears is not red, so it opens no issue and names nothing, its cap end
-# included. Each of its two runs is read once.
+# A failed run that a newer green run of the other group clears is not red, but a cap end in it still opens an issue: the cap-only
+# alarm, titled with the cap wording. Each of its two runs is read once, and its own workflow file is read once for the cap.
 runs_are "$(gh_run ci success 2026-01-02 https://runs/cleared-cap-green-4951 schedule 4951)" "$(gh_run ci failure 2026-01-01 https://runs/cleared-cap-red-4950 push 4950)"
 jobs_of 4950 checks:failure scope-guard:cancelled:40
 jobs_of 4951 checks:success scope-guard:success
 workflow_at 4950 checks scope-guard:37
 workflow_at 4951 checks scope-guard:37
-named green failure-run-cleared-by-a-newer-green-opens-no-issue-and-names-nothing "!cap end named"
+t alarm failure-run-cleared-by-a-newer-green-with-a-cap-end-opens-a-cap-issue "" "" "$(printf '%s\n' '--title CI job hit its time cap on main: scope-guard --body' 'job scope-guard ran 40 min, cap 37 min, run 4950')" "actions/runs/4950/jobs actions/runs/4951/jobs"
+cost cleared-run-with-a-cap-end-reads-each-jobs-list-once-and-each-workflow-file-once 2 2 2
 count_is cleared-run-reads-its-jobs-once "actions/runs/4950/jobs" 1
 count_is clearing-run-reads-its-jobs-once "actions/runs/4951/jobs" 1
-# Control: the same clear with the cap end under its cap is quiet.
+# A cleared failure run's cap end is named when another run is red too: the title stays "CI red on", and the body names the cap end.
+runs_are "$(gh_run ci success 2026-01-02 https://runs/cleared-beside-green-5060 schedule 5060)" "$(gh_run ci failure 2026-01-01 https://runs/cleared-beside-red-5061 push 5061)" "$(gh_run deploy failure 2026-01-02 https://runs/cleared-beside-deploy-5062 push 5062)"
+jobs_of 5061 checks:failure scope-guard:cancelled:40
+jobs_of 5060 checks:success scope-guard:success
+jobs_of 5062 checks:failure
+workflow_at 5061 checks scope-guard:37
+workflow_at 5060 checks scope-guard:37
+t red cleared-cap-run-beside-an-uncleared-red-run-names-the-cap-end "" "" "$(printf '%s\n' '--title CI red on main --body' 'job scope-guard ran 40 min, cap 37 min, run 5061')" "actions/runs/5060/jobs actions/runs/5061/jobs actions/runs/5062/jobs"
+# A red job the newer green run lacks stays red, so a cap end beside it keeps the red title. The green run passes checks and has no lint job.
+runs_are "$(gh_run ci success 2026-01-02 https://runs/partial-green-5043 schedule 5043)" "$(gh_run ci failure 2026-01-01 https://runs/partial-red-5042 push 5042)"
+jobs_of 5042 checks:failure lint:failure scope-guard:cancelled:40
+jobs_of 5043 checks:success scope-guard:success
+workflow_at 5042 checks scope-guard:37
+t red cap-end-beside-a-red-job-the-green-run-lacks-keeps-the-red-title "" "" "$(printf '%s\n' '--title CI red on main --body' 'job scope-guard ran 40 min, cap 37 min, run 5042')" "actions/runs/5042/jobs actions/runs/5043/jobs"
+# Control: the same clear with the cap end under its cap is quiet. Its workflow file is still read once, for the cap.
 runs_are "$(gh_run ci success 2026-01-02 https://runs/cleared-under-green-4953 schedule 4953)" "$(gh_run ci failure 2026-01-01 https://runs/cleared-under-red-4952 push 4952)"
 jobs_of 4952 checks:failure scope-guard:cancelled:2
 jobs_of 4953 checks:success scope-guard:success
 workflow_at 4952 checks scope-guard:37
 workflow_at 4953 checks scope-guard:37
 t green failure-run-cleared-by-a-newer-green-with-its-cap-end-under-the-cap-is-quiet "" "" ""
+cost failure-run-cleared-by-a-newer-green-with-its-cap-end-under-the-cap-reads-its-workflow-file 2 2 2
 
 # Reads per judged run, counted in the call log (the reads the alarm made, not the text of its description). One jobs read per
 # judged run. A failed run with a red job and no clear candidate starts no python3. A run cleared by a candidate reads the
