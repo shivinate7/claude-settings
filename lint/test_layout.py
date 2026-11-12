@@ -12,6 +12,8 @@ and an unreadable branch is unknown. Cases run the child-repo probe on git fixtu
 Identity: check_layout.py reads the readers of claude-settings itself, so it gives no verdict
 elsewhere. A child repo's tree, an installed copy and a stray folder get one refusal line that points
 to `compliance_probes.py layout <root>`; a worktree, a subfolder and a symlinked path of a checkout pass.
+PR template: the checkout's pull request template and the adopter copy under skills/project-ops/templates must be
+byte-equal. A copy that differs is red, naming both paths; a copy that cannot be read is unknown, which is red too.
 
 LAYOUT_LINT_UNDER_TEST names the lint folder under test (default: the folder of this file), so the
 same cases run against another checkout to show them red there.
@@ -1355,6 +1357,23 @@ class Readers(Tree):
             guard.record_folders("not a layout")
 
 
+GITHUB_TEMPLATE = ".github/pull_request_template.md"  # this repo's pull request template
+ADOPTER_TEMPLATE = "skills/project-ops/templates/pull_request_template.md"  # the copy an adopting repo gets
+DIFFERING_LINE = b"Read by lint/check_silent_undo.py (last_paragraph) and decision `debt-close-runs-retire`.\n"  # the line the .github copy holds today
+
+
+def write_bytes(root, rel, data):
+    path = os.path.join(root, *rel.split("/"))
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as handle:
+        handle.write(data)
+
+
+def read_bytes(root, rel):
+    with open(os.path.join(root, *rel.split("/")), "rb") as handle:
+        return handle.read()
+
+
 class ConstantCheck(Tree):
     """lint/check_layout.py over a copy of the repo's readers, with one mutant at a time."""
 
@@ -1366,6 +1385,9 @@ class ConstantCheck(Tree):
         shutil.copyfile(os.path.join(REPO, "hooks", "git_reads.py"), os.path.join(self.tree, "hooks", "git_reads.py"))
         for name in ("layout.py", "layout.json", "check_layout.py"):  # the files under test, from LINT
             shutil.copyfile(os.path.join(LINT, name), os.path.join(self.tree, "lint", name))
+        default = read_bytes(REPO, ADOPTER_TEMPLATE)  # real data: both PR template copies start byte-equal, so the other cases stay green
+        write_bytes(self.tree, GITHUB_TEMPLATE, default)
+        write_bytes(self.tree, ADOPTER_TEMPLATE, default)
 
     def check(self):
         return run([os.path.join(LINT, "check_layout.py"), "--root", self.tree], self.tree)
@@ -1502,6 +1524,85 @@ class ConstantCheck(Tree):
                   '"folder": "docs/questions"', '"folder": "questions"')
         self.assert_red("outside docs/")
 
+    def assert_copies_start_equal(self):
+        """Scope first (P7): the copies agree before a case changes one, so the red comes from that change."""
+        github, adopter = read_bytes(self.tree, GITHUB_TEMPLATE), read_bytes(self.tree, ADOPTER_TEMPLATE)
+        self.assertTrue(github, "the fixture's PR template copies must not start empty")
+        self.assertEqual(github, adopter, "the fixture's PR template copies must start byte-equal")
+
+    def assert_red_naming_both_copies(self):
+        rc, out = self.check()
+        self.assertEqual(rc, 1, "PR template copies that differ must be red, not green: %r" % out)
+        fails = [line for line in out.splitlines() if "check_layout: FAIL:" in line]
+        self.assertEqual(len(fails), 1, "one cause is one FAIL line: %r" % out)
+        self.assertIn(GITHUB_TEMPLATE, fails[0])
+        self.assertIn(ADOPTER_TEMPLATE, fails[0])
+
+    def assert_unknown_naming(self, rel):
+        rc, out = self.check()
+        self.assertEqual(rc, 1, "an unreadable PR template copy must be red, never green: %r" % out)
+        fails = [line for line in out.splitlines() if "check_layout: FAIL:" in line]
+        self.assertEqual(len(fails), 1, "one cause is one FAIL line: %r" % out)
+        self.assertIn(rel, fails[0])
+        self.assertIn("unknown", fails[0])
+        self.assertNotIn("differ", out, "an unreadable copy is not a difference: %r" % out)
+
+    def remove_copy(self, rel):
+        path = os.path.join(self.tree, *rel.split("/"))
+        os.remove(path)
+        self.assertFalse(os.path.lexists(path), "the removal applied: %s" % rel)
+
+    def replace_copy_with_directory(self, rel):
+        self.remove_copy(rel)
+        path = os.path.join(self.tree, *rel.split("/"))
+        os.makedirs(path)
+        self.assertTrue(os.path.isdir(path), "the directory applied: %s" % rel)
+
+    def test_pr_template_copies_that_agree_are_green(self):  # the control beside the reds below
+        self.assert_copies_start_equal()
+        self.assertEqual(self.check(), (0, ""))
+
+    def test_pr_template_copies_differing_by_one_line_are_red_naming_both_paths(self):
+        self.assert_copies_start_equal()
+        write_bytes(self.tree, GITHUB_TEMPLATE, read_bytes(self.tree, ADOPTER_TEMPLATE) + DIFFERING_LINE)
+        self.assertNotEqual(read_bytes(self.tree, GITHUB_TEMPLATE), read_bytes(self.tree, ADOPTER_TEMPLATE))
+        self.assert_red_naming_both_copies()
+
+    def test_pr_template_copies_differing_in_the_last_byte_of_a_full_size_copy_are_red(self):
+        long = b"".join(b"Line %04d of a long template.\n" % n for n in range(2000))  # full size: about 60 KB
+        write_bytes(self.tree, ADOPTER_TEMPLATE, long)
+        write_bytes(self.tree, GITHUB_TEMPLATE, long)
+        self.assert_copies_start_equal()
+        write_bytes(self.tree, GITHUB_TEMPLATE, long + b"!")
+        self.assertEqual(read_bytes(self.tree, GITHUB_TEMPLATE)[-1:], b"!", "the last-byte change applied")
+        self.assert_red_naming_both_copies()
+
+    def test_pr_template_empty_github_copy_against_a_full_adopter_copy_is_red(self):
+        self.assert_copies_start_equal()
+        write_bytes(self.tree, GITHUB_TEMPLATE, b"")
+        self.assertEqual(read_bytes(self.tree, GITHUB_TEMPLATE), b"", "the empty copy applied")
+        self.assert_red_naming_both_copies()
+
+    def test_pr_template_github_copy_missing_is_unknown_red(self):
+        self.assert_copies_start_equal()
+        self.remove_copy(GITHUB_TEMPLATE)
+        self.assert_unknown_naming(GITHUB_TEMPLATE)
+
+    def test_pr_template_github_copy_as_a_directory_is_unknown_red(self):
+        self.assert_copies_start_equal()
+        self.replace_copy_with_directory(GITHUB_TEMPLATE)
+        self.assert_unknown_naming(GITHUB_TEMPLATE)
+
+    def test_pr_template_adopter_copy_missing_is_unknown_red(self):
+        self.assert_copies_start_equal()
+        self.remove_copy(ADOPTER_TEMPLATE)
+        self.assert_unknown_naming(ADOPTER_TEMPLATE)
+
+    def test_pr_template_adopter_copy_as_a_directory_is_unknown_red(self):
+        self.assert_copies_start_equal()
+        self.replace_copy_with_directory(ADOPTER_TEMPLATE)
+        self.assert_unknown_naming(ADOPTER_TEMPLATE)
+
 
 def drop_worktree(path):
     subprocess.run(["git", "-C", REPO, "worktree", "remove", "--force", path], capture_output=True)
@@ -1551,6 +1652,10 @@ class Identity(Tree):
         script = os.path.join(worktree, "lint", "check_layout.py")
         self.assertEqual(run([script], worktree), (0, ""))
         self.assertEqual(run([script], os.path.join(worktree, "lint")), (0, ""))
+
+    def test_the_checkout_itself_agrees(self):
+        # the real files, no --root: the checkout's own PR template copies must be byte-equal
+        self.assertEqual(run([os.path.join(LINT, "check_layout.py")], REPO), (0, ""))
 
 
 # The mockup homes of a repo (rule building-allow-list-is-the-constant). The repo is "fixture", from its origin, so
