@@ -4571,20 +4571,29 @@ new_home() { d=$(mktemp -d "$work/home.XXXXXX"); d=$(realpwd "$d"); default_home
 # The entries a run left under a fake HOME, not counting its default .gitconfig.
 home_entries() { find "$1" -mindepth 1 ! -path "$1/.gitconfig" 2>/dev/null; }
 # One cloud install, piped as the setup script runs it: HOME $1, a cwd $2 that is no checkout, the curl
-# stub folder $3, and the ref $4 (empty means main). Arguments past the fourth are VAR=VALUE pairs for this
-# run; they come last, so they win over the defaults. The temp-folder skip is off (the fixtures sit under
-# $work, under /tmp) unless a VAR=VALUE argument sets it. Sets rc and out.
+# stub folder $3, and the ref $4 (empty leaves CLAUDE_SETTINGS_REF unset, so install.sh uses main).
+# Arguments past the fourth are VAR=VALUE pairs for this run; they come last, so they win over the
+# defaults. The temp-folder skip is off (the fixtures sit under $work, under /tmp) unless a VAR=VALUE
+# argument sets it. Sets rc and out.
 cloud_install() {
   ci_home="$1"; ci_cwd="$2"; ci_bin="$3"; ci_ref="${4:-}"
   [ $# -gt 4 ] && shift 4 || shift $#
   out=$(cd "$ci_cwd" && env -i PATH="$ci_bin:$PATH" HOME="$ci_home" CLAUDE_CONFIG_DIR="$ci_home/.claude-cfg" \
-        CLAUDE_SETTINGS_REF="$ci_ref" GIT_CEILING_DIRECTORIES="$ci_cwd" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
+        ${ci_ref:+"CLAUDE_SETTINGS_REF=$ci_ref"} GIT_CEILING_DIRECTORIES="$ci_cwd" CLAUDE_SETTINGS_SEARCH_ROOTS="$work/no-such-root" \
         CLAUDE_SETTINGS_TEMP_ROOTS="$work/no-such-temp-root" \
         "$@" bash -s -- --cloud < "$INSTALL_SH" 2>&1)
   rc=$?
 }
 # The WARN, ERROR and fatal lines of the last install: a failure message names the problem, not the whole log.
 install_problems() { printf '%s\n' "$out" | grep -E 'WARN|ERROR|fatal' | head -n 3; }
+# record_field FILE KEY: the string KEY of the install record FILE, or "" when FILE is absent or not JSON.
+record_field() {
+  python3 -I -c 'import json, sys
+try:
+    print(json.load(open(sys.argv[1], encoding="utf-8"))[sys.argv[2]])
+except (OSError, ValueError, KeyError, TypeError):
+    pass' "$1" "$2"
+}
 
 # ---- caseK1: a fresh cloud install clones the repo at main, sets the marker, and never fetches the tarball ----
 caseK1() {
@@ -4921,6 +4930,55 @@ caseK11() {
       ok "$name"
     fi
   fi
+}
+
+# ---- caseK12: a cloud install writes the install record: ref, sha, source and installer ----
+# hooks/stale_install.py reads this record each turn. With CLAUDE_SETTINGS_REF unset it names main. With a
+# non-default ref it names that branch, whose tip differs from main's (the fixture moves main on), so a sha
+# taken from the wrong ref fails the second leg.
+# k12_check NAME LEG HOME FX REF: the install that just ran (rc, out) left a record that names REF, REF's tip in FX,
+# a folder for source and a file for installer. Calls bad() and returns 1 at the first miss.
+k12_check() {
+  k12_rec="$3/.claude-cfg/.claude-settings-install.json"
+  if [ "$rc" -ne 0 ]; then bad "$1" "$2: install.sh exited $rc: $(install_problems)"; return 1; fi
+  if [ ! -f "$k12_rec" ]; then bad "$1" "$2: no install record at $k12_rec"; return 1; fi
+  k12_ref=$(record_field "$k12_rec" ref)
+  if [ "$k12_ref" != "$5" ]; then bad "$1" "$2: record ref is [$k12_ref], want [$5]"; return 1; fi
+  k12_want=$(git -C "$4/bare.git" rev-parse "refs/heads/$5")
+  k12_sha=$(record_field "$k12_rec" sha)
+  if [ "$k12_sha" != "$k12_want" ]; then bad "$1" "$2: record sha is [$k12_sha], want the $5 tip [$k12_want]"; return 1; fi
+  k12_src=$(record_field "$k12_rec" source)
+  if [ ! -d "$k12_src" ]; then bad "$1" "$2: record source [$k12_src] is not a folder"; return 1; fi
+  k12_inst=$(record_field "$k12_rec" installer)
+  if [ "$k12_inst" != "$k12_src/install.sh" ]; then bad "$1" "$2: record installer [$k12_inst] is not install.sh under [$k12_src]"; return 1; fi
+  if [ ! -f "$k12_inst" ]; then bad "$1" "$2: record installer [$k12_inst] is not a file"; return 1; fi
+  return 0
+}
+caseK12() {
+  name="caseK12: a cloud install writes the install record (ref, sha, source, installer), with CLAUDE_SETTINGS_REF unset and set to a non-default branch"
+  fx="$work/k12-fx"; bin="$work/k12-bin"
+  make_github_fixture "$fx"
+  git -C "$fx/src" checkout -q -b stable
+  printf 'stable only\n' > "$fx/src/STABLE-ONLY.txt"
+  git -C "$fx/src" add -A
+  git -C "$fx/src" -c user.email=t@example.com -c user.name=t commit -q -m "stable only"
+  git -C "$fx/src" push -q "$fx/bare.git" HEAD:refs/heads/stable
+  git -C "$fx/src" checkout -q main
+  advance_github_fixture "$fx" m2
+  make_curl_stub "$bin" fail-tarball
+  if [ "$(fixture_sha "$fx")" = "$(git -C "$fx/bare.git" rev-parse refs/heads/stable)" ]; then
+    bad "$name" "scope: stable and main have the same tip, so a sha from the wrong ref would pass"
+    return
+  fi
+  h="$work/k12-unset-home"; scratch="$work/k12-unset-scratch"; mkdir -p "$h" "$scratch"
+  write_redirect "$h" "$fx/bare.git"
+  cloud_install "$h" "$scratch" "$bin" ""
+  k12_check "$name" unset "$h" "$fx" main || return
+  h="$work/k12-set-home"; scratch="$work/k12-set-scratch"; mkdir -p "$h" "$scratch"
+  write_redirect "$h" "$fx/bare.git"
+  cloud_install "$h" "$scratch" "$bin" stable
+  k12_check "$name" stable "$h" "$fx" stable || return
+  ok "$name"
 }
 
 # ---- caseL: the merge allow rules come from the source checkout, and the log says what was written ----
@@ -5935,6 +5993,7 @@ run caseK8
 run caseK9
 run caseK10
 run caseK11
+run caseK12
 run caseL1
 run caseL2
 run caseL3
