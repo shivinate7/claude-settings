@@ -230,10 +230,12 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        spawn call's `name`; the latest spawn with that name wins. The state is read by
                        `_transcript.agent_state`: a foreground result, or a background launch closed by a terminal
                        notice or a TaskStop result, is finished; an async_launched result with no close is running.
-                       A spawn whose result is an error ran no agent and is skipped. A state the read cannot place
-                       asks, and so does a transcript record the read cannot parse (noted as
-                       `resume-finished-reviewer-unparsed`). A send to `main`, a name with no spawn, a running
-                       spawn, a spawn of another role, and a send with an agent_id pass. A missing or unreadable
+                       A spawn whose result is an error ran no agent and is skipped. A trailing ` [<ref>]` on `to`
+                       is stripped before matching. A state the read cannot place asks, and so does a parsed
+                       transcript record with the wrong shape (noted as `resume-finished-reviewer-unparsed`); a
+                       line that is not JSON is dropped by the reader and does not ask. A send to `main`, a
+                       name with no spawn, a running spawn, a spawn of another role, and a send with an agent_id
+                       pass. A missing or unreadable
                        transcript passes and is noted as `resume-finished-reviewer-unread`. The reason says to spawn a
                        fresh reviewer and pass it the prior report. One transcript read per judged send, shared with
                        review-record-after-round, no subprocess, no network. An override lifts it. (roles-resume-by-name)
