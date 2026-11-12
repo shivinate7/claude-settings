@@ -1051,6 +1051,29 @@ class ItemCiteTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assert_passes(text)
 
+    # a table bar is no gloss for a record id: a bare D12 in a table cell with a name after the bar is refused
+    def test_icite_red_bare_record_id_in_a_table_cell_is_refused(self):
+        got = rg.bare_cite("Triage left D12 | waiting on owner |")
+        self.assertEqual(got, "D12", "the D-id reader must refuse a bare D12 in a table cell: a bar is no gloss "
+                                     "for a record id, so it gave %r" % got)
+
+    # the scope read keeps a markdown link's text: `see [the waiting page](url)` holds the word page
+    def test_icite_red_scope_word_in_link_text_turns_the_scope_on(self):
+        got = rg.bare_item_cite("Item 46 is open; see [the waiting page](https://x.test/w).", scoped=True)
+        self.assertEqual(got, "46", "the scope read must keep a link's text, so the page word in it turns the "
+                                    "scope on: it gave %r" % got)
+
+    # an item number takes a record slug before it with no comma, as a list head does
+    def test_icite_red_record_slug_with_no_comma_names_the_item(self):
+        got = rg.bare_item_cite("Open: the answered-sink-notes item 4.")
+        self.assertEqual(got, "", "a record slug before an item number names it, with or without a comma: "
+                                  "it gave %r" % got)
+
+    # an item number with a table bar and a name after the bar passes (the item `|` form)
+    def test_icite_green_item_number_with_a_table_bar_and_a_name_passes(self):
+        got = rg.bare_item_cite("Triage left item 46 | waiting on owner |", scoped=True)
+        self.assertEqual(got, "", "an item cite with a table bar and a name after it must pass: it gave %r" % got)
+
     # the Stop hook, through main: the wiring of the same check
     def test_icite_red_bare_item_in_a_report_blocks_through_main(self):
         reply = "Triage left item 46 open.\n\n> **Done** BUILT guard, PR #226\n> **Next** none"
