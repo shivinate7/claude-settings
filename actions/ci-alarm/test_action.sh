@@ -13,10 +13,14 @@ work=$(python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); import _test_
 [ -n "$work" ] || { echo "FAIL - run folder: lint/_test_temp.py made no run folder"; exit 1; }
 trap 'rm -rf "$work"' EXIT
 tmp="$work/case"; mkdir -p "$tmp/bin"
+# A python3 that logs each start to PYLOG, then runs the real one. The cost check counts the interpreter starts of a run.
+real_py="$(command -v python3)"
+printf '#!/usr/bin/env bash\necho python3 >> "${PYLOG:-/dev/null}"\nexec %q "$@"\n' "$real_py" > "$tmp/bin/python3"
+chmod +x "$tmp/bin/python3"
 # Fake gh. FAIL is a glob over "$1 $2"; a call that matches it exits 1. EMPTY is a glob too; a call
 # that matches it exits 0 with no output. `run list` keeps only the --json fields it is asked for and
 # the runs of the --status it is asked for, as gh does; unparsable runs are echoed raw. `api` routes
-# the jobs of a run to $JOBS/<run id> and records each such read in $READS; a run with no jobs fixture
+# the jobs of a run to $JOBS/<run id>; every api call is logged in $READS. A run with no jobs fixture
 # fails the read, so an unexpected read is unknown. The dropped-start routes (pulls, check runs, issue
 # comments, and a POST of a comment) serve DROP_PULLS/<page>, one JSON document per page (--paginate serves
 # every page, without it only page 1), DROP_CHECKS/<sha> and DROP_COMMENTS/<pr>, log each api call to
@@ -83,6 +87,7 @@ contents_api() {
   exit 0
 }
 if [ "$1" = api ]; then classify "$@" >> "${DROP_READS:-/dev/null}"; fi
+if [ "$1" = api ]; then echo "$2" >> "${READS:-/dev/null}"; fi
 if [ -n "${FAIL:-}" ] && [[ "$1 $2" == $FAIL ]]; then echo "gh: HTTP 500 (fake)" >&2; exit 1; fi
 if [ -n "${EMPTY:-}" ] && [[ "$1 $2" == $EMPTY ]]; then exit 0; fi
 case "$1 $2" in
@@ -94,7 +99,6 @@ case "$1 $2" in
     case "$2" in
       */actions/runs/*/jobs*)
         id="${2#*actions/runs/}"; id="${id%%/*}"
-        echo "$2" >> "${READS:-/dev/null}"
         if [ -f "${JOBS:-/nonexistent}/$id" ]; then cat "$JOBS/$id"; else echo "gh: no jobs fixture for run $id (fake)" >&2; exit 1; fi ;;
       --method|*/pulls|*/pulls\?*|*/check-runs*|*/issues/*/comments*) dropped_api "$@" ;;
       */contents/*) contents_api "$@" ;;
@@ -121,10 +125,57 @@ gh_run() {
 }
 # A case starts with its runs: runs_are clears the jobs of the case before the jobs_of lines that follow it.
 runs_are() { printf '%s\n' "$@" | jq -s . > "$tmp/runs"; rm -rf "$tmp/jobs"; mkdir -p "$tmp/jobs"; }
-# jobs_of <run id> [job:conclusion]...: the jobs of one run as `gh api .../actions/runs/<id>/jobs` lists them.
+# jobs_of <run id> [job:conclusion[:minutes|never]]...: the jobs of one run as `gh api .../actions/runs/<id>/jobs` lists them.
+# minutes: the job ran that long from 2026-01-02T10:00:00Z. never: started_at is null. No third field: no times.
 jobs_of() {
   local id="$1"; shift
-  printf '%s\n' "$@" | jq -Rs 'split("\n") | map(select(length > 0) | split(":") | {name: .[0], status: "completed", conclusion: .[1]}) | {total_count: length, jobs: .}' > "$tmp/jobs/$id"
+  printf '%s\n' "$@" | jq -Rs '
+    def at($m): ("2026-01-02T10:00:00Z" | fromdateiso8601) + ($m | tonumber) * 60 | todateiso8601;
+    split("\n") | map(select(length > 0) | split(":") as $f
+      | {name: $f[0], status: "completed", conclusion: $f[1]}
+        + (if ($f[2] // "") == "" then {}
+           elif $f[2] == "never" then {started_at: null, completed_at: "2026-01-02T10:05:00Z"}
+           else {started_at: "2026-01-02T10:00:00Z", completed_at: at($f[2])} end))
+    | {total_count: length, jobs: .}' > "$tmp/jobs/$id"
+}
+# workflow_file <run id> [file name]: the file served at that run's head, read from stdin. Default ci.yml under .github/workflows.
+workflow_file() {
+  local dir="$tmp/contents/$(printf '%040x' "$1")/.github/workflows"
+  mkdir -p "$dir" && cat > "$dir/${2:-ci}.yml"
+}
+# workflow_at <run id> <job[:cap]>...: a ci workflow with one job per argument. A job with no cap has no timeout-minutes line.
+workflow_at() {
+  local id="$1" spec job cap
+  shift
+  {
+    echo "name: ci"; echo "on: push"; echo "jobs:"
+    for spec in "$@"; do
+      job="${spec%%:*}"; cap=""; [ "$spec" = "$job" ] || cap="${spec#*:}"
+      echo "  $job:"; echo "    runs-on: ubuntu-latest"
+      [ -n "$cap" ] && echo "    timeout-minutes: $cap"
+      echo "    steps:"; echo "      - run: echo ok"
+    done
+  } | workflow_file "$id"
+}
+# job_cap <job>: the job-level timeout-minutes of that job in the repo's checks.yml, comment removed. Read from the file, never copied.
+job_cap() {
+  awk -v j="$1" '
+    $0 ~ ("^  " j ":[ \t]*$") { f = 1; next }
+    /^  [A-Za-z0-9_-]+:[ \t]*$/ { f = 0 }
+    f && /^    timeout-minutes:/ { sub(/^    timeout-minutes:[ \t]*/, ""); sub(/[ \t]*#.*$/, ""); print; exit }' "$root/.github/workflows/checks.yml"
+}
+# cost <label> <jobs reads> <contents reads> <python3 starts>: what the last t case did. The one other api read is the
+# workflows list. No file is left in its TMPDIR, so a cache it made is gone.
+cost() {
+  local total j c p other left
+  total="$(wc -l < "$tmp/reads")"
+  j="$(grep -c 'actions/runs/[0-9]*/jobs' "$tmp/reads")"
+  c="$(grep -c '/contents/' "$tmp/reads")"
+  other=$((total - j - c))
+  p="$(grep -c python3 "$tmp/pylog")"
+  left="$(ls -A "$tmp/scratch")"
+  if [ "$j" = "$2" ] && [ "$c" = "$3" ] && [ "$other" = 1 ] && [ "$p" = "$4" ] && [ -z "$left" ]; then echo "ok   $1"
+  else echo "FAIL $1 (jobs reads $j want $2; contents reads $c want $3; other api reads $other want 1; python3 starts $p want $4; files left: $left)"; bad=1; fi
 }
 # The workflows list as `gh api --paginate` prints it: one JSON document per page.
 cat > "$tmp/workflows" <<'JSON'
@@ -153,9 +204,9 @@ jobs:
 YML
 bad=0
 t() { # want label [FAIL glob] [EMPTY glob] [text the issue must name] [jobs reads: "none", or the run paths read, in any order]
-  : > "$tmp/log"; : > "$tmp/reads"
+  : > "$tmp/log"; : > "$tmp/reads"; : > "$tmp/pylog"; rm -rf "$tmp/scratch"; mkdir -p "$tmp/scratch"
   out="$(PATH="$tmp/bin:$PATH" RUNS="$tmp/runs" WORKFLOWS="$tmp/workflows" JOBS="$tmp/jobs" READS="$tmp/reads" LOG="$tmp/log" \
-    FAIL="${3:-}" EMPTY="${4:-}" CONTENTS="$tmp/contents" CONTENTS_DEFAULT="$tmp/no-if.yml" GITHUB_REPOSITORY=o/r SELF=alarm bash "$here/alarm.sh" 2>"$tmp/err")"
+    FAIL="${3:-}" EMPTY="${4:-}" PYLOG="$tmp/pylog" TMPDIR="$tmp/scratch" CONTENTS="$tmp/contents" CONTENTS_DEFAULT="$tmp/no-if.yml" GITHUB_REPOSITORY=o/r SELF=alarm bash "$here/alarm.sh" 2>"$tmp/err")"
   code=$?
   shown="$(grep -v '^::warning::' <<<"$out")" # the verdict, without annotations
   ok=0
@@ -165,7 +216,9 @@ t() { # want label [FAIL glob] [EMPTY glob] [text the issue must name] [jobs rea
     unknown) [ "$shown" = unknown ] && [ ! -s "$tmp/log" ] && grep -q '::warning::' <<<"$out"$'\n'"$(cat "$tmp/err")" && ok=1 ;;
   esac
   [ "$code" = 0 ] || ok=0
-  if [ -n "${5:-}" ] && ! grep -qF -- "$5" "$tmp/log"; then ok=0; fi
+  while IFS= read -r want_text; do # one text per line; each must be in the issue
+    [ -n "$want_text" ] && { grep -qF -- "$want_text" "$tmp/log" || ok=0; }
+  done <<<"${5:-}"
   if [ -n "${6:-}" ]; then
     expect_reads="$(tr ' ' '\n' <<<"$6" | grep -v '^none$' | sort | tr '\n' ' ')"
     got_reads="$(grep -o 'actions/runs/[0-9]*/jobs' "$tmp/reads" | sort | tr '\n' ' ')"
@@ -258,8 +311,90 @@ t unknown green-runs-jobs-read-fails-is-unknown "api *actions/runs/2/jobs*"
 runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)"
 jobs_of 1 checks:failure
 t red red-run-with-no-candidate-reads-no-jobs "" "" https://runs/red-1 none
+# A cancelled run is red only through a job cancelled at its own job-level cap. Its jobs and its workflow file are each read once.
 runs_are "$(gh_run ci cancelled 2026-01-02 u1 push 1)"
-t green cancelled-run-is-not-red "" "" "" none
+jobs_of 1 checks:cancelled:2
+workflow_at 1 checks:20
+t green cancelled-run-is-not-red "" "" "" "actions/runs/1/jobs"
+
+# A job cancelled at its cap (elapsed >= cap, the cap read from the workflow file at the run's head) makes the run red. The
+# alarm names the job, the cap and the run id. The quiet cases below stay quiet. The unknown cases are never red and never clear.
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-exact push 4711)"
+jobs_of 4711 scope-guard:cancelled:37
+workflow_at 4711 scope-guard:37
+t red job-cancelled-at-its-cap-makes-the-run-red "" "" "" "actions/runs/4711/jobs"
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-over push 4712)"
+jobs_of 4712 scope-guard:cancelled:40
+workflow_at 4712 scope-guard:37
+t red job-over-its-cap-names-the-job-the-cap-and-the-run "" "" "$(printf 'scope-guard\n37\n4712')" "actions/runs/4712/jobs"
+cost over-cap-red-reads-one-jobs-list-and-one-workflow-file-and-starts-no-python 1 1 0
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-mixed push 4715)"
+jobs_of 4715 build:success:10 scope-guard:cancelled:40
+workflow_at 4715 build:20 scope-guard:37
+t red one-job-over-its-cap-among-passed-jobs-is-red "" "" "$(printf 'scope-guard\n37\n4715')" "actions/runs/4715/jobs"
+
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-under push 4713)"
+jobs_of 4713 scope-guard:cancelled:2 other:success
+workflow_at 4713 scope-guard:37 other:37
+t green job-cancelled-well-under-its-cap-is-quiet "" "" ""
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-skip push 4714)"
+jobs_of 4714 scope-guard:skipped:40 other:success:40
+workflow_at 4714 scope-guard:37 other:37
+t green skipped-and-passed-jobs-are-not-judged-by-the-cap "" "" ""
+
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-nocap push 4716)"
+jobs_of 4716 scope-guard:cancelled:40
+workflow_at 4716 scope-guard
+t unknown job-cancelled-with-no-cap-is-unknown-not-clear "" "" "" "actions/runs/4716/jobs"
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-absent push 4717)"
+jobs_of 4717 scope-guard:cancelled:40
+workflow_at 4717 other-job:37
+t unknown job-cancelled-and-absent-from-the-workflow-is-unknown-not-clear "" "" "" "actions/runs/4717/jobs"
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-never push 4718)"
+jobs_of 4718 scope-guard:cancelled:never
+workflow_at 4718 scope-guard:37
+t unknown job-cancelled-that-never-started-is-unknown-not-clear "" "" "" "actions/runs/4718/jobs"
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-unread push 4719)"
+jobs_of 4719 scope-guard:cancelled:40
+t unknown job-cancelled-with-an-unreadable-workflow-is-unknown-not-clear "api *contents/*" "" "" "actions/runs/4719/jobs"
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-empty push 4720)"
+jobs_of 4720
+workflow_at 4720 scope-guard:37
+t unknown cancelled-run-with-no-jobs-is-unknown-not-clear "" "" "" "actions/runs/4720/jobs"
+
+# The scanner cases: a timeout-minutes line in a run block, a comment after the cap, a quoted timeout in a run line, a lone quote.
+scanner_wf() {
+  cat <<'YML'
+name: ci
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20 # the cap
+    steps:
+      - name: "tool # not a comment"
+        run: |
+          echo "don't stop here"
+          timeout-minutes: 1
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "timeout-minutes: 2 # quoted"
+YML
+}
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/scan-quiet push 4721)"
+jobs_of 4721 build:cancelled:15
+scanner_wf | workflow_file 4721
+t green scanner-a-run-block-timeout-line-is-not-the-cap "" "" ""
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/scan-red push 4722)"
+jobs_of 4722 build:cancelled:20
+scanner_wf | workflow_file 4722
+t red scanner-a-comment-after-the-cap-is-stripped "" "" "$(printf 'build\n20\n4722')" "actions/runs/4722/jobs"
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/scan-unknown push 4723)"
+jobs_of 4723 lint:cancelled:5
+scanner_wf | workflow_file 4723
+t unknown scanner-a-quoted-timeout-in-a-run-line-is-not-a-cap "" "" "" "actions/runs/4723/jobs"
+
 runs_are "$(gh_run ci success 2026-01-02 u1 schedule 2)" "$(gh_run ci failure 2026-01-01 u0 schedule 1)"
 t green red-schedule-is-cleared-by-a-newer-green-schedule "" "" "" none
 runs_are "$(gh_run ci success 2026-01-02 u1 workflow_dispatch 2)" "$(gh_run ci failure 2026-01-01 u0 push 1)"
@@ -295,6 +430,20 @@ else echo "FAIL open-issue-gets-a-comment-not-a-duplicate"; bad=1; fi
 # A job the red run did not fail, whose job-level if: needs pull_request (the other event), is not needed. A red job always is.
 # The workflow file is read at the green run's head (headSha) through the contents route.
 serve_real_checks() { mkdir -p "$tmp/contents/$1/.github/workflows" && cp "$root/.github/workflows/checks.yml" "$tmp/contents/$1/.github/workflows/checks.yml"; }
+# The full-size cases read the repo's real checks.yml at the run's head. The step-level cap of checks-mutate-guard (5 minutes)
+# sits under its job cap, so a 30-minute cancel is quiet, and the job cap is read past the comment on checks-guard.
+mutate_cap="$(job_cap checks-mutate-guard)"
+guard_cap="$(job_cap checks-guard)"
+runs_are "$(gh_run checks cancelled 2026-01-02 https://runs/real-mutate push 4731)"
+jobs_of 4731 checks-mutate-guard:cancelled:30
+serve_real_checks "$(printf '%040x' 4731)"
+if [ "${mutate_cap:-0}" -gt 30 ] 2>/dev/null; then echo "ok   real-checks-job-cap-is-above-the-30-minute-cancel"
+else echo "FAIL real-checks-job-cap-is-above-the-30-minute-cancel (cap read: '$mutate_cap')"; bad=1; fi
+t green real-checks-job-cap-is-read-past-a-step-cap "" "" ""
+runs_are "$(gh_run checks cancelled 2026-01-02 https://runs/real-guard push 4732)"
+jobs_of 4732 "checks-guard:cancelled:$guard_cap"
+serve_real_checks "$(printf '%040x' 4732)"
+t red real-checks-cap-with-a-trailing-comment-is-the-cap "" "" "$(printf 'checks-guard\n%s\n4732' "$guard_cap")" "actions/runs/4732/jobs"
 # The live nightly case: schedule run 41817705653 failed on checks-windows-merge-3, all-jobs-passed and ci-done skipped. The newer
 # push run 41905916525 passed merge-3 and skipped the same two. The file is the real checks.yml, at the push run's head.
 live_pair() {
