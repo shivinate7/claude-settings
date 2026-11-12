@@ -18314,9 +18314,10 @@ class BatchFreeze(CloudSession):
         """The paths guard_hits reads from lane #n's scripted diff. A case checks this before it asserts a refusal: the scope comes first."""
         return merge.guard_hits([path for path, _, _ in self.host.files_by_pr[n]])
 
-    def remedy_lanes(self, out, name):
-        """The lane numbers of each `merge --batch-build NAME ...` command the run printed, one sorted list per command."""
-        return [sorted(int(x) for x in found.split()) for found in re.findall(rf"merge --batch-build {re.escape(name)}((?: \d+)+)", out)]
+    def remedy_argvs(self, out):
+        """The argv, after `merge`, of each `merge --batch-build ...` line the run printed, in print order: the words a reader would type."""
+        return [line[line.index("merge --batch-build ") + len("merge "):].rstrip(" .").split()
+                for line in out.splitlines() if "merge --batch-build " in line]
 
     def bump(self, branch):
         """One commit of its own on origin's `branch`, as a claim or a heal leaves it: the head moves. -> the new head."""
@@ -18634,9 +18635,8 @@ class BatchFreeze(CloudSession):
         rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
         self.assertEqual(rc, 1, "a request with a guard change lane and another lane was not refused with exit 1: %s" % out)
         self.assertIn("#102", out, "the refusal does not name the guard change lane #102: %s" % out)
-        remedies = self.remedy_lanes(out, "nightly")
-        self.assertIn([102], remedies, "the refusal prints no `merge --batch-build nightly <guard pr>` remedy for lane #102: %s" % out)
-        self.assertTrue(all(lanes == [102] for lanes in remedies), "a remedy the refusal prints names more than the guard lane #102: %s" % out)
+        self.assertEqual(self.remedy_argvs(out), [["--batch-build", "nightly-102", "102"]],
+                         "the refusal does not print the one-lane build of guard lane #102 under its own batch name, and nothing else: %s" % out)
         self.assertEqual(self.host.created, [], "the refused request opened a pull request: %s" % out)
         self.assertEqual(self.head("batch-nightly"), "", "the refused request pushed batch-nightly: %s" % out)
         self.assertEqual(self.pushes(), [], "the refused request pushed: %s" % out)
@@ -18671,6 +18671,85 @@ class BatchFreeze(CloudSession):
         self.assertEqual(self.second_parents("batch-nightly"), {self.heads[101], self.heads[102]},
                          "batch-nightly does not hold the test-path-only lane #101 and lane #102: %s" % out)
         self.assertEqual(rc, 0, "a test-path-only lane with another lane exited %s: %s" % (rc, out))
+
+    def test_a_guard_change_check_that_cannot_read_a_lane_refuses_the_mixed_build_before_any_push(self):
+        self.lane_touching(101, "docs/notes.md")
+        self.lane_touching(102, "hooks/guard.py")
+        self.assertEqual(self.guard_paths_of(102), ["hooks/guard.py"], "setup: lane #102 does not change a guard path")
+        self.host.files_error = "reading the files of pull request #102 failed: HTTP 500"  # the read the check makes fails, so its verdict is unknown
+        self.record_pushes()
+        rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(rc, 1, "a first build whose lane files cannot be read was not refused with exit 1: %s" % out)
+        self.assertIn(self.host.files_error, out, "the refusal does not carry the failed read: %s" % out)
+        self.assertEqual(self.host.created, [], "the refused build opened a pull request: %s" % out)
+        self.assertEqual(self.head("batch-nightly"), "", "the refused build pushed batch-nightly: %s" % out)
+        self.assertEqual(self.pushes(), [], "the refused build pushed: %s" % out)
+
+    def test_two_guard_change_lanes_each_print_a_remedy_that_builds_alone_under_its_own_name(self):
+        self.lane_touching(101, "hooks/guard.py")
+        self.lane_touching(102, "lint/check_x.py")
+        self.assertEqual([self.guard_paths_of(n) for n in (101, 102)], [["hooks/guard.py"], ["lint/check_x.py"]],
+                         "setup: the two lanes do not each change a guard path")
+        self.record_pushes()
+        rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(rc, 1, "two guard change lanes were not refused with exit 1: %s" % out)
+        argvs = self.remedy_argvs(out)
+        self.assertEqual(argvs, [["--batch-build", "nightly-101", "101"], ["--batch-build", "nightly-102", "102"]],
+                         "the refusal does not print one one-lane build per guard lane, each under its own batch name: %s" % out)
+        self.assertEqual(self.host.created, [], "the refused build opened a pull request: %s" % out)
+        self.assertEqual(self.pushes(), [], "the refused build pushed: %s" % out)
+        for argv in argvs:  # each printed line, run in turn on this host, builds
+            line_rc, line_out = self.run_batch(*argv)
+            self.assertEqual(line_rc, 0, "the printed line `merge %s` did not build: %s" % (" ".join(argv), line_out))
+        self.assertEqual([c["branch"] for c in self.host.created], ["batch-nightly-101", "batch-nightly-102"],
+                         "the printed lines did not open one pull request each, under their own batch names: %s" % out)
+        self.assertEqual(self.second_parents("batch-nightly-101"), {self.heads[101]}, "batch-nightly-101 does not hold lane #101 alone: %s" % out)
+        self.assertEqual(self.second_parents("batch-nightly-102"), {self.heads[102]}, "batch-nightly-102 does not hold lane #102 alone: %s" % out)
+
+    def test_a_guard_change_base_release_request_prints_base_in_its_remedy_that_builds(self):
+        self.lane_touching(101, "docs/notes.md")
+        self.lane_touching(102, "hooks/guard.py")
+        for n in (101, 102):
+            self.host.batch_pulls[n]["base"] = "release"  # both lanes target release, as the request says
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "push", "-q", "origin", "origin/main:refs/heads/release")  # origin holds no release branch yet
+        self.record_pushes()
+        rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "--base", "release")
+        self.assertEqual(rc, 1, "a --base release request with a guard change lane was not refused with exit 1: %s" % out)
+        remedy = ["--batch-build", "nightly-102", "102", "--base", "release"]
+        self.assertEqual(self.remedy_argvs(out), [remedy], "the refusal does not print the one-lane build of #102 with --base release: %s" % out)
+        self.assertEqual(self.pushes(), [], "the refused build pushed: %s" % out)
+        line_rc, line_out = self.run_batch(*remedy)
+        self.assertEqual(line_rc, 0, "the printed line `merge %s` did not build: %s" % (" ".join(remedy), line_out))
+        self.assertEqual(self.host.created[-1]["base"], "release", "the printed line did not open its pull request into release: %s" % line_out)
+        self.assertEqual(self.second_parents("batch-nightly-102"), {self.heads[102]}, "batch-nightly-102 does not hold lane #102 alone: %s" % line_out)
+
+    def test_a_guard_change_lane_alone_with_on_is_refused_and_its_remedy_has_no_on(self):
+        self.lane(101)
+        self.lane_touching(102, "hooks/guard.py")
+        self.frozen_batch("old", [101])
+        self.assertEqual(self.guard_paths_of(102), ["hooks/guard.py"], "setup: lane #102 does not change a guard path")
+        created = len(self.host.created)  # the running batch's own pull request is made already
+        self.record_pushes()
+        rc, out = self.run_batch("--batch-build", "nightly", "102", "--on", "batch-old")
+        self.assertEqual(rc, 1, "a guard change lane alone with --on was not refused with exit 1: %s" % out)
+        self.assertIn("#102", out, "the refusal does not name the guard change lane #102: %s" % out)
+        self.assertEqual(self.remedy_argvs(out), [["--batch-build", "nightly-102", "102"]],
+                         "the refusal does not print the one-lane build of #102 without --on: %s" % out)
+        self.assertEqual(len(self.host.created), created, "the refused --on build opened a pull request: %s" % out)
+        self.assertEqual(self.head("batch-nightly"), "", "the refused --on build pushed batch-nightly: %s" % out)
+        self.assertEqual(self.pushes(), [], "the refused --on build pushed: %s" % out)
+
+    def test_a_non_guard_change_lane_with_on_builds(self):
+        self.lane(101)
+        self.lane_touching(102, "docs/notes.md")
+        self.frozen_batch("old", [101])
+        self.assertEqual(self.guard_paths_of(102), [], "setup: lane #102 changes a guard path")
+        old = self.head("batch-old")
+        rc, out = self.run_batch("--batch-build", "nightly", "102", "--on", "batch-old")
+        self.assertEqual(rc, 0, "a non-guard change lane with --on was refused: %s" % out)
+        self.assertTrue(self.head("batch-nightly"), "the --on build of a non-guard change lane did not push batch-nightly: %s" % out)
+        self.assertTrue(self.on_origin(old, "batch-nightly"), "batch-nightly does not hold the running batch-old head: %s" % out)
 
     # Build on a batch that exists: a set that differs is refused, the same set is allowed.
 
