@@ -2180,3 +2180,5 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
+- pass-claim-agent-unchecked: the send check of `hooks/guard.py` skips a call with a non-empty `agent_id`, so an agent's uncited "lint passed" reaches its parent. Decision: pass-claim-cites-verdict.
+- pass-claim-module-flat: `hooks/pass_claim.py` is flat, so `land_guard_set` in `install.sh` can mix versions during an install. A `guard_pass_claim.py` name lands in the guard set but needs a row in `hooks/test_mutate_ci.py`. Decision: pass-claim-cites-verdict.

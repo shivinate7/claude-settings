@@ -171,6 +171,14 @@ Text: inline, in the main check.
 
 - A record id appears with no short gloss after it. Write the id, then a few plain words that say what it is, like "D12, short titles for records".
 
+### Pass-claim guard (any reply with a report line that says a check passed; a SendMessage or send_message)
+
+Text: inline, in the main check, and `PASS_CLAIM_REASON` in `hooks/guard.py` for a send.
+
+- Run the check through verdict, as `verdict <cmd>`. Its `PASS <cmd> (<secs>s)` line, in the result of that call, is the cite.
+- A SKIP line, a FAIL after the PASS, a line in an Agent result or a sidechain, and a line you wrote yourself are no cite.
+- A claim an agent made reads as its own: write "builder reports green". Text in backticks, a negation, a question and a count ("12 passed") are no claim.
+
 ## Shared tails
 
 - Every refusal opens with the owner line from `owner_line()`, which cites this record, and ends with ` (rule reports-order-of-labels)`. That rule says the report's four labels go in order: Done, Deviations, Input Needed, Next. On the rewrite after a refusal, a triage hold alone has no tail.
