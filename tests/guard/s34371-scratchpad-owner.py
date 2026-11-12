@@ -827,6 +827,102 @@ def spo_outside_folder_case():
     return spo_result(problems, "agent B's rm -rf of a folder outside any scratchpad is allowed")
 
 
+# Rule scratchpad-owner, the walk's two limits. The folder check reads at most SCRATCHPAD_WALK_CAP entries, and it does
+# not follow a symlink below the folder it is given. The guard runs as its own process for each case, so the cap is not
+# patched: each case builds a real folder over the cap. A bare folder's entries come in no fixed order, so the cap cases
+# name their entries by a glob. The guard sorts a glob's matches, so `big` is read whole before `zz_a.txt`, and the
+# boundary is exact.
+SPO_CAP_DIR = "big"        # the folder of unrecorded files, the first match of the glob
+SPO_CAP_FILE = "zz_a.txt"  # agent A's file, the second match
+SPO_WALK_CAP_DEFAULT = 5000   # the cap the rule states, used only where the guard names no cap
+
+
+def spo_walk_cap():
+    """The folder walk's cap, read from the guard's module, its one home. A product that names no cap reads as the
+    stated default, so the case fails on what the guard does, not on a missing name."""
+    import guard_shared_tree
+    return getattr(guard_shared_tree, "SCRATCHPAD_WALK_CAP", SPO_WALK_CAP_DEFAULT)
+
+
+def spo_cap_case(tag, name, past, passed):
+    """Folder `capfold` holds `big`, which holds unrecorded files, and agent A's file `zz_a.txt`. B's rm -rf of
+    `capfold/*` reads `big` (one entry), its children, then the file. With `past` False the children number the cap
+    less two, so the file is the last entry the walk reads, and the call is refused. With `past` True they number the
+    cap less one, so the cap stops the walk before the file, and the call passes."""
+    import glob
+    cap = spo_walk_cap()
+    fx = spo_fixture(tag)
+    folder = os.path.join(fx["scratch"], "capfold")
+    big = os.path.join(folder, SPO_CAP_DIR)
+    fillers = cap - 1 if past else cap - 2
+    problems = [spo_scope(fx, name, big)]
+    for index in range(fillers):
+        write(os.path.join(big, "n%05d.txt" % index), "plain\n")
+    problems += spo_folder_writes(fx, name, ((SPO_WRITER, "capfold/%s" % SPO_CAP_FILE, "from A\n"),))
+    listed = sorted(os.path.basename(path) for path in glob.glob(os.path.join(folder, "*")))
+    if listed != sorted([SPO_CAP_DIR, SPO_CAP_FILE]):
+        problems.append("%s: setup, the glob capfold/* lists %s, want %s" % (name, listed, [SPO_CAP_DIR, SPO_CAP_FILE]))
+    held = len(os.listdir(big))
+    if held != fillers:
+        problems.append("%s: setup, %s holds %d entries, want %d" % (name, SPO_CAP_DIR, held, fillers))
+    got, reason = spo_run(fx, SPO_OTHER, "rm -rf %s/*" % folder)
+    if past:
+        problems.append(spo_allowed(name, got, reason))
+    else:
+        problems.append(spo_refused(name, got, reason, (fx["scratch"], SPO_CAP_FILE)))
+    return spo_result(problems, passed)
+
+
+def spo_symlink_inside_case():
+    """Agent A's file sits in `keep`, and folder `symfold` holds only a symlink `ln` to `keep`. B's rm -rf of `symfold`
+    removes the link and leaves `keep` alone, so the call passes: the walk does not follow the link."""
+    fx = spo_fixture("folder-walk-link-1")
+    name = "folder rm walk link 1"
+    keep = os.path.join(fx["scratch"], "keep")
+    folder = os.path.join(fx["scratch"], "symfold")
+    link = os.path.join(folder, "ln")
+    problems = [spo_scope(fx, name, keep), spo_scope(fx, name, folder)]
+    problems += spo_folder_writes(fx, name, ((SPO_WRITER, "keep/a.txt", "from A\n"),))
+    os.makedirs(folder, exist_ok=True)
+    os.symlink(keep, link)
+    if os.path.realpath(link) != os.path.realpath(keep):
+        problems.append("%s: setup, %s does not lead to %s" % (name, link, keep))
+    got, reason = spo_run(fx, SPO_OTHER, "rm -rf %s" % folder)
+    problems.append(spo_allowed("%s, agent B's rm -rf of a folder whose link leads to agent A's file" % name, got, reason))
+    return spo_result(problems, "agent B's rm -rf of a folder holding a link to agent A's file is allowed, as the link "
+                                "is not followed")
+
+
+def spo_symlink_out_case():
+    """Folder `d1` holds a symlink `ln` to `target`, a folder outside every scratchpad that holds as many unrecorded files
+    as the cap. Folder `zz` holds agent A's file. B's rm -rf of the scratchpad's entries, `S/*`, is refused: the walk
+    skips `ln` and reads `zz/a.txt`. A walk that followed `ln` would spend the cap on `target` and stop before `zz`."""
+    import glob
+    cap = spo_walk_cap()
+    fx = spo_fixture("folder-walk-link-2")
+    name = "folder rm walk link 2"
+    target = os.path.join(fx["work"], "target")
+    d1 = os.path.join(fx["scratch"], "d1")
+    link = os.path.join(d1, "ln")
+    problems = [spo_outside(name, target)]
+    for index in range(cap):
+        write(os.path.join(target, "n%05d.txt" % index), "plain\n")
+    os.makedirs(d1, exist_ok=True)
+    os.symlink(target, link)
+    problems += spo_folder_writes(fx, name, ((SPO_WRITER, "zz/a.txt", "from A\n"),))
+    listed = sorted(os.path.basename(path) for path in glob.glob(os.path.join(fx["scratch"], "*")))
+    if listed != ["d1", "zz"]:
+        problems.append("%s: setup, the glob scratchpad/* lists %s, want ['d1', 'zz']" % (name, listed))
+    if os.path.realpath(link) != os.path.realpath(target):
+        problems.append("%s: setup, %s does not lead to %s" % (name, link, target))
+    if len(os.listdir(target)) < cap:
+        problems.append("%s: setup, %s holds fewer entries than the walk cap %d" % (name, target, cap))
+    got, reason = spo_run(fx, SPO_OTHER, "rm -rf %s/*" % fx["scratch"])
+    problems.append(spo_refused(name, got, reason, (fx["scratch"], "a.txt")))
+    return spo_result(problems, "agent B's rm -rf of the scratchpad's entries is refused: the link out is not followed, "
+                                "and agent A's file is read")
+
+
 def spo_approved_case():
     """Agent A writes probe2.py. Agent B's overwrite is refused. The owner types `override 15m` at 30 s, and B's
     overwrite at 60 s is lifted. Once the override has ended, B's run and B's rewrite pass with no override in
@@ -1031,6 +1127,19 @@ spo_register("scratchpad-owner: folder rm control 4, agent B's rm -rf of an empt
              spo_made_folder_case)
 spo_register("scratchpad-owner: folder rm control 5, agent B's rm -rf of a folder outside any scratchpad: allowed",
              spo_outside_folder_case)
+# The walk's limits: the cap at its boundary (over a real folder, as the guard runs in its own process), and the symlinks.
+spo_register("scratchpad-owner: folder rm walk cap 1, agent B's rm -rf of a folder's entries, agent A's file the last "
+             "entry inside the walk cap: refused",
+             lambda: spo_cap_case("folder-walk-cap-1", "folder rm walk cap 1", False,
+                                  "agent A's file inside the walk cap is read, and agent B's rm -rf is refused"))
+spo_register("scratchpad-owner: folder rm walk cap 2, agent B's rm -rf of a folder's entries, agent A's file the first "
+             "entry past the walk cap: allowed",
+             lambda: spo_cap_case("folder-walk-cap-2", "folder rm walk cap 2", True,
+                                  "agent A's file past the walk cap is not read, and agent B's rm -rf is allowed"))
+spo_register("scratchpad-owner: folder rm walk link 1, agent B's rm -rf of a folder whose symlink leads to agent A's "
+             "file inside the scratchpad: allowed", spo_symlink_inside_case)
+spo_register("scratchpad-owner: folder rm walk link 2, agent B's rm -rf of the scratchpad's entries, a symlink out to a "
+             "folder past the cap: refused", spo_symlink_out_case)
 spo_register("scratchpad-owner: cost 1 a call outside any scratchpad makes no helper realpath, open or "
              "gettempdir call", spo_cost_case)
 
