@@ -1356,8 +1356,9 @@ def case_prompt_flags_a_pick_one_question_whose_options_could_combine():
           sentences)
     check("prompt: a sentence never flags options that exclude each other",
           has_pin(sentences, ("never flag",), ("exclude",)), sentences)
-    check("prompt: the prompt still judges against eight rules",
-          has_pin(sentences, ("against eight rules",)), sentences[:2])
+    word = COUNT_WORDS[len(judged_rules()) - 1]  # the count word JUDGED_RULES implies, so a new rule moves it with the list
+    check("prompt: the prompt still judges against the count JUDGED_RULES holds",
+          has_pin(sentences, ("against %s rules" % word,)), sentences[:2])
 
 
 def case_widens_finding_logs_its_rule():
