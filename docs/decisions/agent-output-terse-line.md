@@ -21,6 +21,7 @@ Narration grows each session's context. Cache reads dominate cost. An idle lane 
 
 - It reads each file's body text. YAML frontmatter does not count only when line 1 is `---` and a later `---` line closes it. Otherwise the check reads it as body text (`terse-line-frontmatter-bypass`).
 - Fenced code (``` or ~~~), HTML comments, inline code spans and 4-space indented code blocks do not count. An indented line that continues a paragraph, or sits in a list item, does count.
+- A comment follows CommonMark. One opened mid-line hides text only up to its `-->` in the same paragraph; with no close there it is plain text. One opened at a line start (up to 3 spaces in) hides through the line that holds `-->`, the rest of that line too; with no close it hides the rest of the file, or the rest of its list item.
 - Whitespace collapses, so the line may wrap.
 - Exit 0: every file holds the line. It prints nothing.
 - Exit 1: a file lacks the line, or a role named in `ROLES` has no file. It names each one. Exit 1 wins over exit 2.
