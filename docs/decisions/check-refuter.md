@@ -13,7 +13,7 @@ Ruling: owner, 2026-11-06, the owner's waiting-page item 284 c. The owner's wait
 
 Check: `hooks/check_refuter.py`, the one home of the check refuter. `hooks/call_judge.py` calls it at a `send_message` and at a lane start by `create_session`.
 
-- Trigger: a `send_message` message, or the prompt of a `create_session` that carries the lane tag, whose first non-blank line after its optional `Grant:` line starts `Lane brief: <step>. Topic: <topic>.` The line is read as the lane-topic guard reads it (`shared_names.brief_lines`). Other messages and starts make no model call and do not load the module.
+- Trigger: a `send_message` message, or the prompt of a `create_session` with the lane tag. Its first non-blank line starts `Lane brief: <step>. Topic: <topic>.` An optional `Grant:` line may come before it. The lane-topic guard reads the line the same way (`shared_names.brief_lines`). Other messages and starts make no model call and do not load the module.
 - Done check line: the brief's line that names the check. These forms count:
   - plain: `Done check: <check>`
   - bold: `**Done check:** <check>`
