@@ -1,0 +1,14 @@
+{
+  "id": "idle-resume-compacts-rewrite",
+  "title": "Decision idle-resume-compacts drops /autocompact as a cloud lever",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "lane": null,
+  "blockedBy": [],
+  "why": "An owner ruling in the restart plan has no step, so its prose change would be lost at the archive.",
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "source": "R32 cut 1, owner 11:23 CST Nov 11; plan restart-plan 2c8af8f; retrospective 20:43 CST Nov 11",
+  "note": "Decision idle-resume-compacts drops `/autocompact` as a cloud lever and points at the per-model key in decision precompact-handoff, rule 1. Prose wave (owner 20:24 CST Nov 11, item 521): prose, first wave.",
+  "order": 0.126,
+  "updatedAt": "2026-11-11T20:44:00-06:00"
+}

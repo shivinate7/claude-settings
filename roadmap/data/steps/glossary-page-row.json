@@ -1,0 +1,14 @@
+{
+  "id": "glossary-page-row",
+  "title": "GLOSSARY.md gets a 'page' row, and 'roadmap page' is retired",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "lane": null,
+  "blockedBy": [],
+  "why": "An owner ruling in the restart plan has no step, so its prose change would be lost at the archive.",
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "source": "G14, owner 15:52 CST Nov 10; plan restart-plan 2c8af8f; retrospective 20:43 CST Nov 11",
+  "note": "Add one GLOSSARY.md row, \"page: the repo's one page that triage writes, holding the waiting items and the Status tab\"; retire \"roadmap page\", including in skills/roadmap/SKILL.md's trigger words. Prose wave (owner 20:24 CST Nov 11, item 521): prose, first wave.",
+  "order": 0.121,
+  "updatedAt": "2026-11-11T20:44:00-06:00"
+}

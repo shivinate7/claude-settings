@@ -1,0 +1,14 @@
+{
+  "id": "consultant-role-record",
+  "title": "Decision session-tiers names the consultant as a sixth session role",
+  "status": "todo",
+  "repo": "shivinate7/claude-settings",
+  "lane": null,
+  "blockedBy": [],
+  "why": "An owner ruling in the restart plan has no step, so its prose change would be lost at the archive.",
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "source": "R30, owner box answer before 10:58 CST Nov 11; plan restart-plan 2c8af8f; retrospective 20:43 CST Nov 11",
+  "note": "Add the consultant as a sixth session role in decision session-tiers: started by the owner on demand; talks with him, runs read-only audits, keeps one plan file, sends rulings to triage; builds, merges and decides nothing; ends when its plan lands. Prose wave (owner 20:24 CST Nov 11, item 521): prose, first wave.",
+  "order": 0.122,
+  "updatedAt": "2026-11-11T20:44:00-06:00"
+}
