@@ -59,11 +59,11 @@ Interface the hook must match:
   question a standing ruling already decides. Each case builds its own real git repo (make_repo), and a fixture
   ruling is found in the prompt with the call's JSON cut out. A search that cannot read a source prints one stderr
   line, `past-ruling search unknown:`, and never says clear.
-- A measured challenge (R39 in docs/plans/restart-plan.md, rule outcomes-stale-decision-protocol): item 8 passes a
-  challenge that names the record and its sentence, a measure or "unmeasured", the outcome a ruling protected and what
-  protects it now, and a proposed fix. A new fact alone is not a pass. It refuses a bare re-ask with no new measure or
-  fact. A denial tells the session
-  how to challenge, never to withdraw. A challenge is a question, never a grant (see the section "a measured challenge").
+- A challenge to a past ruling (R39 in docs/plans/restart-plan.md, rule outcomes-stale-decision-protocol; owner ruling,
+  page item 579 pick b, 12:54 CST Nov 12): item 8 passes a question that names the record and brings a new fact. The
+  outcome protected, what protects it now and a proposed fix are optional. It refuses a re-ask that brings no new fact.
+  A denial tells the session how to challenge, never to withdraw. A challenge is a question, never a grant (see the
+  section "a challenge to a past ruling").
 - A relative file_path on an items set or update with no `data`: the file is read against the payload's `cwd`, as
   question_form._write_data reads it, so that write is judged like inline data (the section "a relative file_path").
 """
@@ -1692,13 +1692,13 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
           "Unvetted:" in r.reason(), detail(r))
 
 
-# ------------------------------------------------------------------ a measured challenge (R39)
+# ------------------------------------------------------------------ a challenge to a past ruling (R39)
 #
-# R39 in docs/plans/restart-plan.md, rule outcomes-stale-decision-protocol. Item 8 refuses a bare re-ask with no new
-# measure or fact. It passes a challenge that names the record and its sentence, a measure or "unmeasured", the outcome
-# the ruling protected and what protects it now, and a proposed fix. A denial tells the session how to challenge, never
-# to withdraw. A challenge reaches the owner as a question, never as a grant. The model is mocked, so these cases read the
-# text the code gives the model, the denial text the code appends, and the grant readers that no question path calls.
+# R39 in docs/plans/restart-plan.md, rule outcomes-stale-decision-protocol. Owner ruling, page item 579 pick b (12:54 CST
+# Nov 12): a question that names the record and brings a new fact passes, and the other parts are optional. Item 8 refuses
+# a re-ask that brings no new fact. A denial tells the session how to challenge, never to withdraw. A challenge reaches the
+# owner as a question, never as a grant. The model is mocked, so these cases read the text the code gives the model, the
+# denial text the code appends, and the grant readers that no question path calls.
 CHAL_GOAL = "Goal: decide whether the GitHub apps keep access to claude-settings, now the audit counts more of them"
 CHAL_PROBLEM = ("Problem (risk): %s says 'keep the apps' access to claude-settings as is', which protected easy calls "
                 "into the repo; the monthly audit now protects that, and it counts 14 apps where the ruling named 9, "
@@ -1729,38 +1729,41 @@ def sentences_of(text):
     return [s for s in re.split(r"[.\n]", text.lower()) if s.strip()]
 
 
-def element_checks(text):
-    """(label, passed) for each element a measured challenge carries, read from `text`. Each label names one element,
-    so a failed check names the element that is missing. "unmeasured" is checked on its own: the item must allow it
-    in place of a measure, and must name a measure too."""
-    t = text.lower()
-    return [
-        ("names the record and its sentence", "record" in t and "sentence" in t),
-        ("names a measure", re.search(r"\bmeasure", t) is not None),
-        ("allows the word unmeasured in place of a measure", "unmeasured" in t),
-        ("names the outcome the ruling protected and what protects it now",
-         "outcome" in t and "protect" in t and re.search(r"\bnow\b", t) is not None),
-        ("names a proposed fix", "propos" in t and re.search(r"\bfix", t) is not None),
-    ]
+def refuses_a_bare_re_ask(text):
+    """True when a sentence of `text` refuses a re-ask that brings no new fact."""
+    return any("refuse" in s and "re-ask" in s and "no new fact" in s for s in sentences_of(text))
 
 
-def item_checks(text, subject):
-    """Checks that `text` passes a measured challenge: a sentence that says a challenge passes, then each element.
-    `subject` opens each check's name, so a failure names where the text came from. A failure's detail is one line."""
+def names_a_new_fact_alone_passes(text):
+    """True when a sentence of `text` says a challenge that names the record passes on a new fact alone. A sentence with a
+    negative word (not, never, no) says the opposite, so it does not count."""
+    return any("new fact alone" in s and "pass" in s and "record" in s and re.search(r"\b(not|never|no)\b", s) is None
+               for s in sentences_of(text))
+
+
+def new_shape_checks(text, subject):
+    """Checks that `text` passes a challenge that names the record and brings a new fact, with the other parts optional,
+    refuses a re-ask that brings no new fact, and no longer says a new fact alone is not a pass. `subject` opens each
+    check's name, so a failure names where the text came from. A failure's detail is one line."""
     flat = " ".join(text.split())[:300]
-    says_pass = any("challenge" in s and "pass" in s for s in sentences_of(text))
-    check("%s says a challenge passes" % subject, says_pass, flat)
-    for label, ok in element_checks(text):
-        check("%s %s" % (subject, label), ok, flat)
+    sentences = sentences_of(text)
+    check("%s: a challenge that names the record and brings a new fact passes" % subject,
+          any("challenge" in s and "pass" in s and "record" in s and "new fact" in s for s in sentences), flat)
+    check("%s: the outcome and the fix are optional, never required" % subject,
+          any(re.search(r"\b(optional|never required|not required)\b", s) and ("outcome" in s or "fix" in s)
+              for s in sentences), flat)
+    check("%s: a re-ask that brings no new fact is refused" % subject, refuses_a_bare_re_ask(text), flat)
+    check("%s: the item no longer says a new fact alone is not a pass" % subject,
+          "a new fact alone is not a pass" not in text.lower(), flat)
 
 
 def item8_of(prompt):
     return item_text(prompt, 8)
 
 
-def case_past_ruling_item_passes_a_measured_challenge():
+def case_past_ruling_item_passes_a_challenge_with_a_new_fact():
     item = load_file_module(HOOK, "call_judge_under_test").PAST_RULING_ITEM
-    item_checks(item, "challenge pass: the item")
+    new_shape_checks(item, "challenge pass: the item")
 
 
 def case_past_ruling_challenge_question_gets_item_8():
@@ -1773,7 +1776,7 @@ def case_past_ruling_challenge_question_gets_item_8():
           len(r.calls) == 1 and r.code == 0 and r.out == "", detail(r))
     item8 = item8_of(r.calls[0]["prompt"] if r.calls else "")
     check("challenge question: the prompt holds item 8", item8 != "", detail(r))
-    item_checks(item8, "challenge question: item 8")
+    new_shape_checks(item8, "challenge question: item 8")
 
 
 def case_past_ruling_challenge_page_item_gets_item_8():
@@ -1785,19 +1788,41 @@ def case_past_ruling_challenge_page_item_gets_item_8():
     check("challenge page item: one model call", len(r.calls) == 1, detail(r))
     item8 = item8_of(r.calls[0]["prompt"] if r.calls else "")
     check("challenge page item: the prompt holds item 8", item8 != "", detail(r))
-    item_checks(item8, "challenge page item: item 8")
+    new_shape_checks(item8, "challenge page item: item 8")
+
+
+NEW_FACT_PROBLEM = ("Problem (risk): the record decisions/%s says 'keep the apps' access to claude-settings as is'; the "
+                    "monthly audit counts 14 apps with access, where the ruling was written on 9, so the ruling needs your word"
+                    % APPS_SLUG)
+NEW_FACT_BASED = ("Based on (measured): the monthly audit counts 14 apps with access, 5 more than the 9 the ruling was "
+                  "written on",)
+
+
+def case_new_fact_alone_question_gets_item_8():
+    # A challenge that names the record and brings a new fact, with no outcome and no fix: one model call and no refusal
+    # (a green control). The item 8 the model reads is the one the new-fact checks read.
+    import question_form  # the one form check (hooks/question_form.py)
+    box = good_box(goal=CHAL_GOAL, problem=NEW_FACT_PROBLEM, based=NEW_FACT_BASED, options=CHAL_OPTIONS)
+    check("new fact alone fixture: the box passes chat_hit, so the model judges it",
+          question_form.chat_hit(box) == ("", ""), question_form.chat_hit(box))
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=ALLOW)
+    check("new fact alone question: one model call, and it reaches the owner with no refusal",
+          len(r.calls) == 1 and r.code == 0 and r.out == "", detail(r))
+    item8 = item8_of(r.calls[0]["prompt"] if r.calls else "")
+    check("new fact alone question: the prompt holds item 8", item8 != "", detail(r))
+    check("new fact alone question: item 8 passes a new fact alone with the record named",
+          names_a_new_fact_alone_passes(item8), " ".join(item8.split())[:300])
+    new_shape_checks(item8, "new fact alone question: item 8")
 
 
 def case_past_ruling_item_refuses_a_bare_re_ask():
-    # A bare re-ask is refused by two sentences of the item: a new fact alone is not a pass, and a re-ask that is not such
-    # a challenge is refused. The item says no re-ask passes on a fact alone, so the check reads both sentences.
+    # A re-ask that brings no new fact is refused by a sentence of the item. The refusal no longer points at a four-part
+    # challenge: "such a challenge" named that bar.
     item = load_file_module(HOOK, "call_judge_under_test").PAST_RULING_ITEM
     flat = " ".join(item.split())[:300]
-    sentences = [s.strip() for s in sentences_of(item)]
-    check("bare re-ask: the item says a new fact alone is not a pass",
-          any("a new fact alone is not a pass" in s for s in sentences), flat)
-    check("bare re-ask: the item refuses a re-ask that is not such a challenge",
-          "refuse a re-ask that is not such a challenge" in sentences, flat)
+    check("bare re-ask: the item refuses a re-ask that brings no new fact", refuses_a_bare_re_ask(item), flat)
+    check("bare re-ask: the item no longer refuses a re-ask as not such a challenge",
+          "such a challenge" not in item.lower(), flat)
 
 
 def case_past_ruling_item_never_says_withdraw():
@@ -1806,9 +1831,21 @@ def case_past_ruling_item_never_says_withdraw():
     check("withdraw: the item never tells the session to withdraw the question", not hits, hits)
 
 
+def case_past_ruling_tail_names_the_record_and_the_new_fact():
+    # The how-to-challenge tail of a past-ruling denial: name the record, bring the new fact, the other parts optional, and
+    # never withdraw. Read from call_judge.CHALLENGE_HOW, never copied here.
+    tail = load_file_module(HOOK, "call_judge_under_test").CHALLENGE_HOW
+    lower = tail.lower()
+    check("tail: names the record and brings the new fact", "record" in lower and "new fact" in lower, tail[:300])
+    check("tail: the other parts are optional", re.search(r"\b(optional|never required|not required)\b", lower) is not None,
+          tail[:300])
+    hits = [p for p in WITHDRAW_PHRASES if p in lower]
+    check("tail: never tells the session to withdraw the question", not hits, hits)
+
+
 def case_bare_re_ask_is_refused_beside_a_passing_challenge():
     # R39 item 4: the same question with no new fact is refused. Its denial tells the session how to challenge, and never
-    # to withdraw. A challenge with the four parts, asked beside it, reaches the owner with no denial.
+    # to withdraw. A challenge that brings a new fact, asked beside it, reaches the owner with no denial.
     bare_box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
     refuse = json.dumps({"ok": False, "reason": "decisions/%s: already decided by the keep-the-apps ruling." % APPS_SLUG})
     r = run_hook(question_input(box=bare_box, cwd=DECISIONS_REPO), answer=refuse)
@@ -1816,8 +1853,10 @@ def case_bare_re_ask_is_refused_beside_a_passing_challenge():
     check("re-ask with no new fact: the mocked refusal reaches the denial under the past-ruling rule",
           (r.deny() or {}).get("permissionDecision") == "deny" and reason.startswith("past-ruling"), detail(r))
     check("re-ask with no new fact: the denial tells the session how to challenge", "challenge" in reason, reason[:300])
-    for label, ok in element_checks(reason):
-        check("re-ask with no new fact: the denial %s" % label, ok, reason[:300])
+    check("re-ask with no new fact: the denial names the record and a new fact", "record" in reason and "new fact" in reason,
+          reason[:300])
+    check("re-ask with no new fact: the denial says the other parts are optional",
+          re.search(r"\b(optional|never required|not required)\b", reason) is not None, reason[:300])
     hits = [p for p in WITHDRAW_PHRASES if p in reason]
     check("re-ask with no new fact: the denial never tells the session to withdraw the question", not hits, hits)
     challenge = run_hook(question_input(box=good_box(goal=CHAL_GOAL, problem=CHAL_PROBLEM, based=CHAL_BASED,
@@ -1859,18 +1898,15 @@ def case_challenge_text_never_lifts_a_refusal():
           not lifted_log(r, question_form.PAST_RULING_RULE) and "\toverride\t" not in r.log, r.log[-200:])
 
 
-def case_past_ruling_item_never_passes_a_new_fact_alone():
-    # The ruling on the open reviewer question: item 8 passes only a question with the four challenge parts, and a new
-    # fact alone does not pass.
+def case_new_fact_alone_passes_with_the_record():
+    # Item 8 passes a challenge that names the record and brings a new fact alone. The four-part bar is gone, so the item
+    # must not still require four parts.
     item = load_file_module(HOOK, "call_judge_under_test").PAST_RULING_ITEM
     flat = " ".join(item.split())[:300]
-    sentences = sentences_of(item)
-    named = [s for s in sentences if re.search(r"\bnew fact alone\b", s)]
-    check("new fact alone: the item names a new fact alone", bool(named), flat)
-    check("new fact alone: the sentence that names it says a new fact alone is not a pass",
-          any(re.search(r"\b(not|never)\b", s) is not None and "pass" in s for s in named), flat)
-    check("new fact alone: the item says a question passes only as a challenge with the four parts",
-          any(re.search(r"\bonly\b", s) is not None and "pass" in s and "challenge" in s for s in sentences), flat)
+    check("new fact alone: the item says a challenge that names the record passes on a new fact alone",
+          names_a_new_fact_alone_passes(item), flat)
+    check("new fact alone: the item no longer requires a challenge with four parts",
+          not any("only" in s and "four" in s for s in sentences_of(item)), flat)
 
 
 # A plain-words explain question: its item 5 refusal names a record the repo holds, and it keeps the question judge's
@@ -1950,11 +1986,10 @@ REPLAY_CONTEXT = "\n".join((
     DEPARTS_LINE))
 REPLAY_CHALLENGE_CONTEXT = "\n".join((
     "Goal: decide whether the shared-tree guard reads git inside Python strings, given the ruling to keep the gap",
-    "Problem (risk): %s says \"keep the gap\", which protected a guard small enough to read in one pass; the lint suite "
-    "now holds the guard to that size, so the gap costs more than it did, and the ruling needs your word" % REPLAY_SLUG,
+    "Problem (risk): the record decisions/%s says \"keep the gap\" for git inside a Python string, and the ruling needs "
+    "your word" % REPLAY_SLUG,
     "Based on (measured): the gap was re-asked 4 times in 5 days, and the guard missed 3 of 30 sampled git calls held "
     "in Python strings",
-    "Proposed fix: widen the guard to read git inside Python strings, with a test for each string form",
     DEPARTS_LINE))
 REPLAY_OPTIONS = [
     {"key": "a", "label": "Widen the guard", "gain": "Git inside a Python string is checked.",
@@ -1975,6 +2010,8 @@ def case_past_ruling_replay_item_532():
     check("replay 532: the ruling reaches the candidate list, in one model call",
           len(r.calls) == 1 and REPLAY_SLUG in without_call(prompt, item) and REPLAY_RULING in without_call(prompt, item),
           detail(r))
+    check("replay 532: item 8 refuses a re-ask that brings no new fact", refuses_a_bare_re_ask(item8_of(prompt)),
+          item8_of(prompt)[:300])
     reason = r.reason()
     check("replay 532: the write is denied under the past-ruling rule",
           (r.deny() or {}).get("permissionDecision") == "deny" and reason.startswith(question_form.PAST_RULING_RULE),
@@ -1988,9 +2025,8 @@ def case_past_ruling_replay_item_532():
 
 
 def case_past_ruling_replay_item_532_challenge_passes():
-    # Green control, beside the replay: the same question as a four-part measured challenge. It names the record and
-    # quotes its sentence, gives a measure, names the outcome the ruling protected and what protects it now, and proposes
-    # a fix. The item passes the form, and no check before the one model call refuses it.
+    # Green control, beside the replay: the same question with the record named and a new fact, and no outcome and no fix.
+    # One model call and no refusal. The item 8 the model reads passes a new fact alone, which the new-fact checks read.
     import question_form  # the one form check (hooks/question_form.py)
     challenge = good_page_item(title=REPLAY_TITLE, context=REPLAY_CHALLENGE_CONTEXT, options=REPLAY_OPTIONS)
     got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "c532c", "data": challenge})
@@ -2001,6 +2037,10 @@ def case_past_ruling_replay_item_532_challenge_passes():
           len(r.calls) == 1 and r.code == 0 and r.out == "", detail(r))
     check("replay 532 challenge: the ruling reaches the candidate list",
           REPLAY_SLUG in without_call(prompt, challenge) and REPLAY_RULING in without_call(prompt, challenge), detail(r))
+    item8 = item8_of(prompt)
+    check("replay 532 challenge: item 8 passes a new fact alone with the record named",
+          names_a_new_fact_alone_passes(item8), " ".join(item8.split())[:300])
+    new_shape_checks(item8, "replay 532 challenge: item 8")
 
 
 # ------------------------------------------------------------------ the Item N opener of a refusal (R39)
@@ -2045,17 +2085,6 @@ def case_reply_spec_asks_an_item_n_opening():
     items = load_file_module(HOOK, "call_judge_under_test").JUDGE_ITEMS
     spec = items[items.find("Reply JSON only"):] if "Reply JSON only" in items else ""
     check("reply spec: the reason opens with 'Item N:'", "Item N:" in spec, " ".join(spec.split())[:300])
-
-
-def case_re_ask_refusal_reads_not_such_a_challenge():
-    # The item's refusal sentence for a re-ask reads that a re-ask which is not such a challenge is refused. It no
-    # longer names the measure or fact a re-ask brings.
-    item = load_file_module(HOOK, "call_judge_under_test").PAST_RULING_ITEM
-    flat = " ".join(item.split())[:300]
-    check("re-ask sentence: the item refuses a re-ask that is not such a challenge",
-          "refuse a re-ask that is not such a challenge" in [s.strip() for s in sentences_of(item)], flat)
-    check("re-ask sentence: the item no longer says a re-ask brings no new measure",
-          "brings no new measure" not in item.lower(), flat)
 
 
 def called_names(path):
@@ -2106,16 +2135,17 @@ def main():
                  case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
                  case_page_relative_file_path_reaches_the_review, case_page_relative_file_path_passing_item_passes,
                  case_page_absolute_file_path_is_judged,
-                 case_past_ruling_item_passes_a_measured_challenge, case_past_ruling_challenge_question_gets_item_8,
+                 case_past_ruling_item_passes_a_challenge_with_a_new_fact, case_past_ruling_challenge_question_gets_item_8,
                  case_past_ruling_challenge_page_item_gets_item_8, case_past_ruling_item_refuses_a_bare_re_ask,
                  case_past_ruling_item_never_says_withdraw, case_bare_re_ask_is_refused_beside_a_passing_challenge,
                  case_past_ruling_item_says_a_challenge_never_grants, case_challenge_question_writes_no_grant,
-                 case_challenge_text_never_lifts_a_refusal, case_past_ruling_item_never_passes_a_new_fact_alone,
+                 case_challenge_text_never_lifts_a_refusal, case_new_fact_alone_passes_with_the_record,
                  case_plain_words_explain_keeps_its_rule_id, case_judges_call_no_grant_reader,
                  case_past_ruling_denial_keeps_its_id_and_date, case_past_ruling_denial_plain_reason_keeps_its_id_and_date,
                  case_past_ruling_replay_item_532, case_past_ruling_replay_item_532_challenge_passes,
                  case_item_8_reason_stays_past_ruling, case_item_n_reasons_keep_their_own_rule_id,
-                 case_reply_spec_asks_an_item_n_opening, case_re_ask_refusal_reads_not_such_a_challenge):
+                 case_reply_spec_asks_an_item_n_opening,
+                 case_past_ruling_tail_names_the_record_and_the_new_fact, case_new_fact_alone_question_gets_item_8):
         try:
             case()
         except Exception as exc:
