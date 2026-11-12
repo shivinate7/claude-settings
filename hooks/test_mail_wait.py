@@ -360,6 +360,20 @@ class FalseWake(WaitCase):
         self.assertNotIn("mail: new ", text, "mail open at the start woke the waiter: %r" % text)
         self.assert_ended_quiet(code, text)
 
+    def test_mail_open_at_start_for_this_address_does_not_wake_when_another_address_moves_the_tip(self):
+        store, machine = self.fixture()
+        store.seed(ADDR, "0a1b2c3d4e33", "request", SENDER, "Body marker: open-before-move\n")
+
+        def send_elsewhere():
+            store.seed(OTHER, "0a1b2c3d4e34", "request", SENDER, "Body marker: elsewhere-3\n")
+
+        code, text, probe, _ = self.run_with_event(store, machine, send_elsewhere)
+        self.assertTrue(probe.get("ran"), "the waiter never reached its second sleep, so the send to another address never ran")
+        self.assertTrue(probe["moved"], "control: the send to another address did not move the mail ref")
+        self.assertNotIn("mail: new ", text, "mail open at the start for this address woke the waiter when another "
+                         "address moved the tip: %r" % text)
+        self.assert_ended_quiet(code, text)
+
     def test_transient_ls_remote_failure_keeps_polling(self):
         store, machine = self.fixture()
         probe = {"failed_at": None}
@@ -961,7 +975,12 @@ class WakeLine(WaitCase):
     def test_wake_line_cuts_the_subject_to_160_characters(self):
         code, text, probe = self.wake("W" * 300)
         self.assertIn("sent", probe, "the send never landed: the waiter did not reach its second sleep")
-        longest = max(len(run) for run in re.findall(r"W+", text))
+        wake = [line for line in text.splitlines() if line.startswith("mail: new ")]
+        self.assertTrue(wake, "no wake line printed for the 300-character subject, so there is no subject to measure: %r"
+                        % text)
+        runs = re.findall(r"W+", wake[0])
+        self.assertTrue(runs, "the wake line has no run of W from the subject: %r" % wake[0])
+        longest = max(len(run) for run in runs)
         self.assertEqual(longest, 160, "the wake line shows a subject of %d characters, expected 160" % longest)
 
     def test_repo_address_message_wakes_with_its_own_addr(self):
@@ -992,29 +1011,47 @@ class LockAtomic(WaitCase):
     """A second start must never read the lock while it is empty or partly written. A leftover empty lock is stale."""
 
     def test_a_second_start_never_sees_the_lock_empty_or_partly_written(self):
-        """Records the lock's state before each os call that creates or moves a lock file (os.open, os.fdopen, os.link,
-        os.replace). A waiter that creates the file empty and fills it after shows an empty state at fdopen, which a
-        second start could read. The seam is these four os functions; each recorder calls the real one."""
+        """Records the lock's state at each step that creates or moves a lock file: os.open, os.fdopen, os.link and
+        os.replace; a builtin open() on the lock path; and each json.dump. A plain open() creates the file empty, and
+        only the dump fills it, so the state between the two is seen at the dump. Each recorder calls the real function."""
         store, machine = self.fixture()
         lock = lock_path(machine.cache)
         steps = []
-        patches = []
-        for name in ("open", "fdopen", "link", "replace"):
-            real = getattr(os, name)
+        busy = [False]  # the recorder's own read of the lock goes through open(), and must not record itself
+        real_open = open
+        real_dump = json.dump
 
-            def watched(*args, _real=real, _name=name, **kwargs):
-                steps.append((_name, lock_state(lock)))
-                return _real(*args, **kwargs)
+        def record(name):
+            if busy[0]:
+                return
+            busy[0] = True
+            try:
+                steps.append((name, lock_state(lock)))
+            finally:
+                busy[0] = False
 
-            patches.append(mock.patch.object(os, name, watched))
-        for patch in patches:
-            patch.start()
-        try:
+        def watch_os(name, real):
+            def watched(*args, **kwargs):
+                record(name)
+                return real(*args, **kwargs)
+            return watched
+
+        def watched_open(file, *args, **kwargs):
+            if file == lock:
+                record("open")
+            return real_open(file, *args, **kwargs)
+
+        def watched_dump(obj, fp, *args, **kwargs):
+            record("dump")
+            return real_dump(obj, fp, *args, **kwargs)
+
+        with contextlib.ExitStack() as stack:
+            for name in ("open", "fdopen", "link", "replace"):
+                stack.enter_context(mock.patch.object(os, name, watch_os(name, getattr(os, name))))
+            stack.enter_context(mock.patch("builtins.open", watched_open))
+            stack.enter_context(mock.patch.object(json, "dump", watched_dump))
             code, text = run_wait(machine.env, FakeTime(), Procs(), max_seconds=60)
-        finally:
-            for patch in reversed(patches):
-                patch.stop()
-        self.assertTrue(steps, "control: the waiter made no os step on the lock, so the watch saw nothing")
+        self.assertTrue(steps, "control: the waiter made no step on the lock, so the watch saw nothing")
         torn = [step for step in steps if step[1] in ("empty", "partial")]
         self.assertEqual(torn, [], "a reader at a lock step saw the lock empty or partly written: %r" % torn)
 
