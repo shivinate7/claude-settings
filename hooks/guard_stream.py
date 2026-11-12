@@ -365,15 +365,13 @@ VERDICT_PIPE_REASON = (
 # --lane-lint 7; echo $?` read as "lane lint passes". The run is refused unless `verdict` stands in the
 # call ahead of the program (`verdict merge --lane-lint 7`, `timeout 60 verdict bin/ci-job checks`). A
 # pipe into tail or head is check-tail's refusal, judged first, so it is never refused twice. A
-# background run is out: its output is read from a file after the end note. Tests are not in the roster
+# background run is refused too (coordinator ruling, 2026-11-12 11:23 CST). Tests are not in the roster
 # (no incident names a test command).
 def bare_check_hit(stripped: str, background: bool) -> str:
-    """The matched text when a foreground segment runs a named check with no `verdict` ahead of the
-    program, else ''."""
-    if background:
-        return ""
+    """The matched text when a segment, foreground or background, runs a named check with no `verdict`
+    ahead of the program, else ''."""
     for segment in split_segments(stripped):
-        stage = check_stage(segment, False, ci_job_foreground=True)
+        stage = check_stage(segment, background, ci_job_foreground=True)
         if not stage:
             continue
         tokens = segment_tokens(segment)
