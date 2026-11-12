@@ -696,6 +696,9 @@ ROLE_LINES = {
     "untagged-then-other-tags": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1", session=ROLE_OTHER),
     "untagged-then-both-tags": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1", session=ROLE_OTHER)
     + role_tag_call("t2"),
+    # A batch runner tags its own record after it read it: that read is stale, so the runner role is refused. Tags on another session leave it current.
+    "runner-then-tags": role_call("g1", RUNNER_TAGS) + role_tag_call("t1"),
+    "runner-then-other-tags": role_call("g1", RUNNER_TAGS) + role_tag_call("t1", session=ROLE_OTHER),
     "triage-title": role_call("g1", LANE_TAGS, title="handed to cs-build:triage"),
     "other-triage": role_call("g1", TRIAGE_TAGS, session=ROLE_OTHER),
     "triage-then-lane": role_call("g1", TRIAGE_TAGS) + role_call("g2", LANE_TAGS),
@@ -999,7 +1002,11 @@ lazy_fixture([roster_path(name) for name in ROSTER_REPOS], build_roster_repos)
 
 # A lone lane: a cs-build:lane record with no parent_session_id (ruling G10). Its id is this session's own.
 LONE_LANE_RECORD = json.dumps({"ccr": {"id": ROLE_OWN, "title": "a lone lane", "tags": LANE_TAGS}})
-LONE_LINES = {"lone-lane": [role_use("g1", GET_SESSION), role_result("g1", LONE_LANE_RECORD)]}
+LONE_LINES = {
+    "lone-lane": [role_use("g1", GET_SESSION), role_result("g1", LONE_LANE_RECORD)],
+    # A lone lane tags its own record after it read it: that read is stale, so the lone-lane role is refused.
+    "lone-lane-then-tags": [role_use("g1", GET_SESSION), role_result("g1", LONE_LANE_RECORD)] + role_tag_call("t1"),
+}
 
 
 def write_lone_transcripts():
@@ -1034,6 +1041,12 @@ roster_refuse("roster: a local session whose bare id is another uuid stays refus
               roster_path("local-runner"), env={"CLAUDE_CODE_SESSION_ID": ROSTER_OTHER_LOCAL}, session=ROSTER_OTHER_LOCAL)
 role_allow("G10: a lone lane (cs-build:lane, no parent_session_id) records batch-runner as the batch runner",
            MERGE_SHIM + " --role batch-runner", role_path("lone-lane"))
+role_refuse("a batch runner whose own record a set_session_tags call followed is refused, so the read is stale",
+            MERGE_SHIM + " --role batch-runner", role_path("runner-then-tags"))
+role_refuse("a lone lane whose own record a set_session_tags call followed is refused, so the read is stale",
+            MERGE_SHIM + " --role batch-runner", role_path("lone-lane-then-tags"))
+role_allow("a set_session_tags call on another session leaves a batch runner's own record current",
+           MERGE_SHIM + " --role batch-runner", role_path("runner-then-other-tags"))
 roster_refuse("roster: a session the roster names coordinator is refused, and the coordinator never merges",
               roster_path("coordinator"))
 roster_refuse("roster: the session's id in another line's title, not its id slot, is refused",
