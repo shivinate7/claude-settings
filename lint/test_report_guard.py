@@ -5846,6 +5846,24 @@ class NotesFixTests(unittest.TestCase):
         sha = commit_notes(self.repo, NOTES_BASE + STEP_NOTE, "one")
         self.assert_blocks_naming(self.stop(self.turn("one", sha, DONE_STEP_UNNAMED)), "fix-alpha")
 
+    def test_numbered_step_bullet_absent_from_done_blocks(self):
+        # A numbered bullet is a note line, so its step fix is judged as a dash bullet's is.
+        init_repo(self.repo, base=NOTES_BASE)
+        sha = commit_notes(self.repo, NOTES_BASE + "1. new-note: a gap. Fix: step:fix-alpha\n", "one")
+        self.assert_blocks_naming(self.stop(self.turn("one", sha, DONE_STEP_UNNAMED)), "fix-alpha")
+
+    def test_indented_step_bullet_absent_from_done_blocks(self):
+        # An indented bullet is a note line, so its step fix is judged as a dash bullet's is.
+        init_repo(self.repo, base=NOTES_BASE)
+        sha = commit_notes(self.repo, NOTES_BASE + "  - new-note: a gap. Fix: step:fix-alpha\n", "one")
+        self.assert_blocks_naming(self.stop(self.turn("one", sha, DONE_STEP_UNNAMED)), "fix-alpha")
+
+    def test_glued_step_bullet_absent_from_done_blocks(self):
+        # A dash glued to its word is a note line, so its step fix is judged as a dash bullet's is.
+        init_repo(self.repo, base=NOTES_BASE)
+        sha = commit_notes(self.repo, NOTES_BASE + "-new-note: a gap. Fix: step:fix-alpha\n", "one")
+        self.assert_blocks_naming(self.stop(self.turn("one", sha, DONE_STEP_UNNAMED)), "fix-alpha")
+
     def test_step_named_in_done_passes(self):
         init_repo(self.repo, base=NOTES_BASE)
         sha = commit_notes(self.repo, NOTES_BASE + STEP_NOTE, "one")
