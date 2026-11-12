@@ -8,7 +8,7 @@
   "options": [
     {
       "gain": "The guard can merge with its live check done.",
-      "how": "Paste into Claude Code on your Mac: \"In the claude-settings checkout, run `git fetch origin sim-tool-lease-check-3` and check out commit 72813de085 in a new worktree, then install its hooks for this session only. 1. Run `sim-test --hold --for 900` through the Monitor tool and wait for its \"sim-test: holding <UDID>\" line. 2. Tap and screenshot that device with the simulator tool; both must work. 3. End the hold, then tap again; the guard must refuse it with rule simulator-device-lease. 4. Confirm the device shut down, the lease was given back and the lock is free. Reply with one line per step: PASS or FAIL and what you saw.\" Pick this if every line says PASS.",
+      "how": "Paste into Claude Code on your Mac: \"In the claude-settings checkout, run `git fetch origin sim-tool-lease-check-3` and check out the tip of that branch in a new worktree, then install its hooks for this session only. 1. Run `sim-test --hold --for 900` through the Monitor tool and wait for its \"sim-test: holding <UDID>\" line. 2. Tap and screenshot that device with the simulator tool; both must work. 3. End the hold, then tap again; the guard must refuse it with rule simulator-device-lease. 4. Confirm the device shut down, the lease was given back and the lock is free. Reply with one line per step: PASS or FAIL and what you saw.\" Pick this if every line says PASS.",
       "id": "all-pass",
       "key": "a",
       "label": "All four steps passed",
@@ -24,7 +24,7 @@
     }
   ],
   "owner": "lane sim-tool-lease-check (session_013NEJL2VvLJhuXxraazzfNX)",
-  "ref": "draft PR #3011 (simulator tool needs the caller's own lease), head 72813de085",
+  "ref": "draft PR #3011 (simulator tool needs the caller's own lease), branch sim-tool-lease-check-3",
   "repo": "shivinate7/claude-settings",
   "short": "Mac simulator lease test",
   "status": "open",
