@@ -483,8 +483,20 @@ def _no_start_holder_is_foreign_linux(pid: int, worktree):
     """Linux, a no-start lock whose holder PID is alive: True only when /proc proves the pid is not
     the agent's host: its cwd (`/proc/PID/cwd`, resolved) is outside WORKTREE and no element of its
     argv (`/proc/PID/cmdline`) holds `claude` or `agent`, in any case. A cwd inside the tree, any such
-    argv, no WORKTREE, or any read or parse failure is False: the holder is kept."""
+    argv, no WORKTREE, or any read or parse failure is False: the holder is kept. So is this process
+    or any ancestor of it (the calling session's own host), whatever its argv, and any unreadable parent."""
     if not worktree:
+        return False
+    current = os.getpid()
+    for _ in range(MAX_CLIMB):
+        if current == pid:
+            return False
+        if current <= 1:
+            break
+        current = _parent_pid(current)
+        if current is None:
+            return False
+    else:
         return False
     try:
         cwd = os.path.normcase(os.path.realpath(os.readlink("/proc/%d/cwd" % pid)))
