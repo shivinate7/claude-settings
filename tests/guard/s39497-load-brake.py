@@ -949,10 +949,12 @@ lb_add("an agent's session tool that writes nothing reads no load under the wors
 lb_add("a Bash call whose agent_id is malformed reads no load under the worst reading",
        lb_no_read_check("Bash", {"command": "echo hi"}, agent="not an id!"))
 
-# CLOUD. The brake runs in a cloud session (CLAUDE_CODE_REMOTE "true") as it does locally: a full machine refuses
-# every lane start and every agent's disk-filling call, and a busy one refuses a background spawn. The one skip is the
-# session start, start_session: the new session runs in another container, so the brake reads nothing there (a forced
-# split). These run end to end, so a refused call's file writes are checked too (only guard.log).
+# CLOUD. A cloud session (CLAUDE_CODE_REMOTE "true") brakes a new start as a local one does: a full machine refuses
+# every lane and agent start, and a busy one refuses a background spawn. Two calls skip the brake there. The session
+# start, start_session, runs in another container, so the brake reads nothing (a forced split). A running agent's or a
+# lane's own calls are not braked there: they may be the recovery, and a full disk must not stop the call that frees
+# it (the cases after the same-brake loop). These run end to end, so a refused start's file writes are checked too
+# (only guard.log).
 LB_CLOUD = "true"
 CLOUD_VALUES = ((None, False), ("true", True), ("TRUE", False), ("True", False), ("1", False), ("", False),
                 ("false", False), (" true", False))
@@ -1043,10 +1045,10 @@ lb_add('cloud check: guard_core.is_cloud exists and is True only for exactly "tr
 lb_add("cloud check: guard.py's brake guard holds guard_core.is_cloud, one home", cloud_one_home_check)
 
 
-# THE SAME BRAKE EVERYWHERE. A cloud session (CLAUDE_CODE_REMOTE "true") is braked as a local one is: each full reading
-# refuses the lane start, the agent's disk-filling call and the running agent's call, and the reader runs once. Only
-# the exact value "true" is a cloud session. Unset, "false" and "true" keep the brake, so each full reading is refused
-# under each value. Every label names CLAUDE_CODE_REMOTE, so MUTATE_ONLY=CLAUDE_CODE_REMOTE runs this section alone.
+# THE SAME BRAKE FOR STARTS. Unset, "false" and "true" (a cloud session) brake a start the same way: each full reading
+# refuses it, and the reader runs once. Only the exact value "true" is a cloud session. A running agent's and a lane's
+# own calls are braked only locally: in a cloud session they are allowed, and the reader runs no time. Every label
+# names CLAUDE_CODE_REMOTE, so MUTATE_ONLY=CLAUDE_CODE_REMOTE runs this section alone.
 LB_FULL_READING = lb_reading(memory_pct=97.2)   # a full machine: memory over 95%
 
 
@@ -1082,8 +1084,8 @@ def lb_hit_check(which, tool, reading, tool_input, remote=None, deny=None, reads
     return check
 
 
-# The direct pairs, the decisions and the agent writes: a full reading is refused under each value, and the reader runs
-# once. The cloud steer below says what a cloud session does, since its disk does not drain while it waits.
+# The starts under each value: a full reading refuses each one, and the reader runs once. The cloud steer below says
+# what a cloud session does with a start, since its disk does not drain while it waits.
 for _remote, _say in ((None, "unset"), ("false", "false"), ("true", "true, a cloud session")):
     lb_add("CLAUDE_CODE_REMOTE %s, Agent run_in_background true, memory 97.2%%: load_hit refuses, names the memory"
            % _say,
@@ -1092,26 +1094,33 @@ for _remote, _say in ((None, "unset"), ("false", "false"), ("true", "true, a clo
     lb_add("CLAUDE_CODE_REMOTE %s, Workflow, memory 97.2%%: load_hit refuses, names the memory" % _say,
            lb_hit_check("load_hit", "Workflow", LB_FULL_READING, lb_lane_input("Workflow"), remote=_remote,
                         deny=LB_MEM_FULL))
-    lb_add("CLAUDE_CODE_REMOTE %s, an agent's Bash, memory 97.2%%: running_agent_hit refuses, names the memory, "
-           "tells the agent to stop" % _say,
-           lb_hit_check("running_agent_hit", "Bash", LB_FULL_READING, {"command": "echo hi"}, remote=_remote,
-                        deny=LB_MEM_FULL + (LB_STOP_AGENT,), agent=LB_AGENT))
     lb_add("CLAUDE_CODE_REMOTE %s, Agent run_in_background true, memory 97.2%%: refused, names the memory, "
            "one read" % _say,
            lb_decision_check("Agent", LB_FULL_READING, "deny", LB_MEM_FULL, background=True, remote=_remote))
     lb_add("CLAUDE_CODE_REMOTE %s, Workflow, memory 97.2%%: refused, names the memory" % _say,
            lb_decision_check("Workflow", LB_FULL_READING, "deny", LB_MEM_FULL, remote=_remote))
+
+# A running agent's Bash at full memory is braked locally only: refused, the reader runs once.
+for _remote, _say in ((None, "unset"), ("false", "false")):
+    lb_add("CLAUDE_CODE_REMOTE %s, an agent's Bash, memory 97.2%%: running_agent_hit refuses, names the memory, "
+           "tells the agent to stop" % _say,
+           lb_hit_check("running_agent_hit", "Bash", LB_FULL_READING, {"command": "echo hi"}, remote=_remote,
+                        deny=LB_MEM_FULL + (LB_STOP_AGENT,), agent=LB_AGENT))
     lb_add("CLAUDE_CODE_REMOTE %s, an agent's Bash, memory 97.2%%: refused, names the memory, tells the agent to stop"
            % _say,
            lb_decision_check("Bash", LB_FULL_READING, "deny", LB_MEM_FULL + (LB_STOP_AGENT,),
                              tool_input={"command": "echo hi"}, agent=LB_AGENT, remote=_remote))
+# In a cloud session the same Bash is not braked: running_agent_hit returns the empty pair, and the reader runs no time.
+lb_add("CLAUDE_CODE_REMOTE=true, a cloud session, an agent's Bash, memory 97.2%: running_agent_hit returns the empty "
+       "pair, the reader runs 0 times",
+       lb_hit_check("running_agent_hit", "Bash", LB_FULL_READING, {"command": "echo hi"}, remote=LB_CLOUD, reads=0,
+                    agent=LB_AGENT))
 
-# A cloud session's agent writes are refused at full too. The Bash is the first of LB_WRITES.
+# A cloud session's agent writes are allowed at full memory and read no load. The Bash is the first of LB_WRITES.
 for _tool, _given in LB_WRITES:
-    lb_add("CLAUDE_CODE_REMOTE=true, an agent's %s, memory 97.2%%: refused, names the memory, tells the agent to stop"
-           % _tool,
-           lb_decision_check(_tool, LB_FULL_READING, "deny", LB_MEM_FULL + (LB_STOP_AGENT,), tool_input=_given,
-                             agent=LB_AGENT, remote="true"))
+    lb_add("CLAUDE_CODE_REMOTE=true, an agent's %s, memory 97.2%%: allowed, the reader runs 0 times" % _tool,
+           lb_decision_check(_tool, LB_FULL_READING, "allow", tool_input=_given, agent=LB_AGENT, reads=0,
+                             remote=LB_CLOUD))
 
 # THE CLOUD STEER. A cloud session's disk does not drain while it waits, so a full disk's reason names the two things
 # that free it: free space, or end the session and tell the parent. "Wait, then retry" alone strands it.
@@ -1169,13 +1178,13 @@ for _short, _tool in LB_TOOLS:
 lb_add("Windows: no start call on the live judge makes a GetSystemTimes call", lb_live_times_check, real=True)
 
 
-# A LANE SESSION (decision machine-load-brake). A lane session's own shell or file write is refused at a full machine,
-# as an agent's is, so a lane its orchestrator leaves waiting stops writing. The session's own id is
+# A LANE SESSION (decision machine-load-brake). A local lane session's own shell or file write is refused at a full
+# machine, as an agent's is, so a lane its orchestrator leaves waiting stops writing. The session's own id is
 # CLAUDE_CODE_REMOTE_SESSION_ID (cse_<x>, read as session_<x>). Its own get_session record in the transcript must tag
 # cs-build:lane, with no other cs-build: tier tag, and no set_session_tags naming it may follow that record. Any other
-# session, a session with no own id, and any read error passes. A cloud lane is braked as a local one is. A session
-# with an own id reads the
-# load once, and opens its transcript only when the reading is full.
+# session, a session with no own id, and any read error passes. A cloud lane's own calls are not braked: they are its
+# recovery. A local session with an own id reads the load once, and opens its transcript only when the reading is full.
+# A cloud session reads no load here.
 LB_LANE_TAGS = ["cs-build:lane", "cs-repo:o/r"]
 LB_LANE = role_call("g1", LB_LANE_TAGS)   # the lane's own record, as its transcript holds it
 LB_OWN = ROLE_ENV                          # the env that names it: CLAUDE_CODE_REMOTE_SESSION_ID=cse_ROLEOWN01
@@ -1246,12 +1255,12 @@ def lb_lane_refusal_quiet_check():
     return check
 
 
-def lb_lane_quiet_check(own_env=None):
+def lb_lane_quiet_check(own_env=None, remote=None):
     """A call that no lane check reaches, at a full reading: it is allowed, the reader runs no time, the transcript is
-    not opened, and no file is written."""
+    not opened, and no file is written. `remote` is CLAUDE_CODE_REMOTE, as lb_run's."""
     def check():
         got, reason, side = lb_run("Bash", {"mode": "judge", "reading": LB_ALL_HIGH}, LB_LANE_BASH, own_env=own_env,
-                                   transcript=LB_LANE, spy=True)
+                                   transcript=LB_LANE, spy=True, remote=remote)
         if got == "error":
             return False, reason
         if got != "allow":
@@ -1367,14 +1376,14 @@ lb_add("a lane record at the end of a 400-line transcript, memory 97.2%: full, r
        lb_decision_check("Bash", LB_FULL_READING, "deny", LB_MEM_FULL + LB_LANE_REMEDY, tool_input=LB_LANE_BASH,
                          own_env=LB_OWN, transcript=LB_LONG + LB_LANE))
 
-lb_add("CLAUDE_CODE_REMOTE=true with a lane record, memory 97.2%: refused, names the memory and the lane remedy, the "
-       "reader runs once",
-       lb_lane_refusal_check("Bash", LB_LANE_BASH, LB_FULL_READING, LB_MEM_FULL, remote="true"))
+lb_add("CLAUDE_CODE_REMOTE=true with a lane record, memory 99%: allowed, the reader runs 0 times, transcript not opened",
+       lb_lane_quiet_check(own_env=LB_OWN, remote=LB_CLOUD))
 
 
 # THE STEER'S PLACE. The refusal's reason, as the call is judged. A cloud disk's full refusal holds the steer before the
-# decision citation and does not say "Wait, then retry", for a start call, an agent's call and a lane's call. Any other
-# refusal holds no steer: a cloud memory reading and a local disk reading keep "Wait, then retry" for a start call.
+# decision citation and does not say "Wait, then retry", for a start call. A running agent's and a lane's calls are not
+# braked in a cloud session, so no steer reaches them. Any other refusal holds no steer: a cloud memory reading and a
+# local disk reading keep "Wait, then retry" for a start call.
 LB_STEER_TEXT = re.compile(r"A cloud disk does not drain by waiting", re.I)
 LB_CITE_TEXT = re.compile(re.escape("(decision machine-load-brake"))
 LB_WAIT_THEN = re.compile(r"Wait, then retry", re.I)
@@ -1415,12 +1424,6 @@ CLOUD_DISK = lb_reading(disk_free_gb=3.1, disk_total_gb=252.0)   # a full disk o
 CLOUD_DISK_MEMORY = lb_reading(memory_pct=97.2, disk_free_gb=3.1, disk_total_gb=252.0)   # both full
 lb_add("CLAUDE_CODE_REMOTE=true, a start call at a full cloud disk: the steer holds before the citation, no Wait, then retry",
        lb_steer_check("Agent", CLOUD_DISK, True, False, background=True, remote=LB_CLOUD))
-lb_add("CLAUDE_CODE_REMOTE=true, an agent's Bash at a full cloud disk: the steer holds before the citation, no Wait, "
-       "then retry", lb_steer_check("Bash", CLOUD_DISK, True, False, tool_input={"command": "echo hi"},
-                                    agent=LB_AGENT, remote=LB_CLOUD))
-lb_add("CLAUDE_CODE_REMOTE=true, a lane's Bash at a full cloud disk: the steer holds before the citation, no Wait, then "
-       "retry", lb_steer_check("Bash", CLOUD_DISK, True, False, tool_input=LB_LANE_BASH, own_env=LB_OWN,
-                               transcript=LB_LANE, remote=LB_CLOUD))
 lb_add("CLAUDE_CODE_REMOTE=true, a start call at a full cloud disk and memory: the steer holds before the citation, no "
        "Wait, then retry", lb_steer_check("Agent", CLOUD_DISK_MEMORY, True, False, background=True, remote=LB_CLOUD))
 lb_add("CLAUDE_CODE_REMOTE=true, a start call at full cloud memory: no steer, and Wait, then retry",
