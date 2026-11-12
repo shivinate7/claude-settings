@@ -434,7 +434,7 @@ def heredoc_survives():
 
 
 @case
-def dead_pid_missing_log_returns_fast():
+def dead_pid_missing_log_returns():
     """9. --watch-pid on a dead pid with no log file returns, with no stall report"""
     module_or_fail()
     gone = subprocess.Popen([PY, "-c", "pass"])
@@ -477,7 +477,7 @@ def stall_cases_pass_on_slow_runner():
         if gap != 100.0:
             return [f"clock stub is not live: two reads differ by {gap}, want 100.0"]
         problems = [f"quiet_sleep_stalls_and_exits_3: {p}" for p in quiet_sleep_stalls_and_exits_3()]
-        problems += [f"dead_pid_missing_log_returns_fast: {p}" for p in dead_pid_missing_log_returns_fast()]
+        problems += [f"dead_pid_missing_log_returns: {p}" for p in dead_pid_missing_log_returns()]
     finally:
         time = real_time
     return problems
@@ -936,10 +936,12 @@ def named_log_relative_tee_and_flag_forms_are_read():
     return problems
 
 
-def simulated_watch(phase, ps_secs, tick_extra, quiet=2.0, period=1.7, writes=6):
+def simulated_watch(phase, ps_secs, tick_extra, quiet=2.0, period=1.7, writes=6, job_secs=None, stall_at=None):
     """Run stall_watch.watch on a fake clock. The job writes a named log every `period` seconds from
     `phase`, then ends 1 s after its last write. Each ps takes `ps_secs`, each sleep overshoots by
-    `tick_extra`, as on a loaded runner. Return watch's exit code."""
+    `tick_extra`, as on a loaded runner. `job_secs` sets when the job ends on the fake clock, in place of
+    1 s after its last write. A `stall_at` list gets the fake time of each stall report. Return watch's
+    exit code."""
     import builtins
     import importlib.util
     spec = importlib.util.spec_from_file_location("stall_watch_sim", MODULE)
@@ -947,7 +949,7 @@ def simulated_watch(phase, ps_secs, tick_extra, quiet=2.0, period=1.7, writes=6)
     spec.loader.exec_module(sw)
     clock = [0.0]
     stamps = [phase + period * i for i in range(writes)]
-    end = stamps[-1] + 1.0
+    end = stamps[-1] + 1.0 if job_secs is None else job_secs
 
     def job_state(_pid):
         clock[0] += ps_secs
@@ -969,13 +971,29 @@ def simulated_watch(phase, ps_secs, tick_extra, quiet=2.0, period=1.7, writes=6)
     sw.os = type("Os", (), {"path": type("Path", (), {"exists": staticmethod(lambda _p: True)})})
     sw.job_state = job_state
     sw.log_marks = lambda paths, base=None: {p: (sum(1 for w in stamps if w <= clock[0]), 0) for p in paths}
-    sw.report = lambda *_a: None
+    sw.report = lambda *_a: stall_at.append(clock[0]) if stall_at is not None else None
     real_open = builtins.open
     builtins.open = lambda *_a, **_k: Empty()
     try:
         return sw.watch(1, "log", quiet, ["named.log"])
     finally:
         builtins.open = real_open
+
+
+@posix_case
+def stall_and_exit_latency_on_a_fake_clock():
+    """23b1. on a fake clock a quiet live job is reported within quiet plus two checks, and a job that
+    already ended returns with no report at once: the latency the removed 4 s and 2 s bounds guarded,
+    counted in fake seconds, so a slow runner cannot move it"""
+    stalled = []
+    rc = simulated_watch(0, 0, 0, writes=1, job_secs=30.0, stall_at=stalled)
+    problems = expect(rc == 3, f"quiet live job: exit {rc}, want 3")
+    problems += expect(len(stalled) == 1 and stalled[0] <= 2.0 + 2.0,
+                       f"stall reported at fake times {stalled}, want one report by 4.0 s")
+    ended = []
+    rc = simulated_watch(0, 0, 0, writes=1, job_secs=0.0, stall_at=ended)
+    problems += expect(rc == 0 and not ended, f"ended job: exit {rc}, reports {ended}, want exit 0, none")
+    return problems
 
 
 @posix_case
@@ -989,7 +1007,7 @@ def named_log_written_slower_than_the_check_is_no_stall():
 
 @posix_case
 def named_log_that_stops_growing_stalls():
-    """23c. the same job whose log stops growing: STALL within about 4 s, exit 3, the job alive"""
+    """23c. the same job whose log stops growing: STALL, exit 3, the job alive"""
     log = shlex.quote(os.path.join(new_dir(), "merge.log"))
     rc, text, secs, _cmd = run_rewritten("echo once >> %s; sleep 30 >> %s 2>&1" % (log, log))
     problems = stall_problems(rc, text, sleep_args="sleep 30")
