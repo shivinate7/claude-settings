@@ -363,6 +363,33 @@ add("builder-test: Edit that resolves a conflict in the package.json jest key is
     new_string='    "testEnvironment": "jsdom"', **dict(B, cwd=MCONF_JEST))
 sh("builder-test: git commit of a merge that resolves the package.json jest key is refused",
    "git commit -q -m merge", "deny", rule=BDIFF, **dict(B, cwd=MCONF_JEST_STAGED))
+# ---- a package.json conflict in two hunks: `version` (not owned) and the `jest` key (owned). Git keeps the two
+# conflicts apart, since four unchanged lines sit between them. Debt manifest-hunk-edit-refused: an Edit that resolves
+# the version hunk leaves the jest markers in the file, so it is refused today. That allow case is HELD. It is red on
+# the current guard, so it registers only when GUARD_HELD_CASES names the debt's slug, which hooks/test_manifest_hunk_edit.py
+# sets. CI runs this section without the gate, so the held case is not in its run.
+MCONF_TWO = os.path.join(ROOT, "mconflict-two-hunk")
+
+
+def _two_hunk_repo():
+    _conflict_repo(MCONF_TWO, "package.json", _manifest(), _manifest("1.1.0", env="jsdom"),
+                   _manifest("1.0.1", env="happy-dom"))
+    with open(os.path.join(MCONF_TWO, "package.json"), encoding="utf-8") as handle:
+        blocks = handle.read().count("<<<<<<< ")
+    if blocks != 2:  # the two hunks must stay two, or the cases below judge a different file
+        sys.exit("fixture setup failed: %r holds %d conflict blocks, want 2" % (MCONF_TWO, blocks))
+
+
+lazy_fixture([MCONF_TWO], _two_hunk_repo)
+if os.environ.get("GUARD_HELD_CASES") == "manifest-hunk-edit-refused":
+    add("builder-test: Edit that resolves the version hunk of a two-hunk package.json conflict is allowed", "allow",
+        tool="Edit", file_path="package.json",
+        old_string='<<<<<<< HEAD\n  "version": "1.0.1",\n=======\n  "version": "1.1.0",\n>>>>>>> feature',
+        new_string='  "version": "1.2.0",', **dict(B, cwd=MCONF_TWO))
+add("builder-test: Edit that resolves the jest hunk of a two-hunk package.json conflict is refused", "deny", rule=BT,
+    tool="Edit", file_path="package.json",
+    old_string='<<<<<<< HEAD\n    "testEnvironment": "happy-dom"\n=======\n    "testEnvironment": "jsdom"\n>>>>>>> feature',
+    new_string='    "testEnvironment": "jsdom"', **dict(B, cwd=MCONF_TWO))
 add("builder-test: Write of docs/jest.config.md that names testPathIgnorePatterns is allowed", "allow",
     tool="Write", file_path="docs/jest.config.md",
     content="Set testPathIgnorePatterns in the jest key of package.json.\n", **B)
