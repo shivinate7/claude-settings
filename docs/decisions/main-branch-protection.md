@@ -39,15 +39,19 @@ Built-today lines in this record were not re-read by the edit of 2026-11-11 23:0
 - Before every merge, read the checks yourself and refuse on red. Today the `merge` tool reads its checks
   from the branch protection only. Ruled to change; see Ruled, not yet built.
 - Owner ruling, 2026-10-28 (waiting-page item 33 a): a rename of required checks switches branch
-  protection in the merge act. The owner switches it, then the batch merges at once.
+  protection in the merge act. A session on the owner's computer runs the switch, under the standing grant "Acts the cloud refuses" (as PR #2606's grant text says). Then the batch merges at once.
 
 Reason: agent rules alone did not stop red merges.
 
 ## Ruled, not yet built
 
-- Ruleset on `main` (owner ruling r, 2026-11-11 16:43 CST): a ruleset requires only `all-jobs-passed` and blocks
-  deletion and force-push of `main`. Cause: a classic rule with many checks failed to save (owner, 16:39 CST).
-  In the child-repo sweep (R44), a session on the owner's computer moves every repo's `main` to it.
+- Shared ruleset form on `main`, owner ruling r (2026-11-11 16:43 CST):
+  - Pull request required. 0 approvals.
+  - Only `all-jobs-passed` required. Not strict.
+  - No linear history.
+  - Deletion and force-push of `main` blocked.
+  - The admin role may bypass on pull requests only (owner, 16:49 CST, bypass).
+  Cause: a classic rule with many checks failed to save (owner, 16:39 CST). In the child-repo sweep (R44), a session on the owner's computer moves every repo's `main` to this form.
 - Bypass (owner, 16:49 CST, "yes with bypass", coordinator-relayed): the ruleset may let the repository admin
   role skip the checks on pull requests only. Under this ruling, admins are not bound by the checks there.
 - Step merge-reads-ruleset (the merge tool reads rulesets; owner ruling c, 19:49 CST Nov 11: "c is prob best").
@@ -57,7 +61,7 @@ Reason: agent rules alone did not stop red merges.
 - Old-protection removal: a session on the owner's computer removes old protection only after step
   merge-reads-ruleset has merged and the ruleset is on. PR #2606 (draft, not merged) carries the standing-grant text for it.
 - Old-protection read: deleted once every repo has a ruleset.
-- Not ruled: whether the ruleset keeps `strict`, and whether `merge.requiredChecks` (today `"protection"`) changes value.
+- `merge.requiredChecks` value after step merge-reads-ruleset: not ruled; step merge-reads-ruleset's lane picks it.
 
 Trigger: the built-today lines above go stale when step merge-reads-ruleset merges or `main` gets a ruleset.
 Rewrite them then.
