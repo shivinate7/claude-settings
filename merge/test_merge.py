@@ -20,6 +20,7 @@ import decision_watch  # noqa: E402  the one model caller (hooks/decision_watch.
 sys.path.append(os.path.join(os.path.dirname(HERE), "lint"))  # append: no lint module shadows one this suite imports
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: the run folder's one home (lint/_test_temp.py)
+from _test_event_body import EVENT_BODY_DEF  # noqa: E402  the one home of the test event-body reader
 sys.path.append(os.path.join(os.path.dirname(HERE), "testing"))  # append: no testing module shadows one this suite imports
 import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shallow_clone.py)
 import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
@@ -1592,6 +1593,28 @@ path = os.path.join("docs", "guide.md")  # a checks suite that reads one tracked
 sys.exit(1 if os.path.exists(path) and "BROKEN" in open(path, encoding="utf-8").read() else 0)
 '''
 
+BODY_EXCUSE = "Summary.\n\nDrops-lines: docs/guide.md -- the guide is rewritten on main\n"  # a PR body whose last paragraph excuses a path
+# A step reads the PR body from the event file that GITHUB_EVENT_PATH names, as CI gives it: no step env carries the body.
+# With no event file the step reads a sentinel, never a body, so a missing source is seen as missing (EVENT_BODY_DEF, lint/_test_event_body.py).
+BODY_LINT = (EVENT_BODY_DEF + "import sys\nbody = event_body()\n"
+             "with open(os.environ['SEEN_OUT'], 'w', encoding='utf-8', newline='') as f:\n"
+             "    f.write(body)  # what the step was given, written out for the test\n"
+             "sys.exit(0 if any(line.startswith('Drops-lines:') for line in body.splitlines()) else 1)  # a stand-in for a lint that needs the excuse\n")
+BODY_CHECKS_YML = CHECKS_YML + "      - name: Body excuse\n        run: python3 lint/body_excuse.py\n"
+BODY_READ_YML = ("name: checks\non: pull_request\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
+                 "      - name: Read the body\n        run: python3 lint/body_read.py\n")
+BODY_READ = EVENT_BODY_DEF + ("with open(os.environ['SEEN_OUT'], 'w', encoding='utf-8', newline='') as f:\n"
+                          "    f.write(event_body())\n")
+STUB_CI_JOB = ("import os, sys\nsys.stdout.write(open(os.environ['STUB_TEXT'], encoding='utf-8', newline='').read())\n"
+               "sys.exit(int(os.environ['STUB_RC']))\n")
+
+def seen_text(path):
+    """What a lint step wrote to `path`, or None when the step never ran."""
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8", newline="") as f:
+        return f.read()
+
 class SmallBaseMove(Env):
     """Main moved, but only by paths that no CI job of the batch reads (merge-needs-current-base, step c150).
     The real ci-scope.sh and the real bin/ci-job run against a fixture workflow whose `checks` job holds one cross-file lint:
@@ -1673,14 +1696,16 @@ class SmallBaseMove(Env):
         self.assertFalse(ok, "the batch's rename hid main's change to base.txt, so the green run stands: " + why)
         self.assertIn("main and the batch both change base.txt", why, "the batch's rename hid main's change to base.txt from the shared-path check")
 
-    def scoped(self, workflow=CHECKS_YML, scope=True, name="checks.yml"):
-        """Main and feat both gain the CI files, the workflow under the file name `name`; feat then holds main's tip."""
+    def scoped(self, workflow=CHECKS_YML, scope=True, name="checks.yml", extra=None):
+        """Main and feat both gain the CI files, the workflow under the file name `name`; feat then holds main's tip. extra: more files, {path: text}, in the same commit."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
         if scope:
             with open(SCOPE_SCRIPT, encoding="utf-8") as f:
                 put(os.path.join(o, ".github/scripts/ci-scope.sh"), f.read())
         put(os.path.join(o, ".github/workflows", name), workflow)
+        for path, text in (extra or {}).items():
+            put(os.path.join(o, path), text)
         put(os.path.join(o, "landed-dirs.txt"), "hooks\n")
         put(os.path.join(o, "lint/check_slugs.py"), SLUG_LINT)
         put(os.path.join(o, "hooks/test_reads_guide.py"), DOC_SUITE)
@@ -2071,6 +2096,146 @@ class SmallBaseMove(Env):
         self.assertFalse(ok, why)
         self.assertNotIsInstance(why, merge.UnreadText, why)
         self.assertIn("does not merge cleanly", why)
+
+    def body_scoped(self, body):
+        """Main moves by a docs-only commit after the batch is cut. The batch's one lint step reads the PR body and needs its excuse
+        line, so the small-move proof runs that lint on the merge with the body the caller passes. -> the file that step writes."""
+        self.scoped(workflow=BODY_CHECKS_YML, extra={"lint/body_excuse.py": BODY_LINT})
+        self.host.body = body
+        self.on("main", {"docs/guide.md": "# Guide\n"})
+        return os.path.join(self.t, "seen.txt")
+
+    def merge_with_inherited_body(self, seen, inherited=None):
+        """-> run_merge's (rc, out) for PR 7, with the caller's env holding a body file and an event file that both hold `inherited`
+        when one is given: what a stale run would hand on."""
+        env = {"SEEN_OUT": seen}
+        if inherited is not None:
+            path, event = os.path.join(self.t, "inherited-body.txt"), os.path.join(self.t, "inherited-event.json")
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                f.write(inherited)
+            with open(event, "w", encoding="utf-8") as f:
+                json.dump({"pull_request": {"body": inherited}}, f)
+            env.update({"CI_JOB_PR_BODY_FILE": path, "GITHUB_EVENT_PATH": event})
+        self.host.merged = False
+        with unittest.mock.patch.dict(os.environ, env):
+            return self.run_merge("7", "--confirm")
+
+    def test_a_pr_body_excuse_reaches_the_small_move_lint_and_passes_it(self):
+        seen = self.body_scoped(BODY_EXCUSE)
+        rc, out = self.merge_with_inherited_body(seen)
+        self.assertEqual(seen_text(seen), BODY_EXCUSE, "the small-move lint step did not get the PR body")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertIn("main moved by 1 commit touching only paths no job of this batch reads; the lints pass on the merge", out)
+
+    def test_a_pr_body_without_the_excuse_is_refused_at_the_small_move_lint(self):  # control
+        seen = self.body_scoped("Summary only.\n")
+        rc, out = self.merge_with_inherited_body(seen)
+        self.assertIsNotNone(seen_text(seen), "the small-move lint step did not run, so the refusal proves nothing")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("does not hold origin/main", out)
+        self.assertFalse(self.host.merged, out)
+
+    def test_an_inherited_pr_body_does_not_excuse_the_small_move_lint(self):
+        seen = self.body_scoped("Summary only.\n")
+        rc, out = self.merge_with_inherited_body(seen, inherited=BODY_EXCUSE)
+        self.assertEqual(seen_text(seen), "Summary only.\n", "the small-move lint step did not get the PR's own body, so the inherited files are not tested")
+        self.assertEqual(rc, 1, out)
+        self.assertFalse(self.host.merged, out)
+
+    def test_the_pr_body_wins_over_an_inherited_pr_body(self):
+        seen = self.body_scoped(BODY_EXCUSE)
+        rc, out = self.merge_with_inherited_body(seen, inherited="Summary only.\n")
+        self.assertEqual(seen_text(seen), BODY_EXCUSE, "the small-move lint step read the caller's body file or event file, not the PR body")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+
+    def test_no_ci_job_run_of_the_small_move_proof_gets_an_inherited_pr_body(self):
+        """The lint run and the --plan run both get the PR's body in their own body file, and neither gets the caller's event file."""
+        seen = self.body_scoped(BODY_EXCUSE)
+        calls = []
+        real = merge.sh
+        def spy(args, *a, **k):
+            if merge.CI_JOB in " ".join(args):
+                env = dict(k.get("env") or {})
+                path = env.get("CI_JOB_PR_BODY_FILE")  # read now: ci_job_env removes its file when the run ends
+                calls.append({"body": seen_text(path) if path else None, "event": "GITHUB_EVENT_PATH" in env})
+            return real(args, *a, **k)
+        with unittest.mock.patch.object(merge, "sh", spy):
+            self.merge_with_inherited_body(seen, inherited="Summary only.\n")
+        self.assertTrue(calls, "no ci-job run was made, so nothing was read")
+        leaked = [c for c in calls if c["body"] == "Summary only.\n" or c["event"]]
+        self.assertEqual(leaked, [], "a ci-job run read the caller's body file or event file")
+
+class CiJobRunBody(unittest.TestCase):
+    """ci_job_run hands ci-job the PR body in a UTF-8 file, and a lint step reads it from its event file (GITHUB_EVENT_PATH). The body must
+    reach the step whole at any size: one env string past 128 KB does not exec on Linux. ci_job_run lifts ci-job's exit 2 only for an
+    unknown it can name without the body."""
+
+    def setUp(self):
+        self.repo = tempfile.mkdtemp(dir=run_folder())
+        sh(self.repo, "git", "init", "-q")
+        put(os.path.join(self.repo, ".github", "workflows", "checks.yml"), BODY_READ_YML)
+        put(os.path.join(self.repo, "lint", "body_read.py"), BODY_READ)
+        sh(self.repo, "git", "add", "-A"); sh(self.repo, "git", "commit", "-qm", "fixture")
+        sh(self.repo, "git", "update-ref", "refs/remotes/origin/main", "HEAD")
+        self.folder = tempfile.mkdtemp(dir=run_folder())
+        self.seen = os.path.join(self.folder, "seen.txt")
+
+    def read_body(self, body):
+        """-> (state, what the lint step wrote, ci_job_run's lines) for a run whose PR body is `body`."""
+        env = {"SEEN_OUT": self.seen, "VERDICT_LOG": os.path.join(self.folder, "verdict.log")}
+        with unittest.mock.patch.dict(os.environ, env):
+            state, lines, _log, _liftable = merge.ci_job_run(self.repo, "checks", "--lint", "--base", "origin/main", pr_body=body)
+        return state, seen_text(self.seen), lines
+
+    def assert_body_reaches_the_check(self, body):
+        try:
+            state, seen, lines = self.read_body(body)
+        except (OSError, ValueError) as e:
+            self.fail("the body did not reach the check: the run did not start (%s: %s)" % (type(e).__name__, e))
+        self.assertIsNotNone(seen, "the check step did not run: %s" % lines)
+        self.assertEqual(seen, body, "the check step read a different body")
+        self.assertEqual(state, "pass", lines)
+
+    def test_an_empty_body_reaches_the_check_as_empty(self):  # control
+        self.assert_body_reaches_the_check("")
+
+    def test_a_body_just_under_the_exec_limit_reaches_the_check(self):  # control: full size for its class
+        self.assert_body_reaches_the_check("é" * 60000)
+
+    def test_a_body_of_65536_e_acute_characters_reaches_the_check(self):
+        self.assert_body_reaches_the_check("é" * 65536)
+
+    def test_a_body_of_65536_four_byte_characters_reaches_the_check(self):
+        self.assert_body_reaches_the_check("\U0001F600" * 65536)
+
+    def exit_2(self, text):
+        """-> ci_job_run's answer when ci-job is a stub that prints `text` and exits 2."""
+        printed = os.path.join(self.folder, "printed.txt")
+        put(printed, text)
+        stub = os.path.join(self.folder, "ci_job_stub.py")
+        put(stub, STUB_CI_JOB)
+        env = {"STUB_TEXT": printed, "STUB_RC": "2", "VERDICT_LOG": os.path.join(self.folder, "verdict.log")}
+        with unittest.mock.patch.object(merge, "CI_JOB", stub), unittest.mock.patch.dict(os.environ, env):
+            return merge.ci_job_run(self.repo, "checks", "--lint", "--base", "origin/main")
+
+    def test_exit_2_with_no_unknown_line_is_not_lifted(self):
+        state, lines, _log, liftable = self.exit_2("summary: ran 1 of 2 steps\n")
+        self.assertEqual(state, "unknown", lines)
+        self.assertFalse(liftable, "ci-job's exit 2 with no unknown line was lifted: %s" % lines)
+
+    def test_exit_2_with_an_unknown_line_naming_the_body_is_not_lifted(self):
+        state, lines, _log, liftable = self.exit_2(
+            "unknown         Read the body: run: holds an expression this runner cannot read: github.event.pull_request.body\n"
+            "summary: ran 1 of 2 steps\n")
+        self.assertEqual(state, "unknown", lines)
+        self.assertFalse(liftable, "an unknown line that names the PR body was lifted: %s" % lines)
+
+    def test_exit_2_with_an_unknown_tool_line_is_lifted(self):  # control
+        state, lines, _log, liftable = self.exit_2("unknown         Lint: tool missing: foo\nsummary: ran 1 of 2 steps\n")
+        self.assertEqual(state, "unknown", lines)
+        self.assertTrue(liftable, lines)
 
 class CutBranch(Env):
     def local_branch(self, extra):
@@ -7050,7 +7215,7 @@ class ReadyChecksRun(unittest.TestCase):
                 return 0, ""
             return real(args, *a, **k)
         with unittest.mock.patch.object(merge, "sh", stub):
-            merge.run_ready_checks(wt, 7, "main", checks)
+            merge.run_ready_checks(wt, 7, "main", checks, pr_body="")
         return calls
 
     def test_the_ready_checks_run_ci_job_with_pinned(self):
@@ -9805,21 +9970,23 @@ class RecordsRebuild(RecordsEnv):
         # the lock's own extend_for, as the ready path does. Without it a rate wait there could outlive the lock.
         self.kinds_off()
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        self.host.body = "Summary.\n"  # the PR body the draft step's proof must be given
         lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)
         real_acquire, real_holds, seen = lock.acquire, merge.holds_base, []
         def acquire(*a, **k):
             token = real_acquire(*a, **k)
             self.host.draft = True  # main's read saw a ready PR; the read under the lock sees a draft
             return token
-        def holds(wt, base_ref, sha, before_run=None):
-            seen.append(before_run)
-            return real_holds(wt, base_ref, sha, before_run)
+        def holds(wt, base_ref, sha, before_run=None, **kw):  # kw holds pr_body when the draft step passes it
+            seen.append((before_run, kw.get("pr_body")))
+            return real_holds(wt, base_ref, sha, before_run, **kw)
         lock.acquire = acquire
         with unittest.mock.patch.object(merge, "holds_base", holds):
             rc, out = self.run_merge("7", "--confirm", lock=lock)
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.host.readies, [7], out)
-        self.assertEqual(seen, [lock.extend_for], "the draft step under the lock did not pass the lock's extend_for to holds_base")
+        self.assertEqual([b for b, _ in seen], [lock.extend_for], "the draft step under the lock did not pass the lock's extend_for to holds_base")
+        self.assertEqual([p for _, p in seen], [self.host.body], "the draft step did not pass the PR's body to holds_base for the small-move proof")
         self.assertFalse(self.lock_ref(), "the lock was not released")
         self.assertFalse(getattr(self.host, "merged", False), out)
 
