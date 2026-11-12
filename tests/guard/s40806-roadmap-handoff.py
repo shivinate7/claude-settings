@@ -1,0 +1,280 @@
+# section 40806
+FAMILY = "merge"  # rule roadmap-one-writer's lane handoff allow: GUARD_FAMILY=merge runs these cases
+#
+# The lane handoff allow of rule roadmap-one-writer (decision session-tiers). A lane session pushes its handoff,
+# roadmap/outbox/<slug>-handoff.md, to the record branch. That push is allowed only when every path it adds or
+# changes against the record branch's origin tip is that one file, and its slug is the lane's own: a cs-step tag of
+# the lane's own record, or the checkout's branch with a leading lane/ removed. Triage keeps its full allow. Every
+# other push to the record branch is refused, as today.
+#
+# The changed paths are read with git against refs/remotes/origin/roadmap, the tip the guard reads with no fetch. A
+# local roadmap branch is never the base. Each lane branch is cut from that tip, so its handoff is the only change.
+# Section 40806 runs after the LOG_CHECKS join at section 40805, so its log check joins LOG_CHECKS directly.
+
+HANDOFF_DIR = os.path.join(ROOT, "handoff")
+LONG_SLUG = "lane-handoff-" + "x" * 19  # 32 characters, the slug limit of a record
+HANDOFF_PUSH = VCS + " push origin HEAD:roadmap"
+LANE = LANE_TRANSCRIPT
+TRIAGE = TRIAGE_TRANSCRIPT
+TIP_FILES = {
+    "base.txt": "base\n",
+    "roadmap/data/steps/base.json": "{}\n",
+    "roadmap/outbox/outbox-a-handoff.md": "a old\n",  # the lane's own handoff, already on the record
+    "roadmap/outbox/outbox-b-handoff.md": "b old\n",  # another lane's handoff
+}
+
+
+def _handoff_commit(where, ops):
+    """Apply one commit's ops in `where` and commit them. An op is ("put", path, text), ("rm", path) or
+    ("mv", old, new)."""
+    for op in ops:
+        if op[0] == "put":
+            write(os.path.join(where, op[1]), op[2])
+        elif op[0] == "rm":
+            os.remove(os.path.join(where, op[1]))
+        else:
+            os.makedirs(os.path.dirname(os.path.join(where, op[2])), exist_ok=True)
+            os.rename(os.path.join(where, op[1]), os.path.join(where, op[2]))
+    run_vcs(where, "add", "-A")
+    done = run_vcs(where, *IDENT, "commit", "-q", "-m", "handoff case")
+    if done.returncode != 0:
+        sys.exit("fixture setup failed in _apply: the commit in %r failed. stderr: %s" % (where, done.stderr.strip()))
+
+
+def _handoff_repo(name, branch, commits=(), local_roadmap=False, broken_tip=False):
+    """A checkout on `branch`, cut from the record tip. origin/roadmap is that tip, a ref the guard reads with no fetch.
+    `commits` is a list of commits, each a list of ops. local_roadmap adds a local roadmap branch one commit past the
+    tip, a base that would differ from origin's. broken_tip points origin/roadmap at a commit the object store lacks,
+    so the changed paths cannot be read. Built on first use."""
+    where = os.path.join(HANDOFF_DIR, name)
+
+    def build():
+        make_repo(where, TIP_FILES)
+        if run_vcs(where, "remote", "add", "origin", PUSHREMOTE).returncode != 0:
+            sys.exit("fixture setup failed in _handoff_repo: origin add in %r failed" % where)
+        if run_vcs(where, "update-ref", "refs/remotes/origin/roadmap", "HEAD").returncode != 0:
+            sys.exit("fixture setup failed in _handoff_repo: the origin tip in %r failed" % where)
+        if local_roadmap:
+            if run_vcs(where, "checkout", "-q", "-b", "roadmap").returncode != 0:
+                sys.exit("fixture setup failed in _handoff_repo: local roadmap in %r failed" % where)
+            _handoff_commit(where, [("put", "docs/extra.md", "local only\n")])
+            if run_vcs(where, "checkout", "-q", "main").returncode != 0:
+                sys.exit("fixture setup failed in _handoff_repo: back to main in %r failed" % where)
+        if run_vcs(where, "checkout", "-q", "-b", branch).returncode != 0:
+            sys.exit("fixture setup failed in _handoff_repo: branch %r in %r failed" % (branch, where))
+        for ops in commits:
+            _handoff_commit(where, ops)
+        head = run_vcs(where, "symbolic-ref", "-q", "HEAD").stdout.strip()
+        if head != "refs/heads/" + branch:
+            sys.exit("fixture setup failed in _handoff_repo: %r sits on %r, want %r" % (where, head, branch))
+        if broken_tip:
+            write(os.path.join(where, ".git", "refs", "remotes", "origin", "roadmap"), "1" * 40 + "\n")
+        reads = run_vcs(where, "diff", "--name-status", "refs/remotes/origin/roadmap", "HEAD")
+        if broken_tip and reads.returncode == 0:
+            sys.exit("fixture setup failed in _handoff_repo: the broken tip in %r still reads" % where)
+        if not broken_tip and reads.returncode != 0:
+            sys.exit("fixture setup failed in _handoff_repo: the changed paths in %r do not read: %s"
+                     % (where, reads.stderr.strip()))
+    lazy_fixture([where], build)
+    return where
+
+
+HANDOFF_REPO = {
+    # The lane's own handoff, already on the record, changed in place: the allow.
+    "modify-own": _handoff_repo("modify-own", "lane/outbox-a",
+                                [[("put", "roadmap/outbox/outbox-a-handoff.md", "a new\n")]]),
+    "add-own": _handoff_repo("add-own", "lane/outbox-c",
+                             [[("put", "roadmap/outbox/outbox-c-handoff.md", "c new\n")]]),
+    "add-e": _handoff_repo("add-e", "lane/outbox-a",
+                           [[("put", "roadmap/outbox/outbox-e-handoff.md", "e new\n")]]),
+    "add-other": _handoff_repo("add-other", "lane/outbox-a",
+                               [[("put", "roadmap/outbox/outbox-d-handoff.md", "d new\n")]]),
+    "two-files": _handoff_repo("two-files", "lane/outbox-a",
+                               [[("put", "roadmap/outbox/outbox-a-handoff.md", "a new\n"),
+                                 ("put", "roadmap/outbox/outbox-a-extra.md", "x\n")]]),
+    "under-roadmap": _handoff_repo("under-roadmap", "lane/outbox-a",
+                                   [[("put", "roadmap/data/steps/outbox-a.json", "{}\n")]]),
+    "outside-roadmap": _handoff_repo("outside-roadmap", "lane/outbox-a",
+                                     [[("put", "docs/outbox-a-handoff.md", "a\n")]]),
+    "delete-own": _handoff_repo("delete-own", "lane/outbox-a",
+                                [[("rm", "roadmap/outbox/outbox-a-handoff.md")]]),
+    "delete-other": _handoff_repo("delete-other", "lane/outbox-a",
+                                  [[("rm", "roadmap/outbox/outbox-b-handoff.md")]]),
+    "rename-into-own": _handoff_repo("rename-into-own", "lane/outbox-c",
+                                     [[("mv", "roadmap/data/steps/base.json", "roadmap/outbox/outbox-c-handoff.md")]]),
+    "slash-branch": _handoff_repo("slash-branch", "lane/a/b",
+                                  [[("put", "roadmap/outbox/a/b-handoff.md", "ab\n")]]),
+    "slash-tag": _handoff_repo("slash-tag", "lane/outbox-a",
+                               [[("put", "roadmap/outbox/a/b-handoff.md", "ab\n")]]),
+    "dotdot-tag": _handoff_repo("dotdot-tag", "lane/outbox-a",
+                                [[("put", "roadmap/outbox/..-handoff.md", "dd\n")]]),
+    "empty-tag": _handoff_repo("empty-tag", "lane/outbox-a",
+                               [[("put", "roadmap/outbox/-handoff.md", "e\n")]]),
+    "long-slug": _handoff_repo("long-slug", "lane/" + LONG_SLUG,
+                               [[("put", "roadmap/outbox/%s-handoff.md" % LONG_SLUG, "l\n")]]),
+    # The empty state: a push whose commit changes no path.
+    "no-diff": _handoff_repo("no-diff", "lane/outbox-a"),
+    # The last commit is the handoff alone; the commit before it changes a file outside it.
+    "earlier-commit": _handoff_repo("earlier-commit", "lane/outbox-a",
+                                    [[("put", "docs/notes.md", "n\n")],
+                                     [("put", "roadmap/outbox/outbox-a-handoff.md", "a new\n")]]),
+    "local-roadmap": _handoff_repo("local-roadmap", "lane/outbox-a",
+                                   [[("put", "roadmap/outbox/outbox-a-handoff.md", "a new\n")]],
+                                   local_roadmap=True),
+    "broken-tip": _handoff_repo("broken-tip", "lane/outbox-a",
+                                [[("put", "roadmap/outbox/outbox-a-handoff.md", "a new\n")]], broken_tip=True),
+}
+
+# The lane records these cases name. A record's slug comes from its own cs-step tags, so each tag set is its own record.
+HAND_LINES = {
+    "hand-two": role_call("g1", ["cs-build:lane", "cs-step:outbox-a", "cs-step:outbox-e", "cs-repo:o/r"]),
+    "hand-long": role_call("g1", ["cs-build:lane", "cs-step:" + LONG_SLUG, "cs-repo:o/r"]),
+    "hand-slash": role_call("g1", ["cs-build:lane", "cs-step:a/b", "cs-repo:o/r"]),
+    "hand-dotdot": role_call("g1", ["cs-build:lane", "cs-step:..", "cs-repo:o/r"]),
+    "hand-empty": role_call("g1", ["cs-build:lane", "cs-step:", "cs-repo:o/r"]),
+    "hand-untagged": role_call("g1", ["cs-repo:o/r"]),
+    "hand-title": role_call("g1", ["cs-repo:o/r"], title="handed to cs-build:lane"),
+    "hand-other": role_call("g1", LANE_TAGS, session=ROLE_OTHER),
+    "hand-tagged-after": role_call("g1", LANE_TAGS) + role_tag_call("t1"),
+}
+_CLASH = sorted(set(HAND_LINES) & set(ROLE_LINES))
+if _CLASH:
+    sys.exit("fixture setup failed: handoff transcripts %s name ROLE_LINES entries" % _CLASH)
+ROLE_LINES.update(HAND_LINES)
+lazy_fixture([role_path(name) for name in HAND_LINES], write_role_transcripts)
+
+
+# The new allow. Red on the code that refuses every push a lane makes to the record branch.
+record_allow("roadmap-one-writer handoff: a lane's own handoff, pushed as HEAD:roadmap, is allowed",
+             HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["modify-own"])
+record_allow("roadmap-one-writer handoff: a lane's own handoff, pushed by its source name, is allowed",
+             VCS + " push origin lane/outbox-a:roadmap", LANE, cwd=HANDOFF_REPO["modify-own"])
+record_allow("roadmap-one-writer handoff: a lane's own new handoff file is allowed",
+             HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["add-own"])
+record_allow("roadmap-one-writer handoff: a handoff for a lane's second cs-step slug is allowed",
+             HANDOFF_PUSH, role_path("hand-two"), cwd=HANDOFF_REPO["add-e"])
+record_allow("roadmap-one-writer handoff: a handoff for a 32-character slug is allowed",
+             HANDOFF_PUSH, role_path("hand-long"), cwd=HANDOFF_REPO["long-slug"])
+record_allow("roadmap-one-writer handoff: the changed paths are read against origin/roadmap, not a local roadmap",
+             HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["local-roadmap"])
+# Triage keeps its full allow: none of these is read as a lane's handoff.
+record_allow("roadmap-one-writer handoff: triage's push of two files is allowed",
+             HANDOFF_PUSH, TRIAGE, cwd=HANDOFF_REPO["two-files"])
+record_allow("roadmap-one-writer handoff: triage's push of a delete is allowed",
+             HANDOFF_PUSH, TRIAGE, cwd=HANDOFF_REPO["delete-own"])
+record_allow("roadmap-one-writer handoff: triage's push of a file outside roadmap/ is allowed",
+             HANDOFF_PUSH, TRIAGE, cwd=HANDOFF_REPO["outside-roadmap"])
+
+# Everything else stays denied. Each refusal sits beside the allow above that it must not reach.
+record_refuse("roadmap-one-writer handoff: another lane's slug is refused",
+              HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["add-other"])
+record_refuse("roadmap-one-writer handoff: the own handoff with a second file under roadmap/outbox is refused",
+              HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["two-files"])
+record_refuse("roadmap-one-writer handoff: a file under roadmap/ that is no handoff is refused",
+              HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["under-roadmap"])
+record_refuse("roadmap-one-writer handoff: a file outside roadmap/, named as a handoff, is refused",
+              HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["outside-roadmap"])
+record_refuse("roadmap-one-writer handoff: a delete of the own handoff is refused",
+              HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["delete-own"])
+record_refuse("roadmap-one-writer handoff: a delete of another lane's handoff is refused",
+              HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["delete-other"])
+record_refuse("roadmap-one-writer handoff: a rename into the own handoff path is refused",
+              HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["rename-into-own"])
+record_refuse("roadmap-one-writer handoff: a slug with / from the branch is refused",
+              HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["slash-branch"])
+record_refuse("roadmap-one-writer handoff: a slug with / from a cs-step tag is refused",
+              HANDOFF_PUSH, role_path("hand-slash"), cwd=HANDOFF_REPO["slash-tag"])
+record_refuse("roadmap-one-writer handoff: a slug with .. from a cs-step tag is refused",
+              HANDOFF_PUSH, role_path("hand-dotdot"), cwd=HANDOFF_REPO["dotdot-tag"])
+record_refuse("roadmap-one-writer handoff: an empty slug from a cs-step tag is refused",
+              HANDOFF_PUSH, role_path("hand-empty"), cwd=HANDOFF_REPO["empty-tag"])
+record_refuse("roadmap-one-writer handoff: a push with no changed paths is refused",
+              HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["no-diff"])
+record_refuse("roadmap-one-writer handoff: an earlier commit with a file outside the handoff is refused, "
+              "though the last commit is the handoff alone",
+              HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["earlier-commit"])
+sh("roadmap-one-writer handoff: a forced push of the own handoff is refused, by force-push",
+   VCS + " push --force origin HEAD:roadmap", "deny", transcript=LANE, env=ROLE_ENV, cwd=HANDOFF_REPO["modify-own"])
+record_refuse("roadmap-one-writer handoff: a coordinator's push of a handoff is refused",
+              HANDOFF_PUSH, role_path("coordinator"), cwd=HANDOFF_REPO["modify-own"])
+record_refuse("roadmap-one-writer handoff: a session with no cs-build tag is refused a handoff push",
+              HANDOFF_PUSH, role_path("hand-untagged"), cwd=HANDOFF_REPO["modify-own"])
+record_refuse("roadmap-one-writer handoff: a lane record with a set_session_tags call after it is refused",
+              HANDOFF_PUSH, role_path("hand-tagged-after"), cwd=HANDOFF_REPO["modify-own"])
+record_refuse("roadmap-one-writer handoff: a lane tag in a record's title is not a proof",
+              HANDOFF_PUSH, role_path("hand-title"), cwd=HANDOFF_REPO["modify-own"])
+record_refuse("roadmap-one-writer handoff: another session's lane record is not a proof",
+              HANDOFF_PUSH, role_path("hand-other"), cwd=HANDOFF_REPO["modify-own"])
+record_refuse("roadmap-one-writer handoff: a session with no get_session record is refused a handoff push",
+              HANDOFF_PUSH, role_path("no-record"), cwd=HANDOFF_REPO["modify-own"])
+record_refuse("roadmap-one-writer handoff: a lane's handoff with an unreadable transcript is refused",
+              HANDOFF_PUSH, role_path("unreadable"), cwd=HANDOFF_REPO["modify-own"])
+record_refuse("roadmap-one-writer handoff: a lane's handoff with no transcript is refused",
+              HANDOFF_PUSH, None, cwd=HANDOFF_REPO["modify-own"])
+record_refuse("roadmap-one-writer handoff: a lane's push whose changed paths cannot be read is refused",
+              HANDOFF_PUSH, LANE, cwd=HANDOFF_REPO["broken-tip"])
+
+
+# The path read costs one git spawn per push that reaches the record branch from a lane. Each push is judged with
+# a stand-in git on PATH, which logs every spawn.
+HANDOFF_COST_LABEL = ("roadmap-one-writer: a lane's handoff push reads one changed-path list, a push to another "
+                      "branch reads none, and a push the rule refuses on its tags reads at most one")
+
+
+def _path_read(line):
+    """True when one logged git spawn reads a changed-path list: a diff that names --name-status, --name-only or
+    --raw, or a diff-tree. The conflict-markers check's `git diff --check` is not one."""
+    words = line.split()
+    while len(words) >= 2 and words[0] in ("-C", "-c"):
+        words = words[2:]
+    if "--check" in words:
+        return False
+    if words[:1] == ["diff-tree"]:
+        return True
+    return words[:1] == ["diff"] and bool({"--name-status", "--name-only", "--raw"} & set(words))
+
+
+def handoff_push_cost_case():
+    """A lane's push that reaches the record branch reads its changed paths once, allowed or refused, since the paths
+    decide it. A push to another branch reads none. A push the rule refuses on its tags may read at most one, because
+    the guard need not read the paths there. Why: decision session-tiers, the roadmap-one-writer cost line."""
+    if os.name == "nt":
+        return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
+    log, path = _stand_in_git("handoffcost")
+    if path is None:
+        return False, "no git on PATH"
+
+    def judge(command, cwd, transcript):
+        if os.path.exists(log):
+            os.remove(log)
+        got, _reason = decide({"raw": None, "tool": "Bash", "cwd": cwd, "session": None, "env_path": path,
+                               "config": None, "agent_id": None, "tool_input": {"command": command},
+                               "transcript": transcript, "env": ROLE_ENV})
+        lines = open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []
+        return got, sum(1 for line in lines if _path_read(line))
+
+    # label, command, transcript, checkout, the verdict, whether the read count is exact, the read count.
+    rows = (
+        ("a lane's handoff", HANDOFF_PUSH, LANE, HANDOFF_REPO["modify-own"], "allow", True, 1),
+        ("a lane's handoff for another lane's slug", HANDOFF_PUSH, LANE, HANDOFF_REPO["add-other"], "deny", True, 1),
+        ("a lane's push to lane/foo", VCS + " push origin lane/foo", LANE, HANDOFF_REPO["modify-own"], "allow", True, 0),
+        ("a triage push to roadmap", HANDOFF_PUSH, TRIAGE, HANDOFF_REPO["modify-own"], "allow", False, 1),
+        ("a coordinator's push to roadmap", HANDOFF_PUSH, role_path("coordinator"), HANDOFF_REPO["modify-own"],
+         "deny", False, 1),
+    )
+    problems = []
+    for label, command, transcript, cwd, want, exact, reads in rows:
+        got, count = judge(command, cwd, transcript)
+        if got != want:
+            problems.append("%s: verdict %s, want %s" % (label, got, want))
+        if (count != reads) if exact else (count > reads):
+            problems.append("%s: %d changed-path reads, want %s%d"
+                            % (label, count, "" if exact else "at most ", reads))
+    if problems:
+        return False, "; ".join(problems)
+    return True, "one changed-path read for a lane's push to the record branch, none for another branch, at most one " \
+                 "for a push refused on its tags"
+
+
+LOG_FAMILY[HANDOFF_COST_LABEL] = FAMILY
+LOG_CHECKS = LOG_CHECKS + ((HANDOFF_COST_LABEL, handoff_push_cost_case),)
