@@ -671,14 +671,14 @@ DEEP_RECORD = ('{"ccr": {"id": "%s", "title": "a lane session", "tags": %s, "nes
 # after this file, so this file cannot import it.
 ROLE_REPO_A = os.path.join(ROOT, "role-repo-o-a")  # a checkout whose origin is github.com/o/a
 CONFIRM_ENV = {**ROLE_ENV, "CLAUDE_CODE_REMOTE": "true"}
-SOLO_A_TAGS = ["cs-repo:o/a"]  # a solo session: no parent, no cs-build tag
+SOLO_A_TAGS = ["cs-repo:o/a"]  # a lane on its own: no parent, no cs-build tag
 RUNNER_A_TAGS = ["cs-build:batch-runner", "cs-repo:o/a"]
 COORD_A_TAGS = ["cs-build:coordinator", "cs-repo:o/a"]
 LANE_A_TAGS = ["cs-build:lane", "cs-repo:o/a"]
 TRIAGE_A_TAGS = ["cs-build:triage", "cs-repo:o/a"]
 HAT_CALL = [role_use("b1", "Bash", {"command": MERGE_SHIM + " --role batch-runner"}),
             role_result("b1", "merge: merge role batch-runner recorded for this session.")]
-SUBAGENT_ID = "a1b2c3d4e5f6a7b8c"  # a 17-character agent id, as the harness sends it on a subagent's payload
+AGENT_ID = "a1b2c3d4e5f6a7b8c"  # a 17-character agent id, as the harness sends it on an agent's payload
 CONFIRM_HEAD = "0123456789abcdef0123456789abcdef01234567"  # the 40-hex head the merge tool's --head reads (head_arg)
 
 
@@ -957,21 +957,24 @@ for _role_prefix in ("", "cd somewhere && "):
         # decision session-tiers: the coordinator never merges, in any form, even on its own record
         _coord_cmd = _role_prefix + _role_form + " --role coordinator"
         role_refuse(_coord_cmd + " is refused on its own coordinator record", _coord_cmd, role_path("coordinator"))
-# roles are hats (decision session-tiers): a solo session, with no parent_session_id and no cs-build tag, records the
+# roles are hats (decision session-tiers): a lane on its own, with no parent_session_id and no cs-build tag, records the
 # batch-runner role for its own merge. The cases cover no parent_session_id with no tag, a null parent_session_id, and an
 # empty tag list.
-role_allow("a solo session with no parent_session_id and no cs-build tag records batch-runner", MERGE_SHIM + " --role batch-runner",
+role_allow("a lane wearing the batch-runner hat with no parent_session_id and no cs-build tag records batch-runner",
+           MERGE_SHIM + " --role batch-runner",
            role_path("solo"))
-role_allow("a solo session whose parent_session_id is null records batch-runner", MERGE_SHIM + " --role batch-runner",
+role_allow("a lane wearing the batch-runner hat whose parent_session_id is null records batch-runner",
+           MERGE_SHIM + " --role batch-runner",
            role_path("solo-null-parent"))
-role_allow("a solo session with an empty tag list records batch-runner", MERGE_SHIM + " --role batch-runner",
+role_allow("a lane wearing the batch-runner hat with an empty tag list records batch-runner",
+           MERGE_SHIM + " --role batch-runner",
            role_path("solo-no-tags"))
 role_allow("a solo read, then set_session_tags on another session, still records batch-runner",
            MERGE_SHIM + " --role batch-runner", role_path("solo-then-other-tags"))
 for _role_prefix in ("", "cd somewhere && "):
     for _role_form in (MERGE_SHIM, "bin/merge", "python3 merge/merge.py", "python3 merge/launch.py"):
         _solo_cmd = _role_prefix + _role_form + " --role batch-runner"
-        role_allow(_solo_cmd + " allows a solo session's own record", _solo_cmd, role_path("solo"))
+        role_allow(_solo_cmd + " allows the own record of a lane wearing the batch-runner hat", _solo_cmd, role_path("solo"))
 # Green controls, refused on main and after the change: a parent, any cs-build tag, a stale read, a newer lane read, another
 # session's record and no session id each keep the solo hat out. The new allow must not widen past them.
 role_refuse("an untagged session with a parent_session_id is refused: a parent is a lane's or a triage's, not the solo hat",
@@ -990,34 +993,34 @@ role_refuse("a solo record of another session is ignored, so the own record is m
             MERGE_SHIM + " --role batch-runner", role_path("other-solo"))
 role_refuse("a solo record with no session id in the env is refused",
             MERGE_SHIM + " --role batch-runner", role_path("solo"), env=None)
-# Confirm after a self-tag: the hat a solo session recorded does not carry over to a coordinator, a lane or a triage session that
-# tagged the same session afterwards. The refusal names merge-role-proof, the rule that granted the hat. A true solo session, a
-# batch runner, and a solo session whose tags were set on another session still confirm.
-for _tier, _name in (("coordinator", "confirm-solo-then-coordinator"), ("lane", "confirm-solo-then-lane"),
+# Confirm after a self-tag: the hat a lane on its own recorded does not carry over to a coordinator, a lane or a triage session that
+# tagged the same session afterwards. The refusal names merge-role-proof, the rule that granted the hat. A lane on its own, a
+# batch runner, and a lane on its own whose tags were set on another session still confirm.
+for _role, _name in (("coordinator", "confirm-solo-then-coordinator"), ("lane", "confirm-solo-then-lane"),
                      ("triage", "confirm-solo-then-triage")):
-    sh("merge-role-proof: a solo session that then tagged itself %s cannot confirm" % _tier, MERGE_SHIM + " 5 --confirm --head " + CONFIRM_HEAD,
+    sh("merge-role-proof: a lane wearing the batch-runner hat that then tagged itself %s cannot confirm" % _role, MERGE_SHIM + " 5 --confirm --head " + CONFIRM_HEAD,
        "deny", rule=ROLE_RULE, cwd=ROLE_REPO_A, env=CONFIRM_ENV, transcript=role_path(_name))
 for _name in ("confirm-solo", "confirm-runner", "confirm-solo-then-other-tags"):
     sh("merge-role-proof: confirm allowed for " + _name, MERGE_SHIM + " 5 --confirm --head " + CONFIRM_HEAD, "allow",
        cwd=ROLE_REPO_A, env=CONFIRM_ENV, transcript=role_path(_name))
 # A self-tag after the hat grant, with no re-read, makes the solo read stale: the grant does not carry to the confirm.
-sh("merge-role-proof: a solo session that tagged itself after the hat, with no re-read, cannot confirm",
+sh("merge-role-proof: a lane wearing the batch-runner hat that tagged itself after the hat, with no re-read, cannot confirm",
    MERGE_SHIM + " 5 --confirm --head " + CONFIRM_HEAD, "deny", rule=ROLE_RULE, cwd=ROLE_REPO_A, env=CONFIRM_ENV,
    transcript=role_path("confirm-solo-tagged-no-reread"))
-# One role per agent (decision session-tiers): a subagent of a solo session, a builder or a reviewer, records no hat. The session's
+# One role per agent (decision session-tiers): an agent of a lane on its own, a builder or a reviewer, records no hat. The session's
 # own record allows it, so only the agent id on the payload refuses it.
 for _form in (MERGE_SHIM, "python3 merge/merge.py"):
-    role_refuse("a subagent of a solo session is refused the hat, " + _form, _form + " --role batch-runner",
-                role_path("solo"), agent_id=SUBAGENT_ID, agent_type="builder")
-# A subagent shares its session's id, so the parent's solo hat must not carry to its `merge --confirm`. The subagent of a
+    role_refuse("an agent of a lane wearing the batch-runner hat is refused the hat, " + _form, _form + " --role batch-runner",
+                role_path("solo"), agent_id=AGENT_ID, agent_type="builder")
+# An agent shares its session's id, so the parent's solo hat must not carry to its `merge --confirm`. An agent of a
 # batch runner is the green control: its session holds the batch-runner tag, so it confirms as on main.
 for _form in (MERGE_SHIM, "python3 merge/merge.py"):
-    sh("merge-role-proof: a subagent of a solo session cannot confirm, " + _form, _form + " 5 --confirm --head " + CONFIRM_HEAD,
+    sh("merge-role-proof: an agent of a lane wearing the batch-runner hat cannot confirm, " + _form, _form + " 5 --confirm --head " + CONFIRM_HEAD,
        "deny", rule=ROLE_RULE, cwd=ROLE_REPO_A, env=CONFIRM_ENV, transcript=role_path("confirm-solo"),
-       agent_id=SUBAGENT_ID, agent_type="builder")
-    sh("merge-role-proof: a subagent of a batch runner still confirms, " + _form, _form + " 5 --confirm --head " + CONFIRM_HEAD,
+       agent_id=AGENT_ID, agent_type="builder")
+    sh("merge-role-proof: an agent of a batch runner still confirms, " + _form, _form + " 5 --confirm --head " + CONFIRM_HEAD,
        "allow", cwd=ROLE_REPO_A, env=CONFIRM_ENV, transcript=role_path("confirm-runner"),
-       agent_id=SUBAGENT_ID, agent_type="builder")
+       agent_id=AGENT_ID, agent_type="builder")
 # Nothing the guard cannot read as an own record allows.
 role_refuse("no get_session record in the transcript is refused", MERGE_SHIM + " --role batch-runner",
           role_path("no-record"))

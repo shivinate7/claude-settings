@@ -33,7 +33,7 @@ TIER_PRINTF = re.compile(r"'(session tier: .*)'[ \t]*$", re.MULTILINE)
 UNKNOWN_LINE = "repo caution: unknown, the level could not be read"  # the hook's line when the caution level is unread
 
 
-def hook_tier_line():
+def hook_role_line():
     """The tier line's text as the hook file holds it, so a wording change in the hook edits no test."""
     with open(HOOK, encoding="utf-8") as handle:
         found = TIER_PRINTF.findall(handle.read())
@@ -233,7 +233,7 @@ class SessionStartTierLineTests(SessionStartAgentWorktreeNoticeTests):
     # The 51-worktree case builds 51 worktrees; this class does not repeat it.
     test_no_notice_at_fifty_and_one_notice_at_fifty_one = None
 
-    def tier_lines(self, lines):
+    def role_lines(self, lines):
         return [line for line in lines if line.startswith("session tier:")]
 
     def outside_a_git_tree(self):
@@ -247,47 +247,47 @@ class SessionStartTierLineTests(SessionStartAgentWorktreeNoticeTests):
         return outside
 
     def test_cloud_prints_the_tier_line_once_right_after_the_checkout_line(self):
-        expected = hook_tier_line()
+        expected = hook_role_line()
         lines = self.run_hook(remote="true")
         self.assertTrue(lines and lines[0].startswith("checkout "), "no checkout line first: %r" % lines)
-        self.assertEqual(self.tier_lines(lines), [expected])
+        self.assertEqual(self.role_lines(lines), [expected])
         self.assertEqual(lines.index(expected), 1, "the tier line is not after the checkout line: %r" % lines)
 
     def test_no_tier_line_unless_the_variable_is_exactly_true(self):
-        expected = hook_tier_line()
+        expected = hook_role_line()
         # None is a runner that never sets it; the rest are values the hook must not treat as cloud.
         for remote in (None, "", "false", "1", "TRUE"):
             with self.subTest(remote=remote):
                 lines = self.run_hook(remote=remote)
                 self.assertTrue(lines and lines[0].startswith("checkout "), "no checkout line: %r" % lines)
-                self.assertEqual(self.tier_lines(lines), [])
+                self.assertEqual(self.role_lines(lines), [])
                 self.assertNotIn(expected, lines)
 
     def test_the_tier_line_prints_with_no_remote_and_a_tiny_fetch_timeout(self):
         # The line needs no network, so a fetch bound too short for the bounded git calls still leaves it.
         lines = self.run_hook(remote="true", fetch_timeout="0.01")
-        self.assertEqual(self.tier_lines(lines), [hook_tier_line()])
+        self.assertEqual(self.role_lines(lines), [hook_role_line()])
 
     def test_cloud_prints_the_tier_line_once_outside_any_git_tree(self):
         # The line needs no git, so a cloud session whose cwd is no checkout still gets it, with no stderr.
         outside = self.outside_a_git_tree()
-        expected = hook_tier_line()
+        expected = hook_role_line()
         lines = self.run_hook(remote="true", session_cwd=outside)
         self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
-        self.assertEqual(self.tier_lines(lines), [expected], "the tier line is not printed once: %r" % lines)
+        self.assertEqual(self.role_lines(lines), [expected], "the tier line is not printed once: %r" % lines)
 
     # A local lane session sets CLAUDE_CODE_REMOTE_SESSION_ID and not CLAUDE_CODE_REMOTE, so the id alone must print the line.
     def test_a_session_id_alone_prints_the_tier_line_in_a_git_tree(self):
         lines = self.run_hook(remote_session_id="cse_abc")
         self.assertTrue(lines and lines[0].startswith("checkout "), "no checkout line first: %r" % lines)
-        self.assertEqual(self.tier_lines(lines), [hook_tier_line()],
+        self.assertEqual(self.role_lines(lines), [hook_role_line()],
                          "no tier line in a git tree with CLAUDE_CODE_REMOTE unset and a session id set: %r" % lines)
 
     def test_a_session_id_alone_prints_the_tier_line_outside_a_git_tree(self):
         outside = self.outside_a_git_tree()
         lines = self.run_hook(session_cwd=outside, remote_session_id="cse_abc")
         self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
-        self.assertEqual(self.tier_lines(lines), [hook_tier_line()],
+        self.assertEqual(self.role_lines(lines), [hook_role_line()],
                          "no tier line outside a git tree with CLAUDE_CODE_REMOTE unset and a session id set: %r"
                          % lines)
 
@@ -295,18 +295,18 @@ class SessionStartTierLineTests(SessionStartAgentWorktreeNoticeTests):
     def test_no_tier_line_with_both_variables_unset_in_a_git_tree(self):
         lines = self.run_hook()
         self.assertTrue(lines and lines[0].startswith("checkout "), "no checkout line first: %r" % lines)
-        self.assertEqual(self.tier_lines(lines), [], "a tier line printed with both variables unset: %r" % lines)
+        self.assertEqual(self.role_lines(lines), [], "a tier line printed with both variables unset: %r" % lines)
 
     def test_no_tier_line_with_both_variables_unset_outside_a_git_tree(self):
         outside = self.outside_a_git_tree()
         lines = self.run_hook(session_cwd=outside)
         self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
-        self.assertEqual(self.tier_lines(lines), [], "a tier line printed with both variables unset: %r" % lines)
+        self.assertEqual(self.role_lines(lines), [], "a tier line printed with both variables unset: %r" % lines)
 
     def test_no_tier_line_with_an_empty_session_id_in_a_git_tree(self):
         lines = self.run_hook(remote_session_id="")
         self.assertTrue(lines and lines[0].startswith("checkout "), "no checkout line first: %r" % lines)
-        self.assertEqual(self.tier_lines(lines), [], "a tier line printed with an empty session id: %r" % lines)
+        self.assertEqual(self.role_lines(lines), [], "a tier line printed with an empty session id: %r" % lines)
 
 
 class SessionStartSessionHomeTests(SessionStartAgentWorktreeNoticeTests):
@@ -417,30 +417,30 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         return "cs-build:lane" in sentence or "lane session" in sentence
 
     def test_the_tier_line_names_the_role_writer(self):
-        self.assertIn("merge --role", hook_tier_line())
+        self.assertIn("merge --role", hook_role_line())
 
     def test_the_merge_role_sentence_names_the_command_by_its_home_path(self):
         # Bare `merge` is not on a cloud session's PATH, so the sentence gives the shim's full path.
-        self.assertIn("~/.claude/bin/merge --role", merge_role_sentence(hook_tier_line()))
+        self.assertIn("~/.claude/bin/merge --role", merge_role_sentence(hook_role_line()))
 
     # decision session-tiers: re-pointed from both tiers to the batch runner alone
     def test_the_merge_role_sentence_names_only_the_batch_runner_tag(self):
-        role = [s for s in sentences(hook_tier_line()) if "merge role" in s.lower()]
+        role = [s for s in sentences(hook_role_line()) if "merge role" in s.lower()]
         self.assertEqual(len(role), 1, role)
         self.assertIn("cs-build:batch-runner", role[0])
         self.assertNotIn("coordinator", role[0].lower(), role[0])
 
-    # roles are hats (decision session-tiers): a solo session, with no parent_session_id and no cs-build tag, may record the
+    # roles are hats (decision session-tiers): a lane on its own, with no parent_session_id and no cs-build tag, may record the
     # batch-runner role for its own merge, so the merge role sentence must say so.
-    def test_the_merge_role_sentence_names_a_solo_session_with_no_parent(self):
-        role = [s for s in sentences(hook_tier_line()) if "merge role" in s.lower()]
+    def test_the_merge_role_sentence_names_a_lane_wearing_the_batch_runner_hat(self):
+        role = [s for s in sentences(hook_role_line()) if "merge role" in s.lower()]
         self.assertEqual(len(role), 1, role)
-        self.assertIn("no parent_session_id", role[0], "the merge role sentence does not say a solo session may record the batch-runner role: %r" % role[0])
+        self.assertIn("no parent_session_id", role[0], "the merge role sentence does not say a lane wearing the batch-runner hat may record the batch-runner role: %r" % role[0])
 
     # decision session-tiers: the solo clause matches a session only once it has picked solo from its request. A coordinator has no
     # cs-build tag before it sets one, so an untagged, parentless session would match the clause without the pick.
     def test_the_merge_role_sentence_waits_for_the_session_to_pick_solo(self):
-        role = [s for s in sentences(hook_tier_line()) if "merge role" in s.lower()]
+        role = [s for s in sentences(hook_role_line()) if "merge role" in s.lower()]
         self.assertEqual(len(role), 1, role)
         self.assertIn("no parent_session_id", role[0], role[0])
         self.assertIn("picked", role[0], "the merge role sentence does not wait for the session to pick solo: %r" % role[0])
@@ -449,7 +449,7 @@ class SessionStartMergeRoleTests(unittest.TestCase):
 
     # decision session-tiers: a coordinator tags itself before the run step is read, so no coordinator reaches the run step untagged
     def test_the_coordinator_tags_itself_before_the_run_step(self):
-        sents = sentences(hook_tier_line())
+        sents = sentences(hook_role_line())
         tagged = [s for s in sents if "tags itself" in s]
         self.assertEqual(len(tagged), 1, tagged)
         run = [s for s in sents if "merge --role" in s]
@@ -459,29 +459,29 @@ class SessionStartMergeRoleTests(unittest.TestCase):
 
     # decision session-tiers: no sentence of the tier line says a coordinator merges; "never merges" is not a merge
     def test_no_sentence_of_the_tier_line_says_a_coordinator_merges(self):
-        told = [s for s in sentences(hook_tier_line()) if self.says_coordinator_merges(s)]
+        told = [s for s in sentences(hook_role_line()) if self.says_coordinator_merges(s)]
         self.assertEqual(told, [], "the tier line says a coordinator merges: %r" % told)
 
     # decision session-tiers: the coordinator never merges, so one sentence of the tier line says so
     def test_some_sentence_of_the_tier_line_says_the_coordinator_never_merges(self):
-        told = [s for s in sentences(hook_tier_line()) if self.says_coordinator_never_merges(s)]
+        told = [s for s in sentences(hook_role_line()) if self.says_coordinator_never_merges(s)]
         self.assertTrue(told, "no sentence of the tier line says the coordinator never merges")
 
     # decision session-tiers: a session the owner started (no parent) merges its own PR under the merge grant, affirmatively
     def test_a_session_with_no_parent_merges_its_own_pr_under_the_merge_grant(self):
-        told = [s for s in sentences(hook_tier_line()) if self.is_no_parent_merge(s)]
+        told = [s for s in sentences(hook_role_line()) if self.is_no_parent_merge(s)]
         self.assertTrue(told, "no affirmative sentence says a session with no parent merges its own PR under the merge grant")
 
     # decision session-tiers: only a solo or one-lane session the owner started merges its own PR, so its sentence names that shape
     def test_the_no_parent_merge_sentence_names_solo_or_one_lane(self):
-        told = [s for s in sentences(hook_tier_line()) if self.is_no_parent_merge(s)]
+        told = [s for s in sentences(hook_role_line()) if self.is_no_parent_merge(s)]
         self.assertTrue(told, "no affirmative sentence says a session with no parent merges its own PR under the merge grant")
         for sentence in told:
             self.assertIn("solo or one-lane", sentence, "the no-parent merge sentence does not name solo or one-lane: %r" % sentence)
 
     def hand_off_sentence(self):
         """The tier line's one sentence that hands a branch to the batch runner. Asserts that scope before any content."""
-        found = [s for s in sentences(hook_tier_line()) if "hands" in s and "batch runner" in s]
+        found = [s for s in sentences(hook_role_line()) if "hands" in s and "batch runner" in s]
         self.assertEqual(len(found), 1, "expected one hand-off sentence, found %d: %r" % (len(found), found))
         return found[0]
 
@@ -500,11 +500,11 @@ class SessionStartMergeRoleTests(unittest.TestCase):
 
     def test_the_tier_line_says_the_role_is_recorded_again_after_a_resume(self):
         # A resumed session keeps its id, but the role file may be gone (a fresh container): the line must not say the call is a one-time act.
-        sentence = merge_role_sentence(hook_tier_line())
+        sentence = merge_role_sentence(hook_role_line())
         self.assertIn("resume", sentence.lower(), sentence)
 
     def test_the_tier_line_does_not_say_once(self):
-        self.assertNotRegex(hook_tier_line(), r"(?i)\bonce\b")
+        self.assertNotRegex(hook_role_line(), r"(?i)\bonce\b")
 
     def test_the_merge_role_sentence_is_found_by_its_edges(self):
         # The helper cuts at ". ": from the one before `merge --role` to the one after it, or to the line's ends.
