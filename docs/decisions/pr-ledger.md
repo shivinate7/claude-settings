@@ -59,7 +59,7 @@ One ledger. Home: `merge/merge.py`. It extends `merge --reviewed`. It adds no to
 Each open PR gets exactly one next act. The tool reads it from GitHub alone. The first match wins:
 
 - Done review log for the live head: `batch`. A clean merge of main keeps a record for the live head (decision pr-review-record, The review a changed head owes). Not built.
-- Review record open: `lane round n`, n the next round owed. A failed fix check: `lane round 1`.
+- Review record open: `lane round n`, n the next round owed. A failed fix check: `lane round 1`, except a records-and-notes-only diff, which owes a second fix check (item 633 b, owner, 2026-11-12 14:13 CST; not built in the tool).
 - Review log stale, newest record has no Fix check line: fix check.
 - Review log stale, newest record has a PASS Fix check, and the live head is a conflicted merge of main into the fixed head: one more fix verifier (decision pr-review-record). Its prior record must be a PASS that `review_state` accepts. Not built.
 - Review log stale, in any other case: the fresh full review at the live head, as decision pr-review-record (The review a changed head owes) sets it.
