@@ -2998,6 +2998,45 @@ def case_owner_waits_near_miss_tag_stays_quiet():
         c.cleanup()
 
 
+# --- owner waits: a name that is text inside another name ---------------------------------------
+# The handoff check looks for each refused act's identifier as text in the section. The plain push is
+# text inside the force push, so a section that names only the force push must still leave the plain
+# push unnamed.
+PUSH_PLAIN = "git push"
+PUSH_FORCE = "git push --force origin main"
+PUSH_PLAIN_LINE = "- Gate: `%s` waits for the owner's yes." % PUSH_PLAIN
+PUSH_FORCE_LINE = "- Gate: `%s` waits for the owner's yes." % PUSH_FORCE
+
+
+def two_pushes(c):
+    """A coordinator's transcript with two unanswered refusals: a command, and a longer command that holds it as text."""
+    return as_coordinator(c, [COORD_TAG]) + refused_act("tu-push", PUSH_PLAIN) + refused_act("tu-force", PUSH_FORCE)
+
+
+def case_owner_waits_substring_act_blocks():
+    coordinator_scope(two_pushes)
+    check("owner waits substring (data): the first refused command is text inside the second",
+          PUSH_FORCE.startswith(PUSH_PLAIN) and PUSH_PLAIN != PUSH_FORCE,
+          "plain: %r force: %r" % (PUSH_PLAIN, PUSH_FORCE))
+    c = Case("ow_substring_only_force")
+    try:
+        reason = stop_reason(owner_stop(c, two_pushes(c), handoff=owner_handoff(PUSH_FORCE_LINE)))
+        check("owner waits substring: a section that names only `%s` does not name the refused `%s`, which "
+              "it holds as text, so the Stop blocks on the plain push" % (PUSH_FORCE, PUSH_PLAIN),
+              reason is not None and "Bash `%s`" % PUSH_PLAIN in reason and "Bash `%s`" % PUSH_FORCE not in reason,
+              "reason: %r" % reason)
+    finally:
+        c.cleanup()
+    c = Case("ow_substring_both")
+    try:
+        proc = owner_stop(c, two_pushes(c), handoff=owner_handoff("\n".join([PUSH_PLAIN_LINE, PUSH_FORCE_LINE])))
+        check("owner waits substring (control): a section that names both refused commands passes",
+              stop_reason(proc) is None and proc.returncode == 0,
+              "rc=%r reason: %r" % (proc.returncode, stop_reason(proc)))
+    finally:
+        c.cleanup()
+
+
 def main() -> int:
     case_prompt_names_audit_agent()
     case_precompact_writes_digest_and_state()
@@ -3088,6 +3127,7 @@ def main() -> int:
     case_owner_waits_tag_spelling_record_blocks()
     case_owner_waits_tag_spelling_set_tags_blocks()
     case_owner_waits_near_miss_tag_stays_quiet()
+    case_owner_waits_substring_act_blocks()
 
     if FAILED:
         print()
