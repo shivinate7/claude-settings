@@ -15,15 +15,15 @@ A coordinator's message that states a pick or a hold cites the ruling it rests o
 
 The mistakes, all 2026-11-12 (CST), all by a coordinator:
 
-- 12:06: held a mailbox default. Page item 556 a and plan R49 say a mailbox default is never held; the owner names each mailbox.
-- 12:04: cited plan R22 point 3 for writing a session id into a page item. R22 point 3 says a page item names a lane slug or role, never a session id.
-- 12:30: offered a route to the prose tending lane that goes against step `prose-tending-contract`: no lane routes around a check to tend prose.
+- 12:06: a mailbox default was held, against page item 556 a and plan R49.
+- 12:04: plan R22 point 3 was cited for something R22 does not say.
+- 12:30: a route was offered against step `prose-tending-contract`.
 
 The harm: a lane builds to the wrong pick, the work is redone, and the owner is asked the same thing twice.
 
 Cost, per pick message: one `call_judge.py` process and one Sonnet call (60 s cap), plus one git process (`question_form.past_rulings`). A send with no pick or hold word, or from a session that is no coordinator, starts no process and makes no model call. A pick with no cite makes no model call. Nothing is written but the `guard.log` line of a refusal. `hooks/test_call_judge.py` (section "a coordinator's pick") counts the calls.
 
-Known limit: the judge reads the cited text, not the whole plan or the waiting page. A page item cite is unread, so the pick it backs passes on the cite alone.
+Known limit: the judge reads the cited text, not the whole plan or the waiting page. A page item cite is unread, so the pick it backs passes on the cite alone. A plan R-number that no file of `docs/plans` holds as a `- **R<n>.` bullet is reported to the judge as not searched, never as clear.
 
 Kind: process
 Home: rule:questions-go-to-owner

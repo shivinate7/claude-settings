@@ -47,7 +47,7 @@ docs/plans) refuses a pick the cited text contradicts or does not say. Any other
 model call. A page item is unreadable by the hook, and the prompt says so. A model error allows, with one stderr line.
 Cost: a send with no pick or hold word, or from no coordinator, starts no process and makes no model call. A pick with
 a cite or a no-ruling statement: one git process (question_form.past_rulings) and one Sonnet call, PAST_RULING_TIMEOUT s.
-A pick with neither: one git process only if a record slug could still be the cite, no model call. Nothing is
+A pick with neither: one git process (a listed record's slug may still be the cite), no model call. Nothing is
 written but the guard.log line of a refusal.
 
 Fail open. Any other model error, odd answer or unreadable input allows, with one stderr line.
@@ -485,13 +485,14 @@ def pick_cites(message, candidate_ids):
 
 def judge_pick(payload, tool, args):
     """A coordinator's pick or hold, sent by send_message, must cite a ruling that says it. Code refuses a pick with no
-    cite and no `no ruling found:` line. One Sonnet call judges a cited one against the cited text."""
+    cite and no `no ruling found:` line. One Sonnet call judges a cited one against the cited text. True when it
+    refused, so a caller with another check on the same send runs that check after a pass."""
     message = args.get("message")
     if not isinstance(message, str) or not PICK_WORD.search(message):
-        return 0  # the cheapest test first: most sends hold neither word
+        return False  # the cheapest test first: most sends hold neither word
     try:
         if not is_coordinator(payload):
-            return 0
+            return False
         import question_form
         cwd = payload.get("cwd") or ""
         root = question_form._git_root_of(cwd) or cwd or os.getcwd()
@@ -501,7 +502,8 @@ def judge_pick(payload, tool, args):
             read = question_form.past_rulings(message, root)  # a listed record's slug may still be the cite
             plans, items, slugs, none_found = pick_cites(message, question_form.candidate_ids(read[0]))
             if not (plans or items or slugs or none_found):
-                return refuse(payload, tool, args, PICK_RULE, PICK_NO_CITE)
+                refuse(payload, tool, args, PICK_RULE, PICK_NO_CITE)
+                return True
         candidates, unknown = read or question_form.past_rulings(message, root)
         plan_found, plan_missing = plan_texts(root, plans)
         stems = {c.split(": ", 1)[0].split("/", 1)[-1].lower(): c for c in candidates}
@@ -524,22 +526,23 @@ def judge_pick(payload, tool, args):
                                       shape=OK_SHAPE, effort=None)
     except Exception as exc:
         print("call judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()), file=sys.stderr)
-        return 0
+        return False
     if error:
         print("call judge failed open: %s" % " ".join(str(error).split()), file=sys.stderr)
-        return 0
+        return False
     if verdict.get("ok") is False:
         reason = verdict.get("reason")
-        return refuse(payload, tool, args, rule, reason if isinstance(reason, str) and reason.strip() else fallback)
-    return 0
+        refuse(payload, tool, args, rule, reason if isinstance(reason, str) and reason.strip() else fallback)
+        return True
+    return False
 
 
 def main():
     try:
         payload = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
         tool, args = payload.get("tool_name"), payload.get("tool_input")
-        if tool == PICK_SEND_TOOL:
-            return judge_pick(payload, tool, args) if isinstance(args, dict) else 0
+        if tool == PICK_SEND_TOOL and isinstance(args, dict) and judge_pick(payload, tool, args):
+            return 0  # refused; a pass falls through, so another check on the same send still runs
         if tool not in JUDGES:
             return 0
         if not isinstance(args, dict):
