@@ -106,7 +106,7 @@ BBTW_MERGE = diff_repo("bbtw-merge", _bbtw_merge_conflict)
 # A merge, a rebase or a cherry-pick that stops on a product conflict brings the other side's files into the worktree,
 # so `git status` lists them as changed. The check reads the state file in the worktree's git dir (a file read, no git
 # call). With a stop in progress and no unmerged test path, it allows the call and logs builder-bash-test-write-merging,
-# noted, and the merge-aware commit and stop check judges the change. An unmerged test path still blocks.
+# noted, and the merge-aware commit and stop check judges the change. An unmerged test path still refuses.
 BBTW_MERGING = "builder-bash-test-write-merging"
 BBTW_SRC = "src/app.py"            # a product file both sides rewrite, so bringing the other side in conflicts on it
 BBTW_INCOMING = "tests/test_n.py"  # the test file the other side adds, which comes in clean
@@ -224,20 +224,20 @@ if os.name != "nt":
 
 
 # ---------------------------------------------------------------- cases the guard answers (run_cases)
-# A block reads as "deny" (read_decision maps the PostToolUse block). A check that fails for the named cause is red.
-bbtw_add("builder-bash-test-write: a builder's script that adds tests/foo.py is blocked at PostToolUse, with the undo route and the test-author named, and no path named",
+# A refusal reads as "deny" (read_decision maps the PostToolUse `block` value). A check that fails for the named cause is red.
+bbtw_add("builder-bash-test-write: a builder's script that adds tests/foo.py is refused at PostToolUse, with the undo route and the test-author named, and no path named",
          "deny", BBTW_UNTRACKED, rule=BBTW_RULE, carries=BBTW_UNDO, lacks=("tests/foo.py",))
-bbtw_add("builder-bash-test-write: a builder's script that rewrites a tracked test is blocked at PostToolUse",
+bbtw_add("builder-bash-test-write: a builder's script that rewrites a tracked test is refused at PostToolUse",
          "deny", BBTW_MODIFIED, rule=BBTW_RULE, carries=BBTW_UNDO, lacks=("tests/test_a.py",))
-bbtw_add("builder-bash-test-write: a builder's script that rewrites a mutation test is blocked at PostToolUse",
+bbtw_add("builder-bash-test-write: a builder's script that rewrites a mutation test is refused at PostToolUse",
          "deny", BBTW_MUTANT, rule=BBTW_RULE, carries=BBTW_UNDO, lacks=("hooks/mutate_guard.py",))
-bbtw_add("builder-bash-test-write: a builder's script that deletes a tracked test is blocked at PostToolUse",
+bbtw_add("builder-bash-test-write: a builder's script that deletes a tracked test is refused at PostToolUse",
          "deny", BBTW_DELETED, rule=BBTW_RULE, carries=BBTW_UNDO, lacks=("tests/test_a.py",))
-bbtw_add("builder-bash-test-write: a builder's script that moves a tracked test out of tests/ is blocked at PostToolUse",
+bbtw_add("builder-bash-test-write: a builder's script that moves a tracked test out of tests/ is refused at PostToolUse",
          "deny", BBTW_MOVED, rule=BBTW_RULE, carries=BBTW_UNDO, lacks=("tests/test_a.py",))
-bbtw_add("builder-bash-test-write: a builder's script that writes 64 test files is blocked once, naming none",
+bbtw_add("builder-bash-test-write: a builder's script that writes 64 test files is refused once, naming none",
          "deny", BBTW_MANY, rule=BBTW_RULE, carries=BBTW_UNDO, lacks=("tests/guard/",))
-bbtw_add("builder-bash-test-write: a builder's PowerShell call that adds tests/foo.py is blocked at PostToolUse",
+bbtw_add("builder-bash-test-write: a builder's PowerShell call that adds tests/foo.py is refused at PostToolUse",
          "deny", BBTW_UNTRACKED, tool="PowerShell", rule=BBTW_RULE, carries=BBTW_UNDO, lacks=("tests/foo.py",))
 
 bbtw_add("builder-bash-test-write: a builder's call that changed only product code is allowed silently",
@@ -260,24 +260,24 @@ else:
     skip_case("builder-bash-test-write: a builder's call whose git status fails is allowed silently", NO_STAND_IN)
 
 # Each case names one shape. The folder and merge shapes get their own checks below, which read the fixture first.
-bbtw_add("builder-bash-test-write: a builder's call that leaves a space-named test, tests/my test.py, is blocked at PostToolUse",
+bbtw_add("builder-bash-test-write: a builder's call that leaves a space-named test, tests/my test.py, is refused at PostToolUse",
          "deny", BBTW_SPACE, rule=BBTW_RULE, carries=BBTW_UNDO, lacks=("my test.py",))
-bbtw_add("builder-bash-test-write: a builder's call that leaves a non-ASCII-named test is blocked at PostToolUse",
+bbtw_add("builder-bash-test-write: a builder's call that leaves a non-ASCII-named test is refused at PostToolUse",
          "deny", BBTW_UNICODE, rule=BBTW_RULE, carries=BBTW_UNDO, lacks=("test_caf",))
-bbtw_add("builder-bash-test-write: a builder's block says to stop and report when it cannot undo the test change",
+bbtw_add("builder-bash-test-write: a builder's refusal says to stop and report when it cannot undo the test change",
          "deny", BBTW_UNTRACKED, rule=BBTW_RULE, carries=BBTW_STOP, lacks=("tests/foo.py",))
 
-# The stopped states. An unmerged test path still blocks in each. The reason names the merge-abort step only in a
-# merge, the one state `git merge --abort` ends. A block outside a merge, or in a rebase or cherry-pick, does not name it.
-# The five cases below are CONTROLS: each passes on the old code too. They pin what the new check must keep (the block
+# The stopped states. An unmerged test path still refuses in each. The reason names the merge-abort step only in a
+# merge, the one state `git merge --abort` ends. A refusal outside a merge, or in a rebase or cherry-pick, does not name it.
+# The five cases below are CONTROLS: each passes on the old code too. They pin what the new check must keep (the refusal
 # on an unmerged test path, in each state) and the negative pins on the merge-abort step (the reason names it only in a merge).
-bbtw_add("builder-bash-test-write: a builder's call in a merge with a product conflict and an unmerged test path is blocked, and names the merge-abort step",
+bbtw_add("builder-bash-test-write: a builder's call in a merge with a product conflict and an unmerged test path is refused, and names the merge-abort step",
          "deny", BBTW_MERGE_MIXED, rule=BBTW_RULE, carries=BBTW_UNDO + (BBTW_MERGE_ABORT,), lacks=(BBTW_TEST_A,))
-bbtw_add("builder-bash-test-write: a builder's call in a rebase with an unmerged test path is blocked, and does not name the merge-abort step",
+bbtw_add("builder-bash-test-write: a builder's call in a rebase with an unmerged test path is refused, and does not name the merge-abort step",
          "deny", BBTW_REBASE_TEST, rule=BBTW_RULE, carries=BBTW_UNDO, lacks=(BBTW_MERGE_ABORT, BBTW_TEST_A))
-bbtw_add("builder-bash-test-write: a builder's call in a cherry-pick with an unmerged test path is blocked, and does not name the merge-abort step",
+bbtw_add("builder-bash-test-write: a builder's call in a cherry-pick with an unmerged test path is refused, and does not name the merge-abort step",
          "deny", BBTW_PICK_TEST, rule=BBTW_RULE, carries=BBTW_UNDO, lacks=(BBTW_MERGE_ABORT, BBTW_TEST_A))
-bbtw_add("builder-bash-test-write: a builder's call that rewrites a tracked test outside any merge is blocked, and does not name the merge-abort step",
+bbtw_add("builder-bash-test-write: a builder's call that rewrites a tracked test outside any merge is refused, and does not name the merge-abort step",
          "deny", BBTW_MODIFIED, rule=BBTW_RULE, carries=BBTW_UNDO, lacks=(BBTW_MERGE_ABORT, BBTW_TEST_A))
 bbtw_add("builder-bash-test-write: a builder's call in a merge with only a product conflict is allowed silently, with no merge-abort step",
          "allow", BBTW_MERGE_PRODUCT_ONLY, silent=True)
@@ -329,7 +329,7 @@ def _bbtw_rows(folder, rule):
 
 
 def bbtw_refuse_line_case():
-    """A refusal writes one row for the rule, logged `deny`. Pins the log: a block the log cannot show is no evidence."""
+    """A refusal writes one row for the rule, logged `deny`. Pins the log: a refusal the log cannot show is no evidence."""
     _got, _reason, folder, _ = _bbtw_judge("refuse-line", _bbtw_raw(BBTW_UNTRACKED))
     rows = _bbtw_rows(folder, BBTW_RULE)
     if len(rows) != 1 or rows[0][2] != "deny":
@@ -402,7 +402,7 @@ def bbtw_no_git_main_case():
 
 
 def _bbtw_stdout(raw, folder):
-    """The guard's exit code and stdout for one payload. decide returns only the verdict, which reads both block
+    """The guard's exit code and stdout for one payload. decide returns only the verdict, which reads both refusal
     shapes as deny, so this reads the printed JSON itself. The environment is the one decide sets."""
     env = dict(os.environ)
     for name in ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_PROJECT_DIR"):
@@ -414,8 +414,8 @@ def _bbtw_stdout(raw, folder):
 
 
 def bbtw_block_shape_case():
-    """A block is a PostToolUse answer: {"decision": "block", "reason": ...} on stdout. Claude Code ignores a
-    PreToolUse hookSpecificOutput on this event, so that shape would let the call through unblocked."""
+    """A refusal is a PostToolUse answer: {"decision": "block", "reason": ...} on stdout. Claude Code ignores a
+    PreToolUse hookSpecificOutput on this event, so that shape would let the call through with no refusal."""
     materialize(BBTW_UNTRACKED)
     note = _bbtw_scope(BBTW_UNTRACKED, "tests/foo.py")
     if note:
@@ -430,12 +430,12 @@ def bbtw_block_shape_case():
     if not isinstance(parsed, dict):
         return False, "stdout is JSON but not an object: %r" % out[:80]
     if "hookSpecificOutput" in parsed:
-        return False, "the answer is a PreToolUse hookSpecificOutput, not a PostToolUse block"
+        return False, "the answer is a PreToolUse hookSpecificOutput, not the PostToolUse {decision: block} answer"
     if parsed.get("decision") != "block":
         return False, "decision is %r, want block" % parsed.get("decision")
     if not isinstance(parsed.get("reason"), str) or not parsed["reason"].strip():
-        return False, "the block carries no reason text"
-    return True, "the block is {decision: block, reason} on stdout"
+        return False, "the refusal carries no reason text"
+    return True, "the refusal is {decision: block, reason} on stdout"
 
 
 # ---------------------------------------------------------------- the settings entry (settings.json, read only)
@@ -529,17 +529,17 @@ def _bbtw_folder_scope(where, folder):
 
 
 def bbtw_new_folder_case():
-    """A builder's call that creates a test in a new untracked folder is blocked, and the reason names no path."""
+    """A builder's call that creates a test in a new untracked folder is refused, and the reason names no path."""
     materialize(BBTW_NEWDIR)
     note = _bbtw_folder_scope(BBTW_NEWDIR, "src/newdir")
     if note:
         return False, note
     got, reason, _folder, _names = _bbtw_judge("new-folder", _bbtw_raw(BBTW_NEWDIR))
     if got != "deny":
-        return False, "a builder's test in a new untracked folder is %s, want a block" % got
+        return False, "a builder's test in a new untracked folder is %s, want a refusal" % got
     if "src/newdir" in reason:
-        return False, "the block names the folder"
-    return True, "a test in a new untracked folder is blocked, and the reason names no path"
+        return False, "the refusal names the folder"
+    return True, "a test in a new untracked folder is refused, and the reason names no path"
 
 
 def _bbtw_merge_scope(where):
@@ -554,17 +554,17 @@ def _bbtw_merge_scope(where):
 
 
 def bbtw_merge_abort_case():
-    """A builder's call in a merge that conflicts in a test path is blocked, and the block names the merge-abort step."""
+    """A builder's call in a merge that conflicts in a test path is refused, and the refusal names the merge-abort step."""
     materialize(BBTW_MERGE)
     note = _bbtw_merge_scope(BBTW_MERGE)
     if note:
         return False, note
     got, reason, _folder, _names = _bbtw_judge("merge-abort", _bbtw_raw(BBTW_MERGE))
     if got != "deny":
-        return False, "a builder's call in a merge with a test conflict is %s, want a block" % got
+        return False, "a builder's call in a merge with a test conflict is %s, want a refusal" % got
     if BBTW_MERGE_ABORT not in reason:
-        return False, "the block does not name the merge-abort step %r" % BBTW_MERGE_ABORT
-    return True, "a block in a merge with a test conflict names the merge-abort step"
+        return False, "the refusal does not name the merge-abort step %r" % BBTW_MERGE_ABORT
+    return True, "a refusal in a merge with a test conflict names the merge-abort step"
 
 
 def _bbtw_merging_noted(tag, where, what):
@@ -624,14 +624,14 @@ BBTW_CHECKS = (
      bbtw_status_once_product_case),
     ("builder-bash-test-write: a test-author's call runs no git at all", bbtw_no_git_author_case),
     ("builder-bash-test-write: the main session's call runs no git at all", bbtw_no_git_main_case),
-    ("builder-bash-test-write: a block is the PostToolUse {decision: block, reason} on stdout", bbtw_block_shape_case),
+    ("builder-bash-test-write: a refusal is the PostToolUse {decision: block, reason} on stdout", bbtw_block_shape_case),
     ("builder-bash-test-write: settings.json has a PostToolUse entry for Bash|PowerShell that runs hooks/guard.py",
      bbtw_entry_case),
     ("builder-bash-test-write: the settings entry starts the guard for each builder payload, unchanged",
      bbtw_entry_passes_case),
     ("builder-bash-test-write: the settings entry starts no guard for the main session or a test-author",
      bbtw_entry_stops_case),
-    ("builder-bash-test-write: a builder's test in a new untracked folder is blocked, and the reason names no path",
+    ("builder-bash-test-write: a builder's test in a new untracked folder is refused, and the reason names no path",
      bbtw_new_folder_case),
     ("builder-bash-test-write: a builder's call in a merge with a test conflict names the merge-abort step",
      bbtw_merge_abort_case),
