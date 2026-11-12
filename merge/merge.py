@@ -5024,14 +5024,16 @@ def write_merge_role(tier):
         raise Stop(f"cannot write the merge role to {path} {ROLE_CITE}: {e}.")
 
 def _imported_names(tree):
-    """-> the module names a parsed file imports: an Import, an absolute ImportFrom, and importlib.import_module with a literal name.
-    A dotted name keeps its last part, since a module is found by its basename."""
+    """-> the module names a parsed file imports: an Import, an absolute ImportFrom with its module and each name after `import` (bar `*`),
+    and importlib.import_module with a literal name. A dotted name keeps its last part, since a module is found by its basename. A name
+    after `import` may be a function or a constant, not a module; it then matches no file, or a file of that basename, which over-counts."""
     names = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             names.update(a.name.rpartition(".")[2] for a in node.names)
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             names.add(node.module.rpartition(".")[2])
+            names.update(a.name for a in node.names if a.name != "*")
         elif (isinstance(node, ast.Call) and node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)
               and (node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")) == "import_module"):
             names.add(node.args[0].value.rpartition(".")[2])
