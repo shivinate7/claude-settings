@@ -689,11 +689,11 @@ need "steps are run only" steps_are "run "
 need "no record line" test "$(record_lines)" -eq 0
 end_case "52 reuse path: the Duo it reuses gets no sim-boots.jsonl line"
 
-# A copy of the tool and its sim-lease, with a hooks folder that holds only what sim-lease imports: the record call finds no hook. It must print nothing, and the
-# run must still boot, test and shut down with xcodebuild's exit code.
+# A copy of the tool and its sim-lease, with a hooks folder that holds every guard module but the record hook: the brake loads, so the take boots, and the record
+# call finds no hook. It must print nothing, and the run must still boot, test and shut down with xcodebuild's exit code.
 fresh; ps_stub; devices_json "$DUO1"
 /bin/mkdir -p "$work/nohooks/bin"; cp "$script" "$work/nohooks/bin/sim-test"; cp "$sim_lease" "$work/nohooks/bin/sim-lease"; chmod +x "$work/nohooks/bin/sim-test" "$work/nohooks/bin/sim-lease"
-/bin/mkdir -p "$work/nohooks/hooks"; cp "$root/hooks/_nowindow.py" "$work/nohooks/hooks/"
+/bin/mkdir -p "$work/nohooks/hooks"; cp "$root"/hooks/*.py "$work/nohooks/hooks/"; /bin/rm -f "$work/nohooks/hooks/sim_boot_record.py"
 saved_script=$script; script=$work/nohooks/bin/sim-test
 run PATH="$work/psbin:$PATH"
 script=$saved_script
