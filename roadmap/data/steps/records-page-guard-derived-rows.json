@@ -1,15 +1,15 @@
 {
  "id": "records-page-guard-derived-rows",
  "title": "The records-page guard accepts a main merge whose docs/records.md differs only by derived rows the merge tool rebuilds",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
- "lane": "",
+ "lane": "session_013NEJL4SwoVeA1YEqmzm7s6",
  "owner": "triage",
  "blockedBy": [],
  "why": "Coordinator 15:01 CST Nov 12: lane fan-code-workflows merging main into #2737 hit the records-page guard; its remedy (take main's docs/records.md) is denied by the auto-mode classifier as irreversible local destruction, so a lane merging main is stuck by design (rule verification-cry-wolf-guard-is-spent). Owner item 647 asks for an override meanwhile.",
  "source": "coordinator 15:01 CST Nov 12",
- "note": "Accept the merge when records.md differs from main only by derived rows the merge tool rebuilds at merge; or give a remedy the classifier allows. Red first on #2737's merge. A guard verdict change: round 3 gets the net-value test. Unblocks the four PRs if item 647 picks b.",
- "updatedAt": "2026-11-12T15:03:36-06:00",
+ "note": "Accept the merge when records.md differs from main only by derived rows the merge tool rebuilds at merge; or give a remedy the classifier allows. Red first on #2737's merge. A guard verdict change: round 3 gets the net-value test. Unblocks the four PRs if item 647 picks b. Lane started 15:04 CST Nov 12 (coordinator; kin #2779 cited).",
+ "updatedAt": "2026-11-12T15:06:58-06:00",
  "order": -295
 }

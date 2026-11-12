@@ -1,6 +1,6 @@
 {
   "added": "2026-11-12T21:02:39Z",
-  "context": "Goal: four lane PRs (#2737, #2770, #2875, #2920) take in main after batch 104, so they can join the next batch.\nProblem (rule): the records-page guard refuses the merge until the lane takes main's docs/records.md, and the auto-mode check denies that step as a local delete that cannot be undone; only your typed override passes it.\nBased on (read): lane fan-code-workflows hit both refusals on #2737 (coordinator, 15:01 CST).\nBased on (read): the dropped row is derived; the merge tool rebuilds the records page at merge.\nDeparts from: main \u2014 the records-page guard blocks this lane's main merge \u2014 the lane makes the merge under your typed override, and step records-page-guard-derived-rows fixes the guard for later merges.",
+  "context": "Goal: four lane PRs (#2737 judge replay cases, and the stack #2770, #2875, #2920 on CI alarms) take in main after today's 14:43 CST batch merge, so they can join the next batch.\nProblem (rule): the records-page guard refuses the merge until the lane takes main's copy of the records page, and the auto-mode check denies that step as a local delete that cannot be undone; only your typed override passes it.\nBased on (read): lane fan-code-workflows hit both refusals on #2737, relayed by the coordinator at 15:01 CST today.\nBased on (read): the row the lane would drop is generated; the merge tool rebuilds the records page at merge.\nDeparts from: main \u2014 the records-page guard blocks this lane's main merge \u2014 the lane makes the merge under your typed override, and a guard fix (it accepts a merge that differs only in generated rows) helps later merges.",
   "home": "step records-page-guard-derived-rows",
   "id": "records-page-merge-override",
   "kind": "decision",
@@ -8,17 +8,23 @@
   "options": [
     {
       "gain": "The four PRs take in main now and can join the next batch.",
-      "how": "Open the lane at https://claude.ai/code/session_013NEJL11UY3p6jnSXrTspmu and type `override 15m` there; it covers each refused act in that lane for 15 minutes, so all four merges.",
+      "how": "Open the lane and type `override 15m` there; it covers each refused act in that lane for 15 minutes, so all four merges.",
       "key": "a",
       "label": "Type the override in that lane (Recommended)",
+      "links": [
+        {
+          "label": "Lane fan-code-workflows",
+          "url": "https://claude.ai/code/session_013NEJL11UY3p6jnSXrTspmu"
+        }
+      ],
       "lose": "One typed line from you; the guard stays as it is until its fix lands."
     },
     {
       "gain": "No override; the guard is fixed first, so the next lane that merges main is not stuck either.",
-      "how": "The four PRs stay held by runner 10 until step records-page-guard-derived-rows merges; then the lane merges main with no refusal.",
+      "how": "The four PRs stay held by the batch runner (the session that merges PRs) until the guard fix merges; then the lane merges main with no refusal.",
       "key": "b",
       "label": "Wait for the guard fix",
-      "lose": "The four PRs miss the next batch and wait a lane plus a batch longer."
+      "lose": "The four PRs miss the next batch and wait for the fix lane and one more batch."
     }
   ],
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), for lane fan-code-workflows",

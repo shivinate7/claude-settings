@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-12T21:05:40Z",
+  "context": "Goal: the new guard that refuses a session's write to the page's saved answers reaches review as a draft PR, while you decide its final shape.\nProblem (rule): two of your open questions on this guard (whether it refuses a session's delete of a saved answer, and whether to keep it for page writes only, keep it as built, or drop it) are not answered, so the lane will not open its PR without your own typed word.\nBased on (read): the coordinator relayed the lane's ask at 15:04 CST today.\nDeparts from: main has no PR for this guard \u2014 a draft PR opens and goes to the batch runner, the session that merges PRs; it does not merge until you answer the two questions.\nWhy yours: the lane asked for your own typed words before it opens the PR.",
+  "home": "step answers-session-write-guard",
+  "id": "act-type-2bk5-draft-pr-yes",
+  "kind": "task",
+  "n": 648,
+  "options": [
+    {
+      "gain": "The draft PR exists and is reviewed while you decide the guard's shape.",
+      "how": "Open the lane and paste: yes: open the draft PR for answers-session-write-guard and hand it to runner 10",
+      "key": "a",
+      "label": "Type the yes",
+      "links": [
+        {
+          "label": "Lane answers-session-write-guard",
+          "url": "https://claude.ai/code/session_013NEJL2bk5JjA6fXmQ5SooN"
+        }
+      ],
+      "lose": "One pasted line; the PR still waits for your two answers before it merges."
+    },
+    {
+      "gain": "No PR until you answer the two questions on the guard.",
+      "how": "The lane keeps its branch and waits.",
+      "key": "b",
+      "label": "Wait for your two answers",
+      "lose": "Review starts only after you answer."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), for lane answers-session-write-guard",
+  "ref": "coordinator 15:04 CST Nov 12",
+  "repo": "shivinate7/claude-settings",
+  "short": "Type yes: draft PR for the answers guard",
+  "status": "open",
+  "title": "Type your yes in lane answers-session-write-guard so it opens its draft PR",
+  "why": "The lane opens the PR only on your own typed word."
+}
