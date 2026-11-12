@@ -1783,6 +1783,66 @@ def case_ruled_store_absent_is_only_unknown():
           "ruled store (absent)" not in question_form.unreadable_sources(unknown), str(unknown)[:300])
 
 
+# Store entries join the candidates only when they share a word with the question (the step rulings' word test), and at
+# most RULED_CAP_MAX of them, the newest first. An entry that shares no word stays out.
+RULED_UNRELATED = "ruled-lunch-menu"
+RULED_UNRELATED_TEXT = "Owner: the cafeteria menu changes on Fridays."
+RULED_CAP_MAX = 8
+
+
+def ruled_ids(candidates):
+    """The ids of the ruled candidates, in the order past_rulings gave them (`ruled:<id>: ...` lines)."""
+    return [c[len("ruled:"):].split(":", 1)[0] for c in candidates if c.startswith("ruled:")]
+
+
+def case_ruled_store_words_filter_leaves_out_an_unrelated_entry():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled store words: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("ruled-words", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+    fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files({
+        RULED_ID: fixture.entry(RULED_ID, at=RULED_AT, ruling=RULED_TEXT),
+        # Newer than the matching entry, so newest-first alone would list it first if it were kept.
+        RULED_UNRELATED: fixture.entry(RULED_UNRELATED, at="2026-11-13T09:00:00-06:00", ruling=RULED_UNRELATED_TEXT,
+                                       quote="lunch options", source="page item 40",
+                                       supersedes=[{"kind": "test", "ref": "lunch-menu-check"}]),
+    }), tcj.ROOT)
+    with mock.patch.object(guard_pointer, "pointer_checkout", return_value=repo):
+        candidates, _unknown = fn(tcj.APPS_GOAL, repo)
+    listed = ruled_ids(candidates)
+    check("ruled store words: the entry that shares words with the question is listed",
+          RULED_ID in listed, str(candidates)[:200])
+    check("ruled store words: the entry that shares words with the question is the first candidate",
+          bool(candidates) and candidates[0].startswith("ruled:%s: " % RULED_ID), str(candidates)[:200])
+    check("ruled store words: the entry that shares no word with the question is left out",
+          RULED_UNRELATED not in listed and RULED_UNRELATED_TEXT not in str(candidates), str(candidates)[:200])
+
+
+def case_ruled_store_caps_matching_entries_at_eight_newest_first():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled store cap: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    entries = {}
+    for day in range(1, 13):
+        rid = "ruled-cap-%02d" % day
+        entries[rid] = fixture.entry(rid, at="2026-11-%02dT09:00:00-06:00" % day,
+                                     ruling="Owner: keep the apps' access to claude-settings, round %02d." % day)
+    repo = tcj.make_repo("ruled-cap", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+    fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files(entries), tcj.ROOT)
+    with mock.patch.object(guard_pointer, "pointer_checkout", return_value=repo):
+        candidates, _unknown = fn(tcj.APPS_GOAL, repo)
+    listed = ruled_ids(candidates)
+    expected = ["ruled-cap-%02d" % day for day in range(12, 12 - RULED_CAP_MAX, -1)]
+    check("ruled store cap: at most %d matching entries are listed" % RULED_CAP_MAX,
+          len(listed) <= RULED_CAP_MAX, "listed %d: %r" % (len(listed), listed))
+    check("ruled store cap: the %d newest matching entries are listed, newest first" % RULED_CAP_MAX,
+          listed == expected, "listed %r, want %r" % (listed, expected))
+
+
 class _BrokenPipeGit:
     """A git child that dies before its stdin is read: the write raises BrokenPipeError, and stderr holds the text."""
 
@@ -2572,6 +2632,8 @@ def main():
                  case_key_overlap_resend_and_fact_lists, case_key_overlap_similar_questions_clash,
                  case_past_rulings_skips_the_debt_notes_file,
                  case_ruled_store_first_and_carries_supersedes, case_ruled_store_absent_is_only_unknown,
+                 case_ruled_store_words_filter_leaves_out_an_unrelated_entry,
+                 case_ruled_store_caps_matching_entries_at_eight_newest_first,
                  case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
                  case_task_why_cited_reds, case_task_why_cited_greens,
                  case_press_link_links_not_a_list_on_a_step, case_press_link_links_not_a_list_on_an_option,
