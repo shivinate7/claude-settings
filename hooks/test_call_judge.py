@@ -59,6 +59,10 @@ Interface the hook must match:
   question a standing ruling already decides. Each case builds its own real git repo (make_repo), and a fixture
   ruling is found in the prompt with the call's JSON cut out. A search that cannot read a source prints one stderr
   line, `past-ruling search unknown:`, and never says clear.
+- A measured challenge (R39 in docs/plans/restart-plan.md, rule outcomes-stale-decision-protocol): item 8 passes a
+  challenge that names the record and its sentence, a measure or "unmeasured", the outcome a ruling protected and what
+  protects it now, and a proposed fix. It refuses a bare re-ask with no new measure or fact. A denial tells the session
+  how to challenge, never to withdraw. A challenge is a question, never a grant (see the section "a measured challenge").
 - A relative file_path on an items set or update with no `data`: the file is read against the payload's `cwd`, as
   question_form._write_data reads it, so that write is judged like inline data (the section "a relative file_path").
 """
@@ -1687,6 +1691,175 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
           "Unvetted:" in r.reason(), detail(r))
 
 
+# ------------------------------------------------------------------ a measured challenge (R39)
+#
+# R39 in docs/plans/restart-plan.md, rule outcomes-stale-decision-protocol. Item 8 refuses a bare re-ask with no new
+# measure or fact. It passes a challenge that names the record and its sentence, a measure or "unmeasured", the outcome
+# the ruling protected and what protects it now, and a proposed fix. A denial tells the session how to challenge, never
+# to withdraw. A challenge reaches the owner as a question, never as a grant. The model is mocked, so these cases read the
+# text the code gives the model, the denial text the code appends, and the grant readers that no question path calls.
+CHAL_GOAL = "Goal: decide whether the GitHub apps keep access to claude-settings, now the audit counts more of them"
+CHAL_PROBLEM = ("Problem (risk): %s says 'keep the apps' access to claude-settings as is', which protected easy calls "
+                "into the repo; the monthly audit now protects that, and it counts 14 apps where the ruling named 9, "
+                "so the ruling needs your word" % APPS_SLUG)
+CHAL_BASED = ("Based on (measured): the monthly audit counts 14 apps with access, 5 more than the 9 %s was written on"
+              % APPS_SLUG,)
+CHAL_OPTIONS = [
+    {"label": "Remove the 5 apps the audit lists as unused (Recommended)",
+     "description": "Gain: fewer apps can write to the repo, and the calls the ruling protected stay simple. "
+                    "Lose: five apps lose access."},
+    {"label": "Keep the apps as the ruling says",
+     "description": "Gain: nothing changes on the repo. Lose: five apps keep access the audit does not justify."}]
+CHAL_GRANT_OPTIONS = [
+    {"label": "Yes, grant it now (Recommended)",
+     "description": "Gain: a yes here overrides the ruling and grants the change now. Lose: the ruling's protection goes."},
+    {"label": "Hold it",
+     "description": "Gain: the ruling stands. Lose: the five extra apps keep access."}]
+CHAL_CONTEXT = "\n".join((CHAL_GOAL, CHAL_PROBLEM, CHAL_BASED[0], DEPARTS_LINE))
+CHAL_PAGE_TITLE = "Remove the five unused apps?"
+WITHDRAW_PHRASES = ("withdraw", "drop the question", "take the question back", "do not send", "don't send")
+# The grant readers of the owner's own prompts (hooks/override.py, hooks/local_time.py). No question path may call one.
+GRANT_READERS = ("grant_override_ask", "grant_opus_ask", "grant_override", "opus_ask", "override_ask", "opus_scope")
+JUDGE_SOURCES = ("hooks/call_judge.py", "hooks/question_form.py", "hooks/reply_judge.py", "lint/report_guard.py")
+
+
+def sentences_of(text):
+    """The lowercase sentences of `text`, split at a full stop or a line break."""
+    return [s for s in re.split(r"[.\n]", text.lower()) if s.strip()]
+
+
+def element_checks(text):
+    """(label, passed) for each element a measured challenge carries, read from `text`. Each label names one element,
+    so a failed check names the element that is missing. "unmeasured" is checked on its own: the item must allow it
+    in place of a measure, and must name a measure too."""
+    t = text.lower()
+    return [
+        ("names the record and its sentence", "record" in t and "sentence" in t),
+        ("names a measure", re.search(r"\bmeasure", t) is not None),
+        ("allows the word unmeasured in place of a measure", "unmeasured" in t),
+        ("names the outcome the ruling protected and what protects it now",
+         "outcome" in t and "protect" in t and re.search(r"\bnow\b", t) is not None),
+        ("names a proposed fix", "propos" in t and re.search(r"\bfix", t) is not None),
+    ]
+
+
+def item_checks(text, subject):
+    """Checks that `text` passes a measured challenge: a sentence that says a challenge passes, then each element.
+    `subject` opens each check's name, so a failure names where the text came from. A failure's detail is one line."""
+    flat = " ".join(text.split())[:300]
+    says_pass = any("challenge" in s and "pass" in s for s in sentences_of(text))
+    check("%s says a challenge passes" % subject, says_pass, flat)
+    for label, ok in element_checks(text):
+        check("%s %s" % (subject, label), ok, flat)
+
+
+def item8_of(prompt):
+    return item_text(prompt, 8)
+
+
+def case_past_ruling_item_passes_a_measured_challenge():
+    item = load_file_module(HOOK, "call_judge_under_test").PAST_RULING_ITEM
+    item_checks(item, "challenge pass: the item")
+
+
+def case_past_ruling_challenge_question_gets_item_8():
+    import question_form  # the one form check (hooks/question_form.py)
+    box = good_box(goal=CHAL_GOAL, problem=CHAL_PROBLEM, based=CHAL_BASED, options=CHAL_OPTIONS)
+    check("challenge question fixture: the box passes chat_hit, so the model judges it",
+          question_form.chat_hit(box) == ("", ""), question_form.chat_hit(box))
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=ALLOW)
+    check("challenge question: one model call, and the box reaches the owner with no refusal",
+          len(r.calls) == 1 and r.code == 0 and r.out == "", detail(r))
+    item8 = item8_of(r.calls[0]["prompt"] if r.calls else "")
+    check("challenge question: the prompt holds item 8", item8 != "", detail(r))
+    item_checks(item8, "challenge question: item 8")
+
+
+def case_past_ruling_challenge_page_item_gets_item_8():
+    import question_form  # the one form check (hooks/question_form.py)
+    item = good_page_item(title=CHAL_PAGE_TITLE, context=CHAL_CONTEXT)
+    got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "chal1", "data": item})
+    check("challenge page fixture: the item passes item_hit, so the model judges it", got == ("", ""), got)
+    r = run_hook(page_input("set", item, doc_id="chal1", cwd=DECISIONS_REPO), answer=ALLOW)
+    check("challenge page item: one model call", len(r.calls) == 1, detail(r))
+    item8 = item8_of(r.calls[0]["prompt"] if r.calls else "")
+    check("challenge page item: the prompt holds item 8", item8 != "", detail(r))
+    item_checks(item8, "challenge page item: item 8")
+
+
+def case_past_ruling_item_refuses_a_bare_re_ask():
+    item = load_file_module(HOOK, "call_judge_under_test").PAST_RULING_ITEM
+    lower = item.lower()
+    check("bare re-ask: the item refuses a re-ask with no new measure or fact",
+          "refuse" in lower and "no new" in lower and ("measure" in lower or "fact" in lower), item[:300])
+
+
+def case_past_ruling_item_never_says_withdraw():
+    item = load_file_module(HOOK, "call_judge_under_test").PAST_RULING_ITEM
+    hits = [p for p in WITHDRAW_PHRASES if p in item.lower()]
+    check("withdraw: the item never tells the session to withdraw the question", not hits, hits)
+
+
+def case_past_ruling_denial_says_how_to_challenge():
+    box = good_box(goal=APPS_GOAL, problem=APPS_PROBLEM, based=APPS_BASED, options=APPS_OPTIONS)
+    bare = json.dumps({"ok": False, "reason": "decisions/%s: already decided by the keep-the-apps ruling." % APPS_SLUG})
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=bare)
+    reason = r.reason().lower()
+    check("denial: a bare re-ask is denied under the past-ruling rule",
+          (r.deny() or {}).get("permissionDecision") == "deny" and reason.startswith("past-ruling"), detail(r))
+    check("denial: the denial tells the session how to challenge", "challenge" in reason, reason[:300])
+    for label, ok in element_checks(reason):
+        check("denial: %s" % label, ok, reason[:300])
+    hits = [p for p in WITHDRAW_PHRASES if p in reason]
+    check("denial: never tells the session to withdraw the question", not hits, hits)
+
+
+def case_challenge_text_never_grants():
+    import question_form  # the one form check (hooks/question_form.py)
+    box = good_box(goal=CHAL_GOAL, problem=CHAL_PROBLEM, based=CHAL_BASED, options=CHAL_GRANT_OPTIONS)
+    check("grant text fixture: the box passes chat_hit, so the model judges it",
+          question_form.chat_hit(box) == ("", ""), question_form.chat_hit(box))
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=ALLOW)
+    check("grant text: the challenge is judged once and reaches the owner with no refusal",
+          len(r.calls) == 1 and r.code == 0 and r.out == "", detail(r))
+    grants = os.path.join(r.base, "config", "state", "override")
+    check("grant text: no override pass is written", not os.path.isdir(grants) or not os.listdir(grants), detail(r))
+    check("grant text: guard.log holds no override line", "\toverride\t" not in r.log, r.log[-200:])
+
+
+def case_challenge_text_never_lifts_a_refusal():
+    import question_form  # the one form check (hooks/question_form.py)
+    box = good_box(goal=CHAL_GOAL, problem=CHAL_PROBLEM, based=CHAL_BASED, options=CHAL_GRANT_OPTIONS)
+    bare = json.dumps({"ok": False, "reason": "decisions/%s: already decided by the keep-the-apps ruling." % APPS_SLUG})
+    r = run_hook(question_input(box=box, cwd=DECISIONS_REPO), answer=bare)
+    check("grant text: a refusal stands when the challenge carries grant words",
+          (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+    check("grant text: no lift line for the refusal, and no override line at all",
+          not lifted_log(r, question_form.PAST_RULING_RULE) and "\toverride\t" not in r.log, r.log[-200:])
+
+
+def called_names(path):
+    """The names of each call in the Python file at `path`, read with the ast parser, so a name in a string or a
+    comment is no call."""
+    import ast
+    with open(path, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read(), path)
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name):
+                names.add(node.func.id)
+            elif isinstance(node.func, ast.Attribute):
+                names.add(node.func.attr)
+    return names
+
+
+def case_judges_call_no_grant_reader():
+    for rel in JUDGE_SOURCES:
+        hit = sorted(called_names(os.path.join(REPO, *rel.split("/"))) & set(GRANT_READERS))
+        check("no grant: %s calls no grant reader" % rel, not hit, hit)
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -1712,7 +1885,12 @@ def main():
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
                  case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
                  case_page_relative_file_path_reaches_the_review, case_page_relative_file_path_passing_item_passes,
-                 case_page_absolute_file_path_is_judged):
+                 case_page_absolute_file_path_is_judged,
+                 case_past_ruling_item_passes_a_measured_challenge, case_past_ruling_challenge_question_gets_item_8,
+                 case_past_ruling_challenge_page_item_gets_item_8, case_past_ruling_item_refuses_a_bare_re_ask,
+                 case_past_ruling_item_never_says_withdraw, case_past_ruling_denial_says_how_to_challenge,
+                 case_challenge_text_never_grants, case_challenge_text_never_lifts_a_refusal,
+                 case_judges_call_no_grant_reader):
         try:
             case()
         except Exception as exc:
