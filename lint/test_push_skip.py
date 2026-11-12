@@ -87,7 +87,7 @@ class PushSkipDecision(unittest.TestCase):
         value, _ = self.skip_value(prs=[pr(status="in_progress", conclusion=None)])
         self.assertEqual(value, "false", "an in-progress batch run is not a green run yet, so skip=false")
 
-    def test_skip_false_when_the_matching_head_is_not_a_batch_branch(self):
+    def test_skip_false_when_the_matching_head_is_not_an_integration_branch(self):
         value, _ = self.skip_value(prs=[pr(branch="lane-x")])
         self.assertEqual(value, "false", "a lone lane's head is not a batch head, so skip=false")
 
