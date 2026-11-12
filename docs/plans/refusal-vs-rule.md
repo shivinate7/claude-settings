@@ -31,7 +31,7 @@ batch ahead of it) holds that fix. This sweep cites it and does not redo it.
 - **uncited:** no rule or decision holds the refusal. Most are fail-closed stops on a failed read.
 - **unverified:** no rule sentence could be quoted.
 
-142 rows: exact 88, looser 10, stricter 11, uncited 32, unverified 1. The Gold column is the target for every row. A row whose Verdict is not
+143 rows: exact 88, looser 11, stricter 11, uncited 32, unverified 1. The Gold column is the target for every row. A row whose Verdict is not
 exact has a gap.
 
 
@@ -51,7 +51,7 @@ exact has a gap.
 | `ln-over-directory` | none | - | uncited | exact | `ln -sf /tmp/x existing_dir` is denied; the comment says only "ported from banchi" and names no risk kind | rule rewrite: land a decision with its risk kind and date, or cull it (building-guard-needs-incident) |
 | `destructive-delete` | rm-path-wrapper | "Also a root, a home, or a glob of one (`rm -r /`, `rm -r ~/*`, `rm -r ../*`)." | looser | exact | a recursive delete of `$(pwd)/*` passes, though the same delete of `./*` is denied. So do a delete inside `$(...)` in an unquoted heredoc and a python heredoc that calls shutil.rmtree (step refusal-looser-fixes) | tool fix: read `$(pwd)` and `$PWD` as `.`; read command substitutions in an unquoted heredoc |
 | `linked-node-modules` | guard-linked-node-modules | "A recursive delete into a linked `node_modules` is refused." | exact | exact | `npm ci` in a linked folder is denied; the open holes are the decision's debts | - |
-| `env-file` | none | - | uncited | exact | `cat .env` is denied; `grep -r --exclude=.env foo .` is denied too (debt env-file-rule-false-alarms) | rule rewrite: write an env-file decision; tool fix: skip --exclude and -t values |
+| `env-file` | none | - | uncited | exact | `cat .env` is denied; `grep -r --exclude=.env foo .` is allowed (its value is a glob that excludes) | rule rewrite: write an env-file decision; tool fix: done for --exclude and -t values (decision env-file-stays-unread) |
 | `frozen-path` | frozen-path-resolves-shell-vars | "A write whose resolved target is frozen is refused." | exact | exact | a write to the settings file under `$HOME/.claude` through a variable is denied | rule rewrite: the guard index lists 3 frozen kinds; the code freezes 11 |
 | `config-edit` | none | - | uncited | exact | a write to `.claude/settings.local.json` is allowed and noted; the code cites "Decision 7", which has no file | rule rewrite: land the "project config edits: allow and report" decision |
 | `records-page` | records-index-at-merge | "refuses a lane commit whose staged `docs/records.md` differs from the page on the lane's base." | exact | exact | `python3 lint/hook_catalog.py && git add -A && git commit` is denied even when the page would be unchanged. An accepted limit: the guard runs before the generator, so it cannot read the page the command will stage (triage, step refusal-stricter-fixes) | - |
@@ -70,6 +70,7 @@ Notes: the shared-tree gaps `git update-ref -d`, `git rm -rf .` and `git read-tr
 | `live-stream` | none | - | uncited | exact | `tail -f x` is denied, and so is `timeout 5 tail -f x`, which the remedy itself suggests | tool fix: pass a `timeout N` wrapper; rule rewrite: write a live-stream decision |
 | `waiter` | agents-wait-with-monitor | "refuses only real waste: a loop that pauses... two or more pauses... one pause of 25 s or more" | exact | exact | `sleep 30` is denied; `sleep 3` passes | - |
 | `background-end` | background-needs-end-note | "refuses the call when the note is missing or its condition is empty" | exact | exact | `npm run dev` with no end note is denied | - |
+| `check-tail` | background-check-through-verdict | "A pipeline that holds a named check and a later `tail` or `head` stage is refused." | looser | exact | `merge --lane-lint 7 \| tail -3` is denied, foreground or background; the same call through `verdict` with no pipe after it passes (`verdict <cmd> \| tail` is denied by verdict-pipe-refused), as does a `tee` with no filter after it (`tee x | tail` is denied); `ci-job` is denied in the background only. A PowerShell `Select-Object -Last` passes, as the record's known gaps say | tool fix: read `Select-Object -First/-Last` as `head`/`tail` |
 | `playwright-browsers-path` | playwright-browsers-path | "refuses a Bash or PowerShell command that sets the variable." | exact | exact | an export is denied; echo and unset pass | - |
 | `playwright-install` | playwright-install-once | "An agent never runs a Playwright browser install, in any form." | exact | exact | `npx playwright install` is denied | - |
 | `simulator-boot-cap` | sweep-shuts-down-idle-simulators | "refuses a session's boot when 2 devices are already booted, and names them" | exact | exact | a third boot is denied | - |
@@ -97,7 +98,8 @@ Notes: create_session is not a start tool for load-brake, so a lane session star
 | `agent-model-floor` | agent-model-cap | "Guard rule `agent-model-floor` refuses an Agent, Task, Workflow agent() or start_session call whose model holds haiku." | looser | exact | create_session with model haiku passes: the floor reads start_session only | tool fix: read create_session in floor_hit too |
 | `roles-third-round-steps-up` | roles-third-round-steps-up | "Third try: Opus. A builder's third try ... its brief carries `Round 3 of 3`." | exact | exact | a builder's round 3 on sonnet is denied | - |
 | `agent-model-cap` | agent-model-cap | "Any other spawn runs Opus only when the owner names it." | looser | exact | Explore with model opus and no `Audit:` marker passes unasked; the table gives plain Explore haiku | tool fix: exempt Explore only with the `Audit:` marker |
-| `lane-effort-pin` | agent-model-cap | "A lane session runs at medium effort" | exact | exact | a lane create_session whose prompt is not `/effort medium` is denied | - |
+| `lane-effort-pin` | agent-model-cap | "A lane runs at medium effort" | exact | exact | a lane create_session whose effort is not `medium`, or whose prompt has no Grant line, is denied | - |
+| `lane-start-settings` | agent-model-cap | "The coordinator passes both on every lane start" | exact | exact | a lane create_session with no model, or no source_url, is denied | - |
 | `builder-test-edit` | builders-cannot-edit-tests | "A builder that cannot pass a test must not delete, skip or rewrite it." | stricter | exact | a builder Write to `<scratchpad>/test_probe.py` or `docs/spec/api.md` is denied: the test-path check reads paths outside the repo, and `spec` counts as a test folder | tool fix: skip paths outside the repo; count `spec` only for code files |
 | `test-author-scope` | builders-cannot-edit-tests | "`test-author`: the inverse." | exact | exact | a test-author write to product code is denied; scratchpad passes | - |
 | `record-writer-scope` | builders-cannot-edit-tests | "`record-writer`: may change only `*.md` files" | exact | exact | a .txt note in its own scratchpad is denied; the literal rule holds | - |
@@ -160,14 +162,14 @@ Notes: owner-judge also fires on prose "Problem statement:" (wrong id only). gh-
 | `merge:ready-never-sent` | records-index-at-merge | "so the batch runner marks the PR ready" | exact | exact | the tool never marks a PR ready (1073) | - |
 | `merge:blocked-or-behind` | none | - | uncited | exact | a PR GitHub reads BLOCKED (for example, by a missing review) or BEHIND gets no merge call (1085) | rule rewrite: add to standing-merge-grant that a BLOCKED PR never merges |
 | `merge:merged-other-head` | standing-merge-grant | "Only a proven refusal reverts the claim" | exact | exact | the PR merged at another head (1103); no revert | - |
-| `merge:outcome-unproven` | standing-merge-grant | "Only a proven refusal reverts the claim" | exact | exact | state unread (1098), network loss (1105), or exit 0 still open (1107) | - |
+| `merge:outcome-unproven` | standing-merge-grant | "Only a proven refusal reverts the claim" | exact | exact | state unread (1098), network loss (1105), or exit 0 still open (1107); after the claim push, a read that could not run (a failed wait read, the wait deadline with a check pending, a base read, a small-move read such as the lint listing, the workflow, a suite file or a merge that names no conflict, a debt check with only unknown findings) | - |
 | `merge:refused-reply` | standing-merge-grant | "a refusal reply with the pull request still OPEN" | exact | exact | GitHub refuses the merge call (1111); the claim reverts | - |
 | `merge:claim-refused` | records-index-at-merge (nearest) | "claims record numbers under the merge lock" | uncited | exact | the claim exits non-zero (1173) or prints two claim lines (1176) | - |
 | `merge:stamp-config-unreadable` | standing-merge-grant (nearest) | "reads the switch from the base branch on origin" | uncited | exact | the base config cannot be read or parsed (1135, 1141, 1144) | - |
 | `merge:records-commit-failed` | records-index-at-merge | "Only the merge tool rebuilds the page." | unverified | exact | the generator or its commit fails (1189, 1202, 1226) | - |
 | `merge:records-conflict-beyond-page` | merge-needs-current-base | "The head and the base tip merge cleanly." | exact | exact | the base conflicts on a file other than the records page (1215) | - |
 | `merge:records-no-page-to-heal` | records-index-at-merge | "The heal stops when the generator writes no page for a conflicted page." | exact | exact | (1221) | - |
-| `merge:small-move-unproved` | merge-needs-current-base | "A small move is the one exception: ... any read that fails refuses." | exact | exact | a suite or lint read fails, so the base move is not proved small (1422-1556) | - |
+| `merge:small-move-unproved` | merge-needs-current-base | "A small move is the one exception: ... any read that fails refuses." | exact | exact | a suite or lint read fails, so the base move is not proved small (1422-1556); after the claim push it is `merge:outcome-unproven`: the claim stays | - |
 | `merge:holds-base-behind` | merge-needs-current-base | "The merge tool refuses a head that does not hold the base tip." | exact | exact | the head lacks the base tip with no small-move proof (1577-1579) | - |
 | `merge:push-refused` | none | - | uncited | exact | the plain push of the PR branch is refused (1584) | - |
 | `merge:ff-main-skipped` | shared-trees-no-destructive-git | "No destructive git." | exact | exact | the local main is not moved when a fetch, ancestry or ff-only fails (1617-1631) | - |
@@ -203,14 +205,14 @@ Notes: batch_running (726-753) computes the blockers; area F rows its refusal. T
 | `merge:claim-off-default-base` | one-shared-record-stamp (nearest) | "The claim runs before the merge, on the pull request branch" | uncited | exact | a claimed head on a base that is not the default (2239) | rule rewrite: one line in one-shared-record-stamp |
 | `merge:confirm-head-not-green` | git-never-merge-failing-ci | "Never merge failing CI." | exact | exact | the head checks are red before the claim (2258) | - |
 | `merge:confirm-required-names` | no-merge-during-batch-ci | "The tool refuses a base with no protection and no pinned list." | exact | exact | no protection and no pin (2210, 2220) | - |
-| `merge:confirm-wait-not-green` | git-never-merge-failing-ci | "Never merge failing CI." | exact | exact | a check goes red or the deadline passes; the claim reverts (2287) | - |
-| `merge:claim-proof-stale` | merge-needs-current-base | "A base that moved during the wait, and is not a small move, reverts the claim." | exact | exact | the base fetch fails or the claimed number is now taken (2295-2310) | - |
+| `merge:confirm-wait-not-green` | git-never-merge-failing-ci | "Never merge failing CI." | exact | exact | a check goes red; the claim reverts (2287). The deadline with a check pending is `merge:outcome-unproven`: the claim stays | - |
+| `merge:claim-proof-stale` | merge-needs-current-base | "A base that moved during the wait, and is not a small move, reverts the claim." | exact | exact | the claimed number is now taken (2295-2310). A base fetch that fails, or an UNKNOWN stamp or undo read, is `merge:outcome-unproven`: the claim stays | - |
 | `merge:records-stale` | records-index-at-merge | "A stale page ... gets the rebuild commit" | exact | exact | the base gained a record outside the tool (2317, 2321) | - |
 | `merge:base-moved-in-wait` | merge-needs-current-base | "a batch merges only after a green run that holds for the current main." | exact | exact | main moved during the wait, not small (2324) | - |
 | `merge:heal-push-failed` | records-index-at-merge | "When only the page conflicts with the base, the tool rebuilds it on the merged tree." | exact | exact | the heal commit push fails; the claim reverts (2334) | - |
 | `merge:heal-not-green` | merge-needs-current-base | "A heal merge commit ... Its own checks wait before the merge." | exact | exact | the heal commit is red, or the base moved again (2343-2349) | - |
 | `merge:host-refused` | none | - | uncited | exact | the merge call is refused, for example the head moved; the claim reverts (2366) | - |
-| `merge:confirm-unexpected-error` | none | - | uncited | exact | an error after the claim push; the claim reverts (2266-2277, 2370) | - |
+| `merge:confirm-unexpected-error` | none | - | uncited | exact | an error after the claim push that is no read (not a timeout, OS or value error); the claim reverts (2266-2277, 2370) | - |
 | `merge:role-write-failed` | session-tiers | "Local sessions: unchanged." | uncited | exact | `--role` outside the cloud, with no session id, or on an unwritable file (2422, 2424, 2436) | - |
 | `merge:role-tier-invalid` | session-tiers | "The merge tool refuses any other tier, and the refusal lists no tier." | exact | exact | `--role lane` (2426) | - |
 | `merge:no-merge-role` | session-tiers | "Only a coordinator or batch runner gains a way to merge" | exact | exact | a cloud --confirm with no role file (2461, 2403-2415) | - |
