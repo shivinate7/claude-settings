@@ -1,0 +1,35 @@
+{
+  "added": "2026-11-12T21:51:00Z",
+  "context": "Goal: every ruling you give is kept, wherever you type it, and nothing a session writes is logged as yours.\nProblem (goal): the lane took this undoable pick today without asking you: a relayed message arrives looking exactly like a peer session's message, so the feedback log cannot tell your relayed words from a session's own.\nBased on (ruling): R27 point 4 asks for relayed words to be saved; R12 counts a relay only once a check against the sender's own log is built, and that check is not built yet.\nDeparts from: main has no feedback log \u2014 PR #2996 adds one that saves your typed words and question-box answers only.",
+  "home": "R27 point 4; PR #2996 (feedback log)",
+  "id": "relay-words-saved",
+  "kind": "decision",
+  "n": 652,
+  "options": [
+    {
+      "gain": "Nothing a session writes can be logged as your word.",
+      "how": "PR #2996 as built: only your typed words and question-box answers are logged; relays wait for the sender check. Undo: pick b later.",
+      "id": "keep-skipped",
+      "key": "a",
+      "label": "Keep relays unlogged for now (Recommended)",
+      "lose": "A ruling you give in another session's chat is missing from this log until the check is built."
+    },
+    {
+      "gain": "Relayed rulings are kept from today.",
+      "how": "The relaying session adds a marker line with your exact words and their time, and the log saves marked lines now.",
+      "id": "relay-marker",
+      "key": "b",
+      "label": "Log relays that carry a marker",
+      "lose": "Until the sender check is built, a session that writes the marker wrongly puts words in the log as yours."
+    }
+  ],
+  "owner": "lane prose-tending-contract (session_013NEJL3ebkkPacdNS1qZVrk)",
+  "pick": "a",
+  "ref": "lane prose-tending-contract 15:48 CST Nov 12; PR #2996",
+  "repo": "shivinate7/claude-settings",
+  "short": "Relayed words stay unlogged",
+  "stands": true,
+  "status": "open",
+  "title": "Your words relayed by another session stay out of the feedback log for now",
+  "why": "The lane took this pick; it stands unless you choose b."
+}

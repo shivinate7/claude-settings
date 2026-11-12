@@ -1,0 +1,16 @@
+{
+ "id": "granted-hold-flags-owner",
+ "title": "A held change from a failed granted round prints an owner-item line, and the batch runner files the page item",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "#2326"
+ ],
+ "why": "Owner item 625 a with his condition (15:46 CST Nov 12): \"as long as its flagged to me and doesn't go to sleep idling quietlky\". Lane review-fix-check-round 15:48 CST: the hold for a failed granted round exists only in draft #2326; main reads a round-4 FAIL as done or open.",
+ "source": "owner page save 15:46 CST Nov 12 (item 625); lane review-fix-check-round 15:48 CST",
+ "note": "Lane pick (undoable, triage agrees): merge --reviewed prints one `held: owner item needed` line naming the PR and the choices (drop, restart, merge) and exits non-zero, so a runner cannot pass over it; the batch runner then files the page item. Red test first. After #2326 lands.",
+ "updatedAt": "2026-11-12T15:51:57-06:00"
+}

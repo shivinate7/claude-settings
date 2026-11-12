@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-12T21:51:00Z",
+  "context": "Goal: a lane whose PR conflicts with main after a batch gets back into the next batch fast.\nProblem (rule): the coordinator let a fresh reviewer read only the resolved lines of a conflicted main merge, but your Nov 10 14:07 CST ruling (\"any other difference keeps today's rules\") means such a head owes a full review.\nBased on (ruling): decisions/pr-review-record, owner 2026-11-10 14:07 CST: \"any other difference keeps today's rules\"; this re-asks it because the coordinator wants conflicted lanes back in a batch faster.\nBased on (read): the merge tool's fix-check route already accepts a reviewer of only the changed lines on such a head; it does not check when the review log was written, so a hand-edited log passes.\nDeparts from: main, where a conflicted main merge owes a full review \u2014 a review of only the resolved lines carries it when the merge's first parent is the reviewed head.\nMeanwhile: runner 10 holds any conflicted-merge head that has only a review of the resolved lines.",
+  "home": "decision pr-review-record; step post-batch-conflict-merge",
+  "id": "conflict-merge-hunk-check",
+  "kind": "decision",
+  "n": 651,
+  "options": [
+    {
+      "gain": "Conflicted lanes rejoin a batch in minutes, not after a full review round.",
+      "how": "After a conflicted main merge, a fresh reviewer reads only the lines the merge resolved, recorded as a fix check on the reviewed head; then the PR rejoins a batch.",
+      "id": "hunk-only",
+      "key": "a",
+      "label": "Review the resolved lines only (Recommended)",
+      "lose": "A bad resolution outside the resolved lines is caught only by CI."
+    },
+    {
+      "gain": "Today's safety: the whole change is read again.",
+      "how": "A conflicted main merge gets a full review round, as today.",
+      "id": "full-review",
+      "key": "b",
+      "label": "Keep the full review",
+      "lose": "Each conflicted lane waits a full review round before its next batch."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), for lane post-batch-conflict-merge",
+  "pick": "a",
+  "ref": "coordinator 15:49 CST Nov 12; PR #2969",
+  "repo": "shivinate7/claude-settings",
+  "short": "Hunk-only review after a conflict merge",
+  "status": "open",
+  "title": "After a conflicted main merge, may a review of only the resolved lines carry the change?",
+  "why": "Your Nov 10 ruling keeps today's rules for any other difference, so a full review is owed unless you say otherwise."
+}

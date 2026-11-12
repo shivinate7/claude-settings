@@ -1,0 +1,35 @@
+{
+  "added": "2026-11-12T21:51:00Z",
+  "context": "Goal: a ruling you gave closes only once it really holds on main.\nProblem (goal): the lane took this undoable pick today without asking you: the check closes a ruling as soon as its home file exists on main, so a ruling homed to a file that already exists closes before its edit lands.\nBased on (ruling): R27 point 1, a ruling closes when main holds it; the lane read \"holds it\" as \"its home file is on main\".\nBased on (read): a ruling homed to a roadmap step never closes this way, since the step is the open work; the gap is written down as a debt.\nDeparts from: main has no such close \u2014 PR #2915 adds one that reads the file's presence, not its text.",
+  "home": "R27 point 1; decision prose-tending-contract",
+  "id": "feedback-close-reads-content",
+  "kind": "decision",
+  "n": 653,
+  "options": [
+    {
+      "gain": "Small and ships now with PR #2915.",
+      "how": "As built: the ruling closes once its home file is on main; the debt records that the text is not read. Undo: pick b later.",
+      "id": "file-presence",
+      "key": "a",
+      "label": "Close on the file (Recommended)",
+      "lose": "A ruling homed to an existing file shows closed before its edit lands."
+    },
+    {
+      "gain": "A closed ruling always holds on main.",
+      "how": "The check reads the home file and closes the ruling only when a line from it is there.",
+      "id": "require-content",
+      "key": "b",
+      "label": "Close only when the ruling's text is on main",
+      "lose": "Each ruling needs a line to match, and the lane grows."
+    }
+  ],
+  "owner": "lane prose-tending-contract (session_013NEJL3ebkkPacdNS1qZVrk)",
+  "pick": "a",
+  "ref": "lane prose-tending-contract 15:48 CST Nov 12; PR #2915, PR #2996; debt feedback-close-reads-file-only",
+  "repo": "shivinate7/claude-settings",
+  "short": "Close on file, not on its text",
+  "stands": true,
+  "status": "open",
+  "title": "A ruling closes once its home file is on main, before its edit lands",
+  "why": "The lane took this pick; it stands unless you choose b."
+}

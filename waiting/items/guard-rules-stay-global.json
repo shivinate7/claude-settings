@@ -1,6 +1,6 @@
 {
   "added": "2026-11-12T19:01:00Z",
-  "context": "Goal: rules for building and trusting guards still reach every session that builds a guard.\nProblem (rule): your 11:59 CST picks moved the two guard rules into a claude-settings file that install never copies, so a session building a check in another repo loses them, and only you can undo your pick.\nBased on (ruling): your Nov 12 11:59 CST picks to move two rules out of the global file: trust a guard only once it fails on the mistake it guards against, and build a new guard only against a real mistake it would have stopped.\nBased on (read): install.sh on main, read 13:14 CST: it links hooks, lint, skills, agents, settings.json and a CLAUDE.md pointer into ~/.claude, which every repo's session uses; it never installs .claude/rules, whose file loads only when a claude-settings session edits hooks/. How many other repos build their own checks is unmeasured.\nDeparts from: main keeps both rules in the global CLAUDE.md \u2014 b moves them to repo-only rule files, c to a new skill.",
+  "context": "Goal: rules for building and trusting guards still reach every session that builds or reads a check, in any repo.\nProblem (rule): your 11:59 CST picks would move the two guard rules into a claude-settings file that install never copies, so only you can undo that pick.\nBased on (read): retrospective, read at origin/main today: both rules are still in the global CLAUDE.md, so the move never landed and nothing is lost yet; no shipped skill covers building a guard or check.\nBased on (read): a skill loads only when the model judges its description fits the task, so a session writing a test or CI check in another repo may never load it; the trust-a-guard-only-after-red rule also covers reading any check, not only building one.\nDeparts from: main keeps both rules in the global CLAUDE.md \u2014 b moves them out; c keeps them and adds a how-to skill.",
   "home": "lane global-claude-md-scope-audit",
   "id": "guard-rules-stay-global",
   "kind": "decision",
@@ -14,27 +14,31 @@
     {
       "gain": "Every repo keeps both rules.",
       "how": "Both rules stay in the global CLAUDE.md; the other moves you accepted stand.",
+      "id": "keep-global",
       "key": "a",
-      "label": "Keep both global (Recommended)",
+      "label": "Keep both global",
       "lose": "About 60 words stay in the global file."
     },
     {
       "gain": "About 60 words leave the global file.",
       "how": "Both rules move to the claude-settings rule files as you picked.",
+      "id": "move-anyway",
       "key": "b",
       "label": "Move them anyway",
       "lose": "Other repos lose both rules, and guards outside hooks/ and lint/ load neither."
     },
     {
-      "gain": "The rules load where they are needed, in every repo.",
-      "how": "Build a new skill that loads when a guard is built, in any repo, and home both rules there.",
+      "gain": "Every repo keeps both rules, and a session building a guard gets fuller guidance when the skill loads.",
+      "how": "Both one-line rules stay in the global CLAUDE.md. A new guard-building skill holds the how-to: how to show a guard red on its mistake, and when to cull one. The skill never holds the rule itself.",
+      "id": "global-plus-skill",
       "key": "c",
-      "label": "A guard-building skill",
-      "lose": "A new skill to build, and it loads only when its description matches the task."
+      "label": "Keep both global and add a how-to skill (Recommended)",
+      "lose": "One more skill to build and keep fresh; it adds guidance only when it loads."
     }
   ],
   "owner": "lane global-claude-md-scope-audit (session_013NEJKzRnzW9oYuFZAxseXz)",
-  "ref": "lane global-claude-md-scope-audit, 12:57 CST Nov 12",
+  "pick": "c",
+  "ref": "lane global-claude-md-scope-audit, 12:57 CST Nov 12; reworded after your 15:46 CST note, with the retrospective's read",
   "reply": "Checked install.sh on main (13:14 CST). You're right that the guard hooks reach every repo: install links hooks, lint, skills, agents and settings into ~/.claude, so they run in every session. But it doesn't install the rule file the two rules moved to, which loads only in a claude-settings session that edits hooks/. So shared guards built here keep the rules, but a session building a check inside another repo (a q_max CI check, say) loses them, and so would guard work here under merge/, bin/, actions/ or .github/. The lane's point holds for those cases only. Pick again with that in mind: a keeps them global; b keeps your 11:59 move.",
   "repo": "shivinate7/claude-settings",
   "short": "Guard rules stay global?",
