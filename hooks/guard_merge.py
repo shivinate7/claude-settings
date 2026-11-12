@@ -5,11 +5,13 @@ Other files reach these names through `guard`.
 """
 import contextlib
 import fnmatch
+import importlib
 import io
 import json
 import os
 import re
 import subprocess
+import sys
 from datetime import datetime, timedelta, timezone
 
 from guard_core import (
@@ -1827,6 +1829,101 @@ def brief_hit(tool: str, tool_input, transcript: str):
     if tagged_after:  # a set_session_tags call on the target followed its record, so the topic or steps may have changed
         return "lane brief to a target whose record is stale", BRIEF_STALE_REASON
     return topic_hit(first, tags)
+
+
+# ---- send_message: a coordinator's pick reaches the owner's page (rule pick-reaches-page)
+PICK_MARKER = "Coordinator pick"  # a line of a coordinator's message that opens `Coordinator pick: <key>` states a pick
+COORDINATOR_TAG = BUILD_TAG + "coordinator"
+_PICK_LINE = re.compile(_MARKDOWN_LEAD + re.escape(PICK_MARKER) + r"\b(?P<rest>.*)", re.IGNORECASE)
+_FENCE_LINE = re.compile(r"\s*(```|~~~)")
+PICK_REASON = (
+    "this message states a pick (`Coordinator pick: {key}`) to a session that is not the page writer, and the "
+    "page writer has had no send naming that pick since the owner's last message. The owner overrules a pick on "
+    "the waiting page, so the pick reaches the page first. Send the same `Coordinator pick: {key}` line to the "
+    "page writer (triage) in this turn, as a `stands` item (skill waiting-page, \"Add an item\"), then retry "
+    "this send. (decision pick-reaches-page, a coordinator's pick reaches the owner's page)"
+)
+
+
+def _pick_keys(text):
+    """[(line, key)] for each `Coordinator pick` line of the message `text` outside a fenced block. The key is the
+    rest of the line with its leading `:`, `*`, `_`, dash and spaces and its trailing `.`, `*`, `_`, backtick and
+    spaces cut off, casefolded: one pick has one key, whichever markdown or full stop wraps it. A fence ends at its
+    closing line, and an unclosed one runs to the message's end. Read line by line with one fence flag, so a lone
+    quote, backtick or comment opener in prose before the marker hides nothing."""
+    found, fenced = [], False
+    for line in text.splitlines():
+        if _FENCE_LINE.match(line):
+            fenced = not fenced
+        elif not fenced:
+            hit = _PICK_LINE.match(line)
+            if hit:
+                key = re.sub(r"^[\s:*_\u002d\u2013\u2014]+|[\s.*_`]+$", "", hit.group("rest")).casefold()
+                found.append((line.strip(), key))
+    return found
+
+
+def _lint_module(name):
+    """A module of lint/, beside this file's folder: the one home of the page-writer and transcript readers."""
+    lint = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    return importlib.import_module(name)
+
+
+def _page_writer(transcript_lib, records, cwd):
+    """The page writer's session id: the newest meta/page read's `writer`, else the layout's `page-writer` key
+    of the repo that holds `cwd`. None when neither names one."""
+    writer = transcript_lib.page_writer_id(records)
+    if writer or not cwd:
+        return writer
+    import local_time
+    root = local_time.repo_root(cwd)
+    return _lint_module("layout").page_writer_key(root) if root else None
+
+
+def pick_hit(tool: str, tool_input, transcript: str, own_id, cwd=None):
+    """Return (matched, reason) when this send_message is a coordinator's pick that the owner's page has not been
+    told of, else None. The mistake it stops: a coordinator takes undoable picks and sends them only to
+    lanes, so none reaches the page the owner overrules picks on (decision pick-reaches-page).
+    A message is judged only when a line opens, after markdown lead characters, with PICK_MARKER (any case)
+    outside a fenced block (_pick_keys). The sender is judged next: only a session whose own record (own_session)
+    holds COORDINATOR_TAG, so a lane's pick, and a session with no own record or no own id, pass. A pick whose
+    target is the page writer passes. Else each pick key must be named by a send to the writer since the last
+    human message (an earlier turn does not count). The writer is the newest meta/page read's, else the layout's
+    key; with none known, the send passes.
+    Cost: nothing past the text scan for a message with no marker. A marker message from a session with an own id
+    adds one own-record read and one transcript read; no file written, no process, no timer. Fails open: every
+    unreadable record, missing id or missing writer lets the send through, since the page is the owner's
+    safeguard and a gap here costs the owner a visible pick, not a lost one."""
+    if tool != BRIEF_TOOL or not isinstance(tool_input, dict) or not isinstance(tool_input.get("message"), str):
+        return None
+    picks = _pick_keys(tool_input["message"])
+    if not picks or not own_id or not isinstance(transcript, str) or not transcript:
+        return None
+    try:
+        tags = own_session.own_session_read(transcript, own_id)[0]
+        if not tags or COORDINATOR_TAG not in tags:
+            return None
+        lib = _lint_module("_transcript")
+        records = lib.read_transcript(transcript)
+        writer = _page_writer(lib, records, cwd)
+        if not writer or tool_input.get("session_id") == writer:
+            return None
+        named = set()
+        for rec in lib.records_after_last_human(records):
+            if rec.get("isSidechain"):
+                continue
+            for use in lib.tool_uses(rec):
+                message = (use.get("input") or {}).get("message") if isinstance(use.get("input"), dict) else None
+                if writer in lib.send_targets(use) and isinstance(message, str):
+                    named.update(key for _, key in _pick_keys(message))
+    except Exception:
+        return None
+    for line, key in picks:
+        if key not in named:
+            return line[:120], PICK_REASON.format(key=key)
+    return None
 
 
 # ---- send_message: a header stamp matches the clock (rule message-time-matches-clock)
