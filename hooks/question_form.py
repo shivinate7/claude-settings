@@ -1437,11 +1437,11 @@ def _chat_question_hit(question, options):
 # docs/decisions/cross-repo-question-checked.md, rule `question-checked-with-repo`, built against a named incident
 # (incident in the record): triage filed another repo's design questions on this repo's page, ones the owner had
 # already ruled on. An open decision or task names its `repo` (owner/name). A repo other than the page's needs
-# `checked_with`, the session id of that repo's session that said the owner has not ruled, never the item's own owner.
-# The check keys on fields, never on words (decision predicate-is-the-act).
-# R22 point 3: `checked_with` names a role or a lane slug, never a session id: a session record is gone when the
-# session ends, so a page item that stores its id points at nothing. Only this field is retargeted here; the wider
-# refusal of a session id in other page fields (owner and the rest) is a separate rule.
+# `checked_with`: a role (coordinator, triage, owner's-computer) or a lane slug of that repo's session that said the
+# owner has not ruled, never the item's own owner and never a session id, because a session record is gone when the
+# session ends and an item that stores its id points at nothing.
+# The check keys on fields, never on words (decision predicate-is-the-act). It reads only `checked_with`; a session id
+# in other page fields is a separate rule.
 CROSS_REPO_RULE = "question-checked-with-repo"
 CHECKED_WITH_ROLES = ("coordinator", "triage", "owner's-computer")  # the three R22 names
 LANE_SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")  # a lane's branch slug (rule git-slug-then-claim-number)
