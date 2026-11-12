@@ -1243,10 +1243,10 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
                 where = dir_before_segment(segments, number, cwd, ends) or ""
                 if any(_unproved_confirm(script, where, transcript, depth + 1) for script in scripts):
                     return True
-        if merge_tool_args(segment) is None:
+        flat = _flat_command(segment)   # the raw text: shlex refuses a segment with a lone quote inside a `$( )`, which `flat` has flattened
+        if merge_tool_args(flat) is None:
             continue
         try:
-            flat = _flat_command(segment)
             rest = _amp_cut(merge_tool_args(flat))
             bare = merge_tool_args(strip_redirections(flat))
             bare = None if bare is None else _amp_cut(bare)
@@ -1331,6 +1331,7 @@ def _flat_command(text: str) -> str:
         elif char in "'\"":
             quote = char
         elif char == "(" and depth:
+            outer.append(quote)
             depth += 1
         elif char == ")":
             if not depth:
