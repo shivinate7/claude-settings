@@ -4,6 +4,6 @@
 
 **Where.** `judge`, `new_items` and `mark_items` in `hooks/feedback_guard.py`, and `own_refs`, which drops an item's own refs from its candidates.
 
-**Decision.** `owner-feedback-inbox` (the Repeats bullet: a model matches each new owner message against older feedback and work, and an item never repeats its own block or its own home).
+**Decision.** owner-feedback-inbox (the Repeats bullet: a model matches each new owner message against older feedback and work, and an item never repeats its own block or its own home).
 
 **Retire.** A new case in `hooks/test_feedback_inbox.py`: two blocks stamped in the same minute that share an item id. Each item takes its own block's home, and block A's todo lines are dropped for block A's item.
