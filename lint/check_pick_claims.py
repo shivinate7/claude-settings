@@ -20,7 +20,9 @@ Findings:
   mismatch    the page recorded a different choice than the note claims
   unrecorded  the page has no answer for the item (absent or null)
 
-A sentence that says "in chat" claims no page answer and is skipped.
+A claim marked "in chat" claims no page answer and is skipped: "in chat" sits in the claim's own comma clause, or
+makes up the whole clause just before or after it ("Owner picked a on item 593, in chat."). "in chat" in another
+clause of the sentence ("..., after he asked in chat.") leaves the claim on the page.
 
 Exit 0 clean, 1 findings, 2 unknown: a file could not be read, or an input is not in the shape above (an answers
 file, a steps folder with no step json, a step file that is not an object, a note that is not text).
@@ -45,8 +47,9 @@ CLAIM = re.compile(
     r"\bowner\s+(picked|pick(?![A-Za-z]))\s+(?:" + KEY + LABEL + r"\s+on\s+(?:page\s+)?item\s+(\d+)\b|(\d+)\s+" + KEY + r")",
     re.IGNORECASE)
 SENTENCE_END = re.compile(r"[.!?](?=\s|$)")
+CLAUSE_END = re.compile(r"[,;]")
 IN_CHAT = re.compile(r"\bin\s+chat\b", re.IGNORECASE)
-IF_WORD = re.compile(r"\bif\b", re.IGNORECASE)
+BARE_IN_CHAT = re.compile(r"\s*in\s+chat\s*", re.IGNORECASE)
 
 
 class Unknown(Exception):
@@ -75,16 +78,29 @@ def _sentence(note, m):
     return start, (e.end() if e else len(note))
 
 
+def _in_chat(note, m):
+    """True when "in chat" marks claim `m`: in its own comma clause, or as the whole clause beside it."""
+    start, end = _sentence(note, m)
+    cuts = [start - 1] + [c.start() for c in CLAUSE_END.finditer(note, start, end)] + [end]
+    before = max(i for i, c in enumerate(cuts) if c < m.start())
+    after = min(i for i, c in enumerate(cuts) if c >= m.end())
+    if IN_CHAT.search(note, cuts[before] + 1, cuts[after]):
+        return True
+    side = []
+    if before > 0:
+        side.append(note[cuts[before - 1] + 1:cuts[before]])
+    if after < len(cuts) - 1:
+        side.append(note[cuts[after] + 1:cuts[after + 1]].rstrip(".!?"))
+    return any(BARE_IN_CHAT.fullmatch(s) for s in side)
+
+
 def _scan(note):
     """(item, key, matched text) for each claim in `note` that names the page."""
     found = []
     for m in CLAIM.finditer(note):
-        verb, key1, item1, item2, key2 = m.groups()
-        start, end = _sentence(note, m)
-        if IN_CHAT.search(note, start, end):
+        _, key1, item1, item2, key2 = m.groups()
+        if _in_chat(note, m):
             continue  # an answer given in chat was never on the page
-        if verb.lower() == "pick" and IF_WORD.search(note, start, m.start()):
-            continue  # "if the owner pick ..." is a condition, not a record
         found.append((int(item1 or item2), (key1 or key2).lower(), m.group(0)))
     return found
 
