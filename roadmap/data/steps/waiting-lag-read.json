@@ -11,6 +11,6 @@
  ],
  "why": "Owner item 593 a, 12:40 CST Nov 12: the page database is the one store, with a timely git export as backup.",
  "source": "coordinator 12:53 CST Nov 12, lane page-data-one-store re-cut (PR #2829 at runner 10)",
- "note": "`stale_pages.py --lag <folder>` prints each answer's delay from `at` to its receipt `read`, and unreceipted answers past an age. Reader: the page writer at wake. No new store or timer. Third of lane waiting-route-c.",
- "updatedAt": "2026-11-12T12:58:46-06:00"
+ "note": "`stale_pages.py --lag <folder>` prints each answer's delay from `at` to its receipt `read`, and unreceipted answers past an age. Reader: the page writer at wake. No new store or timer. Third of lane waiting-route-c. Lag age default 60 min (lane pick, unmeasured), 13:13 CST Nov 12: kept as a default with no page item. It only lists late answers and cuts no work off, and the owner's 12:54 CST note on item 595 narrows the no-fixed-numbers ruling to limits that cut work off. Layout pick (flat answers.json/receipts.json, no marker) is the lane's, undoable. PR #2865 (step 1) at runner 10.",
+ "updatedAt": "2026-11-12T13:19:33-06:00"
 }
