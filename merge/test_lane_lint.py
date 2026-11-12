@@ -2351,7 +2351,7 @@ class PostReviewCommit(LaneFixture):
         self.assertIn("unknown", out, "the stop for a review head the clone lacks does not read unknown:\n" + out)
         self.assertEqual(self.host.posted, [], "a lane lint unknown posted a lane-lint PASS:\n" + out)
 
-    def test_a_guard_commit_after_the_last_review_log_is_refused_on_a_release_based_pr_and_named_by_its_sha(self):
+    def test_a_guard_commit_after_the_last_review_log_is_refused_on_a_release_pr_by_sha(self):
         self.push_release_branch()
         self.host.base = "release"  # the lint and the guard walk run against release, not main
         self.record(self.head("feat"), "no", tm.REVIEW_PASS, "not owed")
@@ -2362,7 +2362,7 @@ class PostReviewCommit(LaneFixture):
         self.assertIn(GUARD_PATH, out, "the refusal does not name the guard path it refuses:\n" + out)
         self.assertEqual(self.host.posted, [], "the refused head posted a lane-lint PASS:\n" + out)
 
-    def test_a_guard_commit_release_holds_and_a_merge_commit_brings_in_is_not_counted_on_a_release_based_pr(self):  # control: green on the old code
+    def test_a_guard_commit_release_holds_and_a_merge_brings_in_is_not_counted(self):  # control: green on the old code
         self.push_release_branch()
         self.host.base = "release"
         self.record(self.head("feat"), "no", tm.REVIEW_PASS, "not owed")
