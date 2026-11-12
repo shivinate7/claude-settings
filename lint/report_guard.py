@@ -1179,36 +1179,41 @@ def mistake_problem(text):
 # (rule building-mistake-names-its-guard; decision mistake-means-missing-guard). A report once called a guard queued
 # as a step no one had filed. A queued step is a blob on origin/roadmap, so a step on a lane branch only is not queued. Cost: one `git fetch origin roadmap` and one tree read per report that cites a
 # step; a report that cites none starts nothing. A failed read prints "unknown" and refuses nothing.
-STEP_REF = "refs/remotes/origin/roadmap"
-STEP_CLAIM_RE = re.compile(r"\b(?:queued|filed|(?:has|have|had) a step)\b", re.I)
-STEP_WORD_RE = re.compile(r"\bsteps?\b(?!:)", re.I)
-# "queued" in another sense: a CI run, a job, a merge queue, a runner. Such a sentence makes no step claim.
+# A claim ties the claim word to the step noun: "queued as a roadmap step", "filed as step:x", "has a step",
+# "the step is queued". "Queued, and the next step is the merge" is no claim.
+_STEP_LINK = r"(?:(?:it|this|that|them|as|to|on|in|into|the|a|an|roadmap|queue|new|its)\s+)*"
+STEP_CLAIM_RE = re.compile(
+    r"\b(?:queued|filed|added)\s+" + _STEP_LINK + r"step\b(?!-)"
+    r"|\b(?:has|have|had)\s+(?:a|its|the)\s+(?:roadmap\s+)?step\b(?!-)"
+    r"|\bstep(?::\S+)?\s+(?:is\s+|was\s+|has\s+been\s+|now\s+)?(?:queued|filed)\b", re.I)
+# "queued" in another sense: a CI run, a job, a merge queue, a runner. Such a sentence with no slug makes no claim.
 STEP_OTHER_SENSE_RE = re.compile(
     r"\bCI\b|\b(?:runs?|jobs?|workflows?|checks?|merge[- ]queue|runners?|pipelines?|builds?|actions?)\b", re.I)
-STEP_FETCH_TIMEOUT = 20
+# A slug the writer says is not filed is no claim that it is.
+STEP_PROPOSAL_RE = re.compile(
+    r"\b(?:not\s+(?:yet\s+)?(?:filed|queued)|unfiled|propos\w+|will\s+(?:file|queue)|to\s+(?:file|queue)"
+    r"|should\s+(?:file|queue))\b", re.I)
 STEP_REASON = owner_line(
     "Step-cite guard (rule building-mistake-names-its-guard)",
-    "the report says a step is queued, but %s")
+    "the report cites a step, but %s")
 
 
 def _step_cites(text):
-    """(slugs, unbacked sentence): the `step:<slug>` names in a report sentence that claims a step is queued
-    or sits in Deviations, and the first claim sentence that names none. Inline code stays readable for the
-    slug but is no claim; fences, URLs and quoted text are no claim."""
+    """(slugs, unbacked sentence): every `step:<slug>` a report sentence names, except one the sentence calls
+    not yet filed, and the first sentence that claims a step is queued and names none. Inline code stays
+    readable for the slug but is no claim; fences, URLs and quoted text are no claim."""
     slugs, unbacked = [], ""
     for label in ("Done", "Deviations", "Input Needed", "Next"):
         section = report_section(text, label)
         plain = MISTAKE_URL_RE.sub(" ", FENCE_RE.sub(" ", section))
         for sentence in _sentences(plain):
             found = MISTAKE_STEP_RE.findall(sentence)
-            claim = STEP_CLAIM_RE.search(QUOTED_RE.sub(" ", sentence))
-            if claim and not STEP_OTHER_SENSE_RE.search(sentence):
-                if found:
-                    slugs += found
-                elif STEP_WORD_RE.search(QUOTED_RE.sub(" ", sentence)):
-                    unbacked = unbacked or sentence.strip()
-            elif label == "Deviations":
+            if found and not STEP_PROPOSAL_RE.search(sentence):
                 slugs += found
+            elif not found:
+                bare = QUOTED_RE.sub(" ", sentence)
+                if STEP_CLAIM_RE.search(bare) and not STEP_OTHER_SENSE_RE.search(bare):
+                    unbacked = unbacked or sentence.strip()
     return list(dict.fromkeys(s[len("step:"):] for s in slugs)), unbacked
 
 
@@ -1220,12 +1225,13 @@ def step_cite_problem(text, cwd):
     if not slugs:
         return ""
     _hooks_on_path()
+    import override
     import ruling_home
-    try:
-        fetch = ruling_home._run_git(cwd, ["fetch", "-q", "origin", "roadmap"])
+    try:  # an explicit destination, so a single-branch clone's narrow refspec still updates the ref
+        fetch = ruling_home._run_git(cwd, ["fetch", "-q", "origin", "+refs/heads/roadmap:" + override.STEP_REF])
         if fetch.returncode != 0:
             raise ruling_home._GitFailure("fetch exited %s: %s" % (fetch.returncode, (fetch.stderr or "")[:120]))
-        missing = [s for s in slugs if not ruling_home.step_filed(s, cwd, STEP_REF)]
+        missing = [s for s in slugs if not ruling_home.step_filed(s, cwd, override.STEP_REF)]
     except (ruling_home._GitFailure, OSError) as exc:
         print("step cite unknown: %s" % exc, file=sys.stderr)
         return ""

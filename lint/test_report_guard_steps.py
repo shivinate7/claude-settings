@@ -47,7 +47,7 @@ class StepClaimTests(unittest.TestCase):
         self.folder = tempfile.mkdtemp(dir=RUN_FOLDER)
         self.addCleanup(shutil.rmtree, self.folder, True)
 
-    def repo(self, on_roadmap=(), on_lane=(), remote=True):
+    def repo(self, on_roadmap=(), on_lane=(), remote=True, single_branch=False):
         """A clone whose origin holds branch roadmap with the `on_roadmap` steps and branch lane-x with `on_lane`."""
         origin = os.path.join(self.folder, "origin.git")
         seed = os.path.join(self.folder, "seed")
@@ -68,7 +68,8 @@ class StepClaimTests(unittest.TestCase):
             git(seed, "add", "-A")
             git(seed, "commit", "-qm", branch, "--allow-empty")
         git(seed, "push", "-q", origin, "main", "roadmap", "lane-x")
-        git(self.folder, "clone", "-q", origin, clone)
+        git(self.folder, "clone", "-q", *(["--single-branch", "--branch", "main"] if single_branch else []),
+            origin, clone)
         if not remote:
             git(clone, "remote", "set-url", "origin", os.path.join(self.folder, "no-such.git"))
         return clone
@@ -144,9 +145,42 @@ class StepClaimTests(unittest.TestCase):
                      "The CI job step is queued.",
                      "The job was queued and the step that waits for it is slow.",
                      "I filed the report with the batch runner.",
-                     "Unstarted: batch 104, queued until the merge lands."):
+                     "Unstarted: batch 104, queued until the merge lands.",
+                     "Unstarted: lane x, queued until step merge-reads-ruleset merges.",
+                     "Filed the debt, and the next step is the owner's ruling.",
+                     "The batch is queued, and the next step is the merge.",
+                     "The hook has a step-by-step recovery in its docstring.",
+                     "The lane is queued at step 3 of the batch procedure.",
+                     "Proposed as `step:%s`, not filed yet." % SLUG,
+                     "Triage will file step:%s." % SLUG):
             with self.subTest(text=text):
                 self.passes(clone, report(nxt="> **Next** " + text))
+
+    # Red: a slug cited with an escape word, or with no claim word, is still read from git.
+    def test_red_slug_cited_beside_other_sense_word_or_no_claim_word_blocks(self):
+        clone = self.repo()
+        for text in ("The check is queued as step:%s." % SLUG,
+                     "The guard is queued as step:%s, and CI runs on the PR." % SLUG,
+                     "`step:%s` awaits the owner's ruling." % SLUG,
+                     "The guard was added to the roadmap as step:%s." % SLUG):
+            with self.subTest(text=text):
+                self.blocked(clone, report(nxt="> **Next** " + text))
+
+    def test_red_claim_words_tied_to_the_step_noun_block(self):
+        clone = self.repo()
+        for text in ("The guard has a roadmap step.", "The guard is added to the roadmap as a step.",
+                     "The step is queued.", "It is queued in the roadmap queue as a step."):
+            with self.subTest(text=text):
+                self.blocked(clone, report(nxt="> **Next** " + text))
+
+    # A single-branch clone's narrow refspec must not hide a step that is on origin/roadmap.
+    def test_green_single_branch_clone_sees_roadmap_step(self):
+        clone = self.repo(on_roadmap=[SLUG], single_branch=True)
+        self.passes(clone, report(nxt="> **Next** The guard is queued as step:%s." % SLUG))
+
+    def test_red_single_branch_clone_missing_step_blocks(self):
+        clone = self.repo(single_branch=True)
+        self.blocked(clone, report(nxt="> **Next** The guard is queued as step:%s." % SLUG))
 
     def test_green_code_span_and_quote_are_no_claim(self):
         clone = self.repo()
