@@ -3345,9 +3345,8 @@ def main():
         review_note = "Review-record guard: UNKNOWN, the check did not run (%s)." % type(err).__name__
     note = " ".join(filter(None, [note, hand_note, review_note, closed_note]))
 
-    def block(reason):
-        # The closed-item "not checked" note rides on a block for another reason too, so the owner sees the check did not run.
-        finish({"decision": "block", "reason": reason, **({"systemMessage": closed_note} if closed_note else {})})
+    # The closed-item "not checked" note rides on a block for another reason too, so the owner sees the check did not run.
+    block_note = {"systemMessage": closed_note} if closed_note else {}
 
     relay = []
     if last_human_idx is not None:  # a transcript with no human message never ran the relay and answered checks
@@ -3391,7 +3390,7 @@ def main():
             pick = [r for r in pick if r]
             if pick:
                 reason = " ".join(pick) + " (rule reports-order-of-labels)"
-                block(reason)
+                finish({"decision": "block", "reason": reason, **block_note})
             else:
                 finish({"systemMessage": note} if note else None)
         except Exception:
@@ -3458,7 +3457,7 @@ def main():
         reason = " ".join(reasons) + " (rule reports-order-of-labels)"
         if not shape_ok:
             write_marker(hook, last_human_idx)
-        block(reason)
+        finish({"decision": "block", "reason": reason, **block_note})
     else:
         finish({"systemMessage": note} if note else None)
 
