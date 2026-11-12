@@ -1993,8 +1993,9 @@ STAND_IN_FILED_FOLDER = "app-folder-after-truncation"  # stands in for the app's
 
 
 def _app_folder(cwd):
-    """The project folder the app names a cwd: each character outside A-Za-z0-9 becomes "-".
-    The same rule as `deriveStop` in mods/decision-watch/hooks/register.mjs."""
+    """A project folder name for a cwd, folded per code point: each character outside A-Za-z0-9 becomes "-".
+    The repo does not record the app's rule. For a character outside the Basic Multilingual Plane the mod
+    folds per UTF-16 unit instead, and find_transcript (_cwd_folders) accepts either fold."""
     return re.sub(r"[^A-Za-z0-9]", "-", cwd)
 
 
