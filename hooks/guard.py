@@ -2885,13 +2885,16 @@ def stop_diff_block(payload, role: str, where: str):
 # a colour, key=value), or when it sits inside a double-quoted span that closes on the same line or on a `> ` line.
 # Two forms that touch a period are judged: each sha side of a range (`a..b`, `a...b`, and `main..a` or `a..HEAD`
 # with a ref on one side), and a token followed by sentence marks up to a space or the end of the text. A URL is
-# skipped from its scheme on, so text glued before it (a sha as link text) is judged. A line that starts with
-# `index ` (a pasted diff header of blob ids) is skipped.
+# skipped from its scheme on, so text glued before it (a sha as link text) is judged. A diff header line,
+# `index <hex>..<hex>` (blob ids), is skipped; a sentence that starts with the word index is judged.
 HANDBACK_TOOL = "SubagentHandback"
 REPORT_HEX_RUN = re.compile(r"(?<![0-9A-Za-z])[0-9a-f]+(?![0-9A-Za-z])")
 REPORT_RANGE_BEFORE = re.compile(r"[0-9A-Za-z_/~^]\.{2,3}$")
 REPORT_RANGE_AFTER = re.compile(r"\.{2,3}[0-9A-Za-z_/~^]")
-REPORT_URL_WORD = re.compile(r"[A-Za-z][\w+.-]*://\S*")
+REPORT_INDEX_HEADER = re.compile(r"index [0-9a-f]+\.\.[0-9a-f]+")
+# The lookbehind lets a scheme start only at the start of its word, so a long run of letters with no `://` is
+# tried once, not once per letter: without it, the match is quadratic in the run's length.
+REPORT_URL_WORD = re.compile(r"(?<![\w+.-])[A-Za-z][\w+.-]*://\S*")
 REPORT_MARKS_END = re.compile(r"[.,;:)\]*\"`]*(?:\s|$)")
 REPORT_TOUCH = "-_/#@="
 REPORT_QUOTED = re.compile(r'"[^"\n]*"')
@@ -2941,7 +2944,7 @@ def report_shas(text, limit=REPORT_SHA_MAX) -> list:
         return []
     found = []
     for line in text.split("\n"):
-        if line.startswith("index "):
+        if REPORT_INDEX_HEADER.match(line):
             continue
         line = report_unquoted(line)
         if line is None:
@@ -3140,9 +3143,12 @@ def message_refs(text: str, where: str):
         if line is None:
             continue
         kept.append(line)
-        found = report_shas(line, None)
         if MESSAGE_LINK_TEXT.search(line) and this() is not None:
             line = message_other_link_text_blanked(line, this())
+            raw = message_other_link_text_blanked(raw, this())
+        # report_shas takes the raw line and applies the quote rule itself: a second pass would read the spaces left
+        # by a blanked leading `"..."` as the indent of a `> ` quote line, and skip the rest of the line.
+        found = report_shas(raw, None)
         numbers = message_line_prs(line)
         if (found or numbers) and MESSAGE_REPO_MARKED.search(line) and this() is not None \
                 and message_names_other_repo(line, this()):
