@@ -64,7 +64,7 @@ class Fixture(unittest.TestCase):
         return r.returncode, r.stdout + r.stderr
 
     def git(self, *args):
-        subprocess.run(["git", *args], cwd=self.tree, check=True, capture_output=True)
+        return subprocess.run(["git", *args], cwd=self.tree, check=True, capture_output=True, encoding="utf-8").stdout
 
     def base_repo(self):
         """Commit the tree as origin/main, then return; later puts are the change."""
@@ -757,6 +757,78 @@ class KeptNameTests(Fixture):
         self.assertEqual(code, 1, out)
         self.assertIn("merge/merge_probe.py:1", out)
         self.assertIn("merge/merge_probe.py:2", out)
+
+
+class MovedLineTests(Fixture):
+    """A line the diff moves is not new. A line counts as moved only when the same diff deletes that exact text,
+    from a file this check scans. A file the check skips (SKIP_CODE) is no source of a move.
+
+    Each case writes the base files, then the change: `source` (hooks/x.py by default) is rewritten to `keep`
+    (None deletes it) and the pieces are added. The change first proves its own state: each piece is a new file,
+    not a rename, and each line of `source` that the change takes out is deleted. Only then does the check run."""
+
+    KEEP = "def keep_it():\n    pass\n"
+    MOVED = "def bundle_old():\n    pass\n"
+    ANCHOR = "# see rule:bundle-check\n"
+
+    def setUp(self):
+        super().setUp()
+        self.put("GLOSSARY.md", HEAD + ROWS + CodeNameTests.EXTRA)
+
+    def split(self, base, pieces, keep=None, source="hooks/x.py"):
+        for rel, text in base.items():
+            self.put(rel, text)
+        self.base_repo()
+        if keep is None:
+            os.remove(os.path.join(self.tree, *source.split("/")))
+        else:
+            self.put(source, keep)
+        for rel, text in pieces.items():
+            self.put(rel, text)
+        self.commit()
+        status = self.git("diff", "-M", "--name-status", "origin/main")
+        for rel in pieces:
+            self.assertIn("A\t%s\n" % rel, status, "fixture state: %s is not a new file\n%s" % (rel, status))
+        patch = self.git("diff", "-U0", "-M", "origin/main")
+        kept = (keep or "").splitlines()
+        for row in base[source].splitlines():
+            if row.strip() and row not in kept:
+                self.assertIn("\n-" + row + "\n", patch, "fixture state: the base line is not deleted: " + row)
+        return self.run_check()
+
+    def test_identifier_moved_into_a_new_file_is_clean(self):
+        code, out = self.split({"hooks/x.py": self.MOVED + "\n\n" + self.KEEP},
+                               {"tests/guard/x.py": self.MOVED}, keep=self.KEEP)
+        self.assertEqual(code, 0, "moved identifier counted as added\n" + out)
+
+    def test_new_identifier_beside_a_move_still_fails(self):
+        code, out = self.split({"hooks/x.py": self.MOVED + "\n\n" + self.KEEP},
+                               {"tests/guard/x.py": self.MOVED, "tests/guard/y.py": "def bundle_fresh():\n    pass\n"},
+                               keep=self.KEEP)
+        self.assertEqual(code, 1, out)
+        self.assertIn("tests/guard/y.py:1", out)
+
+    def test_identifier_the_base_holds_in_an_untouched_file_still_fails(self):
+        code, out = self.split({"hooks/x.py": self.MOVED + "\n\n" + self.KEEP,
+                                "hooks/keep.py": "def bundle_new():\n    pass\n"},
+                               {"tests/guard/x.py": self.MOVED, "tests/guard/copy.py": "def bundle_new():\n    pass\n"},
+                               keep=self.KEEP)
+        self.assertEqual(code, 1, out)
+        self.assertIn("tests/guard/copy.py:1", out)
+
+    def test_rule_anchor_changed_while_moved_still_fails(self):
+        code, out = self.split({"hooks/x.py": self.ANCHOR + self.MOVED + "\n\n" + self.KEEP},
+                               {"tests/guard/x.py": self.ANCHOR.replace("check\n", "check.\n"),
+                                "tests/guard/y.py": self.MOVED},
+                               keep=self.KEEP)
+        self.assertEqual(code, 1, out)
+        self.assertIn("tests/guard/x.py:1", out)
+
+    def test_name_deleted_from_a_skipped_file_and_added_in_code_still_fails(self):
+        code, out = self.split({"docs/records.md": self.MOVED + "\n\n" + self.KEEP},
+                               {"tests/guard/x.py": self.MOVED}, keep=self.KEEP, source="docs/records.md")
+        self.assertEqual(code, 1, "a name deleted from a file the check skips excused its copy in code\n" + out)
+        self.assertIn("tests/guard/x.py:1", out, "the copy in code was not flagged\n" + out)
 
 
 class UncommittedTests(Fixture):
