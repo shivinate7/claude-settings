@@ -145,7 +145,7 @@ that holds `round <N>` or `reviewer` and a capital PASS or PASSED claims a PASS,
 "did not PASS") claims nothing, nor does a PASS whose clause places it in the past ("was before the fix", "went stale"). Clauses split on `,`, `;` and `--`; a
 history word in another clause hides no claim. The line claims it for each PR it names, as
 `#<N>`, `PR <N>` or a github pull URL. The Stop is refused unless each such PR has a review record comment for its live head: the newest comment whose first line is
-the review marker, read by merge/merge.py parse_review (never retyped here), naming the PR, and that merge/merge.py live_review_state calls done for the live head,
+the review marker, read by merge/merge.py newest_review, which parses it and reads a split-log fix check's round (never retyped here), naming the PR, and that merge/merge.py live_review_state calls done for the live head,
 the one read `merge --reviewed` makes: a record survives clean merges of main, and a clean-merge read that cannot run keeps it stale, so it still blocks. A claim with no
 PR on its line is refused and asks for the PR. With no record for the live head, the remedy names the act (`merge <pr> --review-record ...`, then post the
 record) and never the live head; a record live_review_state reads open or held is refused with that state and its why, and no post act. A newest record that exists but does not parse is refused in its own words (PR named, "does not parse", the same
