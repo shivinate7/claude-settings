@@ -416,6 +416,25 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         """True when the sentence names the lane session: its cs-build:lane tag, or the words `lane session`."""
         return "cs-build:lane" in sentence or "lane session" in sentence
 
+    @staticmethod
+    def tells_other_tier_to_run_idle_lanes(sentence):
+        """True when the sentence names the idle-lanes command and a tier other than the batch runner, and does not negate the run."""
+        names_command = "merge --idle-lanes" in sentence
+        other_tier = re.search(r"coordinator|cs-build:lane|lane session|other tier", sentence, re.IGNORECASE) is not None
+        negated = re.search(r"\b(?:never|not|no)\s+runs?\b", sentence, re.IGNORECASE) is not None
+        return names_command and other_tier and not negated
+
+    @staticmethod
+    def idle_lanes_sentences(line):
+        """The tier line's sentences that name the idle-lanes command, by its verb and flag."""
+        return [s for s in sentences(line) if "merge --idle-lanes" in s]
+
+    def idle_lanes_sentence(self):
+        """The one sentence that names the idle-lanes command. Asserts that scope before any content."""
+        found = self.idle_lanes_sentences(hook_tier_line())
+        self.assertEqual(len(found), 1, "expected one sentence naming merge --idle-lanes, found %d: %r" % (len(found), found))
+        return found[0]
+
     def test_the_tier_line_names_the_role_writer(self):
         self.assertIn("merge --role", hook_tier_line())
 
@@ -508,6 +527,82 @@ class SessionStartMergeRoleTests(unittest.TestCase):
                                            "runner (list_sessions, tag cs-build:batch-runner, same repo) and never merges."))
         self.assertTrue(self.names_a_lane("A lane session (tag cs-build:lane) hands its reviewed branch, head and PR to the batch "
                                           "runner and never merges."))
+
+    # batch-runner-start-names-idle-lanes: the scope comes first, so a missing sentence fails the scope, never passes empty
+    def test_one_sentence_of_the_tier_line_names_the_idle_lanes_command(self):
+        found = self.idle_lanes_sentences(hook_tier_line())
+        self.assertEqual(len(found), 1, "expected one sentence naming merge --idle-lanes, found %d: %r" % (len(found), found))
+
+    def test_the_idle_lanes_sentence_names_only_the_batch_runner_tag(self):
+        sentence = self.idle_lanes_sentence()
+        self.assertIn("cs-build:batch-runner", sentence, "the idle-lanes sentence names no cs-build:batch-runner tag: %r" % sentence)
+
+    def test_the_idle_lanes_sentence_does_not_name_the_coordinator(self):
+        sentence = self.idle_lanes_sentence()
+        self.assertNotIn("coordinator", sentence.lower(), "the idle-lanes sentence names the coordinator: %r" % sentence)
+
+    def test_the_idle_lanes_sentence_does_not_name_a_lane_session(self):
+        sentence = self.idle_lanes_sentence()
+        self.assertFalse(self.names_a_lane(sentence),
+                         "the idle-lanes sentence names a lane session or the cs-build:lane tag: %r" % sentence)
+
+    def test_no_sentence_tells_the_coordinator_a_lane_or_another_tier_to_run_idle_lanes(self):
+        self.idle_lanes_sentence()  # scope first: one sentence names the command
+        told = [s for s in sentences(hook_tier_line()) if self.tells_other_tier_to_run_idle_lanes(s)]
+        self.assertEqual(told, [], "a sentence tells another tier to run merge --idle-lanes: %r" % told)
+
+    def test_the_idle_lanes_command_is_named_by_its_home_path(self):
+        # Bare `merge` is not on a cloud session's PATH, so the sentence gives the shim's full path, as the merge role sentence does.
+        told = [s for s in sentences(hook_tier_line()) if "~/.claude/bin/merge --idle-lanes --live FILE" in s]
+        self.assertTrue(told, "no sentence names ~/.claude/bin/merge --idle-lanes --live FILE")
+
+    def test_the_idle_lanes_sentence_says_to_run_it_after_each_merge(self):
+        told = [s for s in self.idle_lanes_sentences(hook_tier_line()) if re.search(r"after (?:each|every) merge", s, re.IGNORECASE)]
+        self.assertTrue(told, "no sentence says to run merge --idle-lanes after each merge")
+
+    def test_the_idle_lanes_sentence_says_to_run_get_session_on_each_listed_lane_alone(self):
+        told = [s for s in self.idle_lanes_sentences(hook_tier_line())
+                if "get_session" in s and re.search(r"\balone\b", s)]
+        self.assertTrue(told, "no sentence says to run get_session on each listed lane alone")
+
+    def test_the_idle_lanes_sentence_says_to_archive_each_lane_after_its_get_session(self):
+        told = [s for s in self.idle_lanes_sentences(hook_tier_line()) if 0 <= s.find("get_session") < s.find("archive")]
+        self.assertTrue(told, "no sentence says to archive each lane after its get_session")
+
+    def test_the_idle_lanes_sentence_says_to_skip_a_lane_with_a_hold_marker(self):
+        told = [s for s in self.idle_lanes_sentences(hook_tier_line()) if "HOLD" in s and re.search(r"\bskip", s, re.IGNORECASE)]
+        self.assertTrue(told, "no sentence says to skip a lane that carries a HOLD marker")
+
+    def test_the_idle_lanes_sentence_says_to_skip_a_lane_that_needs_judgment(self):
+        told = [s for s in self.idle_lanes_sentences(hook_tier_line())
+                if re.search(r"judgment", s, re.IGNORECASE) and re.search(r"\bskip", s, re.IGNORECASE)]
+        self.assertTrue(told, "no sentence says to skip a lane that needs judgment")
+
+    def test_the_idle_lanes_sentence_says_to_name_each_skipped_lane_in_its_report(self):
+        told = [s for s in self.idle_lanes_sentences(hook_tier_line()) if re.search(r"\breport\b", s, re.IGNORECASE)]
+        self.assertTrue(told, "no sentence says to name the skipped lanes in the report")
+
+    def test_the_idle_lanes_sentence_names_the_livework_readme_that_builds_the_live_file(self):
+        told = [s for s in self.idle_lanes_sentences(hook_tier_line()) if "roadmap/livework/README.md" in s]
+        self.assertTrue(told, "no idle-lanes sentence names roadmap/livework/README.md as the builder of the live file")
+
+    def test_the_livework_readme_is_named_on_the_record_branch(self):
+        told = [s for s in self.idle_lanes_sentences(hook_tier_line())
+                if "roadmap/livework/README.md" in s and "record branch" in s.lower()]
+        self.assertTrue(told, "no idle-lanes sentence says roadmap/livework/README.md is on the record branch")
+
+    # green controls (P2): the predicate passes on the current code, so a red above is the missing sentence, not a broken predicate
+    def test_the_idle_lanes_predicate_flags_a_coordinator_or_lane_run(self):
+        self.assertTrue(self.tells_other_tier_to_run_idle_lanes(
+            "The coordinator runs ~/.claude/bin/merge --idle-lanes --live FILE after each merge."))
+        self.assertTrue(self.tells_other_tier_to_run_idle_lanes(
+            "A lane session (tag cs-build:lane) runs ~/.claude/bin/merge --idle-lanes --live FILE."))
+
+    def test_the_idle_lanes_predicate_passes_a_batch_runner_run_and_a_negated_one(self):
+        self.assertFalse(self.tells_other_tier_to_run_idle_lanes(
+            "A session tagged cs-build:batch-runner runs ~/.claude/bin/merge --idle-lanes --live FILE after each merge."))
+        self.assertFalse(self.tells_other_tier_to_run_idle_lanes(
+            "A lane, the coordinator or any other tier never runs ~/.claude/bin/merge --idle-lanes --live FILE."))
 
 
 class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):
