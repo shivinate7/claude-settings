@@ -1323,7 +1323,7 @@ def _flat_command(text: str) -> str:
             pass
         elif quote != "'" and text.startswith("$(", index):   # a `$(` opens a span in double quotes too, with a quote state of its own
             if not depth:
-                out.append(" SUBST ")
+                out.append("SUBST")
             outer.append(quote)
             depth, quote, step, keep = depth + 1, "", 2, False
         elif quote:
