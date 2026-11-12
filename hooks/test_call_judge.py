@@ -78,6 +78,7 @@ SETTINGS = os.environ.get("SETTINGS_UNDER_TEST") or os.path.join(REPO, "settings
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(REPO, "lint"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+import shared_names  # noqa: E402  CREATE_SESSION_TOOL, the name the call_judge matcher carries (hooks/shared_names.py)
 ROOT = _test_temp.run_folder()
 atexit.register(shutil.rmtree, ROOT, ignore_errors=True)
 STUB_DIR = os.path.join(ROOT, "stub")
@@ -1397,8 +1398,9 @@ def case_settings_row():
         return
     entry, hook = rows[0]
     matcher = set((entry.get("matcher") or "").split("|"))
-    check("settings: its matcher is Agent, AskUserQuestion, ArtifactData and the send_message tool (the refuter's site)",
-          matcher == {"Agent", "AskUserQuestion", "ArtifactData", "mcp__claude-code-remote__send_message"},
+    check("settings: its matcher is Agent, AskUserQuestion, ArtifactData, and the send_message and create_session tools (the refuter's sites)",
+          matcher == {"Agent", "AskUserQuestion", "ArtifactData", "mcp__claude-code-remote__send_message",
+                      shared_names.CREATE_SESSION_TOOL},
           entry.get("matcher"))
     check("settings: its timeout exceeds the longest model call (60 s)", hook.get("timeout", 0) > 60, hook)
     empty = os.path.join(ROOT, "empty-config")

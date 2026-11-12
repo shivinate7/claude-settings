@@ -19,10 +19,11 @@ Interface the module must match (the builder's contract):
 - ask_for_step(root, step) -> (title, why), from roadmap/data/steps/<step>.json at refs/remotes/origin/<record
   branch>. A missing ref, file or field raises, or returns no title.
 - done_check_line(brief) -> the text after the first line-start `Done check:` (bold allowed), or None.
-- hooks/call_judge.py: a send_message whose first non-blank line carries the lane brief marker is judged. No Done
-  check line refuses with no model call. Otherwise one refute call per brief: gap and unknown refuse, met allows.
-  Any other send_message makes no model call and no import of check_refuter.
-- settings.json: the call_judge row's matcher includes mcp__claude-code-remote__send_message.
+- hooks/call_judge.py: a send_message, or a create_session (a lane start), whose first non-blank line carries the lane
+  brief marker is judged, after its Grant line if it has one. No Done check line refuses with no model call. Otherwise
+  one refute call per brief: gap and unknown refuse, met allows. Any other send_message or create_session makes no
+  model call and no import of check_refuter.
+- settings.json: the call_judge row's matcher includes mcp__claude-code-remote__send_message and create_session.
 - refute passes effort=REFUTER_EFFORT (None, the model's default) and its prompt asks for a realistic
   case. done_check_line accepts the brief template's Done check forms, skips lines inside ``` or ~~~ fences, and reads
   the line after a `## Done check` heading. A check that is only a <...> placeholder is refused with no model call.
@@ -46,6 +47,7 @@ sys.path.insert(0, HERE)
 import _nowindow  # noqa: E402  the one home of a no-window git read; one case wraps its run to read the timeout
 import decision_watch  # noqa: E402  the one model caller; a case replaces its invoke_model
 import guard_merge  # noqa: E402  BRIEF_TOOL and LANE_BRIEF_MARKER, the one home of the brief's names
+import shared_names  # noqa: E402  CREATE_SESSION_TOOL, LANE_TAG and LANE_GRANT_MARKER, the one home of the start's names
 import test_call_judge as tcj  # noqa: E402  the call_judge harness: run_hook, make_repo, git, check, detail
 
 REFUTER_PATH = os.path.join(HERE, "check_refuter.py")
@@ -61,6 +63,9 @@ DEFAULT_FIELDS = {"title": TITLE, "why": WHY}
 NOTE_SENTINEL = "SENTINEL-STEP-NOTE-9b2e"  # in the step's note: the refuter never reads it
 BODY_SENTINEL = "SENTINEL-BRIEF-BODY-4c7a"  # in the brief body: the refuter never reads it
 REFUTER_CALL_MODEL = "sonnet"  # the model the refuter names, as the brief fixes it
+GRANT_LINE = "Grant: owner said go, 13:19 CST"  # the owner's Grant line a lane start opens with
+FIX_MARKER_LINE = "Lane brief: fix-step. Topic: alpha."  # a brief whose step has no record in the fixture
+FETCH_PREFIX = "git fetch origin +refs/heads/"  # what every unknown names, whatever the record branch
 check, detail = tcj.check, tcj.detail
 
 
@@ -132,12 +137,23 @@ def ask_repo(name, fields=None, origin=True):
     return repo
 
 
-def brief_text(done=DONE_LINE, body=None):
-    """A lane brief: the marker on the first non-blank line, a body, then the Done check line unless `done` is None."""
+def brief_text(done=DONE_LINE, body=None, grant=None):
+    """A lane brief: the marker on the first non-blank line, a body, then the Done check line unless `done` is None.
+    A `grant` line, when given, comes first, as a lane start's owner Grant line does."""
     lines = ["%s %s. Topic: check-refuter." % (guard_merge.LANE_BRIEF_MARKER, STEP), "",
              body if body is not None else BODY_SENTINEL + " The brief names files and rulings only.", ""]
     if done is not None:
         lines.append(done)
+    if grant is not None:
+        lines.insert(0, grant)
+    return "\n".join(lines)
+
+
+def fix_brief(grant=None):
+    """A lane brief for step fix-step, with no Done check line. A `grant` line, when given, comes first."""
+    lines = [FIX_MARKER_LINE, "", BODY_SENTINEL + " The brief names files and rulings only.", ""]
+    if grant is not None:
+        lines.insert(0, grant)
     return "\n".join(lines)
 
 
@@ -145,6 +161,37 @@ def send_input(message, cwd):
     """A PreToolUse payload for a send_message call with `message`, from the checkout at `cwd`."""
     return json.dumps({"session_id": tcj.SID_A, "tool_name": guard_merge.BRIEF_TOOL, "cwd": cwd,
                        "tool_input": {"session_id": "ses00003", "message": message}})
+
+
+def start_input(prompt, cwd, tags=(shared_names.LANE_TAG,)):
+    """A PreToolUse payload for a create_session call whose prompt is `prompt`, tagged as a lane start unless `tags`
+    says otherwise, from the checkout at `cwd`."""
+    return json.dumps({"session_id": tcj.SID_A, "tool_name": shared_names.CREATE_SESSION_TOOL, "cwd": cwd,
+                       "tool_input": {"title": "refute1 lane", "tags": list(tags), "prompt": prompt}})
+
+
+def no_git_above(path):
+    """True when neither `path` nor any folder above it holds a .git: the case's fixture is outside every checkout."""
+    here = os.path.realpath(path)
+    while True:
+        if os.path.exists(os.path.join(here, ".git")):
+            return False
+        parent = os.path.dirname(here)
+        if parent == here:
+            return True
+        here = parent
+
+
+def bad_json_repo():
+    """A repo whose origin roadmap ref holds the step file as text that is not JSON."""
+    repo = tcj.make_repo("refuter-bad-json", steps={STEP: NOTE_SENTINEL})
+    tcj.git(repo, "checkout", "-q", "roadmap")
+    with open(os.path.join(repo, "roadmap", "data", "steps", STEP + ".json"), "w", encoding="utf-8") as f:
+        f.write("{not json")
+    tcj.git(repo, "commit", "-q", "-am", "corrupt step")
+    tcj.git(repo, "checkout", "-q", "-")
+    tcj.git(repo, "update-ref", "refs/remotes/origin/roadmap", "refs/heads/roadmap")
+    return repo
 
 
 def done_text(got):
@@ -200,11 +247,13 @@ def case_refuter_timeout_is_under_call_judge_timeout():
           "REFUTER_TIMEOUT=%r, hook timeout=%r" % (timeout, hook_timeout))
 
 
-def case_settings_matcher_includes_send_message():
+def case_settings_matcher_includes_brief_tools():
     rows = tcj.call_judge_rows()
     matcher = (rows[0][0].get("matcher") or "").split("|") if len(rows) == 1 else []
     check("settings: the call_judge row's matcher includes the send_message tool",
           guard_merge.BRIEF_TOOL in matcher, "matcher=%r rows=%d" % ("|".join(matcher), len(rows)))
+    check("settings: the call_judge row's matcher includes the create_session tool (a lane start's brief)",
+          shared_names.CREATE_SESSION_TOOL in matcher, "matcher=%r rows=%d" % ("|".join(matcher), len(rows)))
 
 
 # ------------------------------------------------------------------ refute (blind verdict, mocked model)
@@ -438,6 +487,102 @@ def case_non_brief_send_is_not_judged():
     check("empty send: no model call and allowed", r.calls == [] and r.deny() is None, detail(r))
 
 
+def case_grant_led_brief_without_done_check_is_refused_with_no_call():
+    repo = ask_repo("refuter-origin")
+    control = tcj.run_hook(send_input(fix_brief(), repo), answer=ALLOW_ANSWER)
+    check("brief with no Grant line and no Done check: refused under check-refuter with no model call (control, passes today)",
+          control.deny() is not None and control.reason().startswith("check-refuter") and control.calls == [],
+          detail(control))
+    r = tcj.run_hook(send_input(fix_brief(GRANT_LINE), repo), answer=ALLOW_ANSWER)
+    check("grant-led brief with no Done check: refused under check-refuter with no model call",
+          r.deny() is not None and r.reason().startswith("check-refuter") and r.calls == [], detail(r))
+
+
+def case_grant_led_brief_with_done_check_reaches_the_reader():
+    repo = ask_repo("refuter-origin")
+    r = tcj.run_hook(send_input(brief_text(grant=GRANT_LINE), repo), answer=ALLOW_ANSWER)
+    check("grant-led brief with a Done check: exactly one model call, the refuter reads past the Grant line",
+          len(r.calls) == 1, detail(r))
+    check("grant-led brief with a Done check: allowed after that one call",
+          len(r.calls) == 1 and r.deny() is None, detail(r))
+
+
+def case_lane_start_without_done_check_is_refused_with_no_call():
+    repo = ask_repo("refuter-origin")
+    r = tcj.run_hook(start_input(brief_text(done=None, grant=GRANT_LINE), repo), answer=ALLOW_ANSWER)
+    check("lane start (create_session) with a Grant line and no Done check: refused under check-refuter with no model call",
+          r.deny() is not None and r.reason().startswith("check-refuter") and r.calls == [], detail(r))
+    r = tcj.run_hook(start_input(brief_text(done=None), repo), answer=ALLOW_ANSWER)
+    check("lane start (create_session) with no Grant line and no Done check: refused under check-refuter with no model call",
+          r.deny() is not None and r.reason().startswith("check-refuter") and r.calls == [], detail(r))
+
+
+def case_lane_start_with_done_check_reaches_the_reader():
+    repo = ask_repo("refuter-origin")
+    r = tcj.run_hook(start_input(brief_text(grant=GRANT_LINE), repo), answer=ALLOW_ANSWER)
+    check("lane start with a Done check: exactly one model call, the refuter reads it", len(r.calls) == 1, detail(r))
+    check("lane start with a Done check: allowed after that one call", len(r.calls) == 1 and r.deny() is None,
+          detail(r))
+    r = tcj.run_hook(start_input(brief_text(grant=GRANT_LINE), repo), answer=GAP_ANSWER)
+    check("lane start with a Done check and a gap verdict: refused under check-refuter with the model's case",
+          r.deny() is not None and r.reason().startswith("check-refuter") and GAP_WHY in r.reason(), detail(r))
+
+
+def case_non_lane_create_session_is_not_judged():
+    repo = ask_repo("refuter-origin")
+    r = tcj.run_hook(start_input("Please start a session to check the diff.", repo, tags=()), answer=GAP_ANSWER)
+    check("non-brief create_session: no model call and allowed with no output",
+          r.calls == [] and r.code == 0 and r.deny() is None, detail(r))
+    check("non-brief create_session: check_refuter is not imported", "check_refuter" not in r.imports, detail(r))
+    r = tcj.run_hook(start_input("", repo, tags=()), answer=GAP_ANSWER)
+    check("empty create_session prompt: no model call and allowed", r.calls == [] and r.deny() is None, detail(r))
+
+
+# ------------------------------------------------------------------ every unknown names the fetch command (hook)
+
+def case_unknown_without_checkout_names_the_fetch_command():
+    cwd = os.path.join(tcj.ROOT, "no-checkout")
+    os.makedirs(cwd, exist_ok=True)
+    if not no_git_above(cwd):  # scope: the case only means "no checkout" outside every checkout
+        check("no checkout: scope, no .git above the case's folder", False, cwd)
+        return
+    r = tcj.run_hook(send_input(brief_text(), cwd), answer=ALLOW_ANSWER)
+    check("no checkout: refused under check-refuter as unknown",
+          r.deny() is not None and r.reason().startswith("check-refuter") and "unknown" in r.reason().lower(),
+          detail(r))
+    check("no checkout: the refusal names a fetch command", FETCH_PREFIX in r.reason(), detail(r))
+
+
+def case_unknown_missing_field_names_the_fetch_command():
+    for field in ("title", "why"):
+        repo = ask_repo("refuter-no-" + field, fields={field: None})
+        shown = json.loads(tcj.git(repo, "show", "refs/remotes/origin/roadmap:roadmap/data/steps/%s.json" % STEP).stdout)
+        check("no %s: scope, the origin step file has no %s" % (field, field), shown.get(field) is None, repr(shown)[:120])
+        r = tcj.run_hook(send_input(brief_text(), repo), answer=ALLOW_ANSWER)
+        check("no %s: refused under check-refuter as unknown" % field,
+              r.deny() is not None and r.reason().startswith("check-refuter") and "unknown" in r.reason().lower(),
+              detail(r))
+        check("no %s: the refusal names the fetch command for roadmap" % field,
+              (FETCH % ("roadmap", "roadmap")) in r.reason(), detail(r))
+
+
+def case_unknown_bad_json_names_the_fetch_command():
+    repo = bad_json_repo()
+    text = tcj.git(repo, "show", "refs/remotes/origin/roadmap:roadmap/data/steps/%s.json" % STEP).stdout
+    try:
+        json.loads(text)
+        parses = True
+    except ValueError:
+        parses = False
+    check("bad json: scope, the origin step file does not parse as JSON", not parses, text[:80])
+    r = tcj.run_hook(send_input(brief_text(), repo), answer=ALLOW_ANSWER)
+    check("bad json: refused under check-refuter as unknown",
+          r.deny() is not None and r.reason().startswith("check-refuter") and "unknown" in r.reason().lower(),
+          detail(r))
+    check("bad json: the refusal names the fetch command for roadmap", (FETCH % ("roadmap", "roadmap")) in r.reason(),
+          detail(r))
+
+
 # ------------------------------------------------------------------ effort, the realistic bar, the Done check forms
 
 def case_refute_passes_the_effort_setting():
@@ -600,7 +745,7 @@ def case_refuter_timing_fits_the_hook():
 
 def main():
     for case in (case_refuter_module_defines_the_contract, case_refuter_timeout_is_under_call_judge_timeout,
-                 case_settings_matcher_includes_send_message,
+                 case_settings_matcher_includes_brief_tools,
                  case_refute_flag_is_a_gap_that_names_the_case, case_refute_allow_is_met,
                  case_refute_error_is_unknown, case_refute_odd_answer_is_unknown,
                  case_refute_one_call_with_the_contract_arguments, case_refute_prompt_holds_the_three_lines,
@@ -611,6 +756,12 @@ def main():
                  case_brief_model_error_is_refused_as_unknown, case_brief_without_done_check_is_refused_with_no_call,
                  case_brief_missing_ask_is_refused_as_unknown, case_brief_prompt_is_blind,
                  case_non_brief_send_is_not_judged,
+                 case_grant_led_brief_without_done_check_is_refused_with_no_call,
+                 case_grant_led_brief_with_done_check_reaches_the_reader,
+                 case_lane_start_without_done_check_is_refused_with_no_call,
+                 case_lane_start_with_done_check_reaches_the_reader, case_non_lane_create_session_is_not_judged,
+                 case_unknown_without_checkout_names_the_fetch_command,
+                 case_unknown_missing_field_names_the_fetch_command, case_unknown_bad_json_names_the_fetch_command,
                  case_refute_passes_the_effort_setting, case_refute_prompt_asks_for_a_realistic_case,
                  case_done_check_line_accepts_every_line_start_form, case_done_check_line_skips_fenced_lines,
                  case_placeholder_check_is_refused_with_no_call, case_partly_filled_check_is_judged,
