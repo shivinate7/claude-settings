@@ -662,6 +662,14 @@ MUTATIONS = [
      'AGENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")',
      'AGENT_ID = re.compile(r"^.{1,64}$")',
      "test_an_unsafe_or_unknown_agent_id_names_nothing"),
+    # `_restore_cut_short` reads the finish proof for a locked tree: a cut-short removal under a dead
+    # host's lock is written back only when the agent is proven finished. Passing False reads every
+    # such tree as unproven, so the half-removed tree is never restored and stays dirty.
+    ("cut-short restore: a finished dead-host tree is not restored (the finish proof is read as absent)",
+     "sweep",
+     '            entry.get("locked_reason") or "", bool(entry.get("finished"))) is not True):\n',
+     '            entry.get("locked_reason") or "", False) is not True):\n',
+     "test_a_cut_short_finished_dead_host_tree_is_restored_by_the_next_end"),
     # `decide_listener`'s own three refusals, same shape as the branch/worktree refusals
     # above: each one is a keep this sweep must never lose, proven by mutating it out and
     # watching a REAL fixture listener (janitor/test_sweep.py's ListenerDecisionTests, a real

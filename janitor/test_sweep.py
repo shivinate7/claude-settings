@@ -5531,6 +5531,46 @@ class AgentEndDeadHostLockTests(_AgentEndFixture):
             self.assertEqual(decision["action"], "keep",
                              "reaped a dead-host lock with no finish proof: %s" % decision["reason"])
 
+    def test_a_cut_short_finished_dead_host_tree_is_restored_by_the_next_end(self):
+        """A finished agent's tree under a dead host's lock, cut short while removed. remove_worktree puts
+        the lock back after a failed remove, so the half-removed tree stays locked by the dead host. The
+        next agent end writes the deleted file back only when `_restore_cut_short` reads the finish proof,
+        and then removes the tree. The fault is simulated the way the cut-short removal case in this file
+        simulates it: the first worktree remove with a finite timeout deletes one tracked file and raises
+        TimeoutExpired. Git calls without a timeout run for real."""
+        ending = self.add("cutdeadend")
+        subject = self.finished_tree("cutdead", lock=self.dead_ticks_lock("cutdead"))
+        self.write_stop_row("cutdead", subject)
+        self.age_agent_transcript("cutdead", 31)
+        real_run = subprocess.run
+        injected = []
+
+        def cut_short(argv, *args, **kwargs):
+            timeout = kwargs.get("timeout")
+            if (not injected and isinstance(argv, list) and argv[3:5] == ["worktree", "remove"]
+                    and timeout is not None and any(_norm_path(str(part)) == _norm_path(subject) for part in argv)):
+                injected.append(argv)
+                os.remove(os.path.join(subject, "f.txt"))
+                raise subprocess.TimeoutExpired(argv, timeout)
+            return real_run(argv, *args, **kwargs)
+
+        self.age_control(subject)
+        with mock.patch.object(subprocess, "run", new=cut_short):
+            self.run_in_process("cutdeadend", ending, extra=self.payload_extra(self.running_elsewhere()))
+        with self.subTest(precondition="the removal was cut short, and the tree is still locked by its dead host"):
+            self.assertTrue(injected, "the fault never landed: no finite-timeout worktree remove ran for the subject")
+            self.assertTrue(os.path.isdir(subject), "the cut-short removal finished the tree; nothing is left to restore")
+            self.assertTrue(guard.worktree_locked(self.primary, subject), "the relock after the cut-short remove did not take")
+        self.age_control(subject)
+        finisher = self.add("cutdeadnext")
+        record = self.run_in_process("cutdeadnext", finisher, extra=self.payload_extra(self.running_elsewhere()))
+        row = next((r for r in record.get("worktrees") or []
+                    if _norm_path(str(r.get("path", ""))) == _norm_path(subject)), None)
+        detail = ("; the run wrote no decision row for it" if row is None else
+                  "; row: action=%s reason=%s error=%s" % (row.get("action"), row.get("reason"), row.get("error")))
+        with self.subTest(arm="the next agent end restores the finished tree and removes it"):
+            self.assertRemoved(subject, detail)
+
 
 class AgentEndOtherWorktreeTests(_AgentEndFixture):
     """The same SubagentStop run also removes ANOTHER finished agent's tree under
