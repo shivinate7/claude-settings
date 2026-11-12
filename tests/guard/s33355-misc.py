@@ -38,6 +38,7 @@ LOG_CHECKS = (
      hand_made_refusal_text_case),
     ("hand-made worktree: the pointer remedy names EnterWorktree, not worktree add",
      pointer_remedy_names_enter_worktree_case),
+    (HM_NAMED_LABEL, hand_made_named_red_path_case),
     ("split_segments: a comment starting a word ends its line, "
      "letter-before-# and quoted-# stay literal", split_segments_comment_case),
     ("env: heredoc-allow-strip: strip_heredoc_bodies keeps no body line of the incident cat write",

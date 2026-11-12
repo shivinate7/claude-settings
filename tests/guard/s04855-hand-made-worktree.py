@@ -160,11 +160,12 @@ HMAGENT_SIB_RED = slash(os.path.join(HMWT, "agent-" + HM_SIBLING + "-red"))
 HMAGENT_PREFIX_RED = slash(os.path.join(HMWT, "agent-" + HM_AGENT + "b-red"))
 HMAGENT_OWN_RED = slash(os.path.join(HMWT, "agent-" + HM_AGENT + "-red"))
 HMAGENT_LANE9 = slash(os.path.join(HMWT, "lane9"))
-# A refusal to an agent names the agent's own red-run form, literally, and says EnterWorktree may be refused
-# for a subagent, so the agent knows where its red-run folder goes. A refusal names no sibling's folder, and
-# no refused tree.
-HM_OWN_RED_FORM = ".claude/worktrees/agent-" + HM_AGENT + "-red"
-HM_AGENT_CARRIES = (HM_OWN_RED_FORM, "may be refused for a subagent")
+# A refusal to an agent names the agent's own red-run path in its absolute form, under the primary, and says
+# EnterWorktree may be refused for a subagent. Read from home, a relative form nests inside the home and is
+# refused, so only the absolute form is the remedy. Either spelling of the primary is accepted.
+HM_OWN_RED_ABS = tuple(slash(os.path.join(root, ".claude", "worktrees", "agent-" + HM_AGENT + "-red"))
+                       for root in (HMMAIN, os.path.realpath(HMMAIN)))
+HM_AGENT_CARRIES = (HM_OWN_RED_ABS, "may be refused for a subagent")
 hm_refuse("an agent adds a sibling agent's red-run folder, by absolute path, is refused",
         HMADD + HMAGENT_SIB_RED, carries=HM_AGENT_CARRIES, lacks=(HM_SIBLING,), **HMAG)
 hm_refuse("an agent adds a sibling agent's red-run folder, by a relative path, is refused",
@@ -177,7 +178,7 @@ hm_refuse("a PowerShell call by an agent, adding a sibling's red-run folder, is 
         HMADD + HMAGENT_SIB_RED, tool="PowerShell", carries=HM_AGENT_CARRIES, lacks=(HM_SIBLING,),
         **HMAG)
 hm_refuse("an agent adds a tree outside the primary's folder is refused, as before",
-        HMADD + slash(os.path.join(ROOT, "hm-agent-outside")), **HMAG)
+        HMADD + slash(os.path.join(ROOT, "hm-agent-outside")), lacks=("hm-agent-outside",), **HMAG)
 # The agent's own red-run folder, added the way the test-author's red run adds it, and the agent's
 # own home, both pass. The same lane9 add with no agent_id passes too, so the refusal above is the agent's.
 hm_allow("an agent adds its own red-run folder, as the red run does, passes",
@@ -325,6 +326,48 @@ def pointer_remedy_names_enter_worktree_case():
     if POINTER_OWN_WORKTREE_HINT not in reason:
         return False, "the pointer remedy does not say %r: %s" % (POINTER_OWN_WORKTREE_HINT, reason[-120:])
     return True, "the pointer remedy names EnterWorktree, its call shape, the git -C hint, and no 'worktree add'"
+
+
+# THE PATH THE REFUSAL NAMES. An agent makes its red run by the path the refusal gives it, run from its home. That
+# path must be absolute, under the primary, so the add from home reaches the agent's own folder and does not nest
+# it inside the home. The case reads the path off the printed reason, then runs the add as the agent.
+HM_NAMED_LABEL = ("hand-made worktree: the red-run path the refusal names to an agent is absolute under the primary, "
+                  "and git worktree add --detach to it from the agent's home is allowed")
+HM_NAMED_RED = re.compile(r"([^\s`'\"]*\.claude/worktrees/agent-" + HM_AGENT + r"-red)")
+
+
+def hm_under(path, folder):
+    """True when `path` is `folder` or a path inside it, after both are normalized to one spelling."""
+    def norm(p):
+        return os.path.normcase(os.path.normpath(p))
+    return norm(path) == norm(folder) or norm(path).startswith(norm(folder) + os.sep)
+
+
+def hand_made_named_red_path_case():
+    """The refusal names the agent's red-run path, absolute under the primary, and the add of that path from the
+    agent's home is allowed. A relative path nests inside the home and is refused, so the named path is the remedy."""
+    from_home = {"raw": None, "tool": "Bash", "cwd": HMHOME, "session": None, "env_path": None,
+                 "temp": os.path.join(ROOT, "tmp"), "agent_id": HM_AGENT,
+                 "tool_input": {"command": HMADD + HMAGENT_LANE9}}
+    got, reason = decide(from_home)
+    if got != "deny":
+        return False, "the lane9 add from the agent's home is %s, not refused: %s" % (got, reason[:90])
+    found = HM_NAMED_RED.search(reason)
+    if not found:
+        return False, "the refusal names no .claude/worktrees/agent-%s-red path: %s" % (HM_AGENT, reason[-120:])
+    named = found.group(1)
+    if not os.path.isabs(named):
+        return False, "the red-run path the refusal names is not absolute: %s" % named
+    if not any(hm_under(named, root) for root in (HMMAIN, os.path.realpath(HMMAIN))):
+        return False, "the red-run path the refusal names is not under the primary: %s" % named
+    got, reason = decide(dict(from_home, tool_input={"command": HMADD + "--detach " + named + " HEAD"}))
+    if got != "allow":
+        return False, "git worktree add --detach to the named path, from the agent's home, is %s: %s" % (
+            got, reason[:90])
+    return True, "the path the refusal names is absolute under the primary, and its add from home is allowed"
+
+
+LOG_FAMILY[HM_NAMED_LABEL] = FAMILY   # its registration sits in the misc literal (section 33355), which keeps it here
 
 
 # =========================================================================== 2. machine-wide kills

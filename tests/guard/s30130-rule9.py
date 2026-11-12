@@ -256,10 +256,11 @@ REASON_MAY_NAME = {
     # The refusal names the premises it refuses and their Source tokens, and may name the handoff it judges, under the
     # config folder, as handoff-sections does.
     "handoff-checked-stamp": (ROOT, slash(ROOT), ".claude"),
-    # The refusal names the agent's own red-run folder, `.claude/worktrees/agent-<its id>-red`, the one form the
-    # agent may make its red-run checkout in. That path is the remedy, so the rule may name `.claude`, as
-    # handoff-unread does. Its other fragments stay forbidden, and the agent's sibling folder is never named.
-    "hand-made-worktree": (".claude",),
+    # The refusal names the agent's own red-run folder by its absolute path under the primary, the remedy the agent
+    # makes its red run by. In this suite the primary sits under ROOT, so the rule may name ROOT and its slash form,
+    # and `.claude` for the folder, as handoff-unread does. Its other fragments stay forbidden. A sibling's folder
+    # and a refused tree are pinned by `lacks` on their own cases.
+    "hand-made-worktree": (ROOT, slash(ROOT), ".claude"),
 }
 
 
