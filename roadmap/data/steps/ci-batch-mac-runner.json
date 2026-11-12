@@ -1,0 +1,14 @@
+{
+ "id": "ci-batch-mac-runner",
+ "title": "Batch macOS jobs run on the owner's MacBook; drafts skip macOS while a batch runs",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "session_013NEJL1Pg1yXejPVGo7aocY",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 14:19 CST Nov 12 (R58, plan 0a36899): \"agreed on e, my mac isn't available all the time but imjust saying it shd be available rn and it can help\".",
+ "source": "owner 14:19 CST Nov 12, via retrospective 14:20 CST",
+ "note": "R55 express. Home: decision no-merge-during-batch-ci. Runner label claude-settings-mac; GitHub macOS fallback when offline; never a fork PR; a draft's macOS job skips while a batch run is in progress (page items 639 a, 640 a). Lane started 14:21 CST by the coordinator.",
+ "updatedAt": "2026-11-12T14:22:45-06:00"
+}

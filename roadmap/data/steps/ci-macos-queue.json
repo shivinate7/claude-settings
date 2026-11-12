@@ -1,7 +1,7 @@
 {
  "id": "ci-macos-queue",
  "title": "Batches stop waiting for a macOS runner",
- "status": "blocked",
+ "status": "folded",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
  "lane": "",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Retrospective CI audit 14:12 CST Nov 12: batch 103 waited 26.4 min for macOS, the largest single cost, while 50 draft runs of lane-touched tests took the slots (13:30-14:40 UTC).",
  "source": "retrospective 14:12 CST Nov 12 (CI audit)",
- "note": "R55 express (owner 14:05 CST Nov 12). Waits on owner items 639 (drafts skip macOS while a batch runs) and 640 (his MacBook runs batch macOS jobs).",
- "updatedAt": "2026-11-12T14:21:00-06:00"
+ "note": "R55 express (owner 14:05 CST Nov 12). Waits on owner items 639 (drafts skip macOS while a batch runs) and 640 (his MacBook runs batch macOS jobs). Folded 14:22 CST Nov 12 into ci-batch-mac-runner (R58).",
+ "updatedAt": "2026-11-12T14:22:45-06:00"
 }

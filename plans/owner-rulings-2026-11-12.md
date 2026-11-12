@@ -66,3 +66,6 @@ Relayed by the retrospective.
 - 14:13 CST page save: 620 done; 621 a; 624 b ("for now at least"); 627 a; 630 b; 632 a, widened: any repo his GitHub logins reach (shivinate7, ssemwal-cdc); 633 b (records-only fix-check FAIL carries; home rule roles-review-cap-three, step fix-check-records-carry). None of these: 622 (retrospective decides), 625, 628, 629, 636 (reworded or back to lanes).
 - 14:14 CST (via coordinator, relayed by retrospective): "b: keep mail only ... the doorbell was supposed to be via a whole other route that's translatable anywhere"; the trust-card route is rejected; the retrospective designs the doorbell. Home: decision session-messages; step mailbox-doorbell.
 - 14:17 CST item 622 b, picked by the retrospective on his 14:13 CST instruction: merges resume when the revert merges (his 09:46 CST answer). Home: decision no-merge-onto-red-main.
+- R57, 14:17 CST (plan 79eb441): doorbell route a, a background mail-wait; the retrospective builds it ("q2: ya C"). Home: decision session-messages; step mail-doorbell-wait.
+- R58, 14:19 CST (plan 0a36899): batch macOS jobs on his MacBook (label claude-settings-mac, GitHub fallback, no fork PR); drafts skip macOS while a batch runs. Home: decision no-merge-during-batch-ci; step ci-batch-mac-runner.
+- 14:20 CST: typed yes in the coordinator for the 632/633 records lane (item 638).

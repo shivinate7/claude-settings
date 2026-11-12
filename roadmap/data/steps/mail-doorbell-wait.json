@@ -1,0 +1,14 @@
+{
+ "id": "mail-doorbell-wait",
+ "title": "A background mail-wait wakes an idle session on any machine",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "session_013NEJL4QMn6ywJNPBUQ3WP5",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 14:17 CST Nov 12 (R57, plan 79eb441): \"I'm okay with A for Q1\"; builder: \"q2: ya C\" (the retrospective runs the lane).",
+ "source": "owner 14:17 CST Nov 12, via retrospective 14:20 CST",
+ "note": "Home: decision session-messages. Page items 641 a and 642 a closed. Ruling 3.15 (owner 13:22 CST Nov 11) already allows a timer that costs less than it saves; the 14:15 CST question called the rule a hard ban (retrospective past-ruling miss). Lane started 14:19 CST by the retrospective.",
+ "updatedAt": "2026-11-12T14:22:45-06:00"
+}
