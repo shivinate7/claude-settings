@@ -20780,6 +20780,7 @@ class HandedLaneCheck(RecordsEnv):
         self.assertEqual(self.host.readies, [], f"the draft step marked #7 ready past the check:\n{out}")
         self.assert_refused_untouched(rc, out, refs)
         self.assert_names(out, *named)
+        return out
 
     def assert_passes(self, lanes, left):
         """The draft step passes the check: exit 0, marked ready, and the count line printed once."""
@@ -20823,10 +20824,18 @@ class HandedLaneCheck(RecordsEnv):
         self.assert_handed(20, 31, 32)
         self.assert_passes(2, 3)
 
-    def test_handed_lane_lone_lane_with_other_handed_prs_open_is_not_refused_by_the_check(self):
-        self.fixture("", handed=[9], held=[])  # no Lanes line and the head holds no handed head: a lone lane, so the check does not apply
+    def test_handed_lane_lone_lane_with_a_handed_pr_named_nowhere_is_refused(self):
+        self.fixture("", handed=[9], held=[])  # no Lanes line and the head holds no handed head: a lone lane, which the check reads like any batch
         self.assert_handed(9)
-        self.assert_skipped()
+        out = self.assert_refused(9)
+        self.assert_line_names(out, 9, "is handed but not named in the body")
+
+    def test_handed_lane_lone_lane_naming_a_handed_pr_on_a_left_out_line_with_a_reason_passes(self):
+        self.fixture("Dropped (macOS CI red): #9", handed=[9], held=[])  # the same lone lane, with #9 named on a left-out line with a reason
+        self.assert_handed(9)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, f"the check refused a lone lane whose body names #9 on a left-out line with a reason:\n{out}")
+        self.assertEqual(self.host.readies, [7], f"the draft step did not mark #7 ready:\n{out}")
 
     def test_handed_lane_failed_read_stops_the_draft_step(self):
         self.fixture("Lanes: #12", handed=[12], held=[12])
@@ -21003,17 +21012,37 @@ class HandedLaneCheck(RecordsEnv):
         self.assertEqual(rc, 0, out)
         self.assertTrue(getattr(self.host, "merged", False), f"the ready merge did not land:\n{out}")
 
-    def test_handed_lane_no_lanes_release_head_merging_a_lane_is_refused(self):
+    def release_lane_fixture(self, draft):
+        """The integration PR #7 is into release, and its head merges lane-a's tip, which is on neither main nor release. The body has no
+        Lanes line, and release declares no ready checks, so only the no-Lanes check can read the merge. -> lane-a's tip."""
         self.release_base()
         lane_batch(self, "lane-a")  # the lane is cut from main's new tip, and is on neither main nor release
-        self.fixture("", handed=[], base="release", draft=False)  # lane_batch gave the body a Lanes line: this body has none
+        self.fixture("", handed=[], base="release", draft=draft)  # lane_batch gave the body a Lanes line: this body has none
         self.assert_head_merges_lane("lane-a")
         tip = self.tips["lane-a"]
         self.assertFalse(self.reachable(tip, "release"), "lane-a is already on release, so the fixture does not reach the check")
         self.assertFalse(self.reachable(tip, "main"), "lane-a is already on main, so the fixture does not reach the check")
+        self.assertNotIn("readyChecks", json.loads(self.show("release", ".github/stamp.json")).get("merge", {}),
+                         "release declares merge.readyChecks, so the draft step would run them and not reach the no-Lanes check")
+        return tip
+
+    def test_handed_lane_no_lanes_release_head_merging_a_lane_is_refused(self):
+        tip = self.release_lane_fixture(draft=False)
         refs = self.refs()
         rc, out = self.run_merge("7", "--confirm")
         self.assert_refused_untouched(rc, out, refs)
+        self.assertIn(tip[:9], out, f"the refusal does not name lane-a's tip:\n{out}")
+        self.assertIn(merge.HANDED_CITE, out, f"the refusal is not the no-Lanes check's:\n{out}")
+
+    def test_handed_lane_no_lanes_release_draft_merging_a_lane_is_refused(self):
+        tip = self.release_lane_fixture(draft=True)  # a draft on a non-default base, with no ready checks: the check runs before the ready mark
+        self.assertTrue(self.host.draft, "the fixture did not make #7 a draft")
+        refs = self.refs()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, f"the draft step on a non-default base let the merged lane pass the no-Lanes check:\n{out}")
+        self.assert_refused_untouched(rc, out, refs)
+        self.assertEqual(self.host.readies, [], f"the draft step marked #7 ready past the no-Lanes check:\n{out}")
+        self.assertTrue(self.host.draft, f"the draft step cleared #7's draft flag on a refusal:\n{out}")
         self.assertIn(tip[:9], out, f"the refusal does not name lane-a's tip:\n{out}")
         self.assertIn(merge.HANDED_CITE, out, f"the refusal is not the no-Lanes check's:\n{out}")
 
@@ -21087,6 +21116,56 @@ class HandedLaneCheck(RecordsEnv):
         self.assertIn("the test clone has no origin/main", lifts[0], "the lift line does not name the reason")
         self.assertIn(merge.UNDO_FLAG, lifts[0], "the lift line does not name the flag")
         self.assertTrue(getattr(self.host, "merged", False), f"the ready merge did not land after the lift:\n{out}")
+
+    def left_out_fixture(self, line, n):
+        """The integration PR #7 names #12 on Lanes and `line` for handed PR `n`, whose head the batch head does not hold: `n` is handed, not in the batch."""
+        self.fixture(f"Lanes: #12\n{line}", handed=[12, n], held=[12])
+        self.assert_handed(12, n)
+        self.assertFalse(self.host.holds_head(handed_sha(n), self.head("feat")), f"the fixture puts #{n} in the batch head")
+
+    def assert_placeholder_refused(self, line, n):
+        """`line` gives handed PR `n` a placeholder for its reason: the check refuses `n` on a left-out line with no reason."""
+        self.left_out_fixture(line, n)
+        out = self.assert_refused(n)
+        self.assert_line_names(out, n, "is on a left-out line with no reason")
+
+    def test_handed_lane_placeholder_tbd_reason_is_refused(self):
+        self.assert_placeholder_refused("Dropped (TBD): #15", 15)
+
+    def test_handed_lane_placeholder_reason_after_a_held_from_label_is_refused(self):
+        self.assert_placeholder_refused("Held from #7: #15 (...)", 15)
+
+    def test_handed_lane_placeholder_one_letter_reason_is_refused(self):
+        self.assert_placeholder_refused("Dropped earlier: #15 (x)", 15)
+
+    def assert_left_out_with_a_reason_passes(self, line, n):
+        """`line` is a left-out line with a real reason for handed PR `n`: the check reads it, so the draft step passes with the count line."""
+        self.left_out_fixture(line, n)
+        self.assert_passes(1, 1)
+
+    def test_handed_lane_bulleted_left_out_line_with_a_reason_passes(self):
+        self.assert_left_out_with_a_reason_passes("- Dropped (macOS CI red): #15", 15)
+
+    def test_handed_lane_bold_left_out_line_with_a_reason_passes(self):
+        self.assert_left_out_with_a_reason_passes("**Dropped (macOS CI red):** #15", 15)
+
+    def test_handed_lane_indented_left_out_line_with_a_reason_passes(self):
+        self.assert_left_out_with_a_reason_passes("  Dropped (macOS CI red): #15", 15)
+
+    def test_handed_lane_empty_lanes_line_with_a_merged_lane_is_refused(self):
+        lane_batch(self, "lane-a")  # the head merges lane-a's tip; the fixture below empties the Lanes line lane_batch gave the body
+        self.fixture("Lanes:", handed=[])
+        self.assertEqual(merge.body_lanes(self.host.body)[0], [], "the body's Lanes line names a PR, so the empty-line case does not apply")
+        tip = self.tips["lane-a"]
+        self.assertTrue(any(tip in parents[1:] for parents in self.merge_parents()), "the head does not merge lane-a")
+        self.assertFalse(self.reachable(tip, "main"), "lane-a is already on main, so the fixture does not reach the check")
+        refs = self.refs()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, f"an empty Lanes line let a merged lane pass the no-Lanes check:\n{out}")
+        self.assert_refused_untouched(rc, out, refs)
+        self.assertEqual(self.host.readies, [], f"the draft step marked #7 ready past the check:\n{out}")
+        self.assertIn(tip[:9], out, f"the refusal does not name lane-a's tip:\n{out}")
+        self.assertIn(merge.HANDED_CITE, out, f"the refusal is not the no-Lanes check's:\n{out}")
 
 if __name__ == "__main__":
     if len(sys.argv) == 3 and sys.argv[1] == "--sigchild":
