@@ -154,11 +154,32 @@ class HistoryPhrase:
         return itertools.chain(self.FORMS.finditer(text), run)
 
 
+class CommitHash:
+    """The `commit hash` group: a bare hex id of 7 to 40 characters with a letter and a digit.
+
+    An id that an example word introduces ("e.g. `41ddef83`", "such as 41ddef83", "an id like 41ddef83") names
+    no commit, so it is skipped. Ids listed after the first ("such as `aa11bb22`, `cc33dd44`") join it. Any
+    other word before the id leaves it flagged, so "fixed in", "see" and "cut at" still hit."""
+    HEX = re.compile(r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b")
+    # The marker is the last thing before the id, past an optional quote or backtick and an optional comma.
+    EXAMPLE = re.compile(r"(?:\be\.g\.|\bi\.e\.|\bsuch\s+as|\bfor\s+(?:example|instance)|\blike)[\s,:(]*[`'\"]?$", re.I)
+    # One earlier id of such a list, with its closing quote and the separator to the next id.
+    LISTED = re.compile(r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}[`'\"]?(?:\s*,\s*(?:or\s+|and\s+)?|\s+(?:or|and)\s+)[`'\"]?$", re.I)
+
+    def finditer(self, text):
+        for m in self.HEX.finditer(text):
+            before = text[:m.start()]
+            while (prior := self.LISTED.search(before)):
+                before = before[:prior.start()]
+            if not self.EXAMPLE.search(before):
+                yield m
+
+
 PATTERNS = {
     # A round number is narration, except as a unit ("2 decimals") or inside a decision id's gloss (ReviewRound).
     "review round": ReviewRound(),
     "pr number": re.compile(r"\bPR\s*#?\s*\d{3,}"),
-    "commit hash": re.compile(r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b"),
+    "commit hash": CommitHash(),
     "status word": re.compile(r"\b(?:MEASURED|CORRECTED)\b|\bADDED\s+\d"),
     "date": DatedText(),
     "history phrase": HistoryPhrase(),
