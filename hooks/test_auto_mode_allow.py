@@ -29,7 +29,8 @@ owner about a branch delete after the archive push that guard_branch_worktree's 
   `settings.json` and the entry by its exact title or key, one entry per grant. Its "Never covers wins"
   sentence follows the Never covers sentence and settles any clash with Covers.
 - One "Own Branch Lease Push:" entry quotes the lease push with a named sha and the guard remedy's
-  command form, read from PUSH_REASON. Its Covers text names the 9 lease-push refusals, requires
+  command form, read from PUSH_REASON, and that remedy names the same sha form. Its Covers text names
+  the 9 lease-push refusals, requires
   the branch was pushed earlier in this session, and binds the sha to the tip this session last
   pushed. Its Never covers names each act in LEASE_REFUSED (decision auto-mode-owner-acts).
 - One "Own Branch Lease Push, refspec form:" entry quotes both lease forms typed with a source ref,
@@ -626,6 +627,10 @@ class OwnBranchLeasePushIsAllowed(unittest.TestCase):
         form = remedy_form()
         self.assertIsNotNone(form, "PUSH_REASON names no retry command to quote")
         self.assertIn(form, entry_part(self, LEASE), "entry does not quote the guard remedy's command form")
+
+    def test_guard_remedy_names_the_sha_form_the_entry_allows(self):
+        self.assertEqual(remedy_form(), LEASE_SHA_FORM,
+                         "the guard remedy names a retry form the lease entry does not allow")
 
     def test_covers_names_the_incident(self):
         self.assertIn(LEASE_INCIDENT, entry_part(self, LEASE),
