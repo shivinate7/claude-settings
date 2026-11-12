@@ -7,7 +7,7 @@ sha, source, installer). It asks origin for the recorded ref's tip and acts on t
 - tip equals the recorded sha: prints nothing.
 - tip differs: runs the recorded installer once (`install.sh --cloud`), then reads the record again. A record now at
   the tip prints one line naming both 7-character shas. A record still at another sha (the installer exited 0 but
-  its fetch missed the tip) prints "reinstall did not reach <tip> (record at <sha>)", never "reinstalled". A second
+  its files did not come from the tip: its fetch missed it, or the source clone stayed on another commit) prints "reinstall did not reach <tip> (record at <sha>)", never "reinstalled". A second
   line follows when a changed path needs a new session to read it again: CLAUDE.md, output-styles/,
   and the settings.json keys model and effortLevel (the line names each key). An installer that exits non-zero
   prints "reinstall failed (exit N)" and is not retried that turn. An installer past its timeout gets SIGTERM, so

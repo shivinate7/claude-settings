@@ -1190,14 +1190,14 @@ if [ "$CLOUD" = 1 ] && command -v jq >/dev/null 2>&1 && [ -f "$SRC/settings.json
 fi
 
 # Cloud, a whole install: record what this run installed, for hooks/stale_install.py. ref is $REF as this run
-# resolved it, sha is the tip of origin/$REF the source clone holds (what the files came from; after a failed
-# refresh it is the older tip, which is the truth), source and installer say where to run it again. No tip, no
-# record: the hook then reports the freshness as unknown instead of reading a guess. A failed write is a WARN, never
-# a failed install. The file is built beside its place and renamed over it.
+# resolved it, sha is the source clone's HEAD, the commit the files came from (after a failed refresh, or a clone
+# the refresh left on a local commit, it is that commit, not origin's tip, which is the truth), source and installer
+# say where to run it again. No HEAD, no record: the hook then reports the freshness as unknown instead of reading a
+# guess. A failed write is a WARN, never a failed install. The file is built beside its place and renamed over it.
 record_install() {
-  ri_sha=$(git -C "$SRC" rev-parse -q --verify "refs/remotes/origin/$REF" 2>/dev/null)
+  ri_sha=$(git -C "$SRC" rev-parse -q --verify HEAD 2>/dev/null)
   if [ -z "$ri_sha" ] || [ ! -f "$SRC/install.sh" ]; then
-    log "WARN: no install record written: $SRC has no origin/$REF tip or no install.sh"
+    log "WARN: no install record written: $SRC has no readable HEAD or no install.sh"
     return 0
   fi
   ri_file="$CLAUDE_DIR/.claude-settings-install.json"
