@@ -19286,7 +19286,7 @@ class BatchFreeze(CloudSession):
     def test_a_marker_post_refused_after_the_drop_leaves_the_drop_done_and_says_so(self):
         for n in (101, 102):
             self.lane(n)
-        pr = self.frozen_batch("one", [101, 102], blamed=(102,))
+        self.frozen_batch("one", [101, 102], blamed=(102,))
         def refuse(n, body):
             raise merge.Stop("posting refused")
         self.host.post_comment = refuse
