@@ -110,17 +110,19 @@ Lag mode, run by the writer at a comment wake, after the folder of answers and r
 
     python3 ~/.claude/skills/waiting-page/stale_pages.py --lag <folder> [--max-age <min>] [--now <iso>]
 
-<folder> holds answers/ and receipts/, each the folder `ArtifactData list` saved (<id>.json per doc, the data alone, and the
-.complete marker). It measures how long each item answer took to be read back. Lines, then the total, which is always last:
+<folder> is the wake's folder, read as --unread reads it (load_saved): answers.json and receipts.json, each a list of {"id", "data"}
+entries the session saved from the store. No marker, and no per-doc answers/ folder. It measures how long each item answer took to be
+read back. Lines, then the total, which is always last:
 `read-delay <id> answered <at>, read <read>, delay <N>s` (a receipt whose `read` is at or after the answer's `at`; `filed` is never read),
-`unread-old <id> answered <at>, no read after it, age <N>s` (no such receipt, and the answer is older than --max-age), and
-`lag total: A answers, R read, U unread older than M min, Y unread within M min`. An unread answer within the max age prints no line
-and is counted in the total. Times print in US Central (hooks/local_time.central_full). Exit 0 with no unread-old line, 1 with one.
-Exit 2 with `unknown:` lines and no total when a folder or its marker is missing, a file is not JSON, an answer has no readable `at`,
-or the answer's receipt has no readable `read`; an unread read is never a clean or an old line. A park answer is skipped, as in --unread
-(--parked reads it). --max-age is whole minutes and defaults to 60: an unmeasured pick, a default and not a ruling. --now defaults to
-the clock. The incident: an answer that sat unread 10.5 h (owner's report).
-Cost: one python process, reads the answers and receipts files the writer already saved, writes none, starts no git, no timer.
+`unread-old <id> answered <at>, no read after it, age <N>s` (no such receipt, and the answer is more than --max-age old), and
+`lag total: A answers, R read, U unread older than M min, Y unread within M min`. An unread answer exactly max-age old or younger
+prints no line and is counted as within. A park answer (`park.<id>`, `parked: true`, act `park`) is skipped, as --unread does
+(--parked reads it). Times print in US Central (hooks/local_time.central_full). Exit 0 with no unread-old line, 1 with one.
+Exit 2 with `unknown:` lines and no total when answers.json or receipts.json is missing, not JSON or not a list (an old per-doc
+answers/ folder is a missing answers.json), an answer has no readable `at`, or its receipt has no readable `read`: an unread read is
+never a clean or an old line. --max-age is whole minutes and defaults to 60: an unmeasured pick, a default and not a ruling. --now
+defaults to the clock. The incident: an answer that sat unread 10.5 h (owner's report).
+Cost: one python process, reads 2 files the writer already saved, writes none, starts no git, no timer.
 
 Cost: one python process, at most one read-only git process (no fetch, no network, 30 s cap), no
 extra process for --answers (it reads one more file, a folder one per answer), no
@@ -750,18 +752,28 @@ def parked_mode(argv):
     return 2 if unknown else 1 if lines else 0
 
 
+def load_saved(folder, names):
+    """{name: parsed JSON} of <folder>/<name>.json for each name, the files the wake saves; ValueError with the cause when one cannot be read.
+    The one home of that read for --unread and --lag."""
+    loaded = {}
+    for name in names:
+        try:
+            with open(os.path.join(folder, name + ".json"), encoding="utf-8") as f:
+                loaded[name] = json.load(f)
+        except (OSError, ValueError) as err:
+            raise ValueError("cannot read %s.json in %s (%s)" % (name, folder, err))
+    return loaded
+
+
 def unread_mode(argv):
     """`--unread <dir>`: name each item answer the writer has not read back, from four saved files and no clock."""
     ap = argparse.ArgumentParser(prog="stale_pages.py", allow_abbrev=False)
     ap.add_argument("--unread", required=True)
     args = ap.parse_args(argv)
     try:
-        loaded = {}
-        for name in ("meta", "items", "answers", "receipts"):
-            with open(os.path.join(args.unread, name + ".json"), encoding="utf-8") as f:
-                loaded[name] = json.load(f)
-    except (OSError, ValueError) as err:
-        print("unknown: cannot read %s.json in %s (%s)" % (name, args.unread, err))
+        loaded = load_saved(args.unread, ("meta", "items", "answers", "receipts"))
+    except ValueError as err:
+        print("unknown: %s" % err)
         return 2
     meta, items, answers, receipts = loaded["meta"], loaded["items"], loaded["answers"], loaded["receipts"]
     for name, ok in (("meta", isinstance(meta, dict)), ("items", isinstance(items, list)),
@@ -814,17 +826,6 @@ def unread_mode(argv):
 LAG_MAX_AGE = 60  # minutes: an unmeasured default for how old an unread answer may be before --lag names it, not a ruling
 
 
-def lag_docs(folder, name):
-    """{doc id: data} of <folder>/<name>/, the folder the writer saved; ValueError with the cause when it cannot be read."""
-    path = os.path.join(folder, name)
-    if not os.path.isdir(path):
-        raise ValueError("%s is not a folder" % path)
-    docs, complete = load_docs(path, name, keyed=True)  # export_page.docs_in, the one home of reading this folder
-    if not complete:
-        raise ValueError("%s has no .complete marker, so its list may be cut short" % path)
-    return dict(docs)
-
-
 def lag_mode(argv):
     """`--lag <folder> [--max-age <min>] [--now <iso>]`: how long each item answer took to be read back, and which are unread past the max age."""
     ap = argparse.ArgumentParser(prog="stale_pages.py", allow_abbrev=False)
@@ -837,36 +838,38 @@ def lag_mode(argv):
         print("unknown: --now is not an ISO time, or --max-age is below 0 (%s, %s)" % (args.now, args.max_age))
         return 2
     try:
-        if not os.path.isdir(args.lag):
-            raise ValueError("%s is not a folder" % args.lag)
-        answers, receipts = lag_docs(args.lag, "answers"), lag_docs(args.lag, "receipts")
+        loaded = load_saved(args.lag, ("answers", "receipts"))
     except ValueError as err:
-        print("unknown: cannot read the lag folder (%s)" % err)
+        print("unknown: %s" % err)
         return 2
+    for name, rows in loaded.items():
+        if not isinstance(rows, list):  # a file of the wrong shape is never read as clean or listed
+            print("unknown: %s.json is not a list" % name)
+            return 2
     from local_time import central_full  # the one home of the Central stamp
     stamp = lambda t: central_full(datetime.datetime.fromtimestamp(t, datetime.timezone.utc))
+    data = lambda r: r.get("data") if isinstance(r.get("data"), dict) else {}
+    reads = {}
+    for r in loaded["receipts"]:
+        if isinstance(r, dict):
+            reads.setdefault(r.get("id"), []).append(data(r).get("read"))
     lines, unknown, read, old, young = [], [], 0, 0, 0
-    for key, data in answers.items():
-        if not isinstance(data, dict):
-            unknown.append("unknown: the answer %s is not an object" % key)
-            continue
+    for r in loaded["answers"]:
+        key = r.get("id") if isinstance(r, dict) else None
         # A park answer is read by the --parked mode, never here: keyed park.<id>, parked: true, or act park.
-        if key.startswith("park.") or data.get("parked") is True or data.get("act") == "park":
+        if not isinstance(key, str) or key.startswith("park.") or data(r).get("parked") is True or data(r).get("act") == "park":
             continue
-        at = parse_utc(data.get("at"))
+        at = parse_utc(data(r).get("at"))
         if at is None:  # an unreadable time is never counted read or unread
             unknown.append("unknown: the answer %s has no readable at" % key)
             continue
-        receipt = receipts.get(key)
-        if receipt is not None and not isinstance(receipt, dict):
-            unknown.append("unknown: the receipt of answer %s is not an object" % key)
-            continue
-        seen = parse_utc(receipt.get("read")) if receipt is not None and receipt.get("read") is not None else None
-        if receipt is not None and seen is None:
-            unknown.append("unknown: the receipt of answer %s has no readable read" % key)
-        elif seen is not None and seen >= at:  # a read from before the answer is of an older answer
+        times = [parse_utc(t) if t is not None else None for t in reads.get(key, [])]
+        cleared = [t for t in times if t is not None and t >= at]  # a read from before the answer is of an older answer
+        if cleared:
             read += 1
-            lines.append("read-delay %s answered %s, read %s, delay %ds" % (key, stamp(at), stamp(seen), seen - at))
+            lines.append("read-delay %s answered %s, read %s, delay %ds" % (key, stamp(at), stamp(min(cleared)), min(cleared) - at))
+        elif None in times:
+            unknown.append("unknown: the receipt of answer %s has no readable read" % key)
         elif now - at > args.max_age * 60:
             old += 1
             lines.append("unread-old %s answered %s, no read after it, age %ds" % (key, stamp(at), now - at))
