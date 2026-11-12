@@ -437,8 +437,9 @@ def tree_cpu(table, pid):
 
 
 SHELLS = ("sh", "bash", "dash", "zsh", "ksh", "mksh", "ash", "fish", "csh", "tcsh")
-# A command that never starts or waits on a child. One with a live child is a shell copy that ran its
-# last command by exec (dash does for `( sleep 100 & sleep 100 )`), so it is no waiter.
+# Bandaid. A command that never waits on a child. One with a live child is a shell copy that ran its
+# last command by exec (dash does for `( sleep 100 & sleep 100 )`), so it is no waiter. The residual:
+# `( git fetch & git fetch )` also shows as a non-shell process with a live child, so it reads as a waiter.
 LEAF_COMMANDS = ("sleep",)
 
 
