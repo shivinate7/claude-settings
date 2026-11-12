@@ -28,6 +28,7 @@ Shapes this file assumes, pinned in one place (the adapter `verdicts_of`, and th
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -278,6 +279,52 @@ class ContractTests(unittest.TestCase):
                 external = where.startswith("external:") and len(where) > len("external:")
                 self.assertTrue(where in kinds or external,
                                 "store %s: where %r is neither a layout kind nor external:<name>" % (store, where))
+
+
+FEEDBACK_LINES = (  # the real line forms of a feedback-log item (hooks/feedback_guard.py, decision owner-feedback-inbox)
+    ("- fb-0958-1 [ruling] -> decisions/a-ruling.md", "fb-0958-1"),
+    ("- fb-0958-2 [task] -> debts/a-task.md repeats roadmap:wheel-speed", "fb-0958-2"),
+    ("- fb-0958-3 [ruling] -> decisions/a-ruling.md [closed]", "fb-0958-3"),
+    ("- fb-0958-4 [task] -> step:wheel-speed", "fb-0958-4"),
+)
+
+
+class FeedbackLogContractTests(unittest.TestCase):
+    """The feedback log is the first live store (plan prose-tending-contract, step feedback-log-tends-itself, R27)."""
+
+    def feedback_entry(self):
+        entry = layout_data().get("tending", {}).get("feedback-log")
+        self.assertIsNotNone(entry, "lint/layout.json's tending key has no feedback-log entry")
+        return entry
+
+    def test_feedback_log_is_live(self):
+        state = self.feedback_entry().get("state")
+        self.assertEqual(state, "live", "the feedback-log store is %r, not live: no call point runs it" % state)
+
+    def test_feedback_log_runs_from_stop_and_compact(self):
+        points = sorted(self.feedback_entry().get("runs-from", []))
+        self.assertEqual(points, ["compact", "stop"],
+                         "the feedback-log store runs from %r, not from stop and compact" % points)
+
+    def test_feedback_log_item_regex_reads_the_real_line_form(self):
+        item = self.feedback_entry().get("item", "")
+        for line, want in FEEDBACK_LINES:
+            with self.subTest(line=line):
+                found = re.search(item, line)
+                got = found.group(1) if found and found.groups() else None
+                self.assertEqual(got, want, "the item regex reads %r as %r, not %r" % (line, got, want))
+
+
+class FeedbackLogCommandLineTests(unittest.TestCase):
+    """The runner's command line reads the feedback log at stop and at compact: the caller supplies its text."""
+
+    def test_feedback_log_is_read_at_stop_and_compact(self):
+        root = make_git_repo({"README.md": "x\n"})
+        for point in ("stop", "compact"):
+            with self.subTest(point=point):
+                result = run_cli(make_tree(), root, point=point, store="feedback-log")
+                self.assertIn("tending: unknown feedback-log: caller supplies text", result.stdout,
+                              "at %s the runner printed %r, not the caller-supplies line" % (point, result.stdout))
 
 
 # ---- Runner: the verdicts, the close step, the command line, and the cost. --------------------------------
