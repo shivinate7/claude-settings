@@ -2044,9 +2044,15 @@ class LintSetsBatchLabel(LintPostsPassComment):
     def labeled(self):
         return tm.GhHalf.gh_state(self, "labeled") or []
 
-    def test_a_passing_integration_lint_adds_the_batch_label_by_rest(self):
+    def as_batch_pr(self, head_ref="batch-x", **state):
+        """The gh shim answers pull request 7 with the head branch `head_ref` (an integration PR's starts with `batch-`), and `state` as GhHalf.set takes it."""
         tm.install_gh_shim(self)
-        tm.GhHalf.set(self)
+        sha = self.head("feat")
+        tm.sh(self.co, "git", "push", "-q", "origin", f"{sha}:refs/heads/{head_ref}")  # the lint fetches the PR's head branch from origin
+        tm.GhHalf.set(self, pr_raw={"head": {"ref": head_ref, "sha": sha, "label": "o:" + head_ref}}, **state)
+
+    def test_a_passing_integration_lint_adds_the_batch_label_by_rest(self):
+        self.as_batch_pr()
         self.use_ci_job(PASSING, 0)
         rc, out = self.lane("--lane-lint", "7", "--integration", host=merge.Host())
         self.assertEqual(rc, 0, out)
@@ -2060,25 +2066,32 @@ class LintSetsBatchLabel(LintPostsPassComment):
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.labeled(), [], "a lane lint with no --integration added a label:\n" + out)
 
+    def test_a_lane_pull_request_with_integration_is_refused_before_the_lint_and_gets_no_label(self):
+        self.as_batch_pr(head_ref="lane/feat")
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lane("--lane-lint", "7", "--integration", host=merge.Host())
+        self.assertEqual(rc, 1, out)
+        self.assertIn("lane/feat", out)
+        self.assertIn("without --integration", out)
+        self.assertEqual(self.labeled(), [], "a lane PR got the batch label:\n" + out)
+        self.assertEqual(self.posts, [], "the refusal still ran the lint and posted its comment:\n" + out)
+
     def test_an_integration_fail_adds_no_label(self):
-        tm.install_gh_shim(self)
-        tm.GhHalf.set(self)
+        self.as_batch_pr()
         self.use_ci_job(FAILING, 1)
         rc, out = self.lane("--lane-lint", "7", "--integration", host=merge.Host())
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.labeled(), [], "a FAIL added the batch label:\n" + out)
 
     def test_an_integration_unknown_adds_no_label(self):
-        tm.install_gh_shim(self)
-        tm.GhHalf.set(self)
+        self.as_batch_pr()
         self.use_ci_job(UNKNOWN, 2)
         rc, out = self.lane("--lane-lint", "7", "--integration", host=merge.Host())
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.labeled(), [], "an unknown added the batch label:\n" + out)
 
     def test_a_failed_label_add_prints_the_pass_and_a_hand_fix_and_exits_zero(self):
-        tm.install_gh_shim(self)
-        tm.GhHalf.set(self, label_fail=tm.rest_err(403, "Forbidden"))
+        self.as_batch_pr(label_fail=tm.rest_err(403, "Forbidden"))
         self.use_ci_job(PASSING, 0)
         rc, out = self.lane("--lane-lint", "7", "--integration", host=merge.Host())
         self.assertEqual(rc, 0, "a PASS whose label failed to add did not exit 0:\n" + out)
@@ -2099,8 +2112,7 @@ class LintSetsBatchLabel(LintPostsPassComment):
         self.assertIn("--integration goes with --lane-lint on a pull request number", out)
 
     def test_an_integration_unknown_lifted_by_a_reason_adds_no_label(self):
-        tm.install_gh_shim(self)
-        tm.GhHalf.set(self)
+        self.as_batch_pr()
         self.use_ci_job(UNKNOWN, 2)
         rc, out = self.lane("--lane-lint", "7", "--integration", "--lint-unknown-ok", "shellcheck is not installed on this machine", host=merge.Host())
         self.assertEqual(rc, 0, out)

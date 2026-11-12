@@ -93,8 +93,8 @@
                           and pushes nothing, except that a PASS on a PR number posts one comment on it, as the account that runs it
                           (the join and --reviewed count only an owner's); any session may run it, cloud included. Cost per call: one
                           ci-job run (about 550 s, measured once on one PR head), one worktree, and on a PASS one comment post.
-                          --integration (a PR number only) also adds the `batch` label to the PR on a PASS, one more REST call; a failed
-                          add prints how to label it by hand and the PASS still exits 0.
+                          --integration (a PR number only, whose head branch starts with `batch-`; any other PR is refused before the lint) also adds the
+                          `batch` label to the PR on a PASS, one more REST call; a failed add prints how to label it by hand and the PASS still exits 0.
                           Every head, a ref or commit too, is first merged into origin/<base> with `git merge-tree --write-tree`. A conflict FAILs,
                           naming the base (never lifted).
                           A PR number is also checked against each other open PR of its lane (a draft counts; a PR whose body holds a
@@ -3080,6 +3080,9 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), integrati
         info = host.pr(n)
         base = info["base"]
         info = fetch_pr_head(root, info, base, host, n)  # a lane lints right after its push, when GitHub may still show the old head
+        if integration and not info["branch"].startswith(BATCH_PREFIX):  # before the worktree and the lint: a lane PR must never read as a batch run
+            raise Stop(f"--integration labels a batch's integration pull request, whose head branch starts with `{BATCH_PREFIX}`; #{n} has the head {info['branch']}. "
+                       f"Run `merge --lane-lint {n}` without --integration. Nothing was linted or labelled.")
         head = info["head"]
         tmp, wt = add_worktree(root, head)
     else:
