@@ -780,6 +780,39 @@ add("brief-write-needs-writer: brief-write-comma-prohibit control: Explore brief
     prompt="Do not skip the spec, write the findings to docs/audit.md.", subagent_type="Explore")
 
 
+# A write order whose destination sits past the reach after its verb is still an order. The reach is the characters
+# after a write verb that its object and destination may span (BRIEF_WRITE_REACH). Eight repeats of this sentence put
+# " to docs/review.md." beyond it, with no clause break before the destination. The control is the same repeats with
+# no destination, so it passes for lack of a destination, not for the repeats.
+WRITE_REACH_SENTENCE = "Write a report that lists each finding seen while reading the code"
+add("brief-write-needs-writer: a write order whose destination sits past the 300-char reach is denied", "deny",
+    WRITE_BRIEF, tool="Agent", prompt=" ".join([WRITE_REACH_SENTENCE] * 8) + " to docs/review.md.",
+    subagent_type="Explore")
+add("brief-write-needs-writer: the same eight repeats with no destination is allowed", "allow",
+    tool="Agent", prompt=" ".join([WRITE_REACH_SENTENCE] * 8) + ".", subagent_type="Explore")
+# A destination whose extension BRIEF_WRITE_EXTENSIONS does not list reads as no path, so the order to write it passes.
+for _ext in ("notes", "markdown", "text", "out", "ipynb"):
+    add("brief-write-needs-writer: an order to write review.%s is denied" % _ext, "deny", WRITE_BRIEF,
+        tool="Agent", prompt="Write your findings to review.%s." % _ext, subagent_type="Explore")
+# A comparison whose right side is a dotted word names no destination. `log` is on BRIEF_WRITE_EXTENSIONS, so the reader
+# takes self.log for a file and refuses the comparison; the count case is the control that a dotted word passes.
+add("brief-write-needs-writer: a comparison `count > total.length` is allowed", "allow", tool="Agent",
+    prompt="`count > total.length`", subagent_type="Explore")
+add("brief-write-needs-writer: a comparison `size > self.log` is allowed", "allow", tool="Agent",
+    prompt="`size > self.log`", subagent_type="Explore")
+# A tool's results are no tool use. "Use the Write tool results to save docs/x.md." orders a save to docs/x.md.
+add("brief-write-needs-writer: the Write tool results named before a save order is denied", "deny", WRITE_BRIEF,
+    tool="Agent", prompt="Use the Write tool results to save docs/x.md.", subagent_type="Explore")
+# The two orders above in a Workflow agent. Their Agent forms are the brief-write-tool-negator and the
+# brief-write-comma-prohibit cases above, so these pin the Workflow form of the same text.
+add("brief-write-needs-writer: Workflow Explore agent that runs the write tool test in a file is allowed", "allow",
+    tool="Workflow",
+    script=_step_flow(json.dumps("Run the write tool test in tests/guard/s28508-rule9.py."), "agentType: 'Explore'"))
+add("brief-write-needs-writer: Workflow Explore agent that says do not, under any circumstances, write to a path is allowed",
+    "allow", tool="Workflow",
+    script=_step_flow(json.dumps("Do not, under any circumstances, write to docs/audit.md."), "agentType: 'Explore'"))
+
+
 # ---- A spawn's brief that orders a discard of the working tree (rule brief-destructive-git, rule
 # shared-trees-no-destructive-git). An Agent, Task or Workflow brief is denied when a command span in it is one that
 # shared_tree_match reads as a discard: a backtick span, a fenced line, or a line led by "$ ". A negation before the
@@ -1003,6 +1036,25 @@ add("brief-destructive-git: control, a never over an earlier span still covers t
 add("brief-destructive-git: control, builder brief that says `git reset --hard origin/main` is refused is denied", "deny",
     BRIEF_DESTRUCTIVE, tool="Agent", prompt="Confirm `git reset --hard origin/main` is refused.",
     subagent_type="builder", model="sonnet")
+
+
+# A comma aside inside a negator's clause. "No, really, run a reset" is an order, so the negator must not cover it.
+# "Do not, under any circumstances, run a reset" is a prohibition, so the same aside keeps its negator. Each order pins
+# the reader's side of the comma split, and each prohibition pins the other side. The no-span case reads no command, so
+# it passes whatever the scan does with a span, and it pins that prose with no span stays unread.
+add("brief-destructive-git: a negator with a comma aside, No, read the files, and run a reset, is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="No, read the files, and run `git reset --hard origin/main`.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a negator with two comma asides, No, really, run a reset, is denied", "deny",
+    BRIEF_DESTRUCTIVE, tool="Agent", prompt="No, really, run `git reset --hard`.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a prohibition with a comma aside, Do not, under any circumstances, run a reset, is allowed",
+    "allow", tool="Agent", prompt="Do not, under any circumstances, run `git reset --hard`.",
+    subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a prohibition with a comma aside and a span, Never, ever, run a reset, is allowed",
+    "allow", tool="Agent", prompt="Never, ever, run `git reset --hard`.", subagent_type="builder", model="sonnet")
+add("brief-destructive-git: a prohibition with a comma aside and no span, Never, ever, run git reset --hard, is allowed",
+    "allow", tool="Agent", prompt="Never, ever, run git reset --hard", subagent_type="builder", model="sonnet")
 
 
 # The owner's override lifts this refusal the way it lifts an Opus spawn's (decision owner-override): a one-act override
