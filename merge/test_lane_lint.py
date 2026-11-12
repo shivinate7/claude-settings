@@ -212,7 +212,7 @@ class IntermediateHeadHost(LagHost):
         return info
 
 
-MUTATE_JOB ="checks-mutate-guard"  # checks.yml's job: the lane lint reads its cap and its command from the head's checks.yml
+MUTATE_JOB = "checks-mutate-guard"  # checks.yml's job: the lane lint reads its cap and its command from the head's checks.yml
 MUTATE_STEP = "Guard mutation test"  # the step of that job whose run: line is the mutate command
 WORKFLOW_REL = ".github/workflows/checks.yml"
 MUTATE_LOG = "mutate-calls.jsonl"  # one line per start of a mutate stub, in this case's folder
