@@ -4,8 +4,8 @@
   "status": "ready",
   "order": 50,
   "owner": "coordinator",
-  "lane": "session_013NEJL1HRER1fc7nQ4BtSVb",
+  "lane": "",
   "why": "A builder's `sed -i` on a glob under .github/workflows (`*`, `c*`, `.github/work*/checks.yml`) is allowed, and so are rsync, `yq -i`, `dd of=` and touch into the folder, while the Edit path judges workflow content.",
-  "note": "Coordinator ruling 18:58 CST Nov 7. Stacked on #1688. Note builder-workflow-glob-unread in docs/debts/notes.md (on #1688) points here. Red tests started 18:59 CST. 19:06 CST: #1688 reverted to its reviewed tree at b90092c11; its notes moved to docs PR #1698. Built as draft #1752 (head c8e10ab36, stacked on #1688): round 3 PASS, net value positive; with runner 8 (lane guard-path-expand-forms, message stamped 20:58 CST, arrived 20:57 CST Nov 7). When #1752 merges, the lane retires note builder-workflow-glob-unread on #1698 (coordinator 20:57 CST).",
-  "updatedAt": "2026-11-07T20:57:00-06:00"
+  "note": "Coordinator ruling 18:58 CST Nov 7. Stacked on #1688. Note builder-workflow-glob-unread in docs/debts/notes.md (on #1688) points here. Red tests started 18:59 CST. 19:06 CST: #1688 reverted to its reviewed tree at b90092c11; its notes moved to docs PR #1698. Built as draft #1752 (head c8e10ab36, stacked on #1688): round 3 PASS, net value positive; with runner 8 (lane guard-path-expand-forms, message stamped 20:58 CST, arrived 20:57 CST Nov 7). When #1752 merges, the lane retires note builder-workflow-glob-unread on #1698 (coordinator 20:57 CST). Lane cleared 08:59 CST Nov 12: its session (was \"Lane: guard-path-expand-forms\") is archived (coordinator ask 08:57 CST Nov 12, sweep of ended session ids).",
+  "updatedAt": "2026-11-12T08:59:00-06:00"
 }

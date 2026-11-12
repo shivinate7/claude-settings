@@ -4,8 +4,8 @@
   "status": "ready",
   "order": 60,
   "owner": "coordinator",
-  "lane": "session_013NEJL4HFe7Gz9VNMNryxaZ",
+  "lane": "",
   "why": "The guard fired on the role word inside the backticked id `builders-cannot-edit-tests` (about 17:43 CST Nov 7); an Opus third try shows sonnet in the spawn record, so the report names the wrong model.",
-  "note": "Fix: skip role words inside backticked ids; read each agent's served model, not the brief's. Done check: lint tests for the backticked-id case and the Opus-third-try case. Filed from lane notes-fix-large-3 (session_013NEJL1rKuNDSwMxwArjXHb), 18:04 CST Nov 7, at the coordinator's ask. Built as #1705, with runner 8 with a merge-tool record for its live head (19:50 CST). #1690 is closed, replaced by #1705; #1716 and #1721 stack on it. Possible false alarm, Nov 7 23:24 CST (lane export-after-page-write, #1784): the guard asks for a model on a reviewer spawned with none, though agents/reviewer.md sets haiku. The guard should read the role file's model when the spawn names none. Check whether the open fix covers this case.",
-  "updatedAt": "2026-11-07T23:25:00-06:00"
+  "note": "Fix: skip role words inside backticked ids; read each agent's served model, not the brief's. Done check: lint tests for the backticked-id case and the Opus-third-try case. Filed from lane notes-fix-large-3 (session_013NEJL1rKuNDSwMxwArjXHb), 18:04 CST Nov 7, at the coordinator's ask. Built as #1705, with runner 8 with a merge-tool record for its live head (19:50 CST). #1690 is closed, replaced by #1705; #1716 and #1721 stack on it. Possible false alarm, Nov 7 23:24 CST (lane export-after-page-write, #1784): the guard asks for a model on a reviewer spawned with none, though agents/reviewer.md sets haiku. The guard should read the role file's model when the spawn names none. Check whether the open fix covers this case. Lane cleared 08:59 CST Nov 12: its session (was \"lane: report-model-from-role\") is archived (coordinator ask 08:57 CST Nov 12, sweep of ended session ids).",
+  "updatedAt": "2026-11-12T08:59:00-06:00"
 }

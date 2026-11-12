@@ -4,8 +4,8 @@
   "status": "todo",
   "order": 266.3,
   "owner": "coordinator",
-  "lane": "session_013NEJKzbDHRpreufhWY48Vb",
+  "lane": "",
   "why": "Six copies of the FENCE regex break building-one-home-per-capability: ste_lint.py (two), check_ruling_kind.py, hook_catalog.py, check_skill_model_rows.py and feedback_guard.py (coordinator, 15:34 CST Nov 7).",
-  "note": "Stacked: the one-home-shared-fence lane builds it after its current step hands off. Done check: each file reads the shared fence home, and a grep finds no copy left.",
-  "updatedAt": "2026-11-07T15:34:00-06:00"
+  "note": "Stacked: the one-home-shared-fence lane builds it after its current step hands off. Done check: each file reads the shared fence home, and a grep finds no copy left. Lane cleared 08:59 CST Nov 12: its session (was \"lane: one-home-check\") is archived (coordinator ask 08:57 CST Nov 12, sweep of ended session ids).",
+  "updatedAt": "2026-11-12T08:59:00-06:00"
 }

@@ -3,9 +3,9 @@
   "status": "ready",
   "order": 60.2,
   "owner": "coordinator",
-  "lane": "session_013NEJL4HFe7Gz9VNMNryxaZ",
+  "lane": "",
   "why": "Today any role word in Next excuses a missing Done model, so a report can drop a model name and still pass.",
-  "note": "The waiver should hold only for an agent that Next names as still running, with its model. Debt: done-models-next-waiver-loose. PR stacked on #1690. Filed from lane report-model-from-role, 19:22 CST Nov 7. Built as #1721, with runner 8 with a merge-tool record for its live head (19:50 CST).",
+  "note": "The waiver should hold only for an agent that Next names as still running, with its model. Debt: done-models-next-waiver-loose. PR stacked on #1690. Filed from lane report-model-from-role, 19:22 CST Nov 7. Built as #1721, with runner 8 with a merge-tool record for its live head (19:50 CST). Lane cleared 08:59 CST Nov 12: its session (was \"lane: report-model-from-role\") is archived (coordinator ask 08:57 CST Nov 12, sweep of ended session ids).",
   "phase": "now",
-  "updatedAt": "2026-11-07T19:50:00-06:00"
+  "updatedAt": "2026-11-12T08:59:00-06:00"
 }

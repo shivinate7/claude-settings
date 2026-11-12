@@ -4,8 +4,8 @@
   "status": "ready",
   "order": 60.01,
   "owner": "coordinator",
-  "lane": "session_013NEJKz785dJ3UKyxpvQuZu",
+  "lane": "",
   "why": "That form can weaken a test with no Edit call, so no test guard sees it.",
-  "note": "Incident: a builder in lane handoff-bash-redirect ran that form in its own worktree on Nov 7. Lane handoff-per-agent took it at the coordinator's ask (19:34 CST Nov 7); the PR goes to runner 8. Built as draft #1732 (head 6273a1a08), round 2 PASS, with runner 8 (20:14 CST).",
-  "updatedAt": "2026-11-07T20:14:00-06:00"
+  "note": "Incident: a builder in lane handoff-bash-redirect ran that form in its own worktree on Nov 7. Lane handoff-per-agent took it at the coordinator's ask (19:34 CST Nov 7); the PR goes to runner 8. Built as draft #1732 (head 6273a1a08), round 2 PASS, with runner 8 (20:14 CST). Lane cleared 08:59 CST Nov 12: its session (was \"lane: handoff-per-agent\") is archived (coordinator ask 08:57 CST Nov 12, sweep of ended session ids).",
+  "updatedAt": "2026-11-12T08:59:00-06:00"
 }

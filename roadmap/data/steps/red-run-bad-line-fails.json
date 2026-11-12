@@ -4,8 +4,8 @@
   "status": "ready",
   "order": 60,
   "owner": "coordinator",
-  "lane": "session_013NEJL1rKuNDSwMxwArjXHb",
+  "lane": "",
   "why": "lint/check_red_run.py:70-77 passes a message when any one Red-run line is valid, and the failed form takes any command text, so a forgotten colon or a misspelt keyword (`mutant -> 1 failed on <sha>`, `mutants:`, `mutation:`) passes. Claude can write these by mistake. Main behaves the same; #1672 kept it.",
-  "note": "Fix: a message fails when any Red-run line is malformed; narrow the failed form so mutant-like keywords are refused. Done check: lint/test_check_red_run.py cases red on main, and check_red_run over main's history (1733 messages) flips no existing trailer. Same file as step red-run-mutant-form: one lane for both fits. Filed from lane notes-fix-large-3 (#1672 round 2), 18:43 CST Nov 7. Coordinator 18:45 CST: doing, after #1672. Built as #1691, round 3 PASS, handed off (19:45 CST).",
-  "updatedAt": "2026-11-07T19:45:00-06:00"
+  "note": "Fix: a message fails when any Red-run line is malformed; narrow the failed form so mutant-like keywords are refused. Done check: lint/test_check_red_run.py cases red on main, and check_red_run over main's history (1733 messages) flips no existing trailer. Same file as step red-run-mutant-form: one lane for both fits. Filed from lane notes-fix-large-3 (#1672 round 2), 18:43 CST Nov 7. Coordinator 18:45 CST: doing, after #1672. Built as #1691, round 3 PASS, handed off (19:45 CST). Lane cleared 08:59 CST Nov 12: its session (was \"lane: notes-fix-large-3\") is archived (coordinator ask 08:57 CST Nov 12, sweep of ended session ids).",
+  "updatedAt": "2026-11-12T08:59:00-06:00"
 }

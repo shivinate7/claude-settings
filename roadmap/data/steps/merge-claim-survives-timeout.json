@@ -4,8 +4,8 @@
   "status": "ready",
   "order": 260.0,
   "owner": "coordinator",
-  "lane": "session_013NEJL2cKZU229mwVPY4TGu",
+  "lane": "",
   "why": "Owner, 15:10 CST Nov 7 (via the coordinator): a degen batch keeps failing to merge. Each GitHub check timeout made the merge tool undo its record claim, which moved the head and cost a new CI run.",
-  "note": "In merge/merge.py, a GitHub read that cannot run (timeout, 5xx, connection error) after the claim push keeps the claim and stops with \"unknown, rerun merge\"; only a check that answered no reverts it (decision standing-merge-grant: only a proven refusal reverts the claim). Retry the read, and reuse the claim on a rerun. Topic merge-tool. Red test first. Built as #1695, with runner 8 (coordinator 19:08 CST). #1695 is at a1307e55a, reverted to its reviewed tree with the record posted; its docs are in #1703, round 1 (coordinator, 19:17 CST).",
-  "updatedAt": "2026-11-07T19:22:00-06:00"
+  "note": "In merge/merge.py, a GitHub read that cannot run (timeout, 5xx, connection error) after the claim push keeps the claim and stops with \"unknown, rerun merge\"; only a check that answered no reverts it (decision standing-merge-grant: only a proven refusal reverts the claim). Retry the read, and reuse the claim on a rerun. Topic merge-tool. Red test first. Built as #1695, with runner 8 (coordinator 19:08 CST). #1695 is at a1307e55a, reverted to its reviewed tree with the record posted; its docs are in #1703, round 1 (coordinator, 19:17 CST). Lane cleared 08:59 CST Nov 12: its session (was \"merge-claim-survives-timeout\") is archived (coordinator ask 08:57 CST Nov 12, sweep of ended session ids).",
+  "updatedAt": "2026-11-12T08:59:00-06:00"
 }
