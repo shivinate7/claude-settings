@@ -30,17 +30,18 @@ FAMILY = "load-brake"
 #                  claude_procs key in a reading changes nothing. A cpu_pct key in a stub reading changes
 #                  nothing either: a change that still reads the CPU refuses on those stubs and fails here.
 #                  The OS sources, all faked by THE FAKE HOST: darwin reads memory through sysctlbyname;
-#                  linux reads memory in use from /proc/meminfo, 100 * (MemTotal - MemAvailable) / MemTotal,
-#                  and a cgroup memory.max of `max`, or no file, means MemTotal. Both read the disk through
-#                  shutil.disk_usage on the home folder. Neither reads the CPU ticks, the load average, or waits.
+#                  linux reads memory in use from /proc/meminfo, 100 * (MemTotal - MemAvailable) / MemTotal, and
+#                  opens no cgroup file, so the total is MemTotal. Both read the disk through shutil.disk_usage on
+#                  the home folder. Neither reads the CPU ticks, the load average, or waits.
 # The judge must call it by its bare name, so the probe's patch (set on every guard module that
 # holds the name) is the function that runs. A function the probe cannot replace fails every case.
 # The reading of a call is one read_load() per start call, and none on any other call.
 # THE FAKE HOST. A case with a `fake` spec runs the real read_load under fakes, in the probe, and judges the
 # call on what it read. The fake sets sys.platform, ctypes.CDLL and ctypes.cdll, os.getloadavg (the load
-# average, which no reading uses), shutil.disk_usage, the /proc/stat file, /proc/meminfo and
-# /sys/fs/cgroup/memory.max (builtins.open and io.open). `meminfo_opens` counts each open of /proc/meminfo, so a case
-# can check that the reader opened the file before it checks the value. Each source is restored before the judge runs.
+# average, which no reading uses), shutil.disk_usage, the /proc/stat file, /proc/meminfo and /sys/fs/cgroup/memory.max
+# (builtins.open and io.open). `meminfo_opens` counts each open of /proc/meminfo, so a case can check that the reader
+# opened the file before it checks the value. `cgroup_opens` counts each open of memory.max, which the reader must not
+# make: the memory limit is unmeasured. Each source is restored before the judge runs.
 # Tick samples: a base sample, then one that adds the case's busy share, so a reader that reads the ticks would see
 # that share. `tick_reads` counts each read of them.
 # THE WAITS. Every time.sleep the probe makes is counted in `sleeps`, and nothing waits. On Windows the probe
@@ -312,17 +313,16 @@ def lb_meminfo(total_kb, available_kb, free_kb=None):
     return "".join("%s: %s\n" % row for row in rows)
 
 
-def lb_fake(platform, busy=10.0, load=0.5, memory=40, disk_total=926.0, disk_free=500.0, meminfo=None,
-            cgroup="max\n"):
+def lb_fake(platform, busy=10.0, load=0.5, memory=40, disk_total=926.0, disk_free=500.0, meminfo=None):
     """A fake host for THE FAKE HOST: `busy` the CPU share the tick samples would show, `load` the 1-minute
     load average, `memory` the percent in use, and the disk in GB. The defaults are a quiet host with room on
     the disk. `meminfo` is the text of /proc/meminfo: by default a 16 GB host at `memory` percent in use; the
-    word "missing" makes the file not there. `cgroup` is /sys/fs/cgroup/memory.max, the same way."""
+    word "missing" makes the file not there. /sys/fs/cgroup/memory.max is served as `max`, and its opens are counted."""
     total_kb = 16 * 1024 * 1024
     if meminfo is None:
         meminfo = lb_meminfo(total_kb, int(round(total_kb * (100 - memory) / 100.0)))
     return {"platform": platform, "busy": busy, "load": load, "memory": memory,
-            "disk_total_gb": disk_total, "disk_free_gb": disk_free, "meminfo": meminfo, "cgroup": cgroup}
+            "disk_total_gb": disk_total, "disk_free_gb": disk_free, "meminfo": meminfo, "cgroup": "max\n"}
 
 
 def lb_reading(**changes):
@@ -783,13 +783,17 @@ lb_add("the reader returns no cpu_pct key on darwin", lb_reader_fake(lb_fake("da
 lb_add("the reader returns no cpu_pct key on linux", lb_reader_fake(lb_fake("linux"), lb_no_cpu_key))
 
 
-# LINUX MEMORY. The reader reads memory in use from /proc/meminfo: 100 * (MemTotal - MemAvailable) / MemTotal. The
-# scope comes first: the reader opens the file once. Then the value, which is `want`, or None when the file gives none.
+# LINUX MEMORY. The reader reads memory in use from /proc/meminfo: 100 * (MemTotal - MemAvailable) / MemTotal, and no
+# cgroup file. The scope comes first: the reader opens /proc/meminfo once and memory.max never. Then the value, which is
+# `want`, or None when the file gives none.
 def lb_memory_check(want):
     def check(side):
         opens = side.get("meminfo_opens")
         if opens != 1:
             return False, "read_load opened /proc/meminfo %s time(s), want 1" % (opens,)
+        cgroup = side.get("cgroup_opens")
+        if cgroup != 0:
+            return False, "read_load opened /sys/fs/cgroup/memory.max %s time(s), want 0" % (cgroup,)
         got = (side.get("reading") or {}).get("memory_pct")
         if want is None:
             if got is None:
@@ -807,9 +811,8 @@ def lb_memory_check(want):
 LB_MEMINFO_75 = lb_meminfo(8000000, 2000000, free_kb=100000)
 lb_add("linux memory: read_load reads /proc/meminfo, 100 * (MemTotal - MemAvailable) / MemTotal: 75.0%, not MemFree",
        lb_reader_fake(lb_fake("linux", meminfo=LB_MEMINFO_75), lb_memory_check(75.0), side_check=True))
-lb_add("linux memory: a cgroup memory.max with no file leaves the total at MemTotal: 75.0%",
-       lb_reader_fake(lb_fake("linux", meminfo=LB_MEMINFO_75, cgroup="missing"), lb_memory_check(75.0),
-                      side_check=True))
+lb_add("linux memory: read_load opens no cgroup memory.max, so the total is MemTotal: 75.0%",
+       lb_reader_fake(lb_fake("linux", meminfo=LB_MEMINFO_75), lb_memory_check(75.0), side_check=True))
 lb_add("linux memory: a /proc/meminfo that is not there reads None, and the reader does not raise",
        lb_reader_fake(lb_fake("linux", meminfo="missing"), lb_memory_check(None), side_check=True))
 lb_add("linux memory: an empty /proc/meminfo reads None, and the reader does not raise",
@@ -1296,25 +1299,25 @@ def lb_spy_control_check():
 
 # The refusal at a full machine: each write tool, a disk reading, and the shell's quiet refusal.
 for _tool, _given in LB_WRITES:
-    lb_add("a lane session's %s, memory 97.2%%: full, refused, names the memory, tells the lane to end its turn "
+    lb_add("a lane's %s, memory 97.2%%: full, refused, names the memory, tells the lane to end its turn "
            "and report to @parent" % _tool,
            lb_lane_refusal_check(_tool, _given, LB_FULL_READING, LB_MEM_FULL))
-lb_add("a lane session's Bash, 3.1 GB free of 926 GB: full, refused, names the disk, tells the lane to end its turn",
+lb_add("a lane's Bash, 3.1 GB free of 926 GB: full, refused, names the disk, tells the lane to end its turn",
        lb_lane_refusal_check("Bash", LB_LANE_BASH, lb_reading(disk_free_gb=3.1, disk_total_gb=926.0), (lb_gb(3.1, 926),)))
-lb_add("a lane session's Bash, memory 97.2%: full, starts no child process and writes only the guard.log line",
+lb_add("a lane's Bash, memory 97.2%: full, starts no child process and writes only the guard.log line",
        lb_lane_refusal_quiet_check())
 
 # The busy reading lets a lane run, and the lane's one read is the reader's.
-lb_add("a lane session's Bash, memory 91.7%: busy, allowed, the reader runs once",
+lb_add("a lane's Bash, memory 91.7%: busy, allowed, the reader runs once",
        lb_decision_check("Bash", LB_BUSY, "allow", tool_input=LB_LANE_BASH, own_env=LB_OWN, transcript=LB_LANE))
-lb_add("a lane session's Edit, 9.4 GB free of 926 GB: busy, allowed, the reader runs once",
+lb_add("a lane's Edit, 9.4 GB free of 926 GB: busy, allowed, the reader runs once",
        lb_decision_check("Edit", LB_BUSY_EDIT, "allow", tool_input=LB_LANE_EDIT, own_env=LB_OWN, transcript=LB_LANE))
 # An agent of a lane makes an agent's call, so it reads the load once, as an agent's write does, and the lane check never
 # reads it again. Both pin the cost of the new check on an agent's call, which must not add a second read.
-lb_add("a lane session's agent Bash (agent_id set), memory 91.7%: busy, allowed, the reader runs once",
+lb_add("a lane's agent Bash (agent_id set), memory 91.7%: busy, allowed, the reader runs once",
        lb_decision_check("Bash", LB_BUSY, "allow", tool_input=LB_LANE_BASH, agent=LB_AGENT, own_env=LB_OWN,
                          transcript=LB_LANE))
-lb_add("a lane session's agent Bash (agent_id set), memory 97.2%: full, refused by the agent's stop, "
+lb_add("a lane's agent Bash (agent_id set), memory 97.2%: full, refused by the agent's stop, "
        "the reader runs once",
        lb_decision_check("Bash", LB_FULL_READING, "deny", LB_MEM_FULL + (LB_STOP_AGENT,), tool_input=LB_LANE_BASH,
                          agent=LB_AGENT, own_env=LB_OWN, transcript=LB_LANE))
@@ -1332,10 +1335,10 @@ for _say, _lines in (
                              transcript=_lines))
 
 # set_session_tags: a lane that tags its own record after it is no longer a lane. Tagging another session leaves it one.
-lb_add("a lane session that tags its own record after it, memory 97.2%: full, allowed, the reader runs once",
+lb_add("a lane that tags its own record after it, memory 97.2%: full, allowed, the reader runs once",
        lb_decision_check("Bash", LB_FULL_READING, "allow", tool_input=LB_LANE_BASH, own_env=LB_OWN,
                          transcript=LB_LANE + role_tag_call("t1")))
-lb_add("a lane session whose record is tagged on another session after it, memory 97.2%: full, refused",
+lb_add("a lane whose record is tagged on another session after it, memory 97.2%: full, refused",
        lb_decision_check("Bash", LB_FULL_READING, "deny", LB_MEM_FULL + LB_LANE_REMEDY, tool_input=LB_LANE_BASH,
                          own_env=LB_OWN, transcript=LB_LANE + role_tag_call("t1", session=ROLE_OTHER)))
 
@@ -1367,6 +1370,63 @@ lb_add("a lane record at the end of a 400-line transcript, memory 97.2%: full, r
 lb_add("CLAUDE_CODE_REMOTE=true with a lane record, memory 97.2%: refused, names the memory and the lane remedy, the "
        "reader runs once",
        lb_lane_refusal_check("Bash", LB_LANE_BASH, LB_FULL_READING, LB_MEM_FULL, remote="true"))
+
+
+# THE STEER'S PLACE. The refusal's reason, as the call is judged. A cloud disk's full refusal holds the steer before the
+# decision citation and does not say "Wait, then retry", for a start call, an agent's call and a lane's call. Any other
+# refusal holds no steer: a cloud memory reading and a local disk reading keep "Wait, then retry" for a start call.
+LB_STEER_TEXT = re.compile(r"A cloud disk does not drain by waiting", re.I)
+LB_CITE_TEXT = re.compile(re.escape("(decision machine-load-brake"))
+LB_WAIT_THEN = re.compile(r"Wait, then retry", re.I)
+
+
+def lb_steer_check(tool, reading, want_steer, want_wait, tool_input=None, background=None, agent=None, own_env=None,
+                   transcript=None, remote=None):
+    """The judged refusal under `reading` (the reader runs once). With want_steer, the steer comes before the citation
+    and "Wait, then retry" is absent. Without it, no steer, and "Wait, then retry" is present when want_wait."""
+    def check():
+        given = lb_lane_input(tool, background) if tool_input is None else tool_input
+        got, reason, side = lb_run(tool, {"mode": "judge", "reading": reading}, given, agent=agent, remote=remote,
+                                   own_env=own_env, transcript=transcript)
+        if got == "error":
+            return False, reason
+        if got != "deny":
+            return False, "%s, want deny: %s" % (got, reason[:90])
+        if side.get("reads") != 1:
+            return False, "the reader ran %s times, want 1" % (side.get("reads"),)
+        steer, cite, wait = LB_STEER_TEXT.search(reason), LB_CITE_TEXT.search(reason), LB_WAIT_THEN.search(reason)
+        if want_steer:
+            if steer is None:
+                return False, "the cloud disk refusal has no steer: %s" % reason[-120:]
+            if cite is not None and steer.start() > cite.start():
+                return False, "the steer comes after the citation: %s" % reason[-120:]
+            if wait is not None:
+                return False, "the cloud disk refusal still says Wait, then retry: %s" % reason[-120:]
+            return True, "the steer holds before the citation, and no Wait, then retry"
+        if steer is not None:
+            return False, "a refusal with no cloud disk holds the steer: %s" % reason[-120:]
+        if want_wait and wait is None:
+            return False, "the refusal does not say Wait, then retry: %s" % reason[-120:]
+        return True, "no steer%s" % (", Wait, then retry" if want_wait else "")
+    return check
+
+
+CLOUD_DISK = lb_reading(disk_free_gb=3.1, disk_total_gb=252.0)   # a full disk on a 252 GB drive, memory normal
+CLOUD_DISK_MEMORY = lb_reading(memory_pct=97.2, disk_free_gb=3.1, disk_total_gb=252.0)   # both full
+lb_add("CLAUDE_CODE_REMOTE=true, a start call at a full cloud disk: the steer holds before the citation, no Wait, then retry",
+       lb_steer_check("Agent", CLOUD_DISK, True, False, background=True, remote=LB_CLOUD))
+lb_add("CLAUDE_CODE_REMOTE=true, an agent's Bash at a full cloud disk: the steer holds before the citation, no Wait, "
+       "then retry", lb_steer_check("Bash", CLOUD_DISK, True, False, tool_input={"command": "echo hi"},
+                                    agent=LB_AGENT, remote=LB_CLOUD))
+lb_add("CLAUDE_CODE_REMOTE=true, a lane's Bash at a full cloud disk: the steer holds before the citation, no Wait, then "
+       "retry", lb_steer_check("Bash", CLOUD_DISK, True, False, tool_input=LB_LANE_BASH, own_env=LB_OWN,
+                               transcript=LB_LANE, remote=LB_CLOUD))
+lb_add("CLAUDE_CODE_REMOTE=true, a start call at a full cloud disk and memory: the steer holds before the citation, no "
+       "Wait, then retry", lb_steer_check("Agent", CLOUD_DISK_MEMORY, True, False, background=True, remote=LB_CLOUD))
+lb_add("CLAUDE_CODE_REMOTE=true, a start call at full cloud memory: no steer, and Wait, then retry",
+       lb_steer_check("Agent", LB_FULL_READING, False, True, background=True, remote=LB_CLOUD))
+lb_add("CLAUDE_CODE_REMOTE unset, a start call at a full local disk: no steer, and Wait, then retry",
+       lb_steer_check("Agent", CLOUD_DISK, False, True, background=True, remote=None))
 # No lane check reaches these calls: a session with no own id, and an own id in another shape.
 lb_add("a lane record and no own id, memory 99%: allowed, the reader runs 0 times, transcript not opened",
        lb_lane_quiet_check(own_env=None))
@@ -1375,9 +1435,9 @@ lb_add("a lane record and an own id in another shape (xyz), memory 99%: allowed,
 
 # The transcript is opened only at a full reading. The spy control shows that one open is counted.
 lb_add("probe control: the transcript spy counts one open of the transcript", lb_spy_control_check())
-lb_add("a lane session's transcript is opened at a full reading, so the lane check reads it",
+lb_add("a lane's transcript is opened at a full reading, so the lane check reads it",
        lb_transcript_read_check(LB_FULL_READING, True))
-lb_add("a lane session's transcript is not opened at a normal reading, and the reader runs once",
+lb_add("a lane's transcript is not opened at a normal reading, and the reader runs once",
        lb_transcript_read_check(LB_NORMAL, False))
 
 
