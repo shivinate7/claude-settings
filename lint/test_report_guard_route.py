@@ -10,8 +10,8 @@ These cases pin four gaps the check had:
 - an ack that carries a later message from the same sender into the turn;
 - an owner-facing session, with its own record, whose question goes to @parent, which reaches no one there;
 - a question box alone in a repo that has a waiting page, with or without a remote id;
-- a target's first reply with a "?" outside quotes, code, fences and blockquotes, read as its ack (the lane-ack
-  debt). Such a reply is an answer: it starts a turn.
+- a target's first reply with a "?" outside quotes, code, fences and blockquotes, read as its ack. Such a reply
+  is an answer: it starts a turn, so a question after it needs a send of its own.
 
 The fixture, the transcript helpers and the run folder come from lint/test_report_guard.py, the one home.
 They are borrowed by name here, so this file adds only its cases. Run with:
@@ -68,7 +68,7 @@ class RouteTests(RouteFixture, unittest.TestCase):
 
     def test_rt_red_lane_message_after_the_ack_starts_a_turn(self):
         # Catches: the parent's second message skipped as a second ack, so a question with no send rides on the
-        # first send. The ack skip never clears the sender's targets (the lane-ack debt).
+        # first send. The ack skip never clears the sender's targets.
         out = self.lane(peer_msg("pick?"), *self.send(session_id="@parent"),
                         peer_msg("got it", from_session=self.PARENT),
                         peer_msg("one more pick?", from_session=self.PARENT),
@@ -121,8 +121,8 @@ class RouteTests(RouteFixture, unittest.TestCase):
         self.assert_blocked(out, *phrases)
 
     def test_rt_red_parent_reply_with_a_question_mark_is_an_answer_not_an_ack(self):
-        # Catches: the lane-ack debt. A send to @parent, the parent's one reply asking a new question with a plain
-        # "?", and the lane's reply asking it with no send. The parent's reply was taken as the ack, so it passed.
+        # Catches: the parent's one reply, asking a new question with a plain "?", read as the ack of a send to @parent.
+        # The lane's reply asks it with no send of its own, so the question passed.
         out = self.lane(peer_msg("pick?"), *self.send(session_id="@parent"),
                         peer_msg("Is the pick still open?", from_session=self.PARENT),
                         assistant_text(self.reply(self.QUESTION)))
