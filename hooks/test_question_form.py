@@ -2561,6 +2561,13 @@ def case_stops_consistent_items_pass():
     stops_page("neither holds nor stops", stops_item(), None)
 
 
+def case_stops_item_passes_the_real_page_fields():
+    """No seam: the check reads the real page's itemFields list. A consistent stops item passes on both surfaces only once
+    the page lists stops, so until then it is refused as item-field-rendered, naming the field."""
+    page("a consistent stops item passes the page's own field list", "set",
+         entry_of(stops_item(holds=STOPS_HOLDS, stops=["lane fix-proxy", "PR #1201"])), None)
+
+
 def case_stops_needs_holds_and_a_list():
     """stops with no holds, a stops that is not a list, and a repeated entry are each refused, naming the stops or the entry."""
     stops_page("stops with no holds", stops_item(stops=["lane fix-proxy"]), "stops")
@@ -2630,6 +2637,7 @@ def main():
                  case_judged_relative_file_path_read_at_cwd, case_judged_absolute_and_empty_are_unchanged,
                  case_judged_mixed_writes_all_returned,
                  case_stops_names_each_entry_in_holds, case_stops_consistent_items_pass,
+                 case_stops_item_passes_the_real_page_fields,
                  case_stops_needs_holds_and_a_list, case_stops_refusal_prints_its_table_text):
         try:
             case()
