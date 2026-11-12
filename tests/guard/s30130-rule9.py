@@ -500,6 +500,14 @@ def carried(fragment, reason):
     return any(option in reason for option in options)
 
 
+def outside_form(reason):
+    """The reason with each BRIEF_ROLE_FORM prefix taken out, so a role named only inside the expected form does
+    not count as named."""
+    for prefix in BRIEF_ROLE_FORM:
+        reason = reason.replace(prefix, " ")
+    return reason
+
+
 def names_the_target(reason, rule=None):
     """Return the first forbidden fragment the printed reason carries, else ''.
 
