@@ -1770,7 +1770,8 @@ def names_unmeasured_route(text, needs_pass=True):
     states no measure (rule outcomes-stale-decision-protocol: name the record and the sentence). One sentence holds
     `unmeasured`, `record`, a quote and `sentence`, and no negation (not, never, without, or no pass). With `needs_pass`
     that sentence also says the route passes, as the whole word, so "is refused too" and "fails" are no pass. The tail
-    and the records name the route in a sentence with no pass, and their pass is a sentence of its own."""
+    and the records pass needs_pass=False: their route sentence has no pass word, and the tail's pass is its own sentence
+    (passes_on_either_route)."""
     return any("unmeasured" in s and "record" in s and "quot" in s and "sentence" in s and NEGATED_ROUTE.search(s) is None
                and (not needs_pass or re.search(r"\bpass", s) is not None)
                for s in sentences_of(text))
