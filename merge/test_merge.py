@@ -4312,8 +4312,10 @@ try:
             raise Refused(api_error(404, "Branch not protected"))
         finish(one({"strict": True, "contexts": S["contexts"], "checks": [{"context": c, "app_id": None} for c in S["contexts"]]}, jq), 0, include)
 
-    elif method == "GET" and rel in ("rules/branches/main", "rulesets"):  # GitHub's reply when no ruleset applies is []; a case sets S["main_rules"] for the rules
-        finish(one(S.get("main_rules") or [] if rel == "rules/branches/main" else [], jq), 0, include)
+    elif method == "GET" and rel == "rules/branches/main":  # GitHub's reply when no ruleset applies is []; a case sets S["main_rules"] for the rules
+        answer_list(S.get("main_rules") or [], None)
+    elif method == "GET" and rel == "rulesets":
+        finish(one([], jq), 0, include)
 
     else:
         raise Refused(api_error(404, "Not Found"))
@@ -12533,8 +12535,9 @@ def github_read(args, rules, contexts, read_error=None):
         return 0, REST.one({"contexts": contexts}, jq)
     if rel in ("rules/branches/main", "rulesets", "rulesets/9") and read_error:
         return read_error
-    if rel == "rules/branches/main":
-        return 0, REST.one(rules, jq)
+    if rel == "rules/branches/main":  # a list read: the page asked for, 30 rules to a page unless per_page asks for more
+        _method, _path, params, flags, _jq = REST.parse(args[1:])
+        return 0, REST.listing(rules, None, params, flags, jq, 100)
     if rel == "rulesets":
         return 0, REST.one([{"id": 9, "name": "ruleset-9", "target": "branch"}] if rules else [], jq)
     if rel == "rulesets/9":
@@ -12635,6 +12638,15 @@ class RulesetFirst(unittest.TestCase):
         host = RulesHost([two], contexts=None)
         self.assertEqual(self.read(host.protection_names), [REQUIRED_CHECK, "extra-check"],
                          "the wait names every check the ruleset requires, not only the first")
+
+    def test_a_check_rule_on_page_two_of_the_rules_read_is_named(self):
+        # GitHub gives 30 rules to a page by default, so the check rule (the 31st) is on page 2 and only a read that asks for it holds it
+        two = {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": REQUIRED_CHECK}, {"context": "extra-check"}]}}
+        rules = [NO_CHECK_RULES[i % 2] for i in range(30)] + [two]
+        self.assertEqual(rules.index(two), 30, "the scope: the check rule is past the first page of 30")
+        host = RulesHost(rules, contexts=None)
+        self.assertEqual(self.read(host.protection_names), [REQUIRED_CHECK, "extra-check"],
+                         "the check rule on page 2 names nothing: the rules read stops at page 1")
 
     def test_a_failed_ruleset_read_stops_and_does_not_fall_back_to_the_classic_list(self):
         host = RulesHost([], contexts=["checks"], read_error=(1, rest_err(403, "Resource not accessible by integration")))
