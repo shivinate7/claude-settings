@@ -26,9 +26,10 @@
   "owner": "lane ruled-prose-express (session_013NEJL18BcVaH118GLXrQiv)",
   "pick": "a",
   "ref": "PR #2985 (ruled prose skips the batch queue); lane question 16:06 CST",
+  "reply": "Withdrawn 16:08 CST: already ruled. R55 (13:21 CST Nov 12) lets only merge and CI fixes cancel a running batch, and decision batch-freeze-lane-set says a late change never rebuilds a running batch, so a ruled wording change waits for the next batch.",
   "repo": "shivinate7/claude-settings",
   "short": "Ruled wording vs a running batch",
-  "status": "open",
+  "status": "closed",
   "title": "Should a ruled wording change cancel a batch that is already in CI?",
   "why": "Cancelling a batch costs a full CI rerun, and your ruling on merge fixes covers only those."
 }
