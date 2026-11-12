@@ -7,8 +7,9 @@ Status: draft until build step 2 and the 20-message trial run. Q1 to Q4, page it
 The mailbox build is on main: PR #1371 merged 2026-11-08 inside batch-65g (PR #2236). Follow-up PR #2484 merged 2026-11-10 in batch 71.
 Next step: the Mac round trip (the owner's check card). A Windows round trip passed (owner's Windows helper, relayed by the
 coordinator at 11:52 CST Nov 12; no other record yet). Cloud works for the owner's account; ssemwal-cdc is unmeasured.
-`MAILBOX_REPO` has a settings.json `env` default (owner page item 556 a, 2026-11-12 12:04 CST). A session with an address and
-a reachable store reads mail at turn start; any other prints "mail unknown". The 20-message trial (step 5) is still open.
+`MAILBOX_REPO` has a settings.json `env` default, set by the owner's ruling (page item 556 a, 2026-11-12 12:04 CST), not by
+measurement. A session with an address reads mail at turn start. A failed read prints "mail unknown: <reason>". A session
+with no address, or a store with no mail ref, prints nothing. The 20-message trial (step 5) is still open.
 
 ## Ruling
 
@@ -209,12 +210,12 @@ Design:
    `cloud/session_rtripb`), 2026-11-09 19:34 CST: send message 2979e0b314d0 (request), read, take (exit 0),
    reply message 60884f559348, reply read and taken by the sender (exit 0), second take of 2979e0b314d0
    refused "taken by another" (exit 1). Cloud only; Mac and Windows auth still not measured.
-   Not yet measured: Mac and Windows auth for `ls-remote`.
+   Not yet measured then: Mac and Windows auth for `ls-remote` (later: Windows round trip passed 2026-11-12; Mac open).
 3. Test-author: red cases against a `file://` bare `MAILBOX_REPO`: round trip, push race, take race,
    inform close, offline, cost counts.
 4. Builder, PR #1371 merged 2026-11-08 inside batch-65g (PR #2236): `hooks/mail.py`, `bin/mail`, `bin/mail.cmd` and the
-   `hooks/local_time.py` call. The `settings.json` env default stays unset until step 2 measures Mac and
-   Windows auth for `ls-remote`.
+   `hooks/local_time.py` call. The `settings.json` env default was left unset here. The owner set it by
+   ruling on 2026-11-12 (page item 556 a), before the Mac measure.
 5. Skill section rewrite. Check: a two-session trial of 20 messages, cloud to a local computer, on a Mac and on a Windows PC, none lost, none acted
    on twice.
 
