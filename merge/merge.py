@@ -14,6 +14,17 @@
                           Cost per draft-step ready: one ci-job run and one worktree; the run time is unmeasured for a step subset
                           (the 3600 s lint bound applies). No new file but ci-job's own log.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
+                          The draft step, a ready --confirm (before the lock) and the preview run the handed-lane check. A body with a `Lanes:`
+                          line must name every handed lane PR (open, newest review record done): on that line, or on a `Dropped`, `Held` or
+                          `Next batch` line with a reason; one not named refuses, nothing pushed, locked or marked ready. A body with no `Lanes:`
+                          line makes no gh read: a head that merges lanes (local git, in the worktree the path already opens) refuses.
+                          --undo-check-unknown-ok "REASON" also lifts a failed lane read of the no-Lanes check (one line names it).
+                          Cost: with a `Lanes:` line, reviewed_read's reads (two list reads, and three gh calls per ready PR with a record), then
+                          one gh api compare per open PR on the base that reads done (against the base), one per handed PR against the integration
+                          head, and one per Lanes-named open PR not in the batch. Without a `Lanes:` line, no gh call: one `git log` in the worktree,
+                          then one `git merge-base --is-ancestor` per merged-in parent (plus a shallow-repo probe on exit 1); on a base that is not the
+                          default branch, when it finds a lane tip, add one `git fetch` of the default branch and one ancestry read per lane tip.
+                          No long-lived process, file or timer.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V] [--grant "#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT"]
@@ -211,6 +222,9 @@ class UnreadText(str):
 class Held(Stop):
     pass
 
+class Unnamed(Stop):
+    """The handed-lane check found a handed lane PR the integration PR body does not name. Not a failed read: a refusal."""
+
 # The cite each refusal prints, in the house form (decision <slug>, <gloss>). Message text only.
 LOCK_CITE = "(decision merge-lock, one run holds the merge lock for a bounded time and never waits on a lock that could expire)"
 PIN_CITE = "(decision main-branch-protection, the merge tool reads the check names from the protection)"
@@ -226,6 +240,7 @@ RERUN_REMEDY = "gh run rerun"  # base_state names it for a cancelled run on the 
 RERUN_IN_FLIGHT = "is a re-run still going"  # base_state words an unknown re-run with it; red_base reads it back to give the re-run its own headline
 DROP_CITE = "(decision merge-deletes-batch-lanes, a batch that drops a lane by a revert of its merge does not merge)"
 BATCH_LANES = "Lanes:"  # a body line that starts with it lists the lanes in the integration PR: `Lanes: #12 #15`
+BATCH_LEFT_OUT = ("Dropped", "Held", "Next batch")  # a body line that starts with one lists handed lanes left out: `Dropped from #9: #20 (reason)`
 HANDED_CITE = "(decision batch-body-names-handed, each handed lane is named in the integration PR body)"
 BATCH_CITE = "(decision no-merge-during-batch-ci, nothing merges while another ready pull request's CI runs, and the required checks are never empty)"
 FREEZE_CITE = BATCH_CITE  # the batch build and drop refusals cite the batch brake's decision, though the freeze decision governs them; a later change points this at the freeze decision
@@ -3350,6 +3365,11 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     if info["draft"]:
         say(f"merge: #{n} is a draft. This is a preview only; --confirm on a draft is the records step, and it never merges.")
     base = info["base"]
+    try:
+        handed_check(host, n, info)
+    except Unnamed as e:  # one greppable line, as for a dropped line; the detail follows
+        say("BLOCKED: " + " ".join(str(e).split()))
+        raise
     resumed = trailer = records = None
     tmp, wt = open_worktree(root, info, base)  # the same tree confirm checks
     try:
@@ -3357,11 +3377,15 @@ def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
             undo_check(wt, f"origin/{base}", unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"])
             debt_check(wt, f"origin/{base}", host, info)
             refuse_dropped_lane(wt, f"origin/{base}", info["head"], unknown_ok)
+            handed_local(wt, f"origin/{base}", n, info, unknown_ok, cfg["defaultBranch"])  # after the dropped-lane check: its refusal is the more specific
             stale, stands = holds_base(wt, f"origin/{base}", info["head"])
             current = stale and ("BEHIND: " if "does not hold" in stale else "UNKNOWN: ") + stale + " --confirm refuses it."
             current = current or stands and stands + ". The green run stands."
         except Dropped as e:  # one greppable line for a reader that scans the output for a verdict; the detail follows
             say("BLOCKED: " + " ".join(str(e).splitlines()[:-1]).replace("  ", " ").strip())
+            raise
+        except Unnamed as e:  # the handed-lane check: the whole text is the line
+            say("BLOCKED: " + " ".join(str(e).split()))
             raise
         if base == cfg["defaultBranch"]:  # ids are claimed only on the default branch
             sc = base_stamp_config(wt, tmp, cfgrel, f"origin/{base}")
@@ -3425,13 +3449,16 @@ def run_ready_checks(wt, n, base, checks, remedy="Fix it on the branch, push, an
         raise LintFail(message, lines, log) if state == "fail" else Stop(message)
     say(f"merge: the ready checks ({', '.join(checks)}) pass on {short}.")
 
-def draft_step(root, cfg, n, host, info):
+def draft_step(root, cfg, n, host, info, unknown_ok=""):
     """`merge <pr> --confirm` on a draft: rebuild the records page on the head, push it, mark the pull request ready, and
     stop. So the branch is final at ready, and the ready confirm pushes nothing (decision records-index-at-merge).
     Takes no lock, claims no number and never merges: a claim stays at the ready confirm.
     A repo that declares merge.readyChecks also runs them first, on the tree the step would push, before any push and before the
     ready mark, on every path (the ready checks, decision lanes-run-no-full-ci-job). One ci-job run, in one worktree."""
     base = info["base"]
+    counted = handed_check(host, n, info)  # first: a refusal leaves nothing pushed and nothing marked ready
+    if counted:
+        say(counted)
     checks = cfg.get("merge", {}).get("readyChecks")
     if not checks:
         say("merge: this repo declares no ready checks (merge.readyChecks), so the draft step runs none.")
@@ -3441,6 +3468,7 @@ def draft_step(root, cfg, n, host, info):
     if default or checks:  # one worktree, one open_worktree call, on either base
         tmp, wt = open_worktree(root, info, base)
         try:
+            handed_local(wt, f"origin/{base}", n, info, unknown_ok, cfg["defaultBranch"])  # before any push or ready check
             if not default:
                 run_ready_checks(wt, n, base, checks)
             else:
@@ -3531,7 +3559,10 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
     base = info["base"]  # the PR's own base; read again under the lock
     base_ref = f"origin/{base}"
     if info["draft"]:  # the records step: no lock, no claim, no wait, never a merge
-        return draft_step(root, cfg, n, host, info)
+        return draft_step(root, cfg, n, host, info, unknown_ok)
+    counted = handed_check(host, n, info)  # before the lock, any claim or any merge; a body with no Lanes line is read in the worktree, below
+    if counted:
+        say(counted)
     lock.holder = {"pr": n, "branch": info["branch"], "session": session}
     lifts = {}  # each reason flag that lifts a check in this run, for the merge commit message
     token = lock.acquire(base, (WAITS * m["deadlineMinutes"] + 10) * 60)  # each wait at most once, ten minutes spare
@@ -3549,7 +3580,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             raise Stop(f"the base of #{n} changed from {base} to {info['base']} while the lock was taken {BASE_CITE}. Nothing was claimed or pushed.")
         host.take_base = base
         if info["draft"]:  # it turned draft after the first read: the records step, never a merge
-            return draft_step(root, cfg, n, host, info)
+            return draft_step(root, cfg, n, host, info, unknown_ok)
         host.required_names()  # an empty or unreadable list stops here, before anything is pushed
         record_lift(lifts, RED_FLAG, red_base(root, host, base, red_ok))
         busy = batch_refusal(host, n, base, info["head"])
@@ -3560,6 +3591,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"]))
         debt_check(wt, base_ref, host, info)
         record_lift(lifts, UNDO_FLAG, refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok))
+        record_lift(lifts, UNDO_FLAG, handed_local(wt, base_ref, n, info, unknown_ok, cfg["defaultBranch"]))  # after the dropped-lane check: its refusal is the more specific
         stale, stands = holds_base(wt, base_ref, info["head"], host.before_wait)
         if stale:
             raise Stop(stale + " This run claimed nothing.")
@@ -4199,6 +4231,108 @@ def touches_lines(h, run, cases, files):
         if hits:
             out.append(f"#{d['number']} {d['head']['ref']} {d['head']['sha'][:9]} {'draft' if d.get('draft') else 'ready'}: " + "; ".join(hits))
     return (out or ([] if unknown else [TOUCH_NONE])), unknown
+
+_PR_REF = re.compile(r"#(\d+)(?:\s*\(((?:[^()]|\([^()]*\))*)\))?")  # `#12`, then its reason in parentheses when one follows
+
+def label_colon(line):
+    """The index of the first colon outside parentheses, or -1: the colon that ends a left-out line's label. A colon inside a reason's
+    parentheses (`Dropped (see note: lint): #8`, a URL) does not end it."""
+    depth = 0
+    for i, ch in enumerate(line):
+        depth += (ch == "(") - (ch == ")" and depth > 0)
+        if ch == ":" and depth == 0:
+            return i
+    return -1
+
+def body_lanes(body):
+    """-> (lanes, left_out) read from an integration PR body. lanes: the numbers on the BATCH_LANES line, or None when the body has none.
+    The Lanes line may start with a list marker (`- ` or `* `) or bold (`**Lanes:**`), in any case. left_out: {number: [has a reason, ...]},
+    one entry per time the number is on a line that starts with a BATCH_LEFT_OUT prefix. Only the numbers after the label's colon (label_colon)
+    count. A reason is a `(...)` right after the number, or a `(...)` in the label before the colon."""
+    lanes, left = None, {}
+    for line in body.splitlines():
+        text = line.lstrip(" \t-*>")
+        if text[:len(BATCH_LANES)].lower() == BATCH_LANES.lower():
+            lanes = (lanes or []) + [int(m.group(1)) for m in _PR_REF.finditer(text[len(BATCH_LANES):])]
+        elif line.startswith(BATCH_LEFT_OUT) and label_colon(line) >= 0:
+            i = label_colon(line)
+            labelled = bool(re.search(r"\([^()]*\S[^()]*\)", line[:i]))
+            for m in _PR_REF.finditer(line[i + 1:]):
+                left.setdefault(int(m.group(1)), []).append(labelled or bool(m.group(2) and m.group(2).strip()))
+    return lanes, left
+
+def handed_check(host, n, info):
+    """The handed-lane check: the integration PR `n` names every handed lane PR in its body (decision batch-body-names-handed).
+    It applies only when the body has a `Lanes:` line; with none it reads nothing and returns None (handed_local reads the head instead).
+    A handed PR is an open PR on the same base whose newest review record reads done (reviewed_read's done set), less `n` and less one whose
+    head the base already holds. One whose head the integration head holds is in the batch and must be on the Lanes line; any other must be
+    on a left-out line with a reason; each PR on the Lanes line must be in the head. A finding raises Unnamed, one line per PR.
+    A failed read raises Stop: unknown is never a pass. -> the count line when every handed PR is named.
+    Cost: reviewed_read's reads (two list reads and three gh calls per ready PR with a record); each compare is one gh api call: one per open PR
+    on the base that reads done, other than `n` (against the base), one per handed PR and one per Lanes-named open PR not in the batch (against the
+    integration head). No long-lived process, file or timer."""
+    lanes, left = body_lanes(info.get("body") or "")
+    if lanes is None:
+        return None
+    base, head = info["base"], info["head"]
+    done = reviewed_read(host)
+    rows = {d["number"]: d["head"]["sha"] for d in done[2]}
+    handed = [m for m in sorted({m for m, b in done[1] if b == base}) if m != n and m in rows and not host.holds_head(rows[m], base)]
+    in_batch = {m for m in handed if host.holds_head(rows[m], head)}
+    named = set(lanes)
+    found = {}  # PR number -> every fact found about it
+    def find(m, why):
+        found.setdefault(m, []).append(why)
+    for m in handed:
+        if m in in_batch and m not in named:
+            find(m, "is in the batch head but not on the Lanes line")
+        elif m not in in_batch and m not in named and m not in left:
+            find(m, "is handed but not named in the body")
+    for m in sorted(named - {n}):
+        if m not in in_batch and m in rows and not host.holds_head(rows[m], head):
+            find(m, "is named on Lanes but not in the head")
+    for m in sorted(left):
+        if not all(left[m]):
+            find(m, "is on a left-out line with no reason")
+    if found:
+        named_lines = "\n".join(f"#{m} {' and '.join(whys)} of #{n}." for m, whys in sorted(found.items()))
+        raise Unnamed(f"{named_lines}\nName each in the body of #{n}: on the {BATCH_LANES} line, or on a {'/'.join(BATCH_LEFT_OUT)} line with a reason. "
+                      f"Nothing was pushed, marked ready, locked, claimed or merged. {HANDED_CITE}")
+    return f"merge: handed-lane check: {len(named)} lanes in the batch, {len(left)} named as left out."
+
+def handed_local(wt, base_ref, n, info, unknown_ok="", default=""):
+    """The handed-lane check for a body with no `Lanes:` line, in the worktree `wt` of the head: local git, no gh read. A head that merges
+    lane tips (read_lanes, less the dropped ones) is an integration head, so the missing Lanes line refuses. A read that fails raises Stop: unknown is never a pass,
+    unless the run has the reason flag --undo-check-unknown-ok "<reason>", which lifts the same read for refuse_dropped_lane: one line says so
+    and the reason is returned, for record_lift. On a base that is not `default` (the default branch), a tip that origin/<default> holds is the
+    default branch merged into the head, not a lane. origin/<default> is fetched first: open_worktree and load_config fetch only the base
+    and the head, and a stale ref reads a default-branch tip as a lane. A failed fetch or ancestry read is an unknown read, as above.
+    A body with a Lanes line is handed_check's. Cost, no gh call: read_lanes runs one `git log`, then one `git merge-base --is-ancestor`
+    per merged-in parent, plus a shallow-repo probe when one exits 1. On a base that is not the default branch, when it finds a lane tip,
+    add one `git fetch` of the default branch and one ancestry read per lane tip (plus the probe on exit 1)."""
+    if body_lanes(info.get("body") or "")[0] is not None:
+        return None
+    try:
+        tips, dropped = read_lanes(wt, base_ref, info["head"])
+        tips = [t for t in tips if t not in dropped]  # a reverted lane is refuse_dropped_lane's
+        if tips and default and info["base"] != default:  # no tip, nothing to read: a plain PR never depends on the default branch's fetch
+            c, out = git(wt, "fetch", "-q", "origin", f"+refs/heads/{default}:refs/remotes/origin/{default}")  # worktrees share refs/remotes
+            if c:
+                raise ValueError(f"git fetch origin {default} failed: " + (out.splitlines() or ["?"])[-1])
+            held = {t: ancestor(wt, t, f"origin/{default}") for t in tips}
+            if None in held.values():  # git could not tell: never "not an ancestor"
+                raise ValueError(f"git merge-base failed against origin/{default}")
+            tips = [t for t in tips if not held[t]]
+    except Exception as e:
+        if unknown_ok.strip():
+            say(f"merge: handed-lane check UNKNOWN ({type(e).__name__}: {e}). {UNDO_FLAG}, reason: {unknown_ok.strip()}")
+            return unknown_ok.strip()
+        raise Stop(f"the handed-lane check could not read the merge commits of #{n} ({type(e).__name__}: {e}). Unknown is not a pass. "
+                   f"Nothing was pushed, marked ready, locked, claimed or merged. {HANDED_CITE}")
+    if tips:
+        raise Unnamed(f"the head of #{n} merges lanes (tip {', '.join(sorted(t[:9] for t in tips))}) but the body has no {BATCH_LANES} line.\n"
+                      f"Name each lane on a {BATCH_LANES} line, and each handed lane left out on a {'/'.join(BATCH_LEFT_OUT)} line with a reason. "
+                      f"Nothing was pushed, marked ready, locked, claimed or merged. {HANDED_CITE}")
 
 def default_branch(root):
     """The default branch of the checkout `root`: origin/HEAD first, else the repo's default branch as gh reads it (host_default_branch).
@@ -5096,7 +5230,7 @@ def build_parser():
     p.add_argument("--ready", action="store_true", help="with --batch-build: lint the head of batch-NAME once and run the ready checks, then ask the host to mark its draft pull request ready; the PR list may be left out")
     p.add_argument("--blame", type=pr_arg, metavar="PR", help="with --batch-build NAME and --run: store that a failed CI run of the batch's current head blames lane PR, so a drop may take it off; nothing else")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
-    p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
+    p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history, or the lane read of the dropped-lane check or of the handed-lane check on a body with no Lanes line cannot; logged")
     p.add_argument("--base-red-ok", default="", metavar="REASON", help="go on when the base's latest run is red or unreadable (the batch carries the fix); logged")
     p.add_argument("--session", default="", metavar="NAME", help="your session name; the lock shows it to waiting runs")
     p.add_argument("--config", default=".github/stamp.json")
