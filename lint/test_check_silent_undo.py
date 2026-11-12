@@ -5,7 +5,7 @@ Every case builds a throwaway repo with a local `origin` and asks the check for 
 Red cases: a squash that carries the pre-deletion copy of a file (a revert nobody wrote), and a
 merge that drops a parent's added line.
 """
-import atexit, contextlib, inspect, io, json, os, shutil, subprocess, sys, tempfile, unittest, unittest.mock
+import atexit, contextlib, difflib, inspect, io, json, os, random, shutil, subprocess, sys, tempfile, unittest, unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -3046,7 +3046,9 @@ class RevivedNote(NotesFixture, unittest.TestCase):
 
 class NoteRowEdits(NotesFixture, unittest.TestCase):
     """An edit in place to a note row the base holds is a finding. So is a base row whose slug and text change together, and a
-    notes file that git moves with an edited row. Rows the branch adds, rows it deletes, one wording of a duplicated slug that
+    notes file that git moves with an edited row. A row with no slug form is its whole line, so an edit of it is a finding, and so
+    is a slug row that loses its slug form. A reword that reads 0.85 or more like the row it replaces is a finding; one that
+    reads 0.75 passes. Rows the branch adds, rows it deletes, one wording of a duplicated slug that
     it deletes, a second row under a base slug while the base row stays, a trailing space, CRLF line ends, and main's edits to
     base rows that a merge brings in all pass. A base the check cannot read is Unknown. Each case that expects a pass first
     asserts its scope: the same branch edits a base row and gets a finding. That keeps the case red on a check that never
@@ -3066,6 +3068,14 @@ class NoteRowEdits(NotesFixture, unittest.TestCase):
     BASE_ALT = "- base-note: a second wording of the same slug (lint/check_base.py)"
     BASE_TRAILING = BASE + " "  # the base row with one trailing space and no other change
     MOVED = "docs/debts/notes-moved.md"
+    BASE_DASH = "- base-note - a finding the base holds (lint/check_base.py)"  # the colon after the slug becomes a dash
+    BASE_STAR = "* base-note: a finding the base holds (lint/check_base.py)"  # the `- ` bullet becomes a star
+    BOUNDARY = "- boundary-note: the nightly cache is warmed before the build runs each night"
+    AT_THRESHOLD = "- at-note: quick job cache is warmed before the build runs each night"  # reads 0.85 against BOUNDARY
+    BELOW_THRESHOLD = "- low-note: pool was primed is warmed before the build runs each night"  # reads 0.75 against BOUNDARY
+    COST_WORDS = ("cache warm nightly build index shard replica queue retry token session quota ledger audit trail rollback "
+                  "deploy canary probe timeout budget vendor invoice schema table column migrate backup restore pipeline "
+                  "runner worker lease lock fence snapshot checksum bundle release notes owner review gate").split()
 
     @staticmethod
     def sweep(edited=False):
@@ -3340,6 +3350,110 @@ class NoteRowEdits(NotesFixture, unittest.TestCase):
         self.assertEqual(got, [], "premise: the check passes, so the count is for a clean read: %r" % got)
         self.assertEqual(spawns, 7, "git spawns in edited_notes for a moved notes file: %d, expected 7: the base notes file is "
                                     "read twice, and the second read repeats the first" % spawns)
+
+    def test_a_row_with_no_slug_form_that_is_edited_in_place_is_a_finding(self):
+        self.start(union=True, retire=False, base=(self.BASE, self.OTHER, self.NONSLUG),
+                   branch=(self.BASE_EDITED, self.OTHER, self.NONSLUG_EDITED), main=(self.BASE, self.OTHER, self.NONSLUG, self.MAIN))
+        self.assertIn(self.NONSLUG_EDITED, self.notes_at("HEAD"), "premise: the branch rewords the row with no slug form")
+        got = self.r.verdict()
+        self.assertEqual(len(self.named(got, "base-note", self.NOTES)), 1, "scope: the base-note edit is not a finding: %r" % got)
+        self.assertEqual(len(self.named(got, "AskUserQuestion")), 1,
+                         "an edit in place of a row with no slug form is not a finding: %r" % got)
+        self.assertEqual(len(got), 2, "the two edits give more than two findings: %r" % got)
+
+    def test_an_unchanged_row_with_no_slug_form_passes(self):  # control
+        self.start(union=True, retire=False, base=(self.BASE, self.OTHER, self.NONSLUG),
+                   branch=(self.BASE_EDITED, self.OTHER, self.NONSLUG), main=(self.BASE, self.OTHER, self.NONSLUG, self.MAIN))
+        self.assertIn(self.NONSLUG, self.notes_at("HEAD"), "premise: the row with no slug form is kept at head")
+        got = self.r.verdict()
+        self.assertEqual(len(self.named(got, "base-note", self.NOTES)), 1, "scope: the base-note edit is not a finding: %r" % got)
+        self.assertEqual(self.named(got, "AskUserQuestion"), [], "an unchanged row with no slug form is a finding: %r" % got)
+
+    def test_a_row_with_no_slug_form_the_branch_adds_passes(self):  # control
+        self.start(union=True, retire=False, base=(self.BASE, self.OTHER), branch=(self.BASE_EDITED, self.OTHER, self.NONSLUG),
+                   main=(self.BASE, self.OTHER, self.MAIN))
+        self.assertIn(self.NONSLUG, self.notes_at("HEAD"), "premise: the branch adds the row with no slug form")
+        got = self.r.verdict()
+        self.assertEqual(len(self.named(got, "base-note", self.NOTES)), 1, "scope: the base-note edit is not a finding: %r" % got)
+        self.assertEqual(self.named(got, "AskUserQuestion"), [], "a row with no slug form that the branch adds is a finding: %r" % got)
+
+    def slug_form_lost(self, row):
+        """A base row whose text the branch keeps and whose slug form it takes away: the base slug is gone at head."""
+        self.start(union=True, retire=False, base=(self.BASE, self.OTHER), branch=(row, self.OTHER_EDITED),
+                   main=(self.BASE, self.OTHER, self.MAIN))
+        self.assertIn(row, self.notes_at("HEAD"), "premise: the branch writes the row without its slug form")
+        got = self.r.verdict()
+        self.assertEqual(len(self.named(got, "other-note", self.NOTES)), 1, "scope: the other-note edit is not a finding: %r" % got)
+        self.assertEqual(len(self.named(got, "base-note", self.NOTES)), 1,
+                         "a base row that loses its slug form is not a finding: %r" % got)
+        self.assertEqual(len(got), 2, "the two edits give more than two findings: %r" % got)
+
+    def test_a_slug_row_that_loses_its_colon_to_a_dash_is_a_finding(self):
+        self.slug_form_lost(self.BASE_DASH)
+
+    def test_a_slug_row_that_becomes_a_star_bullet_is_a_finding(self):
+        self.slug_form_lost(self.BASE_STAR)
+
+    @staticmethod
+    def ratio_of(base_row, new_row):
+        """The ratio the check reads for a base row and a new row: over the text after each row's slug, base first."""
+        return difflib.SequenceMatcher(None, base_row.split(":", 1)[1], new_row.split(":", 1)[1], autojunk=False).ratio()
+
+    def test_a_reword_that_reads_at_the_threshold_is_a_finding(self):
+        """0.85 is the cutoff, and a row that reads exactly on it is a rename with a reword (`>=`, not `>`)."""
+        self.start(union=True, retire=False, base=(self.BOUNDARY, self.OTHER), branch=(self.AT_THRESHOLD, self.OTHER),
+                   main=(self.BOUNDARY, self.OTHER, self.MAIN))
+        self.assertEqual(self.ratio_of(self.BOUNDARY, self.AT_THRESHOLD), 0.85, "premise: the pair reads exactly 0.85")
+        got = self.r.verdict()
+        self.assertEqual(len(self.named(got, "boundary-note", self.NOTES)), 1,
+                         "a reword that reads 0.85 against the row it replaces is not a finding: %r" % got)
+        self.assertEqual(len(got), 1, "the reword gives more than one finding: %r" % got)
+
+    def test_a_reword_below_the_threshold_passes(self):
+        self.start(union=True, retire=False, base=(self.BOUNDARY, self.OTHER), branch=(self.AT_THRESHOLD, self.OTHER),
+                   main=(self.BOUNDARY, self.OTHER, self.MAIN))
+        self.assertEqual(len(self.named(self.r.verdict(), "boundary-note", self.NOTES)), 1,
+                         "scope: the reword that reads 0.85 is not a finding")
+        self.start(union=True, retire=False, base=(self.BOUNDARY, self.OTHER), branch=(self.BELOW_THRESHOLD, self.OTHER),
+                   main=(self.BOUNDARY, self.OTHER, self.MAIN))
+        self.assertEqual(self.ratio_of(self.BOUNDARY, self.BELOW_THRESHOLD), 0.75, "premise: the pair reads exactly 0.75")
+        got = self.r.verdict()
+        self.assertEqual(self.named(got, "boundary-note"), [], "a reword that reads 0.75 against the row it replaces is a finding: %r" % got)
+
+    def cost_text(self, seed):
+        """Four to fourteen words, drawn from one seed. Two seeds share few words in order, so unrelated rows read well below
+        SAME_NOTE, as the notes on main do."""
+        rnd = random.Random(seed)
+        return " ".join(rnd.choice(self.COST_WORDS) for _ in range(rnd.randint(4, 14)))
+
+    def full_ratio_reads(self):
+        """(problem lines of edited_notes, the full SequenceMatcher.ratio() calls it makes). The count wraps edited_notes alone,
+        and it counts calls, never time."""
+        real, reads = difflib.SequenceMatcher.ratio, []
+
+        def counted(matcher):
+            reads.append(matcher)
+            return real(matcher)
+        with unittest.mock.patch.object(difflib.SequenceMatcher, "ratio", counted):
+            got = C.edited_notes(self.r.dir, "origin/main", "HEAD")
+        return [line for _, line in got], len(reads)
+
+    def test_300_rows_retired_and_300_added_read_at_most_a_tenth_of_the_pairs(self):
+        """The read compares each retired row's text with each added row's: 300 by 300 pairs here. A full ratio on every pair is
+        quadratic, so the read takes a cheap bound first. The bound is a count of full ratio() calls, at most a tenth of the
+        pairs. The same run must still flag the one real rename among the 300 rows."""
+        base = tuple("- cost-%03d: %s" % (i, self.cost_text(i)) for i in range(300))
+        branch = tuple("- fresh-%03d: %s" % (i, self.cost_text(1000 + i)) for i in range(299))
+        branch += ("- renamed-150: %s now" % self.cost_text(150),)
+        self.start(union=True, retire=False, base=base, branch=branch, main=base + (self.MAIN,))
+        self.assertEqual(len(self.body("HEAD")), 300, "premise: head holds the 300 added rows")
+        got, reads = self.full_ratio_reads()
+        self.assertEqual(len(self.named(got, "cost-150", self.NOTES)), 1,
+                         "scope: the real rename of cost-150 among 300 rows is not a finding: %r" % got[:2])
+        self.assertEqual(len(got), 1, "the 300 by 300 read gives findings beyond the one rename: %r" % got[:3])
+        self.assertLessEqual(reads, 9000,
+                             "the read made %d full ratio() calls for 300 retired and 300 added rows; a tenth of the 90000 "
+                             "pairs is 9000, and a read of every pair makes 90000" % reads)
 
 
 if __name__ == "__main__":
