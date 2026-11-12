@@ -3859,8 +3859,8 @@ BRIEF_UNREAD = "brief_unread"
 BRIEF_LITERAL_REMEDY = "write the brief as a literal string"
 BRIEF_MARKER_REMEDY = BRIEF_LITERAL_REMEDY + " so the marker is readable"
 BRIEF_UNREAD_REASON = ("The guard could not read this reviewer's brief, so it cannot check that the brief holds no report "
-                       "or verdict: " + BRIEF_LITERAL_REMEDY + ". Pass work to the reviewer as a file it reads "
-                       "(decision reviewer-brief-blind).")
+                       "or verdict: " + BRIEF_LITERAL_REMEDY + ". Name the diff file or the commit range in the "
+                       "brief, not its contents (decision reviewer-brief-blind).")
 
 
 def spawn_inputs(tool: str, tool_input):
