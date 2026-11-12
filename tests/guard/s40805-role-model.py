@@ -1035,31 +1035,6 @@ role_model_refuse("role-model: Explore on sonnet names neither the round 1 sente
 role_model_refuse("role-model: test-author on sonnet names neither the round 1 sentence nor the fix check round form",
                   "test-author", "sonnet", "Write the failing cases.",
                   lacks=ROLE_LACKS + (ROUND_ONE_SENTENCE, ROUND_FIX_FORM))
-def flipped_guard_path(name, old, new):
-    """The guard, with one line of it replaced, run from a tree of its own: hooks/ holds every guard module, and
-    lint/ sits beside it, since the guard reads lint/layout.py from ../lint (without it the role table reads as
-    unread and every role-model arm passes). A line that is not found once, or is found twice, leaves the tree
-    unedited, so the case that names it fails on its first carry."""
-    root = os.path.join(ROOT, "flipped", name)
-    tree = os.path.join(root, "hooks")
-    mutate_shared.guard_tree(tree)
-    shutil.copytree(os.path.join(HERE, "..", "lint"), os.path.join(root, "lint"),
-                    ignore=shutil.ignore_patterns("__pycache__"))
-    try:
-        mutate_shared.apply_mutant(tree, old, new)
-    except (mutate_shared.StaleMutant, mutate_shared.AmbiguousMutant):
-        pass
-    return os.path.join(tree, "guard.py")
-
-
-# The first round is free: the copied guard's free-rounds constant reads every round, so the refusal names it among them.
-# Its sentence then says the test-author runs on its role's model, and does not say the first round runs on its row.
-FLIPPED_GUARD = flipped_guard_path("round-one-free", 'ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")',
-                                   'ROLE_REVIEWER_FREE_ROUNDS = ("1", "2", "3")')
-add("role-model: round 1 free: reviewer on sonnet names round 1 among the free rounds, and says the test-author runs on its role's model",
-    "deny", ROLE_RULE, tool="Agent", config=ROLE_REAL_CFG, guard=FLIPPED_GUARD,
-    carries=("the test-author runs on its role's model", "review round 1 or 2 or 3", ROLE_REMEDY),
-    lacks=ROLE_LACKS + (ROUND_ONE_SENTENCE,), **role_input("reviewer", "sonnet", "Check the diff for typos."))
 
 
 # ---- I: the reviewer's guard marker. A reviewer on Sonnet may run a guard or check diff when its brief carries the line
@@ -1068,7 +1043,7 @@ add("role-model: round 1 free: reviewer on sonnet names round 1 among the free r
 # a lowercase form or a line inside a fenced block lifts nothing. The marker text is a literal here: REVIEW_GUARD_MARKER in
 # shared_names is a new name, and a read at import would fail every case on the old code (as EXPLORE_MARKER is). The check
 # review_guard_marker_check holds shared_names to this text.
-def review_record_guard_line():
+def review_log_guard_line():
     """The `Guard or check: yes` line merge/merge.py review_body writes for a guard or check change, read from the writer
     so this file holds no copy of the text."""
     import importlib.util
@@ -1089,7 +1064,7 @@ def review_guard_marker_check():
     marker = getattr(names, "REVIEW_GUARD_MARKER", None)
     if marker is None:
         return False, "shared_names has no REVIEW_GUARD_MARKER, the one name for the review record's Guard or check line"
-    if marker != review_record_guard_line():
+    if marker != review_log_guard_line():
         return False, "REVIEW_GUARD_MARKER is not the Guard or check line the review record writes"
     return True, "REVIEW_GUARD_MARKER is the review record's Guard or check line"
 
@@ -1222,6 +1197,22 @@ role_model_allow("role-model: round row: a record whose reviewer round 2 row nam
 role_model_refuse("role-model: round row: a record whose reviewer round 2 row names haiku still denies an unmarked round 1 "
                   "reviewer on sonnet", "reviewer", "sonnet", "Round 1 of 3. Check the diff.", config=ROUND_HAIKU_TWO_CFG,
                   carries=(ROLE_REMEDY,))
+# The record's round 1 row names sonnet, so the first round is among the rows that lift a reviewer on sonnet. The refusal names
+# round 1 among those rounds and says the test-author runs on its role's model. The fallback's free-rounds literal is not read.
+ROUND_SONNET_ONE_POINTER = role_table("roundsonnetone", ROLE_TABLE_RULES + "\n" + ROUND_TABLE_HEAD + "| reviewer | 1 other | sonnet | xhigh |\n")
+ROUND_SONNET_ONE_CFG = role_config("roundsonnetone", ROUND_SONNET_ONE_POINTER)
+add("role-model: round 1 free: reviewer on sonnet names round 1 among the free rounds, and says the test-author runs on its role's model",
+    "deny", ROLE_RULE, tool="Agent", config=ROUND_SONNET_ONE_CFG,
+    carries=("the test-author runs on its role's model", "review round 1 or 2 or 3", ROLE_REMEDY),
+    lacks=ROLE_LACKS + (ROUND_ONE_SENTENCE,), **role_input("reviewer", "sonnet", "Check the diff for typos."))
+# The record's round 3 row names haiku, the reviewer's own row, so a round 3 reviewer on sonnet is not lifted. The step-up does not
+# decide first: round 3 is not the exact round, and sonnet is not below haiku. The table read in role_model_one decides it.
+ROUND_HAIKU_THREE_POINTER = role_table("roundhaikuthree", ROLE_TABLE_RULES + "\n" + ROUND_TABLE_HEAD + "| reviewer | 3 | haiku | xhigh |\n")
+ROUND_HAIKU_THREE_CFG = role_config("roundhaikuthree", ROUND_HAIKU_THREE_POINTER)
+role_model_refuse("role-model: round row: a record whose reviewer round 3 row names haiku denies a round 3 reviewer on sonnet",
+                  "reviewer", "sonnet", "Round 3 of 3. Re-check the diff.", config=ROUND_HAIKU_THREE_CFG,
+                  carries=(ROLE_REMEDY, "`Round 2 of 3`"), lacks=ROLE_LACKS + ("`Round 3 of 3`",))
+
 # Case 4: with no decision record the round rows read as absent, and the spawn passes as it does today.
 role_model_allow("role-model: no decision record, a reviewer round 1 on sonnet with the guard marker passes silently",
                  "reviewer", "sonnet", "Round 1 of 3. Check the guard diff.\n" + REVIEW_GUARD_MARKER, config=ROLE_MISSING_CFG)
