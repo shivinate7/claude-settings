@@ -18,7 +18,7 @@ Owner ruling, 2026-11-10 15:04 CST, relayed by the retrospective session. It is 
 
 ## Why
 
-A guard that goes red when nothing is wrong is spent, because its reader stops reading it (`guard-that-cries-wolf-is-spent`). The owner gave no reason for R5. This line gives the reason from that decision.
+Under rule `verification-cry-wolf-guard-is-spent` (false alarms spend a guard), a guard that fires when nothing is wrong is spent, since its reader stops reading it (`guard-that-cries-wolf-is-spent`). The owner gave no reason for R5. This line gives the reason from that decision.
 
 Kind: process
 Home: rule:building-guard-needs-incident
