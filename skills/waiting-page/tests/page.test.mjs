@@ -124,7 +124,7 @@ after(async () => { if (browser) await browser.close(); });
 
 // clock: a fixed browser time (an ISO string), so a case reads the page's clock without the real one. keepStorage: each storage key is set
 // only when absent, so a reload keeps what the page wrote on the earlier load (a reload that resets storage would undo it).
-async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, holdAsks = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, hasTouch = false, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false, keepItems = false, holdMeasure = false } = {}) {
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, holdAsks = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, hasTouch = false, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false, keepItems = false, holdMeasure = false, frameBoxes = false } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   // hasTouch: a touch device, so the page's pointer: coarse rules apply.
@@ -144,6 +144,15 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   // platform: the OS a browser reports, as navigator.platform with no userAgentData (a Windows or a Mac browser).
   // holdMeasure: the page drops every mockup's height report, so a case reads the boxes before any measure, as on first paint.
   if (holdMeasure) await page.addInitScript(() => { if (window.parent === window) window.addEventListener("message", (e) => { if (e.data && e.data.dfit === 1) e.stopImmediatePropagation(); }, true); });
+  // frameBoxes: the box height of each option's picture, by option key, read in the animation-frame step of the first frame it is in the page (window.__frameBoxes), before that frame paints.
+  if (frameBoxes) await page.addInitScript(() => {
+    window.__frameBoxes = {};
+    const take = () => {
+      for (const w of document.querySelectorAll("label.opt .dfitwrap")) { const k = w.closest("label.opt").getAttribute("for"); if (!(k in window.__frameBoxes)) window.__frameBoxes[k] = w.getBoundingClientRect().height; }
+      requestAnimationFrame(take);
+    };
+    requestAnimationFrame(take);
+  });
   if (platform) await page.addInitScript((p) => { Object.defineProperty(navigator, "platform", { get: () => p }); Object.defineProperty(navigator, "userAgentData", { get: () => undefined }); }, platform);
   if (clock) await page.clock.setFixedTime(new Date(clock));
   await page.goto(ORIGIN);
@@ -930,7 +939,7 @@ for (const width of [1440]) {
   });
 }
 
-// Owner ruling (waiting-page item 84 pick b, option 5B), round 2: at 1065 wide the option column binds, so a scrolling picture is column less 2 less the gutter.
+// Owner ruling, waiting-page item 470 a, 2026-11-09 21:26 CST: a scrolling picture is the card's width less 2 and the gutter, capped by its column. At 1065 wide the column is narrower than the card, so the box must sit inside the column.
 // The column is read from its rect, not clientWidth, which rounds up. The budget is floor(rect width) less 2 and the gutter (docs/design/c204-sizes.md item 7).
 // The box sits inside the column's edges to 0.01px, and its sizer and picture fit the budget.
 const strictBox = (page, id) => page.locator(boxSel(id)).evaluate((w) => {
@@ -1174,13 +1183,19 @@ test("a tall picture that fits once the gutter narrows it draws whole at the nar
   await framesAt(page, 2, 980);
   await boxesSettled(page, it.id);
   const room = await budget(page, it.id), F = fitOf(room);
+  // Precondition: at this budget the picture is over F + 1 at the card's width, so the gutter branch is the one under test.
+  assert.ok(Math.ceil((980 * room) / 390) > F + 1, `at a budget of ${room} the 980 picture is ${Math.ceil((980 * room) / 390)} high, not over F + 1 = ${F + 1}; the case does not reach the gutter branch`);
   const boxes = await optBoxes(page, it.id);
   assert.equal(boxes.length, 2, "the card does not hold the two options the case gave it");
-  for (const b of boxes) {
+  // The picture's bottom edge, read in the same order as the boxes, so each box is checked against its own picture.
+  const edges = await page.evaluate((i) => [...document.querySelectorAll(`#item-${i} label.opt`)].map((l) => ({ box: l.querySelector(".dfitwrap").getBoundingClientRect().bottom, picture: l.querySelector("iframe").getBoundingClientRect().bottom })), it.id);
+  boxes.forEach((b, i) => {
     assert.ok(b.wrapH <= F + 1, `${b.opt} box is ${b.wrapH} high, over F + 1 = ${F + 1}`);
     assert.ok(!/scroll/.test(b.cls), `${b.opt} picture scrolls, though it fits once the gutter narrows it`);
     assert.ok(b.wrapW <= room + 3, `${b.opt} box is ${b.wrapW} wide, over the card's ${room + 2}`);
-  }
+    assert.ok(b.fw <= room - b.g + 1, `${b.opt} picture is ${b.fw} wide, over the budget ${room} less the ${b.g}px gutter`);
+    assert.ok(edges[i].picture <= edges[i].box + 1, `${b.opt} picture ends at ${Math.round(edges[i].picture)}, under its box's bottom at ${Math.round(edges[i].box)}: the picture is clipped`);
+  });
 });
 
 // Owner ruling, waiting-page item 470, pick a (2026-11-09 21:26 CST), Grow to a phone: a picture scrolls only when its drawn height is over F + 1,
@@ -1383,6 +1398,40 @@ for (const kind of Object.keys(FIRST_KINDS)) for (const width of [390, 1280]) {
     assertScope(r.first, 3, width);
     assertScope(r.settled, 3, width);
     r.first.forEach((f, i) => assert.ok(Math.abs(f.wrapH - r.settled[i].wrapH) <= 1, `${f.opt} box is ${f.wrapH} high at first paint, ${r.settled[i].wrapH} once measured`));
+  });
+}
+
+// The first painted frame. Each option's box is read in the first frame it is in the page, with no measure reported, so it holds the declared
+// size; the settled boxes are read once every frame has measured. Each first-frame box must be within 1px of its settled height. Before a box is
+// placed, its aspect is taken at the full column width, so it stands 2 x bh / bw px too tall until the placement fits it again.
+const FIRST_FRAME_KINDS = {
+  phone: { item: (count) => picItem("ff-phone", 88, { count, declared: { w: 390, h: 844 } }), data: SAME(PHONE), H: 844 },
+  focus: { item: (count) => ({ ...picItem("ff-focus", 88, { count }), designs: LOOK_OPTS.slice(0, count).map((o) => ({ slug: o.design, label: o.label, focus: "#panel", size: { w: 390, h: 700 } })) }), data: SAME(FOCUS_700), H: 1600 },
+  duo: { item: (count) => ({ ...picItem("ff-duo", 88, { count }), designs: LOOK_OPTS.slice(0, count).map((o) => ({ slug: o.design, label: o.label, size: { w: 800, h: 844 }, drawn: 800 })) }), data: SAME(DUO), H: 844 },
+};
+// The viewport holds every option in view.
+const firstFrameAndSettled = async (t, kind, width, count, scheme) => {
+  const k = FIRST_FRAME_KINDS[kind], item = k.item(count);
+  const held = await open(t, { items: [item], designData: k.data, scheme, viewport: { width, height: 2400 }, holdMeasure: true, frameBoxes: true }); if (!held) return null;
+  await held.waitForFunction((n) => Object.keys(window.__frameBoxes).length >= n, count);
+  const first = await held.evaluate(() => window.__frameBoxes);
+  await held.close(); // the held page is read in full; the settled page is a separate load
+  const page = await open(t, { items: [item], designData: k.data, scheme, viewport: { width, height: 2400 } }); if (!page) return null;
+  await framesAt(page, count, k.H);
+  if (kind === "focus") await page.waitForFunction((sel) => document.querySelector(sel).querySelector("iframe").style.transform.includes("translate"), boxSel(item.id));
+  await settleFit(page, item.id);
+  await boxesSettled(page, item.id);
+  return { first, settled: await optBoxes(page, item.id) };
+};
+for (const scheme of ["light", "dark"]) for (const width of [390, 1280]) for (const count of [2, 3]) for (const kind of Object.keys(FIRST_FRAME_KINDS)) {
+  test(`a ${kind} picture's box in its first painted frame is the height it settles to once measured, with ${count} options at ${width} wide, ${scheme} scheme`, async (t) => {
+    const r = await firstFrameAndSettled(t, kind, width, count, scheme); if (!r) return;
+    assertScope(r.settled, count, width);
+    assert.equal(Object.keys(r.first).length, count, "a box was not in the first frame the card was in the page");
+    for (const b of r.settled) {
+      const f = r.first[b.opt];
+      assert.ok(Math.abs(f - b.wrapH) <= 1, `${b.opt} box is ${f.toFixed(2)} high in its first painted frame, ${b.wrapH} once measured`);
+    }
   });
 }
 
