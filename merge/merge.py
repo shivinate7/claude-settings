@@ -4651,6 +4651,8 @@ def stacked_without_base(root, h, base, heads, running, own=None, remedy="Add th
     others = [(n, info["head"]) for n, info in h.open_prs() if n not in heads and n != own and info["base"] == base]
     unread = fetch_heads(root, [s for _, s in others])
     found, named = [], set()
+    import git_reads  # hooks/git_reads.py, on sys.path from the top of this file
+    cut = git_reads.is_shallow(root) is not False  # a cut history hides a shared commit from rev-list, so a shallow or unreadable clone takes every pair through holds()
     lane_own = {m: own_commits(root, heads[m], kept) for m in sorted(heads)}  # one read per lane and one per other head, none per pair
     for n, head in others:
         if head in unread:
@@ -4658,7 +4660,7 @@ def stacked_without_base(root, h, base, heads, running, own=None, remedy="Add th
             continue
         theirs = own_commits(root, head, kept)
         # a pair that shares no commit outside `kept` has no common commit to hold, so only the pairs that share one take the full read
-        hit = [m for m in sorted(heads) if not lane_own[m].isdisjoint(theirs) and holds_commit_of(root, heads[m], head, kept, frozen)]
+        hit = [m for m in sorted(heads) if (cut or not lane_own[m].isdisjoint(theirs)) and holds_commit_of(root, heads[m], head, kept, frozen)]
         found += [f"#{m} holds a commit of #{n}, which is not in this request" for m in hit]
         named.update(hit)
     if found:
