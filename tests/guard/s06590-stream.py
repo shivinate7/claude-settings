@@ -664,14 +664,18 @@ for _tool, _command in (
     add("ci-wait: foreground %s %s stays refused" % (_tool, _command), "deny", "waiter",
         tool=_tool, cwd=NOGIT, command=_command)
 
-# A Monitor call's command gets the shell verdict, and the stream family exempts Monitor from its rules. The ci-wait
-# ruling names every program: no `gh run watch` runs under Monitor either, and a foreground `gh pr checks --watch`
-# is refused under it as its Bash twin is. Each Monitor case has the foreground Bash twin beside it.
-for _command in ("gh run watch 123", "gh pr checks 1 --watch"):
-    monitor("ci-wait: Monitor runs %s, refused as its Bash twin is" % _command, _command, "deny", "waiter")
-    sh("ci-wait: Bash twin of the Monitor run of %s, in the foreground, stays refused" % _command, _command,
-       "deny", "waiter", cwd=NOGIT)
-# The Bash background twin of the Monitor case above. A background `gh pr checks --watch` is allowed
+# A Monitor call's command gets the shell verdict, and the stream family exempts Monitor from its rules.
+# The ci-wait ruling (owner 2026-10-16, decision ci-wait-reads-run-status) names `gh run watch` only, so a
+# Monitor `gh run watch` is refused. A background `gh pr checks --watch` is allowed (decision
+# agents-wait-with-monitor, line 14 on main), and Monitor counts as background, so a Monitor
+# `gh pr checks --watch` is allowed. Each Monitor case has its foreground Bash twin beside it.
+monitor("ci-wait: Monitor runs gh run watch 123, refused as its Bash twin is", "gh run watch 123", "deny", "waiter")
+sh("ci-wait: Bash twin of the Monitor run of gh run watch 123, in the foreground, stays refused",
+   "gh run watch 123", "deny", "waiter", cwd=NOGIT)
+monitor("ci-wait: Monitor runs gh pr checks 1 --watch, allowed as a background watch is", "gh pr checks 1 --watch", "allow")
+sh("ci-wait: Bash twin of the Monitor run of gh pr checks 1 --watch, in the foreground, stays refused",
+   "gh pr checks 1 --watch", "deny", "waiter", cwd=NOGIT)
+# The Bash background twin of the Monitor watch above. A background `gh pr checks --watch` is allowed
 # (decision agents-wait-with-monitor), so this case pins the Bash side of that split.
 add("waiter: gh pr checks 1 --watch under run_in_background is allowed", "allow", cwd=NOGIT,
     command="gh pr checks 1 --watch", run_in_background=True)
