@@ -31,3 +31,36 @@ GH_RUN_CONTROLS = (
 for _name, _command, _lacks in GH_RUN_CONTROLS:
     sh("gh-write-cloud: [cull-text-reads] control, %s, is refused in a cloud session" % _name, _command,
        "deny", GH_WRITE_RULE, cwd=NOGIT, env=GH_WRITE_CLOUD, carries=GH_WRITE_REMEDY, lacks=(_lacks,))
+
+# An UNQUOTED heredoc delimiter lets bash run each `$(...)` and backtick in the body while it writes the body.
+# A python that only reads the body does not change that, so a gh write in one of those is a run and is refused.
+GH_SUBSTITUTION_RUNS = (
+    ("python -c prints its stdin, backtick body runs gh pr merge",
+     "python3 -c \"import sys; print(sys.stdin.read())\" <<EOF\nRun `gh pr merge 12 --squash` next\nEOF",
+     "gh pr merge"),
+    ("python -c prints its stdin, $() body runs gh pr create",
+     "python3 -c \"import sys; print(sys.stdin.read())\" <<EOF\n$(gh pr create --draft --title x)\nEOF",
+     "gh pr create"),
+    ("python script file reads its stdin, backtick body runs gh pr merge",
+     "python3 tools/post_note.py <<EOF\nRun `gh pr merge 12 --squash` next\nEOF",
+     "gh pr merge"),
+)
+for _name, _command, _lacks in GH_SUBSTITUTION_RUNS:
+    sh("gh-write-cloud: [cull-text-reads] unquoted heredoc, %s, is refused in a cloud session" % _name, _command,
+       "deny", GH_WRITE_RULE, cwd=NOGIT, env=GH_WRITE_CLOUD, carries=GH_WRITE_REMEDY, lacks=(_lacks,))
+
+# Green controls: a quoted delimiter runs nothing, so the same bodies are data and stay allowed. An unquoted body
+# that names gh in plain text, with no `$(` or backtick in it, runs nothing either.
+GH_DATA_BODIES = (
+    ("quoted python -c, backtick body names gh pr merge",
+     "python3 -c \"import sys; print(sys.stdin.read())\" <<'EOF'\nRun `gh pr merge 12 --squash` next\nEOF"),
+    ("quoted python -c, $() body names gh pr create",
+     "python3 -c \"import sys; print(sys.stdin.read())\" <<'EOF'\n$(gh pr create --draft --title x)\nEOF"),
+    ("quoted python script file, backtick body names gh pr merge",
+     "python3 tools/post_note.py <<'EOF'\nRun `gh pr merge 12 --squash` next\nEOF"),
+    ("unquoted python -c, plain body names gh pr merge, no substitution",
+     "python3 -c \"import sys; print(sys.stdin.read())\" <<EOF\nRun gh pr merge 12 --squash next\nEOF"),
+)
+for _name, _command in GH_DATA_BODIES:
+    sh("gh-write-cloud: [cull-text-reads] control, %s, is allowed in a cloud session" % _name, _command,
+       "allow", cwd=NOGIT, env=GH_WRITE_CLOUD)
