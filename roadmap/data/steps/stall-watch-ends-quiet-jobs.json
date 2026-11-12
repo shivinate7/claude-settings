@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "hooks/stall_watch.py ends quiet-by-design background jobs and strands their processes: `merge --batch-build 104` ended twice with exit 3 while pid 27483 ran on under init; `sleep 420; gh api ...` ended before its read ran, though the waiter guard's own remedy allows one pause then a command; a piped `--batch-build` earlier (note no-pipe-long-merge).",
  "source": "batch runner 10, 10:13 CST Nov 12, via coordinator 10:13 CST; owner asked it be fixed",
- "note": "Debt, code. #2680 (step stall-watch-live-run) covers the live-CPU case only; this step holds the git-wait and lone-sleep cases and the whole-tree kill. Pairs with step kill-own-stranded-job. Ready, no lane.",
- "updatedAt": "2026-11-12T10:25:00-06:00"
+ "note": "Debt, code. #2680 (step stall-watch-live-run) covers the live-CPU case only; this step holds the git-wait and lone-sleep cases and the whole-tree kill. Pairs with step kill-own-stranded-job. Ready, no lane. Narrowed to parts A and B (coordinator pick 11:05 CST Nov 12): git waiters and a lone sleep are not ended. The whole-tree kill is dropped: it would reverse decision stall-watch line 6 with nothing measured.",
+ "updatedAt": "2026-11-12T11:06:59-06:00"
 }
