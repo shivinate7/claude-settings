@@ -27,10 +27,14 @@ Known gaps, each a note and no debt yet:
 - A script file written elsewhere, then run: the file's text never names the answers path on the command line that runs it.
 - Shell writers the reader does not know: `touch`, `dd`, `rsync`, `tar -C`, and `git checkout`, `restore` and `apply` onto an answers path.
 - The page's own writes never pass the hook, so this rule cannot see them (decision `waiting-page-one-store`, "What D changes").
+- A delete of an answers record passes through `ArtifactData`, but shell `rm`, `git rm` and a GitHub `delete_file` of an answers path are refused: a grant-removing delete is judged two ways.
+- A cloud writer that commits the repo copy with GitHub `push_files` for `waiting-data/answers/*.json` entries is refused (`answers_github_hit`), while the git route passes. The copy ends at step `retire-page-copy`.
 
 Cost: no new process and no file. The `ArtifactData` read is two string tests. A shell command that holds no `answers` is not read further; one that does goes through the frozen-path reader once. It also goes through the interpreter reader once, when it holds a heredoc or an inline script that could write. The GitHub MCP read is one path test per path.
 
 Tests: family `answers-session-write` in `hooks/test_guard.py` (`tests/guard/s40500-answers-session-write.py`).
+
+Review: round 1 FAIL (cd, interpreter, MCP gaps), round 2 FAIL (delete refused, two false alarms, git cd/-C gap), round 3 net safety value POSITIVE, no holes opened; notes above.
 
 Kind: process
 Home: hooks/guard.py
