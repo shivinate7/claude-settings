@@ -20128,6 +20128,18 @@ class BatchFreeze(CloudSession):
         """The index of the first line that names batch `name` and each of `numbers`, the build's start line, or None."""
         return next((i for i, line in enumerate(lines) if name in line and all(str(n) in line for n in numbers)), None)
 
+    def old_logs(self, folder, tmp=False):
+        """The fixture's old build logs in `folder`: old-00 (the oldest) to old-21, each with its own fixed mtime. With `tmp`, each also has a
+        folder old-NN.tmp holding one lint step's output in a folder of its own, as a build's ci-job leaves it."""
+        os.makedirs(folder, exist_ok=True)
+        for age in range(22):
+            name = "old-%02d" % age
+            path = os.path.join(folder, name + ".log")
+            put(path, "an old build\n")
+            os.utime(path, (self.OLD_LOG_MTIME + age, self.OLD_LOG_MTIME + age))
+            if tmp:
+                put(os.path.join(folder, name + ".tmp", "ci-job-lint-probe", "1.log"), "a lint step's output\n")
+
     @contextlib.contextmanager
     def ci_job_stub(self, answer, temp_dir):
         """The real --ready lint: lane_lint and ci_job_run run for real, and each bin/ci-job call is answered by `answer(args, env, timeout)`,
@@ -20229,17 +20241,13 @@ class BatchFreeze(CloudSession):
 
     def test_the_log_folder_keeps_its_newest_twenty_logs_including_this_builds(self):
         folder = os.path.dirname(self.batch_log())
-        os.makedirs(folder)
-        for age in range(22):  # old-00 is the oldest: each fixture log has its own fixed mtime
-            path = os.path.join(folder, "old-%02d.log" % age)
-            put(path, "an old build\n")
-            os.utime(path, (self.OLD_LOG_MTIME + age, self.OLD_LOG_MTIME + age))
+        self.old_logs(folder)
         for n in (101, 102):
             self.lane(n)
         with self.no_lint_or_ready_check():
             rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
         self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
-        kept = sorted(os.listdir(folder))
+        kept = sorted(name for name in os.listdir(folder) if name.endswith(".log"))  # a build's <name>.tmp folder sits beside the logs: count logs only
         self.assertEqual(len(kept), 20, "%d logs remain in %s, not the newest 20: %s" % (len(kept), folder, kept))
         self.assertIn("nightly.log", kept, "the build's own log was pruned: %s" % kept)
         self.assertEqual([name for name in kept if name != "nightly.log"], ["old-%02d.log" % age for age in range(3, 22)],
