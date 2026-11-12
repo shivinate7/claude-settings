@@ -132,8 +132,10 @@ class LeaseCase(unittest.TestCase):
         return subprocess.run([sys.executable, SIM_LEASE, *args], env=self.env(**(env or {})),
                               capture_output=True, text=True, timeout=60)
 
-    def take(self, device, pid, wait=1, env=None, udid=False):
+    def take(self, device, pid, wait=1, env=None, udid=False, for_udid=None):
         extra = ["--udid"] if udid else []
+        if for_udid is not None:
+            extra += ["--for-udid", for_udid]
         return self.run_tool("take", "--device", device, "--pid", str(pid), "--wait", str(wait), *extra, env=env)
 
     def give(self, pid):
@@ -356,6 +358,88 @@ class UdidTake(LeaseCase):
         r = self.take("duo", os.getpid(), udid=True)
         self.assertEqual(r.returncode, 1, "a take --udid at a 5-minute load of 100 is not refused with exit 1")
         self.assertEqual(r.stdout.strip(), "", "a refused take --udid prints a UDID")
+
+
+class ForUdidTake(LeaseCase):
+    """take --for-udid UDID grants the slot whose SLOT_UDID is UDID, under the queue and holder rules of take, with no
+    load limit. A UDID in no slot, or in a slot of the other role, is one stderr line and exit 2."""
+
+    NO_SLOT_UDID = "00000000-0000-4000-8000-000000000000"
+
+    def test_for_udid_prints_the_slot_it_names(self):
+        pid = self.spawn().pid
+        self.assertEqual(grant(self.take("duo", pid, for_udid=SLOT_UDID["2"])), (0, "2"),
+                         "take --for-udid of slot 2's UDID is not granted slot 2 with slot 1 free")
+
+    def test_for_udid_matches_the_udid_without_case(self):
+        pid = self.spawn().pid
+        self.assertEqual(grant(self.take("duo", pid, for_udid=SLOT_UDID["1"].lower())), (0, "1"),
+                         "take --for-udid does not match slot 1's UDID in lower case")
+
+    def test_for_udid_is_granted_at_a_load_that_refuses_take(self):
+        self.set_load("0.50", "100.00", "0.50")
+        pid = self.spawn().pid
+        self.assertEqual(grant(self.take("duo", pid, for_udid=SLOT_UDID["1"])), (0, "1"),
+                         "take --for-udid is refused at a 5-minute load of 100: it does not skip the load bars")
+        self.assertEqual(self.load_reads(), 0, "take --for-udid reads the load, though it boots nothing")
+
+    def test_for_udid_waits_behind_a_queued_head(self):
+        holder, head, later = self.spawn(), self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid)), (0, "1"), "the first duo take is not granted slot 1")
+        self.queue_waiter("pro", head.pid)
+        self.assertEqual(self.take("duo", later.pid, for_udid=SLOT_UDID["2"]).returncode, 1,
+                         "take --for-udid is granted slot 2 ahead of the queued pro head")
+
+    def test_for_udid_is_refused_while_the_slots_live_holder_stays(self):
+        holder, later = self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", holder.pid)), (0, "1"), "the first duo take is not granted slot 1")
+        self.assertEqual(self.take("duo", later.pid, for_udid=SLOT_UDID["1"]).returncode, 1,
+                         "take --for-udid is granted slot 1 while its live holder stays")
+
+    def test_for_udid_duo_is_refused_while_pro_is_held(self):
+        first, second = self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("pro", first.pid)), (0, "pro"), "the pro take is not granted pro")
+        self.assertEqual(self.take("duo", second.pid, for_udid=SLOT_UDID["2"]).returncode, 1,
+                         "take --for-udid of a duo slot is granted while pro is held")
+
+    def test_for_udid_pro_is_refused_while_a_duo_is_held(self):
+        first, second = self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", first.pid)), (0, "1"), "the duo take is not granted slot 1")
+        self.assertEqual(self.take("pro", second.pid, for_udid=SLOT_UDID["pro"]).returncode, 1,
+                         "take --for-udid of the pro UDID is granted while a duo is held")
+
+    def test_for_udid_with_slots_1_and_2_held_refuses_both(self):
+        first, second, third = self.spawn(), self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", first.pid)), (0, "1"), "the first duo take is not granted slot 1")
+        self.assertEqual(grant(self.take("duo", second.pid)), (0, "2"), "the second duo take is not granted slot 2")
+        for slot in ("1", "2"):
+            with self.subTest(slot=slot):
+                self.assertEqual(self.take("duo", third.pid, for_udid=SLOT_UDID[slot]).returncode, 1,
+                                 "take --for-udid of slot %s is granted while both duo slots are held" % slot)
+
+    def assert_refused_with_one_line(self, device, udid, label):
+        pid = self.spawn().pid
+        r = self.run_tool("take", "--device", device, "--pid", str(pid), "--wait", "1", "--for-udid", udid)
+        self.assertEqual(r.returncode, 2, "%s does not exit 2" % label)
+        lines = [line for line in r.stderr.splitlines() if line.strip()]
+        self.assertEqual(len(lines), 1, "%s does not print one stderr line" % label)
+        self.assertNotIn("usage:", lines[0].lower(), "%s prints the usage line, not a refusal" % label)
+
+    def test_a_udid_in_no_slot_is_refused_with_one_line(self):
+        self.assert_refused_with_one_line("duo", self.NO_SLOT_UDID, "a take --for-udid of a UDID in no slot")
+
+    def test_a_udid_of_the_other_role_is_refused_with_one_line(self):
+        self.assert_refused_with_one_line("pro", SLOT_UDID["1"], "a pro take --for-udid of slot 1's UDID")
+        self.assert_refused_with_one_line("duo", SLOT_UDID["pro"], "a duo take --for-udid of the pro UDID")
+
+    def test_for_udid_is_a_no_op_under_ci_or_off_darwin(self):
+        for label, env in (("uname Linux", {"SIM_LEASE_TEST_UNAME": "Linux"}), ("CI=true", {"CI": "true"}),
+                           ("GITHUB_ACTIONS=true", {"GITHUB_ACTIONS": "true"})):
+            with self.subTest(label):
+                pid = self.spawn().pid
+                r = self.take("duo", pid, env=env, for_udid=SLOT_UDID["1"])
+                self.assertEqual(grant(r), (0, "none"), "%s: take --for-udid is not a no-op that prints none" % label)
+                self.assertEqual(files_under(self.cfg), [], "%s: take --for-udid wrote a file" % label)
 
 
 class Usage(LeaseCase):
