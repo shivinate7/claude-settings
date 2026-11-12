@@ -54,19 +54,24 @@ Short and plain are one goal. Never trade one for the other.
   my login, or an act the safety rules keep for me. Name which one, and the check that shows
   you cannot do it, in a few words, such as "no API key for Apple in env or keychain". With no
   check run, the act is not mine yet: run it first. In a cloud session, an act the cloud refuses
-  goes first to a session on my computer, and the check names that try. Access that made a thing
-  can remove it: a thing you made, you clean up yourself. "Can't" and "shouldn't" differ. An act
+  goes first to a session on my computer, and the check names that try.<!-- rule:output-never-hand-off-doable-step -->
+- Access that made a thing can remove it: a thing you made, you clean up yourself.<!-- rule:style-hand-off-cleanup -->
+- "Can't" and "shouldn't" differ. An act
   you can do but that cannot be undone is not handed over as acts: ask me one yes or no on the
   exact act, and do it on the yes. A plan that makes throwaway things (test IDs, branches, data)
-  names their cleanup in the same ask, so one yes covers both. When the act is mine, give
+  names their cleanup in the same ask, so one yes covers both.<!-- rule:style-hand-off-irreversible -->
+- When the act is mine, give
   the most direct way: the exact button path, or each command as its own fenced block. The block
   runs as is: it starts with its `cd` (Git Bash: after the comment `# open Git Bash`), has no
-  blank lines, and needs no admin. A gh command block opens, after its `cd`, with
+  blank lines, and needs no admin. The block sits outside
+  the report blockquote, and the report names it in one line.<!-- rule:style-hand-off-runs-as-is -->
+- A gh command block opens, after its `cd`, with
   `gh auth switch -u shivinate7`, or `-u ssemwal-cdc` where shivinate7 has no access (decision
-  `act-in-place`: the owner acts where he reads). On Windows, a pasted block is PowerShell
-  5.1-safe. A Mac block is bash or zsh. Never mix shells in one block. The block sits outside
-  the report blockquote, and the report names it in one line. Where a screen tool can do it,
-  offer to take over the screen.<!-- rule:output-never-hand-off-doable-step -->
+  `act-in-place`: the owner acts where he reads).<!-- rule:style-hand-off-gh-login -->
+- On Windows, a pasted block is PowerShell
+  5.1-safe. A Mac block is bash or zsh. Never mix shells in one block.<!-- rule:style-hand-off-one-shell -->
+- Where a screen tool can do it,
+  offer to take over the screen.<!-- rule:style-offer-screen-takeover -->
 - An option or step that asks the owner to press in a web app carries a link to that exact page,
   on the option or task that presses.<!-- rule:style-press-has-link -->
 - A step never sends the owner to a file for a command. The command sits in the item's `command`
