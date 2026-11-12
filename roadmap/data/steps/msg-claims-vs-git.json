@@ -1,12 +1,12 @@
 {
   "title": "A message that says a lane was added or merged checks git first",
   "phase": "now",
-  "status": "todo",
+  "status": "ready",
   "order": 1011,
   "owner": "triage",
   "why": "Runner 8 told the coordinator #2268 and #2555 were added to batch 73 when git showed them only queued; a claim in a cross-session message went unchecked.",
-  "note": "Proposed by runner 8, relayed by coordinator 13:01 CST Nov 10; queued by triage. Guard: before a send_message says a lane was added, merged or released, the sender reads git log of the named branch, or the message guard refuses the claim.",
-  "updatedAt": "2026-11-10T13:04:00-06:00",
+  "note": "Proposed by runner 8, relayed by coordinator 13:01 CST Nov 10; queued by triage. Guard: before a send_message says a lane was added, merged or released, the sender reads git log of the named branch, or the message guard refuses the claim. Extended 12:17 CST Nov 12 (owner 12:11 CST: \"you also need to literally mechanize the verification that something was queued\"): a report or message that says a step was queued or filed (step:<slug>) checks origin/roadmap for that step file first. Incident: coordinator 12:10 CST called pick-reaches-page queued with no step file. Lane waits on the retrospective's reply on existing plans.",
+  "updatedAt": "2026-11-12T12:16:50-06:00",
   "lane": "",
   "blockedBy": []
 }

@@ -45,3 +45,7 @@ Relayed by the retrospective.
   pill at 1440x900 on Past Rates; the EPI2B-3 check is re-pointed for Past Rates only), and a debt too: q_max
   decision D-649 as a whole is a stale screen-layout lock he does not want. Lane qmax-browser-main-red builds a and
   files the debt in q_max's debt store.
+
+- 12:10 CST, relayed by the coordinator: "Custom connectors are not allowed -- so we can do route B". Page item 558 closed; decision waiting-page-one-store moves to route B (lane page-data-one-store); steps page-git-connector-probe and page-one-store-answers folded.
+- 12:14 CST, in chat, relayed by the retrospective: "ah ok C is good go for it": page item 559 pick c, each failing required job wakes the batch runner as it fails, no cancel; R4's lint-first cancel stays. Step red-job-wakes-runner; plan R50.
+- 12:08 to 12:11 CST, relayed by the coordinator: he cannot see coordinator picks to overrule them, "this needs to be mechanized", and "you also need to literally mechanize the verification that something was queued". Steps pick-reaches-page and msg-claims-vs-git; picks posted as stands items 560-583.

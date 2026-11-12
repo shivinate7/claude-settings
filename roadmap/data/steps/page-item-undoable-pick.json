@@ -6,6 +6,6 @@
   "owner": "triage",
   "lane": "",
   "why": "At 08:24 CST Nov 8 triage filed page item 423 (which widths bin/shoot shoots as touch). The cutoff can be undone, so the coordinator could take it with no question (rule parallelism-keep-going), and it withdrew the item at 08:22 CST. A needless page item spends the owner's attention.",
-  "note": "Fix: before a page write, triage asks whether the pick can be undone and serves the owner's goal; if so, it routes the pick to the coordinator and files nothing. Home: the waiting-page skill's writer steps, or the question judge (step page-question-judge). Done check: the skill names the test, and a red case where a question with a reversible pick and no widening option is flagged. Filed by triage 08:26 CST Nov 8.",
-  "updatedAt": "2026-11-08T08:26:00-06:00"
+  "note": "Fix: before a page write, triage asks whether the pick can be undone and serves the owner's goal; if so, it routes the pick to the coordinator and files nothing. Home: the waiting-page skill's writer steps, or the question judge (step page-question-judge). Done check: the skill names the test, and a red case where a question with a reversible pick and no widening option is flagged. Filed by triage 08:26 CST Nov 8. Re-worded 12:17 CST Nov 12 (coordinator 12:10 CST): an undoable pick gets no question item, but it does get a `stands: true` item (section Pick stands), which is not a question, so the owner can see and overrule it (owner 12:08 CST: he could not see the picks). Fits with step pick-reaches-page.",
+  "updatedAt": "2026-11-12T12:16:50-06:00"
 }

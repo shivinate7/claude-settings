@@ -1,0 +1,14 @@
+{
+ "id": "red-job-wakes-runner",
+ "title": "Each failing required job in a batch run wakes the batch runner as it fails",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner chat 12:14 CST Nov 12, page item 559 pick c: \"ah ok C is good go for it\".",
+ "source": "retrospective 12:15 CST Nov 12; plan R50 (restart-plan 2571c62)",
+ "note": "Each required job that fails posts the red-run notice as it fails, so the batch runner starts the drop and fix at once; the other jobs run on and name any second bad lane; the new head's run replaces the old one. R4's lint-first cancel stays beside it. Home: decision ci-wait-reads-run-status (the red-run comment rule). Why not cancel: red builds carry about 2 bad lanes each (147 drops over 74 builds, Nov 11 audit). Red first.",
+ "updatedAt": "2026-11-12T12:16:50-06:00"
+}
