@@ -899,9 +899,10 @@ def opus_override(cfg, session=OV_SESSION):
         return None
 
 
-def far_or_none(until):
-    """True when an Opus override's end is no end: null in the file, or a date past any clock a case uses."""
-    return until is None or until.year >= 9000
+def no_end_time(until):
+    """True when an Opus override has no end time: its `until` is null, the shape a plain ask with no length writes
+    (owner item 601 a). A far date would not pass."""
+    return until is None
 
 
 def take_spawn(cfg, role, at=OV_NOW):
@@ -942,7 +943,7 @@ def case_opus_ask_judge_approved_lifts_every_role():
     check("opus ask: a judge-approved prompt with no role word writes an override for every role",
           got is not None and got[0] == "opus" and got[2] is None, "got %r; files %r" % (got, ov_files(cfg)))
     check("opus ask: a plain ask with no length has no end time: it lasts until session end",
-          got is not None and far_or_none(got[1]), "got %r" % (got,))
+          got is not None and no_end_time(got[1]), "got %r" % (got,))
     took = take_spawn(cfg, "reviewer")
     check("opus ask: the judge-approved override lifts an Opus reviewer spawn refusal", lifted(took),
           "take() returned %r for a reviewer spawn" % (took,))
@@ -1126,7 +1127,7 @@ def case_opus_ask_first_word_opus_is_plain_unless_keyword():
     check("opus ask: `Opus judges please, send them` writes an override for every role",
           got is not None and got[0] == "opus" and got[2] is None, "got %r; files %r" % (got, ov_files(cfg)))
     check("opus ask: `Opus judges please, send them` writes an override with no end time",
-          got is not None and far_or_none(got[1]), "got %r" % (got,))
+          got is not None and no_end_time(got[1]), "got %r" % (got,))
     cfg, calls, _, _ = opus_type("opus 2h please", answer={"ok": True})
     check("opus ask: the keyword prompt `opus 2h please` makes no judge call", calls == [],
           "judge calls %d" % len(calls))
@@ -1658,7 +1659,7 @@ def case_opus_ask_source_keyword_forms_are_gated():
 
 
 # PLAIN ASK SCOPE (decision owner-override). A plain ask that names no role takes its roles from the owner's nearby typed
-# prompts, read by scope_judge. When those name none, it grants every role for 2h, and it never asks. These cases call
+# prompts, read by scope_judge. When those name none, it grants every role with no end time, and it never asks. These cases call
 # grant_opus_ask directly, with the yes/no judge and the scope read stood in. A case about excluded records checks first
 # that the read runs on the plain prompt, and only then checks the excluded words, so an empty read cannot pass that
 # check by accident.
@@ -1926,7 +1927,7 @@ def case_opus_scope_pasted_block_in_a_prior_prompt_never_reaches_the_read():
               "context %r" % (context,))
     got = opus_override(cfg)
     check("opus scope: the pasted block alone grants every role", got is not None and got[2] is None, "got %r" % (got,))
-    # The same words as plain text name reviewers: the positive pair, red on the old build.
+    # The same words as plain text name reviewers: the positive pair.
     cfg, judge, scope, _ = scope_grant("send opus now", [owner_turn("look at this, reviewers please audit, then the refactor")],
                                        ScopeStub(reads=True))
     got = opus_override(cfg)
@@ -2025,7 +2026,7 @@ def case_opus_scope_read_sees_every_role_before_it_runs():
         check("opus scope: during the read the Opus override file exists with role null",
               seen is not None and seen[0] == "opus" and seen[2] is None, "file during the read %r" % (seen,))
         check("opus scope: during the read the file has no end time: it lasts until session end",
-              seen is not None and far_or_none(seen[1]), "file during the read %r" % (seen,))
+              seen is not None and no_end_time(seen[1]), "file during the read %r" % (seen,))
 
 
 def case_opus_scope_a_kill_during_the_read_leaves_every_role():
@@ -2039,7 +2040,7 @@ def case_opus_scope_a_kill_during_the_read_leaves_every_role():
         check("opus scope: %s during the read, the read was reached" % name, ran, "read calls %d" % len(stub.calls))
         got = opus_override(cfg)
         check("opus scope: %s during the read leaves an every-role override with no end time" % name,
-              got is not None and got[0] == "opus" and got[2] is None and far_or_none(got[1]),
+              got is not None and got[0] == "opus" and got[2] is None and no_end_time(got[1]),
               "got %r; files %r" % (got, ov_files(cfg)))
 
 
@@ -2051,7 +2052,7 @@ def case_opus_scope_valid_answer_ends_narrowed():
     check("opus scope: a valid answer ends the file narrowed to builder",
           got is not None and got[0] == "opus" and got[2] == "builder", "got %r" % (got,))
     check("opus scope: the narrowed file keeps the no-end time of the plain ask",
-          got is not None and far_or_none(got[1]), "got %r" % (got,))
+          got is not None and no_end_time(got[1]), "got %r" % (got,))
 
 
 # NEGATION AFTER A ROLE, AND THE MODEL'S ROLE NAMES (decision owner-override). A negation within three words after a role
@@ -2143,7 +2144,9 @@ def case_opus_ask_exclusion_words_grant_nothing():
 
 
 def case_opus_ask_plain_lists_still_grant_both():
-    # Guard, passes on the build too: a plain list (and, a comma, or) between two roles names both roles.
+    # A plain list (and, a comma, or) between two roles names both roles. A plain ask with no length has no end time: it
+    # lasts until session end or `opus off`, and its file's `until` is null (owner item 601 a, page save 12:54 CST Nov
+    # 12). The 30-minute case keeps its length check.
     for prompt, minutes in (("send opus builders and reviewers", None), ("send opus builders, reviewers", None),
                             ("use opus for builders or reviewers for 30m", 30)):
         cfg, calls, _, _ = opus_type(prompt, answer={"ok": True})
@@ -2153,7 +2156,7 @@ def case_opus_ask_plain_lists_still_grant_both():
               got is not None and got[2] == ["builder", "reviewer"], "got %r" % (got,))
         if minutes is None:
             check("opus ask: %r has no length, so no end time: it lasts until session end" % prompt,
-                  got is not None and far_or_none(got[1]), "got %r" % (got,))
+                  got is not None and no_end_time(got[1]), "got %r" % (got,))
         else:
             check("opus ask: %r ends %d minutes after the grant" % (prompt, minutes),
                   got is not None and got[1] is not None
@@ -2790,7 +2793,7 @@ def queued_record(prompt, origin=None):
 
 # The attachment's own origin says a harness or a peer wrote the words. On the keyword route, each one grants nothing.
 # The peer object is already refused by the shared transcript reader (lint/_transcript.py), so its row is a green pin;
-# the other rows are red on the old code.
+# the other rows pin the refusal of an attachment whose own origin names a harness or a peer.
 QUEUED_NOT_OWNER = (
     ("a task-notification origin", {"kind": "task-notification"}),
     ("a loop_wakeup origin", {"kind": "loop_wakeup"}),
@@ -2977,14 +2980,55 @@ def case_opus_off_is_not_gated_by_source():
           "files %r" % (ov_files(cfg),))
 
 
+def case_typed_opus_off_ends_a_pending_one_act_override():
+    # Item 601 a: a one-act override ends at the owner's next typed prompt that grants nothing, and a typed `opus off`
+    # grants nothing. It ends the pending one-act override even when it also removes an Opus override: the Opus removal
+    # returns first, so the one-act removal must not depend on the Opus file being there.
+    cfg = ov_cfg()
+    opus_type("opus 2h", cfg=cfg)
+    opus_type("override", cfg=cfg)
+    check("typed opus off: precondition, an Opus override and a one-act override are both pending",
+          opus_override(cfg) is not None and ends_after(ov_pass(cfg), "once", OV_ONCE),
+          "files %r" % (ov_files(cfg),))
+    opus_type("opus off", cfg=cfg, at=OV_NOW + timedelta(minutes=1))
+    check("typed opus off: the Opus override file is removed", opus_files(cfg) == [], "files %r" % (ov_files(cfg),))
+    got = take_at(cfg, OV_NOW + timedelta(minutes=2))
+    check("typed opus off: the pending one-act override ends with it, so a refusal is not lifted", not lifted(got),
+          "take() returned %r" % (got,))
+
+
+def case_typed_opus_off_without_an_opus_file_ends_a_pending_one_act_override():
+    # Control: with no Opus file, a typed `opus off` grants nothing and the one-act removal runs.
+    cfg = ov_cfg()
+    opus_type("override", cfg=cfg)
+    opus_type("opus off", cfg=cfg, at=OV_NOW + timedelta(minutes=1))
+    got = take_at(cfg, OV_NOW + timedelta(minutes=2))
+    check("typed opus off without an Opus file: the pending one-act override ends", not lifted(got),
+          "take() returned %r" % (got,))
+
+
+def case_harness_opus_off_leaves_a_pending_one_act_override():
+    # Control: a harness `opus off` removes an Opus override, since the word is ungated, but a harness prompt is no owner
+    # turn, so the pending one-act override stays live.
+    for source in SOURCE_REFUSED:
+        cfg = ov_cfg()
+        opus_type("opus 2h", cfg=cfg)
+        opus_type("override", cfg=cfg)
+        opus_type("opus off", cfg=cfg, at=OV_NOW + timedelta(minutes=1), extra={"source": source})
+        check("harness opus off: source %s: the Opus override file is removed" % source, opus_files(cfg) == [],
+              "files %r" % (ov_files(cfg),))
+        check("harness opus off: source %s: the pending one-act override stays live" % source,
+              lifted(take_at(cfg, OV_NOW + timedelta(minutes=2))), "take() was refused")
+
+
 def case_opus_ask_without_a_length_has_no_end():
-    # C: an Opus ask with no length lasts until session end or `opus off`. The file has no end time: null, or a far date.
+    # C: an Opus ask with no length lasts until session end or `opus off`. The file has no end time: `until` is null.
     for prompt in ("send opus judges", "send a swarm of opus agents"):
         cfg, calls, _, _ = opus_type(prompt, answer={"ok": True})
         check("opus no length: `%s` reaches the judge once" % prompt, len(calls) == 1, "judge calls %d" % len(calls))
         got = opus_override(cfg)
         check("opus no length: `%s` writes an every-role Opus override with no end time" % prompt,
-              got is not None and got[0] == "opus" and got[2] is None and far_or_none(got[1]),
+              got is not None and got[0] == "opus" and got[2] is None and no_end_time(got[1]),
               "got %r; files %r" % (got, opus_files(cfg)))
 
 
@@ -3285,6 +3329,9 @@ def main():
         case_opus_keyword_harness_record_grants_nothing()
         case_opus_keyword_typed_controls_grant()
         case_opus_off_is_not_gated_by_source()
+        case_typed_opus_off_ends_a_pending_one_act_override()
+        case_typed_opus_off_without_an_opus_file_ends_a_pending_one_act_override()
+        case_harness_opus_off_leaves_a_pending_one_act_override()
         case_opus_ask_without_a_length_has_no_end()
         case_opus_ask_without_a_length_lifts_at_a_later_time()
         case_opus_ask_without_a_length_receipt_names_no_clock_time()
