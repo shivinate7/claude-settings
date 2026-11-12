@@ -37,6 +37,25 @@ The waiting page shows an option by its position, as a letter: the first option 
   - Known limit: an update that carries `options` but no `status` is judged even if the stored item is closed. The guard cannot see the stored status.
   - Known limit: unusual forms pass: `*B*:`, `` `B`: ``, `B:x` and `- B: x`.
 
+An option also keeps its letter once shown (owner ruling R60, roadmap ruling r60, 2026-11-12 15:07 CST: "in general if sessions create options triage should hold those letters the same (or they shd be referenced by IDs each option rather than A B which can be arbitrarily swapped)"). Guard rule `option-letters-frozen` (`hooks/question_form.py`, function `frozen_letters_hit`, run by `item_hit` after `option_letter_hit`) refuses a set or update of an open decision on this repo's waiting page whose write carries `options` when:
+
+  - an option has no non-empty string `id`, has an id that is a lone letter, or shares an id with another option;
+  - the write carries no `shown` list. `shown` is the options as first shown, in order, each as `{key, id, label}`;
+  - there are fewer options than shown; or
+  - an option at a shown position differs from the shown entry in key, id or label (a reorder, a relabel, a changed id).
+
+  - A note on an option (`note`), with key, id and label unchanged, passes. So does an option appended after the shown ones. A rule-driven change adds a `note` and reorders nothing; the page shows the note on the option's card.
+  - A first `set` must carry a `shown` equal to its own options. An update may append.
+  - A task, a note, a closed item and a write with no `options` pass. `shown` is in the page's `itemFields` block (rule `item-field-rendered`).
+  - The reason says: keep each shown option's key, id and label and position, give each option a unique id, carry `shown`. It names no target.
+  - Incident: 2026-11-12 14:39 CST, waiting item 646. Triage reordered the options after the chat question went out, so chat a became page b. The owner's "a" (15:03 CST) could have been filed as the opposite pick. `option_letter_hit` could not see it: after the swap each key was still its position's letter.
+  - Cost: no new process. It runs in the guard process that every waiting-page write already starts, reads only the write, and writes no file unless it denies.
+  - Known limit: a `str_replace` on `options` bypasses the freeze. The guard cannot see the stored item.
+  - Known limit: a write that rewrites `shown` itself is not detectable. The guard trusts `shown`, since the stored item is unseen.
+  - Known limit: a write that carries no `options` is not judged, so an update that drops `shown` alone passes.
+
+The id is the stable name of an option; the letter is its place. The page saves `optionId` beside `choice` in the answer. `skills/waiting-page/page_grant.py` prints `held:` (exit 3) for an answer whose `optionId`, or with none its `label`, no longer matches the item's option at the choice key, or whose key the item no longer holds: the owner confirms in words (R60, part 3). `skills/waiting-page/question_source.py` (`render`) builds the chat question and the item's `options` and `shown` from one spec, so the two copies share one source.
+
 A letter also means the same option in the chat and on the page. Guard rule `option-labels-match-chat` (`hooks/question_form.py`, functions `chat_page_label_hit` and `page_label_hit`, run by `hooks/guard.py` `data_tool_label_hit`) refuses a set or update of an open decision on this repo's waiting page. The refusal holds when an option label differs from the chat's text for the same letter.
 
   - A chat question cites its item in a line `Page item: <id>` (the colon may be left out when the id holds a digit or a hyphen, or is the written item's own id) and writes one line per option, the letter then the text: `a) <text>`, `a)<text>`, `a. <text>`, `**a**) <text>`, `**A** <text>`, `**A** — <text>`, `A — <text>` or `Option A: <text>`, the letters in the page's order. The check reads the newest assistant text in the last 1 MiB of the session's transcript that cites the item's id and writes option lines for it.
