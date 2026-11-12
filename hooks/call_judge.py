@@ -383,9 +383,10 @@ def past_ruling_context(payload, units):
             question_form.unreadable_sources(unknown))
 
 
-# A decision the brief names: `decision <slug>`, `decisions/<slug>` or a backticked slug. A name with no record is
-# dropped by question_form.named_rulings, so a backticked word that is no record costs one stat.
-NAMED_SLUG = re.compile(r"(?:\bdecisions?[ \t]+`?|\bdecisions/|`)([a-z0-9]+(?:-[a-z0-9]+)*)(?![\w-])(?!\.\w)", re.I)
+# A decision the brief names: `decision <slug>`, `decision: <slug>`, `decision **<slug>**`, `decision` and a newline
+# then the slug, `decisions/<slug>[.md]` (also under docs/) or a backticked slug. A name with no record is dropped by
+# question_form.named_rulings, so a backticked word that is no record costs one stat. A path up a folder names none.
+NAMED_SLUG = re.compile(r"(?:\bdecisions?:?\s+[`*]*|\bdecisions/|`)([a-z0-9]+(?:-[a-z0-9]+)*)(?![\w-])(?!\.(?!md\b)\w)", re.I)
 
 
 def named_ruling_block(payload, args):
@@ -403,13 +404,16 @@ def named_ruling_block(payload, args):
         return "", []
     import question_form
     cwd = payload.get("cwd") or ""
-    lines, unknown = question_form.named_rulings(slugs, question_form._git_root_of(cwd) or cwd or os.getcwd())
+    lines, unknown, dropped = question_form.named_rulings(slugs, question_form._git_root_of(cwd) or cwd or os.getcwd())
     if unknown:
         print("call judge: named rulings not all read: " + ", ".join(unknown), file=sys.stderr)
+    if dropped:
+        print("call judge: named rulings dropped past the cap of %d: %s" % (question_form.NAMED_MAX, ", ".join(dropped)),
+              file=sys.stderr)
     if not lines:
         return "", []
     return ("\n\nNamed rulings, one per line as `<id>: <text>`:\n" + "\n".join(lines),
-            question_form.candidate_ids(lines))
+            question_form.candidate_ids(l for l in lines if not l.startswith("[cut: ")))
 
 
 def main():
@@ -475,11 +479,7 @@ def main():
     if verdict.get("ok") is False:
         reason = verdict.get("reason")
         reason = reason if isinstance(reason, str) and reason.strip() else fallback
-        if ids and not units:  # a spawn's named rulings: a cite of a record not shown is no usable verdict
-            import question_form
-            if question_form.ruling_cite(reason, ids) == "bogus":
-                print("call judge failed open: the review cited a record that was not shown", file=sys.stderr)
-                return 0
+        if ids and not units:  # a spawn's named rulings: a refusal stands, whatever record it cites
             return refuse(payload, tool, args, rule, reason)
         cite = question_form.ruling_cite(reason, ids) if units else ""
         if cite == "bogus":  # the answer cites a record the model was not shown: no usable verdict

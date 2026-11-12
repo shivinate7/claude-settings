@@ -1709,18 +1709,27 @@ NAMED_MAX, NAMED_CAP = 8, 1500
 
 
 def named_rulings(slugs, repo_root):
-    """(lines, unknown): `decisions/<slug>: <ruling section>` for the first NAMED_MAX of `slugs` that have a record
-    in the repo or the claude-settings checkout, in `slugs` order. A slug with no file adds nothing. Reads only
-    those records; one that cannot be read adds to `unknown`."""
+    """(lines, unknown, dropped): `decisions/<slug>: <ruling section>` for the first NAMED_MAX of `slugs` that have a
+    record in the repo or the claude-settings checkout, in `slugs` order. A ruling over NAMED_CAP characters is cut,
+    and a marker line `[cut: N chars more, read docs/decisions/<slug>.md]` follows it. A slug with no file adds
+    nothing. `dropped` lists the present slugs past NAMED_MAX. Reads only the shown records; one that cannot be read
+    adds to `unknown`."""
     unknown = []
     roots = _decision_roots(repo_root, unknown)
     unknown = [u for u in unknown if "(absent)" not in u]  # an absent pointer is no read that failed
     present = [s for s in slugs if any(os.path.isfile(os.path.join(r, "docs", "decisions", s + ".md")) for r in roots)]
-    wanted, lines, seen = set(present[:NAMED_MAX]), [], set()
+    wanted, found, seen = set(present[:NAMED_MAX]), [], set()
     for root in roots:
-        lines += _record_index(root, "decisions", unknown, "decision records", seen, wanted, NAMED_CAP)[1]
+        found += _record_index(root, "decisions", unknown, "decision records", seen, wanted, None)[1]  # None: whole text
     order = {"decisions/%s" % s: i for i, s in enumerate(present)}
-    return sorted(lines, key=lambda line: order[line.split(": ", 1)[0]]), unknown
+    lines = []
+    for line in sorted(found, key=lambda line: order[line.split(": ", 1)[0]]):
+        record_id, text = line.split(": ", 1)
+        shown = text[:NAMED_CAP].rstrip()
+        lines.append("%s: %s" % (record_id, shown))
+        if len(shown) < len(text):
+            lines.append("[cut: %d chars more, read docs/%s.md]" % (len(text) - len(shown), record_id))
+    return lines, unknown, present[NAMED_MAX:]
 
 
 def past_rulings(question_text, repo_root):
