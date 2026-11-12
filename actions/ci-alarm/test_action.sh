@@ -689,6 +689,19 @@ jobs_of 7100 scope-guard:cancelled:40
 workflow_at 7100 scope-guard:37
 t alarm failure-run-not-newest-in-a-full-window-wakes-the-pr "" "" "$(capmsg 7100 scope-guard 40 37)" "actions/runs/7100/jobs"
 woke failure-run-not-newest-in-a-full-window-wakes-for-that-run 7100
+# A cap end in an earlier attempt of a failure run that a newer run of its group supersedes wakes the PR for that run. The newest
+# attempt holds no cap end; the attempts endpoint does. The control has the same shape with that attempt under its cap, and stays quiet.
+runs_are "$(gh_run ci success 2026-01-02 https://runs/stale-retry-green-7201 push 7201)" "$(gh_run ci failure 2026-01-01 https://runs/stale-retry-red-7200 push 7200 completed 2)"
+attempt_jobs_of 7200 1 scope-guard:cancelled:40
+jobs_of 7200 checks:failure scope-guard:success
+workflow_at 7200 checks scope-guard:37
+t alarm failure-run-not-newest-cap-end-in-attempt-1-wakes-the-pr "" "" "$(capmsg 7200 scope-guard 40 37 ', attempt 1')" "actions/runs/7200/jobs"
+count_is failure-run-not-newest-cap-end-in-attempt-1-reads-attempt-1-jobs-once "actions/runs/7200/attempts/1/jobs" 1
+runs_are "$(gh_run ci success 2026-01-02 https://runs/stale-retry-under-green-7221 push 7221)" "$(gh_run ci failure 2026-01-01 https://runs/stale-retry-under-red-7220 push 7220 completed 2)"
+attempt_jobs_of 7220 1 scope-guard:cancelled:2
+jobs_of 7220 checks:failure scope-guard:success
+workflow_at 7220 checks scope-guard:37
+t green failure-run-not-newest-cap-end-in-attempt-1-under-its-cap-stays-quiet "" "" ""
 runs_are "$(gh_run ci failure 2026-01-01 https://runs/stale-red-7020 push 7020)" "$(gh_run ci success 2026-01-02 https://runs/stale-red-green-7021 push 7021)"
 jobs_of 7020 checks:failure
 t green failure-run-not-newest-with-no-cap-end-stays-quiet
@@ -700,6 +713,10 @@ workflow_at 7030 scope-guard:37
 t green failure-run-not-newest-with-a-cap-job-under-its-cap-stays-quiet
 quiet_wake failure-run-not-newest-with-a-cap-job-under-its-cap-makes-no-wake
 count_is failure-run-not-newest-with-a-cap-job-under-its-cap-reads-its-jobs-once "actions/runs/7030/jobs" 1
+# A failure run that a newer run of its group supersedes is never red. When its jobs read fails, the alarm is unknown, not green: the
+# unread jobs may hold a cap end.
+runs_are "$(gh_run ci success 2026-01-02 https://runs/stale-unread-green-7211 push 7211)" "$(gh_run ci failure 2026-01-01 https://runs/stale-unread-red-7210 push 7210)"
+t unknown failure-run-not-newest-with-an-unreadable-jobs-read-is-unknown-not-green "api *actions/runs/7210/jobs*" "" "" "actions/runs/7210/jobs"
 # A re-run in flight is the group's newest run: its status is in_progress or queued and its attempt is above 1. The group is
 # UNKNOWN (main's judged rule, merge/merge.py base_state), so the alarm reads unknown with a warning and writes no issue. It never
 # reads green, and never falls back to an older run. A first attempt still in progress waits its turn, so the older run is judged (1d).
