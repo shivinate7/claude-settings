@@ -831,6 +831,23 @@ class ReopenClosed(CloseEnv):
         self.assertEqual(len(lines), 1, "no reopen line for #4, which open batch #9 freezes at its current head:\n" + "\n".join(lines))
         self.assertRegex(lines[0], r"^reopen: o/alpha #4 \(.+\)$", "the reopen line does not name #4 with a reason:\n" + lines[0])
 
+    def test_a_carried_lane_that_the_only_open_batch_freezes_reopens(self):
+        # #4 is closed as carried by #9, and open batch #9 freezes #4 at its head. #9 is the only open pull request, and no `Replaces` claim
+        # names #4, so the batch's frozen block is the one reason to reopen #4.
+        body = freeze_body(freeze_inner("nightly", [(4, head_of(4))]))
+        block = self.block_for_alpha(pulls=[named_pull(9, head_of(9), body=body, draft=True, head_ref=BATCH_HEAD)],
+                                     comments=[review_comment(90, 4, "Carried by #9")], closed=[closed_pull(4, head_of(4))])
+        self.assertEqual(kind_lines(block, REOPENED), ["reopen: o/alpha #4 (an open batch freezes it at its head)"],
+                         "no reopen line for #4, which open batch #9 freezes at its current head:\n" + "\n".join(block))
+
+    def test_a_carried_lane_that_an_open_batch_freezes_reopens_beside_a_done_pull_request(self):
+        # The same lane with done pull request #5 present, so the freeze is read. A Carried note reopens under a frozen head as a Replaced
+        # note does (test_a_frozen_lane_that_its_open_batch_names_reopens).
+        body = freeze_body(freeze_inner("nightly", [(4, head_of(4))]))
+        lines = self.reopened(closed=[closed_pull(4, head_of(4))], extra_pulls=[named_pull(9, head_of(9), body=body, draft=True, head_ref=BATCH_HEAD)],
+                              extra_comments=[review_comment(90, 4, "Carried by #9")])
+        self.assertEqual(lines, ["reopen: o/alpha #4 (an open batch freezes it at its head)"], "\n".join(lines))
+
     def test_a_link_named_by_a_pull_request_that_is_not_a_batch_keeps_its_pr_closed(self):
         # Control: open #7 is not a batch, names #4 with `Replaces #4`, and freezes nothing. #4 stays closed.
         lines = self.reopened(closed=[closed_pull(4, head_of(4))], extra_pulls=[named_pull(7, head_of(7), body="Replaces #4")],
