@@ -2,7 +2,7 @@
 """Accuracy of the machine-load readings against the OS's own tools. Standard library only, and no
 test runner.
 
-Run it from the repository root, on a real Windows or Mac host:
+Run it from the repository root, on a real Windows, Mac or Linux host:
 
     python hooks/test_guard_load_os.py
 
@@ -23,6 +23,7 @@ returns a dict, and each reading is defined here:
   memory_pct      percent of physical memory IN USE.
                   Windows reference: Win32_OperatingSystem, 100 * (total - free) / total.
                   Mac reference: memory_pressure, 100 - "System-wide memory free percentage".
+                  Linux reference: free -k, the available column (MemAvailable), 100 * (total - available) / total.
   disk_free_gb    GB FREE on the drive that holds the home folder, 2**30 bytes to the GB.
                   Windows reference: Get-PSDrive, Free / 1GB.
                   Mac reference: df -k on the home folder, Available / 1048576 (KiB to GiB).
@@ -48,6 +49,7 @@ GUARD = os.environ.get("GUARD_UNDER_TEST") or os.path.join(HERE, "guard.py")
 TOLERANCE = {
     "win32": {"memory_pct": 5.0, "disk_free_gb": 2.0, "disk_total_gb": 1.0},
     "darwin": {"memory_pct": 8.0, "disk_free_gb": 2.0, "disk_total_gb": 1.0},
+    "linux": {"memory_pct": 5.0, "disk_free_gb": 2.0, "disk_total_gb": 1.0},
 }
 
 WINDOWS_SCRIPT = r"""
@@ -79,15 +81,23 @@ def windows_reference():
 def mac_reference():
     pressure = run("memory_pressure")
     free = re.search(r"System-wide memory free percentage:\s*(\d+)%", pressure)
+    return dict(disk_reference(), memory_pct=100 - int(free.group(1)))
+
+
+def disk_reference():
+    """The home drive from df -k: Available for the free GB, 1K-blocks for the size."""
     df = run("df", "-k", os.path.expanduser("~")).strip().splitlines()[-1].split()
-    return {
-        "memory_pct": 100 - int(free.group(1)),
-        "disk_free_gb": int(df[3]) / 1048576,
-        "disk_total_gb": int(df[1]) / 1048576,
-    }
+    return {"disk_free_gb": int(df[3]) / 1048576, "disk_total_gb": int(df[1]) / 1048576}
 
 
-REFERENCE = {"win32": windows_reference, "darwin": mac_reference}
+def linux_reference():
+    """Memory from free -k: the available column is MemAvailable, so the share in use leaves out the cache."""
+    row = next(line.split() for line in run("free", "-k").splitlines() if line.startswith("Mem:"))
+    total, available = int(row[1]), int(row[6])
+    return dict(disk_reference(), memory_pct=100 * (total - available) / total)
+
+
+REFERENCE = {"win32": windows_reference, "darwin": mac_reference, "linux": linux_reference}
 
 
 def load_reader():
@@ -121,11 +131,11 @@ def check_reading(key):
 
 
 CASES = [
-    ("memory in use matches the OS tool", lambda: check_reading("memory_pct"), ("win32", "darwin")),
+    ("memory in use matches the OS tool", lambda: check_reading("memory_pct"), ("win32", "darwin", "linux")),
     ("disk free on the home drive matches the OS tool", lambda: check_reading("disk_free_gb"),
-     ("win32", "darwin")),
+     ("win32", "darwin", "linux")),
     ("disk size on the home drive matches the OS tool", lambda: check_reading("disk_total_gb"),
-     ("win32", "darwin")),
+     ("win32", "darwin", "linux")),
 ]
 
 
