@@ -41,10 +41,13 @@ const sentItem = () => mk("sent-closed", 90, { status: "closed", lastAnswer: { c
 
 // The stub database: each collection is a map of id to data, and each write fires its listeners. window.__putItem is a session's
 // write after load; window.__answers reads the answers the page wrote.
-function stubDb({ items, answers, groups }) {
-  const data = { items: Object.fromEntries(items.map((i) => [i.id, i])), answers: { ...answers }, groups: { ...groups }, receipts: {}, meta: {} };
+function stubDb({ items, answers, groups, meta, holdMeta }) {
+  const data = { items: Object.fromEntries(items.map((i) => [i.id, i])), answers: { ...answers }, groups: { ...groups }, receipts: {}, meta: meta ? { page: meta } : {} };
   window.__log = [];
   const subs = {};
+  // holdMeta: the meta document's listener is kept, and window.__releaseMeta delivers it. The stub has no clock, so a case names the moment meta arrives.
+  const heldMeta = [];
+  window.__releaseMeta = () => heldMeta.splice(0).forEach((cb) => cb(dsnap("meta", "page")));
   const snap = (name) => ({ docs: Object.entries(data[name] || {}).map(([id, v]) => ({ id, data: () => v })) });
   const dsnap = (name, id) => ({ exists: !!(data[name] || {})[id], data: () => (data[name] || {})[id] || null });
   const fire = (name) => (subs[name] || []).forEach((cb) => cb(snap(name)));
@@ -56,7 +59,7 @@ function stubDb({ items, answers, groups }) {
     set: async (body) => { window.__log.push(["set", name, id, body]); (data[name] = data[name] || {})[id] = body; setTimeout(() => fire(name), 0); },
     update: async (body) => { if (!(data[name] || {})[id]) throw { code: "not-found" }; data[name][id] = { ...data[name][id], ...body }; setTimeout(() => fire(name), 0); },
     delete: async () => { delete (data[name] || {})[id]; setTimeout(() => fire(name), 0); },
-    onSnapshot: (cb) => { setTimeout(() => cb(dsnap(name, id)), 0); return () => {}; },
+    onSnapshot: (cb) => { if (name === "meta" && holdMeta) heldMeta.push(cb); else setTimeout(() => cb(dsnap(name, id)), 0); return () => {}; },
   });
   const db = {
     doc: (p) => docRef(p.split("/")[0], p.split("/")[1]),
@@ -70,7 +73,7 @@ function stubDb({ items, answers, groups }) {
 }
 
 // Loads the page with these items and waits until the first one is drawn. Each case gets its own browser page.
-async function open(t, { items, answers = {}, groups = {} }) {
+async function open(t, { items, answers = {}, groups = {}, meta, holdMeta = false }) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
@@ -78,7 +81,7 @@ async function open(t, { items, answers = {}, groups = {} }) {
   t.after(() => page.close());
   // The page is served from a stand-in origin, so the init script and localStorage both apply. Every other request is refused.
   await page.route("**/*", (r) => (r.request().url() === ORIGIN ? r.fulfill({ contentType: "text/html; charset=utf-8", body: html }) : r.abort()));
-  await page.addInitScript(stubDb, { items, answers, groups });
+  await page.addInitScript(stubDb, { items, answers, groups, meta, holdMeta });
   await page.goto(ORIGIN);
   await page.waitForFunction("state.items.length > 0");
   await page.waitForSelector(`#item-${items[0].id}`);
@@ -251,4 +254,91 @@ test("each tier head has one line that names its key, and the line shows once on
     const shown = (body.match(new RegExp(re.source, "gi")) || []).length;
     assert.equal(shown, 1, `tier-${k}'s key line shows ${shown} times on the page`);
   }
+});
+
+// ---------------------------------------------------------------- the sort key, the group count, and the repo heads (review round 2)
+
+test("a group's stops are the union of its members' lists, so it sorts above an older solo with fewer", async (t) => {
+  // The lists are {lane a, lane b} and {lane b, lane c}: each member has two, the union has three. The older solo has two.
+  const solo = blk("union-solo", 1, { added: at(1), stops: ["lane x", "lane y"] });
+  const grpA = blk("union-a", 2, { added: at(3), group: "pair", stops: ["lane a", "lane b"] });
+  const grpB = blk("union-b", 3, { added: at(4), group: "pair", stops: ["lane b", "lane c"] });
+  const page = await open(t, { items: [solo, grpA, grpB] }); if (!page) return;
+  const ids = await tierIds(page, "holds");
+  assert.deepEqual(ids.slice(0, 2).sort(), [grpA.id, grpB.id].sort(), "the group with three stops in union is not first: " + ids.join(", "));
+  assert.deepEqual(ids.slice(2), [solo.id], "the older solo with two stops is not last: " + ids.join(", "));
+});
+
+test("a card that gains stops after load shows no count the order does not use", async (t) => {
+  const counted = blk("frozen-counted", 1, { added: at(1), stops: ["lane a", "lane b"] });
+  const grows = mk("frozen-grows", 2, { added: at(2) });
+  const page = await open(t, { items: [counted, grows] }); if (!page) return;
+  assert.deepEqual(await tierIds(page, "calm"), [grows.id], "the item with no holds is not in Whenever at load");
+  // The writer adds holds and three stops while the page is open. The order keeps the count of zero it took at load.
+  await page.evaluate((it) => window.__putItem(it), { ...grows, holds: "Lane fix-proxy, PR #1201 and lane c wait on your word.", stops: ["lane fix-proxy", "PR #1201", "lane c"] });
+  await page.locator(`#tier-holds #item-${grows.id}`).waitFor();
+  assert.deepEqual(await tierIds(page, "holds"), [counted.id, grows.id], "the order moved the card that gained stops while the page was open");
+  assert.match(await topIn(page, "holds", counted), /\bstops 2\b/, `No. ${counted.n} lost its count of two`);
+  const top = await topIn(page, "holds", grows);
+  assert.doesNotMatch(top, /\bstops \d/, `No. ${grows.n} shows a count the order does not use: "${top.trim()}"`);
+});
+
+test("a group whose member gains stops after load keeps the head count the order sorts by", async (t) => {
+  const first = blk("grp-open", 1, { added: at(1), group: "pair", stops: ["lane a"] });
+  const gains = blk("grp-gains", 2, { added: at(2), group: "pair" });
+  const rival = blk("grp-rival", 3, { added: at(3), stops: ["lane b", "lane c"] });
+  const page = await open(t, { items: [first, gains, rival] }); if (!page) return;
+  // At load the group counts 1 (its union, {lane a}); the rival counts 2, so the rival is first.
+  assert.equal((await tierIds(page, "holds"))[0], rival.id, "the rival with two stops is not first at load");
+  // The writer adds three stops to the second member while the page is open: the union goes from 1 to 4.
+  await page.evaluate((it) => window.__putItem(it), { ...gains, stops: ["lane d", "lane e", "lane f"] });
+  await page.waitForFunction((id) => ((state.items.find((i) => i.id === id) || {}).stops || []).length === 3, gains.id);
+  const frame = page.locator("#tier-holds section.bundle#group-pair");
+  assert.equal(await frame.count(), 1, "the two members are not one frame in Blocking");
+  assert.equal((await tierIds(page, "holds"))[0], rival.id, "the order moved while the page was open");
+  // The head's text as the eye reads it: its screen-reader words (.sr) are left out.
+  const head = await frame.locator("header").first().evaluate((h) => { const c = h.cloneNode(true); c.querySelectorAll(".sr").forEach((n) => n.remove()); return c.textContent; });
+  assert.match(head, /\bstops 1\b/, "the group head does not show the count the order sorts by (its union at load, 1): " + head);
+});
+
+test("until the repo meta arrives the tiers draw flat: no sub-heads and no 'This repo first.' line", async (t) => {
+  // The items arrive; the meta document is held back, so the page does not yet know which repo is this one.
+  const repoless = blk("meta-repoless", 1, { added: at(1) });
+  const other = blk("meta-other", 2, { added: at(2), repo: "owner/other-repo" });
+  const page = await open(t, { items: [repoless, other], holdMeta: true }); if (!page) return;
+  assert.equal(await page.locator("#tier-holds section.subgrp").count(), 0, "a repo sub-head is drawn before the repo meta arrives");
+  assert.doesNotMatch(await page.locator("#tier-holds .tsub").innerText(), /This repo first\./, "the key line says 'This repo first.' before the repo meta arrives");
+});
+
+test("the order after the repo meta arrives is the order a load with the meta gives, and no card moves when the two orders agree", async (t) => {
+  const META = { repo: "owner/this-repo" };
+  // The own-repo item is the older one. Before the meta it is an other-repo group, so the flat draw puts the repo-less item
+  // first; with the meta it is this repo's, and sorts by age inside the own group, ahead of the repo-less item.
+  const ownSlug = blk("meta-order-slug", 1, { added: at(1), repo: "owner/this-repo" });
+  const repoless = blk("meta-order-repoless", 2, { added: at(2) });
+  const other = blk("meta-order-other", 3, { added: at(3), repo: "owner/other-repo" });
+  const items = [ownSlug, repoless, other];
+  const held = await open(t, { items, holdMeta: true }); if (!held) return;
+  const before = await tierIds(held, "holds");
+  await held.evaluate(() => window.__releaseMeta());
+  await held.waitForFunction("feed.meta === true");
+  const after = await tierIds(held, "holds");
+  const full = await open(t, { items, meta: META });
+  const withMeta = await tierIds(full, "holds");
+  assert.deepEqual(after, withMeta, "after the meta arrives the order is not the order a load with the meta gives: " + after.join(", "));
+  // A card may move on the meta's arrival only when the order before it differs from the order with it.
+  if (JSON.stringify(before) === JSON.stringify(withMeta)) assert.deepEqual(after, before, "a card moved when the meta arrived");
+});
+
+test("at 1280 the first run in the rail's chips has no top gap: its label's margin-top is 0", async (t) => {
+  const META = { repo: "owner/this-repo" };
+  const repoless = blk("gap-own", 1, { added: at(1) });
+  const other = blk("gap-other", 2, { added: at(2), repo: "owner/other-repo" });
+  const page = await open(t, { items: [repoless, other], meta: META }); if (!page) return;
+  const runs = page.locator("#rail .chips-n > .rrun");
+  assert.equal(await runs.count(), 2, "the rail does not draw one run per repo, so the gap is not reached");
+  const marginOf = (i) => runs.nth(i).locator(".rrepo").evaluate((el) => getComputedStyle(el).marginTop);
+  const second = await marginOf(1), first = await marginOf(0);
+  assert.equal(second, "4px", "the second run's label has no 4px gap, so the width rule does not apply here");
+  assert.equal(first, "0px", "the first run's label has a top gap from .rrepo: " + first);
 });
