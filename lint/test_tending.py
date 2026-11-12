@@ -90,12 +90,25 @@ def load_runner():
     return module
 
 
-def verdicts_of(runner, entry, text, root):
-    """{id: verdict} from runner.tend(entry, text, root). The one place that reads tend's return shape."""
+WORST = {"true": 0, "unknown": 1, "stale": 2}  # the rank a repeated id keeps: its worst verdict
+
+
+def line_rows(runner, entry, text, root):
+    """[(key, id, verdict)] from runner.tend(entry, text, root): one row per open item line, in file order. The one
+    place that reads tend's return shape. A dict (one verdict per id, so repeated ids merge) gives rows with no key."""
     result = runner.tend(entry, text, root)
     if isinstance(result, dict):
-        return dict(result)
-    return {pair[0]: pair[1] for pair in result}
+        return [(None, ident, verdict) for ident, verdict in result.items()]
+    return [tuple(row) for row in result]
+
+
+def verdicts_of(runner, entry, text, root):
+    """{id: verdict}, each id's worst verdict over its lines. The shape the one-verdict-per-id cases read."""
+    worst = {}
+    for _, ident, verdict in line_rows(runner, entry, text, root):
+        if ident not in worst or WORST[verdict] > WORST[worst[ident]]:
+            worst[ident] = verdict
+    return worst
 
 
 def entry(still_true, close="mark", runs_from=("merge-check",), state="live", where="todo"):
@@ -657,6 +670,88 @@ class ResolverAgreementTests(unittest.TestCase):
         self.assertTrue(ruling.value_resolves("docs/x.md", root), "scope: the resolver does not hold docs/x.md")
         got = verdicts_of(load_runner(), entry("home-held"), "- H2 a note. Home: docs/x.md\n", root)
         self.assertEqual(got, {"H2": "true"}, "a bare path the resolver holds read as %r" % got)
+
+
+# ---- Round 2: the import route per line, skipped stores, and a byte-order mark. Each case is red on build2 as it
+# ---- stands, except the controls, which hold a rule's positive side.
+
+REPEATED_D1 = "- D1 until 2020-01-01\n- D1 until 2099-01-01\n"
+REPEATED_D1_ONE_CLOSED = "- D1 until 2020-01-01 [closed]\n- D1 until 2099-01-01\n"
+
+
+class PerLineRouteTests(unittest.TestCase):
+    """Ruling 1: tend gives one verdict per line, so a repeated id does not merge. close, called on tend's output,
+    closes only the stale line. The command line and the import route give the same text."""
+
+    def test_tend_gives_one_row_per_line_for_a_repeated_id(self):
+        rows = line_rows(load_runner(), entry("until-date"), REPEATED_D1, make_repo({}))
+        self.assertEqual([(ident, verdict) for _, ident, verdict in rows], [("D1", "stale"), ("D1", "true")],
+                         "tend merged the two D1 lines into one verdict: got %r" % (rows,))
+
+    def test_import_close_marks_only_the_stale_line(self):
+        runner, root = load_runner(), make_repo({})
+        out = runner.close(entry("until-date"), REPEATED_D1, runner.tend(entry("until-date"), REPEATED_D1, root))
+        self.assertEqual(out, REPEATED_D1_ONE_CLOSED, "the import route closed a line whose own verdict is not stale")
+
+    def test_command_line_and_import_give_the_same_text(self):
+        runner = load_runner()
+        root = make_git_repo({"docs/todo.md": REPEATED_D1})
+        import_text = runner.close(entry("until-date"), REPEATED_D1, runner.tend(entry("until-date"), REPEATED_D1, root))
+        self.assertEqual(import_text, REPEATED_D1_ONE_CLOSED, "scope: the import route did not close only the stale line")
+        run_cli(probe_tree(close="mark", still_true="until-date", runs_from=("stop",)), root, point="stop")
+        with open(os.path.join(root, "docs", "todo.md"), encoding="utf-8") as f:
+            cli_text = f.read()
+        self.assertEqual(cli_text, import_text, "the command line and the import route close different lines")
+
+
+class SkippedStoreTests(unittest.TestCase):
+    """Ruling 2: a store named with --store that the point does not read prints one `skipped <store>: <why>` line
+    and exits 0, never silence."""
+
+    def test_declared_store_named_with_store_prints_one_skipped_line(self):
+        tree = make_tree({"probe": entry("home-held", close="mark", state="declared")})
+        root = make_git_repo({"lint/held.py": "x\n", "docs/todo.md": TODO_STALE})
+        result = run_cli(tree, root, store="probe")
+        self.assertEqual(result.returncode, 0, "a declared store named with --store exited %d, not 0" % result.returncode)
+        skipped = [line for line in result.stdout.splitlines() if "skipped probe:" in line]
+        self.assertEqual(len(skipped), 1, "a declared store named with --store printed %d `skipped probe:` line(s), "
+                         "not 1: %r" % (len(skipped), result.stdout))
+
+    def test_live_store_that_does_not_run_from_the_point_prints_one_skipped_line(self):
+        tree = make_tree({"probe": entry("home-held", close="none", runs_from=("stop",))})
+        root = make_git_repo({"lint/held.py": "x\n", "docs/todo.md": TODO_HELD})
+        result = run_cli(tree, root, point="merge-check", store="probe")
+        self.assertEqual(result.returncode, 0, "a live store off its point, named with --store, exited %d, not 0"
+                         % result.returncode)
+        skipped = [line for line in result.stdout.splitlines() if "skipped probe:" in line]
+        self.assertEqual(len(skipped), 1, "a live store off its point printed %d `skipped probe:` line(s), not 1: %r"
+                         % (len(skipped), result.stdout))
+
+    def test_store_that_runs_from_the_point_prints_no_skipped_line(self):
+        # A control: a store the point reads is read, and nothing is skipped.
+        tree = make_tree({"probe": entry("home-held", close="none")})
+        root = make_git_repo({"lint/held.py": "x\n", "docs/todo.md": TODO_HELD})
+        result = run_cli(tree, root, store="probe")
+        self.assertFalse(any("skipped" in line for line in result.stdout.splitlines()),
+                         "a store the point reads printed a skipped line: %r" % result.stdout)
+
+
+class ByteOrderMarkTests(unittest.TestCase):
+    """Ruling 3: a UTF-8 byte-order mark before the first bullet does not drop that item."""
+
+    def test_bom_before_the_first_bullet_still_reads_the_item(self):
+        root = make_git_repo({"lint/held.py": "x\n"})
+        rows = line_rows(load_runner(), entry("home-held"), "﻿- A1 held. Home: lint/held.py\n", root)
+        self.assertEqual([(ident, verdict) for _, ident, verdict in rows], [("A1", "true")],
+                         "a byte-order mark before the first bullet dropped A1: got %r" % (rows,))
+
+    def test_bom_store_with_a_stale_first_item_fails_merge_check(self):
+        root = make_git_repo({"lint/held.py": "x\n", "docs/todo.md": TODO_HELD})
+        with open(os.path.join(root, "docs", "todo.md"), "wb") as f:
+            f.write(b"\xef\xbb\xbf- A2 gone. Home: lint/gone.py\n")
+        result = run_cli(probe_tree(close="none"), root)
+        self.assertEqual(result.returncode, 1, "a store whose first item carries a byte-order mark and is stale "
+                         "exited %d, not 1: the item was dropped" % result.returncode)
 
 
 if __name__ == "__main__":
