@@ -475,21 +475,25 @@ def bare_writer_hits(text):
     return [" ".join(prose[max(0, m.start() - 30):m.end() + 10].split()) for m in BARE_WRITER.finditer(prose)]
 
 
-def handoff_text(open_items="none", watches=(), role="Triage", body=()):
+def handoff_text(open_items="none", watches=(), role="Triage", body=(), title=None):
     """A full role hand-off. open_items=None leaves the `Open items:` line out. Each watch is the
     text after `Watch: `, one line each. role names the title, `# <role> handoff`; None leaves the title out, so the
-    file has no heading. body lines go in the State section. Triage is the page writer. The one fixture of the
-    HandoffCheck cases: a case adds an option, never a copy."""
+    file has no heading. title, when set, is the whole first heading line, `#` included, and replaces role. body lines
+    go in the State section. Triage is the page writer. The one fixture of the HandoffCheck cases: a case adds an
+    option, never a copy."""
     pages = ["Watches stopped at 10:00", ""]
     if open_items is not None:
         pages.append(f"Open items: {open_items}")
     pages.extend(f"Watch: {w}" for w in watches)
-    title = [] if role is None else [f"# {role} handoff, 2026-01-02", ""]
+    if title is not None:
+        heading = [title, ""]
+    else:
+        heading = [] if role is None else [f"# {role} handoff, 2026-01-02", ""]
     state = ["## State", "", "Item 12 is in flight.", ""]
     if body:
         state += [*body, ""]
     return "\n".join([
-        *title,
+        *heading,
         'From "old triage" at the limit. Checked: main abc1234, record branch def5678.', "",
         "## Standing instructions", "", "Don't skip the check.", "",
         *state,
@@ -673,6 +677,29 @@ class HandoffCheck(TempDest):
                 found = problems(handoff_text(ITEMS, [PAGE], role=role))
                 self.assertEqual(len(found), 1, found)
                 self.assertRegex(found[0], r"(?i)watch")
+
+    def test_a_title_naming_triage_or_the_page_writer_is_the_writers_even_beside_a_coordinator_or_batch_runner(self):
+        # The page-writer words win: a first heading that names triage or the page writer is the writer's, whatever
+        # else it names. The two plain role titles at the end are controls: their verdict must not move.
+        writer_titles = ("# Batch runner and triage handoff", "# Triage and batch runner handoff, 2026-11-12",
+                         "# Lane handoff (triage and batch runner hats)", "# Triage handoff, for the coordinator",
+                         "# Coordinator-triage handoff", "# Coordinator and page writer handoff")
+        for title in writer_titles:
+            with self.subTest(title=title, watch="none"):
+                text = handoff_text(ITEMS, ["none"], title=title)
+                self.assertEqual(text.splitlines()[0], title, "the title must be the first line the check reads")
+                found = problems(text)
+                self.assertEqual(len(found), 1, f"{title}: Watch: none with open items must be the page writer's problem")
+                self.assertRegex(found[0], r"(?i)watch")
+            with self.subTest(title=title, watch="url"):
+                text = handoff_text(ITEMS, [PAGE], title=title)
+                self.assertEqual(text.splitlines()[0], title, "the title must be the first line the check reads")
+                self.assertEqual(problems(text), [], f"{title}: a page URL on the Watch line must pass for the page writer")
+        for title in ("# Coordinator handoff", "# Batch runner handoff"):
+            with self.subTest(title=title, control=True):
+                text = handoff_text(ITEMS, ["none"], title=title)
+                self.assertEqual(text.splitlines()[0], title, "the title must be the first line the check reads")
+                self.assertEqual(problems(text), [], f"{title}: Watch: none with open items must pass for a non-writer")
 
     def test_no_check_message_says_a_bare_writer(self):
         # Each message names the page writer, the glossary term. A `writer` in backticks is a field name, so it passes.
