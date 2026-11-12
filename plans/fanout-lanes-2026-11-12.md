@@ -4,6 +4,12 @@ Source: plans/fanout-2026-11-12.md, minus the steps laned at 07:20 CST and the t
 
 How lanes were cut: steps of one repo and one kind (code or prose) that name the same file, or the same home when they name no file, are one group, so no two lanes edit one file. A group over 8 steps splits into parts that run in order ("after" names the part before). Files and homes are read from step text, not from code: each lane confirms its files first. Steps marked "unmapped" named no file or home; their lanes share nothing known and may still clash. Each lane checks every step's ruling source first and reports a step with none instead of building it (coordinator 07:21 CST, owner ruling 13:51 CST Nov 11).
 
+## Coordinator picks (process-only, can be undone; 07:31 CST Nov 12)
+
+1. A step with an old open PR is carried forward on a fresh branch from main, not rebuilt.
+2. A lane builds a step of the other kind too and hands it in under its true kind; kind splits batches, not lanes.
+3. A step already done on main is closed, not built.
+
 ## code-agents
 
 - Kind: code. Repo: claude-settings.
