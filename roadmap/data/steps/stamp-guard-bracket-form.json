@@ -1,0 +1,14 @@
+{
+ "id": "stamp-guard-bracket-form",
+ "title": "The message time check reads the bracket stamp form",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Incident 13:13-13:14 CST Nov 12: the retrospective's four messages stamped 13:16 and 13:19 CST were sent at 13:13-13:14 CST; it wrote the times without reading the clock (rule building-mistake-names-its-guard).",
+ "source": "retrospective 13:15 CST Nov 12",
+ "note": "Guard message-time-matches-clock let them through: its header pattern (hooks/guard_merge.py _STAMP_HEADER) needs a comma, colon or dash after the sender words, and the bracket form \"[consultant 13:19 CST]\" has none. The coordinator uses the same form, so every bracket stamp goes unchecked. Fix: the pattern accepts a leading \"[<words> HH:MM CST]\". Red first on \"[consultant 13:19 CST] x\" at 13:14. Same family as step stamp-guard-send-message (lane session_013NEJL2w2TGYjZFexEa6uyw): fold in if that lane takes it.",
+ "updatedAt": "2026-11-12T13:18:10-06:00"
+}

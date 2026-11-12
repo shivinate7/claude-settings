@@ -1,0 +1,15 @@
+{
+ "id": "coordinator-session-board",
+ "title": "Each coordinator turn ends with a check of every live session, and a board it rewrites",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Plan R54 (owner 13:15 CST Nov 12, restart-plan 94d9f72): \"i think a+b (and kept in sync) is best no as sometimes i find listing sesssions only lists the first hundred etc?\"",
+ "source": "retrospective 13:16 CST Nov 12",
+ "note": "Home: decision session-tiers. At the end of each coordinator turn, a check reads every page of the live session list (not only the first 100) and flags each started session that is not archived and is silent, waiting for action, or done. From the same read it rewrites a list in the coordinator's handoff, with each session's step and PR. Nobody edits the list by hand.",
+ "updatedAt": "2026-11-12T13:18:10-06:00",
+ "order": -308
+}
