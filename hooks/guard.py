@@ -3560,7 +3560,8 @@ def step_up_hit(tool: str, tool_input) -> str:
 
 
 def step_up_reason(prompt: str, role, model) -> str:
-    model = str(model or "").lower()
+    model = str(model or "").strip().lower()
+    role = role_key(role)
     for kind, n in brief_markers(prompt):
         kind = kind.lower()
         if role == "reviewer" and kind == "round" and n == "2" and "sonnet" not in model:
@@ -3592,7 +3593,7 @@ ROLE_DEFAULT = "general-purpose"
 # A reviewer whose brief's first non-blank line starts with FIX_CHECK_MARKER (a fix check) may also run Sonnet above its row.
 # An Explore may run Sonnet, above its Haiku row, or Opus (opus_spawn_hit), only when its brief's first non-blank line carries
 # EXPLORE_AUDIT_MARKER (decision agent-model-cap). Case-sensitive, so lowercase prose does not count. It counts on the first line, with anything ahead of it, as BRIEF_MARKERS says; marker_hits reads it.
-from shared_names import EXPLORE_AUDIT_MARKER, FIX_CHECK_MARKER  # noqa: E402  the one home, shared with the spawn judge (hooks/call_judge.py)
+from shared_names import EXPLORE_AUDIT_MARKER, FIX_CHECK_MARKER  # noqa: E402  the one home (hooks/shared_names.py); the spawn judge (hooks/call_judge.py) imports only EXPLORE_AUDIT_MARKER
 from shared_names import REPO_TAG, repo_tag_names  # noqa: E402  the one home of the repo tag, shared with skills/roadmap/build.py
 EXPLORE_ROLE = "Explore"
 ROLE_REVIEWER_FREE_ROUNDS = ("2", "3")
