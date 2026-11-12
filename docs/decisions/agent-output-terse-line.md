@@ -29,7 +29,7 @@ Narration grows each session's context. Cache reads dominate cost. An idle lane 
 ## Where it lives
 
 - The ten role files: `agents/*.md`, named in `ROLES` in the check. Any other `agents/*.md` file is checked too.
-- The lane start text: `skills/project-ops/templates/operating-model.md`.
+- The lane start text: `skills/project-ops/templates/operating-model.md`, under `## Agent output`.
 - A pasted copy in another repo is not read. See the note `terse-line-pasted-copy-unchecked`.
 
 ## Cost
