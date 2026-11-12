@@ -9,8 +9,11 @@ refuses an Input Needed line that cites a closed item. The rules the cases pin:
 - Cite forms, in the Input Needed section only: "item 214", "page item 214", "items 214, 381 and 383",
   "items 214 or 381", "items 214/381", "items 214-216" (both ends), "Items: 214, 381", "**Items:** 214",
   "**Items**: 214", "item(s) 214", "item **214**", "items:" then a bullet list whose bullets may carry text
-  ("> - 214: pick a or b"), a label such as "Items waiting on you:" before such a list, "Cockpit item 214",
-  "item 214 a", "item 1 of 3" (cites 1). Not in Done or Next, not inside backticks or quotes, not PR numbers
+  ("> - 214: pick a or b"), a label such as "Items waiting on you:" before such a list, a dash-bulleted label
+  ("- Items waiting on you:") with its sub-bullets, numbers that are sub-bullets of a label bullet ("> - waiting"
+  then ">   - 214"), "Cockpit item 214", "item-214", "page-item-214", "Cockpit item-214", "items 214-216",
+  "items 214–216" (en dash), "items 214 to 216", "items 214 through 216" (both ends), "items 214; 381",
+  "items 214 + 381", "item 214 a", "item 1 of 3" (cites 1). Not in Done or Next, not inside backticks or quotes, not PR numbers
   ("PR" or "#" before the number), not an ISO date after "item", not a bare number, not a list marker
   ("> 1. 214" cites 214).
 - Not a cite, though a number follows the item: a count ("214 and 5 others", "381, 2 of which"), a clock time,
@@ -19,7 +22,8 @@ refuses an Input Needed line that cites a closed item. The rules the cases pin:
 - A cited item whose status is `closed` in the copy refuses the Stop. The refusal states that each closed item
   reads closed in the waiting copy, and names no step for the session.
 - An open or missing item passes. A same-turn ArtifactData read of collection `items` that shows the item open
-  skips the copy for that item. A read in an earlier turn does not.
+  skips the copy for that item. A same-turn read that shows it closed refuses the Stop, whether the copy holds it
+  open or cannot be read. A read in an earlier turn does not count.
 - Fails open: no record branch, no items folder, an item file that is not a JSON object, a git error. No refusal,
   and a systemMessage that says "not checked". The guard never raises.
 - A repo with no waiting page runs no check and reads no copy. One copy read per Stop.
@@ -154,16 +158,17 @@ class ClosedItemFixture(unittest.TestCase):
         """One owner turn: the owner's message, the records of its calls, then the reply."""
         return [trg.human("look at the open items"), *calls, trg.assistant_text(reply)]
 
-    def assert_refused(self, out, closed, what):
-        """A block that names each closed item, then states the fact: the item reads closed in the waiting copy. The
-        numbers come first, so a cite the guard misses fails on the number, not on the wording."""
+    def assert_refused(self, out, closed, what, source="waiting copy"):
+        """A block that names each closed item, then states the fact: the item reads closed in the waiting copy, or in
+        this turn's read (`source`). The numbers come first, so a cite the guard misses fails on the number, not on
+        the wording."""
         self.assertIsNotNone(out, "%s: the Stop passed, so the closed item was not refused" % what)
         self.assertEqual(out.get("decision"), "block", "%s: no block: %r" % (what, out))
         reason = out.get("reason", "")
         for n in closed:
             self.assertRegex(reason, r"(?<!\d)%d(?!\d)" % n, "%s: the refusal does not name closed item %d" % (what, n))
         self.assertIn("closed", reason, "%s: the refusal does not say closed" % what)
-        self.assertIn("waiting copy", reason, "%s: the refusal does not say the waiting copy shows it" % what)
+        self.assertIn(source, reason, "%s: the refusal does not say %r shows it" % (what, source))
         self.assertNotIn("get or query", reason, "%s: the refusal names a step (get or query)" % what)
         self.assertNotIn("is read before", reason, "%s: the refusal names a step (is read before)" % what)
 
@@ -276,6 +281,33 @@ class ClosedItemRefusalTests(ClosedItemFixture):
                   trg.tool_result_msg("g1", "[main abc123] step")]
         out = self.stop(self.turn(report("item 214 is open."), *commit), repo)
         self.assert_refused(out, [214], "item 214 cited in a landed turn")
+
+
+class ClosedItemReadClosedTests(ClosedItemFixture):
+    """A same-turn ArtifactData read that shows a cited item closed refuses the Stop. The copy either holds the item
+    open or cannot be read, so the read alone decides that item. Each refusal names the read as its source."""
+
+    def test_read_closed_refuses_when_the_copy_holds_it_open(self):
+        # Catches: a same-turn read that shows item 214 closed ignored, so the copy's open item 214 passes the Stop.
+        repo = copy_repo("open214", OPEN_214)
+        self.assertEqual(copy_status(repo, 214), "open", "the fixture copy must hold item 214 open")
+        out = self.stop(self.turn(report("item 214 is open."), *artifact_read(214, "closed")), repo)
+        self.assert_refused(out, [214], "item 214 read closed this turn, the copy holds it open", source="read this turn")
+
+    def test_read_closed_refuses_when_the_copy_is_unreadable(self):
+        # Catches: a same-turn read that shows item 214 closed ignored when the copy cannot be read, so the Stop passes.
+        repo = copy_repo("torn-ref", CLOSED_214, torn=True)
+        out = self.stop(self.turn(report("item 214 is open."), *artifact_read(214, "closed")), repo)
+        self.assert_refused(out, [214], "item 214 read closed this turn, the copy unreadable", source="read this turn")
+
+    def test_read_closed_and_copy_closed_items_are_both_named(self):
+        # Catches: a refusal that drops the read's closed item 214, or the copy's closed item 381, when both are cited.
+        repo = copy_repo("closed381", CLOSED_381)  # 214 open, 381 closed, 383 open
+        self.assertEqual(copy_status(repo, 381), "closed", "the fixture copy must hold item 381 closed")
+        out = self.stop(self.turn(report("items 214 and 381 are open."), *artifact_read(214, "closed")), repo)
+        self.assert_refused(out, [214, 381], "items 214 and 381: 214 read closed this turn, 381 closed in the copy",
+                            source="read this turn")
+        self.assertIn("waiting copy", out.get("reason", ""), "the refusal does not name the copy's closed item 381")
 
 
 class ClosedItemCiteFormTests(ClosedItemFixture):
@@ -433,6 +465,79 @@ class ClosedItemCiteFormTests(ClosedItemFixture):
         out = self.stop(self.turn(report("Item 1 of 3 needs your pick.")), repo)
         self.assert_refused(out, [1], "Item 1 of 3, item 1 closed")
 
+    def test_en_dash_range_names_both_ends(self):
+        # Catches: "items 214–216" with an en dash read as item 214 alone, so 216 closed passes. The middle, 215, is
+        # not pinned, as with the hyphen range.
+        repo = copy_repo("closed-range", CLOSED_RANGE)
+        self.assertEqual(copy_status(repo, 216), "closed", "the fixture copy must hold item 216 closed")
+        out = self.stop(self.turn(report("items 214–216 are open.")), repo)
+        self.assert_refused(out, [214, 216], "items 214 en dash 216, 214 and 216 closed")
+
+    def test_to_range_names_both_ends(self):
+        # Catches: "items 214 to 216" read as item 214 alone, so 216 closed passes. The middle is not pinned.
+        repo = copy_repo("closed-range", CLOSED_RANGE)
+        self.assertEqual(copy_status(repo, 216), "closed", "the fixture copy must hold item 216 closed")
+        out = self.stop(self.turn(report("items 214 to 216 are open.")), repo)
+        self.assert_refused(out, [214, 216], "items 214 to 216, 214 and 216 closed")
+
+    def test_through_range_names_both_ends(self):
+        # Catches: "items 214 through 216" read as item 214 alone, so 216 closed passes. The middle is not pinned.
+        repo = copy_repo("closed-range", CLOSED_RANGE)
+        self.assertEqual(copy_status(repo, 216), "closed", "the fixture copy must hold item 216 closed")
+        out = self.stop(self.turn(report("items 214 through 216 are open.")), repo)
+        self.assert_refused(out, [214, 216], "items 214 through 216, 214 and 216 closed")
+
+    def test_semicolon_list_names_every_item(self):
+        # Catches: "items 214; 381" read as item 214 alone, so 381 closed passes.
+        repo = copy_repo("closed-pair", CLOSED_PAIR)  # 214 closed, 381 closed, 383 open
+        self.assertEqual(copy_status(repo, 381), "closed", "the fixture copy must hold item 381 closed")
+        out = self.stop(self.turn(report("items 214; 381 are open.")), repo)
+        self.assert_refused(out, [214, 381], "items 214; 381, both closed")
+
+    def test_plus_list_names_every_item(self):
+        # Catches: "items 214 + 381" read as item 214 alone, so 381 closed passes.
+        repo = copy_repo("closed-pair", CLOSED_PAIR)
+        self.assertEqual(copy_status(repo, 381), "closed", "the fixture copy must hold item 381 closed")
+        out = self.stop(self.turn(report("items 214 + 381 are open.")), repo)
+        self.assert_refused(out, [214, 381], "items 214 + 381, both closed")
+
+    def test_hyphen_item_form_names_the_item(self):
+        # Catches: "item-214" read as no cite, because the hyphen after the word blocks the number.
+        repo = copy_repo("closed214", CLOSED_214)
+        self.assertEqual(copy_status(repo, 214), "closed", "the fixture copy must hold item 214 closed")
+        out = self.stop(self.turn(report("item-214 is open.")), repo)
+        self.assert_refused(out, [214], "item-214 cited")
+
+    def test_page_hyphen_item_form_names_the_item(self):
+        # Catches: "page-item-214" read as no cite, because the hyphen after the word blocks the number.
+        repo = copy_repo("closed214", CLOSED_214)
+        self.assertEqual(copy_status(repo, 214), "closed", "the fixture copy must hold item 214 closed")
+        out = self.stop(self.turn(report("page-item-214 is open.")), repo)
+        self.assert_refused(out, [214], "page-item-214 cited")
+
+    def test_cockpit_hyphen_item_form_names_the_item(self):
+        # Catches: "Cockpit item-214" read as no cite, because the hyphen after the word blocks the number.
+        repo = copy_repo("closed214", CLOSED_214)
+        self.assertEqual(copy_status(repo, 214), "closed", "the fixture copy must hold item 214 closed")
+        out = self.stop(self.turn(report("Cockpit item-214 is open.")), repo)
+        self.assert_refused(out, [214], "Cockpit item-214 cited")
+
+    def test_dash_label_bullets_name_every_item(self):
+        # Catches: a list under a dash-bulleted label ("- Items waiting on you:") read as no cite, so 214 and 381 closed
+        # pass. The sub-bullets are the list.
+        repo = copy_repo("closed-pair", CLOSED_PAIR)
+        self.assertEqual(copy_status(repo, 381), "closed", "the fixture copy must hold item 381 closed")
+        out = self.stop(self.turn(report("- Items waiting on you:\n>   - 214: pick\n>   - 381: pick")), repo)
+        self.assert_refused(out, [214, 381], "- Items waiting on you: then sub-bullets of 214 and 381, both closed")
+
+    def test_numbers_nested_under_a_label_bullet_name_every_item(self):
+        # Catches: numbers that are sub-bullets of a label bullet ("- waiting") read as no cite, so 214 and 381 closed
+        # pass. The label holds no number, so its sub-bullets are the list, not the item's own text.
+        repo = copy_repo("closed-pair", CLOSED_PAIR)
+        self.assertEqual(copy_status(repo, 381), "closed", "the fixture copy must hold item 381 closed")
+        out = self.stop(self.turn(report("items:\n> - waiting\n>   - 214\n>   - 381")), repo)
+        self.assert_refused(out, [214, 381], "items: then a label bullet with sub-bullets 214 and 381, both closed")
+
 
 class ClosedItemFalseCiteTests(ClosedItemFixture):
     """A number in the text that is no page item is no cite. Each text refuses on its real item alone, with the false
@@ -559,6 +664,36 @@ class ClosedItemPassTests(ClosedItemFixture):
         out = self.stop(self.turn(report("item 214 is open.")), repo, trace=trace)
         self.assert_passes(out, "a repo with no waiting page, item 214 closed on its branch")
         self.assertEqual(copy_reads(trace), 0, "a repo with no waiting page read the waiting copy")
+
+
+class ClosedItemBlockNoteTests(ClosedItemFixture):
+    """The closed-item "not checked" systemMessage rides on a block for another reason, so the owner sees that the
+    check did not run. The block here is the Departs-from check of a pick with no Departs from line. The copy is
+    unreadable and item 381 is cited, so the closed-item check has a note and no refusal."""
+
+    PICK = "Two ways for item 381:\n> A (my pick): fold the guard\n> B: add a second hook"
+
+    def assert_blocked_with_note(self, out, what):
+        self.assertIsNotNone(out, "%s: no block and no note" % what)
+        self.assertEqual(out.get("decision"), "block", "%s: no block: %r" % (what, out))
+        self.assertIn("Departs-from guard", out.get("reason", ""),
+                      "%s: the block is not the Departs-from check: %r" % (what, out))
+        self.assertIn("not checked", out.get("systemMessage", ""),
+                      "%s: the block carries no not-checked systemMessage: %r" % (what, out))
+
+    def test_unlanded_block_carries_the_not_checked_note(self):
+        # Catches: the closed-item note dropped from an unlanded turn's block (the block_note spread on that path).
+        repo = copy_repo("torn-ref", CLOSED_214, torn=True)
+        out = self.stop(self.turn(report(self.PICK)), repo)
+        self.assert_blocked_with_note(out, "an unlanded turn, a pick with no Departs from line, item 381 cited")
+
+    def test_landed_block_carries_the_not_checked_note(self):
+        # Catches: the closed-item note dropped from a landed turn's block (the block_note spread on that path).
+        repo = copy_repo("torn-ref", CLOSED_214, torn=True)
+        commit = [trg.tool_use_msg("Bash", {"command": COMMIT}, id_="g1"),
+                  trg.tool_result_msg("g1", "[main abc123] step")]
+        out = self.stop(self.turn(report(self.PICK), *commit), repo)
+        self.assert_blocked_with_note(out, "a landed turn, a pick with no Departs from line, item 381 cited")
 
 
 class ClosedItemCostTests(ClosedItemFixture):
