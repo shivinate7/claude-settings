@@ -640,7 +640,8 @@ def _merge_head_page(top, base):
 def _clean_merge_page(top):
     """The blob id of the page in the clean three-way merge of HEAD and MERGE_HEAD (`git merge-tree
     --write-tree`), else ''. A conflicted merge (exit 1), a failed read, a merge with no page and an
-    unexpected output give ''. The merge is computed in memory and writes no ref and no working file."""
+    unexpected output give ''. `--write-tree` writes the merged tree and any new blobs into the object
+    store as loose objects. It writes no ref and changes neither the working tree nor the index."""
     done = _git(top, "merge-tree", "--write-tree", "HEAD", "MERGE_HEAD")
     lines = done.stdout.split() if done is not None and done.returncode == 0 else []
     if not lines:
