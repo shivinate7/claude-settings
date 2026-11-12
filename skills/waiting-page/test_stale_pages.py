@@ -1512,12 +1512,14 @@ class Stale(unittest.TestCase):
         os.remove(os.path.join(cut_short, ".complete"))
         return (("malformed JSON", malformed), ("a JSON object, not a list", an_object), ("a folder with no complete marker", cut_short))
 
-    def assert_fail_last(self, r):
-        """Exactly one line starts FAIL:, and it is the last line of stdout."""
+    def assert_fail_last(self, r, want=None):
+        """Exactly one line starts FAIL:, and it is the last line of stdout. With `want`, that line is `want` exactly."""
         lines = r.stdout.splitlines()
         fails = [line for line in lines if line.startswith("FAIL:")]
         self.assertEqual(len(fails), 1, "want one FAIL line:\n" + r.stdout + r.stderr)
         self.assertTrue(lines and lines[-1] == fails[0], "the FAIL line is not the last line:\n" + r.stdout + r.stderr)
+        if want is not None:
+            self.assertEqual(fails[0], want, "the FAIL line differs from the wording pinned for it:\n" + r.stdout + r.stderr)
 
     def assert_no_fail(self, r):
         """No line starts FAIL:."""
@@ -1762,6 +1764,41 @@ class Stale(unittest.TestCase):
                 r = self.asks_run(empty, path)
                 self.assert_one_unknown(r, "open-ask")
                 self.assert_page_word(r, "unknown", 2)
+
+    def test_fail_text_one_listed_ask_says_route_each_or_name_its_holder(self):
+        current, _ = self.current_and_behind()
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                r = self.asks_run(current, self.asks_shaped([ASK_OPEN], as_folder))
+                self.assertEqual(self.open_ask_lines(r.stdout), [open_ask_line(ASK_OPEN)],
+                                 "the open ask is not listed once, so the run read no asks:\n" + r.stdout + r.stderr)
+                self.assert_page_word(r, "current", 1)
+                self.assert_fail_last(r, FAIL_ONE)
+
+    def test_fail_text_full_size_counts_asks_and_items_and_says_route_each_or_name_its_holder(self):
+        # 40 open asks and one open item with its kept answer make 41 listed lines, so the count is plural.
+        current, _ = self.current_and_behind()
+        asks = [ask_doc("ask-%02d" % k, "2026-11-06T08:%02d:00Z" % k) for k in range(40)]
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file"):
+                items_arg, answers_arg = self.shaped([OPEN_ITEM], [(OPEN_ID, OPEN_ANSWER)], as_folder)
+                r = self.page_run(current, "--main", TEMPLATE, "--asks", self.asks_shaped(asks, as_folder),
+                                  "--items", items_arg, "--answers", answers_arg, env={})
+                self.assertEqual(len(self.open_ask_lines(r.stdout)), 40, "want 40 open-ask lines:\n" + r.stdout + r.stderr)
+                self.assertEqual(self.open_item_names(r.stdout), [(OPEN_N, OPEN_ID)],
+                                 "the open item is not named once, so the run read no item:\n" + r.stdout + r.stderr)
+                self.assert_page_word(r, "current", 1)
+                self.assert_fail_last(r, FAIL_MANY)
+
+    def test_fail_text_unreadable_list_line_is_unchanged(self):
+        # The unreadable list keeps its own FAIL line. The clause edit must not change it.
+        current, _ = self.current_and_behind()
+        for label, path in self.unreadable_asks_inputs():
+            with self.subTest(label):
+                r = self.asks_run(current, path)
+                self.assert_one_unknown(r, "open-ask")
+                self.assert_page_word(r, "current", 2)
+                self.assert_fail_last(r, FAIL_UNREADABLE)
 
     def test_open_item_run_with_answers_and_no_items_prints_an_open_item_unknown_line_and_exits_2(self):
         # --answers without --items cannot name an open item, so the run must say it read none, and must never read as clear.
@@ -2163,6 +2200,13 @@ def ask_doc(ask_id, at, text="A question for the owner?", **extra):
 def open_ask_line(ask):
     """The line --asks prints for an ask with no reply: its id, its time and its text, newlines as spaces."""
     return "open-ask: %s at %s: %s" % (ask["id"], ask["at"], ask["text"].replace("\n", " "))
+
+
+# The FAIL lines --asks prints, pinned as literal text and never read back from stale_pages.py: the count with its plural
+# suffixes, the clause that tells the writer what to do, and the unreadable-list line, which keeps its own wording.
+FAIL_ONE = "FAIL: 1 owner ask or item with no reply; route each, or name its holder, before this wake ends"
+FAIL_MANY = "FAIL: 41 owner asks or items with no reply; route each, or name its holder, before this wake ends"
+FAIL_UNREADABLE = "FAIL: the open asks could not be read; do not treat the page as clear"
 
 
 # The open item every --items, --answers and --asks case expects to see named: open, with its answer kept under answers/<id>.
