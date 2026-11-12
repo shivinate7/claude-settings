@@ -68,7 +68,8 @@ PHRASE_ONLY = "The fix would reach the owner before the review."
 PHRASE_PIN = "would reach the owner"
 # The order the past-ruling judge wrote into its reason in the boundary case, which must not reach the owner.
 JUDGE_ORDER = "Drop the question and send it again."
-# The on-the-page reason (page_form). Its check name opens it, and the form words and the owner ruling it cites stay in it.
+# Fixture for the on-the-page reason (page_form). Its check name opens it; the form words and the stamp it quotes stay in
+# it, so the reader can tie the reason to the item it names.
 PAGE_FORM_CHECK = "Pick guard"
 PAGE_FORM_FORM = "on the page, item"
 PAGE_FORM_STAMP = "2026-11-10 16:57 CST"
@@ -430,7 +431,7 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
                 self.assertNotIn(phrase, reason, "the reason tells the session what its reply holds: %r" % reason)
 
     def test_page_form_reason_keeps_the_owner_ruling_it_cites(self):
-        # Control: the stamp of the owner ruling sits at the end of the clause, so a cut that takes the clause must keep it.
+        # Control: the stamp sits at the end of the fix-step clause, so cutting the clause must leave the stamp in place.
         reason = self.page_form_reason()
         self.assertIn(PAGE_FORM_STAMP, reason, "the reason drops the owner ruling it cites: %r" % reason)
 
