@@ -4272,9 +4272,16 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             continue
         words = segment_tokens(segment)
         own_c = _segment_git_c_target(words) if words else None
+        unread = False   # a relative `-C` whose folder cannot be told: it never earns the scratchpad pass
         if own_c is not None:
             # a `--work-tree` beside the `-C` moves the files the call discards to that tree
             root = command_root(segment, cwd) if GIT_WORK_TREE_RE.search(segment) else _absolute(own_c, cwd)
+            # Git reads a relative `-C` from the folder the shell is in, which a `cd` ahead of it moves. Read so
+            # where the cwd is this session's scratchpad, the one place a root decides a pass on its path alone.
+            if (not GIT_WORK_TREE_RE.search(segment) and not os.path.isabs(_absolute(own_c, ""))
+                    and under_session_scratchpad(_absolute(own_c, cwd), session_id, any_temp=True)):
+                root = _absolute(own_c, shell_dir) if shell_dir else root
+                unread = not shell_dir or any(mark in root for mark in "$%`")
         else:
             whole_root = whole_root or [command_root(stripped, cwd)]
             root = whole_root[0]
@@ -4285,11 +4292,11 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         resolved = checkout_conflict_resolve(segment, root)
         if resolved:
             continue
-        # This session's own scratchpad: private by path, so nothing shared can be lost.
-        # A `-C` folder reads against the folder the shell is in (a `cd` ahead of it), not the shell's cwd
-        # the root above was read from, so a call with its own `-C` passes only when that folder is private too.
-        if under_session_scratchpad(root, session_id, any_temp=True) and (
-                own_c is None or (shell_dir and under_session_scratchpad(shell_dir, session_id, any_temp=True))):   # the session id in the path is the proof, so TMPDIR may name another folder
+        # This session's own scratchpad: private by path, so nothing shared can be lost. A relative `-C` that
+        # cannot be read (an untold `cd`, an unread variable) fails closed: its folder may be any checkout.
+        if unread:
+            refuse(tool, "deny", "shared-tree", TREE_DENY_REASON, matched)
+        if under_session_scratchpad(root, session_id, any_temp=True):   # the session id in the path is the proof, so TMPDIR may name another folder
             continue
         # The subject read. An empty subject is a silent pass. An unreadable subject is allowed
         # and logged under its OWN rule, so a reader can tell "I could not confirm this" from
@@ -5880,6 +5887,27 @@ SCRATCHPAD_REMOVERS = ("rm", "mv")
 SCRATCHPAD_WRITE_PASSES = 8   # shell write targets listed from one call, at most
 
 
+def ln_unlinks(command: str) -> bool:
+    """True when a segment of `command` runs `ln` with `-f` or `--force`, which unlinks the link name
+    before it links, so it destroys that file as `rm` does. Read for the whole call, not per target: an
+    `ln` with no `-f` over a file that exists fails, so a second `ln` beside a forced one loses nothing
+    by the wider reading. A short cluster stops at `-S` or `-t`, which take a value."""
+    for segment in split_segments(command):
+        tokens = segment_tokens(segment)
+        at = resolve_command(tokens) if tokens else None
+        if at is None or basename(tokens[at]) not in ("ln", "ln.exe"):
+            continue
+        for token in tokens[at + 1:]:
+            if token == "--":
+                break
+            if token.startswith("--"):
+                if len(token) > 2 and "--force".startswith(token):
+                    return True
+            elif token.startswith("-") and "f" in re.split("[St]", token[1:])[0]:
+                return True
+    return False
+
+
 def scratchpad_agent(payload) -> str:
     """The valid `agent_id` of the call, or '' for the top-level session and a call with no valid id."""
     agent = payload.get("agent_id") if isinstance(payload, dict) else None
@@ -5905,11 +5933,12 @@ def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
             if SCRATCHPAD_WORD not in command and SCRATCHPAD_WORD not in cwd:
                 return agent, session, files, removed
             command, found = strip_heredoc_bodies(command), {}
+            unlinks = ln_unlinks(command)
 
             def in_scratchpad(word, at, verb):
                 full = shell_abs(word, at)
                 if full and SCRATCHPAD_WORD in full and full not in files and under_session_scratchpad(full, session):
-                    found[word] = (full, verb in SCRATCHPAD_REMOVERS)
+                    found[word] = (full, verb in SCRATCHPAD_REMOVERS or (verb == "ln" and unlinks))
                     return True
                 return False
 
@@ -5929,8 +5958,8 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
     """Rule scratchpad-owner, the write form. A call with no `agent_id` clears the record of each scratchpad
     file it writes: the file is its own now. An agent's call records the agent as the writer of each file it
     writes, and is refused when a file's record named another agent. A refused write moves no record; an owner
-    override that lifts the refusal moves it (`refuse`'s `on_lift`), because an approved write lands. A file an `rm` or `mv` names is judged but not recorded. A first write, a rewrite of its own file, a file
-    that no longer exists and a file whose writer has finished (`scratchpad_mark_finished`) pass (`scratchpad_writer_of`), except that an `rm` or `mv` of a finished writer's file is still refused. Run once the call's other rules passed."""
+    override that lifts the refusal moves it (`refuse`'s `on_lift`), because an approved write lands. A file an `rm`, `mv` or `ln -f` names is judged but not recorded. A first write, a rewrite of its own file, a file
+    that no longer exists and a file whose writer has finished (`scratchpad_mark_finished`) pass (`scratchpad_writer_of`), except that an `rm`, an `mv` or an `ln -f` (`ln_unlinks`) of a finished writer's file is still refused. Run once the call's other rules passed."""
     agent, session, files, removed = scratchpad_writes(payload, tool, tool_input, cwd)
     if not agent:
         for full in files:
