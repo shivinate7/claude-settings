@@ -22,7 +22,7 @@ def step_refuse(name, transcript, message, target=ROLE_OTHER, carries=(), lacks=
 def step_allow(name, transcript, message, target=ROLE_OTHER):
     """A send_message the guard lets through silently."""
     add("lane-one-topic: " + name, "allow", tool=SEND_MESSAGE, cwd=NOGIT, silent=True, transcript=transcript,
-        env=ROLE_ENV, session_id=target, message=message)
+        env=ROLE_ENV, session_id=target, message=owner_brief(message))
 
 
 # Refused: the brief's topic differs from the lane's. Each brief names the lane's own step, so a match on the step

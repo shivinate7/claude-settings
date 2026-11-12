@@ -130,7 +130,7 @@ mtc_allow("a status line with a stamp mid-line is allowed",
 # Passes: a lane brief's first line holds no stamp, so the later stamp is not judged. The lane fixture lets the
 # brief through lane-one-topic, so this case isolates this rule.
 mtc_allow("a lane brief whose first line holds no stamp is allowed, though a stamp follows it",
-          "Lane brief: icon-a. Topic: icons.\nCoordinator, 13:40 CST: go",
+          owner_brief("Lane brief: icon-a. Topic: icons.\nCoordinator, 13:40 CST: go"),
           transcript=role_path("step-topic-lane"))
 # Refused: a label of four words is a header, so this stamp 18 minutes ahead is refused.
 mtc_refuse("a label of four words, Owner of the lane, 13:40 CST, is a header and is refused",

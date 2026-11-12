@@ -75,6 +75,7 @@ from precompact_handoff import PREMISE_KINDS  # noqa: E402,F401  the one home of
 import precompact_handoff as ph  # noqa: E402,F401  the one home of the handoff and flag paths
 import local_time  # noqa: E402,F401  the one home of the inbox paths
 import mutate_shared  # noqa: E402,F401  module_files: every module a copied guard may import
+import shared_names  # noqa: E402  the one home of the owner-unread phrases (rule lane-one-topic)
 
 # Assembled, so this file never holds the token whole.
 ENV = "." + "env"
@@ -114,7 +115,7 @@ FAMILIES = {
     "hook-bypass": "a git commit, merge or push that skips the git hooks: core.hooksPath on the command or in the environment, --no-verify, and -n on commit; the mutation tool's own exemption",
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, while a branch of the lane is ahead of its repo's default branch with no pull request, or when the lane's record cannot be read",
-    "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread",
+    "lane-one-topic": "one lane, one topic: a send_message brief whose Topic differs from the lane's cs-topic, or names none, is refused; an older lane with no cs-topic is judged by its cs-step tags; a message without the marker passes unread; a lane brief, sent or started, with no owner-unread sentence (both phrases, whitespace- and case-blind) is refused",
     "message-time-matches-clock": "a send_message whose first non-blank line opens with a header stamp (a label of 1 to 4 words, then a comma, a colon or a spaced dash, then H:MM or HH:MM with optional seconds, then CST or CDT in any case) is refused when the stamp is wrong for the clock: a CST or CDT label that is not the clock's zone, a dated stamp more than 1 minute ahead, or an undated stamp 2 to 60 minutes ahead; an undated stamp more than 60 minutes ahead, or behind the clock, passes; a stamp later in the message, mid-line, on a status line, or on another tool passes. A dated ISO instant with an offset more than 1 minute ahead is refused too in `added` of an ArtifactData write to collection items (a whole instant, or a time fragment such as T20:24:00Z), `updatedAt` of a Write to a roadmap step file, each instant an Edit or MultiEdit writes to a roadmap step file (with or without a key), and the last literal `updatedAt` key in a Bash command (bare, quoted, or followed by `]`; then `:`, `=` or jq's `|=`; then a single- or double-quoted value); a time in prose, another field or collection, or a value with no offset passes",
     "sendmessage-session-id": "SendMessage whose to starts session_: refused, since a session_ id is not an agent name and delivery to one is unmeasured; mcp__claude-code-remote__send_message takes the session_id. Any other to, and that tool, pass this rule",
     "records-page": "a lane commit of the generated records page: refused unless the page is the base's",
@@ -441,6 +442,22 @@ def chained_ask(name, command, **kw):
     more = kw.pop("carries", ())
     carries = (ALONE,) + ((more,) if isinstance(more, str) else tuple(more))
     sh(name, command, "deny", CHAIN_ASK, carries=carries, **kw)
+
+
+# ---- the owner-unread sentence of a lane brief (rule lane-one-topic). One home of the phrases: the tuple
+# shared_names.OWNER_UNREAD_PHRASES. A shared_names that lacks the tuple reads ("", "") here, so this file still loads
+# on the old guard: a phrase case then fails on its verdict, never on an import.
+OWNER_FIRST, OWNER_LAST = (tuple(getattr(shared_names, "OWNER_UNREAD_PHRASES", ())) + ("", ""))[:2]
+OWNER_SENTENCE = ("The %s this brief: send each override line, owner act and question to the Coordinator in the %s."
+                  % (OWNER_FIRST, OWNER_LAST))
+
+
+def owner_brief(message):
+    """`message` with the owner-unread sentence appended, when it is a lane brief (it holds the `Lane brief:` marker).
+    Any other message comes back as it was."""
+    if "Lane brief:" not in message:
+        return message
+    return message + "\n" + OWNER_SENTENCE
 
 
 # The cases after the helpers above are section files in tests/guard/. A section file's first line is

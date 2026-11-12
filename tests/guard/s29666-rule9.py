@@ -111,7 +111,7 @@ add("lane-one-topic: lane tag with cs-topic alpha and a brief for topic colors i
     model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-one-topic: lane tag with cs-topic alpha and a brief for topic alpha is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS + ["cs-topic:alpha"],
-    prompt=LANE_GRANT + "\nLane brief: icon-a. Topic: alpha.", effort=LANE_EFFORT_FIELD,
+    prompt=owner_brief(LANE_GRANT + "\nLane brief: icon-a. Topic: alpha."), effort=LANE_EFFORT_FIELD,
     model="sonnet", source_url=LANE_SOURCE_URL)
 # A start's brief marker must sit on the first line after the Grant line. A marker past a preamble line is read by
 # no one, so this start names topic colors on a lane of topic alpha and passes. The marker-first starts above are

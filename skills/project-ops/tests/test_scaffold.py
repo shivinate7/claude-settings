@@ -23,7 +23,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(SKILL, "scripts"))
 sys.path.insert(1, os.path.join(SKILL, "..", "..", "lint"))
+sys.path.insert(2, os.path.join(SKILL, "..", "..", "hooks"))
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+import shared_names  # noqa: E402  the one home of the owner-unread phrases (rule lane-one-topic)
 import protect  # noqa: E402
 import scaffold  # noqa: E402
 
@@ -355,6 +357,21 @@ class Scaffold(TempDest):
         self.assertIn("Run `merge --lane-lint` from the main checkout, never from a session or agent "
                       "isolated in a worktree: Claude Code's worktree check can refuse it there.", flat,
                       "templates/brief.md does not say where lane lint runs")
+
+    def test_brief_says_owner_never_reads_it(self):
+        sents = self.brief_sentences()  # the scope first: the template is the lane brief
+        # The phrases are read in the method, not at import, so this file still loads on a shared_names without the
+        # tuple. The Coordinator word is case-sensitive: the template's lowercase `coordinator` is no sentence of this claim.
+        phrases = getattr(shared_names, "OWNER_UNREAD_PHRASES", ())
+
+        def holds_all(sentence):
+            flat = " ".join(sentence.split()).casefold()
+            return all(p.casefold() in flat for p in phrases) and re.search(r"\bCoordinator\b", sentence) is not None
+
+        self.assertTrue(any(holds_all(s) for s in sents),
+                        "no one sentence of templates/brief.md holds both owner-unread phrases and the word Coordinator")
+        # An empty tuple would pass any sentence with Coordinator, so the tuple's home is asserted after the sentence.
+        self.assertTrue(phrases, "shared_names holds no OWNER_UNREAD_PHRASES, so the brief's owner-unread sentence has no home")
 
     def test_writes_nothing_private(self):
         run("--dest", self.dest, "--repo", "acme/widgets")
