@@ -77,7 +77,7 @@ Each next act has an age limit, in one constant, `PR_STATE_AGE_HOURS` in merge/m
 
 ## The round-age measure
 
-Measured 13:10 CST Nov 12, by REST (`gh api repos/shivinate7/claude-settings/...`, no GraphQL), on claude-settings only. Sample: every eighth PR from #1100 to #2863, plus all 351 open PRs: 524 PRs, 393 with a review log, created 2026-11-02 to 2026-11-12. A record's time is its comment's `created_at`.
+Measured 13:10 CST Nov 12, by REST (`gh api repos/shivinate7/claude-settings/...`, no GraphQL), on claude-settings only. Sample: every eighth PR from #1100 to #2860, plus all 351 open PRs: 524 PRs, 393 with a review log, created 2026-11-02 to 2026-11-12. A record's time is its comment's `created_at`.
 
 | Age | Samples | Median | 90th | Max | Over the limit |
 | --- | --- | --- | --- | --- | --- |
@@ -85,9 +85,9 @@ Measured 13:10 CST Nov 12, by REST (`gh api repos/shivinate7/claude-settings/...
 | One record to the next (limit 72 h) | 709 | 0.6 h | 10.8 h | 56.8 h | 0 |
 | Last record to merge (limit 24 h) | 47 | 7.8 h | 12.6 h | 22.3 h | 0 |
 
-- No round waited past 57 h before the next one, so 72 h stops no round that went on. Two PRs got their first record after 72 h (the longest 122 h). The opened-to-first-record row is context only; lane round 1 ages from the last update.
+- No gap between two records passed 57 h. Of the 709 gaps, 217 add exactly one round (max 45.7 h; 363 add none, max 56.8 h), so 72 h flags no round that went on. Two PRs got their first record after 72 h (the longest 122 h). The opened-to-first-record row is context only; lane round 1 ages from the last update.
 - Of 288 open PRs with a record, 100 are over 72 h since the newest record (max 118 h); of 63 open with no record, 23 are over 72 h since the last update. They are still open: they may yet get a round. They are the stalled PRs the ledger exists to show.
-- 24 h for batch holds all 47 merges, with 1.7 h to spare. A main-red hold runs past it by design and shows red.
+- 24 h for batch holds all 47 merged PRs that have a record, with 1.7 h to spare. The other 37 merged PRs in the sample have no record, so they are not measured. A main-red hold runs past it by design and shows red.
 - A tighter limit would flag live work: 24 h on one record to the next flags 30 of 709.
 
 A main-red hold shows on each batch line it holds.
