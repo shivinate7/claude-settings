@@ -102,7 +102,7 @@ except ImportError:  # without it a heredoc body may name a log: at worst a stal
 try:
     sys.path.insert(1, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
     import _transcript  # the one reader of a job's finish: notices, TaskStop results (lint/_transcript.py)
-except ImportError:  # without it no notice can close a job, so Stop prints nothing
+except ImportError:  # without it no notice can close a job: Stop prints nothing on stdout and names it on stderr
     _transcript = None
 try:
     from shared_names import TASK_NOTIFICATION_TAG  # the one home of the notice tag
@@ -531,7 +531,10 @@ def open_call(path, size):
 
 
 def stop():
-    if not TASK_NOTIFICATION_TAG or _transcript is None:  # every finished job would look open: say nothing
+    if _transcript is None:  # every finished job would look open: stdout stays silent, stderr names the cause
+        print("stall_watch: lint/_transcript.py could not be loaded, so Stop lists no jobs", file=sys.stderr)
+        return 0
+    if not TASK_NOTIFICATION_TAG:  # likewise without the tag: say nothing
         return 0
     try:
         call = json.load(sys.stdin)

@@ -230,11 +230,13 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        spawn call's `name`; the latest spawn with that name wins. The state is read by
                        `_transcript.agent_state`: a foreground result, or a background launch closed by a terminal
                        notice or a TaskStop result, is finished; an async_launched result with no close is running.
-                       A state the read cannot place asks. A send to `main`, a name with no spawn, a running
+                       A spawn whose result is an error ran no agent and is skipped. A state the read cannot place
+                       asks, and so does a transcript record the read cannot parse (noted as
+                       `resume-finished-reviewer-unparsed`). A send to `main`, a name with no spawn, a running
                        spawn, a spawn of another role, and a send with an agent_id pass. A missing or unreadable
                        transcript passes and is noted as `resume-finished-reviewer-unread`. The reason says to spawn a
-                       fresh reviewer and pass it the prior report. One transcript read per judged send, no
-                       subprocess, no network. An override lifts it. (roles-resume-by-name)
+                       fresh reviewer and pass it the prior report. One transcript read per judged send, shared with
+                       review-record-after-round, no subprocess, no network. An override lifts it. (roles-resume-by-name)
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   gh-write-cloud       deny. In a cloud session, a gh write: `gh pr` create, merge, comment, edit, close, review or
                        ready; `gh issue` create, comment, edit or close; `gh api` with a write method, or with a field
@@ -6259,10 +6261,10 @@ def judge(payload) -> None:
         refuse(tool, "deny", "review-record-after-round", record_reason, record_matched)
 
     # A SendMessage to a reviewer or design-reviewer spawn that has finished (rule resume-finished-reviewer).
-    resume_decision, resume_reason, resume_matched, resume_unread = resume_finished_hit(
+    resume_decision, resume_reason, resume_matched, resume_note = resume_finished_hit(
         tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", bool(payload.get("agent_id")))
-    if resume_unread:
-        record(tool, "noted", "resume-finished-reviewer-unread", tool)
+    if resume_note:
+        record(tool, "noted", resume_note, tool)
     if resume_decision == "deny":
         refuse(tool, "deny", "resume-finished-reviewer", resume_reason, resume_matched)
     if resume_decision == "ask":
