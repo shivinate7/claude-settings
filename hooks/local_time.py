@@ -291,30 +291,50 @@ def page_note_text(data):
     return "Waiting page note%s: %s" % ((", " + " ".join(parts)) if parts else "", data["note"])
 
 
+def say_page_note(messages):
+    """One PostToolUse additionalContext line for the page-note hook, or nothing when there is no message."""
+    if messages:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse",
+                                                 "additionalContext": " ".join(messages)}}))
+
+
 def page_note(raw):
     """PostToolUse on ArtifactData: saves the note of each new answer a `get` of `answers` returned.
-    Saves nothing for any other call. Prints a PostToolUse additionalContext JSON when a save fails."""
+    Saves nothing for any other call. Prints one PostToolUse additionalContext JSON line when a save fails
+    or a note is skipped because its answer names another session (the item ids, never the note)."""
     hook = json.loads(raw.decode("utf-8"))
     inp = hook.get("tool_input")
     if (hook.get("tool_name") != "ArtifactData" or not isinstance(inp, dict)
             or inp.get("action") != "get" or inp.get("collection") != "answers"):
         return
     paths = inbox_paths(hook.get("session_id"))
+    candidates = []
+    for doc_id, data in _documents(hook.get("tool_response")):
+        note = data.get("note")
+        if data.get("parked") is True:
+            continue  # a parked act's note is the entry's own text, not the owner's words
+        if isinstance(note, str) and note.strip() and note.strip() != "accepted pick":
+            candidates.append((doc_id, data))
+    if not candidates:
+        return  # no note to save or skip: the large override module is never loaded
     try:
         from override import remote_session_id  # lazy: override imports local_time inside a function
         own = remote_session_id()
     except ImportError:
-        own = None
-    notes = []
-    for doc_id, data in _documents(hook.get("tool_response")):
-        note = data.get("note")
+        own = None  # no owner to compare: every note saves
+    notes, skipped = [], []
+    for doc_id, data in candidates:
         if isinstance(data.get("session"), str) and own is not None and data["session"] != own:
-            continue  # the note belongs to another session's item; that session captures it
-        if data.get("parked") is True:
-            continue  # a parked act's note is the entry's own text, not the owner's words
-        if isinstance(note, str) and note.strip() and note.strip() != "accepted pick":
+            skipped.append(str(data.get("item") or doc_id))  # another session's item: save nothing, tell this one
+        else:
             notes.append((doc_id, data))
+    messages = []
+    if skipped:
+        messages.append("Waiting page note: the answer to item %s names another session, so its note was not saved. "
+                        "If you inherited the item, jot the note by hand from the answer you read."
+                        % ", ".join(skipped))
     if paths is None or not notes:
+        say_page_note(messages)
         return
     keys_path = page_notes_path(hook.get("session_id"))
     try:
@@ -340,9 +360,8 @@ def page_note(raw):
         except OSError as e:
             print("local_time: page note key: %s" % e, file=sys.stderr)
     if failures:
-        print(json.dumps({"hookSpecificOutput": {
-            "hookEventName": "PostToolUse",
-            "additionalContext": not_saved("page note", "; ".join(failures))}}))
+        messages.append(not_saved("page note", "; ".join(failures)))
+    say_page_note(messages)
 
 
 def grant_override(raw, at):

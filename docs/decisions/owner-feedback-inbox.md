@@ -20,12 +20,12 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   Each answer is appended as one block when its `data.note` is non-empty, not `accepted pick`,
   and not a parked-line act (`parked: true`, whose note is the entry's own text).
   The block is stamped with the answer's `at` in Central, with the one-line text `Waiting page note, item <n> (<item>): <note>`.
-  An answer whose `session` names another session than the reader's (env `CLAUDE_CODE_REMOTE_SESSION_ID`) is skipped; an unknown id on either side saves as before.
+  An answer is skipped only when the env `CLAUDE_CODE_REMOTE_SESSION_ID` reads `cse_<x>` (the reader is `session_<x>`) and the answer's `session` is a string other than `session_<x>`. That includes an empty string and a `cse_` form. An answer with no `session`, or a `session` that is not a string, saves. So does every answer when the env is unset or of another shape. A skipped answer that holds a note prints one `additionalContext` line naming each skipped item id, never the note, so the new owner of an inherited item jots the note by hand.
   The label leaves out a missing n or item.
   The label adds no line, so a note is a burst by the Burst bullet's own test. The file `<session_id>.inbox.pagenotes` holds
   one key `<url>|<doc_id>|<at>` per saved note, and a repeat read saves nothing. Cost: one process
   start per `ArtifactData` call. Files are written only when a read of `answers` returns a new note:
-  the inbox and the key file. A failed save tells the session to jot the note by hand.
+  the inbox and the key file. A failed save, and a skip for another session's item, each tell the session to jot the note by hand; both share one line when they come in one read.
 - **Notices.** A message that starts with a tag in `shared_names.MACHINE_TAGS` is agent or system
   text. It is never captured, and it does not count toward a burst. Hand-backs and the
   `<cross-session-message` frame are skipped. That skip is a bandaid (owner ruling 2026-11-01

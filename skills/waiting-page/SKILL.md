@@ -329,7 +329,7 @@ A save on the page sends a comment to Claude when the page allows it. The commen
 sessions that watch the page. Only the owning session reads, routes and closes its items, except that the writer closes an item on a park answer. On a `lane` item, the park branch has it tell first. It reads
 the answers at each wake, and at the start of each turn while it has an item open (the writer also
 while `meta/page.parked` is not empty): `ArtifactData list answers`. That read is the fallback when no wake comes. A peer session never
-relays an answer's text. It sends only the page URL, the item id and the act, and the receiver checks the answer itself (decision relayed-grant-read-from-page). The page-note capture saves no note from an answer whose `session` names another session; routing never reads `session`. An answer typed in the chat counts the same. A chat answer to an open item: the
+relays an answer's text. It sends only the page URL, the item id and the act, and the receiver checks the answer itself (decision relayed-grant-read-from-page). When `CLAUDE_CODE_REMOTE_SESSION_ID` is set, the page-note capture saves no note from an answer whose `session` names another session and prints a line naming the skipped item; with the env unset it saves every note. Routing never reads `session`. An answer typed in the chat counts the same. A chat answer to an open item: the
 writer adds the answer and its time to the item's `context`, and the writer closes it. Nothing is
 written to `answers/`, so steps 2 to 4 of "Route and close" skip their delete.
 The writer also sets `lastAnswer` from the chat answer, with the time the owner gave it.
@@ -339,8 +339,8 @@ The writer also sets `lastAnswer` from the chat answer, with the time the owner 
   `meta/page`, or from the `Watch:` line of the project-ops role handoff
   (`templates/role-handoff.md`), which names the watch for its successor. A session that inherits
   items also rewrites each item's `owner` to itself: `owner` is the session that reads the answer.
-  The page-note capture skips an inherited item's answer whose `session` names the old owner.
-  So when it re-reads that answer, it jots the note to the feedback inbox by hand, like a chat message.
+  With `CLAUDE_CODE_REMOTE_SESSION_ID` set, the page-note capture skips an inherited item's answer whose `session` names the old owner, and says so in one line naming the item.
+  So when it re-reads that answer, it jots the note to the feedback inbox by hand, like a chat message. With the env unset the capture saves the note itself.
   It stops watching (`ArtifactComments` action `watch` with `on: false` and the page URL) when it
   has no open item and is not the writer, and at step 1 of a project-ops rotation.
 - At a comment wake, never at turn start, the writer saves `ArtifactData list receipts`, `answers` and `items`, and `meta/page`, to a folder. It lists `answers`, `items` and `receipts` in full: `query.limit` 1000, follow `next_cursor` until it is empty, as the export flow does. A cut list gives wrong lines. It runs `python3 ~/.claude/skills/waiting-page/stale_pages.py --unread <dir>`. For each `answer-unread` line it sends the session in the item's `owner` a `send_message` with the page URL, the item id and the act, never the answer text.
