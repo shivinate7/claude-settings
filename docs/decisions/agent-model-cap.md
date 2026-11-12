@@ -72,6 +72,7 @@ record-writing, and the owner will measure cost and quality. Writing prose and r
 | decision watch (`hooks/decision_watch.py`) | haiku | xhigh |
 | decision watch mod (`mods/decision-watch`, the Stop-time judge) | haiku, through `$.model.complete`, the app login; the python path above stays xhigh | session default: the call passes no effort field |
 | every other hook and guard | no model; plain code | n/a |
+| local_time (`hooks/local_time.py`, UserPromptSubmit only; a model call only for a plain owner ask with the whole word `override` or `opus` that passes its gates, plus one scope read after a yes, for an opus ask that names no role and has an earlier prompt; a failed plain ask grants nothing; a first-word `override` with a reason still grants a one-act override) | haiku, through `decision_watch.invoke_model` | low |
 
 The Agent prompt judge refuses an audit Explore (a brief that asks it to audit, review, judge, rate or
 compare meaning) unless the call sets model sonnet or opus; haiku or no model refuses. Explore stays a
@@ -97,7 +98,7 @@ unless the file is a Haiku role. It also fails an `agents/*.md` body that states
 - With no pointer checkout the rule stands down and logs nothing. A table or agents folder in the pointer checkout that cannot be read passes the spawn and logs one `agent-role-model-unread` line, which `lint/guard_log_report.py` counts as a note for that rule.
 - The override lifts an above-row refusal (owner, 2026-11-01 17:25 CST, item 127, pick a; `never_lifted` in `hooks/guard.py` no longer reads it). No override lifts the no-model refusal (`owner-override`, the model guards).
 
-Cost: one read of this record per spawn. A spawn with no model adds one read of the agent files. No process starts, and no file is written but the unread line. Kind of risk: incident. Landed 2026-10-30.
+Cost: one read of this record per spawn (unmeasured). A spawn with no model adds one read of the agent files (unmeasured). No process starts, and no file is written but the unread line. Kind of risk: incident. Landed 2026-10-30.
 
 Incident one: briefs named sonnet for haiku-row roles until 13:59 CDT on 2026-10-30. Incident two: the round-2 builder of PR 872 named no model. The cloud CLI had no `CLAUDE_CODE_SUBAGENT_MODEL`, and `agents/builder.md` has no pin, so it inherited the lane's Opus (note `nao-builder-ran-opus`).
 
@@ -135,7 +136,7 @@ tag beside its target's. The rule runs after `lane-effort-pin`, so a call that b
 first. An owner override lifts it.
 The roadmap build shares this read (`github_slug` and `blob_url` in `skills/roadmap/build.py`). For an ssh origin with a port, a non-GitHub https origin or a POSIX local path, the build links its last two path segments on github.com.
 Cost, per lane `create_session` only: one extras file read, and one `git remote get-url origin` process start
-when the extras name no repo. A deny writes one guard.log line. No other file, and no timer.
+when the extras name no repo (unmeasured). A deny writes one guard.log line (unmeasured). No other file, and no timer.
 Known gaps: a Windows drive path with backslashes reads as no origin. A `cwd` below the repo root reads no
 extras file. Tags set by `set_session_tags` after the start are not judged.
 Kind of risk: incident. Landed 2026-11-01.
@@ -189,7 +190,8 @@ the run's `modelUsage` and the agent's own report of its model id. Background ca
 | builder, no pin | unset | haiku | haiku |
 
 So a pin in `agents/*.md` beats the variable in both directions. A reviewer spawn that names no model
-runs Haiku even where the variable is `sonnet`; rounds 2 and 3 must set the model per spawn.
+runs Haiku even where the variable is `sonnet`; rounds 2 and 3 and a fix check must set the model per spawn
+(owner, item 444 a, 2026-11-08 15:04 CST).
 A running cloud thread does not load `~/.claude/agents` files written mid-session: its Agent tool
 refused `reviewer`, `designer` and `builder` as unknown types. A process started after the write
 loaded all of them. Unknown: whether the cloud thread harness itself, as against a headless run in
