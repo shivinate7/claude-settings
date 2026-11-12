@@ -13241,6 +13241,20 @@ class MergeRoleCheck(CloudSession):
             with self.subTest(remote=remote):
                 self.assert_refused(**{**LOCAL_ENV, "CLAUDE_CODE_REMOTE": remote})
 
+    def test_a_confirm_with_no_session_id_and_no_claude_code_env_is_not_refused_by_the_role_check(self):
+        # An owner at a terminal runs merge with no session id and no CLAUDE_CODE* env. The role check is for a session, so it does not refuse
+        # this run, and the standing grant (absent here, so on) does not refuse it. The control: the same run with a session id and no role is refused.
+        with unittest.mock.patch.dict(os.environ):
+            for name in [n for n in os.environ if n.startswith("CLAUDE_CODE")]:
+                os.environ.pop(name)
+            rc, out, err = self.run_local("7", "--confirm", CLAUDE_CODE_SESSION_ID=None)
+        text = out + err
+        self.assertNotIn("this session may not merge", text,
+                         "the role check refused an owner's run with no session id and no CLAUDE_CODE env: %s" % text)
+        self.assertNotIn("standing merge grant is off", text,
+                         "the standing grant refused an owner's run with no session id: %s" % text)
+        self.assert_refused(**LOCAL_ENV)  # control: a session id with no recorded role stays refused
+
     # ---- the writer: merge --role <tier>
     def test_role_writes_this_sessions_role_and_makes_the_state_folder(self):
         self.assertEqual(self.role_files(), {})
