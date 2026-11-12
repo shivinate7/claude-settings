@@ -2800,7 +2800,8 @@ def case_override_queued_command_typed_still_grants():
     for origin_name, origin in (("no origin", None), ("a human origin", {"kind": "human"})):
         for prompt_name, prompt, kind, length in (
                 ("`override 15m please`", "override 15m please", "timed", timedelta(minutes=15)),
-                ("`override`", "override", "once", OV_ONCE)):
+                ("`override`", "override", "once", OV_ONCE),
+                ("`override that`", "override that", "once", OV_ONCE)):
             path = transcript_file(own + [queued_record(prompt, origin)])
             cfg, judge, _, _, err = ask_type(prompt, transcript=path)
             name = "a queued command with %s, %s" % (origin_name, prompt_name)
@@ -2809,6 +2810,34 @@ def case_override_queued_command_typed_still_grants():
             got = ov_pass(cfg)
             check("override queued control: %s: grants a %s override" % (name, kind), ends_after(got, kind, length),
                   "got %r; files %r" % (got, ov_pass_files(cfg)))
+
+
+# The plain ask's words, with a queued record as the prompt's own record. `override that` is a keyword form: the
+# keyword route refuses it, and the plain ask does not judge it.
+QUEUED_PLAIN_PROMPTS = (
+    ("`yes override that for 15 minutes please`", "yes override that for 15 minutes please"),
+    ("`override that`", "override that"),
+)
+
+
+def case_override_queued_plain_ask_grants_nothing():
+    # The plain ask reads the prompt's own record through the tail reader, not the owner-turn test, so the attachment's
+    # origin must keep the judge out. The judge answers yes: a missing gate shows as a judge call and a grant.
+    own = [owner_turn("set up the lane")]
+    for origin_name, origin in QUEUED_NOT_OWNER:
+        for prompt_name, prompt in QUEUED_PLAIN_PROMPTS:
+            path = transcript_file(own + [queued_record(prompt, origin)])
+            ask_no_grant("a queued command with %s, %s" % (origin_name, prompt_name), prompt, {None}, transcript=path)
+
+
+def case_override_queued_plain_ask_typed_still_reaches_the_judge():
+    # The control for the case above: the same record with no origin, or a human origin, is the owner's typed turn. The
+    # plain prompt reaches the judge once and grants the 15-minute override. Only the origin differs.
+    own = [owner_turn("set up the lane")]
+    for origin_name, origin in (("no origin", None), ("a human origin", {"kind": "human"})):
+        path = transcript_file(own + [queued_record("yes override that for 15 minutes please", origin)])
+        ask_grants("a queued command with %s, `yes override that for 15 minutes please`" % origin_name,
+                   "yes override that for 15 minutes please", "timed", timedelta(minutes=15), transcript=path)
 
 
 def main():
@@ -2932,6 +2961,8 @@ def main():
         case_override_bare_number_with_words_is_not_the_fast_path()
         case_override_queued_command_from_a_harness_or_peer_grants_nothing()
         case_override_queued_command_typed_still_grants()
+        case_override_queued_plain_ask_grants_nothing()
+        case_override_queued_plain_ask_typed_still_reaches_the_judge()
     finally:
         shutil.rmtree(ROOT, ignore_errors=True)
     if FAILED:
