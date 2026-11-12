@@ -941,12 +941,17 @@ def offers_a_pick(text):
     return len(numbers) >= 2 and context
 
 
+def has_open_question(text):
+    """True when `text` holds a "?" outside quotes, backticks and blockquoted lines. The one home for the
+    question test: the Input Needed check and the lane ack both call it."""
+    kept = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith(">"))
+    return bool(QUESTION_MARK_RE.search(QUOTED_RE.sub("", kept)))
+
+
 def asks_a_question(text):
     """True when the Input Needed item holds a sentence that ends in "?" outside quotes, backticks and
     blockquoted lines (questions-reach-page: a question for the owner, whether or not it offers a pick)."""
-    section = input_needed_section(text)
-    kept = "\n".join(line for line in section.splitlines() if not line.lstrip().startswith(">"))
-    return bool(QUESTION_MARK_RE.search(QUOTED_RE.sub("", kept)))
+    return has_open_question(input_needed_section(text))
 
 
 # compaction-carry: after a compaction the session reports two lines, `Recovered:` (what it got back
@@ -974,8 +979,7 @@ def message_asks(rec):
                             if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str))
     if not isinstance(content, str):
         return False
-    kept = "\n".join(line for line in FENCE_RE.sub(" ", content).splitlines() if not line.lstrip().startswith(">"))
-    return bool(QUESTION_MARK_RE.search(QUOTED_RE.sub("", kept)))
+    return has_open_question(FENCE_RE.sub(" ", content))
 
 
 def _reply_text(rec):
@@ -3224,8 +3228,8 @@ def main():
     cannot = ""
     if last_human_idx is not None and cannot_refused is not None:
         try:
-            # A try backs a claim only in this turn: after the last message, a peer's included. A peer's reply to a send of
-            # this turn is an ack and starts no turn, as in the question check.
+            # A try backs a claim only in this turn: after the last message, a peer's included. message_asks keeps a
+            # peer reply that holds a "?" as an answer that starts a turn; a plain-text reply is an ack and starts none.
             acks = {sender: {sender} | PARENT_TARGETS for sender in map(peer_sender, records) if sender}
             idx = last_incoming_index(records, acks, message_asks)
             ack_turn = records if idx is None else records[idx + 1:]
