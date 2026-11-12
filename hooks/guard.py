@@ -1425,12 +1425,12 @@ CAP_ASK_REASON = (
     "time shown here is the one you want. "
     "(decision agent-model-cap, the owner's cap on the agent model lifts only with his word)"
 )
-from shared_names import CAP_DEADLINE_FIELD  # noqa: E402  the one home of the cap-lift deadline's field name, shared with hooks/config_watch.py
+from shared_names import CAP_DEADLINE_FIELD, parse_deadline  # noqa: E402  the one home of the cap-lift deadline's field name, shared with hooks/config_watch.py
 
 # The cap-lift deadline a write sets: the field, then an ISO-8601 instant. Like AGENT_CAP_ASSIGN it reads a
 # JSON pair and a shell assignment, and the last one wins.
 CAP_DEADLINE_ASSIGN = re.compile(
-    r"['\"]?" + re.escape(CAP_DEADLINE_FIELD) + r"['\"]?\s*[:=]\s*['\"]?([0-9][0-9T:.+\-Zz]*)"
+    r"['\"]?" + re.escape(CAP_DEADLINE_FIELD) + r"['\"]?\s*[:=]\s*['\"]?([0-9][0-9T:.+\-Zz]*(?: [0-9][0-9:.+\-Zz]*)?)"
 )
 
 
@@ -1579,35 +1579,114 @@ def write_content_parts(tool_input, arriving=False):
     return parts
 
 
-def cap_deadline_end(parts) -> str:
-    """Return the end of the cap lift a write sets, as `HH:MM CST` or `CDT` in US Central, else ''.
-
-    The last deadline the parts name is the one the file will hold. A deadline that is not a readable
-    ISO-8601 instant, or one already passed, reads as '' and the write is not asked about for it:
-    `hooks/config_watch.py` revokes a lift with such a deadline, as before. The time is
-    `local_time.central_hhmm`, the one home of the Central clock (rule style-time-central-24h); no
-    date is printed, because an end is shown for a lift the owner is approving now.
-    """
+def cap_deadline_text(parts) -> str:
+    """The last cap-lift deadline text the parts name, else ''. The last one is what the file will hold."""
     text = ""
     for part in parts:
         if isinstance(part, str):
             for found in CAP_DEADLINE_ASSIGN.finditer(part):
                 text = found.group(1)
-    if not text:
+    return text
+
+
+def cap_deadline_end(parts) -> str:
+    """Return the end of the cap lift a write sets, as `HH:MM CST` or `CDT` in US Central, else ''.
+
+    The last deadline the parts name is the one the file will hold. A deadline that is not a readable
+    ISO-8601 instant, or one already passed, reads as '' and the write is not asked about for it:
+    `hooks/config_watch.py` revokes a lift with such a deadline. The instant is read by
+    `shared_names.parse_deadline`, the parser the watch calls too. The time is
+    `local_time.central_hhmm`, the one home of the Central clock (rule style-time-central-24h); no
+    date is printed, because an end is shown for a lift the owner is approving now.
+    """
+    text = cap_deadline_text(parts)
+    deadline = parse_deadline(text) if text else None
+    if deadline is None:
         return ""
     import local_time
-    from datetime import datetime, timezone
-    if text[-1:] in ("Z", "z"):
-        text = text[:-1] + "+00:00"
     try:
-        deadline = datetime.fromisoformat(text)
-        if deadline.tzinfo is None:
-            deadline = deadline.replace(tzinfo=timezone.utc)
         if deadline < local_time.clock():
             return ""
         return local_time.central_hhmm(deadline)
     except (ValueError, OverflowError, TypeError):
         return ""
+
+
+CAP_DISK_MAX = 1_000_000   # a settings file is small; a larger one is left unread
+
+
+def cap_disk_text(path: str, cwd: str = ""):
+    """The text of the file a write targets, or None when it is missing, too large or unreadable."""
+    try:
+        full = path if os.path.isabs(path) else os.path.join(cwd or os.getcwd(), path)
+        if os.path.getsize(full) > CAP_DISK_MAX:
+            return None
+        with open(full, encoding="utf-8", errors="replace") as handle:
+            return handle.read()
+    except OSError:
+        return None
+
+
+def cap_edited_text(disk: str, edits) -> str:
+    """The file text after the edits, applied in order as the Edit tool applies them (the first match, or each with replace_all)."""
+    for edit in edits:
+        if not isinstance(edit, dict):
+            continue
+        old, new = edit.get("old_string"), edit.get("new_string")
+        if not isinstance(old, str) or not isinstance(new, str) or not old:
+            continue
+        disk = disk.replace(old, new) if edit.get("replace_all") is True else disk.replace(old, new, 1)
+    return disk
+
+
+def cap_arriving_parts(tool_input, target: str, cwd: str = "") -> list:
+    """The texts to read the cap-lift end from, for an Edit or MultiEdit: the file it arrives at.
+
+    A value-only edit names no field in its strings, and a second edit can move the end a first one
+    set, so the strings alone can show a wrong end or none. When the file on disk is readable and the
+    edits change its deadline, the result of applying them is the one text. Otherwise the strings
+    stand, as for a Write, so an edit that leaves the deadline alone adds no ask of its own.
+    """
+    strings = write_content_parts(tool_input, arriving=True)
+    edits = tool_input.get("edits") if isinstance(tool_input.get("edits"), list) else []
+    if "old_string" in tool_input:
+        edits = [tool_input] + edits
+    disk = cap_disk_text(target, cwd) if edits else None
+    if disk is None:
+        return strings
+    arrived = cap_edited_text(disk, edits)
+    if cap_deadline_text([arrived]) == cap_deadline_text([disk]):
+        return strings
+    return [arrived]
+
+
+# A `sed` substitution, `s/old/new/flags`, with any one of the usual delimiters.
+SED_SUBST = re.compile(r"\bs([/|#,@:])((?:\\.|(?!\1).)*)\1((?:\\.|(?!\1).)*)\1[gIi0-9]*")
+
+
+def cap_sed_parts(raw: str, path: str, cwd: str = "") -> list:
+    """The texts to read the cap-lift end from, for a shell write: the command, or the file a `sed` leaves.
+
+    Best effort: each `s/old/new/` of a command that runs `sed` is applied, in order, to the file on
+    disk, the pattern read as a regular expression. When that changes the file's deadline, the
+    result is the text read. Any other command is read as itself.
+    """
+    if not re.search(r"\bsed\b", raw):
+        return [raw]
+    disk = cap_disk_text(path, cwd)
+    if disk is None:
+        return [raw]
+    arrived = disk
+    for found in SED_SUBST.finditer(raw):
+        delim, pattern, new = found.group(1), found.group(2), found.group(3)
+        new = new.replace("\\" + delim, delim)
+        try:
+            arrived = re.sub(pattern, lambda _match: new, arrived)
+        except re.error:
+            continue
+    if cap_deadline_text([arrived]) == cap_deadline_text([disk]):
+        return [raw]
+    return [arrived]
 
 
 def cap_with_deadline(change: str, end: str) -> str:
@@ -4726,7 +4805,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # narrow, beats a bypass by a second segment.
     matched = shell_write_hit(raw, cwd, is_settings_file)
     if matched:
-        change = cap_with_deadline(cap_change(raw), cap_deadline_end([raw]))
+        change = cap_with_deadline(cap_change(raw), cap_deadline_end(cap_sed_parts(raw, matched, cwd)))
         if change:
             ask_command("agent-model-cap", cap_ask_reason(change, matched),
                      log_path_and_text(matched, change), "settings write")
@@ -6431,7 +6510,7 @@ def judge(payload) -> None:
         # carry the name never fires, and no other file than a settings file reaches this rule.
         if is_settings_file(target, cwd):
             change = cap_with_deadline(cap_change_parts(write_content_parts(tool_input)),
-                                       cap_deadline_end(write_content_parts(tool_input, arriving=True)))
+                                       cap_deadline_end(cap_arriving_parts(tool_input, target, cwd)))
             if change:
                 refuse(tool, "ask", "agent-model-cap", cap_ask_reason(change, target),
                        log_path_and_text(target, change))

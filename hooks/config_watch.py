@@ -101,7 +101,7 @@ def _add_guard_set_dir() -> None:
 
 _add_guard_set_dir()
 
-from shared_names import CAP_DEADLINE_FIELD, PROJECT_FROZEN_FILES, config_dir  # noqa: E402  stdlib only
+from shared_names import CAP_DEADLINE_FIELD, PROJECT_FROZEN_FILES, config_dir, parse_deadline  # noqa: E402  stdlib only
 
 # The guard is imported lazily, by `_load_guard`, so a call where nothing changed exits on the
 # stdlib alone (see `unchanged`). GUARD_UNDER_TEST points the suite at another copy of the guard,
@@ -357,10 +357,11 @@ def reading_text(reading) -> str:
 
 # ------------------------------------------------------------------ the expiry
 #
-# `_agentCapUntil` is a REPO-OWNED field, read from the parsed JSON document only, never from a
-# text scan. That keeps it out of `env` (see the module docstring: an `env` key is exported into
-# every agent's shell, and a key inside `env` is what `guard.AGENT_CAP_KEY` reads). It also
-# keeps this watch the ONLY reader of it, so the PreToolUse ask never fires on this field alone.
+# `_agentCapUntil` is a REPO-OWNED field, and this watch reads it from the parsed JSON document
+# only, never from a text scan. That keeps it out of `env` (see the module docstring: an `env` key
+# is exported into every agent's shell, and a key inside `env` is what `guard.AGENT_CAP_KEY`
+# reads). The guard reads the field too, from the text a write leaves, to show the end in its ask;
+# both parse the end with `shared_names.parse_deadline`, so they read one instant.
 
 _MODEL_KEYS = ("CLAUDE_CODE_SUBAGENT_MODEL", "CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL")
 EXPIRY_FIELD = CAP_DEADLINE_FIELD
@@ -461,15 +462,9 @@ def expiry_problem(content, clock=None) -> str:
         return "missing"
     if where == "env":
         return EXPIRY_WRONG_PLACE
-    text = raw.strip()
-    if text[-1:] in ("Z", "z"):
-        text = text[:-1] + "+00:00"
-    try:
-        deadline = datetime.fromisoformat(text)
-    except Exception:
+    deadline = parse_deadline(raw)
+    if deadline is None:
         return "not a parseable ISO-8601 time"
-    if deadline.tzinfo is None:
-        deadline = deadline.replace(tzinfo=timezone.utc)
     if clock is None:
         clock = datetime.now(timezone.utc)
     ahead = (deadline - clock).total_seconds()

@@ -15,6 +15,28 @@ PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json"
 # guard reads it to show the end in its ask, and the config watch reads it to revoke a lift at the deadline.
 CAP_DEADLINE_FIELD = "_agentCapUntil"
 
+
+def parse_deadline(text: Any) -> Optional[Any]:
+    """The one reader of a cap-lift deadline: an aware datetime, or None when the text is not ISO-8601.
+
+    The guard shows the end this returns and the config watch revokes at it, so both call this and
+    can never read one text as two instants. The forms read: a trailing Z, an offset such as -05:00,
+    a space between date and time, and no offset at all, which reads as UTC.
+    """
+    from datetime import datetime, timezone
+    if not isinstance(text, str):
+        return None
+    text = text.strip()
+    if text[-1:] in ("Z", "z"):
+        text = text[:-1] + "+00:00"
+    try:
+        deadline = datetime.fromisoformat(text)
+    except (ValueError, OverflowError, TypeError):
+        return None
+    if deadline.tzinfo is None:
+        deadline = deadline.replace(tzinfo=timezone.utc)
+    return deadline
+
 # The one home of the claude-code-remote server name (rule agent-no-remote-tools). The guard imports it by name;
 # lint/check_agent_models.py reads it from the guard.
 REMOTE_SERVER = "mcp__claude-code-remote"
