@@ -15,6 +15,7 @@ branding (`waiting_page_colour()`, `waiting_page_icon()`, read by lint/repo_colo
 of the page's writer (`page_writer_key()`, read by the pick guard in lint/report_guard.py). The "record-branch" key
 names the branch of the record in a fork worktree (`record_branch()`); with no key it is "roadmap".
 `set_waiting_page()` writes the "waiting-page" key once, for triage; it never writes "rolled-out".
+The layout's own "tending" key holds the prose stores' tending contract (`tending()`, decision prose-tending-contract).
 
 BANDAID, named: a repo that has not rolled out is read where the shared tools read it before the
 layout, through the layout's "legacy" map, so no tool changes its verdict on a repo before then. A kind
@@ -105,6 +106,18 @@ def kinds(root=None):
                 raise LayoutError("%s: kind %s is in the layout at %s; this file puts it at %s" % (extras, name, held, kind["path"].strip("/")))
             _safe(kind["path"], _extras(root))
             found[name] = dict(kind, set="extra")
+    return found
+
+
+TENDING = "tending"  # the layout key that holds each prose store's tending entry (decision prose-tending-contract)
+
+
+def tending():
+    """{store: entry} from the layout's "tending" key, {} when it has none. LayoutError when the key is not an object of
+    objects. The fields of an entry are judged by lint/tending.py, the contract's one reader."""
+    found = layout().get(TENDING, {})
+    if not isinstance(found, dict) or not all(isinstance(entry, dict) for entry in found.values()):
+        raise LayoutError("%s: \"%s\" is not an object of store entries" % (LAYOUT_PATH, TENDING))
     return found
 
 
