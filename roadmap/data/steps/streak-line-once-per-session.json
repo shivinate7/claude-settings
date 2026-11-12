@@ -1,0 +1,14 @@
+{
+ "id": "streak-line-once-per-session",
+ "title": "The lost-login line prints once per session",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A lost login prints its line at every Stop with a growing count, and an API-key-only account sees it every turn.",
+ "source": "coordinator pick 11:11 CST Nov 12, option a (an undoable behaviour pick, taken by the coordinator; the 11:10 CST owner question was withdrawn and not posted)",
+ "note": "hooks/decision_watch.py streak_line (about lines 976-992) has no once-per-session limit. Pick a: print it once per session. Backing note streak-line-repeats-every-stop on #2728's branch model-auth-build (docs/debts/notes.md:2189), found in review round 3 of #2728 (reviewer sonnet, code read only). Owner words \"one-time setup\" (11:43 CST Nov 6). Sibling note streak-line-keeps-last-kind is on the same branch. Waits on #2728's merge; ready after.",
+ "updatedAt": "2026-11-12T11:13:25-06:00"
+}
