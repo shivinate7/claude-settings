@@ -2848,7 +2848,7 @@ def case_owner_waits_cost_skips_plain_transcripts():
               "%d decodes for %d lines" % (decodes, len(plain)))
         coord_reason, coord_err, _ = gap_with_decodes(c, as_coordinator(c, [COORD_TAG]) + plain)
         check("owner waits cost (parse): a coordinator's transcript of the same size still blocks when the "
-              "handoff lacks the heading", coord_err is None and coord_reason is not None,
+              "handoff lacks the heading", coord_err is None and bool(coord_reason),
               "error: %r reason: %r" % (coord_err, coord_reason))
     finally:
         c.cleanup()
