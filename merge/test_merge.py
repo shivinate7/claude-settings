@@ -18392,7 +18392,8 @@ class BatchFreeze(CloudSession):
     def counted_reads(self):
         """Yields a list that gathers, while the block runs, each `merge-base --all` merge runs through merge.git and each ancestry read it runs
         through merge.ancestor, as (kind, arguments). Each call still reaches the real function."""
-        calls, real_git, real_ancestor = [], merge.git, merge.ancestor
+        import git_reads  # hooks/git_reads.py: the probe forced_probe patches; the ancestry reads below keep the real one
+        calls, real_git, real_ancestor, real_probe = [], merge.git, merge.ancestor, git_reads.is_shallow
 
         def git(cwd, *a, input=None):
             if "merge-base" in a and "--all" in a:
@@ -18401,10 +18402,19 @@ class BatchFreeze(CloudSession):
 
         def ancestor(cwd, tip, base):
             calls.append(("ancestor", (tip, base)))
-            return real_ancestor(cwd, tip, base)
+            with unittest.mock.patch.object(git_reads, "is_shallow", real_probe):  # a forced answer is the stacked check's, not the history's
+                return real_ancestor(cwd, tip, base)
 
         with unittest.mock.patch.object(merge, "git", git), unittest.mock.patch.object(merge, "ancestor", ancestor):
             yield calls
+
+    @contextlib.contextmanager
+    def forced_probe(self, answer):
+        """Makes git_reads.is_shallow answer `answer` while the block runs. The clone stays as it is: only the stacked check's own probe read
+        takes the answer, so the case does not depend on whether the clone it runs in is shallow."""
+        import git_reads  # hooks/git_reads.py: the one shallow probe
+        with unittest.mock.patch.object(git_reads, "is_shallow", lambda where: answer):
+            yield
 
     def body(self, n):
         return self.host.batch_pulls[n]["body"]
@@ -19791,10 +19801,11 @@ class BatchFreeze(CloudSession):
         self.assertTrue(self.on_origin(self.heads[101], "batch-nightly") and self.on_origin(self.heads[102], "batch-nightly"),
                         "batch-nightly does not hold both stacked lanes: %s" % out)
 
-    def test_stacked_check_reads_no_merge_base_for_open_prs_that_share_no_commit(self):
+    def prefilter_fixture(self):
+        """Lanes #101 to #103 and twelve open pull requests on main, #104 to #115, none sharing a commit with a lane but main. -> the twelve numbers."""
         for n in (101, 102, 103):
             self.lane(n)
-        others = list(range(104, 116))  # twelve open pull requests on main, none sharing a commit with a lane
+        others = list(range(104, 116))
         for n in others:
             self.lane(n)
         sh(self.co, "git", "fetch", "-q", "origin")
@@ -19804,7 +19815,30 @@ class BatchFreeze(CloudSession):
                 self.assertEqual(sh(self.co, "git", "merge-base", "--all", self.heads[n], self.heads[o]), main,
                                  "setup: #%d and #%d share a commit besides main" % (n, o))
         self.assertEqual(len(self.host.open_prs()), 15, "setup: the open pull requests are not three lanes and twelve others")
-        with self.counted_reads() as calls:
+        return others
+
+    def stacked_check_run(self, answer):
+        """The prefilter fixture's build, with the stacked check's probe answering `answer`. -> (rc, output, the (lane head, other head) pairs that
+        were read with `merge-base --all`, the twelve other pull requests' numbers)."""
+        import git_reads  # hooks/git_reads.py: the probe the scope check reads
+        others = self.prefilter_fixture()
+        with self.counted_reads() as calls, self.forced_probe(answer):
+            self.assertIs(git_reads.is_shallow(self.co), answer, "scope: the probe does not answer %r" % (answer,))
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "103")
+        pairs = {(a[2], a[3]) for kind, a in calls if kind == "merge-base --all"}
+        return rc, out, pairs, others
+
+    def assert_pair_check_runs_for_every_pair(self, answer):
+        rc, out, pairs, others = self.stacked_check_run(answer)
+        expected = {(self.heads[n], self.heads[o]) for n in (101, 102, 103) for o in others}
+        self.assertEqual(rc, 0, "a build with the probe at %r exited %s, not 0: %s" % (answer, rc, out))
+        self.assertEqual(len(self.host.created), 1, "a build with the probe at %r did not open exactly one pull request: %s" % (answer, out))
+        self.assertEqual(pairs, expected, "with the probe at %r the stacked check read %d of %d lane and pull request pairs with `merge-base --all`: %s"
+                         % (answer, len(pairs & expected), len(expected), out))
+
+    def test_stacked_check_reads_no_merge_base_for_open_prs_that_share_no_commit(self):
+        self.prefilter_fixture()
+        with self.counted_reads() as calls, self.forced_probe(False):  # the full clone's answer, stated so the case does not depend on its clone
             rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "103")
         self.assertEqual(rc, 0, "the build of three lanes that share no commit with the open pull requests exited %s, not 0: %s" % (rc, out))
         self.assertEqual(len(self.host.created), 1, "the build did not open exactly one pull request: %s" % out)
@@ -19812,6 +19846,13 @@ class BatchFreeze(CloudSession):
         ancestry = [a for kind, a in calls if kind == "ancestor"]
         self.assertEqual(merge_base, [], "the stacked check ran %d `merge-base --all` for open pull requests that share no commit: %s" % (len(merge_base), out))
         self.assertEqual(ancestry, [], "the stacked check read ancestry %d times for open pull requests that share no commit: %s" % (len(ancestry), out))
+
+    def test_a_shallow_probe_runs_the_pair_check_for_every_pair(self):
+        # A cut history hides a shared commit from the prefilter's sets, so a shallow clone must read every pair.
+        self.assert_pair_check_runs_for_every_pair(True)
+
+    def test_an_unknown_probe_runs_the_pair_check_for_every_pair(self):
+        self.assert_pair_check_runs_for_every_pair(None)
 
     def test_green_control_a_lane_stacked_on_an_open_pr_left_out_is_refused_and_named(self):
         self.lane(90)  # open #90 is not in the request, and lane #101 is stacked on it
