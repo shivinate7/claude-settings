@@ -5,7 +5,7 @@
 A full CI run is red only when something is broken, never because a job ran out of time (owner, 2026-10-27, roadmap step c95). A job's time limit exists to end a hang, so it is generous and computed: decision `time-limits-end-hangs-only` holds the rule, and `actions/ci-limits/ci_limits.py` computes it. R3 of the restart plan replaced the 80% target, the re-cap-or-split item and the measured-figure comment of step c95.
 
 - A job's limit is the slowest sample of the newest 30 completed push runs on main, times 1.5, never plus a fixed number.
-- A job that ends at its cap with no failed CI step is a sample of at least its cap, so its limit rises.
+- By default a job that ends at its cap with no failed CI step is a sample of at least its cap, so its limit rises. The owner's answer is pending (waiting-page item 586); `--green-only` ignores a cut run.
 - A job with no green run yet is new. It takes the limit of its nearest kind times 1.5, else the largest times 1.5. If it is cut at that limit, it was misjudged and takes the largest times 1.5.
 - Every job limit is at least the median of all job limits, derived each run (coordinator, 2026-11-12 12:22 CST), so a job that runs for seconds is never cut at a minute.
 - A job skipped in every run of the window never ran on main. It shows "not measured on main", in the table and as null in the JSON, and it joins no median, estimate or deadline.

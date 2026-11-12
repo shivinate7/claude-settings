@@ -23,7 +23,7 @@ New jobs, owner 14:36 and 14:37 CST, agreed at 15:03 CST ("yes thats fine agreed
 
 Premises of the script:
 
-- A run the cap cut counts as a sample of at least its limit (owner, 2026-11-12 12:24 CST, waiting-page item 586, pick a). A job is cut when it was cancelled, no CI step failed, and it ran as long as the job's `timeout-minutes` on the base ref. Without this, a cut run would hide the slowest run and the limit would never rise. The owner accepts the cost: a job that truly hangs ratchets its limit up to 360 until the silence stop, a later step, ends hangs.
+- A run the cap cut counts as a sample of at least its limit. This is the default, and the question is open: the owner picked it at 12:24 CST on 2026-11-12 and reopened it at 12:30 CST (waiting-page item 586). The owner's answer is pending. `--green-only`, or `cut_counts_as_sample=False`, ignores a cut run instead. A job is cut when it was cancelled, no CI step failed, and it ran as long as the job's `timeout-minutes` on the base ref. Without the default, a cut run would hide the slowest run and the limit would never rise. The cost it accepts: a job that truly hangs ratchets its limit up to 360 until the silence stop, a later step, ends hangs.
 - A failed run, or a run cancelled before its cap by a newer push, is no sample.
 - Margins multiply: limit = slowest sample x 1.5, rounded up, at most 360 minutes (the 6 hour job limit of GitHub-hosted runners).
 - Every job limit is at least the median of all job limits, derived each run (coordinator, 2026-11-12 12:22 CST). A job that runs for seconds is then never cut at a minute.

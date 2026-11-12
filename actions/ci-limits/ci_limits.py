@@ -6,7 +6,8 @@
 
 The limit ends a hung job and nothing else, so it is generous: the slowest sample x 1.5, rounded up, at most 360.
 A sample is a green job run, or a run the cap cut (cancelled, no failed CI step, minutes at or past the cap passed in,
-the workflow's `timeout-minutes` on the base ref): a cut run counts as at least its limit (owner ruling, decision time-limits-end-hangs-only). A job that
+the workflow's `timeout-minutes` on the base ref): a cut run counts as at least its limit. That is the default and the
+owner's question is open (decision time-limits-end-hangs-only); --green-only, or cut_counts_as_sample=False, ignores a cut run. A job that
 failed, or was cancelled before its cap by a newer push, is no sample.
 A new job (no green run yet) takes its nearest kind's limit x 1.5, else the largest old limit x 1.5. A new job cut at
 its cap was misjudged and takes the largest. Every job limit is at least the median of all job limits (median_floor),
@@ -87,7 +88,7 @@ def is_cut(job, minutes, cap):
             and not any(s.get("conclusion") == "failure" for s in job.get("steps") or ()))
 
 
-def analyse(jobs_by_run, caps, kinds, window):
+def analyse(jobs_by_run, caps, kinds, window, cut_counts_as_sample=True):
     """-> (limits, misjudged). See job_limits."""
     kinds = {name: kind_of(name) for name in caps} if kinds is None else kinds
     samples, steps, green, cut, seen, ran = {}, {}, set(), set(), set(), set()
@@ -105,7 +106,9 @@ def analyse(jobs_by_run, caps, kinds, window):
             if job.get("conclusion") == "success":
                 green.add(name)
             elif is_cut(job, minutes, caps[name]):
-                cut.add(name)
+                cut.add(name)  # a cut still marks a new job misjudged, sample or not
+                if not cut_counts_as_sample:
+                    continue
             else:
                 continue
             samples.setdefault(name, []).append(minutes)
@@ -135,12 +138,12 @@ def analyse(jobs_by_run, caps, kinds, window):
     return limits, misjudged
 
 
-def job_limits(jobs_by_run, caps, kinds=None, window=30):
+def job_limits(jobs_by_run, caps, kinds=None, window=30, cut_counts_as_sample=True):
     """jobs_by_run: completed push runs on main, newest first, [{"run_id": int, "jobs": [jobs-API job, ...]}].
     caps: {job name: timeout-minutes in force}. kinds: {job name: kind}, else kind_of.
     -> ({job name: minutes, or None when the job never ran on main; "job/CI step": minutes},
         the job names cut at their estimate while still new)."""
-    return analyse(jobs_by_run, caps, kinds, window)
+    return analyse(jobs_by_run, caps, kinds, window, cut_counts_as_sample)
 
 
 def deadline_minutes(jobs_by_run, limits, window=30):
@@ -162,7 +165,7 @@ def deadline_minutes(jobs_by_run, limits, window=30):
     return min(CLAMP, deadline)
 
 
-def read_limits(fetch, caps, kinds=None, window=30):
+def read_limits(fetch, caps, kinds=None, window=30, cut_counts_as_sample=True):
     """-> (limits with "deadlineMinutes", misjudged, warning lines). A failed fetch gives every limit CLAMP and one warning."""
     try:
         jobs_by_run = fetch()
@@ -171,7 +174,7 @@ def read_limits(fetch, caps, kinds=None, window=30):
         limits = {name: CLAMP for name in caps}
         limits["deadlineMinutes"] = CLAMP
         return limits, [], ["ci-limits: cannot read the jobs API (%s). Every limit is %d minutes." % (why, CLAMP)]
-    limits, misjudged = job_limits(jobs_by_run, caps, kinds, window)
+    limits, misjudged = job_limits(jobs_by_run, caps, kinds, window, cut_counts_as_sample)
     limits["deadlineMinutes"] = deadline_minutes(jobs_by_run, {n: limits[n] for n in caps}, window)
     return limits, misjudged, []
 
@@ -191,8 +194,9 @@ def main(argv, fetch, caps, kinds=None, out=None, err=None):
     form = parser.add_mutually_exclusive_group(required=True)
     form.add_argument("--json", action="store_true")
     form.add_argument("--table", action="store_true")
+    parser.add_argument("--green-only", action="store_true", help="a run the cap cut is no sample")
     args = parser.parse_args(argv)
-    limits, misjudged, warnings = read_limits(fetch, caps, kinds)
+    limits, misjudged, warnings = read_limits(fetch, caps, kinds, cut_counts_as_sample=not args.green_only)
     for line in warnings:
         print(line, file=err)
     for name in misjudged:
