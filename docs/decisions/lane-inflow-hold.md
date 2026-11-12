@@ -11,7 +11,7 @@ The coordinator starts no new lane while the hold stands, except the lanes that 
 - Ends: the ruling names no end.
 - On main, checked 2026-11-12 07:36 CST: no record or plan cites this hold, its item 384, or any ruling that lifts it.
 - The freeze on main is newer than the hold. Restart plan (`restart-plan`), stage 1, says "The freeze holds (owner 09:18 CST Nov 10): no new lanes except fixes of items landing on main." Its R42 records the owner's 13:51 CST Nov 11 pick "a": "until the fan-out, only fixes that main's stability needs start." The freeze narrows new lanes until the fan-out, and ends at the fan-out.
-- Open: whether the freeze is this hold; the coordinator asked the owner.
+- Open: whether the freeze is this hold.
 
 Kind: process
 Home: rule:parallelism-keep-going
