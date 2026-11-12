@@ -95,6 +95,9 @@ LANE_TAG = BUILD_TAG + "lane"
 # A lane start prompt opens with `Grant: <owner words>, <time>`; the guard reads the line by this marker (rules
 # lane-effort-pin and lane-one-topic).
 LANE_GRANT_MARKER = "Grant:"
+# A lane brief must say the owner never reads the lane and where each owner-bound line goes; the guard reads these two
+# phrases (rule lane-one-topic) and the brief template holds them in one sentence.
+OWNER_UNREAD_PHRASES = ("owner never reads", "same turn")
 CREATE_SESSION_TOOL = REMOTE_SERVER + "__create_session"
 
 

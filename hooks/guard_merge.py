@@ -18,7 +18,7 @@ from guard_core import (
     is_cloud, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import BUILD_TAG, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import BUILD_TAG, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, OWNER_UNREAD_PHRASES, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -1709,6 +1709,40 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
     if stranded:
         return ARCHIVE_STRANDED_MATCH, ARCHIVE_NO_PR_REASON
     return None
+
+
+BRIEF_OWNER_REASON = (
+    "this lane brief does not say the owner never reads it. Add the template sentence from the brief template "
+    "(skills/project-ops/templates/brief.md): it holds the phrases `" + OWNER_UNREAD_PHRASES[0] + "` and `"
+    + OWNER_UNREAD_PHRASES[1] + "`, and tells the lane to send each override line, owner act and question to the "  # glossary-ok: session-tiers is the decision's file name
+    "Coordinator. (decision session-tiers, a lane holds one topic)"
+)
+
+
+def brief_owner_hit(tool: str, tool_input):
+    """Return (matched, reason) when this send_message, or lane create_session, is a lane brief whose text lacks one
+    of OWNER_UNREAD_PHRASES, else None. A brief is a message whose first non-blank line, after an optional Grant
+    line, starts with LANE_BRIEF_MARKER (the same marker match as brief_hit, defined below). The match is whitespace-flattened and
+    case-blind. Cost: the message text only; no transcript read."""
+    if not isinstance(tool_input, dict):
+        return None
+    if tool == BRIEF_TOOL:
+        text = tool_input.get("message")
+    elif is_lane_create_session(tool, tool_input):
+        text = tool_input.get("prompt")
+    else:
+        return None
+    if not isinstance(text, str):
+        return None
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    if lines and lines[0].startswith(LANE_GRANT_MARKER):
+        lines = lines[1:]
+    if not lines or not _BRIEF_MARKER_LINE.match(lines[0]):
+        return None
+    flat = " ".join(text.split()).casefold()
+    if all(p.casefold() in flat for p in OWNER_UNREAD_PHRASES):
+        return None
+    return "lane brief that does not say the owner never reads it", BRIEF_OWNER_REASON
 
 
 # ---- send_message: a lane brief goes to a lane of its own topic (rule lane-one-topic)
