@@ -19,7 +19,7 @@ Narration grows each session's context. Cache reads dominate cost. An idle lane 
 
 ## What the check reads and refuses
 
-- It reads each file's body text. YAML frontmatter does not count.
+- It reads each file's body text. YAML frontmatter does not count only when line 1 is `---` and a later `---` line closes it. Otherwise the check reads it as body text (`terse-line-frontmatter-bypass`).
 - Fenced code (``` or ~~~), HTML comments, inline code spans and 4-space indented code blocks do not count. An indented line that continues a paragraph, or sits in a list item, does count.
 - Whitespace collapses, so the line may wrap.
 - Exit 0: every file holds the line. It prints nothing.
@@ -37,7 +37,7 @@ Narration grows each session's context. Cache reads dominate cost. An idle lane 
 - Two `python3` starts per CI run: the check (step "Agent terse line") and its fixture suite (step "Agent terse line fixture suite"). Both are in `.github/workflows/checks.yml`.
 - Standard library only. It reads the ten role files and the lane text, 11 files today.
 - It writes no file. It keeps no log. It has no hook and no long-lived process.
-- Measured 0.0 s wall for the check on this tree, through `verdict`, 2026-11-12 09:38 CST.
+- Measured 0.1 s through `verdict`, and 0.03 to 0.05 s for the bare run, on this tree.
 
 ## Dated by
 
