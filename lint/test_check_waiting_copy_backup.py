@@ -121,10 +121,74 @@ TEST_PATH_READER = '''def read_copy(layout, root):
     return open(os.path.join(layout.path(root, "waiting-data"), "items", "1.json")).read()
 '''
 
-PEEK = '''
+PEEK_PARAM = '''
 
-def peek_copy(layout, root):
-    return open(os.path.join(layout.path(root, "waiting-data"), "items", "1.json")).read()
+def peek_items(folder):
+    return open(os.path.join(folder, "items", "1.json")).read()
+'''
+
+SHELL_FORMS = (
+    ("cat", "bin/peek_cat", "cat $ROOT/waiting-data/items/1.json"),
+    ("head", "bin/peek_head", "head -n 5 $ROOT/waiting-data/items/1.json"),
+    ("jq", "bin/peek_jq", "jq . $ROOT/waiting-data/items/1.json"),
+    ("quoted", "bin/peek_quoted", 'cat "$ROOT/waiting-data/items/1.json"'),
+)
+
+JS_TWO_LINE = ('const folder = layout.path(root, "waiting-data");\n'
+               'const text = fs.readFileSync(path.join(folder, "items", "1.json"), "utf8");\n')
+
+GIT_LIST = '''import subprocess
+
+def head_item(root):
+    return subprocess.run(["git", "-C", root, "show", "origin/main:waiting/items/1.json"], capture_output=True)
+'''
+
+GIT_STRING = '''import subprocess
+
+def head_item(root):
+    return subprocess.run("git show origin/main:waiting-data/items/1.json", shell=True, cwd=root)
+'''
+
+TWO_STEPS = '''import json, os
+
+def copy_folder(layout, root):
+    return layout.path(root, "waiting-data")
+
+def read_items(folder):
+    with open(os.path.join(folder, "items", "1.json"), encoding="utf-8") as handle:
+        return json.load(handle)
+
+def compose(layout, root):
+    return read_items(copy_folder(layout, root))
+'''
+
+PRESENCE_FORMS = (
+    ("isfile", 'import os\n\ndef filed(layout, root):\n'
+               '    return os.path.isfile(os.path.join(layout.path(root, "waiting-data"), "items", "1.json"))\n'),
+    ("exists", 'import os\n\ndef filed(layout, root):\n'
+               '    return os.path.exists(os.path.join(layout.path(root, "waiting-data"), "items", "1.json"))\n'),
+    ("listdir", 'import os\n\ndef filed(layout, root):\n'
+                '    return os.listdir(os.path.join(layout.path(root, "waiting-data"), "items"))\n'),
+)
+
+TWO_FILED = '''class Homes:
+    def filed_numbers(self, layout, root):
+        folder = waiting_copy(layout, root)
+        return _run_git(root, ["grep", "-I", "-e", ".", "origin/main", "--", folder + "/items/"])
+
+
+class Other:
+    def filed_numbers(self, layout, root):
+        folder = waiting_copy(layout, root)
+        return _run_git(root, ["grep", "-I", "-e", ".", "origin/main", "--", folder + "/items/"])
+'''
+
+LAYOUT_READER = '''import json, os
+
+def copy_path(root):
+    with open(os.path.join(root, "lint", "layout.json"), encoding="utf-8") as handle:
+        kinds = json.load(handle)["kinds"]
+    return kinds["waiting-data"]["path"]
 '''
 
 
@@ -259,13 +323,80 @@ class ControlCases(unittest.TestCase):
         self.assertFalse([line for line in reader_lines(out) if line.startswith(EXPORT + ":")],
                          "export_page.py's own recovery, merge and export modes were flagged: %r" % out)
 
-    def test_export_page_new_function_reading_the_copy_fails(self):
+    def test_export_page_parameter_reader_fails(self):
         with open(os.path.join(ROOT, *EXPORT.split("/")), encoding="utf-8") as handle:
             real = handle.read()
-        root = tree(self._testMethodName, {EXPORT: real + PEEK})
+        text = real + PEEK_PARAM
+        root = tree(self._testMethodName, {EXPORT: text})
         rc, out = check(root)
-        self.assertEqual(rc, 1, "a new function in export_page.py that reads the copy passed: %r" % out)
-        self.assertTrue(reader_named(out, EXPORT), "peek_copy in export_page.py was not flagged as a live reader")
+        def_line = next(i for i, line in enumerate(text.split("\n"), 1) if "def peek_items" in line)
+        self.assertEqual(rc, 1, "a new export_page.py function that reads a folder passed in was not flagged: %r" % out)
+        numbers = reader_line_numbers(out, EXPORT)
+        self.assertTrue(any(def_line <= n <= def_line + 2 for n in numbers),
+                        "peek_items in export_page.py (line %d) was not the flagged reader, found %r" % (def_line, numbers))
+
+
+def reader_line_numbers(out, rel):
+    return [int(line.split(":")[1]) for line in reader_lines(out) if line.startswith(rel + ":")]
+
+
+class GuardHoleCases(unittest.TestCase):
+    """Holes a session could reach by mistake in normal work (decision guard-guards-mistakes-only)."""
+
+    def test_shell_read_of_the_copy_items_fails(self):
+        for form, rel, command in SHELL_FORMS:
+            with self.subTest(form=form):
+                root = tree("%s-%s" % (self._testMethodName, form), {rel: "#!/bin/sh\n" + command + "\n"})
+                rc, out = check(root)
+                self.assertEqual(rc, 1, "a shell %s of the copy's items passed: %r" % (form, out))
+                self.assertTrue(reader_named(out, rel), "%s was not flagged as a live reader" % rel)
+
+    def test_two_line_javascript_read_fails(self):
+        root = tree(self._testMethodName, {"skills/waiting-page/two_line.mjs": JS_TWO_LINE})
+        rc, out = check(root)
+        self.assertEqual(rc, 1, "a javascript read split over two lines passed: %r" % out)
+        self.assertTrue(reader_named(out, "skills/waiting-page/two_line.mjs"), "two_line.mjs was not flagged")
+
+    def test_git_argument_list_with_a_literal_copy_path_fails(self):
+        root = tree(self._testMethodName, {"hooks/reads_git_list.py": GIT_LIST})
+        rc, out = check(root)
+        self.assertEqual(rc, 1, "git show of a literal waiting/ path in an argument list passed: %r" % out)
+        self.assertTrue(reader_named(out, "hooks/reads_git_list.py"), "reads_git_list.py was not flagged")
+
+    def test_git_shell_string_with_the_copy_name_fails(self):
+        root = tree(self._testMethodName, {"hooks/reads_git_string.py": GIT_STRING})
+        rc, out = check(root)
+        self.assertEqual(rc, 1, "a git show of waiting-data in a shell string passed: %r" % out)
+        self.assertTrue(reader_named(out, "hooks/reads_git_string.py"), "reads_git_string.py was not flagged")
+
+    def test_name_read_and_compose_in_three_helpers_fails(self):
+        root = tree(self._testMethodName, {"hooks/reads_two_steps.py": TWO_STEPS})
+        rc, out = check(root)
+        self.assertEqual(rc, 1, "a copy folder read through two helper steps passed: %r" % out)
+        self.assertTrue(reader_named(out, "hooks/reads_two_steps.py"), "reads_two_steps.py was not flagged")
+
+    def test_presence_check_of_the_copy_items_fails(self):
+        for form, text in PRESENCE_FORMS:
+            with self.subTest(form=form):
+                rel = "hooks/presence_%s.py" % form
+                root = tree("%s-%s" % (self._testMethodName, form), {rel: text})
+                rc, out = check(root)
+                self.assertEqual(rc, 1, "an os.path/listdir %s of the copy's items passed: %r" % (form, out))
+                self.assertTrue(reader_named(out, rel), "%s was not flagged as a live reader" % rel)
+
+    def test_second_function_named_like_the_allowed_one_fails(self):
+        root = tree(self._testMethodName, {"hooks/feedback_guard.py": TWO_FILED})
+        rc, out = check(root)
+        other = next(i for i, line in enumerate(TWO_FILED.split("\n"), 1) if line.startswith("class Other"))
+        self.assertEqual(rc, 1, "a second filed_numbers that reads the copy passed: %r" % out)
+        numbers = reader_line_numbers(out, "hooks/feedback_guard.py")
+        self.assertTrue(numbers and all(n > other for n in numbers),
+                        "the second filed_numbers (after line %d) was not the flagged one, found %r" % (other, numbers))
+
+    def test_layout_config_key_read_is_not_a_copy_reader(self):
+        root = tree(self._testMethodName, {"lint/reads_layout.py": LAYOUT_READER})
+        rc, out = check(root)
+        self.assertEqual(rc, 0, "a read of the waiting-data key in lint/layout.json was flagged as a copy read: %r" % out)
 
 
 class ProseCases(unittest.TestCase):
