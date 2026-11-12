@@ -9,7 +9,7 @@ Lane pr-backlog-clear, read 12:47 CST Nov 12. Acts for claude-settings come from
 | merge in next batch | 124 | every PR has one |
 | fix by lane (lane round N) | 89 | every PR has one |
 | fix by lane (lane lint) | 88 | every PR has one |
-| keep open, file check found gaps (see rows) | 19 | every PR has one |
+| closed as replaced after 605 a, replacer open | 18 (plus #1858, already closed) | every PR has one |
 | closed as replaced | 12 | every PR has one |
 | fix by lane (fix check) | 8 | every PR has one |
 | fix by lane (fresh full review) | 6 | every PR has one |
