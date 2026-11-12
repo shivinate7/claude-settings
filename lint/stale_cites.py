@@ -77,7 +77,8 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             touched, and only when Markdown is read. A cited .py that does not parse at head is one unknown line, no finding.
             A line marked `<!-- ste-disable-line STALE010 -->` is left out.
 A cite path led by `..`, `~` or `/` (`outside_repo`) names a path outside the repo, which no read asks git for: it is
-no path cite for STALE010, and one unknown line for a STALE005 backing or a STALE008 value cite.
+no path cite for STALE010, and one unknown line for a STALE005 backing. A STALE008 value cite led by `..` or `~` gives
+one unknown line; one led by `/` is read as a repo path, so a wrong value it quotes is flagged (`outside_repo` `absolute`).
 A line left in place, for a name the range did not remove, never fires. A moved or reworded line is an added
 line, which STALE010 judges. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
@@ -133,7 +134,8 @@ at head through the one `cat-file` the run opens, once per range. That `cat-file
 added line cites a .py file by a path with a folder part; no Markdown blob is read. A range that adds a folder .py cite and
 removes nothing starts 4 (rev-parse, merge-base, diff, that `cat-file`), one more than the same range with no such cite
 (NameCiteTests pins the 4); a range that already opens the `cat-file` for another read adds no start for it. A cite led
-by `..`, `~` or `/` (`outside_repo`) names a path outside the repo and reads nothing: it opens no `cat-file`.
+by `..`, `~` or `/` (`outside_repo`) names a path outside the repo and reads nothing: it opens no `cat-file`. A value
+cite led by `/` is the exception: STALE008 reads it as a repo path.
 A touched .py also loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
 STALE008 starts at most the one `cat-file`. It reads every tracked .md, through the same `ls-tree` and `cat-file`, only
 when a touched .py changed a module-level literal, as the removed-name read does. Otherwise it reads only the touched .md
@@ -195,8 +197,9 @@ FOREIGN_FILE = re.compile(r"\.%s\Z" % FOREIGN_EXT)
 DISABLE_RE = re.compile(r"<!--\s*ste-disable-line([^>]*?)-->")
 SIMPLE_PATH = re.compile(r"^%s$" % RUN)
 # The lead of a cite path (after `cite_path`) outside the repo: `..`, `~` or `/`. No blob at a rev holds one, and a `..`
-# lead ends `git cat-file`, so no reader asks for one (`outside_repo`).
-OUTSIDE_LEAD = r"(?:\.\.(?:/|\Z)|~|/)"
+# lead ends `git cat-file`, so no reader asks for one (`outside_repo`). A value cite reads a `/` lead as a repo path.
+OUTSIDE_LEAD_RELATIVE = r"(?:\.\.(?:/|\Z)|~)"
+OUTSIDE_LEAD = OUTSIDE_LEAD_RELATIVE[:-1] + r"|/)"
 # A path cite: a folder part and an extension, inside the repo.
 FILE_CITE = re.compile(r"^(?!%s)[^/]+(?:/[^/]+)*/[^/]*[^/.]\.[A-Za-z0-9]+$" % OUTSIDE_LEAD)
 ANCHOR = re.compile(r":(\d+)(?:-(\d+))?(?!\w)")
@@ -607,9 +610,11 @@ def cite_path(text):
     return posixpath.normpath(text)
 
 
-def outside_repo(text):
-    """True when a cited path names a path outside the repo (`OUTSIDE_LEAD`): its reader gives one unknown line."""
-    return re.match(OUTSIDE_LEAD, cite_path(text)) is not None
+def outside_repo(text, absolute=True):
+    """True when a cited path names a path outside the repo (`OUTSIDE_LEAD`): its reader gives one unknown line.
+    `absolute=False` leaves a `/` lead out: a value cite led by `/` is read as a repo path, as it was before this
+    reader knew `OUTSIDE_LEAD`, so a wrong value it quotes is still flagged."""
+    return re.match(OUTSIDE_LEAD if absolute else OUTSIDE_LEAD_RELATIVE, cite_path(text)) is not None
 
 
 def path_cites(line, gone, exotic):
@@ -860,7 +865,7 @@ class ValueReader:
                 continue
             if path in state.rng.removed or path in state.rng.renamed:
                 continue  # STALE001 judges a cite of a path the range removed
-            if outside_repo(path):
+            if outside_repo(path, absolute=False):
                 cannot_read("%s is outside the repo, so the cite is not checked" % path, False)
                 continue
             tree = self.tree(state, "head", path)
