@@ -4,7 +4,7 @@
  "status": "doing",
  "order": -300,
  "why": "Lane page-answered-sink took 'By repo' (page item 212, closed as taken under questions-go-to-owner; mockup docs/design/answered-sink.html, state sections-repo).",
- "note": "Waits on: PR #1137 merges. Adds a new writer field `repo` on items. Named by the coordinator Nov 3 18:16 CST. Dead wait found 11:21 CST Nov 12: PR #1137 merged 2026-11-04 03:23Z, so this step sat 8 days on a wait already met. Ready now; placed at the top of now (triage re-weigh, owner ask 11:19 CST Nov 12).",
- "updatedAt": "2026-11-12T13:42:08-06:00",
+ "note": "Waits on: PR #1137 merges. Adds a new writer field `repo` on items. Named by the coordinator Nov 3 18:16 CST. Dead wait found 11:21 CST Nov 12: PR #1137 merged 2026-11-04 03:23Z, so this step sat 8 days on a wait already met. Ready now; placed at the top of now (triage re-weigh, owner ask 11:19 CST Nov 12). Built in #2906 with tier-items-sorted (lane 14:48 CST Nov 12); main merged in at bd7f9b88f; ready for runner 10's lane-lint re-run.",
+ "updatedAt": "2026-11-12T14:49:30-06:00",
  "lane": "session_013NEJL3fCEUUibxozV7CUtJ"
 }
