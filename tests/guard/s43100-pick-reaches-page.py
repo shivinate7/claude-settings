@@ -1,0 +1,277 @@
+# section 43100
+FAMILY = "pick-reaches-page"
+#
+# Rule pick-reaches-page. A coordinator (its own record tags cs-build:coordinator) sends a send_message with a line
+# that opens `Coordinator pick` (after markdown lead chars and spaces, any case). A pick sent to a lane is refused
+# unless the page writer got a send in this turn (after the last human message) that names the same pick key. A pick
+# sent to the page writer passes. The marker counts only at a line's start, outside a fenced block. Only a coordinator's
+# send_message is judged; no own record, no own session id or no transcript fails open. A message with no marker reads
+# no transcript. The page writer is the `writer` in the newest ArtifactData get of meta/page (lint/_transcript.py).
+PK_RULE = "pick-reaches-page"
+PK_SEND = "mcp__claude-code-remote__send_message"
+PK_OWN = "session_PKOWN01"  # the coordinator; override.remote_session_id reads cse_PKOWN01 as this id
+PK_ENV = {"CLAUDE_CODE_REMOTE_SESSION_ID": "cse_PKOWN01"}
+PK_WRITER = "session_PKWRITER01"  # the page writer: the `writer` the meta/page read names
+PK_LANE = "session_PKLANE01"  # a lane the coordinator sends a pick to
+PK_OLD_WRITER = "session_PKOLDWRITER01"  # the writer an earlier meta/page read named: the newest read decides
+PK_PICK = "Coordinator pick: icons-a"
+PK_DIR = os.path.join(ROOT, "pickrec")
+PK_PROBE = os.path.join(PK_DIR, "pk-probe.py")  # the load-brake probe, run as the guard, with its open spy
+PK_TURN_ONE = "Owner: pick the icons for the page."
+PK_TURN_TWO = "Owner: and the colors too."
+
+
+def pk_path(name):
+    """The transcript fixture for one case: a JSONL file under this run's folder."""
+    return os.path.join(PK_DIR, name + ".jsonl")
+
+
+def pk_page_read(tool_id, writer):
+    """One paired ArtifactData get of meta/page whose result names `writer`, as the page's own read returns it."""
+    return [role_use(tool_id, "ArtifactData", {"action": "get", "collection": "meta", "doc_id": "page"}),
+            role_result(tool_id, json.dumps({"id": "page", "writer": writer}))]
+
+
+def pk_send(tool_id, target, text):
+    """One paired send_message to `target` whose result is the cloud's delivered body."""
+    return [role_use(tool_id, PK_SEND, {"session_id": target, "message": text}),
+            role_result(tool_id, '{"status":"delivered"}')]
+
+
+# The coordinator's own record, the writer's read and the lane's record: the head every coordinator fixture shares.
+PK_HEAD = (role_call("o1", COORD_TAGS, session=PK_OWN) + pk_page_read("p1", PK_WRITER)
+           + role_target_call("l1", LANE_TAGS, target=PK_LANE))
+PK_LINES = {
+    "turn-empty": [role_said(PK_TURN_ONE)] + PK_HEAD,
+    "turn-writer-sent": [role_said(PK_TURN_ONE)] + PK_HEAD + pk_send("s1", PK_WRITER, PK_PICK),
+    "turn-writer-earlier": [role_said(PK_TURN_ONE)] + PK_HEAD + pk_send("s1", PK_WRITER, PK_PICK)
+                           + [role_said(PK_TURN_TWO)],
+    "turn-writer-other": [role_said(PK_TURN_ONE)] + PK_HEAD + pk_send("s1", PK_WRITER, "Coordinator pick: colors-b"),
+    "turn-writer-casefold": [role_said(PK_TURN_ONE)] + PK_HEAD
+                            + pk_send("s1", PK_WRITER, "Coordinator pick: ICONS-A."),
+    "turn-writer-no-key": [role_said(PK_TURN_ONE)] + PK_HEAD
+                          + pk_send("s1", PK_WRITER, "Status: the page is up to date."),
+    "turn-lane-sent": [role_said(PK_TURN_ONE)] + PK_HEAD + pk_send("s1", PK_LANE, PK_PICK),
+    "lane-own": [role_said(PK_TURN_ONE)] + role_call("o1", LANE_TAGS, session=PK_OWN)
+                + pk_page_read("p1", PK_WRITER) + role_target_call("l1", LANE_TAGS, target=PK_LANE),
+    "no-own-record": [role_said(PK_TURN_ONE)] + pk_page_read("p1", PK_WRITER)
+                     + role_target_call("l1", LANE_TAGS, target=PK_LANE),
+    # Two meta/page reads: the newest names PK_WRITER, so a send to PK_OLD_WRITER is not a send to the writer.
+    "two-page-reads": [role_said(PK_TURN_ONE)] + role_call("o1", COORD_TAGS, session=PK_OWN)
+                      + pk_page_read("p0", PK_OLD_WRITER) + pk_page_read("p1", PK_WRITER)
+                      + role_target_call("l1", LANE_TAGS, target=PK_LANE) + pk_send("s1", PK_OLD_WRITER, PK_PICK),
+    "two-page-reads-new": [role_said(PK_TURN_ONE)] + role_call("o1", COORD_TAGS, session=PK_OWN)
+                          + pk_page_read("p0", PK_OLD_WRITER) + pk_page_read("p1", PK_WRITER)
+                          + role_target_call("l1", LANE_TAGS, target=PK_LANE) + pk_send("s1", PK_WRITER, PK_PICK),
+    # The pick key is the whole rest of the line: a writer send naming a longer key names a different pick.
+    "turn-writer-longer": [role_said(PK_TURN_ONE)] + PK_HEAD
+                          + pk_send("s1", PK_WRITER, "Coordinator pick: icons-a and colors-b"),
+}
+
+
+def write_pk_transcripts():
+    """Write each fixture as JSONL, one record per line."""
+    for name, lines in PK_LINES.items():
+        write(pk_path(name), "\n".join(lines) + "\n")
+
+
+lazy_fixture([pk_path(name) for name in PK_LINES], write_pk_transcripts)
+
+
+def pk_log(label, check):
+    """Register one log check. LOG_CHECKS_EXTRA joined LOG_CHECKS in s40805, before this section, so the check joins
+    LOG_CHECKS itself, under this family, and needs no fixture materialized for it."""
+    global LOG_CHECKS
+    LOG_FAMILY[label] = PK_RULE
+    LOG_CHECKS = LOG_CHECKS + ((label, check),)
+    FIXTURELESS_CHECKS.add(check)
+
+
+def pk_refuse(name, message, transcript="turn-empty", target=PK_LANE, carries=()):
+    """A coordinator's send_message the guard refuses. The reason names its rule."""
+    add("pick-reaches-page: " + name, "deny", rule=PK_RULE, tool=PK_SEND, cwd=NOGIT, transcript=pk_path(transcript),
+        env=PK_ENV, carries=carries, session_id=target, message=message)
+
+
+def pk_allow(name, message, transcript="turn-empty", target=PK_LANE, env=PK_ENV):
+    """A send_message the guard lets through silently."""
+    add("pick-reaches-page: " + name, "allow", tool=PK_SEND, cwd=NOGIT, silent=True, transcript=pk_path(transcript),
+        env=env, session_id=target, message=message)
+
+
+# Refused: a pick to a lane, with no writer send this turn. Each marker form opens a line after its lead chars.
+pk_refuse("a plain pick to a lane, with no writer send this turn, is refused, and the steer names triage or the writer",
+          PK_PICK, carries=(("triage", "writer"),))
+pk_refuse("a bold pick marker, **Coordinator pick:** icons-a, to a lane is refused",
+          "**Coordinator pick:** icons-a")
+pk_refuse("a heading pick marker, # Coordinator pick: icons-a, to a lane is refused", "# Coordinator pick: icons-a")
+pk_refuse("a quoted pick marker, > Coordinator pick: icons-a, to a lane is refused", "> Coordinator pick: icons-a")
+pk_refuse("a lowercase pick marker, coordinator pick: icons-a, to a lane is refused", "coordinator pick: icons-a")
+pk_refuse("an italic pick marker, _Coordinator pick: icons-a_, to a lane is refused", "_Coordinator pick: icons-a_")
+# Refused: the marker counts on any line of the message, not only the first.
+pk_refuse("a pick marker on line three, after a blank line, to a lane is refused",
+          "Two picks follow.\n\nCoordinator pick: icons-a")
+# Refused: a lone quote, backtick or comment opener in the text before the marker does not hide it.
+pk_refuse("a pick marker after a lone apostrophe in the line before it is refused",
+          "Owner's call on the picks.\nCoordinator pick: icons-a")
+pk_refuse("a pick marker after a lone backtick in the line before it is refused",
+          "Use `icons for the page.\nCoordinator pick: icons-a")
+pk_refuse("a pick marker after a comment opener in prose, /* in the line before it, is refused",
+          "See the note /* about the picks\nCoordinator pick: icons-a")
+# Refused: a fence ends at its closing line, so a marker after it is a real line.
+pk_refuse("a pick marker after a fence that closes is refused: the fence ends at its closing line",
+          "```\nsample\n```\nCoordinator pick: icons-a")
+
+# Passes: a marker that is not at a line's start, or sits in a fenced block, or is not a pick at all.
+pk_allow("a pick marker mid-line, not at a line start, passes", "We logged a Coordinator pick: icons-a earlier.")
+pk_allow("a pick marker after a dash bullet is not at a lead-char line start, and passes",
+         "- Coordinator pick: icons-a")
+pk_allow("a pick marker inside a fenced block passes", "Example:\n```\nCoordinator pick: icons-a\n```")
+pk_allow("a shell comment, # Coordinator pick, inside a fenced block passes",
+         "```bash\n# Coordinator pick: icons-a\n```")
+pk_allow("a status line about icons-a, with no marker, passes", "Status: icons-a is in review.")
+# Passes: a pick sent to the page writer is the route the rule asks for.
+pk_allow("a pick sent to the page writer passes, with no earlier send this turn", PK_PICK, target=PK_WRITER)
+
+# The turn rule: a pick to a lane passes only after the writer's send this turn names the same pick key.
+pk_allow("a pick to a lane passes after the writer's send this turn names the same pick",
+         PK_PICK, transcript="turn-writer-sent")
+pk_refuse("a writer send naming the same pick, in an earlier turn, does not count: the pick to a lane is refused",
+          PK_PICK, transcript="turn-writer-earlier")
+pk_refuse("a writer send this turn naming a different pick does not count: the pick to a lane is refused",
+          PK_PICK, transcript="turn-writer-other")
+pk_allow("the pick key is casefolded and stripped: ICONS-A. to the writer, then icons-a in lowercase, passes",
+         "coordinator pick: icons-a", transcript="turn-writer-casefold")
+pk_refuse("a writer send this turn that names no pick does not count: the pick to a lane is refused",
+          PK_PICK, transcript="turn-writer-no-key")
+pk_refuse("a send to a lane this turn naming the same pick does not count: only the writer does",
+          PK_PICK, transcript="turn-lane-sent")
+pk_refuse("a writer send naming a longer pick key does not name this pick: the key is the whole rest of the line",
+          PK_PICK, transcript="turn-writer-longer")
+pk_refuse("a send to an older page writer does not count when a newer meta/page read names another writer",
+          PK_PICK, transcript="two-page-reads")
+pk_allow("a send to the newest page writer counts, though an older meta/page read named another writer",
+         PK_PICK, transcript="two-page-reads-new")
+
+# Passes: only a coordinator's send is judged. A lane, no own record, no transcript and no own id all fail open.
+pk_allow("a lane's own pick passes: only a coordinator's send is judged", PK_PICK, transcript="lane-own")
+pk_allow("a coordinator send with no own record in the transcript passes: fail open", PK_PICK,
+         transcript="no-own-record")
+pk_allow("a coordinator send with no own session id in the environment passes: fail open", PK_PICK, env=None)
+add("pick-reaches-page: a coordinator send with no transcript path passes: fail open", "allow", tool=PK_SEND,
+    cwd=NOGIT, silent=True, env=PK_ENV, session_id=PK_LANE, message=PK_PICK)
+# Passes: a pick written into another tool is not a send_message.
+sh("pick-reaches-page: a pick written into a Bash echo is not a send and passes", "echo 'Coordinator pick: icons-a'",
+   "allow", silent=True, transcript=pk_path("turn-empty"), env=PK_ENV, cwd=NOGIT)
+
+
+# Scope before subject (P7): each fixture reads as the guard reads it, before any case asserts on the guard.
+def pk_scope_check():
+    """The page writer and the coordinator's own tags read from each fixture, through the real readers."""
+    import _transcript as pk_transcript
+    import own_session as pk_own
+    problems = []
+    for name in ("turn-empty", "turn-writer-sent", "turn-writer-earlier", "turn-writer-other", "turn-writer-casefold",
+                 "turn-writer-no-key", "turn-lane-sent", "turn-writer-longer", "two-page-reads", "two-page-reads-new"):
+        records = pk_transcript.read_transcript(pk_path(name))
+        if pk_transcript.page_writer_id(records) != PK_WRITER:
+            problems.append(name + ": the page writer does not read as " + PK_WRITER)
+        tags = pk_own.own_session_read(pk_path(name), PK_OWN)[0] or []
+        if "cs-build:coordinator" not in tags:
+            problems.append(name + ": the own record does not hold cs-build:coordinator")
+    if pk_own.own_session_read(pk_path("lane-own"), PK_OWN)[0] is None:
+        problems.append("lane-own: the own record is missing")
+    if pk_own.own_session_read(pk_path("no-own-record"), PK_OWN)[0] is not None:
+        problems.append("no-own-record: an own record reads for a session the transcript never names")
+    return (not problems), "; ".join(problems) or "every fixture reads as its case assumes"
+
+
+pk_log("pick-reaches-page: each fixture reads as its case assumes, before the guard is judged", pk_scope_check)
+
+
+def pk_probe_script():
+    """The load-brake probe as a script: it runs the guard under test and counts each open of the path it is told."""
+    os.makedirs(PK_DIR, exist_ok=True)
+    head = ("import os, sys\n"
+            "sys.argv = [sys.argv[0], %r, os.environ['PK_PROBE_SIDE'], os.environ['PK_PROBE_SPEC']]\n" % GUARD)
+    write(PK_PROBE, head + LB_PROBE)
+    return PK_PROBE
+
+
+def pk_spy_run(message, transcript, target=PK_LANE):
+    """(decision, reason, opens): the guard's verdict on one coordinator send, and how many times it opened the
+    transcript. The probe is the load-brake one (s39497): it counts opens through builtins.open and io.open."""
+    path = pk_path(transcript)
+    materialize(path)
+    side = os.path.join(PK_DIR, "side-%s.json" % abs(hash(message + transcript)))
+    if os.path.exists(side):
+        os.remove(side)
+    spec = json.dumps({"mode": "judge", "spy": path})
+    case = {"raw": None, "tool": PK_SEND, "tool_input": {"session_id": target, "message": message}, "cwd": NOGIT,
+            "session": None, "env_path": None, "config": None, "agent_id": None, "agent_type": None, "temp": None,
+            "env": dict(PK_ENV, PK_PROBE_SIDE=side, PK_PROBE_SPEC=spec), "load": None, "transcript": path,
+            "guard": pk_probe_script()}
+    got, reason = decide(case)
+    try:
+        with open(side, encoding="utf-8") as handle:
+            opens = json.load(handle).get("opened", 0)
+    except (OSError, ValueError):
+        opens = None  # the probe wrote no record: the guard crashed before it, which the verdict shows
+    return got, reason, opens
+
+
+def pk_read_check(name, message, want, reads):
+    """A check that the guard's verdict is `want`, and that it opens the transcript when `reads` is True, else never."""
+    def check():
+        got, reason, opens = pk_spy_run(message, "turn-empty")
+        if got != want:
+            return False, "got %s (%s), want %s" % (got, reason[:70], want)
+        if opens is None:
+            return False, "the probe wrote no open count: the guard did not reach its judge"
+        if (opens > 0) != reads:
+            return False, "the transcript opened %d times, want %s" % (opens, "at least once" if reads else "never")
+        return True, "%s, and the transcript opened %d times" % (want, opens)
+    pk_log("pick-reaches-page: " + name, check)
+
+
+# Cost (rule outcomes-mechanize-rules): a send with no marker reads no transcript. The control is the refused pick,
+# which reads it, so the spy is shown to count a read here. The load-brake spy is the one home of the open count.
+pk_read_check("a status send with no pick marker reads no transcript, so it costs no read",
+              "Status: icons-a is in review.", "allow", reads=False)
+pk_read_check("a pick to a lane reads the transcript before it is refused", PK_PICK, "deny", reads=True)
+
+
+# The owner's override lifts a refused pick like any refusal (copy of the act checks above).
+def pk_override_check(name, prompt, timed):
+    """A one-act or timed override lets a refused pick through, as the override family's acts do."""
+    config, session = ov_config("pick-" + name), "pk-ov-" + name
+    transcript = pk_path("turn-empty")
+    materialize(transcript)
+
+    def call(seconds):
+        return lambda: ov_call(PK_SEND, {"session_id": PK_LANE, "message": PK_PICK}, NOGIT, config, session, seconds,
+                               env=PK_ENV, transcript=transcript)
+
+    ok, why = ov_story([("with no override", call(0), "deny", PK_RULE)])
+    if not ok:
+        return False, why
+    note = ov_type(config, session, prompt)
+    if timed:
+        steps = [("first call", call(60), "allow", PK_RULE),
+                 ("call just before the end", call(OV_TIMED_SECONDS - 1), "allow", PK_RULE),
+                 ("call at the end instant", call(OV_TIMED_SECONDS), "deny", PK_RULE)]
+    else:
+        steps = [("first call", call(60), "allow", PK_RULE),
+                 ("second call, override spent", call(120), "deny", PK_RULE)]
+    ok, why = ov_story(steps, note)
+    if not ok:
+        return False, why
+    return True, "a refused pick, then allowed %s" % ("until the end" if timed else "once")
+
+
+for _is_timed in (False, True):
+    _pk_name = "a timed override lets a refused pick through until it ends" if _is_timed else \
+        "a one-act override lets a refused pick through once, then refuses it again"
+    _pk_check = (lambda t: lambda: pk_override_check("timed" if t else "once",
+                                                     "override 15m" if t else "override", t))(_is_timed)
+    pk_log("pick-reaches-page: " + _pk_name, _pk_check)
