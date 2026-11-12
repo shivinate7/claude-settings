@@ -18,7 +18,7 @@ This reading goes to the owner for correction. It is not the owner's words. The 
 - At 94%, every session stops new work.
 - An account with no limit never brakes.
 
-The third point is consistent with the owner's 2026-11-01 17:56 CST ruling. Its recorded words, in `docs/decisions/session-tiers.md` (line 28), are "There is no usage limit". The retrospective reads that ruling as being about session length (`docs/plans/restart-plan.md`, item R43). That reading is the retrospective's, not the owner's.
+The retrospective reads the third point as consistent with the owner's 2026-11-01 17:56 CST ruling. Its recorded words, in `docs/decisions/session-tiers.md` (line 28), are "There is no usage limit". The retrospective reads that ruling as being about session length (`docs/plans/restart-plan.md`, item R43). That reading is the retrospective's, not the owner's.
 
 Open question for the owner: does the no-limit ruling conflict with the brake reading?
 
