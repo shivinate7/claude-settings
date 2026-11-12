@@ -106,6 +106,28 @@ own optional field in meta/page. The incident: an answer that sat unread 10.5 h 
 Write `read` and `filed` as ISO UTC with a trailing Z: a time with no zone is read in the host's zone.
 Cost: one python process, reads 4 files, writes none, starts no git, no timer.
 
+Awaiting mode, run by the writer at a comment wake (SKILL.md, "Read the answers"), after it saves its report.
+
+    python3 ~/.claude/skills/waiting-page/stale_pages.py --awaiting <dir>
+
+<dir> holds threads.txt, the output of `ArtifactComments read` (every page, in order, concatenated), and report.md
+(the writer's report), read only when it is there. A thread starts at a `Thread <uuid>` line; its next line begins
+`open` or `resolved`. A comment row is a line at exactly two spaces, `  [<who> - <ISO time>]` (with the tool's em
+dash). A text line carries a six-space `<token>| ` prefix and never counts. A thread is awaiting when it is open and
+its last comment row does not begin `[Claude`. The tool prints no "awaiting reply" marker: awaiting means open and
+last comment not Claude's. A `  [location] <label>` row is the label.
+Without report.md, one line per awaiting thread in file order, then exit 1:
+`thread-awaiting <first 8 chars of id> (last comment <time>, <location or "no location">)`. With none,
+`awaiting: clean` and exit 0 (a threads.txt with no thread is clean). A cut or unreadable read is never clean: a
+`  [N comments elided` row, a `[N more threads not listed` line, a missing or empty threads.txt, an open thread with no
+comment rows or a thread with no open or resolved status prints `unknown: <what>` and exits 2, with no report check.
+With report.md the mode prints report lines only, never the thread-awaiting lines. The text between the bold
+`Input Needed` label and the next bold Done, Deviations or Next label must hold each awaiting id8, and a line
+`Awaiting reply: N` must give the count (also when N is 0). `report-missing <id8>` names each omitted thread;
+`report-count <found or none> expected <N>` names a wrong or absent count; exit 1. All right:
+`awaiting-report: ok (N listed)`, exit 0. The incident: an owner thread waited 37 h for a reply.
+Cost: one python process, reads 2 files, writes none, starts no git, no timer.
+
 Cost: one python process, at most one read-only git process (no fetch, no network, 30 s cap), no
 extra process for --answers (it reads one more file, a folder one per answer), no
 file written without --write, no timer, thread or child left running. Single-page mode never imports `layout`; batch and session-line modes do.
@@ -795,9 +817,94 @@ def unread_mode(argv):
     return 2 if unknown else 1 if lines else 0
 
 
+AWAITING_ROW = re.compile(r"  \[(?P<who>.+) — (?P<at>\d{4}-\d\d-\d\dT\S+)\]")  # exactly two spaces: a text line has six
+AWAITING_ELIDED = re.compile(r"  \[\d+ comments elided")
+AWAITING_CUT = re.compile(r"\[\d+ more threads not listed")
+AWAITING_LABELS = ("Done", "Deviations", "Next")  # the bold labels that end the Input Needed section
+
+
+def awaiting_threads(text):
+    """Parses threads.txt. Returns (threads, unknown): each thread is a dict of id, status, rows (who, at) and location."""
+    threads, unknown, cur = [], [], None
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        head = re.fullmatch(r"Thread (\S+)", line)
+        if head:
+            status = lines[i + 1].strip() if i + 1 < len(lines) else ""
+            cur = {"id": head.group(1), "rows": [], "location": None,
+                   "status": "open" if status.startswith("open") else "resolved" if status.startswith("resolved") else None}
+            threads.append(cur)
+            if cur["status"] is None:
+                unknown.append("unknown: thread %s has no open or resolved status line" % cur["id"][:8])
+        elif AWAITING_CUT.match(line):
+            unknown.append("unknown: the read is cut (%s)" % line[:60])
+            cur = None
+        elif cur is not None:
+            row = AWAITING_ROW.fullmatch(line)
+            if AWAITING_ELIDED.match(line):
+                unknown.append("unknown: thread %s has elided comments" % cur["id"][:8])
+            elif line.startswith("  [location] "):
+                cur["location"] = line[len("  [location] "):].strip()
+            elif row:
+                cur["rows"].append((row.group("who"), row.group("at")))
+    for t in threads:
+        if t["status"] == "open" and not t["rows"] and not any(t["id"][:8] in u for u in unknown):
+            unknown.append("unknown: open thread %s has no comment rows" % t["id"][:8])
+    return threads, unknown
+
+
+def awaiting_report(report, waiting):
+    """The report-missing and report-count lines for the awaiting id8s `waiting`: none when the report is right."""
+    section = re.search(r"\*\*Input Needed\*\*(.*?)(?=\*\*(?:%s)\*\*|\Z)" % "|".join(AWAITING_LABELS), report, re.S)
+    body = section.group(1) if section else ""
+    lines = ["report-missing " + t for t in waiting if not re.search(r"(?<![0-9a-f])%s(?![0-9a-f])" % t, body)]
+    count = re.search(r"(?m)^Awaiting reply: (\d+)[ \t]*$", report)
+    if not count or int(count.group(1)) != len(waiting):
+        lines.append("report-count %s expected %d" % (count.group(1) if count else "none", len(waiting)))
+    return lines
+
+
+def awaiting_mode(argv):
+    """`--awaiting <dir>`: name each open thread whose last comment is not Claude's, from threads.txt, and check report.md lists them."""
+    ap = argparse.ArgumentParser(prog="stale_pages.py", allow_abbrev=False)
+    ap.add_argument("--awaiting", required=True)
+    args = ap.parse_args(argv)
+    try:
+        with open(os.path.join(args.awaiting, "threads.txt"), encoding="utf-8") as f:
+            text = f.read()
+    except (OSError, ValueError) as err:
+        print("unknown: cannot read threads.txt in %s (%s)" % (args.awaiting, err))
+        return 2
+    if not text.strip():
+        print("unknown: threads.txt in %s is empty" % args.awaiting)
+        return 2
+    threads, unknown = awaiting_threads(text)
+    waiting = [t for t in threads if t["status"] == "open" and t["rows"] and not t["rows"][-1][0].startswith("Claude")]
+    lines = ["thread-awaiting %s (last comment %s, %s)" % (t["id"][:8], t["rows"][-1][1], t["location"] or "no location") for t in waiting]
+    if unknown:
+        print("\n".join(lines + unknown))
+        return 2
+    try:
+        with open(os.path.join(args.awaiting, "report.md"), encoding="utf-8") as f:
+            report = f.read()
+    except FileNotFoundError:
+        report = None
+    except (OSError, ValueError) as err:  # a report that is there and cannot be read is never read as absent
+        print("unknown: cannot read report.md in %s (%s)" % (args.awaiting, err))
+        return 2
+    if report is not None:
+        bad = awaiting_report(report, [t["id"][:8] for t in waiting])
+        print("\n".join(bad) if bad else "awaiting-report: ok (%d listed)" % len(waiting))
+        return 1 if bad else 0
+    print("\n".join(lines) if lines else "awaiting: clean")
+    return 1 if lines else 0
+
+
 def main(argv):
     if "--unread" in argv:
         return unread_mode(argv)
+    if "--awaiting" in argv:
+        return awaiting_mode(argv)
     if "--parked" in argv:
         return parked_mode(argv)
     if "--session-line" in argv:
@@ -808,7 +915,8 @@ def main(argv):
         sys.exit("usage: stale_pages.py <fetched-dir> [<repo root> ...]\n"
                  "       stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>]\n"
                  "       stale_pages.py --parked <dir> [--now <iso>]\n"
-                 "       stale_pages.py --unread <dir>")
+                 "       stale_pages.py --unread <dir>\n"
+                 "       stale_pages.py --awaiting <dir>")
     import layout  # batch mode only
     fetched, roots = argv[0], argv[1:] or default_roots()
     with open(TEMPLATE, encoding="utf-8") as f:
