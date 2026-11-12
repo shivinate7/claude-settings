@@ -23,11 +23,13 @@
     }
   ],
   "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "pick": "a",
   "rank": 1,
   "ref": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB); retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "reply": "The coordinator took a at 19:41 CST, the plan's own order (restart-plan R23 ends the drain at the named queue plus #2591). The plan follow-up #2605 merges alone before the archive. #2588, #2552, #2600 and #2601 carry over in the handoffs. You can reverse it in chat.",
   "repo": "shivinate7/claude-settings",
   "short": "archive vs batch 84",
-  "status": "open",
+  "status": "closed",
   "title": "Does the archive wait for batch 84?",
   "why": "Batch 84 is outside the drain you set, so only you can add it (measured 2026-11-11, coordinator's queue read 19:36 CST)."
 }
