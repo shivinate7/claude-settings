@@ -21,4 +21,4 @@ Known limit: a negator anywhere earlier in the clause exempts the word, so "Q2 w
 Kind: process
 Home: lint/report_guard.py
 
-One message per Stop (plan R32 part 2, half 1). A turn with no human message, such as a lane's, runs this check and the relay checks on its first Stop, with the checks of the human path. Before, it met them only on the retry, so one reply took two fix turns. Cost per Stop: no process start added. A reply that asks nothing starts nothing; an asking reply keeps the relay check's one documented git read. Proof: `lint/test_report_guard_one_message.py`.
+One message per Stop (plan R32 part 2, half 1). A turn with no human message, such as a lane's, runs this check and the relay checks on its first Stop, with the checks of the human path. Before, it met them only on the retry, so one reply took two fix turns. Cost per Stop: an asking reply on a turn with no human message runs the past-ruling check on its first Stop. That check starts one git read and one `claude -p` call, at most once per Stop. A reply that asks nothing starts nothing. No other process start is added. Proof: `lint/test_report_guard_one_message.py`.
