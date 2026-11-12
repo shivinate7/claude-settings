@@ -12619,22 +12619,27 @@ class PullsHost(merge.Host):
     `gh` also answers `pulls/<n>` from the open list, and the compare read of two heads: `compares` maps (base sha, head sha) to the status
     GitHub would answer. A pair not listed is "diverged", so unrelated heads never contain each other. The base branch's read,
     `compare/<base>...<head>`, is keyed ("main", head sha) in the same map. `compare_error` answers every compare read;
-    `base_compare_error` answers only the base branch's read. `files` are the changed files of the pull requests (`pulls/<n>/files`, one page
-    per 100), and `files_error` fails that read. `changed_files` is the count `pulls/<n>` reports (None: the length of `files`). `repo` is the
-    OWNER/NAME the host names its repo by (Host.repo): the header of a `--reviewed --root` block reads it. `commits` maps a commit sha to its
-    parent shas: `gh` answers `commits/<sha>` with them, and a sha not listed is a 404, as GitHub answers an unknown commit. `trees` maps a
-    commit sha to its tree sha, which the same answer names under commit.tree.sha."""
+    `base_compare_error` answers only the base branch's read. `diffs` maps (older head, newer head) to compare_of(...), the status and the
+    files GitHub gives the older...newer read. The compare is GitHub's three-dot one: its files are those on the second head's side of the
+    merge base, so the reverse read answers "behind" with no file, and a diverged pair answers "diverged" in either order. `files` are the
+    changed files of the pull requests (`pulls/<n>/files`, one page per 100), and `files_error` fails that read. `changed_files` is the count
+    `pulls/<n>` reports (None: the length of `files`). `repo` is the OWNER/NAME the host names its repo by (Host.repo): the header of a
+    `--reviewed --root` block reads it. `commits` maps a commit sha to its parent shas: `gh` answers `commits/<sha>` with them, and a sha
+    not listed is a 404, as GitHub answers an unknown commit. `trees` maps a commit sha to its tree sha, which the same answer names under
+    commit.tree.sha."""
     def __init__(self, pulls, check_rows, pulls_error=None, required=("checks",), workflow_runs=None, ignore=None, compares=None, compare_error=None,
-                 base_compare_error=None, comments=(), comments_error=None, count_gh=False, files=None, files_error=None, changed_files=None, repo=None,
-                 commits=None, trees=None):
+                 base_compare_error=None, comments=(), comments_error=None, count_gh=False, repo=None, diffs=None, comment_error=None,
+                 files=None, files_error=None, changed_files=None, commits=None, trees=None):
         super().__init__(list(required), base="main", minute=60, pause=lambda s: None, ignore=ignore, repo=repo)
         self.pulls, self.check_rows, self.pulls_error = pulls, check_rows, pulls_error
         self.comments, self.comments_error = list(comments), comments_error  # the repo-wide issue comments, oldest first
+        self.comment_error = comment_error  # the message of a failed review_comment read; every such read fails with it
         self.files = list(files) if files is not None else [pr_file("README.md")]  # the changed files of every pull request, as `pulls/<n>/files` lists them
         self.files_error = files_error  # the (code, output) text of a failed files read
         self.changed_files = changed_files  # the changed_files count of `pulls/<n>`; None is the length of files
         self.workflow_runs = workflow_runs or {}  # sha -> the workflow runs `gh run list --commit <sha>` answers
         self.compares, self.compare_error, self.base_compare_error = compares or {}, compare_error, base_compare_error  # the (code, output) of a failed read
+        self.diffs = diffs or {}  # (older head, newer head) -> compare_of(status, *files): the reply of the net diff between them
         self.reads = []
         self.list_calls = []
         self.count_gh, self.gh_calls = count_gh, []
@@ -12667,7 +12672,7 @@ class PullsHost(merge.Host):
             is_base = re.fullmatch(r"[0-9a-f]{40}", m.group(1)) is None  # compare/<base branch>...<head>: the base read
             if self.compare_error or (is_base and self.base_compare_error):
                 return self.compare_error or self.base_compare_error
-            return 0, json.dumps({"status": self.compares.get(m.groups(), "diverged")})
+            return 0, json.dumps(self.compare_reply(*m.groups()))
         m = re.search(r"/commits/([0-9a-f]{40})$", route)
         if m:
             sha = m.group(1)
@@ -12679,6 +12684,34 @@ class PullsHost(merge.Host):
                 answer["commit"] = {"tree": {"sha": self.trees[sha]}}
             return 0, json.dumps(answer)
         raise AssertionError("unexpected gh call: " + " ".join(args))
+
+    def compare_reply(self, first, second):
+        """The reply of GitHub's three-dot compare of first...second: status, the commit counts, and the files on second's side of the merge base.
+        A pair listed in `diffs` as (older, newer) answers "ahead" with its files from the older read, and "behind" with none from the newer read,
+        since the older head holds no file the newer one lacks. A diverged pair keeps its files in either order; a pair not listed answers
+        "diverged" with no file."""
+        hit = self.diffs.get((first, second))
+        if hit is not None:
+            status, files = hit["status"], list(hit["files"])
+        elif (second, first) in self.diffs:
+            rev = self.diffs[(second, first)]
+            status = {"ahead": "behind"}.get(rev["status"], rev["status"])  # the read against the older head is behind
+            files = [] if status == "behind" else list(rev["files"])
+        else:
+            status, files = "diverged", []
+        ahead, behind = {"ahead": (1, 0), "behind": (0, 1), "diverged": (1, 1)}[status]
+        return {"status": self.compares.get((first, second), status), "ahead_by": ahead, "behind_by": behind, "files": files}
+
+    def review_comment(self, comment_id):
+        """The Host read of one repo comment: its body, the number of the issue or pull request it is on, and when it was created. Served from the
+        comment list the way pages("issues/comments") serves it. A comment the list does not hold is a Stop, as a failed read is."""
+        if self.comment_error:
+            raise merge.Stop(self.comment_error)
+        for c in self.comments:
+            if c["id"] == comment_id:
+                number = int(re.search(r"/issues/(\d+)$", c["issue_url"]).group(1))
+                return {"body": c["body"], "issue_number": number, "created_at": c["created_at"]}
+        raise merge.Stop(f"comment {comment_id} is not on the repo")
 
     def pull_reply(self, n):
         """-> (code, output) of `pulls/<n>`: the open pull request n, as the REST read gives it."""
@@ -12699,7 +12732,6 @@ class PullsHost(merge.Host):
             return text
         link = '<https://api.github.com/repos/{owner}/{repo}/%s?page=%d>; rel="next"' % (rel, page + 1)
         return "HTTP/1.1 200 OK\nLink: %s\n\n%s" % (link, text)
-
     def answer(self, rel, argv):
         """The reply of one REST route for the request's own flags, as the fake gh gives it (REST.listing): the page asked for, or with
         --paginate every page in the --slurp shape. The protection answers its --jq value. A list read that asks for a page gets that page."""
@@ -13840,8 +13872,16 @@ REVIEW_HEAD = "a1b2c3d4" * 5  # 40 hex characters
 REVIEW_OLD_HEAD = "0f" * 20
 REVIEW_PASS = ("Round 1: reviewer, sonnet, PASS",)
 REVIEW_FAILED_THREE = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL", "Round 3: reviewer, opus, FAIL")
+REVIEW_PASSED_THREE = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS",)  # the third round passes: a fixture for a rule a third-round FAIL would hold
+REVIEW_PARTIAL_THREE = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PARTIAL",)  # a round-3 PARTIAL keeps the rules that predate the hold
+REVIEW_HELD_WHY = "round 3 failed, so the finding becomes a new lane at round 1"  # the why of a change held by a failed third round or fix check
 REVIEW_FLAGS = ("--kind", "normal", "--guard", "no", "--round", "1:reviewer:sonnet:PASS")
 REVIEW_FOOTER = "\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"  # the footer a GitHub post carries, a lane's or the server's
+
+def round_args(lines):
+    """The --round values for the round lines a record prints, so a case writes the same lines its earlier record holds. Each line's number,
+    role, model and verdict become one N:ROLE:MODEL:VERDICT value."""
+    return tuple(":".join(re.fullmatch(r"Round (\d+): ([^,]+), ([^,]+), ([^,]+)", line).groups()) for line in lines)
 
 def record_text(rounds=REVIEW_PASS, head=REVIEW_HEAD, kind="normal", guard="no", net="not owed", n=7, marker=REVIEW_MARKER, fix=(), grant=()):
     """The record line by line, in the order the form gives. A keyword replaces one field, so a case changes only what it tests. `fix` holds the
@@ -13912,6 +13952,14 @@ def lint_of(n, head):
     """The lane-lint PASS of pull request n at `head`, as the comment list gives it. A done pull request needs one (decision lanes-run-no-full-ci-job)."""
     return lint_comment(500 + n, head, n=n)
 
+def compare_of(status, *files):
+    """One pair's compare reply for PullsHost's `diffs`: the status GitHub gives the older...newer read, and the files of the net diff."""
+    return {"status": status, "files": list(files)}
+
+def file_entry(name, status="modified", previous=None):
+    """One file of a compare reply, as GitHub names it: its status, and previous_filename for a rename."""
+    return {"filename": name, "status": status, **({"previous_filename": previous} if previous is not None else {})}
+
 def list_line(test, out, n):
     """The one `merge --reviewed` line for pull request n."""
     lines = [l for l in out.splitlines() if l.startswith(f"#{n} ")]
@@ -13924,6 +13972,8 @@ def no_record_numbers(out):
 
 REVIEW_FIX_PASS = (REVIEW_OLD_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "PASS")  # the parsed fix check tuple: reviewed head, role, model, verdict; every fix check runs on that model (owner item 444 a)
 REVIEW_FIX_FAIL = (REVIEW_OLD_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "FAIL")
+REVIEW_FIX_WIDE = (REVIEW_OLD_HEAD, "reviewer", merge.REVIEW_FIX_GUARD_MODEL, "WIDE")  # the fix check whose diff is wider than its finding
+REVIEW_WIDE_WHY = "the fix diff is wider than its finding, so the fix needs a new lane at round 1"  # the why of a WIDE fix check
 
 def fix_state(test, fix, **kw):
     """-> (state, why) of a record built without a fix line, with `fix` set on its parsed dict. review_state runs without the parser, so a
@@ -13931,6 +13981,11 @@ def fix_state(test, fix, **kw):
     rec = parse_text(test, record_text(**kw))
     rec["fix"] = fix
     return review_fn(test, "review_state")(rec, REVIEW_HEAD)
+
+def switch(name, value):
+    """merge.py's module constant `name` set to `value` for one case. create=True: a switch the build has not made yet is still set, so the
+    case fails on the rule it switches and not on a missing name."""
+    return unittest.mock.patch.object(merge, name, value, create=True)
 
 def body_with_fix(test, rounds, net, fix):
     """review_body for pull request 7 at REVIEW_HEAD, a normal change with guard no, with `fix`. A merge.py that takes no fix argument fails here by name."""
@@ -13971,6 +14026,13 @@ class ReviewFixForm(unittest.TestCase):
         rec = parse_text(self, text)
         self.assertEqual(rec.get("fix"), REVIEW_FIX_PASS, f"the fix line did not parse to its four fields: {rec.get('fix')!r}")
         self.assertEqual(review_fn(self, "review_body")(**rec).splitlines(), text.splitlines())
+
+    def test_the_wide_fix_line_parses_and_prints_back(self):
+        # the fix check takes PASS, FAIL or WIDE; a WIDE line parses to its four fields and prints back as written
+        text = record_text(rounds=REVIEW_PASS, fix=(fix_verifier_line(verdict="WIDE"),))
+        rec = parse_text(self, text)
+        self.assertEqual(rec.get("fix"), REVIEW_FIX_WIDE, f"the WIDE fix line did not parse to its four fields: {rec.get('fix')!r}")
+        self.assertEqual(review_fn(self, "review_body")(**rec).splitlines(), text.splitlines(), "the WIDE fix line did not print back as written")
 
     def test_a_malformed_fix_line_is_not_a_record(self):
         good = record_text(rounds=REVIEW_PASS, fix=(fix_verifier_line(),))
@@ -14044,6 +14106,11 @@ class ReviewRecordForm(unittest.TestCase):
     def test_the_parser_refuses_an_unknown_verdict(self):
         self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=("Round 1: reviewer, sonnet, MAYBE",))))
 
+    def test_the_parser_refuses_wide_as_a_round_verdict(self):
+        # WIDE is a fix check verdict only; a round line keeps PASS, FAIL and PARTIAL
+        self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=("Round 1: reviewer, sonnet, WIDE",))),
+                          "parse_review accepted WIDE as a round verdict")
+
     def test_the_parser_refuses_an_unknown_role(self):
         self.assertIsNone(review_fn(self, "parse_review")(record_text(rounds=("Round 1: qa-reviewer, sonnet, PASS",))))
 
@@ -14102,33 +14169,48 @@ class ReviewRecordForm(unittest.TestCase):
         self.assertEqual(parse_text(self, no_note).get("fix"), (fix_head, "reviewer", "sonnet", "PASS"), "the fix check did not parse")
 
 class ReviewRecordRules(unittest.TestCase):
-    """review_state over records the form gives (owner, page item 471 a). A change with Guard or check no is done by the review cap rule
-    (roles-review-cap-three): the last round is PASS and the last design-reviewer line is PASS or absent, or the final round is recorded, whatever its
-    verdict. A change with Guard or check yes is done after a passing round with no fix check, as a change with no guard is, and at the final round
-    only with a Net value of zero or positive. Net value negative is held. A first-round FAIL is open, except a delete-only change with Guard or check no.
-    The verdicts are PASS, FAIL and PARTIAL."""
+    """review_state over records the form gives. A change is done by the review cap rule (roles-review-cap-three): the last round is PASS
+    and the last design-reviewer line is PASS or absent, or the third round is done and Guard or check is no, or the third round is done
+    with Guard or check yes and a Net value of zero or positive. Net value negative is held. A FAIL line in the third round is held, whatever
+    the guard, the net value and the design line (decision hold-unsafe-after-round-3). The third round with Guard or check yes and no
+    Net value is open. A first-round FAIL is open. The verdicts are PASS, FAIL and PARTIAL; a third-round PARTIAL keeps the rules above."""
 
     def test_a_pass_in_the_last_round_is_done(self):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS)), "done")
 
-    def test_round_three_is_done_whatever_its_verdict_when_guard_is_no(self):
-        for verdict in ("PASS", "FAIL", "PARTIAL"):
-            with self.subTest(verdict=verdict):
-                rounds = REVIEW_FAILED_THREE[:2] + (f"Round 3: reviewer, opus, {verdict}",)
-                self.assertEqual(record_state(self, record_text(rounds=rounds, guard="no", net="not owed")), "done")
+    def test_round_three_is_done_on_pass_when_guard_is_no(self):
+        rounds = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS",)
+        self.assertEqual(record_state(self, record_text(rounds=rounds, guard="no", net="not owed")), "done")
+
+    def test_round_three_fail_is_held_whatever_the_guard_and_the_net_value(self):
+        # a FAIL in the third round holds the change, so the finding becomes a new lane at the first round; a net value of zero or positive does not settle it
+        for guard in ("no", "yes"):
+            for net in ("not owed", "zero", "positive"):
+                with self.subTest(guard=guard, net=net):
+                    state, why = record_verdict(self, record_text(rounds=REVIEW_FAILED_THREE, guard=guard, net=net))
+                    self.assertEqual(state, "held", f"a round-3 FAIL with guard {guard} and net value {net} did not read held: {why!r}")
+                    self.assertEqual(why, REVIEW_HELD_WHY, f"the why of a held round 3 is not the new-lane why: {why!r}")
 
     def test_round_three_with_guard_yes_is_done_when_net_value_is_zero_or_positive(self):
-        # The third round is FAIL here, so the net value alone decides. A guard or check change owes the third round, and then its net value.
+        # the third round passes here, so the net value decides; a FAIL in the third round is held (above)
         for net in ("zero", "positive"):
             with self.subTest(net=net):
-                self.assertEqual(record_state(self, record_text(rounds=REVIEW_FAILED_THREE, guard="yes", net=net)), "done")
+                self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASSED_THREE, guard="yes", net=net)), "done")
 
     def test_round_three_with_guard_yes_is_held_when_net_value_is_negative(self):
-        self.assertEqual(record_state(self, record_text(rounds=REVIEW_FAILED_THREE, guard="yes", net="negative")), "held")
+        self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASSED_THREE, guard="yes", net="negative")), "held")
 
     def test_round_three_with_guard_yes_is_open_when_net_value_is_not_written(self):
-        # "not owed" does not close a net-value test that the guard change owes. The third round is FAIL, so no done rule applies.
-        self.assertEqual(record_state(self, record_text(rounds=REVIEW_FAILED_THREE, guard="yes", net="not owed")), "open")
+        # "not owed" does not close a net-value test that the guard change owes. The third round passes, so the net value rule decides.
+        self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASSED_THREE, guard="yes", net="not owed")), "open")
+
+    def test_round_three_partial_holds_whatever_the_guard_and_net_value(self):
+        # a round-3 PARTIAL holds the change (owner page item 362 b), so no net value settles it
+        for guard in ("no", "yes"):
+            for net in ("not owed", "zero", "positive", "negative"):
+                with self.subTest(guard=guard, net=net):
+                    state, why = record_verdict(self, record_text(rounds=REVIEW_PARTIAL_THREE, guard=guard, net=net))
+                    self.assertEqual(state, "held", f"a round-3 PARTIAL with guard {guard} and net value {net} did not read held: {why!r}")
 
     def test_round_one_fail_on_a_normal_change_is_open(self):
         self.assertEqual(record_state(self, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))), "open")
@@ -14136,12 +14218,21 @@ class ReviewRecordRules(unittest.TestCase):
     def test_a_design_reviewer_fail_in_round_one_is_open(self):
         self.assertEqual(record_state(self, record_text(rounds=("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL"))), "open")
 
-    def test_a_design_reviewer_fail_in_round_three_with_guard_no_is_done(self):
-        # The review cap rule (roles-review-cap-three) ends the review after the third round when Guard or check is no, even when that round fails.
-        rounds = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS", "Round 3: design-reviewer, opus, FAIL")
+    def test_a_design_reviewer_partial_in_round_three_with_guard_no_is_held(self):
+        # A round-3 PARTIAL holds the change whichever role gave it (owner page item 362 b), so the review cap's done rule does not reach it
+        rounds = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS", "Round 3: design-reviewer, opus, PARTIAL")
         state, why = record_verdict(self, record_text(rounds=rounds, guard="no"))
-        self.assertEqual(state, "done", "round 3 is done whatever its verdict, so the state must stay done")
-        self.assertIn("in round 3 is FAIL", why, f"why does not name the design reviewer's round 3 FAIL: {why!r}")
+        self.assertEqual(state, "held", "round 3 holds on a design-reviewer PARTIAL line, so the state must read held")
+        self.assertEqual(why, REVIEW_HELD_WHY, f"the why of a held round 3 is not the new-lane why: {why!r}")
+
+    def test_a_design_reviewer_fail_in_round_three_is_held_whatever_the_guard(self):
+        # a FAIL line of either role in the third round holds the change, the design reviewer's included
+        rounds = REVIEW_FAILED_THREE[:2] + ("Round 3: reviewer, opus, PASS", "Round 3: design-reviewer, opus, FAIL")
+        for guard in ("no", "yes"):
+            with self.subTest(guard=guard):
+                state, why = record_verdict(self, record_text(rounds=rounds, guard=guard))
+                self.assertEqual(state, "held", f"a design-reviewer FAIL in round 3 with guard {guard} did not read held: {why!r}")
+                self.assertEqual(why, REVIEW_HELD_WHY, f"the why of a held round 3 is not the new-lane why: {why!r}")
 
     def test_a_reviewer_pass_in_the_last_round_does_not_clear_a_design_fail_in_round_one(self):
         rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, PASS")
@@ -14200,7 +14291,7 @@ class ReviewRecordRules(unittest.TestCase):
     def test_a_round_three_guard_no_with_a_design_fail_in_round_one_is_done_and_names_round_one(self):
         rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, FAIL", "Round 3: reviewer, opus, PASS")
         state, why = record_verdict(self, record_text(rounds=rounds, guard="no"))
-        self.assertEqual(state, "done", "round 3 is done whatever its verdict, so the state must stay done")
+        self.assertEqual(state, "done", "round 3 passed with guard no, so the state must stay done")
         self.assertIn("in round 1 is FAIL", why, f"why does not name the design reviewer's round 1 FAIL: {why!r}")
 
     def test_a_delete_only_guard_no_with_a_design_fail_in_round_one_and_a_round_two_fail_is_done_and_names_round_one(self):
@@ -14210,7 +14301,7 @@ class ReviewRecordRules(unittest.TestCase):
         self.assertIn("in round 1 is FAIL", why, f"why does not name the design reviewer's round 1 FAIL: {why!r}")
 
     def test_a_round_three_guard_yes_net_positive_with_a_design_partial_in_round_one_is_done_and_names_round_one(self):
-        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PARTIAL", "Round 2: reviewer, sonnet, FAIL", "Round 3: reviewer, opus, FAIL")
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PARTIAL", "Round 2: reviewer, sonnet, FAIL", "Round 3: reviewer, opus, PASS")
         state, why = record_verdict(self, record_text(rounds=rounds, guard="yes", net="positive"))
         self.assertEqual(state, "done", "round 3 with a net value of positive is done, so the state must stay done")
         self.assertIn("in round 1 is PARTIAL", why, f"why does not name the design reviewer's round 1 PARTIAL: {why!r}")
@@ -14243,13 +14334,6 @@ class ReviewRecordRules(unittest.TestCase):
             with self.subTest(net=net):
                 state, why = record_verdict(self, record_text(rounds=rounds, kind="delete-only", guard="yes", net=net))
                 self.assertEqual(state, "done", f"a passing second round with no fix check must read done before the final round: {why!r}")
-
-    def test_a_delete_only_guard_yes_after_a_failed_round_one_is_done_at_round_three_with_net_zero(self):
-        # control: the final round with a zero net value closes a delete-only change that failed its first round, whatever that round's verdict is
-        for verdict in ("PASS", "FAIL", "PARTIAL"):
-            with self.subTest(verdict=verdict):
-                rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL", f"Round 3: reviewer, opus, {verdict}")
-                self.assertEqual(record_state(self, record_text(rounds=rounds, kind="delete-only", guard="yes", net="zero")), "done")
 
     def test_a_delete_only_guard_yes_with_a_passed_first_round_and_a_failed_second_round_is_open(self):
         # A FAIL in a later round leaves the change open, because the round that failed is not passed.
@@ -14323,29 +14407,94 @@ class ReviewRecordRules(unittest.TestCase):
     def test_a_record_for_an_older_head_is_stale(self):
         self.assertEqual(record_state(self, record_text(rounds=REVIEW_PASS, head=REVIEW_OLD_HEAD), head=REVIEW_HEAD), "stale")
 
+    def test_a_round_three_partial_holds_only_when_the_partial_switch_is_on(self):
+        # Q3, the PARTIAL switch (default True, owner page item 362 b): a third-round PARTIAL holds the change. Off, it reads by the done rules. Both values are pinned
+        for value, want in ((False, "done"), (True, "held")):
+            with self.subTest(ROUND3_PARTIAL_HOLDS=value), switch("ROUND3_PARTIAL_HOLDS", value):
+                state, why = record_verdict(self, record_text(rounds=REVIEW_PARTIAL_THREE))
+                self.assertEqual(state, want, f"ROUND3_PARTIAL_HOLDS={value}: a round-3 PARTIAL must read {want}, got {state}: {why!r}")
+
+    def test_a_round_three_design_reviewer_fail_holds_only_when_the_design_switch_is_on(self):
+        # Q5, the design switch (default True): a design-reviewer FAIL in the third round holds. Off, only a reviewer FAIL in the third round holds,
+        # so the reviewer FAIL is the control under both values
+        passed_two = REVIEW_PASS + ("Round 2: reviewer, sonnet, PASS",)
+        design = record_text(rounds=passed_two + ("Round 3: design-reviewer, opus, FAIL",))
+        reviewer = record_text(rounds=passed_two + ("Round 3: reviewer, opus, FAIL",))
+        for value in (True, False):
+            with self.subTest(ROUND3_DESIGN_FAIL_HOLDS=value), switch("ROUND3_DESIGN_FAIL_HOLDS", value):
+                want = "held" if value else "done"
+                self.assertEqual(record_state(self, design), want, f"ROUND3_DESIGN_FAIL_HOLDS={value}: a design-reviewer FAIL in round 3 must read {want}")
+                self.assertEqual(record_state(self, reviewer), "held",
+                                 f"ROUND3_DESIGN_FAIL_HOLDS={value}: a reviewer FAIL in round 3 must hold under either value")
+
 class ReviewFixRules(unittest.TestCase):
-    """review_state with a fix check (decision hold-unsafe-after-round-3, owner, page item 471 a). A fix check is not a review of its own. A FAIL is
-    open, whatever the rounds say. A PASS counts as the round it follows passing. For Guard or check no, when that round is the first or the second
-    allowed one, the record is done whatever that round's verdict, and owes no net value yet. For Guard or check yes, a fix check PASS below the final
-    round leaves the record open, whatever the round said. A last design-reviewer line of FAIL or PARTIAL keeps the record open, and the why names the
-    design reviewer. On the final round the fix check keeps the net value that round gave, and does not settle a net value that is still owed. With no
-    round recorded the record is open. The rule cases build their record with fix_state(); the last case reads the fix line from the text."""
+    """review_state with a fix check (decision hold-unsafe-after-round-3). A fix check is not a review of its own. A FAIL counts as the next
+    round: open, with the why naming that round, and after the last allowed round held, whatever the net value. A WIDE is open with the new-lane why
+    and counts no round. A PASS counts as the round it follows passing. When that round is the first or the second allowed one, the record is done
+    whatever that round's verdict, and owes no net value yet. A last design-reviewer line of FAIL or PARTIAL keeps the record open, and the
+    why names the design reviewer. On the last allowed round the fix check keeps the net value that round gave, and does not settle a net
+    value that is still owed. With no round recorded the record is open. The rule cases build their record with fix_state(); the last case
+    reads the fix line from the text."""
 
-    def test_a_fix_fail_after_round_three_is_open_and_says_new_lane(self):
-        state, why = fix_state(self, REVIEW_FIX_FAIL, rounds=REVIEW_FAILED_THREE, guard="no")
-        self.assertEqual(state, "open", "a failed fix check must not read done")
-        self.assertIn("fix verifier failed", why)
-        self.assertIn("new lane", why)
+    def test_a_fix_fail_after_round_three_is_held_and_says_new_lane(self):
+        # after the last round a failed fix check holds the change, so the finding becomes a new lane at the first round. The third round passes here, so the fix check alone holds it.
+        state, why = fix_state(self, REVIEW_FIX_FAIL, rounds=REVIEW_PASSED_THREE, guard="no")
+        self.assertEqual(state, "held", "a failed fix check after round 3 must read held")
+        self.assertEqual(why, REVIEW_HELD_WHY, f"the why of a held fix check is not the new-lane why: {why!r}")
 
-    def test_a_fix_fail_after_round_three_with_a_positive_net_value_is_open(self):
-        state, why = fix_state(self, REVIEW_FIX_FAIL, rounds=REVIEW_FAILED_THREE, guard="yes", net="positive")
-        self.assertEqual(state, "open", "a failed fix check must not read done, even when round 3's net value is positive")
-        self.assertIn("fix verifier failed", why)
+    def test_a_fix_fail_after_round_three_with_guard_yes_is_held_whatever_the_net_value(self):
+        for net in ("not owed", "zero", "positive"):
+            with self.subTest(net=net):
+                state, why = fix_state(self, REVIEW_FIX_FAIL, rounds=REVIEW_PASSED_THREE, guard="yes", net=net)
+                self.assertEqual(state, "held", f"a failed fix check after round 3 with net value {net} must read held: {why!r}")
+                self.assertEqual(why, REVIEW_HELD_WHY, f"the why of a held fix check is not the new-lane why: {why!r}")
+
+    def test_a_round_three_fail_is_held_unless_a_fix_pass_clears_it(self):
+        # the round-3 hold comes before the fix check's rules: a FAIL or WIDE fix check reads held, whatever the guard. A PASS clears the hold
+        # under FIX_PASS_CLEARS_ROUND3_HOLD, so the next case reads it by the round-3 done rules
+        fixes = {"FAIL": REVIEW_FIX_FAIL, "WIDE": REVIEW_FIX_WIDE}
+        for verdict, fix in fixes.items():
+            for guard in ("no", "yes"):
+                with self.subTest(verdict=verdict, guard=guard):
+                    state, why = fix_state(self, fix, rounds=REVIEW_FAILED_THREE, guard=guard, net="not owed")
+                    self.assertEqual(state, "held", f"a round-3 FAIL with a fix check {verdict}, guard {guard}, did not read held: {why!r}")
+                    self.assertEqual(why, REVIEW_HELD_WHY, f"the why of a held round 3 is not the new-lane why: {why!r}")
 
     def test_a_fix_fail_after_a_delete_only_round_one_is_open(self):
         state, why = fix_state(self, REVIEW_FIX_FAIL, rounds=REVIEW_PASS, kind="delete-only", guard="no")
         self.assertEqual(state, "open", "a failed fix check must not read done, even after a delete-only round 1")
-        self.assertIn("fix verifier failed", why)
+        self.assertEqual(why, "the fix check failed, so it counts as round 2; the next record carries Round 2",
+                         f"the why does not name round 2 as the counted round: {why!r}")
+
+    def test_a_fix_fail_after_round_one_names_round_two(self):
+        state, why = fix_state(self, REVIEW_FIX_FAIL, rounds=("Round 1: reviewer, sonnet, FAIL",))
+        self.assertEqual(state, "open", "a failed fix check must not read done")
+        self.assertEqual(why, "the fix check failed, so it counts as round 2; the next record carries Round 2",
+                         f"the why does not name round 2: {why!r}")
+
+    def test_a_fix_fail_after_round_two_names_round_three(self):
+        state, why = fix_state(self, REVIEW_FIX_FAIL, rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"))
+        self.assertEqual(state, "open", "a failed fix check must not read done")
+        self.assertEqual(why, "the fix check failed, so it counts as round 3; the next record carries Round 3",
+                         f"the why does not name round 3: {why!r}")
+
+    def test_a_wide_fix_is_open_and_says_new_lane_at_round_one(self):
+        # a WIDE fix never reads done, whatever the rounds and net value say, and its why names a new lane at the first round
+        # a third-round FAIL is held instead, so the cases after the third round pass that round
+        cases = ((REVIEW_PASS, "delete-only", "no", "not owed"), (REVIEW_PASS, "normal", "no", "not owed"),
+                 (REVIEW_PASSED_THREE, "normal", "no", "not owed"), (REVIEW_PASSED_THREE, "normal", "yes", "positive"))
+        for rounds, kind, guard, net in cases:
+            with self.subTest(rounds=rounds, kind=kind, guard=guard, net=net):
+                state, why = fix_state(self, REVIEW_FIX_WIDE, rounds=rounds, kind=kind, guard=guard, net=net)
+                self.assertEqual(state, "open", f"a WIDE fix check must not read done: {why!r}")
+                self.assertEqual(why, REVIEW_WIDE_WHY, f"the why of a WIDE fix check is not the new-lane why: {why!r}")
+
+    def test_the_wide_fix_line_in_the_text_reaches_the_state_rules(self):
+        # end to end: the WIDE line is read from the record text, and the state reads open with the new-lane why
+        text = record_text(rounds=REVIEW_PASS, fix=(fix_verifier_line(verdict="WIDE"),))
+        state, why = record_verdict(self, text)
+        self.assertEqual(state, "open", f"a WIDE fix line in the text must read open: {why!r}")
+        self.assertEqual(why, REVIEW_WIDE_WHY, f"the why of a WIDE fix line in the text is not the new-lane why: {why!r}")
 
     def test_a_fix_pass_after_round_one_is_done_whatever_round_one_said(self):
         # A fix PASS after the first round counts as that round passing, for a normal change with guard no
@@ -14417,18 +14566,18 @@ class ReviewFixRules(unittest.TestCase):
         self.assertIn("no round", why, f"why does not say no round is recorded: {why!r}")
 
     def test_a_fix_pass_after_round_three_with_guard_no_is_done(self):
-        state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_FAILED_THREE, guard="no")
+        state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_PASSED_THREE, guard="no")
         self.assertEqual(state, "done", f"a fix check PASS after round 3 of a change with no guard must read done: {why!r}")
 
     def test_a_fix_pass_after_round_three_with_guard_yes_is_done_for_a_zero_or_positive_net_value(self):
         for net in ("zero", "positive"):
             with self.subTest(net=net):
-                state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_FAILED_THREE, guard="yes", net=net)
+                state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_PASSED_THREE, guard="yes", net=net)
                 self.assertEqual(state, "done", f"round 3's net value {net} must carry through the fix check: {why!r}")
 
     def test_a_fix_pass_after_round_three_with_guard_yes_keeps_the_net_value_owed(self):
         # the fix check does not settle a net value that the third round left owed
-        state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_FAILED_THREE, guard="yes", net="not owed")
+        state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_PASSED_THREE, guard="yes", net="not owed")
         self.assertEqual(state, "open", f"a fix check settled a net value round 3 left owed: {why!r}")
 
     def test_a_delete_only_guard_fix_pass_at_the_final_round_is_done_for_a_zero_or_positive_net_value(self):
@@ -14444,8 +14593,17 @@ class ReviewFixRules(unittest.TestCase):
         self.assertEqual(state, "open", f"a fix check settled a net value the final round left owed, delete-only with guard yes: {why!r}")
 
     def test_a_fix_pass_after_round_three_with_guard_yes_is_held_for_a_negative_net_value(self):
-        state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_FAILED_THREE, guard="yes", net="negative")
+        state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_PASSED_THREE, guard="yes", net="negative")
         self.assertEqual(state, "held", f"a negative net value must hold through the fix check: {why!r}")
+
+    def test_a_fix_pass_after_a_round_three_fail_follows_the_round_three_done_rules(self):
+        # a fix check PASS clears the round-3 hold (owner page item 363 b), so the round-3 done rules decide: guard no is done, and a guard change needs its net value
+        cases = (("no", "not owed", "done"), ("yes", "not owed", "open"), ("yes", "zero", "done"), ("yes", "positive", "done"))
+        for guard, net, want in cases:
+            with self.subTest(guard=guard, net=net):
+                state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_FAILED_THREE, guard=guard, net=net)
+                self.assertEqual(state, want, f"a fix check PASS after a failed round 3, guard {guard}, net {net}, must read {want}: {why!r}")
+                self.assertNotEqual(why, REVIEW_HELD_WHY, f"a cleared round 3 must not carry the new-lane why: {why!r}")
 
     def test_a_fix_pass_after_a_delete_only_round_one_with_guard_no_is_done(self):
         state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_PASS, kind="delete-only", guard="no")
@@ -14453,10 +14611,12 @@ class ReviewFixRules(unittest.TestCase):
 
     def test_the_fix_line_in_the_text_reaches_the_state_rules(self):
         # end to end: the line is read from the record text, then the same rules apply
-        cases = ((REVIEW_FAILED_THREE, "no", "not owed", "FAIL", "open"),
-                 (REVIEW_FAILED_THREE, "no", "not owed", "PASS", "done"),
-                 (REVIEW_FAILED_THREE, "yes", "zero", "PASS", "done"),
-                 (REVIEW_FAILED_THREE, "yes", "negative", "PASS", "held"),
+        cases = ((REVIEW_FAILED_THREE, "no", "not owed", "PASS", "done"),  # a fix PASS clears a round-3 FAIL, and the round-3 done rules decide
+                 (REVIEW_PASSED_THREE, "no", "not owed", "FAIL", "held"),  # a fix FAIL after the third round holds
+                 (REVIEW_PASSED_THREE, "no", "not owed", "PASS", "done"),
+                 (REVIEW_PASSED_THREE, "yes", "zero", "PASS", "done"),
+                 (REVIEW_PASSED_THREE, "yes", "negative", "PASS", "held"),
+                 (REVIEW_FAILED_THREE, "yes", "positive", "PASS", "done"),
                  (REVIEW_PASS, "no", "not owed", "PASS", "done"),  # a fix PASS after a passing first round is done
                  (("Round 1: reviewer, sonnet, FAIL",), "no", "not owed", "PASS", "done"),
                  (REVIEW_PASS, "yes", "positive", "PASS", "open"),  # a guard change before the final round stays open, whatever its net value
@@ -14484,6 +14644,38 @@ class ReviewFixRules(unittest.TestCase):
         self.assertIn("fix check", why, f"the why does not name the fix check: {why!r}")
         self.assertNotIn("round 1 passed", why, f"the why reads as a passed round: {why!r}")
 
+    def test_a_fix_pass_after_a_round_three_fail_clears_the_hold_only_when_the_switch_is_on(self):
+        # Q4, FIX_PASS_CLEARS_ROUND3_HOLD (default True, owner page item 363 b): a fix check PASS clears a round-3 FAIL, so the round-3 done rules decide. Off, the hold stays
+        for guard, net in (("no", "not owed"), ("yes", "positive")):
+            text = record_text(rounds=REVIEW_FAILED_THREE, guard=guard, net=net, fix=(fix_verifier_line(verdict="PASS"),))
+            for value, want in ((False, "held"), (True, "done")):
+                with self.subTest(guard=guard, FIX_PASS_CLEARS_ROUND3_HOLD=value), switch("FIX_PASS_CLEARS_ROUND3_HOLD", value):
+                    state, why = record_verdict(self, text)
+                    self.assertEqual(state, want,
+                                     f"FIX_PASS_CLEARS_ROUND3_HOLD={value}, guard {guard}: a fix PASS after a round-3 FAIL must read {want}, got {state}: {why!r}")
+
+    def test_a_fix_fail_after_a_round_three_pass_holds_only_when_the_switch_is_on(self):
+        # The fix-FAIL switch (default True, the lane's reading): a fix check FAIL after the third round holds. Off, it reads open with the fix-failed why
+        text = record_text(rounds=REVIEW_PASSED_THREE, fix=(fix_verifier_line(verdict="FAIL"),))
+        for value, want, why_has in ((True, "held", "round 3 failed"), (False, "open", "fix check failed")):
+            with self.subTest(FIX_FAIL_AFTER_ROUND3_HOLDS=value), switch("FIX_FAIL_AFTER_ROUND3_HOLDS", value):
+                state, why = record_verdict(self, text)
+                self.assertEqual(state, want, f"FIX_FAIL_AFTER_ROUND3_HOLDS={value}: a fix FAIL after round 3 must read {want}, got {state}: {why!r}")
+                self.assertIn(why_has, why, f"FIX_FAIL_AFTER_ROUND3_HOLDS={value}: the why does not name its cause: {why!r}")
+
+    def test_a_fix_pass_does_not_clear_a_round_three_design_reviewer_hold(self):
+        # G2: a fix check PASS clears a round-3 code reviewer's hold (owner page item 363 b), not a design reviewer's. A design-reviewer FAIL or PARTIAL
+        # in the third round stays held, and its why names the design reviewer. The code reviewer's third-round FAIL with a fix PASS still follows the done rules
+        for verdict in ("FAIL", "PARTIAL"):
+            with self.subTest(design=verdict):
+                rounds = ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS", "Round 3: reviewer, opus, PASS",
+                          f"Round 3: design-reviewer, opus, {verdict}")
+                state, why = fix_state(self, REVIEW_FIX_PASS, rounds=rounds, guard="no", net="not owed")
+                self.assertEqual(state, "held", f"a fix check PASS after a round-3 design-reviewer {verdict} must stay held: {why!r}")
+                self.assertIn("design reviewer", why, f"the why does not name the design reviewer: {why!r}")
+        state, why = fix_state(self, REVIEW_FIX_PASS, rounds=REVIEW_FAILED_THREE, guard="no", net="not owed")
+        self.assertEqual(state, "done", f"control: a fix check PASS after a round-3 code reviewer FAIL, guard no, must read done: {why!r}")
+
 class ReviewEnv(Env):
     """The review-record cases' flags and records. The run helpers (run_args, assert_usage_error) are Env's. No test lives here."""
 
@@ -14493,9 +14685,52 @@ class ReviewEnv(Env):
 
     def record_host(self, *comments, head=REVIEW_HEAD, files=None, **reads):
         """A host whose pull request 7 is at `head`, with the repo's review record comments in the order given, oldest first, and the files given
-        (default: one non-guard file). `reads` are PullsHost's other scripted reads, such as commits and compares."""
+        (default: one non-guard file). `reads` go to PullsHost: `diffs` for the compare replies, `compare_error` for a failed compare read."""
         return PullsHost([batch_pull(7, head)], {}, comments=comments, files=files, **reads)
 
+    def listing(self, pulls, comments=(), check_rows=None, **reads):
+        """`merge --reviewed` over the open `pulls` and the repo's `comments`, on a PullsHost: -> (host, rc, out, err). The one home of that read."""
+        host = PullsHost(pulls, check_rows or {}, comments=comments, **reads)
+        rc, out, err = self.run_args("--reviewed", host=host)
+        return host, rc, out, err
+
+    def compared(self, host, a, b):
+        """True when the host read the compare of heads a and b, in either order."""
+        return any(set(pair) == {a, b} for pair in host.compare_reads)
+
+    def assert_refused(self, rc, out, err):
+        """A refused fix check: rc 2, no record printed, no traceback."""
+        self.assertEqual(rc, 2, "the fix check was not refused:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
+        self.assertNotIn("Traceback", err)
+
+    FIELD_CLAUSES = {"net": ("Net value", "--net-value"), "guard": ("Guard or check", "--guard"), "kind": ("Kind", "--kind")}  # a field's record label and flag
+
+    def assert_refused_naming(self, rc, out, err, field, old, new):
+        """A refused fix check (assert_refused) whose reason names the field and both of its values, each as a whole word. The field is named in its
+        own clause, `LABEL OLD, so FLAG must be OLD`: the reason's lead-in names all three fields, so the lead-in alone proves none of them."""
+        self.assert_refused(rc, out, err)
+        label, flag = self.FIELD_CLAUSES[field]
+        self.assertRegex(err, rf"(?i){re.escape(label)} {re.escape(old)}, so {re.escape(flag)} must be",
+                         f"the refusal does not name the {field} field in its own clause:\n" + err)
+        for value in (old, new):
+            self.assertRegex(err, rf"(?<![\w-]){re.escape(value)}(?![\w-])", f"the refusal does not name the value {value!r}:\n" + err)
+
+    def run_or_fail(self, *argv, host):
+        """-> (rc, out, err), as run_args gives them. An exception that escapes merge.main fails the case by name: a process would print a traceback and exit 1."""
+        try:
+            return self.run_args(*argv, host=host)
+        except Exception as e:  # a crash is a failed case, not an error, and the name says what escaped
+            self.fail(f"merge raised {type(e).__name__}: {e}")
+
+    def set_origin(self, name):
+        """This checkout's origin is GitHub repo `name` (owner/name). The layout reads a repo's GitHub name from its origin."""
+        sh(self.co, "git", "remote", "set-url", "origin", f"https://github.com/{name}.git")
+
+    def roll_out(self, extras=None):
+        """This checkout's repo has rolled out to the layout: its extras file says so, and it keeps no kind at a legacy place. `extras`, when given,
+        is the file's body instead, so a case can write an extras file the layout cannot read."""
+        put(os.path.join(self.co, ".claude/layout-extras.json"), json.dumps({"kinds": {}, "rolled-out": True} if extras is None else extras))
     def git_commit(self, parent, changes, *more_parents):
         """-> the sha of a commit whose tree is `parent`'s tree with `changes` ({path: text}) written over it, and whose parents are `parent`
         then `more_parents`. The tree is built in an index of this run's folder, so the checkout's own files and index stay as they are."""
@@ -14758,10 +14993,160 @@ class ReviewRecordWrite(ReviewEnv):
         self.assertEqual(parse_text(self, posted_body(self, out))["net"], "negative")
 
     def test_a_bad_round_exits_two_and_prints_no_record(self):
-        for rnd in ("1:reviewer:sonnet:MAYBE", "4:reviewer:sonnet:PASS", "1:reviewer:PASS", "x:reviewer:sonnet:PASS", "1:qa:sonnet:PASS"):
+        for rnd in ("1:reviewer:sonnet:MAYBE", "1:reviewer:sonnet:WIDE", "4:reviewer:sonnet:PASS", "1:reviewer:PASS", "x:reviewer:sonnet:PASS", "1:qa:sonnet:PASS"):
             with self.subTest(round=rnd):
                 out, _err = self.assert_usage_error("7", "--review-record", "--kind", "normal", "--guard", "no", "--head", self.head(), "--round", rnd)
                 self.assertNotIn(REVIEW_MARKER, out)
+
+class ReviewLogAncestorHead(ReviewEnv):
+    """`--head` may name an ancestor of the live head, but only for a record that reads open: a FAIL that a push has since moved past. Its every
+    line in the highest round is FAIL, it carries no fix check, and it would read open. The ancestry is the compare read once, head first, as
+    compare(head, live): ahead with no behind. A PASS record keeps the equal-head rule and reads no compare. A head that is not an ancestor is
+    refused after its compare is read. A refusal has a control: the same argv with only the disputed factor changed, which exits 0."""
+
+    LIVE = REVIEW_HEAD  # the live head of pull request 7 in every case
+    ANC = REVIEW_OLD_HEAD  # a head the live head holds: the compare of ANC and LIVE answers ahead
+    DIVERGED = "4e" * 20  # a head that neither holds the live head nor is held by it: the compare answers diverged
+    EARLIER = "5e" * 20  # the Head of an earlier record on pull request 7: the fix base of case 7
+    FAIL_ONE = ("1:reviewer:sonnet:FAIL",)
+    PASS_ONE = ("1:reviewer:sonnet:PASS",)
+
+    def review_at(self, head, rounds, status="ahead", comments=(), extra=(), kind="normal"):
+        """The record for --head `head` with `rounds` (N:ROLE:MODEL:VERDICT each), `extra` after them. The compare of `head` and the live head
+        answers `status`. -> (rc, out, err, host)."""
+        host = self.record_host(*comments, diffs={(head, self.LIVE): compare_of(status)})
+        argv = ["7", "--review-record", "--kind", kind, "--guard", "no", "--head", head]
+        for rnd in rounds:
+            argv += ["--round", rnd]
+        rc, out, err = self.run_args(*argv, *extra, host=host)
+        return rc, out, err, host
+
+    def assert_head_refused(self, rc, out, err, label):
+        """A refused head: exit 1, no record printed, no traceback, and a reason on stderr."""
+        self.assertEqual(rc, 1, f"{label} was not refused with exit 1:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out, f"{label} still printed a record")
+        self.assertNotIn("Traceback", err)
+        self.assertTrue(err.strip(), f"{label} was refused with no reason on stderr")
+
+    def test_a_fail_round_one_on_an_ancestor_head_prints_that_head(self):
+        rc, out, err, host = self.review_at(self.ANC, self.FAIL_ONE)
+        self.assertEqual(rc, 0, "a FAIL record on an ancestor of the live head was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["head"], self.ANC, "the record does not print the head the review read")
+        self.assertIn((self.ANC, self.LIVE), host.compare_reads, "the ancestry was not read as compare(head, live)")
+
+    def test_a_fix_verifier_on_the_live_head_follows_an_ancestor_fail_record(self):
+        # The fix check's base is the Head of the earlier FAIL record, so the check needs no compare read. This case controls the ancestor FAIL
+        # case above: the live head with its fix line is accepted.
+        fail = review_comment(1, 7, record_text(head=self.ANC, rounds=("Round 1: reviewer, sonnet, FAIL",)))
+        host = self.record_host(fail)
+        rc, out, err = self.run_args("7", "--review-record", "--kind", "normal", "--guard", "no", "--head", self.LIVE, "--round", "1:reviewer:sonnet:FAIL",
+                                     "--fix-check", f"{self.ANC}:reviewer:sonnet:PASS", host=host)
+        self.assertEqual(rc, 0, "the fix check after the ancestor FAIL record was refused:\n" + out + err)
+        rec = parse_text(self, posted_body(self, out))
+        self.assertEqual((rec["head"], rec["fix"]), (self.LIVE, (self.ANC, "reviewer", "sonnet", "PASS")), "the fix check record is not the live head with its fix line")
+
+    def test_a_pass_record_on_an_ancestor_head_is_refused_and_reads_no_compare(self):
+        rc, out, err, host = self.review_at(self.ANC, self.PASS_ONE, status="ahead")
+        self.assertEqual(rc, 1, "a PASS record on an ancestor head was not refused with exit 1:\n" + out + err)
+        self.assertNotIn(REVIEW_MARKER, out)
+        self.assertNotIn("Traceback", err)
+        self.assertIn(self.LIVE[:9], err, "the equal-head refusal does not name the live head")  # the reason of a PASS: the equal-head rule
+        self.assertIn(self.ANC[:9], err, "the equal-head refusal does not name the reviewed head")
+        self.assertEqual(host.compare_reads, [], "a PASS record read a compare")
+        # control: the same ancestor with a FAIL round is accepted, so the refusal is for the PASS line
+        rc, out, err, _ = self.review_at(self.ANC, self.FAIL_ONE, status="ahead")
+        self.assertEqual(rc, 0, "control: a FAIL record on the same ancestor was refused:\n" + out + err)
+
+    def test_a_partial_round_on_an_ancestor_head_is_refused_with_no_compare(self):
+        # A PARTIAL line reads open, so only the every-line-FAIL clause refuses this record, and it does so before any compare is read.
+        rc, out, err, host = self.review_at(self.ANC, ("1:reviewer:sonnet:PARTIAL",), status="ahead")
+        self.assert_head_refused(rc, out, err, "a PARTIAL-only round on an ancestor head")
+        self.assertEqual(host.compare_reads, [], "a PARTIAL-only round read a compare")
+        # control: the same ancestor with a FAIL round is accepted, so the refusal is for the PARTIAL line
+        rc, out, err, _ = self.review_at(self.ANC, self.FAIL_ONE, status="ahead")
+        self.assertEqual(rc, 0, "control: a FAIL-only round on the same ancestor was refused:\n" + out + err)
+
+    def test_a_fail_record_on_a_diverged_head_is_refused_after_its_compare_is_read(self):
+        rc, out, err, host = self.review_at(self.DIVERGED, self.FAIL_ONE, status="diverged")
+        self.assertIn((self.DIVERGED, self.LIVE), host.compare_reads, "the diverged head was not compared with the live head before the refusal")
+        self.assert_head_refused(rc, out, err, "a FAIL record on a diverged head")
+        # control: the same head with its compare ahead is accepted, so the diverged answer is the reason
+        rc, out, err, _ = self.review_at(self.DIVERGED, self.FAIL_ONE, status="ahead")
+        self.assertEqual(rc, 0, "control: a FAIL record on the same head with an ahead compare was refused:\n" + out + err)
+
+    def test_a_mixed_round_on_an_ancestor_head_is_refused(self):
+        # the round has a FAIL and a PASS line; the record reads open, so only the every-line-FAIL clause refuses it
+        rc, out, err, _ = self.review_at(self.ANC, ("1:reviewer:sonnet:FAIL", "1:design-reviewer:opus:PASS"), status="ahead")
+        self.assert_head_refused(rc, out, err, "a round with a FAIL and a PASS line on an ancestor head")
+        # control: the FAIL line alone is accepted
+        rc, out, err, _ = self.review_at(self.ANC, self.FAIL_ONE, status="ahead")
+        self.assertEqual(rc, 0, "control: a FAIL-only round on the same ancestor was refused:\n" + out + err)
+
+    def test_a_round_three_fail_on_an_ancestor_head_is_refused_as_held(self):
+        # A FAIL in the final allowed round reads held. The control stops at the first two rounds, which read open, so the final round is the
+        # factor under test.
+        rc, out, err, host = self.review_at(self.ANC, ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:FAIL"), status="ahead")
+        self.assert_head_refused(rc, out, err, "a round-3 all-FAIL record on an ancestor head")
+        self.assertEqual(host.compare_reads, [], "a round-3 all-FAIL record read a compare, so the held rule came after the ancestry read")
+        rc, out, err, _ = self.review_at(self.ANC, ("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL"), status="ahead")
+        self.assertEqual(rc, 0, "control: a rounds 1-2 all-FAIL record on the same ancestor was refused:\n" + out + err)
+
+    def test_a_delete_only_fail_record_on_an_ancestor_head_is_refused_with_no_compare(self):
+        # A delete-only change with no guard or check reads done after its first round, so only the reads-open clause refuses this record,
+        # and it does so before any compare is read. The control is the same record as a normal change, which reads open.
+        rc, out, err, host = self.review_at(self.ANC, self.FAIL_ONE, kind="delete-only")
+        self.assert_head_refused(rc, out, err, "a delete-only FAIL record on an ancestor head")
+        self.assertEqual(host.compare_reads, [], "a delete-only FAIL record that reads done read a compare")
+        rc, out, err, _ = self.review_at(self.ANC, self.FAIL_ONE, status="ahead")
+        self.assertEqual(rc, 0, "control: the normal-kind FAIL record on the same ancestor was refused:\n" + out + err)
+
+    def test_a_net_negative_fail_record_on_an_ancestor_head_is_refused_with_no_compare(self):
+        # A negative net value holds the change, so only the reads-open clause refuses this record, and it does so before any compare is read.
+        # The control is the same record with the net value at its default.
+        rc, out, err, host = self.review_at(self.ANC, self.FAIL_ONE, extra=("--net-value", "negative"))
+        self.assert_head_refused(rc, out, err, "a net-negative FAIL record on an ancestor head")
+        self.assertEqual(host.compare_reads, [], "a net-negative FAIL record read a compare")
+        rc, out, err, _ = self.review_at(self.ANC, self.FAIL_ONE, status="ahead")
+        self.assertEqual(rc, 0, "control: the same ancestor record with its default net value was refused:\n" + out + err)
+
+    def test_a_pass_then_fail_round_two_on_an_ancestor_head_prints_that_head(self):
+        # The top round is all FAIL, though the first round passed. The rule reads only the highest round.
+        rc, out, err, host = self.review_at(self.ANC, ("1:reviewer:sonnet:PASS", "2:reviewer:sonnet:FAIL"), status="ahead")
+        self.assertEqual(rc, 0, "a record whose top round is all FAIL, after a passed round 1, was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["head"], self.ANC, "the record does not print the head the review read")
+        self.assertIn((self.ANC, self.LIVE), host.compare_reads, "the ancestry was not read as compare(head, live)")
+
+    def test_a_record_with_no_round_on_an_ancestor_head_is_refused_with_no_compare(self):
+        # With no round recorded, the ancestor rule never reads a compare. The normal kind reads open with no round, so only the no-round clause
+        # refuses it. The docs-only kind reads done with no round, and the no-round clause refuses it first.
+        for kind in ("docs-only", "normal"):
+            with self.subTest(kind=kind):
+                host = self.record_host(diffs={(self.ANC, self.LIVE): compare_of("ahead")})
+                rc, out, err = self.run_args("7", "--review-record", "--kind", kind, "--guard", "no", "--head", self.ANC, host=host)
+                self.assert_head_refused(rc, out, err, f"a {kind} record with no round on an ancestor head")
+                self.assertEqual(host.compare_reads, [], f"a {kind} record with no round read a compare")
+
+    def test_a_fail_record_with_a_fix_verifier_on_an_ancestor_head_is_refused(self):
+        # the fix base is an earlier record's Head, so the fix check is valid on its own. The fix verdict is FAIL: the record then reads open, and
+        # only the no-fix-check clause can refuse it. The control drops the fix check and keeps the same comments.
+        earlier = review_comment(1, 7, record_text(head=self.EARLIER, rounds=REVIEW_PASS))
+        rc, out, err, _ = self.review_at(self.ANC, self.FAIL_ONE, status="ahead", comments=(earlier,),
+                                         extra=("--fix-check", f"{self.EARLIER}:reviewer:sonnet:FAIL"))
+        self.assert_head_refused(rc, out, err, "a FAIL record with a fix check on an ancestor head")
+        rc, out, err, _ = self.review_at(self.ANC, self.FAIL_ONE, status="ahead", comments=(earlier,))
+        self.assertEqual(rc, 0, "control: the same ancestor record without its fix check was refused:\n" + out + err)
+
+    def test_a_fail_record_on_an_ancestor_head_lists_as_stale_on_the_reviewed_listing(self):
+        # Pinned: `merge --reviewed` lists an open FAIL record on an ancestor of the live head as stale, and names the head it reviewed. No review
+        # read the live head, so the line never reads done. The compare is answered ahead, so the fixture holds the ancestry the record claims.
+        host = self.record_host(review_comment(1, 7, record_text(head=self.ANC, rounds=("Round 1: reviewer, sonnet, FAIL",))),
+                                diffs={(self.ANC, self.LIVE): compare_of("ahead")})
+        rc, out, err = self.run_args("--reviewed", host=host)
+        self.assertEqual(rc, 0, "the listing refused the ancestor-head record:\n" + out + err)
+        line = list_line(self, out, 7)
+        self.assertRegex(line, rf"^#7 feat7 {self.LIVE[:9]} stale: the record is for head {self.ANC[:9]}; ",
+                         "the ancestor-head FAIL record is not listed as stale, naming its head:\n" + out)
+        self.assertNotRegex(line, r" done: ", "the ancestor-head FAIL record reads done on the reviewed listing:\n" + out)
 
 class ReviewFixFlag(ReviewEnv):
     """`--fix-check REVIEWED_HEAD:reviewer:MODEL:VERDICT` goes with --review-record and prints the fix check line after the rounds. A usage
@@ -14798,6 +15183,13 @@ class ReviewFixFlag(ReviewEnv):
             with self.subTest(bad=bad):
                 out, _err = self.assert_usage_error("7", "--review-record", *self.flags(), "--fix-check", bad)
                 self.assertNotIn(REVIEW_MARKER, out)
+
+    def test_a_wide_fix_value_is_accepted_and_printed(self):
+        # the flag takes WIDE as it takes PASS and FAIL, and the line prints after the rounds
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(verdict="WIDE"), host=self.earlier_host())
+        self.assertEqual(rc, 0, "the well-formed WIDE --fix-check is refused:\n" + out + err)
+        self.assertEqual(posted_body(self, out).splitlines()[5:],
+                         ["Round 1: reviewer, sonnet, PASS", fix_verifier_line(verdict="WIDE"), "Net value: not owed", REVIEW_CI_LINE])
 
     def test_a_fix_whose_reviewed_head_is_the_live_head_exits_two(self):
         # the fix diff would be empty, so parse_review refuses the record, and the flag refuses it the same way the rounds do
@@ -14838,20 +15230,27 @@ class ReviewFixFlag(ReviewEnv):
                 self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (REVIEW_OLD_HEAD, "reviewer", model, "PASS"))
 
 class ReviewFixBase(ReviewEnv):
-    """`--fix-check BASE:...` with --review-record refuses unless BASE is the head of the newest review record already on the pull request, and
-    that record has no fix check line. The fix diff then starts from the head the last record reviewed, and a fix never follows a fix. The
-    earlier records come from review_comments, which PullsHost serves from its comment list, oldest first. A refusal exits 2 and prints no record."""
+    """`--fix-check BASE:...` with --review-record refuses unless the newest review record already on the pull request has no fix check line, or
+    its fix check PASSed (ReviewFixPassChain), and either BASE is that record's Head, or the compare of BASE and that Head shows one an ancestor
+    of the other with only record or notes files between them. The fix diff then starts from BASE, and a fix never follows a failed or wide fix.
+    The earlier records come from review_comments, which PullsHost serves from its comment list, oldest first. A refusal exits 2 and prints no
+    record. A failed compare read exits 1, as every failed read does."""
 
     EARLIER_HEAD = "1e" * 20  # a head that an earlier record reviewed, and that is not the newest record's
     OTHER_HEAD = "2e" * 20  # a head that no record reviewed
+    NOTES_HEAD = "3e" * 20  # a notes commit after REVIEW_OLD_HEAD, whose files are record or notes files only
+    # lint/layout.json's record and notes kinds, their legacy paths, and the generated page docs/records.md
+    RECORD_PATHS = ("docs/decisions/d-010-slug.md", "docs/debts/slug.md", "docs/plans/slug.md", "docs/debts/notes.md", "docs/todo.md",
+                    "docs/records.md", "decisions/d-010-slug.md", "debts/slug.md", "plans/slug.md", "debts/notes.md")
+    NON_RECORD_PATHS = ("merge/merge.py", "lint/layout.json", "docs/specs/slug.md")  # code, config and a spec: none is a record or notes file
 
     def review_with_base(self, base, host):
         return self.run_args("7", "--review-record", "--head", REVIEW_HEAD, *REVIEW_FLAGS, "--fix-check", f"{base}:reviewer:{merge.REVIEW_FIX_GUARD_MODEL}:PASS", host=host)
 
-    def assert_refused(self, rc, out, err):
-        self.assertEqual(rc, 2, "the fix check was not refused:\n" + out + err)
-        self.assertNotIn(REVIEW_MARKER, out, "a refused fix check still printed a record")
-        self.assertNotIn("Traceback", err)
+    def orders(self):
+        """The two orders of a fix base beside the newest record's Head, as (label, record Head, base). The compare reads the files between the two
+        heads in both: the record Head newer than the base (a notes commit after the base, the base an ancestor), then the record Head older."""
+        return (("record head newer", self.NOTES_HEAD, REVIEW_OLD_HEAD), ("record head older", REVIEW_OLD_HEAD, self.NOTES_HEAD))
 
     def test_a_base_equal_to_the_newest_earlier_record_head_prints_the_record(self):
         # control: the fix diff starts from the head the newest earlier record reviewed, and that record has no fix line
@@ -14861,12 +15260,16 @@ class ReviewFixBase(ReviewEnv):
         self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), REVIEW_FIX_PASS)
 
     def test_a_base_that_is_not_the_head_of_the_newest_earlier_record_is_refused(self):
-        # only the newest record's head counts, so a head that just an older record reviewed is refused as well as a head no record reviewed
+        # a head that an older record reviewed is no base on its record alone: the compare of it and the newest Head decides. Diverged from that
+        # Head, it is refused with notes between them as with none, and so is a head no record reviewed
         older = review_comment(1, 7, record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS))
         newest = review_comment(2, 7, record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS))
+        diffs = {(self.EARLIER_HEAD, REVIEW_OLD_HEAD): compare_of("diverged", file_entry("docs/debts/notes.md")),
+                 (self.OTHER_HEAD, REVIEW_OLD_HEAD): compare_of("diverged")}
         for base in (self.OTHER_HEAD, self.EARLIER_HEAD):
             with self.subTest(base=base):
-                rc, out, err = self.review_with_base(base, self.record_host(older, newest))
+                host = self.record_host(older, newest, diffs=diffs)
+                rc, out, err = self.review_with_base(base, host)
                 self.assert_refused(rc, out, err)
 
     def test_a_newest_earlier_record_with_a_fix_line_refuses_its_head_as_the_base(self):
@@ -14875,6 +15278,10 @@ class ReviewFixBase(ReviewEnv):
         # the new head is a plain commit on that fixed head, so the refusal stays the same once the head's parents are read
         host = self.record_host(review_comment(1, 7, fixed), commits={REVIEW_HEAD: [REVIEW_OLD_HEAD]})
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, host)
+        self.assert_refused(rc, out, err)
+        # and a base the compare would allow, a notes-only ancestor of that head, is refused for the same reason
+        diffs = {(self.EARLIER_HEAD, REVIEW_OLD_HEAD): compare_of("ahead", file_entry("docs/debts/notes.md"))}
+        rc, out, err = self.review_with_base(self.EARLIER_HEAD, self.record_host(review_comment(1, 7, fixed), diffs=diffs))
         self.assert_refused(rc, out, err)
 
     def test_no_earlier_record_on_the_pull_request_refuses_the_fix_check(self):
@@ -14907,6 +15314,587 @@ class ReviewFixBase(ReviewEnv):
         rc, out, err = self.review_with_base(REVIEW_OLD_HEAD, self.record_host(older, malformed))
         self.assert_refused(rc, out, err)
 
+class ReviewChainFixture(ReviewEnv):
+    """The one home of a pull request whose newest earlier record may carry a fix check. LIVE is the live head, NEWEST the Head of that newest
+    record, and EARLIER the Head of the older record its fix check reviewed. OTHER and NOTES are heads some cases name, and CODE and NOTES_FILE
+    are the files of their compares. `pair` builds the two records, `chain_link` one record of a longer chain, and `run_chain` runs a fix check on them. No test lives here."""
+
+    LIVE = REVIEW_HEAD  # the live head of pull request 7 in every case
+    NEWEST = REVIEW_OLD_HEAD  # the Head of the newest earlier record
+    EARLIER = "1e" * 20  # the Head of the older record, which the newest record's fix check reviewed
+    OTHER = "2e" * 20  # a head no record reviewed
+    NOTES = "3e" * 20  # a head past NEWEST whose only change is a notes file
+    CODE = file_entry("merge/merge.py")  # a code file: a fix diff that holds one is not a record-only step
+    NOTES_FILE = file_entry("docs/debts/notes.md")
+
+    def pair(self, verdict, rounds=REVIEW_PASS, net="not owed", guard="no", kind="normal"):
+        """Pull request 7's comments for a second small fix after a passed fix check: an older record at EARLIER, then the
+        newest record at NEWEST, whose fix check of `verdict` reviewed EARLIER. A `verdict` of None leaves the newest record with no fix check line.
+        `rounds`, `net`, `guard` and `kind` set the newest record's fields."""
+        fix = (fix_verifier_line(verdict=verdict, head=self.EARLIER),) if verdict else ()
+        return (review_comment(1, 7, record_text(head=self.EARLIER, rounds=REVIEW_PASS)),
+                review_comment(2, 7, record_text(head=self.NEWEST, rounds=rounds, guard=guard, kind=kind, fix=fix, net=net)))
+
+    def chain_link(self, cid, head, fix_base=None, rounds=REVIEW_PASS, net="not owed", guard="no", kind="normal"):
+        """Pull request 7's record number `cid` at `head`, with `rounds`, `net`, guard and kind. `fix_base` set gives it a Fix check PASS from that
+        head; None gives it no Fix check line. A longer chain is a run of these, each record's fix base the head before it."""
+        fix = (fix_verifier_line(verdict="PASS", head=fix_base),) if fix_base else ()
+        return review_comment(cid, 7, record_text(head=head, rounds=rounds, kind=kind, guard=guard, net=net, fix=fix))
+
+    def run_chain(self, base, comments=(), diffs=None, verdict="PASS", net="not owed", guard="no", kind="normal",
+                  rounds=("1:reviewer:sonnet:PASS",), live=None):
+        """The record for the live head (`live`, LIVE by default), with the `rounds` given (N:ROLE:MODEL:VERDICT each; none makes a record
+        with no round lines), and --fix-check `base` at `verdict`, on the repo's `comments` and the compares `diffs`. `net`, `guard` and `kind`
+        are the new record's fields. -> (rc, out, err, host)."""
+        live = live or self.LIVE
+        host = self.record_host(*comments, head=live, diffs=diffs or {})
+        argv = ["7", "--review-record", "--kind", kind, "--guard", guard, "--head", live, *(a for r in rounds for a in ("--round", r)),
+                "--fix-check", f"{base}:reviewer:sonnet:{verdict}", "--net-value", net]
+        rc, out, err = self.run_args(*argv, host=host)
+        return rc, out, err, host
+
+class ReviewFixNetFreeze(ReviewChainFixture):
+    """A fix check that follows a record whose final round is the last allowed one (decision hold-unsafe-after-round-3): its --net-value, --guard
+    and --kind must equal that record's. Otherwise it is refused with exit 2 and no record, and the refusal names the field and both values. This
+    holds for a first fix check, a chained one, a chain whose newest record is short (fewer round lines than the final round), and the record a
+    --fix-base-record stands in for (ReviewFixBaseRecord holds that case). A record with fewer round lines than the final round is refused where
+    it is written, by the round floor; a chain that still reads one reads the final round's record behind it. Before the final round the three may
+    change. A case that passes on the old code is a control, or a pin of the chain's net clause; the rest are red there."""
+
+    ALL_PASS_ARGS = ("1:reviewer:sonnet:PASS", "2:reviewer:sonnet:PASS", "3:reviewer:opus:PASS")  # the final round passes, as --round values
+    ALL_PASS = ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS", "Round 3: reviewer, opus, PASS")  # the same lines as a record prints them
+
+    def held_chain(self):
+        """The earlier record at NEWEST, with every round passed, Guard or check yes and Net value negative, so it reads held. -> the comments."""
+        comments = self.pair(None, rounds=self.ALL_PASS, net="negative", guard="yes")
+        self.assertEqual(record_state(self, comments[-1]["body"], self.NEWEST), "held", "scope: the final-round record does not read held")
+        return comments
+
+    def test_a_first_fix_verifier_after_a_held_round_3_may_not_change_its_net_value(self):
+        comments = self.pair(None, rounds=REVIEW_FAILED_THREE, net="negative", guard="yes")
+        self.assertEqual(record_state(self, comments[-1]["body"], self.NEWEST), "held", "scope: the round-3 record with Net value negative does not read held")
+        for net in ("zero", "positive", "not owed"):
+            with self.subTest(net=net):
+                rc, out, err, _ = self.run_chain(self.NEWEST, comments, net=net, guard="yes", rounds=round_args(REVIEW_FAILED_THREE))
+                self.assert_refused_naming(rc, out, err, "net", "negative", net)
+
+    def test_a_first_fix_verifier_after_a_held_round_3_that_keeps_its_net_value_is_accepted(self):
+        # control, green on the old code: the same net value is accepted, and the record it prints still reads held
+        comments = self.pair(None, rounds=REVIEW_FAILED_THREE, net="negative", guard="yes")
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, net="negative", guard="yes", rounds=round_args(REVIEW_FAILED_THREE))
+        self.assertEqual(rc, 0, "a first fix check keeping the round-3 net value negative was refused:\n" + out + err)
+        self.assertEqual(record_state(self, posted_body(self, out), self.LIVE), "held", "the accepted record does not read held")
+
+    def test_a_first_fix_verifier_after_an_open_round_3_may_not_change_its_net_value_or_guard(self):
+        comments = self.pair(None, rounds=REVIEW_PASSED_THREE, net="not owed", guard="yes")
+        self.assertEqual(record_state(self, comments[-1]["body"], self.NEWEST), "open", "scope: the round-3 record on a guard change does not read open")
+        rounds = round_args(REVIEW_PASSED_THREE)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, net="not owed", guard="yes", rounds=rounds)
+        self.assertEqual(rc, 0, "control: a first fix check keeping every field was refused:\n" + out + err)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, net="zero", guard="yes", rounds=rounds)
+        with self.subTest(field="net"):
+            self.assert_refused_naming(rc, out, err, "net", "not owed", "zero")
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, net="not owed", guard="no", rounds=rounds)
+        with self.subTest(field="guard"):
+            self.assert_refused_naming(rc, out, err, "guard", "yes", "no")
+
+    def test_a_first_fix_verifier_after_round_3_may_not_change_its_kind(self):
+        comments = self.pair(None, rounds=REVIEW_PASSED_THREE, net="zero", guard="yes")
+        self.assertEqual(record_state(self, comments[-1]["body"], self.NEWEST), "done", "scope: the round-3 record does not read done")
+        rounds = round_args(REVIEW_PASSED_THREE)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, net="zero", guard="yes", kind="normal", rounds=rounds)
+        self.assertEqual(rc, 0, "control: a first fix check keeping every field was refused:\n" + out + err)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, net="zero", guard="yes", kind="delete-only", rounds=rounds)
+        self.assert_refused_naming(rc, out, err, "kind", "normal", "delete-only")
+
+    def test_a_first_fix_verifier_before_round_3_may_change_its_net_value_guard_or_kind(self):
+        # control, green on the old code: net value is not owed before the final round, so a fix check on a record that ends at the second round may change any of the three
+        comments = self.pair(None, rounds=REVIEW_FAILED_THREE[:2], net="not owed", guard="yes")
+        self.assertEqual(max(i for i, *_ in parse_text(self, comments[-1]["body"])["rounds"]), 2, "scope: the newest record does not end at round 2")
+        rounds = round_args(REVIEW_FAILED_THREE[:2])
+        for net in ("not owed", "zero", "positive", "negative"):
+            with self.subTest(net=net):
+                rc, out, err, _ = self.run_chain(self.NEWEST, comments, net=net, guard="yes", rounds=rounds)
+                self.assertEqual(rc, 0, f"a fix check after round 2 with Net value {net} was refused:\n" + out + err)
+                self.assertEqual(parse_text(self, posted_body(self, out))["net"], net)
+        for guard, kind in (("no", "normal"), ("yes", "delete-only")):
+            with self.subTest(guard=guard, kind=kind):
+                rc, out, err, _ = self.run_chain(self.NEWEST, comments, net="not owed", guard=guard, kind=kind, rounds=rounds)
+                self.assertEqual(rc, 0, f"a fix check after round 2 with guard {guard} and kind {kind} was refused:\n" + out + err)
+
+    def test_a_record_with_fewer_round_lines_than_the_final_round_is_refused_at_the_write_step(self):
+        # the round floor of the newest earlier record applies to a fix check's own record, so a short one is refused where it is written
+        comments = self.held_chain()
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, net="negative", guard="yes", rounds=self.ALL_PASS_ARGS)
+        self.assertEqual(rc, 0, "control: a fix check that copies every round line of the final round was refused:\n" + out + err)
+        earlier = [parse_text(self, c["body"]) for c in comments]
+        for lines in range(3):
+            with self.subTest(round_lines=lines):
+                rc, out, err, _ = self.run_chain(self.NEWEST, comments, net="negative", guard="yes", rounds=self.ALL_PASS_ARGS[:lines])
+                self.assert_refused(rc, out, err)
+                short = parse_text(self, record_text(head=self.LIVE, rounds=self.ALL_PASS[:lines], net="negative", guard="yes"))
+                why = review_fn(self, "round_floor")(earlier, short)
+                self.assertIsNotNone(why, "scope: round_floor does not hold the short record")
+                self.assertIn(why, err, "the refusal does not name the round floor:\n" + err)
+
+    def test_a_fix_verifier_keeps_the_net_value_of_the_newest_final_round_record(self):
+        # two records reach the final round with different net values; the one a fix check keeps is the newest, so zero passes and not owed is refused
+        older = review_comment(1, 7, record_text(head=self.EARLIER, rounds=self.ALL_PASS, net="not owed", guard="no"))
+        newer = review_comment(2, 7, record_text(head=self.NEWEST, rounds=self.ALL_PASS, net="zero", guard="no"))
+        comments = (older, newer)
+        for body, net in ((older["body"], "not owed"), (newer["body"], "zero")):
+            rec = parse_text(self, body)
+            self.assertEqual((max(i for i, *_ in rec["rounds"]), rec["net"]), (len(self.ALL_PASS), net), "scope: a record does not reach the final round with its net value")
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, net="zero", guard="no", rounds=self.ALL_PASS_ARGS)
+        self.assertEqual(rc, 0, "a fix check keeping the newest final-round net value zero was refused:\n" + out + err)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, net="not owed", guard="no", rounds=self.ALL_PASS_ARGS)
+        self.assert_refused_naming(rc, out, err, "net", "zero", "not owed")
+
+    def test_a_short_fix_verifier_after_a_short_plain_record_is_held_by_the_final_round_before_it(self):
+        # the floor reads every earlier record, not only the newest one: a short plain record does not hide the final round before it
+        for lines in (1, 2):
+            with self.subTest(round_lines=lines):
+                short = record_text(head=self.OTHER, rounds=self.ALL_PASS[:lines], net="negative", guard="yes")
+                # control, green on the old code: a short fix check after the short record alone is accepted
+                rc, out, err, _ = self.run_chain(self.OTHER, (review_comment(1, 7, short),), net="negative", guard="yes", rounds=self.ALL_PASS_ARGS[:lines])
+                self.assertEqual(rc, 0, "control: a short fix check after the short record alone was refused:\n" + out + err)
+                comments = self.held_chain() + (review_comment(3, 7, short),)
+                rc, out, err, _ = self.run_chain(self.OTHER, comments, net="negative", guard="yes", rounds=self.ALL_PASS_ARGS[:lines])
+                self.assert_refused(rc, out, err)
+                earlier = [parse_text(self, c["body"]) for c in comments[:-1]]
+                why = review_fn(self, "round_floor")(earlier, parse_text(self, short))
+                self.assertIsNotNone(why, "scope: round_floor does not hold the short record")
+                self.assertIn(why, err, "the refusal does not name the round floor:\n" + err)
+
+class ReviewFixCountsRound(ReviewEnv):
+    """A failed fix check counts as the next round of review, inside the cap (rule roles-review-cap-three, decision pr-review-record). The floor is
+    applied when a record is read: merge --reviewed holds a record whose last round is below the count, or whose counted round is not a FAIL
+    line, as open with the floor's reason. The write step floors only a fix-check record (ReviewFixNetFreeze holds those cases), so a plain record
+    is written as it is today, even on a host whose earlier record reached a higher round. Two cases write a plain record on such a host, so a
+    write-time floor on a plain record refuses them. Each case reads the new record against the newest earlier record, and each is paired with a
+    control that a FAIL line on the counted round passes."""
+
+    EARLIER_HEAD = "1e" * 20  # the head of the newest earlier record, whose fix check FAILed
+    FIX_BASE = "2e" * 20  # the head the failed fix check's fix diff started from
+
+    def earlier_text(self, rounds):
+        """The newest earlier record's text: the round lines given, then a fix check FAIL on its head."""
+        fix = (fix_verifier_line(verdict="FAIL", head=self.FIX_BASE),)
+        return record_text(head=self.EARLIER_HEAD, rounds=rounds, fix=fix)
+
+    def earlier_record(self, rounds):
+        """The newest earlier record, parsed."""
+        return parse_text(self, self.earlier_text(rounds))
+
+    def write_record(self, *rounds, earlier_rounds=None):
+        """`merge 7 --review-record` on the live head with the round values given, on a host whose pull request 7 holds the earlier record of
+        `earlier_rounds` when given. -> (rc, out, err, the printed record, parsed)."""
+        argv = ["7", "--review-record", "--kind", "normal", "--guard", "no", "--head", REVIEW_HEAD]
+        for value in rounds:
+            argv += ["--round", value]
+        comments = () if earlier_rounds is None else (review_comment(1, 7, self.earlier_text(earlier_rounds)),)
+        rc, out, err = self.run_args(*argv, host=self.record_host(*comments))
+        return rc, out, err, (parse_text(self, posted_body(self, out)) if rc == 0 else None)
+
+    def own_state(self, rec):
+        """The record's state on its own rules, with no earlier record read."""
+        return review_fn(self, "review_state")(rec, REVIEW_HEAD)[0]
+
+    def floor_of(self, earlier, rec):
+        """The round floor of the new record against the newest earlier record: its why, or None."""
+        return review_fn(self, "round_floor")([earlier], rec)
+
+    def held_why(self, counted, last):
+        """The round floor's why when the failed fix check counts as round `counted` and the new record's last round is `last`."""
+        return f"a failed fix check on head {self.EARLIER_HEAD[:9]} counts as round {counted}, but this record's last round is {last}"
+
+    def test_a_pass_on_the_counted_round_does_not_fill_its_fail_slot(self):
+        earlier = self.earlier_record(("Round 1: reviewer, sonnet, FAIL",))
+        rc, out, err, rec = self.write_record("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:PASS")
+        self.assertEqual(rc, 0, "control: the record was not printed:\n" + out + err)
+        self.assertEqual(self.own_state(rec), "done", "scope: the record on its own rules does not read done")
+        self.assertEqual(self.floor_of(earlier, rec), f"a failed fix check on head {self.EARLIER_HEAD[:9]} counts as round 2, and only a FAIL line "
+                         "fills it, but this record's round 2 has none", "round_floor did not hold a PASS on the counted round")
+
+    def test_a_record_with_only_round_one_is_held_below_the_counted_round(self):
+        earlier = self.earlier_record(("Round 1: reviewer, sonnet, FAIL",))
+        rc, out, err, rec = self.write_record("1:reviewer:sonnet:PASS", earlier_rounds=("Round 1: reviewer, sonnet, FAIL",))
+        self.assertEqual(rc, 0, "control: the record was not printed:\n" + out + err)
+        self.assertEqual(self.own_state(rec), "done", "scope: the record on its own rules does not read done")
+        self.assertEqual(self.floor_of(earlier, rec), self.held_why(2, 1), "round_floor does not name round 2 for a record that stops at round 1")
+
+    def test_after_two_failed_rounds_the_failed_fix_verifier_counts_the_final_round_not_round_one(self):
+        rounds = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL")
+        earlier = self.earlier_record(rounds)
+        rc, out, err, rec = self.write_record("1:reviewer:sonnet:PASS", earlier_rounds=rounds)
+        self.assertEqual(rc, 0, "control: the record was not printed:\n" + out + err)
+        self.assertEqual(self.own_state(rec), "done", "scope: the record on its own rules does not read done")
+        self.assertEqual(self.floor_of(earlier, rec), self.held_why(3, 1), "round_floor does not name the final round for a record that stops at round 1")
+
+    def test_a_fail_on_the_counted_round_is_not_floored(self):
+        # control: a FAIL line fills the counted round, so the floor lets the record through and its own rules decide
+        earlier = self.earlier_record(("Round 1: reviewer, sonnet, FAIL",))
+        rc, out, err, rec = self.write_record("1:reviewer:sonnet:FAIL", "2:reviewer:sonnet:FAIL", "3:reviewer:opus:PASS")
+        self.assertEqual(rc, 0, "control: the record was not printed:\n" + out + err)
+        self.assertEqual(self.own_state(rec), "done", "scope: the record that fills the counted round and passes the final round does not read done")
+        self.assertIsNone(self.floor_of(earlier, rec), "round_floor held a record whose counted round is a FAIL line")
+
+class ReviewFixRemedies(ReviewChainFixture):
+    """A refused fix check names the remedy for its own cause. The head remedy, "The reviewed head must be the Head of the newest earlier review
+    record", fits only a head refusal: a fix base that is not the newest earlier record's Head, refused by its compare (fix_base_problem). Every other
+    refusal names its own remedy and prints no head remedy: the round floor, a copy that drops a Round line, a failed fix slot with no FAIL line, the
+    net value, guard and kind freeze, the ancestor read, the FAIL or WIDE chain, a missing review record, an unparsable newest record, each refused
+    --fix-base-record (the own-records one too), fix_base_problem's unreadable layout, which names the layout, and its unreadable extras file, which names
+    that file. Every case asserts the refusal (assert_refused), then the cause it names, then the subject: the head remedy absent and the
+    remedy's text present. Each remedy's text is written out in its case, so a remedy that is blanked or swapped for another fails the case."""
+
+    HEAD_REMEDY = "The reviewed head must be the Head of the newest earlier review record"
+    FLOOR_REMEDY = "Carry every round up to the floor: pass each round line with --round."
+    FROZEN_REMEDY = "Pass the old values."
+    ANCESTOR_REMEDY = "The fix base must be an ancestor of the live head."
+    WIDE_REMEDY = "Start a new lane at round 1."
+    FAIL_FINAL_REMEDY = "This FAIL holds the change: its finding starts a new lane at round 1."
+    MISSING_REMEDY = "Post the round's review record first."
+    ORDERED_CAUSE = "the reviewed head must be the Head of the newest earlier review log on this pull request"  # main's ordered --fix-check refusal
+    PROSE_REMEDY = "Keep prose below the --- line, then post the record again."
+    LAYOUT_EXTRAS_REMEDY = "Fix the file the error names, then run the fix check again."
+    OWN_RECORD_REMEDY = "Drop --fix-base-record: this pull request's own record takes the fix check."
+    DROPPED_REMEDY = "Copy every Round line of that record unchanged and in its order, then add the new lines after them."
+    ALL_PASS = ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS", "Round 3: reviewer, opus, PASS")  # every round of a record passed
+    ALL_PASS_ARGS = round_args(ALL_PASS)
+    FAIL_ONE = ("Round 1: reviewer, sonnet, FAIL",)
+    FAIL_THEN_PASS = ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")  # the slot a failed fix check fills holds a PASS
+
+    def assert_own_remedy(self, rc, out, err, cause, remedy):
+        """A refused fix check (assert_refused) whose stderr names `cause`, prints no head remedy, and holds the text `remedy`."""
+        self.assert_refused(rc, out, err)
+        self.assertIn(cause, err, "scope: the refusal does not name its cause:\n" + err)
+        self.assertNotIn(self.HEAD_REMEDY, err, "the refusal prints the head remedy, which fits only a head refusal:\n" + err)
+        self.assertIn(remedy, err, "the refusal does not hold the remedy for its cause:\n" + err)
+
+    def test_a_record_below_the_round_floor_names_the_round_flag_as_its_remedy(self):
+        # the floor is the highest round an earlier record reached, here every round. A record that carries fewer round lines is refused where it
+        # is written, and its remedy is the round lines, not the head
+        comments = self.pair(None, rounds=self.ALL_PASS, net="negative", guard="yes")
+        earlier = [parse_text(self, c["body"]) for c in comments]
+        for lines in range(3):
+            with self.subTest(round_lines=lines):
+                rc, out, err, _ = self.run_chain(self.NEWEST, comments, net="negative", guard="yes", rounds=self.ALL_PASS_ARGS[:lines])
+                short = parse_text(self, record_text(head=self.LIVE, rounds=self.ALL_PASS[:lines], net="negative", guard="yes"))
+                why = review_fn(self, "round_floor")(earlier, short)
+                self.assertIsNotNone(why, "scope: round_floor does not hold the short record")
+                self.assert_own_remedy(rc, out, err, why, self.FLOOR_REMEDY)
+
+    def test_a_record_that_leaves_the_failed_fix_slot_names_the_missing_fail_line(self):
+        # a failed fix check counts as the next round, and only a FAIL line fills that slot. The remedy names that line, not the generic floor
+        failed = review_comment(1, 7, record_text(head=self.EARLIER, rounds=self.FAIL_ONE, fix=(fix_verifier_line(verdict="FAIL", head=self.OTHER),)))
+        for label, rounds, remedy in (
+                ("no round 2", self.FAIL_ONE, "Carry every round up to round 2, and make round 2 a FAIL line: pass each round line with --round."),
+                ("a PASS on round 2", self.FAIL_THEN_PASS, "Round 2 needs a FAIL line: pass it with --round.")):
+            with self.subTest(label=label):
+                newest = review_comment(2, 7, record_text(head=self.NEWEST, rounds=rounds))
+                rc, out, err, _ = self.run_chain(self.NEWEST, (failed, newest), rounds=round_args(rounds))
+                self.assert_own_remedy(rc, out, err, "a failed fix check on head", remedy)
+                self.assertNotIn(self.FLOOR_REMEDY, err, "the failed slot got the generic round floor remedy:\n" + err)
+
+    def test_a_fix_verifier_that_moves_a_frozen_field_of_the_final_record_names_the_old_values_as_its_remedy(self):
+        # the final round's net value, guard and kind are held (decision hold-unsafe-after-round-3): a fix check keeps the value it was given, so
+        # the refusal names that value and the flag that carries it
+        diffs = {(self.NEWEST, self.LIVE): compare_of("ahead", self.CODE)}
+        for field, old, new in (("net", "negative", "zero"), ("net", "negative", "positive"), ("net", "negative", "not owed"),
+                                ("guard", "yes", "no"), ("kind", "delete-only", "normal")):
+            with self.subTest(field=field, new=new):
+                held = {"net": "negative", "guard": "no", "kind": "normal"}
+                comments = self.pair("PASS", rounds=REVIEW_FAILED_THREE, **{**held, field: old})
+                rc, out, err, _ = self.run_chain(self.NEWEST, comments, diffs=diffs, rounds=round_args(REVIEW_FAILED_THREE), **{**held, field: new})
+                label, flag = self.FIELD_CLAUSES[field]
+                self.assert_own_remedy(rc, out, err, f"{label} {old}, so {flag} must be {old}", self.FROZEN_REMEDY)
+
+    def test_a_newest_fix_verifier_that_failed_or_was_wide_names_its_own_remedy(self):
+        # a FAIL before the final round leaves the next round open, a FAIL after it holds the change, and a WIDE is a new lane. Each names its own
+        # remedy, and none prints the head one
+        diffs = {(self.NEWEST, self.LIVE): compare_of("ahead", self.CODE)}
+        for label, verdict, rounds, remedy in (
+                ("a FAIL before the final round", "FAIL", REVIEW_PASS, "Post round 2's review record: a FAIL line for round 2 and no Fix check line."),
+                ("a FAIL after the final round", "FAIL", REVIEW_FAILED_THREE, self.FAIL_FINAL_REMEDY),
+                ("a WIDE", "WIDE", REVIEW_PASS, self.WIDE_REMEDY)):
+            with self.subTest(label=label):
+                rc, out, err, _ = self.run_chain(self.NEWEST, self.pair(verdict, rounds=rounds), diffs=diffs)
+                self.assert_own_remedy(rc, out, err, f"Fix check is {verdict}", remedy)
+
+    def test_a_pull_request_with_no_review_log_is_refused_by_the_ordered_rule(self):
+        rc, out, err, _ = self.run_chain(self.NEWEST)
+        self.assert_refused(rc, out, err)
+        self.assertIn(self.ORDERED_CAUSE, err, "the refusal does not name main's ordered rule:\n" + err)
+
+    def incident(self):
+        """A posted record with reviewer prose between its CI line and its rule, which the parser refuses. -> (the record as posted, the same text cut after its CI
+        line). The cut parses, so the prose is the one difference between the two."""
+        bad = record_text(head=self.NEWEST, rounds=REVIEW_PASS) + "\nReviewer prose.\n" + REVIEW_FOOTER
+        cut = bad[:bad.index(REVIEW_CI_LINE) + len(REVIEW_CI_LINE)] + "\n"
+        return bad, cut
+
+    def test_an_unparsable_newest_record_is_refused_by_the_ordered_rule(self):
+        # the newest record exists but does not parse; main's ordered refusal names the newest earlier review log
+        bad, _ = self.incident()
+        self.assertIsNone(review_fn(self, "parse_review")(bad), "scope: the incident record parses, so the case tests nothing")
+        rc, out, err, _ = self.run_chain(self.NEWEST, (review_comment(1, 7, bad),))
+        self.assert_refused(rc, out, err)
+        self.assertIn(self.ORDERED_CAUSE, err, "the refusal does not name main's ordered rule:\n" + err)
+
+    def test_the_same_record_cut_after_its_ci_line_parses_and_its_fix_verifier_is_written(self):
+        # the control for the unparsable case: the text cut after its CI line parses, prose below the rule parses the same way (the remedy's placement),
+        # and the fix check is written on the posted record
+        _, cut = self.incident()
+        parse = review_fn(self, "parse_review")
+        self.assertIsNotNone(parse(cut), "control: the record cut after its CI line does not parse")
+        self.assertEqual(parse(cut + "---\nReviewer prose.\n"), parse(cut), "control: prose below the rule changes the record")
+        rc, out, err, _ = self.run_chain(self.NEWEST, (review_comment(1, 7, cut),))
+        self.assertEqual(rc, 0, "control: the record cut after its CI line was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (self.NEWEST, "reviewer", "sonnet", "PASS"),
+                         "control: the fix check was not written on the posted record:\n" + out)
+
+    def test_a_copy_that_drops_a_round_line_names_the_copy_as_its_remedy_without_the_head_remedy(self):
+        # the newest earlier record's design FAIL line is dropped, so dropped_round_lines refuses the copy, and its remedy is the copy. The head
+        # remedy fits only a head refusal and must stay out. The control keeps both lines in order and is written, so only the dropped line
+        # can refuse the copy
+        lines = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL")
+        comments = self.pair(None, rounds=lines)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(lines))
+        self.assertEqual(rc, 0, "control: a copy that keeps every round line was refused:\n" + out + err)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(lines[:1]))
+        self.assert_own_remedy(rc, out, err, "this record drops or reorders Round 1: design-reviewer, opus, FAIL", self.DROPPED_REMEDY)
+
+class ReviewFixKeepsRounds(ReviewChainFixture):
+    """A fix check record copies every Round line of the record it follows (rule roles-review-cap-three, decision pr-review-record). That record is the
+    newest earlier record on the pull request, or the source record a --fix-base-record names. A copy that drops a line is refused: exit 2, no record
+    printed. Dropping a design-reviewer line can flip the state, since a design FAIL that held the earlier record open is lost. Dropping a lower
+    reviewer line may leave the state as it reads, and the refusal still holds, because the record must copy every line. A line is the same when its
+    round number, role, model and verdict match, and the copy keeps the order of lines that share a round, so a swap is refused too. Extra lines are
+    not refused by this rule. Each refusal sits beside a control that keeps every line in order, which the old code already writes."""
+
+    DESIGN_FAIL = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL")  # a design FAIL keeps the record it sits in open
+    LOWER_REVIEWER = ("Round 1: reviewer, sonnet, FAIL", "Round 1: design-reviewer, opus, PASS", "Round 2: reviewer, sonnet, PASS")  # dropping its reviewer FAIL leaves the state as it reads, so only the copy rule refuses it
+    SOURCE_PR, SOURCE_ID = 1541, 5  # the pull request and comment of the source record in the --fix-base-record cases
+    SOURCE_URL = f"https://github.com/o/r/pull/{SOURCE_PR}#issuecomment-{SOURCE_ID}"
+
+    def setUp(self):
+        super().setUp()
+        self.set_origin("o/r")  # the --fix-base-record link must name this repo, and the layout reads the repo's name from origin
+
+    def newest(self, rounds):
+        """The newest earlier record on pull request 7, at NEWEST, as its one comment, with `rounds` and no fix check line."""
+        return (review_comment(1, 7, record_text(head=self.NEWEST, rounds=rounds)),)
+
+    def assert_names(self, err, *parts):
+        """The refusal's stderr holds each part, so a failure names the one part it lacks."""
+        for part in parts:
+            self.assertIn(part, err, f"the refusal does not name {part!r}:\n" + err)
+
+    def test_a_fix_verifier_that_drops_the_design_reviewer_fail_line_is_refused(self):
+        comments = self.newest(self.DESIGN_FAIL)
+        # scope: the earlier record reads open for its design FAIL, and the copy without that line reads done on its own rules
+        self.assertEqual(record_state(self, comments[0]["body"], self.NEWEST), "open", "scope: the earlier record with its design FAIL does not read open")
+        copy = record_text(head=self.LIVE, rounds=("Round 1: reviewer, sonnet, PASS",), fix=(fix_verifier_line(verdict="PASS", head=self.NEWEST),))
+        self.assertEqual(record_state(self, copy, self.LIVE), "done", "scope: the copy without the design line does not read done")
+        # control, green on the old code: the fix check that keeps every line is written
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(self.DESIGN_FAIL))
+        self.assertEqual(rc, 0, "control: a fix check that keeps every round line was refused:\n" + out + err)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=("1:reviewer:sonnet:PASS",))
+        self.assert_refused(rc, out, err)
+        self.assert_names(err, "Round 1", "design-reviewer")
+
+    def test_a_fix_verifier_that_drops_a_reviewer_line_of_a_lower_round_is_refused_while_the_top_round_is_kept(self):
+        comments = self.newest(self.LOWER_REVIEWER)
+        kept = round_args(self.LOWER_REVIEWER)
+        # scope: dropping the lower reviewer FAIL leaves the state as the earlier record reads it, so the copy rule alone must refuse the copy
+        copy_state = record_state(self, record_text(head=self.LIVE, rounds=self.LOWER_REVIEWER[1:]), self.LIVE)
+        self.assertEqual(record_state(self, comments[0]["body"], self.NEWEST), copy_state, "scope: dropping the lower reviewer FAIL changes the state")
+        # control, green on the old code: every line, the top round included, is written
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=kept)
+        self.assertEqual(rc, 0, "control: a fix check that keeps every round line was refused:\n" + out + err)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=kept[1:])  # only the lower reviewer FAIL goes, so the refusal must name that line
+        self.assert_refused(rc, out, err)
+        self.assert_names(err, "Round 1", "reviewer, sonnet, FAIL")
+
+    def test_a_fix_verifier_that_swaps_two_design_lines_of_one_round_is_refused(self):
+        # the last design line of the earlier record is a FAIL, which holds it open. A copy that keeps both lines in the other order reads done, so
+        # the copy keeps their order too
+        lines = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, PASS", "Round 1: design-reviewer, opus, FAIL")
+        comments = self.newest(lines)
+        self.assertEqual(record_state(self, comments[0]["body"], self.NEWEST), "open", "scope: the earlier record with a FAIL as its last design line does not read open")
+        swapped = (*lines[:1], lines[2], lines[1])
+        self.assertEqual(record_state(self, record_text(head=self.LIVE, rounds=swapped, fix=(fix_verifier_line(verdict="PASS", head=self.NEWEST),)), self.LIVE),
+                         "done", "scope: the swapped copy does not read done on its own rules")
+        # control, green on the old code: the same lines in their own order are written
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(lines))
+        self.assertEqual(rc, 0, "control: a fix check that keeps every round line in order was refused:\n" + out + err)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(swapped))
+        self.assert_refused(rc, out, err)
+        self.assert_names(err, "Round 1", "design-reviewer")
+
+    def test_a_fix_verifier_that_drops_the_middle_of_three_round_lines_names_only_that_line(self):
+        # the middle line is the design FAIL that holds the earlier record open. The lines on either side are kept, and the refusal must name only the
+        # dropped line: a miss must not read the kept lines after it as missing too
+        lines = ("Round 1: reviewer, sonnet, PASS", "Round 1: design-reviewer, opus, FAIL", "Round 2: reviewer, sonnet, PASS")
+        dropped = (lines[0], lines[2])
+        comments = self.newest(lines)
+        self.assertEqual(record_state(self, comments[0]["body"], self.NEWEST), "open", "scope: the earlier record with the design FAIL in its middle does not read open")
+        self.assertEqual(record_state(self, record_text(head=self.LIVE, rounds=dropped, fix=(fix_verifier_line(verdict="PASS", head=self.NEWEST),)), self.LIVE),
+                         "done", "scope: the copy without the middle line does not read done on its own rules")
+        # control, green on the old code: every line, kept in order, is written
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(lines))
+        self.assertEqual(rc, 0, "control: a fix check that keeps every round line in order was refused:\n" + out + err)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(dropped))
+        self.assert_refused(rc, out, err)
+        self.assert_names(err, "design-reviewer")
+        self.assertNotIn(lines[0], err, "the refusal names the kept line before the dropped one:\n" + err)
+        self.assertNotIn(lines[2], err, "the refusal names the kept line after the dropped one:\n" + err)
+
+    def test_a_fix_verifier_that_keeps_every_round_line_is_written(self):
+        comments = self.newest(self.DESIGN_FAIL)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(self.DESIGN_FAIL))
+        self.assertEqual(rc, 0, "a fix check that keeps every round line was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.NEWEST, "reviewer", "sonnet", "PASS"))
+
+    def test_a_fix_verifier_that_adds_a_round_line_to_the_copied_lines_is_written(self):
+        # extra lines are not refused by this rule: every copied line is present, and a line added after them leaves the copy whole
+        comments = self.newest(self.DESIGN_FAIL)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=(*round_args(self.DESIGN_FAIL), "2:reviewer:sonnet:PASS"))
+        self.assertEqual(rc, 0, "a fix check with an extra round line was refused:\n" + out + err)
+
+    def stand_in(self, rounds, comments):
+        """The run of --fix-check on pull request 7 at REVIEW_HEAD, with `rounds` and --fix-base-record naming the source record, whose head is
+        the fix base. A parser that has never heard of the flag says so on stderr, which fails here by that name."""
+        host = self.record_host(*comments, head=REVIEW_HEAD)
+        argv = ["7", "--review-record", "--head", REVIEW_HEAD, "--kind", "normal", "--guard", "no"]
+        argv += [a for r in rounds for a in ("--round", r)]
+        argv += ["--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:sonnet:PASS", "--fix-base-record", self.SOURCE_URL]
+        rc, out, err = self.run_args(*argv, host=host)
+        for old in OLD_PARSER_ERRORS:
+            self.assertNotIn(old, err, "merge.py takes no --fix-base-record flag:\n" + err)
+        return rc, out, err
+
+    def test_a_copied_line_whose_verdict_changed_is_refused(self):
+        comments = self.newest(self.DESIGN_FAIL)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(self.DESIGN_FAIL))  # control, green on the old code
+        self.assertEqual(rc, 0, "control: a fix check that keeps every round line was refused:\n" + out + err)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=("1:reviewer:sonnet:PASS", "1:design-reviewer:opus:PASS"))
+        self.assert_refused(rc, out, err)
+        self.assert_names(err, "Round 1", "design-reviewer")
+
+    def test_a_copied_line_whose_model_changed_is_refused(self):
+        comments = self.newest(self.DESIGN_FAIL)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(self.DESIGN_FAIL))  # control, green on the old code
+        self.assertEqual(rc, 0, "control: a fix check that keeps every round line was refused:\n" + out + err)
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=("1:reviewer:sonnet:PASS", "1:design-reviewer:sonnet:FAIL"))
+        self.assert_refused(rc, out, err)
+        self.assert_names(err, "Round 1", "design-reviewer")
+
+class ReviewFixAfterFinalFail(ReviewChainFixture):
+    """A fix check after the final round (decision hold-unsafe-after-round-3, decision pr-review-record): a failed or WIDE fix check on a record that
+    reached its final round holds the change, and its finding starts a new lane from the first round. The fix check reads only the newest earlier
+    record, so a plain record that copies every round at a new head would hide that fix check, and a fix check from that head would be written. Record A,
+    at EARLIER, holds the rounds and the fix check; record B, at NEWEST, copies the rounds with no fix line; the fix check PASS from B at LIVE must be
+    refused. A refusal exits 2 and prints no record. Its stderr names head A and the cause. Before the final round a FAIL counts as the next round, and a
+    chain after records that PASS every round with no failed fix check is written. Those cases pass on the old code and are the controls."""
+
+    TWO_FAILS = REVIEW_FAILED_THREE[:2]  # rounds 1 and 2 FAIL: the rounds a record holds before its final round
+
+    def copy_pair(self, a_fix=()):
+        """Pull request 7's two earlier records: A at EARLIER with REVIEW_FAILED_THREE and `a_fix` as its fix check lines, then B at NEWEST with the
+        same rounds and no fix line. The fix check reads B, so only A's fix lines can refuse it."""
+        return (review_comment(1, 7, record_text(head=self.EARLIER, rounds=REVIEW_FAILED_THREE, fix=a_fix)),
+                review_comment(2, 7, record_text(head=self.NEWEST, rounds=REVIEW_FAILED_THREE)))
+
+    def test_a_failed_fix_verifier_after_round_3_is_not_hidden_by_a_plain_copy_of_the_rounds(self):
+        # control, green on the old code: with no fix line on A, the fix check PASS from B is written
+        rc, out, err, _ = self.run_chain(self.NEWEST, self.copy_pair(), rounds=round_args(REVIEW_FAILED_THREE))
+        self.assertEqual(rc, 0, "control: a fix check from a plain copy of the rounds was refused with no failed fix check:\n" + out + err)
+        rc, out, err, _ = self.run_chain(self.NEWEST, self.copy_pair((fix_verifier_line(verdict="FAIL", head=self.OTHER),)),
+                                         rounds=round_args(REVIEW_FAILED_THREE))
+        self.assert_refused(rc, out, err)
+        self.assertIn("merge: --fix-check:", err, "scope: the refusal is not the fix check's:\n" + err)
+        self.assertIn(self.EARLIER[:9], err, "the refusal does not name head A, whose fix check FAILed after round 3:\n" + err)
+        self.assertIn(ReviewFixRemedies.FAIL_FINAL_REMEDY, err, "the refusal does not hold the remedy for a FAIL after round 3:\n" + err)
+
+    def test_a_wide_fix_verifier_after_round_3_is_not_hidden_by_a_plain_copy_of_the_rounds(self):
+        # control, green on the old code: the same two records with no fix line on A
+        rc, out, err, _ = self.run_chain(self.NEWEST, self.copy_pair(), rounds=round_args(REVIEW_FAILED_THREE))
+        self.assertEqual(rc, 0, "control: a fix check from a plain copy of the rounds was refused with no WIDE fix check:\n" + out + err)
+        rc, out, err, _ = self.run_chain(self.NEWEST, self.copy_pair((fix_verifier_line(verdict="WIDE", head=self.OTHER),)),
+                                         rounds=round_args(REVIEW_FAILED_THREE))
+        self.assert_refused(rc, out, err)
+        self.assertIn("merge: --fix-check:", err, "scope: the refusal is not the fix check's:\n" + err)
+        self.assertIn(self.EARLIER[:9], err, "the refusal does not name head A, whose fix check was WIDE after round 3:\n" + err)
+        self.assertIn("WIDE", err, "the refusal does not name the WIDE verdict:\n" + err)
+        self.assertIn("new lane at round 1", err, "the refusal does not say the finding starts a new lane at round 1:\n" + err)
+
+    def test_a_fail_fix_verifier_before_round_3_counts_as_the_next_round_and_the_chain_is_written(self):
+        # control, green on the old code: before the final round a FAIL is the next round, so B's FAIL in the round before the last fills its slot and the PASS is written
+        comments = (review_comment(1, 7, record_text(head=self.EARLIER, rounds=ReviewFixRemedies.FAIL_ONE,
+                                                     fix=(fix_verifier_line(verdict="FAIL", head=self.OTHER),))),
+                    review_comment(2, 7, record_text(head=self.NEWEST, rounds=self.TWO_FAILS)))
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(self.TWO_FAILS))
+        self.assertEqual(rc, 0, "a fix check from B after a FAIL fix check before round 3 was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.NEWEST, "reviewer", "sonnet", "PASS"))
+
+class ReviewFixHiddenByCopy(ReviewChainFixture):
+    """A plain copy of a record's Round lines must not hide that record's fix check. The write step reads only the newest earlier record, and a copy
+    carries no fix line, so the refusal has to look through the copy to the record it repeats. EARLIER holds the rounds, NEWEST holds the same rounds with
+    a fix check from EARLIER, and a plain copy of NEWEST's rounds follows at NEWEST. A record whose Round lines change is not a copy, so a fix check from
+    it is written; the listing reads a fix check PASS at a later head as clearing only a fix check that is not WIDE."""
+
+    ROUND_1 = REVIEW_PASS  # a record whose first round passed
+    ROUND_1_2 = ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS")
+    FAIL_IN_ROUND_2 = ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, FAIL")  # a FAIL fix check takes the next Round slot, so the record after it carries a FAIL Round line for that slot
+
+    def hidden(self, verdict):
+        """Pull request 7's three records before the new fix check: EARLIER's record, then NEWEST's record with a fix check of `verdict` from EARLIER,
+        then a plain copy of NEWEST's rounds at NEWEST, which hides that fix line from a read of the newest record alone."""
+        return (review_comment(1, 7, record_text(head=self.EARLIER, rounds=self.ROUND_1)),
+                review_comment(2, 7, record_text(head=self.NEWEST, rounds=self.ROUND_1, fix=(fix_verifier_line(verdict=verdict, head=self.EARLIER),))),
+                review_comment(3, 7, record_text(head=self.NEWEST, rounds=self.ROUND_1)))
+
+    def test_a_wide_fix_verifier_is_not_hidden_by_a_plain_copy_of_its_record(self):
+        # the copy carries no fix line, so the newest record reads clean; the WIDE on the record it copies must still refuse the fix check
+        rc, out, err, _ = self.run_chain(self.NEWEST, self.hidden("WIDE"), rounds=round_args(self.ROUND_1))
+        self.assert_refused(rc, out, err)
+        self.assertIn("merge: --fix-check:", err, "scope: the refusal is not the fix check's:\n" + err)
+        self.assertIn("WIDE", err, "the refusal does not name the WIDE fix check the copy hides:\n" + err)
+
+    def test_a_fail_fix_verifier_is_not_hidden_by_a_plain_copy_of_its_record(self):
+        # control, green on the old code: a record with only a first Round line sits below the slot a FAIL fix check takes, so the floor refuses it
+        rc, out, err, _ = self.run_chain(self.NEWEST, self.hidden("FAIL"), rounds=round_args(self.ROUND_1))
+        self.assert_refused(rc, out, err)
+        self.assertIn("merge: --fix-check:", err, "scope: the refusal is not the fix check's:\n" + err)
+        # the record fills the FAIL's round, so the floor passes it and only the FAIL on the record the copy repeats can refuse the fix check
+        rc, out, err, _ = self.run_chain(self.NEWEST, self.hidden("FAIL"), rounds=round_args(self.FAIL_IN_ROUND_2))
+        self.assert_refused(rc, out, err)
+        self.assertIn("merge: --fix-check:", err, "scope: the refusal is not the fix check's:\n" + err)
+        self.assertRegex(err, r"\bFAIL\b", "the refusal does not name the FAIL fix check the copy hides:\n" + err)
+
+    def test_a_fix_pass_after_a_copied_wide_fix_verifier_reads_not_done(self):
+        # control, green on the old code: at NEWEST nothing passes the WIDE, so the listing reads the pull request as open
+        comments = self.hidden("WIDE")
+        host, rc, out, err = self.listing([batch_pull(7, self.NEWEST)], comments)
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {self.NEWEST[:9]} open: ", "control: the WIDE does not hold the listing open:\n" + out)
+        # the fix check PASS at LIVE is one the write step refuses; a WIDE clears only by a fresh review, not by a fix check PASS, so the listing must not read this PASS as cleared
+        comments += (review_comment(4, 7, record_text(head=self.LIVE, rounds=self.ROUND_1, fix=(fix_verifier_line(verdict="PASS", head=self.NEWEST),))),)
+        host, rc, out, err = self.listing([batch_pull(7, self.LIVE)], comments)
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotRegex(list_line(self, out, 7), r" done: ",
+                            "a fix check PASS after a WIDE fix check reads done; a WIDE needs a new lane at round 1:\n" + out)
+
+    def test_a_fix_verifier_after_a_record_that_changes_the_round_lines_is_written(self):
+        # control, green on the old code: the record after the WIDE changes its Round lines, so it is not a copy and a fix check from it is written
+        comments = (review_comment(1, 7, record_text(head=self.EARLIER, rounds=self.ROUND_1)),
+                    review_comment(2, 7, record_text(head=self.NEWEST, rounds=self.ROUND_1, fix=(fix_verifier_line(verdict="WIDE", head=self.EARLIER),))),
+                    review_comment(3, 7, record_text(head=self.NEWEST, rounds=self.ROUND_1_2)))
+        rc, out, err, _ = self.run_chain(self.NEWEST, comments, rounds=round_args(self.ROUND_1_2))
+        self.assertEqual(rc, 0, "a fix check after a record that changes the Round lines was refused:\n" + out + err)
+        self.assertEqual(parse_text(self, posted_body(self, out))["fix"], (self.NEWEST, "reviewer", "sonnet", "PASS"))
 class ReviewFixAfterMainMerge(ReviewEnv):
     """A fix check after a merge of main (decision pr-review-record). The newest earlier record holds a fix check, so the rule of ReviewFixBase
     refuses every fix check from its head. A lane that merges main into the fixed head has a new head: a merge commit whose first parent is that
@@ -15356,13 +16344,10 @@ class ReviewedList(ReviewEnv):
     record parse, the newest-record rule and the states are the real code. Output: one line per open pull request whose newest record parses,
     then one `no record:` line for the rest."""
 
-    def listing(self, pulls, comments=(), check_rows=None, **reads):
-        host = PullsHost(pulls, check_rows or {}, comments=comments, **reads)
-        rc, out, err = self.run_args("--reviewed", host=host)
-        return host, rc, out, err
-
     def test_the_newest_record_decides_the_line(self):
-        comments = [review_comment(1, 7, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))), review_comment(2, 7, record_text(rounds=REVIEW_PASS)),
+        # the newer record reaches the second round, so it clears the earlier first-round FAIL, and the newest record decides the line
+        comments = [review_comment(1, 7, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))),
+                    review_comment(2, 7, record_text(rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"))),
                     lint_of(7, REVIEW_HEAD)]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], comments)
         self.assertEqual(rc, 0, out + err)
@@ -15467,10 +16452,176 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(host.gh_calls, ["pulls", "issues/comments"])
 
     def test_a_newest_record_with_the_attribution_footer_lists_as_done(self):
-        # The older record is open, so the newer one must be the record the list reads. Its footer is trailing text: the line is done, not bad.
+        # The older record is open, so the newer one must be the record the list reads. The newer one reaches the second round, which clears the failed first round.
+        # Its footer is trailing text: the line is done, not bad.
         older = record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))
-        newest = record_text(rounds=REVIEW_PASS).rstrip("\n") + REVIEW_FOOTER
+        newest = record_text(rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")).rstrip("\n") + REVIEW_FOOTER
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, older), review_comment(2, 7, newest), lint_of(7, REVIEW_HEAD)])
+        self.assertEqual(rc, 0, out + err)
+        self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
+
+    EARLIER_HEAD ="1e" * 20  # the head of the earlier record, the one that holds the failed fix check
+    FIX_BASE_HEAD = "2e" * 20  # the head the fix diff started from, as the earlier record's fix line names it
+
+    def floor_listing(self, verdict, earlier_rounds, newest_rounds, lint=(), **reads):
+        """The one pull request at REVIEW_HEAD: an earlier record with a fix check of `verdict`, then the newest record with `newest_rounds`."""
+        earlier = record_text(head=self.EARLIER_HEAD, rounds=earlier_rounds, fix=(fix_verifier_line(verdict=verdict, head=self.FIX_BASE_HEAD),))
+        newest = record_text(rounds=newest_rounds)
+        return self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, earlier), review_comment(2, 7, newest), *lint], **reads)
+
+    def test_a_failed_fix_verifier_holds_the_newest_record_open_until_its_round_is_counted(self):
+        # the failed fix check counts as round N+1, so a newest record whose last round is below N+1 reads open, and its why names the fix check
+        cases = ((("Round 1: reviewer, sonnet, FAIL",), REVIEW_PASS, "round 2", 1),
+                 (("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"),
+                  ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"), "round 3", 2))
+        for earlier_rounds, newest_rounds, counted, last in cases:
+            with self.subTest(counted=counted, last=last):
+                host, rc, out, err = self.floor_listing("FAIL", earlier_rounds, newest_rounds)
+                self.assertEqual(rc, 0, out + err)
+                prefix = (f"#7 feat7 {REVIEW_HEAD[:9]} open: a failed fix check on head {self.EARLIER_HEAD[:9]} counts as {counted}, "
+                          f"but this record's last round is {last}; CI ")
+                self.assertTrue(list_line(self, out, 7).startswith(prefix),
+                                f"the newest record did not read open with the fix check's why:\n{out}")
+
+    def test_a_newest_record_that_reaches_the_counted_round_reads_by_the_normal_rules(self):
+        # control: the newest record's second round is a FAIL, which fills the counted slot, so the floor does not apply and its own rules decide
+        host, rc, out, err = self.floor_listing("FAIL", ("Round 1: reviewer, sonnet, FAIL",),
+                                                ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, FAIL"))
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(list_line(self, out, 7).startswith(f"#7 feat7 {REVIEW_HEAD[:9]} open: round 2 is not passed; CI "), out)
+
+    def test_a_pass_fix_verifier_on_a_round_one_record_floors_nothing_above_round_one(self):
+        # control: a PASS fix check clears the first-round FAIL, so a later first-round PASS reads done. A WIDE leaves the first round uncleared, which the G1 cases cover
+        host, rc, out, err = self.floor_listing("PASS", ("Round 1: reviewer, sonnet, FAIL",), REVIEW_PASS, lint=(lint_of(7, REVIEW_HEAD),))
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(list_line(self, out, 7).startswith(f"#7 feat7 {REVIEW_HEAD[:9]} done: round 1 passed; CI "), out)
+
+    def test_the_fix_floor_read_costs_the_same_five_gh_calls(self):
+        # control: the floor reads the comment list the listing already holds, so two records on a pull request cost the calls one costs
+        host, rc, out, err = self.floor_listing("FAIL", ("Round 1: reviewer, sonnet, FAIL",), REVIEW_PASS, count_gh=True)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(host.gh_calls, ["pulls", "issues/comments", f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status",
+                                         "branches/main/protection/required_status_checks"])
+
+    OTHER_HEAD = "3e" * 20  # the head of a second earlier record, so a case can tell the two earlier records apart
+    TWO_ROUNDS_PASS = REVIEW_PASS + ("Round 2: reviewer, sonnet, PASS",)  # an earlier record that reached the second round, both rounds passed
+
+    def pr_listing(self, *bodies, **reads):
+        """The one pull request at REVIEW_HEAD, with its records in the order `bodies` gives them, oldest first."""
+        return self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(i, 7, body) for i, body in enumerate(bodies, 1)], **reads)
+
+    @staticmethod
+    def why_of(line):
+        """The why of a `merge --reviewed` line: the text after `state: ` and before `; CI`."""
+        return line.split(": ", 1)[1].rsplit("; CI ", 1)[0]
+
+    def test_the_floor_is_the_most_rounds_any_earlier_record_reached(self):
+        # the probe: a first record whose fix check FAIL counts the third round, a second that stops at the second round, and a newest at the first round. The floor is
+        # the third round from the first record, so the newest reads open, and its why names the first record's head and the floor
+        first = record_text(head=self.EARLIER_HEAD, rounds=self.TWO_ROUNDS_PASS, fix=(fix_verifier_line(verdict="FAIL", head=self.FIX_BASE_HEAD),))
+        second = record_text(head=self.OTHER_HEAD, rounds=self.TWO_ROUNDS_PASS)
+        host, rc, out, err = self.pr_listing(first, second, record_text(rounds=REVIEW_PASS))
+        self.assertEqual(rc, 0, out + err)
+        line = list_line(self, out, 7)
+        self.assertTrue(line.startswith(f"#7 feat7 {REVIEW_HEAD[:9]} open: "),
+                        f"the newest record reads by its own round 1, so the floor from the first record was lost:\n{out}")
+        self.assertIn(self.EARLIER_HEAD[:9], self.why_of(line), f"the why does not name the record that sets the floor:\n{out}")
+        self.assertRegex(self.why_of(line), r"\b3\b", f"the why does not name the floor, round 3:\n{out}")
+
+    def test_a_malformed_record_between_earlier_records_is_skipped(self):
+        # the middle record skips the second round, so it does not parse: the floor reads past it and still holds the newest at the first record's third round
+        first = record_text(head=self.EARLIER_HEAD, rounds=self.TWO_ROUNDS_PASS, fix=(fix_verifier_line(verdict="FAIL", head=self.FIX_BASE_HEAD),))
+        middle = record_text(head=self.OTHER_HEAD, rounds=("Round 1: reviewer, sonnet, PASS", "Round 3: reviewer, sonnet, PASS"))
+        self.assertIsNone(review_fn(self, "parse_review")(middle), "the middle record must not parse, or the case tests nothing")
+        host, rc, out, err = self.pr_listing(first, middle, record_text(rounds=REVIEW_PASS))
+        self.assertEqual(rc, 0, out + err)
+        line = list_line(self, out, 7)
+        self.assertTrue(line.startswith(f"#7 feat7 {REVIEW_HEAD[:9]} open: "), f"the malformed middle record hid the floor, so the newest reads done:\n{out}")
+        self.assertIn(self.EARLIER_HEAD[:9], self.why_of(line), f"the why does not name the record that sets the floor:\n{out}")
+
+    def test_a_wide_fix_verifier_floors_later_records_at_its_own_last_round(self):
+        # a WIDE fix check on the second round floors a later record at the second round, so a newest record that restarts at the first round reads open
+        first = record_text(head=self.EARLIER_HEAD, rounds=self.TWO_ROUNDS_PASS, fix=(fix_verifier_line(verdict="WIDE", head=self.FIX_BASE_HEAD),))
+        host, rc, out, err = self.pr_listing(first, record_text(rounds=REVIEW_PASS))
+        self.assertEqual(rc, 0, out + err)
+        line = list_line(self, out, 7)
+        self.assertTrue(line.startswith(f"#7 feat7 {REVIEW_HEAD[:9]} open: "), f"a WIDE fix check on round 2 let the newest restart at round 1:\n{out}")
+        self.assertIn(self.EARLIER_HEAD[:9], self.why_of(line), f"the why does not name the WIDE record:\n{out}")
+        self.assertRegex(self.why_of(line), r"\b2\b", f"the why does not name the floor, round 2:\n{out}")
+
+    def test_a_three_record_floor_read_costs_the_same_five_gh_calls(self):
+        # control: the floor reads the bodies the listing already holds, so a third record on a pull request costs no call
+        first = record_text(head=self.EARLIER_HEAD, rounds=self.TWO_ROUNDS_PASS, fix=(fix_verifier_line(verdict="FAIL", head=self.FIX_BASE_HEAD),))
+        host, rc, out, err = self.pr_listing(first, record_text(head=self.OTHER_HEAD, rounds=self.TWO_ROUNDS_PASS), record_text(rounds=REVIEW_PASS),
+                                             count_gh=True)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(host.gh_calls, ["pulls", "issues/comments", f"commits/{REVIEW_HEAD}/check-runs", f"commits/{REVIEW_HEAD}/status",
+                                         "branches/main/protection/required_status_checks"])
+
+    def test_a_fix_fail_counted_as_round_two_reads_open_when_round_two_is_only_pass(self):
+        # a failed fix check after the first round counts the second round, and a newest record whose second round is only PASS does not fill that slot: it reads open,
+        # and its why names the fix check and the second round
+        first = record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASS, fix=(fix_verifier_line(verdict="FAIL", head=self.FIX_BASE_HEAD),))
+        host, rc, out, err = self.pr_listing(first, record_text(rounds=self.TWO_ROUNDS_PASS))
+        self.assertEqual(rc, 0, out + err)
+        line = list_line(self, out, 7)
+        self.assertTrue(line.startswith(f"#7 feat7 {REVIEW_HEAD[:9]} open: "),
+                        f"a round-2 PASS filled the slot the failed fix check counts as, so the newest reads done:\n{out}")
+        self.assertIn("fix check", self.why_of(line), f"the why does not name the fix check:\n{out}")
+        self.assertIn("round 2", self.why_of(line), f"the why does not name round 2, the counted round:\n{out}")
+
+    def test_a_fix_fail_counted_as_round_three_reads_open_when_round_three_is_only_pass(self):
+        # the same for the last round: a failed fix check after the second round counts the third round, and a third-round PASS does not fill that slot
+        first = record_text(head=self.EARLIER_HEAD, rounds=self.TWO_ROUNDS_PASS, fix=(fix_verifier_line(verdict="FAIL", head=self.FIX_BASE_HEAD),))
+        host, rc, out, err = self.pr_listing(first, record_text(rounds=self.TWO_ROUNDS_PASS + ("Round 3: reviewer, opus, PASS",)))
+        self.assertEqual(rc, 0, out + err)
+        line = list_line(self, out, 7)
+        self.assertTrue(line.startswith(f"#7 feat7 {REVIEW_HEAD[:9]} open: "),
+                        f"a round-3 PASS filled the slot the failed fix check counts as, so the newest reads done:\n{out}")
+        self.assertIn("fix check", self.why_of(line), f"the why does not name the fix check:\n{out}")
+        self.assertIn("round 3", self.why_of(line), f"the why does not name round 3, the counted round:\n{out}")
+
+    def test_a_round_three_fail_fills_the_counted_slot_and_holds(self):
+        # control: a FAIL in the third round fills the slot the failed fix check counts as, so the newest record reads by its own rules: held
+        first = record_text(head=self.EARLIER_HEAD, rounds=self.TWO_ROUNDS_PASS, fix=(fix_verifier_line(verdict="FAIL", head=self.FIX_BASE_HEAD),))
+        host, rc, out, err = self.pr_listing(first, record_text(rounds=self.TWO_ROUNDS_PASS + ("Round 3: reviewer, opus, FAIL",)))
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(list_line(self, out, 7).startswith(f"#7 feat7 {REVIEW_HEAD[:9]} held: {REVIEW_HELD_WHY}; CI "), out)
+
+    def test_a_failed_round_stays_failed_until_a_newer_record_reaches_a_later_round_or_passes_a_fix(self):
+        # G1: an earlier record whose last round N is uncleared (a FAIL or PARTIAL line, or a fix check FAIL or WIDE, and no fix check PASS) holds
+        # the newer record open until that record reaches round N+1 or carries a fix check PASS. The why names the earlier head and round N
+        failed_three = record_text(head=self.EARLIER_HEAD, rounds=REVIEW_FAILED_THREE)
+        passed_three_fix_fail = record_text(head=self.EARLIER_HEAD, rounds=REVIEW_PASSED_THREE, fix=(fix_verifier_line(verdict="FAIL", head=self.FIX_BASE_HEAD),))
+        failed_one_wide = record_text(head=self.EARLIER_HEAD, rounds=REVIEW_FAILED_THREE[:1], fix=(fix_verifier_line(verdict="WIDE", head=self.FIX_BASE_HEAD),))
+        failed_two_wide = record_text(head=self.EARLIER_HEAD, rounds=REVIEW_FAILED_THREE[:2], fix=(fix_verifier_line(verdict="WIDE", head=self.FIX_BASE_HEAD),))
+        cases = (("a round 3 FAIL, held", failed_three, REVIEW_PASSED_THREE, 3),
+                 ("a round 3 PASS with a fix check FAIL", passed_three_fix_fail, REVIEW_PASSED_THREE, 3),
+                 ("a round 1 FAIL with a fix check WIDE", failed_one_wide, REVIEW_PASS, 1),
+                 ("a round 2 FAIL with a fix check WIDE", failed_two_wide, ("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"), 2))
+        for label, earlier, newer_rounds, n in cases:
+            with self.subTest(earlier=label):
+                host, rc, out, err = self.pr_listing(earlier, record_text(rounds=newer_rounds))
+                self.assertEqual(rc, 0, out + err)
+                line = list_line(self, out, 7)
+                self.assertTrue(line.startswith(f"#7 feat7 {REVIEW_HEAD[:9]} open: "),
+                                f"{label}: a newer record that neither reaches a round above {n} nor passes a fix check read as done, so round {n} was not kept:\n{out}")
+                self.assertIn(self.EARLIER_HEAD[:9], self.why_of(line), f"{label}: the why does not name the earlier head:\n{out}")
+                self.assertRegex(self.why_of(line), rf"\bround {n}\b", f"{label}: the why does not name the uncleared round {n}:\n{out}")
+
+    def test_a_failed_round_is_cleared_when_a_newer_record_reaches_a_later_round_or_passes_a_fix(self):
+        # control: the normal path. A newer record that reaches the round after the failed one, or that carries a fix check PASS, reads by its own rules
+        earlier = record_text(head=self.EARLIER_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, earlier), review_comment(2, 7, record_text(rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS"))), lint_of(7, REVIEW_HEAD)])
+        self.assertEqual(rc, 0, out + err)
+        self.assertTrue(list_line(self, out, 7).startswith(f"#7 feat7 {REVIEW_HEAD[:9]} done: round 2 passed; CI "), out)
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, earlier), review_comment(2, 7, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",), fix=(fix_verifier_line(verdict="PASS"),))), lint_of(7, REVIEW_HEAD)])
+        self.assertEqual(rc, 0, out + err)
+        line = list_line(self, out, 7)
+        self.assertTrue(line.startswith(f"#7 feat7 {REVIEW_HEAD[:9]} done: "), out)
+        self.assertIn("fix check", self.why_of(line), f"the why does not name the fix check that cleared round 1:\n{out}")
+        newest = record_text(rounds=("Round 1: reviewer, sonnet, FAIL", "Round 2: reviewer, sonnet, PASS")).rstrip("\n") + REVIEW_FOOTER
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, earlier), review_comment(2, 7, newest), lint_of(7, REVIEW_HEAD)])
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} done: ")
 
@@ -16552,7 +17703,6 @@ class ReviewGuardCost(ReviewEnv):
                 self.assertEqual(parse_text(self, posted_body(self, out))["guard"], guard)
                 self.assertEqual(host.gh_calls, ["pulls/7", "pulls/7/files"], "the record's gh reads, in order")
 
-
 # `merge --reviewed --root DIR [--root DIR ...]`: one call reads every repo the batch runner owns. The seam is `hosts`: main takes a mapping
 # from each --root string, exactly as given, to that root's Host. A root's header is the `repo` of its host, and its config is read by
 # load_config on that root. A test host keeps its own checks, as `host` does.
@@ -17168,8 +18318,9 @@ class ReviewFixSonnet(ReviewEnv):
                 "--fix-check", f"{REVIEW_OLD_HEAD}:reviewer:{fix_model}:PASS")
 
     def earlier_host(self):
-        """ReviewFixFlag's shared step: the live head, with one earlier record that reviewed the fix base and has no fix line."""
-        return ReviewFixFlag.earlier_host(self)
+        """The live head, with one earlier record that reviewed the fix base, has no fix line, and failed its first round. The guard flags name
+        that round as FAIL, and the copy rule (every Round line of the earlier record, unchanged) needs the earlier record to hold it too."""
+        return self.record_host(review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, rounds=("Round 1: reviewer, sonnet, FAIL",))), head=self.head())
 
     def test_a_fix_pass_on_another_model_on_a_guard_change_reads_open_not_done(self):
         # The model refusal is asserted in the why, not only the open state: under owner item 402 a, a guard-yes change reads open on its own,

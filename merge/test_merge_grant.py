@@ -163,7 +163,7 @@ class ReviewGrantForm(unittest.TestCase):
 
 class ReviewGrantRules(unittest.TestCase):
     """review_state over a record with a Grant line. The fourth round is the last one a grant allows, and it follows the rules of the last round with no grant. The why
-    names the fourth round, not the third. Design-reviewer lines stay out of these cases, so the why carries no design note."""
+    names the fourth round, not the third. Design-reviewer lines stay out of these cases, except the one whose fourth round is a design line alone (its why is not asserted)."""
 
     def granted_state(self, verdict, **kw):
         """-> (state, why) of a record with a Grant line whose fourth round is `verdict`; the rest of the form comes from `kw`."""
@@ -173,30 +173,34 @@ class ReviewGrantRules(unittest.TestCase):
         self.assertIn("round 4", why, f"the why does not name round 4: {why!r}")
         self.assertNotIn("round 3", why, f"the why names round 3, not round 4: {why!r}")
 
-    def test_round_four_with_guard_no_is_done_whatever_its_verdict(self):
-        for verdict in ("PASS", "FAIL", "PARTIAL"):
+    def test_round_four_with_guard_no_is_done_on_a_pass_and_held_on_a_fail(self):
+        # re-pointed (round-3 hold rule, owner items 356 a and 362 b): a FAIL or PARTIAL in the final round holds the change, the fourth round included
+        state, why = self.granted_state("PASS", guard="no")
+        self.assertEqual(state, "done", "round 4 is the final round, and with guard no and a PASS it is done")
+        self.assert_names_round_four(why)
+        for verdict in ("FAIL", "PARTIAL"):
             with self.subTest(verdict=verdict):
                 state, why = self.granted_state(verdict, guard="no")
-                self.assertEqual(state, "done", "round 4 is the final round, and with guard no it is done whatever its verdict")
+                self.assertEqual(state, "held", f"a round 4 {verdict} holds the change, as a round 3 one does")
                 self.assert_names_round_four(why)
 
-    def test_round_four_with_guard_yes_is_done_when_net_value_is_zero_or_positive(self):
-        # the fourth round's verdict is FAIL, so the net value alone decides done
-        for net in ("zero", "positive"):
+    def test_round_four_with_guard_yes_fail_is_held_whatever_the_net_value(self):
+        # re-pointed from a FAIL that read done on net value: a final-round FAIL holds before the net-value rule runs
+        for net in ("zero", "positive", "not owed"):
             with self.subTest(net=net):
                 state, why = self.granted_state("FAIL", guard="yes", net=net)
-                self.assertEqual(state, "done", f"round 4 with net value {net} is done")
+                self.assertEqual(state, "held", f"round 4 FAIL with net value {net} is held")
                 self.assert_names_round_four(why)
 
     def test_round_four_with_guard_yes_is_held_when_net_value_is_negative(self):
         self.assertEqual(self.granted_state("FAIL", guard="yes", net="negative")[0], "held")
 
     def test_round_four_with_guard_yes_is_open_when_net_value_is_not_written(self):
-        for verdict in ("FAIL", "PASS"):
-            with self.subTest(verdict=verdict):
-                state, why = self.granted_state(verdict, guard="yes", net="not owed")
-                self.assertEqual(state, "open", "a net value the guard change owes is not settled by round 4")
-                self.assert_names_round_four(why)
+        # re-pointed: a fourth-round FAIL is held before this rule (see the test above), so only the PASS reads open here
+        state, why = self.granted_state("PASS", guard="yes", net="not owed")
+        self.assertEqual(state, "open", "a net value the guard change owes is not settled by round 4")
+        self.assert_names_round_four(why)
+        self.assertEqual(self.granted_state("FAIL", guard="yes", net="not owed")[0], "held")
 
     def test_a_round_four_pass_with_guard_yes_owes_the_net_value_test(self):
         for net, want in (("not owed", "open"), ("zero", "done"), ("positive", "done"), ("negative", "held")):
@@ -213,6 +217,23 @@ class ReviewGrantRules(unittest.TestCase):
                 state, why = tm.review_fn(self, "review_state")(rec, tm.REVIEW_HEAD)
                 self.assertEqual(state, "done", f"a granted fourth round with a fix PASS reads {state!r}: {why!r}")
                 self.assert_names_round_four(why)
+
+    def test_a_granted_round_four_with_only_a_design_pass_does_not_clear_a_reviewer_fail(self):
+        # the third round's reviewer FAIL stands, and the fourth round holds only the design reviewer's PASS, no reviewer line. A design line never clears
+        # a reviewer FAIL, so the record reads open. The record parses: its grant is for its own PR, and the fourth round is the final round.
+        rounds = tm.REVIEW_FAILED_THREE + ("Round 4: design-reviewer, opus, PASS",)
+        rec = tm.parse_text(self, tm.record_text(rounds=rounds, grant=(f"Grant: {REVIEW_GRANT}",)))
+        state, why = tm.review_fn(self, "review_state")(rec, tm.REVIEW_HEAD)
+        self.assertEqual(state, "open", f"a granted record whose round 4 is a design-reviewer PASS only reads {state!r}, not open: {why!r}")
+
+    def test_a_granted_round_four_reviewer_pass_after_a_reviewer_fail_reads_done(self):
+        # the control, and the accepted reading (decision pr-review-record: with a Grant line, the fourth round is final): the fourth round's
+        # reviewer PASS is the verdict that counts
+        rounds = tm.REVIEW_FAILED_THREE + ("Round 4: reviewer, sonnet, PASS",)
+        rec = tm.parse_text(self, tm.record_text(rounds=rounds, grant=(f"Grant: {REVIEW_GRANT}",)))
+        state, why = tm.review_fn(self, "review_state")(rec, tm.REVIEW_HEAD)
+        self.assertEqual(state, "done", f"a granted record whose round 4 is a reviewer PASS reads {state!r}, not done: {why!r}")
+        self.assert_names_round_four(why)
 
 class ReviewGrantFlag(tm.ReviewEnv):
     """`--grant TEXT` goes with --review-record and lets a fourth round in: the one round past the usual limit. Its text is `#<pr>, <cite>`,
@@ -296,6 +317,42 @@ class ReviewGrantFlag(tm.ReviewEnv):
             with self.subTest(date=date):
                 out, _err = self.assert_usage_error(*self.granted("--grant", grant_text(cite=f"item 396 a, owner, {date}")))
                 self.assertNotIn(tm.REVIEW_MARKER, out)
+
+    def fix_verifier_host(self, earlier):
+        """The pull request at the live head, with one earlier record `earlier` (its whole text) on the fix base REVIEW_OLD_HEAD."""
+        return self.record_host(tm.review_comment(1, 7, earlier), head=self.head())
+
+    def fix_verifier_argv(self, verdict, rounds=FOUR, grant=None):
+        """The argv of a fix check on the live head after `rounds`: the fix base REVIEW_OLD_HEAD, the fix check's model, `verdict`, and the grant when given."""
+        return self.granted("--fix-check", f"{tm.REVIEW_OLD_HEAD}:reviewer:{tm.merge.REVIEW_FIX_GUARD_MODEL}:{verdict}",
+                            *(("--grant", grant) if grant else ()), rounds=rounds)
+
+    def test_a_granted_round_four_pass_then_a_fix_verifier_pass_with_grant_prints_the_record(self):
+        # the fix check rebuilds the round-4 body, and that body must carry the grant too, or parse_review reads it as no record
+        host = self.fix_verifier_host(tm.record_text(head=tm.REVIEW_OLD_HEAD, rounds=round_four_text("PASS"), grant=(f"Grant: {REVIEW_GRANT}",)))
+        rc, out, err = self.run_or_fail(*self.fix_verifier_argv("PASS", grant=REVIEW_GRANT), host=host)
+        self.assertEqual(rc, 0, "merge refused a granted round-4 fix check PASS:\n" + out + err)
+        body = tm.posted_body(self, out)
+        self.assertIn(f"Grant: {REVIEW_GRANT}", body.splitlines(), "the printed record has no Grant line:\n" + body)
+        self.assertEqual(tm.parse_text(self, body).get("fix"), tm.REVIEW_FIX_PASS, "the printed record has no PASS fix check line:\n" + body)
+
+    def test_a_granted_round_four_then_a_fix_verifier_fail_prints_the_record(self):
+        host = self.fix_verifier_host(tm.record_text(head=tm.REVIEW_OLD_HEAD, rounds=round_four_text("PASS"), grant=(f"Grant: {REVIEW_GRANT}",)))
+        rc, out, err = self.run_or_fail(*self.fix_verifier_argv("FAIL", grant=REVIEW_GRANT), host=host)
+        self.assertNotIn("Traceback", err, "a granted round-4 fix check FAIL printed a traceback:\n" + err)
+        self.assertEqual(rc, 0, f"a granted round-4 fix check FAIL exited {rc}, not a record:\n" + out + err)
+        body = tm.posted_body(self, out)
+        self.assertIn(f"Grant: {REVIEW_GRANT}", body.splitlines(), "the printed record has no Grant line:\n" + body)
+        self.assertEqual(tm.parse_text(self, body).get("fix"), tm.REVIEW_FIX_FAIL, "the printed record has no FAIL fix check line:\n" + body)
+
+    def test_an_ungranted_round_three_fix_verifier_pass_still_prints_the_record(self):
+        # control: no grant, so the third round is final. It passes on the old code too, so a red run shows only the granted cases
+        host = self.fix_verifier_host(tm.record_text(head=tm.REVIEW_OLD_HEAD, rounds=tm.REVIEW_PASSED_THREE))
+        rc, out, err = self.run_or_fail(*self.fix_verifier_argv("PASS", rounds=(*self.THREE[:4], "--round", "3:reviewer:opus:PASS")), host=host)
+        self.assertEqual(rc, 0, "merge refused an ungranted round-3 fix check PASS:\n" + out + err)
+        body = tm.posted_body(self, out)
+        self.assertEqual(tm.parse_text(self, body).get("fix"), tm.REVIEW_FIX_PASS, "the printed record has no PASS fix check line:\n" + body)
+        self.assertFalse([l for l in body.splitlines() if l.startswith("Grant:")], "an ungranted record prints a Grant line:\n" + body)
 
 
 
