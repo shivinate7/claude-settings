@@ -4,6 +4,11 @@
   "home": "step habit-is-not-a-guard (a report's guard line names a real guard)",
   "id": "guard-line-null-values",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T21:46:00Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 628,
   "options": [
     {
@@ -37,10 +42,10 @@
   ],
   "owner": "lane habit-is-not-a-guard (session_013NEJL4HbEaurThYorsKFGD)",
   "ref": "lane habit-is-not-a-guard, draft PR #2881, Nov 12, 14:00 and 14:03 CST",
-  "reply": "Reworded 14:14 CST: a is the recommended pick; c is not better.",
+  "reply": "Closed 15:47 CST: you picked a. A guard line with no reference is refused; a report with no guard to name leaves the line out or names a step.",
   "repo": "shivinate7/claude-settings",
   "short": "Guard line: always needs a ref",
-  "status": "open",
+  "status": "closed",
   "title": "A guard line with no reference is refused; a report with nothing to name drops the line",
   "why": "The check's reach on clean reports is wider than your ruling said."
 }

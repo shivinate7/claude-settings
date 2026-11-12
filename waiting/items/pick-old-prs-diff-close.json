@@ -4,6 +4,11 @@
   "home": "step pr-backlog-clear",
   "id": "pick-old-prs-diff-close",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T21:46:00Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 605,
   "options": [
     {
@@ -46,10 +51,11 @@
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
   "pick": "a",
   "ref": "coordinator pick, Nov 12, 12:51 CST; reworded after your 15:26 CST note; corrected to keep ruling close-replaced-at-open",
+  "reply": "Closed 15:47 CST: you picked a. An old PR closes when its work is on main, a record says it was dropped on purpose, or its replacing PR is open; one whose replacement closed without merging reopens. The backlog lane goes ahead.",
   "repo": "shivinate7/claude-settings",
   "short": "Which old PRs close",
   "stands": true,
-  "status": "open",
+  "status": "closed",
   "title": "An old PR closes only when its work is on main or was dropped on purpose",
   "why": "A coordinator pick you could not see before."
 }

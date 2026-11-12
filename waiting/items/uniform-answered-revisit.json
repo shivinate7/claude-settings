@@ -4,6 +4,11 @@
   "home": "decision uniform-over-variants (a repo changes to fit a shared tool, never the tool to fit a repo)",
   "id": "uniform-answered-revisit",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T21:46:00Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 643,
   "options": [
     {
@@ -30,10 +35,10 @@
   ],
   "owner": "lane widening-question-not-asked (session_013NEJKzNDgCKgjct5ZNZtN7)",
   "ref": "lane widening-question-not-asked, PR #2929, via coordinator 14:23 CST Nov 12",
-  "reply": "Reworded 15:25 CST: the check is general (any question your shared-tool ruling already answers); this item is only about its corner case.",
+  "reply": "Closed 15:47 CST: you picked a. The check refuses such a question; to revisit the ruling, you say so in chat.",
   "repo": "shivinate7/claude-settings",
   "short": "Revisit question: refused or allowed",
-  "status": "open",
+  "status": "closed",
   "title": "A question that asks you to revisit the shared-tool ruling itself",
   "why": "The new check would stop you from being asked to revisit that ruling."
 }

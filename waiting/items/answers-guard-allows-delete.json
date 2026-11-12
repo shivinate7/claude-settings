@@ -4,6 +4,11 @@
   "home": "step answers-session-write-guard (a session cannot forge your page answers)",
   "id": "answers-guard-allows-delete",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T21:46:00Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 635,
   "options": [
     {
@@ -24,10 +29,10 @@
   ],
   "owner": "lane answers-session-write-guard (session_013NEJL2bk5JjA6fXmQ5SooN)",
   "ref": "lane answers-session-write-guard, head 53e065d31, via coordinator 14:11 CST Nov 12",
-  "reply": "Reworded 15:25 CST with more context, as you asked.",
+  "reply": "Closed 15:47 CST: you picked a. The guard refuses a session that writes or edits your saved answer; a delete passes, so rewording or reopening an item can still ask you again. The lane is told.",
   "repo": "shivinate7/claude-settings",
   "short": "Answer guard: allow delete?",
-  "status": "open",
+  "status": "closed",
   "title": "The answer guard lets a session delete a saved answer, or refuses that too",
   "why": "The decision text says the guard refuses every session write to answers; a delete is a write."
 }

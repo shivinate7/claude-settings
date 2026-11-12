@@ -4,6 +4,11 @@
   "home": "step review-fix-check-round (fix checks name their round)",
   "id": "granted-round-fail-holds",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T21:46:00Z",
+    "choice": "a",
+    "note": "as long as its flagged to me and doesn't go to sleep idling quietlky"
+  },
   "n": 625,
   "options": [
     {
@@ -23,10 +28,10 @@
   ],
   "owner": "lane review-fix-check-round (session_013NEJL14ysfQUFFZcFfWrpP)",
   "ref": "lane review-fix-check-round, Nov 12, 13:56 CST",
-  "reply": "Reworded 14:14 CST: held = parked until you decide; open = a fix lane starts without you.",
+  "reply": "Closed 15:47 CST: you picked a, on your condition: a held change is put in front of you on this page at once, never left parked in silence. The lane is told to build it that way.",
   "repo": "shivinate7/claude-settings",
   "short": "Failed granted round: hold or not",
-  "status": "open",
+  "status": "closed",
   "title": "Hold a change whose extra review round, granted by you, fails",
   "why": "No ruling covers a failed round you granted beyond three."
 }
