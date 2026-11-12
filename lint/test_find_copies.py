@@ -54,6 +54,12 @@ CONTROL = "vendor/whatever.mjs"  # a child copy of another parent file, reported
 # template and this file whole scores 1.0 for both, and the ranking picks the template.
 Z_TEXT = "".join(f"export function zed{i}(value) {{ return value + {i}; }}\n" for i in range(20))
 Z_EDITED = Z_TEXT.replace("return value + 3;", "return value + 33;", 1)  # a near copy: 19 of 20 lines
+# The parent's twin of the template at a second path, drifted on line 3 only, and a 100-line parent file
+# that shares no line with the template.
+TWIN = ".claude/pull_request_template.md"
+DRIFTED_TWIN = PR_TEMPLATE.replace("Summary line 0: say", "Summary line 0: this parent says", 1)
+LONG = "testing/long.mjs"
+LONG_TEXT = "".join(f"export function long{i}(value) {{ return value - {i}; }}\n" for i in range(100))
 
 
 def module_under_test():
@@ -367,6 +373,60 @@ class FindCopiesTest(unittest.TestCase):
             for mode in ("json", "text"):
                 with self.subTest(variant=label, mode=mode):
                     self.assert_own_template_not_reported(text, mode)
+
+    def assert_twin_would_be_reported(self, text):
+        # Scope first (P7): the twin is a near copy of this child text, so the scan would report it without the rule.
+        mod = module_under_test()
+        tlines, clines = mod.significant_lines(DRIFTED_TWIN.encode()), mod.significant_lines(text.encode())
+        self.assertGreaterEqual(len(DRIFTED_TWIN.encode()), mod.MIN_BYTES, "fixture: the twin is under MIN_BYTES")
+        self.assertGreaterEqual(len(tlines), mod.MIN_LINES, "fixture: the twin is under MIN_LINES")
+        self.assertLessEqual(len(clines), mod.CHILD_GROWTH * len(tlines),
+                             "fixture: the child is over the growth bound for the twin")
+        self.assertGreaterEqual(len(tlines & clines) / len(tlines), 0.8,
+                                "fixture: the child holds too little of the twin")
+
+    def test_own_pr_template_near_copy_is_not_reported_against_drifted_twin(self):
+        # The parent keeps the template at a second path, drifted on line 3. The child keeps its own
+        # template, so the drifted twin does not make that template a copy.
+        write(self.parent, TWIN, DRIFTED_TWIN)
+        for label, text in self.near_variants().items():
+            self.assert_twin_would_be_reported(text)
+            for mode in ("json", "text"):
+                with self.subTest(variant=label, mode=mode):
+                    self.assert_own_template_not_reported(text, mode)
+
+    def test_own_pr_template_holding_a_whole_parent_file_beside_drifted_twin_is_reported(self):
+        # The control for the drifted twin: the same parent, and a child template that holds the whole
+        # template and a 100-line parent file. The rule excuses the template, never that parent file.
+        mod = module_under_test()
+        write(self.parent, TWIN, DRIFTED_TWIN)
+        write(self.parent, LONG, LONG_TEXT)
+        llines = mod.significant_lines(LONG_TEXT.encode())
+        clines = mod.significant_lines((PR_TEMPLATE + LONG_TEXT).encode())
+        self.assertGreaterEqual(len(LONG_TEXT.encode()), mod.MIN_BYTES, "fixture: the parent file is under MIN_BYTES")
+        self.assertEqual(len(llines), 100, "fixture: the parent file is not 100 significant lines")
+        self.assertFalse(llines & mod.significant_lines(PR_TEMPLATE.encode()),
+                         "fixture: the parent file shares a line with the template")
+        self.assertTrue(llines <= clines, "fixture: the child does not hold the whole parent file")
+        self.assertLessEqual(len(clines), mod.CHILD_GROWTH * len(llines),
+                             "fixture: the child is over the growth bound for the parent file")
+        write(self.child, OWN_TEMPLATE, PR_TEMPLATE + LONG_TEXT)
+        write(self.child, CONTROL, TEST)
+        with self.subTest(mode="json"):
+            proc = run(self.parent, self.child, "--json")
+            self.assertIn(proc.returncode, (0, 1), proc.stderr)
+            pairs = [(f["child"], f["parent"], f["kind"]) for f in json.loads(proc.stdout)["files"]]
+            self.assertIn((CONTROL, "testing/skip-locally-fail-in-ci.test.mjs", "byte-equal"), pairs,
+                          "control: the run did not report the other copy")
+            self.assertIn((OWN_TEMPLATE, LONG, "near-equal"), pairs,
+                          "the child's PR template holding a whole parent file is not reported as that copy")
+        with self.subTest(mode="text"):
+            proc = run(self.parent, self.child)
+            self.assertIn(proc.returncode, (0, 1), proc.stderr)
+            self.assertTrue(text_reports(proc.stdout, CONTROL), "control: the run did not report the other copy")
+            self.assertTrue(any(line.startswith(f"file {OWN_TEMPLATE} copies {LONG} (near-equal, ")
+                                for line in proc.stdout.splitlines()),
+                            "the child's PR template holding a whole parent file is not reported as that copy")
 
     def test_reads_only(self):
         write(self.child, "harness/tests/copy.test.mjs", TEST)
