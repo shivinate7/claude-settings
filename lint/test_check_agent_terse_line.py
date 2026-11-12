@@ -216,6 +216,20 @@ class BodyCases:
         self.assertEqual(self.verdict("Work the brief.\n\n    " + TERSE_LINE)[0], 1,
                          "a four-space indented code block holding the line counted as holding it")
 
+    def test_a_four_space_line_under_a_paragraph_line_counts(self):
+        # Control first: the same line unindented under the text line counts.
+        self.assertEqual(self.verdict("Work the brief.\n" + TERSE_LINE), (0, ""),
+                         "control: an unindented line under a text line was flagged")
+        self.assertEqual(self.verdict("Work the brief.\n    " + TERSE_LINE), (0, ""),
+                         "a four-space line continuing a paragraph was read as code, so the line did not count")
+
+    def test_a_list_item_four_space_line_after_a_blank_line_counts(self):
+        # Control first: the same line unindented after the blank line counts.
+        self.assertEqual(self.verdict("- Every lane keeps its prose short.\n\n" + TERSE_LINE), (0, ""),
+                         "control: an unindented line after a list item and a blank line was flagged")
+        self.assertEqual(self.verdict("- Every lane keeps its prose short.\n\n    " + TERSE_LINE), (0, ""),
+                         "a list item's four-space paragraph after a blank line was read as code, so the line did not count")
+
     def test_a_file_that_cannot_be_read_is_unknown_not_clear(self):
         root = fixture_root()
         path = os.path.join(root, self.NAME)
