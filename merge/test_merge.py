@@ -11758,10 +11758,14 @@ LINKS_WORKFLOW = "\n".join([
 ]) + "\n"
 
 
-def main_run(id_, conclusion, status="completed", name="checks", event="push", path=".github/workflows/checks.yml", sha=None, run_attempt=1):
-    """One run on main, as `GET actions/runs` lists it. Its head is `sha`, or a sha of its own id. A re-run keeps its id, at `run_attempt` 2 or more."""
-    return {"id": id_, "name": name, "path": path, "event": event, "status": status, "conclusion": conclusion if status == "completed" else None,
-            "head_sha": sha or f"{id_:040x}", "html_url": f"https://github.com/o/r/actions/runs/{id_}", "run_attempt": run_attempt}
+def main_run(id_, conclusion, status="completed", name="checks", event="push", path=".github/workflows/checks.yml", sha=None, run_attempt=1, message=None):
+    """One run on main, as `GET actions/runs` lists it. Its head is `sha`, or a sha of its own id. A re-run keeps its id, at `run_attempt` 2 or more.
+    `message` is the head commit's message, as GitHub gives it in `head_commit` and `display_title`: a merge commit names its pull request in it."""
+    run = {"id": id_, "name": name, "path": path, "event": event, "status": status, "conclusion": conclusion if status == "completed" else None,
+           "head_sha": sha or f"{id_:040x}", "html_url": f"https://github.com/o/r/actions/runs/{id_}", "run_attempt": run_attempt}
+    if message is not None:
+        run["display_title"], run["head_commit"] = message.splitlines()[0], {"message": message}
+    return run
 
 
 def main_job(name, conclusion, minutes=1):
@@ -12496,6 +12500,121 @@ class RedMainBrake(Env):
         self.refused(rc, out, before)
         self.assertIn("run 1601", out)
         self.assertNotIn("gh run rerun 1601", out, "the cancelled run 1601 is on a commit that is not the base's head, so no re-run is named")
+
+    # The breaking merge (decision no-merge-onto-red-main, the revert route): a red push run whose parent run is green is the run a merge broke.
+    # The refusal names that run's commit and its pull request, read from the run's head commit message. A first red names its re-run first,
+    # and blames nothing until that re-run is red again.
+    @staticmethod
+    def sha_of(id_):
+        """The head sha of main's run `id_`: its id repeated, so its first nine characters name the run."""
+        return (f"{id_:x}" * 40)[:40]
+
+    def merge_run(self, id_, conclusion, pr, run_attempt=1):
+        """Main's push run `id_` on the merge commit of pull request `pr`, as the runs list gives it."""
+        return main_run(id_, conclusion, sha=self.sha_of(id_), run_attempt=run_attempt, message=f"Merge pull request #{pr} from o/lane-{pr}")
+
+    @staticmethod
+    def page_jobs(runs):
+        """The jobs of each run: a failed run fails `checks`, any other passes it, and `scope` passes in every run."""
+        return {r["id"]: [main_job("scope", "success"), main_job("checks", "failure" if r["conclusion"] == "failure" else "success", 20)] for r in runs}
+
+    def test_a_red_main_blames_the_first_red_run_whose_parent_is_green(self):
+        # 903 broke main: its parent 902 is green, and 903 is red again on its re-run. 904 and 905 are later reds on top of it.
+        runs = [self.merge_run(905, "failure", 2652), self.merge_run(904, "failure", 2651), self.merge_run(903, "failure", 2650, run_attempt=2),
+                self.merge_run(902, "success", 2649), self.merge_run(901, "success", 2648)]
+        rc, out, before = self.go(runs, self.page_jobs(runs))
+        self.refused(rc, out, before)
+        self.assertIn(self.sha_of(903)[:9], out, "the refusal does not name the breaking merge commit, run 903's")
+        self.assertIn("#2650", out, "the refusal does not name the pull request of the breaking merge commit")
+        for pr in (2651, 2652):
+            self.assertNotIn(f"#{pr}", out, f"the refusal blames #{pr}, a later red run on top of the breaking merge")
+
+    def test_a_red_main_blames_the_breaking_run_deep_in_a_full_page_of_fifty(self):
+        # a full page, newest first: 1060 to 1041 are red, and 1041 is red again on its re-run; its parent 1040 is green, and the rest are green
+        runs = [self.merge_run(i, "failure" if i >= 1041 else "success", i + 1000, run_attempt=2 if i == 1041 else 1) for i in range(1060, 1010, -1)]
+        self.assertEqual(len(runs), 50, "the fixture is not a full page of fifty runs")
+        rc, out, before = self.go(runs, self.page_jobs(runs))
+        self.refused(rc, out, before)
+        self.assertIn(self.sha_of(1041)[:9], out, "the refusal does not name the breaking merge commit, run 1041's, at the far end of the page")
+        self.assertIn("#2041", out, "the refusal does not name the pull request of run 1041")
+        for i in range(1042, 1061):
+            self.assertNotIn(f"#{i + 1000}", out, f"the refusal blames #{i + 1000}, a red run above the breaking run 1041")
+
+    def test_a_red_main_names_the_pull_request_of_the_breaking_commit_in_either_merge_style(self):
+        for style, message in (("merge commit", "Merge pull request #2650 from o/lane-2650"), ("squash", "Lane fix (#2650)")):
+            with self.subTest(style=style):
+                runs = [main_run(903, "failure", sha=self.sha_of(903), run_attempt=2, message=message), main_run(902, "success", sha=self.sha_of(902))]
+                rc, out, before = self.go(runs, self.page_jobs(runs))
+                self.refused(rc, out, before)
+                self.assertIn("#2650", out, f"the refusal does not name pull request #2650 from its {style} message")
+
+    def test_a_first_red_names_its_re_run_first_and_blames_no_pull_request(self):
+        runs = [self.merge_run(903, "failure", 2650), self.merge_run(902, "success", 2649)]
+        rc, out, before = self.go(runs, self.page_jobs(runs))
+        self.refused(rc, out, before)
+        self.assertIn("gh run rerun 903 --failed", out, "the refusal does not name the re-run of the first red run 903 as its first way out")
+        self.assertIn("--base-red-ok", out, "the refusal names no reason flag after the re-run")
+        self.assertLess(out.index("gh run rerun 903 --failed"), out.index("--base-red-ok"), "the re-run is not named before the reason flag")
+        self.assertNotIn("#2650", out, "the first red run is blamed before its re-run is red again")
+
+    def test_a_breaking_run_is_blamed_only_once_its_re_run_is_red_again(self):
+        first = [self.merge_run(903, "failure", 2650), self.merge_run(902, "success", 2649)]
+        rc, out, before = self.go(first, self.page_jobs(first))
+        self.refused(rc, out, before)
+        self.assertNotIn("#2650", out, "run 903 is blamed on its first red, before its re-run")
+        again = [self.merge_run(903, "failure", 2650, run_attempt=2), self.merge_run(902, "success", 2649)]
+        rc, out, before = self.go(again, self.page_jobs(again))
+        self.refused(rc, out, before)
+        self.assertIn("#2650", out, "run 903 is red again on its re-run, and the refusal does not blame its pull request")
+
+    def test_the_refusal_names_base_red_ok_as_the_route_for_the_revert_pr(self):
+        runs = [self.merge_run(903, "failure", 2650, run_attempt=2), self.merge_run(902, "success", 2649)]
+        rc, out, before = self.go(runs, self.page_jobs(runs))
+        self.refused(rc, out, before)
+        self.assertRegex(out, r"(?i)revert[^.\n]*--base-red-ok|--base-red-ok[^.\n]*revert", "the refusal does not name --base-red-ok as the route for the revert PR")
+        self.assertRegex(out, r"(?i)merges? resumes? once the revert merges", "the refusal does not say merges resume once the revert merges")
+
+    def pr_head_after(self, *steps, drops=""):
+        """Push feat, the PR head, on top of its own head. Each step is a sha to revert, "HEAD" to revert the commit before it, or "fix" to add a file.
+        `drops` is a trailer line for the head commit's message: the silent-undo check's escape for a commit that deletes a file on purpose.
+        -> feat's new head."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        for step in steps:
+            if step == "fix":
+                put(os.path.join(o, "fix.txt"), "fix\n")
+                sh(o, "git", "add", "-A")
+                sh(o, "git", "commit", "-q", "-m", "Fix the lane")
+            else:
+                sh(o, "git", "revert", "--no-edit", step)
+        if drops:
+            sh(o, "git", "commit", "--amend", "-q", "-m", f"{sh(o, 'git', 'log', '-1', '--format=%B')}\n\n{drops}")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        return sh(o, "git", "rev-parse", "HEAD")
+
+    def test_a_revert_pr_with_its_drops_line_is_not_refused_on_a_red_main_beyond_the_red_main_itself(self):
+        # the PR head reverts main's own lane commit and carries the silent-undo escape for the file it deletes; under --base-red-ok the run merges
+        push_base(self, {"lane.txt": "lane work\n"})
+        self.pr_head_after(self.main_head(), drops="Drops-lines: lane.txt -- revert of the breaking merge")
+        runs = [self.merge_run(903, "failure", 2650, run_attempt=2), self.merge_run(902, "success", 2649)]
+        rc, out, _ = self.go(runs, self.page_jobs(runs), "--base-red-ok", "revert of the breaking merge")
+        self.assertNotIn("silently undoes", out, "the silent-undo check refuses the revert PR, and --base-red-ok does not lift that finding")
+        self.merged(rc, out)
+
+    def test_a_revert_of_a_revert_pr_is_not_refused_on_a_red_main_under_base_red_ok(self):
+        # a revert of the revert, plus the fix: the re-land shape. It deletes no file, and red_base refuses nothing for it.
+        push_base(self, {"lane.txt": "lane work\n"})
+        self.pr_head_after(self.main_head(), "HEAD", "fix")
+        runs = [self.merge_run(903, "failure", 2650, run_attempt=2), self.merge_run(902, "success", 2649)]
+        rc, out, _ = self.go(runs, self.page_jobs(runs), "--base-red-ok", "re-land the lane with its fix")
+        self.assertNotIn("silently undoes", out, "the silent-undo check refuses the revert of a revert, and --base-red-ok does not lift that finding")
+        self.merged(rc, out)
+
+    def main_head(self):
+        """Main's head, as the other clone reads it after a fetch: the commit the PR head reverts."""
+        sh(self.other, "git", "fetch", "-q", "origin")
+        return sh(self.other, "git", "rev-parse", "origin/main")
 
 class PinnedMismatchStopsMain(Env):
     """c189 part 1: main() itself refuses a pinned list that disagrees with protection, before any lock is taken."""
