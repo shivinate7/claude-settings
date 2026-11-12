@@ -4,11 +4,12 @@
 
 A repo lists paths that no session may write, in `.claude/layout-extras.json`. The claude-settings guard enforces the list. Owner ask ask-mw6vyc57pi part 2 (2026-11-07 14:58 CST); roadmap step `repo-protected-paths`.
 
-- Shape: `"protected-paths": [{"path": "fixtures/", "why": "<the harm, one line>"}]`. `path` is repo-relative POSIX; a trailing `/` means the folder and all under it. No leading `/`, no `..`. `why` is required. Reader: `lint/layout.py` `protected_paths`. No key means the rule is off.
+- Shape: `"protected-paths": [{"path": "fixtures/", "why": "<the harm, one line>"}]`. `path` is repo-relative POSIX; a path covers itself and all under it, with or without a trailing `/`. No leading `/`, no `..`. `why` is required. Reader: `lint/layout.py` `protected_paths`. No key means the rule is off. An extras file may hold this key alone, with no `kinds` object.
+- A repo with a non-empty list also protects its extras file, so a session cannot edit the list away. The reason says so.
 - Guard rule `protected-path` (`hooks/guard.py`; predicate `is_protected` and `protected_shell_hit` in `hooks/guard_frozen.py`). Denied: a Write, Edit, MultiEdit or NotebookEdit to a listed path; a shell write to one, through the frozen rule's scanner (`_shell_write_hit`, with a leading `cd` followed); a python or node script's own write (`interpreter_write_hit`). A read, a grep, an echo of the path, and a copy out are allowed.
 - The list is that of the checkout that holds the target, never the session's cwd. A write from repo A into repo B's listed path is denied.
 - A path matches per segment: `fixtures/` covers `fixtures/x/y.csv`, never `fixturesX/` or `src/fixtures.py`. The literal and the resolved (symlink) spellings both count.
-- `touch` counts as a write (`MUTATING_COMMAND`), for this rule and every rule that reads that list, the frozen path's too.
+- Write forms only this rule counts (`PROTECTED_MUTATING_COMMAND`, and `protected=True` through `writes_to` and `interpreter_write_hit`): `touch`, `rsync` (its destination), `unlink`, `shred`, `sort -o`, `sed --in-place`, `perl -pi`, `find` with `-delete` or a mutating `-exec`, and in python `os.remove`, `unlink`, `rmtree`, `Path.touch` and `joinpath`. No other rule (builder-test-edit, frozen-path, other-checkout) reads them: their verdicts stay as they were.
 - The reason quotes the entry's `why`. It never prints a command that writes the path.
 - `git restore <path>` and `git checkout [<tree>] [--] <path>` count as writes, even from HEAD or the index: a session cannot put back a listed file; the owner's override covers that rare restore (coordinator pick, 2026-11-07).
 - A malformed key allows the call and writes one `noted` guard.log line for `protected-path`. One bad entry drops the whole list, not that entry alone.

@@ -264,8 +264,10 @@ Other tools, in `judge` order:
                        No record (a non-isolated agent, or the orchestrator) allows everything.
                        No override lifts it. (an-agent-outside-its-home-tree-must-stop)
   protected-path       deny. A write to a path the repo that holds it lists under "protected-paths" in its layout
-                       extras file: a Write family call, a shell write (redirect, `tee`, `sed -i`, `rm`, `mv`,
-                       `cp`, `touch`, after a leading `cd`) or a python or node script's own write. The list read
+                       extras file, and to that file itself: a Write family call, a shell write (redirect, `tee`,
+                       `sed -i`, `rm`, `mv`, `cp`, `touch`, `unlink`, `shred`, `sort -o`, `rsync`, `find -delete`,
+                       `git restore` or `git checkout` of the path, after a leading `cd`) or a python or node
+                       script's own write or removal. These extra forms count for this rule alone. The list read
                        is the target's checkout's. A read, a copy out and a malformed list pass; a malformed list
                        is noted once. The reason quotes the entry's why. An override lifts it. (protected-path)
   other-checkout       deny. Any session's write whose target sits in a checkout of this clone
@@ -586,7 +588,7 @@ while True:
         )
         _loading = "guard_frozen"
         from guard_frozen import (
-            FROZEN_REASON, MUTATING_COMMAND, _holds_frozen, _resolve_vars, _shell_write_hit, interpreter_may_write,
+            FROZEN_REASON, MUTATING_COMMAND, PROTECTED_MUTATING_COMMAND, _holds_frozen, _resolve_vars, _shell_write_hit, interpreter_may_write,
             interpreter_write_hit, is_frozen, is_project_config, project_config_shell_hit, shell_write_hit,
             is_protected, protected_reason, protected_shell_hit,
             PROJECT_FROZEN_FILES,  # noqa: F401  re-export: test_shared_names and test_wrappers read guard.PROJECT_FROZEN_FILES
@@ -4655,10 +4657,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "frozen-path", FROZEN_REASON, matched)
 
     # 7a. A protected path (decision protected-path). The plain forms are read from the stripped command, and only
-    # when it looks like a write (SHELL_WRITE_HINT), so a read-only call opens no extras file. A python or node
+    # when it looks like a write (PROTECTED_WRITE_HINT), so a read-only call opens no extras file. A python or node
     # script's own writes are read from the raw command: the predicate runs only for a path the script writes.
-    matched = (protected_shell_hit(stripped, cwd) if SHELL_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", stripped)) else "")
-    matched = matched or interpreter_write_hit(raw, cwd, is_protected)
+    matched = (protected_shell_hit(stripped, cwd) if PROTECTED_WRITE_HINT.search(SHELL_QUIET_REDIRECT.sub(" ", stripped)) else "")
+    matched = matched or interpreter_write_hit(raw, cwd, is_protected, protected=True)
     if matched:
         refuse(tool, "deny", "protected-path", protected_reason(matched), matched)
 
@@ -5321,8 +5323,10 @@ def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
 # A shell command with none of these can write no named file, so it spends no git read here. A
 # redirect onto a stream (`2>&1`) or the null device writes no checkout, so it is dropped first.
 SHELL_QUIET_REDIRECT = re.compile(r"\d*>>?[ \t]*(?:&[0-9-]|/dev/null\b)")
-SHELL_WRITE_HINT = re.compile(
-    r">|" + MUTATING_COMMAND + r"|\bsed\b|\bperl\b|\bgit\b[^\n;|&]*\b(?:restore|checkout)\b"
+SHELL_WRITE_HINT = re.compile(r">|" + MUTATING_COMMAND + r"|\bsed\b")
+# The same gate for the protected-path rule, which reads more write forms (`writes_to`, protected=True).
+PROTECTED_WRITE_HINT = re.compile(
+    r">|" + PROTECTED_MUTATING_COMMAND + r"|\b(?:sed|perl)\b|\bsort\b[^\n;|&]*\s(?:-[A-Za-z]*o\b|--output)|\bgit\b[^\n;|&]*\b(?:restore|checkout)\b"
     r"|\bfind\b[^\n;|&]*\s-(?:delete|exec|execdir|ok|okdir)\b")
 
 

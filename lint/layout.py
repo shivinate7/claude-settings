@@ -46,20 +46,23 @@ class BranchNameError(LayoutError):
     """The extras file reads, and its "record-branch" key is not a branch name."""
 
 
-def _read(path):
+def _read(path, extras=False):
     try:
         with open(path, encoding="utf-8") as handle:
-            return _parse(handle.read(), path)
+            return _parse(handle.read(), path, extras)
     except OSError as err:
         raise LayoutError("cannot read %s: %s" % (path, err)) from err
 
 
-def _parse(text, path):
-    """The extras or layout text as a dict. `path` names the source in an error."""
+def _parse(text, path, extras=False):
+    """The extras or layout text as a dict. `path` names the source in an error. An extras file (`extras`) may hold
+    no "kinds" object, as a repo that sets only keys such as "protected-paths" has none; it then reads as {}."""
     try:
         data = json.loads(text)
     except ValueError as err:
         raise LayoutError("cannot read %s: %s" % (path, err)) from err
+    if extras and isinstance(data, dict) and "kinds" not in data:
+        data = dict(data, kinds={})
     if not isinstance(data, dict) or not isinstance(data.get("kinds"), dict):
         raise LayoutError("%s: no \"kinds\" object" % path)
     for name, kind in data["kinds"].items():
@@ -88,14 +91,14 @@ def has_extras(root):
 def rolled_out(root):
     """True when `root` holds its extras file and the file's "rolled-out" key is true, so it keeps
     every kind at its layout path."""
-    return has_extras(root) and _read(_extras(root)).get(ROLLED_OUT) is True
+    return has_extras(root) and _read(_extras(root), True).get(ROLLED_OUT) is True
 
 
 def kinds(root=None):
     """{name: kind} from the layout, plus the kinds in the extras file of `root` when it has one."""
     found = {name: dict(kind) for name, kind in layout()["kinds"].items()}
     if root is not None and rolled_out(root):
-        for name, kind in _read(_extras(root))["kinds"].items():
+        for name, kind in _read(_extras(root), True)["kinds"].items():
             if name in found and kind["path"].strip("/") in _kept(name):
                 continue  # the extras file repeats a place legacy-repos keeps this kind
             if name in found:
@@ -206,7 +209,7 @@ def unmoved(root):
     name = repo_name(root)
     found = {kind: where.strip("/") for kind, where in (legacy_repos().get(name, {}) if name else {}).items()}
     if rolled_out(root):
-        for kind, entry in _read(_extras(root))["kinds"].items():
+        for kind, entry in _read(_extras(root), True)["kinds"].items():
             if kind not in found and isinstance(entry, dict) and entry["path"].strip("/") in _kept(kind):
                 found[kind] = entry["path"].strip("/")
     return found
@@ -409,7 +412,7 @@ def waiting_page(root):
     file reads it from the default branch's (_default_branch_extras); its own file always wins.
     "unknown" when the repo has no extras file and no page: a repo with no page is not an error."""
     if has_extras(root):
-        return _page_in(root, _read(_extras(root)), _extras(root))
+        return _page_in(root, _read(_extras(root), True), _extras(root))
     held = _default_branch_extras(root)
     if held is None:
         return "unknown"
@@ -429,7 +432,7 @@ def set_waiting_page(root, url):
     if not ARTIFACT_URL.fullmatch(url):
         raise LayoutError("%s: %s %r is not a claude.ai artifact link with an id" % (_extras(root), WAITING_PAGE, url))
     if has_extras(root):
-        data = _read(_extras(root))
+        data = _read(_extras(root), True)
         held = next((e for e in artifacts(root) if e["role"] == WAITING_ROLE), None)
         if held is not None:
             if artifact_id(held["url"]) == artifact_id(url):
@@ -518,7 +521,7 @@ def live_pages(roots):
 
 def _repo_keys(root):
     """The extras file of `root` as a dict, or {} when the repo has none."""
-    return _read(_extras(root)) if has_extras(root) else {}
+    return _read(_extras(root), True) if has_extras(root) else {}
 
 
 def _named(root, key, table):
