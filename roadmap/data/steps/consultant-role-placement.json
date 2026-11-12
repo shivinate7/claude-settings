@@ -1,0 +1,14 @@
+{
+ "id": "consultant-role-placement",
+ "title": "The consultant role is listed in session-tiers' side-session list and in rule roles-pick-mode-from-request",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The consultant is missing from session-tiers' side-session list (about line 110) and from rule roles-pick-mode-from-request.",
+ "source": "coordinator 08:47 CST Nov 12, from lane fan-prose-decisions; owner source: restart-plan R30, owner 10:54 CST Nov 11 (\"im able to spawn a retrospective or a consultant ...\"), box answer before 10:58 CST \"Add consultant role\"",
+ "note": "Prose. Owner source found in docs/plans/restart-plan.md R30 (lines 160-167 on main 2a7521db9), so a step, not a page item. Unlaned.",
+ "updatedAt": "2026-11-12T08:46:00-06:00"
+}
