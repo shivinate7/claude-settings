@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-12T01:38:00Z",
+  "context": "Goal: archive the sessions and start fresh as soon as the drain lands.\nProblem (goal): batch 84 holds 4 PRs: the guard fix (#2588, never ask on an all-branches push), the mail test fix (#2552), the installer fix (#2601) and the record of your 16:44 'agreed on p' ruling (#2600). The plan's drain does not name it, so it runs only on your word. The coordinator and the batch runner queued it without asking.\nBased on (read): restart-plan R23 and its 'What happens next' end the drain at the named queue plus #2591, and say #2552 carries over in handoffs.\nBased on (read): the retrospective asks the same about #2588, which is not a named carry-over. This one answer covers both.\nDeparts from: the plan, where the archive follows batch 82e \u2014 this adds one more batch before the archive.\nMeanwhile: the batch runner holds batch 84; batch 82e carries on. The retrospective waits only on this item.",
+  "holds": "Whether batch 84 lands before the archive or carries over in the handoffs.",
+  "home": "plan restart-plan, 'What happens next' item 1",
+  "id": "archive-waits-batch84",
+  "kind": "decision",
+  "n": 518,
+  "options": [
+    {
+      "gain": "The restart comes one batch sooner, as the plan says.",
+      "how": "Archive after batch 82e. The 4 PRs carry over in the coordinator's handoff and land first after the respawn.",
+      "key": "a",
+      "label": "Archive after 82e (Recommended)",
+      "lose": "Until the installer fix lands, each resume needs a manual hook reinstall, and the push-ask fix lands after the respawn."
+    },
+    {
+      "gain": "New sessions start with the installer and push-ask fixes on main, and nothing carries over.",
+      "how": "Land batch 84, then archive.",
+      "key": "b",
+      "label": "Land batch 84 first",
+      "lose": "One more batch, with its CI run, before the restart."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB)",
+  "rank": 1,
+  "ref": "coordinator (session_013NEJL2hB1pLZPDpzas7VgB); retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "repo": "shivinate7/claude-settings",
+  "short": "archive vs batch 84",
+  "status": "open",
+  "title": "Does the archive wait for batch 84?",
+  "why": "Batch 84 is outside the drain you set, so only you can add it (measured 2026-11-11, coordinator's queue read 19:36 CST)."
+}
