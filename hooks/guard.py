@@ -1590,14 +1590,14 @@ def cap_deadline_text(parts) -> str:
 
 
 def cap_deadline_end(parts) -> str:
-    """Return the end of the cap lift a write sets, as `HH:MM CST` or `CDT` in US Central, else ''.
+    """Return the end of the cap lift a write sets, as `YYYY-MM-DD HH:MM CST` or `CDT` in US Central, else ''.
 
     The last deadline the parts name is the one the file will hold. A deadline that is not a readable
     ISO-8601 instant, or one already passed, reads as '' and the write is not asked about for it:
     `hooks/config_watch.py` revokes a lift with such a deadline. The instant is read by
-    `shared_names.parse_deadline`, the parser the watch calls too. The time is
-    `local_time.central_hhmm`, the one home of the Central clock (rule style-time-central-24h); no
-    date is printed, because an end is shown for a lift the owner is approving now.
+    `shared_names.parse_deadline`, the parser the watch calls too. The text is
+    `local_time.central_full`, the one home of the Central clock (rule style-time-central-24h). The
+    date is printed because a lift may run any length, so an end next year must not read as tonight.
     """
     text = cap_deadline_text(parts)
     deadline = parse_deadline(text) if text else None
@@ -1607,7 +1607,7 @@ def cap_deadline_end(parts) -> str:
     try:
         if deadline < local_time.clock():
             return ""
-        return local_time.central_hhmm(deadline)
+        return local_time.central_full(deadline)
     except (ValueError, OverflowError, TypeError):
         return ""
 
@@ -1627,14 +1627,20 @@ def cap_disk_text(path: str, cwd: str = ""):
         return None
 
 
-def cap_edited_text(disk: str, edits) -> str:
-    """The file text after the edits, applied in order as the Edit tool applies them (the first match, or each with replace_all)."""
+def cap_edited_text(disk: str, edits):
+    """The file text after the edits, applied in order as the Edit tool applies them (the first match, or each with replace_all).
+
+    None when an edit's old_string is not in the text it meets: the file on disk is not the one the
+    edit was written against, so the result says nothing about the end the file will hold.
+    """
     for edit in edits:
         if not isinstance(edit, dict):
             continue
         old, new = edit.get("old_string"), edit.get("new_string")
         if not isinstance(old, str) or not isinstance(new, str) or not old:
             continue
+        if old not in disk:
+            return None
         disk = disk.replace(old, new) if edit.get("replace_all") is True else disk.replace(old, new, 1)
     return disk
 
@@ -1643,9 +1649,11 @@ def cap_arriving_parts(tool_input, target: str, cwd: str = "") -> list:
     """The texts to read the cap-lift end from, for an Edit or MultiEdit: the file it arrives at.
 
     A value-only edit names no field in its strings, and a second edit can move the end a first one
-    set, so the strings alone can show a wrong end or none. When the file on disk is readable and the
-    edits change its deadline, the result of applying them is the one text. Otherwise the strings
-    stand, as for a Write, so an edit that leaves the deadline alone adds no ask of its own.
+    set, so the strings alone can show a wrong end or none. When the file on disk is readable, the
+    result of applying the edits is what counts: a changed deadline gives that one text, and an
+    unchanged one gives no text, so an edit that leaves the deadline alone adds no ask of its own,
+    even when its new_string repeats the deadline line. When the file cannot be read, or an edit's
+    old_string is not in it, the strings stand, as for a Write.
     """
     strings = write_content_parts(tool_input, arriving=True)
     edits = tool_input.get("edits") if isinstance(tool_input.get("edits"), list) else []
@@ -1655,13 +1663,17 @@ def cap_arriving_parts(tool_input, target: str, cwd: str = "") -> list:
     if disk is None:
         return strings
     arrived = cap_edited_text(disk, edits)
-    if cap_deadline_text([arrived]) == cap_deadline_text([disk]):
+    if arrived is None:
         return strings
+    if cap_deadline_text([arrived]) == cap_deadline_text([disk]):
+        return []
     return [arrived]
 
 
-# A `sed` substitution, `s/old/new/flags`, with any one of the usual delimiters.
-SED_SUBST = re.compile(r"\bs([/|#,@:])((?:\\.|(?!\1).)*)\1((?:\\.|(?!\1).)*)\1[gIi0-9]*")
+# A `sed` substitution, `s/old/new/flags`, with any one of the usual delimiters. A backslash is read
+# only as the start of an escape pair, never as a plain character, so each character has one way to
+# match and a long backslash run with no closing delimiter fails in linear time, not exponential.
+SED_SUBST = re.compile(r"\bs([/|#,@:])((?:\\.|(?!\1|\\).)*)\1((?:\\.|(?!\1|\\).)*)\1[gIi0-9]*")
 
 
 def cap_sed_parts(raw: str, path: str, cwd: str = "") -> list:
