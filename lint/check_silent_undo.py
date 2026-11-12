@@ -144,8 +144,8 @@ def last_paragraph(pr_body):
             del paras[-2:]
         elif is_attribution(" ".join(lines)) or (len(lines) == 2 and is_attribution(lines[0]) and SESSION_URL.fullmatch(lines[1])):
             paras.pop()
-        elif len(lines) == 1 and SESSION_URL.fullmatch(lines[0]) and is_attribution(norm(paras[-2])):
-            paras.pop()  # the URL's own paragraph: only the attribution above makes it closing text
+        elif len(lines) == 1 and SESSION_URL.fullmatch(lines[0]) and is_attribution(([n for n in map(norm, paras[-2].splitlines()) if n] or [""])[-1]):
+            paras.pop()  # the URL's own paragraph: only an attribution ending the paragraph above makes it closing text
         else:
             break
     return paras[-1]
