@@ -18,8 +18,9 @@ take  queues PID and waits for its turn. Granted: prints the slot, `1`, `2` or `
       SIM_LEASE_POLL (default 2) seconds. --pid is required on take and give: without it, or with any other bad argument, one usage line goes to stderr and the
       exit is 2. --session defaults to $CLAUDE_CODE_SESSION_ID.
 give  frees PID's lease and its queue place. It is idempotent and always exits 0.
-renew exits 0 when PID holds a lease, else 1 (a no-op host: 0, as give). It writes nothing. A live holder calls it
-      (bin/sim-test, every SIM_TEST_RENEW s) to learn that its lease is gone.
+renew exits 0 when PID holds a lease, else 1 (a no-op host: 0, as give; a usage error: 2). It does not extend the lease: a
+      lease ends only when its holder's pid is gone. It writes leases.json only when its reap drops a dead entry (see Cost).
+      A live holder calls it (bin/sim-test, every SIM_TEST_RENEW s) to learn that its lease is gone.
 status  prints one line per lease (with the device's `udid`), one per waiter, and the load.
 
 Limits on every grant: the 5-minute load is under 100 and the 1-minute load is under 60.
@@ -46,8 +47,9 @@ State: ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-lease/leases.json, written 
 under an fcntl.flock on the file lock in the same folder. The lock is held for one read-decide-write step, never
 while sleeping.
 Cost: per call, one `uname`, one `ps` per recorded pid, and one `sysctl` on take and status (take: one `sysctl` per poll). A
-renew is one such call: one sim-lease process, and no write. Files written:
-leases.json, only when its content changes (a waiting take changes it each poll, with its `seen`), plus the empty lock file. No daemon, no log.
+renew is one such call, with no `sysctl`: one sim-lease process, one `uname`, one `ps` per recorded pid, and a write of
+leases.json only when its reap drops a dead entry. Files written: leases.json, only when its content changes (a waiting take
+changes it each poll, with its `seen`), plus the empty lock file. No daemon, no log.
 Reader: the guard calls live_leases() (SLOT_UDID maps a slot to its device) to let a session's MCP launch boot the device
 its own live lease holds. It takes no flock and writes nothing: one read of leases.json and one `ps` per lease.
 macOS only in effect; it runs under python3's standard library alone.
