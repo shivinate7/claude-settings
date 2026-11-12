@@ -16,8 +16,8 @@ The design pass (the plan's direction, not an owner quote) makes git the first w
 - Route chosen: B, the owner's own site. A small Worker (Cloudflare) serves the page and an API. It holds a GitHub token as a
   Worker secret, so no token sits in a page. It reads and writes `waiting/<collection>/<id>.json` on the record branch through the GitHub API.
   The page no longer lives on claude.ai and declares no `db`.
-- Route D (the page stays on claude.ai, git through a connector) is ruled out. The organisation forbids custom connectors (owner, 12:10 CST), and
-  the connector directory has no GitHub connector (coordinator, checked 12:08 CST).
+- Route D (the page stays on claude.ai, git through a connector) is ruled out. Custom connectors are not allowed (owner, 12:10 CST). The
+  coordinator's relay adds that the connector directory has no GitHub connector (checked 12:08 CST); this lane read no source for that.
 - Mechanized: two checks, never a skill step (owner, 11:24 CST). See Mechanism.
 
 Routes judged (Plan agent, Opus, then a refuter, Opus, verdict `revise`; the revisions are taken below):
@@ -34,9 +34,10 @@ Routes judged (Plan agent, Opus, then a refuter, Opus, verdict `revise`; the rev
 - The page's six collections move from `window.claude.use("db")` to the Worker's API. `sendAll` returns when there is no db (2299), and Withdraw
   (1815), Undo (2371), asks (2552, 2609) and Mark read (2806) fail the same way, so every one of them is re-pointed. `comments` is fetched only
   after the db exists (3179), and the claude.ai `comments` wake does not exist off claude.ai, so the boot and the wake change.
-- The Worker writes only `answers/`, `asks/` and the owner's read mark (`dismissed`). It never writes `items/`, `meta/` or `receipts/`.
-  That keeps the page's write reach as narrow as today's grant (SKILL.md "Read the answers").
-- A Send of several answers is one commit (GitHub trees API). Undo and Withdraw become a second commit. Git history keeps the undone
+- The Worker writes only what the page writes today: `answers/` and `asks/` records, the `dismissed` read mark on an item or an ask, and
+  the delete of `receipts/<id>` on Undo (`page.html` 2378, 2806). It writes no other field of an item and no `meta/`. A session writes the receipt
+  otherwise (SKILL.md "Read the answers"). The Worker checks each write against that list.
+- A Send of several answers is meant to be one commit (GitHub trees API; step 1 measures it). Undo and Withdraw become a second commit. Git history keeps the undone
   answer; today Undo deletes it (SKILL.md "Read the answers").
 - The Worker commits under its own committer name, so a guard can tell the page's writes from a session's.
 - The git copy holds five collections and no `receipts` (`export_page.py`, `waiting-data-in-repo`). `receipts` and
@@ -51,12 +52,11 @@ Routes judged (Plan agent, Opus, then a refuter, Opus, verdict `revise`; the rev
   and the Worker's own writes never do. None is built, so SKILL.md "Read the answers" says "this sentence is the only guard". Picked below.
 - Who can write answers is a gate. A Worker open to anyone with the URL would let anyone write answers, which is wider than today's grant.
   An access gate (Cloudflare Access, or a login the Worker checks) is part of the route, not an extra.
-- The token is scoped to this repo. A fine-grained token cannot be limited to one branch, so the repo's ruleset on main (`main-branch-protection`:
-  no direct push, no deletion) is what keeps it off main. The probe measures that.
+- The token is scoped to this repo. A fine-grained token cannot be limited to one branch, so only a ruleset on main keeps it off main. Decision `main-branch-protection`, ruling r, rules a ruleset that blocks deletion and force-push of main and requires `all-jobs-passed`; that ruleset is ruled, not yet built. A pull request requirement is planned, not ruled. The probe measures the token's reach.
 
 ## Picks
 
-Taken by the coordinator at 11:43 CST on 2026-11-12, as undoable picks (no owner question).
+Taken by the coordinator at 11:43 CST on 2026-11-12, as undoable picks (no owner question). Pick 1 is reworded for route B.
 
 1. Live view: poll about every 30 s while the page is open, and refresh on load and focus. The 30 s is tunable and unmeasured, never a
    rule. The Worker answers a poll with a cheap change check (an etag or the branch head), and the page fetches only on change.
@@ -70,7 +70,7 @@ Each act that cannot be undone or costs money needs one owner yes, asked by the 
 ## Known gaps
 
 - Unmeasured, decided by the probe:
-  - Whether a Worker can wake the writer on a save. The candidate is a POST from the Worker to a webhook URL that the writer made with its `watch_url` tool, which arrives in the writer's conversation. The fallback is the turn-start read of `answers/`.
+  - Whether a Worker can wake the writer on a save. The candidate is a POST from the Worker to a webhook URL that the writer made with its `watch_url` tool, which arrives in the writer's conversation. Decision `session-messages` (line 37) says a webhook to `watch_url` is likely blocked, because its signing secret is sealed to the artifact service, so a Worker may not be able to sign it. The fallback is the turn-start read of `answers/`.
   - The delay from a click to a commit on the record branch, and the cost of a poll in GitHub API calls.
   - Whether the free Cloudflare plan and its Access gate cover one owner on a phone.
   - Whether one commit can carry several files, and whether the token can be kept off main by the ruleset alone.
@@ -79,7 +79,7 @@ Each act that cannot be undone or costs money needs one owner yes, asked by the 
 
 ## Mechanism (build steps, handed to the coordinator as step text)
 
-1. `waiting-site-probe` (blockedBy none): on a scratch branch, never the record branch, measure a test Worker. Measure one commit of several files, a conditional read and the click-to-commit delay. Measure a wake by webhook to a session, the Access login on a phone, the free plan's limits and the token's reach. Owner acts: a Cloudflare account, a token, a test deploy.
+1. `waiting-site-probe` (blockedBy none): on a scratch branch, never the record branch, measure a test Worker. Measure one commit of several files, a conditional read and the click-to-commit delay. Measure a wake by webhook to a session, the Access login on a phone, the free plan's limits and the token's reach. Owner acts: a Cloudflare account, a token, a test deploy and the access gate.
 2. `page-one-store-answers` (blockedBy 1): the owner's word to re-point the `settings.json` "Relayed Grant" entry (line 54), which reads answers fetched with ArtifactData.
 3. `waiting-item-check` (blockedBy 2): one validator over `waiting/**.json` for the item rules now keyed on ArtifactData (`guard.py`, `question_form.py`, `call_judge.py`, `local_time.py --page-note`). It runs as a PreToolUse on a commit or push touching `waiting/`. It also runs in record-branch CI, which does not exist today (`checks.yml` 3-7 runs on main and PRs). Red first on the old commit. The Worker checks only the shape of what it writes (answers, asks); the item rules stay here.
 4. `waiting-site-build` (blockedBy 1, 3): the Worker, its API and the access gate, kept in this repo. `page.html` moves its collections from db to the API, with one commit per Send, Undo or Ask batch and a poll with a change check. Designs and Status read from git. Owner acts: the token mint, the deploy, the gate (one yes each).
@@ -97,7 +97,7 @@ Protects: the owner sees the same data in git and on the page. A lost page or an
 
 ## Cost
 
-No long-lived process or timer of ours. The Worker is hosted by Cloudflare on the free plan (unmeasured limits). The open page polls (Picks 1): the viewer's browser runs it. A check runs at each commit or push that touches `waiting/` (step 3), and one record-branch CI job. One commit per Send, Undo or Ask batch.
+No long-lived process or timer of ours. The Worker is hosted by Cloudflare on the free plan (unmeasured limits). The open page polls (pick 1): the viewer's browser runs it. A check runs at each commit or push that touches `waiting/` (step 3), and one record-branch CI job. One commit per Send, Undo or Ask batch.
 
 Refuter: revise, on the plan that judged all four routes (taken: the `stale_pages.py` loader, the `receipts` layout, the probe gaps, the Status tab, the forgery claim, the live-view pick). The owner's ruling at 12:10 CST picked route B from that plan; no new plan was made.
 
