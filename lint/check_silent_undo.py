@@ -700,11 +700,16 @@ def default_base(cwd, head):
     rc, up = git(cwd, "rev-parse", "--symbolic-full-name", name + "@{upstream}", ok=(0, 128))
     up = up.strip()
     if rc != 0 or not up:
-        return DEFAULT_BASE, "the upstream of %s, %s, is gone" % (name, merge)
+        remote = git(cwd, "config", "--get", "branch.%s.remote" % name, ok=(0, 1))[1].strip()
+        kept = merge[len("refs/heads/"):] if merge.startswith("refs/heads/") else merge
+        stored = merge if remote == "." else "refs/remotes/%s/%s" % (remote, kept)
+        if remote and git(cwd, "rev-parse", "--verify", "-q", stored, ok=(0, 1))[0] != 0:
+            return DEFAULT_BASE, "the upstream of %s, %s on %s, is gone" % (name, merge, remote)
+        return DEFAULT_BASE, "the upstream of %s cannot be read" % name
     if merge == ref:
         return DEFAULT_BASE, "%s tracks its own pushed copy" % name
     if git(cwd, "rev-parse", ref + "^{commit}")[1] == git(cwd, "rev-parse", up + "^{commit}", ok=(0, 128))[1]:
-        return DEFAULT_BASE, "%s tracks its own pushed copy %s" % (name, up)
+        return DEFAULT_BASE, "the upstream tip equals the branch tip"
     return up, "the branch's tracked upstream"
 
 
@@ -847,7 +852,8 @@ def main(argv):
     try:
         if a.upstream is None and not a.history:
             a.upstream, why = default_base(a.repo, a.head)
-            say("silent-undo: base: %s (%s)" % (re.sub("^refs/(heads|remotes)/", "", a.upstream), why))
+            used = resolve_upstream(a.repo, a.upstream)  # the ref check() will read: local main when there is no origin
+            say("silent-undo: base: %s (%s)" % (re.sub("^refs/(heads|remotes)/", "", used), why))
         if a.history:
             n, hits = history(a.repo, a.history, a.window)
             say("\n".join(hits))
