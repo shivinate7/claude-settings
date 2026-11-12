@@ -118,7 +118,7 @@
                           set and leaves the pull request as it is, draft or ready; a late PR, a moved head or a lane left out is refused,
                           and nothing is pushed or edited. Runs no lane lint and no ready check, waits for no CI, takes no lock.
                           A cloud run needs the batch-runner role.
-  merge --batch-build NAME [PR ...] --ready [--lint-unknown-ok REASON]
+  merge --batch-build NAME [PR ...] --ready
                           run the repo's ready checks on the head of batch-NAME (no lane lint: batch CI runs the lint first, and each lane
                           linted at hand-off), and record the head that passed (Linted:). Then it asks the host to mark the draft ready. Host.ready sends nothing, so on a
                           real host the run stops there and names the session's route to mark it ready. A FAIL of a ready
@@ -4448,7 +4448,7 @@ def freeze_markers(lines):
 
 def parse_freeze(body):
     """-> None when the body holds no block, else {name, on: (branch, sha) or None, base: sha or None, lanes: {PR: head}, dropped: [PR],
-    blamed: [PR] (the lanes the last FAILing lint of the batch head blamed), linted: sha or None (the head a lint and the ready checks passed), at: (begin line, end line)}.
+    blamed: [PR] (the lanes the last FAILing ready check of the batch head blamed), linted: sha or None (the head the ready checks passed), at: (begin line, end line)}.
     A body with more or fewer than one begin and one end marker, or a line in the block this tool cannot read, is a Stop."""
     lines = body.split("\n")
     begins, ends = freeze_markers(lines)
@@ -4485,7 +4485,7 @@ def parse_freeze(body):
 def freeze_lines(name, lanes, dropped=(), on=None, base=None, blamed=(), linted=None):
     """-> the block's lines, markers included. `lanes` is {PR: head}, listed by PR number; `on` is (branch, sha) or None; `base` is the sha
     of the base branch the batch was built on, or None (a block made before Base was recorded). `blamed` is the lanes the last FAILing lint of the
-    batch head blamed, the only lanes a drop may take off after the build. `linted` is the head a lint and the ready checks passed, or None: a
+    batch head blamed, the only lanes a drop may take off after the build. `linted` is the head the ready checks passed, or None: a
     rebuild leaves it None, because the new head is no head a lint read."""
     return [BATCH_BEGIN, f"Batch: {name}", *([f"On: {on[0]} {on[1]}"] if on else []), *([f"Base: {base}"] if base else []),
             *(f"Lane: #{n} {lanes[n]}" for n in sorted(lanes)),
@@ -4570,11 +4570,11 @@ def return_to_draft(h, n, info):
 
 def needs_ready(name, drafted=True):
     """The line after a push that moved the integration branch of a batch that was ready when read. `drafted` False: the return to draft was refused, so the
-    pull request is still ready on a head no lint has read, and `--ready` alone leaves a ready one as it is: it must go back to draft first."""
+    pull request is still ready on a head no ready check has read, and `--ready` alone leaves a ready one as it is: it must go back to draft first."""
     if drafted:
         say(f"merge: batch {name} needs `merge --batch-build {name} --ready` again before it goes ready.")
     else:
-        say(f"merge: batch {name} is still ready, on a head no lint has read. Return its pull request to draft by hand, then run `merge --batch-build {name} --ready`.")
+        say(f"merge: batch {name} is still ready, on a head no ready check has read. Return its pull request to draft by hand, then run `merge --batch-build {name} --ready`.")
 
 def restack(root, h, moved, new_head, gone=None, seen=frozenset()):
     """Batch branch `moved` has a new head. Rebuild each open batch whose block says `On: moved` on it: the same lanes, the On sha updated, force-with-lease,
@@ -4804,7 +4804,7 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", co
     """merge --batch-build NAME PR... [--on BRANCH] [--base BRANCH]: the integration branch and its one draft pull request, or the same set again.
     With `ready` (--ready): the batch already exists. It is checked as the same set again, with no PR list meaning its frozen set, then the repo's ready checks run, and the host is asked to mark the draft ready (Host.ready sends nothing, so
     a real run stops there and names the route). The block records the head that passed (`Linted:`), and the lanes a FAIL of a ready
-    check names (`Blamed:`): a ready batch whose head is that head is left as it is, and any other head is linted again,
+    check names (`Blamed:`): a ready batch whose head is that head is left as it is, and any other head is checked again,
     ready or not. `on` and `base` default to the block's.
     Returns 0, or 1 when a batch stacked on a rebuilt one could not be rebuilt."""
     if ready and unknown_ok:
@@ -4891,7 +4891,7 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", co
                 say(f"merge: the blame could not be stored ({why}); a drop of a blamed lane will be refused until a blame is stored.")
             raise Stop("\n".join([str(e), *blame_lines(name, blamed, base, stored), DRAFT_CITE])) from None
         tip = fetch_branch(root, branch, FREEZE_CITE)
-        pr, info = record_in_block(h, branch, blamed=[], linted=tip)  # the head that passed, so a ready batch is linted again only when its head moves
+        pr, info = record_in_block(h, branch, blamed=[], linted=tip)  # the head that passed, so a ready batch is checked again only when its head moves
         if info["draft"]:
             ok, why = h.ready(pr)
             if not ok:
@@ -5083,7 +5083,7 @@ def build_parser():
     p.add_argument("pr", nargs="?", help="a pull request number; with --lane-lint, a number or a commit or ref")
     p.add_argument("-C", "--repo-dir", default=None, metavar="PATH", help="act in the checkout at PATH, not the one the process stands in; the last value wins")
     p.add_argument("--confirm", action="store_true")
-    p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing")
+    p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as batch CI's lint job does; takes no lock, merges nothing")
     p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
     p.add_argument("--with", dest="with_prs", default=None, metavar="PR,PR,...", help="with --lane-lint on a PR number: also check the head against each named open PR (a comma list), even one of another session")
@@ -5091,7 +5091,7 @@ def build_parser():
     p.add_argument("--batch-build", nargs="+", metavar=("NAME", "PR"), help="build batch-NAME and its one draft pull request from these lane PRs, or allow the same set again; stands alone; takes no lock")
     p.add_argument("--batch-drop", nargs=2, metavar=("NAME", "PR"), help="take PR, and each frozen lane that stacks on it, off batch-NAME; stands alone; takes no lock")
     p.add_argument("--on", metavar="BRANCH", help="with --batch-build: stack the batch on this running batch's head")
-    p.add_argument("--ready", action="store_true", help="with --batch-build: lint the head of batch-NAME once and run the ready checks, then ask the host to mark its draft pull request ready; the PR list may be left out")
+    p.add_argument("--ready", action="store_true", help="with --batch-build: run the ready checks on the head of batch-NAME (no lane lint), then ask the host to mark its draft pull request ready; the PR list may be left out")
     p.add_argument("--blame", type=pr_arg, metavar="PR", help="with --batch-build NAME and --run: store that a failed CI run of the batch's current head blames lane PR, so a drop may take it off; nothing else")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
     p.add_argument("--undo-check-unknown-ok", default="", metavar="REASON", help="go on when the silent-undo check cannot read the history; logged")
@@ -5173,7 +5173,7 @@ def main(argv, host=None, lock=None, hosts=None):
         p.error("--with goes with --lane-lint")
     if not (a.lane_lint or a.ready):
         if a.lint_unknown_ok:
-            p.error("--lint-unknown-ok goes with --lane-lint or --batch-build --ready")
+            p.error("--lint-unknown-ok goes with --lane-lint")
         if a.pr is not None and not a.pr.isdigit():
             p.error(f"argument pr: invalid int value: {a.pr!r}")
     # A batch route takes only these options; any other option set (a mode flag or a modifier) means it does not stand alone.

@@ -44,7 +44,7 @@ class LintFirst(unittest.TestCase):
         _, lint, cancel = blocks()
         self.assertIsNotNone(cancel, "no cancel-on-red-lint job in checks.yml")
         self.assertEqual(needs_of(cancel), [LINT])
-        self.assertIsNone(job_key(cancel, "if"), "the cancel job has a job-level if: all-jobs-passed reads its skip as red; the condition sits in its steps")
+        self.assertEqual(job_key(cancel, "if"), "${{ always() }}", "without always() GitHub skips the cancel job when lint fails (actions/all-jobs-passed/action.yml): no comment, no cancel")
         steps = re.split(r"^      - ", cancel.split("    steps:", 1)[1], flags=re.M)[1:]
         self.assertTrue(steps)
         for step in steps:
@@ -62,6 +62,14 @@ class LintFirst(unittest.TestCase):
         comment, cancelled = cancel.find("actions/ci-done-comment"), cancel.find("gh run cancel")
         self.assertGreater(comment, -1, "the cancel job posts no comment: a cancelled run's ci-done is skipped, so no session wakes")
         self.assertGreater(cancelled, comment, "the cancel job cancels the run before it posts the comment, and the cancel ends the job")
+
+    def test_cancel_waits_for_the_posted_comment(self):  # a failed post exits 0 by default; a cancelled run skips ci-done, so a cancel after a failed post wakes nobody
+        _, _, cancel = blocks()
+        self.assertIsNotNone(cancel)
+        self.assertRegex(cancel, r"id: comment\b", "the comment step has no id for the cancel step to read")
+        self.assertRegex(cancel, r"CI_DONE_STRICT|strict:\s*['\"]?true", "the comment step is not strict: a failed post would not fail the step")
+        cancel_step = cancel[cancel.index("name: Cancel the run"):]
+        self.assertIn("steps.comment.outcome == 'success'", cancel_step, "the cancel step does not wait for the comment step's success")
 
     def test_fan_in_jobs_need_lint_and_the_cancel_job(self):
         text, _, _ = blocks()

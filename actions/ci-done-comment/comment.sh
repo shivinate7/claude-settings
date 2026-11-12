@@ -2,7 +2,7 @@
 # Posts one PR comment naming the jobs that ended failure or cancelled. Prints the body and posts
 # nothing when CI_DONE_DRY=1 (the test seam). A green run prints nothing and posts nothing. A skipped
 # job is not red: the scope job skips jobs a change does not need. A failed post warns and exits 0,
-# because a red job here wakes no one either.
+# because a red job here wakes no one either, unless CI_DONE_STRICT=1: then it exits 1.
 set -euo pipefail
 red="$(echo "$NEEDS" | jq -r '[to_entries[] | select(.value.result == "failure" or .value.result == "cancelled")
   | "\(.key) (\(.value.result))"] | join(", ")')"
@@ -11,4 +11,7 @@ body="<!-- ci-done -->
 CI finished red on ${SHA:0:7}: ${red}.
 Run: ${RUN_URL}"
 if [ "${CI_DONE_DRY:-}" = 1 ]; then printf '%s\n' "$body"; exit 0; fi
-gh pr comment "$PR" --repo "$REPO" --body "$body" || echo "::warning::CI done comment not posted on PR $PR"
+if ! gh pr comment "$PR" --repo "$REPO" --body "$body"; then
+  echo "::warning::CI done comment not posted on PR $PR"
+  if [ "${CI_DONE_STRICT:-}" = 1 ]; then exit 1; fi  # a caller that acts on the post (cancel-on-red-lint) needs the failure
+fi
