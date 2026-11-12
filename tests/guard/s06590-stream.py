@@ -240,9 +240,9 @@ LANE_LINT_BOUND_MS = (lane_lint_constant("LINT_SECONDS") + lane_lint_constant("P
 # A limit well above the bound, for the rows that are not about the bound.
 LANE_LINT_ABOVE_MS = LANE_LINT_BOUND_MS + 60 * 1000
 
-# A background lane-lint with no limit above the bound is refused by rule lane-lint-timeout (owner ruling, 11:26 CST
-# Nov 10, step lane-lint-bg-timeout). The rows below name other rules, so each one carries a limit above the bound,
-# and the lane-lint rule judges none of them.
+# A background lane-lint with no limit above the bound is refused by rule lane-lint-timeout. The rows below each
+# name another rule, so each one carries a limit above the bound. Without that limit, lane-lint-timeout would refuse
+# the row first, and the row would not test the rule it names.
 TAIL_BG_UNTIL = "Lane lint in the background. until: the lint prints its verdict"
 
 add("check-tail: the incident line, backgrounded, is refused", "deny",
