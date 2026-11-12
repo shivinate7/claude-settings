@@ -7,7 +7,7 @@ question-form holds the ruling; rule `style-question-form` holds the text.
     item_hit(op, entry, cwd) -> (rule, matched)   one waiting-page write: set, update or str_replace
 
 ("", "") is a pass. hooks/call_judge.py calls chat_hit and page_item_hit; hooks/guard.py data_tool_hit calls
-page_item_hit, which filters the ArtifactData writes by collection and url and then calls item_hit; a write to another page gets only the check for an option keyed none. Nothing here writes a file. The only process it starts is the one git read of past_rulings, for a caller that makes a model call anyway.
+page_item_hit, which filters the ArtifactData writes by collection and url (a known waiting page, whatever the cwd, waiting_page_root) and then calls item_hit; a write to another artifact gets only the check for an option keyed none. Nothing here writes a file. The only process it starts is the one git read of past_rulings, for a caller that makes a model call anyway.
 
     past_rulings(text, repo_root) -> (candidates, unknown)   the decision, debt and step rulings the judge reads
     key_overlap(reply, earlier)   -> clashing option keys     lint/report_guard.py rule question-keys
@@ -967,7 +967,7 @@ def form_str_replace_hit(entry):
     return PASS
 
 
-def item_hit(op, entry, cwd="", session_id=None):
+def item_hit(op, entry, cwd="", session_id=None, root=None):
     """(rule, matched) for one write of a waiting item that a rule refuses, else ("", ""). `session_id` is the
     writer's, for the cross-repo check."""
     data = _write_data(entry, cwd)
@@ -1001,7 +1001,7 @@ def item_hit(op, entry, cwd="", session_id=None):
     hit = port_item_hit(op, data)
     if hit:
         return "port-question", hit
-    page_repo = _page_repo(cwd)
+    page_repo = _layout().repo_name(root) if root else _page_repo(cwd)  # the page's own checkout, whatever the cwd
     hit = cross_repo_hit(op, data, page_repo, session_id) if page_repo else None
     if hit:
         return CROSS_REPO_RULE, hit
@@ -1041,14 +1041,7 @@ ITEM_OPS = ("set", "update", "str_replace")
 
 
 def _git_root_of(cwd):
-    here = os.path.realpath(cwd or os.getcwd())
-    while True:
-        if os.path.exists(os.path.join(here, ".git")):
-            return here
-        parent = os.path.dirname(here)
-        if parent == here:
-            return None
-        here = parent
+    return _layout().git_root_of(cwd)
 
 
 def _layout():
@@ -1061,11 +1054,33 @@ def _layout():
 
 
 def waiting_page_root(tool_input, cwd):
-    """The git root of cwd's repo when the call's url is that repo's waiting page (lint/layout.py, the one
-    home), else None. A repo with no page reads as unknown; only the none-key check judges its calls."""
+    """The root of the checkout whose waiting page the call's url names, else None. It looks through the known roots
+    (lint/layout.py known_roots: the cwd's git root, that worktree's main checkout, the pointer checkout, and the
+    folders beside it that hold an extras file), so a write to claude-settings' page is checked whatever the cwd is.
+    A root matches by the artifact id of its waiting page (layout.is_waiting_page_url: the registry entry with role
+    waiting-page, else the legacy "waiting-page" key); any
+    other artifact reads as unknown and only the none-key check judges it. A bad extras file in a root after the
+    cwd's reads as no page; the cwd's own raises LayoutError, as before.
+    Cost: file reads only, no process: ~/.claude/CLAUDE.md once (the pointer), one `.git` file and its commondir
+    file, one directory list, and each root's extras file until one matches. A call with no artifact url reads
+    nothing."""
     layout = _layout()
-    root = _git_root_of(cwd)
-    return root if root and layout.is_waiting_page_url(root, tool_input.get("url")) else None
+    if not layout.artifact_id(tool_input.get("url")):
+        return None
+    try:
+        import guard_pointer  # the one home of the pointer line
+        pointer = guard_pointer.pointer_checkout()
+    except Exception:
+        pointer = ""
+    first = _git_root_of(cwd)
+    for root in layout.known_roots(cwd or os.getcwd(), pointer):
+        try:
+            if layout.is_waiting_page_url(root, tool_input.get("url")):
+                return root
+        except layout.LayoutError:
+            if os.path.realpath(root) == first:
+                raise
+    return None
 
 
 def names_no_artifact(url):
@@ -1079,14 +1094,15 @@ def has_waiting_page(cwd):
     return bool(root) and _layout().waiting_page(root) != "unknown"
 
 
-def design_file_problems(writes, root):
+def design_file_problems(writes, root, cwd=""):
     """[(doc_id, slug, sentence)] for each `designs` entry in `writes` (design_writes' picture writes) that has no
     `file`, or whose `file` lint/layout.py mockup_home_problem refuses against this machine's home. The sentence names
     the design folder and the field, never the refused path. An entry that is no dict has no file. Judges the shape
-    only: it does not ask origin, and starts no process (rule mockup-home)."""
+    only: it does not ask origin, and starts no process (rule mockup-home). A relative `file_path` item is read
+    against `cwd`, the session's."""
     layout = _layout()
     found = []
-    for _op, doc_id, data in design_writes(writes):
+    for _op, doc_id, data in design_writes(writes, cwd):
         designs = data.get("designs")
         for entry in designs if isinstance(designs, list) else []:
             entry = entry if isinstance(entry, dict) else {}
@@ -1097,13 +1113,13 @@ def design_file_problems(writes, root):
 
 
 def is_waiting_page(tool_input, cwd) -> bool:
-    """True when the call's url is this repo's waiting page."""
+    """True when the call's url is the waiting page of a known root (waiting_page_root), whatever the cwd."""
     return waiting_page_root(tool_input, cwd) is not None
 
 
 def page_item_hit(tool_input, cwd="", session_id=None):
     """((rule, matched), writes) for one ArtifactData call. `writes` are the (op, entry) item writes of
-    this repo's waiting page, empty for a read, another collection or another page (such a write still gets the check for an option keyed none). The hit is the first
+    a known waiting page (waiting_page_root), empty for a read, another collection or another artifact (such a write still gets the check for an option keyed none). The hit is the first
     write that a rule refuses, else ("", "")."""
     if not isinstance(tool_input, dict):
         return PASS, []
@@ -1114,12 +1130,13 @@ def page_item_hit(tool_input, cwd="", session_id=None):
     writes = [(op, e) for op, e in entries if op in ITEM_OPS and e.get("collection") == WAITING_ITEMS]
     if not writes:  # a read or another collection loads nothing more
         return PASS, []
-    if not is_waiting_page(tool_input, cwd):
+    page_root = waiting_page_root(tool_input, cwd)
+    if page_root is None:
         # The cwd's page is unknown, or the url is another's: only the option-key check still reads the
         # write, and refuses only a key none. No writes return, so no other check or model review follows.
         return keyed_options_hit(writes, cwd), []
     for op, entry in writes:
-        hit = item_hit(op, entry, cwd, session_id)
+        hit = item_hit(op, entry, cwd, session_id, page_root)
         if hit[0]:
             return hit, writes
     return PASS, writes
@@ -1141,13 +1158,13 @@ def keyed_options_hit(writes, cwd=""):
     return PASS
 
 
-def design_writes(writes):
+def design_writes(writes, cwd=""):
     """The (op, doc_id, data) of each set or update in `writes` whose data carries a picture: a non-empty
     `designs` list, or an option with a `design`. Rule page-item-design reads only these, so a write with no
-    picture never starts the checker."""
+    picture never starts the checker. A relative `file_path` item is read against `cwd`, the session's."""
     found = []
     for op, entry in writes:
-        data = _write_data(entry) if op in ("set", "update") else None
+        data = _write_data(entry, cwd) if op in ("set", "update") else None
         if not isinstance(data, dict) or data.get("status") == "closed":  # a closed item is not drawn
             continue
         options = data.get("options")
@@ -1170,8 +1187,7 @@ def judged_item_writes(writes, cwd=""):
     task that carries `context`, `steps` or `options`. A task is kind task, or any write that carries
     `steps`, since steps are task-only. A str_replace on `context` or `options` (a subfield too) is
     read as {"op", "doc_id", "field", "new_str"}: its new_str alone, never old_str, because the rest of the
-    item is unseen. A write that names a `file_path` is read from it, a relative path against `cwd` (the
-    payload's cwd, as page_item_hit reads it), so the review sees the data the guard judged."""
+    item is unseen. A relative `file_path` item is read against `cwd`, the session's."""
     judged = []
     for op, entry in writes:
         if op == "str_replace":
@@ -1314,7 +1330,8 @@ def rework_off_page_hit(data) -> str:
     """The matched text when this write puts "being reworked" in the item's text with no status closed."""
     if not isinstance(data, dict) or data.get("status") == "closed":
         return ""
-    return reworked_hit(_item_text_fields(data))
+    reply = data.get("reply")  # the item's text fields leave reply out for the other readers; this check reads it
+    return reworked_hit(_item_text_fields(data) + ([reply] if isinstance(reply, str) else []))
 
 
 # ------------------------------------------------------------------ an item field the page renders

@@ -486,6 +486,70 @@ def live_pages(roots):
     return found
 
 
+def git_root_of(start):
+    """The nearest folder at or above `start` (real path) that holds a .git entry, a directory or a worktree's file, else
+    None. File reads only."""
+    here = os.path.realpath(start or os.getcwd())
+    while True:
+        if os.path.exists(os.path.join(here, ".git")):
+            return here
+        parent = os.path.dirname(here)
+        if parent == here:
+            return None
+        here = parent
+
+
+def main_checkout(root):
+    """The main checkout of the linked worktree at `root`, read from its `.git` file (its `gitdir:` line, then that
+    folder's `commondir` file), else None: for a main checkout, a bare or submodule layout, or any unreadable step. Starts
+    no git process."""
+    dot = os.path.join(root, ".git")
+    if not os.path.isfile(dot):
+        return None
+    try:
+        with open(dot, encoding="utf-8", errors="replace") as f:
+            line = next((l for l in f.read().splitlines() if l.startswith("gitdir:")), "")
+        gitdir = os.path.join(root, line[len("gitdir:"):].strip())
+        with open(os.path.join(gitdir, "commondir"), encoding="utf-8", errors="replace") as f:
+            common = os.path.realpath(os.path.join(gitdir, f.read().strip()))
+    except OSError:
+        return None
+    return os.path.dirname(common) if os.path.basename(common) == ".git" else None
+
+
+def known_roots(start, pointer=""):
+    """The checkouts whose waiting pages are known, first to last, each once: the git root of `start`; that root's main
+    checkout when it is a linked worktree; `pointer`, the checkout the global rules file names
+    (hooks/guard_pointer.py pointer_checkout, passed in because lint/ never imports hooks/); then each folder beside
+    `pointer` that holds an extras file, by name. The one list that the page checks of hooks/question_form.py and
+    skills/waiting-page/stale_pages.py read. File reads only: one `.git` file, its gitdir's commondir file, and one
+    directory list. A folder that does not exist is left out."""
+    found, seen = [], set()
+
+    def add(folder):
+        real = os.path.normcase(os.path.realpath(folder)) if folder else ""
+        if real and real not in seen and os.path.isdir(real):
+            seen.add(real)
+            found.append(folder)
+
+    here = git_root_of(start) if start else None
+    add(here)
+    if here:
+        add(main_checkout(here))
+    add(pointer)
+    extras = layout().get("extras", "")
+    if pointer and extras:
+        parent = os.path.dirname(os.path.abspath(pointer))
+        try:
+            names = sorted(os.listdir(parent))
+        except OSError:
+            names = []
+        for name in names:
+            if os.path.isfile(os.path.join(parent, name, *extras.split("/"))):
+                add(os.path.join(parent, name))
+    return found
+
+
 def _repo_keys(root):
     """The extras file of `root` as a dict, or {} when the repo has none."""
     return _read(_extras(root)) if has_extras(root) else {}

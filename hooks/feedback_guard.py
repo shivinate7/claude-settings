@@ -1332,14 +1332,14 @@ def _cleared(exports, results, newest, page_id):
 def export_check(cwd, transcript_path, session_id):
     """(reason, note) of the export check (roadmap step waiting-export-check). `reason` is the block text
     when this session is the page writer and the transcript holds a successful ArtifactData write of an
-    exported collection to the repo's waiting page that is newer than the newest commit on origin/<record
-    branch> touching the waiting copy folder, and no later shell run of export_page.py cleared it (a line
+    exported collection to the waiting page of a known root (question_form.waiting_page_root, whatever the cwd) that is newer than the newest commit on origin/<record
+    branch> touching the waiting copy folder (each root is judged on its own newest write), and no later shell run of export_page.py cleared it (a line
     `same`, or `<page id>: same` under --all, anywhere in its output). This session is the writer when the newest meta/page get names
     `session_id` or the id the remote env names (override.remote_session_id). A writer named there decides
     alone. Only when none is named does an interpreter run of export_page.py (EXPORT_RUN) before the write
     make this session the writer. A session that is not the writer, or whose writer cannot be told, passes
-    with no note. `note` is the systemMessage text only after a page write was found and a read of the repo
-    or the layout failed: that is never a block. A transcript that cannot be read gives neither. The whole
+    with no note. `note` is the systemMessage text only after a page write was found and a read of a root's
+    repo or layout failed: that is never a block, and a block from another root wins over it. A transcript that cannot be read gives neither. The whole
     transcript is read and timestamps decide, so a write in an earlier turn still counts."""
     try:
         records = _transcript.read_transcript(transcript_path)
@@ -1358,26 +1358,36 @@ def export_check(cwd, transcript_path, session_id):
     if not is_writer:
         return None, None  # receipts and answers are not this session's to export
     try:
-        root = Homes(cwd)._cwd_root()
-        if root is None:
-            return None, None
-        is_page = {url: layout.is_waiting_page_url(root, url) for url in {w[2] for w in writes}}
-        wrote = [w[0] for w in writes if is_page[w[2]]]
-        if not wrote:
-            return None, None
-        newest = max(wrote)
-        waiting = [e for e in layout.artifacts(root) if e["role"] == layout.WAITING_ROLE]
-        if _cleared(exports, results, newest, waiting[0]["id"] if waiting else ""):
-            return None, None
-        branch, folder = waiting_copy(layout, root)
-        run = ruling_home._run_git(root, ["log", "-1", "--format=%ct", "refs/remotes/origin/" + branch,
-                                          "--", folder + "/"])
+        import question_form  # the one home of "which known root holds this page" (layout.known_roots)
+        by_root = {}  # root -> [epoch of each write to its page]
+        for url in {w[2] for w in writes}:
+            root = question_form.waiting_page_root({"url": url}, cwd)
+            if root is not None:
+                by_root.setdefault(root, []).extend(w[0] for w in writes if w[2] == url)
     except (layout.LayoutError, ruling_home._GitFailure) as e:
         return None, FAIL_OPEN_EXPORT % (" ".join(str(e).split()) or type(e).__name__)
-    out = run.stdout.strip()
-    if run.returncode != 0 or (out and not out.isdigit()):
-        return None, FAIL_OPEN_EXPORT % ("origin/%s cannot be read" % branch)
-    return (None, None) if int(out or 0) >= newest else (EXPORT_REASON % (branch, folder), None)
+    # Sorted, so the verdict does not hang on set order. A root that cannot be read leaves a note and the walk
+    # goes on: a later root that needs an export still blocks, and a block wins over a note.
+    note = None
+    for root in sorted(by_root):
+        newest = max(by_root[root])  # per root: another page's later write does not move this page's bar
+        try:
+            waiting = [e for e in layout.artifacts(root) if e["role"] == layout.WAITING_ROLE]
+            if _cleared(exports, results, newest, waiting[0]["id"] if waiting else ""):
+                continue
+            branch, folder = waiting_copy(layout, root)
+            run = ruling_home._run_git(root, ["log", "-1", "--format=%ct", "refs/remotes/origin/" + branch,
+                                              "--", folder + "/"])
+        except (layout.LayoutError, ruling_home._GitFailure) as e:
+            note = note or FAIL_OPEN_EXPORT % (" ".join(str(e).split()) or type(e).__name__)
+            continue
+        out = run.stdout.strip()
+        if run.returncode != 0 or (out and not out.isdigit()):
+            note = note or FAIL_OPEN_EXPORT % ("origin/%s cannot be read" % branch)
+            continue
+        if int(out or 0) < newest:
+            return EXPORT_REASON % (branch, folder), None
+    return None, note
 
 
 def main():

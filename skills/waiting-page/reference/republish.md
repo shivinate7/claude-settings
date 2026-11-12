@@ -35,8 +35,8 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
    could not be read, or main's `page.html` could not be read (no claude-settings clone, or no
    `origin/main` in it). Only main proves a page current; the installed copy never does.
 
-The guard enforces this (rule `page-stale`, decision `page-stale-publish`): an `Artifact` publish of this
-repo's waiting page from a file behind main is refused, and its reason repeats steps 1, 2 and 4. An allowed
+The guard enforces this (rule `page-stale`, decision `page-stale-publish`): an `Artifact` publish of a known
+repo's waiting page, whatever the cwd, from a file behind main is refused, and its reason repeats steps 1, 2 and 4. An allowed
 publish of main's page stamps main's page version, and the next session start says when the page is behind.
 
 Cost: on demand, inside a wake already running. One `Artifact read`, one python process, at most
