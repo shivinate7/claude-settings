@@ -5,6 +5,7 @@ Each case builds a throwaway git repo: `main` holds the record homes, `roadmap` 
 import contextlib
 import datetime
 import hashlib
+import inspect
 import io
 import json
 import os
@@ -4296,6 +4297,348 @@ class IdleLanes(UpkeepFixture):
                          "the completed lane on the landed step is listed beside the done one: %r" % (entries,))
         self.assertEqual(self.ids(build.idle_lanes_report(self.repo, str(self.live))), ["session_a", "session_b"],
                          "the merge tool's read lists the same lanes")
+
+
+class SessionBoard(UpkeepFixture):
+    """The session board (plan R54, step coordinator-session-board): the upkeep row `session board` and
+    build.session_board. A session of this repo that carries a cs-build: tag other than the coordinator's, and is not
+    archived, is flagged by its status bucket: `waiting for action` (BLOCKED), `done` (COMPLETED or REVIEW_READY),
+    `failed` (FAILED), or `silent` (WORKING, with an updated_at more than SILENT_MINUTES before now). A WORKING session
+    updated recently is not listed. A line names the session's cs-step ids, or `-`, and the open pull on one of those
+    steps' head refs, or `no PR`. A read the board cannot make is one `unknown (<why>)` entry. Each negative case lists
+    a control beside it, so an empty board cannot pass."""
+
+    ROW = "session board"
+    LANE = "cs-build:lane"
+    COORDINATOR = "cs-build:coordinator"
+
+    def board_row(self, sid, bucket, *tags, updated_at=None, status="SESSION_STATUS_IDLE"):
+        """A sessions row of this repo (its cs-repo tag) with `tags`, its get_session bucket, and updated_at when given."""
+        row = session_row(sid, status, self.REPO, *tags, status_bucket=bucket)
+        if updated_at is not None:
+            row["updated_at"] = updated_at
+        return row
+
+    def read(self, slug=UpkeepFixture.SLUG):
+        """(work, steps): the fixture's live file and the record branch's steps, read the way the build reads them."""
+        source, why = build.record_source(self.repo, "roadmap")
+        self.assertIsNotNone(source, why)
+        steps = build.load(source)["steps"]
+        return build.live_work(str(self.live), steps, slug), steps
+
+    def board(self, work, steps, slug=UpkeepFixture.SLUG):
+        """build.session_board's entries. Until build has the function the board is [], so each case fails on its own
+        expected line and never on a missing name."""
+        fn = getattr(build, "session_board", None)
+        if fn is None:
+            return []
+        return fn(work, steps, slug, self.repo)
+
+    def board_entries(self, slug=UpkeepFixture.SLUG):
+        """The board the build makes from the fixture's live file."""
+        work, steps = self.read(slug)
+        return self.board(work, steps, slug)
+
+    def board_out(self):
+        """(count, entries) of the session board row, from a build from main that reads the fixture's live file."""
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        count, detail = self.row(out, self.ROW)
+        return count, self.entries(detail)
+
+    def assertSameEntries(self, entries, expected, cause):
+        self.assertEqual(sorted(entries), sorted(expected), "%s; the board read %r" % (cause, entries))
+
+    @staticmethod
+    def listed(entries, sid):
+        """True when an entry names session `sid` as its first word."""
+        return any(entry.split(" ", 1)[0] == sid for entry in entries)
+
+    def test_control_a_live_file_with_session_rows_builds_and_an_existing_upkeep_row_reads(self):
+        # Green on the old code too: the fixture's live file with session rows builds, and a row that exists now still
+        # reads, so the red cases in this class fail on the new row and not on the fixture.
+        self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1")])
+        _, out = self.build_from_main("--live", str(self.live), expect=(0, 1))
+        self.assertEqual(self.row(out, "notes over %d words" % build.NOTE_WORDS), (0, ""))
+
+    def test_blocked_session_reads_waiting_for_action_with_its_step_and_pull(self):
+        self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1")],
+                     pulls=[{"number": 41, "title": "c1 lane", "branch": "lane/c1"}])
+        self.assertSameEntries(self.board_entries(), ["session_a (waiting for action; c1; PR #41)"],
+                               "a blocked session does not read as waiting for action with its step and its PR")
+
+    def test_completed_and_review_ready_sessions_read_done(self):
+        self.publish(sessions=[self.board_row("session_a", BUCKET_COMPLETED, self.LANE, "cs-step:c1"),
+                               self.board_row("session_b", BUCKET_REVIEW_READY, self.LANE, "cs-step:c2")])
+        self.assertSameEntries(self.board_entries(), ["session_a (done; c1; no PR)", "session_b (done; c2; no PR)"],
+                               "a completed or review ready session does not read as done")
+
+    def test_failed_session_reads_failed(self):
+        self.publish(sessions=[self.board_row("session_a", BUCKET_FAILED, self.LANE, "cs-step:c1")])
+        self.assertSameEntries(self.board_entries(), ["session_a (failed; c1; no PR)"],
+                               "a failed session does not read as failed")
+
+    def test_working_session_silent_for_over_sixty_minutes_reads_silent(self):
+        self.publish(sessions=[self.board_row("session_a", BUCKET_WORKING, self.LANE, "cs-step:c1",
+                                              updated_at=iso_ago(90))])
+        self.assertSameEntries(self.board_entries(), ["session_a (silent; c1; no PR)"],
+                               "a working session last updated 90 minutes ago does not read as silent")
+
+    def test_working_session_updated_recently_is_not_listed(self):
+        self.publish(sessions=[self.board_row("session_silent", BUCKET_WORKING, self.LANE, "cs-step:c1",
+                                              updated_at=iso_ago(90)),
+                               self.board_row("session_recent", BUCKET_WORKING, self.LANE, "cs-step:c2",
+                                              updated_at=iso_ago(5))])
+        entries = self.board_entries()
+        self.assertIn("session_silent (silent; c1; no PR)", entries, "control: the silent session is not listed")
+        self.assertFalse(self.listed(entries, "session_recent"),
+                         "a working session updated 5 minutes ago is listed as flagged")
+
+    def test_silent_starts_past_sixty_minutes_not_at_forty_five(self):
+        # The margins sit 15 minutes either side of 60, so the case holds whether the board reads updated_at against
+        # now or against the live read's readAt.
+        self.publish(sessions=[self.board_row("session_a", BUCKET_WORKING, self.LANE, "cs-step:c1",
+                                              updated_at=iso_ago(45)),
+                               self.board_row("session_b", BUCKET_WORKING, self.LANE, "cs-step:c2",
+                                              updated_at=iso_ago(75))])
+        self.assertSameEntries(self.board_entries(), ["session_b (silent; c2; no PR)"],
+                               "the silent threshold is not between 45 and 75 minutes")
+
+    def test_silent_minutes_constant_is_sixty(self):
+        self.assertEqual(getattr(build, "SILENT_MINUTES", None), 60, "build.SILENT_MINUTES is not 60")
+
+    def test_each_pull_on_a_lane_branch_or_a_bare_step_branch_is_read_as_the_pr(self):
+        self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1"),
+                               self.board_row("session_b", BUCKET_BLOCKED, self.LANE, "cs-step:c2")],
+                     pulls=[{"number": 51, "title": "c1 lane", "branch": "lane/c1"},
+                            {"number": 52, "title": "c2 lane", "branch": "c2"}])
+        self.assertSameEntries(self.board_entries(), ["session_a (waiting for action; c1; PR #51)",
+                                                      "session_b (waiting for action; c2; PR #52)"],
+                               "a pull on lane/<step> or on <step> is not read as that session's PR")
+
+    def test_session_with_two_steps_names_both_in_id_order(self):
+        # Space-joined and sorted, as idle_lanes joins its steps.
+        self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c2", "cs-step:c1")],
+                     pulls=[{"number": 53, "title": "c1 lane", "branch": "c1"}])
+        self.assertSameEntries(self.board_entries(), ["session_a (waiting for action; c1 c2; PR #53)"],
+                               "a session with two cs-step tags does not name both steps, with the pull on one")
+
+    def test_a_pull_counts_on_its_branch_only_not_on_its_title_or_a_longer_branch(self):
+        self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1"),
+                               self.board_row("session_c", BUCKET_BLOCKED, self.LANE, "cs-step:c2")],
+                     pulls=[{"number": 61, "title": "lane c10", "branch": "c10"},
+                            {"number": 62, "title": "c1 cleanup", "branch": "other"},
+                            {"number": 63, "title": "c2 lane", "branch": "lane/c2"}])
+        entries = self.board_entries()
+        self.assertIn("session_c (waiting for action; c2; PR #63)", entries, "control: the lane/c2 pull is not read")
+        self.assertIn("session_a (waiting for action; c1; no PR)", entries,
+                      "a pull whose branch is not c1 or lane/c1 is read as session_a's PR")
+
+    def test_session_with_no_cs_step_tag_reads_a_dash_for_its_steps(self):
+        self.publish(sessions=[self.board_row("session_b", BUCKET_BLOCKED, self.LANE, "cs-step:c1"),
+                               self.board_row("session_a", BUCKET_BLOCKED, self.LANE)])
+        entries = self.board_entries()
+        self.assertIn("session_b (waiting for action; c1; no PR)", entries, "control: the session with a step is not read")
+        self.assertIn("session_a (waiting for action; -; no PR)", entries,
+                      "a session with no cs-step tag does not read a dash for its steps")
+
+    def test_tier_session_is_listed_and_a_session_with_no_cs_build_tag_is_not(self):
+        self.publish(sessions=[self.board_row("session_tier", BUCKET_BLOCKED, "cs-build:batch-runner"),
+                               self.board_row("session_topic", BUCKET_BLOCKED, "cs-topic:roadmap")])
+        entries = self.board_entries()
+        self.assertIn("session_tier (waiting for action; -; no PR)", entries, "control: the tier session is not listed")
+        self.assertFalse(self.listed(entries, "session_topic"), "a session with no cs-build: tag is listed")
+
+    def test_session_of_another_repo_is_never_listed(self):
+        self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1"),
+                               session_row("session_other", "SESSION_STATUS_IDLE", "cs-repo:other/repo", self.LANE,
+                                           status_bucket=BUCKET_BLOCKED)])
+        entries = self.board_entries()
+        self.assertTrue(self.listed(entries, "session_a"), "control: this repo's session is not listed: %r" % (entries,))
+        self.assertFalse(self.listed(entries, "session_other"), "another repo's session is listed: %r" % (entries,))
+
+    def test_archived_session_is_never_listed(self):
+        self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1"),
+                               self.board_row("session_old", BUCKET_BLOCKED, self.LANE, "cs-step:c2",
+                                              status="SESSION_STATUS_ARCHIVED")])
+        entries = self.board_entries()
+        self.assertTrue(self.listed(entries, "session_a"), "control: the live session is not listed: %r" % (entries,))
+        self.assertFalse(self.listed(entries, "session_old"), "an archived session is listed: %r" % (entries,))
+
+    def test_coordinator_session_is_never_listed(self):
+        self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1"),
+                               self.board_row("session_coord", BUCKET_BLOCKED, self.COORDINATOR)])
+        entries = self.board_entries()
+        self.assertTrue(self.listed(entries, "session_a"), "control: the lane session is not listed: %r" % (entries,))
+        self.assertFalse(self.listed(entries, "session_coord"), "the coordinator's own session is listed: %r" % (entries,))
+
+    def test_repo_tag_is_read_the_way_repo_tag_names_reads_it(self):
+        self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1"),
+                               session_row("session_upper", "SESSION_STATUS_IDLE", "cs-repo:" + self.SLUG.upper(),
+                                           self.LANE, status_bucket=BUCKET_BLOCKED),
+                               session_row("session_spaced", "SESSION_STATUS_IDLE", "cs-repo:" + self.SLUG + " ",
+                                           self.LANE, status_bucket=BUCKET_BLOCKED)])
+        entries = self.board_entries()
+        self.assertTrue(self.listed(entries, "session_a"), "control: this repo's session is not listed: %r" % (entries,))
+        self.assertTrue(self.listed(entries, "session_upper"),
+                        "a cs-repo tag that differs only in case is not read as this repo: %r" % (entries,))
+        self.assertFalse(self.listed(entries, "session_spaced"),
+                         "a cs-repo tag with a trailing space is read as this repo: %r" % (entries,))
+
+    def test_empty_sessions_list_reads_an_empty_board_not_unknown(self):
+        self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1")])
+        self.assertEqual(self.board_entries(), ["session_a (waiting for action; c1; no PR)"],
+                         "control: the listed session is not read")
+        self.publish(sessions=[])
+        self.assertEqual(self.board_entries(), [], "an empty sessions list does not read as an empty board")
+
+    def test_missing_sessions_list_reads_one_unknown_entry(self):
+        self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1")])
+        self.assertEqual(self.board_entries(), ["session_a (waiting for action; c1; no PR)"],
+                         "control: the listed session is not read")
+        self.publish(sessions=None)
+        entries = self.board_entries()
+        self.assertEqual(len(entries), 1, "a file with no sessions list reads %r, not one unknown entry" % (entries,))
+        self.assertTrue(entries[0].startswith("unknown ("), "the entry is not an unknown: %r" % (entries,))
+        self.assertIn("sessions list", entries[0], "the unknown entry does not say the sessions list is missing")
+
+    def test_no_github_name_reads_one_unknown_entry(self):
+        self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1")])
+        self.assertEqual(self.board_entries(), ["session_a (waiting for action; c1; no PR)"],
+                         "control: the listed session is not read")
+        work, steps = self.read(slug=None)
+        entries = self.board(work, steps, None)
+        self.assertEqual(len(entries), 1, "a repo with no GitHub name reads %r, not one unknown entry" % (entries,))
+        self.assertTrue(entries[0].startswith("unknown ("), "the entry is not an unknown: %r" % (entries,))
+
+    def test_stale_live_read_reads_one_unknown_entry(self):
+        self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1")])
+        self.assertEqual(self.board_entries(), ["session_a (waiting for action; c1; no PR)"],
+                         "control: the listed session is not read")
+        self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1")],
+                     read_at=iso_ago(build.STALE_LIVE_MINUTES + 30))
+        entries = self.board_entries()
+        self.assertEqual(len(entries), 1, "a stale live read reads %r, not one unknown entry" % (entries,))
+        self.assertTrue(entries[0].startswith("unknown ("), "the entry is not an unknown: %r" % (entries,))
+
+    def test_no_session_row_with_a_bucket_name_reads_one_unknown_entry(self):
+        self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1")])
+        self.assertEqual(self.board_entries(), ["session_a (waiting for action; c1; no PR)"],
+                         "control: the listed session is not read")
+        self.publish(sessions=[self.board_row("session_a", "blocked", self.LANE, "cs-step:c1"),
+                               self.board_row("session_b", None, self.LANE, "cs-step:c2")])
+        entries = self.board_entries()
+        self.assertEqual(len(entries), 1, "rows with no bucket name read %r, not one unknown entry" % (entries,))
+        self.assertTrue(entries[0].startswith("unknown ("), "the entry is not an unknown: %r" % (entries,))
+        self.assertIn("bucket", entries[0], "the unknown entry does not say the bucket is missing")
+
+    def test_working_session_with_no_updated_at_reads_one_unknown_entry(self):
+        # The control is the same file with updated_at on the working row: the board reads the blocked session only.
+        self.publish(sessions=[self.board_row("session_b", BUCKET_BLOCKED, self.LANE, "cs-step:c2"),
+                               self.board_row("session_a", BUCKET_WORKING, self.LANE, "cs-step:c1",
+                                              updated_at=iso_ago(5))])
+        self.assertEqual(self.board_entries(), ["session_b (waiting for action; c2; no PR)"],
+                         "control: the blocked session is not read beside a recent working one")
+        self.publish(sessions=[self.board_row("session_b", BUCKET_BLOCKED, self.LANE, "cs-step:c2"),
+                               self.board_row("session_a", BUCKET_WORKING, self.LANE, "cs-step:c1")])
+        entries = self.board_entries()
+        self.assertEqual(len(entries), 1, "a working session with no updated_at reads %r, not one unknown entry" % (entries,))
+        self.assertTrue(entries[0].startswith("unknown ("), "the entry is not an unknown: %r" % (entries,))
+        self.assertTrue("updated_at" in entries[0] or "session_a" in entries[0],
+                        "the unknown entry names neither updated_at nor the working session: %r" % (entries,))
+
+    def test_working_session_whose_updated_at_has_no_zone_reads_one_unknown_entry(self):
+        self.publish(sessions=[self.board_row("session_a", BUCKET_WORKING, self.LANE, "cs-step:c1",
+                                              updated_at=iso_ago(90))])
+        self.assertEqual(self.board_entries(), ["session_a (silent; c1; no PR)"],
+                         "control: a working session with a zoned updated_at is not read as silent")
+        self.publish(sessions=[self.board_row("session_a", BUCKET_WORKING, self.LANE, "cs-step:c1",
+                                              updated_at=iso_ago(90)[:-1])])
+        entries = self.board_entries()
+        self.assertEqual(len(entries), 1, "a working session with an updated_at that has no zone reads %r" % (entries,))
+        self.assertTrue(entries[0].startswith("unknown ("), "the entry is not an unknown: %r" % (entries,))
+
+    def test_thirty_two_sessions_across_every_flag_are_all_listed(self):
+        # Full size: eight sessions per flag, each on its own step.
+        plan = {1: (BUCKET_BLOCKED, None, "waiting for action"), 2: (BUCKET_COMPLETED, None, "done"),
+                3: (BUCKET_FAILED, None, "failed"), 0: (BUCKET_WORKING, 90, "silent")}
+        sessions, expected = [], []
+        for n in range(1, 33):
+            sid, step = "session_%02d" % n, "L%02d" % n
+            bucket, ago, flag = plan[n % 4]
+            sessions.append(self.board_row(sid, bucket, self.LANE, "cs-step:" + step,
+                                           updated_at=None if ago is None else iso_ago(ago)))
+            expected.append("%s (%s; %s; no PR)" % (sid, flag, step))
+        self.publish(sessions=sessions)
+        self.assertSameEntries(self.board_entries(), expected, "the 32 sessions do not each read their flag")
+
+    def test_upkeep_row_lists_each_flagged_session_with_the_count(self):
+        self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1"),
+                               self.board_row("session_b", BUCKET_WORKING, self.LANE, "cs-step:c2",
+                                              updated_at=iso_ago(90)),
+                               self.board_row("session_c", BUCKET_WORKING, self.LANE, "cs-step:c3",
+                                              updated_at=iso_ago(5)),
+                               self.board_row("session_d", BUCKET_COMPLETED, self.COORDINATOR)])
+        count, entries = self.board_out()
+        self.assertEqual(count, 2, "the session board row counts %d, not its 2 flagged sessions" % count)
+        self.assertSameEntries(entries, ["session_a (waiting for action; c1; no PR)", "session_b (silent; c2; no PR)"],
+                               "the session board row does not list the flagged sessions")
+
+    def test_upkeep_row_reads_one_unknown_entry_when_there_is_no_live_file(self):
+        self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1")])
+        self.assertEqual(self.board_out(), (1, ["session_a (waiting for action; c1; no PR)"]),
+                         "control: the session board row does not list the flagged session")
+        _, out = self.build_from_main(expect=(0, 1))
+        count, detail = self.row(out, self.ROW)
+        self.assertEqual(count, 1, "the session board row with no live file counts %d, not one unknown entry" % count)
+        self.assertTrue(detail.startswith("unknown ("), "the session board row is not an unknown: %r" % (detail,))
+
+    def test_upkeep_row_reads_zero_when_no_session_is_flagged(self):
+        self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1")])
+        self.assertEqual(self.board_out(), (1, ["session_a (waiting for action; c1; no PR)"]),
+                         "control: the session board row does not list the flagged session")
+        self.publish(sessions=[self.board_row("session_a", BUCKET_WORKING, self.LANE, "cs-step:c1",
+                                              updated_at=iso_ago(5))])
+        self.assertEqual(self.board_out(), (0, []), "a recent working session is counted in the session board row")
+
+    def test_live_work_copies_each_session_rows_updated_at_as_it_copies_the_bucket(self):
+        stamp = iso_ago(90)
+        self.publish(sessions=[self.board_row("session_a", BUCKET_WORKING, self.LANE, "cs-step:c1", updated_at=stamp),
+                               self.board_row("session_b", BUCKET_BLOCKED, self.LANE, "cs-step:c2")])
+        work, _ = self.read()
+        rows = {row["id"]: row for row in work["laneSessions"]}
+        self.assertEqual(rows["session_a"]["status_bucket"], BUCKET_WORKING,
+                         "control: live_work does not copy the bucket of a session row")
+        self.assertEqual(rows["session_a"].get("updated_at"), stamp, "live_work dropped the updated_at of a session row")
+        self.assertIsNone(rows["session_b"].get("updated_at"), "live_work gave a row with no updated_at one")
+
+    def test_live_work_keeps_its_parameters_so_the_board_adds_no_session_walk(self):
+        # Green on the old code too: a control for the cost proof, not a red case.
+        self.assertEqual(list(inspect.signature(build.live_work).parameters), ["path", "steps", "slug"],
+                         "live_work's parameters changed, so the board may walk the sessions again")
+
+    def test_session_board_makes_no_subprocess_call_and_opens_no_file(self):
+        # Cost proof: the board reads only the work it is given. Each spy raises OSError, so a call is seen wherever a
+        # caller would catch it. The read before the patch supplies the work. The open spy must see the scope control's
+        # live read, or the spies prove nothing.
+        self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1"),
+                               self.board_row("session_b", BUCKET_WORKING, self.LANE, "cs-step:c2",
+                                              updated_at=iso_ago(90))])
+        work, steps = self.read()
+        targets = ("subprocess.run", "subprocess.Popen", "subprocess.call", "subprocess.check_call",
+                   "subprocess.check_output", "builtins.open", "io.open")
+        with contextlib.ExitStack() as stack:
+            spies = {t: stack.enter_context(mock.patch(t, side_effect=OSError("the session board must not reach this")))
+                     for t in targets}
+            build.live_work(str(self.live), steps, self.SLUG)  # scope control: a live read, which must reach the open spy
+            self.assertTrue(spies["io.open"].called or spies["builtins.open"].called,
+                            "the patched open saw no read of the live file, so the spies prove nothing")
+            for spy in spies.values():
+                spy.reset_mock()
+            entries = self.board(work, steps, self.SLUG)
+            self.assertSameEntries(entries, ["session_a (waiting for action; c1; no PR)", "session_b (silent; c2; no PR)"],
+                                   "the board lists the wrong lines while its calls are spied")
+            for target, spy in spies.items():
+                self.assertFalse(spy.called, "session_board called %s" % target)
 
 
 class SharedTagNames(unittest.TestCase):
