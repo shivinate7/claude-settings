@@ -5,7 +5,10 @@
   "order": 975,
   "owner": "coordinator",
   "lane": null,
-  "updatedAt": "2026-11-10T08:44:00-06:00",
+  "updatedAt": "2026-11-12T13:29:42-06:00",
   "why": "#2530 adds a closed-item read to lint/report_guard.py. Eight hand mutants of it survive, so the guard is not yet proved red on the defect it guards.",
-  "note": "Test-author lane. WAITS: #2530 (input-needed-reads-page-status) merges, batch 72. Coordinator's pick (process only, 06:56 CST Nov 10): a lane, not a debt, because a guard is trusted only once it goes red on its defect (rule verification-trust-guard-after-red). Source: coordinator [ended:Claude-settings-coordinator-handoff], 06:56 CST Nov 10. Also waits on #2530's re-release: runner 8 dropped it from batch-72b ( CST Nov 10) for a clash with #2522 in test_rule_audit."
+  "note": "Test-author lane. WAITS: #2530 (input-needed-reads-page-status) merges, batch 72. Coordinator's pick (process only, 06:56 CST Nov 10): a lane, not a debt, because a guard is trusted only once it goes red on its defect (rule verification-trust-guard-after-red). Source: coordinator [ended:Claude-settings-coordinator-handoff], 06:56 CST Nov 10. Also waits on #2530's re-release: runner 8 dropped it from batch-72b ( CST Nov 10) for a clash with #2522 in test_rule_audit.",
+  "blockedBy": [
+    "input-needed-reads-page-status"
+  ]
 }

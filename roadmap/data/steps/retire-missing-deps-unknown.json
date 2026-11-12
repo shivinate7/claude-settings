@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Coordinator 12:51 CST Nov 12 (its clock): the merge tool refused q_max #1163's debt close because the Retire test ran in a scratch worktree with no node_modules (ERR_MODULE_NOT_FOUND typescript); CI run 43274529795 was green and 34 tests pass locally. Stands item 600.",
  "source": "coordinator 12:51 CST Nov 12",
- "note": "Fix run_span in lint/check_debt_retire.py so the scratch worktree has the repo's dependencies, or reports a missing-dependency failure as unknown, never as a failed retire. Then batch runner 11 re-runs the q_max #1163 merge. Rule building-fix-cause-not-symptom; decision debt-close-runs-retire. Undo: owner b on item 600 (the q_max lane drops the debt close). Lane starting now (coordinator).",
- "updatedAt": "2026-11-12T12:51:05-06:00"
+ "note": "Fix run_span in lint/check_debt_retire.py so the scratch worktree has the repo's dependencies, or reports a missing-dependency failure as unknown, never as a failed retire. Then batch runner 11 re-runs the q_max #1163 merge. Rule building-fix-cause-not-symptom; decision debt-close-runs-retire. Undo: owner b on item 600 (the q_max lane drops the debt close). Lane starting now (coordinator). Runner 11 13:27 CST Nov 12: q_max #1161 hits the same retire refusal as #1163; both wait on this lane.",
+ "updatedAt": "2026-11-12T13:29:42-06:00"
 }
