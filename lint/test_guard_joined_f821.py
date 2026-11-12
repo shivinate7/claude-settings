@@ -27,6 +27,7 @@ import sys
 import tomllib
 import unittest
 from fnmatch import fnmatch
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -98,12 +99,18 @@ def joined(runner_text, sections):
 
 
 def ruff_command():
-    """Ruff at the pin in lint/code_check_standard.json, through pipx when pipx is on PATH, else ruff on PATH."""
+    """Ruff at the pin in lint/code_check_standard.json: through pipx when pipx is on PATH. Without pipx, the ruff on
+    PATH, which must report the pin: another ruff reads the guard files under other rules, so the check stops."""
+    with open(os.path.join(REPO, CODE_CHECK), encoding="utf-8") as f:
+        pin = json.load(f)["tools"]["ruff"]
     if shutil.which("pipx"):
-        with open(os.path.join(REPO, CODE_CHECK), encoding="utf-8") as f:
-            pin = json.load(f)["tools"]["ruff"]
         return ["pipx", "run", "ruff==" + pin]
     if shutil.which("ruff"):
+        version = subprocess.run(["ruff", "--version"], capture_output=True, text=True, encoding="utf-8")
+        words = version.stdout.split()
+        got = words[1] if version.returncode == 0 and len(words) > 1 else "unknown"
+        if got != pin:
+            raise RuntimeError("no pipx, and the ruff on PATH is %s, want the pin %s" % (got, pin))
         return ["ruff"]
     raise RuntimeError("no ruff: neither pipx nor ruff is on PATH")
 
@@ -243,6 +250,30 @@ class JoinedOrderF821(unittest.TestCase):
         self.assertEqual(proc.returncode, 1, "the planted syntax error did not read as a finding: " + proc.stdout
                          + proc.stderr)
         self.assertIn("zz_planted.py:2: invalid-syntax", proc.stdout)
+
+    def fake_ruff_on_path(self, version):
+        """A folder on PATH holding a `ruff` that reports `version`, and nothing else: no pipx."""
+        folder = os.path.join(self.run, "ruff-%s" % version)
+        os.makedirs(folder)
+        fake = os.path.join(folder, "ruff")
+        with open(fake, "w", encoding="utf-8") as f:
+            f.write("#!/bin/sh\necho 'ruff %s'\n" % version)
+        os.chmod(fake, 0o755)
+        return folder
+
+    def test_ruff_on_path_at_another_version_stops_the_check_without_pipx(self):
+        """Without pipx the check runs the ruff on PATH, which must be the pin. Any other ruff reads the guard files
+        under other rules, so the check stops."""
+        pin = json.loads(read(REPO, CODE_CHECK))["tools"]["ruff"]
+        other = "0.0.1" if pin != "0.0.1" else "0.0.2"
+        with mock.patch.dict(os.environ, {"PATH": self.fake_ruff_on_path(other)}):
+            with self.assertRaisesRegex(RuntimeError, "want the pin %s" % re.escape(pin)):
+                ruff_command()
+
+    def test_ruff_on_path_at_the_pin_is_used_without_pipx(self):
+        pin = json.loads(read(REPO, CODE_CHECK))["tools"]["ruff"]
+        with mock.patch.dict(os.environ, {"PATH": self.fake_ruff_on_path(pin)}):
+            self.assertEqual(ruff_command(), ["ruff"], "the ruff at the pin was refused")
 
     def test_ruff_toml_no_longer_ignores_f821_for_the_guard_files(self):
         with open(os.path.join(REPO, "ruff.toml"), "rb") as f:
