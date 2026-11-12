@@ -25,7 +25,9 @@ The payload must carry a valid `agent_id`. Every agent type is judged, reviewers
 
 - A token of 7 to 12, or exactly 40, lowercase hex characters, with at least one digit and one letter a-f. That rules out agent ids (17), digests (32, 64) and other long hex.
 - A token that touches `-`, `_`, `/`, `#`, `.`, `@` or `=` is not one. That rules out UUIDs, colours, URLs, file names, `key=value` and `owner/repo@sha`.
-- Two exceptions are judged: each side of a range (`a..b`, `a...b`), and a token followed by sentence marks (`.`, `,`, `;`, `:`, `)`, `]`, `*`, `"`, a backtick) up to a space or the end of the text, so "Fixed in 8c1f0e2a7." and "(fixed in 8c1f0e2a7.)" are judged.
+- Two exceptions are judged. The first is a sha side of a range: `a..b`, `a...b`, or `main..a` and `a..HEAD` with a ref on one side.
+- The second is a token followed by a sentence mark: `.`, `,`, `;`, `:`, `)`, `]`, `*`, `"` or a backtick. It is judged up to a space or the end of the text, so "Fixed in 8c1f0e2a7." and "(fixed in 8c1f0e2a7.)" are judged.
+- A word that holds `://` (a URL) is skipped whole, so neither side of a compare link is judged. A line that starts with `index ` (a pasted diff header, which names blob ids) is skipped.
 - A token inside a double-quoted span or on a `> ` quoted line is skipped, since quoted text may come from another repo (coordinator brief, 2026-11-08: a sha in quoted text of another repo is a false alarm). A quoted span ends at the line end. A backticked sha is checked.
 - A sha resolves when `git cat-file --batch-check` finds it as `<sha>^{commit}` in the repo of the payload's `cwd`. A short sha that git reports as ambiguous passes.
 
@@ -43,5 +45,6 @@ A hand-back is judged before any other guard rule reads git, so a hand-back with
 
 - A sha that exists but that the agent did not make (an old commit) passes. This check proves the commit exists, not that the agent did the work.
 - A sha written in uppercase is not read.
-- A range with a ref on one side, a sha in quotes or JSON, `key=<sha>`, and a 13-39 hex token pass. A pasted diff header's blob ids and the right side of a compare URL can refuse. Notes: report-sha-ref-range-unjudged, report-sha-quoted-forms-pass, report-sha-diff-header-false-alarm, report-sha-compare-url-right-side.
+- A sha in quotes or JSON, `key=<sha>`, and a 13-39 hex token pass (note report-sha-quoted-forms-pass).
+- A made-up sha inside a word that holds `://` passes, such as `[8c1f0e2a7](https://…)` link text, and so does one on a line that starts with `index ` (note report-sha-link-text-pass).
 - A shallow clone (a clone that holds only recent history) allows every missing sha, so a made-up sha passes there. See Fail open. Note: report-sha-shallow-allowed.
