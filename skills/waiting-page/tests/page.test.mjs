@@ -124,7 +124,8 @@ after(async () => { if (browser) await browser.close(); });
 
 // clock: a fixed browser time (an ISO string), so a case reads the page's clock without the real one. keepStorage: each storage key is set
 // only when absent, so a reload keeps what the page wrote on the earlier load (a reload that resets storage would undo it).
-async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, holdAsks = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, hasTouch = false, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false, keepItems = false } = {}) {
+// timers: the page's timers run on a fake clock, installed before load, so a case moves time on with clock.runFor and never waits on it.
+async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, failDelete = false, failDeleteIn = "", failSet = false, failSetText = "", comments = { can: "available" }, storage = {}, meta = null, groups = {}, receipts = {}, holdReceipts = false, holdAsks = false, designData = null, dbExtra = {}, pageHtml = html, viewport = { width: 1280, height: 900 }, hasTouch = false, scheme = "light", errors = null, platform = null, noStore = false, hold = {}, clock = null, keepStorage = false, failUpdate = false, keepItems = false, timers = false } = {}) {
   browser = browser || await needEnv(t, "chromium", async () => require("playwright").chromium.launch());
   if (!browser) return null;
   // hasTouch: a touch device, so the page's pointer: coarse rules apply.
@@ -144,6 +145,7 @@ async function open(t, { items = [DECISION, TASK], rawItems = {}, answers = {}, 
   // platform: the OS a browser reports, as navigator.platform with no userAgentData (a Windows or a Mac browser).
   if (platform) await page.addInitScript((p) => { Object.defineProperty(navigator, "platform", { get: () => p }); Object.defineProperty(navigator, "userAgentData", { get: () => undefined }); }, platform);
   if (clock) await page.clock.setFixedTime(new Date(clock));
+  if (timers) await page.clock.install();
   await page.goto(ORIGIN);
   // With no store there are no items to wait for: the page is loaded once its empty state is drawn.
   if (noStore) { await page.waitForFunction("state.loaded"); return page; }
@@ -5517,8 +5519,8 @@ const anchorOf = (page, sent) => page.evaluate((ids) => {
 }, sent.map((it) => "item-" + it.id));
 // Scroll anchoring stays off unless the case asks for it.
 // sentMove names the SENT_MOVE value a case pins (see withSentMove); none keeps the page's own value.
-const openSend = async (t, { items, width, height, scheme, anchored, sentMove }) => {
-  const page = await open(t, { items, scheme, viewport: { width, height }, pageHtml: sentMove ? withSentMove(sentMove) : undefined });
+const openSend = async (t, { items, width, height, scheme, anchored, sentMove, timers }) => {
+  const page = await open(t, { items, scheme, timers, viewport: { width, height }, pageHtml: sentMove ? withSentMove(sentMove) : undefined });
   if (page && !anchored) await noAnchor(page);
   return page;
 };
@@ -5839,7 +5841,7 @@ test("answered-sink: control: Undo of a Send from a card in view returns it to i
 // An answer that arrives without a Send, on a card in view: the card keeps its height while in view, and drops once wholly off the screen.
 async function answerWithoutSend(t, { width, scheme }) {
   const inView = mk("in-view", 4, { context: LONG }), below = mk("below", 5);
-  const page = await openSend(t, { items: [...LEADS, inView, below, ...FILLER], width, height: 800, scheme, anchored: false }); if (!page) return;
+  const page = await openSend(t, { items: [...LEADS, inView, below, ...FILLER], width, height: 800, scheme, anchored: false, timers: true }); if (!page) return;
   await settleAt(page, inView, "top", 40);
   const pre = await cardMap(page);
   const I = "item-in-view", B = "item-below";
@@ -5849,7 +5851,7 @@ async function answerWithoutSend(t, { width, scheme }) {
   assert.equal(await page.evaluate(() => window.__log.filter((l) => l[0] === "set").length), 1, "the page wrote an answer of its own");
   const atOnce = await cardMap(page);
   assert.ok(atOnce[I].h >= pre[I].h - 1, `an answer without a Send dropped its height at once: ${pre[I].h}px to ${atOnce[I].h}px`);
-  await frameWait(page, 2); // a card in view is never dropped on a timer, so two frames show any change
+  await page.clock.runFor(700); // a card in view is never dropped on a timer: the fake clock runs past any drop timer, with no wait
   const held = await cardMap(page);
   assert.ok(Math.abs(held[I].h - pre[I].h) <= 1, `an answer without a Send changed the card's height while in view: ${pre[I].h}px to ${held[I].h}px`);
   assert.ok(Math.abs(held[B].top - pre[B].top) <= 1, `an answer without a Send moved the card below: ${pre[B].top} to ${held[B].top}`);
