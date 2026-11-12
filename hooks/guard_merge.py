@@ -1422,7 +1422,7 @@ def record_push_hit(stripped: str, cwd: str, transcript: str, record_branch_of, 
     unread = ""
     for root, source, every in _record_pushes(stripped, cwd, record_branch_of, read_verb):
         if proved is None:
-            proved = _own_tier_proved(transcript, RECORD_WRITER_TIER)
+            proved = _own_tier_proved(transcript, RECORD_WRITER_TIER)  # glossary-ok: main's own names for the session role proof, not renamed across files
         if every:  # names no destination, so the writer rule never judged it: only a triage push is noted
             if proved:
                 unread = unread or "unknown: the push sends every branch (--all or --mirror), so no head was read"
