@@ -354,6 +354,97 @@ add("check-tail: pytest with bin/ci-job as an argument piped to tail, background
     "allow", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="python3 -m pytest hooks/test_guard.py -k bin/ci-job | tail -5")
 
+# --- a background lane-lint run needs a tool timeout above the lint's bound (rule lane-lint-timeout)
+#
+# The lint waits for a ci-job run and for GitHub to show the pushed head, so it can run past the Bash default of
+# 30 minutes. A background run that the default stops gives no verdict (step lane-lint-bg-timeout). The call's own
+# `timeout`, in milliseconds, must be above LANE_LINT_BOUND_MS. A `timeout` wrapper in the command text does not
+# count. A foreground run and the other merge flags are not this rule's. The lint is read through the wrappers,
+# `uv run` and a script run by python, as check_stage reads it.
+LANE_LINT_RULE = "lane-lint-timeout"
+LANE_LINT_NOMERGE_GUARD = os.path.join(ROOT, "lanelint-nomerge", "hooks", "guard.py")
+
+
+def build_lanelint_nomerge():
+    """A copy of the guard with no merge/ folder beside it, so the lint's constants cannot be read there."""
+    folder = os.path.dirname(os.path.dirname(LANE_LINT_NOMERGE_GUARD))
+    os.makedirs(os.path.join(folder, "hooks"), exist_ok=True)
+    copy_guard_family(os.path.join(folder, "hooks"))
+
+
+lazy_fixture([LANE_LINT_NOMERGE_GUARD], build_lanelint_nomerge)
+
+
+def lane_lint_bg(name, expected, command, timeout=None, rule=None, guard=None):
+    """One background call of `command`, with the call's tool timeout in milliseconds when `timeout` is given."""
+    extra = {} if timeout is None else {"timeout": timeout}
+    add(name, expected, rule, cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL, command=command,
+        guard=guard, **extra)
+
+
+# Refused: no limit (the Bash default of 30 minutes), a limit at or below the bound, and a limit written in seconds.
+lane_lint_bg("lane-lint timeout: a background lane-lint with no timeout is refused", "deny",
+             "~/.claude/bin/merge --lane-lint 1476", rule=LANE_LINT_RULE)
+lane_lint_bg("lane-lint timeout: the 30-minute default is refused", "deny",
+             "merge --lane-lint 1476", timeout=1800000, rule=LANE_LINT_RULE)
+lane_lint_bg("lane-lint timeout: a limit equal to the bound is refused", "deny",
+             "merge --lane-lint 1476", timeout=LANE_LINT_BOUND_MS, rule=LANE_LINT_RULE)
+lane_lint_bg("lane-lint timeout: a limit one second under the bound is refused", "deny",
+             "merge --lane-lint 1476", timeout=LANE_LINT_BOUND_MS - 1000, rule=LANE_LINT_RULE)
+lane_lint_bg("lane-lint timeout: a limit written in seconds (7200) is 7.2 s, so it is refused", "deny",
+             "merge --lane-lint 1476", timeout=7200, rule=LANE_LINT_RULE)
+# Allowed: a limit one millisecond above the bound, and a two-hour one.
+lane_lint_bg("lane-lint timeout: a limit one millisecond above the bound is allowed", "allow",
+             "merge --lane-lint 1476", timeout=LANE_LINT_BOUND_MS + 1)
+lane_lint_bg("lane-lint timeout: a two-hour limit is allowed", "allow",
+             "merge --lane-lint 1476", timeout=7200000)
+# Not this rule's: a foreground lint, and the other merge flags and checks, with no limit.
+add("lane-lint timeout: a foreground lane-lint with no timeout is not this rule's", "allow",
+    cwd=NOGIT, command="merge --lane-lint 1476")
+add("lane-lint timeout: a foreground lane-lint at the 30-minute default is not this rule's", "allow",
+    cwd=NOGIT, command="merge --lane-lint 1476", timeout=1800000)
+lane_lint_bg("lane-lint timeout: a background review-record run is not a lane-lint", "allow",
+             "merge --review-record 7")
+lane_lint_bg("lane-lint timeout: a background release-check run is not a lane-lint", "allow",
+             "merge --release-check 7")
+lane_lint_bg("lane-lint timeout: a lane-lint with --confirm is not a check run", "allow",
+             "merge --lane-lint 7 --confirm")
+lane_lint_bg("lane-lint timeout: a background ci-job lint is not this rule's", "allow",
+             "~/.claude/bin/ci-job checks --lint --base origin/main")
+# The lint read through the wrappers, `uv run` and a script run by python, as check_stage reads it: each is refused.
+for _name, _command in (
+    ("merge.cmd", "merge.cmd --lane-lint 7"),
+    ("python3 runs merge/merge.py", "python3 merge/merge.py --lane-lint 7"),
+    ("python runs merge/launch.py", "python merge/launch.py --lane-lint 7"),
+    ("uv run runs merge/merge.py", "uv run merge/merge.py --lane-lint 7"),
+    ("uv run python runs merge/merge.py", "uv run python merge/merge.py --lane-lint 7"),
+    ("a python flag before the script", "python3 -W ignore merge/merge.py --lane-lint 7"),
+    ("env with a variable", "env CI=1 merge --lane-lint 7"),
+    ("after a cd", "cd lanes && merge --lane-lint 7"),
+    ("through verdict", "~/.claude/bin/verdict ~/.claude/bin/merge --lane-lint 7"),
+    ("behind a timeout wrapper of its own", "timeout 9000 merge --lane-lint 7"),
+):
+    lane_lint_bg("lane-lint timeout: a background lane-lint " + _name + " with no timeout is refused", "deny",
+                 _command, rule=LANE_LINT_RULE)
+# Quoted text is no run, and a quote or a comment opener in text does not hide a run after it.
+lane_lint_bg("lane-lint timeout: a lane-lint named in echo's quotes is no run", "allow", "echo 'merge --lane-lint 1'")
+lane_lint_bg("lane-lint timeout: a comment opener inside quotes is no run", "allow", 'echo "# merge --lane-lint 1"')
+lane_lint_bg("lane-lint timeout: a lane-lint named in a multi-line quote is no run", "allow",
+             'echo "first line\nmerge --lane-lint 1\nlast line"')
+lane_lint_bg("lane-lint timeout: grep naming the script is no run", "allow", 'grep -n "--lane-lint" merge/merge.py')
+lane_lint_bg("lane-lint timeout: a comment opener before a lane-lint is still refused", "deny",
+             'echo "# lint"; merge --lane-lint 7', rule=LANE_LINT_RULE)
+lane_lint_bg("lane-lint timeout: a lone apostrophe in quotes does not hide a lane-lint", "deny",
+             'echo "it\'s up"; merge --lane-lint 7', rule=LANE_LINT_RULE)
+# Unreadable constants read as unknown, and the rule does not refuse on that: the copy has no merge/ beside it.
+lane_lint_bg("lane-lint timeout: unreadable constants read as unknown, so no timeout is allowed", "allow",
+             "merge --lane-lint 1476", guard=LANE_LINT_NOMERGE_GUARD)
+lane_lint_bg("lane-lint timeout: unreadable constants read as unknown, so the 30-minute default is allowed", "allow",
+             "merge --lane-lint 1476", timeout=1800000, guard=LANE_LINT_NOMERGE_GUARD)
+# The same copy still runs check-tail, so the two allows above reach the guard that reads the lint, not a dead copy.
+lane_lint_bg("lane-lint timeout: the copy without merge/ still refuses a lane-lint piped to tail", "deny",
+             "merge --lane-lint 1476 | tail -8", rule="check-tail", guard=LANE_LINT_NOMERGE_GUARD)
+
 # Wrapper forms in the foreground: each deny reads its check through the wrapper, each allow does not.
 sh("check-tail: uv run python runs the script piped to tail in the foreground is refused",
    "uv run python merge/merge.py --lane-lint 7 2>&1 | tail -8", "deny", "check-tail", cwd=NOGIT)
