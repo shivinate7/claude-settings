@@ -9,7 +9,7 @@ Terms:
 - A breaking merge is a merge after which main's newest finished run is red.
 - A revert PR is the lane PR that undoes the commit of a breaking merge. It merges as an ordinary lane PR with `--base-red-ok`.
 
-State: the red-main check below is live. The revert route is target, not live. The code still has `merge --revert` and its trailer guards. The target removes them (refuter, 2026-11-11 22:58 CST, simpler route (a)), in the removal act of R42 part 2.
+State: the red-main check below and the `--base-red-ok` reason flag are live now. Using that flag for a revert PR is the target usage. The merge tool on main has no `merge --revert` flag, and the target adds none (refuter, 2026-11-11 22:58 CST, simpler route (a)).
 
 PICK PENDING OWNER: a red main stops merges only until the revert's run on main is green. Owner question Q3 i is open. Its options are (a) the revert's run on main is green, which is this wording, or (b) the revert merge itself lifts the brake. This record does not choose between them until the owner answers.
 
