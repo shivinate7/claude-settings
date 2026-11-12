@@ -10,6 +10,7 @@
         "doc_id": "p1",
         "data": {
           "kind": "decision",
+          "repo": "shivinate7/claude-settings",
           "title": "Ship the change today?",
           "status": "open",
           "context": "Goal: ship the change today\nProblem (risk): the change touches the guard, so it needs your word\nBased on (read): the diff changes one rule\nDeparts from: lint/stamp.py:run_stamp — the stamp check moves to the lint job",
@@ -43,6 +44,7 @@
         "doc_id": "t1",
         "data": {
           "kind": "task",
+          "repo": "shivinate7/claude-settings",
           "title": "Set the guard skip",
           "status": "open",
           "context": "Why yours: a session on your computer was asked first and none could reach the remote",
@@ -65,6 +67,7 @@
         "doc_id": "c133",
         "data": {
           "kind": "decision",
+          "repo": "shivinate7/claude-settings",
           "title": "Raise the CI milestone job cap?",
           "status": "open",
           "context": "Goal: finish CI milestone runs without a false red\nProblem (risk): a milestone run ended at its job cap again, so the cap needs your word\nBased on (measured): the milestone job ran out of time at its cap on the last run\nDeparts from: lint/stamp.py:run_stamp — the stamp check moves to the lint job",
@@ -101,6 +104,7 @@
         "doc_id": "p1",
         "data": {
           "kind": "decision",
+          "repo": "shivinate7/claude-settings",
           "title": "Ship the change today?",
           "status": "open",
           "context": "Goal: ship the change today\nProblem (risk): the change touches the guard, so it needs your word\nBased on (read): the diff changes one rule\nDeparts from: lint/stamp.py:run_stamp — the stamp check moves to the lint job",
@@ -134,6 +138,7 @@
         "doc_id": "t99",
         "data": {
           "kind": "task",
+          "repo": "shivinate7/claude-settings",
           "title": "Set the guard skip",
           "status": "open",
           "context": "Why yours: a session on your computer was asked first and none could reach the remote",
