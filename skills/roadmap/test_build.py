@@ -4623,6 +4623,31 @@ class SessionBoard(UpkeepFixture):
         self.assertTrue(entries[0].startswith("unknown ("), "the entry is not an unknown: %r" % (entries,))
         self.assertIn("bucket", entries[0], "the unknown entry does not say the bucket is missing")
 
+    def test_wrong_form_bucket_rows_beside_a_blocked_row_are_skipped_not_read_unknown(self):
+        # A row with no bucket and a row whose bucket is not an enum name, each beside the blocked row the board lists.
+        self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1"),
+                               self.board_row("session_missing", None, self.LANE, "cs-step:c2"),
+                               self.board_row("session_wrong", "blocked", self.LANE, "cs-step:c3")])
+        self.assertSameEntries(self.board_entries(), ["session_a (waiting for action; c1; no PR)"],
+                               "a session row with a missing or wrong-form status_bucket is read as an entry "
+                               "beside a blocked row")
+
+    def test_wrong_form_bucket_row_beside_only_recent_working_rows_reads_an_empty_board(self):
+        # The control is a silent working row alone: the board lists it, so an empty board cannot pass. The named read
+        # is the wrong-form row beside a recent working row: the row is skipped, and no unknown entry is written.
+        with pinned_clock():
+            self.publish(sessions=[self.board_row("session_silent", BUCKET_WORKING, self.LANE, "cs-step:c1",
+                                                  updated_at=self.stamp_ago(self.SILENT_SECONDS + 1))],
+                         read_at=self.stamp_ago(0))
+            self.assertSameEntries(self.board_entries(), ["session_silent (silent; c1; no PR)"],
+                                   "control: the silent working session is not listed")
+            self.publish(sessions=[self.board_row("session_recent", BUCKET_WORKING, self.LANE, "cs-step:c1",
+                                                  updated_at=self.stamp_ago(5)),
+                                   self.board_row("session_wrong", "blocked", self.LANE, "cs-step:c2")],
+                         read_at=self.stamp_ago(0))
+            self.assertSameEntries(self.board_entries(), [],
+                                   "a wrong-form bucket row beside only recent working rows is read as an entry")
+
     def test_working_session_with_no_updated_at_reads_one_unknown_entry(self):
         # The control is the same file with updated_at on the working row: the board reads the blocked session only.
         self.publish(sessions=[self.board_row("session_b", BUCKET_BLOCKED, self.LANE, "cs-step:c2"),
