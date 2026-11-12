@@ -1439,10 +1439,17 @@ def _chat_question_hit(question, options):
 # already ruled on. An open decision or task names its `repo` (owner/name). A repo other than the page's needs
 # `checked_with`, the session id of that repo's session that said the owner has not ruled, never the item's own owner.
 # The check keys on fields, never on words (decision predicate-is-the-act).
+# R22 point 3: `checked_with` names a role or a lane slug, never a session id: a session record is gone when the
+# session ends, so a page item that stores its id points at nothing. Only this field is retargeted here; the wider
+# refusal of a session id in other page fields (owner and the rest) is a separate rule.
 CROSS_REPO_RULE = "question-checked-with-repo"
+CHECKED_WITH_ROLES = ("coordinator", "triage", "owner's-computer")  # the three R22 names
+LANE_SLUG = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")  # a lane's branch slug (rule git-slug-then-claim-number)
+LANE_SLUG_MAX = 32
 CROSS_REPO_REASON = ("An open decision or task on the waiting page names its `repo` (owner/name). A repo other than "
-                     "the page's own needs `checked_with`: the session id of that repo's triage, coordinator or "
-                     "owner's-computer session that said the owner has not ruled. "
+                     "the page's own needs `checked_with`: a role (coordinator, triage, owner's-computer) or a lane "
+                     "slug of that repo's session that said the owner has not ruled. `checked_with` never holds a "
+                     "session id, which no page item stores. "
                      "(decision cross-repo-question-checked, a question on another repo is checked with that repo)")
 _WAITING_PAGE_DIR = os.path.join(HERE, "..", "skills", "waiting-page")
 
@@ -1463,11 +1470,12 @@ CROSS_REPO_UPDATE_REASON = ("An update that carries `checked_with` and no `repo`
 
 def cross_repo_hit(op, data, page_repo, session_id=None):
     """The reason when this write of an open decision or task names no repo, a repo that is not owner/name, a repo
-    off the page's own without a session-shaped `checked_with`, or a `checked_with` that is the session in its
-    `owner` or the writer's own `session_id`; else None. `repo` is required whether or not the page's repo is
+    off the page's own whose `checked_with` is not a role or a lane slug (a session id is refused, which covers the
+    item's `owner` and the writer's own session); else None. `repo` is required whether or not the page's repo is
     known; with it unknown only the compare is skipped. An update is judged only when it carries `repo`, and one
     that carries `checked_with` without `repo` is refused; a str_replace (item_hit judges its field) and a closed
-    item pass. `session_id` is the writer's session record id (session_<x>), None for a local session."""
+    item pass. `session_id` (the writer's session record id) is kept for the callers' signature: every session id
+    is refused now, so it no longer changes a verdict."""
     if op not in ("set", "update") or not _open_decision(data, ("decision", "task")):
         return None
     if op == "update" and "repo" not in data:
@@ -1485,13 +1493,14 @@ def cross_repo_hit(op, data, page_repo, session_id=None):
     if not page_repo or repo.lower() == page_repo.lower():
         return None
     checked = data.get("checked_with")
-    if not (isinstance(checked, str) and SESSION_ID.fullmatch(checked)):
-        return ("`repo` %s is not this page's repo, and `checked_with` is missing or not a session id. Ask that "
-                "repo's triage, coordinator or owner's-computer session whether the owner has ruled, then write its "
-                "session id in `checked_with`." % repo)
-    if checked in str(data.get("owner") or "") or (session_id and checked == session_id):
-        return ("`checked_with` is the session that files this item. Write the session id of the %s session that "
-                "checked, not the one that files the item." % repo)
+    if isinstance(checked, str) and SESSION_ID.fullmatch(checked):
+        return ("`checked_with` holds a session id, which no page item stores. Write a role (coordinator, triage, "
+                "owner's-computer) or a lane slug.")
+    if not (isinstance(checked, str) and (checked in CHECKED_WITH_ROLES
+                                          or (len(checked) <= LANE_SLUG_MAX and LANE_SLUG.fullmatch(checked)))):
+        return ("`repo` %s is not this page's repo, and `checked_with` is missing or is neither a role nor a lane "
+                "slug. Ask that repo's triage, coordinator or owner's-computer whether the owner has ruled, then "
+                "write that role, or the lane slug of the lane that checked, in `checked_with`." % repo)
     return None
 
 
