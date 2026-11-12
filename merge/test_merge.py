@@ -16072,6 +16072,8 @@ class ReleaseCheck(ReviewEnv):
 # so an entry with no example fails.
 GUARD_EXAMPLES = {"hooks/": "hooks/guard.py", "lint/": "lint/check_x.py", "bin/": "bin/merge", "actions/": "actions/stamp/stamp.mjs",
                   ".github/": ".github/workflows/checks.yml", "merge/": "merge/merge.py", "githooks/": "githooks/pre-commit", "settings.json": "settings.json"}
+# The PR template stays a guard path with no exception: CI's excuse checks read the PR bodies it seeds. Its folder form is a hit too.
+PR_TEMPLATE, PR_TEMPLATE_FORM = ".github/pull_request_template.md", ".github/PULL_REQUEST_TEMPLATE/x.md"
 
 class ReviewGuardPaths(unittest.TestCase):
     """merge.GUARD_PATHS: the rule dirs of lint/stale_cites.py, then merge/ and githooks/, folder prefixes only. merge.GUARD_FILES: settings.json,
@@ -16136,6 +16138,11 @@ class ReviewGuardHits(unittest.TestCase):
     def test_hits_are_sorted_and_only_the_guard_paths_are_kept(self):
         self.assertEqual(review_fn(self, "guard_hits")(["lint/b.py", "README.md", "hooks/a.py", "docs/x.md", "merge/m.py"]),
                          ["hooks/a.py", "lint/b.py", "merge/m.py"])
+
+    def test_pr_template_and_its_folder_form_are_both_guard_hits(self):
+        self.assertTrue(os.path.isfile(os.path.join(os.path.dirname(HERE), PR_TEMPLATE)), f"{PR_TEMPLATE} is not in the repo, so this case proves nothing")
+        self.assertEqual(review_fn(self, "guard_hits")([PR_TEMPLATE, PR_TEMPLATE_FORM]), [PR_TEMPLATE_FORM, PR_TEMPLATE],
+                         "guard_hits does not list the PR template and its folder form as guard paths")
 
 TEST_PATHS = ("hooks/test_guard.py", "merge/test_merge.py", "lint/test_stale_cites.py", "githooks/test_pre_commit.sh")
 
@@ -16214,6 +16221,11 @@ class ReviewGuardRefusal(ReviewGuardEnv):
     def test_a_hooks_markdown_file_refuses(self):
         self.host.changed = [("hooks/README.md", "modified", 0)]
         self.assert_refused(*self.run_args(*self.review_argv()), "hooks/README.md")
+
+    def test_pr_template_alone_refuses_as_a_guard_change(self):
+        # The template is a guard path (ReviewGuardHits), so a PR that touches only it and says guard no is refused
+        self.host.changed = [(PR_TEMPLATE, "modified", 0)]
+        self.assert_refused(*self.run_args(*self.review_argv()), PR_TEMPLATE)
 
     def test_docs_only_on_a_guard_path_refuses(self):
         # hooks/README.md is no doc, but the guard refuses it before the kind is checked, so the Guard reason holds
