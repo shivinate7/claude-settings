@@ -5072,7 +5072,7 @@ def idle_lanes(live, repo_dir=None):
     # An unknown entry with no lane beside it is the whole list unread: no summary, so it never reads as an empty list.
     unread = bool(entries) and not lanes  # exit 1 then, so a caller never reads exit 0 as "no lanes"
     if not unread:
-        entries = [*entries, f"merge: {len(lanes)} lanes to archive. Run get_session on each alone, then archive it."]
+        entries = [*entries, f"merge: {len(lanes)} lanes to archive. Run get_session on each lane in one message, then archive them in the next message."]
     say(*entries)
     return 1 if unread else 0
 
