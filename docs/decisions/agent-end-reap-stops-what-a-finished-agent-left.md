@@ -63,4 +63,4 @@ Cap: the last 200 rows (`MAX_LOG_LINES` in `janitor/agent_end_reap.py`).
 
 Reader: `hooks/daily_note.py` (`agent_end_failures`), at the first startup of each Central day. It prints one line that counts the runs whose day is in the window and that have a `started` row with no `done` row, or a row with an `error`. A run whose rows the cap cut is not counted. `janitor/prove_agent_end_reap.py` reads the last row of the log in its own empty temp config dir.
 
-Cost: each agent end rewrites the log twice, through a temp file and a replace, and takes the lock file. The log starts no process: its writer is the SubagentStop hook that already runs. The note reads the log once a day.
+Cost: each agent end rewrites the log twice, through a temp file and a replace, and takes the lock file (unmeasured). The log starts no process: its writer is the SubagentStop hook that already runs. The note reads the log once a day (unmeasured).
