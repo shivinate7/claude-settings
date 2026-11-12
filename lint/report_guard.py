@@ -727,11 +727,27 @@ def _item_named(before, after):
     return bool(before and (gloss_lead(before, label_ok=False) or ITEM_RECORD_RE.search(before)))
 
 
-def _item_scope_sentences(text, clean):
+def _item_scope_keep(match):
+    """CITE_SKIP_RE replacement for the scope read: a link keeps its text in place, other skipped text is blanked. The
+    result keeps the match's length and newlines, as _item_skip does."""
+    text = match.group(0)
+    link = ITEM_LINK_RE.fullmatch(text)
+    if link:
+        return " " + link.group(1) + " " * (len(text) - len(link.group(1)) - 1)
+    return re.sub(r"[^\n]", " ", text)
+
+
+def _item_scope_sentences(text):
     """[(start, end)] of each sentence of `text` that names waiting page, waiting-page or triage outside skipped text.
-    `clean` is `text` with skipped text blanked at the same places, so a dot in code or a URL ends no sentence."""
-    return [(a, b) for a, b in _clause.sentences(clean, ())
-            if ITEM_SCOPE_RE.search(CITE_SKIP_RE.sub(" ", ITEM_LINK_RE.sub(r"\1", text[a:b])))]
+    A dot in code or a URL ends no sentence, and a link's text stays in the sentence it opens."""
+    view = CITE_SKIP_RE.sub(_item_scope_keep, text)
+    return [(a, b) for a, b in _clause.sentences(view, ()) if ITEM_SCOPE_RE.search(view[a:b])]
+
+
+def _item_window(text):
+    """`text` with each run of blanks read as one space: skipped text keeps its length in the clean text, but it is one
+    gap to a name beside the cite."""
+    return re.sub(r"\s{2,}", " ", text)
 
 
 def bare_item_cite(text, scoped=False):
@@ -745,7 +761,7 @@ def bare_item_cite(text, scoped=False):
         head = ITEM_HEAD_RE.search(clean, pos)
         if not head:
             return ""
-        before = clean[max(0, head.start() - 80):head.start()].rsplit("\n", 1)[-1]
+        before = _item_window(clean[max(0, head.start() - 2000):head.start()].rsplit("\n", 1)[-1])[-80:]
         plural = head.group(1).lower() == "items"
         cites = [(head.group(2), head.end(), before)]
         end = head.end()
@@ -759,12 +775,12 @@ def bare_item_cite(text, scoped=False):
             or (plural and len(cites) > 1 and bool(ITEM_COMMA_NEXT_RE.match(clean, head.end())))
         if not refuse:
             if in_scope is None:
-                in_scope = _item_scope_sentences(text, clean)
+                in_scope = _item_scope_sentences(text)
             refuse = any(a <= head.start() < b for a, b in in_scope)
         for number, stop, lead_before in cites:
             if number in named:
                 continue
-            if _item_named(lead_before, clean[stop:stop + 80]):
+            if _item_named(lead_before, _item_window(clean[stop:stop + 2000])[:80]):
                 named.add(number)
             elif refuse:
                 return number
