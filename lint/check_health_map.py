@@ -23,9 +23,9 @@ part that does not exist yet, and is never checked.
 
 The map is {"rows": [{"n": int, "sees": str, "grade": str, "why": str, "covers": [glob, ...]}, ...]}. A grade
 is green, amber, red or grey. Each n is unique and each covers list is not empty, except a parked row. Other keys are kept as
-they are; this check never reads them. The roadmap build (skills/roadmap/build.py) reads a top-level "read" text
-and, on a row, "gold" (one sentence of what good looks like) and "quiet" (true when its check breaks with no
-record). An empty rows list is valid: every part is then uncovered.
+they are; this check never reads them, except that a "quiet" on a row must be true or false. The roadmap build
+(skills/roadmap/build.py) reads a top-level "read" text and, on a row, "gold" (one sentence of what good looks like)
+and "quiet" (true when its check breaks with no record). An empty rows list is valid: every part is then uncovered.
 
     python3 lint/check_health_map.py [--root DIR] [--map FILE]
 
@@ -103,6 +103,8 @@ def read_doc(path):
                 raise Unknown("%s has no %s text" % (label, key))
         if r.get("grade") not in GRADES:
             raise Unknown("%s has a bad grade %r, not one of %s" % (label, r.get("grade"), ", ".join(GRADES)))
+        if "quiet" in r and not isinstance(r["quiet"], bool):
+            raise Unknown("%s: quiet must be true or false" % label)
         covers = r.get("covers")
         if not isinstance(covers, list) or not all(isinstance(g, str) and g for g in covers):
             raise Unknown("%s needs a covers list of globs" % label)

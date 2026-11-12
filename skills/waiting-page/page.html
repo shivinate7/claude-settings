@@ -3912,7 +3912,7 @@ const rows = Array.isArray(H.rows) ? H.rows : null;
 // The build's grade words (red, amber, grey, green) and the mark class each one draws.
 const GRADES = [["red", "bad", "Broken"], ["amber", "iss", "Has issues"], ["grey", "unm", "Not measured"], ["green", "ok", "Healthy"]];
 const CLS = Object.fromEntries(GRADES.map(([g, c]) => [g, c])), WORD = Object.fromEntries(GRADES.map(([g, , w]) => [g, w]));
-const KIND = { hook: "Hooks", check: "Checks", skill: "Skills" };
+const KIND = { hook: "Hooks", check: "Checks", skill: "Skills", janitor: "Janitor scripts", merge: "Merge scripts" };
 const base = (p) => String(p).replace(/\/$/, "").split("/").pop();
 
 /* The four marks. Healthy: a filled ring with a check. Has issues: a ring half filled. Broken: a filled octagon with a cross.

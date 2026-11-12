@@ -662,8 +662,8 @@ def health_map(repo):
     why unknown. None when the repo holds neither the map nor lint/check_health_map.py: it keeps no health map, so the
     page draws no Health tab. Shape: {"read", "rows": [{"n", "grade", "sees", "why", "gold", "quiet", "mk"}] | None,
     "counts": {grade: n}, "coverage": {"total", "named", "left": {kind: [path]}} | None, "why": None | "unknown (...)",
-    "coverageWhy"}. A map that does not read gives rows None and why; a parts list that does not read gives coverage None
-    and coverageWhy. Neither is ever 0 or clear. Cost: reads the map file and lists three folders of the checkout once."""
+    "coverageWhy"}. In "left" the hook, check and skill keys are always there; janitor and merge appear only when a part is left. A map that does not read gives rows None and why; a parts list that does not read gives coverage None
+    and coverageWhy. Neither is ever 0 or clear. Cost: reads the map file and lists the part folders of the checkout once."""
     path = repo / HEALTH_MAP_REL
     if not path.exists() and not (repo / "lint" / "check_health_map.py").exists():
         return None
@@ -684,7 +684,7 @@ def health_map(repo):
         left = {k: [] for k in HEALTH_KINDS}
         for part in parts:
             if not check_health_map.covered(part, doc["rows"]):
-                left[part[0]].append(part[1])
+                left.setdefault(part[0], []).append(part[1])  # janitor and merge keys appear only when a part is left
         coverage = {"total": len(parts), "named": len(parts) - sum(len(v) for v in left.values()), "left": left}
     except check_health_map.Unknown as e:
         coverage_why = "unknown (%s)" % e
