@@ -319,11 +319,13 @@ CHAT_WIDENS_REASON = ("A recommended option never widens what a shared tool acce
                       "repo changes to fit a shared tool, never the tool to fit a repo. Recommend an option "
                       "where the repo changes to match the shared format, and give the widening option no "
                       "(Recommended) label.")
-# Rule `uniform-answered`: when every option but one widens, the ruling has already chosen the one left, so the
-# question is refused with or without a pick. A question whose options all widen is left to `uniform-pick`.
+# Rule `uniform-answered` (docs/decisions/uniform-over-variants.md): when every option but one widens, the
+# ruling has already chosen the one left, so the question is refused with or without a pick. A question whose
+# options all widen passes both rules: `uniform-answered` needs exactly one that does not, `uniform-pick` needs a pick.
 ANSWERED_REASON = ("uniform-over-variants decides this; take the non-widening option. Every option but one widens "
                    "what a shared tool accepts, and the owner ruled that a repo changes to fit a shared tool, so "
-                   "this question is already answered. Do the one option that does not widen; do not ask.")
+                   "this question is already answered. Do the one option that does not widen; do not ask. "
+                   "(decision uniform-over-variants, a repo changes to fit a shared tool, never the tool to fit a repo)")
 # Older sessions still write these words in chat; the mark keeps refusing them. No card, rule text or
 # reason carries them.
 LEGACY_WIDENS_TEXT = "Goes against your uniform ruling (t18)"
@@ -347,8 +349,9 @@ def only_one_stays(widening) -> bool:
 
 
 def widens_answered_hit(data) -> str:
-    """The matched text when a decision's options leave exactly one that is not marked `widens: true`."""
-    if not isinstance(data, dict) or data.get("kind", "decision") != "decision":
+    """The matched text when an open decision's options leave exactly one that is not marked `widens: true`.
+    A closed item passes, as in decision_form_hit."""
+    if not _open_decision(data):
         return ""
     options = data.get("options")
     if not isinstance(options, list):
