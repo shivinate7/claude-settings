@@ -52,8 +52,7 @@ def block_rows(text):
 
 
 def data_for(change=None):
-    data = {f: {"meaning": "What %s holds." % f, "rules": []} for f in FIELDS}
-    data["port"]["rules"] = ["port-question"]
+    data = {f: {"meaning": "What %s holds." % f} for f in FIELDS}
     (change or (lambda d: None))(data)
     return json.dumps(data, indent=2)
 
@@ -105,8 +104,8 @@ class Cases(unittest.TestCase):
     def test_written_block_is_current_and_shaped(self):
         self.assertEqual(self.run_cmd("--check"), (0, "", ""), "a block the script just wrote is not current")
         block = block_of(self.baseline)
-        self.assertIn("| Field | Guard rules | Meaning |", block, "the table header is missing")
-        self.assertIn("`item-field-rendered`", block, "no line names the rule item-field-rendered")
+        self.assertIn("| Field | Meaning |", block, "the table header is missing")
+        self.assertIn("`item-field-rendered`", block.split("\n")[1], "the block's first line does not name the rule")
         self.assertTrue(all(l.startswith("  ") for l in block.split("\n") if l), "a block line lacks the indent")
         self.assertEqual(block_rows(self.baseline), FIELDS, "the rows are not the page's itemFields in order")
 
@@ -122,10 +121,8 @@ class Cases(unittest.TestCase):
     def test_each_problem_is_named_and_refused(self):
         cases = (("a page field with no data entry", FIELDS + ["zzz"], None, ("zzz",)),
                  ("a data field the page does not list", None,
-                  lambda d: d.update(ghost={"meaning": "Not on the page.", "rules": []}), ("ghost",)),
-                 ("an empty meaning", None, lambda d: d["id"].update(meaning=""), ("id",)),
-                 ("a rule PAGE_REASONS does not hold", None, lambda d: d["kind"].update(rules=["no-such-rule"]),
-                  ("kind", "no-such-rule")))
+                  lambda d: d.update(ghost={"meaning": "Not on the page."}), ("ghost",)),
+                 ("an empty meaning", None, lambda d: d["id"].update(meaning=""), ("id",)))
         for why, fields, change, tokens in cases:
             with self.subTest(why):
                 self.put("page.html", self.page_with(fields) if fields else read(REAL["page.html"]))
@@ -181,7 +178,7 @@ class Cases(unittest.TestCase):
         row = [line for line in block_of(read(self.skill)).split("\n") if "| `id` |" in line]
         self.assertEqual(len(row), 1, "the id row is not one line")
         self.assertIn("Same \\| string as the database key.", row[0], "the pipe in the meaning is not escaped")
-        self.assertEqual(len(re.split(r"(?<!\\)\|", row[0].strip())), 5, "a pipe in the meaning splits the row")
+        self.assertEqual(len(re.split(r"(?<!\\)\|", row[0].strip())), 4, "a pipe in the meaning splits the row")
 
     def test_rows_follow_the_page_order(self):
         self.put("page.html", self.page_with(FIELDS[::-1]))
