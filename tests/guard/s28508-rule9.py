@@ -568,6 +568,82 @@ for _name, _prompt in WRITE_FALSE_ALARMS:
         tool="Agent", prompt=_prompt, subagent_type="Explore")
     add("brief-write-needs-writer: Workflow Explore agent with %s is allowed" % _name, "allow",
         tool="Workflow", script=_step_flow(json.dumps(_prompt), "agentType: 'Explore'"))
+# The reader's holes, pinned both ways, in the Agent and the Workflow form. A false alarm is a read-only brief that
+# names a repo file as what it reports on, plans or compares, with no write in it: it must be allowed. Its control is
+# the same shape with the object sent to a file, which the same read-only role is denied for. A bypass is a write
+# order the reader has no word for (add, record, generate, output, draft, log, update), or a lead-in it does not take
+# (remember, "job is to", "be sure to", should). It must be denied for an Explore brief. Its control is the same order
+# to a builder, a writer role, which is allowed. Failure classes: a false deny on a read-only brief, a bypass the reader
+# passes, and a control a writer role or a read-only role must keep.
+WRITE_FALSE_ALARM_PAIRS = (
+    ("reviewer", "Make sure the rule in docs/decisions/x.md matches the code.",
+     "Make sure the rule is saved to docs/decisions/x.md."),
+    ("reviewer", "Make sure the guard in hooks/guard.py refuses it.",
+     "Make sure the verdict is saved to hooks/guard.py."),
+    ("reviewer", "Make a table listing each rule in hooks/guard.py.",
+     "Make a table listing each rule and save it to audit.md."),
+    ("reviewer", "Write a summary listing the flaws in hooks/guard.py.",
+     "Write a summary listing the flaws to audit.md."),
+    ("reviewer", "Create a list naming each caller in hooks/guard.py.",
+     "Create a list naming each caller and save it to audit.md."),
+    ("reviewer", "Write a report describing each gap in docs/x.md.",
+     "Write a report describing each gap to docs/x.md."),
+    ("reviewer", "Write the callers in hooks/guard.py as a list.",
+     "Write the callers to audit.md as a list."),
+    ("reviewer", "Write what you find in hooks/guard.py in your reply.",
+     "Write what you find to audit.md in your reply."),
+    ("Plan", "Make a plan to add a rule to hooks/guard.py.",
+     "Make a plan and save it to plan.md."),
+    ("Plan", "Write a plan to add a test to tests/guard/a.py.",
+     "Write a plan and save it to plan.md."),
+    ("Plan", "Create a plan to move the check to hooks/guard.py.",
+     "Create a plan and save it to plan.md."),
+    ("reviewer", "Write each finding as file, line, what is wrong.",
+     "Write each finding to audit.md as file, line, what is wrong."),
+    ("reviewer", "Write each finding as file:line plus the failing input.",
+     "Write each finding to audit.md plus the failing input."),
+    ("reviewer", "Write what you found in the file in your reply.",
+     "Write what you found to audit.md in your reply."),
+    ("reviewer", "Check whether `age > max_age` holds.",
+     "Check whether `echo x > audit.md` holds."),
+    ("reviewer", "Check that `len(x) > limit` is true.",
+     "Check that `echo x > audit.md` is true."),
+    ("reviewer", "Write the report in the same shape as docs/report.md.",
+     "Write the report in the same shape and save it to docs/report.md."),
+    ("reviewer", "Make the summary as short as README.md.",
+     "Make the summary and save it to README.md."),
+)
+for _role, _prompt, _order in WRITE_FALSE_ALARM_PAIRS:
+    add("brief-write-needs-writer: false alarm, %s brief, %r, is allowed" % (_role, _prompt), "allow",
+        tool="Agent", prompt=_prompt, subagent_type=_role)
+    add("brief-write-needs-writer: false alarm, Workflow %s agent, %r, is allowed" % (_role, _prompt), "allow",
+        tool="Workflow", script=_step_flow(json.dumps(_prompt), "agentType: '%s'" % _role))
+    add("brief-write-needs-writer: control, %s brief, %r, is denied" % (_role, _order), "deny",
+        WRITE_BRIEF, tool="Agent", prompt=_order, subagent_type=_role)
+    add("brief-write-needs-writer: control, Workflow %s agent, %r, is denied" % (_role, _order), "deny",
+        WRITE_BRIEF, tool="Workflow", script=_step_flow(json.dumps(_order), "agentType: '%s'" % _role))
+WRITE_BYPASS_ORDERS = (
+    "Add your findings to docs/audit.md.",
+    "Record your findings in docs/audit.md.",
+    "Generate a report in docs/audit.md.",
+    "Output the findings to out.txt.",
+    "Draft the plan in plan.md.",
+    "Log each finding to ~/x.md.",
+    "Update docs/audit.md with the findings.",
+    "Remember to write the findings to docs/audit.md.",
+    "Your job is to save the findings to docs/audit.md.",
+    "Be sure to write the findings to notes.md.",
+    "The agent should write the findings to notes.md.",
+)
+for _order in WRITE_BYPASS_ORDERS:
+    add("brief-write-needs-writer: bypass, Explore brief, %r, is denied" % _order, "deny", WRITE_BRIEF,
+        tool="Agent", prompt=_order, subagent_type="Explore")
+    add("brief-write-needs-writer: bypass, Workflow Explore agent, %r, is denied" % _order, "deny", WRITE_BRIEF,
+        tool="Workflow", script=_step_flow(json.dumps(_order), "agentType: 'Explore'"))
+    add("brief-write-needs-writer: control, builder brief, %r, is allowed" % _order, "allow",
+        tool="Agent", prompt=_order, subagent_type="builder", model="sonnet")
+    add("brief-write-needs-writer: control, Workflow builder agent, %r, is allowed" % _order, "allow",
+        tool="Workflow", script=_step_flow(json.dumps(_order), "agentType: 'builder', model: 'sonnet'"))
 
 
 # ---- A spawn's brief that orders a discard of the working tree (rule brief-destructive-git, rule
