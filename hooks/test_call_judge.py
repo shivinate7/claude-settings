@@ -61,6 +61,9 @@ Interface the hook must match:
   line, `past-ruling search unknown:`, and never says clear.
 - A relative file_path on an items set or update with no `data`: the file is read against the payload's `cwd`, as
   question_form._write_data reads it, so that write is judged like inline data (the section "a relative file_path").
+- judge-run: each model call of the judge writes one guard.log line, rule judge-run, decision measured, matched
+  `ms= chars= outcome=` with outcome ok, refused, timeout or error. A call whose model process never starts (a token
+  file that cannot be read, or a process that fails to start) writes no such line.
 """
 import atexit
 import json
@@ -227,6 +230,8 @@ def _fake_run(argv, **kwargs):
     prompt = prompt.decode("utf-8", "replace") if isinstance(prompt, bytes) else str(prompt)
     with open(os.environ["CJ_RECORD"], "a", encoding="utf-8") as f:
         f.write(json.dumps({"argv": list(argv), "prompt": prompt}) + "\n")
+    if os.environ.get("CJ_MODEL_NOSTART"):
+        raise FileNotFoundError("claude")  # the attempt is recorded, then the process never starts
     if os.environ.get("CJ_MODEL_TIMEOUT"):
         raise subprocess.TimeoutExpired(argv, kwargs.get("timeout"))  # a model call that runs out of time
     if os.environ.get("CJ_MODEL_FAIL"):
@@ -315,7 +320,15 @@ def write_pass(cfg, session, body):
         f.write(body if isinstance(body, str) else json.dumps(body))
 
 
-def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None):
+def unreadable_token(cfg):
+    """Setup for a case: a token file that opens but is not text. The bytes have no BOM, so no encoding _hook_token
+    tries decodes them. One home: hooks/test_report_guard_remedy.py reuses it."""
+    os.makedirs(os.path.join(cfg, "state"), exist_ok=True)
+    with open(os.path.join(cfg, "state", "hook-token"), "wb") as f:
+        f.write(b"\x81\x82\x83")
+
+
+def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None, extra_env=None, prep=None):
     RUNS[0] += 1
     base = os.path.join(ROOT, "run-%03d" % RUNS[0])
     cfg = os.path.join(base, "config")
@@ -325,11 +338,14 @@ def run_hook(stdin_text, answer=ALLOW, model_fail=False, pass_=None):
         f.write(STUB_SITE)
     if pass_ is not None:  # (session id, override file body): what the owner's prompt would write
         write_pass(cfg, *pass_)
+    if prep is not None:  # the case's own setup of the config folder, such as a token file
+        prep(cfg)
     env = {k: v for k, v in os.environ.items() if not k.startswith("CJ_")}
     env.update({"CLAUDE_CONFIG_DIR": cfg, "PYTHONPATH": STUB_DIR, "CJ_LOADED_DIR": base,
                 "CJ_RECORD": os.path.join(base, "calls.jsonl"), "CJ_ANSWER": answer})
     if model_fail:
         env["CJ_MODEL_FAIL"] = "1"
+    env.update(extra_env or {})
     proc = subprocess.run([sys.executable, HOOK], input=stdin_text, capture_output=True, text=True,
                           encoding="utf-8", errors="replace", env=env, timeout=120)
     return Run(proc, base)
@@ -1689,6 +1705,54 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
           "Unvetted:" in r.reason(), detail(r))
 
 
+# ------------------------------------------------------------------ judge-run lines (one per model call)
+#
+# The judge's model call writes one guard.log line: rule judge-run, decision measured, and matched `ms= chars= outcome=`.
+# The matched field is read by regex from the line, never by a tab split: the one split of guard.log lines is the reader's.
+JUDGE_RUN_LINE = re.compile(r"\tmeasured\tjudge-run\tms=(\d+) chars=(\d+) outcome=(ok|refused|timeout|error)(?:\t|$)")
+
+
+def judge_run_lines(r):
+    return [line for line in r.log.splitlines() if "\tjudge-run\t" in line]
+
+
+def case_judge_run_one_line_per_model_call():
+    for outcome, kwargs in (
+        ("ok", {"answer": ALLOW}),
+        ("refused", {"answer": FLAG}),
+        ("timeout", {"extra_env": {"CJ_MODEL_TIMEOUT": "1"}}),
+        ("error", {"model_fail": True}),
+    ):
+        r = run_hook(spawn_input("builder", model="sonnet"), **kwargs)
+        check("judge-run %s: the spawn made one model call" % outcome, len(r.calls) == 1, detail(r))
+        if len(r.calls) != 1:
+            continue
+        lines = judge_run_lines(r)
+        check("judge-run %s: one judge-run line for the one model call" % outcome, len(lines) == 1, detail(r))
+        if len(lines) != 1:
+            continue
+        found = JUDGE_RUN_LINE.search(lines[0])
+        check("judge-run %s: the matched field is ms= chars= outcome=%s, with no candidates field" % (outcome, outcome),
+              found is not None and found.group(3) == outcome, lines[0])
+        check("judge-run %s: chars is the length of the prompt sent" % outcome,
+              found is not None and int(found.group(2)) == len(r.calls[0]["prompt"]), lines[0])
+
+
+def case_judge_run_none_when_no_model_process_starts():
+    # Controls: the old code writes no judge-run line at all, so these pass on it. They fail once a writer logs a line
+    # before the process check.
+    no_token = run_hook(spawn_input("builder", model="sonnet"), answer=ALLOW, prep=unreadable_token)
+    check("judge-run: an unreadable token file is named, with no model call",
+          "token file could not be read" in no_token.err and no_token.calls == [], detail(no_token))
+    check("judge-run: an unreadable token file writes no judge-run line", judge_run_lines(no_token) == [],
+          detail(no_token))
+    no_start = run_hook(spawn_input("builder", model="sonnet"), answer=ALLOW, extra_env={"CJ_MODEL_NOSTART": "1"})
+    check("judge-run: a model process that fails to start is named, after one attempt",
+          "model subprocess failed to start" in no_start.err and len(no_start.calls) == 1, detail(no_start))
+    check("judge-run: a model process that fails to start writes no judge-run line",
+          judge_run_lines(no_start) == [], detail(no_start))
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -1714,7 +1778,8 @@ def main():
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
                  case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
                  case_page_relative_file_path_reaches_the_review, case_page_relative_file_path_passing_item_passes,
-                 case_page_absolute_file_path_is_judged):
+                 case_page_absolute_file_path_is_judged, case_judge_run_one_line_per_model_call,
+                 case_judge_run_none_when_no_model_process_starts):
         try:
             case()
         except Exception as exc:

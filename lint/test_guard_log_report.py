@@ -1415,6 +1415,209 @@ class PastRulingRunSummaryTests(unittest.TestCase):
         self.assertEqual(fields.get("max chars"), "1099", "summary field max chars: %r" % fields)
         self.assertEqual(fields.get("timeouts"), "9", "timeouts at 100..900 are nine: %r" % fields)
 
+    def test_two_runs_median_is_the_mean_of_the_middle_pair(self):
+        self.write([past_run(self.today, 100, 500, "ok"), past_run(self.today, 300, 900, "ok")])
+        fields = self.summary(1)
+        self.assertEqual(fields.get("median ms"), "200", "runs at 100 and 300 ms have a median of 200: %r" % fields)
+
+    def test_even_full_size_log_median_is_the_mean_of_the_middle_pair(self):
+        self.write([past_run(self.today, 2 * ms, 100, "ok") for ms in range(1, 1001)])
+        fields = self.summary(1)
+        self.assertEqual(fields.get("count"), "1000", "scope: a 1000-run log did not count every run: %r" % fields)
+        self.assertEqual(fields.get("median ms"), "1001", "runs at 2..2000 ms: the median is the mean of 1000 and 1002: %r"
+                         % fields)
+
+    def test_empty_window_prints_n_a_for_median_and_max(self):
+        self.write([self.today + "\tStop\tdeny\tshared-tree\tgit stash", past_run(self.old, 50, 60, "ok")])
+        fields = self.summary(1)
+        self.assertEqual(fields.get("count"), "0", "scope: the window counted runs: %r" % fields)
+        self.assertEqual(fields.get("median ms"), "n/a", "an empty window printed a number for median ms: %r" % fields)
+        self.assertEqual(fields.get("max ms"), "n/a", "an empty window printed a number for max ms: %r" % fields)
+
+    def test_zero_byte_log_prints_n_a_for_median_and_max(self):
+        open(self.path, "w", encoding="utf-8").close()
+        fields = self.summary(1)
+        self.assertEqual(fields.get("count"), "0", "scope: a zero-byte log did not count zero runs: %r" % fields)
+        self.assertEqual(fields.get("median ms"), "n/a", "a zero-byte log printed a number for median ms: %r" % fields)
+        self.assertEqual(fields.get("max ms"), "n/a", "a zero-byte log printed a number for max ms: %r" % fields)
+
+
+def judge_run(when, ms, chars, outcome):
+    """A judge-run line as call_judge writes it: tool PreToolUse, decision measured, and the three matched fields."""
+    return "%s\tPreToolUse\tmeasured\tjudge-run\tms=%d chars=%d outcome=%s" % (when, ms, chars, outcome)
+
+
+JUDGE_RULE = "judge-run"
+
+
+class DefaultReadTests(unittest.TestCase):
+    """The default read (no --rule) counts the rules in its table and prints other verdicts verbatim under other. A
+    past-ruling-run or judge-run line is counted only by its own --rule read, so the default read prints neither."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+        self.path = os.path.join(self.folder, "guard.log")
+        self.today = datetime.now().astimezone().isoformat(timespec="seconds")
+
+    def report(self, lines):
+        write_log(self.path, lines)
+        rc, out = run_main(["--log", self.path])
+        self.assertEqual(rc, 0, "the default read exited %d" % rc)
+        return out
+
+    def test_past_ruling_run_line_is_not_printed_raw(self):
+        line = past_run(self.today, 120, 800, "ok")
+        out = self.report([line])
+        self.assertNotIn(line, out, "the default read printed a past-ruling-run line raw, under other")
+
+    def test_judge_run_line_is_not_printed_raw(self):
+        line = judge_run(self.today, 120, 800, "ok")
+        out = self.report([line])
+        self.assertNotIn(line, out, "the default read printed a judge-run line raw, under other")
+
+    def test_other_verdicts_stay_verbatim_and_a_deny_still_counts(self):
+        reverted = stamped(0, "reverted", "shared-tree", "git stash drop")
+        probe = stamped(0, "measured", "probe-rule", "ms=1")
+        out = self.report([stamped(0, "deny", "shared-tree", "git stash"), reverted, probe])
+        self.assertIn(reverted, out, "a reverted line is no longer printed under other")
+        self.assertIn(probe, out, "a measured line of another rule is no longer printed under other")
+        self.assertEqual(rule_table(out)["shared-tree"]["deny"], "1", "the deny line is not counted in the table")
+
+
+class JudgeRunSummaryTests(unittest.TestCase):
+    """`guard_log_report.py --rule judge-run --days N` prints the summary of the judge's model calls in the window, with
+    the same labels as --rule past-ruling-run. Only judge-run lines are counted."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp(dir=RUN_FOLDER)
+        self.path = os.path.join(self.folder, "guard.log")
+        now = datetime.now().astimezone()
+        self.today = now.isoformat(timespec="seconds")
+        self.old = (now - timedelta(days=3)).isoformat(timespec="seconds")
+
+    def summary(self, lines, days):
+        write_log(self.path, lines)
+        rc, out = run_main(["--log", self.path, "--days", str(days), "--rule", JUDGE_RULE])
+        self.assertEqual(rc, 0, "the judge-run read exited %d" % rc)
+        return summary_fields(out)
+
+    def test_rule_judge_run_prints_the_summary_of_judge_runs_only(self):
+        fields = self.summary([
+            judge_run(self.today, 100, 500, "ok"),
+            judge_run(self.today, 300, 900, "refused"),
+            judge_run(self.today, 200, 700, "timeout"),
+            past_run(self.today, 9999, 9999, "timeout"),  # past-ruling-run: another rule, not counted
+            judge_run(self.old, 9999, 9999, "timeout"),  # three days back: outside --days 1
+        ], 1)
+        self.assertEqual(fields.get("count"), "3", "summary field count: %r" % fields)
+        self.assertEqual(fields.get("median ms"), "200", "summary field median ms: %r" % fields)
+        self.assertEqual(fields.get("max ms"), "300", "summary field max ms: %r" % fields)
+        self.assertEqual(fields.get("max chars"), "900", "summary field max chars: %r" % fields)
+        self.assertEqual(fields.get("timeouts"), "1", "summary field timeouts: %r" % fields)
+
+    def test_full_size_log_counts_every_judge_run(self):
+        fields = self.summary([judge_run(self.today, ms, 100 + ms, "timeout" if ms % 100 == 0 else "ok")
+                               for ms in range(1, 1000)], 1)
+        self.assertEqual(fields.get("count"), "999", "a 999-run log did not count every judge run: %r" % fields)
+        self.assertEqual(fields.get("median ms"), "500", "median of 1..999 is 500: %r" % fields)
+        self.assertEqual(fields.get("max chars"), "1099", "summary field max chars: %r" % fields)
+        self.assertEqual(fields.get("timeouts"), "9", "timeouts at 100..900 are nine: %r" % fields)
+
+    def test_empty_window_prints_n_a_for_median_and_max(self):
+        fields = self.summary([judge_run(self.old, 50, 60, "ok")], 1)
+        self.assertEqual(fields.get("count"), "0", "--rule judge-run printed no count of 0 for a window with no run: %r"
+                         % fields)
+        self.assertEqual(fields.get("median ms"), "n/a", "an empty window printed a number for median ms: %r" % fields)
+        self.assertEqual(fields.get("max ms"), "n/a", "an empty window printed a number for max ms: %r" % fields)
+
+
+def record_sites(source):
+    """(enclosing function, rule) for each `guard_core.record(...)` call in a source, read with `ast`. The rule is the
+    string literal at the rule position, the module-level string constant it names, or None for a variable."""
+    tree = ast.parse(source)
+    constants = {}
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign) and isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str):
+            for target in stmt.targets:
+                if isinstance(target, ast.Name):
+                    constants[target.id] = stmt.value.value
+    enclosing = {}
+    for node in ast.walk(tree):  # breadth first, so an inner def's calls are set after its outer def's
+        if isinstance(node, ast.FunctionDef):
+            for inner in ast.walk(node):
+                if isinstance(inner, ast.Call):
+                    enclosing[id(inner)] = node.name
+    sites = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "record" \
+                and "guard_core" in ast.unparse(node.func.value) and len(node.args) > 2:
+            rule = node.args[2]
+            if isinstance(rule, ast.Constant) and isinstance(rule.value, str):
+                value = rule.value
+            elif isinstance(rule, ast.Name):
+                value = constants.get(rule.id)
+            else:
+                value = None
+            sites.append((enclosing.get(id(node)), value))
+    return sites
+
+
+JUDGE_RULES = ("past-ruling-run", JUDGE_RULE)
+HOOK_JUDGE = os.path.join(REPO_ROOT, "hooks", "call_judge.py")
+
+
+class RecordHomeTests(unittest.TestCase):
+    """The writer of the past-ruling-run and judge-run lines has one home: hooks/call_judge.py record_judge_run, which
+    both checks call. The scanner is pinned on the shapes a text scanner gets wrong."""
+
+    def test_scanner_finds_a_literal_rule_in_its_function(self):
+        src = 'def f(t):\n    guard.guard_core.record("Stop", "measured", "past-ruling-run", "m")\n'
+        self.assertEqual(record_sites(src), [("f", "past-ruling-run")])
+
+    def test_a_comment_opener_inside_a_string_hides_no_site(self):
+        src = ('def f():\n    x = "# not a comment /* nor this //"\n'
+               '    guard.guard_core.record("Stop", "measured", "judge-run", "ms=1")\n')
+        self.assertEqual(record_sites(src), [("f", "judge-run")])
+
+    def test_a_multi_line_string_that_describes_a_call_names_no_site(self):
+        src = ('DOC = """\nguard.guard_core.record("Stop", "measured", "ghost-run", "m")\n"""\n'
+               'def f():\n    guard.guard_core.record("Stop", "measured", "judge-run", "m")\n')
+        self.assertEqual(record_sites(src), [("f", "judge-run")])
+
+    def test_a_lone_quote_in_text_hides_no_site(self):
+        src = "# don't stop here\ndef f():\n    guard.guard_core.record(\"Stop\", \"measured\", \"judge-run\", \"m\")\n"
+        self.assertEqual(record_sites(src), [("f", "judge-run")])
+
+    def test_a_module_constant_resolves_to_its_rule(self):
+        src = 'RULE = "past-ruling-run"\ndef f():\n    guard.guard_core.record("Stop", "measured", RULE, "m")\n'
+        self.assertEqual(record_sites(src), [("f", "past-ruling-run")])
+
+    def test_a_variable_rule_names_no_literal(self):
+        self.assertEqual(record_sites('def f(rule):\n    guard.guard_core.record("Stop", "measured", rule, "m")\n'),
+                         [("f", None)])
+
+    def test_past_ruling_and_judge_run_are_written_only_by_record_judge_run(self):
+        offenders = []
+        for folder in ("hooks", "lint"):
+            base = os.path.join(REPO_ROOT, folder)
+            for name in sorted(os.listdir(base)):
+                if not name.endswith(".py") or name.startswith("test_"):
+                    continue
+                with open(os.path.join(base, name), encoding="utf-8") as handle:
+                    sites = record_sites(handle.read())
+                for function, rule in sites:
+                    if rule in JUDGE_RULES and (folder + "/" + name, function) != ("hooks/call_judge.py",
+                                                                                 "record_judge_run"):
+                        offenders.append("%s/%s in %s" % (folder, name, function))
+        self.assertEqual(offenders, [], "a guard_core.record call writes a judge line outside record_judge_run: %s"
+                         % offenders)
+
+    def test_record_judge_run_holds_the_one_record_call(self):
+        with open(HOOK_JUDGE, encoding="utf-8") as handle:
+            sites = record_sites(handle.read())
+        inside = [rule for function, rule in sites if function == "record_judge_run"]
+        self.assertEqual(len(inside), 1, "record_judge_run holds %d guard_core.record calls, not one" % len(inside))
+
 
 def tearDownModule():
     shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder

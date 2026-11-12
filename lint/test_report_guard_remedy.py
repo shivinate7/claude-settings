@@ -611,10 +611,13 @@ class PastRulingRunLogTests(trg.SameTurnWriter, unittest.TestCase):
         return case([trg.human("decide"), *self.sent_to_writer(), trg.assistant_text(trg.RELAY)], "past-ruling",
                     repo, env=env)
 
-    def run_logged(self, env=None, cwd=None, config=None):
-        """Run the question case with its own call record and config folder (`config` when given). Return what the
-        hook printed and the folder the call record and guard.log are read from."""
+    def run_logged(self, env=None, cwd=None, config=None, prep=None):
+        """Run the question case with its own call record and config folder (`config` when given). `prep`, when given,
+        sets up that folder first. Return what the hook printed and the folder the call record and guard.log are read
+        from."""
         folder = tempfile.mkdtemp(dir=trg.RUN_FOLDER)
+        if prep is not None:
+            prep(folder)
         c = self.question_case(env=env, cwd=cwd)
         c["env"].update(CLAUDE_CONFIG_DIR=config or folder, CJ_RECORD=os.path.join(folder, "calls.jsonl"))
         return self.run_stop(c), folder
@@ -706,6 +709,22 @@ class PastRulingRunLogTests(trg.SameTurnWriter, unittest.TestCase):
         self.fields_of(rows[0])
         for private in PRIVATE_TEXT:
             self.assertNotIn(private, rows[0].line, "the log line holds asked or ruling text: %r" % private)
+
+    def test_no_line_when_the_token_file_cannot_be_read(self):
+        # The model process never starts: invoke_model returns before any call, so the line has no call to measure.
+        out, folder = self.run_logged(prep=tcj.unreadable_token)
+        self.assertEqual(out.get("decision"), "block", "scope: the unreadable token did not refuse: %r" % out)
+        self.assertIn("token file could not be read", out.get("reason", ""),
+                      "scope: the refusal does not name the token error: %r" % out)
+        self.assertEqual(self.stub_prompts(folder), [], "scope: a model call was made with no token file read")
+        self.assertEqual(self.run_rows(folder), [], "a past-ruling-run line for a model process that never started")
+
+    def test_no_line_when_the_model_process_fails_to_start(self):
+        out, folder = self.run_logged(env={"CJ_MODEL_NOSTART": "1"})
+        self.assertIn("model subprocess failed to start", out.get("reason", ""),
+                      "scope: the refusal does not name the start failure: %r" % out)
+        self.assertEqual(len(self.stub_prompts(folder)), 1, "scope: the start failure was not one attempted call")
+        self.assertEqual(self.run_rows(folder), [], "a past-ruling-run line for a model process that never started")
 
 
 if __name__ == "__main__":
