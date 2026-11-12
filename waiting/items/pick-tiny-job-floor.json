@@ -4,6 +4,11 @@
   "home": "step time-limits-end-hangs-only",
   "id": "pick-tiny-job-floor",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T21:26:00Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 587,
   "options": [
     {
@@ -31,11 +36,11 @@
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
   "pick": "a",
   "ref": "coordinator pick, Nov 12, 12:22 CST",
-  "reply": "Since a cut run now raises the limit, b (no floor) costs at most one cut run per short job.",
+  "reply": "Closed 15:31 CST: you kept the pick; a short job's limit is never below the median of all limits.",
   "repo": "shivinate7/claude-settings",
   "short": "Lowest CI time limit for a very short job",
   "stands": true,
-  "status": "open",
+  "status": "closed",
   "title": "Lowest CI time limit for a very short job",
   "why": "A coordinator pick you could not see before."
 }

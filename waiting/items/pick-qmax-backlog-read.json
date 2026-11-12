@@ -4,6 +4,11 @@
   "home": "step pr-backlog-clear",
   "id": "pick-qmax-backlog-read",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T21:28:00Z",
+    "choice": "a",
+    "note": "i thought a lot of q_max prs were from sessions that had their work paused"
+  },
   "n": 604,
   "options": [
     {
@@ -24,11 +29,11 @@
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
   "pick": "a",
   "ref": "coordinator pick, Nov 12, 12:51 CST",
-  "reply": "Runner 11's verdict (12:53 CST): q_max PR #1011 is revived as lane qmax-1011-carry for its two missing parts; the other 10 q_max PRs stay open.",
+  "reply": "Closed 15:35 CST: you kept the pick. Your note went to batch runner 11: an old q_max PR whose session was paused is revived as a lane, never closed, and each verdict says whether the work was paused.",
   "repo": "shivinate7/claude-settings",
   "short": "Runner 11 judges q_max's old PRs",
   "stands": true,
-  "status": "open",
+  "status": "closed",
   "title": "Batch runner 11 reads q_max's old PRs and gives a verdict on each",
   "why": "A coordinator pick you could not see before."
 }

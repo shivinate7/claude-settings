@@ -1,33 +1,55 @@
 {
   "added": "2026-11-12T18:53:00Z",
-  "context": "Goal: the work goes on now, and you can overrule any coordinator pick.\nProblem (goal): the coordinator took this undoable pick on Nov 12, 12:51 CST without asking you; it stands unless you choose b.\nBased on (ruling): rules building-never-drop-item-silently (never drop an item without saying so) and shared-trees-archive-then-delete (save a branch to an archive copy before deleting it), cited by the coordinator.\nDeparts from: main has no such pick on record \u2014 19 old claude-settings PRs are checked one by one before any closes.",
+  "context": "Goal: old claude-settings PRs whose work is done or dropped leave the list, and no wanted work is lost.\nProblem (goal): the lane's test, \"every change is elsewhere\", counts a change as covered when the PR that replaced it holds it, even if that PR was itself closed on purpose and never reached main.\nBased on (notes): your 15:26 CST page note: what if PRs were intentionally closed without the work reaching main?\nBased on (read): the lane compares each of the 19 old PRs with main and with the PR that replaced it.\nDeparts from: main \u2014 19 old PRs stay open; the lane closes the ones it finds covered.",
   "home": "step pr-backlog-clear",
   "id": "pick-old-prs-diff-close",
   "kind": "decision",
   "n": 605,
   "options": [
     {
-      "gain": "No change is lost, and every old PR that is fully covered goes away.",
-      "how": "The PR backlog lane compares each of the 19 old claude-settings PRs with main and with the PR that replaced it. It closes one only when every change is elsewhere, after saving its branch as an archive copy; the rest stay open with their missing files listed. Undo: reopen.",
+      "gain": "Nothing you still want is lost, and work dropped on purpose leaves the list too.",
+      "how": "The lane closes an old PR only when each change is on main, or a record says it was dropped on purpose. A replacing PR counts only if it merged. It saves the branch as an archive copy first, and lists the rest for you with what is missing. Undo: reopen.",
+      "id": "main-or-recorded-drop",
       "key": "a",
-      "label": "Keep the pick (Recommended)",
-      "lose": "The other route is not taken unless you choose b."
+      "label": "Main or a recorded drop (Recommended)",
+      "lose": "An old PR whose drop was never written down stays open until you look."
     },
     {
       "gain": "Nothing closes without you.",
-      "how": "Leave all 19 open until you look at them.",
+      "how": "All 19 stay open until you look at them.",
+      "id": "leave-all-open",
       "key": "b",
-      "label": "Overrule it",
+      "label": "Leave all open",
+      "links": [
+        {
+          "label": "claude-settings open PRs",
+          "url": "https://github.com/shivinate7/claude-settings/pulls"
+        }
+      ],
       "lose": "19 old PRs keep cluttering the list."
+    },
+    {
+      "gain": "You see every PR before it closes.",
+      "how": "The lane lists all 19, each marked on main, dropped on purpose, or missing, and you choose per PR.",
+      "id": "list-for-you",
+      "key": "c",
+      "label": "List each for you",
+      "links": [
+        {
+          "label": "claude-settings open PRs",
+          "url": "https://github.com/shivinate7/claude-settings/pulls"
+        }
+      ],
+      "lose": "19 picks for you."
     }
   ],
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
   "pick": "a",
-  "ref": "coordinator pick, Nov 12, 12:51 CST",
+  "ref": "coordinator pick, Nov 12, 12:51 CST; reworded 15:31 CST after your 15:26 CST note",
   "repo": "shivinate7/claude-settings",
-  "short": "Old PRs close only when nothing is lost",
+  "short": "Which old PRs close",
   "stands": true,
   "status": "open",
-  "title": "An old PR closes only when every change it holds is already elsewhere",
+  "title": "An old PR closes only when its work is on main or was dropped on purpose",
   "why": "A coordinator pick you could not see before."
 }

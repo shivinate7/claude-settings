@@ -4,6 +4,11 @@
   "home": "lane owner-override-one-route",
   "id": "pick-override-rows-one-lane",
   "kind": "decision",
+  "lastAnswer": {
+    "at": "2026-11-12T21:26:00Z",
+    "choice": "a",
+    "note": ""
+  },
   "n": 603,
   "options": [
     {
@@ -24,10 +29,11 @@
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
   "pick": "a",
   "ref": "coordinator pick, Nov 12, 12:51 CST",
+  "reply": "Closed 15:31 CST: you kept the pick; the three override-length rows stay with the override lane.",
   "repo": "shivinate7/claude-settings",
   "short": "Override rows go to the override lane",
   "stands": true,
-  "status": "open",
+  "status": "closed",
   "title": "The override-length rows go to the override lane, so two lanes do not edit one file",
   "why": "A coordinator pick you could not see before."
 }
