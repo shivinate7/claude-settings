@@ -4332,12 +4332,13 @@ class SharedTagNames(unittest.TestCase):
 
 
 class DeadPrWaits(UpkeepFixture):
-    """Part (b) of step dead-pr-waits, the check end. The build flags an open step whose text waits on a bare PR
-    number (#N) when the live file's prStates list (the publisher's one read per build) shows that PR closed and
-    unmerged. The flag line names the step and the PR, and the build exits 1. A wait with no usable state reads
-    unknown and exits 0, never clean. Matcher: after, waits on, wait on, waiting for, blocked on, once, until,
-    when, then #N. Every not-flagged case sits beside a flagged control in the same build, so a quiet check
-    cannot pass as clean. The read time and the step times are fixed: no case reads the clock."""
+    """Part (b) of step dead-pr-waits, the check end. The build flags an open step whose title, why, note or ask waits
+    on a bare PR number (#N, or PR #N) when the live file's prStates list (the publisher's one read per build) shows
+    that PR closed and unmerged. The flag line names the step and the PR, and the build exits 1. A wait with no usable
+    state reads unknown and exits 0, never clean. A state is usable only when it is open or closed. Matcher: the words
+    of DEAD_PR_WAIT_PHRASES (after, waits on, wait on, waiting for, blocked on, once, until, when). Every not-flagged
+    case sits beside a flagged control in the same build, so a quiet check cannot pass as clean. The read time and the
+    step times are fixed: no case reads the clock."""
 
     READ_AT = "2026-11-12T13:00:00Z"
     CONTROL = "dead-pr-control"
@@ -4514,6 +4515,44 @@ class DeadPrWaits(UpkeepFixture):
         self.add_steps({"wait-open-only": "The lint lane waits on #43."})
         out = self.run_build([{"number": 43, "state": "open", "merged": False}], expect=(0,))
         self.assertEqual(self.flagged(out, "wait-open-only", 43), [], "an open wait was flagged:\n%s" % out)
+
+    BAD_STATES = {42: "CLOSED", 43: "Closed", 44: "OPEN", 45: ""}  # PR number -> a prStates state that is not open or closed
+
+    def test_bad_state_value_reads_unknown(self):
+        """A row whose state is not the lower-case open or closed (gh's CLOSED, Closed, OPEN, or empty) gives no usable
+        state: its wait reads unknown, never clean and never closed. The valid closed control keeps the build at 1."""
+        self.add_steps({"bad-state-%d" % n: "The lint lane waits on #%d." % n for n in self.BAD_STATES})
+        rows = [{"number": n, "state": state, "merged": False} for n, state in self.BAD_STATES.items()]
+        out = self.run_build(rows + [self.CONTROL_PR], expect=(1,))
+        self.assert_control_flagged(out)
+        for n, state in self.BAD_STATES.items():
+            sid = "bad-state-%d" % n
+            with self.subTest(state=state):
+                self.assertTrue([line for line in self.lines_for(out, sid, n) if "unknown" in line],
+                                "the wait on #%d with state %r did not read unknown:\n%s" % (n, state, out))
+                self.assertEqual(self.flagged(out, sid, n), [],
+                                 "the wait on #%d with state %r was flagged closed:\n%s" % (n, state, out))
+
+    def test_bad_state_alone_reads_unknown_and_exits_zero(self):
+        self.add_steps({"bad-alone": "The lint lane waits on #42."})
+        out = self.run_build([{"number": 42, "state": "CLOSED", "merged": False}], expect=(0,))
+        self.assertTrue([line for line in self.lines_for(out, "bad-alone", 42) if "unknown" in line],
+                        "the wait on #42 with state 'CLOSED' did not read unknown:\n%s" % out)
+        self.assertEqual(self.flagged(out, "bad-alone", 42), [], "the wait on #42 with state 'CLOSED' was flagged closed:\n%s" % out)
+
+    def test_pr_form_wait_flags_a_closed_wait(self):
+        """`PR #N` after a wait word is a wait too: the legacy WAIT_ON_PULL reads it, so the build must."""
+        self.add_steps({"pr-form": "Start once PR #1120 merges."})
+        out = self.run_build([{"number": 1120, "state": "closed", "merged": False}, self.CONTROL_PR])
+        self.assert_control_flagged(out)
+        self.assertTrue(self.flagged(out, "pr-form", 1120), "the PR-form wait on closed #1120 was not flagged:\n%s" % out)
+
+    def test_wait_in_ask_flags_a_closed_wait(self):
+        """The ask field is step text too, as title, why and note are: a wait in it on a closed unmerged PR is flagged."""
+        self.add_steps({"ask-wait": "Brief is written."}, ask="The lint lane waits on #42.")
+        out = self.run_build([self.CLOSED, self.CONTROL_PR])
+        self.assert_control_flagged(out)
+        self.assertTrue(self.flagged(out, "ask-wait", 42), "a wait in the ask field on closed #42 was not flagged:\n%s" % out)
 
 
 if __name__ == "__main__":
