@@ -1279,9 +1279,10 @@ RECORD_REASON = (
     "cs-build:triage, same cs-repo). If this session is triage: run get_session (no argument) alone in its "
     "own turn, then retry. A lane may push only its own roadmap/outbox/<slug>-handoff.md, as plain commits that "
     "each add or change that file alone, with no force, lease or tags. If the lane's push was refused for that "
-    "form: fetch the record branch's origin tip (a single-branch clone widens its fetch refspec first), fix the "
-    "commits, then retry the handoff push. (decision session-tiers, the triage session is the only writer of the "
-    "record branch)"
+    "form: fetch the record branch's origin tip (a single-branch clone widens its fetch refspec first), then rebase "
+    "the commits onto that tip, with no merge commit, since a pull's merge commit is refused. Make each commit in its "
+    "own call first, then retry the handoff push in a later call: a push chained after a commit is read before that "
+    "commit exists. (decision session-tiers, the triage session is the only writer of the record branch)"
 )
 
 
