@@ -1106,7 +1106,7 @@ MALFORMED_CORPORA = (
 )
 
 
-def case_feedback_hit_on_any_candidate_reads_deny():
+def case_feedback_hit_on_any_candidate_reads_refuse():
     """feedback_guard: a repeat is a hit on any candidate, not only on the older message the case names. The controls run
     first: a hit on the first older message reads deny on every row, and an empty list reads every allow row allow. Then
     a hit on the second older message must read deny on every row, since each feedback case has that candidate."""
@@ -1217,7 +1217,7 @@ CASES = (case_seam_control, case_corpora, case_corpus_not_under_hooks, case_scop
          case_pending_judge_missing_or_empty_corpus_reads_no_cases,
          case_pending_judge_with_cases_runs_its_rows, case_pending_exemption_follows_the_pending_table,
          case_changed_page_judge_file_runs_no_page_cases,
-         case_feedback_hit_on_any_candidate_reads_deny, case_opus_scope_fail_open_answer_reads_no_verdict,
+         case_feedback_hit_on_any_candidate_reads_refuse, case_opus_scope_fail_open_answer_reads_no_verdict,
          case_scope_helpers_touch_the_judges_they_feed, case_malformed_corpus_exits_1_and_names_judge_and_path)
 
 
