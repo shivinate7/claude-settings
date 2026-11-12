@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 from guard_core import (
     SHELL_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
     dir_before_segment, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
-    is_cloud, strip_heredoc_bodies, strip_redirections,
+    is_cloud, strip_heredoc_bodies, strip_redirections, walk_quotes,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import BUILD_TAG, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
@@ -1232,18 +1232,39 @@ def repo_proof_hit(stripped: str, cwd: str, transcript: str) -> str:
 MERGE_NEST_DEPTH = 4  # `bash -c` inside `bash -c` is followed this far; a deeper script is judged as a refusal
 
 
-def _head_is_substitution(segment: str) -> bool:
-    """True when the segment's --head value (`--head V` or `--head=V`) starts a command substitution, `$(` or a backtick, quoted or bare.
-    A segment that does not tokenize says no, so the refusal keeps the repo remedy."""
-    tokens = segment_tokens(segment) or []
-    for number, token in enumerate(tokens):
-        if token.startswith("--head="):
-            value = token[len("--head="):]
-        elif token == "--head" and number + 1 < len(tokens):
-            value = tokens[number + 1]
-        else:
+def _raw_words(segment: str):
+    """The segment's words as written, quotes and escapes kept: (text, runs) pairs, where `runs` is True when bash would run a command
+    substitution inside the word, an unquoted or double-quoted `$(` or backtick that no backslash escapes. A single-quoted one, an
+    escaped one and one inside `$'...'` are text. Quote state comes from walk_quotes, the one quote walk (an escape `\\x` is one step,
+    so the escaped character is never read as a `$` or a backtick)."""
+    words, first, runs = [], None, False
+    for at, char, quote in walk_quotes(segment):
+        if not quote and char.isspace():
+            if first is not None:
+                words.append((segment[first:at], runs))
+            first, runs = None, False
             continue
-        if value.startswith(("$(", "`")):
+        if first is None:
+            first = at
+        if quote in ("", '"') and (char == "`" or (char == "$" and segment[at + 1:at + 2] == "(")):
+            runs = True
+    if first is not None:
+        words.append((segment[first:], runs))
+    return words
+
+
+def _head_is_substitution(segment: str) -> bool:
+    """True when the segment's --head value (`--head V` or `--head=V`) holds a command substitution bash would run, `$(` or a backtick,
+    bare, double-quoted or after other text. It reads the raw words, so `'$(x)'` and `\\$(x)` (literal text) say no and the refusal
+    keeps the repo remedy. A segment that does not tokenize says no too."""
+    if segment_tokens(segment) is None:
+        return False
+    words = _raw_words(segment)
+    for number, (text, runs) in enumerate(words):
+        if text.startswith("--head="):
+            if runs:
+                return True
+        elif text == "--head" and number + 1 < len(words) and words[number + 1][1]:
             return True
     return False
 
