@@ -36,7 +36,7 @@ hour) or a size unit (B, KB, MB, GB), line references (`name.ext:123`), "Round N
 "of" is no count. A claim passes when its sentence holds a bound (at most, up to, no more than, never more than, capped
 at, max, fewer, at least), says
 "not pinned", "unpinned", "unmeasured" or "no test", or holds a test-name candidate that exists under the root and
-holds, as a whole name, the code span nearest the count word. A test-name span is never the nearest span. A sentence
+holds, as a whole name, the code span nearest the count word. A pin candidate (a test file name) never counts. A sentence
 with no other code span passes on no test: it needs a bound or a mark. A sentence with a claim that passes none of
 these is one finding, on the line of its count word: `<record>:<line>: count in a Cost sentence with no reader`.
 
@@ -214,6 +214,11 @@ def is_test_name(token):
     return bool(TEST_NAME.match(basename(bare(token))))
 
 
+def is_candidate(token):
+    """A pin candidate: a test file name with an extension, as opposed to a test function name."""
+    return is_test_name(token) and bool(EXTENSION.search(basename(bare(token))))
+
+
 def is_file(token):
     plain = PLACEHOLDER.sub("X", bare(token))
     if re.search(r"\s", plain) or is_test_name(token):
@@ -294,7 +299,7 @@ def has_reader(sentence, start, end, candidates, root, texts):
     if BOUND.search(sentence.blanked):
         return True
     near = [(min(abs(a - end), abs(start - b)), k) for k, (a, b) in enumerate(sentence.blanks)
-            if not is_test_name(sentence.spans[k][0])]
+            if not is_candidate(sentence.spans[k][0])]
     if not near:
         return False
     return pinned(sentence.spans[min(near)[1]][0], candidates, root, texts)
@@ -320,7 +325,7 @@ def check(root):
             for sentence in sentences:
                 if EXEMPT.search(sentence.text):
                     continue
-                candidates = [t for t, _ in sentence.spans if is_test_name(t) and EXTENSION.search(basename(bare(t)))]
+                candidates = [t for t, _ in sentence.spans if is_candidate(t)]
                 for token, number in sentence.spans:
                     row = (record, number, token, "%s named in a Cost sentence with no pin" % token)
                     if is_file(token) and row not in findings and not pinned(token, candidates, root, texts):
