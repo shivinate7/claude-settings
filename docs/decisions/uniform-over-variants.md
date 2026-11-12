@@ -12,7 +12,7 @@ Owner, 2026-10-27 12:51 CDT, topic t18 (one home, then variants): when a repo di
   - Cost: no new process. It runs inside the guard process that every `ArtifactData` call already starts. It writes no file unless it denies.
   - Known limit: an update that sets `pick` without `options` cannot see the stored options and passes. The writer carries `options` again on such an update.
   - Known limit: the guard reads the `widens` mark, not the option's text. An unmarked widening option passes this rule. The call judge is the backstop.
-- Guard rule `uniform-answered` (same files) refuses a waiting-page item, and a chat question box, whose options leave exactly one that does not widen: the ruling already chose it, so the question is refused with or without a pick. Built by step `widening-question-not-asked`.
+- Guard rule `uniform-answered` (same files) refuses a waiting-page item, and a chat question box, whose options leave exactly one that does not widen: the ruling already chose it, so the question is refused with or without a pick. Built by step `widening-question-not-asked`. It also refuses a question that asks the owner to revisit this ruling; he raises a revisit himself in chat (owner, 2026-11-12 15:46 CST, page item 643 a).
   - It judges an open decision of two or more options, from the `widens` mark (page) or the ruling's words in the option (chat). A closed item passes, as in rule `question-form`.
   - An item whose options all widen passes it and is left to `uniform-pick`.
   - Cost and limits: as for `uniform-pick`.
