@@ -1791,6 +1791,21 @@ test("pending cite: with cite.scanGlobs unset, the printed fix keeps the default
     assert.equal(read(root, "README.md"), "See D-002, p for the plan.\n", "README.md is no longer scanned after the printed list was applied");
   }));
 
+// A file that scanGlobs names and an excludeGlobs entry covers needs one step: narrow that entry. Dropping
+// the entry would also scan the folder's other files, and a plain cite in one of them would then refuse.
+test("pending cite: --claim on a file that only an excludeGlobs entry covers says narrow the entry, and does not say drop", () =>
+  withTempDir((root) => {
+    pendingCiteRepo(root, EXCLUDE_WINS, { [BLOCK]: BLOCK_TEXT });
+    assert.deepEqual(JSON.parse(read(root, ".github/stamp.json")).cite.scanGlobs, EXCLUDE_WINS.scanGlobs, "scope: scanGlobs must name the file's glob, so only the exclude entry covers it");
+
+    const r = runStamp(root, ".github/stamp.json", "claim");
+    const out = outputOf(r);
+    assert.notEqual(r.status, 0, `--claim exited 0 with a pending cite inside an excludeGlobs entry:\n${out}`);
+    assert.match(out, /plugins\/_shared\/fidelity\.block:3/, `--claim named no file and line:\n${out}`);
+    assert.match(out, /\bnarrow\b/i, `--claim's fix for an excluded file does not say narrow the entry:\n${out}`);
+    assert.doesNotMatch(out, /\bdrop\b/i, `--claim's fix for an excluded file says drop the entry, which also scans the folder's other files:\n${out}`);
+  }));
+
 // The cite scanner reads text, so the cases that break a naive scanner go in: a comment opener
 // inside a string, a multi-line template literal, and a lone quote in prose. Each cite sits outside
 // scanGlobs and must still refuse at its own line. The refusal reads a cite as the rewrite does, so
