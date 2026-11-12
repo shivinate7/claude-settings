@@ -31,11 +31,13 @@
     }
   ],
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "pick": "c",
   "rank": 1,
   "ref": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "reply": "Answered in the retrospective's chat at 19:49 CST: \"c is prob best\". The merge tool reads main's ruleset first and the old protection second, and it lands before the sweep removes any old protection. Once every repo has a ruleset, the old read is deleted. The grant stays as written. Home: step merge-reads-ruleset (it rewrites decision main-branch-protection); plan restart-plan 1cce54a, R45.",
   "repo": "shivinate7/claude-settings",
   "short": "ruleset vs merge tool",
-  "status": "open",
+  "status": "closed",
   "title": "When main moves to a ruleset, may the old branch protection go?",
   "why": "The ruleset grant you gave at 16:43 CST would let a sweep remove the protection the merge tool reads (measured 2026-11-11, the merge tool on main at 19:47 CST)."
 }
