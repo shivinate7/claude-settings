@@ -680,6 +680,14 @@ if _UNNAMED or _BAD_LOG:
 SKIP = "skip"
 
 
+def outside_form(reason):
+    """The reason with each BRIEF_ROLE_FORM prefix taken out, so a role named only inside the expected form does
+    not count as named. BRIEF_ROLE_FORM is set by the lane-one-topic section, which loads before any case runs."""
+    for prefix in BRIEF_ROLE_FORM:
+        reason = reason.replace(prefix, " ")
+    return reason
+
+
 def run_cases():
     mode = os.environ.get("GUARD_TESTS", "")
     if mode not in GUARD_TESTS_MODES:
