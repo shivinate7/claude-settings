@@ -4,6 +4,6 @@
 
 **Where.** `merge/merge.py` `guard_hits`; the three files above.
 
-**Decision.** pr-review-record.
+**Decision.** pr-review-record (what the merge tool's review record checks before a merge).
 
 **Retire.** Count a change to the guarded part only. Parse the `itemFields` block and the Commands table in the PR diff, and count `skills/roadmap/build.py` whole, so that an edit elsewhere in the page is no guard change. The check: a `merge/test_merge.py` case where a PR that edits only the `itemFields` block with Guard `no` is refused, and one that edits only page styles is not.
