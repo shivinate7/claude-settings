@@ -80,6 +80,7 @@ WRITER_RULES = [
     "- Push only with: git push origin HEAD:<branch>.",
     "- Make no gh call unless your brief names it.",
     "- Report in 25 lines or fewer unless the brief sets a cap. Order: Done, Deviations, Input Needed, Next.",
+    "- If SubagentHandback is refused, never retry it. Put your full report in your final reply and end.",
     "- End each commit message with: Co-Authored-By: <model> <noreply@anthropic.com>",
     "- Name no record path in a commit message. The only exception is the Drops-lines: trailer.",
     "- Before you end, stop each server you started, by the $! from the same call or through the harness.",
@@ -89,6 +90,7 @@ READER_RULES = [
     STASH_LINE,
     "- Make no gh call unless your brief names it.",
     "- Report in 25 lines or fewer unless the brief sets a cap. Order: Done, Deviations, Input Needed, Next.",
+    "- If SubagentHandback is refused, never retry it. Put your full report in your final reply and end.",
 ]
 PUSH_KEY = "Push only with"
 TRAILER_KEY = "End each commit message with"

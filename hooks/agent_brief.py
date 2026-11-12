@@ -26,6 +26,7 @@ COMMON = [
     (True, "- Make no gh call unless your brief names it."),
     (True, "- {scope}"),
     (True, "- Report in 25 lines or fewer unless the brief sets a cap. Order: Done, Deviations, Input Needed, Next."),
+    (True, "- If SubagentHandback is refused, never retry it. Put your full report in your final reply and end."),
     (False, "- End each commit message with: Co-Authored-By: <model> <noreply@anthropic.com>"),
     (False, "- Name no record path in a commit message. The only exception is the Drops-lines: trailer."),
     (False, "- Before each commit, run `git diff --cached --stat`; if it names a file you did not change this round, commit nothing and report it (decision `lanes-start-in-tool-worktrees`: lanes start only in the tool's own worktrees)."),
