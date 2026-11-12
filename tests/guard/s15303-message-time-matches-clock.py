@@ -127,6 +127,19 @@ mtc_allow("a bracket header 10 minutes behind is allowed: a stamp behind the clo
 mtc_allow("a bracket label with no time is allowed", "[coordinator] pick 1 taken, due 13:40 CST")
 mtc_allow("a bracket header with a right stamp, then a later ETA mid-line, is allowed",
           "[coordinator 13:22 CST] pick 1 taken, ETA 13:40 CST")
+# Round 2 of review: a label word may hold a digit, and a list bullet may lead, as the comma form allows.
+mtc_refuse("a bracket header with a numbered label, [triage 6 13:40 CST], is refused: a label word may hold a digit",
+           "[triage 6 13:40 CST] pick 1 taken")
+mtc_refuse("a bracket header with a lane number, [lane 3 13:40 CST], is refused",
+           "[lane 3 13:40 CST] pick 1 taken")
+mtc_refuse("a bullet bracket header, - [coordinator 13:40 CST], is refused: a list bullet leads like markdown",
+           "- [coordinator 13:40 CST] pick 1 taken")
+mtc_refuse("a lowercase bracket zone, [coordinator 13:40 cst], is refused",
+           "[coordinator 13:40 cst] pick 1 taken")
+mtc_allow("a numbered bracket header at the clock's own minute is allowed",
+          "[triage 6 13:22 CST] pick 1 taken")
+mtc_allow("a bullet bracket header 10 minutes behind is allowed",
+          "- [coordinator 13:12 CST] pick 1 taken")
 
 # Refused: the incident. A header 2 minutes ahead is past the 1-minute limit.
 mtc_refuse("a header 2 minutes ahead is refused: the incident, pick taken at 13:24 CST",
