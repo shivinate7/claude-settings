@@ -17,7 +17,6 @@ PASS_LINE = "PASS python3 lint/test_x.py (1.2s)"
 SKIP_LINE = "SKIP python3 lint/test_x.py, 3 skipped (1.2s)"
 FAIL_LINE = "FAIL python3 lint/test_x.py rc=1 (1.2s) log=/tmp/verdict-x.log"
 PARENT_ID = "sess-passclaim-parent"
-AGENT_ID = "pc0a1b2c3d4e5f6a7"        # an agent whose own transcript holds the cite
 NOCITE_AGENT_ID = "pc9z8y7x6w5v4u3t2"  # an agent with no transcript at all
 SEND_TO = "@parent"
 SEND_SESSION = "session_01AbCdEfGhIjKlMnOpQrStUv"
@@ -53,10 +52,16 @@ SIDECHAIN = transcript_file("sidechain.jsonl", [HUMAN] + call_records(PASS_CMD, 
 BARE_RUN = transcript_file("bare.jsonl", [HUMAN] + call_records("python3 lint/test_x.py", PASS_LINE, "tu_b"))
 OTHER_CMD = transcript_file("other-cmd.jsonl", [HUMAN] + call_records(
     PASS_CMD, "PASS python3 lint/test_y.py (1.2s)", "tu_o"))
-# The parent's transcript holds no cite. The agent's own transcript sits in <parent>/subagents/agent-<id>.jsonl.
+# The parent's transcript holds no cite.
 PARENT = transcript_file(PARENT_ID + ".jsonl", [HUMAN])
-AGENT_TRANSCRIPT = transcript_file(os.path.join(PARENT_ID, "subagents", "agent-" + AGENT_ID + ".jsonl"),
-                                   [HUMAN] + call_records(PASS_CMD, PASS_LINE, "tu_ag"))
+# The real call forms, and a result that comes as a list of text blocks. Each cite has a SKIP-only sibling.
+REAL_FORMS = (("the full verdict path", "~/.claude/bin/verdict python3 lint/test_x.py"),
+              ("after a cd", "cd x && ~/.claude/bin/verdict python3 lint/test_x.py"),
+              ("through the repo's bin/verdict", "python3 bin/verdict python3 lint/test_x.py"))
+LIST_CITED = transcript_file("list-cited.jsonl", [HUMAN] + call_records(
+    PASS_CMD, [{"type": "text", "text": PASS_LINE}], "tu_l"))
+LIST_SKIP = transcript_file("list-skip.jsonl", [HUMAN] + call_records(
+    PASS_CMD, [{"type": "text", "text": SKIP_LINE}], "tu_m"))
 
 
 def pass_refuse(name, tool, message, transcript, **target):
@@ -107,10 +112,17 @@ pass_allow("control, attributed to a reviewer, to a session", MCP_TOOL, "Reviewe
            session_id=SEND_SESSION)
 pass_refuse("sibling, unattributed, to a session", MCP_TOOL, "Lint passed.", UNCITED, session_id=SEND_SESSION)
 
-# An agent sender: the cite sits in the agent's own transcript, beside the parent's. The reading of that folder
-# is the owner's call (the session report raises it); this case pins the reading the agent's own verdict is a cite.
-add("pass-claim: an agent's claim cited in its own transcript is allowed", "allow", tool="SendMessage", cwd=NOGIT,
-    transcript=PARENT, agent_id=AGENT_ID, silent=True, to=SEND_TO, message="Lint passed.")
+# The real call forms and the list-shape result: a cite passes, and the SKIP-only sibling is refused.
+for _n, (_form, _command) in enumerate(REAL_FORMS):
+    _cited = transcript_file("form-%d-cited.jsonl" % _n, [HUMAN] + call_records(_command, PASS_LINE, "tu_c%d" % _n))
+    _skipped = transcript_file("form-%d-skip.jsonl" % _n, [HUMAN] + call_records(_command, SKIP_LINE, "tu_s%d" % _n))
+    pass_allow("cited " + _form + ", to @parent", "SendMessage", "Lint passed.", _cited, to=SEND_TO)
+    pass_refuse("SKIP only " + _form + ", to @parent", "SendMessage", "Lint passed.", _skipped, to=SEND_TO)
+pass_allow("cited as a list of text blocks, to @parent", "SendMessage", "Lint passed.", LIST_CITED, to=SEND_TO)
+pass_refuse("SKIP as a list of text blocks, to @parent", "SendMessage", "Lint passed.", LIST_SKIP, to=SEND_TO)
+
+# An agent sender with a cite in its own transcript is not pinned here. A real subagent transcript marks every record
+# sidechain, and the rule reads non-sidechain calls only, so that outcome is an open owner pick (Input Needed).
 add("pass-claim: an agent's claim with no cite in any transcript is refused", "deny", rule=PASS_RULE,
     tool="SendMessage", cwd=NOGIT, transcript=PARENT, agent_id=NOCITE_AGENT_ID, to=SEND_TO,
     message="Lint passed.")
