@@ -11,7 +11,8 @@ One clean repo is built once. Each defect case copies it and adds one defect, co
 the other two modes pass the same tree. The traps (a link in a code fence, a `#` in a Python string, a `//` in a JSON
 string, a lone quote in text, an external link) each sit in a small repo of their own and must pass. The empty and the
 full-size repos are the P8 states. Conventional JSONC names (tsconfig*.json, jsconfig.json, .eslintrc.json,
-devcontainer.json) may hold comments; every other .json may not, and the controls keep that gate.
+devcontainer.json, .devcontainer.json, and the .vscode launch, settings, tasks and extensions files) may hold comments;
+every other .json may not, and the controls keep that gate. A settings.json outside .vscode is no JSONC file.
 Temp files: this run's folder (lint/_test_temp.py, decision test-temp-standard).
 """
 import os
@@ -181,7 +182,8 @@ class FalseAlarms(QuickChecks):
         self.assert_passes(make_repo({"tsconfig.json": JSONC}))
 
     def test_each_conventional_jsonc_name_with_comments_passes_json(self):
-        for name in ("tsconfig.base.json", "jsconfig.json", ".eslintrc.json", "devcontainer.json"):
+        for name in ("tsconfig.base.json", "jsconfig.json", ".eslintrc.json", "devcontainer.json", ".devcontainer.json",
+                     ".vscode/launch.json", ".vscode/settings.json", ".vscode/tasks.json", ".vscode/extensions.json"):
             with self.subTest(file=name):
                 self.assert_passes(make_repo({name: JSONC}), ["json"])
 
@@ -207,8 +209,11 @@ class FalseAlarmControls(QuickChecks):
     a broken reference definition still fail, each named."""
 
     def test_a_plain_json_file_with_comments_still_fails_json(self):
-        root = defect_repo({"config/notes.json": '// a note\n{"name": "widgets"}\n'})
-        self.assert_one_cause(root, "json", ["config/notes.json"])
+        # config/settings.json: the basename of a .vscode file, outside .vscode, so the gate is the path, not the basename.
+        for name in ("config/notes.json", "data.json", "config/settings.json"):
+            with self.subTest(file=name):
+                root = defect_repo({name: '// a note\n{"name": "widgets"}\n'})
+                self.assert_one_cause(root, "json", [name])
 
     def test_broken_json_in_a_conventional_jsonc_file_still_fails_json(self):
         root = defect_repo({"tsconfig.json": '// options\n{"strict": }\n'})

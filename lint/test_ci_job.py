@@ -11,12 +11,14 @@ StepMaps reads a step's with: and env: values: a block scalar as its lines, an i
 StepSelect: --step runs only the named steps; a name no step has is one unknown line, exit 2.
 Lint mode: a --lint run that picks no lint step is unknown, exit 2; a lint step that a pull-request run would run reads
 unknown when it is skipped; a lint step that runs only off a pull request reads skipped, and the run still exits 0.
-QuickChecksAction: the starter CI's quick-checks step is a known action under --lint: planned, run on the checkout, FAIL on a broken link.
+QuickChecksAction: the starter CI's quick-checks step is a known action under --lint: planned, run on the checkout, FAIL on a broken link,
+a broken .py or a broken .json. Its mode loop in bin/ci-job ties to the one in action.yml and to quick_checks.py's MODES.
 WorkflowFind: ci-job's own workflow search gives a checks-less or unreadable workflow its own unknown, and only a missing folder the no-CI refusal.
 ParallelLint: --lint runs its lint steps at once (CI_JOB_LINT_WORKERS, else the cpu count up to 4), keeps the printed
 lines and each step's log lines in workflow order, and treats an install step as a barrier. Overlap is proven by rendezvous.
 Run: python3 lint/test_ci_job.py
 """
+import ast
 import functools
 import json
 import os
@@ -401,12 +403,26 @@ class SteAction(Job):
 STARTER_CHECKS = os.path.join(HERE, "..", "skills", "project-ops", "templates", "starter-ci", "checks.yml")
 QUICK_CHECKS_USES = re.compile(r"uses:[ \t]*(\S*actions/quick-checks@\S+)")  # the starter's own uses: line, pin and all
 QC = "Quick checks"  # the step's name in these cases; the starter's own step has none
+QUICK_CHECKS_PY = os.path.join(HERE, "..", "actions", "quick-checks", "quick_checks.py")
+QUICK_CHECKS_YML = os.path.join(HERE, "..", "actions", "quick-checks", "action.yml")
+MODE_LOOP = re.compile(r"for mode in ([\w ]+); do")  # a quick-checks mode loop: in bin/ci-job's Python string, and in action.yml
+
+
+def quick_checks_modes():
+    """MODES of quick_checks.py, read from its source: the file is parsed, never run."""
+    with open(QUICK_CHECKS_PY, encoding="utf-8") as f:
+        tree = ast.parse(f.read(), filename=QUICK_CHECKS_PY)
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "MODES" for t in node.targets):
+            return list(ast.literal_eval(node.value))
+    raise AssertionError("quick_checks.py has no module-level MODES assignment")
 
 
 class QuickChecksAction(Job):
     """The starter CI's quick-checks step is a known action under --lint: ci-job plans it, runs its three modes on the
-    checkout (actions/quick-checks/quick_checks.py beside bin/ci-job), and FAILs a broken link. Its uses: line is read from the
-    starter's template, the one home of that pin."""
+    checkout (actions/quick-checks/quick_checks.py beside bin/ci-job), and FAILs a broken link, a broken .py or a broken .json.
+    Its uses: line is read from the starter's template, the one home of that pin. Its modes are one list in three files: the
+    loop in bin/ci-job, the loop in action.yml, and quick_checks.py's MODES."""
 
     def setUp(self):
         super().setUp()
@@ -438,6 +454,27 @@ class QuickChecksAction(Job):
         self.commit({"docs/broken.md": "# Broken\n\nSee [gone](missing.md).\n"}, "lane: a broken link")
         rc, lines, out = self.run_job(step(QC, uses=self.uses), args=("--lint", "--base", "origin/main"))
         self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out)
+
+    def test_a_broken_python_script_fails_the_starter_quick_checks_step_under_lint(self):
+        self.commit({"tools/tidy.py": "def main(:\n    pass\n"}, "lane: a broken script")
+        rc, lines, out = self.run_job(step(QC, uses=self.uses), args=("--lint", "--base", "origin/main"))
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out)
+
+    def test_a_broken_json_file_fails_the_starter_quick_checks_step_under_lint(self):
+        self.commit({"config/rows.json": '{"name": "widgets",}\n'}, "lane: a broken json file")
+        rc, lines, out = self.run_job(step(QC, uses=self.uses), args=("--lint", "--base", "origin/main"))
+        self.assertEqual((rc, self.verdicts(lines)), (1, ["FAIL"]), out)
+
+    def test_ci_job_action_yml_and_quick_checks_py_name_the_same_modes(self):
+        with open(CI_JOB, encoding="utf-8") as f:
+            job_loops = MODE_LOOP.findall(f.read())
+        with open(QUICK_CHECKS_YML, encoding="utf-8") as f:
+            action_loops = MODE_LOOP.findall(f.read())
+        self.assertEqual(len(job_loops), 1, "scope: bin/ci-job holds %d mode loops, want one" % len(job_loops))  # scope first
+        self.assertEqual(len(action_loops), 1, "scope: action.yml holds %d mode loops, want one" % len(action_loops))
+        job, action, modes = job_loops[0].split(), action_loops[0].split(), quick_checks_modes()
+        self.assertEqual(job, action, "ci-job's quick-checks loop runs %s; action.yml's runs %s" % (job, action))
+        self.assertEqual(job, modes, "ci-job's quick-checks loop runs %s; quick_checks.py's MODES names %s" % (job, modes))
 
 
 UNREADABLE_CHECKS = b"name: caf\xe9\non: push\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n"  # a latin-1 byte

@@ -1760,12 +1760,12 @@ class BatchLintFlags(tm.Env):
         found = any(p.startswith(".github/workflows/") and p.endswith((".yml", ".yaml")) for p in listed.splitlines())
         self.assertEqual(found, has_yml, "scope: the head's workflow .yml files are not the ones this case names:\n" + listed)
 
-    def assert_no_ci_refusal(self):
+    def assert_no_ci_refusal(self, unknown_ok=""):
         """The lint of NO_CI refuses: it names the starter CI step (decision same-check-kinds, plan R17), offers no --lint-unknown-ok lift
-        (the exemption the owner refused), and reads as no pass."""
+        (the exemption the owner refused), and reads as no pass. unknown_ok is the lift reason the lint is given; no reason lifts it."""
         out = io.StringIO()
-        with self.assertRaises(merge.Stop) as raised:
-            self.lane_lint(NO_CI, out)
+        with self.assertRaises(merge.Stop, msg="the lint of a head with no CI took a pass or a liftable path, not the no-CI refusal") as raised:
+            self.lane_lint(NO_CI, out, unknown_ok)
         text = str(raised.exception) + out.getvalue()
         self.assertEqual(pass_lines(out.getvalue()), [], "a head with no CI read as a pass: " + text)
         self.assertIn("project-ops", text, "the no-CI refusal names no project-ops step")
@@ -1779,6 +1779,11 @@ class BatchLintFlags(tm.Env):
     def test_a_head_whose_workflow_folder_holds_no_yml_file_refuses_as_no_ci_and_names_the_starter_step(self):
         self.push_no_ci_head({".github/workflows/README.md": "# Workflows\n"}, has_yml=False)
         self.assert_no_ci_refusal()
+
+    def test_a_head_with_no_ci_is_not_lifted_by_a_lint_unknown_ok_reason(self):
+        # The lift reason is set and non-blank: a liftable unknown would pass here, so the refusal is the no-CI one only.
+        self.push_no_ci_head({"notes.md": "# Notes\n"}, has_yml=False)
+        self.assert_no_ci_refusal(unknown_ok="shellcheck is not on this box")
 
     def test_a_head_whose_workflow_has_no_checks_job_is_a_liftable_unknown(self):
         # A repo that has a workflow, but none with a checks job, is an unknown a flag lifts. Only a repo with no workflow is the no-CI refusal.
