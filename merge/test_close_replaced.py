@@ -36,11 +36,20 @@ def closed_pull(number, sha, body="", merged=False):
 
 
 class ClosedHost(PullsHost):
-    """PullsHost that also answers `pulls/<n>` for each closed pull request in `closed`. Every other number and every other read is PullsHost's."""
+    """PullsHost that also answers `pulls/<n>` for each closed pull request in `closed`, and that holds `since` on the comment list as GitHub
+    does: a comment whose updated_at is before `since` is not in the list (open-list runs only; count_gh runs take PullsHost's list). Every
+    other number and every other read is PullsHost's."""
 
     def __init__(self, pulls, check_rows, closed=(), unreadable=(), **kw):
         super().__init__(pulls, check_rows, **kw)
         self.closed, self.unreadable = list(closed), set(unreadable)
+
+    def pages(self, rel, key=None, fields=None):
+        if rel == "issues/comments" and fields and "since" in fields and not self.count_gh:
+            self.reads.append(rel)
+            self.list_calls.append((rel, dict(fields)))
+            return [c for c in self.comments if (c.get("updated_at") or c["created_at"]) >= fields["since"]]
+        return super().pages(rel, key, fields)
 
     def pull_reply(self, n):
         if n in self.unreadable:
@@ -280,6 +289,15 @@ class CloseAsCarried(CloseEnv):
                                      check_rows={same: green()})
         self.assertEqual(kind_lines(block, CARRIED), ["close as carried: o/alpha #6 by #4"], "\n".join(block))
 
+    def test_identical_heads_batch_the_lower_and_keep_the_higher_off_the_batch(self):
+        # Pin of the batch half, on the direction of test_identical_heads_close_only_the_higher_numbered_pr: #4 holds, so it is batched, and
+        # #6 closes by #4, so it is not. A coordinator reply on the direction is pending; if the direction changes, this case and that one change together.
+        same = head_of(4)
+        block = self.block_for_alpha(pulls=[named_pull(4, same), named_pull(6, same)], comments=[record_of(4, same), record_of(6, same)],
+                                     check_rows={same: green()})
+        self.assertEqual(batch_lines_of(block), ["open batch now: o/alpha #4"], "the batch line does not hold the lower of two identical heads:\n" + "\n".join(block))
+        self.assertNotIn("#6", "\n".join(batch_lines_of(block)), "the higher of two identical heads is on the batch line, though its close line names it")
+
     def test_a_chain_closes_each_lane_under_the_holder_outside_it(self):
         # #3 is inside #5, and #5 is inside #4. #3's lowest-numbered holder is #4, and #5's holder is #4. #4 closes nothing.
         heads = {3: head_of(3), 4: head_of(4), 5: head_of(5)}
@@ -445,6 +463,16 @@ class ReopenClosed(CloseEnv):
         pulls = [named_pull(4, head_of(4)), named_pull(12, head_of(12), body="Replaces #5")]
         lines = kind_lines(self.block_for_alpha(pulls=pulls, comments=notes, closed=closed), REOPENED)
         self.assertEqual(lines, [], "#5 reopened while open #12 still names it, so the next wake closes it again:\n" + "\n".join(lines))
+
+    def test_a_note_older_than_every_open_pr_is_not_read(self):
+        # Pin of the stated limit: the comment list starts at the oldest open pull request, so #4's note of 2026-09-01 is never read and #4 does
+        # not reopen, though its replacer #7 is closed unmerged. Why it stays so: an older note needs an earlier comment read on every wake,
+        # and each quiet run would pay for it. Control: #6's note is inside the window, and it reopens.
+        closed = [closed_pull(4, head_of(4)), closed_pull(6, head_of(6)), closed_pull(7, head_of(7)), closed_pull(8, head_of(8))]
+        notes = [review_comment(90, 4, "Replaced by #7", created="2026-09-01T00:00:00Z"), review_comment(91, 6, "Replaced by #8")]
+        lines = kind_lines(self.block_for_alpha(pulls=[named_pull(5, head_of(5))], comments=notes, closed=closed), REOPENED)
+        self.assertIn("reopen: o/alpha #6 (replacer #8 dropped)", lines, "control: the note inside the window does not reopen #6:\n" + "\n".join(lines))
+        self.assertFalse([l for l in lines if l.startswith("reopen: o/alpha #4 ")], "#4 reopened from a note older than the oldest open pull request")
 
 
 class ReplacesCycles(CloseEnv):
