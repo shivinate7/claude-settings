@@ -265,7 +265,6 @@ def two_worktrees_hit(segment: str, root: str) -> str:
 # ref for the push. The word is the lowercase substring `git`, as the owner's check reads it. A read that
 # fails passes, since nothing then shows a creation. The remedy names no command of the refused form
 # (rule git-remedy-never-names-target).
-BRANCH_SLUG_RULE = "branch-slug-no-git"
 BRANCH_SLUG_REFUSE_REASON = (
     "Rule (branch-slug-no-git): this call creates a branch whose name holds the word git. Claude Code's "
     "own worktree check refuses any later command of yours that names such a branch, so the lane could "
@@ -370,7 +369,9 @@ def _new_push_names(args, root: str):
     remote, specs = named
     found = []
     for spec, dest in zip(specs, push_destinations(args, root)):
-        if not dest or dest.startswith("refs/") or "*" in dest:
+        # a glob, a tag or other non-branch ref, or a shell expansion (`$(git branch --show-current)`
+        # holds the word as a command, not as a name) is no branch name this can read
+        if not dest or dest.startswith("refs/") or any(char in spec + dest for char in "*$`("):
             continue
         if BRANCH_SLUG_WORD in spec and BRANCH_SLUG_WORD in dest and _remote_ref_exists(root, remote, dest) is False:
             found.append(dest)
