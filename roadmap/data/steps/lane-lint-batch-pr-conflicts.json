@@ -1,7 +1,7 @@
 {
  "id": "lane-lint-batch-pr-conflicts",
  "title": "On a batch integration PR, merge --lane-lint reports conflicts with later open PRs to those lanes instead of refusing",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
  "lane": "session_013NEJL3X9nLPmg93fTowhHx",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "merge --lane-lint FAILed batch #2814 at c63629c18 on merge-tree conflicts with later open PRs #2839, #2884, #2906, not with main, and \"No override lifts this refusal\": a green batch cannot merge until later lanes close. It holds main.",
  "source": "coordinator 14:30 CST Nov 12",
- "note": "Fix: on an integration PR, report other-PR conflicts to those later lanes and do not refuse. Red first on #2814 at c63629c18. Bandaid now (coordinator): runner 10 closes #2839, #2884, #2906, merges #2814, then reopens them. Rank with the stability fixes. Lane started 14:34 CST Nov 12. Bandaid ran 14:43 CST Nov 12: runner 10 closed #2839, #2884, #2906, merged #2814 (bcbeaa26a), reopened all three. Lane post-batch-conflict-merge 15:29 CST Nov 12 (#2969, head c7adf46c3). Coordinator relay 16:05 CST Nov 12: #2951 record posted at dc7896926 (round 1 sonnet PASS, net value zero). Left for follow-up: (1) decision lanes-run-no-full-ci-job still says the join always needs the comment and a counted clash always FAILs; (2) `merge --reviewed` and the release check still ask a lint on a green integration head (overlaps step merge-skips-lint-on-green-ci).",
- "updatedAt": "2026-11-12T16:07:51-06:00"
+ "note": "Fix: on an integration PR, report other-PR conflicts to those later lanes and do not refuse. Red first on #2814 at c63629c18. Bandaid now (coordinator): runner 10 closes #2839, #2884, #2906, merges #2814, then reopens them. Rank with the stability fixes. Lane started 14:34 CST Nov 12. Bandaid ran 14:43 CST Nov 12: runner 10 closed #2839, #2884, #2906, merged #2814 (bcbeaa26a), reopened all three. Lane post-batch-conflict-merge 15:29 CST Nov 12 (#2969, head c7adf46c3). Coordinator relay 16:05 CST Nov 12: #2951 record posted at dc7896926 (round 1 sonnet PASS, net value zero). Left for follow-up: (1) decision lanes-run-no-full-ci-job still says the join always needs the comment and a counted clash always FAILs; (2) `merge --reviewed` and the release check still ask a lint on a green integration head (overlaps step merge-skips-lint-on-green-ci). Done 16:49 CST Nov 12: merged in batch 109 (#3002, lane PR #2951) at 83066e30e. Lane session_013NEJL3X9nLPmg93fTowhHx for runner 10 to archive.",
+ "updatedAt": "2026-11-12T16:50:01-06:00"
 }
