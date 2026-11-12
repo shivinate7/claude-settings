@@ -452,12 +452,13 @@ class Scope(unittest.TestCase):
     # The waiting page export suite (skills/waiting-page/test_export_page.py) runs in checks-shoot, which runs only on `shoot`.
     # It reads these paths: hooks/question_form.py and hooks/_nowindow.py (through page_check.py), lint/_test_temp.py
     # (its run folder), and the steps it reads, in SKILL.md and in reference/copies-and-accounts.md and reference/repo-pages.md.
-    # reference/designs.md is read by the page suite (skills/waiting-page/tests/page.test.mjs), whose job gates on `shoot` too.
+    # Every reference/*.md is read by the page suite (skills/waiting-page/tests/page.test.mjs), whose job gates on `shoot` too.
     # Named failure: a PR that changes only one of them leaves `shoot` off, so the suite is skipped.
     def test_waiting_page_export_suite_paths_turn_on_shoot(self):
         for p in ("hooks/question_form.py", "hooks/_nowindow.py", "lint/_test_temp.py", "skills/waiting-page/SKILL.md",
                   "skills/waiting-page/reference/copies-and-accounts.md", "skills/waiting-page/reference/repo-pages.md",
-                  "skills/waiting-page/reference/designs.md"):
+                  "skills/waiting-page/reference/designs.md", "skills/waiting-page/reference/republish.md",
+                  "skills/waiting-page/reference/routing-and-sessions.md"):
             with self.subTest(path=p):
                 self.assertFlags(run([p], existing=[p]), want_true=["shoot"])
 
