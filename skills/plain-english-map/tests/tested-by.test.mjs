@@ -26,6 +26,8 @@
 //        literal that holds the import as text fails (T5g). The same template before a real import passes (T5h).
 //   T6   a shell test is read through its quoted string literals. A literal path passes (T6a, T6g, T6h). A `#` inside a string (T6c), a lone
 //        quote in a comment (T6e) and a string that spans two lines (T6f) hide no path. A path only in a comment does not load the file (T6d).
+//        A bare word (T6i) and a `$VAR` prefix (T6j) do not load the file: pinned gaps of debt `map-tested-by-no-shell`. A lone apostrophe in
+//        a comment (T6k) and a path in a heredoc body (T6l, with the control T6m after its end line) follow the shell scanner.
 //        With no python3 on PATH, a Python test fails as an unknown read, and with python3 it passes (T6b).
 //   T7   placement and form. A tested-by line under a table line (T7a), a screen line (T7b) or a home (T7c) fails. Unindented (T7d), with no
 //        backticks (T7e), or with a `;` separator (T7f), it fails. Under a map line after a decisions line (T7g), it passes.
@@ -33,7 +35,8 @@
 //   T8   one hop. Through `src/pkg/index.ts`, the test passes (T8a). Without the re-export, it fails (T8b). Two hops fail (T8c).
 //        Through `src/pkgpy/__init__.py`, the test passes (T8d). Without the re-export, it fails (T8e).
 //   T10  an import by a tsconfig path alias. An alias that a `paths` entry maps passes (T10a). An alias no entry maps does not load the
-//        file (T10b), and a type-only import by an alias does not count (T10c).
+//        file (T10b), and a type-only import by an alias does not count (T10c). A tsconfig with comments, trailing commas, and `//` and
+//        `/*` inside a string still maps (T10d).
 //   T11  a path built by `path.join` or `os.path.join` from literal pieces. A join that names the file passes (T11a, T11b), and a lone quote
 //        in a comment before it hides nothing (T11e). A join of another file (T11c) and a join in a comment (T11d) do not load the file.
 //   C0   control, green on the old code: the import reader MAP11 uses reads the fixture's imports the way these cases assume.
@@ -348,6 +351,63 @@ test("T6h. a shell test that runs `python3 'src/retry.py'` passes: a single-quot
   mustPass(check(dir));
 });
 
+// Known gap, debt `map-tested-by-no-shell`: the shell reader takes quoted strings only.
+// A bare word does not load the file, so this case pins the gap. Once the reader reads bare words, this case goes red.
+test('T6i. known gap: a bare word, `python3 src/retry.py`, does not load the file. MAP11 fails as a read that does not load', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  shellTest(dir, '#!/bin/sh\npython3 src/retry.py\n');
+  // The scope first: the path is a bare word, and no quoted string names it.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^python3 src\/retry\.py$/m, 'the shell test must run src/retry.py by a bare word');
+  const r = check(dir);
+  mustFail(r, 'src/retry_check.sh', 'src/retry.py');
+  assert.match(map11(r), /does not load/, `the bare-word test must fail as a read that does not load\n${map11(r)}`);
+  assert.doesNotMatch(map11(r), /unknown/, `the bare-word test must not fail as an unknown read\n${map11(r)}`);
+});
+
+// Known gap, the same debt: the reader does not expand a `$VAR` prefix, so this string names no tracked file.
+test('T6j. known gap: a variable prefix, `"$ROOT/src/retry.py"`, does not load the file. MAP11 fails as a read that does not load', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  shellTest(dir, '#!/bin/sh\npython3 "$ROOT/src/retry.py"\n');
+  // The scope first: the only string of the test holds the variable form.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /python3 "\$ROOT\/src\/retry\.py"/, 'the shell test must run the file through a variable prefix');
+  const r = check(dir);
+  mustFail(r, 'src/retry_check.sh', 'src/retry.py');
+  assert.match(map11(r), /does not load/, `the variable-prefix test must fail as a read that does not load\n${map11(r)}`);
+  assert.doesNotMatch(map11(r), /unknown/, `the variable-prefix test must not fail as an unknown read\n${map11(r)}`);
+});
+
+test("T6k. a lone apostrophe in a shell comment opens no string. The single-quoted path on the next line is code, and the test passes", () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  shellTest(dir, "#!/bin/sh\n# the file's path is set below\npython3 'src/retry.py'\n");
+  // The scope first: the comment holds an apostrophe, and the path sits on the line after it.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^# the file's path is set below$/m, 'the comment must hold an apostrophe');
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^python3 'src\/retry\.py'$/m, 'the shell test must run src/retry.py by a single-quoted path');
+  mustPass(check(dir));
+});
+
+test('T6l. a quoted path in a heredoc body does not count. The body is text, so the test does not load the file, and MAP11 fails', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  shellTest(dir, '#!/bin/sh\ncat <<EOF\npython3 "src/retry.py"\nEOF\necho done\n');
+  // The scope first: the path sits in the heredoc body alone.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^cat <<EOF\npython3 "src\/retry\.py"\nEOF$/m, 'the heredoc body must hold the quoted path');
+  const r = check(dir);
+  mustFail(r, 'src/retry_check.sh', 'src/retry.py');
+  assert.match(map11(r), /does not load/, `the heredoc-only test must fail as a read that does not load\n${map11(r)}`);
+});
+
+test('T6m. control: a quoted path after a heredoc end line is code. The test passes', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  shellTest(dir, '#!/bin/sh\ncat <<EOF\npython3 "src/retry.py"\nEOF\npython3 "src/retry.py"\n');
+  // The scope first: the same heredoc as T6l, then the path again after its end line.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^EOF\npython3 "src\/retry\.py"$/m, 'the path must sit after the heredoc end line');
+  mustPass(check(dir));
+});
+
 test('T6b. with no python3 on PATH, a Python test fails MAP11 as an unknown read that names it; with python3 on PATH it passes', POSIX_ONLY, () => {
   needFile(REL);
   const dir = scratchRepo();
@@ -516,6 +576,38 @@ test("T10c. control: a type-only import by an alias does not load the file, so t
   assert.match(readAt(dir, 'src/home.spec.ts'), /^import type \{ homeTitle \} from '@\/src\/home';$/m, 'the test must hold the type-only alias import');
   setTestedBy(dir, 'src/home.ts', tested('src/home.spec.ts'));
   mustFail(check(dir), CORE, 'src/home.spec.ts');
+});
+
+// A tsconfig.json as a person writes it, with comments and trailing commas.
+// The reader must read it, including `//` and `/*` inside a string value.
+const COMMENTED_TSCONFIG = [
+  '{',
+  "  // the host's alias is set here",
+  '  "compilerOptions": {',
+  '    /* the root is the base */',
+  '    "baseUrl": ".",',
+  '    "paths": {',
+  '      "@/*": ["./*"], // the alias maps the root',
+  '    },',
+  '  },',
+  '  "note": "see https://example.test/* and // here",',
+  '}',
+  '',
+].join('\n');
+
+test("T10d. control: a tsconfig with comments, trailing commas, and `//` and `/*` in a string still maps the alias. An import by it passes MAP11", () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  writeAt(dir, 'tsconfig.json', COMMENTED_TSCONFIG);
+  gitIn(dir, 'add', '-N', 'tsconfig.json');
+  writeAt(dir, 'src/home.spec.ts', "import { homeTitle } from '@/src/home';\n");
+  // The scope first: the file holds comments, a trailing comma and both openers in a string, and the test imports by the alias.
+  assert.match(readAt(dir, 'tsconfig.json'), /"note": "see https:\/\/example\.test\/\* and \/\/ here",/, 'the string value must hold // and /*');
+  assert.match(readAt(dir, 'tsconfig.json'), /^  \/\/ the host's alias is set here$/m, 'the comment must hold an apostrophe');
+  assert.match(readAt(dir, 'tsconfig.json'), /\],[^\n]*\/\/ the alias maps the root\n    \},/, 'the paths object must end in a trailing comma');
+  assert.match(readAt(dir, 'src/home.spec.ts'), /from '@\/src\/home'/, 'the test must import by the alias');
+  setTestedBy(dir, 'src/home.ts', tested('src/home.spec.ts'));
+  mustPass(check(dir));
 });
 
 test('T11a. a Python test that builds the file path by os.path.join("src", "retry.py") loads the file: MAP11 passes', () => {
