@@ -616,7 +616,7 @@ def push_destinations(args, cwd: str, overrides=None):
     return _DESTINATIONS[key]
 
 
-PUSH_LINE = re.compile(r"^[#*_>\s]*Push to:(.*)$")
+PUSH_LINE = re.compile(r"^[#*_>\s]*Push to:(?![*_])(.*)$")   # `**Push to:**` is no line: its value would start with `*`
 PUSH_FENCE = re.compile(r"^\s*(```|~~~)")
 PUSH_NONE = "none"   # the value of a Push to: line that lets the agent push nothing
 PUSH_NO_TARGET_REASON = (
@@ -636,25 +636,28 @@ PUSH_OTHER_REASON = (
 
 
 def brief_push_target(brief):
-    """The branch the brief's first `Push to:` line names, `none` for a none line, else '' (no usable line). A line
+    """The branch the brief's first real `Push to:` line names, `none` for a none line, else '' (no usable line). A line
     counts when it starts, after markdown lead characters (`#*_>`) and spaces, with `Push to:`, outside a fence and
-    not in backticks, which cannot start such a line. The first line decides: an empty value or a `<placeholder>`
-    on it is no target, never a reason to read a later line. An `origin/` prefix is cut off."""
+    not in backticks, which cannot start such a line. A `**Push to:**` line is no line. The value is read without code
+    ticks, a trailing full stop, `refs/heads/` or `origin/`. A line with an empty or `<placeholder>` value is skipped:
+    the first line with a real value decides."""
     fenced = False
     for line in brief.split("\n") if isinstance(brief, str) else []:
         if PUSH_FENCE.match(line):
             fenced = not fenced
         elif not fenced and (found := PUSH_LINE.match(line)):
-            value = found.group(1).strip()
+            value = found.group(1).strip().strip("`").rstrip(".").strip()
             if not value or (value.startswith("<") and value.endswith(">")):
-                return ""
-            return PUSH_NONE if value.lower() == PUSH_NONE else value.removeprefix("origin/")
+                continue
+            if value.lower() == PUSH_NONE:
+                return PUSH_NONE
+            return value.removeprefix("refs/heads/").removeprefix("origin/")
     return ""
 
 
 def push_target_kind(brief, args, cwd, overrides=None):
     """How an agent's push fails its brief: '' when it passes, 'line' for no usable Push to: line, 'none' for a none
-    line, 'other' for a destination that is not the named branch. A named branch passes only when every destination of
+    line, 'other' for a destination that is not the named branch, or a push that also sends tags. A named branch passes only when every destination of
     the push (`push_destinations`) is that branch. A destination that cannot be resolved, or a glob, is not that
     branch. The caller prints the reason of each kind: PUSH_NO_TARGET_REASON, PUSH_NONE_REASON or PUSH_OTHER_REASON."""
     target = brief_push_target(brief)
@@ -662,6 +665,8 @@ def push_target_kind(brief, args, cwd, overrides=None):
         return "line"
     if target == PUSH_NONE:
         return "none"
+    if _push_tags_only(args):   # --tags sends every tag to the remote, which no branch a brief names covers
+        return "other"
     return "" if all(dest == target for dest in push_destinations(args, cwd, overrides)) else "other"
 
 
