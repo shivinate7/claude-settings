@@ -136,6 +136,101 @@ def repo_tag_names(tag: object, slug: str) -> bool:
 
 # The tool that reads and writes the waiting page's items (hooks/guard.py, hooks/call_judge.py).
 DATA_TOOL = "ArtifactData"
+# The tool that publishes a page (hooks/guard.py).
+PAGE_TOOL = "Artifact"
+
+# The artifact tools reach a session under two sets of names: the cloud three, and the Mac claude-artifacts server's
+# fifteen. Each family is one constant; a settings.json matcher that names a cloud tool names its whole family
+# (lint/test_settings_matcher.py), and hooks/test_shared_names.py pins the eighteen live names.
+ARTIFACT_MAC_SERVER = "mcp__claude-artifacts"
+
+
+def _mac(*shorts: str) -> tuple:
+    return tuple(ARTIFACT_MAC_SERVER + "__" + short for short in shorts)
+
+
+# Reads and writes of the page's database.
+ARTIFACT_DATA_TOOLS = (DATA_TOOL,) + _mac("db_get", "db_list", "db_query", "db_str_replace", "db_usage", "db_write")
+# Publishes and reads of the page itself, and the capability and guide tools.
+ARTIFACT_PAGE_TOOLS = (PAGE_TOOL,) + _mac(
+    "declare_capabilities", "describe_capabilities", "get_artifact", "guide", "list_artifacts", "publish_files",
+    "read_artifact")
+# Comments on a page. No guard judges them today; the names sit here so a matcher can name them.
+ARTIFACT_COMMENTS_TOOLS = ("ArtifactComments",) + _mac("read_comments", "watch")
+
+_MAC_DB_WRITE_OPS = {"set": "set", "merge": "update", "update": "update", "delete": "delete"}
+
+
+def _split_doc_path(path: object) -> Optional[tuple]:
+    """(collection, doc_id) of a `collection/doc_id` path, the doc id being the rest of the path, else None. A leading
+    slash is dropped and the collection is lower-cased, so `Items/a` and `/items/a` reach the checks `items/a` does."""
+    if not isinstance(path, str):
+        return None
+    collection, _, doc_id = path.lstrip("/").partition("/")
+    return (collection.lower(), doc_id) if collection and doc_id else None
+
+
+def _canonical_mac_call(short: str, tool_input: dict) -> Optional[tuple]:
+    """The (name, input) of one Mac call in the shape of its cloud twin, or None when it is not mapped or is malformed."""
+    rest = dict(tool_input)
+    if short == "db_write":
+        ops = rest.pop("ops", None)
+        if not isinstance(ops, list):
+            return None
+        writes = []
+        for op in ops:
+            # Each op stands alone: one the page cannot run (an unknown op, an unreadable path) is left out, so it
+            # cannot hide the readable ops beside it from the checks.
+            if not isinstance(op, dict) or op.get("op") not in _MAC_DB_WRITE_OPS:
+                continue
+            parts = _split_doc_path(op.get("path"))
+            if parts is None:
+                continue
+            write = {"op": _MAC_DB_WRITE_OPS[op["op"]], "collection": parts[0], "doc_id": parts[1]}
+            for key in ("data", "ifVersion"):
+                if key in op:
+                    write[key] = op[key]
+            writes.append(write)
+        if ops and not writes:  # no op is readable: nothing to judge, and no batch to claim
+            return None
+        return DATA_TOOL, dict(rest, action="batch", writes=writes)
+    if short in ("db_get", "db_str_replace"):
+        parts = _split_doc_path(rest.pop("path", None))
+        if parts is None:
+            return None
+        if short == "db_str_replace" and not all(isinstance(rest.get(k), str) for k in ("field", "old_str", "new_str")):
+            return None
+        return DATA_TOOL, dict(rest, action="get" if short == "db_get" else "str_replace",
+                               collection=parts[0], doc_id=parts[1])
+    if short in ("db_list", "db_query"):
+        if not isinstance(rest.get("collection"), str) or not rest["collection"]:
+            return None
+        return DATA_TOOL, dict(rest, action="list" if short == "db_list" else "query",
+                               collection=rest["collection"].lstrip("/").lower())
+    if short == "publish_files":
+        files = rest.pop("files", None)
+        if not isinstance(files, list):
+            return None
+        for entry in files:
+            if isinstance(entry, dict) and entry.get("as") == "index.html" and isinstance(entry.get("path"), str):
+                return PAGE_TOOL, dict(rest, action="publish", file_path=entry["path"])
+        return None
+    return None
+
+
+def canonical_artifact_call(tool_name: object, tool_input: object) -> tuple:
+    """(name, input) of a Mac claude-artifacts db or publish call mapped to its cloud twin's shape (ArtifactData or
+    Artifact), so each later check reads one shape. Any other call, and any malformed one, comes back unchanged. Pure:
+    it never raises and never changes the caller's input. Assumed, not confirmed: a Mac call carries its page's url
+    as tool_input.url."""
+    prefix = ARTIFACT_MAC_SERVER + "__"
+    if not isinstance(tool_name, str) or not tool_name.startswith(prefix) or not isinstance(tool_input, dict):
+        return tool_name, tool_input
+    try:
+        mapped = _canonical_mac_call(tool_name[len(prefix):], tool_input)
+    except Exception:
+        mapped = None
+    return mapped if mapped is not None else (tool_name, tool_input)
 
 # The folder under the config dir that holds per-hook state files.
 STATE_DIR_NAME = "state"
