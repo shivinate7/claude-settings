@@ -127,7 +127,8 @@
                           Linted head is left as it is. Takes no lock. A cloud run needs the batch-runner role.
   merge --batch-build NAME --blame PR --run URL
                           store Blamed: #PR in batch-NAME's block, so --batch-drop may take PR off. URL is the Actions run that blames it:
-                          it must be completed, concluded failure, and on the batch pull request's current head, and PR must be a frozen
+                          it must be on the batch pull request's current head and concluded failure, or still be going with a job that has
+                          already finished red (the slow jobs are not waited for), and PR must be a frozen
                           lane. Any other run, or a lane outside the batch, is refused and nothing is stored. Runs no lint and no ready
                           check, pushes nothing, takes no lock. A cloud run needs the batch-runner role.
   merge --batch-drop NAME PR
@@ -1111,6 +1112,15 @@ class Host:
             return d["conclusion"], d["head_sha"]
         except (ValueError, KeyError, TypeError) as e:
             raise Stop(f"reading the run {url} from GitHub failed: {e} {DEBT_CITE}")
+
+    def red_job_names(self, url):
+        """-> the names of the jobs of the workflow run at `url` that finished red (conclusion failure), the rollup job (ROLLUP_JOB) left out: it
+        fails only once every job is done. One jobs read, all pages. A failed read is a Stop, never an empty list."""
+        m = RUN_URL_ID.search(url)
+        if not m:
+            raise Stop(f"{url} is not a workflow run URL {DEBT_CITE}")
+        return [j.get("name") or str(j.get("id")) for j in self.pages(f"actions/runs/{m.group(1)}/jobs", "jobs")
+                if j.get("conclusion") == "failure" and j.get("name") != ROLLUP_JOB]
 
     def issue_comments(self, since):
         """-> (records, lints): one list read of the repo's issue comments updated since `since`. The number comes from the comment's issue_url.
@@ -4902,8 +4912,9 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", co
     return rc
 
 def batch_blame(root, h, name, number, url):
-    """merge --batch-build NAME --blame PR --run URL: store `Blamed: #PR` in batch-NAME's block, so a drop may take PR off. Only a completed run
-    that concluded failure, on the batch pull request's current head, counts. A refusal writes nothing. Runs no lint and no ready check, and pushes nothing."""
+    """merge --batch-build NAME --blame PR --run URL: store `Blamed: #PR` in batch-NAME's block, so a drop may take PR off. Only a run on the batch
+    pull request's current head counts, and only one that concluded failure or is still going with a job that already finished red: that red job
+    shows the cause, so the slow jobs (macOS, Windows) are not waited for. A run still going with no red job blames nothing. A refusal writes nothing. Runs no lint and no ready check, and pushes nothing."""
     branch = integration_branch(name)
     found = h.batch_pr(branch)
     if found is None:
@@ -4917,15 +4928,19 @@ def batch_blame(root, h, name, number, url):
     if number not in block["lanes"]:
         raise Stop(f"#{number} is not in batch {name}'s frozen lane set, which is {lane_list(block['lanes'])}, so nothing was blamed. {FREEZE_CITE}")
     conclusion, sha = h.cited_run(url)
-    if conclusion is None:
-        raise Stop(f"the run {url} is still running, not completed, so it blames no lane yet. Nothing was stored. {FREEZE_CITE}")
-    if conclusion != "failure":
+    red = []
+    if conclusion is None and sha == info["head"]:  # a run on an older head is refused below, with no jobs read
+        red = h.red_job_names(url)
+        if not red:
+            raise Stop(f"the run {url} is still running, not completed, and no job of it has finished red, so it blames no lane yet. Nothing was stored. {FREEZE_CITE}")
+    elif conclusion not in (None, "failure"):
         raise Stop(f"the run {url} concluded {conclusion}, not failure: only a failed run blames a lane. Nothing was stored. {FREEZE_CITE}")
     if sha != info["head"]:
         raise Stop(f"the run {url} ran on {(sha or 'no head')[:9]}, an older head: batch {name}'s current head is {info['head'][:9]}. "
                    f"Only a run on the current head blames a lane. Nothing was stored. {FREEZE_CITE}")
     record_in_block(h, branch, blamed=sorted({*block["blamed"], number}))
-    say(f"merge: batch {name}: #{number} is blamed by the failed run {url} on {sha[:9]}. To take it off the batch, run:",
+    say(f"merge: batch {name}: #{number} is blamed by the failed run {url} on {sha[:9]}"
+        + (f" (the run is still going; the job that finished red: {', '.join(red)})" if red else "") + ". To take it off the batch, run:",
         f"  merge --batch-drop {name} {number}")
     return 0
 
