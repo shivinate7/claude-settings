@@ -459,6 +459,21 @@ def case_uniform_answered_reasons():
           ANSWERED_WORDS in r.reason(), tcj.detail(r))
 
 
+def case_uniform_answered_closed_item_passes():
+    shape = [page_option("a", "Keep one form"), page_option("b", "Allow the second form", widens=True),
+             page_option("c", "Allow a third form", widens=True)]
+    base = answered_item(shape)
+    base.pop("status", None)  # the control: this item with no status is open
+    closed = dict(base, status="closed")
+    got = call("widens_answered_hit", closed)
+    check("uniform-answered: widens_answered_hit passes a closed item with one plain option", got == "",
+          "want '' for a closed item, got %r" % (got,))
+    page("a closed item with one plain option and two widening ones, with no pick, passes", "set",
+         entry_of(closed), None)
+    page("control: the same item with no status is refused as uniform-answered", "set",
+         entry_of(base), (ANSWERED_RULE, None))
+
+
 # ------------------------------------------------------------------ closed items, stood picks, updates
 
 def case_closed_stood_and_updates():
@@ -2604,7 +2619,7 @@ def main():
                  case_form_lines, case_form_placeholders_on_edits,
                  case_options_state_gain_and_loss, case_older_rules_keep_their_ids,
                  case_uniform_answered_reds, case_uniform_answered_controls, case_uniform_answered_reasons,
-                 case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
+                 case_uniform_answered_closed_item_passes, case_closed_stood_and_updates, case_str_replace, case_batch, case_chat_boxes,
                  case_line_order_and_prose, case_chat_press_scan_skips_gain_and_lose, case_session_press_needs_no_link,
                  case_claude_own_merge_needs_no_link,
                  case_chat_reasons_name_a_remedy_and_no_page_field, case_page_reasons_are_one_table,
