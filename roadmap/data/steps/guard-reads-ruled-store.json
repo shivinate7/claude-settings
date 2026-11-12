@@ -1,0 +1,17 @@
+{
+ "id": "guard-reads-ruled-store",
+ "title": "The shared guard core reads the ruling store before any refusal: a ruled lift lets the act through and names the ruling",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "ruled-store-one-home"
+ ],
+ "why": "R59 part 3 (owner 15:05 CST Nov 12: \"ruling governs the guard right away\"; plan 9064e3c1; store roadmap/rulings/r59.json). Owner 15:11 CST: \"guards that trigger off main's code that give feeedback to sessions i wonder if sessions will then remember that the store supercedes them\". The refusal tells the session, so it never has to remember (retrospective 15:12 CST).",
+ "source": "retrospective 15:12 CST Nov 12, under R59 part 3",
+ "note": "Lane ruled-store-one-home builds only the lookup (lint/ruled_store.py ruling_for_guard, guard_ruling_line). This step: (1) wires that lookup into the shared guard core, one home, before any refusal; (2) when an open, checked entry lifts the rule, the act goes through and prints \"allowed by ruling <id>\"; (3) when an entry names the rule without lifting it, the refusal adds \"a newer ruling may apply: <id>, <title>\"; (4) adds one CLAUDE.md line: an open, checked entry outranks main's text. Red first on a guard refusal with a lifting entry. A guard verdict change: round 3 gets the net-value test. Express (R55).",
+ "updatedAt": "2026-11-12T15:13:51-06:00",
+ "order": -300
+}
