@@ -40,6 +40,7 @@ FAIL = "Delete the old helper. Check: `tests/test_fail.py`."
 PROSE = "Delete the old helper once nothing reads it."
 RUN_URL = "https://github.com/fixture/repo/actions/runs/42"
 ATTRIBUTION = "\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+SESSION_URL = "https://claude.ai/code/session_013NEJL2SdAA1CCG5eTFVFVr"
 NO_RETIRED = "check_debt_retire has no retired(): a Retire-run cite cannot excuse a debt close (decision debt-close-runs-retire)"
 
 
@@ -354,6 +355,17 @@ class RetireRun(Case):
         found = self.findings(head=pr_head, pr_body="Retire-run: d-prose -- %s\n" % RUN_URL, run_state=runs)
         self.assertEqual(runs.urls, [RUN_URL], "the cited run was not read")
         self.assertEqual(pairs(found), [], "a green run on a descendant of the PR head did not clear the debt")
+
+    def test_r1c_a_session_url_line_after_the_attribution_does_not_hide_the_cite(self):
+        self.closed_prose()
+        plain = "Summary.\n\nRetire-run: d-prose -- %s\n\n%s\n" % (RUN_URL, ATTRIBUTION)
+        self.assertEqual(pairs(self.findings(pr_body=plain, run_state=Runs(("success", self.head)))), [],
+                         "scope: the body without the session URL line did not clear the prose debt")
+        runs = Runs(("success", self.head))
+        body = "Summary.\n\nRetire-run: d-prose -- %s\n\n%s\n\n%s\n" % (RUN_URL, ATTRIBUTION, SESSION_URL)
+        found = self.findings(pr_body=body, run_state=runs)
+        self.assertEqual(runs.urls, [RUN_URL], "a session URL line after the attribution hid the Retire-run cite")
+        self.assertEqual(pairs(found), [], "a session URL line after the attribution left the prose debt standing")
 
     def test_r2_a_cite_of_a_failing_run_is_red(self):
         self.closed_prose()
