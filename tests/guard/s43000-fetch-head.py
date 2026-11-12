@@ -72,6 +72,39 @@ fetch_head_refused("fetch-head read, a newline inside a quoted string does not h
 fetch_head_refused("fetch-head read in a bash -c script, the inner script is walked, denies",
                    'bash -c "' + VCS + ' show FETCH_HEAD"', cwd=GITWT)
 
+# A range that names FETCH_HEAD at either end is a read of it, in any verb that walks the commits.
+fetch_head_refused("fetch-head read, a two-dot range that ends at FETCH_HEAD denies",
+                   VCS + " log FETCH_HEAD..HEAD", cwd=GITWT)
+fetch_head_refused("fetch-head read, a three-dot range that ends at FETCH_HEAD denies",
+                   VCS + " diff FETCH_HEAD...HEAD", cwd=GITWT)
+
+# A verb that takes a commit as its start point reads it, whatever the verb is.
+fetch_head_refused("fetch-head read, a worktree started at FETCH_HEAD denies",
+                   VCS + " worktree add ../x FETCH_HEAD", cwd=GITWT)
+fetch_head_refused("fetch-head read, a branch started at FETCH_HEAD denies",
+                   VCS + " branch nb FETCH_HEAD", cwd=GITWT)
+
+# -m is a boolean on show and log, and --pretty takes its value only after `=`, so the ref that follows is a read.
+fetch_head_refused("fetch-head read, show -m before FETCH_HEAD denies",
+                   VCS + " show -m FETCH_HEAD", cwd=GITWT)
+fetch_head_refused("fetch-head read, log -m before FETCH_HEAD denies",
+                   VCS + " log -m FETCH_HEAD", cwd=GITWT)
+fetch_head_refused("fetch-head read, show --pretty with no value before FETCH_HEAD denies",
+                   VCS + " show --pretty FETCH_HEAD", cwd=GITWT)
+
+# The text order of a command decides: a $( ) read written before a fetch is not cleared by it.
+fetch_head_refused("fetch-head read in a $( ) text before a fetch in the same command denies",
+                   "echo $(" + VCS + " show FETCH_HEAD:p); " + VCS + " fetch -q origin x", cwd=GITWT)
+
+# Allowed: the name of the file or a path, never a ref. rev-parse --git-path prints where the file lives, and a
+# path that ends in FETCH_HEAD.md under a ref names a file in that ref, not the fetch result.
+sh("fetch-head allowed, rev-parse --git-path prints the file's path, not its ref",
+   VCS + " rev-parse --git-path FETCH_HEAD", "allow", cwd=GITWT)
+sh("fetch-head allowed, cat of a file named FETCH_HEAD.md is no git read",
+   "cat FETCH_HEAD.md", "allow", cwd=GITWT)
+sh("fetch-head allowed, a path named FETCH_HEAD.md under origin/main is no ref",
+   VCS + " show origin/main:FETCH_HEAD.md", "allow", cwd=GITWT)
+
 # Allowed: a read of origin/<b>, which is the remedy's own read. A fetch alone, and a fetch earlier in the same
 # command, with the read after it of FETCH_HEAD or of origin/<b>. A long chain with its fetch first is the
 # full-size form.
