@@ -324,6 +324,7 @@ Each row has the slug, the first sentence of the record, and a link to it. A rec
 | `pointer-edit` | The guard refuses a Write, Edit, MultiEdit or NotebookEdit whose target is one of the pointer checkout's own files. | [`docs/decisions/pointer-edit.md`](../docs/decisions/pointer-edit.md) |
 | `post-merge-hook-is-a-fallback` | Owner, 2026-10-22: `install.ps1` writes its git post-merge hook only when it installs a copy, not a link. | [`docs/decisions/post-merge-hook-is-a-fallback.md`](../docs/decisions/post-merge-hook-is-a-fallback.md) |
 | `pr-ledger` | Owner, 2026-11-07 12:22 CST, in chat to the coordinator. | [`docs/decisions/pr-ledger.md`](../docs/decisions/pr-ledger.md) |
+| `protected-path` | A repo lists paths that no session may write, in `.claude/layout-extras.json`. | [`docs/decisions/protected-path.md`](../docs/decisions/protected-path.md) |
 | `records-index-at-merge` | Each repo that keeps records has one generated index page, `docs/records.md`. | [`docs/decisions/records-index-at-merge.md`](../docs/decisions/records-index-at-merge.md) |
 | `rm-path-wrapper` | `bin/rm` sits ahead of the real `rm` on PATH, for Claude sessions only. | [`docs/decisions/rm-path-wrapper.md`](../docs/decisions/rm-path-wrapper.md) |
 | `session-messages` | Owner asks ask-mw5b3m9hl0 (2026-11-06 12:27 CST) and ask-mw5a0ekdlv (11:56 CST). | [`docs/decisions/session-messages.md`](../docs/decisions/session-messages.md) |
