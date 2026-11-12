@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 20:00 CST Nov 11. The owner's list closed at 18:43 CST Nov 10; R21 to R45 came after.
+the history. Last rewrite: 20:03 CST Nov 11. The owner's list closed at 18:43 CST Nov 10; R21 to R45 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -942,14 +942,16 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   ssemwal-cdc repos (owner's gh runs, 15:26 and 15:31 CST).
   Rulesets, ruled r, owner 16:43 CST Nov 11: "r". In the R44 child-repo sweep, a session on the owner's
   computer moves every repo's main to a ruleset that requires only all-jobs-passed and blocks deletion
-  and force-push of main. Cause: a classic rule with many checks failed to save (owner, 16:39 CST). The
-  grant names rulesets, so it lands in the repo's standing grants beside the Oct 30 grant (branch
-  grant-shared-ruleset). The merge tool reads rulesets, ruled c, owner 19:49 CST Nov 11: "c is prob best".
+  and force-push of main. Cause: a classic rule with many checks failed to save (owner, 16:39 CST). Owner 16:49 CST, in the coordinator's chat (coordinator-relayed): "yes
+  with bypass": the ruleset may also let the repository admin role skip the checks on pull requests only. The
+  grant names rulesets, so it lands in the repo's standing grants beside the Oct 30 grant (draft
+  PR #2606). The merge tool reads rulesets, ruled c, owner 19:49 CST Nov 11: "c is prob best".
   Today merge/merge.py protection_names reads main's old branch protection and stops every merge when it
   is gone. Step merge-reads-ruleset makes it read main's ruleset first and the old protection second;
-  skills/project-ops/scripts/protect.py sets the ruleset. It lands before the sweep removes any old
-  protection. Once every repo has a ruleset, the old-protection read is deleted. This fits the ruling that
-  a repo changes to fit a shared tool: rulesets become every repo's shared form under r.
+  skills/project-ops/scripts/protect.py, which sets classic protection today, will set the ruleset. It lands before the sweep removes any old
+  protection. Once every repo has a ruleset, the old-protection read is deleted. Option c carried the label
+  "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo"; he
+  chose it over that ruling.
   No GitHub Issues, ruled p', owner 16:44 CST Nov 11: "agreed on p", then "yea" when asked whether he meant
   the refuter's revised p'. g is
   mostly built: skills/roadmap/build.py derives live and done from PRs (decision stalled-steps). 1. Nobody
