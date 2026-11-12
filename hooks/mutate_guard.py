@@ -2959,19 +2959,29 @@ MUTATIONS = [
      '    return started is None or started == entry["start"] or not started', "simlease",
      "lease: a dead lease (its pid is not alive) is refused", "posix"),
     ("sim-lease: the live read takes the queue for the leases",
-     '    return [e for e in data["leases"] if isinstance(e, dict) and is_live(e) and not lease_expired(e, now, max_age)]',
-     '    return [e for e in data["queue"] if isinstance(e, dict) and is_live(e) and not lease_expired(e, now, max_age)]',
+     '    return [e for e in data["leases"] if isinstance(e, dict) and is_live(e)]',
+     '    return [e for e in data["queue"] if isinstance(e, dict) and is_live(e)]',
      "simlease",
      "lease: this session only queued, not granted, is refused", "posix"),
     ("sim-lease: the live read creates the lock file",
-     '    return [e for e in data["leases"] if isinstance(e, dict) and is_live(e) and not lease_expired(e, now, max_age)]',
+     '    return [e for e in data["leases"] if isinstance(e, dict) and is_live(e)]',
      '    open(os.path.join(state_dir(), "lock"), "a").close()\n'
-     '    return [e for e in data["leases"] if isinstance(e, dict) and is_live(e) and not lease_expired(e, now, max_age)]', "simlease",
+     '    return [e for e in data["leases"] if isinstance(e, dict) and is_live(e)]', "simlease",
      "the lease read writes nothing", "posix"),
+    ("sim-lease: a live lease expires once its silence passes 1800 s",
+     '    return [e for e in data["leases"] if isinstance(e, dict) and is_live(e)]',
+     '    now = now_s()\n'
+     '    return [e for e in data["leases"] if isinstance(e, dict) and is_live(e)\n'
+     '            and (e.get("granted") is None or now - e["granted"] <= 1800)]', "simlease",
+     "lease allow: a live lease silent past", "posix"),
     ("sim-lease: the pro slot maps to another device",
      '"pro": "86F9268A-A905-4B82-9BC0-D7EBB682D341",',
      '"pro": "86F9268A-A905-4B82-9BC0-D7EBB682D342",', "simlease",
      "lease allow: this session's live pro lease", "posix"),
+    ("simulator-boot-lease: a reuse lease allows a boot of its device",
+     ' and e.get("slot") in lease.SLOT_UDID and not e.get("reuse")}',
+     ' and e.get("slot") in lease.SLOT_UDID}', "guard",
+     "lease: a reuse lease of Duo 1 does not allow a launch of Duo 1 by name", "posix"),
     # ---- handoff-unread (decision precompact-handoff, item 9): one mutant per arm. The anchors sit in
     # guard.py and in reread_check.py; a "guard" mutant lands in whichever module holds the anchor.
     ("handoff-unread: the refusal is never printed",

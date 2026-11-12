@@ -1418,10 +1418,10 @@ release_slot2
 ARGS=(-scheme X)
 end_case "104 both Duos booted, each leased by another live pid: the run queues, then exits 1 at the lease wait limit, with no xcodebuild and no boot"
 
-# Case 105: a run whose xcodebuild outlives SIM_LEASE_MAX keeps its slot-1 lease. The run renews it every SIM_TEST_RENEW
-# seconds, so a holder that stops answering loses its turn. Here SIM_LEASE_MAX=3, renew every 1 s,
-# and xcodebuild runs 6 s. At second 5 a take for Duo 1's slot is not granted while the run lives. The 5 s is the
-# stimulus's timing; the assert is the take's outcome.
+# Case 105: a live run keeps its slot-1 lease however long its xcodebuild runs. A lease ends only when its pid is gone,
+# so the slot stays taken while the run lives. Here the run renews every 1 s (SIM_TEST_RENEW=1) and xcodebuild runs 6 s.
+# At second 5 a take for Duo 1's slot is not granted while the run lives. The 5 s is the stimulus's timing; the assert
+# is the take's outcome.
 fresh; start_tool SIM_LEASE_MAX=3 SIM_TEST_RENEW=1 STUB_HANG=1 STUB_HANG_SECS=6
 need "run A is in xcodebuild" poll_for 20 test -e "$work/started"
 "$REAL_SLEEP" 5
@@ -1435,7 +1435,7 @@ need "a take for Duo 1 at second 5 is not granted while run A lives" test "$seco
 finish_tool
 need "run A exits 0" rc_is 0
 kill "$second_pid" 2>/dev/null; wait "$second_pid" 2>/dev/null
-end_case "105 SIM_TEST_RENEW keeps run A's slot-1 lease past SIM_LEASE_MAX while its xcodebuild runs: a take for Duo 1 at second 5 is not granted"
+end_case "105 a live run A keeps its slot-1 lease however long its xcodebuild runs: a take for Duo 1 at second 5 is not granted"
 
 # Case 106: a renew that finds its lease gone (sim-lease renew exits 1) is named once on stderr, however many renews fail,
 # and the run exits with its child's code. The lease is dropped from leases.json once xcodebuild runs. The child then runs

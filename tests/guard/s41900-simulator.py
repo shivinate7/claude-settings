@@ -943,9 +943,9 @@ def register_simulator_lease_cases():
     lease_launch("control: an own-boot slot 1 lease of Duo 1 still allows a launch of Duo 1 by name", "allow",
                  own1, device=duo1)
 
-    # A lease expires only when its pid is gone. A live holder silent past SIM_LEASE_MAX keeps its slot and its boot,
-    # since a slow renew is not a crash. A dead holder's lease allows nothing. The clock is SIM_LEASE_NOW, a fixed
-    # number, so the case reads no real time. The fresh lease beside it, silent for less, still allows.
+    # A lease expires only when its pid is gone, however long ago it was granted. A live holder granted 3600 s ago keeps
+    # its slot and its boot, since a slow renew is not a crash. A dead holder's lease allows nothing. The clock is
+    # SIM_LEASE_NOW, a fixed number, so the case reads no real time. The fresh lease beside it, granted 60 s ago, still allows.
     clock = {"SIM_LEASE_NOW": "1790000000", "SIM_LEASE_MAX": "1800"}
     silent = dict(lease_entry("1"), granted=1790000000 - 3600)
     lease_launch("lease allow: a live lease silent past SIM_LEASE_MAX still allows a launch of Duo 1", "allow",
