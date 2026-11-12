@@ -926,6 +926,27 @@ class LaneLint(LaneFixture):
         self.assertNotIn("FAIL", line, out)
         self.assertEqual([n for n, _ in self.host.posted], [7], "the PASS comment was not posted")
 
+    def test_a_bad_record_for_an_older_head_names_the_new_round_and_not_a_corrected_record(self):
+        head = self.head("feat")
+        self.review_host([tm.review_comment(1, 7, tm.record_text(head=tm.REVIEW_OLD_HEAD) + "Lane note.\n")])
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertNotEqual(rc, 0, "the lane lint passed a bad record for an older head:\n" + out)
+        line = self.review_record_line(out)
+        sentence = (f"It names {tm.REVIEW_OLD_HEAD[:9]}, not the live head {head[:9]}. Review the live head in a new round, "
+                    "then post a new record for it (`merge 7 --review-record`).")
+        self.assertIn(sentence, line, "the Review record FAIL does not name the old head and the new round:\n" + out)
+        self.assertNotIn("Post a corrected record", line, "the Review record FAIL asks for a corrected record at an older head:\n" + out)
+
+    def test_a_bad_record_at_the_live_head_says_post_a_corrected_record(self):  # control: the remedy for a live-head record is unchanged
+        head = self.head("feat")
+        self.review_host([tm.review_comment(1, 7, tm.record_text(head=head) + "Lane note.\n")])
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertNotEqual(rc, 0, "the lane lint passed a bad record at the live head:\n" + out)
+        line = self.review_record_line(out)
+        self.assertIn("Post a corrected record", line, "a bad record at the live head does not ask for a corrected record:\n" + out)
+
     def test_an_older_bad_record_then_a_newest_good_one_passes_the_review_record_step(self):  # control: the newest record decides
         head = self.head("feat")
         self.review_host([tm.review_comment(1, 7, tm.record_text(head=head) + "Lane note.\n"), tm.review_comment(2, 7, tm.record_text(head=head))])

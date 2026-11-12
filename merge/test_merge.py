@@ -14878,6 +14878,12 @@ class ReviewFixFlag(ReviewEnv):
         self.assertIsNotNone(rule, "merge.py names no REVIEW_RULE_STEP, so the refusal has no one sentence")
         self.assertIn(rule, err, "the --fix-check refusal's remedy is not REVIEW_RULE_STEP:\n" + err)
 
+    def test_a_fix_check_refusal_names_the_comment_and_line_of_an_earlier_record_for_another_pr(self):
+        host = self.record_host(review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, n=9)), head=self.head())
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(), host=host)
+        self.assertEqual(rc, 2, "the fix check after an earlier record for PR #9 was not refused:\n" + out + err)
+        self.assertIn("comment 1, line 2: PR: #9", err, "the refusal does not name the comment and line of the record for another PR:\n" + err)
+
     def test_a_fix_check_refusal_names_no_remedy_when_the_bad_line_is_elsewhere(self):  # control
         earlier = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, kind="bogus")
         host = self.record_host(review_comment(1, 7, earlier), head=self.head())
@@ -15408,6 +15414,16 @@ class ReviewedList(ReviewEnv):
         host = PullsHost(pulls, check_rows or {}, comments=comments, **reads)
         rc, out, err = self.run_args("--reviewed", host=host)
         return host, rc, out, err
+
+    def test_the_bad_line_names_its_comment_and_line_with_the_rule_once_and_no_double_period(self):
+        bad = len(record_text(rounds=REVIEW_PASS).splitlines()) + 1  # the line after the CI line
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(3, 7, record_text(rounds=REVIEW_PASS) + "Lane note.\n")])
+        self.assertEqual(rc, 0, out + err)
+        line = list_line(self, out, 7)
+        rule = getattr(merge, "REVIEW_RULE_STEP", None)
+        self.assertIsNotNone(rule, "merge.py names no REVIEW_RULE_STEP, so the bad line has no remedy sentence")
+        self.assertIn(f"(comment 3, line {bad}: Lane note. {rule})", line, "the bad line is not `(comment 3, line N: text REVIEW_RULE_STEP)`:\n" + out)
+        self.assertNotIn("..", line, "the bad line has a double period:\n" + out)
 
     def test_a_bad_newest_record_names_its_comment_id_and_first_failing_line_beside_bad(self):
         bad = len(record_text(rounds=REVIEW_PASS).splitlines()) + 1  # the line after the CI line
