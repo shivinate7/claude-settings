@@ -6,7 +6,7 @@ Question: what backs a session's claim that a check passed? Ruling: coordinator,
 
 - A report line or a message that says a check passed must be backed by a verdict line from this session's own transcript.
 - The cite is a verbatim `PASS <cmd> (<secs>s)` line in the result of a non-sidechain Bash call whose program is `verdict`. `<cmd>` must be the words that call ran. Both sides read `~` and `$HOME` as the shell expands them. `uv run verdict` counts.
-- The cite must match the claim's check. A lint or ci-job claim needs a roster command: `merge --lane-lint`, `merge --review-record`, `merge --release-check` or `ci-job` (the roster in `hooks/guard_stream.py`, one home). A tests or suite claim needs a command that names a test, such as `python3 lint/test_x.py` or `pytest`. A checks claim takes either. `verdict true` backs nothing.
+- The cite must match the claim's check. A lint or ci-job claim needs a roster command: `merge --lane-lint`, `merge --release-check` or `ci-job` (a test run is not one; `merge --review-record` is not one) (the roster in `hooks/guard_stream.py`, one home). A tests or suite claim needs a command that names a test, such as `python3 lint/test_x.py` or `pytest`. A checks claim takes either. `verdict true` backs nothing.
 - The newest verdict line per command wins. A FAIL after a PASS of the same command cancels it. A SKIP line backs no claim.
 - Text in a reply, an Agent result, a sidechain call or a bare run is no cite.
 - A claim an agent made is attributed ("builder reports green") and is no claim of this session.
