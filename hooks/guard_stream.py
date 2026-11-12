@@ -308,9 +308,9 @@ def lane_lint_bound_ms():
     module = merge_module()
     try:
         seconds = module.LINT_SECONDS + module.PUSHED_HEAD_WAIT_MINUTES * 60
-    except AttributeError:  # no tool, or a tool without the constants: unknown, never a refusal
+    except (AttributeError, TypeError):  # no tool, no constants, or a constant that is not a number: unknown
         return None
-    return seconds * 1000 if isinstance(seconds, int) else None
+    return seconds * 1000 if type(seconds) is int else None
 
 
 def lane_lint_timeout_hit(stripped: str, background: bool, timeout) -> str:
@@ -325,16 +325,17 @@ def lane_lint_timeout_hit(stripped: str, background: bool, timeout) -> str:
     bound = lane_lint_bound_ms()
     if bound is None:
         return ""
-    if isinstance(timeout, int) and not isinstance(timeout, bool) and timeout > bound:
+    if isinstance(timeout, (int, float)) and not isinstance(timeout, bool) and timeout > bound:
         return ""
     return stage + " --lane-lint"
 
 
+# A template: the call site fills in the bound that lane_lint_bound_ms() read, so the text never copies a number.
 LANE_LINT_TIMEOUT_REASON = (
-    "this background lane lint can outlast the tool's default time limit, which stops it with no verdict. "
-    "Remedy: set this tool call's `timeout`, in milliseconds, above the lint's own bound, which is the "
-    "merge tool's lint run limit plus its pushed-head wait (3900 s on main, so 3900000 ms), such as "
-    "`timeout: 7200000`."
+    "this background lane lint can outlast the tool's default time limit, which stops it with no verdict "
+    "(decision background-check-through-verdict). "
+    "Remedy: set this tool call's `timeout`, in milliseconds, above the lint's own bound of %d ms (%d s), "
+    "which is the merge tool's lint run limit plus its pushed-head wait."
 )
 
 
