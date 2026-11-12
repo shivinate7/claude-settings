@@ -111,6 +111,7 @@ FAMILIES = {
     "env": "environment files",
     "argv": "process arguments: a ps, pgrep or /proc form that prints other processes' full arguments is refused; pid-and-name forms, quoted or heredoc text and the guard's own readers pass",
     "git-env": "a command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE",
+    "fetch-head": "a Bash command that reads FETCH_HEAD (a git show, log, rev-parse, diff, cat-file or merge of it) with no git fetch earlier in the same command is refused, and the remedy names the fetch into origin/<b> and a read of origin/<b>; a fetch in another command, a read of origin/<b>, a fetch alone, and a mention in quoted text or a grep pattern pass",
     "hook-bypass": "a git commit, merge or push that skips the git hooks: core.hooksPath on the command or in the environment, --no-verify, and -n on commit; the mutation tool's own exemption",
     "merge": "merge into main, draft pull requests and the merge guard",
     "lane-closes-after-records": "archive_session of a lane: refused while the lane's repo has an open pull request on its step slug, while a branch of the lane is ahead of its repo's default branch with no pull request, or when the lane's record cannot be read",
