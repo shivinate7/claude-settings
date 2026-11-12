@@ -5322,6 +5322,35 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
             with self.subTest(line=line):
                 self.assert_allowed(line)
 
+    # Pins: green on the built code. Each row's claim sits after a word that the clause cut splits at, with a negator before
+    # that word, so the negator reaches the claim only when the cut is gone. Each row goes red on that removal.
+
+    def test_pe_pin_negator_does_not_reach_past_or_yet_then_or_though(self):
+        rows = [
+            # Catches: the cut at "or" is removed, so "not" before it exempts the claim after it.
+            "The lint did not start or the failure is pre-existing.",
+            # Catches: the cut at "yet" is removed, so "not" before it exempts the claim after it.
+            "The lint did not start yet the failure is pre-existing.",
+            # Catches: the cut at "then" is removed, so "not" before it exempts the claim after it.
+            "The lint did not run then the failure is pre-existing.",
+            # Catches: the cut at "though" is removed, so "not" before it exempts the claim after it.
+            "The lint did not run though the failure is pre-existing.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
+    def test_pe_pin_a_dot_inside_a_token_ends_no_clause(self):
+        # Catches: a dot inside a token ends a clause, so the failure word before "a.py" loses the "on main too" after it.
+        # Both rows are refusals: a negator is absent, so the only thing that can exempt them is a clause break.
+        rows = [
+            "Lint fails in a.py on main too.",
+            "Lint fails in a.py on 32b5f8b8e too.",
+        ]
+        for line in rows:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+
 
 class PendingRefusalTests(unittest.TestCase):
     """refusal-note, the Stop half: a refused tool stays pending until the reply names it under

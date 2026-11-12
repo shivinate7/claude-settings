@@ -26,6 +26,7 @@ import report_guard
 
 REPORT_GUARD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "report_guard.py")
 CLAUSE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_clause.py")
+NARRATION_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "check_comment_narration.py")
 
 
 def clause_with(name, value):
@@ -77,6 +78,17 @@ def writer_words(source):
             if WRITER_WORDS.search(node.value):
                 hits.append((node.lineno, node.value))
     return scanned, hits
+
+
+def imports_of(source):
+    """The module names `source` imports, read from its Import and ImportFrom nodes. A comment or a string names none."""
+    names = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            names.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            names.add(node.module)
+    return names
 
 
 def calls_of(fn):
@@ -544,6 +556,23 @@ TEXT = "it's a plain string, not a pattern: this session"
                 self.assertEqual(getattr(probe, name), ("zqxvlead",), "scope: the probe does not read the sentinel %s" % name)
                 self.assertIn("zqxvlead", probe._LEAD_RE.pattern, "_LEAD_RE does not read %s" % name)
                 self.assertIn("zqxvlead", probe._WRITER_START.pattern, "_WRITER_START does not read %s" % name)
+
+    def test_comment_narration_reads_the_clause_parser_by_import(self):
+        # Catches: check_comment_narration.py imports no _clause, so ReviewRound.gloss_ids reads its own words and not the
+        # parser's (the shared clause parser decision, checks-share-the-clause-parser). The scope is the gloss_ids method;
+        # the control is that a comment or a string names no import, and that report_guard.py, which reads the parser,
+        # imports _clause.
+        with open(NARRATION_PATH, encoding="utf-8") as handle:
+            source = handle.read()
+        gloss = [fn for node in ast.walk(ast.parse(source)) if isinstance(node, ast.ClassDef) and node.name == "ReviewRound"
+                 for fn in node.body if isinstance(fn, ast.FunctionDef) and fn.name == "gloss_ids"]
+        self.assertEqual(len(gloss), 1, "scope: check_comment_narration.py has no ReviewRound.gloss_ids to read")
+        self.assertEqual(imports_of('import re  # from _clause import JOINERS\nTEXT = "import _clause"\n'), {"re"},
+                         "control: a comment or a string is read as an import")
+        with open(REPORT_GUARD, encoding="utf-8") as handle:
+            self.assertIn("_clause", imports_of(handle.read()), "control: report_guard.py does not import _clause")
+        self.assertIn("_clause", imports_of(source),
+                      "check_comment_narration.py imports no _clause, so gloss_ids reads its own words, not the parser's")
 
 
 if __name__ == "__main__":
