@@ -61,6 +61,9 @@ CLI_DIR = ".github/judge-replay"  # the folder that pins the claude CLI the job 
 CLI_FILES = (CLI_DIR + "/package.json", CLI_DIR + "/package-lock.json")
 WORKFLOW = ".github/workflows/checks.yml"
 PIN_TEXT = "@anthropic-ai/claude-code@"
+NO_CASES = "no cases yet"
+# A judge whose corpus is a later step's to add. Its row names the step while its corpus file is absent.
+PENDING_STEPS = {"call_judge.page": "pending step judge-replay-page-cases"}
 
 
 def corpus_path(name):
@@ -387,8 +390,12 @@ def touched(paths):
 
 
 def load_corpus(name):
-    with open(os.path.join(REPO, *JUDGES[name]["corpus"].split("/")), encoding="utf-8") as f:
-        return json.load(f)
+    """The cases of a judge's corpus file. A missing file is no cases: the judge's row says so and makes no call."""
+    try:
+        with open(os.path.join(REPO, *JUDGES[name]["corpus"].split("/")), encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return []
 
 
 def one_run(row, case):
@@ -520,6 +527,10 @@ def main(argv):
     for name in names:
         rows = replay(name, runs)
         print("%s (%d cases, %d run%s each)" % (name, len(rows), runs, "" if runs == 1 else "s"))
+        if not rows:
+            print("  %s" % NO_CASES)
+            if name in PENDING_STEPS:
+                print("  %s" % PENDING_STEPS[name])
         for r in rows:
             note = "  %s" % r["error"] if r.get("error") else ""
             print("  %-7s %s expect=%s got=%s agreement=%s%s" % (r["verdict"], r["id"], r["expect"], r["got"],
