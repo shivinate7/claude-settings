@@ -24,7 +24,7 @@ A test must not fail on runner speed. CI runs a job only when its suites' files 
 - macOS runs once per batch (R61, owner pick b, 2026-11-12 15:29 CST). A push to main starts no macOS runner: `shell-macos`, `checks-macos` and `checks-macos-b` skip it at job level, since a step-level skip still starts a runner. A pull request, the nightly and a manual run still start them. `checks-macos` runs one mac-tagged slice of the guard suite (`GUARD_TESTS=macos-slice`, no shard) and `checks-macos-b` runs no guard step.
 - The nightly skips when main's head has a green push run of `checks.yml` and the newest completed nightly is green. The `nightly-skip` job decides (`.github/scripts/nightly-skip.py`), and `scope` waits on it, so a skip reaches every job through `needs`. Nothing is cancelled: a cancelled run reads UNKNOWN and blocks merges. A failed read runs everything. The newest completed nightly decides, so a skipped green nightly never supersedes a red one.
 - `concurrency` cancels superseded runs on pull requests only. Push, nightly and manual runs finish.
-- Step names do not change: `lint/rule_audit.py` reads them.
+- Step names that `lint/rule_audit.py` reads do not change. The macOS guard step is the one rename: it is now "Guard fixture suite (macOS slice)", because its shard is gone, and no audit row cites it (`lint/rule_mechanisms.json`).
 - When a CI job nears its time cap, split the slowest suite's subject by family into its own job, and give the measured CI time before and after. This is a step of the `ci-hygiene` skill (owner, 2026-10-17 23:46 CDT).
 
 Reason: a slow Windows runner failed a PR on tests its change did not touch. Fixed sleeps cost time, and macOS CI minutes went to suites
@@ -32,8 +32,7 @@ that do not touch the OS. A duplicate run costs minutes for no new verdict.
 
 Accepted risk: a defect in an OS-independent suite that shows only on macOS or Windows is not caught. Unmeasured.
 
-Accepted risk (R61): the full guard suite no longer runs on macOS at all. Every event that starts a macOS job (a pull request, the nightly, a manual run) runs the mac-tagged slice, and a push to main runs no macOS job. A macOS-only guard defect outside the slice reaches main and is not caught. Unmeasured. The slice's tag comes from the darwin arms in `hooks/` (`MACOS_REACH` in `hooks/test_guard.py`, held to the arms by an ast scan). The macOS guard step is renamed "Guard fixture suite (macOS slice)", the one step rename here; no audit row cites it (`lint/rule_mechanisms.json`).
-
+Accepted risk (R61): the full guard suite no longer runs on macOS at all. Every event that starts a macOS job (a pull request, the nightly, a manual run) runs the mac-tagged slice, and a push to main runs no macOS job. A macOS-only guard defect outside the slice reaches main and is not caught. Unmeasured. The slice's tag comes from the darwin arms in `hooks/` (`MACOS_REACH` in `hooks/test_guard.py`, held to the arms by an ast scan).
 Cost of `nightly-skip`: one runs read per nightly (two `GET` calls on the Actions runs API), unmeasured. It starts no process beyond its own job, writes no file and sets no timer.
 
 Kind: process
