@@ -1652,12 +1652,13 @@ class Host:
 
     def head_read(self, n, nothing_is_green=False, batch_ignore=None):
         """One read, no wait, of every check and workflow run on the head, required or not.
-        -> (verdict, detail): green, pending, red, batch, or unknown when any read could not run. The guard's
+        -> (verdict, detail): green, pending, red, or unknown when any read could not run. The guard's
         home for "has this head settled", so it shares classify and runs with the wait.
         No check and no run reads as pending, not green: right after a push GitHub has not created
         them yet (wait_checks settles for the same reason). `nothing_is_green` is for a repo with no workflows.
-        batch: the head is settled, but another ready PR on its base has a workflow run or a required check pending (batch_running,
-        which takes `batch_ignore` as its ignore list).
+        Another ready PR's running CI holds no merge (per-lane merge). A settled head still makes the read of those pull requests (batch_running,
+        which takes `batch_ignore` as its ignore list), because that read takes the branch protection's required names: a read of them that
+        fails is unknown, and the guard denies a merge it could not read.
         Its `gh` calls (the pull request, the check runs, the commit statuses, the workflow runs; a branch name adds the open pull request list;
         a head whose check runs link more than one run adds one more workflow runs read; a settled head adds the batch read) share one deadline (SH_TIMEOUT, the guard's one budget for this whole
         read) instead of each getting it afresh, so a hung gh holds the whole read for one deadline,
@@ -1671,7 +1672,8 @@ class Host:
                 runs = self.runs(info["head"])
                 red, pending = self.settle(red, pending, *self.judge_runs(runs))
                 unseen = not got and not runs and not nothing_is_green
-                blockers = [] if red or pending or unseen else self.batch_running(num, info["base"], unprotected_counts_all=True, ignore=batch_ignore, head=info["head"])
+                if not (red or pending or unseen):
+                    self.batch_running(num, info["base"], unprotected_counts_all=True, ignore=batch_ignore, head=info["head"])  # the answer holds no merge; a failed read raises
         except subprocess.TimeoutExpired:  # its text names the resolved program path
             return "unknown", "a gh call timed out"
         except Exception as e:  # Stop, a missing gh, malformed JSON: all unread
@@ -1682,8 +1684,6 @@ class Host:
             return "pending", ", ".join(pending)
         if unseen:
             return "pending", "no check and no workflow run is reported on the head yet"
-        if blockers:
-            return "batch", "; ".join(blockers)
         return "green", ""
 
     def block(self, pending, got):

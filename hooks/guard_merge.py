@@ -34,9 +34,9 @@ from guard_push_delete import (
 # quoted message and a heredoc body name an act and perform none.
 #
 # 1. merge-checks: a merge made outside the merge tool is
-#    refused while the head has a check or a workflow run pending or red, while another ready PR
-#    on the same base runs CI (decision no-merge-during-batch-ci), or when that read could not run. The merge tool (merge/merge.py) runs its own `gh pr merge` as a subprocess, so no hook
-#    sees it; it has already waited. The read below is the tool's own `Host.head_read`, one home.
+#    refused while the head has a check or a workflow run pending or red, or when that read could not run. Another ready PR's CI never
+#    holds a merge (per-lane merge). The merge tool (merge/merge.py) runs its own `gh pr merge` as a subprocess, so no hook
+#    sees it; it has already read the head green. The read below is the tool's own `Host.head_read`, one home.
 # 2. cite-by-id (CLAUDE.md `git-cite-by-id`): a commit message or PR body that cites a record by
 #    its path is refused. The id is the record's file name without folder or `.md`, the slug
 #    lint/check_record_slugs.py measures, or the number the stamp claims at merge.
@@ -201,8 +201,7 @@ def has_workflows(where: str) -> bool:
 
 
 def merge_check(selector, repo: str, where: str):
-    """Return (verdict, detail) for the head of the named pull request: green, pending, red,
-    batch (another ready PR on the base has a workflow run or a required check pending), or unknown. One read, no
+    """Return (verdict, detail) for the head of the named pull request: green, pending, red, or unknown. One read, no
     wait, run in `where` so `gh` names the repo the command names."""
     module = merge_module()
     if module is None:
@@ -225,17 +224,7 @@ MERGE_CHECK_REASON = (
 )
 
 
-# The merge tool refuses this case too, so the remedy is to wait, never to run another merge.
-MERGE_BATCH_REASON = (
-    "Rule (Git, git-no-merge-during-batch-ci): another ready PR's CI runs on this base, and its head "
-    "does not contain this head: %s. A merge now moves the base that run tests. Remedy: wait for that run to end. Its run's end, or its "
-    "CI-done comment on a red run, wakes the session that watches that PR. Then merge."
-)
-
-
 def merge_check_reason(verdict: str, detail: str) -> str:
-    if verdict == "batch":
-        return MERGE_BATCH_REASON % cap_safe(detail, 160)
     return MERGE_CHECK_REASON % (verdict + (" (" + cap_safe(detail, 160) + ")" if detail else ""))
 
 
