@@ -409,8 +409,8 @@ class StaleWaiter(LeaseCase):
 
 class LeaseExpiry(LeaseCase):
     """A lease expires only when its holder's pid is gone. A live holder keeps its slot however long it is silent, since
-    a slow renew is not a crash. A dead holder's lease is freed on the next take. SIM_LEASE_NOW is the clock: the grant
-    is stamped with it, as `seen` is, and a later take reads it."""
+    a slow renew is not a crash. A dead holder's lease is freed on the next take. SIM_LEASE_NOW is the clock: a grant
+    is stamped with it, as `seen` is, and nothing reads `granted` to free a lease."""
 
     def test_a_live_lease_older_than_sim_lease_max_keeps_slot_1_from_the_next_waiter(self):
         holder, second, waiter = self.spawn(), self.spawn(), self.spawn()
@@ -419,14 +419,15 @@ class LeaseExpiry(LeaseCase):
         r = self.take("duo", waiter.pid, wait=2, env=self.clock(1061, 60))
         self.assertEqual(r.returncode, 1,
                          "a live holder's slot 1 is given to the next waiter 61 s after its grant, "
-                         "past SIM_LEASE_MAX=60")
+                         "while its pid is alive")
 
     def test_a_lease_younger_than_sim_lease_max_still_blocks_the_next_waiter(self):
         holder, second, waiter = self.spawn(), self.spawn(), self.spawn()
         self.assertEqual(grant(self.take("duo", holder.pid, env=self.clock(1000, 60))), (0, "1"))
         self.assertEqual(grant(self.take("duo", second.pid, env=self.clock(1000, 60))), (0, "2"))
         r = self.take("duo", waiter.pid, wait=1, env=self.clock(1059, 60))
-        self.assertEqual(r.returncode, 1, "a lease 59 s old is under SIM_LEASE_MAX=60, so the waiter is not granted")
+        self.assertEqual(r.returncode, 1,
+                         "the waiter is granted while the live holder of slot 1 holds it, 59 s after its grant")
         lines = self.run_tool("status", env=self.clock(1059, 60)).stdout.splitlines()
         self.assertTrue(any(line.startswith("lease slot 1 ") and mentions(line, holder.pid) for line in lines),
                         "the holder keeps slot 1")
@@ -438,7 +439,7 @@ class LeaseExpiry(LeaseCase):
         r = self.take("duo", waiter.pid, wait=2, env=self.clock(2801))
         self.assertEqual(r.returncode, 1,
                          "a live holder's slot 1 is given to the next waiter 1801 s after its grant, "
-                         "past the default 1800 s")
+                         "while its pid is alive")
 
     def test_a_silent_live_holder_keeps_slot_1_against_a_reuse_of_its_udid(self):
         holder, waiter = self.spawn(), self.spawn()
@@ -476,8 +477,9 @@ class LeaseExpiry(LeaseCase):
 
 
 class Renew(LeaseCase):
-    """`renew` stamps the holder's `granted` with now and exits 0 while its pid holds a lease, else 1. A live holder's
-    lease is kept however long it is silent, so a renew after a long silence still finds it."""
+    """`renew` exits 0 while its pid holds a lease, else 1. It does not stamp `granted`, which stays the grant time
+    the take set. A live holder's lease is kept however long it is silent, so a renew after a long silence still
+    finds it."""
 
     def test_renew_keeps_a_lease_past_sim_lease_max(self):
         holder, waiter = self.spawn(), self.spawn()
@@ -485,7 +487,7 @@ class Renew(LeaseCase):
         self.run_tool("renew", "--pid", str(holder.pid), env=self.clock(1080, 100))
         r = self.take("duo", waiter.pid, wait=1, env=self.clock(1150, 100))
         self.assertNotEqual(grant(r), (0, "1"),
-                            "the holder renewed at 1080 and its pid is alive, so at 1150 slot 1 is not free")
+                            "the waiter is granted slot 1 at 1150 while the holder's pid is alive")
 
     def test_a_live_holder_renews_after_a_silence_past_sim_lease_max(self):
         holder = self.spawn()
@@ -496,7 +498,7 @@ class Renew(LeaseCase):
                         "the live holder's lease, 150 s silent, is not listed at 1150")
         r = self.run_tool("renew", "--pid", str(holder.pid), env=self.clock(1150, 100))
         self.assertEqual(r.returncode, 0,
-                         "renew of a live holder 150 s silent, past SIM_LEASE_MAX=100, exits %d, not 0" % r.returncode)
+                         "renew of a live holder 150 s silent exits %d, not 0" % r.returncode)
 
     def test_renew_of_a_pid_with_no_lease_exits_1(self):
         holder, stranger = self.spawn(), self.spawn()
@@ -530,7 +532,7 @@ class LiveLeases(LeaseCase):
         self.assertEqual(self.live_leases(dict(clock, SIM_LEASE_NOW="1050")), [holder.pid],
                          "a live holder's lease, 50 s silent, is not listed by live_leases")
         self.assertEqual(self.live_leases(dict(clock, SIM_LEASE_NOW="1150")), [holder.pid],
-                         "a live holder's lease, 150 s silent past SIM_LEASE_MAX=100, is not listed by live_leases")
+                         "a live holder's lease, 150 s silent, is not listed by live_leases")
 
     def test_live_leases_drops_a_dead_holder_inside_and_past_sim_lease_max(self):
         holder = self.spawn()
