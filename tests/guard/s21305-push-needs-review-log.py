@@ -774,7 +774,7 @@ pfr_fix_refuse("a fix check FAIL for PR 1464 posted, then a push to its head bra
 pfr_fix_refuse("a fix check PASS for PR 1464 posted, a round 2 FAIL unrecorded, then a push to its head branch",
                PFR_FIX_PUSH, pfr_path("fix-pass-then-round2-fail"))
 # A Fix check line on a PR denies a push to its head branch, and the first-review FAIL beside it stays uncleared. The
-# deny comes before that FAIL's ask, so the push is denied, not asked (decision push-needs-review-record).
+# deny comes before that FAIL's ask, so the push is denied, not asked (decision push-needs-review-log).
 pfr_fix_refuse("a FAIL round 1 with a Fix check record line for PR 1467, then a push to its head branch: deny, "
                "the fix-branch rule comes before the pending ask", PFR_PUSH, pfr_path("round-fail-fix-record"),
                lacks=PFR_BRANCH)
