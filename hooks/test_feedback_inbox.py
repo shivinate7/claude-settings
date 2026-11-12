@@ -3462,10 +3462,11 @@ def case_repeat_model_error_fails_open_and_is_not_retried():
 
 def case_repeat_old_inboxes_bind_by_sidecar_and_capture_writes_it_once():
     """An older inbox is a candidate only with a sidecar that names this repo. Capture writes this
-    session's sidecar once, inside a repo, and never outside one."""
+    session's sidecar once, inside a repo, and never outside one. The two captures are stamped 36 minutes apart
+    (LOCAL_TIME_NOW), so the earlier message stays a candidate of the later item."""
     root = repeat_repo("repeat-binding")
     cfg, sid = new_cfg(), "repeat-binding"
-    env = git_counter(cfg)
+    env = dict(git_counter(cfg), LOCAL_TIME_NOW=EARLY_NOW)
     write_old_inbox(cfg, OLD_A_SID, OLD_A_TEXT, sidecar=os.path.realpath(root))
     write_old_inbox(cfg, OLD_B_SID, OLD_B_TEXT)
     start = len(git_lines(env))
@@ -3475,7 +3476,7 @@ def case_repeat_old_inboxes_bind_by_sidecar_and_capture_writes_it_once():
     check("binding: capture starts at most one git process", len(git_lines(env)) - start <= 1,
           git_lines(env, start))
     mid = snapshot(cfg)
-    capture(cfg, sid, MSG_TWO, cwd=root)
+    capture(cfg, sid, MSG_TWO, cwd=root, extra_env={"LOCAL_TIME_NOW": LATE_NOW})
     check("binding: a second capture leaves the sidecar as it was",
           sidecar_rel(sid) not in written_between(mid, snapshot(cfg)), sorted(written_between(mid, snapshot(cfg))))
     add_item(cfg, sid)
@@ -3827,7 +3828,10 @@ def case_repeat_repo_item_is_never_judged_as_a_repeat():
 # the real clock, and two captures in one minute share an inbox ref, so the refs would not name a message.
 NEW_SID = "c3d4e5f6-0a1b-4c2d"
 EARLY_HEADER = "2026-10-13 10:04 CDT (UTC-05:00)"
-LATE_HEADER = "2026-10-13 10:09 CDT (UTC-05:00)"
+LATE_HEADER = "2026-10-13 10:40 CDT (UTC-05:00)"
+# The same two minutes as LOCAL_TIME_NOW. They are 36 minutes apart, outside the 30-minute window in which a same-inbox
+# candidate is dropped, so the earlier message stays a candidate of the later one.
+EARLY_NOW, LATE_NOW = "2026-10-13T10:04:00-05:00", "2026-10-13T10:40:00-05:00"
 EARLY_REF = "inbox:%s@%s" % (NEW_SID[:8], EARLY_HEADER[:16])  # the candidate ref of the 10:04 message
 MARK_EARLY = " repeats " + EARLY_REF
 
@@ -3837,19 +3841,19 @@ def write_inbox(cfg, sid, rows):
     write_file(inbox_of(cfg, sid), "".join(render_block(text, header=h, items=items) for h, text, items in rows))
 
 
-LATE_REF = "inbox:%s@%s" % (NEW_SID[:8], LATE_HEADER[:16])  # the candidate ref of the 10:09 message
+LATE_REF = "inbox:%s@%s" % (NEW_SID[:8], LATE_HEADER[:16])  # the candidate ref of the 10:40 message
 SAME_MINUTE_REF = EARLY_REF + "#2"  # the second of two messages stamped 10:04: inbox_refs takes `#2`
 AGAIN_ID = "fb-1004-1"
 AGAIN_LINE = "- fb-1004-1 [note] -> noted"
 
 
-def judged_again_with_mark(name, second_header, second_ref, mark):
-    """The shared step of the second-judging marks. The item sits on the first message, with `mark` already on
-    its line. The second message is a plain one stamped `second_header`. The Stop judges the item again, and the
-    model names `second_ref` as its repeat. Returns (cfg, Proc, calls)."""
+def judged_again_with_mark(name, rows, second_ref, mark):
+    """The shared step of the second-judging marks. `rows` is the inbox, and the item (AGAIN_ID) sits on the block
+    whose line already holds `mark`. The Stop judges the item again, and the model names `second_ref` as its
+    repeat. Returns (cfg, Proc, calls)."""
     root = repeat_repo(name, step=True)
     cfg = new_cfg()
-    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [AGAIN_LINE + mark]), (second_header, MSG_TWO, [])])
+    write_inbox(cfg, NEW_SID, rows)
     answer = json.dumps({"repeats": [{"id": AGAIN_ID, "ref": second_ref}]})
     p, calls = stop(cfg, NEW_SID, root, answer=answer)
     return cfg, p, calls
@@ -3860,9 +3864,10 @@ def case_repeat_same_minute_mark_is_recognised_on_a_second_judging():
     already marked with that ref is marked: a Stop that judges the item again must leave the line with its one
     mark. MARKED must recognise the `#N` suffix: without it, the `#2` mark reads as no mark, and mark_items
     appends the same ref again. The Stop's flag line names the ref, so the hit is known accepted, not a
-    vacuous pass."""
+    vacuous pass. The pair sits 36 minutes before the item, so its `#2` candidate stays in the item's list."""
     mark = " repeats " + SAME_MINUTE_REF
-    cfg, p, calls = judged_again_with_mark("repeat-same-minute-mark", EARLY_HEADER, SAME_MINUTE_REF, mark)
+    rows = [(EARLY_HEADER, MSG_TWO, []), (EARLY_HEADER, MSG_ONE, []), (LATE_HEADER, MSG_ONE, [AGAIN_LINE + mark])]
+    cfg, p, calls = judged_again_with_mark("repeat-same-minute-mark", rows, SAME_MINUTE_REF, mark)
     check("same minute mark: the Stop judges the item once", len(calls) == 1, p.desc())
     check("same minute mark: the Stop flags the item at its ref", "%s may repeat %s" % (AGAIN_ID, SAME_MINUTE_REF) in p.out,
           p.desc())
@@ -3875,7 +3880,8 @@ def case_repeat_unsuffixed_mark_stays_one_mark_on_a_second_judging():
     `#`. MARKED matches a time-only ref, and mark_items adds no second mark. It keeps the plain ref working
     beside the `#N` case, so a fix to the suffix match cannot break the plain one."""
     mark = " repeats " + LATE_REF
-    cfg, p, calls = judged_again_with_mark("repeat-unsuffixed-mark", LATE_HEADER, LATE_REF, mark)
+    rows = [(EARLY_HEADER, MSG_ONE, [AGAIN_LINE + mark]), (LATE_HEADER, MSG_TWO, [])]
+    cfg, p, calls = judged_again_with_mark("repeat-unsuffixed-mark", rows, LATE_REF, mark)
     check("unsuffixed mark control: the Stop judges the item once", len(calls) == 1, p.desc())
     check("unsuffixed mark control: the Stop flags the item at its ref", "%s may repeat %s" % (AGAIN_ID, LATE_REF) in p.out,
           p.desc())
@@ -3904,18 +3910,18 @@ def case_repeat_own_home_is_never_a_candidate_for_its_item():
 
 def case_repeat_each_item_is_judged_against_the_other_messages():
     """R38 (owner 13:03 CST Nov 11): one candidate list was given to every item in a Stop, so each message of the
-    Stop hid the others. The item on the later message repeats the earlier one: the earlier message is its
-    candidate, and it is marked. The item on the earlier message is never marked against its own message. One
-    model call covers both items."""
+    Stop hid the others. The later message is 36 minutes after the earlier one, outside the 30-minute window, so the
+    earlier message stays the later item's candidate and gets the mark. The item on the earlier message is never
+    marked against its own message. One model call covers both items."""
     root = repeat_repo("repeat-per-item", step=True)
     cfg = new_cfg()
-    early_line, late_line = "- fb-1004-1 [note] -> noted", "- fb-1009-1 [note] -> noted"
+    early_line, late_line = "- fb-1004-1 [note] -> noted", "- fb-1040-1 [note] -> noted"
     write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [early_line]), (LATE_HEADER, MSG_TWO, [late_line])])
-    answer = json.dumps({"repeats": [{"id": "fb-1009-1", "ref": EARLY_REF}, {"id": "fb-1004-1", "ref": EARLY_REF}]})
+    answer = json.dumps({"repeats": [{"id": "fb-1040-1", "ref": EARLY_REF}, {"id": "fb-1004-1", "ref": EARLY_REF}]})
     p, calls = stop(cfg, NEW_SID, root, answer=answer)
     check("per item: one model call covers both messages", len(calls) == 1, p.desc())
     check("per item: the later item is marked against the earlier message",
-          inbox_line(cfg, NEW_SID, "fb-1009-1") == late_line + MARK_EARLY, inbox_line(cfg, NEW_SID, "fb-1009-1"))
+          inbox_line(cfg, NEW_SID, "fb-1040-1") == late_line + MARK_EARLY, inbox_line(cfg, NEW_SID, "fb-1040-1"))
     check("per item: the earlier item is not marked against its own message",
           inbox_line(cfg, NEW_SID, "fb-1004-1") == early_line, inbox_line(cfg, NEW_SID, "fb-1004-1"))
 
@@ -3942,22 +3948,26 @@ def backlog_repo(name):
 
 def case_repeat_same_minute_blocks_keep_their_own_candidates():
     """R38 (restart plan, owner 13:03 CST Nov 11): two messages stamped in the same minute share the inbox ref
-    inbox:<sid8>@<hh:mm>, so dropping the item's own block also dropped the other message. The later item repeats
-    the earlier message: that message stays its candidate and gets the mark. Control: the earlier item names its
-    own message and gets no mark. Both items name their candidate by its words, so the case holds whatever ref a
-    fix gives each message."""
+    inbox:<sid8>@<hh:mm>, and each takes `#<block number>`. The later item sits 36 minutes after that pair, so both
+    messages stay its candidates, and it marks the earlier one by its own ref. Control: the earlier item sits in the
+    pair, so the pair is inside the 30-minute window of its own block and is not its candidate: it gets no mark.
+    Both items name their candidate by its words, so the case holds whatever ref a fix gives each message."""
     root = repeat_repo("repeat-same-minute", step=True)
     cfg = new_cfg()
-    early_line, late_line = "- fb-1004-1 [note] -> noted", "- fb-1009-1 [note] -> noted"
-    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [early_line]), (EARLY_HEADER, MSG_TWO, [late_line])])
-    p, calls = stop(cfg, NEW_SID, root, pick=[["fb-1009-1", EARLY_PHRASE], ["fb-1004-1", EARLY_PHRASE]])
+    early_line, late_line = "- fb-1004-1 [note] -> noted", "- fb-1040-1 [note] -> noted"
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [early_line]), (EARLY_HEADER, MSG_TWO, []),
+                               (LATE_HEADER, MSG_TWO, [late_line])])
+    p, calls = stop(cfg, NEW_SID, root, pick=[["fb-1040-1", EARLY_PHRASE], ["fb-1004-1", EARLY_PHRASE]])
     check("same minute: one model call covers both messages", len(calls) == 1, p.desc())
     prompt = calls[0]["prompt"] if len(calls) == 1 else ""
+    refs = candidate_refs(prompt)
+    check("same minute: both messages stamped 10:04 keep their own refs",
+          EARLY_REF + "#1" in refs and EARLY_REF + "#2" in refs, refs)
     ref = candidate_ref_of(prompt, EARLY_PHRASE)
     check("same minute: the earlier message is a candidate for the later item", ref != "", prompt[-300:])
     check("same minute: the later item is marked against the earlier message",
-          ref != "" and inbox_line(cfg, NEW_SID, "fb-1009-1") == late_line + " repeats " + ref,
-          inbox_line(cfg, NEW_SID, "fb-1009-1"))
+          ref != "" and inbox_line(cfg, NEW_SID, "fb-1040-1") == late_line + " repeats " + ref,
+          inbox_line(cfg, NEW_SID, "fb-1040-1"))
     check("same minute control: the earlier item names its own message and gets no mark",
           inbox_line(cfg, NEW_SID, "fb-1004-1") == early_line, inbox_line(cfg, NEW_SID, "fb-1004-1"))
 
