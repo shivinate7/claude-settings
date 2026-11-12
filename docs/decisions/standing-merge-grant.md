@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner rulings, 2026-10-10, 2026-10-29 16:47 CDT, 2026-10-29 20:33 CDT, 2026-10-30 15:06 CDT, 2026-11-01 17:37 CST, 2026-11-01 19:23 CST, 2026-11-02 14:02 CST, 2026-11-02 15:14 CST and 2026-11-02 15:38 CST. The coordinator holds a standing merge grant in claude-settings and in every repo of the owner (`shivinate7`). It is not a fixed list of repos. The batch runner merges under the coordinator's grant, so it has the same scope.
+Owner rulings, 2026-10-10, 2026-10-29 16:47 CDT, 2026-10-29 20:33 CDT, 2026-10-30 15:06 CDT, 2026-11-01 17:37 CST, 2026-11-01 19:23 CST, 2026-11-02 14:02 CST, 2026-11-02 15:14 CST and 2026-11-02 15:38 CST. The lone lane also rests on 2026-11-10 14:23 CST and 2026-11-10 14:33 CST (see Grounds below). The coordinator holds a standing merge grant in claude-settings and in every repo of the owner (`shivinate7`). It is not a fixed list of repos. The batch runner merges under the coordinator's grant, so it has the same scope.
 
 Owner, 2026-11-01 21:34 CST: a batch runner runs every merge under the coordinator's grant. The coordinator never merges.
 
@@ -10,8 +10,12 @@ Owner, 2026-11-01 21:34 CST: a batch runner runs every merge under the coordinat
 - Owner, 17:37 CST, relayed by the coordinator: `YOU HAVE EXPLICIT APPROVAL FOR ANY AND ALL REPOS YOU WANT OF MINE TO MARK PR READY, MERGE, REVIEW, ETC.` Per the 19:23 ruling, "REVIEW" there means reviewer agents.
 - Each build has one holder. In a build with a coordinator, the coordinator holds the grant and a batch runner uses it.
 - A lane with no coordinator above it holds the 2026-10-10 grant in claude-settings only. The 19:23 ruling does not widen it.
+  - Scope: a lone lane's scope is claude-settings only. The coordinator's pick of the lone-lane route (Route A, 10:31 CST Nov 12; a pick, not an owner ruling) names this bullet for that case. The absent-key rule in The switch covers the coordinator and the batch runner. The specific bullet governs its case.
+  - Role: the lane records the existing `batch-runner` merge role itself, with `merge --role batch-runner`. No new role word. The merge guard (`hooks/guard_merge.py`, `role_proof_hit`) admits the call when the lane's own newest `get_session` record shows no parent session, no tag set after it and no `cs-build:` tag. Its sources must name `LONE_LANE_REPO` (claude-settings).
+  - Confirm: a cloud confirm still needs a `cs-repo:` tag that names the repo. The lane sets that tag on itself, then re-reads its record. A `cs-build:lane` tag with no parent, or with no source, is refused.
+  - Grounds: session roles ruling (G2, owner, 2026-11-10 14:23 CST) and roles-are-hats ruling (G10, owner, 2026-11-10 14:33 CST).
 - In a cloud session, `merge.py` refuses `--confirm` unless the session recorded the batch-runner role.
-- A lane with no coordinator above it merges with no batch runner (owner, 2026-11-02 14:02 CST). The merge tool still refuses its cloud confirm, because the role is missing. It merges only under that repo's own merge grant or the owner's named act, and it widens no grant (decision `session-tiers`, Lane the owner starts).
+- A lane with no coordinator above it merges with no batch runner (owner, 2026-11-02 14:02 CST). Its cloud confirm is refused until it records the role itself (Role sub-bullet above). It merges only under that repo's own merge grant or the owner's named act, and it widens no grant (decision `session-tiers`, Lane the owner starts).
 - A lane the owner started merges its own lone lane under the same limits (owner, 2026-11-02 15:14 CST; decision `session-tiers`). A cloud confirm still fails without the batch-runner role.
 - A lane that a coordinator started never merges. Owner, 19:23 CST, on the option that lets such a lane merge its own PR: `option C absolutely not correct`.
 - The grant holds "for now", until the owner withdraws it.
@@ -27,8 +31,8 @@ Owner, 2026-11-01 19:23 CST: `just me and claude building and maintaining these 
 Owner pick, 2026-10-30 15:06 CDT (waiting item `merge-grant-claude-md-line`, option c): the grant's home in each repo is a true/false switch, `merge.standingGrant`, in that repo's merge settings, `.github/stamp.json`. The rule `questions-go-to-owner` (questions go to the owner) allows the merge tool's config as a grant's home. The owner's words: "can we basically have like a =true/false on either claude.md or some sorta guard so it can be enabled / disabled on the session? adding to the parent claude.md makes less sense".
 
 - The merge tool reads the switch from the base branch on origin, never from the pull request's tree. A pull request cannot turn its own grant on.
-- Absent key, or no `stamp.json`: the grant holds. That keeps the behaviour from before the switch. A merge tool older than the switch never meets an unknown field in a repo that leaves the key out.
-- `false`: in a cloud session, the merge tool refuses `merge <pr> --confirm` for the coordinator and the batch runner. The coordinator never merges (owner, 2026-11-01 21:34 CST). The batch runner holds no grant of its own, so it reads the same switch. The refusal names no key and no file, so a session does not learn to turn the grant back on.
+- Absent key, or no `stamp.json`: the grant holds. That keeps the behaviour from before the switch. A merge tool older than the switch never meets an unknown field in a repo that leaves the key out. This rule covers the coordinator and the batch runner. A lone lane's scope is the Scope sub-bullet in The ruling: claude-settings only.
+- `false`: in a cloud session, the merge tool refuses `merge <pr> --confirm` for every session, a lone lane included. The coordinator never merges (owner, 2026-11-01 21:34 CST). The batch runner holds no grant of its own, so it reads the same switch. The refusal names no key and no file, so a session does not learn to turn the grant back on.
 - A value that is not `true` or `false` stops the merge tool as a broken config.
 - Outside the cloud the switch changes nothing. There the tool cannot tell the owner from a session, and the owner must stay able to merge the pull request that turns the switch back on.
 - The owner withdraws the grant in a repo by setting the switch to `false` on main, or by telling a session to. A withdrawal in chat still binds every session. The switch makes the merge tool enforce it.
