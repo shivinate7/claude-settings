@@ -481,6 +481,19 @@ def stale_agent_lock_verdict(reason: str):
     return abs(actual - locked_ms) > git_reads.SESSION_LIVE_TOLERANCE_MS
 
 
+def finish_gated_lock_verdict(reason: str, finished: bool):
+    """`stale_agent_lock_verdict`, except that a live-form lock (start S in clock ticks) whose host
+    is gone reads as held unless FINISHED, the proof that the agent finished (`agent_finished`). A
+    dead host names no process to rule out, so a shell the agent left may still be in its tree.
+    The date-form lock and the lock with no start time keep their own verdict."""
+    stale = stale_agent_lock_verdict(reason)
+    if stale is True and not finished:
+        found = AGENT_LOCK_RE.match(reason or "")
+        if found and (found.group(2) or "").isdigit():
+            return False
+    return stale
+
+
 MAX_CLIMB = 64  # fixed depth bound against a pid cycle, never a real tree this deep
 
 
@@ -827,7 +840,7 @@ def decide_worktree(where: str, entry: dict, attended: bool = False, agent_rule:
     own_lock = False
     if entry.get("locked_reason") is not None:
         holder = entry.get("locked_reason") or "locked"
-        stale_agent_lock = stale_agent_lock_verdict(holder)
+        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock)
         if stale_agent_lock is not True:
             own_lock = (own_lock_rule and own_agent_lock_verdict(holder) is True
                         and (not fast or batch is not None)
@@ -2462,7 +2475,8 @@ def _restore_cut_short(where: str, entry: dict):
     if not dirty or not all(line.startswith(" D ") for line in dirty):
         return
     locked = git_reads.worktree_locked(where, path)
-    if locked is None or (locked and stale_agent_lock_verdict(entry.get("locked_reason") or "") is not True):
+    if locked is None or (locked and finish_gated_lock_verdict(
+            entry.get("locked_reason") or "", bool(entry.get("finished"))) is not True):
         return
     if git_reads.worktree_live_session(path) is not False:
         return
