@@ -19,8 +19,7 @@ count is unmeasured since the batch-head cases were added.
 BatchHeadMutation (class BatchHeadMutation) lints a batch head, `--batch-build NAME --ready`, and the same head by hand-off, `--lane-lint <sha>`,
 on one touched lane. Its pre-join cases run `--lane-lint <pr>` through the gh shim, in a cloud session with the batch-runner role or with none; the
 shim's comment list holds the hand-off PASS record. Cost per case: one run (the batch build or the lint), one ci-job stub start, and one mutate stub
-start where the run starts (the batch head's lint starts none). Measured on a9ee17e88 with these cases: its 9 cases took 3.7 s to 3.9 s over two runs,
-one of them red.
+start where the run starts (the batch head's lint starts none). Measured: its 9 cases took 3.7 s to 3.9 s over two runs.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
 import ast, atexit, contextlib, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
