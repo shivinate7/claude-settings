@@ -4389,9 +4389,9 @@ class OutboxRulings(Fixture):
         }
 
     def test_held_when_the_words_break_across_lines_on_main(self):
-        self.record_rulings("session-a", [self.ruling("held-step", self.HELD)], steps=["held-step"])
+        self.record_rulings("session-a", [self.ruling("kept-step", self.HELD)], steps=["kept-step"])
         out = self.build_output()
-        self.assertEqual(self.verdict_lines(out, "held-step", self.HELD), [["held"]],
+        self.assertEqual(self.verdict_lines(out, "kept-step", self.HELD), [["held"]],
                          "the words are on main once whitespace folds, so the one line must say held:\n" + out)
 
     def test_not_held_when_the_home_words_are_reworded(self):
@@ -4422,7 +4422,7 @@ class OutboxRulings(Fixture):
         self.assertEqual(after, before, "a line with no [ruling] tag printed output")
 
     def test_check_costs_at_most_three_git_starts_no_file_and_no_process(self):
-        cases = [("held", self.HELD, "held", 4), ("reworded", self.REWORDED, "not held", 2),
+        cases = [("kept", self.HELD, "held", 4), ("reworded", self.REWORDED, "not held", 2),
                  ("branch", self.BRANCH_ONLY, "not held", 2), ("gone", self.GONE, "unknown", 2)]
         steps, lines, want = [], [], []
         for tag, home, verdict, count in cases:
