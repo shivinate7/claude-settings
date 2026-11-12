@@ -1659,5 +1659,87 @@ class MockupHomes(Tree):
         self.refuses("docs/design")
 
 
+class ProtectedPaths(Tree):
+    """The "protected-paths" key of a repo's extras file: a list of {path, why}. A trailing slash names a folder, and any
+    other path names one file. protected_paths(root) reads the list, [] when the file or the key is absent, and raises
+    LayoutError, naming the key and the entry, for a shape it cannot read. A missing accessor fails by name."""
+
+    def setUp(self):
+        super().setUp()
+        self.layout = load("layout_under_test", os.path.join(LINT, "layout.py"))
+
+    def fn(self):
+        found = getattr(self.layout, "protected_paths", None)
+        if found is None:
+            self.fail("lint/layout.py has no protected_paths yet")
+        return found
+
+    def keyed(self, value):
+        self.put(EXTRAS, json.dumps({"kinds": {}, "protected-paths": value}))
+
+    def refused(self, names=None):
+        """protected_paths() refuses the extras file. Its message names the key, and `names` when given."""
+        with self.assertRaises(self.layout.LayoutError, msg="protected_paths did not refuse the extras file") as caught:
+            self.fn()(self.tree)
+        message = str(caught.exception)
+        self.assertIn("protected-paths", message, "the refusal does not name the key: %s" % message)
+        if names is not None:
+            self.assertIn(names, message, "the refusal does not name the entry %r: %s" % (names, message))
+
+    def test_a_repo_with_no_extras_file_has_no_protected_paths(self):
+        self.assertEqual(self.fn()(self.tree), [], "a repo with no extras file has protected paths")
+
+    def test_a_repo_with_no_key_has_no_protected_paths(self):
+        self.put(EXTRAS, json.dumps({"kinds": {}}))
+        self.assertEqual(self.fn()(self.tree), [], "a repo with no protected-paths key has protected paths")
+
+    def test_an_empty_list_has_no_protected_paths(self):
+        self.keyed([])
+        self.assertEqual(self.fn()(self.tree), [], "an empty protected-paths list has protected paths")
+
+    def test_entries_are_read_in_order_with_their_path_and_why(self):
+        self.keyed([{"path": "fixtures/", "why": "generated"}, {"path": "docs/CHANGELOG.md", "why": "released"}])
+        found = self.fn()(self.tree)
+        self.assertEqual([(e["path"], e["why"]) for e in found], [("fixtures/", "generated"), ("docs/CHANGELOG.md", "released")],
+                         "the entries were not read in order, with their path and why")
+
+    def test_a_file_path_without_a_trailing_slash_is_read_as_given(self):
+        self.keyed([{"path": "docs/CHANGELOG.md", "why": "released"}])
+        self.assertEqual([e["path"] for e in self.fn()(self.tree)], ["docs/CHANGELOG.md"],
+                         "a file path without a trailing slash was not read as given")
+
+    def test_a_non_list_is_refused_naming_the_key(self):
+        self.keyed("fixtures/")
+        self.refused()
+
+    def test_a_non_object_entry_is_refused_naming_the_entry(self):
+        self.keyed(["fixtures/"])
+        self.refused("fixtures/")
+
+    def test_an_entry_with_no_path_is_refused(self):
+        self.keyed([{"why": "generated"}])
+        self.refused()
+
+    def test_an_entry_with_no_why_is_refused_naming_its_path(self):
+        self.keyed([{"path": "fixtures/"}])
+        self.refused("fixtures/")
+
+    def test_an_entry_with_an_empty_why_is_refused_naming_its_path(self):
+        self.keyed([{"path": "fixtures/", "why": ""}])
+        self.refused("fixtures/")
+
+    def test_a_leading_slash_path_is_refused(self):
+        self.keyed([{"path": "/fixtures/", "why": "generated"}])
+        self.refused("/fixtures/")
+
+    def test_a_dotdot_path_is_refused(self):
+        self.keyed([{"path": "../fixtures/", "why": "generated"}])
+        self.refused("../fixtures/")
+
+    def test_a_dotdot_segment_inside_the_path_is_refused(self):
+        self.keyed([{"path": "fixtures/../src/", "why": "generated"}])
+        self.refused("fixtures/../src/")
+
+
 if __name__ == "__main__":
     unittest.main()
