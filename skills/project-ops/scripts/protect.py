@@ -25,7 +25,7 @@ from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the req
 
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 BRANCH_RE = re.compile(r"^[A-Za-z0-9_./-]+$")
-# The Admin repository role's actor_id. GitHub's rulesets docs give no role-to-id table (read 2026-11-12); 5 is the id the API reports for Admin.
+# The Admin repository role's actor_id. 5 is unconfirmed against a live ruleset (none exists yet); read it back at the first live one.
 ADMIN_ROLE_ID = 5
 BYPASS = {"actor_type": "RepositoryRole", "actor_id": ADMIN_ROLE_ID, "bypass_mode": "pull_request"}
 OWNED_RULES = ("required_status_checks", "deletion", "non_fast_forward")  # the rule types the ruled form names; any other rule on a ruleset is kept

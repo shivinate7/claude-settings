@@ -1254,11 +1254,8 @@ class Host:
     def ruleset_names(self):
         """-> the check names that the base's ruleset requires: every context of every required_status_checks rule that applies to the base,
         in order, once each. None when no rule requires a check, which hands the names to the classic protection. One read of rules/branches/<base>,
-        which answers [] when no ruleset applies. An HTTP 404 that is not a network error reads as no ruleset, like the classic read's 404 (a host with no
-        rules route has no ruleset). Any other failed read raises Stop: the classic list is no stand-in for an unread ruleset."""
+        which answers [] when no ruleset applies. Any failed read raises Stop, an HTTP 404 included: the classic list is no stand-in for an unread ruleset."""
         c, out = self.api(f"rules/branches/{self.base}")
-        if c and not is_net(c, out) and re.search(r"\bHTTP 404\b", out):
-            return None
         try:
             rules = json.loads(out) if not c else None
             if not isinstance(rules, list):
