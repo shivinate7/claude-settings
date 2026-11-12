@@ -28,3 +28,17 @@ if os.name == "nt":
 else:
     skip_case("home-literal: delete: rd /s /q at the home directory's literal path denies",
               "a Windows home folder: this run is not on Windows, so it cannot read one")
+
+# The cmd.exe spelling of a home folder written with backslashes, the way a Windows session writes it.
+# The home is fixed on the guard's own environment (HOME, and USERPROFILE, which Windows reads the home
+# from), so the case names the same folder on Linux and on Windows, and never skips.
+WIN_HOME = "C:\\Users\\alice"
+WIN_HOME_ENV = {"HOME": WIN_HOME, "USERPROFILE": WIN_HOME}
+sh("home-literal: delete: rd /s /q of the home folder with backslashes denies",
+   "rd /s /q " + WIN_HOME, "deny", "destructive-delete", cwd=NOGIT, env=WIN_HOME_ENV)
+sh("home-literal: delete: rd /s /q of the quoted home folder with backslashes denies",
+   'rd /s /q "' + WIN_HOME + '"', "deny", "destructive-delete", cwd=NOGIT, env=WIN_HOME_ENV)
+
+# Control: a folder under that home is not the home, so it stays allowed.
+sh("home-literal: delete: rd /s /q of a folder under the home folder with backslashes is allowed",
+   "rd /s /q " + WIN_HOME + "\\build\\out", "allow", cwd=NOGIT, env=WIN_HOME_ENV)
