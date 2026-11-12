@@ -228,20 +228,22 @@ test("related items share one frame with one sentence, in the most urgent tier o
   assert.match(await card(page, items[0]).locator(".top").textContent(), /goes with No\. 2/);
 });
 
-test("a stands item sits in the last section, goes with the next Send, and a changed pick wins", async (t) => {
-  const s1 = mk("stand-one", 7, { stands: true }), s2 = mk("stand-two", 8, { stands: true });
+test("a stands item sits in the last section, and only a pick the owner pressed goes with Send", async (t) => {
+  const s1 = mk("stand-one", 7, { stands: true }), s2 = mk("stand-two", 8, { stands: true }), s3 = mk("stand-three", 10, { stands: true });
   const plain = mk("rule-q", 9);
-  const page = await open(t, { items: [s1, s2, plain] }); if (!page) return;
-  assert.equal(await page.locator("#tier-stands article.card").count(), 2);
+  const page = await open(t, { items: [s1, s2, s3, plain] }); if (!page) return;
+  assert.equal(await page.locator("#tier-stands article.card").count(), 3);
   assert.equal(await page.isChecked(`#o-${s1.id}-a`), true, "a stood pick is not shown");
   assert.equal(await page.locator(`input[name="g-${plain.id}"]:checked`).count(), 0, "a rule question is preselected");
-  assert.match(await page.locator("#barStatus").textContent(), /2 where my pick stands/);
+  assert.equal(await page.locator("#send").isDisabled(), true, "unseen stood picks alone enable Send");
   await choose(page, s2, "b");
+  await choose(page, s3, "a"); // pressing the starred pick accepts it
   await send(page);
   await page.waitForFunction(() => Object.keys(window.__answers()).length === 2);
   const a = await answers(page);
-  assert.deepEqual([a[s1.id].choice, a[s1.id].note], ["a", "accepted pick"]);
+  assert.equal(s1.id in a, false, "a stood pick the owner never pressed was recorded");
   assert.deepEqual([a[s2.id].choice, a[s2.id].note], ["b", ""]);
+  assert.equal(a[s3.id].choice, "a");
   assert.equal(plain.id in a, false, "an unanswered rule question was sent");
 });
 
@@ -340,6 +342,7 @@ for (const withDesigns of [false, true]) for (const viewport of [{ width: 1280, 
       assert.equal(await page.locator("#item-first iframe").count(), 2, "the option designs have no frames in their cards");
       await page.evaluate(() => { window.__of = [...document.querySelectorAll("#item-first iframe")]; });
     }
+    await choose(page, items[1], "a"); // a stood pick goes with Send only once pressed
     const base = await geo(page);
     const same = async (what) => {
       assert.deepEqual(await geo(page), base, "the page moved on " + what);
@@ -1279,17 +1282,17 @@ test("a second click on the selected option unselects it, with no write", async 
   assert.deepEqual(await page.evaluate(() => window.__log), []);
 });
 
-test("a second click unselects a stood pick, and it stays unselected", async (t) => {
+test("a press accepts a stood pick, and a second press unselects it", async (t) => {
   const it = mk("stand-solo", 7, { stands: true });
   const page = await open(t, { items: [it] }); if (!page) return;
   assert.equal(await page.isChecked(`#o-${it.id}-a`), true, "the pick does not stand");
+  assert.equal(await page.locator("#send").isDisabled(), true, "an unseen stood pick enables Send");
   await choose(page, it, "a");
-  assert.equal(await page.isChecked(`#o-${it.id}-a`), false, "a stood pick cannot be unselected");
-  assert.equal(await page.locator("#send").isDisabled(), true, "an unselected stood pick still goes with Send");
-  await takePick(page, it);
-  assert.equal(await page.isChecked(`#o-${it.id}-a`), true);
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), true, "a press on the stood pick unselected it");
+  assert.equal(await page.locator("#send").isDisabled(), false, "an accepted stood pick cannot be sent");
   await choose(page, it, "a");
-  assert.equal(await page.isChecked(`#o-${it.id}-a`), false, "a second click unselects a pick taken by a tap");
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), false, "a second press leaves the pick selected");
+  assert.equal(await page.locator("#send").isDisabled(), true);
 });
 
 test("emptying a note drops it", async (t) => {
@@ -1871,10 +1874,13 @@ test("a withdraw leaves an answer that changed since the page read it", async (t
   assert.deepEqual((await page.evaluate(() => window.__log)).filter((l) => l[0] === "delete"), []);
 });
 
-test("a note typed on an item whose pick stands sends the stood pick plus the note", async (t) => {
+test("a note on an item whose pick stands sends nothing until the pick is pressed, then sends both", async (t) => {
   const it = mk("stand-note", 7, { stands: true });
   const page = await open(t, { items: [it] }); if (!page) return;
   await addNote(page, it, "with a thought");
+  assert.equal(await page.locator("#send").isDisabled(), true, "a note alone sent an unpressed stood pick");
+  await choose(page, it, "a");
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), true, "pressing the pick after a note unselected it");
   await send(page);
   await page.waitForFunction((id) => !!window.__answers()[id], it.id);
   const a = (await answers(page))[it.id];
@@ -7713,13 +7719,13 @@ test("a pick that stands, as a list, sits in the last section, goes with Send as
   assert.deepEqual(await ticked(page, s1), ["a", "c"], "a stood pick is not shown");
   assert.deepEqual(await ticked(page, s2), ["a", "c", "d"]);
   assert.match(await rankText(page, s2, "c"), rank("1st", 3));
-  assert.match(await page.locator("#barStatus").textContent(), /2 where my pick stands/);
+  assert.equal(await page.locator("#send").isDisabled(), true, "unseen stood list picks enable Send");
   await choose(page, s1, "a"); // untick: the owner's list now differs from my pick
   await send(page);
-  await page.waitForFunction(() => Object.keys(window.__answers()).length === 2);
+  await page.waitForFunction(() => Object.keys(window.__answers()).length === 1);
   const a = await answers(page);
   assert.deepEqual([a[s1.id].choice, a[s1.id].note], [["c"], ""]);
-  assert.deepEqual([a[s2.id].choice, a[s2.id].note], [["c", "a", "d"], "accepted pick"]);
+  assert.equal(s2.id in a, false, "a stood list pick the owner never touched was recorded");
 });
 
 test("a pick that is not a valid list shows no star; a valid list does", async (t) => {
