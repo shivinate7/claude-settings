@@ -15823,7 +15823,7 @@ class ReleaseCheck(ReviewEnv):
     def test_check_2_a_record_that_names_another_pr_does_not_count_for_this_one(self):
         stray = review_comment(9, 7, record_text(n=8, head=self.head()))  # on #7's thread, but it names #8
         rc, lines, err, _ = self.release([7, 8], comments=[stray, self.review(8)])
-        self.assert_fails_alone(self.line_of(lines, 7), 7, r"record")
+        self.assert_fails_alone(self.line_of(lines, 7), 7, r"review log")
         self.assertEqual(self.line_of(lines, 8), "#8 PASS", err)
         self.assertEqual(rc, 1, err)
 
