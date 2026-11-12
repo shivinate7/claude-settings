@@ -112,6 +112,9 @@
                           .ps1 tests print `skip <test>: <reason>`. A failing test refuses, with its last output; a timeout, an
                           unloadable selector or an unreadable diff is an unknown, lifted by --lint-unknown-ok. The PASS line names
                           the run and skipped counts. Extra cost: the touched tests' own run time, bounded in all by LINT_SECONDS.
+                          Before any step: a lint tree that lacks lint/check_python_floor.py or .github/workflows/checks.yml, which the head's
+                          own tree holds, reads UNKNOWN (exit 2) and names the file; no step runs and --lint-unknown-ok never lifts it. Cost:
+                          one `git ls-tree` of the head.
   merge --idle-lanes --live FILE
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
@@ -181,6 +184,9 @@ class Stop(Exception):
 
 class Liftable(Stop):
     """A refusal that a reason flag lifts. Its message names the flag, so main() does not add the no-override line."""
+
+class UnknownStop(Stop):
+    """A refusal that reads UNKNOWN: the run could not tell pass from fail. main() exits 2 on it (as bin/ci-job does), and no flag lifts it."""
 
 class LintFail(Stop):
     """The lint of a head FAILed. `lines` are ci-job's FAIL lines, `log` its `log=` line as a list of 0 or 1: the step output that names the paths is in that log."""
@@ -3112,6 +3118,22 @@ def run_touched_tests(wt, base, head):
             ran += 1
     return ran, skips, fails, unknowns
 
+LINT_TREE_FILES = ("lint/check_python_floor.py", ".github/workflows/checks.yml")  # files the lint reads from its own tree: the floor check and the workflow that names the steps
+
+def refuse_incomplete_tree(wt, head, base):
+    """UNKNOWN, before any ci-job step runs, when the made lint tree `wt` lacks a file of LINT_TREE_FILES that the head's own git tree holds: a tree
+    cut incomplete (the incident's tree lacked both), not a head that never had the file. Without it the floor step only crashes on the file and its
+    FAIL blames the lane for a tree defect. Names each missing file; --lint-unknown-ok never lifts it (UnknownStop, not Liftable).
+    A head whose tree git cannot list is the same unknown."""
+    c, listed = git(wt, "ls-tree", "-r", "--name-only", "-z", head, "--", *LINT_TREE_FILES)
+    if c:
+        raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the head's tree could not be listed, so the lint tree was not checked: {listed}")
+    held = [p for p in listed.split("\0") if p]
+    missing = [rel for rel in held if not os.path.isfile(os.path.join(wt, *rel.split("/")))]
+    if missing:
+        raise UnknownStop("\n".join([f"the lint of {head[:9]} against {base} is unknown, not a pass: the lint tree lacks {', '.join(missing)}, so no step ran.",
+                                     "Run again. If it keeps happening, the tree made for this head is incomplete. --lint-unknown-ok does not lift this. " + LANE_LINT_REMEDY]))
+
 def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_tests=False):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
@@ -3140,6 +3162,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     touched = None
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
         pin_notes, fails, reports, stop = [], [], [], ""
+        refuse_incomplete_tree(wt, head, base)
         if target.isdigit():
             refuse_unstacked_head(root, head, base)
         fetched = {}
@@ -5469,7 +5492,7 @@ def main(argv, host=None, lock=None, hosts=None):
         return (preview(root, cfg, a.config, a.pr, h, lock, info, a.undo_check_unknown_ok)) or 0
     except Stop as e:
         print(f"merge: {e}" + ("" if isinstance(e, (Liftable, Unproven)) else " No override lifts this refusal, because this tool runs after the guard."), file=sys.stderr)
-        return 1
+        return 2 if isinstance(e, UnknownStop) else 1
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
