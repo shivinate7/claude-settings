@@ -142,8 +142,9 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   blocks. They also include the blocks of the 50 newest other inboxes whose sidecar
   `<sid>.inbox.repo` holds a folder at or under the repo root. Capture writes that sidecar once per
   session, when its cwd is in a repo. It walks up for `.git` and starts no process. The model names
-  at most one candidate per item. Each item has its own candidate list: the judge drops the step or
-  debt file the item's home names and the item's own owner-message block (ruling 2026-11-11 13:03 CST,
+  at most one candidate per item. Each item has its own candidate list: the judge drops the step,
+  debt, todo or notes file the item's home names (every line of a todo or notes file) and the item's own
+  owner-message block, even when two blocks share a minute (ruling 2026-11-11 13:03 CST,
   restart plan R38). Another message of the same Stop, and the same text in another session's
   inbox, stay candidates. An item with no candidate left is not asked. A hit appends ` repeats <ref>`
   to the item line (one inbox rewrite through a temp file) and prints one systemMessage line. A mark

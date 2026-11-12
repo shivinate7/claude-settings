@@ -138,8 +138,9 @@ source) of REPEAT_CUT
 characters: roadmap steps at the local ref (one `git grep`, never fetched), the layout's backlog files
 in the working tree, this inbox's blocks, and the blocks of the REPEAT_INBOXES newest other
 inboxes whose sidecar `<sid>.inbox.repo` (local_time.bind_repo) names a folder in this repo. Each item
-has its own candidate list: the judge drops the step or debt file the item's home names and the item's
-own owner-message block (own_refs). A later or earlier message of the same Stop, and the same text in
+has its own candidate list: the judge drops the step, debt, todo or notes file the item's home names
+(every line of a todo or notes file) and the item's own owner-message block, told from another block
+stamped in the same minute (own_refs, inbox_refs). A later or earlier message of the same Stop, and the same text in
 another session's inbox, stay candidates. An item left with no candidate is not asked; no candidate
 for any item means no call. A hit appends ` repeats <ref>` to the item line (one rewrite of the inbox)
 and prints one systemMessage line; a mark never blocks the turn. No repo means only this inbox's
@@ -150,6 +151,7 @@ Format: see hooks/test_feedback_inbox.py. Exit 0 always. Any other error goes to
 """
 import json
 import os
+import posixpath
 import re
 import sys
 
@@ -1134,15 +1136,18 @@ def backlog_candidates(root):
     return out
 
 
-def inbox_ref(sid, block):
-    """The candidate ref of an inbox block."""
-    return "inbox:%s@%s" % (sid[:8], block["stamp"][:16])
+def inbox_refs(sid, blocks):
+    """The candidate ref of each inbox block, in block order: `inbox:<sid8>@<date hh:mm>`. Blocks stamped
+    in the same minute share that form, so each of them also takes `#<block number>`, and no two refs match."""
+    base = ["inbox:%s@%s" % (sid[:8], b["stamp"][:16]) for b in blocks]
+    return [ref + "#%d" % n if base.count(ref) > 1 else ref for n, ref in enumerate(base, 1)]
 
 
 def inbox_candidates(blocks, sid):
     """[(ref, label, text)] for each block of an inbox, newest first."""
-    return [(inbox_ref(sid, b), squash(b["text"], 60), squash(b["text"]))
-            for b in reversed(blocks) if (b["text"] or "").strip()]
+    refs = inbox_refs(sid, blocks)
+    return [(refs[n], squash(b["text"], 60), squash(b["text"]))
+            for n, b in reversed(list(enumerate(blocks))) if (b["text"] or "").strip()]
 
 
 def under(path, root):
@@ -1199,23 +1204,31 @@ def candidates(root, inbox, blocks):
     return found[:REPEAT_MAX]
 
 
-def own_refs(rest, root, sid, block):
-    """The candidate refs that are the item's own, which it never repeats: the roadmap step or debt file
-    its home names, and its own owner-message block. Other messages of the Stop, and the same text in
+def own_refs(rest, root, own_block, found):
+    """The refs among `found` that are the item's own, which it never repeats: its own owner-message block
+    (`own_block`, its ref from inbox_refs), and its home: the roadmap step, the debt file, or the todo or
+    notes file (every line of that file) it names. Other messages of the Stop, and the same text in
     another session's inbox, stay candidates."""
-    refs = {inbox_ref(sid, block)}
+    own = {own_block}
     try:
         step = step_home(rest)
         if step is not None:
-            refs.add("roadmap:" + step.group(1))
+            own.add("roadmap:" + step.group(1))
         elif root is not None and home_word(rest):
             import layout
-            folder, _, name = home_path(rest).replace("\\", "/").rpartition("/")
-            if name.endswith(".md") and folder.strip("/") == layout.path(root, "debts").strip("/"):
-                refs.add("debt:" + name[:-len(".md")])
+            home = posixpath.normpath(home_path(rest).replace("\\", "/")).strip("/")
+            folder, _, name = home.rpartition("/")
+            known = layout.kinds(root)
+            at = {key: layout.path(root, key).strip("/") for key in HOME_KINDS["task"] if key in known}
+            if home == at.get("todo"):
+                own |= {r for r in found if r.startswith("todo:")}
+            elif home == at.get("debt-notes"):
+                own |= {r for r in found if r.startswith("note:")}
+            elif name.endswith(".md") and folder == at.get("debts"):
+                own.add("debt:" + name[:-len(".md")])
     except Exception as e:  # an unreadable home drops only the home's ref
         print("feedback_guard: own home: %s" % e, file=sys.stderr)
-    return refs
+    return own & found
 
 
 def judge(homes, inbox, blocks, new):
@@ -1230,12 +1243,13 @@ def judge(homes, inbox, blocks, new):
     sid = os.path.basename(inbox)[:-len(INBOX_SUFFIX)]
     rests = {it[0]: it[1] for b in blocks for it in map(item, b["items"]) if it is not None}
     refs = {ref for ref, _, _ in found}
+    block_refs = inbox_refs(sid, blocks)
     asked, allowed = [], {}
     for i, n in new:
-        drop = own_refs(rests.get(i, ""), root, sid, blocks[n])
+        drop = own_refs(rests.get(i, ""), root, block_refs[n], refs)
         allowed[i] = refs - drop
         if allowed[i]:
-            asked.append((i, n, sorted(drop & refs)))
+            asked.append((i, n, sorted(drop)))
     if not asked:
         return [], None
     labels = {ref: label for ref, label, _ in found}
