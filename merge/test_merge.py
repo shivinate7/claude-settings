@@ -20457,6 +20457,39 @@ class BatchFreeze(CloudSession):
         self.assertTrue(lines, "the batch log is empty after a refusal")
         self.assertEqual(lines[-1], "end: refused: #102 cannot be read.", "the log's end line is not the first line of the refusal: %r" % lines[-1])
 
+    def test_the_prune_removes_the_tmp_folder_of_each_log_it_removes(self):
+        folder = os.path.dirname(self.batch_log())
+        self.old_logs(folder, tmp=True)  # 22 old logs, each with its own <name>.tmp folder: the prune keeps the newest 19 others
+        for n in (101, 102):
+            self.lane(n)
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+        pruned, kept = range(3), range(3, 22)
+        for age in pruned:  # scope first: the prune did remove each of these logs, so their folders are the subject
+            self.assertFalse(os.path.exists(os.path.join(folder, "old-%02d.log" % age)), "setup: the prune kept old-%02d.log: %s" % (age, sorted(os.listdir(folder))))
+        for age in pruned:
+            tmp = os.path.join(folder, "old-%02d.tmp" % age)
+            self.assertFalse(os.path.exists(tmp), "the prune removed old-%02d.log but left its folder %s behind: %s" % (age, tmp, sorted(os.listdir(folder))))
+        for age in kept:  # a kept log's folder stays, with what it holds
+            probe = os.path.join(folder, "old-%02d.tmp" % age, "ci-job-lint-probe", "1.log")
+            self.assertTrue(os.path.isfile(probe), "the prune removed the folder of kept log old-%02d: %s" % (age, probe))
+
+    def test_the_build_never_prunes_its_own_tmp_folder(self):
+        # A guard: the old code never touches a <name>.tmp folder, so this case is green there. It holds the new prune to the build's own folder,
+        # which has no log beside it before the build (nightly.log is the build's own log, so the prune must not take it for an orphan).
+        folder = os.path.dirname(self.batch_log())
+        own = os.path.join(folder, "nightly.tmp")
+        self.old_logs(folder)  # 22 old logs: the prune runs, and removes the oldest
+        put(os.path.join(own, "earlier", "1.log"), "an earlier build's lint output\n")
+        for n in (101, 102):
+            self.lane(n)
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+        self.assertFalse(os.path.exists(os.path.join(folder, "old-00.log")), "setup: the prune kept old-00.log, so it did not run: %s" % sorted(os.listdir(folder)))
+        self.assertTrue(os.path.isdir(own), "the build removed its own folder %s, where its ci-job writes: %s" % (own, out))
+
 # `merge --touches [--run RUN_ID] [--case TEXT]... [--file PATH]...`: the open pull requests that already touch a failing case or a named file.
 # The incident's fixtures: red main run 42559512356 failed two brief-destructive-git cases, and open pull 2390 already fixes them.
 # The run's record names no case. The two cases here are the ones the fix's patch edits the body of, so the names come from that patch.
