@@ -879,8 +879,8 @@ class RecordSlugsTests(unittest.TestCase):
         self.commit_change()
         self.assert_passes()
 
-    # Pins: a sighting is an edit, so it carries the Until rule with it. Each case here is red or green on the base
-    # already, because the Until rule judges every edited line. The cases stop a Seen change from skipping that rule.
+    # Pins: a sighting is an edit, so it carries the Until rule with it. The Until rule judges every edited line, so each
+    # case here turns on that rule alone. The cases stop a Seen change from skipping that rule.
 
     def test_raising_seen_on_an_old_none_note_with_a_past_until_is_red(self):
         self.put(DEBT_NOTES, NOTES_HEAD + "- old-none: a gap. Fix: none — owner decides. Until: %s\n" % day(-1))
