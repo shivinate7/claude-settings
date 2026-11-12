@@ -1,5 +1,6 @@
-"""A stand-in for ci_limits.py: the same names, and no logic. test_ci_limits.py runs against it through
-CI_LIMITS_UNDER_TEST for the red record. Each case then fails on its own assert, not on a missing module.
+"""A stand-in for ci_limits.py: the same names and no logic. Each case that expects a value fails on it, some on an
+assert and some on an error. The empty-window case passes, since it expects none. Load it with CI_LIMITS_UNDER_TEST;
+it shows only that those cases can go red.
 """
 
 

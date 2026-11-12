@@ -18,8 +18,8 @@ These cases pin the interface of ci_limits.py:
       Warnings go to err; the JSON or the table goes to out.
 
 Minutes are whole seconds over 60, read from the fixtures' own timestamps. No clock is injected, and nothing sleeps.
-The module under test loads from CI_LIMITS_UNDER_TEST when set (the red-run stand-in, ci_limits_stub_test.py),
-else from ci_limits.py beside this file.
+The module under test loads from CI_LIMITS_UNDER_TEST when set (a copy of ci_limits.py with one change, for a red run,
+or ci_limits_stub_test.py, which fails each case that expects a value), else from ci_limits.py beside this file.
 """
 import builtins
 import datetime
@@ -133,6 +133,23 @@ class SampleRules(unittest.TestCase):
         self.assertEqual(limits["checks"], 15,
                          "the oldest run (100 min) is the 31st, outside the newest 30, and must not count")
 
+    def test_limit_follows_the_slowest_green_run_not_the_newest(self):
+        runs = [run(2, job("checks", 10)), run(1, job("checks", 20))]
+        limits, _ = ci_limits.job_limits(runs, {"checks": 60})
+        self.assertIn("checks", limits, "checks has no limit")
+        self.assertEqual(limits["checks"], 30,
+                         "the newest green run is 10 min and the older is 20 min: the limit must follow the slowest, "
+                         "20 x 1.5 = 30, got %r" % (limits["checks"],))
+
+    def test_failed_job_at_its_cap_with_no_failed_step_is_not_a_cut(self):
+        # 62 min on a 60 min cap, failed, no step failed: sample-shaped in every way but its conclusion.
+        runs = [run(2, job("checks-guard", 62, "failure")), run(1, job("checks-guard", 20))]
+        limits, _ = ci_limits.job_limits(runs, {"checks-guard": 60})
+        self.assertIn("checks-guard", limits, "checks-guard has no limit")
+        self.assertEqual(limits["checks-guard"], 30,
+                         "a failed job at 62 min on its 60 min cap, with no failed step, was counted as a cut: "
+                         "only the green 20 min run counts, got %r" % (limits["checks-guard"],))
+
     def test_empty_window_gives_no_limits(self):
         self.assertEqual(ci_limits.job_limits([], {}), ({}, []),
                          "an empty window must give no limits and no misjudged jobs")
@@ -183,6 +200,38 @@ class NewJobs(unittest.TestCase):
                          "checks, an old job cut at its 75 min cap (76 min), must rise to 76 x 1.5 = 114")
         self.assertEqual(sorted(misjudged), [], "an old job cut at its cap was flagged misjudged")
 
+    def test_two_jobs_with_no_kind_are_not_the_same_kind(self):
+        # docs-a and misc-new have no kind, so docs-a is no kind match for misc-new.
+        # checks, at 60, is the largest old limit.
+        caps = {"docs-a": 60, "checks": 75, "misc-new": 60}
+        runs = [run(1, job("docs-a", 10), job("checks", 40))]
+        limits, _ = ci_limits.job_limits(runs, caps)
+        self.assertIn("misc-new", limits, "misc-new has no limit")
+        self.assertEqual(limits["misc-new"], 90,
+                         "misc-new has no kind and no job of its kind, so its estimate is the largest old limit x 1.5 "
+                         "= 60 x 1.5 = 90, got %r: docs-a, which has no kind either, was taken as its kind"
+                         % (limits["misc-new"],))
+
+    def test_job_cut_while_new_is_not_an_old_job_for_its_kind(self):
+        # lint-cut has no green run, so its 62 min cut is a misjudged estimate, not a sample of an old job.
+        caps = {"lint-a": 30, "lint-c": 30, "lint-d": 30, "lint-cut": 60, "lint-new": 60, "checks": 75}
+        kinds = {"lint-a": "lint", "lint-c": "lint", "lint-d": "lint", "lint-cut": "lint", "lint-new": "lint",
+                 "checks": "test"}
+        runs = [run(2, job("lint-cut", 62, "cancelled"), job("lint-a", 20), job("lint-c", 20), job("lint-d", 20),
+                    job("checks", 50)),
+                run(1, job("lint-a", 20), job("lint-c", 20), job("lint-d", 20), job("checks", 50))]
+        limits, misjudged = ci_limits.job_limits(runs, caps, kinds)
+        self.assertIn("lint-new", limits, "lint-new has no limit")
+        self.assertEqual(limits["lint-new"], 45,
+                         "lint-new is new and its kind lint is at 30 (lint-a, lint-c, lint-d): 30 x 1.5 = 45. "
+                         "lint-cut, cut while new, is no old job of that kind: got %r" % (limits["lint-new"],))
+        self.assertIn("lint-cut", limits, "lint-cut has no limit")
+        self.assertEqual(limits["lint-cut"], 113,
+                         "lint-cut, new and cut at its cap, takes the largest old limit 75 x 1.5 = 112.5, which rounds "
+                         "up to 113: got %r" % (limits["lint-cut"],))
+        self.assertEqual(sorted(misjudged), ["lint-cut"],
+                         "lint-cut was cut at its cap while new and not flagged misjudged")
+
 
 class StepLimits(unittest.TestCase):
     def test_step_limit_is_keyed_job_slash_step(self):
@@ -204,6 +253,28 @@ class StepLimits(unittest.TestCase):
         self.assertIn(key, limits, "no step limit under the key " + key)
         self.assertEqual(limits[key], 30,
                          "a real failure in a 40 min step set the step limit: only the green 20 min step counts")
+
+    def test_step_limit_follows_the_slowest_green_run_not_the_newest(self):
+        key = "checks/Guard suite"
+        runs = [run(2, job("checks", 10, steps=[step("Guard suite", 0, 10)])),
+                run(1, job("checks", 20, steps=[step("Guard suite", 0, 20)]))]
+        limits, _ = ci_limits.job_limits(runs, {"checks": 60})
+        self.assertIn(key, limits, "no step limit under the key " + key)
+        self.assertEqual(limits[key], 30,
+                         "the Guard suite step took 10 min in the newest run and 20 min in the older: the step limit "
+                         "must follow the slowest, 20 x 1.5 = 30, got %r" % (limits[key],))
+
+    def test_cancelled_step_of_a_cut_job_is_not_a_step_sample(self):
+        # The job was cut at its 60 min cap. Its Guard step was cancelled after 40 min, so that step is no sample.
+        runs = [run(2, job("checks-guard", 62, "cancelled",
+                           steps=[step("Install", 0, 2), step("Guard suite", 2, 40, "cancelled")])),
+                run(1, job("checks-guard", 20))]
+        limits, _ = ci_limits.job_limits(runs, {"checks-guard": 60})
+        self.assertIn("checks-guard/Install", limits, "the cut job's steps were not read: no Install step limit")
+        self.assertEqual(limits["checks-guard/Install"], 3, "Install took 2 min: 2 x 1.5 = 3")
+        self.assertNotIn("checks-guard/Guard suite", limits,
+                         "a cancelled step of 40 min counted as a step sample: step limit %r, want none"
+                         % (limits.get("checks-guard/Guard suite"),))
 
 
 class Deadline(unittest.TestCase):
