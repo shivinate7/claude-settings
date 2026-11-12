@@ -170,6 +170,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 from required_check import REQUIRED_CHECK  # noqa: E402  the one home of the required check's name (hooks/required_check.py)
 import stale_cites  # noqa: E402  the one home of the rule dirs (lint/stale_cites.py); the lint dir is on sys.path from the records import above
 from pin_note import MARKER as PIN_NOTE_MARKER  # noqa: E402  the one home of the pin note's marker (hooks/pin_note.py)
+from shared_names import STATE_DIR_NAME, config_dir  # noqa: E402  the one home of the config dir and its state folder (hooks/shared_names.py)
 
 class Stop(Exception):
     """A refusal. The message is the whole report."""
@@ -506,6 +507,75 @@ def say(*lines):
     except UnicodeEncodeError:  # a piped Windows stdout is cp1252, strict: escape what it cannot hold, so no name can stop the steps after a merge. stderr already escapes
         enc = sys.stdout.encoding or "ascii"
         print(text.encode(enc, "backslashreplace").decode(enc), flush=True)
+    batch_log_note(text)
+
+# ------------------------------------------------------------------ the batch build log
+# A batch build keeps a log under the config dir's state folder, which no sweep removes. A session's temp folder, where ci-job's own files go,
+# is swept once the session's transcript is idle 24 hours (decision windows-temp-sweep), so a log kept there is lost with a build that timed out.
+BATCH_LOGS_KEPT = 20  # the newest logs a build leaves in the folder
+# ci-job's parallel lint steps write their output to files in its temp folder and reach the verdict log only at the end, so the build also gives
+# ci-job a temp folder of its own beside the log (<name>.tmp): a step's output is under state/ as it is written, and a kill at the timeout loses none.
+_BATCH_LOG = None  # (log path, open handle, ci-job temp folder or None) while a batch build runs with a log, else None
+
+def batch_build_log_path(name):
+    """Where the build of batch `name` writes its log: <config dir>/state/batch-build/<name>.log."""
+    return os.path.join(config_dir(), STATE_DIR_NAME, "batch-build", name + ".log")
+
+def batch_tmp_path(log_path):
+    """The temp folder ci-job gets in the build whose log is `log_path`: the log's path with .tmp for .log, so the prune pairs each log with its folder."""
+    return log_path[:-len(".log")] + ".tmp"
+
+def batch_log_note(text):
+    """Write `text` as lines to the running batch build's log, flushed. A write that fails drops the log with one stderr line: the build goes on."""
+    global _BATCH_LOG
+    if _BATCH_LOG is None:
+        return
+    path, f, _ = _BATCH_LOG
+    try:
+        f.write(text + "\n")
+        f.flush()
+    except (OSError, ValueError) as e:
+        _BATCH_LOG = None
+        print(f"merge: the batch build log {path} could not be written ({e}); the build goes on without it.", file=sys.stderr)
+
+def prune_batch_logs(folder, current):
+    """Keep `current` and the newest other logs in `folder`, BATCH_LOGS_KEPT in all; remove the rest. Runs in the build that opens the log, so it costs no process and no timer."""
+    others = []
+    with contextlib.suppress(OSError):
+        for entry in os.scandir(folder):
+            if entry.name.endswith(".log") and entry.is_file() and os.path.normcase(entry.path) != os.path.normcase(current):
+                others.append((entry.stat().st_mtime, entry.name, entry.path))
+    for _, _, path in sorted(others, reverse=True)[BATCH_LOGS_KEPT - 1:]:
+        with contextlib.suppress(OSError):
+            os.remove(path)
+        shutil.rmtree(batch_tmp_path(path), ignore_errors=True)  # the pruned log's ci-job folder; `current` is never in `others`, so its folder stays
+
+@contextlib.contextmanager
+def batch_build_log(name):
+    """Open batch `name`'s log for append for the length of a build, and prune the folder. A log that cannot be opened prints one stderr line naming its path and the build goes on without it."""
+    global _BATCH_LOG
+    path = batch_build_log_path(name)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        f = open(path, "a", encoding="utf-8")
+    except OSError as e:
+        print(f"merge: the batch build log {path} cannot be opened ({e}); the build goes on without it.", file=sys.stderr)
+        yield
+        return
+    tmp = batch_tmp_path(path)
+    try:
+        os.makedirs(tmp, exist_ok=True)
+    except OSError as e:
+        print(f"merge: the batch build temp folder {tmp} cannot be made ({e}); ci-job keeps the temp folder it has.", file=sys.stderr)
+        tmp = None
+    _BATCH_LOG = (path, f, tmp)
+    try:
+        prune_batch_logs(os.path.dirname(path), path)
+        yield
+    finally:
+        _BATCH_LOG = None
+        with contextlib.suppress(OSError):
+            f.close()
 
 # ------------------------------------------------------------------ the merge lock
 # A lock is a commit that a ref points at. The commit message holds the expiry. The ref is
@@ -3026,10 +3096,16 @@ def ci_job_run(wt, *args, notes=None):
     0 or 1 (the last one: the FAIL lines name it too). liftable: True only for ci-job's own exit 2, which names its unknown steps.
     notes: a list the caller passes to receive, on a pass, each ci-job line that holds the pin note marker (a stale pin); the draft step passes none and ignores them."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}  # as the merge's own lint run reads it
+    if _BATCH_LOG:  # inside a batch build, ci-job's step output goes to the build's log, not a temp file a sweep may remove
+        env["VERDICT_LOG"] = _BATCH_LOG[0]
+        if _BATCH_LOG[2]:  # ci-job's own files, the parallel lint steps' output among them, go under state/ as they are written
+            env.update(TMPDIR=_BATCH_LOG[2], TEMP=_BATCH_LOG[2], TMP=_BATCH_LOG[2])
     try:
         c, out = sh([sys.executable, CI_JOB, *args], cwd=wt, env=env, timeout=LINT_SECONDS, live_stderr=True)
     except subprocess.TimeoutExpired:
-        return "unknown", [f"ci-job did not finish in {LINT_SECONDS} s"], [], False
+        timed_out = f"ci-job did not finish in {LINT_SECONDS} s"
+        batch_log_note(timed_out)
+        return "unknown", [timed_out, *([f"batch build log: {_BATCH_LOG[0]}"] if _BATCH_LOG else [])], [], False
     lines = out.splitlines()
     log = [l for l in lines if l.startswith("log=")][-1:]
     if c == 0:
@@ -4554,6 +4630,9 @@ def batch_start(root, block, base):
     say(f"merge: batch {block['name']} records no Base line (built before it was recorded); rebuilt on the current tip of {base}, {tip[:9]}.")
     return tip, tip
 
+def first_line(text):
+    return (text.strip().splitlines() or [""])[0]
+
 def lane_list(numbers):
     return " ".join(f"#{n}" for n in sorted(numbers))
 
@@ -4801,6 +4880,24 @@ def batch_ready_checks(root, cfg, pr, name, branch, base):
         drop_worktree(root, tmp, wt)
 
 def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", config=".github/stamp.json"):
+    """merge --batch-build NAME ...: batch_build_run, with the build's log open (state/batch-build/NAME.log) for every line it prints.
+    The start line comes before the first read, and one end line closes the log: ok, refused (a Stop), or failed (any other exception, raised again).
+    A kill leaves no end line."""
+    with batch_build_log(name):
+        lanes = lane_list(numbers) if numbers else "the batch's frozen set" if ready else "none"
+        batch_log_note(f"merge: batch {name} {'ready check' if ready else 'build'} started {datetime.datetime.now().astimezone().isoformat(timespec='seconds')}, lanes {lanes}")
+        try:
+            rc = batch_build_run(root, h, name, numbers, on, base, ready, unknown_ok, config)
+        except Stop as e:
+            batch_log_note("end: refused: " + first_line(str(e)))
+            raise
+        except Exception as e:
+            batch_log_note("end: failed: " + first_line(str(e) or type(e).__name__))
+            raise
+        batch_log_note("end: ok" if not rc else f"end: failed: exit {rc}")
+        return rc
+
+def batch_build_run(root, h, name, numbers, on, base, ready=False, unknown_ok="", config=".github/stamp.json"):
     """merge --batch-build NAME PR... [--on BRANCH] [--base BRANCH]: the integration branch and its one draft pull request, or the same set again.
     With `ready` (--ready): the batch already exists. It is checked as the same set again, with no PR list meaning its frozen set, then the one
     lint of the integration branch head runs, then the repo's ready checks, and the host is asked to mark the draft ready (Host.ready sends nothing, so
@@ -4817,7 +4914,9 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", co
         frozen = parse_freeze(found[1]["body"])
         if frozen is None:
             raise Stop(f"#{found[0]} is the open pull request of {branch} and holds no frozen block, so its lane set is not known. {FREEZE_CITE}")
-        numbers = numbers or sorted(frozen["lanes"])
+        if not numbers:
+            numbers = sorted(frozen["lanes"])
+            batch_log_note(f"merge: batch {name} lanes {lane_list(numbers)}, the frozen set")  # the start line was written before this read
         on = on or (frozen["on"][0] if frozen["on"] else None)
         base = base or found[1]["base"]
     base = base or "main"
