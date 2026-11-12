@@ -1192,9 +1192,10 @@ function line41({ open = false, reps = false, wait = false, lab, tag, endTag, fw
   }
   const la = `<div class="receipt last"><p class="lhead">Your last answer, ${I41.sent}</p><div class="line"><b>${esc(I41.what)}</b></div></div>`;
   const mine = reps ? myReply("answered") + sessionReply() : "";
-  return `<article class="askc rline ropen" id="line-41" aria-labelledby="lt-41"><div class="ahead">${G("done")}<span class="fno">No. 41</span>${homeTag(I41.home)}${mark}<button class="morebtn" type="button" id="lfold-${I41.id}" aria-expanded="true">Fold</button></div>
+  // The focus of option "On its line": the whole opened line, so the picture holds the thread and its end. Main's id is line-41.
+  return `<article class="askc rline ropen" id="pick-online" aria-labelledby="lt-41"><div class="ahead">${G("done")}<span class="fno">No. 41</span>${homeTag(I41.home)}${mark}<button class="morebtn" type="button" id="lfold-${I41.id}" aria-expanded="true">Fold</button></div>
     <h3 class="rtitle" id="lt-41">${esc(I41.title)}</h3>
-    <div class="thread" id="pick-online"${lbl(lab, tag)}>${la}<p class="lhead">Reply from ${I41.owner}</p><p class="reply">${esc(I41.reply)}</p>${mine}<p class="filed">${where}</p></div>
+    <div class="thread"${lbl(lab, tag)}>${la}<p class="lhead">Reply from ${I41.owner}</p><p class="reply">${esc(I41.reply)}</p>${mine}<p class="filed">${where}</p></div>
     ${replyEnd(K41, `<div class="endrow">${replyBtn(K41, 41)}${markBtn("idis-", I41.id, name)}</div>`, { lab, labText: endTag })}</article>`;
 }
 // Option "In the Asks list" (the branch today): itemHere reads state.items only, so the closed item's reply is an Asks row of its own.
