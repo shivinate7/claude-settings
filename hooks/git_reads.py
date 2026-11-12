@@ -1,7 +1,8 @@
 """The git and session reads the guard and the janitor share: one `git` call, the primary
 checkout, a tree's status, the default branch, a branch's proof of survival, a worktree's lock
 and whether a live session stands in it. The roadmap build also imports it for `github_repo`, the one
-reading of a checkout's GitHub repo, which the guard's rule lane-repo-tag shares.
+reading of a checkout's GitHub repo, which the guard's rule lane-repo-tag shares. `open_pull_requests` is the one
+`gh` read, for the guard's rule lane-start-open-pr.
 
 The janitor (janitor/sweep.py, janitor/session_end_sweep.py) imports this file and no guard module,
 so its start-up never loads the guard. guard_core.py imports it by name, and a test or the janitor
@@ -312,6 +313,34 @@ def github_repo(root, extras=_READ_EXTRAS):
     if done is None or done.returncode != 0:
         return None
     return origin_slug(done.stdout)
+
+
+# The one bounded read of a repo's open pull requests (guard rule lane-start-open-pr). One `gh` process, 10 s cap.
+GH_PR_LIST_TIMEOUT = 10
+GH_PR_LIST_FIELDS = "number,title,body,headRefName,isDraft"
+GH_PR_LIST_LIMIT = "100"
+
+
+def open_pull_requests(repo):
+    """(list, "") of the open pull requests of GitHub repo `owner/name`, each a dict of GH_PR_LIST_FIELDS, or
+    (None, why) when the read failed: no gh, a timeout, a non-zero exit, output that is not a JSON list. One gh
+    process, no file, no retry; the caller decides what a failed read means."""
+    argv = ["gh", "pr", "list", "--repo", repo, "--state", "open", "--json", GH_PR_LIST_FIELDS,
+            "--limit", GH_PR_LIST_LIMIT]
+    try:
+        done = _nowindow.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
+                             timeout=GH_PR_LIST_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return None, "gh timed out after %d s" % GH_PR_LIST_TIMEOUT
+    except OSError as exc:
+        return None, "gh did not start (%s)" % type(exc).__name__
+    if done.returncode != 0:
+        return None, "gh exited %d" % done.returncode
+    try:
+        prs = json.loads(done.stdout)
+    except ValueError:
+        return None, "gh printed no JSON"
+    return (prs, "") if isinstance(prs, list) else (None, "gh printed no JSON list")
 
 
 def is_shallow(where: str):

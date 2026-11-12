@@ -153,6 +153,16 @@ judged (both inherited from the lane effort pin and the lane repo tag). The rule
 present, not which model.
 Kind of risk: likely. Landed 2026-11-08.
 
+**The lane start open pull request check.** Guard rule `lane-start-open-pr` refuses a `create_session` call tagged
+`cs-step:<slug>` while an open pull request of the calling checkout's repo already holds that step, unless the prompt
+cites the pull request (`#<n>` or `/pull/<n>`). A pull request holds the step when the slug is a whole token in its
+title or head branch, or opens a body marker line (`Step`, `Lane` or `cs-step`, colon and backticks optional, at a line
+start or after a sentence's full stop). Not lane-only. The reason names each uncited number. A failed `gh` read passes
+with one stderr line. An owner override lifts it. Known gap: a step named in a body in other words is not read.
+Kind of risk: incident (a second session started on a step an open draft already held). Landed 2026-11-12.
+
+Cost: at most one `gh` process per tagged call, 10 s cap, no file, no timer.
+
 **The step-up.** Guard rule `roles-third-round-steps-up` reads the `Round N of 3` marker in
 the brief. A line that starts with it counts. When the brief's first non-blank line starts with no marker, the
 leftmost marker on that line also counts if it is `Round N of 3`, such as "Builder, Round 3 of 3. Lane ...". A
