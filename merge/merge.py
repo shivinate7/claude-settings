@@ -3053,7 +3053,7 @@ def ci_job_run(wt, *args, notes=None):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
-TOUCHED_SELECTOR = ".github/scripts/touched-tests.py"  # the lint worktree's own selector, so the batch's tests are chosen by the batch's rules
+TOUCHED_SELECTOR = ".github/scripts/touched-tests.py"  # the lint worktree's own selector, so the head's tests are chosen by the head's rules
 TOUCHED_RUNNERS = {".py": sys.executable, ".sh": "bash", ".mjs": "node", ".js": "node"}  # bash, not sh: the suites use bashisms
 TOUCHED_TAIL_LINES = 15  # last output lines a failing test shows; the whole log would bury the assertion
 
