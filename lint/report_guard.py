@@ -1117,7 +1117,7 @@ def departs_problem(text):
 # admits only when a first-person word comes before its fault word, so "The test was wrong so I re-pointed it"
 # passes. A negator clears it only when at most MISTAKE_NEGATOR_GAP words sit between it and the fault word,
 # so a negator that governs an earlier verb ("I did not run the check and broke it") does not.
-# `step:<slug>` is checked for form only.
+# `step:<slug>` is read from git by step_cite_problem below.
 MISTAKE_FIRST_PERSON_RE = re.compile(r"\bI\b|\b[Mm]y\b")
 # "broke the batch into three lanes" splits a thing and admits nothing: "into" is followed by a count or a
 # parts noun. "broke the build into a red state" still admits. The words between may hold no "by", "when"
@@ -1173,6 +1173,105 @@ def mistake_problem(text):
             or any(MISTAKE_GUARD_WORD_RE.search(s) and DONE_REF_RE.search(s) for s in _sentences(deviations))):
         return ""
     return MISTAKE_REASON % repr(clause[:80])
+
+
+# A `step:<slug>` a report cites, or a "queued"/"filed"/"has a step" claim about a step, is read from git
+# (rule building-mistake-names-its-guard; decision mistake-means-missing-guard). A report once called a guard queued
+# as a step no one had filed. A queued step is a blob on origin/roadmap, so a step on a lane branch only is not queued. Cost: one `git fetch origin roadmap` and one tree read per report that cites a
+# step; a report that cites none starts nothing. A failed read prints "unknown" and refuses nothing.
+# A sentence with no slug claims a step only when a roadmap word ties to the step noun, so coding text such as
+# "Added a step to the install script" or "The deploy step is filed under ops" is no claim. Claim forms:
+# "queued/filed <object> as a (roadmap) step"; "the step (for the guard) is queued", where only a determiner or a
+# roadmap word may sit before "step", so "the CI job step is queued" is no claim; "added" with roadmap or queue
+# in the step's clause; "has a step" with roadmap, follow-up, guard or fix in its clause. A merge queue is no queue
+# here. "step-by-step", "step 3" and a `step:` slug are not the step noun.
+_STEP_NOUN = r"steps?\b(?![-:])(?!\s*\d)"
+_STEP_DET = r"(?:a|an|the|its|this|that|new|roadmap|follow-up|guard|fix)"
+STEP_CLAIM_RE = re.compile(
+    r"\b(?:queued|filed)\s+(?:[^\s.;:]+\s+){0,6}?as\s+(?:" + _STEP_DET + r"\s+)*" + _STEP_NOUN
+    + r"|\b" + _STEP_DET + r"\s+" + _STEP_NOUN + r"(?:\s+(?:for|of)\s+(?:(?:the|a|this)\s+)?[\w-]+)?"
+    r"\s+(?:(?:is|was|are|were|has\s+been|have\s+been|now)\s+)?(?:queued|filed)\b", re.I)
+STEP_NOUN_RE = re.compile(r"\b" + _STEP_NOUN, re.I)
+STEP_ADDED_RE = re.compile(r"\badd(?:ed|s)?\b", re.I)
+STEP_ROADMAP_RE = re.compile(r"\broadmap\b|(?<!merge\s)(?<!merge-)\bqueue\b", re.I)
+STEP_HAS_RE = re.compile(r"\b(?:has|have|had)\s+(?:a|an|its|the|one)\s+(?:new\s+)?(?:roadmap\s+)?" + _STEP_NOUN
+                         + r"(?!\s+(?:that|which|where|to|of|list)\b)", re.I)
+STEP_FOLLOW_UP_RE = re.compile(r"\b(?:follow-ups?|guards?|fix(?:es)?)\b", re.I)
+# A slug in a negated or future claim ("not yet filed", "Triage will file", "File step:x", "Should I file") is no
+# claim that it is filed. A proposal word alone skips nothing: "the proposed guard is queued as step:x" is read.
+STEP_NOT_FILED_RE = re.compile(
+    r"\b(?:not|never)\s+(?:yet\s+)?(?:been\s+)?(?:file[ds]?|queue[ds]?)\b"
+    r"|n't\s+(?:yet\s+)?(?:been\s+)?(?:file[ds]?|queue[ds]?)\b|\bunfiled\b"
+    r"|\b(?:will|can|could|would|should|shall|may|might)\s+(?:[\w-]+\s+)?(?:file|queue)\b|\bto\s+(?:file|queue)\b|^\W*(?:file|queue)\b"
+    r"|\b(?:missing\s+from|not\s+(?:yet\s+)?on)\s+(?:the\s+|origin/)?roadmap\b", re.I)
+STEP_REASON = owner_line(
+    "Step-cite guard (rule building-mistake-names-its-guard)",
+    "the report cites a step, but %s; a cite clears once triage files the step and the sentence names it as "
+    "`step:<slug>`, and text in backticks makes no claim")
+
+
+STEP_CLAUSE_SPLIT_RE = re.compile(r"[,;:]|\band\b", re.I)
+
+
+def _step_claim(bare):
+    """True when a sentence with no slug claims a step is queued or filed (the forms above). The added and has forms
+    read their roadmap or guard word in the step noun's own clause, so "Added a CI step and rebuilt the roadmap
+    page" is no claim."""
+    if STEP_CLAIM_RE.search(bare):
+        return True
+    for clause in STEP_CLAUSE_SPLIT_RE.split(bare):
+        if not STEP_NOUN_RE.search(clause):
+            continue
+        roadmap = STEP_ROADMAP_RE.search(clause)
+        if roadmap and STEP_ADDED_RE.search(clause):
+            return True
+        if STEP_HAS_RE.search(clause) and (roadmap or STEP_FOLLOW_UP_RE.search(clause)):
+            return True
+    return False
+
+
+def _step_cites(text):
+    """(slugs, unbacked sentence): every `step:<slug>` a report sentence names, except one the sentence calls
+    not yet filed, and the first sentence that claims a step is queued and names none. Inline code stays
+    readable for the slug but is no claim; fences, URLs and quoted text are no claim."""
+    slugs, unbacked = [], ""
+    for label in ("Done", "Deviations", "Input Needed", "Next"):
+        section = report_section(text, label)
+        plain = MISTAKE_URL_RE.sub(" ", FENCE_RE.sub(" ", section))
+        for sentence in _sentences(plain):
+            found = MISTAKE_STEP_RE.findall(sentence)
+            if found and not STEP_NOT_FILED_RE.search(sentence):
+                slugs += found
+            elif not found and _step_claim(QUOTED_RE.sub(" ", sentence)):
+                unbacked = unbacked or sentence.strip()
+    return list(dict.fromkeys(s[len("step:"):] for s in slugs)), unbacked
+
+
+def step_cite_problem(text, cwd):
+    """The refusal text for a report whose step claim git does not back (see above), else ''. An unbacked
+    sentence and a missing slug share one refusal, so neither hides the other."""
+    slugs, unbacked = _step_cites(text)
+    problems = ["the sentence %r names no `step:<slug>`" % unbacked[:80]] if unbacked else []
+    missing = _missing_steps(slugs, cwd) if slugs else []
+    if missing:
+        problems.append("origin/roadmap holds no step file for `step:%s`" % missing[0])
+    return STEP_REASON % ", and ".join(problems) if problems else ""
+
+
+def _missing_steps(slugs, cwd):
+    """The slugs with no step file on origin/roadmap after one fetch. A failed read prints unknown and returns []."""
+    _hooks_on_path()
+    import override
+    import ruling_home
+    try:  # an explicit destination, so a single-branch clone's narrow refspec still updates the ref
+        fetch = ruling_home._run_git(cwd, ["fetch", "-q", "origin", "+refs/heads/roadmap:" + override.STEP_REF])
+        if fetch.returncode != 0:
+            raise ruling_home._GitFailure("fetch exited %s: %s" % (fetch.returncode, (fetch.stderr or "")[:120]))
+        missing = [s for s in slugs if not ruling_home.step_filed(s, cwd, override.STEP_REF)]
+    except (ruling_home._GitFailure, OSError) as exc:
+        print("step cite unknown: %s" % exc, file=sys.stderr)
+        return []
+    return missing
 
 
 def _own_lane_read(path, own_id):
@@ -3278,6 +3377,12 @@ def main():
                 reasons.append(mistake)
         except Exception as exc:
             print("mistake check failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
+        try:
+            cited = step_cite_problem(text, hook.get("cwd"))
+            if cited:
+                reasons.append(cited)
+        except Exception as exc:
+            print("step cite check failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
     reasons += [r for r in relay if r]
     if hand_off:
         reasons.append(hand_off)
