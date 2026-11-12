@@ -3126,7 +3126,7 @@ def refuse_incomplete_tree(wt, head, base):
     A head whose tree git cannot list is the same unknown."""
     c, listed = git(wt, "ls-tree", "-r", "--name-only", "-z", head, "--", *LINT_TREE_FILES)
     if c:
-        raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the head's tree could not be listed, so the lint worktree was not checked: {listed}")
+        raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the head's tree could not be listed, so the lint worktree was not checked: {listed} {LANE_LINT_CITE}")
     held = [p for p in listed.split("\0") if p]
     missing = [rel for rel in held if not os.path.isfile(os.path.join(wt, *rel.split("/")))]
     if missing:
