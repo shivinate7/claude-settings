@@ -107,6 +107,10 @@ repo_case("a nested ( ) in a $( ) value beside --confirm in the own checkout is 
           f"{MERGE_SHIM} 5 --confirm --base-red-ok $( (echo a) )", REPO_A, TX_A)
 repo_case("an apostrophe inside a double-quoted $( ) value beside -C another checkout is denied", "deny",
           f"""{MERGE_SHIM} -C '{REPO_B}' "$(echo "it's")" 5 --confirm""", REPO_A, TX_A)
+repo_case("a $( ) glued to --base-red-ok= beside --confirm in the own checkout is allowed", "allow",
+          f"{MERGE_SHIM} 5 --confirm --base-red-ok=$(cat r)", REPO_A, TX_A)
+repo_case("a $( ) glued to a word of the reason in the own checkout is allowed", "allow",
+          f"{MERGE_SHIM} 5 --confirm --base-red-ok fix-$(date)", REPO_A, TX_A)
 repo_case("a quoted ( in a $( ) value before --confirm beside -C another checkout is denied", "deny",
           f"{MERGE_SHIM} -C '{REPO_B}' $(echo '(') 5 --confirm", REPO_A, TX_A)
 repo_case("an unquoted reason with a > file and 2>&1 is allowed", "allow",
