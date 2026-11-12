@@ -240,10 +240,10 @@ def _mutates_as_command(command: str, words) -> bool:
     return bool(re.fullmatch(MUTATING_COMMAND, command))
 
 
-# The in-place flag of perl and ruby: `-i`, a cluster ending in i (`-pi`, `-ni`), and either with a backup
-# suffix (`-i.bak`). A cluster that merely holds an i (`-rtime`) is a library, not an edit in place, and so
+# The in-place flag of perl and ruby: `-i`, a cluster ending in i (`-pi`, `-ni`, `-0pi`, where `-0` takes
+# digits), and either with a backup suffix (`-i.bak`). A cluster that merely holds an i (`-rtime`) is a library, not an edit in place, and so
 # is one that holds a capital I: `-Iui` is the include directory `ui`, as `-I` takes the rest of the word.
-_INPLACE_FLAG = r"-[A-HJ-Za-z]*i(?:\.\S*)?"
+_INPLACE_FLAG = r"-[0-9A-HJ-Za-z]*i(?:\.\S*)?"
 
 # A character that lets a script run text the segment split cannot see: a substitution, a group, a brace,
 # or a backslash (an escaped quote or separator the split would read wrongly).
