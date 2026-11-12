@@ -79,6 +79,9 @@ os.environ["CLAUDE_CONFIG_DIR"] = os.path.join(RUN_FOLDER, "config")
 check, FAILED = tcj.check, tcj.FAILED
 
 import guard  # noqa: E402
+import guard_pointer  # noqa: E402  the claude-settings pointer, patched by the ruled-store cases
+sys.path.insert(0, os.path.join(REPO, "lint", "test_support"))
+import ruled_store_fixture as fixture  # noqa: E402  the one home of a ruled-store fixture
 import reply_judge  # noqa: E402  the reply judge's instructions, which carry the widening sentence
 import route_match  # noqa: E402  the rows-file reader; the task-why cases count its reads
 import test_refusal_note as hook_base  # noqa: E402  the route-row fixture (one home), with its own run folder
@@ -1728,6 +1731,58 @@ def case_past_rulings_skips_the_debt_notes_file():
           notes_mark not in text, text[:200])
 
 
+# The owner's rulings not yet on main (the ruled store) sit on origin/roadmap. past_rulings puts each open entry first,
+# ahead of the decision records, and names what it supersedes. The pointer is patched to the fixture repo, so the cases
+# pass whichever checkout past_rulings reads the store from.
+RULED_ID, RULED_CLOSED_ID = "ruled-apps-keep", "ruled-old-shut"
+RULED_AT = "2026-11-12T14:15:00-06:00"
+RULED_TEXT = "Owner, 2026-11-12, page item 12: keep the apps' access to claude-settings as it is."
+RULED_SUPERSEDES = [{"kind": "main-sentence", "ref": "apps-keep-sentence"},
+                    {"kind": "test", "ref": "hooks/test_question_form.py::case_ruled_store_first_and_carries_supersedes"}]
+
+
+def case_ruled_store_first_and_carries_supersedes():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled store: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("ruled-first", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+    fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files({
+        RULED_ID: fixture.entry(RULED_ID, at=RULED_AT, ruling=RULED_TEXT, supersedes=RULED_SUPERSEDES),
+        RULED_CLOSED_ID: fixture.entry(RULED_CLOSED_ID, status="closed"),
+    }), tcj.ROOT)
+    with mock.patch.object(guard_pointer, "pointer_checkout", return_value=repo):
+        candidates, _unknown = fn(tcj.APPS_GOAL, repo)
+    first = candidates[0] if candidates else ""
+    check("ruled store: the open entry is the first candidate, ahead of the decision records",
+          first.startswith("ruled:%s: " % RULED_ID), str(candidates)[:200])
+    check("ruled store: the first candidate carries the entry's ruling text", RULED_TEXT in first, first[:200])
+    check("ruled store: the first candidate names the owner time and says open, not on main",
+          ("(owner %s; open, not on main; supersedes " % RULED_AT) in first and first.endswith(")"), first[:200])
+    check("ruled store: the first candidate carries each supersedes ref",
+          all(item["ref"] in first for item in RULED_SUPERSEDES), first[:200])
+    check("ruled store: a closed entry is no candidate",
+          not any(c.startswith("ruled:%s:" % RULED_CLOSED_ID) for c in candidates), str(candidates)[:200])
+
+
+def case_ruled_store_absent_is_only_unknown():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled store absent: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    repo = tcj.make_repo("ruled-absent", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+    with mock.patch.object(guard_pointer, "pointer_checkout", return_value=repo):
+        candidates, unknown = fn(tcj.APPS_GOAL, repo)
+    check("ruled store absent: the unknown list names the store as absent",
+          "ruled store (absent)" in unknown, str(unknown)[:300])
+    check("ruled store absent: no candidate is a ruled entry",
+          not any(c.startswith("ruled:") for c in candidates), str(candidates)[:200])
+    check("ruled store absent: the absent store never refuses",
+          "ruled store (absent)" not in question_form.unreadable_sources(unknown), str(unknown)[:300])
+
+
 class _BrokenPipeGit:
     """A git child that dies before its stdin is read: the write raises BrokenPipeError, and stderr holds the text."""
 
@@ -2516,6 +2571,7 @@ def main():
                  case_past_rulings_caps_and_ranks, case_past_rulings_reads_debts, case_key_overlap,
                  case_key_overlap_resend_and_fact_lists, case_key_overlap_similar_questions_clash,
                  case_past_rulings_skips_the_debt_notes_file,
+                 case_ruled_store_first_and_carries_supersedes, case_ruled_store_absent_is_only_unknown,
                  case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
                  case_task_why_cited_reds, case_task_why_cited_greens,
                  case_press_link_links_not_a_list_on_a_step, case_press_link_links_not_a_list_on_an_option,
