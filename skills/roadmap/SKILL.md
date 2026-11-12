@@ -316,7 +316,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
 About six git processes, plus up to four when a step cites a mockup, and one file written per build. With `--live`, the publisher's reads add
 one `list_threads` walk and one or two GitHub list calls, and one file it writes and the roadmap build script
 reads. The stale-step row adds one more `list_sessions` walk inside that publish, and three more
-fields per session in the file. The flagged sessions row adds `updated_at` per session to that file and
+fields (id, session_status, tags) per session in the file. The flagged sessions row adds `updated_at` per session to that file and
 no other read. The page-ruling row adds one `ArtifactData list items` read (every
 page) to the same publish. The roadmap build script adds no git process, file, timer or log for either row. The
 dated-claim row reads the notes already loaded and adds nothing.

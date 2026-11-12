@@ -1638,6 +1638,8 @@ def session_board(work, steps, slug, repo):
     out = []
     for row, tags in cands:
         bucket = row.get("status_bucket")
+        if not isinstance(bucket, str):
+            continue  # a list or other unhashable bucket would raise in the dict lookup below
         flag = BOARD_FLAGS.get(bucket)
         if bucket == SESSION_BUCKETS[0]:
             at = zoned_time(row.get("updated_at"))
