@@ -433,6 +433,93 @@ add("brief-claim: an empty brief is allowed", "allow", tool="Agent", prompt="", 
     model="sonnet")
 
 
+# ---- A brief that orders a read-only agent to write a file (rule brief-write-needs-writer, step
+# brief-write-needs-writer). An Agent or Task brief to a read-only type (READ_ONLY in hooks/agent_brief.py: Explore,
+# Plan, refuter, reviewer, design-reviewer, claude-code-guide) is refused when it orders a file write: a save, a create
+# of a file, a tee, a redirect into a path, or the Write tool. The refusal names a remedy: a writer role, or a report of
+# the text. A writer role told to write passes. A read-only agent told to report or read passes, and so does one told
+# never to write. Prose with no file as its object passes, and so does a word that holds a command name inside it
+# ("committee" holds tee). Failure classes: a false deny (a read-only brief that reports, reads or forbids a write, or a
+# writer role's brief), a false allow (a save, create, tee, redirect or Write-tool order to a read-only type, in any case,
+# under a plugin prefix, on line 30 of a brief, after a lone apostrophe or a comment opener). Each deny is red on today's
+# code, where no rule reads a brief for a write. Selector: MUTATE_ONLY=brief-write-needs-writer: runs these cases alone.
+from agent_brief import READ_ONLY  # noqa: E402  the one home of the read-only roles, as the SubagentStart hook reads them
+WRITE_BRIEF = "brief-write-needs-writer"
+WRITE_CANONICAL = "Write the findings to audit.md."
+WRITE_REMEDY = (("record-writer", "builder", "test-author"), "report")   # the refusal names a writer role, or a report
+WRITE_LONG = LONG_BRIEF + "\n" + WRITE_CANONICAL                          # the order sits on line 30 of the brief
+# Each read-only type is given the canonical order. Explore carries the remedy pin, so the other types take the rest.
+add("brief-write-needs-writer: Explore brief that says write the findings to audit.md is denied", "deny",
+    WRITE_BRIEF, tool="Agent", prompt=WRITE_CANONICAL, subagent_type="Explore", carries=WRITE_REMEDY)
+for _role in sorted(READ_ONLY - {"Explore"}):
+    add("brief-write-needs-writer: %s brief that says write the findings to audit.md is denied" % _role, "deny",
+        WRITE_BRIEF, tool="Agent", prompt=WRITE_CANONICAL, subagent_type=_role)
+# The phrasings a mistaken brief uses to order a write. Each is an Explore brief, the type a mistake most often names.
+WRITE_ORDERS = (
+    ("save", "Save the findings to `docs/audit.md`."),
+    ("create a file", "Create a file named audit.md with the findings."),
+    ("tee", "Pipe the findings through `tee audit.md` to keep them."),
+    ("redirect", "Redirect the output: `cat findings.txt > audit.md`."),
+    ("the Write tool", "Use the Write tool to put the findings in audit.md."),
+    ("a redirect in a fence", "Run this first:\n```\necho \"$FINDINGS\" > audit.md\n```"),
+    ("a tee on a line led by $", "Then run:\n$ cat findings.txt | tee audit.md"),
+    ("save as", "Save your findings as audit.md."),
+    ("a path written into", "Write your findings into `docs/audit.md`."),
+    ("a lone apostrophe before the order", "It's late. Write the findings to audit.md."),
+    ("a hash inside the span", "Save the findings to `docs/audit.md#findings`."),
+    ("a comment opener after the order", "Write the findings to audit.md // summary only."),
+)
+for _name, _prompt in WRITE_ORDERS:
+    add("brief-write-needs-writer: Explore brief that orders a write by %s is denied" % _name, "deny",
+        WRITE_BRIEF, tool="Agent", prompt=_prompt, subagent_type="Explore")
+add("brief-write-needs-writer: explore in lower case, with a write order, is denied", "deny",
+    WRITE_BRIEF, tool="Agent", prompt=WRITE_CANONICAL, subagent_type="explore")
+add("brief-write-needs-writer: a plugin-prefixed reviewer with a write order is denied", "deny",
+    WRITE_BRIEF, tool="Agent", prompt=WRITE_CANONICAL, subagent_type="my-plugin:reviewer")
+add("brief-write-needs-writer: a Task spawn of Explore with a write order is denied", "deny",
+    WRITE_BRIEF, tool="Task", prompt=WRITE_CANONICAL, subagent_type="Explore")
+add("brief-write-needs-writer: a write order on line 30 of a long Explore brief is denied", "deny",
+    WRITE_BRIEF, tool="Agent", prompt=WRITE_LONG, subagent_type="Explore")
+# Controls: a writer role told to write passes, on the model its role table names (builder sonnet; test-author and
+# record-writer haiku). A brief with the general-purpose role, or with no role, is no read-only type, so it passes.
+for _role, _model, _prompt in (
+        ("builder", "sonnet", WRITE_CANONICAL),
+        ("test-author", "haiku", "Save the findings to `docs/audit.md`."),
+        ("record-writer", "haiku", "Create a file named docs/audit.md with the findings.")):
+    add("brief-write-needs-writer: %s brief that orders a write is allowed" % _role, "allow",
+        tool="Agent", prompt=_prompt, subagent_type=_role, model=_model)
+add("brief-write-needs-writer: general-purpose brief that orders a write is allowed", "allow",
+    tool="Agent", prompt=WRITE_CANONICAL, subagent_type="general-purpose")
+add("brief-write-needs-writer: Agent brief with no role that orders a write is allowed", "allow",
+    tool="Agent", prompt=WRITE_CANONICAL)
+# Controls: every read-only type told to report, to read, or never to write passes.
+READ_ONLY_CONTROLS = (
+    ("report", "Report the findings in your reply."),
+    ("read and report", "Read audit.md and report what it says."),
+    ("a ban on writing", "Never write a file. Report the findings in your reply."),
+)
+for _role in sorted(READ_ONLY):
+    for _name, _prompt in READ_ONLY_CONTROLS:
+        add("brief-write-needs-writer: %s brief that says %s is allowed" % (_role, _name), "allow",
+            tool="Agent", prompt=_prompt, subagent_type=_role)
+# Controls: prose with no file as the object of a write, a negated order, and a word that holds a command name all
+# pass. Each is a false alarm that a plain word match would raise.
+WRITE_PROSE = (
+    ("a prose write-up", "Write up the findings in your reply."),
+    ("a prose create of a list", "Create a list of the findings in your reply."),
+    ("a word that holds tee", "Check the committee notes and report them."),
+    ("a later save by the record-writer", "Report the findings. The record-writer saves them to audit.md later."),
+    ("a save idiom", "Save time: skip the full suite and report what you read."),
+    ("a negated save", "Do not save anything to disk; report the text."),
+    ("a negated tee", "Don't pipe the output to tee; report it."),
+)
+for _name, _prompt in WRITE_PROSE:
+    add("brief-write-needs-writer: Explore brief with %s is allowed" % _name, "allow",
+        tool="Agent", prompt=_prompt, subagent_type="Explore")
+add("brief-write-needs-writer: Explore brief with an empty prompt is allowed", "allow",
+    tool="Agent", prompt="", subagent_type="Explore")
+
+
 # ---- A spawn's brief that orders a discard of the working tree (rule brief-destructive-git, rule
 # shared-trees-no-destructive-git). An Agent, Task or Workflow brief is denied when a command span in it is one that
 # shared_tree_match reads as a discard: a backtick span, a fenced line, or a line led by "$ ". A negation before the
