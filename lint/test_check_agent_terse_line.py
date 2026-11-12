@@ -314,6 +314,27 @@ class BodyCases:
         self.assertEqual(self.verdict("<!-- note\n--> " + TERSE_LINE)[0], 1,
                          "the text after a line-start comment's close on a later line counted as holding the line")
 
+    def test_a_line_start_comment_after_a_paragraph_line_hides_the_text_after_its_close(self):
+        # Controls first: a line-start comment closed on its own line hides nothing below it, and one never closed hides the rest.
+        self.assertEqual(self.verdict("Work the brief.\n<!-- note -->\n\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a line-start comment closed on its own line was hidden")
+        self.assertEqual(self.verdict("Work the brief.\n<!-- open\n\n" + TERSE_LINE)[0], 1,
+                         "control: an unclosed line-start comment after a paragraph line did not hide the rest of the file")
+        self.assertEqual(self.verdict("Work the brief.\n<!-- note --> " + TERSE_LINE)[0], 1,
+                         "the text after a line-start comment's close on the same line counted as holding the line")
+
+    def test_a_line_start_comment_indented_one_to_three_spaces_hides_the_text_after_its_close(self):
+        self.assertEqual(self.verdict("   <!-- note -->\n\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a 3-space line-start comment closed on its own line was hidden")
+        self.assertEqual(self.verdict("   <!-- note --> " + TERSE_LINE)[0], 1,
+                         "the text after a 3-space line-start comment's close on the same line counted as holding the line")
+
+    def test_an_unclosed_line_start_comment_in_a_list_item_ends_with_the_item(self):
+        self.assertEqual(self.verdict("- item\n  <!-- open -->\n\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a line-start comment closed on its line in a list item was hidden")
+        self.assertEqual(self.verdict("- item\n  <!-- open\n\n" + TERSE_LINE), (0, ""),
+                         "an unclosed line-start comment in a list item hid the terse line after the list item ended")
+
     def test_a_file_that_cannot_be_read_is_unknown_not_clear(self):
         root = fixture_root()
         path = os.path.join(root, self.NAME)
