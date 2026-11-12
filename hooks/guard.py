@@ -150,7 +150,9 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   merge-checks         deny. A merge while the head has a check pending or red, while another
                        ready PR on the base runs CI, or when the read could not run. `--auto` too.
   merge-role-proof     deny. A merge-tool call with a role flag whose tier the session's own get_session
-                       record (read from the transcript) does not show in its cs-build tags.
+                       record (read from the transcript) does not show in its cs-build tags. The solo hat
+                       (no parent, no cs-build tag) is refused to a subagent, and a `merge --confirm` is refused
+                       once a session that wore the hat tags itself coordinator, lane or triage.
   merge-confirm-repo   deny. In a cloud session, a merge-tool call with --confirm whose checkout (the -C or
                        --repo-dir value as the merge tool's own parser reads it, else the `cd X &&` directory, else
                        the working directory) has a repo (`git_reads.github_repo`) that no cs-repo tag of the
@@ -574,7 +576,7 @@ while True:
             BARE_MERGE_REASON, CONFLICT_MARKERS_CHAIN_REASON, CONFLICT_MARKERS_PUSH_REASON, CONFLICT_MARKERS_REASON,
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
-            records_page_hit, repo_proof_hit, role_proof_hit,
+            records_page_hit, repo_proof_hit, role_proof_hit, solo_hat_confirm_hit,
             DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
@@ -4605,7 +4607,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             ask_command("bare-merge", BARE_MERGE_REASON, "gh pr merge " + merging[0], "bare merge")
 
     # 6a. A merge-tool call with a role flag its own get_session record does not prove (rule merge-role-proof).
-    matched = role_proof_hit(stripped, transcript)
+    matched = role_proof_hit(stripped, transcript, agent) or solo_hat_confirm_hit(stripped, cwd, transcript)
     if matched:
         refuse(tool, "deny", "merge-role-proof", ROLE_REASON, matched)
 

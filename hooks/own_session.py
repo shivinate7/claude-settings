@@ -10,6 +10,8 @@ import json
 import os
 import re
 
+from shared_names import BUILD_TAG
+
 # A get_session result for another session arrives as its untrusted text: an opening tag with a nonce, a preamble,
 # the record, then a closing tag. Only a closing tag with the opening nonce ends the wrapper.
 _OTHER_SESSION = re.compile(
@@ -71,6 +73,13 @@ def own_session_read(transcript, own_id, created=False):
     return _scan(transcript, own_id, created)[:3]
 
 
+def solo_hat_granted(transcript, own_id, is_hat_call):
+    """True when the session wore the solo hat: it ran a shell command for which `is_hat_call(command)` holds, and that call returned
+    with no error, while its newest own record had no parent_session_id and no cs-build tag (decision session-tiers, Roles are hats).
+    A session that never ran such a call, or ran it as a lane or runner, is False. Raises like own_session_read."""
+    return _scan(transcript, own_id, False, is_hat_call)[4]
+
+
 def own_session_ccr(transcript, own_id):
     """The whole `ccr` dict of the newest get_session result whose ccr.id is own_id, else None. The
     branch and source fields of the record are read from it (lane-closes-after-records).
@@ -87,9 +96,15 @@ def own_session_ccr(transcript, own_id):
         return None
 
 
-def _scan(transcript, own_id, created):
-    """(tags, tagged_after, parent, ccr): the one pass over the transcript behind both readers."""
+def _is_solo(tags, parent):
+    """A record of a solo session: no parent and no cs-build tag."""
+    return parent is None and not any(isinstance(t, str) and t.startswith(BUILD_TAG) for t in tags)
+
+
+def _scan(transcript, own_id, created, is_hat_call=None):
+    """(tags, tagged_after, parent, ccr, hat): the one pass over the transcript behind the readers. `hat` is solo_hat_granted's answer."""
     uses, newest, parent, tagged_after, newest_ccr = set(), None, None, False, None
+    solo_calls, hat = {}, False  # tool_use id of a hat call -> whether the own record was solo when it ran
     creates = {}  # tool_use id -> (tags, parent) a create_session call set
     with open(transcript, encoding="utf-8") as handle:
         for line in handle:
@@ -102,7 +117,13 @@ def _scan(transcript, own_id, created):
             for block in content:
                 if not isinstance(block, dict):
                     continue
-                if block.get("type") == "tool_use" and str(block.get("name", "")).endswith("get_session"):
+                if is_hat_call and block.get("type") == "tool_use" and block.get("name") in ("Bash", "PowerShell"):
+                    command = block.get("input", {}).get("command") if isinstance(block.get("input"), dict) else None
+                    if isinstance(command, str) and is_hat_call(command):
+                        solo_calls[block.get("id")] = newest is not None and _is_solo(newest, parent)
+                elif solo_calls.get(block.get("tool_use_id")) and block.get("type") == "tool_result":
+                    hat = hat or not block.get("is_error")
+                elif block.get("type") == "tool_use" and str(block.get("name", "")).endswith("get_session"):
                     uses.add(block.get("id"))
                 elif created and block.get("type") == "tool_use" and str(block.get("name", "")).endswith("create_session"):
                     given = block.get("input", {}).get("tags") if isinstance(block.get("input"), dict) else None
@@ -133,4 +154,4 @@ def _scan(transcript, own_id, created):
                             parent = found if isinstance(found, str) and found else None
                     except (ValueError, KeyError, TypeError):
                         continue
-    return newest, tagged_after, parent, newest_ccr
+    return newest, tagged_after, parent, newest_ccr, hat
