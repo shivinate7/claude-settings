@@ -328,8 +328,9 @@ workflow_allow("role-model: Workflow builder on sonnet with a variable brief is 
                "const brief = 'Fix the failing case.';\n"
                + _step_flow("brief", "agentType: 'builder', model: 'sonnet'"))
 
-# H3: a refusal for a brief the scan cannot read names the remedy that makes it readable, a literal string. One
-# constant holds the words, so each refusal of a variable brief carries the same remedy.
+# H3: a refusal for a brief the scan cannot read names the remedy that makes it readable, a literal string. The guard
+# builds BRIEF_MARKER_REMEDY from BRIEF_LITERAL_REMEDY, so the marker form is the base words plus its suffix. This
+# local copy holds the marker form, which the role-row and Opus refusals name.
 BRIEF_LITERAL_REMEDY = "write the brief as a literal string so the marker is readable"
 workflow_refuse("role-model: Workflow builder on opus with a variable brief is denied and names the literal-brief remedy",
                 "const brief = 'Fix the failing case.';\n"
