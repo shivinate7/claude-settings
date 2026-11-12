@@ -157,7 +157,7 @@ class OneTermTests(unittest.TestCase):
             self.assertIn("STE022", r.stdout)
 
     def test_platform_name_behind_punctuation_passes(self):
-        self.assertEqual(len(lint("A subagent runs.\n")), 1)  # control: the retired name still warns
+        self.assertEqual(len(lint("A gate runs.\n")), 1)  # control: a retired name still warns
         for text in ("Hooks (SubagentStop, SubagentStart) run.\n",
                      "(CLAUDE_CODE_SUBAGENT_MODEL) is set.\n",
                      "**SubagentStop** runs.\n"):
