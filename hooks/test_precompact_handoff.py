@@ -165,14 +165,14 @@ class Case(object):
         return subprocess.run([sys.executable, MODULE] + args, input=json.dumps(payload),
                                capture_output=True, text=True, env=self.env(), cwd=self.repo)
 
-    def run_precompact(self, transcript_path):
+    def run_precompact(self, transcript_path, cwd=None):
         payload = {"session_id": self.session_id, "transcript_path": transcript_path,
-                   "cwd": self.repo, "hook_event_name": "PreCompact"}
+                   "cwd": cwd or self.repo, "hook_event_name": "PreCompact"}
         return self.run([], payload)
 
-    def run_reorient(self):
+    def run_reorient(self, cwd=None):
         payload = {"session_id": self.session_id, "hook_event_name": "SessionStart",
-                   "source": "compact", "cwd": self.repo}
+                   "source": "compact", "cwd": cwd or self.repo}
         return self.run(["--reorient"], payload)
 
     def digest_path(self):
@@ -352,6 +352,141 @@ def case_reorient_failed_state_says_digest_missing():
               "stdout: %r" % out)
         check("reorient-failed: still names the prompt file", c.prompt_path() in out,
               "stdout: %r" % out)
+    finally:
+        c.cleanup()
+
+
+# --------------------------------------------------------------------------- agent worktrees (handoff-agent-write)
+# An agent shares its parent's session_id, so an agent's own compaction ran the parent's handoff hooks and overwrote the
+# parent's digest and state (the handoff lock report, Part 1). A hook run whose cwd is an agent's
+# worktree, <repo>/.claude/worktrees/agent-*, writes nothing under state/handoff and prints no reorient text. The cases
+# from a lane's own cwd, and from a worktree that is not an agent's, are the controls: they must keep working.
+
+AGENT_WORKTREE = os.path.join(".claude", "worktrees", "agent-a1634141822b8dc54")   # the incident's builder agent
+LANE_WORKTREE = os.path.join(".claude", "worktrees", "lane-handoff")               # a worktree, not an agent's
+
+
+def worktree_at(c, rel):
+    """The folder `rel` under the case's repo, made. The hooks read only the cwd's path, so a plain folder is enough."""
+    path = os.path.join(c.repo, rel)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def is_agent_worktree(path):
+    """The shape the hooks test: the last two parents are .claude and worktrees, and the folder is agent-*."""
+    parts = os.path.normpath(path).split(os.sep)
+    return len(parts) >= 3 and parts[-3:-1] == [".claude", "worktrees"] and parts[-1].startswith("agent-")
+
+
+def handoff_state_files(c):
+    """Every file under the case's state/handoff folder: {path: bytes}. Empty when the folder is absent."""
+    root = os.path.join(c.cfg, "state", "handoff")
+    out = {}
+    for dp, _, names in os.walk(root):
+        for name in names:
+            path = os.path.join(dp, name)
+            with open(path, "rb") as f:
+                out[path] = f.read()
+    return out
+
+
+def changed_names(before, after):
+    """The base names of the files that differ between two handoff_state_files snapshots, sorted."""
+    keys = set(before) | set(after)
+    return sorted(os.path.basename(k) for k in keys if before.get(k) != after.get(k))
+
+
+def case_agent_precompact_leaves_parent_state_alone():
+    """An agent's PreCompact, run from its own worktree, writes no digest and no state, so the parent's are kept. The
+    parent's own PreCompact at the lane cwd writes both first: the live control, so the check is not a vacuous pass."""
+    c = Case("agent_precompact")
+    try:
+        lane_t = os.path.join(c.root, "lane.jsonl")
+        write_transcript(lane_t, [transcript_line("user", [{"type": "text", "text": "PARENTTEXT"}])])
+        lane = c.run_precompact(lane_t)
+        check("agent precompact: live control, the parent's PreCompact writes its digest and state",
+              lane.returncode == 0 and c.read_digest() is not None and c.read_state() is not None,
+              "rc=%r stderr=%r" % (lane.returncode, lane.stderr[-300:]))
+        wt = worktree_at(c, AGENT_WORKTREE)
+        check("agent precompact: scope, the run's cwd is .claude/worktrees/agent-*", is_agent_worktree(wt), wt)
+        before = handoff_state_files(c)
+        agent_t = os.path.join(c.root, "agent.jsonl")
+        write_transcript(agent_t, [transcript_line("user", [{"type": "text", "text": "AGENTTEXT"}])])
+        proc = c.run_precompact(agent_t, cwd=wt)
+        check("agent precompact: exits 0", proc.returncode == 0,
+              "rc=%r stderr=%r" % (proc.returncode, proc.stderr[-300:]))
+        after = handoff_state_files(c)
+        check("agent precompact: nothing under state/handoff changes, so the parent's digest and state stay",
+              before == after, "changed: %s" % changed_names(before, after))
+    finally:
+        c.cleanup()
+
+
+def case_lane_worktree_precompact_still_writes():
+    """Control: a PreCompact from a worktree that is not an agent's runs as before, and writes digest and state."""
+    c = Case("lane_precompact")
+    try:
+        wt = worktree_at(c, LANE_WORKTREE)
+        check("lane precompact: scope, the cwd is under .claude/worktrees/ and is not agent-*",
+              not is_agent_worktree(wt) and os.path.basename(os.path.dirname(wt)) == "worktrees", wt)
+        tpath = os.path.join(c.root, "lane.jsonl")
+        write_transcript(tpath, [transcript_line("user", [{"type": "text", "text": "LANETEXT"}])])
+        proc = c.run_precompact(tpath, cwd=wt)
+        check("lane precompact: exits 0", proc.returncode == 0,
+              "rc=%r stderr=%r" % (proc.returncode, proc.stderr[-300:]))
+        check("lane precompact: the digest is written", c.read_digest() is not None,
+              "no digest at %s" % c.digest_path())
+        check("lane precompact: the state is written", c.read_state() is not None,
+              "no state at %s" % c.state_path())
+    finally:
+        c.cleanup()
+
+
+def case_agent_reorient_prints_nothing():
+    """An agent's SessionStart compact hook, run from its own worktree, prints no reorient text and writes nothing under
+    state/handoff, so the agent is not sent to rewrite the parent's handoff (the incident, 17:20:26). The parent's reorient
+    at the lane cwd prints the reorient text: the live control."""
+    c = Case("agent_reorient")
+    try:
+        lane_t = os.path.join(c.root, "lane.jsonl")
+        write_transcript(lane_t, [transcript_line("user", [{"type": "text", "text": "PARENTTEXT"}])])
+        c.run_precompact(lane_t)
+        live = c.run_reorient()
+        live_out = live.stdout or ""
+        check("agent reorient: live control, the parent's reorient names its prompt, digest and handoff",
+              c.prompt_path() in live_out and c.digest_path() in live_out and c.handoff_path() in live_out,
+              "stdout: %r" % live_out[-300:])
+        wt = worktree_at(c, AGENT_WORKTREE)
+        check("agent reorient: scope, the run's cwd is .claude/worktrees/agent-*", is_agent_worktree(wt), wt)
+        before = handoff_state_files(c)
+        proc = c.run_reorient(cwd=wt)
+        check("agent reorient: exits 0", proc.returncode == 0,
+              "rc=%r stderr=%r" % (proc.returncode, proc.stderr[-300:]))
+        check("agent reorient: prints no reorient text", (proc.stdout or "").strip() == "",
+              "stdout: %r" % (proc.stdout or "")[-300:])
+        after = handoff_state_files(c)
+        check("agent reorient: nothing under state/handoff changes", before == after,
+              "changed: %s" % changed_names(before, after))
+    finally:
+        c.cleanup()
+
+
+def case_lane_worktree_reorient_still_prints():
+    """Control: a SessionStart compact hook from a worktree that is not an agent's still prints the reorient text."""
+    c = Case("lane_reorient")
+    try:
+        lane_t = os.path.join(c.root, "lane.jsonl")
+        write_transcript(lane_t, [transcript_line("user", [{"type": "text", "text": "PARENTTEXT"}])])
+        c.run_precompact(lane_t)
+        wt = worktree_at(c, LANE_WORKTREE)
+        check("lane reorient: scope, the cwd is under .claude/worktrees/ and is not agent-*",
+              not is_agent_worktree(wt) and os.path.basename(os.path.dirname(wt)) == "worktrees", wt)
+        proc = c.run_reorient(cwd=wt)
+        out = proc.stdout or ""
+        check("lane reorient: prints the reorient text, naming the prompt, digest and handoff",
+              proc.returncode == 0 and c.prompt_path() in out and c.digest_path() in out
+              and c.handoff_path() in out, "rc=%r stdout: %r" % (proc.returncode, out[-300:]))
     finally:
         c.cleanup()
 
@@ -2363,6 +2498,10 @@ def main() -> int:
     case_nudge_sections_flags_an_empty_handoff()
     case_nudge_sections_count_numbered_headings()
     case_one_reader_for_the_premises_section()
+    case_agent_precompact_leaves_parent_state_alone()
+    case_lane_worktree_precompact_still_writes()
+    case_agent_reorient_prints_nothing()
+    case_lane_worktree_reorient_still_prints()
 
     if FAILED:
         print()
