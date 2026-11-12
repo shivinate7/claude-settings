@@ -15,7 +15,7 @@ A file that cannot be read is unknown (exit 2, named), never clear.
 
 The no-argument run reads the module's ROOT when it runs. These cases patch ROOT to a fixture tree.
 """
-import contextlib, io, os, shutil, sys, tempfile, time, unittest
+import contextlib, io, os, shutil, sys, tempfile, unittest
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -476,13 +476,24 @@ class CountingText(str):
         return part
 
 
+class CountingSearch:
+    """Stands in for SPAN_OR_COMMENT in body_text. Counts its search calls, then runs the real pattern."""
+
+    def __init__(self, pattern):
+        self.pattern = pattern
+        self.calls = 0
+
+    def search(self, text, pos=0):
+        self.calls += 1
+        return self.pattern.search(text, pos)
+
+
 class ScanCost(unittest.TestCase):
-    """The scan's cost grows no faster than its input. The list case counts the characters that body_text's
-    find and slice calls scan, not a clock (test-strategy-reset, point 2). The paragraph case still times the scan,
-    since its cost is spent inside one regex search that no count sees."""
+    """The scan's cost grows no faster than its input, and an unclosed paragraph is not searched for comments.
+    Both are counted, not timed (test-strategy-reset, point 2): the list case counts the characters that body_text's
+    find and slice calls scan, and the paragraph case counts its searches."""
     NAME = os.path.join("agents", "builder.md")
-    SMALL, BIG = 500, 2000  # repeats of a shape: the big input is 4 times the small one
-    LIMIT = 8.0  # a linear scan takes about 4 times as long on 4 times the input; a quadratic one about 16
+    SMALL = 500  # the repeats of a shape in the paragraph case and the control
     COUNT_SMALL = 250  # the counted list has this many repeats, then twice as many
     COUNT_LIMIT = 2.5  # a linear scan doubles its count on a doubled input; a quadratic one nearly quadruples it
 
@@ -492,26 +503,19 @@ class ScanCost(unittest.TestCase):
         C.body_text(text)
         return text.scanned
 
-    def timed(self, body, runs):
-        """The fastest of `runs` checks of one file. The file is written once, outside the timing."""
-        path = write(fixture_root(), self.NAME, doc(body))
-        best = None
-        for _ in range(runs):
-            start = time.perf_counter()
-            check_files(path)
-            elapsed = time.perf_counter() - start
-            best = elapsed if best is None else min(best, elapsed)
-        return best
+    def searches(self, body):
+        """How many times body_text searches body for a comment or a code span."""
+        counting = CountingSearch(C.SPAN_OR_COMMENT)
+        with mock.patch.object(C, "SPAN_OR_COMMENT", counting):
+            C.body_text(body)
+        return counting.calls
 
-    def growth(self, make):
-        """How many times longer the big input takes than the small one, both measured in this process."""
-        return self.timed(make(self.BIG), runs=2) / self.timed(make(self.SMALL), runs=3)
-
-    def test_a_long_paragraph_of_openers_grows_no_faster_than_linear(self):
-        ratio = self.growth(lambda n: "x <!-- " * n + "\n\n" + TERSE_LINE)
-        self.assertLess(ratio, self.LIMIT,
-                        "a paragraph of unclosed openers 4 times as long took %.1f times as long to read: "
-                        "the scan is worse than linear" % ratio)
+    def test_an_unclosed_paragraph_of_openers_is_never_searched(self):
+        # Control first: a closed comment is searched for, so a count of 0 below means the scan skipped the paragraph.
+        self.assertGreaterEqual(self.searches("x <!-- y --> z"), 1,
+                                "control: a closed comment was not searched for, so the counter sees nothing")
+        self.assertEqual(self.searches("x <!-- " * self.SMALL + "\n\n" + TERSE_LINE), 0,
+                         "a paragraph of unclosed openers with no --> was searched for comments")
 
     def test_a_long_list_of_line_start_comments_scans_no_more_than_linear(self):
         small_body = "- item\n" + "  <!-- x -->\n" * self.COUNT_SMALL + "\n" + TERSE_LINE
