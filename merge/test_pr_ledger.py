@@ -148,7 +148,7 @@ class NextActReds(LedgerCase):
         self.assertEqual(act, "none", f"#7 is not a draft and has no record, so no rule gives it an act:\n{out}")
         self.assertTrue(red, f"#7 has no next act, and its line does not read RED:\n{out}")
 
-    def test_a_done_record_for_an_older_head_is_never_batched_and_reads_fix_check(self):
+    def test_a_done_record_for_an_older_head_is_never_batched_and_reads_fix_verifier(self):
         host = LedgerHost([pull(7)], comments=[record(7, 10, head=OLD)], commits={LIVE: [OLD]})
         out = self.reviewed(host)
         self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} stale: ", "control: #7's record does not read stale at the live head")
@@ -196,7 +196,7 @@ class NextActReds(LedgerCase):
                 self.assertEqual(act, "none", f"#7 is based on main, and `{body}` in its body does not stack it; only its base ref does:\n{out}")
                 self.assertTrue(red, f"#7 has no next act, and its line does not read RED:\n{out}")
 
-    def test_a_fix_check_older_than_72_h_reads_red(self):
+    def test_a_fix_verifier_older_than_72_h_reads_red(self):
         host = LedgerHost([pull(7)], comments=[record(7, 80, head=OLD)], commits={LIVE: [OLD]})
         out = self.reviewed(host)
         self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} stale: ", "control: #7's record does not read stale at the live head")
@@ -275,7 +275,7 @@ class NextActShapes(LedgerCase):
         self.assertEqual(act, "lane round 2", f"#7's record fails round 1, so round 2 is the next round owed:\n{out}")
         self.assertFalse(red, f"#7 has no limit on lane round 2, and its line reads RED:\n{out}")
 
-    def test_a_stale_record_with_a_failed_fix_check_reads_fresh_full_review(self):
+    def test_a_stale_record_with_a_failed_fix_verifier_reads_fresh_full_review(self):
         fix = tm.fix_verifier_line("FAIL", head=OTHER)
         host = LedgerHost([pull(7)], comments=[record(7, 10, head=OLD, fix=(fix,))], commits={LIVE: [OLD]})
         out = self.reviewed(host)
@@ -311,7 +311,7 @@ class NextActShapes(LedgerCase):
         self.assertEqual(act, "batch run", f"#7 carries the batch label, so its act is batch run:\n{out}")
         self.assertFalse(red, f"#7's batch label was last added 2 h ago, inside the 24 h limit, and its line reads RED:\n{out}")
 
-    def test_a_fix_check_under_72_h_is_not_red(self):
+    def test_a_fix_verifier_under_72_h_is_not_red(self):
         host = LedgerHost([pull(7)], comments=[record(7, 10, head=OLD)], commits={LIVE: [OLD]})
         out = self.reviewed(host)
         act, red = self.next_act(out, 7)

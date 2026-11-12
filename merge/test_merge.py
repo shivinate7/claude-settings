@@ -15374,8 +15374,8 @@ class ReviewedList(ReviewEnv):
         self.assertEqual(rc, 0, out + err)
         self.assertRegex(list_line(self, out, 7), rf"^#7 feat7 {REVIEW_HEAD[:9]} stale: ")
 
-    # Why PR 8 also gets a line of its own, with its next act: the PR ledger (decision pr-ledger), owner ruling 2026-11-07 12:22 CST and
-    # coordinator ruling 2026-11-07 12:33 CST: every open PR gets one next act. The `no record:` line stays for the same PR.
+    # A PR with no record gets its own line with `next: none ... RED`, because the PR ledger gives every open PR one
+    # next act (decision pr-ledger). The `no record:` line is still printed for the same PR.
     def test_a_pr_with_no_record_is_named_on_the_no_record_line(self):
         comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS))]
         host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD), batch_pull(8, REVIEW_OLD_HEAD)], comments)
