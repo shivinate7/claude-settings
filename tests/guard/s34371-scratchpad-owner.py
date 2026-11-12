@@ -532,6 +532,61 @@ spo_register("scratchpad-owner: remove 2 agent B's rm of agent A's file, which f
 spo_register("scratchpad-owner: remove 3 agent B's rm of its own file: allowed", rm_own_case)
 
 
+# Rule scratchpad-owner, the link form. `ln -sf` unlinks its target before it links, so over a finished writer's file it
+# destroys the content as `rm` does, and the finished writer's exemption must not cover it. The same call over a running
+# writer's file is refused already, and an agent's `ln -sf` on its own file passes.
+
+def link_finished_case():
+    """Agent A writes msg.txt and finishes; agent B runs ln -sf over msg.txt: refused."""
+    fx = spo_fixture("l1")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "l1", msg)] + spo_wrote(fx, "l1", SPO_WRITER, msg, "from A\n")
+    problems += spo_finish(fx, "l1", SPO_WRITER)
+    got, reason = spo_run(fx, SPO_OTHER, "ln -sf %s %s" % (os.path.join(fx["work"], "src.txt"), msg))
+    problems.append(spo_refused("l1", got, reason, (fx["scratch"], "msg.txt")))
+    return spo_result(problems, "agent B's ln -sf over the file of finished agent A is refused")
+
+
+def link_running_case():
+    """Agent A writes msg.txt and keeps running; agent B runs ln -sf over msg.txt: refused."""
+    fx = spo_fixture("l2")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "l2", msg)] + spo_wrote(fx, "l2", SPO_WRITER, msg, "from A\n")
+    got, reason = spo_run(fx, SPO_OTHER, "ln -sf %s %s" % (os.path.join(fx["work"], "src.txt"), msg))
+    problems.append(spo_refused("l2", got, reason, (fx["scratch"], "msg.txt")))
+    return spo_result(problems, "agent B's ln -sf over the file of running agent A is refused")
+
+
+def link_write_finished_case():
+    """Agent A writes msg.txt and finishes; agent B writes msg.txt with Write: allowed, the write the link case sits beside."""
+    fx = spo_fixture("l3")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "l3", msg)] + spo_wrote(fx, "l3", SPO_WRITER, msg, "from A\n")
+    problems += spo_finish(fx, "l3", SPO_WRITER)
+    got, reason = spo_call(fx, "Write", SPO_OTHER, file_path=msg, content="from B\n")
+    problems.append(spo_allowed("l3", got, reason))
+    return spo_result(problems, "agent B's Write over the file of finished agent A is allowed")
+
+
+def link_own_case():
+    """Agent B writes own.txt itself, then runs ln -sf over it: allowed."""
+    fx = spo_fixture("l4")
+    own = os.path.join(fx["scratch"], "own.txt")
+    problems = [spo_scope(fx, "l4", own)] + spo_wrote(fx, "l4", SPO_OTHER, own, "from B\n")
+    got, reason = spo_run(fx, SPO_OTHER, "ln -sf %s %s" % (os.path.join(fx["work"], "src.txt"), own))
+    problems.append(spo_allowed("l4", got, reason))
+    return spo_result(problems, "agent B runs ln -sf over its own file and is allowed")
+
+
+spo_register("scratchpad-owner: link 1 agent B's ln -sf over the file of agent A, which finished: refused",
+             link_finished_case)
+spo_register("scratchpad-owner: link 2 agent B's ln -sf over the file of agent A, which is still running: refused",
+             link_running_case)
+spo_register("scratchpad-owner: link 3 agent B's Write over the file of agent A, which finished: allowed",
+             link_write_finished_case)
+spo_register("scratchpad-owner: link 4 agent B's ln -sf over its own file: allowed", link_own_case)
+
+
 # Rule scratchpad-owner, more cases. Each case's label says refused, allowed or passes,
 # and each control beside it stays green: the writer runs the same call, so a red case names this rule's gap.
 

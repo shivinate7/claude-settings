@@ -448,6 +448,39 @@ sh("scratchpad, shell cwd in the scratchpad: cd into the throwaway repo, then gi
 sh("scratchpad, shell cwd outside the scratchpad: cd into the dirty checkout, then git reset --hard is refused",
    "cd %s && %s reset --hard" % (slash(SUBJDIRTY), VCS), "deny", "shared-tree", cwd=NOGIT)
 TEMP_DIR = None
+# THE CLEAN SCRATCH REPO AS THE SHELL CWD. The non-git cwd above denies as "not a git tree" whatever the command does, so
+# those rows cannot show whether a cd into a real checkout is judged. These rows start in PRIVCLEAN, a clean repository
+# under this session's scratchpad. The clean cwd passes on its own, so a cd (or pushd, or a cd through a variable) into a
+# dirty checkout, then `git -C .`, is refused only when the folder that cd names is judged too.
+if not os.path.realpath(PRIVCLEAN).startswith(os.path.realpath(SHELL_SCRATCH) + os.sep):   # scope before subject
+    sys.exit("fixture setup failed: PRIVCLEAN is not under this session's scratchpad, so the clean-cwd cases prove nothing")
+sh("scratchpad, clean scratch repo as cwd: cd into a dirty checkout, then git -C . reset --hard is refused",
+   "cd %s && %s -C . reset --hard" % (slash(SUBJDIRTY), VCS), "deny", "shared-tree",
+   cwd=PRIVCLEAN, session=FAKE_SESSION)
+sh("scratchpad, clean scratch repo as cwd: pushd into a dirty checkout, then git -C . reset --hard is refused",
+   "pushd %s && %s -C . reset --hard" % (slash(SUBJDIRTY), VCS), "deny", "shared-tree",
+   cwd=PRIVCLEAN, session=FAKE_SESSION)
+sh("scratchpad, clean scratch repo as cwd: cd \"$D\" into a dirty checkout named by a variable, then git -C . reset --hard is refused",
+   'D=%s; cd "$D" && %s -C . reset --hard' % (slash(SUBJDIRTY), VCS), "deny", "shared-tree",
+   cwd=PRIVCLEAN, session=FAKE_SESSION)
+sh("scratchpad, clean scratch repo as cwd: git -C . reset --hard with no cd is allowed",
+   "%s -C . reset --hard" % VCS, "allow", cwd=PRIVCLEAN, session=FAKE_SESSION)
+# A LANE WORKTREE AS THE SHELL CWD. The lane is no scratch, so a call that stays in it is judged by the lane's own dirty tree.
+# A -C into this session's own dirty repo reaches no one else, so it is allowed from the lane, and so is a cd into that repo
+# first, named by a variable. A -C into a real dirty checkout is refused from any cwd.
+if os.path.realpath(GITWT).startswith(os.path.realpath(SHELL_SCRATCH) + os.sep):   # scope before subject
+    sys.exit("fixture setup failed: GITWT sits under this session's scratchpad, so the lane-cwd cases prove nothing")
+sh("scratchpad, lane cwd: git -C this session's dirty scratch repo reset --hard is allowed",
+   "%s -C %s reset --hard" % (VCS, slash(PRIVREPO)), "allow", cwd=GITWT, session=FAKE_SESSION)
+sh("scratchpad, lane cwd: X names this session's dirty scratch repo, cd \"$X\", then git -C that repo reset --hard is allowed",
+   'X=%s; cd "$X" && %s -C %s reset --hard' % (slash(PRIVREPO), VCS, slash(PRIVREPO)), "allow",
+   cwd=GITWT, session=FAKE_SESSION)
+sh("scratchpad, lane cwd: git -C a real dirty checkout reset --hard is refused",
+   "%s -C %s reset --hard" % (VCS, slash(SUBJDIRTY)), "deny", "shared-tree", cwd=GITWT,
+   session=FAKE_SESSION)
+sh("scratchpad, lane cwd: cd into the lane, then git -C a real dirty checkout reset --hard is refused",
+   "cd %s && %s -C %s reset --hard" % (slash(GITWT), VCS, slash(SUBJDIRTY)), "deny", "shared-tree",
+   cwd=GITWT, session=FAKE_SESSION)
 # AN UNREADABLE SUBJECT IS ALLOWED, and logged under its own rule (checked in
 # subject_unread_log_case). The cwd is the REAL dirty repository, so the only difference from the
 # deny case above is that the git on PATH gives no answer.
