@@ -189,6 +189,44 @@ def _live_nodes(tree):
     return live
 
 
+def _section_dir(tree, full):
+    """The folder a runner's `SECTION_DIR = os.path.join(...)` names, read by ast (the runner holds the one
+    copy of the path), or None when the runner assigns none or builds it from anything but its own folder
+    (`HERE`), strings and os.path.join."""
+    def value(n):
+        if isinstance(n, ast.Constant) and isinstance(n.value, str):
+            return n.value
+        if isinstance(n, ast.Name) and n.id == "HERE":
+            return os.path.dirname(os.path.abspath(full))
+        if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == "join"
+                and not n.keywords):
+            parts = [value(a) for a in n.args]
+            return None if None in parts or not parts else os.path.join(*parts)
+        return None
+    for n in tree.body:
+        if (isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name)
+                and n.targets[0].id == "SECTION_DIR"):
+            return value(n.value)
+    return None
+
+
+def _with_sections(tree, full):
+    """`tree` with the body of each section file of its runner added, so a case a section file registers
+    resolves as one the runner registers. The runner execs the sections in its own globals, one module."""
+    folder = _section_dir(tree, full)
+    if not folder or not os.path.isdir(folder):
+        return tree
+    body = list(tree.body)
+    for name in sorted(os.listdir(folder)):
+        if not name.endswith(".py"):
+            continue
+        try:
+            body += ast.parse(read(os.path.join(folder, name))).body
+        except SyntaxError:
+            continue  # the run itself stops on it; the audit reads the cases it can
+    return ast.Module(body=body, type_ignores=[])
+
+
 def citation_problem(test_id: str, root: str = ROOT):
     """Return why `test_id` names no test that provably runs, or None when it does.
 
@@ -231,6 +269,7 @@ def citation_problem(test_id: str, root: str = ROOT):
         tree = ast.parse(text)
     except SyntaxError as e:
         return f"`{path}` does not parse: {e}."
+    tree = _with_sections(tree, full)
     cls_name, _, func = name.rpartition(".")
     classes = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
     matches = [(c, n) for c, n in _defs(tree)

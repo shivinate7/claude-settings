@@ -6,4 +6,4 @@
 
 **Decision.** The decision `merge-confirm-repo`: a cloud merge confirm acts only in a repo its own record names.
 
-**Retire.** In a cloud session, the MCP merge tool is denied for an `owner/repo` that no cs-repo tag of the own newest get_session record names (read `hooks/guard_merge.py` `repo_proof_hit`, the Bash route's denial). It is allowed for one that a tag names (read `hooks/shared_names.py` `repo_tag_names`; decision `merge-confirm-repo`: a cloud merge confirm acts only in a repo its own record names). A case in `hooks/test_guard.py` `REPO_RULE` must show both, with a record that lacks the tag and one that has it.
+**Retire.** In a cloud session, the MCP merge tool is denied for an `owner/repo` that no cs-repo tag of the own newest get_session record names (read `hooks/guard_merge.py` `repo_proof_hit`, the Bash route's denial). It is allowed for one that a tag names (read `hooks/shared_names.py` `repo_tag_names`; decision `merge-confirm-repo`: a cloud merge confirm acts only in a repo its own record names). A case in `tests/guard/s29942-merge.py` `REPO_RULE` must show both, with a record that lacks the tag and one that has it.

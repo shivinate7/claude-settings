@@ -22,6 +22,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rule_audit  # noqa: E402
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 
 # .mjs fixtures must be listable: form 1 names node:test, form 2 names LIST_TESTS (see rule_audit).
 NODE_TEST = 'import { test } from "node:test";\n'
@@ -422,6 +423,32 @@ class GuardTextTests(unittest.TestCase):
         self.assertIn("main-rule", guard_text)
         self.assertIn("sibling-rule", guard_text)
         self.assertNotIn("test-only-rule", guard_text)
+
+
+class SectionFileCitation(unittest.TestCase):
+    """A test id on hooks/test_guard.py may name a case that a section file of the suite defines. The section
+    files are tests/guard/*.py, read from the runner's SECTION_DIR, so the runner file alone does not hold it."""
+
+    RUNNER_LINES = ('import os\n'
+                    'HERE = os.path.dirname(os.path.abspath(__file__))\n'
+                    'SECTION_DIR = os.path.join(HERE, "..", "tests", "guard")\n')
+    CASE = "kill: a case that only a section file defines"
+
+    def test_case_defined_only_in_a_section_file_resolves(self):
+        run_dir = _test_temp.run_folder()
+        try:
+            os.makedirs(os.path.join(run_dir, "hooks"))
+            os.makedirs(os.path.join(run_dir, "tests", "guard"))
+            with open(os.path.join(run_dir, "hooks", "test_guard.py"), "w", encoding="utf-8") as f:
+                f.write(self.RUNNER_LINES)
+            with open(os.path.join(run_dir, "tests", "guard", "s00001-kill.py"), "w", encoding="utf-8") as f:
+                f.write('# section 1\nsh("%s", "kill 1", "allow")\n' % self.CASE)
+            with open(os.path.join(run_dir, "hooks", "test_guard.py"), encoding="utf-8") as f:
+                self.assertNotIn(self.CASE, f.read(), "the scope: the runner file must not define the case itself")
+            problem = rule_audit.citation_problem("hooks/test_guard.py::" + self.CASE, run_dir)
+            self.assertIsNone(problem, "a case in a section file does not resolve: %s" % problem)
+        finally:
+            shutil.rmtree(run_dir, ignore_errors=True)
 
 
 class CitationTests(unittest.TestCase):
