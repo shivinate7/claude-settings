@@ -817,15 +817,15 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .stackh { margin: 0; font-size: 14px; font-weight: 600; color: var(--muted); }
 .stack { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 /* A stacked ask is not in the store yet: a dashed edge, the look the page gives a thing not yet sent. */
-.stack > li { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: start; gap: 4px 12px; padding: 8px 8px 8px 12px; border: 1.5px dashed var(--faint); border-radius: var(--r); background: var(--ground); }
+.stack > li { container: stk / inline-size; display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: start; gap: 4px 12px; padding: 8px 8px 8px 12px; border: 1.5px dashed var(--faint); border-radius: var(--r); background: var(--ground); }
 .stack .sn { font: 600 13px/44px var(--mono); color: var(--muted); text-align: end; }
 .stack .stext { margin: 0; min-width: 0; padding-block: 10px; white-space: pre-line; overflow-wrap: anywhere; }
 .stack .stext.sedit { padding-block: 0; }
-/* Wraps, so in a column too narrow for Edit and Remove side by side the second press drops under the first, inside its card. A label
-   wider than the whole column breaks inside its press. `anywhere`, since the label is the press's flex item, which never shrinks below
-   its min-content; a press that fits keeps its word whole, as the wrap is placed on each press's own max-content. */
+/* Wraps, so in a column too narrow for Edit and Remove side by side the second press drops under the first, inside its card. The label sits in one
+   grid track that may shrink to nothing, so a press never runs past its card; the label breaks between words, and inside a word only
+   where the word is wider than the whole card (a flex press would keep the word whole and run on). */
 .stack .sacts { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
-.stack .sacts .btn { min-height: 44px; min-inline-size: 0; max-inline-size: 100%; white-space: normal; overflow-wrap: anywhere; }
+.stack .sacts .btn { display: inline-grid; grid-template-columns: minmax(0, max-content); min-height: 44px; min-inline-size: 0; max-inline-size: 100%; white-space: normal; overflow-wrap: break-word; hyphens: manual; }
 .stack .sstate { min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding-inline: 10px; font-size: 14px; color: var(--muted); white-space: nowrap; }
 .stack .sstate.ok { color: var(--good); font-weight: 600; }
 .stack textarea, .askform textarea.copybox { width: 100%; min-height: 66px; resize: vertical; padding: 8px 12px; border: 1.5px solid var(--acc); border-radius: var(--r); background: var(--surface); font: inherit; color: var(--ink); }
@@ -838,6 +838,9 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
   .stack .sacts { grid-column: 2; justify-content: flex-start; }
   .stack .serr { grid-column: 2; }
 }
+/* Where the card is too narrow for the word Remove (about 4.2em) beside the number's column, the presses take the card's whole width under
+   the text, so a word breaks inside only when it is wider than the card. A threshold in em, so it moves with the reader's text size. */
+@container stk (width < calc(4.2em + 60px)) { .stack .sacts { grid-column: 1 / -1; } }
 #askList { display: grid; gap: 8px; }
 .asklist { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; container: askl / inline-size; }
 .askc { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; display: grid; gap: 8px; min-width: 0; }
