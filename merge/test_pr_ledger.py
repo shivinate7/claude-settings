@@ -20,6 +20,8 @@ THE OUTPUT CONTRACT these cases read (merge.py builds it):
 Each red case fails on the current merge.py at its act or number assert. Where the fixture gives the pull request a line today, a
 control assert reads that line's state first. A pull request with no line today has no next act, so the scope assert (one line
 for it) runs before the act is read. The no-write case passes on the current code: it guards the cost the record states.
+The cases of NextActGaps, and the lane-lint and held-draft greens of NextActShapes, pass on the current code: each guards a rule
+the fix for the reds must keep.
 """
 import calendar
 import os
@@ -51,9 +53,9 @@ def pull(n, head=LIVE, *, draft=False, labels=(), body="", hours_ago=2, base="ma
     return {**d, "updated_at": iso(hours_ago), "body": body, "labels": [{"name": name} for name in labels]}
 
 
-def record(n, hours_ago=3, rounds=tm.REVIEW_PASS, head=LIVE, fix=()):
-    """The review record comment of pull request n, posted `hours_ago` before NOW."""
-    return tm.review_comment(1000 + n, n, tm.record_text(rounds=rounds, head=head, n=n, fix=fix), created=iso(hours_ago))
+def record(n, hours_ago=3, rounds=tm.REVIEW_PASS, head=LIVE, fix=(), grant=(), guard="no"):
+    """The review record comment of pull request n, posted `hours_ago` before NOW. `grant` holds its Grant line, which lets one round past the cap read."""
+    return tm.review_comment(1000 + n, n, tm.record_text(rounds=rounds, head=head, n=n, fix=fix, grant=grant, guard=guard), created=iso(hours_ago))
 
 
 def lint(n, head=LIVE):
@@ -228,6 +230,35 @@ class NextActReds(LedgerCase):
         self.assertIn(act, ("lane", "lane lint"), f"#7 is done at the live head, but no lane-lint PASS names that head, so its act is the lane's, not batch:\n{out}")
         self.assertEqual(owner, "lane", f"#7's act is the lane's, so its owner is lane, not batch runner:\n{out}")
 
+    def test_a_done_record_with_no_lint_older_than_72_h_reads_lane_lint_and_red(self):
+        out = self.reviewed(LedgerHost([pull(7, hours_ago=120)], comments=[record(7, 100)]))
+        self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} no lint: ", "control: #7's record does not read no lint at the live head")
+        act, owner, red = self.next_part(out, 7)
+        self.assertEqual(act, "lane lint", f"#7 is done at the live head with no lane-lint PASS, so its act is lane lint:\n{out}")
+        self.assertEqual(owner, "lane", f"#7's act is lane lint, so its owner is the lane:\n{out}")
+        self.assertTrue(red, f"#7's lane lint has waited 100 h, past the 72 h limit, and its line does not read RED:\n{out}")
+
+    def test_the_longest_wait_counts_a_done_record_with_no_lint(self):
+        out = self.reviewed(LedgerHost([pull(7, hours_ago=120)], comments=[record(7, 100)]))
+        self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} no lint: ", "control: #7's record does not read no lint at the live head")
+        m = NO_ACT_LINE.search(out)
+        self.assertIsNotNone(m, f"merge --reviewed printed no `open PRs with no next act` line:\n{out}")
+        self.assertEqual(int(m.group("count")), 0, f"#7's lane lint is an act, so no open PR has no next act:\n{out}")
+        m = LONGEST_LINE.search(out)
+        self.assertIsNotNone(m, f"merge --reviewed printed no `longest wait from a done record` line:\n{out}")
+        self.assertEqual(float(m.group("hours")), 100.0,
+                         f"#7's done record was posted 100 h before now, and its lane lint waits from that record, so the longest wait is 100.0h:\n{out}")
+
+    def test_a_held_draft_with_no_waits_line_reads_red(self):
+        for label in ("held", "parked", "replaced"):
+            with self.subTest(label=label):
+                host = LedgerHost([pull(7, draft=True, labels=[label]), pull(9, draft=True)], events={7: [event(label, 5)]})
+                out = self.reviewed(host)
+                self.assertEqual(self.next_act(out, 9), ("lane round 1", False),
+                                 f"control: #9 is an unlabelled draft with no record, so it reads lane round 1, not RED:\n{out}")
+                _act, red = self.next_act(out, 7)
+                self.assertTrue(red, f"#7 is a draft labelled {label} with no `Waits on:` line, so no hold rule holds it, and its line does not read RED:\n{out}")
+
 
 class NextActShapes(LedgerCase):
     """The acts that read green: each rule's act and its age, with no red."""
@@ -309,6 +340,60 @@ class NextActShapes(LedgerCase):
         self.assertEqual(act, "batch", f"#7 is done at the live head with a lane-lint PASS, so its act is batch:\n{out}")
         self.assertEqual(owner, "batch runner", f"#7's act is batch, so its owner is the batch runner:\n{out}")
         self.assertFalse(red, f"#7 is done 3 h ago, inside the 24 h limit, and its line reads RED:\n{out}")
+
+    def test_a_done_record_with_no_lint_under_72_h_reads_lane_lint_and_not_red(self):
+        out = self.reviewed(LedgerHost([pull(7, hours_ago=70)], comments=[record(7, 60)]))
+        self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} no lint: ", "control: #7's record does not read no lint at the live head")
+        act, red = self.next_act(out, 7)
+        self.assertEqual(act, "lane lint", f"#7 is done at the live head with no lane-lint PASS, so its act is lane lint:\n{out}")
+        self.assertFalse(red, f"#7's lane lint has waited 60 h, inside the 72 h limit, and its line reads RED:\n{out}")
+
+    def test_a_held_draft_with_a_waits_line_reads_waits_on_and_not_red(self):
+        for label in ("held", "parked", "replaced"):
+            with self.subTest(label=label):
+                host = LedgerHost([pull(7, draft=True, labels=[label])], comments=[note(7, "Waits on: debt:merge-flake")], events={7: [event(label, 5)]})
+                out = self.reviewed(host)
+                act, red = self.next_act(out, 7)
+                self.assertEqual(act, "waits on debt:merge-flake",
+                                 f"#7 is a draft labelled {label} with `Waits on: debt:merge-flake`, so its act is waits on that item:\n{out}")
+                self.assertFalse(red, f"#7 waits on debt:merge-flake, which has no limit of its own, and its line reads RED:\n{out}")
+
+
+class NextActGaps(LedgerCase):
+    """Gaps in the spec that the current merge.py already holds. Each passes on today's code, so a fix for the reds must keep it."""
+
+    def test_a_waits_line_with_a_note_reads_the_bare_item(self):
+        host = LedgerHost([pull(7, labels=["held"])], comments=[note(7, "Waits on: debt:merge-flake (waiting for the lane)")], events={7: [event("held", 5)]})
+        out = self.reviewed(host)
+        act, red = self.next_act(out, 7)
+        self.assertEqual(act, "waits on debt:merge-flake", f"#7 is held with `Waits on: debt:merge-flake (note)`, and the note is not part of the item:\n{out}")
+        self.assertFalse(red, f"#7 waits on debt:merge-flake, which has no limit of its own, and its line reads RED:\n{out}")
+
+    def test_a_granted_round_4_older_than_72_h_reads_red(self):
+        grant = ("Grant: #7, item 444 a, owner, 2026-11-10 12:00 CST",)
+        # a grant parses only with its granted round recorded, and a final round that did not pass on a guard change with its net value owed reads open
+        rounds = tm.REVIEW_FAILED_THREE + ("Round 4: reviewer, opus, PASS",)
+        out = self.reviewed(LedgerHost([pull(7)], comments=[record(7, 80, rounds=rounds, grant=grant, guard="yes")]))
+        self.assertRegex(self.line_of(out, 7), rf"^#7 feat7 {LIVE[:9]} open: ", "control: #7's record does not read open at the live head")
+        act, red = self.next_act(out, 7)
+        self.assertEqual(act, "lane round 4", f"control: #7's record has a Grant line and round 4 recorded on a guard change, so round 4 is the act:\n{out}")
+        self.assertTrue(red, f"#7's lane round 4 has waited 80 h, past the 72 h limit, and its line does not read RED:\n{out}")
+
+    def test_a_pr_blocked_on_a_red_pr_reads_red(self):
+        out = self.reviewed(LedgerHost([pull(7, base="feat5", hours_ago=5), pull(5, draft=True, hours_ago=80)]))
+        self.assertEqual(self.next_act(out, 5), ("lane round 1", True),
+                         f"control: #5 is a draft with no record for 80 h, past its 72 h limit, so it reads RED:\n{out}")
+        act, red = self.next_act(out, 7)
+        self.assertEqual(act, "blocked on #5", f"#7's base ref is feat5, the head branch of open #5, so it is blocked on #5:\n{out}")
+        self.assertTrue(red, f"#7 is blocked on #5, which reads RED, and its line does not read RED:\n{out}")
+
+    def test_a_block_loop_reads_red_on_both_prs(self):
+        out = self.reviewed(LedgerHost([pull(7, base="feat8", hours_ago=5), pull(8, base="feat7", hours_ago=5)]))
+        for n, on in ((7, 8), (8, 7)):
+            with self.subTest(n=n):
+                act, red = self.next_act(out, n)
+                self.assertEqual(act, f"blocked on #{on}", f"control: #{n}'s base ref is the head of #{on}, so it is blocked on #{on}:\n{out}")
+                self.assertTrue(red, f"#{n} is blocked on #{on}, which is blocked on #{n}: a loop with no PR that can move, and its line does not read RED:\n{out}")
 
 
 class NumberLines(LedgerCase):
