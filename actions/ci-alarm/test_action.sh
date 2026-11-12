@@ -20,7 +20,8 @@ chmod +x "$tmp/bin/python3"
 # Fake gh. FAIL is a glob over "$1 $2"; a call that matches it exits 1. EMPTY is a glob too; a call
 # that matches it exits 0 with no output. `run list` keeps only the --json fields it is asked for and
 # the runs of the --status it is asked for, as gh does; unparsable runs are echoed raw. `api` routes
-# the jobs of a run to $JOBS/<run id>; every api call is logged in $READS. A run with no jobs fixture
+# the jobs of a run to $JOBS/<run id>, and the jobs of an earlier attempt (attempts/<n>/jobs) to $JOBS/<run id>.a<n>;
+# every api call is logged in $READS. A run with no jobs fixture
 # fails the read, so an unexpected read is unknown. The dropped-start routes (pulls, check runs, issue
 # comments, and a POST of a comment) serve DROP_PULLS/<page>, one JSON document per page (--paginate serves
 # every page, without it only page 1), DROP_CHECKS/<sha> and DROP_COMMENTS/<pr>, log each api call to
@@ -97,6 +98,9 @@ case "$1 $2" in
     jq --arg want "$want" --arg status "$status" '[.[] | select($status == "" or .status == $status) | with_entries(select(.key as $k | $want | split(",") | any(. == $k)))]' "$RUNS" 2>/dev/null || cat "$RUNS" ;;
   api*)
     case "$2" in
+      */actions/runs/*/attempts/*/jobs*)
+        id="${2#*actions/runs/}"; id="${id%%/attempts/*}"; att="${2#*/attempts/}"; att="${att%%/*}"
+        if [ -f "${JOBS:-/nonexistent}/$id.a$att" ]; then cat "$JOBS/$id.a$att"; else echo "gh: no attempt fixture for run $id attempt $att (fake)" >&2; exit 1; fi ;;
       */actions/runs/*/jobs*)
         id="${2#*actions/runs/}"; id="${id%%/*}"
         if [ -f "${JOBS:-/nonexistent}/$id" ]; then cat "$JOBS/$id"; else echo "gh: no jobs fixture for run $id (fake)" >&2; exit 1; fi ;;
@@ -114,14 +118,14 @@ chmod +x "$tmp/bin/gh"
 # conclusion (null for a run still going), createdAt, url, event, databaseId (the run id) and status
 # (completed unless given). Workflow ids: ci 1, deploy 2, alarm 3, pages 4, old 5 (deleted),
 # gone 6 (absent from the list), late 7 (on page two of the workflows list), dman 8 and dinact 9
-# (disabled, on page two), links 10 (on page two).
+# (disabled, on page two), links 10 (on page two). The attempt (8th arg) is the run's attempt number, 1 unless given.
 gh_run() {
   local id concl
   case "$1" in ci) id=1 ;; deploy) id=2 ;; alarm) id=3 ;; pages) id=4 ;; old) id=5 ;; gone) id=6 ;; late) id=7 ;;
     dman) id=8 ;; dinact) id=9 ;; links) id=10 ;; checks) id=11 ;; esac
   concl="\"$2\""; [ "$2" = null ] && concl=null
-  printf '{"workflowName":"%s","workflowDatabaseId":%s,"databaseId":%s,"conclusion":%s,"createdAt":"%s","url":"%s","event":"%s","status":"%s","headSha":"%040x"}\n' \
-    "$1" "$id" "$6" "$concl" "$3" "$4" "$5" "${7:-completed}" "$6"
+  printf '{"workflowName":"%s","workflowDatabaseId":%s,"databaseId":%s,"conclusion":%s,"createdAt":"%s","url":"%s","event":"%s","status":"%s","headSha":"%040x","attempt":%s}\n' \
+    "$1" "$id" "$6" "$concl" "$3" "$4" "$5" "${7:-completed}" "$6" "${8:-1}"
 }
 # A case starts with its runs: runs_are clears the jobs of the case before the jobs_of lines that follow it.
 runs_are() { printf '%s\n' "$@" | jq -s . > "$tmp/runs"; rm -rf "$tmp/jobs"; mkdir -p "$tmp/jobs"; }
@@ -138,6 +142,9 @@ jobs_of() {
            else {started_at: "2026-01-02T10:00:00Z", completed_at: at($f[2])} end))
     | {total_count: length, jobs: .}' > "$tmp/jobs/$id"
 }
+# attempt_jobs_of <run id> <attempt> [job:conclusion[:minutes|never]]...: the jobs of an earlier attempt of a run, as its
+# attempts/<n>/jobs read gives them. The latest attempt's jobs are jobs_of.
+attempt_jobs_of() { local id="$1" att="$2"; shift 2; jobs_of "$id.a$att" "$@"; }
 # workflow_file <run id> [file name]: the file served at that run's head, read from stdin. Default ci.yml under .github/workflows.
 workflow_file() {
   local dir="$tmp/contents/$(printf '%040x' "$1")/.github/workflows"
@@ -213,6 +220,7 @@ t() { # want label [FAIL glob] [EMPTY glob] [text the issue must name] [jobs rea
   case "$1" in
     green) [ "$shown" = green ] && [ ! -s "$tmp/log" ] && ok=1 ;;
     red) [ "$shown" = red ] && grep -q ISSUE "$tmp/log" && ok=1 ;;
+    raised) [ "$code" = 0 ] && grep -q ISSUE "$tmp/log" && ok=1 ;; # the issue opened; the verdict is not pinned
     unknown) [ "$shown" = unknown ] && [ ! -s "$tmp/log" ] && grep -q '::warning::' <<<"$out"$'\n'"$(cat "$tmp/err")" && ok=1 ;;
   esac
   [ "$code" = 0 ] || ok=0
@@ -232,6 +240,31 @@ runs_are "$(gh_run ci success 2026-01-02 u1 push 1)" "$(gh_run ci failure 2026-0
 t green red-then-fixed-is-quiet
 runs_are "$(gh_run alarm failure 2026-01-02 u1 push 1)"
 t green own-workflow-is-ignored
+# named <green|notred> <label> [text | !text]...: one run of alarm.sh. Each text must share one line with "cap end named" in its
+# output (stdout or stderr); a text with a leading ! must appear nowhere. The last stdout line is the verdict: green exactly for
+# green, else any verdict but red. No issue may open.
+named() {
+  local want="$1" label="$2" out code verdict all ok=1 text
+  shift 2
+  : > "$tmp/log"; : > "$tmp/reads"; : > "$tmp/pylog"; rm -rf "$tmp/scratch"; mkdir -p "$tmp/scratch"
+  out="$(PATH="$tmp/bin:$PATH" RUNS="$tmp/runs" WORKFLOWS="$tmp/workflows" JOBS="$tmp/jobs" READS="$tmp/reads" LOG="$tmp/log" \
+    FAIL="" EMPTY="" PYLOG="$tmp/pylog" TMPDIR="$tmp/scratch" CONTENTS="$tmp/contents" CONTENTS_DEFAULT="$tmp/no-if.yml" GITHUB_REPOSITORY=o/r SELF=alarm bash "$here/alarm.sh" 2>"$tmp/err")"
+  code=$?
+  all="$out"$'\n'"$(cat "$tmp/err")"
+  verdict="$(tail -n 1 <<<"$out")"
+  [ "$code" = 0 ] || ok=0
+  case "$want" in
+    green) [ "$verdict" = green ] || ok=0 ;;
+    notred) [ -n "$verdict" ] && [ "$verdict" != red ] || ok=0 ;;
+  esac
+  [ ! -s "$tmp/log" ] || ok=0
+  for text in "$@"; do
+    if [ "${text#!}" != "$text" ]; then grep -qF -- "${text#!}" <<<"$all" && ok=0
+    else grep -F -- "cap end named" <<<"$all" | grep -qF -- "$text" || ok=0
+    fi
+  done
+  if [ "$ok" = 1 ]; then echo "ok   $label"; else echo "FAIL $label (exit $code, verdict: ${verdict:-none}; got: $all; issue log: $(tr '\n' ' ' < "$tmp/log"))"; bad=1; fi
+}
 runs_are "$(gh_run ci success 2026-01-02 u1 push 1)" "$(gh_run deploy timed_out 2026-01-01 u2 push 2)"
 t red one-red-workflow-among-green
 
@@ -311,27 +344,28 @@ t unknown green-runs-jobs-read-fails-is-unknown "api *actions/runs/2/jobs*"
 runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-1 push 1)"
 jobs_of 1 checks:failure
 t red red-run-with-no-candidate-reads-no-jobs "" "" https://runs/red-1 none
-# A cancelled run is red only through a job cancelled at its own job-level cap. Its jobs and its workflow file are each read once.
+# A cancelled run raises the alarm only through a job cancelled at its own job-level cap. Its jobs and its workflow file are each read once.
 runs_are "$(gh_run ci cancelled 2026-01-02 u1 push 1)"
 jobs_of 1 checks:cancelled:2
 workflow_at 1 checks:20
 t green cancelled-run-is-not-red "" "" "" "actions/runs/1/jobs"
 
-# A job cancelled at its cap (elapsed >= cap, the cap read from the workflow file at the run's head) makes the run red. The
-# alarm names the job, the cap and the run id. The quiet cases below stay quiet. The unknown cases are never red and never clear.
+# A job cancelled at its cap (elapsed >= cap, the cap read from the workflow file at the run's head) raises the alarm: the issue
+# names the job, the cap and the run id. These cases pin the alarm, not the verdict. The quiet cases below stay quiet. The unknown
+# cases are never red and never clear.
 runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-exact push 4711)"
 jobs_of 4711 scope-guard:cancelled:37
 workflow_at 4711 scope-guard:37
-t red job-cancelled-at-its-cap-makes-the-run-red "" "" "" "actions/runs/4711/jobs"
+t raised job-cancelled-at-its-cap-raises-the-alarm "" "" "" "actions/runs/4711/jobs"
 runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-over push 4712)"
 jobs_of 4712 scope-guard:cancelled:40
 workflow_at 4712 scope-guard:37
-t red job-over-its-cap-names-the-job-the-cap-and-the-run "" "" "$(printf 'scope-guard\n37\n4712')" "actions/runs/4712/jobs"
+t raised job-over-its-cap-names-the-job-the-cap-and-the-run "" "" "$(printf 'scope-guard\n37\n4712')" "actions/runs/4712/jobs"
 cost over-cap-red-reads-one-jobs-list-and-one-workflow-file-and-starts-no-python 1 1 0
 runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-mixed push 4715)"
 jobs_of 4715 build:success:10 scope-guard:cancelled:40
 workflow_at 4715 build:20 scope-guard:37
-t red one-job-over-its-cap-among-passed-jobs-is-red "" "" "$(printf 'scope-guard\n37\n4715')" "actions/runs/4715/jobs"
+t raised one-job-over-its-cap-among-passed-jobs-raises-the-alarm "" "" "$(printf 'scope-guard\n37\n4715')" "actions/runs/4715/jobs"
 
 runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-under push 4713)"
 jobs_of 4713 scope-guard:cancelled:2 other:success
@@ -345,7 +379,7 @@ t green skipped-and-passed-jobs-are-not-judged-by-the-cap "" "" ""
 runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-nocap push 4716)"
 jobs_of 4716 scope-guard:cancelled:40
 workflow_at 4716 scope-guard
-t unknown job-cancelled-with-no-cap-is-unknown-not-clear "" "" "" "actions/runs/4716/jobs"
+t green job-cancelled-with-no-cap-under-the-360-minute-default-is-quiet "" "" "" "actions/runs/4716/jobs"
 runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-absent push 4717)"
 jobs_of 4717 scope-guard:cancelled:40
 workflow_at 4717 other-job:37
@@ -361,6 +395,62 @@ runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-empty push 4720)"
 jobs_of 4720
 workflow_at 4720 scope-guard:37
 t unknown cancelled-run-with-no-jobs-is-unknown-not-clear "" "" "" "actions/runs/4720/jobs"
+
+# A job with no job-level timeout-minutes has GitHub's default cap, 360 minutes: cancelled at 360 it raises the alarm, under it it is quiet.
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/nocap-360 push 4741)"
+jobs_of 4741 scope-guard:cancelled:360
+workflow_at 4741 scope-guard
+t raised job-cancelled-at-360-minutes-with-no-cap-raises-the-alarm "" "" "job scope-guard ran 360 min, cap 360 min, run 4741"
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/nocap-359 push 4742)"
+jobs_of 4742 scope-guard:cancelled:359
+workflow_at 4742 scope-guard
+t green job-cancelled-at-359-minutes-with-no-cap-is-quiet "" "" ""
+
+# A failure run whose only red job was cancelled at its cap is red by its conclusion. The alarm names that job, its cap and its
+# minutes, as the cancelled-run path does. Only the issue is pinned here, not the verdict.
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/fail-cap-4740 push 4740)"
+jobs_of 4740 scope-guard:cancelled:40
+workflow_at 4740 scope-guard:37
+t raised failure-run-with-its-only-red-job-cancelled-at-its-cap-names-the-job "" "" "job scope-guard ran 40 min, cap 37 min, run 4740"
+
+# A job cancelled at its cap in attempt 1 of a run whose attempt 2 is green: the alarm names it on a "cap end named" line, the
+# verdict is not red, and no issue opens. Attempt 1's jobs come from the attempts endpoint; the latest attempt's jobs do not hold them.
+runs_are "$(gh_run ci success 2026-01-02 https://runs/retry-cap-4750 push 4750 completed 2)"
+attempt_jobs_of 4750 1 scope-guard:cancelled:40
+jobs_of 4750 scope-guard:success
+workflow_at 4750 scope-guard:37
+named notred cap-end-in-attempt-1-of-a-green-run-is-named-not-red "job scope-guard ran 40 min, cap 37 min, run 4750"
+# Controls: a green run whose earlier attempt has no cap end stays silent.
+runs_are "$(gh_run ci success 2026-01-02 https://runs/retry-under-4751 push 4751 completed 2)"
+attempt_jobs_of 4751 1 scope-guard:cancelled:2
+jobs_of 4751 scope-guard:success
+workflow_at 4751 scope-guard:37
+named green attempt-1-cancelled-under-its-cap-in-a-green-run-stays-silent "!cap end named"
+runs_are "$(gh_run ci success 2026-01-02 https://runs/retry-clean-4752 push 4752 completed 2)"
+attempt_jobs_of 4752 1 scope-guard:success
+jobs_of 4752 scope-guard:success
+workflow_at 4752 scope-guard:37
+named green green-run-with-no-cap-end-in-any-attempt-stays-silent "!cap end named"
+
+# The cancelled-path cost sentence in action.yml: the one that starts "Cost of that check", in the first paragraph of the description.
+# Scope first: the sentence must be found. Then it may not claim that no process starts or no file is written, must say
+# "no long-lived process", and must keep its three read counts.
+action_yml="$root/actions/ci-alarm/action.yml"
+cost_sentence="$(awk '/^description: >/ { f = 1; next } f && /^[ \t]*$/ { exit } f' "$action_yml" | sed 's/^[ \t]*//' | tr '\n' ' ' | sed -n 's/.*\(Cost of that check.*\)/\1/p' | sed 's/\. .*$//')"
+if [ -z "$cost_sentence" ]; then echo "FAIL action-yml-cancelled-cost-sentence-not-found"; bad=1
+else
+  claim="$(grep -Eo 'no (new |local )?(process|file)' <<<"$cost_sentence" | head -n 1)"
+  if [ -n "$claim" ]; then echo "FAIL action-yml-cost-line-claims-$(tr ' ' '-' <<<"$claim")"; bad=1
+  else echo "ok   action-yml-cost-line-claims-no-process-start-or-file-write"; fi
+  if grep -qF 'no long-lived process' <<<"$cost_sentence"; then echo "ok   action-yml-cost-line-says-no-long-lived-process"
+  else echo "FAIL action-yml-cost-line-does-not-say-no-long-lived-process"; bad=1; fi
+  if grep -qF 'jobs read' <<<"$cost_sentence"; then echo "ok   action-yml-cost-line-keeps-the-jobs-read"
+  else echo "FAIL action-yml-cost-line-drops-the-jobs-read"; bad=1; fi
+  if grep -Eq 'workflow[- ](file )?read (only )?when a job' <<<"$cost_sentence"; then echo "ok   action-yml-cost-line-keeps-the-workflow-read-when-a-job-was-cancelled"
+  else echo "FAIL action-yml-cost-line-drops-the-workflow-read-when-a-job-was-cancelled"; bad=1; fi
+  if grep -qF 'workflows-list read' <<<"$cost_sentence"; then echo "ok   action-yml-cost-line-keeps-the-workflows-list-read"
+  else echo "FAIL action-yml-cost-line-drops-the-workflows-list-read"; bad=1; fi
+fi
 
 # The scanner cases: a timeout-minutes line in a run block, a comment after the cap, a quoted timeout in a run line, a lone quote.
 scanner_wf() {
@@ -389,7 +479,7 @@ t green scanner-a-run-block-timeout-line-is-not-the-cap "" "" ""
 runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/scan-red push 4722)"
 jobs_of 4722 build:cancelled:20
 scanner_wf | workflow_file 4722
-t red scanner-a-comment-after-the-cap-is-stripped "" "" "$(printf 'build\n20\n4722')" "actions/runs/4722/jobs"
+t raised scanner-a-comment-after-the-cap-is-stripped "" "" "$(printf 'build\n20\n4722')" "actions/runs/4722/jobs"
 runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/scan-unknown push 4723)"
 jobs_of 4723 lint:cancelled:5
 scanner_wf | workflow_file 4723
@@ -443,7 +533,7 @@ t green real-checks-job-cap-is-read-past-a-step-cap "" "" ""
 runs_are "$(gh_run checks cancelled 2026-01-02 https://runs/real-guard push 4732)"
 jobs_of 4732 "checks-guard:cancelled:$guard_cap"
 serve_real_checks "$(printf '%040x' 4732)"
-t red real-checks-cap-with-a-trailing-comment-is-the-cap "" "" "$(printf 'checks-guard\n%s\n4732' "$guard_cap")" "actions/runs/4732/jobs"
+t raised real-checks-cap-with-a-trailing-comment-is-the-cap "" "" "$(printf 'checks-guard\n%s\n4732' "$guard_cap")" "actions/runs/4732/jobs"
 # The live nightly case: schedule run 41817705653 failed on checks-windows-merge-3, all-jobs-passed and ci-done skipped. The newer
 # push run 41905916525 passed merge-3 and skipped the same two. The file is the real checks.yml, at the push run's head.
 live_pair() {
