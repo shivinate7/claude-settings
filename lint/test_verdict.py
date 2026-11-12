@@ -211,7 +211,7 @@ class T(unittest.TestCase):
             self.assertTrue(os.path.exists(pidfile), "child never started")
             pid = int(open(pidfile).read())
             self.assertFalse(alive(pid), f"child {pid} still running after verdict returned")
-            self.assertLess(elapsed, 6, elapsed)
+            self.assertLess(elapsed, 6, elapsed)  # hang guard, 2x the child's 3 s: bin/verdict waits on the closed reader, so the child cannot be made longer
             self.assertNotIn("cannot run", open(log).read())
             self.assertNotIn("cannot run", r.stdout + r.stderr)
 
