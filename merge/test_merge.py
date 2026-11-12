@@ -19280,8 +19280,8 @@ class BatchFreeze(CloudSession):
         with self.no_lint_or_ready_check():
             rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
         self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
-        self.assertRegex(out, r"unmapped: its failing lines name #101 #102, not one lane",
-                         "a job whose two lines name two lanes is not refused with the cross-line cause: %s" % out)
+        self.assertIn("job unit-tests is unmapped: its failing lines name #101 #102, not one lane", out,
+                      "a job whose two lines name two lanes is not refused with the cross-line cause: %s" % out)
         self.assertEqual(rc, 1, "a split of a job whose two lines name two lanes exited %s, not 1: %s" % (rc, out))
         self.assert_untouched(pr, snap, out)
 
@@ -19294,10 +19294,13 @@ class BatchFreeze(CloudSession):
         snap = self.snapshot(pr)
         self.record_pushes()
         with self.no_lint_or_ready_check():
-            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+            try:
+                rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+            except Exception as e:  # a crash is no refusal: fail on it, and name it
+                self.fail(f"a split of a job with only summary lines raised {e!r} instead of refusing it as unmapped")
         self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
-        self.assertRegex(out, r"unmapped: it has no failing line that names a case or a file",
-                         "a job whose only failing lines are summaries is not refused with the no-named-line cause: %s" % out)
+        self.assertIn("job unit-tests is unmapped: it has no failing line that names a case or a file", out,
+                      "a job whose only failing lines are summaries is not refused with the no-named-line cause: %s" % out)
         self.assertEqual(rc, 1, "a split of a job with only summary lines exited %s, not 1: %s" % (rc, out))
         self.assert_untouched(pr, snap, out)
 
