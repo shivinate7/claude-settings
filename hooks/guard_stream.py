@@ -513,7 +513,7 @@ def waiter_verdict(segments, background: bool, watch_only: bool = False) -> str:
     `gh pr checks --watch`. Allowed: one short sleep, `gh pr checks --watch` with
     run_in_background, and, with run_in_background, one sleep of any length followed by a command
     and a `clock_loop`: a `+%s` read ordered against an epoch, or an ISO read ordered against an ISO time.
-    With `watch_only`, only a `gh` watch form is judged, foreground or background, and any pause is not."""
+    With `watch_only`, only `gh run watch` is judged, foreground or background, and any pause is not."""
     sleeps, loop, watcher, run_watch, followed = [], False, "", "", False
     token_rows = []
     for segment in segments:
@@ -542,7 +542,7 @@ def waiter_verdict(segments, background: bool, watch_only: bool = False) -> str:
         elif waiter_hit(segment) and not watch_only:
             return waiter_hit(segment)
     if watch_only:
-        return watcher
+        return run_watch
     if background and clock_loop(token_rows):
         # A `+%s` read ordered against an epoch, or an ISO read ordered against an ISO time, ends the loop at
         # that time, so only its pauses are judged.

@@ -4483,7 +4483,8 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if poller:
             refuse(tool, "deny", "waiter", PATTERN_POLLER_REASON, poller + " " + matched)
         refuse(tool, "deny", "waiter", WAITER_REASON, matched)
-    # No program runs a `gh` watch, so the Monitor exemption stops there (decision ci-wait-reads-run-status).
+    # No program runs `gh run watch`, so the Monitor exemption stops there (decision ci-wait-reads-run-status).
+    # A Monitor `gh pr checks --watch` is a background watch, which decision agents-wait-with-monitor allows.
     matched = waiter_verdict(split_segments(stripped), background, watch_only=True) if not stream_family else ""
     if matched:
         refuse(tool, "deny", "waiter", WAITER_REASON, matched)
