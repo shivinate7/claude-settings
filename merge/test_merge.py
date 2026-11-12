@@ -19702,6 +19702,109 @@ class BatchFreeze(CloudSession):
         self.assertEqual([target for target, _, _ in self.lint_calls(mocks)], ["batch-nightly"], "--ready did not lint the batch head once: %s" % out)
         self.assertEqual(self.host.readies, [pr], "--ready did not mark the batch PR ready once: %s" % out)
 
+    @contextlib.contextmanager
+    def git_starts(self):
+        """Yields {git subcommand: starts} for each git process the block starts. hooks/_nowindow.py starts every child through subprocess.run,
+        and merge's sh() and git_reads both read through it, so one spy counts a read whichever helper makes it."""
+        seen = {}
+        real = subprocess.run
+
+        def spy(argv, *a, **k):
+            if isinstance(argv, (list, tuple)) and len(argv) > 1 and os.path.splitext(os.path.basename(str(argv[0])))[0] == "git":
+                sub = argv[3] if argv[1] == "-C" and len(argv) > 3 else argv[1]
+                seen[sub] = seen.get(sub, 0) + 1
+            return real(argv, *a, **k)
+
+        with unittest.mock.patch.object(subprocess, "run", spy):
+            yield seen
+
+    def stacked_check(self, lanes, rows):
+        """Run stacked_without_base for the request `lanes` ({PR: head}) against `rows`, the open pull requests as (PR, info) pairs. Its one host
+        read is served from `rows`. Raises merge.Stop when the check refuses."""
+        host = types.SimpleNamespace(open_prs=lambda: list(rows))
+        merge.stacked_without_base(self.co, host, "main", lanes, None)
+
+    def test_the_stacked_check_git_starts_grow_per_lane_and_not_per_open_pr(self):
+        """The check's git starts grow with the request's lanes, not with lanes times open pull requests. Two kinds are carved out and bounded
+        apart: fetch, which the check makes once, and cat-file, which fetch_heads makes at most twice per other head. Every other start is a
+        commit-graph read: at twice the lanes and twice the open pull requests it stays under 2x plus 10, and at 40 open pull requests it is
+        within 2 of its count at 10."""
+        request, outside = list(range(101, 107)), list(range(201, 241))
+        for n in (*request, *outside):
+            self.lane(n)
+        sh(self.co, "git", "fetch", "-q", "origin")  # every head is in the clone, so the fetch step fetches nothing and the fetch left is the base's
+        listed = dict(self.host.open_prs())  # read before the spy: FakeHost's read starts one git per open pull request
+
+        def starts(lanes, opened):
+            heads = {n: self.heads[n] for n in request[:lanes]}
+            rows = [(n, listed[n]) for n in (*request[:lanes], *outside[:opened])]
+            with self.git_starts() as seen:
+                try:
+                    self.stacked_check(heads, rows)
+                except merge.Stop as e:
+                    self.fail(f"the check refused {lanes} lanes that stack on nothing, with {opened} unrelated open pull requests: {e}")
+            return sum(c for s, c in seen.items() if s not in ("fetch", "cat-file")), seen
+
+        small, small_seen = starts(3, 10)
+        big, big_seen = starts(6, 20)
+        wide, wide_seen = starts(3, 40)
+        empty, _ = starts(3, 0)
+        self.assertGreater(small, 0, "setup: the spy counted no commit-graph read in the check: %s" % small_seen)
+        with self.subTest("the commit-graph reads grow linearly in the lanes"):
+            self.assertLessEqual(big, 2 * small + 10, "the check's commit-graph reads grew faster than its lanes: %d at 6 lanes and 20 open pull "
+                                 "requests, %d at 3 lanes and 10" % (big, small))
+        with self.subTest("the commit-graph reads do not depend on the open pull requests"):
+            self.assertLessEqual(abs(wide - small), 2, "the check's commit-graph reads depend on the open pull requests: %d at 3 lanes and 40, "
+                                 "%d at 3 lanes and 10" % (wide, small))
+        with self.subTest("no open pull request reads no more than ten"):
+            self.assertLessEqual(empty, small, "the check reads more with no open pull request than with ten: %d and %d" % (empty, small))
+        for seen, opened in ((small_seen, 10), (big_seen, 20), (wide_seen, 40)):
+            with self.subTest(f"the fetch step fetches once with {opened} open pull requests"):
+                self.assertLessEqual(seen.get("fetch", 0), 2, "the check fetched more than once with %d open pull requests: %s" % (opened, seen))
+            with self.subTest(f"the fetch step probes each open pull request's head a fixed number of times, with {opened}"):
+                self.assertLessEqual(seen.get("cat-file", 0), 2 * opened, "the check probed heads more than twice per open pull request: %d for %d: %s"
+                                     % (seen.get("cat-file", 0), opened, seen))
+
+    def test_an_unfetchable_open_head_is_said_and_skipped_and_the_scan_goes_on(self):
+        self.lane(101)
+        self.lane(102, on=101)  # lane #102 is stacked on outside #101
+        sh(self.co, "git", "fetch", "-q", "origin")  # a run fetches the request's lane heads before the check, and so does this test
+        listed = dict(self.host.open_prs())
+        unfetchable = dict(listed[101], head="1" * 40)  # an open pull request whose head origin does not hold, as a fork's head is not on origin
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(merge.Stop) as cm:
+            self.stacked_check({102: self.heads[102]}, [(150, unfetchable), (101, listed[101])])  # the unfetchable head comes first
+        self.assertIn("merge: #150's head 111111111 cannot be fetched from origin", out.getvalue(), "the check did not say that #150's head "
+                      "cannot be fetched: %s" % out.getvalue())
+        self.assertIn("#102 holds a commit of #101", str(cm.exception), "the check stopped at the unfetchable head and did not reach #101: %s" % cm.exception)
+        self.assertNotIn("#150", str(cm.exception), "the check named #150, whose head it could not read: %s" % cm.exception)
+
+    def test_a_stacked_lane_names_only_the_outside_pr_it_stacks_on_among_several(self):
+        self.lane(101)
+        self.lane(102, on=101)  # lane #102 is stacked on outside #101
+        self.lane(103)  # outside #103 is unrelated: it stacks on nothing
+        sh(self.co, "git", "fetch", "-q", "origin")  # a run fetches the request's lane heads before the check, and so does this test
+        listed = dict(self.host.open_prs())
+        with self.assertRaises(merge.Stop) as cm:
+            self.stacked_check({102: self.heads[102]}, [(101, listed[101]), (103, listed[103])])
+        named = [line for line in str(cm.exception).splitlines() if "holds a commit of" in line]
+        self.assertEqual(named, ["#102 holds a commit of #101, which is not in this request"],
+                         "the refusal names other pull requests than the one lane #102 is stacked on: %s" % cm.exception)
+
+    def test_a_lane_stacked_on_a_chain_of_outside_prs_names_each_of_them_as_the_old_check_does(self):
+        self.lane(101)
+        self.lane(104, on=101)  # outside #104 is stacked on outside #101
+        self.lane(102, on=101)  # lane #102 is stacked on #101 too, so its merge-base with #104 is #101
+        sh(self.co, "git", "fetch", "-q", "origin")  # a run fetches the request's lane heads before the check, and so does this test
+        listed = dict(self.host.open_prs())
+        with self.assertRaises(merge.Stop) as cm:
+            self.stacked_check({102: self.heads[102]}, [(101, listed[101]), (104, listed[104])])
+        named = sorted(line for line in str(cm.exception).splitlines() if "holds a commit of" in line)
+        # The old check names #104 as well: #102 and #104 both have #101 as their merge-base, an outside head. Pinned as it is.
+        self.assertEqual(named, sorted(["#102 holds a commit of #101, which is not in this request",
+                                        "#102 holds a commit of #104, which is not in this request"]),
+                         "the refusal for lane #102 on a chain of outside pull requests names other pull requests than the old check: %s" % cm.exception)
+
     def test_a_failed_body_write_on_drop_leaves_the_branch_and_the_body_agreeing(self):
         for n in (101, 102, 103):
             self.lane(n)
