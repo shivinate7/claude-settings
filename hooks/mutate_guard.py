@@ -2927,8 +2927,8 @@ MUTATIONS = [
      "lease: an MCP launch naming the shut-down device in lowercase is refused by the lease"),
     # The lease allow (ruling 5): one mutant per arm of guard.sim_lease_holds and of bin/sim-lease's read.
     ("simulator-boot-lease: the lease's session is not compared",
-     '                if session == e.get("session") and e.get("slot") in lease.SLOT_UDID}',
-     '                if e.get("slot") in lease.SLOT_UDID}', "guard",
+     '                if session == e.get("session") and e.get("slot") in lease.SLOT_UDID and not e.get("reuse")}',
+     '                if e.get("slot") in lease.SLOT_UDID and not e.get("reuse")}', "guard",
      "lease: another session's live slot 1 lease on Duo 1 does not allow this session", "posix"),
     ("simulator-boot-lease: an empty session may match an empty lease session",
      '    if not session or not udids:\n        return False',
