@@ -561,11 +561,12 @@ def C14_a_judge_error_that_holds_the_api_key_keeps_its_text_and_loses_the_key():
 
 
 @case
-def C17_an_unreadable_token_file_with_the_api_key_set_fails_closed_and_the_key_stays_out():
-    """C17. a token file that cannot be decoded, and ANTHROPIC_API_KEY set in this process: the judge call fails
-    closed as an unreadable token file does (no verdict, no judge start), and the key value is in no judge env, no
-    error text, no Stop output, and no outcome record. Why: the key is a fallback for a judge with no setup token
-    only, so an unreadable token file must never hand the call to the key."""
+def C17_an_undecodable_token_file_with_the_api_key_set_never_hands_the_call_to_the_key():
+    """C17. an undecodable token file, with ANTHROPIC_API_KEY set in this process: the judge call fails closed
+    (no verdict, no judge start), and the key value is in no judge env, no error text, no Stop output, and no
+    outcome record. Why: the key is a fallback for a judge with no setup token only, so an undecodable token file
+    must never hand the call to the key. Scope: a file that exists and cannot be decoded. A token path that exists
+    but cannot be opened is not covered here."""
     sid = "model-auth-c17"
     with scratch_config("c17", parent_key=FAKE_KEY) as cfg:
         problems = scoped(cfg) + takes_session_id_problems()
@@ -584,14 +585,14 @@ def C17_an_unreadable_token_file_with_the_api_key_set_fails_closed_and_the_key_s
             verdict, error = dw.invoke_model("judge this", session_id=sid)
         text = error or ""
         problems += expect(verdict is None,
-                           "unreadable token file with the key set: the judge returned a verdict, want none")
+                           "undecodable token file with the key set: the judge returned a verdict, want none")
         problems += expect("token file" in text.lower() and "could not be read" in text.lower(),
-                           "unreadable token file with the key set: the error does not say the token file "
+                           "undecodable token file with the key set: the error does not say the token file "
                            "could not be read: %r" % text)
         problems += expect(UNREADABLE_MARK.decode() not in text, "the error text holds the token file's bytes")
         problems += expect(FAKE_KEY not in text, "the API key value is in the error text")
         problems += expect(not judge_envs,
-                           "unreadable token file with the key set: %d judge start(s), want 0" % len(judge_envs))
+                           "undecodable token file with the key set: %d judge start(s), want 0" % len(judge_envs))
         for env in judge_envs:
             problems += expect(KEY_NAME not in env and FAKE_KEY not in env.values(),
                                "the API key reached the judge env")
