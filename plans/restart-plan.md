@@ -914,6 +914,8 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
      when it sends. A guard refuses a page write that stores a session id.
   4. Fits R18 point 2: each item names who wakes, by slug or role.
   Home: skill project-ops; skill waiting-page.
+- **R46. Who archives finished sessions.** Owner 09:41 CST Nov 12 asked who archives a session that opens no PR: "should coordinator just be responsible for all with batch runner getting a subset?" Read 09:39 CST: since the respawn, 1 of 64 lanes is archived and 31 sit idle and completed. Owner 09:42 CST: "on archivals option A is best". Whoever starts a session archives it. The batch runner archives PR lanes after each merge, for the coordinator. The coordinator archives each other finished session it started at its next wake, once it has read the report. Home: decision session-tiers, Archiving scope.
+
 - **R45. How cloud sessions delete branches.** Owner
   14:25 CST Nov 11: "im good with either an actions workflow or a github token -- github token seems
   better? im very ambivalent to tokens being in all my cloud sessions its just a github token".
