@@ -1768,7 +1768,7 @@ BRIEF_GRANT_REASON = (
 BRIEF_ROLE_REASON = (
     "this brief does not name {missing} by role, so the lane cannot tell whom to ask. Name "
     + ", ".join(ROLE_LABELS) + " once each, as a whole word in any case (for example `Ask: Coordinator, Triage, Batch runner.`). "
-    "A role's session id may follow, and none is required. (decision session-tiers, a lane holds one topic)"  # glossary-ok: session-tiers is the decision's file name
+    "Name the role only; none is required beyond its label. The roster on the record branch holds the ids, and the wake path reads them there. (decision session-tiers, a lane holds one topic)"  # glossary-ok: session-tiers is the decision's file name
 )
 
 
@@ -1846,7 +1846,7 @@ def brief_hit(tool: str, tool_input, transcript: str):
 
 def _brief_role_hit(message: str):
     """A brief that cleared the topic or step check is refused when its text lacks a role in ROLE_LABELS as a
-    whole word. A session id is optional. cost: message text only, no extra transcript read."""
+    whole word. The guard neither requires nor reads a session id. cost: message text only, no extra transcript read."""
     missing = [label for label in ROLE_LABELS if not _ROLE_WORDS[label].search(message)]
     if not missing:
         return None
