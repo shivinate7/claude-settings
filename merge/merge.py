@@ -3915,7 +3915,7 @@ def newest_review(bodies):
             old = recs[i]
             if old and old["n"] == rec["n"] and old["head"] == rec["fix"][0]:
                 if old["rounds"] and not old["fix"]:
-                    return {**rec, "rounds": old["rounds"], "net": old["net"], "inherited_from": i}  # the Net value goes with the rounds: a fix record never lifts a hold or settles a net value owed
+                    return {**rec, "rounds": old["rounds"], "net": old["net"], "inherited_from": i}  # the Net value goes with the rounds, so a fix record's own value never lifts a hold the round gave (a hold typed only on the fix record is ignored)
                 break
     return rec
 
