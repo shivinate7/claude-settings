@@ -1627,7 +1627,8 @@ def idle_lanes_report(repo, live, record_branch=None, main_branch="main"):
 
 # The line an outbox writer emits for an owner ruling (skills/project-ops README template for the outbox):
 #   - <step> [ruling] -> <home>: "<exact words>" (owner, <time>)
-OUTBOX_RULING = re.compile(r'^- (?P<step>\S+) \[ruling\] -> (?P<home>[^\s:]+): "(?P<words>.+)" \(owner, [^)]*\)\s*$')
+# The words need one non-blank character: blank words fold to "", which every home holds, so they read malformed.
+OUTBOX_RULING = re.compile(r'^- (?P<step>\S+) \[ruling\] -> (?P<home>[^\s:]+): "(?P<words>\s*\S.*)" \(owner, [^)]*\)\s*$')
 OUTBOX_RULING_LINE = "outbox ruling"
 OUTBOX_FOLDER = "roadmap/outbox/"
 
