@@ -507,27 +507,27 @@ chained_ask("cap var: a cap write to a settings path held in a shell variable, t
 # =========================================================================== the cap-lift deadline ask
 #
 # THE DEADLINE ASKS (owner ruling, page item 602, pick a, 2026-11-12 12:54 CST). A write that sets
-# `_agentCapUntil` alone asks under agent-model-cap, and the ask names the end in US Central on a 24-hour
-# clock with its zone (rule style-time-central-24h). A deadline has no ceiling, so one years ahead asks too.
-# A deadline already passed, or one that does not parse, stays silent, as on main. A model raise still asks.
-# The expected Central text comes from hooks/local_time.py, the one home of the Central clock, so a reason
-# that echoes the UTC reading, or hard-codes CST, reads as wrong.
+# `_agentCapUntil` alone asks under agent-model-cap, and the ask names the end in US Central: its date,
+# a 24-hour clock and the zone (rule style-time-central-24h). A deadline has no ceiling, so one years
+# ahead asks too. A deadline already passed, or one that does not parse, stays silent, as on main. A
+# model raise still asks. The expected Central text comes from hooks/local_time.py, the one home of the
+# Central clock, so a reason that echoes the UTC reading, hard-codes CST, or drops the date reads as wrong.
 import datetime as _dt  # noqa: E402  the instants the Central helper reads (local_time is imported by test_guard)
 
 EXPIRY_KEY = "_agentCapUntil"
-DEADLINE_WINTER = "2099-01-15T03:30:00Z"   # CST: 21:30 on the 14th
-DEADLINE_SUMMER = "2099-07-15T03:30:00Z"   # CDT: 22:30 on the 14th
+DEADLINE_WINTER = "2099-01-15T03:30:00Z"   # CST: 2099-01-14 21:30 on the 14th
+DEADLINE_SUMMER = "2099-07-15T03:30:00Z"   # CDT: 2099-07-14 22:30 on the 14th
 DEADLINE_PAST = "2000-01-01T00:00:00Z"
 
 
 def _central_text(text):
-    """The Central reading of a Z-suffixed instant, from the one helper."""
+    """The Central reading of a Z-suffixed instant, date, time and zone, from the one helper."""
     instant = _dt.datetime.strptime(text, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=_dt.timezone.utc)
-    return local_time.central_hhmm(instant)
+    return local_time.central_full(instant)
 
 
-WANT_WINTER = _central_text(DEADLINE_WINTER)   # "21:30 CST"
-WANT_SUMMER = _central_text(DEADLINE_SUMMER)   # "22:30 CDT"
+WANT_WINTER = _central_text(DEADLINE_WINTER)   # "2099-01-14 21:30 CST"
+WANT_SUMMER = _central_text(DEADLINE_SUMMER)   # "2099-07-14 22:30 CDT"
 
 add("cap deadline: a Write that sets only the cap-lift end asks under agent-model-cap and names the end in CST",
     "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
@@ -552,7 +552,7 @@ sh("cap deadline: a shell write that sets only the cap-lift end asks under agent
 # The clock is pinned to an instant one hour before the deadline, so this end is near, not far: it asks
 # at any length, and it is the control that a far-only row cannot be.
 NEAR_CLOCK = "2099-01-14T20:30:00+00:00"
-DEADLINE_NEAR = "2099-01-14T21:30:00Z"   # one hour after NEAR_CLOCK: 15:30 CST
+DEADLINE_NEAR = "2099-01-14T21:30:00Z"   # one hour after NEAR_CLOCK: 2099-01-14 15:30 CST
 add("cap deadline: a Write that sets a cap-lift end one hour ahead asks under agent-model-cap and names the end in CST",
     "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
     content=json.dumps({EXPIRY_KEY: DEADLINE_NEAR}), carries=(_central_text(DEADLINE_NEAR),),
@@ -570,13 +570,17 @@ CLOCK_FOR_DISK_CASES = "2026-11-12T13:47:00-06:00"   # Central, the clock the gu
 DISK_CLOCK = {"LOCAL_TIME_NOW": CLOCK_FOR_DISK_CASES}
 OLD_END_2026 = "2026-11-12T10:00:00Z"
 CAP_END_2030 = "2030-01-01T00:00:00Z"
-WANT_2030 = _central_text(CAP_END_2030)   # "18:00 CST", on the 31st of December 2029
+WANT_2030 = _central_text(CAP_END_2030)   # "2029-12-31 18:00 CST", the 31st of December 2029
 MULTI_START_2099 = "2099-03-01T00:00:00Z"
 
 
-def disk_settings(tag, text):
-    """Write one project settings file under this run folder, for an edit case to read from disk."""
-    path = os.path.join(DEADLINE_DIR, tag, ".claude", "settings.local.json")
+def disk_settings(tag, text, beside=False):
+    """Write one project settings file under this run folder, for an edit case to read from disk.
+
+    `beside` puts the file at the folder's top, not in `.claude`, so a shell command can name it with no slash.
+    """
+    parts = [DEADLINE_DIR, tag] + ([] if beside else [".claude"]) + ["settings.local.json"]
+    path = os.path.join(*parts)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as handle:
         handle.write(text)
@@ -644,6 +648,47 @@ UNRELATED_FILE = json.dumps({"env": {CAP_KEY: "sonnet", "TZ": "UTC"}, EXPIRY_KEY
 add("cap deadline: an Edit that leaves a settings file's cap-lift end alone adds no ask, though the end is on disk",
     "allow", tool="Edit", cwd=NOGIT, file_path=disk_settings("unrelated-edit", UNRELATED_FILE),
     old_string='"TZ": "UTC"', new_string='"TZ": "CET"', silent=True, env=DISK_CLOCK)
+# AN EDIT THAT REPEATS THE END LINE. The edit's new text holds the cap-lift end line again, but the end on
+# disk does not move: the file arrives with the same end it had. The end the edit's strings show is not a
+# change, so the edit adds no ask.
+add("cap deadline: an Edit whose new_string repeats the cap-lift end line, with the end unchanged on disk, is silent",
+    "allow", tool="Edit", cwd=NOGIT, file_path=disk_settings("repeat-end-line", UNRELATED_FILE),
+    old_string='"TZ": "UTC"}, "%s": "%s"' % (EXPIRY_KEY, DEADLINE_WINTER),
+    new_string='"TZ": "CET"}, "%s": "%s"' % (EXPIRY_KEY, DEADLINE_WINTER), silent=True, env=DISK_CLOCK)
+
+# THE SAME CENTRAL DAY. DISK_CLOCK is 13:47 CST on 12 November 2026, and this end is 14:00 CST that day.
+# The date is printed with the time, so a reader sees that the lift ends today, not on another day.
+SAME_DAY_END = "2026-11-12T20:00:00Z"   # 2026-11-12 14:00 CST
+add("cap deadline: a Write that sets a cap-lift end later the same Central day asks and names the date and time in CST",
+    "ask", "agent-model-cap", tool="Write", cwd=NOGIT, file_path=PROJ_SETTINGS,
+    content=json.dumps({EXPIRY_KEY: SAME_DAY_END}), carries=(_central_text(SAME_DAY_END),), env=DISK_CLOCK)
+
+# A LONG BACKSLASH RUN IN A SED PATTERN, WITH NO SLASH AFTER IT. The regex that reads `s/old/new/` splits each
+# backslash two ways, so when nothing closes the pattern it backtracks over every split: an exponential run that
+# holds the guard for minutes. The second expression moves the cap-lift end, so the case pins the ask as well as
+# the speed. The file is named with no slash, so nothing after the run closes the pattern. The control is the
+# same shape with four backslashes: it must ask within the same limit, so the limit is not failing on startup.
+SED_LIMIT_S = 1
+
+
+def sed_run_case(count, tag):
+    """The settings file and the sed command for a `count`-backslash pattern, in its own folder."""
+    path = disk_settings(tag, OPUS_LIFT_2026, beside=True)
+    command = "sed -i -e 's/%s' -e 's#%s#%s#' settings.local.json" % ("\\" * count, OLD_END_2026, CAP_END_2030)
+    return os.path.dirname(path), command
+
+
+_folder, _command = sed_run_case(200, "sed-run-200")
+add("cap deadline: a sed whose pattern holds a 200-backslash run and no slash after it asks in under 1 s, "
+    "and names the end's date and time in CST",
+    "ask", "agent-model-cap", cwd=_folder, command=_command, carries=(WANT_2030,),
+    max_seconds=SED_LIMIT_S, env=DISK_CLOCK)
+_folder, _command = sed_run_case(4, "sed-run-4")
+# The control pins the time alone, which the guard already prints, so it is green on head: the date is the new claim.
+add("control: a sed whose pattern holds a 4-backslash run in the same shape asks in under 1 s, "
+    "and names the end's time in CST",
+    "ask", "agent-model-cap", cwd=_folder, command=_command, carries=("18:00 CST",),
+    max_seconds=SED_LIMIT_S, env=DISK_CLOCK)
 
 # ----------------------------------------------------- one reading of each offset form of the end
 #
