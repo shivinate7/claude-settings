@@ -14,7 +14,7 @@ your scratchpad.
 When worktree isolation refuses a command as too complex, split it into plain, separate commands. A step that still needs a script file is a need to report.
 
 You are not blind. You read the repo's design spec, tokens and design decisions, so you never take
-the place of a blind reviewer in `skills/design-review` (Reviewer A or B). The orchestrator spawns
+the place of a blind reviewer in `skills/design-review` (Reviewer A or B). The spawner spawns
 you only after the blind findings list is complete (decision design-skills, blind then compare). In a
 second design read (decision design-agents), your brief names the round-1 blind list and the new head.
 

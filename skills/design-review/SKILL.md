@@ -3,7 +3,7 @@ name: design-review
 description: Use after a change to a screen in a repo that has screens. Runs two blind design reviews of the changed pages, then compares them with the repo's design records. Its Mockup set check also flags a set of explore mockups that all keep today's structure. Not for a change that has no screen.
 ---
 
-Run this in the orchestrator. Agents never spawn, so the orchestrator spawns both reviewers.
+Run this in the spawner. Agents never spawn, so the spawner spawns both reviewers.
 The ruling is decision design-skills (third-party design skills), 2026-10-10.
 
 ## When it runs
@@ -93,9 +93,9 @@ It is not a review of a built screen.
    tabs, today's way to move between them, and today's first screen, with only their layout or
    style changed; else `new`. It names the parts that decide the verdict. In an iOS repo, it also gives
    each mockup the `native` or `web-like` line of step 7.
-3. When every mockup is `same`, the orchestrator puts one flag at the top of the owner's list: the set
+3. When every mockup is `same`, the spawner puts one flag at the top of the owner's list: the set
    holds no new structure. It offers one more round of blind designers, from the template.
-4. When a blind mockup is `same`, the orchestrator reads that designer's brief against the template
+4. When a blind mockup is `same`, the spawner reads that designer's brief against the template
    (`blind_brief.py`) and names any fault beside the verdict.
 
 ## Rules

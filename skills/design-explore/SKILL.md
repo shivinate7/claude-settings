@@ -3,7 +3,7 @@ name: design-explore
 description: Use before the builder on a lane that explores a screen, a new screen or a redesign. Spawns designers in blind, informed and directed kinds, so the owner can cull a varied set of mockups. Not for a small change to an existing screen.
 ---
 
-Run this in the orchestrator. Agents never spawn, so the orchestrator spawns every designer.
+Run this in the spawner. Agents never spawn, so the spawner spawns every designer.
 The ruling is decision design-agents, 2026-10-27. The owner wants a mix of control and new ideas
 between the mockups.
 
@@ -19,16 +19,16 @@ worktree (`parallelism-each-own-checkout`).
   also holds the device and its poses, and fixed House rules and Deliver text. It never names the current
   screen, a view of today's product or its code. It never names a screenshot, a mockup, a path or
   link, the spec, the tokens, or a keep or match rule. It holds no colour, font or spacing value of
-  the repo, so it has no Palette section. The orchestrator reads the job and the data from the spec or the
+  the repo, so it has no Palette section. The spawner reads the job and the data from the spec or the
   owner's words, and writes them in plain words. A blind designer shows ideas the repo's habits would
   hide. Each designer's worktree holds the code, spec, tokens and mockups, and the guard
   `designer-scope` limits writes only, so the brief and the designer's own instruction keep it blind.
-  Colour, type and spacing come from the house `tokens.md` only. The orchestrator checks a finished
+  Colour, type and spacing come from the house `tokens.md` only. The spawner checks a finished
   blind mockup for a repo hex before it shows it to the owner.
 - **Informed designer.** The brief gives the current screen, its mockups, the spec and the tokens. Its
   second line is `Blind designers: <n>`, the count of the run's blind designers.
 - **Directed designer.** An informed designer plus one named direction, such as denser, phone first, or one
-  primary action. The orchestrator picks directions that differ from each other.
+  primary action. The spawner picks directions that differ from each other.
 
 ## Default mix
 
@@ -55,7 +55,7 @@ designer. A text-only change gets none (decision `design-agents`).
    (hook `blind_brief.py`), but only this run sees the whole set and the view names.
 3. **Name the files.** Each designer writes `<screen>-<kind>-<n>.html` and
    `<screen>-<kind>-<n>-notes.md` in the design folder. `<kind>` is `blind`, `informed` or
-   `directed`. `<n>` counts the designers of that kind, from 1. The orchestrator assigns it in the brief. So designers never collide. Each mockup
+   `directed`. `<n>` counts the designers of that kind, from 1. The spawner assigns it in the brief. So designers never collide. Each mockup
    prints its designer kind on the page. A directed mockup also prints its direction.
 4. **Spawn all designers together.** The designers share no input, so they run in parallel. Designers never talk
    to each other (`parallelism-no-mid-task-talk`).
@@ -66,12 +66,12 @@ designer. A text-only change gets none (decision `design-agents`).
    the designer. Then run the structure check of skill
    `design-review` (Mockup set check) on the whole set. Give the owner one list: each mockup with its
    path, kind and direction, and the structure verdict of each.
-6. **Gather.** Each designer pushes to the branch its brief names, so each brief names one branch per designer. The orchestrator copies every designer's pair onto the
+6. **Gather.** Each designer pushes to the branch its brief names, so each brief names one branch per designer. The spawner copies every designer's pair onto the
    step's design branch, so the owner sees the whole set in one place.
-7. **The owner culls** from the whole set. The orchestrator renames the kept pair to `<screen>.html`
+7. **The owner culls** from the whole set. The spawner renames the kept pair to `<screen>.html`
    and `<screen>-notes.md`, and deletes the rest in the same branch. Git keeps them. It names the
    kept path in the briefs of the builder and the design reviewer, and the builder builds to it
-   (`agents/builder.md`). Then the orchestrator opens one PR of only the kept pair, into the repo's design folder (the `design`
+   (`agents/builder.md`). Then the spawner opens one PR of only the kept pair, into the repo's design folder (the `design`
    kind in `~/.claude/lint/layout.json`). The PR goes through the repo's normal PR path and merges
    there, per decision `waiting-data-in-repo` (fb-1458-1): a repo's artifacts live in its git. The
    builder builds to the kept path on the design branch and does not wait for that PR.

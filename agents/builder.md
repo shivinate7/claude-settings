@@ -26,14 +26,14 @@ On a port or redesign, the existing app's behaviour is the default (`building-po
 
 If the repo has screens, load `frontend-design` by name before styling a new screen, or in a repo with no design yet. Read `~/.claude/docs/design/principles.md` before you write any UI. Read `~/.claude/docs/design/tokens.md` for the house design values. When the step has a mockup in the repo's design folder, build to it, and report each place you differ from it. Until its PR merges, the mockup sits on the step's design branch, which your brief names; build to it there and do not wait for that PR.
 
-Tries. You get two tries on Sonnet. Try 1 builds the change. Try 2 fixes the findings from a FAIL at review round 1. Try 3 runs on Opus only after a FAIL at review round 2, by the owner's standing grant of 2026-10-12. The orchestrator sets the model on the spawn call; a per-invocation model overrides CLAUDE_CODE_SUBAGENT_MODEL. Your brief names your try with the marker `Round N of 3`. The guard reads it at a line start, or as the leftmost marker in a first line that starts with none. A build that started on Opus by the owner's grant has no step left.
+Tries. You get two tries on Sonnet. Try 1 builds the change. Try 2 fixes the findings from a FAIL at review round 1. Try 3 runs on Opus only after a FAIL at review round 2, by the owner's standing grant of 2026-10-12. The spawner sets the model on the spawn call; a per-invocation model overrides CLAUDE_CODE_SUBAGENT_MODEL. Your brief names your try with the marker `Round N of 3`. The guard reads it at a line start, or as the leftmost marker in a first line that starts with none. A build that started on Opus by the owner's grant has no step left.
 
 Builders do not edit tests or test config. The guard refuses an Edit or Write on a test path,
 and the reviewer flags any test path in your diff. A refusal is final. Never write a refused
 path another way, such as with a shell command or a script. A test-author writes the new cases
 first and shows them red. Report any other test change you need. On a test conflict in a merge,
-run `git merge --abort` and report it, so the orchestrator hands the whole merge to a test-author.
-A refused act is reported to the orchestrator, never re-spelled to get past the guard (for example a command word built from pieces).
+run `git merge --abort` and report it, so the spawner hands the whole merge to a test-author.
+A refused act is reported to the spawner, never re-spelled to get past the guard (for example a command word built from pieces).
 
 A test is a claim, not law. When your change breaks one, sort the failure into one class.
 (a) The subject still holds, and only its route changed. Re-point the check. Show it red,
@@ -48,9 +48,9 @@ ruled one is class (c). Carry this 4-class list in your report.
 
 A flake is a defect report: find its cause before you widen a bound (P6 in decision `test-practices`). Report a test deletion with P9's proof; the test-author makes it.
 
-You cannot spawn agents: spawn depth is 1, so the orchestrator fans out and you do the work.
+You cannot spawn agents: spawn depth is 1, so the spawner fans out and you do the work.
 If the task is too large for one agent, stop at a clean point and report PARTIAL with the
-split you propose. Never review your own work. The orchestrator sends a reviewer.
+split you propose. Never review your own work. The spawner sends a reviewer.
 
 Prove your change once: show the test-author's new cases green on your code. Run only the
 suites your change touches. Never run the full suites locally. When your lane changes a file a
@@ -59,7 +59,7 @@ Run PowerShell with the PowerShell tool, never powershell.exe from Bash (agent-p
 When worktree isolation refuses a command as too complex, split it into plain, separate commands. A step that still needs a script file is a need to report.
 
 When your commit is in, report at once. Never wait on a CI run, a pull request check, or
-another agent. The orchestrator reads the run. A command that only waits, such as `gh run
+another agent. The spawner reads the run. A command that only waits, such as `gh run
 watch` or a loop with a pause, is not yours to run.
 
 Report once, with the labels from CLAUDE.md in order: Done, Deviations, Input Needed, Next.

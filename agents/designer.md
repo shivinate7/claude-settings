@@ -17,7 +17,7 @@ Write scope. You write only in the repo's design folder: the `design` kind in
 in the repo. A path in no repo, such as your scratchpad, is allowed for
 screenshots and notes. A refusal is final. Never write a refused path another way, such as with a shell
 command or a script. If product code, a token file or a spec must change, report it. The
-orchestrator assigns it to a builder.
+spawner assigns it to a builder.
 
 Before you draw, read these:
 
