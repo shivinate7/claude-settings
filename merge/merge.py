@@ -228,6 +228,7 @@ RERUN_REMEDY = "gh run rerun"  # base_state names it for a cancelled run on the 
 RERUN_IN_FLIGHT = "is a re-run still going"  # base_state words an unknown re-run with it; red_base reads it back to give the re-run its own headline
 DROP_CITE = "(decision merge-deletes-batch-lanes, a batch that drops a lane by a revert of its merge does not merge)"
 BATCH_CITE = "(decision no-merge-during-batch-ci, nothing merges while another ready pull request's CI runs, and the required checks are never empty)"
+EXPRESS_CITE = "(decision no-merge-during-batch-ci, ruling r55, a prose-only pull request with a ruling in the store may go on to the merge, and the batch brake still holds)"
 FREEZE_CITE = BATCH_CITE  # the batch build and drop refusals cite the batch brake's decision, though the freeze decision governs them; a later change points this at the freeze decision
 DRAFT_CITE = "(decision draft-until-reviewed, every pull request opens as a draft and only the one integration PR goes ready)"
 STAMP_RUN_CITE = "(decision one-shared-record-stamp, the claim runs before the merge, on the pull request branch, in the merge tool)"
@@ -3344,7 +3345,7 @@ def batch_refusal(host, n, base, head):
     return (f"#{n} does not merge to {base} while another ready PR's CI runs and that PR's head does not contain this head: " + "; ".join(blockers) + ".\n"
             f"Wait for that run to end. Its run's end, or its CI-done comment on a red run, wakes the session that watches that PR. Then run again. {BATCH_CITE}")
 
-RULED_STORE_PATH = "roadmap/rulings/{id}.json"  # on origin/roadmap: one file per owner ruling; --express reads one
+RULED_STORE_PATH = "roadmap/rulings/{id}.json"  # on origin/roadmap: one file per ruling; --express reads one
 RULING_LINE = re.compile(r"^Ruling:[ \t]*(.*?)[ \t\r]*$", re.M)  # only the first such line counts, so a later valid one cannot rescue an invalid first
 RULING_ID = re.compile(r"[a-z0-9-]+")
 EXPRESS_PATHS_SHOWN = 8
@@ -3361,7 +3362,7 @@ def express_refusal(root, wt, base_ref, info):
                 f"reads {rid!r}" if found else "--express needs a `Ruling: <id>` line in the PR body, and it has none")
     path = RULED_STORE_PATH.format(id=rid)
     try:
-        tip = fetch_branch(root, "roadmap")
+        tip = fetch_branch(root, "roadmap", EXPRESS_CITE)
     except Stop as e:
         return f"unknown: the ruling store cannot be read, so ruling {rid} is unproven ({e})"
     if git(root, "cat-file", "-e", f"{tip}:{path}")[0]:
@@ -3382,7 +3383,7 @@ def express_refusal(root, wt, base_ref, info):
             f.write(script + "\n")
         env = {**{k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")},
                "EVENT": "pull_request", "BASE_SHA": base_tip, "HEAD_REF": info["branch"], "GITHUB_OUTPUT": out_file}
-        c, _ = sh(["bash", copy], cwd=wt, env=env, timeout=120)
+        c, said = sh(["bash", copy], cwd=wt, env=env, timeout=120)
         with open(out_file, encoding="utf-8") as f:
             flags = dict(l.strip().split("=", 1) for l in f if "=" in l)
     except (subprocess.TimeoutExpired, OSError, ValueError) as e:
@@ -3393,7 +3394,7 @@ def express_refusal(root, wt, base_ref, info):
                 os.remove(p)
     missing = [n for n in names if n not in flags]
     if c or missing:
-        return f"unknown: {CI_SCOPE} " + (f"failed (exit {c})" if c else "wrote no flag for " + ", ".join(missing)) + ", so whether the diff is prose-only is unproven"
+        return f"unknown: {CI_SCOPE} " + (f"failed (exit {c}; last line: {(said.splitlines() or ['no output'])[-1][:200]})" if c else "wrote no flag for " + ", ".join(missing)) + ", so whether the diff is prose-only is unproven"
     on = sorted(k for k, v in flags.items() if k != "mutation_report" and v != "false")
     if on:
         paths = git(wt, "diff", "--name-only", "--no-renames", f"{base_tip}...HEAD")[1].splitlines()
@@ -3613,10 +3614,10 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             tmp, wt = open_worktree(root, info, base)
             no_express = express_refusal(root, wt, base_ref, info)
             if no_express:
-                raise Stop(no_express + ". Nothing was claimed or pushed.")
+                raise Stop(no_express + f". Nothing was claimed or pushed. {EXPRESS_CITE}")
         busy = batch_refusal(host, n, base, info["head"])
         if busy:
-            raise Stop(busy + (" With --express the batch runner cancels the running batch run first (ruling r55, decision no-merge-during-batch-ci)." if express else "") + " Nothing was claimed or pushed.")
+            raise Stop(busy + (" With --express the batch runner cancels the running batch run first (ruling r55)." if express else "") + " Nothing was claimed or pushed.")
         branch = info["branch"]
         if wt is None:
             tmp, wt = open_worktree(root, info, base)
