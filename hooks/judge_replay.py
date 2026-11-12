@@ -41,6 +41,7 @@ for _path in (HERE, os.path.join(REPO, "lint")):
         sys.path.insert(0, _path)
 
 import decision_watch  # noqa: E402  the one model seam; invoke_model is looked up here at call time
+import layout  # noqa: E402  the one home of the record folders
 
 # The waiting-page item that carries the owner's step of adding the CI secret.
 PAGE_ITEM = "283"
@@ -179,7 +180,6 @@ def spawn(case_input, calls):
 
 
 def waiting_url():
-    import layout
     return layout.waiting_page(REPO)
 
 
@@ -331,7 +331,7 @@ OK = {"ok": True}
 NOT_OK = {"ok": False, "reason": "the case's judge item misses; fix the line it names."}
 # A refusal of a past-ruling check must cite a listed record, and a case's list is its own, so this answer cites none the
 # check can vouch for. The check reads that as a refusal it cannot verify, which is still a deny.
-RULING_NOT_OK = {"ok": False, "reason": "decisions/replay-case: a listed ruling already decides this."}
+RULING_NOT_OK = {"ok": False, "reason": "%s/replay-case: a listed ruling already decides this." % layout.legacy("decisions")}
 
 
 def entry(name, adapter, own, answers, extra=()):

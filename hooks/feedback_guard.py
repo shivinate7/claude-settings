@@ -140,8 +140,8 @@ in the working tree, this inbox's other blocks, and the blocks of the REPEAT_INB
 inboxes whose sidecar `<sid>.inbox.repo` (local_time.bind_repo) names a folder in this repo. A hit
 appends ` repeats <ref>` to the item line (one rewrite of the inbox) and is named in the block reason,
 or in systemMessage when stop_hook_active. No repo means only this inbox's blocks are candidates; no
-candidate means no call. An item with no usable verdict this Stop stays out of `judged`, so the next Stop sends it again
-(owner ruling, waiting-page item 279). No usable verdict: a model error, an off-shape answer, a raise
+candidate means no call. An item with no usable verdict this Stop stays out of `judged`, so the next Stop sends it again.
+That retry and the REPEAT_BATCH cap are lane choices pending the owner: no ruling covers them. No usable verdict: a model error, an off-shape answer, a raise
 while judging, or an answer entry that is not an object or names an unknown id or ref. A hit item is
 judged. Another entry's bad part leaves every other sent item unjudged and adds one systemMessage
 line, shown only when such an item remains. Items past REPEAT_BATCH wait for the next Stop. An
@@ -1013,7 +1013,7 @@ REPEAT_CUT = 300  # characters of one candidate in the prompt
 REPEAT_MAX = 400  # candidates in the prompt: roadmap, backlog, inbox blocks; open steps and newest first
 REPEAT_SHARES = {"roadmap": 200, "backlog": 100, "inbox": 100}  # per source, so one cannot crowd out the rest
 REPEAT_INBOXES = 50  # other sessions' inboxes read, newest by mtime
-REPEAT_BATCH = 20  # new items one Stop sends, oldest first; the rest wait for the next Stop
+REPEAT_BATCH = 20  # new items one Stop sends, oldest first; the rest wait for the next Stop. A lane choice, no owner ruling yet
 MESSAGE_CUT = 1000  # characters of one new message in the prompt
 MARK = " repeats "  # appended to an item line, before the ref
 REF_KINDS = ("roadmap", "debt", "todo", "note", "inbox")  # the candidate ref prefixes
