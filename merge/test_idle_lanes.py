@@ -39,6 +39,8 @@ SUMMARY_LINE = re.compile(r"^merge: \d+ lanes to archive\b", re.M)
 ZERO_LINE = re.compile(r"^merge: 0 lanes to archive\.", re.M)
 HELD_ONE = "merge: 0 lanes to archive, 1 held. Run get_session on each lane line alone, then archive it; never archive a hold line."
 MIXED = "merge: 1 lanes to archive, 1 held. Run get_session on each lane line alone, then archive it; never archive a hold line."
+# The hold line the CLI prints for a doing step under a lane. It pins the CLI's output on its own, as the summary lines do.
+DOING_HOLD = "hold (step %s still doing under this lane; set the step's status to todo or done; lane %s)"
 
 # Made in setUpModule, not at import, so a helper that imports this file leaks no folder.
 RUN_FOLDER = None
@@ -209,7 +211,9 @@ class IdleLanesCli(unittest.TestCase):
         roadmap.git(self.repo, "commit", "-q", "-m", "step c3")
         code, out, err = self.run_merge("--idle-lanes", "--live", str(self.live))
         self.assertEqual(code, 0, err)
-        self.assertEqual(out.splitlines(), ["hold (step c3 still doing under this lane; lane session_a)", HELD_ONE], out)
+        self.assertRegex(out, r"(?m)^hold \(step c3 ", "a doing step under a completed lane printed no hold line: %r" % out)
+        self.assertEqual(out.splitlines(), [DOING_HOLD % ("c3", "session_a"), HELD_ONE],
+                         "the hold line is not the pinned text: %r" % out)
 
 
 if __name__ == "__main__":

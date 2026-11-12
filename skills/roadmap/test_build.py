@@ -3858,6 +3858,9 @@ class IdleLanes(UpkeepFixture):
     never an empty list. Each negative case shares its live file with a listed control, so an empty row cannot pass."""
 
     ROW = "lanes to archive"
+    # The hold line for a lane a doing step still holds: the step id(s), then the way out, then the lane. Pinned here and
+    # in merge/test_idle_lanes.py, the CLI's copy of the same line.
+    DOING_HOLD = "hold (step %s still doing under this lane; set the step's status to todo or done; lane %s)"
 
     def lane(self, sid, step, bucket=BUCKET_COMPLETED, status="SESSION_STATUS_IDLE"):
         """A sessions row for a lane of this repo that names `step`, with its get_session bucket."""
@@ -4434,9 +4437,11 @@ class IdleLanes(UpkeepFixture):
         steps, marks = self.steps_and_marks()
         self.assertEqual(steps["c2"].get("lane"), "session_a", "scope: c2 does not name session_a")
         self.assertNotIn("c2", marks, "scope: c2 reads as landed, so it is not a step still doing")
-        self.assertEqual(self.idle_direct(), ["hold (step c2 still doing under this lane; lane session_a)",
-                                              "session_b (c3; topic -)"],
-                         "a completed lane with a doing step still under it was archived, not held")
+        entries = self.idle_direct()
+        self.assertTrue(self.line_for(entries, "session_a").startswith("hold (step c2 "),
+                        "a completed lane with a doing step still under it was archived, not held: %r" % (entries,))
+        self.assertEqual(entries, [self.DOING_HOLD % ("c2", "session_a"), "session_b (c3; topic -)"],
+                         "the doing-step hold line is not the pinned text")
 
     def test_completed_lane_with_an_active_step_under_it_is_held_not_archived(self):
         # The same shape with status active. The hold wording is the spec's one line, so it still reads "still doing".
@@ -4447,9 +4452,11 @@ class IdleLanes(UpkeepFixture):
         self.assertEqual((steps["c2"].get("status"), steps["c2"].get("lane")), ("active", "session_a"),
                          "scope: c2 is not an active step under session_a")
         self.assertNotIn("c2", marks, "scope: c2 reads as landed, so it is not a step still open")
-        self.assertEqual(self.idle_direct(), ["hold (step c2 still doing under this lane; lane session_a)",
-                                              "session_b (c3; topic -)"],
-                         "a completed lane with an active step still under it was archived, not held")
+        entries = self.idle_direct()
+        self.assertTrue(self.line_for(entries, "session_a").startswith("hold (step c2 "),
+                        "a completed lane with an active step still under it was archived, not held: %r" % (entries,))
+        self.assertEqual(entries, [self.DOING_HOLD % ("c2", "session_a"), "session_b (c3; topic -)"],
+                         "the doing-step hold line is not the pinned text")
 
     def test_two_doing_steps_under_a_completed_lane_are_one_hold_line_naming_both_sorted(self):
         # c2 and c3 are doing under session_a, and their order fields run the other way, so the hold line must sort by
@@ -4460,9 +4467,11 @@ class IdleLanes(UpkeepFixture):
         steps, marks = self.steps_and_marks()
         self.assertEqual([k for k in sorted(steps) if steps[k].get("lane") == "session_a" and k not in marks], ["c2", "c3"],
                          "scope: the two doing steps under session_a are not both open")
-        self.assertEqual(self.idle_direct(), ["hold (step c2 c3 still doing under this lane; lane session_a)",
-                                              "session_b (c4; topic -)"],
-                         "two doing steps under a completed lane did not read as one sorted hold line")
+        entries = self.idle_direct()
+        self.assertTrue(self.line_for(entries, "session_a").startswith("hold (step c2 c3 "),
+                        "two doing steps under a completed lane did not read as one sorted hold line: %r" % (entries,))
+        self.assertEqual(entries, [self.DOING_HOLD % ("c2 c3", "session_a"), "session_b (c4; topic -)"],
+                         "the doing-step hold line is not the pinned text")
 
     def test_doing_step_under_another_session_does_not_hold_this_lane(self):
         # c2 is doing under session_other, which has no live row here. session_a is archived as it is today.
@@ -4598,6 +4607,19 @@ class IdleLanes(UpkeepFixture):
                          "scope: the cased done and todo steps do not read under session_a")
         self.assertEqual(self.idle_direct(), ["session_a (c1; topic -)", "session_b (c2; topic -)"],
                          "a done or todo step in another casing changed session_a's archive line")
+
+    def test_the_doing_hold_line_names_the_way_out_as_todo_or_done(self):
+        # A hold a doing step causes must say how the lane is released: set the step's status to todo or done.
+        self.land({"c1": {"status": "done", "order": 1}, "c2": {"status": "doing", "order": 2, "lane": "session_a"}})
+        self.publish(sessions=[self.lane("session_a", "c1")])
+        steps, marks = self.steps_and_marks()
+        self.assertEqual((steps["c2"].get("status"), steps["c2"].get("lane")), ("doing", "session_a"),
+                         "scope: c2 is not a doing step under session_a")
+        self.assertNotIn("c2", marks, "scope: c2 reads as landed, so it is not a step still doing")
+        line = self.line_for(self.idle_direct(), "session_a")
+        self.assert_held(line, "session_a")
+        self.assertIn("set the step's status to todo or done", line,
+                      "the doing-step hold line does not say how to clear it: %r" % line)
 
 
 class SharedTagNames(unittest.TestCase):
