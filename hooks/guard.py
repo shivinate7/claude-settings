@@ -4262,7 +4262,12 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
     # Not a recursive judge_shell: that clears PENDING_ASK and would lose a deny.
     texts = [stripped, *substitution_commands(raw, stripped)]
     whole_root = []   # command_root reads the whole command: once per command, never per segment
-    for segment in (part for text in texts for part in split_segments(text)):
+    parts = []   # (segment, the folder the shell is in when it runs, or None when that cannot be told)
+    for text in texts:
+        ends = []
+        pieces = split_segments(text, ends)
+        parts.extend((piece, dir_before_segment(pieces, number, cwd, ends)) for number, piece in enumerate(pieces))
+    for segment, shell_dir in parts:
         if not segment.strip():
             continue
         words = segment_tokens(segment)
@@ -4281,7 +4286,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if resolved:
             continue
         # This session's own scratchpad: private by path, so nothing shared can be lost.
-        if under_session_scratchpad(root, session_id, any_temp=True):   # the session id in the path is the proof, so TMPDIR may name another folder
+        # A `-C` folder reads against the folder the shell is in (a `cd` ahead of it), not the shell's cwd
+        # the root above was read from, so a call with its own `-C` passes only when that folder is private too.
+        if under_session_scratchpad(root, session_id, any_temp=True) and (
+                own_c is None or (shell_dir and under_session_scratchpad(shell_dir, session_id, any_temp=True))):   # the session id in the path is the proof, so TMPDIR may name another folder
             continue
         # The subject read. An empty subject is a silent pass. An unreadable subject is allowed
         # and logged under its OWN rule, so a reader can tell "I could not confirm this" from
@@ -5922,7 +5930,7 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
     file it writes: the file is its own now. An agent's call records the agent as the writer of each file it
     writes, and is refused when a file's record named another agent. A refused write moves no record; an owner
     override that lifts the refusal moves it (`refuse`'s `on_lift`), because an approved write lands. A file an `rm` or `mv` names is judged but not recorded. A first write, a rewrite of its own file, a file
-    that no longer exists and a file whose writer has finished (`scratchpad_mark_finished`) pass (`scratchpad_writer_of`). Run once the call's other rules passed."""
+    that no longer exists and a file whose writer has finished (`scratchpad_mark_finished`) pass (`scratchpad_writer_of`), except that an `rm` or `mv` of a finished writer's file is still refused. Run once the call's other rules passed."""
     agent, session, files, removed = scratchpad_writes(payload, tool, tool_input, cwd)
     if not agent:
         for full in files:
@@ -5932,8 +5940,11 @@ def scratchpad_owner_write(payload, tool: str, tool_input: dict, cwd: str) -> No
     for full in files:
         writer = scratchpad_writer_of(full, session)
         if writer and writer != agent and not taken:
+            detail = "agent %s writes over a scratchpad file agent %s wrote: %s" % (agent, writer, full)
+            if full in removed:   # a finished writer's file may be written over, never removed or moved: that destroys it for the writer
+                taken = detail
             if not scratchpad_agent_finished(session, writer):
-                taken = "agent %s writes over a scratchpad file agent %s wrote: %s" % (agent, writer, full)
+                taken = detail
 
     def record_writers():
         if files:
