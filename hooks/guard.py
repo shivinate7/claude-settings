@@ -3419,9 +3419,11 @@ BRIEF_DESTRUCTIVE_NEXT_TO = ("avoid", "without")   # a negator only as the word 
 BRIEF_DESTRUCTIVE_RUN_VERBS = ("run", "use", "call", "execute", "type")
 BRIEF_DESTRUCTIVE_NOT = re.compile(r"\b(?:do|must|should|can)\s+not\b", re.IGNORECASE)
 BRIEF_DESTRUCTIVE_LIST_COMMA = re.compile(r"\x00\s*,\s*(?:(?:and|or|nor)\s+)*(?=\x00|$)", re.IGNORECASE)
+BRIEF_DESTRUCTIVE_ASIDES = (   # the closed list of asides a negator may carry between two commas; any other phrase is an order
+    "under any circumstances", "in any case", "in any event", "at any time", "for any reason", "at all", "ever")
 BRIEF_DESTRUCTIVE_NEGATOR_COMMA = re.compile(
-    r"(?<![\w'-])(never|no|don't|(?:do|must|should|can)\s+not|shouldn't|mustn't|can't|cannot)\s*,[^,;.]{1,60},",
-    re.IGNORECASE)
+    r"(?<![\w'-])(never|no|don't|(?:do|must|should|can)\s+not|shouldn't|mustn't|can't|cannot)\s*,\s*(?:%s)\s*,"
+    % "|".join(BRIEF_DESTRUCTIVE_ASIDES), re.IGNORECASE)
 BRIEF_DESTRUCTIVE_BULLET = re.compile(r"\s*(?:[-*+]|\d+[.)])\s")
 BRIEF_DESTRUCTIVE_SKIP = ("branch-delete", "worktree-remove", "worktree-prune")
 BRIEF_DESTRUCTIVE_REASON = (
@@ -3566,7 +3568,7 @@ def brief_destructive_hit(tool: str, tool_input) -> str:
 #     the Write tool. Compose verbs also take "at" ("Write a report at docs/review.md"), a colon after a short object that
 #     names the output ("Write the report: docs/review.md"), and "<path> with your <report>" ("Create docs/review.md with
 #     your report"); a redirect in prose outside a span ("run cat v > audit.md") counts. A verb reads 400 chars before it
-#     and 300 after it (BRIEF_WRITE_WINDOW, BRIEF_WRITE_REACH), so one long line costs time in proportion to its length.
+#     and 800 after it (BRIEF_WRITE_WINDOW, BRIEF_WRITE_REACH), so one long line costs time in proportion to its length.
 # Passes: a negator before the verb in its clause (_brief_prohibits) or between the verb and its destination, a "Must
 # deny:" or "Add a case:" line, and a negating heading's cover. The forms this reader misses are the Limits in decision
 # brief-write-needs-writer. The override lifts it. Cost: pure text work inside the one guard call. No process, no file.
@@ -3590,7 +3592,7 @@ BRIEF_WRITE_WRAPPER = re.compile(
     r"|the\s+agent\s+(?:should|must|will|needs?\s+to))(?![\w-])", re.IGNORECASE)
 BRIEF_WRITE_REST_END = re.compile(r"[.!?;:](?=\s|$)|,(?=\s|$)|\b(?:and|then|but)\b", re.IGNORECASE)
 BRIEF_WRITE_WINDOW = 400   # chars of text before a verb that a clause can use; a longer run is read as its last 400
-BRIEF_WRITE_REACH = 300    # chars after a verb that its object and destination can span
+BRIEF_WRITE_REACH = 800    # chars after a verb that its object and destination can span
 BRIEF_WRITE_COLON_NOUN = re.compile(
     r"(?<![\w-])(?:report|findings?|review|audit|summary|verdict|notes|results?|analysis|answer|output|plan)(?![\w-])",
     re.IGNORECASE)
@@ -3600,11 +3602,13 @@ BRIEF_WRITE_MAY_NOT = re.compile(r"(?<![\w-])(?:(?:may|will)\s+(?:not|never)|won
 BRIEF_WRITE_EXTENSIONS = frozenset((
     "md mdx txt rst adoc json jsonl yaml yml toml ini cfg conf env log csv tsv html htm css scss js jsx ts tsx mjs cjs py "
     "pyi sh bash zsh ps1 bat cmd go rs java kt swift c h cpp hpp cs rb php sql xml lock diff patch png jpg jpeg gif svg "
-    "pdf docx xlsx pptx zip gz tar").split())
+    "pdf docx xlsx pptx zip gz tar notes markdown text out ipynb").split())
+BRIEF_WRITE_RECEIVERS = ("self", "this", "cls")   # `self.log` after a `>` is an attribute compared, not a file
 BRIEF_WRITE_FILE = re.compile(r"\b(?:create|write|make|touch)\s+(?:a|an|the|new)\s+(?:new\s+)?file\b", re.IGNORECASE)
 BRIEF_WRITE_TOOL = re.compile(
     r"(?<![\w-])(?:use|call|invoke|run)\s+(?:the\s+)?write\s+tool\b(?!\s+(?:tests?|cases?|specs?|checks?|guard|rule|hook"
-    r"|names?|output|docs?|results?)\b)", re.IGNORECASE)
+    r"|names?)\b)", re.IGNORECASE)
+BRIEF_WRITE_TOOL_NOUN = re.compile(r"\s+(?:output|docs?|results?)\b", re.IGNORECASE)
 BRIEF_WRITE_PROSE_TEE = re.compile(r"(?<![\w-])tee\s+(?:-\w+\s+)*(`?[\w~./#-]+)", re.IGNORECASE)
 BRIEF_WRITE_LEAD = frozenset((
     "please", "now", "you", "must", "should", "will", "can", "to", "just", "always", "finally", "also", "then", "are",
@@ -3627,11 +3631,12 @@ BRIEF_WRITE_REASON = (
 
 
 def _brief_write_target_ok(target: str) -> bool:
-    """True for a redirect or tee target that is no repo write: a word that is no path (a comparison's right side),
-    /dev/null, or a path under any session scratchpad."""
+    """True for a redirect or tee target that is no repo write: a word that is no path or is an attribute of self, this or
+    cls (a comparison's right side), /dev/null, or a path under any session scratchpad."""
     target = target.strip("`\"'")
-    return not _brief_write_path(target) or target == "/dev/null" \
-        or (target.startswith("/") and in_any_session_scratchpad(target))
+    attribute = re.fullmatch(r"(\w+)\.\w+", target)   # `self.log`: an attribute of a receiver, so a comparison's right side
+    return not _brief_write_path(target) or bool(attribute) and attribute.group(1) in BRIEF_WRITE_RECEIVERS \
+        or target == "/dev/null" or (target.startswith("/") and in_any_session_scratchpad(target))
 
 
 def _brief_write_path(token: str) -> bool:
@@ -3736,6 +3741,10 @@ def _brief_write_orders(text: str) -> bool:
                 ordered = _brief_write_leads(before) and not _brief_prohibits(before)
             else:   # a "may not", "will not" or "won't" before the tool is a ban; a bare "may" or "will" is not
                 ordered = not _brief_prohibits(BRIEF_WRITE_MAY_NOT.sub("never", before))
+                if ordered and BRIEF_WRITE_TOOL_NOUN.match(text, match.end()):   # "Write tool results": a noun, unless a save order follows
+                    end = BRIEF_WRITE_REST_END.search(text, match.end(), match.end() + BRIEF_WRITE_REACH)
+                    rest = text[match.end():end.start() if end else match.end() + BRIEF_WRITE_REACH]
+                    ordered = bool(BRIEF_WRITE_VERB.search(rest)) and any(_brief_write_path(word) for word in rest.split())
             if ordered:
                 return True
     return False
