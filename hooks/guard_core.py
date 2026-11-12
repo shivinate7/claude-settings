@@ -1002,6 +1002,13 @@ _SHELL_RUNNER = re.compile(r"(?:" + _SHELLS + "|" + _WRAPPERS + r")(?:\.exe|\.cm
 _SCRIPT_RUNNER = re.compile(r"(?:python[\d.]*|perl|ruby|node|nodejs|bun|deno)(?:\.exe|\.cmd)?").fullmatch
 
 
+# The runners a body of python, or of anything else, can have: python alone, and the rest.
+_PYTHON_HEADER = _interpreter_header("python[\\d.]*")
+_OTHER_HEADER = _interpreter_header(_SHELLS + "|perl|ruby|node")
+_PYTHON_RUNNER = re.compile(r"python[\d.]*(?:\.exe|\.cmd)?").fullmatch
+_OTHER_RUNNER = re.compile(r"(?:" + _SHELLS + "|perl|ruby|node|" + _WRAPPERS + r")(?:\.exe|\.cmd)?").fullmatch
+
+
 def _plain_words(words):
     return [word[2:] if word.startswith("./") else word for word in words if not re.match(r"\w+=", word)]
 
@@ -1044,6 +1051,18 @@ def _feeds_data(header: str, scripts: bool) -> bool:
             return False
         fed = True
     return fed
+
+
+def python_runs_body(raw: str, header: str) -> bool:
+    """True when python, and no other interpreter, runs the heredoc body that `header` opens: it is fed to
+    python (`python3 - <<'EOF'`), or it is written to a file that only a bare python word runs. An unknown
+    runner, a wrapper (`env python3 f`) or `./f` is not python, so the body stays in view."""
+    header = _without_message_values(header)
+    if _PYTHON_HEADER(header):
+        return not _OTHER_HEADER(header)
+    text = _without_message_values(_drop_heredoc_bodies(raw))
+    return (_runs_written_file(text, [header], runner=_PYTHON_RUNNER)
+            and not _runs_written_file(text, [header], runner=_OTHER_RUNNER))
 
 
 def strip_heredoc_bodies(cmd: str, shells_only: bool = False, per_body: bool = False) -> str:
