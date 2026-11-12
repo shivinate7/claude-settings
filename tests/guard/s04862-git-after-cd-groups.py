@@ -191,44 +191,14 @@ def git_after_cd_crash_check():
     shutil.rmtree(folder, ignore_errors=True)
     landing = os.path.join(folder, "landing")
     os.makedirs(landing)
-    guards = {}
-    for name in ("intact", "planted"):
-        hooks = os.path.join(folder, name, "hooks")
-        os.makedirs(hooks)
-        copy_guard_family(hooks)
-        guards[name] = os.path.join(hooks, "guard.py")
-    core = os.path.join(folder, "planted", "hooks", "guard_core.py")
-    with open(core, encoding="utf-8") as handle:
-        text = handle.read()
-    if text.count(CD_WALK_TRY) != 1:
-        return False, "the cd_walk try block occurs %d times in guard_core.py, want once: no plant" % text.count(CD_WALK_TRY)
-    write(core, text.replace(CD_WALK_TRY, CD_WALK_PLANTED, 1))
+    guards, cause = planted_cd_walk_guards(folder)
+    if guards is None:
+        return False, cause
     command = "cd %s; %s push" % (slash(landing), VCS)
-
-    def verdict(name):
-        cfg = os.path.join(folder, name, "cfg")
-        env = dict(os.environ)
-        for var in ("CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_PROJECT_DIR",
-                    "CLAUDE_CODE_REMOTE"):
-            env.pop(var, None)
-        env["CLAUDE_CONFIG_DIR"] = cfg
-        payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": landing}
-        run = subprocess.run([sys.executable, guards[name]], input=json.dumps(payload), capture_output=True,
-                             text=True, env=env, timeout=120)
-        out = run.stdout.strip()
-        spec = json.loads(out).get("hookSpecificOutput", {}) if out else {}
-        log = os.path.join(cfg, "guard.log")
-        logged = ""
-        if os.path.exists(log):
-            with open(log, encoding="utf-8") as handle:
-                logged = handle.read()
-        return (spec.get("permissionDecision", "allow") if out else "allow",
-                spec.get("permissionDecisionReason", ""), logged)
-
-    control, _reason, _log = verdict("intact")
+    control, _reason, _log = planted_verdict(guards, folder, "intact", command, landing)
     if control != "allow":
         return False, "control: the intact copy's verdict on the landing cd is %r, want allow" % control
-    decision, reason, logged = verdict("planted")
+    decision, reason, logged = planted_verdict(guards, folder, "planted", command, landing)
     if decision != "deny":
         return False, "the planted copy's verdict on the landing cd is %r, want deny" % decision
     if "git-after-cd" not in reason:
