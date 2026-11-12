@@ -838,7 +838,7 @@ def _run_hash_counts(cwd, base, sha, cache):
     and on any unknown. One answer per distinct (base, sha) in `cache`."""
     if not cwd:
         return True
-    key = (base.lower(), sha.lower())
+    key = (base.lower() if "/" not in base else base, sha.lower())  # origin/<branch> is a ref name: case counts
     if key not in cache:
         cache[key] = _check_run_hash(cwd, key[0], sha)
     return cache[key]
@@ -861,10 +861,10 @@ def _check_run_hash(cwd, base, sha):
 
 def _names_main_run(kept, cwd=None, cache=None):
     cache = {} if cache is None else cache
-    if MAIN_RUN_URL_RE.search(kept) and ON_BASE_RE.search(MAIN_RUN_URL_RE.sub(" ", kept)):
-        return True
     cites = [(m.group(1) or m.group(4), m.group(2) or m.group(3) or m.group(5)) for m in MAIN_RUN_RE.finditer(kept)]
-    return any(_run_hash_counts(cwd, base, sha, cache) for base, sha in cites)
+    if cites:  # a cited hash decides; the URL counts only on a line with no cite
+        return any(_run_hash_counts(cwd, base, sha, cache) for base, sha in cites)
+    return bool(MAIN_RUN_URL_RE.search(kept) and ON_BASE_RE.search(MAIN_RUN_URL_RE.sub(" ", kept)))
 
 
 def pre_existing_problem(text, cwd=None):
