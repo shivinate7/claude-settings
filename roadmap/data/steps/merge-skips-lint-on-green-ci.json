@@ -1,14 +1,14 @@
 {
  "id": "merge-skips-lint-on-green-ci",
  "title": "The merge tool skips its local lint when all-jobs-passed is green on the exact head it merges",
- "status": "done",
+ "status": "ready",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
- "lane": "session_013NEJL3X9nLPmg93fTowhHx",
+ "lane": "",
  "owner": "triage",
  "blockedBy": [],
  "why": "Retrospective 14:40 CST Nov 12: batch 104 (#2814) went green in CI at 14:04 CST; after the coordinator's 14:26 CST order, runner 10 began a local lint of the batch head (task b7uh1jq59), still running at 14:38 CST. Lane lints measured 688 to 921 s each today, run one after another. CI already ran the full checks on that head (rule roles-each-layer-proves-once: the spawner reads CI once, on the head it merges), so the second lint is a repeated proof adding about 12 to 15 min to every merge.",
  "source": "retrospective 14:40 CST Nov 12",
- "note": "Fix in merge/merge.py: on merge, when all-jobs-passed is green on the exact head sha, skip the lane lint and say so in the merge line; any other head runs it as today. Red first on #2814 at c63629c18. Kin: lane-lint-once-fail-fast (lint once per lane, at hand-off), records-page-before-ready (one CI run per merge). R55 express list. Folded into lane lane-lint-batch-pr-conflicts 14:44 CST Nov 12 (coordinator): same merge-time lint in merge/merge.py. Done 16:49 CST Nov 12: merged in batch 109 (#3002, lane PR #2951) at 83066e30e. Lane session_013NEJL3X9nLPmg93fTowhHx for runner 10 to archive.",
- "updatedAt": "2026-11-12T16:50:01-06:00"
+ "note": "Fix in merge/merge.py: on merge, when all-jobs-passed is green on the exact head sha, skip the lane lint and say so in the merge line; any other head runs it as today. Red first on #2814 at c63629c18. Kin: lane-lint-once-fail-fast (lint once per lane, at hand-off), records-page-before-ready (one CI run per merge). R55 express list. Folded into lane lane-lint-batch-pr-conflicts 14:44 CST Nov 12 (coordinator): same merge-time lint in merge/merge.py. Done 16:49 CST Nov 12: merged in batch 109 (#3002, lane PR #2951) at 83066e30e. Lane session_013NEJL3X9nLPmg93fTowhHx for runner 10 to archive. Reopened 17:56 CST Nov 12 (coordinator incident): the skip did not fire at batch 111. merge --confirm on #3017's green head still refused \"no lane-lint PASS names this head\"; runner 10 ran a PR lint to pass it (refusal line in its merge3017.log). Cause unmeasured: the skip needs more than a green head, or the installed tool lacks it. Express under R55/R65 (merge-flow fix).",
+ "updatedAt": "2026-11-12T17:57:31-06:00"
 }
