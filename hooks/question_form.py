@@ -967,7 +967,7 @@ def form_str_replace_hit(entry):
     return PASS
 
 
-def item_hit(op, entry, cwd="", session_id=None):
+def item_hit(op, entry, cwd="", session_id=None, root=None):
     """(rule, matched) for one write of a waiting item that a rule refuses, else ("", ""). `session_id` is the
     writer's, for the cross-repo check."""
     data = _write_data(entry, cwd)
@@ -1001,7 +1001,7 @@ def item_hit(op, entry, cwd="", session_id=None):
     hit = port_item_hit(op, data)
     if hit:
         return "port-question", hit
-    page_repo = _page_repo(cwd)
+    page_repo = _layout().repo_name(root) if root else _page_repo(cwd)  # the page's own checkout, whatever the cwd
     hit = cross_repo_hit(op, data, page_repo, session_id) if page_repo else None
     if hit:
         return CROSS_REPO_RULE, hit
@@ -1130,12 +1130,13 @@ def page_item_hit(tool_input, cwd="", session_id=None):
     writes = [(op, e) for op, e in entries if op in ITEM_OPS and e.get("collection") == WAITING_ITEMS]
     if not writes:  # a read or another collection loads nothing more
         return PASS, []
-    if not is_waiting_page(tool_input, cwd):
+    page_root = waiting_page_root(tool_input, cwd)
+    if page_root is None:
         # The cwd's page is unknown, or the url is another's: only the option-key check still reads the
         # write, and refuses only a key none. No writes return, so no other check or model review follows.
         return keyed_options_hit(writes, cwd), []
     for op, entry in writes:
-        hit = item_hit(op, entry, cwd, session_id)
+        hit = item_hit(op, entry, cwd, session_id, page_root)
         if hit[0]:
             return hit, writes
     return PASS, writes

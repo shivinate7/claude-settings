@@ -1333,7 +1333,7 @@ def export_check(cwd, transcript_path, session_id):
     """(reason, note) of the export check (roadmap step waiting-export-check). `reason` is the block text
     when this session is the page writer and the transcript holds a successful ArtifactData write of an
     exported collection to the waiting page of a known root (question_form.waiting_page_root, whatever the cwd) that is newer than the newest commit on origin/<record
-    branch> touching the waiting copy folder, and no later shell run of export_page.py cleared it (a line
+    branch> touching the waiting copy folder (each root is judged on its own newest write), and no later shell run of export_page.py cleared it (a line
     `same`, or `<page id>: same` under --all, anywhere in its output). This session is the writer when the newest meta/page get names
     `session_id` or the id the remote env names (override.remote_session_id). A writer named there decides
     alone. Only when none is named does an interpreter run of export_page.py (EXPORT_RUN) before the write

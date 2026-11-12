@@ -2200,6 +2200,32 @@ def case_item_stray_field_refused_from_a_record_branch_checkout():
     verdict("control: the same stray field at the page's own checkout is refused", control[0], ("item-field-rendered", "focus"))
 
 
+def case_cross_repo_page_repo_is_the_pages_checkout_from_any_cwd():
+    """The page's repo comes from the checkout that holds the page, not from the cwd. Judged from a cwd with no page
+    key, a foreign repo with no checked_with is refused, a cwd with another origin does not change that, and the
+    page's own repo passes. Scope: the hooks' own checkout needs a page and a GitHub origin."""
+    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+    sys.path.insert(0, os.path.join(here, "lint"))
+    import layout
+    url, own = layout.waiting_page(here), layout.repo_name(here)
+    check("scope: the hooks' checkout has a page and a GitHub origin", url != "unknown" and bool(own), "page %r origin %r" % (url, own))
+    if url == "unknown" or not own:
+        return
+    bare = tcj.make_repo("no-page-cwd", page=None)
+    other = tcj.make_repo("other-origin-cwd", page=None)
+    tcj.git(other, "remote", "add", "origin", "https://github.com/shivinate7/other-repo")
+    import guard_pointer
+    old_pointer = guard_pointer.pointer_checkout
+    guard_pointer.pointer_checkout = lambda: os.path.realpath(here)  # the fixture's config folder names none
+    try:
+        for label, cwd in (("a cwd with no origin", bare), ("a cwd with another origin", other)):
+            foreign = call("page_item_hit", dict(ma144_write(), url=url, action="set"), cwd)
+            check("foreign repo, no checked_with, from " + label + ": refused by the cross-repo rule",
+                  foreign[0][0] == CROSS_REPO_RULE, "got %r" % (foreign[0],))
+            mine = call("page_item_hit", dict(ma144_write(repo=own), url=url, action="set"), cwd)
+            check("the page's own repo from " + label + ": passes", mine[0] == ("", ""), "got %r" % (mine[0],))
+    finally:
+        guard_pointer.pointer_checkout = old_pointer
 # ------------------------------------------------------------------ a decision on another repo is checked with that repo
 #
 # Rule question-checked-with-repo (CROSS_REPO_RULE). An open decision or task set that names a `repo` other than the
@@ -2723,6 +2749,7 @@ def main():
                  case_file_path_item_is_read_against_the_session_cwd,
                  case_page_linked_worktree_refuses_a_link_to_its_main_checkouts_page,
                  case_item_reply_saying_being_reworked_is_refused,
+                 case_cross_repo_page_repo_is_the_pages_checkout_from_any_cwd,
                  case_task_why_cited_reds, case_task_why_cited_greens,
                  case_press_link_links_not_a_list_on_a_step, case_press_link_links_not_a_list_on_an_option,
                  case_task_str_replace_removes_only_the_label, case_str_replace_blank_prose_line_passes,
