@@ -35,17 +35,19 @@ A question also gets item 8, the past-ruling check: question_form.past_rulings f
 rulings it reads. The check always runs; a task gets it too. A chat box carries item 8 in its one model call. Two
 other paths have a dedicated call, lint/report_guard.py past_ruling_problem (the one past-ruling judge, also the
 Stop hook's): Sonnet, item 8 alone, PAST_RULING_TIMEOUT s.
-  Page item write: the dedicated call runs first. A refusal denies with rule `past-ruling` and the relay remedy
-  and makes no form-judge call. Otherwise the form judge (Opus, items 1 to 7) runs, and its prompt holds no item 8.
+  Page item write: the dedicated call runs first. A ruling found denies with rule `past-ruling` and the facts-only
+  relay text; a check that could not run denies with UNVETTED_REMEDY. Neither makes a form-judge call. Otherwise
+  the form judge (Opus, items 1 to 7) runs, and its prompt holds no item 8.
   Every write's text reaches the dedicated call, uncut. Each question needs its own `Unvetted:` line to pass a check
   that could not run, and a form-judge error refuses as Unvetted too.
   Owner-question send: a `mcp__claude-code-remote__send_message` or `SendMessage` whose message holds a Goal line
   and a Problem line (question_form.GOAL_LINE, PROBLEM_LABEL; the Problem line needs no stake) gets the dedicated
   call before it is sent, whoever the target is. A refusal is rule `past-ruling`. Any other send exits before a heavy
   import. The form lines are read outside code, after the marks a page uses (bold, bullet, heading, quote) are cut.
-  Cap rule (send_question): a message over report_guard.ASK_TEXT_MAX characters goes as that many characters from its
-  first form line (Goal, Problem, Based on or Departs from). Each question in a send needs its own `Unvetted:` line,
-  read in the whole message, one unit per Goal/Problem pair.
+  Cap rule (send_question, capped_questions): a message over report_guard.ASK_TEXT_MAX characters goes as the start
+  of each question's unit, from the first form line (Goal, Problem, Based on or Departs from), in at most that many
+  characters; each unit gets an equal share, and a short unit's spare share goes to the longer ones. Each question
+  in a send needs its own `Unvetted:` line, read in the whole message, one unit per Goal/Problem pair.
 When the check cannot run (a model error, a source that exists and cannot be read, or a refusal that cites a record
 the model was not shown), the question is refused with the Unvetted remedy, unless its own text carries an
 `Unvetted:` line. An absent source allows, with one stderr line.
@@ -406,27 +408,17 @@ def past_ruling_context(payload, units):
 PAST_RULING_RULE_NAME = "past-ruling"  # question_form.PAST_RULING_RULE, here so a send needs no import to name it
 
 
-def past_ruling_check(payload, asked, marked, tool=None):
+def past_ruling_check(payload, asked, marked):
     """The dedicated past-ruling call (item 8 alone) for the question text `asked`: (rule, refusal text), or None when
     nothing settles it. The one judge is lint/report_guard.py past_ruling_problem, also the Stop hook's: it makes the git
-    read and the Sonnet call, and its text is the relay remedy, or the Unvetted remedy for a check that could not run
-    (unless `marked`: every question in the call carries its own `Unvetted:` line). `asked` is sent whole. For a page
-    write (`tool` is the data tool) the Unvetted remedy also says where the line goes."""
+    read and the Sonnet call. A ruling found is its facts-only relay text. A check that could not run is
+    UNVETTED_REMEDY, the same text every Unvetted outcome of this hook prints (unless `marked`: every question in the
+    call carries its own `Unvetted:` line)."""
     sys.path.insert(0, os.path.join(HERE, "..", "lint"))
     import report_guard
-    problem = report_guard.past_ruling_problem(asked, payload.get("cwd") or "", marked)
-    if not problem:
-        return None
-    relay = problem.startswith(report_guard.RELAY_RULE_REASON.split("%", 1)[0])
-    if not relay and tool == DATA_TOOL:
-        problem += " For a page item, put the line in `context`."
-    return PAST_RULING_RULE_NAME, problem  # the Unvetted refusal of this check is rule past-ruling too
-
-
-# lint/report_guard.py UNVETTED_REASON, copied here because that module is what may have failed to import. It holds no
-# record cite: refuse() adds the one this hook's refusals carry.
-UNRUN_REASON = ("Unvetted guard (rule past-ruling): a question to the owner went out without the past-ruling check, "
-                "which could not run (%s)")
+    problem = report_guard.past_ruling_problem(asked, payload.get("cwd") or "", marked, UNVETTED_REMEDY)
+    # the Unvetted refusal of this check is rule past-ruling too
+    return (PAST_RULING_RULE_NAME, problem) if problem else None
 
 
 def text_leaves(value):
@@ -450,7 +442,7 @@ def refuse_unrun(payload, tool, args, exc, text):
             return 0
     except Exception:
         pass
-    return refuse(payload, tool, args, PAST_RULING_RULE_NAME, UNRUN_REASON % why)
+    return refuse(payload, tool, args, PAST_RULING_RULE_NAME, UNVETTED_REMEDY % why)
 
 
 SEND_HEADING_MARK = re.compile(r"^#{1,6}[ \t]+")  # a Markdown heading mark, cut like a list bullet
@@ -525,13 +517,15 @@ def send_question(message):
 def capped_questions(lines, bounds, cap):
     """The text of a send past `cap` characters, as the start of each question's unit (`bounds`: the line index where
     each unit opens, then the end). Each unit gets an equal share of `cap` and a short unit's unused share goes to the
-    longer ones, so a question past a long first unit still reaches the call. One unit is the cap from its first line."""
+    longer ones, so a question past a long first unit still reaches the call. A cut unit is followed by a newline, so
+    the next unit's Goal line still opens a line. One unit is the cap from its first line."""
     units = ["".join(lines[bounds[i]:bounds[i + 1]]) for i in range(len(bounds) - 1)]
-    shares, left = {}, cap
+    shares, left = {}, cap - (len(units) - 1)  # one character per join newline stays inside the cap
     for count, i in enumerate(sorted(range(len(units)), key=lambda i: len(units[i]))):
         shares[i] = min(len(units[i]), left // (len(units) - count))
         left -= shares[i]
-    return "".join(units[i][:shares[i]] for i in range(len(units)))
+    cut = [units[i][:shares[i]] for i in range(len(units))]
+    return "".join(piece if piece.endswith("\n") or i == len(cut) - 1 else piece + "\n" for i, piece in enumerate(cut))
 
 
 def send_asks_owner(message):
@@ -554,7 +548,7 @@ def judge_send(payload, tool, args):
         try:
             asks = send_asks_owner(message)
         except Exception:
-            asks = isinstance(message, str)  # not even the regexes load: a send with both words is unchecked and "goal:" in message.lower() and "problem" in message.lower()
+            asks = isinstance(message, str)  # not even the regexes load: any text message is treated as a question
         if asks:
             return refuse_unrun(payload, tool, args, exc, message)
         print("call judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()),
@@ -601,7 +595,7 @@ def main():
             units = question_form.page_units(judged)
             # Every write's text goes to the dedicated call, uncut. Each question needs its own Unvetted line.
             found = past_ruling_check(payload, "\n".join(words for _, words in units),
-                                      all(question_form.has_unvetted(marker) for marker, _ in units), tool)
+                                      all(question_form.has_unvetted(marker) for marker, _ in units))
             if found:  # item 8 refused it, or could not run: no form-judge call
                 return refuse(payload, tool, args, found[0], found[1])
             reask = any(is_reask(w) for w in judged)

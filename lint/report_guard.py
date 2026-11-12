@@ -2889,27 +2889,30 @@ def asked_text(text):
     return "\n".join(questions + [u for u in unvetted if u not in questions])[-ASK_TEXT_MAX:]
 
 
-def cannot_run(asked, why, marked=None):
+def cannot_run(asked, why, marked=None, remedy=None):
     """The Unvetted refusal for a check that could not run, or '' when the asked text carries its own
     `Unvetted:` line. The marker is read only here, so it never skips a check that can run. A caller that asks several
-    questions in one text passes `marked`, whether every one carries its own line."""
+    questions in one text passes `marked`, whether every one carries its own line. `remedy` is the refusal's text with
+    one slot for `why`: the Stop hook's facts-only UNVETTED_REASON by default, and the marker remedy from
+    hooks/call_judge.py for a PreToolUse refusal."""
     _hooks_on_path()
     import question_form
     if marked is None:
         marked = question_form.has_unvetted(asked)
-    return "" if marked else UNVETTED_REASON % why
+    return "" if marked else (remedy or UNVETTED_REASON) % why
 
 
-def past_ruling_problem(asked, cwd, marked=None):
+def past_ruling_problem(asked, cwd, marked=None, remedy=None):
     """The refusal text for asked text that a past ruling settles, or that could not be checked, else ''. `marked`
-    is cannot_run's: set by a caller whose text holds several questions or is cut before it is sent here."""
+    and `remedy` are cannot_run's: `marked` is set by a caller whose text holds several questions or is cut before it
+    is sent here."""
     _hooks_on_path()
     import question_form
     candidates, unknown = question_form.past_rulings(asked, repo_root(cwd) or cwd or os.getcwd())
     print(question_form.unknown_line(unknown), file=sys.stderr)
     unreadable = question_form.unreadable_sources(unknown)
     if unreadable:
-        return cannot_run(asked, "; ".join(unreadable), marked)
+        return cannot_run(asked, "; ".join(unreadable), marked, remedy)
     import call_judge  # the one home of item 8, its model and its time limit
     import decision_watch
     prompt = ("Review this text, which a session sends the owner and which asks him something:\n<<<\n" + asked
@@ -2921,13 +2924,13 @@ def past_ruling_problem(asked, cwd, marked=None):
                                                  timeout=call_judge.PAST_RULING_TIMEOUT,
                                                  shape=call_judge.OK_SHAPE, effort=None)
     if error:
-        return cannot_run(asked, " ".join(str(error).split()), marked)
+        return cannot_run(asked, " ".join(str(error).split()), marked, remedy)
     if verdict.get("ok") is not False:
         return ""
     reason = verdict.get("reason")
     reason = reason.strip() if isinstance(reason, str) and reason.strip() else "a past ruling settles this."
     if question_form.ruling_cite(reason, question_form.candidate_ids(candidates), strict=True) != "cited":
-        return cannot_run(asked, "the review cited a record that was not in the list", marked)
+        return cannot_run(asked, "the review cited a record that was not in the list", marked, remedy)
     if session_wording(reason):
         # The judge's reason holds an order to the session. The owner reads it in chat, so only the ruling id stays.
         cited = [i for i in question_form.candidate_ids(candidates) if i in reason or i.split("/", 1)[-1] in reason]
