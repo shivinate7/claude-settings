@@ -21,6 +21,19 @@ HMHOME = os.path.join(HMMAIN, ".claude", "worktrees", "agent-" + HM_AGENT)  # th
 HM_GONE = "hmagentgone4"    # an agent whose home was built, recorded, then removed by the harness
 HM_BADREC = "hmagentbad5"   # an agent whose home record is a folder, so reading it raises
 HMGONE = os.path.join(HMMAIN, ".claude", "worktrees", "agent-" + HM_GONE)  # that agent's gone home
+# The rule text a refusal with no agent_id prints, as it reads on bcbeaa26a. The printed reason holds it whole.
+HM_TODAY_REASON = (
+    "Rule (hand-made worktree): a worktree comes only from the Agent tool's isolation "
+    "'worktree' option or from the EnterWorktree tool, never from a tree made by hand. "
+    "A hand-made tree sends an agent or a session to work in the main clone and loses the isolation. "
+    "Remedy: start the work with one of those two tools. Call EnterWorktree with a `name` and no "
+    "`path`. A path the guard cannot read, such as one held in a variable or a substitution, is "
+    "refused too. If the tree is your own red-run checkout, write its path out in full, with no "
+    "variable or substitution. If the tool's isolation was refused, "
+    "make no tree by hand: stop and report to the owner which layer refused and its exact "
+    "message. A guard refusal starts \"Rule (\" and names its rule. Any other refusal is the "
+    "harness's."
+)
 
 
 def _build_hand_made():
@@ -66,6 +79,8 @@ def hm_allow(name, command, **kw):
 
 # DENY. The new tree lands outside <primary>/.claude/worktrees/.
 hm_refuse("a relative sibling path from the primary is refused", HMADD + "../lane-x")
+hm_refuse("a call with no agent_id keeps today's reason, and names no -red folder", HMADD + "../lane-x",
+        carries=HM_TODAY_REASON, lacks=("-red",))
 hm_refuse("-C reaches the primary from elsewhere, and a scratch path is refused",
         VCS + " -C " + HMIN + " worktree add " + HMSCRATCH, cwd=NOGIT)
 hm_refuse("cd into a non-temp primary, then a tree in the temp folder, is the incident",
@@ -145,16 +160,22 @@ HMAGENT_SIB_RED = slash(os.path.join(HMWT, "agent-" + HM_SIBLING + "-red"))
 HMAGENT_PREFIX_RED = slash(os.path.join(HMWT, "agent-" + HM_AGENT + "b-red"))
 HMAGENT_OWN_RED = slash(os.path.join(HMWT, "agent-" + HM_AGENT + "-red"))
 HMAGENT_LANE9 = slash(os.path.join(HMWT, "lane9"))
+# A refusal to an agent names the agent's own red-run form, literally, and says EnterWorktree may be refused
+# for a subagent, so the agent knows where its red-run folder goes. A refusal names no sibling's folder, and
+# no refused tree.
+HM_OWN_RED_FORM = ".claude/worktrees/agent-" + HM_AGENT + "-red"
+HM_AGENT_CARRIES = (HM_OWN_RED_FORM, "may be refused for a subagent")
 hm_refuse("an agent adds a sibling agent's red-run folder, by absolute path, is refused",
-        HMADD + HMAGENT_SIB_RED, **HMAG)
+        HMADD + HMAGENT_SIB_RED, carries=HM_AGENT_CARRIES, lacks=(HM_SIBLING,), **HMAG)
 hm_refuse("an agent adds a sibling agent's red-run folder, by a relative path, is refused",
-        HMADD + "../agent-" + HM_SIBLING + "-red", **HMAG)
+        HMADD + "../agent-" + HM_SIBLING + "-red", carries=HM_AGENT_CARRIES, lacks=(HM_SIBLING,), **HMAG)
 hm_refuse("an agent adds a folder whose name only starts with its own id is refused",
         HMADD + HMAGENT_PREFIX_RED, **HMAG)
 hm_refuse("an agent adds a non-agent folder, lane9, under the primary's folder is refused",
-        HMADD + HMAGENT_LANE9, **HMAG)
+        HMADD + HMAGENT_LANE9, carries=HM_AGENT_CARRIES, lacks=("lane9",), **HMAG)
 hm_refuse("a PowerShell call by an agent, adding a sibling's red-run folder, is refused",
-        HMADD + HMAGENT_SIB_RED, tool="PowerShell", **HMAG)
+        HMADD + HMAGENT_SIB_RED, tool="PowerShell", carries=HM_AGENT_CARRIES, lacks=(HM_SIBLING,),
+        **HMAG)
 hm_refuse("an agent adds a tree outside the primary's folder is refused, as before",
         HMADD + slash(os.path.join(ROOT, "hm-agent-outside")), **HMAG)
 # The agent's own red-run folder, added the way the test-author's red run adds it, and the agent's
