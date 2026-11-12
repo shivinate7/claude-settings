@@ -2124,8 +2124,8 @@ class UnreadStale(FolderCase):
 
 # --lag: how long each answer took to read back, and which answers are unread past a set age (waiting-page SKILL.md, the wake;
 # decision waiting-page-one-store, Mechanism step 3). It reads the two files the wake saves beside each other in one folder, as
-# --unread does: answers.json and receipts.json, each a list of {"id", "data"} entries; both must be there and parse, or the mode is
-# unknown. It also reads items.json, to skip an answer whose item is gone, as --unread does. It writes no file, starts no process
+# --unread does: answers.json, receipts.json and items.json, each a list of {"id", "data"} entries; all three must be there and parse,
+# or the mode is unknown. items.json also lets it skip an answer whose item is gone, as --unread does. It writes no file, starts no process
 # and reads no clock: --now sets the time, as --parked's does.
 #   read-delay <id> answered <at>, read <read>, delay <N>s       an answer with a receipt whose read is at or after its at
 #   unread-old <id> answered <at>, no read after it, age <N>s    an answer with no such receipt, older than --max-age (default 60 min)
@@ -2282,14 +2282,17 @@ class LagStale(FolderCase):
         self.assertEqual([line for line in output_lines(out) if line.startswith(("read-delay", "unread-old", "lag total"))], [],
                          "the per-doc folder printed lines as if it were a store: %r" % out)
 
-    def test_a_missing_or_unparseable_answers_or_receipts_file_is_unknown_and_exits_2(self):
+    def test_a_missing_or_unparseable_saved_file_is_unknown_exits_2_and_prints_no_total(self):
         cases = (
             ("answers.json missing", "answers.json", None),
             ("receipts.json missing", "receipts.json", None),
+            ("items.json missing", "items.json", None),
             ("answers.json not JSON", "answers.json", "{ not json"),
             ("receipts.json not JSON", "receipts.json", "["),
+            ("items.json not JSON", "items.json", "{ not json"),
             ("answers.json an object, not a list", "answers.json", "{}"),
             ("receipts.json an object, not a list", "receipts.json", "{}"),
+            ("items.json an object, not a list", "items.json", "{}"),
         )
         for case, name, text in cases:
             with self.subTest(case=case):
@@ -2303,6 +2306,8 @@ class LagStale(FolderCase):
                     write_text(path, text)
                 rc, out = self.run_unknown(case)
                 self.assert_unknown(rc, out, name)
+                self.assertFalse(any(line.startswith("lag total") for line in output_lines(out)),
+                                 "%s: a total was printed beside the unknown line: %r" % (case, out))
 
     def test_an_answer_with_no_readable_at_or_a_receipt_with_no_readable_read_is_unknown_and_exits_2(self):
         with self.subTest(case="an answer with no readable at"):
