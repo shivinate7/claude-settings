@@ -42,9 +42,17 @@ import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
 
 UNDER_TEST = os.environ.get("CI_LIMITS_UNDER_TEST") or os.path.join(HERE, "ci_limits.py")
-_spec = importlib.util.spec_from_file_location("ci_limits_under_test", UNDER_TEST)
-ci_limits = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(ci_limits)
+
+
+def load_under_test(name):
+    """A new module object from UNDER_TEST, so its module-level cache starts empty."""
+    spec = importlib.util.spec_from_file_location(name, UNDER_TEST)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+ci_limits = load_under_test("ci_limits_under_test")
 
 T0 = datetime.datetime(2026, 11, 10, 10, 0, 0, tzinfo=datetime.timezone.utc)
 
@@ -666,6 +674,32 @@ class CutCounts(unittest.TestCase):
         self.assertEqual(rc, 0, "--json exited %r, want 0" % (rc,))
         self.assertEqual(json.loads(out.getvalue())["checks-guard"], 93,
                          "--json should count the 62 min cut: 93")
+
+
+class MergeLoad(unittest.TestCase):
+    def test_a_failed_load_is_retried_not_served_half_built(self):
+        # load_merge sets its cache before exec_module, so a failed load leaves an empty module behind.
+        fresh = load_under_test("ci_limits_merge_load")
+        real_spec = importlib.util.spec_from_file_location
+        calls = []
+
+        def first_exec_fails(name, location, *args, **kwargs):
+            spec = real_spec(name, location, *args, **kwargs)
+            calls.append(name)
+            if len(calls) == 1:
+                def exec_module(module):
+                    raise ImportError("injected: merge.py failed to load")
+                spec.loader.exec_module = exec_module
+            return spec
+
+        self.addCleanup(sys.modules.pop, "merge_for_ci_limits", None)
+        with mock.patch.object(importlib.util, "spec_from_file_location", first_exec_fails):
+            with self.assertRaises(ImportError):
+                fresh.load_merge()
+            self.assertNotIn("merge_for_ci_limits", sys.modules, "a failed load left a module in sys.modules")
+            again = fresh.load_merge()
+        self.assertTrue(hasattr(again, "job_minutes"),
+                        "the call after a failed load got a half-built module with no job_minutes")
 
 
 if __name__ == "__main__":
