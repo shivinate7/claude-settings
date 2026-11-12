@@ -3,15 +3,20 @@ name: stable
 # Moves the stable branch to a main commit whose checks run finished green. Sessions install from
 # stable, so a red main never reaches them. The job reads the run's result and runs no check of
 # its own. Only a push run on main counts: a pull request run never moves stable.
+# zizmor flags workflow_run as dangerous because it can run with a pull request's code or secrets.
+# It is safe here: the job's `if:` passes only a push run on main of this repository, no step checks
+# out pull request code (checkout takes a main sha), and the run's values reach the action through
+# env, never into a shell script.
 on:
-  workflow_run:
+  workflow_run: # zizmor: ignore[dangerous-triggers]
     workflows: [checks]
     types: [completed]
 
 permissions: {}
 
-# One move at a time. A queued move waits and runs, so a green head is never dropped; the mover
-# refuses a head that stable already passed.
+# One move at a time. When a newer run queues, GitHub cancels the older pending one, and that is
+# safe: the move goes to the newest green head, and the mover refuses a head that stable already
+# passed.
 concurrency:
   group: stable
   cancel-in-progress: false
