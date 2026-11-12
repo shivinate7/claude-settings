@@ -4067,7 +4067,7 @@ REVIEW_BATCH_BUILD = "build next batch on the running head: "  # ... and when on
 REVIEW_BATCH_UNKNOWN = "batch line unknown "  # ... and when a read for the batch line stopped: the reason follows, in brackets
 
 # The PR ledger (decision pr-ledger, part 1): each open pull request gets one next act, read from GitHub alone.
-PR_STATE_AGE_HOURS = {"batch": 24, "lane round 1": 72, "lane round 2": 72, "lane round 3": 72, "lane round 4": 72, "fix check": 72, "fresh full review": 72, "batch run": 24, "lane lint": 72}  # hours a next act may wait before it reads RED, by act. Every limit is an unmeasured first guess; decision pr-ledger holds the picks. An act with no key has no limit: waits on, blocked on. The last `lane round` key is the granted extra round past REVIEW_LAST_ROUND (pr_next_round)
+PR_STATE_AGE_HOURS = {"batch": 24, "lane round 1": 72, "lane round 2": 72, "lane round 3": 72, "lane round 4": 72, "fix check": 72, "fresh full review": 72, "batch run": 24, "lane lint": 72}  # hours a next act may wait before it reads RED, by act. Lane round, fix check, fresh full review and batch are measured, lane lint is not; decision pr-ledger holds the measure. An act with no key has no limit: waits on, blocked on. The last `lane round` key is the granted extra round past REVIEW_LAST_ROUND (pr_next_round)
 PR_HOLD_LABELS = ("held", "parked", "replaced")  # a label that holds a pull request when a `Waits on:` line names what it waits for
 PR_BATCH_LABEL = "batch"  # an integration pull request in a batch run
 PR_RECORD_STATES = ("done", "open", "stale")  # the review states that give a record act; held and bad give none, so they fall to the label, blocked and draft rules
