@@ -665,9 +665,9 @@ for _tool, _command in (
         tool=_tool, cwd=NOGIT, command=_command)
 
 # A Monitor call's command gets the shell verdict, and the stream family exempts Monitor from its rules.
-# The ci-wait ruling (owner 2026-10-16, decision ci-wait-reads-run-status) names `gh run watch` only, so a
+# The ci-wait ruling (decision ci-wait-reads-run-status) names `gh run watch` only, so a
 # Monitor `gh run watch` is refused. A background `gh pr checks --watch` is allowed (decision
-# agents-wait-with-monitor, line 14 on main), and Monitor counts as background, so a Monitor
+# agents-wait-with-monitor, its waiter bullets), and Monitor counts as background, so a Monitor
 # `gh pr checks --watch` is allowed. Each Monitor case has its foreground Bash twin beside it.
 monitor("ci-wait: Monitor runs gh run watch 123, refused as its Bash twin is", "gh run watch 123", "deny", "waiter")
 sh("ci-wait: Bash twin of the Monitor run of gh run watch 123, in the foreground, stays refused",
