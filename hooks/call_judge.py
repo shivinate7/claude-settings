@@ -42,8 +42,10 @@ A coordinator's pick (rule `pick-judge`, decision pick-cites-ruling-before-send)
 (shared_names.PICK_TOOLS: `mcp__claude-code-remote__send_message`, `mcp__claude-code-remote__create_session` and
 `SendMessage`) from a session tagged cs-build:coordinator (own_session.own_session_read, plus the add and remove of a later own
 set_session_tags call; unlike guard.lane_session_hit, another cs-build: tag does not void it) whose text (the `message` of send_message and SendMessage, the `prompt` of create_session; a title or a summary
-alone is not judged) holds a whole
-word pick, picks, picked, hold, holds or held (not `hold on`, `pick up`, `on hold` or a hyphen id) must cite a ruling
+alone is not judged) states a pick must cite a ruling. On send_message a statement is a whole
+word pick, picks, picked, hold, holds or held (not `hold on`, `pick up`, `on hold` or a hyphen id). On create_session and
+SendMessage it is a marker only (PICK_BRIEF_MARKER): a `Pick:`, `Hold:`, `Decision:`, `Coordinator pick` or `Coordinator hold` line
+or clause, or `my pick`, `picked`, `the pick is`. The brief template's "no longer holds" costs no call. A pick must cite a ruling
 (a plan R-number, a decision, debt or step id, a `page item N`) or say `no ruling found: <what was searched>`.
 Neither is a code refusal with the remedy, no model call.
 Otherwise one Sonnet call (PICK_JUDGE; the rulings come from ruled_candidates, the one read: the question_form.past_rulings
@@ -87,7 +89,7 @@ if HERE not in sys.path:
 # shared_names is standard library only and adds about 2 ms.
 from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402
 from shared_names import DATA_TOOL  # noqa: E402  stdlib only: the one home of the tool name
-from shared_names import COORDINATOR_TAG, CREATE_SESSION_TOOL, PICK_TOOLS  # noqa: E402  stdlib only: the coordinator tag, the judged tools
+from shared_names import COORDINATOR_TAG, CREATE_SESSION_TOOL, PICK_SEND_TOOL, PICK_TOOLS  # noqa: E402  stdlib only: the coordinator tag, the judged tools
 
 OK_SHAPE = {"ok": (True, False)}
 SPAWN_RULE, QUESTION_RULE, PICK_RULE = "spawn-judge", "question-judge", "pick-judge"
@@ -423,11 +425,18 @@ PICK_JUDGE = (PICK_PROMPT, PAST_RULING_MODEL, PAST_RULING_TIMEOUT, PICK_RULE,
 PICK_NO_CITE = (
     "a coordinator's pick or hold names a past ruling to weigh, or says what it searched. Add the ruling it follows "
     "(a plan R-number, `decision <slug>`, `step <slug>`, `debt <slug>` or a page item number), or the line "
-    "`no ruling found: <what was searched>`, and send it again.")
+    "`no ruling found: <what was searched>`, and send it again. A message that states no pick can be reworded so it does not.")
 PICK_WEIGH = "Treat it as a past ruling to weigh: a later ruling may supersede it."
 # A statement word is pick, picks, picked, hold, holds or held. Chatter is no statement: `hold on`, `pick up`, `on hold`, and a
 # word with a hyphen beside it (a hyphenated record id such as hold-unsafe-after-round-3).
 PICK_WORD = re.compile(r"(?<![\w-])(?<!\bon[ \t])(?:pick|picks|picked|hold|holds|held)(?![\w-])(?![ \t]+(?:on|up)\b)", re.I)
+# A brief tool (create_session `prompt`, SendMessage `message`) carries plain prose such as "If a claim no longer holds", so a
+# bare hold, holds or held states no pick there. A statement is a marker: a line or sentence that starts with `Pick:`, `Hold:`,
+# `Decision:`, `Coordinator pick` or `Coordinator hold` (after markdown lead characters), or the words `my pick`, `picked`
+# or `the pick is`.
+PICK_BRIEF_MARKER = re.compile(
+    r"(?:^|[.!?;][ \t]+)[ \t>*_`#+\d.)-]*(?:(?:pick|hold|decision)[ \t*_`]*:|coordinator[ \t]+(?:pick|hold)(?![\w-]))"
+    r"|(?<![\w-])(?:my[ \t]+pick|picked|the[ \t]+pick[ \t]+is)(?![\w-])(?![ \t]+(?:on|up)\b)", re.I | re.M)
 PICK_NO_RULING = re.compile(r"\bno ruling found[ \t*_`]*:[ \t*_`]*\w", re.I)  # markdown may wrap the label and the text
 PICK_PLAN_REF = re.compile(r"(?<![\w-])R(\d{1,3})(?!\w)")
 # A bare "item N" is no cite. One letter may follow the number (`556a`), unless a word character or hyphen follows it (`3d-x`).
@@ -601,7 +610,14 @@ def _page_lines(reader, items):
         number = _flat(row.get("n"))
         choice = row.get("choice")
         choice = ", ".join(map(str, choice)) if isinstance(choice, list) else choice
-        said = "choice %s" % _flat(choice) if choice not in (None, "") else "parked, no choice"
+        if choice not in (None, ""):
+            said = "choice %s" % _flat(choice)
+        elif row.get("done") is True:
+            said = "done"
+        elif row.get("act") == "park":
+            said = "parked"
+        else:
+            said = "no choice, note only"
         later = any(_flat(r.get("n")) == number for r in rows[i + 1:])
         mark = ""
         if later:
@@ -728,8 +744,9 @@ def judge_pick(payload, tool, args):
     cite and no `no ruling found:` line. One Sonnet call judges a cited one against the cited text. True when it
     refused, so a caller with another check on the same send runs that check after a pass."""
     message = args.get("prompt" if tool == CREATE_SESSION_TOOL else "message")  # create_session's text is its brief
-    if not isinstance(message, str) or not PICK_WORD.search(message):
-        return False  # the cheapest test first: most sends hold neither word
+    states_pick = PICK_WORD if tool == PICK_SEND_TOOL else PICK_BRIEF_MARKER
+    if not isinstance(message, str) or not states_pick.search(message):
+        return False  # the cheapest test first: most sends state no pick
     try:
         if not is_coordinator(payload):
             return False
