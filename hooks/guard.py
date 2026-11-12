@@ -197,8 +197,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        a judged value is present. An override lifts it.
   agent-no-remote-tools
                        deny. A call by an agent (the payload carries a non-empty agent_id) to a claude-code-remote
-                       tool in shared_names.REMOTE_OUTWARD_TOOLS: starting, messaging, tagging or archiving sessions,
-                       scheduled tasks, repos and computers. The session's own call, and the read tools, pass.
+                       tool in shared_names.REMOTE_OUTWARD_TOOLS or shared_names.AGENT_DENIED_DESKTOP_TOOLS (the desktop
+                       start_session): starting, messaging, tagging or archiving sessions, scheduled tasks, repos and computers. The session's own call, and the read tools, pass.
                        An override lifts it.
   sendmessage-session-id
                        deny. A SendMessage whose `to` is a string starting `session_`: that is no agent name, and the
@@ -2855,10 +2855,10 @@ def judge_stop(payload) -> None:
 
 
 SPAWN_TOOLS = ("Agent", "Task")
-SESSION_TOOL = "mcp__ccd_session__start_session"
 from shared_names import (  # noqa: E402  the one home; lint/check_agent_models.py reads REMOTE_SERVER from here
-    CREATE_SESSION_TOOL, REMOTE_OUTWARD_TOOLS, REMOTE_SERVER, is_lane_create_session, lane_tags,  # noqa: F401  REMOTE_SERVER re-exported: lint/check_agent_models.py reads guard.REMOTE_SERVER
+    AGENT_DENIED_DESKTOP_TOOLS, CREATE_SESSION_TOOL, DESKTOP_START_TOOL, REMOTE_OUTWARD_TOOLS, REMOTE_SERVER, is_lane_create_session, lane_tags,  # noqa: F401  REMOTE_SERVER re-exported: lint/check_agent_models.py reads guard.REMOTE_SERVER
 )
+SESSION_TOOL = DESKTOP_START_TOOL
 # The one lane effort. lint/check_agent_models.py reads it from here and checks the lane row of the model table.
 LANE_EFFORT = "medium"
 AGENT_NO_REMOTE_REASON = (
@@ -6108,7 +6108,7 @@ def judge(payload) -> None:
     # the session that spawned it does. Keyed on a truthy agent_id of any shape, so a drifted id stays refused. After the
     # rules of 8a, which refuse first with their own remedy; before the spawn rules (agent-model-floor, lane-effort-pin), so an
     # agent's create_session is refused here. An override lifts it.
-    if payload.get("agent_id") and tool in REMOTE_OUTWARD_TOOLS:
+    if payload.get("agent_id") and tool in REMOTE_OUTWARD_TOOLS + AGENT_DENIED_DESKTOP_TOOLS:
         refuse(tool, "deny", "agent-no-remote-tools", AGENT_NO_REMOTE_REASON, tool)
 
     # 9. The agent model floor. A spawn that names a Haiku model is refused. The reason names no

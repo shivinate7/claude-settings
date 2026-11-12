@@ -23,6 +23,12 @@ REMOTE_OUTWARD_TOOLS = tuple(REMOTE_SERVER + "__" + short for short in (
     "fire_trigger", "send_later", "watch_url", "unwatch_url", "subscribe_pr_activity",
     "unsubscribe_pr_activity", "add_repo", "register_repo_root", "confirm_repository_trust",
     "request_computer_folder"))
+# The desktop session-start tool is no claude-code-remote tool, so REMOTE_OUTWARD_TOOLS does not name it. Here, not in
+# REMOTE_OUTWARD_TOOLS: test_guard pins that tuple at twenty names. The agent-no-remote-tools check reads this tuple too
+# (decision lanes-start-as-agents). The lane-tag guards stay create_session-only: start_session has no tags field, a split
+# the platform forces.
+DESKTOP_START_TOOL = "mcp__ccd_session__start_session"
+AGENT_DENIED_DESKTOP_TOOLS = (DESKTOP_START_TOOL,)
 
 # A prompt that starts with one of these is a notice from a tool or an agent, never the owner.
 TASK_NOTIFICATION_TAG = "<task-notification>"
