@@ -515,4 +515,25 @@ sh("cap-until: a shell redirect that sets the cap asks and names the _agentCapUn
    cwd=NOGIT, carries="_agentCapUntil")
 
 
+# A CAP WRITE MADE BY AN INTERPRETER'S OWN FILE CALL (debt cap-write-by-python-unseen). `python -c`, a python
+# heredoc and `node -e` write the settings file with their own open or write call, which the shell-write reader
+# does not read. The interpreter reader already returns the path for each, so each form asks as a redirect does.
+# The green control is a `python -c` that prints the same cap JSON and writes no file, which keeps its allow.
+PY_CAP_C = ("python3 -c \"import json; open('settings.local.json', 'w').write(json.dumps({'env': {'"
+            + CAP_KEY + "': '" + OPUS + "'}}))\"")
+PY_CAP_HEREDOC = ("python3 - <<'PY'\nimport json\nopen('settings.local.json', 'w').write(json.dumps({'env': {'"
+                  + CAP_KEY + "': '" + OPUS + "'}}))\nPY")
+NODE_CAP_E = ("node -e \"require('fs').writeFileSync('settings.local.json', JSON.stringify({env: {'"
+              + CAP_KEY + "': '" + OPUS + "'}}))\"")
+sh("cap python -c: a python -c that writes the cap key to a settings file asks", PY_CAP_C, "ask",
+   "agent-model-cap", cwd=PROJ, carries=CAP_KEY)
+sh("cap python heredoc: a python heredoc that writes the cap key to a settings file asks", PY_CAP_HEREDOC,
+   "ask", "agent-model-cap", cwd=PROJ, carries=CAP_KEY)
+sh("cap node -e: a node -e that writes the cap key to a settings file asks", NODE_CAP_E, "ask",
+   "agent-model-cap", cwd=PROJ, carries=CAP_KEY)
+sh("cap python -c control: a python -c that prints the cap JSON and writes no file allows",
+   "python3 -c \"import json; print(json.dumps({'env': {'" + CAP_KEY + "': '" + OPUS + "'}}))\"",
+   "allow", cwd=PROJ)
+
+
 # =========================================================================== 6c. ask alone
