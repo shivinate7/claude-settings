@@ -809,7 +809,7 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   standard, everywhere". 73 of 3561 commits on main since Nov 4 fix the lint. Owner 12:56 CST: "A --
   and im sure this 30 word thing is only one of many stale digit level hooks".
   1. STE001 stops failing; wordiness and repetition go to reviewers and judges, which never count. (step:fixed-number-limits-census)
-  2. The lint, its action, its codes and the rule anchor drop "STE" from their names.
+  2. The lint, its action, its codes and the rule anchor drop "STE" from their names. (step:ste-lint-rename)
   3. A read-only census (started 12:57 CST) lists every fixed number that refuses or fails. Each one (step:fixed-number-limits-census)
      the owner did not rule is retired, or derived from measured runs as in 3.2.
   Owner 13:10 CST: "on fixed numbers A". The census (scratchpad limits-census.md) lists about 45
