@@ -2,7 +2,7 @@
 
 Owner's plan, kept by the retrospective session (session_013NEJKz5AWFJhGvmCUoi6wQ, child of the
 coordinator session_013NEJL2hB1pLZPDpzas7VgB). Rewritten in place each time a point settles; git keeps
-the history. Last rewrite: 19:42 CST Nov 11. The owner's list closed at 18:43 CST Nov 10; R21 to R45 came after.
+the history. Last rewrite: 19:46 CST Nov 11. The owner's list closed at 18:43 CST Nov 10; R21 to R45 came after.
 
 Judged by two priorities, in order: accurate, then as fast as possible without losing accuracy.
 
@@ -634,7 +634,7 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   $1,839 and triage $1,567 since Nov 3. Not seen: hook judges, local sessions, the other account.
   The cuts, owner 11:21 and 11:23 CST Nov 11 (waiting page item 506):
   1. d with a. The coordinator and triage get a measured Sonnet trial inside R33's evaluation. "a: i
-     agree fold into d": earlier compaction applies only to a session that stays on Opus, through the
+     agree fold into d": earlier compaction is set per model, so Opus can compact tighter than Sonnet, through the
      per-model key `modelSettings.<model>.autoCompactWindow` (decision precompact-handoff, rule 1).
      Owner: "opus could compact tigheter than sonnet no?". Yes; that key sets it per model. Why the
      coordinator compacts at 441,600 and seeded sessions at 384,000 is still unmeasured; the step finds
@@ -653,8 +653,8 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
      caught.
   Compaction, owner 11:09 CST: "i frankly dont mind compacting sooner given we have such good handoff
   hooks". Today the coordinator compacts at 441,600 tokens and lanes at 384,000; why they differ is
-  unmeasured (decision idle-resume-compacts). Cut 1 below narrows it: only a session that stays on Opus
-  compacts sooner, at a size set from measured per-turn cost. The lever is the per-model key or
+  unmeasured (decision idle-resume-compacts). Cut 1 below sets the size per model from measured per-turn cost,
+  so Opus can compact tighter than Sonnet (owner 11:23 CST: "opus could compact tigheter than sonnet no?"). The lever is the per-model key or
   `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, never `/autocompact` (decision precompact-handoff, rule 1,
   coordinator pick 2026-11-01 17:45). Decision idle-resume-compacts, which lists `/autocompact` as a
   cloud lever, is rewritten to match. Home: decision precompact-handoff, rule 1.
@@ -843,9 +843,9 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   archived sessions, and 292 were re-stamped by bulk passes on Nov 10. Owner 15:22 CST: "i think at
   that point we should just integrate github's pr tracker thing there's like a whole connector it has
   doesn't it it's kinda like a table that shows stuff in progress" (GitHub Projects, the table view).
-  Open: a probe (triage step github-projects-probe) confirms which connector or API can read and write
-  it from local and cloud. The probe starts now, beside the drain, outside the freeze. Owner 14:20 CST
-  Nov 11: "a is cool given it's just a probe".
+  Settled by ruling g (owner 15:19 CST Nov 11, under R45): no Projects table; status comes from live PRs.
+  The probe ran (owner 14:20 CST Nov 11: "a is cool given it's just a probe"): GraphQL is refused in the
+  cloud, so the table cannot be written from there.
 - **R6. Triage's outbox is read against main.** Owner 15:22 CST Nov 10: "yes but it's tbd if an outbox
   is the right spot right? but for rn it only make senses that it is read". A check, run when triage
   reports status, lists each owner ruling in the outbox and whether its home on main holds its words.
@@ -913,7 +913,7 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
      when it sends. A guard refuses a page write that stores a session id.
   4. Fits R18 point 2: each item names who wakes, by slug or role.
   Home: skill project-ops; skill waiting-page.
-- **R45. Cloud sessions delete branches and write the Projects table with the owner's GitHub token.** Owner
+- **R45. How cloud sessions delete branches.** Owner
   14:25 CST Nov 11: "im good with either an actions workflow or a github token -- github token seems
   better? im very ambivalent to tokens being in all my cloud sessions its just a github token".
   Measured 14:21 CST: the cloud relay drops a branch-delete push; a new-branch push works. Origin holds
@@ -944,7 +944,8 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   computer moves every repo's main to a ruleset that requires only all-jobs-passed and blocks deletion
   and force-push of main. Cause: a classic rule with many checks failed to save (owner, 16:39 CST). The
   grant names rulesets, so it lands in the repo's standing grants beside the Oct 30 grant.
-  No GitHub Issues, ruled p', owner 16:44 CST Nov 11: "agreed on p" (after a refuter's revise). g is
+  No GitHub Issues, ruled p', owner 16:44 CST Nov 11: "agreed on p", then "yea" when asked whether he meant
+  the refuter's revised p'. g is
   mostly built: skills/roadmap/build.py derives live and done from PRs (decision stalled-steps). 1. Nobody
   types doing; triage's build sets status from live PRs. 2. Triage closes the stale drafts on build.py's
   list once, then at each batch. 3. A guard refuses a lane PR whose branch or title names no step id
