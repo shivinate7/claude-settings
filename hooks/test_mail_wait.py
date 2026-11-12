@@ -21,7 +21,8 @@ Contract the builder codes against. The names are pinned in this block, and each
 - Lock: <cache>/wait-<address with / as _>.lock, created O_EXCL, JSON {pid, ppid, session, started, deadline}.
   started is start_time(pid) at creation. A lock is stale when its pid is dead, its deadline has passed, or its
   started differs from start_time(pid); a stale lock is replaced. The waiter exits when its lock is gone or its
-  ppid is dead. It removes its lock on every exit, SIGTERM included.
+  ppid is dead. It removes its lock on every exit, SIGTERM included. wait() itself installs and restores its
+  SIGTERM handler, so an in-process call gets the same handler the CLI gets.
 - hooks/mail.py git(args, env, cache=None, timeout=TRANSFER_BOUND, input_text=None): a timeout kills the child and
   raises MailError("timeout"). Its Windows branch runs when mail.WINDOWS is True, read at call time, and that branch
   never calls communicate() after kill. Windows is unmeasured: on this Linux runner the cases drive that branch
@@ -32,6 +33,7 @@ Contract the builder codes against. The names are pinned in this block, and each
 import contextlib
 import io
 import json
+from collections import Counter
 import os
 import re
 import signal
@@ -412,12 +414,17 @@ class Windows(MailCase):
 
 class FakeChild:
     """A git child that outlives its bound. Its first communicate() raises TimeoutExpired, as a bound does. Every later
-    call is recorded and returns at once, so a helper that calls it again cannot hang this run."""
+    call is recorded and returns at once, so a helper that calls it again cannot hang this run. Its pipes are closable
+    buffers, so the Windows-safe fix (kill, close the pipes, wait with a bound) runs against it too."""
 
     def __init__(self, args, *rest, **kwargs):
         self.args = args
-        self.events = []
+        self.pid = 0
+        self.stdin = io.BytesIO()
+        self.stdout = io.BytesIO()
+        self.stderr = io.BytesIO()
         self.returncode = None
+        self.events = []
 
     def __enter__(self):
         return self
@@ -431,12 +438,19 @@ class FakeChild:
             raise subprocess.TimeoutExpired(self.args, timeout)
         return b"", b""
 
+    def poll(self):
+        return self.returncode
+
     def kill(self):
         self.events.append(("kill", None))
+        self.returncode = -9
+
+    def terminate(self):
+        self.events.append(("terminate", None))
 
     def wait(self, timeout=None):
         self.events.append(("wait", timeout))
-        return 0
+        return self.returncode
 
 
 class Cleanup(WaitCase):
@@ -534,10 +548,11 @@ class Cleanup(WaitCase):
 
 
 class Cost(WaitCase):
-    def measure_hour(self):
-        """One simulated hour at the default interval with no new mail for the session. The first hook marks the end
-        of the baseline, so the baseline's starts are not counted as polls. Files written are the lock the waiter
-        creates at its start, plus any change inside the hour."""
+    def measure_hour(self, move_at=None):
+        """One simulated hour at the default interval. The first hook marks the end of the baseline, so the baseline's
+        starts are not counted as polls. With move_at, another address gets mail at that sleep (the sha moves). The
+        seed's own git starts are cut from the count: they are the case's writes, not the waiter's. Files written are
+        the lock the waiter creates at its start, plus any change inside the hour."""
         store, machine = self.fixture()
         procs = Procs()
         cache = machine.cache
@@ -545,6 +560,10 @@ class Cost(WaitCase):
         before = snapshot(cache)
         with Starts() as starts:
             def count(fake):
+                if len(marks) + 1 == move_at:
+                    cut = len(starts.argv)
+                    store.seed(OTHER, "0a1b2c3d4e50", "inform", SENDER, "Body marker: moved\n")
+                    del starts.argv[cut:]
                 marks.append(len(starts.argv))
                 if len(marks) == 1:
                     snaps["first"] = snapshot(cache)
@@ -553,13 +572,16 @@ class Cost(WaitCase):
                 snaps["end"] = snapshot(cache)
 
             fake = FakeTime(hook=count, end_at=HOUR, on_end=end)
-            run_wait(machine.env, fake, procs)
+            code, _ = run_wait(machine.env, fake, procs)
         argv = starts.argv
-        polls = argv[marks[0]:marks[-1]] if marks else []
+        window = argv[marks[0]:marks[-1]] if marks else []
+        polls = [args for args in window if program_name(args) == "git" and git_subcommand(args) == "ls-remote"]
         added_at_start = diff(before, snaps["first"])[0] if "first" in snaps else []
         hour = diff(snaps["first"], snaps["end"]) if "end" in snaps else ([], [], [])
         return {
-            "polls": [args for args in polls if program_name(args) == "git" and git_subcommand(args) == "ls-remote"],
+            "code": code,
+            "window": window,
+            "polls": polls,
             "fetches": [args for args in argv if program_name(args) == "git" and git_subcommand(args) == "fetch"],
             "non_git": [args for args in argv if program_name(args) != "git"],
             "sleeps": set(fake.sleeps),
@@ -573,6 +595,9 @@ class Cost(WaitCase):
         self.assertTrue(m["polls"], "control: the waiter made no ls-remote poll in the simulated hour")
         self.assertEqual(len(m["polls"]), 120, "an hour at the default interval made %d ls-remote polls, expected 120"
                          % len(m["polls"]))
+        counted = dict(Counter(git_names(m["window"])))
+        self.assertEqual(counted, {"ls-remote": 120}, "the polls of an unchanged hour ran git %r, expected only 120 "
+                         "ls-remote" % counted)
         self.assertEqual(len(m["fetches"]), 1, "the waiter ran %d fetches, expected 1 (the baseline)" % len(m["fetches"]))
         self.assertEqual(m["sleeps"], {30}, "the waiter slept %r between polls, expected 30 s" % sorted(m["sleeps"]))
         self.assertEqual(m["non_git"], [], "the waiter started %d processes that are not git: a second long-lived process"
@@ -581,6 +606,17 @@ class Cost(WaitCase):
                          % (m["hour"],))
         self.assertEqual(len(m["locks"]), 1, "the waiter created %d lock files, expected 1" % len(m["locks"]))
         self.assertEqual(m["listings"], [], "the waiter wrote a listing file, which the wait never writes")
+
+    def test_one_moved_sha_adds_exactly_one_fetch_and_one_grep(self):
+        m = self.measure_hour(move_at=60)
+        self.assertTrue(m["polls"], "control: the waiter made no ls-remote poll in the simulated hour")
+        counted = dict(Counter(git_names(m["window"])))
+        self.assertEqual(counted, {"ls-remote": 120, "fetch": 1, "grep": 1},
+                         "an hour with one moved sha ran git %r, expected 120 ls-remote, 1 fetch and 1 grep" % counted)
+        self.assertEqual(len(m["fetches"]), 2, "the hour ran %d fetches in all, expected 2 (the baseline and the move)"
+                         % len(m["fetches"]))
+        self.assertEqual(m["code"], "test-ended", "mail for another address ended the waiter with exit %r, expected it "
+                         "to keep waiting" % (m["code"],))
 
     def test_the_decision_states_the_measured_doorbell_cost(self):
         text = read_text(os.path.join(REPO, RECORD_REL)) or ""
