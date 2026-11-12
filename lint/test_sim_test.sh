@@ -320,6 +320,10 @@ no_lease_file() { [ ! -e "$lease_file" ]; }
 set_disk() { printf '%s\n' "$1" > "$work/disk"; }
 # brake_polls_at_least N: the seam logs each brake read, so a take that waits reads the brake at least N times.
 brake_polls_at_least() { [ "$(cat "$work/disk_reads" 2>/dev/null | wc -l | tr -d ' ')" -ge "$1" ]; }
+# sim_lease_run ARGS: bin/sim-lease run as start_tool runs it, with the same env and the brake's disk seam, so a real
+# disk never decides a direct take or status call of the suite.
+sim_lease_run() { env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS HOME="$work/home" PYTHONPATH="$shim" \
+  SIM_LEASE_TEST_DISK="$work/disk" SIM_LEASE_TEST_DISKLOG="$work/disk_reads" "$sim_lease" "$@"; }
 # mkdir_lock_first: one mkdir of the lock folder (no -p) is in the call log, before the first simctl call.
 mkdir_lock_first() {
   local m s
@@ -347,8 +351,7 @@ slot_holder=
 hold_slot1() {
   sleep 600 > /dev/null 2>&1 &
   slot_holder=$!
-  need "the holder is granted Duo slot 1" test "$(env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS HOME="$work/home" \
-    "$sim_lease" take --device duo --pid "$slot_holder" --wait 1 2>/dev/null)" = 1
+  need "the holder is granted Duo slot 1" test "$(sim_lease_run take --device duo --pid "$slot_holder" --wait 1 2>/dev/null)" = 1
 }
 release_slot1() {
   if [[ -n $slot_holder ]]; then kill "$slot_holder" 2>/dev/null; wait "$slot_holder" 2>/dev/null; fi
@@ -875,7 +878,7 @@ in_lease_file() { lease_holds "$lease_file" "$tool_pid"; }
 tool_ended() { local st; st=$(ps -o stat= -p "$tool_pid" 2>/dev/null); [[ -z $st || $st == Z* ]]; }
 # lease_freed_after_reap: a `sim-lease status` call drops the dead holders and places, as a later take does. Then the tool
 # holds neither a lease nor a place.
-lease_freed_after_reap() { env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS HOME="$work/home" "$sim_lease" status > /dev/null 2>&1; lease_released; }
+lease_freed_after_reap() { sim_lease_run status > /dev/null 2>&1; lease_released; }
 
 # pro_dies_during_duo_wait BOOTED: a pro holder takes the pro lease, a duo run queues behind it, and the holder dies. With
 # BOOTED yes the 18 Pro is still booted when the holder dies, as a pro run that never shut it down leaves it. With BOOTED
@@ -884,8 +887,7 @@ pro_dies_during_duo_wait() {
   fresh
   sleep 600 > /dev/null 2>&1 &
   local holder=$!
-  need "the pro holder is granted the pro lease" test "$(env -u CLAUDE_CONFIG_DIR -u CI -u GITHUB_ACTIONS HOME="$work/home" \
-    "$sim_lease" take --device pro --pid "$holder" --wait 1 2>/dev/null)" = pro
+  need "the pro holder is granted the pro lease" test "$(sim_lease_run take --device pro --pid "$holder" --wait 1 2>/dev/null)" = pro
   ARGS=(-scheme X); start_tool SIM_LEASE_WAIT=60
   need "the duo run is queued behind the pro lease" poll_for 20 in_lease_file
   if [[ $1 = yes ]]; then
