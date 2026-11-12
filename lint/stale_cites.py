@@ -60,12 +60,38 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             value, so a set cite ignores order. A head value that is no literal, such as a call, gives no finding.
             A name no module-level assignment ever bound is no removal: only an added line says so, without "removed".
             A .py cite the check cannot read is never skipped. On an added line, a cite whose value is no JSON literal
-            (MAP9 reads none) or whose path no tracked file has is a finding. A cite of a name that holds no literal at
+            (MAP9 reads none) or whose path no tracked file has is a finding, except a path led by `..`, `~` or `/`, which is unknown. A cite of a name that holds no literal at
             head, or of a file that does not parse, is unknown. An untouched line prints each of these as unknown too,
             only when the whole tree is read. A cite of a path the range removed is STALE001's.
-A line already stale at base, for a name the range did not remove, never fires. Left out: docs/records.md,
+  STALE009  (decision record-cites-live-code; range mode only, report only) a SENTENCE of an added line of a decision
+            record (`docs/decisions/*.md`) that
+            states what code does or does not do: a code subject (a noun such as tool, ledger, script, hook, guard,
+            check, or one source file) and a behaviour verb (reads, writes, prints, calls, refuses, counts, runs,
+            checks; also after never, only, or does not). It passes when it cites `file.py` `name`, (file.py name) or
+            a test node id, as STALE002 reads them. A cite of a .mjs, .cjs, .js, .ts or .sh file is no finding: it gives
+            one unknown line, and in a claim sentence that line prints even for a file the range did not touch. A dead
+            cite is no missing cite: STALE010 judges it, and STALE009 reports only a code claim
+            with no cite. Paragraphs, sentences and the mark come from STALE005. It prints as
+            `stale-cites: report, path:line: STALE009 ...` and never changes the exit code (decision
+            source-prose-lint-ships-dark). A line marked `<!-- ste-disable-line STALE009 -->` is left out.
+  STALE010  (decision record-cites-live-code; range mode only, a finding) a line the range ADDS to governed Markdown
+            that cites a Python name in a STALE002
+            form (`file.py` `name`, (file.py name)) or as a test node id, when the .py file is absent at head or does
+            not bind the name there (`names_in`; a node id is judged one segment at a time). Fenced lines count as
+            prose, as for STALE002. It judges each line the range adds, a moved or reworded line too, never a line it
+            left, and not in --tree mode. A cite path outside the repo (`outside_repo`) is no path cite. It
+            leaves a cite of a path the range removed or renamed to STALE001 and a name the range unbound to
+            STALE002, so a line never gets two codes for one cite. A cite of a .mjs, .cjs, .js, .ts or .sh file gives
+            one unknown line and no finding. In a decision claim sentence the line prints even for a file the range did
+            not touch. On another added line it follows the existing unknown rule: it prints only for a file the range
+            touched, and only when Markdown is read. A cited .py that does not parse at head is one unknown line, no finding.
+            A line marked `<!-- ste-disable-line STALE010 -->` is left out.
+A cite path led by `..`, `~` or `/` (`outside_repo`) names a path outside the repo, which no read asks git for: it is
+no path cite for STALE010, and one unknown line for a STALE005 backing or a STALE008 value cite.
+A line left in place, for a name the range did not remove, never fires. A moved or reworded line is an added
+line, which STALE010 judges. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
-`<!-- ste-disable-line STALE001 -->` (or STALE002, STALE003, STALE004, STALE007, STALE008). Fenced blocks count as prose.
+`<!-- ste-disable-line STALE001 -->` (or STALE002, STALE003, STALE004, STALE007, STALE008, STALE009, STALE010). Fenced blocks count as prose.
 Each Markdown file is read as committed at head, never from the working tree.
 --tree [REV] reads every tracked Markdown file at REV (default HEAD) instead of a range, so it fires on lines no
 change touched. It is opt-in (the ste-lint input `tree-cites`). It needs no base, so a shallow clone is fine.
@@ -103,7 +129,11 @@ Markdown outside RULE_FILES and adds no value cite of a code file (STALE008 belo
 a code-only range pays only for the patch text. An added governed line that holds a verb or a route word reads its
 file's head blob (the paragraph around it) and, when a sentence cites a route or a `(read ...)` or `(test ...)` file,
 the rows file or that file's presence at head, all through the one `cat-file` the run opens: one more start, and none
-for a range with no such line. A range that changes the rows file reads it at base and head through the same `cat-file`;
+for a range with no such line. So a range that adds a `docs/decisions` line holding a code verb (CODE_VERB_WORD,
+STALE009's list) starts 4 (rev-parse, merge-base, diff, cat-file). A full claim is not needed: "- Run the tests." in a
+decision record starts 4. A Markdown range starts 3 when it adds none of these: a line in a decision record holding a code
+verb, a STALE005 capability verb or route word, a folder .py name cite, a value cite of a code file. It starts 4 with any of them
+(CostTests pins the 3 and the 4 for a STALE005 line or a code verb, NameCiteTests the 4 for a name cite). A range that changes the rows file reads it at base and head through the same `cat-file`;
 when a row id is gone it also lists the tree once and reads each tracked .md once.
 A touched .py or .sh adds one `git cat-file --batch`, which the flag reader and the name reader share, and, through
 the report below, one `ls-tree`, so it starts 5. A removed or renamed path adds `ls-tree` and that `cat-file --batch`,
@@ -112,6 +142,12 @@ longer defines, or a flag that a touched .py or .sh no longer declares, gives th
 A flag read through a parent parser or a helper (`parent_flags`, for a removed flag of a .py that imports one) first lists
 the whole head tree with one `ls-tree` and keeps it in `rng.tree`, then reads the module's blob through the same `cat-file`.
 That listing is the one the report would have made, so the count stays 5 (CostTests, test a_flag_read_through_an_untouched_helper_starts_no_git_process_beyond_the_five).
+STALE010 reads the added lines the one diff already carries, and for each .py file an added line cites, one blob
+at head through the one `cat-file` the run opens, once per range. That `cat-file` is one start, and it opens only when an
+added line cites a .py file by a path with a folder part; no Markdown blob is read. A range that adds a folder .py cite and
+removes nothing starts 4 (rev-parse, merge-base, diff, that `cat-file`), one more than the same range with no such cite
+(NameCiteTests pins the 4); a range that already opens the `cat-file` for another read adds no start for it. A cite led
+by `..`, `~` or `/` (`outside_repo`) names a path outside the repo and reads nothing: it opens no `cat-file`.
 A touched .py also loads the py-facts script once, in-process (no start, no .pyc). It writes no file and leaves no process running.
 STALE008 starts at most the one `cat-file`. It reads every tracked .md, through the same `ls-tree` and `cat-file`, only
 when a touched .py changed a module-level literal, as the removed-name read does. Otherwise it reads only the touched .md
@@ -150,6 +186,7 @@ import route_match  # noqa: E402  the one home of the route rows file's path (ho
 from rule_audit import ANCHOR_RE, RULE_FILES  # noqa: E402  the one home of the anchor pattern and the rule files
 
 RECORDS_PAGE = "docs/records.md"
+CODE_NAME_CITE = "STALE010"  # a dead Python name cite on an added line (`dead_name_cites`)
 RUN = r"[\w./@+~-]+"  # a run of path characters; a cite is one whole run, so a `-` or `.` before a path is no boundary
 NOT_BEFORE = r"(?<![\w/.@+~-])"
 RUN_RE = re.compile(RUN)
@@ -171,7 +208,11 @@ FOREIGN_PAIR_RES = pair_res(FOREIGN_EXT)
 FOREIGN_FILE = re.compile(r"\.%s\Z" % FOREIGN_EXT)
 DISABLE_RE = re.compile(r"<!--\s*ste-disable-line([^>]*?)-->")
 SIMPLE_PATH = re.compile(r"^%s$" % RUN)
-FILE_CITE = re.compile(r"^[^/]+(?:/[^/]+)*/[^/]*[^/.]\.[A-Za-z0-9]+$")  # a folder part and an extension
+# The lead of a cite path (after `cite_path`) outside the repo: `..`, `~` or `/`. No blob at a rev holds one, and a `..`
+# lead ends `git cat-file`, so no reader asks for one (`outside_repo`).
+OUTSIDE_LEAD = r"(?:\.\.(?:/|\Z)|~|/)"
+# A path cite: a folder part and an extension, inside the repo.
+FILE_CITE = re.compile(r"^(?!%s)[^/]+(?:/[^/]+)*/[^/]*[^/.]\.[A-Za-z0-9]+$" % OUTSIDE_LEAD)
 ANCHOR = re.compile(r":(\d+)(?:-(\d+))?(?!\w)")
 
 
@@ -741,12 +782,23 @@ def disabled(line):
     return codes
 
 
+def cite_path(text):
+    """A cited path in its tracked form: `./lint/x.py` is `lint/x.py`. The one home both STALE001 and STALE010 (and the
+    STALE002 name match) read a cite's path through."""
+    return posixpath.normpath(text)
+
+
+def outside_repo(text):
+    """True when a cited path names a path outside the repo (`OUTSIDE_LEAD`): its reader gives one unknown line."""
+    return re.match(OUTSIDE_LEAD, cite_path(text)) is not None
+
+
 def path_cites(line, gone, exotic):
     """Each removed path the line names, at a path boundary."""
     hits = []
     for run in RUN_RE.finditer(line):
         text = run.group(0)
-        candidate = text.rstrip(".-")
+        candidate = cite_path(text.rstrip(".-"))
         if candidate in gone and candidate not in hits:
             hits.append(candidate)
     for path in exotic:
@@ -763,6 +815,8 @@ class Range:
         self.added_lines = lines or {}  # the .md lines the range adds, by path
         self.unknowns = []
         self.added = set(added)
+        self.bound_names = {}  # path -> names bound at head (`head_names`), read once
+        self.removed_names = {}  # file (base and head path) -> names the range unbound there (NameReader.prepare)
         self.tree = None  # the head tree entries once a read listed the tree (the flag reader also lists it); the report reuses it
         self.whole = False  # find_stale read every tracked Markdown page, so an untouched line was read too
         self.changed = set(removed) | set(renamed) | set(renamed.values()) | set(modified) | set(added)
@@ -807,7 +861,7 @@ class NameReader:
     code = "STALE002"
 
     def prepare(self, rng):
-        removed_names = {}  # file at base -> names the range removed
+        removed_names = {}  # file, by base path and by head path -> names the range removed
         for path in sorted(rng.py_files):
             old_src = rng.batch.get("%s:%s" % (rng.base, path))
             new_src = rng.batch.get("%s:%s" % (rng.head, rng.py_files[path]))
@@ -818,7 +872,8 @@ class NameReader:
                 rng.unknowns.append("%s does not parse at %s; the names it removed were not checked"
                                     % (path, " and ".join(bad)))
             elif before - after:
-                removed_names[path] = before - after
+                removed_names[path] = removed_names[rng.py_files[path]] = before - after  # base path and head path
+        rng.removed_names = removed_names  # STALE010 leaves these names to STALE002
         return removed_names or None
 
     def line(self, state, text, claimed):
@@ -827,11 +882,11 @@ class NameReader:
         messages = []
         for pair in PAIR_RES:
             for match in pair.finditer(text):
-                path, name = match.group(1), match.group(2)
+                path, name = cite_path(match.group(1)), match.group(2)
                 if path not in claimed and name in state.get(path, ()):
                     messages.append("%s no longer defines %s at head; find its new home" % (path, name))
         for match in NODE_RE.finditer(text):
-            path = match.group(1)
+            path = cite_path(match.group(1))
             for name in match.group(2).split("::"):
                 if path not in claimed and name in state.get(path, ()):
                     messages.append("%s no longer defines %s at head; find its new home" % (path, name))
@@ -989,6 +1044,9 @@ class ValueReader:
                 continue
             if path in state.rng.removed or path in state.rng.renamed:
                 continue  # STALE001 judges a cite of a path the range removed
+            if outside_repo(path):
+                cannot_read("%s is outside the repo, so the cite is not checked" % path, False)
+                continue
             tree = self.tree(state, "head", path)
             lit = parse_literal(literal)
             if tree is ABSENT:
@@ -1022,7 +1080,11 @@ ROWS_AT_HEAD = os.path.relpath(route_match.ROUTE_ROWS_FILE, os.path.join(os.path
 HTML_COMMENT = re.compile(r"<!--.*?-->")
 # Text in straight or curly double quotes, or a bare file path (a folder part and an extension): a mention, no claim.
 BARE_PATH = r"(?<![\w./@+~-])(?:[\w.@+~-]+/)+[\w.@+~-]*\.\w+"  # a file path with a folder part and an extension
-MENTION = re.compile(r'"[^"]*"|\u201c[^\u201d]*\u201d|' + BARE_PATH)
+QUOTED = r'"[^"]*"|\u201c[^\u201d]*\u201d'
+MENTION = re.compile(QUOTED + "|" + BARE_PATH)
+QUOTED_ONLY = re.compile(QUOTED)
+CODE_EXT = r"(?:py|mjs|cjs|js|ts|sh)"  # a source file a sentence can name as the subject of a code claim
+SOURCE_SPAN = re.compile(r"[\w./@+~-]+\.%s\Z" % CODE_EXT)
 PATH_SPAN = re.compile(BARE_PATH + r"\Z")
 HEADING_OR_QUOTE = re.compile(r"^[ \t]{0,3}(?:#{1,6}(?:[ \t]|$)|>)")
 FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})(.*)$")
@@ -1205,13 +1267,15 @@ def named_excerpt(names, text, around=3, limit=40):
     return "\n".join(out)
 
 
-def blanked(text):
+def blanked(text, subjects=False):
     """(outside, route): `text` twice, each the same length, with the newlines kept.
     outside: each code span and HTML comment blanked, so a verb or a sentence end inside one is a mention.
     route: the same, except the words of a code span that names no path stay: a route word used as the subject,
     "`gh` cannot close", still counts. A span with a `/` or `.` names a file, so its words are not a route.
     Both also blank text in straight or curly double quotes and a bare file path, the same way: each is a mention.
-    An apostrophe is no quote and a lone quote pairs with none; single quotes are left as they are."""
+    An apostrophe is no quote and a lone quote pairs with none; single quotes are left as they are.
+    `subjects=True` is the view a code claim reads (CodeClaimReader): a code span that is one source file and a bare
+    file path stay in `outside`, since a path can be the subject of a claim; quotes and comments are still blanked."""
     outside, route = list(text), list(text)
 
     def blank(chars, start, end):
@@ -1221,13 +1285,15 @@ def blanked(text):
     for match in CODE_SPAN.finditer(text):
         start, end = match.span()
         ticks = len(match.group(1))
+        if subjects and SOURCE_SPAN.match(text[start + ticks:end - ticks].strip()):
+            continue
         blank(outside, start, end)
         if "/" in text[start:end] or "." in text[start:end]:
             blank(route, start, end)
         else:
             blank(route, start, start + ticks)
             blank(route, end - ticks, end)
-    for match in MENTION.finditer("".join(outside)):
+    for match in (QUOTED_ONLY if subjects else MENTION).finditer("".join(outside)):
         blank(outside, *match.span())
         blank(route, *match.span())
     for match in HTML_COMMENT.finditer("".join(outside)):
@@ -1426,8 +1492,7 @@ class RouteClaimReader:
         found, rows_at_head = {}, []
         for path in sorted(files):
             added = dict(files[path])
-            if not any(VERB.search(HTML_COMMENT.sub(" ", t)) or ROUTE_WORD.search(HTML_COMMENT.sub(" ", t))
-                       for t in added.values()):
+            if not any(self.worth_reading(t) for t in added.values()):
                 continue
             blob = rng.batch.get("%s:%s" % (rng.head, path))
             rows = (blob or b"").decode("utf-8", "replace").replace("\r\n", "\n").split("\n")
@@ -1436,24 +1501,37 @@ class RouteClaimReader:
                 i = bisect.bisect_left(numbers, first)
                 if i == len(numbers) or numbers[i] >= first + len(block):
                     continue  # the range adds no line to this paragraph
-                for number, message in self.judge_paragraph(rng, first, block, set(numbers), rows_at_head):
+                for number, message in self.judge_paragraph(rng, first, block, set(numbers), rows_at_head, path):
                     found[(path, number)] = message
         if rows_changed:
             self.removed_rows(rng, found, rows_at_head)
         return [(path, number, message) for (path, number), message in found.items()]
 
-    def judge_paragraph(self, rng, first, block, added, rows_at_head):
+    def worth_reading(self, row):
+        """True when an added row may hold a claim, so the file's head blob is read. A loose pre-check."""
+        row = HTML_COMMENT.sub(" ", row)
+        return bool(VERB.search(row) or ROUTE_WORD.search(row))
+
+    def view(self, text):
+        """(outside, route) of a paragraph, as `blanked` gives them."""
+        return blanked(text)
+
+    def states_claim(self, outside, route):
+        """True when a sentence, as `view` gives it, states what this reader judges."""
+        return bool(VERB.search(outside) and ROUTE_WORD.search(route))
+
+    def judge_paragraph(self, rng, first, block, added, rows_at_head, path=None):
         """[(first row number of the sentence, message)] for each unbacked claim sentence of the paragraph that
-        holds an added row and carries no `ste-disable-line STALE005` mark."""
+        holds an added row and carries no `ste-disable-line` mark for this reader's code."""
         text = "\n".join(block)
-        outside, route = blanked(text)
+        outside, route = self.view(text)
         starts, offset = [], 0
         for row in block:
             starts.append(offset)
             offset += len(row) + 1
         out = []
         for a, b in sentences(text, outside):
-            if not (VERB.search(outside[a:b]) and ROUTE_WORD.search(route[a:b])):
+            if not self.states_claim(outside[a:b], route[a:b]):
                 continue
             top, bottom = (first + bisect.bisect_right(starts, x) - 1 for x in (a, b - 1))
             if not any(n in added for n in range(top, bottom + 1)):
@@ -1461,20 +1539,25 @@ class RouteClaimReader:
             if any("ste-disable-line" in block[n - first] and self.code in disabled(block[n - first])
                    for n in range(top, bottom + 1)):
                 continue
-            message = self.judge(rng, text[a:b], rows_at_head)
+            message = self.judge(rng, text[a:b], rows_at_head, (path, top))
             if message:
                 out.append((top, message))
         return out
 
-    def judge(self, rng, sentence, rows_at_head):
-        """The message for one claim sentence, or None when it is backed."""
+    def judge(self, rng, sentence, rows_at_head, where=None):
+        """The message for one claim sentence, or None when it is backed. `where` is (path, line) of the sentence."""
         backed, dead, dead_files, unchecked = False, [], [], []
         for cite in paren_cites(sentence):
             kind, rest = cite_kind(cite)
             path = backing_path(kind, rest)
             if kind in BACKING_KINDS or kind == "test":
                 sourced = bool(TEST_CITE.match(rest)) if kind == "test" else has_source(rest)
-                if sourced and path is not None and rng.batch.get("%s:%s" % (rng.head, posixpath.normpath(path))) is None:
+                if sourced and path is not None and outside_repo(path):
+                    note = "%s:%d: %s is outside the repo, so the backing was not checked" % (where + (path,))
+                    if note not in rng.unknowns:
+                        rng.unknowns.append(note)
+                    backed = True  # an unknown, never a finding
+                elif sourced and path is not None and rng.batch.get("%s:%s" % (rng.head, posixpath.normpath(path))) is None:
                     dead_files.append(path)  # a read or test backing is dead when its file is not at head
                 else:
                     backed = backed or sourced
@@ -1525,6 +1608,109 @@ class RouteClaimReader:
                     found.setdefault((md, number), "cites %s, a route row this range removes" % ", ".join(ids))
 
 
+# STALE009: a code subject, then a behaviour verb. A subject is a noun below or one source file (`hooks/x.py`, build.py).
+CODE_NOUNS = r"(?:tool|ledger|script|hook|guard|check|lint|linter|command|module|function|program|parser|scanner)"
+BEHAVIOUR_VERBS = ("read", "write", "print", "call", "refuse", "count", "run", "check")  # the base forms
+PRESENT_VERBS = ("reads", "writes", "prints", "calls", "refuses", "counts", "runs", "checks")
+CLAIM_END = r"(?![\w@+~/-]|\.\w)"  # a verb that opens a path (`reads.py`) is no verb
+CODE_CLAIM = re.compile(
+    r"(?:\b%s|(?<![\w./@+~-])`?[\w./@+~-]+\.%s`?)\s+(?:(?:never|only|always|also|just)\s+)*"
+    r"(?:%s|(?:does\s+not|doesn['\u2019]t)\s+%s)%s"
+    % (CODE_NOUNS, CODE_EXT, "|".join(PRESENT_VERBS), "(?:%s)" % "|".join(BEHAVIOUR_VERBS), CLAIM_END), re.I)
+CODE_VERB_WORD = re.compile(r"\b(?:%s)\b" % "|".join(BEHAVIOUR_VERBS + PRESENT_VERBS), re.I)  # the loose pre-check
+
+
+NO_FILE = ()  # `head_names` answer for a file absent at head; an empty file gives an empty set
+
+
+def head_names(rng, path):
+    """The names `path` binds at head (`names_in`), NO_FILE for a file absent at head, or None when it does not parse.
+    Read once per path through the one `cat-file` and cached on `rng.bound_names`."""
+    if path not in rng.bound_names:
+        blob = rng.batch.get("%s:%s" % (rng.head, posixpath.normpath(path)))
+        if blob is None:
+            rng.bound_names[path] = NO_FILE
+        else:
+            names = names_in(blob.decode("utf-8", "replace"))
+            if names is None:
+                rng.unknowns.append("%s does not parse at head; cites of its names were not checked" % path)
+            rng.bound_names[path] = names
+    return rng.bound_names[path]
+
+
+def python_cites(text):
+    """[(path, name)] of each Python name a line cites in a STALE002 form or as a test node id, in line order."""
+    cites = [(m.start(), m.group(1), m.group(2)) for pair in PAIR_RES for m in pair.finditer(text)]
+    for node in NODE_RE.finditer(text):
+        cites += [(node.start(), node.group(1), name) for name in node.group(2).split("::")]
+    return [(path, name) for _, path, name in sorted(cites, key=lambda c: c[0])]
+
+
+def dead_name_cites(rng):
+    """STALE010, a finding: {(path, line, code): [messages]} for each cite of a Python name on a line the range adds to
+    governed Markdown, whose file is absent at head or does not bind the name there. A cite of a file the range removed
+    or renamed is STALE001's, and a name the range unbound is STALE002's. Fenced lines count as prose, as for STALE002.
+    The blobs come from the one `cat-file`, and only for a line that cites a .py file."""
+    found, excludes = {}, exclude_patterns(".")
+    gone = set(rng.removed) | set(rng.renamed)
+    for md in sorted(rng.added_lines):
+        if not governed(md, excludes):
+            continue
+        for number, line in rng.added_lines[md]:
+            if ".py" not in line or ("ste-disable-line" in line and CODE_NAME_CITE in disabled(line)):
+                continue
+            for path, name in python_cites(line):
+                path = cite_path(path)
+                if not FILE_CITE.match(path):
+                    continue  # no folder part, or a lead outside the repo: no path cite, the STALE003 test
+                names = None if path in gone else head_names(rng, path)
+                if names is None or name in names or name in rng.removed_names.get(path, ()):
+                    continue
+                message = "cites %s %s, %s" % (path, name, "a file absent at head" if names is NO_FILE
+                                                else "a file with no such name at head")
+                if message not in found.setdefault((md, number, CODE_NAME_CITE), []):
+                    found[(md, number, CODE_NAME_CITE)].append(message)
+    return found
+
+
+class CodeClaimReader(RouteClaimReader):
+    """STALE009: a sentence an added line of a decision record states about what code does or does not do (a code
+    subject and a behaviour verb) and that cites no name bound at head. A cite is STALE002's: "`file.py` `name`",
+    "(file.py name)" or a test node id. A cite of a .mjs, .js, .cjs, .ts or .sh file is read as unknown. A cite whose
+    name is gone is no missing cite here: STALE010 fails it. Report only
+    (decision source-prose-lint-ships-dark). Paragraphs, sentences and the disable mark are RouteClaimReader's."""
+    code = "STALE009"
+
+    def prepare(self, rng):
+        """(files, False), or None. files: {path: [(number, text)]} of the decision records the range adds lines to."""
+        folders = set(decision_folders())
+        excludes = exclude_patterns(".")
+        files = {p: rows for p, rows in rng.added_lines.items()
+                 if rows and governed(p, excludes) and posixpath.dirname(p) in folders}
+        return (files, False) if files else None
+
+    def worth_reading(self, row):
+        return bool(CODE_VERB_WORD.search(row))  # no comment strip: a `<!--` in a code span must hide nothing
+
+    def view(self, text):
+        outside, _ = blanked(text, subjects=True)
+        return outside, outside
+
+    def states_claim(self, outside, route):
+        return bool(CODE_CLAIM.search(outside))
+
+    def judge(self, rng, sentence, rows_at_head, where=None):
+        cites = python_cites(sentence)
+        for pair in FOREIGN_PAIR_RES:
+            for m in pair.finditer(sentence):
+                note = "%s:%d: %s %s: JavaScript and shell names are not checked" % (where + (m.group(1), m.group(2)))
+                if note not in rng.unknowns:
+                    rng.unknowns.append(note)
+        if cites or any(True for pair in FOREIGN_PAIR_RES for _ in pair.finditer(sentence)):
+            return None  # a cite, live or dead, is no missing cite: STALE010 judges a dead one
+        return "states what code does or does not do with no cite; cite `file.py` `name` or (file.py name), a name bound at head"
+
+
 def route_ids(rng, cache):
     """(ids, why) of the route rows at head, read once. ids is the set of row ids, or None with `why` ("absent" or
     "unreadable") when the file is missing or is not {"rows": [...]}: one unknown is noted, and no id is called dead.
@@ -1555,7 +1741,7 @@ def route_ids(rng, cache):
 # its messages are report lines, never findings. A reader may also have `needs_tree(state)` and `pages(state)`: when
 # no reader that judges needs the tree, the run reads only the pages those readers name, and only those readers.
 # `begin(state, md, rng)` is called before the lines of each page. A new check adds one entry.
-READERS = (PathReader(), NameReader(), ForeignReader(), FlagReader(), ForeignValueReader(), ValueReader(), RouteClaimReader())
+READERS = (PathReader(), NameReader(), ForeignReader(), FlagReader(), ForeignValueReader(), ValueReader(), RouteClaimReader(), CodeClaimReader())
 
 
 def tracked_entries(rev, *paths):
@@ -1596,6 +1782,7 @@ def find_stale(rng):
     active = [(r, state) for r in READERS if getattr(r, "scope", "tree") == "tree"
               for state in [r.prepare(rng)] if state is not None]
     judges = [(r, state) for r, state in active if not getattr(r, "unknown", False)]
+    found.update(dead_name_cites(rng))
     if not judges:
         return found  # an unknown line never starts the Markdown read
 
