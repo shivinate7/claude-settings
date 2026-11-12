@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// One shared parser for "claim the number at merge" (CLAUDE.md rule git-slug-then-claim-number:
+// One shared parser for "claim the number at merge" (skills/fresh-prose/SKILL.md rule git-slug-then-claim-number:
 // "Never allocate a numbered record on a branch. Write a slug. Claim the number at merge.").
 //
 // A branch writes a record with a PENDING marker instead of a number. This tool numbers every

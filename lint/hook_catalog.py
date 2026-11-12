@@ -16,7 +16,7 @@ The root is `--root DIR`, else the folder in the environment variable HOOK_CATAL
 this script is in. It is never the working folder.
 
 The catalog needs a hooks/, skills/ or mods/ folder. A root with none gets no catalog and is never asked
-for settings.json. The records page is read from CLAUDE.md (the `<!-- rule:<id> -->` markers) and the .md
+for settings.json. The records page is read from the rule files that lint/rule_audit.py RULE_FILES names (the `<!-- rule:<id> -->` markers) and the .md
 files in the record folders that lint/layout.json lists. A root with no record gets no records page. A record
 that holds overruled text (a line that opens with Superseded, Overruled, Previously, No longer in force,
 Old ruling or "was:", or a "was:" after the word "old" in its block) is a problem, and so is an empty one. No page is written while a problem stands.
@@ -505,7 +505,7 @@ OLD_WORD = re.compile(r"\bold\b", re.I)
 
 RECORDS_INTRO = """# Records index
 
-This page lists every record in this repo: the rules in `CLAUDE.md`, and the files in {folders}. A script writes it. Do not edit it by hand.
+This page lists every record in this repo: the rules in the rule files that `lint/rule_audit.py` RULE_FILES names, and the files in {folders}. A script writes it. Do not edit it by hand.
 
 The merge tool writes this page again when a pull request merges, so a pull request need not carry a fresh one. To write it by hand, run `python3 lint/hook_catalog.py` from the claude-settings checkout, with `--root` set to this repo. The check on the default branch fails when the page is stale.
 
