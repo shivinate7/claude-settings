@@ -1871,6 +1871,7 @@ def parked_data_answer(item_id, at):
 # named_sessions finds each name as a whole word.
 OWNER_SESSION, TRIAGE_SESSION, COORD_SESSION, LANE_SESSION = "session_asker", "session_triage", "session_coord", "session_lane_7"
 SESSION_NAMES = (OWNER_SESSION, TRIAGE_SESSION, COORD_SESSION, LANE_SESSION)
+SESSION_OK = "session_ok"  # an entry in the session id shape, whole: the one form the mode reads as a session
 # The full-size store's items take each of these by item number: no wakes (so the owner alone), one name, two names,
 # and three names with the owner among them.
 FULL_WAKES = (None, [TRIAGE_SESSION], [TRIAGE_SESSION, COORD_SESSION], [OWNER_SESSION, COORD_SESSION, LANE_SESSION])
@@ -2070,6 +2071,31 @@ class UnreadStale(FolderCase):
                 rc, out = self.run_unread(codes=(0, 1, 2))
                 self.assert_unknown(rc, out, "colour-pick")
                 self.assert_no_listed_line(out, "%s: an answer was listed against wakes that name no session" % label)
+
+    def test_a_wakes_entry_that_is_not_a_whole_session_id_is_unknown_and_lists_no_answer(self):
+        """An entry is a session only when the whole entry is session_ plus word characters. A bare word, a padded name, a
+        name with a prefix, or one such entry beside a good one, makes the answer unknown: exit 2, no answer line. The exit
+        code is checked before the output, so a run that lists the answer fails on its own cause."""
+        cases = (("a bare word", ["triage"]), ("a leading space, no prefix", [" sB"]), ("a trailing space, no prefix", ["sB "]),
+                 ("a trailing newline, no prefix", ["sB\n"]), ("a leading space on an id", [" " + SESSION_OK]),
+                 ("a trailing space on an id", [SESSION_OK + " "]), ("a trailing newline on an id", [SESSION_OK + "\n"]),
+                 ("an id with a prefix", ["x" + SESSION_OK]), ("an id beside a bare word", [SESSION_OK, "triage"]))
+        for label, wakes in cases:
+            with self.subTest(wakes=label):
+                self.clear_store()
+                self.store(items=[item_entry("colour-pick", "open", n=143, owner=OWNER_SESSION, wakes=wakes)],
+                           answers=[pick_answer_entry("colour-pick", EARLY)])
+                r = Stale.run_script(self, "--unread", self.folder)
+                self.assertEqual(r.returncode, 2, "wakes %r was read as a session, not as unknown: exit %d: %s"
+                                 % (wakes, r.returncode, r.stdout + r.stderr))
+                self.assert_mode_lines(r.stdout, r.stderr)
+                self.assert_unknown(r.returncode, r.stdout, "colour-pick")
+                self.assert_no_listed_line(r.stdout, "%s: an answer was listed against a wakes entry that is not a whole session id" % label)
+
+    def test_a_wakes_entry_in_the_session_id_shape_is_listed_with_its_name(self):
+        """Green on the old code too: an entry in the session id shape is one word, and the answer line names it."""
+        line = self.one_answer_line(owner=OWNER_SESSION, wakes=[SESSION_OK])
+        self.assertIn("wakes %s" % SESSION_OK, line, "an entry in the session id shape is not named in its answer line: " + line)
 
     def test_a_full_store_names_each_unread_answers_own_wakes_and_no_other_items(self):
         count = 120  # a full page of items, each kind of wakes in turn (FULL_WAKES), and every third answer read back
