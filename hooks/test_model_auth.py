@@ -75,6 +75,8 @@ _spec.loader.exec_module(dw)
 SCRATCH = tss.SCRATCH  # one run folder per run: the Stop harness makes it and removes it at exit
 
 FAKE_TOKEN = "sk-ant-oat01-FAKE"
+KEY_NAME = "ANTHROPIC_API_KEY"
+FAKE_KEY = "sk-ant-api03-FAKE"  # a fake value: a failure names the key's presence, never its value
 UNREADABLE_MARK = b"BYTES-MARKER"
 SETUP = "claude setup-token"
 HOOK_TOKEN_REL = os.path.join("state", "hook-token")
@@ -169,19 +171,26 @@ class Probe:
 
 
 @contextlib.contextmanager
-def scratch_config(name):
-    """Point CLAUDE_CONFIG_DIR at this case's own folder under the run folder, then restore it."""
+def scratch_config(name, parent_key=None):
+    """Point CLAUDE_CONFIG_DIR at this case's own folder under the run folder, and set or clear this
+    process's ANTHROPIC_API_KEY, then restore both. A case that names no key starts with it cleared."""
     cfg = os.path.join(SCRATCH, "config-" + name)
     os.makedirs(cfg, exist_ok=True)
-    prior = os.environ.get("CLAUDE_CONFIG_DIR")
+    keys = ("CLAUDE_CONFIG_DIR", KEY_NAME)
+    prior = {k: os.environ.get(k) for k in keys}
     os.environ["CLAUDE_CONFIG_DIR"] = cfg
+    if parent_key is None:
+        os.environ.pop(KEY_NAME, None)
+    else:
+        os.environ[KEY_NAME] = parent_key
     try:
         yield cfg
     finally:
-        if prior is None:
-            os.environ.pop("CLAUDE_CONFIG_DIR", None)
-        else:
-            os.environ["CLAUDE_CONFIG_DIR"] = prior
+        for k in keys:
+            if prior[k] is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = prior[k]
 
 
 def token_file(cfg, data):
@@ -311,6 +320,40 @@ def C3_no_token_and_probe_fails_warns_once_with_the_fix():
     problems += expect(SETUP in text, "the warning does not name %r: %r" % (SETUP, text))
     problems += expect(path in text, "the warning does not name the hook-token path %r: %r" % (path, text))
     problems += expect(STDERR in text, "the warning does not carry the probe error: %r" % text)
+    return problems
+
+
+@case
+def C15_the_fix_line_names_the_api_key_the_judge_uses_when_no_setup_token_is_saved():
+    """C15. no token file and a failed probe: the one fix line names ANTHROPIC_API_KEY. Why: a judge uses that key
+    when no setup token is saved, so an account with only an API key is told the route it can use."""
+    with scratch_config("c15") as cfg:
+        problems = scoped(cfg)
+        fn, miss = interface("auth_check")
+        if miss:
+            return problems + miss
+        probe = Probe((None, Kinded(FAIL_ERR, "AUTH")))  # an authentication failure: the fix applies
+        text = fn(model_call=probe)
+    if text == "":
+        return problems + ["no token file and the probe failed: auth_check printed nothing"]
+    problems += expect(KEY_NAME in text, "the fix line does not name ANTHROPIC_API_KEY: %r" % text)
+    return problems
+
+
+@case
+def C16_the_fix_line_never_says_the_api_key_is_not_offered():
+    """C16. no token file and a failed probe: the fix line does not say the API key is not offered. Why: that
+    text is false for a judge with no setup token, so it would send the owner away from a working route."""
+    with scratch_config("c16") as cfg:
+        problems = scoped(cfg)
+        fn, miss = interface("auth_check")
+        if miss:
+            return problems + miss
+        probe = Probe((None, Kinded(FAIL_ERR, "AUTH")))  # an authentication failure: the fix applies
+        text = fn(model_call=probe)
+    if text == "":
+        return problems + ["no token file and the probe failed: auth_check printed nothing"]
+    problems += expect("not offered" not in text, "the fix line still says the API key is not offered: %r" % text)
     return problems
 
 
@@ -487,6 +530,33 @@ def C8_fake_token_reaches_no_stdout_and_no_written_file_but_the_token_file():
             with open(os.path.join(cfg, rel), "rb") as f:
                 if FAKE_TOKEN.encode("utf-8") in f.read():
                     problems.append("the fake token is in the written file %s" % rel)
+    return problems
+
+
+@case
+def C14_a_judge_error_that_holds_the_api_key_keeps_its_text_and_loses_the_key():
+    """C14. no token file, the key in this process, and a judge error that echoes the key: the Stop line keeps
+    the error text around the key, and the key is in no stdout and no written file. Why: the judge holds the key
+    when no token is saved, so the error path must scrub the key as it scrubs the token."""
+    sid = "model-auth-c14"
+    with scratch_config("c14", parent_key=FAKE_KEY) as cfg:
+        problems = scoped(cfg) + takes_session_id_problems()
+        problems += expect(os.environ.get(KEY_NAME) == FAKE_KEY, "scope: this process does not carry the fake key")
+        problems += expect(not os.path.exists(os.path.join(cfg, HOOK_TOKEN_REL)), "scope: a token file is present")
+        if problems:
+            return problems
+        for _ in range(3):
+            invoke_failing(stderr="auth failed for " + FAKE_KEY, session_id=sid)
+        p, msg, out = stop_message(sid)
+    problems += p
+    problems += expect("Model calls: 3 failed in a row" in msg, "no Stop line after three failures")
+    problems += expect("auth failed for" in msg, "the Stop line lost the error text around the key")
+    problems += expect(FAKE_KEY not in msg, "the API key value is in the Stop line")
+    problems += expect(FAKE_KEY not in out, "the API key value is in the Stop output")
+    for rel in files_under(cfg):
+        with open(os.path.join(cfg, rel), "rb") as f:
+            if FAKE_KEY.encode("utf-8") in f.read():
+                problems.append("the API key value is in the written file %s" % rel)
     return problems
 
 

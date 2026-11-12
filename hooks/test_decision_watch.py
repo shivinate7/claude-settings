@@ -738,8 +738,8 @@ def case_invoke_model_timeout_is_error():
 # The one home for the child's isolation flags. Decision reply-judge-samples-never-refuses (the
 # reply judge) and the reply judge row of agent-model-cap: haiku, xhigh effort, module timeout.
 def case_invoke_model_argv():
-    # Its env checks assume no token file: pin CLAUDE_CONFIG_DIR so a real one on this
-    # machine cannot change the child's env.
+    # Its env checks assume no token file and no API key in this process: pin CLAUDE_CONFIG_DIR
+    # and clear the key, so a real config dir or key on this machine cannot change the child's env.
     with scratch_config("argv"):
         _invoke_model_argv_body()
 
@@ -809,17 +809,21 @@ def _invoke_model_argv_body():
 
     # FIX 5: the env is built from JUDGE_ENV_ALLOWLIST alone, never os.environ copied and
     # subtracted. Every allowed name that this process itself carries must survive, and
-    # the host-IPC/session/secret names must never appear, whether or not this process
-    # happens to carry them.
+    # the host-IPC and session names must never appear, whether or not this process happens
+    # to carry them.
     for name in dw.JUDGE_ENV_ALLOWLIST:
         if name in os.environ:
             check("invoke_model_argv: allowlisted %s carried through" % name, name in env, env)
     excluded = (
         "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
-        "CLAUDE_CODE_HOST_SESSION_ID", "CLAUDE_CODE_OAUTH_SCOPES", "ANTHROPIC_API_KEY",
+        "CLAUDE_CODE_HOST_SESSION_ID", "CLAUDE_CODE_OAUTH_SCOPES",
     )
     for name in excluded:
         check("invoke_model_argv: %s is not in the isolated env" % name, name not in env, env.get(name))
+    # The API key reaches a judge only in the no-token case with the key set (case k1). This case
+    # sets no key, so the env must hold none. The value is never printed.
+    check("invoke_model_argv: ANTHROPIC_API_KEY is not in the isolated env when this process sets none",
+          KEY_NAME not in env)
     check(
         "invoke_model_argv: env holds only allowlisted names plus CLAUDE_CONFIG_DIR",
         set(env) <= set(dw.JUDGE_ENV_ALLOWLIST) | {"CLAUDE_CONFIG_DIR"},
@@ -1048,22 +1052,30 @@ def case_main_stop_hook_active_stays_quiet():
 FAKE_TOKEN = "tok-test-123"
 PARENT_TOKEN = "tok-parent-456"
 TOKEN_KEY = "CLAUDE_CODE_OAUTH_TOKEN"
+KEY_NAME = "ANTHROPIC_API_KEY"
+FAKE_KEY = "sk-ant-api03-FAKE"  # a fake value: no case prints it, and a failure names only its presence
 ALLOW = {"verdict": "ALLOW"}
 
 
 @contextlib.contextmanager
-def scratch_config(name, parent_token=None):
+def scratch_config(name, parent_token=None, parent_key=None):
     """Point CLAUDE_CONFIG_DIR at a scratch dir, and set or clear this process's own
-    CLAUDE_CODE_OAUTH_TOKEN, for one case. Both are restored afterwards."""
+    CLAUDE_CODE_OAUTH_TOKEN and ANTHROPIC_API_KEY, for one case. A case that names neither
+    starts with both cleared, so the machine's own environment cannot change its result.
+    All are restored afterwards."""
     cfg = os.path.join(ROOT, "config-" + name)
     os.makedirs(cfg, exist_ok=True)
-    keys = ("CLAUDE_CONFIG_DIR", TOKEN_KEY)
+    keys = ("CLAUDE_CONFIG_DIR", TOKEN_KEY, KEY_NAME)
     prior = {k: os.environ.get(k) for k in keys}
     os.environ["CLAUDE_CONFIG_DIR"] = cfg
     if parent_token is None:
         os.environ.pop(TOKEN_KEY, None)
     else:
         os.environ[TOKEN_KEY] = parent_token
+    if parent_key is None:
+        os.environ.pop(KEY_NAME, None)
+    else:
+        os.environ[KEY_NAME] = parent_key
     try:
         yield cfg
     finally:
@@ -1251,6 +1263,75 @@ def case_token_t10_undecodable_file_is_an_error():
     check("token_t10: error holds no file bytes",
           not any(s in text for s in (FAKE_TOKEN, "\\xff", "\\xfe", "\\x41")), text)
     check("token_t10: no subprocess started", calls == [], "%d call(s)" % len(calls))
+
+
+# The API key a judge may use when no setup token is saved. A failure names only whether the
+# key is present; no case prints its value.
+
+def _key_presence(env):
+    return "present" if KEY_NAME in env else "absent"
+
+
+def _scope_config_is(name, cfg):
+    """Scope first (P7): the config dir the code reads is this case's folder, before any subject assert."""
+    check("%s: scope: the config dir is this case's folder" % name,
+          os.path.realpath(dw.guard.config_dir()) == os.path.realpath(cfg), "config dir is elsewhere")
+
+
+# K1. No setup token saved, and this process carries the key: the judge's env holds the key
+# with this process's value, so a judge can authenticate with no token.
+def case_key_k1_no_token_offers_the_api_key():
+    captured = {}
+    with scratch_config("k1", parent_key=FAKE_KEY) as cfg:
+        _scope_config_is("key_k1", cfg)
+        check("key_k1: scope: no token file", not os.path.exists(os.path.join(cfg, "state", "hook-token")))
+        check("key_k1: scope: this process carries the key", os.environ.get(KEY_NAME) == FAKE_KEY,
+              "key is " + _key_presence(os.environ))
+        verdict, error = _run_invoke(captured)
+    env = captured.get("env") or {}
+    check("key_k1: call returns ALLOW with no token file", verdict == ALLOW and error is None,
+          "an error is set" if error else "")
+    check("key_k1: child env holds ANTHROPIC_API_KEY", KEY_NAME in env, "key is " + _key_presence(env))
+    check("key_k1: child key is this process's value", env.get(KEY_NAME) == FAKE_KEY,
+          "key is " + _key_presence(env))
+    check("key_k1: child env holds no token", TOKEN_KEY not in env, "token is " + _presence(env))
+
+
+# K2. A setup token saved and this process carries the key: the judge's env holds the token and
+# no API key. The token is the route; the key is never a second one.
+def case_key_k2_token_file_offers_the_token_and_not_the_key():
+    captured = {}
+    with scratch_config("k2", parent_key=FAKE_KEY) as cfg:
+        _token_file(cfg, FAKE_TOKEN + "\n")
+        _scope_config_is("key_k2", cfg)
+        check("key_k2: scope: this process carries the key", os.environ.get(KEY_NAME) == FAKE_KEY,
+              "key is " + _key_presence(os.environ))
+        verdict, error = _run_invoke(captured)
+    env = captured.get("env") or {}
+    check("key_k2: call returns ALLOW with a token file", verdict == ALLOW and error is None,
+          "an error is set" if error else "")
+    check("key_k2: child env holds CLAUDE_CODE_OAUTH_TOKEN", TOKEN_KEY in env, "token is " + _presence(env))
+    check("key_k2: child token is the file's", env.get(TOKEN_KEY) == FAKE_TOKEN, "token is " + _presence(env))
+    check("key_k2: child env holds no ANTHROPIC_API_KEY", KEY_NAME not in env, "key is " + _key_presence(env))
+    check("key_k2: no child env value is the key's value", FAKE_KEY not in env.values(),
+          "a child env value is the key's value")
+
+
+# K3. Neither a setup token saved nor the key in this process: the judge's env holds neither
+# variable. The control for K1 and K2: no credential is supplied from nowhere.
+def case_key_k3_neither_offers_neither_credential():
+    captured = {}
+    with scratch_config("k3") as cfg:
+        _scope_config_is("key_k3", cfg)
+        check("key_k3: scope: no token file", not os.path.exists(os.path.join(cfg, "state", "hook-token")))
+        check("key_k3: scope: this process carries no key", KEY_NAME not in os.environ,
+              "key is " + _key_presence(os.environ))
+        verdict, error = _run_invoke(captured)
+    env = captured.get("env") or {}
+    check("key_k3: call returns ALLOW with neither", verdict == ALLOW and error is None,
+          "an error is set" if error else "")
+    check("key_k3: child env holds no token", TOKEN_KEY not in env, "token is " + _presence(env))
+    check("key_k3: child env holds no ANTHROPIC_API_KEY", KEY_NAME not in env, "key is " + _key_presence(env))
 
 
 # --------------------------------------------------------------------------- case E1
@@ -2004,6 +2085,9 @@ def main():
     case_token_t5_prose_reply_error_is_scrubbed()
     case_token_encodings_read_as_the_bare_token()
     case_token_t10_undecodable_file_is_an_error()
+    case_key_k1_no_token_offers_the_api_key()
+    case_key_k2_token_file_offers_the_token_and_not_the_key()
+    case_key_k3_neither_offers_neither_credential()
     case_main_ordinary_turn()
     case_main_prints_the_config_report()
     case_main_powershell_config_report()
