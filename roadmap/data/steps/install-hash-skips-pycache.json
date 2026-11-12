@@ -6,10 +6,10 @@
   "phase": "now",
   "lane": "session_013NEJL1eZiamYduyKb3aU3Y",
   "why": "The cloud backs up waiting-page at each start because __pycache__ changes the hash: 23 copies, 38 MB.",
-  "note": "R41 (owner 13:36 CST Nov 11, \"r41 yes on all\", relayed by the retrospective; plan restart-plan 0f99805, R41 item 2). Keep all 5 mods, 11 skills and shiv-stylisms; fix seven defects. Audit notes: the retrospective's scratchpad, on request. install.sh tree_hash skips __pycache__, so the cloud stops backing up waiting-page at each start (23 copies, 38 MB). Placed ahead of the older ready steps in now (triage re-weigh 11:17 CST Nov 12, plans/reweigh-2026-11-12.md): an owner ruling not yet started.",
+  "note": "R41 (owner 13:36 CST Nov 11, \"r41 yes on all\", relayed by the retrospective; plan restart-plan 0f99805, R41 item 2). Keep all 5 mods, 11 skills and shiv-stylisms; fix seven defects. Audit notes: the retrospective's scratchpad, on request. install.sh tree_hash skips __pycache__, so the cloud stops backing up waiting-page at each start (23 copies, 38 MB). Placed ahead of the older ready steps in now (triage re-weigh 11:17 CST Nov 12, plans/reweigh-2026-11-12.md): an owner ruling not yet started. Owner item 645 (14:32 CST Nov 12): a yes to delete the 23 old waiting-page backups on the owner's computer, keeping any that differ from main's skill. The install fix lands either way.",
   "source": "owner 2026-11-11 13:36 CST, relayed by the retrospective session",
   "owner": "triage",
-  "updatedAt": "2026-11-12T13:42:08-06:00",
+  "updatedAt": "2026-11-12T14:32:38-06:00",
   "blockedBy": [],
   "order": -199
 }

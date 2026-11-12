@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-12T20:31:00Z",
+  "context": "Goal: the install script stops piling up copies of the waiting-page skill, and the old copies go.\nProblem (cannot undo): lane install-hash-skips-pycache fixes the install script so it stops backing up the waiting-page skill at each start; 23 old backup copies (38 MB) remain, and deleting them keeps no copy.\nBased on (ruling): R41 (owner 13:36 CST Nov 11, \"r41 yes on all\"): fix the seven install defects, this one included.\nDeparts from: main keeps every waiting-page backup the install script made \u2014 the 23 old copies are deleted.",
+  "home": "step install-hash-skips-pycache (the install script's hash skips Python cache folders)",
+  "id": "waiting-page-backups-delete",
+  "kind": "decision",
+  "n": 645,
+  "options": [
+    {
+      "gain": "38 MB back and one clean backups folder; nothing lost that main's copy of the skill does not hold.",
+      "how": "A session on your computer lists the waiting-page backups under ~/.claude/backups/skills/, keeps any copy that differs from main's skill, and deletes the rest. It reports the kept ones.",
+      "key": "a",
+      "label": "Delete the copies that match main (Recommended)",
+      "lose": "The matching copies, which are duplicates of main's skill."
+    },
+    {
+      "gain": "Nothing is deleted.",
+      "how": "The lane lands only the install fix; the 23 copies stay.",
+      "key": "b",
+      "label": "Keep all 23 copies",
+      "lose": "38 MB of duplicate copies stay on your computer."
+    }
+  ],
+  "owner": "lane install-hash-skips-pycache (session_013NEJL1eZiamYduyKb3aU3Y)",
+  "ref": "lane install-hash-skips-pycache, via coordinator 14:29 CST Nov 12",
+  "repo": "shivinate7/claude-settings",
+  "short": "Delete old waiting-page backups",
+  "status": "open",
+  "title": "Delete 23 old backup copies of the waiting-page skill on your computer",
+  "why": "A delete that keeps no copy needs your yes."
+}

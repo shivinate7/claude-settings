@@ -919,3 +919,5 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - Batch 106 (coordinator 14:25 CST Nov 12): runner 10 has a coordinator waiver for the --ready lint only; the unknown is the ci-done-comment action #2860 adds, which main's bin/ci-job cannot run.
 - Waiting copy exported 14:28 CST Nov 12 (170 files changed; last export was d95b542eb on Nov 11), asked by lane cull-narration-hex-id-fix.
 - Batch 104 #2814 (coordinator 14:26 CST Nov 12): runner 10 merges it at c63629c18 (green), then rebuilds batch 106 on the new main.
+- Coordinator 14:27 CST Nov 12: lane builder-bash-test-write's two "page" questions were not owner questions; the coordinator answered them, nothing filed.
+- Coordinator blocked sweep 14:29 CST Nov 12: glossary-orchestrator-sweep picked "coordinator"; fan-code-decisions adds child repos itself; rollup-needs-all-shards gates by step; owner-only: waiting-site-probe has an "Approve or deny Artifact" prompt, grant-scope-fixcheck-carry needs the owner's `override 15m` in that session.

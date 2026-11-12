@@ -4,11 +4,11 @@
   "status": "doing",
   "repo": "shivinate7/claude-settings",
   "phase": "next",
-  "lane": "session_013NEJL1rreXGu8xv7m6nN3h",
+  "lane": "session_013NEJKzqM5fLnC5CwpRt8p3",
   "why": "The repeat judge marked owner remarks as repeats of themselves and held turns; a false mark costs the owner a re-read.",
-  "note": "R38 (owner 13:03 CST Nov 11, relayed by the retrospective, page item 509): \"yes on the fix !\". The judge skips a candidate on the item's own home or the same owner message; each item gets its own candidates; a mark prints one line and never blocks; the meaning match stays. Home: decision owner-feedback-inbox (the owner feedback inbox), its Repeats part, rewritten in place. Closes fb-1259-3. Lane prose-unmapped-4 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
+  "note": "R38 (owner 13:03 CST Nov 11, relayed by the retrospective, page item 509): \"yes on the fix !\". The judge skips a candidate on the item's own home or the same owner message; each item gets its own candidates; a mark prints one line and never blocks; the meaning match stays. Home: decision owner-feedback-inbox (the owner feedback inbox), its Repeats part, rewritten in place. Closes fb-1259-3. Lane prose-unmapped-4 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Moved to lane repeat-mark-fixes 14:27 CST Nov 12 (coordinator); old lane fan-prose-unmapped-4 archived.",
   "source": "owner 2026-11-11 13:03 CST, relayed by the retrospective session",
   "owner": "triage",
-  "updatedAt": "2026-11-12T07:29:00-06:00",
+  "updatedAt": "2026-11-12T14:32:38-06:00",
   "blockedBy": []
 }

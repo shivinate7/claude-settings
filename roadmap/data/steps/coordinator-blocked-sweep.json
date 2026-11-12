@@ -1,0 +1,14 @@
+{
+ "id": "coordinator-blocked-sweep",
+ "title": "At each wake the coordinator reads every blocked session and acts on each",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 14:27 CST Nov 12: \"seems a lot of sessions are waiting for you coordinator and triage to reply\". The coordinator's 14:29 CST sweep found 9 blocked sessions; 4 cleared at once.",
+ "source": "owner 14:27 CST Nov 12, via coordinator 14:30 CST",
+ "note": "At each wake the coordinator reads list_sessions status_bucket blocked and acts on each, or routes it to triage or the owner. Reads on demand inside the running session; starts no timer.",
+ "updatedAt": "2026-11-12T14:32:38-06:00"
+}

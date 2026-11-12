@@ -1,0 +1,37 @@
+{
+  "added": "2026-11-12T20:28:00Z",
+  "context": "Goal: a coordinator pick that a past ruling already covers is not brought to you as a question.\nProblem (rule): PR #2932 judges a pick only in a message the coordinator sends to a running session; a pick written in the brief that starts a new lane session, or in a message to an agent, passes unjudged.\nBased on (read): PR #2932 lists this as a known limit. Your 14:25 CST words: \"we're literally trying to make changes to hooks and ure showing me how our old hooks/rules are the law stop that\".\nDeparts from: today's live code judges no pick \u2014 PR #2932 judges messages to running sessions only; b also judges lane briefs and agent messages.",
+  "home": "step pick-ack-past-ruling (a pick a past ruling covers is acked, not asked)",
+  "id": "pick-check-briefs-too",
+  "kind": "decision",
+  "n": 644,
+  "options": [
+    {
+      "gain": "A smaller check; fewer places an old ruling is quoted back at you.",
+      "how": "The check stays as built; the known limit stays a note.",
+      "key": "a",
+      "label": "Session messages only (Recommended)",
+      "links": [
+        {
+          "label": "PR #2932",
+          "url": "https://github.com/shivinate7/claude-settings/pull/2932"
+        }
+      ],
+      "lose": "A pick inside a lane brief is not judged."
+    },
+    {
+      "gain": "No route skips the check.",
+      "how": "The check also reads the brief that starts a lane and each message to an agent.",
+      "key": "b",
+      "label": "Lane briefs and agent messages too",
+      "lose": "More places where an old ruling can be held up against a change you want."
+    }
+  ],
+  "owner": "lane pick-ack-past-ruling (PR #2932, via coordinator session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "ref": "lane pick-ack-past-ruling, PR #2932 head 3c38ce6db, via coordinator 14:27 CST Nov 12",
+  "repo": "shivinate7/claude-settings",
+  "short": "Pick check: briefs too?",
+  "status": "open",
+  "title": "The past-ruling check on coordinator picks also reads lane briefs",
+  "why": "It sets how far a check that quotes old rulings reaches, after your 14:25 CST remark."
+}

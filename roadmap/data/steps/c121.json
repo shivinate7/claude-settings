@@ -1,10 +1,10 @@
 {
  "title": "Each repo's live waiting page is republished on the final look",
  "phase": "now",
- "status": "doing",
+ "status": "blocked",
  "order": -298,
  "why": "c100 (the waiting page's final look) merged in batch #683; the live pages (home-app, degen, mailaudit) still show the old one. Build advisor, Oct 27 04:25 CDT.",
- "note": "Ruling, Oct 27 23:48 CDT (shiv, waiting page item 4, b): start fresh pages on this account; each repo gets a new page at its visit, and open answers on the old pages (other accounts, 404 here) are dropped; this project's page is artifact:queue. Due after: each repo's visit (r1), home-app first. Brief: briefs/c100-republish-live-pages.md. Port: yes, every repo's page. Placed at the top of now (triage re-weigh, owner ask 11:19 CST Nov 12): without it a template fix on main never reaches another repo's live page. Its \"Due after: each repo's visit\" wait needs a fresh read before the lane starts. Lane live-pages-republish (coordinator 11:27 CST Nov 12): act 1 re-reads the wait and lists the live pages, then the coordinator picks.",
- "updatedAt": "2026-11-12T13:42:08-06:00",
- "lane": "session_013NEJL1ypMcv6QGLD1nyvXW"
+ "note": "Ruling, Oct 27 23:48 CDT (shiv, waiting page item 4, b): start fresh pages on this account; each repo gets a new page at its visit, and open answers on the old pages (other accounts, 404 here) are dropped; this project's page is artifact:queue. Due after: each repo's visit (r1), home-app first. Brief: briefs/c100-republish-live-pages.md. Port: yes, every repo's page. Placed at the top of now (triage re-weigh, owner ask 11:19 CST Nov 12): without it a template fix on main never reaches another repo's live page. Its \"Due after: each repo's visit\" wait needs a fresh read before the lane starts. Lane live-pages-republish (coordinator 11:27 CST Nov 12): act 1 re-reads the wait and lists the live pages, then the coordinator picks. Triage pick 14:32 CST Nov 12 (coordinator asked; a step close is triage's call): b, keep open until each of the three repos has a fresh page. c130 (done) republishes on a template change, but it does not make a fresh page on this account for a repo not yet visited, which is this step's done line. The lane may end once it files its list of live pages; the step then waits on each repo's visit.",
+ "updatedAt": "2026-11-12T14:32:38-06:00",
+ "lane": ""
 }
