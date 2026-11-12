@@ -500,14 +500,15 @@ def dirty_paths_are_pushed_copies(where: str, lines):
     edited = _z_names(_git(where, "diff-files", "--name-only", "-z"))
     if staged is None or edited is None:
         return None
-    paths = sorted(set(staged) | set(edited))
+    edited_set = set(edited)
+    paths = sorted(set(staged) | edited_set)
     # A name git printed that this decode altered cannot be looked up again, so it proves nothing.
     if not paths or any("�" in path for path in paths):
         return False
     index = _index_entries(where, paths)
     if index is None:
         return None
-    changed = _worktree_entries(where, [p for p in paths if p in set(edited)])
+    changed = _worktree_entries(where, [p for p in paths if p in edited_set])
     if changed is None:
         return None
     if changed is False:
