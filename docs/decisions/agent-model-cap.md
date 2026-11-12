@@ -148,7 +148,7 @@ whose input has no `model` or no `source_url`; an empty or whitespace-only value
 repo has nothing to work in. A lane with no model starts on the coordinator's model, not the lane row's. The coordinator
 passes both on every lane start. The rule runs after `lane-repo-tag`. An owner override lifts it.
 Known gaps: a lane tag set after the start is not judged (inherited from the lane effort pin and the lane repo
-tag). `start_session` carries no `tags` field, so no lane-tag rule can judge it: platform-forced. An agent's
+tag). `start_session` has no `tags` field (source: step `both-session-starts-judged`; unchecked against the live tool schema), so no lane-tag rule judges it: `is_lane_create_session` accepts only `create_session`. An agent's
 `start_session` call is refused by `agent-no-remote-tools` (`START_SESSION_TOOL` is in `REMOTE_OUTWARD_TOOLS`). The rule
 checks that a model is present, not which model.
 Kind of risk: likely. Landed 2026-11-08.

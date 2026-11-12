@@ -15,9 +15,10 @@ PROJECT_FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json"
 # lint/check_agent_models.py reads it from the guard.
 REMOTE_SERVER = "mcp__claude-code-remote"
 # The session server's start_session, the one outward tool outside claude-code-remote (its own server prefix). The one
-# home of the name; the guard's start-tool checks import it. Its input has no `tags` field, so the lane-tag guards
-# (lane-effort-pin, lane-repo-tag, lane-start-settings, all through is_lane_create_session) cannot judge it:
-# platform-forced. Only agent-no-remote-tools, through REMOTE_OUTWARD_TOOLS, stops an agent's call.
+# home of the name; the guard's start-tool checks import it. Its input has no `tags` field (source: step
+# both-session-starts-judged; not checked against the live tool schema), so the lane-tag guards (lane-effort-pin,
+# lane-repo-tag, lane-start-settings, all through is_lane_create_session, which accepts only create_session) do not
+# judge it. Only agent-no-remote-tools, through REMOTE_OUTWARD_TOOLS, stops an agent's call.
 START_SESSION_TOOL = "mcp__ccd_session__start_session"
 # The tools that start, message, tag or archive sessions, set scheduled tasks or attach repos and computers: the
 # twenty claude-code-remote tools, and START_SESSION_TOOL. An agent never calls one; the session that spawned it does.
