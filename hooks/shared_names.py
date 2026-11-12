@@ -47,6 +47,9 @@ NOTICE_FRAMES = tuple(tag + end for tag in ("<webhook-payload", "<wake", "<teamm
 EXPLORE_AUDIT_MARKER = "Audit:"
 # A reviewer may run Sonnet, above its Haiku row, when its brief's first non-blank line starts with this marker: the brief is a fix check.
 FIX_CHECK_MARKER = "Fix check"
+# A fresh reviewer or refuter that replaces a finished agent of its role may carry that agent's prior report when its brief's
+# first non-blank line is this marker followed by the replaced agent's name (rule reviewer-brief-blind, decision reviewer-brief-blind).
+REPLACES_MARKER = "Replaces:"
 
 # THE BRIEF MARKER TABLE (rules agent-role-model, roles-third-round-steps-up; decision agent-model-cap). One row per
 # marker: (kind, regex text, position). guard.marker_hits is the one scanner that reads it. Cost: a pure scan of the

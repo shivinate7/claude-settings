@@ -3576,7 +3576,9 @@ def step_up_reason(prompt: str, role, model) -> str:
 # report or a prior round's verdict anchors on it and confirms it. A spawn whose role is a reviewer is refused when its brief
 # holds a report-shaped block or a verdict line. Each shape is read at line start, never as a word, so a brief that quotes the
 # rule passes. A later round's findings list (file, line, claim) and a fix check's one finding hold neither shape. An argument
-# pasted as plain prose is not caught. Cost: no process start and no file written; one pass over the brief's text.
+# pasted as plain prose is not caught. A brief whose first non-blank line is `Replaces: <name>` is a replacement agent's and
+# may carry the prior report. Cost: no process start and no file written; one pass over the brief's text.
+from shared_names import REPLACES_MARKER  # noqa: E402  the one home of the brief markers
 BRIEF_BLIND_ROLES = ("reviewer", guard_core.REFUTER_ROLE)
 REVIEWER_VERDICT_WORDS = ("PASS", "FAIL", "PARTIAL", "CHANGES")
 BRIEF_DONE_LABEL = "Done"
@@ -3618,9 +3620,21 @@ def brief_blind_bodied_labels(brief: str) -> set:
     return bodied
 
 
+def brief_blind_replaces(brief: str) -> bool:
+    """True when the brief's first non-blank line is REPLACES_MARKER and a name: some non-blank text after it. A template
+    hole (`\x00`) names nothing the scan can read, so it never counts. The guard cannot check that the named agent
+    exists; a copied marker over a pasted report passes (decision reviewer-brief-blind)."""
+    first = brief_first_line(brief).lstrip(" \t")
+    if not first.startswith(REPLACES_MARKER):
+        return False
+    name = first[len(REPLACES_MARKER):]
+    return bool(name.strip()) and "\x00" not in brief
+
+
 def brief_blind_shape(brief) -> str:
-    """The shape of a brief that a reviewer must not read: "report", "item" or "verdict", else ""."""
-    if not isinstance(brief, str):
+    """The shape of a brief that a reviewer must not read: "report", "item" or "verdict", else "". A brief that opens with
+    the Replaces: line is a replacement agent's and carries the prior report, so it has none."""
+    if not isinstance(brief, str) or brief_blind_replaces(brief):
         return ""
     if len(brief_blind_bodied_labels(brief)) >= 2:
         return "report"
