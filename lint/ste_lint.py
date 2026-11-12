@@ -1620,7 +1620,7 @@ def one_term_findings(text):
         for at in hits or [0]:
             token = re.match(r"\w*", text[max(0, text.rfind(" ", 0, at) + 1):]).group(0)
             if token in check_glossary.PLATFORM_NAMES or token.startswith(check_glossary.PLATFORM_PREFIXES):
-                continue  # Claude Code's own name: SubagentStop holds the retired name subagent
+                continue  # Claude Code's own name, kept by check_glossary.PLATFORM_NAMES
             out.append((at, name, term))
     return out
 
