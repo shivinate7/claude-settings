@@ -1,0 +1,33 @@
+{
+  "added": "2026-11-12T22:01:00Z",
+  "context": "Goal: the gather reads every child repo once, so no finding about claude-settings is missed.\nProblem (rule): the lane can see claude-settings only; tile-windows, session-mailbox, joyous, ios-adblock, adblock-lists, inbox-engine, advisor, Brewer-KYC, mailaudit-data, frag-head-beta and note-scrape were never swept.\nBased on (measured): the lane's GitHub scope is claude-settings only (the gather plan, 2026-11-12).\nDeparts from: main \u2014 adds read-only access for one session to 11 repos.\nWhy yours: a session reaches another repo only with your yes, and a cloud attach may show you a card to confirm.",
+  "home": "step outbox-aggregate-plan",
+  "id": "outbox-repo-access",
+  "kind": "task",
+  "n": 660,
+  "options": [
+    {
+      "gain": "The sweep finishes in the cloud, with nothing written to those repos.",
+      "how": "Save this; the lane attaches each of the 11 repos for reading only, and you confirm any card it shows you.",
+      "id": "attach-read-only",
+      "key": "a",
+      "label": "Yes, attach them read-only",
+      "lose": "Up to 11 confirm cards if the app asks for each."
+    },
+    {
+      "gain": "No access given.",
+      "how": "Nothing to do; the lane pauses the sweep of these 11 repos.",
+      "id": "not-now",
+      "key": "b",
+      "label": "Not now",
+      "lose": "Findings in those 11 repos stay unread."
+    }
+  ],
+  "owner": "lane outbox-aggregate-plan (session_013NEJL21kw7F4TNpNyj1j1o)",
+  "ref": "plan PR #2974, owner act a",
+  "repo": "shivinate7/claude-settings",
+  "short": "Read access to 11 repos",
+  "status": "open",
+  "title": "Let the gather lane read the 11 repos not swept on Nov 10",
+  "why": "Work in a repo other than the one the session started in needs your word."
+}

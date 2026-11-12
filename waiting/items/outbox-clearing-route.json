@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-12T22:01:00Z",
+  "context": "Goal: a finding leaves the child repo once it is filed here, so nothing is filed twice or lost.\nProblem (rule): the plan has the child's own triage remove each filed line, but an earlier route has a claude-settings session push into each child under your override, and only you can pick.\nBased on (read): every filed line cites its source repo and file; the child's triage removes a line when that cite is on claude-settings main or the record branch.\nBased on (read): the shared template skills/project-ops/templates/operating-model.md, which each child copies, needs one line for route a.\nDeparts from: main \u2014 adds a clearing step for child findings filed here.",
+  "home": "docs/plans/outbox-aggregate-plan.md act 4; step outbox-aggregate-plan",
+  "id": "outbox-clearing-route",
+  "kind": "decision",
+  "n": 659,
+  "options": [
+    {
+      "gain": "No session writes into another repo, and no override is needed.",
+      "how": "Each child's triage removes a line once its cite shows up in claude-settings; a lane adds that line to the shared template. Route b stays the fallback for a child with no triage running.",
+      "id": "child-triage-clears",
+      "key": "a",
+      "label": "Each child's triage clears its own (Recommended)",
+      "lose": "A child whose triage is not running keeps its filed lines until one runs."
+    },
+    {
+      "gain": "Every child clears at once, with or without a running triage.",
+      "how": "A claude-settings session pushes the removals into each child's record branch, under one override you type per repo.",
+      "id": "override-push",
+      "key": "b",
+      "label": "A one-time push into each child",
+      "lose": "You type an override per repo, and a session writes outside its own repo."
+    }
+  ],
+  "owner": "lane outbox-aggregate-plan (session_013NEJL21kw7F4TNpNyj1j1o)",
+  "pick": "a",
+  "ref": "plan PR #2974, owner act b; item 490 route",
+  "repo": "shivinate7/claude-settings",
+  "short": "Clearing a child's filed findings",
+  "status": "open",
+  "title": "Who removes a child repo's finding once claude-settings has filed it?",
+  "why": "Option b writes into other repos, which needs your override each time."
+}
