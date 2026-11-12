@@ -173,6 +173,14 @@ class ReviewGrantRules(unittest.TestCase):
         self.assertIn("round 4", why, f"the why does not name round 4: {why!r}")
         self.assertNotIn("round 3", why, f"the why names round 3, not round 4: {why!r}")
 
+    def test_a_round_three_fail_with_no_grant_is_held_while_the_granted_round_four_is_done(self):
+        # The final round is 3 with no Grant and 4 with one. A round-3 FAIL holds only where round 3 is the final round, so the granted
+        # round 4 PASS beside it (the control) reads done, not held.
+        held, why = tm.record_verdict(self, tm.record_text(rounds=tm.REVIEW_FAILED_THREE, guard="no"))
+        self.assertEqual(held, "held", f"a round-3 FAIL with no grant is the final round, and it reads {held!r}: {why!r}")
+        state, why = self.granted_state("PASS", guard="no")
+        self.assertEqual(state, "done", f"the granted round 4 PASS after a round-3 FAIL reads {state!r}: {why!r}")
+
     def test_round_four_with_guard_no_is_done_whatever_its_verdict(self):
         for verdict in ("PASS", "FAIL", "PARTIAL"):
             with self.subTest(verdict=verdict):
