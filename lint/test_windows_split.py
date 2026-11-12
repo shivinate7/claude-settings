@@ -57,7 +57,6 @@ REQUIRED = [
     "python lint/test_ruling_census.py",
     "python lint/test_verdict.py",
     "python lint/test_hook_platform_exit.py",
-    "python lint/check_unknown_reads_contract.py",
     "python janitor/test_session_end_sweep.py",
     "python janitor/test_install_launchd.py",
     "python janitor/test_install_schtasks.py",
@@ -1375,6 +1374,20 @@ class SplitJobs(unittest.TestCase):
         for label, (text, check) in cases.items():
             with self.subTest(defect=label):
                 self.assertTrue([p for p in check(text) if "check_unknown_reads_contract" in p], label)
+
+    def test_the_unknown_reads_lint_never_runs_on_windows(self):
+        # Named failure: a pure lint runs on Windows too (decision test-strategy-reset: pure lints run on ubuntu only),
+        # so each batch pays for a Windows run of a check Linux already proves.
+        def windows_runs(text):
+            return {n: [st for st in step_blocks(job_block(text, n)) if "check_unknown_reads_contract" in (run_body(st) or "")]
+                    for n in windows_jobs(text)}
+
+        self.assertEqual({n: r for n, r in windows_runs(self.text).items() if r}, {})
+        # The checker sees the step in a block scalar, which a header-only read of `run:` misses.
+        block = ("      - name: Unknown-read contract\n        run: |\n          python lint/check_unknown_reads_contract.py\n")
+        head, sep, tail = self.text.partition("  checks-windows-rest:\n")
+        mutant = head + sep + tail.replace("    steps:\n", "    steps:\n" + block, 1)
+        self.assertTrue([n for n, r in windows_runs(mutant).items() if r], "a block-scalar run in a Windows job went unseen")
 
     def test_the_linux_guard_runs_in_its_two_shard_jobs(self):
         # Named failure: the guard suite runs in one Linux job, or in a third, or in neither, so its cases do not each run once.

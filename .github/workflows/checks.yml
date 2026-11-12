@@ -1891,10 +1891,6 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() }}
         run: python lint/test_hook_platform_exit.py
 
-      - name: Unknown-read contract (guard + session_start)
-        if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
-        run: python lint/check_unknown_reads_contract.py
-
       - name: Janitor triggers fixture suite (SessionEnd hook)
         if: ${{ (needs.scope.outputs.checks_windows_rest == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         run: python janitor/test_session_end_sweep.py
