@@ -1584,10 +1584,6 @@ _EDGE_AFTER = r"(?:(?![A-Za-z0-9])|%s)" % _CASE_STEP
 _WORD_JOIN = r"(?:[^A-Za-z0-9]+|%s)" % _CASE_STEP
 
 
-def reset_one_term_cache():
-    _ONE_TERM_CACHE.clear()
-
-
 def _check_glossary():
     """The check_glossary module, or None when it does not load (said once on stderr): STE022 is then off,
     and every other check runs as before."""
