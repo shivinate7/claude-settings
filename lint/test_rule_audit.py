@@ -576,6 +576,15 @@ class MoveOffMechanismTests(ToolTreeCase):
         self.assertEqual(rc, 0, out)
         self.assertNotIn("moved off a mechanism", out, out)
 
+    def test_a_row_moving_between_unmechanized_and_judgment_is_no_move(self):
+        # Both kinds are off a mechanism already, so a move between them is no move off one, in either direction.
+        for base_kind, new_kind in (("judgment", "unmechanized"), ("unmechanized", "judgment")):
+            with self.subTest(base_kind=base_kind, new_kind=new_kind):
+                base_mech = {"kind": base_kind, "reason": MECH_REASON}
+                rc, out = audit(self.move_tree(base_mech, {"kind": new_kind, "reason": WHY}))
+                self.assertEqual(rc, 0, out)
+                self.assertNotIn("moved off a mechanism", out, out)
+
     def test_no_origin_main_compares_no_move_and_fails_nothing(self):
         # Control: no origin/main to read, so the move is not compared. The report says so and nothing fails.
         same = {"kind": "ci", "ref": "step-00", "reason": MECH_REASON}
