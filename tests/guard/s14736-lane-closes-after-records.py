@@ -240,6 +240,21 @@ archive_refuse("a sources-only repo whose own read answers 404 is out of this se
 archive_refuse("a lane whose branch compare in q_max is the cloud proxy's 403 for a repo outside this session's scope is refused, and the reason names the scope and the runner, with no retry",
                role_path("archive-inc"), fake_gh_path(ARCHINC_COMPARE403), carries=ARCHIVE_SCOPE_PIN,
                lacks=ARCHIVE_SCOPE_LACKS + ARCHIVE_NOPR_PIN)
+# The reason names the repo that failed, by its slug, so the runner to route to is the one that holds it. A repo the
+# record names only through its sources is no cs-repo tag, so the reason never says a cs-repo tag names it.
+archive_refuse("a sources-only repo whose own read answers 404 names its slug, never says a cs-repo tag names it, and keeps the scope, runner and no retry",
+               role_path("archive-inc-source-only"), fake_gh_path(ARCHINC_REPO404), carries=ARCHIVE_SCOPE_PIN + (ARCH_REPO_QMAX,),
+               lacks=ARCHIVE_SCOPE_LACKS + ("cs-repo tag names it",))
+archive_refuse("a sources-only repo whose branch compare the cloud proxy refuses names its slug, never says a cs-repo tag names it, and keeps the scope, runner and no retry",
+               role_path("archive-inc-source-only"), fake_gh_path(ARCHINC_COMPARE403), carries=ARCHIVE_SCOPE_PIN + (ARCH_REPO_QMAX,),
+               lacks=ARCHIVE_SCOPE_LACKS + ("cs-repo tag names it",))
+# A cs-repo failure names its repo too: the lane's own cs-repo tag is o/r, and the reason carries that slug.
+archive_refuse("a lane whose cs-repo o/r answers 404 on its open list names o/r, with the scope, runner and no retry",
+               role_path("archive-lane"), fake_gh_path(ARCHSCOPE_OUT), carries=ARCHIVE_SCOPE_PIN + ("o/r",),
+               lacks=ARCHIVE_SCOPE_LACKS)
+archive_refuse("a lane whose cs-repo o/r the cloud proxy refuses with a 403 names o/r, with the scope, runner and no retry",
+               role_path("archive-lane"), fake_gh_path(ARCHSCOPE_PROXY), carries=ARCHIVE_SCOPE_PIN + ("o/r",),
+               lacks=ARCHIVE_SCOPE_LACKS)
 # The controls. A transient failure in scope still says retry and names neither the scope nor the runner. A 404 on a
 # branch's own tip is missing, not out of scope: it refuses as unreadable, with the read reason.
 TRANSIENT_PIN = ARCHIVE_READ_PIN + (("retry", "Retry"),)

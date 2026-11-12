@@ -20678,9 +20678,10 @@ class TouchesRead(Env):
 
 
 class ScopeReads(unittest.TestCase):
-    """Host.pages types a read of a repo outside this session's GitHub scope as ScopeStop: a 404 on a list read, or the
-    cloud proxy's 403 with its sentence, on any page. A 5xx is a Stop that is no scope, and a 200 that quotes the sentence is data.
-    Each case names the type by its name, so a merge tool without ScopeStop fails the assert, not an import."""
+    """Host.pages types a read of a repo outside this session's GitHub scope as ScopeStop: a 404 on a list read through pages
+    (the archive guard's reads), or the cloud proxy's 403 with its sentence, in its JSON or its wrapped form, on any page. The merge
+    flow's own reads (open_pulls, checks, pull_files) take a 404 as a plain Stop. A 5xx is a Stop that is no scope, and a 200 that
+    quotes the sentence is data. Each case names the type by its name, so a merge tool without ScopeStop fails the assert, not an import."""
 
     SENTENCE = "GitHub access to this repository is not enabled for this session."
     # What gh prints for a read run with -i: the status block, the JSON body, then gh's tail line that ends the output.
@@ -20738,6 +20739,73 @@ class ScopeReads(unittest.TestCase):
         stop, _ = self.read((0, "HTTP/1.1 200 OK\r\n\r\n" + body))
         self.assertIsNotNone(stop, "a 200 object that quotes the sentence raised nothing")
         self.assertEqual(type(stop).__name__, "Stop", "a 200 object that quotes the sentence raised %s, want a plain Stop" % type(stop).__name__)
+
+    # gh's wrapped form of the proxy's 403: `HTTP 403: <sentence> (<url>)`, the sentence neither at the tail nor at the JSON start.
+    WRAPPED_403 = "HTTP 403: " + SENTENCE + " (https://api.github.com/repos/o/r/pulls?state=open&per_page=100&page=1)"
+
+    def merge_read(self, call, *replies):
+        """One merge-flow read, `call(host)`, its gh calls answered by `replies` in turn. -> the Stop it raised, or None."""
+        host = merge.Host(repo="o/r")
+        with unittest.mock.patch.object(host, "api", side_effect=list(replies)):
+            try:
+                call(host)
+            except merge.Stop as error:
+                return error
+        return None
+
+    def test_wrapped_403_on_a_list_read_is_scope_stop(self):
+        stop, _ = self.read((1, self.WRAPPED_403))
+        self.assertIsNotNone(stop, "the wrapped 403 on a list read raised nothing")
+        self.assertEqual(type(stop).__name__, "ScopeStop", "the wrapped 403 on a list read raised %s, want ScopeStop" % type(stop).__name__)
+
+    def test_wrapped_403_is_scope(self):
+        self.assertTrue(merge.is_scope(1, self.WRAPPED_403), "is_scope reads the wrapped 403 as no scope")
+
+    def test_successful_call_quoting_the_wrapped_403_is_no_scope(self):
+        # A control: a call that succeeds is never scope, and a 200 list is data whatever its titles say.
+        self.assertFalse(merge.is_scope(0, self.WRAPPED_403), "is_scope reads a successful call that quotes the wrapped 403 as scope")
+        items = [{"number": 3, "title": self.WRAPPED_403}]
+        stop, got = self.read((0, "HTTP/1.1 200 OK\r\n\r\n" + json.dumps(items)))
+        self.assertIsNone(stop, "a 200 list that quotes the wrapped 403 raised %s" % (type(stop).__name__,))
+        self.assertEqual(got, items, "a 200 list that quotes the wrapped 403 did not come back as its items")
+
+    def test_merge_flow_open_pulls_404_is_plain_stop(self):
+        stop = self.merge_read(lambda host: host.open_pulls(), (1, self.NOT_FOUND))
+        self.assertIsNotNone(stop, "a 404 on the merge flow's open pull request list raised nothing")
+        self.assertEqual(type(stop).__name__, "Stop", "a 404 on the merge flow's open pull request list raised %s, want a plain Stop" % type(stop).__name__)
+
+    def test_merge_flow_check_runs_404_is_plain_stop(self):
+        stop = self.merge_read(lambda host: host.checks(7, sha="a" * 40), (1, self.NOT_FOUND))
+        self.assertIsNotNone(stop, "a 404 on the merge flow's check-runs read raised nothing")
+        self.assertEqual(type(stop).__name__, "Stop", "a 404 on the merge flow's check-runs read raised %s, want a plain Stop" % type(stop).__name__)
+
+    def test_merge_flow_pull_files_404_is_plain_stop(self):
+        stop = self.merge_read(lambda host: host.pull_files(7), (1, self.NOT_FOUND))
+        self.assertIsNotNone(stop, "a 404 on the merge flow's pull files read raised nothing")
+        self.assertEqual(type(stop).__name__, "Stop", "a 404 on the merge flow's pull files read raised %s, want a plain Stop" % type(stop).__name__)
+
+    def test_merge_flow_check_runs_proxy_403_is_still_scope_stop(self):
+        # A control: the proxy's 403 is scope on every read, the merge flow's included.
+        stop = self.merge_read(lambda host: host.checks(7, sha="a" * 40), (1, self.PROXY_403))
+        self.assertIsNotNone(stop, "the proxy's 403 on the merge flow's check-runs read raised nothing")
+        self.assertEqual(type(stop).__name__, "ScopeStop", "the proxy's 403 on the merge flow's check-runs read raised %s, want ScopeStop" % type(stop).__name__)
+
+    # The archive guard's other paged reads keep a 404 as scope. Controls, green before the merge-flow fix. Its open list is
+    # test_list_404_is_scope_stop above.
+    def test_archive_head_filter_list_404_stays_scope_stop(self):
+        stop = self.merge_read(lambda host: host.pages("pulls", fields={"state": "all", "head": "o:claude/x"}), (1, self.NOT_FOUND))
+        self.assertIsNotNone(stop, "a 404 on the archive's head-filter list read raised nothing")
+        self.assertEqual(type(stop).__name__, "ScopeStop", "a 404 on the archive's head-filter list read raised %s, want ScopeStop" % type(stop).__name__)
+
+    def test_archive_matching_refs_copy_404_stays_scope_stop(self):
+        stop = self.merge_read(lambda host: host.pages("git/matching-refs/heads/archive/claude/x"), (1, self.NOT_FOUND))
+        self.assertIsNotNone(stop, "a 404 on the archive's matching-refs read of its copies raised nothing")
+        self.assertEqual(type(stop).__name__, "ScopeStop", "a 404 on the archive's matching-refs read of its copies raised %s, want ScopeStop" % type(stop).__name__)
+
+    def test_archive_matching_refs_form_404_stays_scope_stop(self):
+        stop = self.merge_read(lambda host: host.pages("git/matching-refs/heads/lane-closes-after-records"), (1, self.NOT_FOUND))
+        self.assertIsNotNone(stop, "a 404 on the archive's matching-refs read of a slug form raised nothing")
+        self.assertEqual(type(stop).__name__, "ScopeStop", "a 404 on the archive's matching-refs read of a slug form raised %s, want ScopeStop" % type(stop).__name__)
 
 
 if __name__ == "__main__":
