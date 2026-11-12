@@ -79,8 +79,10 @@ guard rule, so the watcher does the waiting and the session is told once.
   shell and has a live child (merge on its git children) is never reported, however long the job is quiet.
   A shell is no waiter, so `( )`, `$( )` and a loop body that wait on a `sleep` are still ended, and so is a
   `sleep` with a live child (dash runs the last command of `( sleep N & sleep N )` by exec). Limit: a copy that
-  exec'd another command, `( git fetch & git fetch )`, reads as a waiter. The ps `comm` column gives the
-  name; the check adds no process or call. Stop counts a waiter as life too, by the same check (has_waiter),
+  exec'd another command, `( git fetch & git fetch )`, reads as a waiter. A shebang script (`./deploy.sh`,
+  `#!/bin/sh`) is a shell too: on Linux the interpreter in argv[0] decides (runs_shell), since the ps `comm`
+  column gives the script's file name; elsewhere the comm decides alone. The check adds no process, and at
+  most one small read per process with a non-shell comm and a live child. Stop counts a waiter as life too, by the same check (has_waiter),
   at the job's holder root as well as under it, so a job whose shell exec'd the waiter is not listed.
   Limit: a waiter over a hung child is never ended or reported.
   A lone pause is life until its command's first output: a job that is one `sleep N` and one command

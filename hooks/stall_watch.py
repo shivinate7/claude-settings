@@ -445,15 +445,34 @@ SHELLS = ("sh", "bash", "dash", "zsh", "ksh", "mksh", "ash", "fish", "csh", "tcs
 LEAF_COMMANDS = ("sleep",)
 
 
+def runs_shell(pid, comm):
+    """True when the process runs a shell: its ps comm is a SHELLS name, or, on Linux, its interpreter is.
+    A script started by its shebang (`./deploy.sh`, `#!/bin/sh`) has its file name as comm, but the kernel
+    puts the interpreter path in argv[0], the first field of /proc/<pid>/cmdline. A `#!/usr/bin/python3`
+    script reads python3 there, so it is no shell. argv[0] that cannot be read (no /proc on macOS or
+    Windows, the process gone, a kernel thread) is '', so the comm decides alone. Cost: no read when comm
+    is a shell, else one read of the small cmdline file; no process, no file written."""
+    if comm in SHELLS:
+        return True
+    try:
+        with open("/proc/%s/cmdline" % pid, "rb") as f:
+            argv0 = f.read(4096).split(b"\0", 1)[0]
+    except OSError:
+        return False
+    return os.path.basename(argv0.decode("utf-8", "replace")).lstrip("-") in SHELLS
+
+
 def has_waiter(table, pid, include_root=False):
     """True when a process under pid is a waiter: not a shell, with a child that is still alive. A tool
     that waits on its children (merge on its git children, a python script on a subprocess) is working
-    while a child runs, though the job prints nothing. A shell is no waiter: `( )`, `$( )` and a loop body
-    are copies of the job shell, and a copy that waits on `sleep 100` is the hung shape the watcher ends.
-    A copy that exec'd its last command shows as that command, so a LEAF_COMMANDS process is no waiter
-    either; a copy that exec'd a non-leaf command (`( git fetch & git fetch )`) still reads as one.
+    while a child runs, though the job prints nothing. A shell is no waiter (runs_shell): `( )`, `$( )`, a
+    loop body and a shebang script are shells, and one that waits on `sleep 100` is the hung shape the
+    watcher ends. A copy that exec'd its last command shows as that command, so a LEAF_COMMANDS process is
+    no waiter either; a copy that exec'd a non-leaf command (`( git fetch & git fetch )`) still reads as one.
     pid itself is left out, as in tree_cpu, unless include_root: at Stop the job's shell may have exec'd
-    the waiter, so the root is the waiter and is checked too."""
+    the waiter, so the root is the waiter and is checked too. Cost: the ps table the caller read, and at
+    most one runs_shell read per process with a non-shell comm and a live child, per call (once a second
+    in the watcher, once at Stop)."""
     rows, kids, _ = table
     stack, seen = list(kids.get(str(pid), [])), set()
     if include_root and str(pid) in rows:
@@ -466,7 +485,8 @@ def has_waiter(table, pid, include_root=False):
         children = kids.get(cur, [])
         stack.extend(children)
         comm = os.path.basename(rows[cur][4].strip()).lstrip("-") if len(rows[cur]) > 4 else ""
-        if comm not in SHELLS + LEAF_COMMANDS and any(not rows[c][2].startswith("Z") for c in children):
+        if (comm not in SHELLS + LEAF_COMMANDS and any(not rows[c][2].startswith("Z") for c in children)
+                and not runs_shell(cur, comm)):
             return True
     return False
 
