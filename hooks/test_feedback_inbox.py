@@ -61,7 +61,8 @@ Inbox: <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.inbox.md, outside git. Format:
 Repeat flag (decision owner-feedback-inbox, "Repeats"): the Stop guard judges each new item with one
   model call per Stop, `decision_watch.invoke_model` (model claude-haiku-5-5, timeout 45 s, effort
   None). A match appends ` repeats <ref>` to the item's line in the inbox. systemMessage names it, one
-  line per mark, and a mark never blocks (owner ruling 13:03 CST Nov 11). A candidate on the item's own
+  line per mark, and a mark never blocks: it is a note the session merges or drops, so a guess never
+  stops a turn. A candidate on the item's own
   home is dropped for that item. Judged ids are kept in the turn state file under
   `judged`. Candidates come from the repo of the payload cwd: the step at refs/remotes/origin/roadmap,
   the layout's backlog files in the working tree, and older inboxes whose sidecar `<sid>.inbox.repo`
@@ -3332,8 +3333,8 @@ def in_a_repo(path):
 
 def case_repeat_roadmap_step_marks_the_item_and_tells_the_owner():
     """The owner says `carousel`; the step says `wheel`. The model names the step for the item. The
-    item line gains the mark, systemMessage names it, and the mark blocks nothing (owner ruling 13:03 CST
-    Nov 11). The mark keeps the line well formed."""
+    item line gains the mark, systemMessage names it, and the mark blocks nothing, because a mark is a note
+    the session merges or drops. The mark keeps the line well formed."""
     root = repeat_repo("repeat-roadmap", step=True)
     cfg, sid = new_cfg(), "repeat-roadmap"
     check("roadmap: the message is saved", ran_central(capture(cfg, sid, MSG_ONE, cwd=root)))
@@ -3617,8 +3618,9 @@ def case_repeat_cap_keeps_each_source_within_its_share():
 
 
 def case_repeat_mark_never_blocks_and_prints_one_system_line():
-    """A mark never blocks (owner ruling 13:03 CST Nov 11). A Stop whose only reason is a mark passes:
-    systemMessage holds the one flag line, and the line still gains the mark. A mark beside a burst message
+    """A mark never blocks, because it is a note the session merges or drops, not a gate on the turn. A Stop
+    whose only reason is a mark passes: systemMessage holds the one flag line, and the line still gains the
+    mark. A mark beside a burst message
     that needs items keeps the block for that reason alone: the flag stays out of the block reason, and
     systemMessage holds it, with no double period in the reason."""
     root = repeat_repo("repeat-reason", step=True)
@@ -3856,8 +3858,9 @@ def judged_again_with_mark(name, second_header, second_ref, mark):
 def case_repeat_same_minute_mark_is_recognised_on_a_second_judging():
     """A ref of a message stamped in a minute shared with another ends `#<block number>` (inbox_refs). A line
     already marked with that ref is marked: a Stop that judges the item again must leave the line with its one
-    mark. Red on ca3f3cd: MARKED ends at the time, so the `#2` mark is no mark, and mark_items appends the same
-    ref again. The Stop's flag line names the ref, so the hit is known accepted, not a vacuous pass."""
+    mark. MARKED must recognise the `#N` suffix: without it, the `#2` mark reads as no mark, and mark_items
+    appends the same ref again. The Stop's flag line names the ref, so the hit is known accepted, not a
+    vacuous pass."""
     mark = " repeats " + SAME_MINUTE_REF
     cfg, p, calls = judged_again_with_mark("repeat-same-minute-mark", EARLY_HEADER, SAME_MINUTE_REF, mark)
     check("same minute mark: the Stop judges the item once", len(calls) == 1, p.desc())
@@ -3869,7 +3872,8 @@ def case_repeat_same_minute_mark_is_recognised_on_a_second_judging():
 
 def case_repeat_unsuffixed_mark_stays_one_mark_on_a_second_judging():
     """Control for the case above: the same shape with the second message in its own minute, so its ref has no
-    `#`. It passes on ca3f3cd: MARKED matches the time-only ref, and mark_items adds no second mark."""
+    `#`. MARKED matches a time-only ref, and mark_items adds no second mark. It keeps the plain ref working
+    beside the `#N` case, so a fix to the suffix match cannot break the plain one."""
     mark = " repeats " + LATE_REF
     cfg, p, calls = judged_again_with_mark("repeat-unsuffixed-mark", LATE_HEADER, LATE_REF, mark)
     check("unsuffixed mark control: the Stop judges the item once", len(calls) == 1, p.desc())
