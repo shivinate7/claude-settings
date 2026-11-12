@@ -439,8 +439,9 @@ class RecordSlugsTests(unittest.TestCase):
         self.commit_change()
         self.assert_passes()
 
-    def test_readme_and_notes_are_not_read_with_git_show(self):
-        # With their blobs removed, git show fails on either file. No UNKNOWN means neither file was read.
+    def test_readme_edit_and_deleted_notes_read_no_base_blob(self):
+        # Both base blobs are removed, so a git show of either would fail. The README is never read (debt_file skips
+        # it), and a deleted notes file is not read (added_note_lines and notes_ratchet stop at HEAD). No UNKNOWN.
         self.put(DEBT_README, README_FEEL_TEXT)
         self.put(DEBT_NOTES, NOTES_FEEL_TEXT)
         self.commit_base()
