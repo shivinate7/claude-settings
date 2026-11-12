@@ -33,9 +33,9 @@ tend() and close(). Asked for by --store at a point with no text, it prints `unk
 
 open-until-home-on-main reads a feedback-log item (`- <id> [<kind>] -> <home>`, hooks/feedback_guard.item): it is
 "true" (still needs work) until a ruling or task whose home is a file is held on main, then "stale". A step home,
-and any other kind, stay "true". The caller supplies the proof as `known`, {(kind, home path): held on main}, from
-the home check it already ran (feedback_guard.Homes), so the test starts no process. A home missing from `known`
-is "unknown". Without `known` the test is "unknown" for every ruling and task: the runner reads no external store.
+and any other kind, stay "true". The caller supplies the proof as `known`, {(line index, kind, home path): held on
+main}, from the home check it already ran on that line (feedback_guard.Homes), so the test starts no process.
+A line missing from `known` is "unknown". Without `known` the test is "unknown" for every ruling and task: the runner reads no external store.
 
 Reuse: the home test resolves a home as hooks/ruling_home.py does (its whole-value read, `_unwrap`, the refusal of an
 absolute or leaving path) and a step home as hooks/feedback_guard.py does (STEP_HOME, STEP_PATH). It calls the
@@ -94,7 +94,8 @@ class _Reads:
 
     def __init__(self, root, known=None):
         self.root = root
-        self.known = known  # {(kind, home path): held on main}, proved by the caller; None: no proof supplied
+        self.known = known  # {(line index, kind, home path): held on main}, proved by the caller; None: no proof supplied
+        self.index = None  # the line index of the item the test is judging, set by tend()
         self._refs = False  # False: not read yet. None: git cannot read the repo.
         self._held = {}
 
@@ -126,7 +127,7 @@ class _Reads:
 
     def held_main(self, kind, path):
         """True or False: the caller proved the home held on main or not. None: no proof for this home."""
-        return None if self.known is None else self.known.get((kind, path))
+        return None if self.known is None else self.known.get((self.index, kind, path))
 
 
 def _clean(word):
@@ -243,7 +244,7 @@ def _match(item, line):
 
 def tend(entry, text, root, known=None):
     """[(line index, id, verdict)] for each open item line of text, in order. `known` is the caller's proof for
-    open-until-home-on-main: {(kind, home path): held on main}."""
+    open-until-home-on-main: {(line index, kind, home path): held on main}."""
     test = TESTS.get(entry["still-true"])
     if test is None:
         raise ValueError("no still-true test named %r" % (entry["still-true"],))
@@ -251,6 +252,7 @@ def tend(entry, text, root, known=None):
     for index, line in enumerate(text.split("\n")):
         hit = _match(item, line)
         if hit is not None and not closed.search(hit[2]):
+            reads.index = index
             found.append((index, hit[0], test(hit[2], reads)))
     return found
 

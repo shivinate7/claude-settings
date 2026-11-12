@@ -401,8 +401,8 @@ class Homes:
         self._filed = None  # (numbers or None, branch, folder), read once per Stop
         self._top = None  # (the cwd's repo top or None,), read once per Stop
         self._templated = {}  # (branch, slug) -> whether the step file holds TEMPLATE_DIR, read once per Stop
-        self.on_main = {}  # (kind, home path) -> whether main holds a ruling or task home the check passed: the close's proof
-        self.tried = set()  # the (kind, home path) keys problem() has run for
+        self.on_main = {}  # (line index, kind, home path) -> whether main holds the home this line's check passed: the close's proof
+        self.tried = set()  # the keys problem() has run for
 
     def _root(self, where):
         run = ruling_home._run_git(where, ["rev-parse", "--show-toplevel"])
@@ -455,15 +455,17 @@ class Homes:
             raise failed
         return None, held
 
-    def problem(self, item_id, kind, rest, grant=False):
+    def problem(self, item_id, kind, rest, grant=False, at=None):
         """None when the home is good in some repo or the check stood down, else the reason text (the first
         repo's). `grant` is true in a block that holds a grant word: a ruling may then name a GRANT_ROOT_HOMES
-        file, if the repo tracks it."""
+        file, if the repo tracks it. `at` is the item line's 0-based index in the inbox: the close's proof is kept
+        per line, since a grant in one block never settles a plain ruling to the same path in another."""
         try:
             import layout  # lint/layout.py, the one home of where each kind lives
         except ImportError as e:
             return self._stand_down(e)
-        self.tried.add((kind, home_path(rest) if home_word(rest) else ""))
+        key = (at, kind, home_path(rest) if home_word(rest) else "")
+        self.tried.add(key)
         try:
             step = step_home(rest) if kind == "task" else None
             if step:  # steps hold tasks, so only a task may name one; the step file is the proof
@@ -478,7 +480,7 @@ class Homes:
             reasons, failed = [], None
             for root, rel in places:  # a repo whose read fails is skipped; a readable one still decides
                 try:
-                    reasons.append(self._judge(layout, item_id, kind, root, rel, grant, (kind, home_path(rest))))
+                    reasons.append(self._judge(layout, item_id, kind, root, rel, grant, key))
                 except (layout.LayoutError, ruling_home._GitFailure) as e:
                     failed = failed or e
             if not reasons:  # no repo could be read (or none resolved): stand down
@@ -978,7 +980,7 @@ def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox="", sessio
                       page_form_problem(text, [item(ln) for ln in b["items"]], homes, pages, session)):
             if found:
                 out.append(found)
-        for ln in b["items"]:
+        for ln, at in zip(b["items"], b["item_at"]):
             it = item(ln)
             if it is None:
                 out.append("the item line `%s` is malformed: it needs `- <id> [kind] -> home`" % ln[2:])
@@ -993,7 +995,7 @@ def problems(blocks, handoff, homes=None, burst=(), pages=None, inbox="", sessio
                 if found:
                     out.append(found)
             elif homes is not None and it[1].startswith(("[ruling]", "[task]")):
-                found = homes.problem(it[0], it[1][1:it[1].index("]")], it[1], grant)
+                found = homes.problem(it[0], it[1][1:it[1].index("]")], it[1], grant, at - 1)
                 if found:
                     out.append(found)
             elif homes is not None and it[3] and it[1].startswith("[note]"):
@@ -1223,6 +1225,12 @@ def judge(homes, inbox, blocks, new):
     return list(hits.values()), None
 
 
+def read_inbox(inbox):
+    """The inbox text, bytes unchanged (no newline translation)."""
+    with open(inbox, encoding="utf-8", newline="") as f:
+        return f.read()
+
+
 def write_inbox(inbox, text):
     """The one rewrite of the inbox, for a repeat mark and for a close: through a temp file and os.replace."""
     temp = inbox + ".tmp"
@@ -1295,12 +1303,13 @@ def settle(homes, blocks):
     """Runs the home check for each open ruling or task item that problems() has not run it for, so `homes.on_main`
     holds the proof of each. Nothing new starts for an item the Stop's own check already judged."""
     for b in blocks:
-        for ln in b["items"]:
+        grant = is_grant(norm(b["text"]))  # as problems() reads it, so the proof matches the Stop's own verdict
+        for ln, at in zip(b["items"], b["item_at"]):
             it = item(ln)
             if it and it[2] and not it[3] and it[1].startswith(SETTLING_PREFIXES) and home_word(it[1]):
                 kind = it[1][1:it[1].index("]")]
-                if (kind, home_path(it[1])) not in homes.tried:
-                    homes.problem(it[0], kind, it[1])
+                if (at - 1, kind, home_path(it[1])) not in homes.tried:
+                    homes.problem(it[0], kind, it[1], grant, at - 1)
 
 
 def tend_text(homes, text):
@@ -1318,9 +1327,12 @@ def tend_text(homes, text):
     return [r for r in rows if r[0] + 1 in lines], entry
 
 
-def settled_ids(homes, text):
-    """The ids of the item lines tending reads as stale: settled, so the compaction note leaves them out."""
-    return {ident for _, ident, verdict in tend_text(homes, text)[0] if verdict == "stale"}
+def needs_work_ids(homes, text):
+    """The ids of the open ruling, task and standing item lines that still need work, in file order: the compaction
+    note's list. A line tending reads as stale is settled and left out, by line, so another line of the same id stays."""
+    settled = {index for index, _, verdict in tend_text(homes, text)[0] if verdict == "stale"}
+    return [it[0] for b in parse(text) for it, at in ((item(ln), n) for ln, n in zip(b["items"], b["item_at"]))
+            if it and it[2] and not it[3] and it[1].startswith(OPEN_KINDS) and at - 1 not in settled]
 
 
 def close_settled(homes, inbox, blocks):
@@ -1330,9 +1342,12 @@ def close_settled(homes, inbox, blocks):
         return None
     try:
         import tending
-        with open(inbox, encoding="utf-8", newline="") as f:
-            text = f.read()
+        text = read_inbox(inbox)
         rows, entry = tend_text(homes, text)
+        again = read_inbox(inbox)  # a message captured during the reads is kept, as mark_items keeps it
+        if again != text:
+            text = again
+            rows, entry = tend_text(homes, text)
         new = tending.close(entry, text, rows)
         if new != text:
             write_inbox(inbox, new)
@@ -1523,7 +1538,8 @@ def inbox_stop(hook):
                        + "; ".join(r.rstrip(".") for r in reasons)
                        + (". The check reads the inbox file at each Stop, so items added in any later turn count,"
                           " and no new heading is needed. Send each page ruling to the page writer, each repo item's"
-                          " message to that repo's triage session, and put open standing ids in the handoff."
+                          " message to that repo's triage session, and put open standing ids in the handoff, or end a settled item's"
+                          " line with [closed]."
                           if found else "."))
         return out
     except Exception as e:  # advisory: a crash passes, and says so on stderr

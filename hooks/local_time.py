@@ -29,8 +29,9 @@ repo (a `.git` found by walking up; no process starts): the real path of the cwd
 it to find other sessions' inboxes of the same repo (decision owner-feedback-inbox, "Repeats"). Cost:
 one small file per session.
 A PostToolUse payload on stdin (hook_event_name PostToolUse, no flag) is the question box: for an AskUserQuestion
-call the tool's result, which holds the owner's answer, is saved as one block like a typed message (the same
-fence, stamp and repo sidecar), with no time line. An empty result and any other tool save nothing. A relay of the
+call the owner's answers, cut from the tool's result with the question text left out, are saved as one block like
+a typed message (the same fence, stamp and repo sidecar), with no time line. An empty result and any other tool
+save nothing; a result that does not hold each question's answer is not saved and the session is told. A relay of the
 owner's words from another session is not saved: it arrives in the `<cross-session-message` frame a peer's own
 send uses, and no marker tells the two apart. Cost: no process start.
 `--agent` never reads stdin and never saves. The Stop guard that reads the inbox, and decides which
@@ -343,15 +344,38 @@ def page_note(raw):
             "additionalContext": not_saved("page note", "; ".join(failures))}}))
 
 
+def answers_of(hook):
+    """The owner's answers in an AskUserQuestion result, one per question, or None when the result holds none in the
+    form `"<question>"="<answer>"`. The result is cut at each `"="`: what follows it up to `", "` (the next question's
+    opening) is an answer, and the last answer ends at the result's last quote mark, which the tool's closing sentence
+    never holds. The question text is the session's words, so it is never kept."""
+    for text in _strings(hook.get("tool_response")):
+        parts = text.split('"="')
+        if len(parts) < 2:
+            continue
+        answers = []
+        for n, part in enumerate(parts[1:], 1):
+            cut = part.rfind('", "') if n < len(parts) - 1 else part.rfind('"')
+            if cut >= 0:
+                answers.append(part[:cut])
+        return [a for a in answers if a.strip()]
+    return None
+
+
 def question_answer(hook):
-    """PostToolUse on AskUserQuestion: saves the owner's answer as one inbox block, like a typed message
-    (decision owner-feedback-inbox, R27). The tool's result is the owner's words. An empty result saves nothing.
-    Prints one line when the save fails."""
+    """PostToolUse on AskUserQuestion: saves the owner's answers as one inbox block, like a typed message
+    (decision owner-feedback-inbox, R27). Only the answers are saved, never the question text. An empty answer
+    saves nothing. A result in a form it cannot read is not saved, and the session is told so."""
     paths = inbox_paths(hook.get("session_id"))
-    text = "\n".join(s.strip() for s in _strings(hook.get("tool_response")) if s.strip())
-    if paths is None or not text:
+    if paths is None or not any(s.strip() for s in _strings(hook.get("tool_response"))):
         return
-    err = save_message(paths[0], line()[len("Local time: "):], text)
+    answers = answers_of(hook)
+    if answers is None:
+        err = "the result did not hold each question's answer"
+    elif not answers:
+        return
+    else:
+        err = save_message(paths[0], line()[len("Local time: "):], "\n".join(answers))
     if err is not None:
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PostToolUse",
                                                  "additionalContext": not_saved("question answer", err)}}))

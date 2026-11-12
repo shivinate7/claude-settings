@@ -582,8 +582,7 @@ def inbox_note(session_id):
         return ""
     try:  # an item whose home main holds is settled: it needs no work, so the note leaves it out (R27)
         homes = feedback_guard.Homes(None, feedback_guard.session_repo(session_id))
-        settled = feedback_guard.settled_ids(homes, text)
-        ids = [i for i in ids if i not in settled]
+        ids = feedback_guard.needs_work_ids(homes, text)
     except Exception as e:  # unread homes show every open id, never fewer
         sys.stderr.write("precompact_handoff: settled items not read: %s\n" % e)
     if not ids:
