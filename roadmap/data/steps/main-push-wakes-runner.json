@@ -1,0 +1,14 @@
+{
+ "id": "main-push-wakes-runner",
+ "title": "A CI alarm on a push to main wakes the batch runner",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Plan R53 (owner 13:07 CST Nov 12): a CI or merge alarm (red main, a job at its time cap, a dropped check run) wakes the batch runner and opens no GitHub issue.",
+ "source": "lane red-job-wakes-runner 13:11 CST Nov 12",
+ "note": "Gap: step red-job-wakes-runner covers only the PR-comment wake (actions/ci-done-comment, `job:` input, needs a PR number); a run on a push to main has no PR, so no channel reaches the runner. Its repeat-skip memory is PR-comment markers only, nothing for main, so this step also keeps the record of run ids already alarmed (stands item 608). One home: the main-run wake; PR #2745 (cap alarm, lane fan-code-workflows) calls it and does not build its own. Red first.",
+ "updatedAt": "2026-11-12T13:12:04-06:00"
+}
