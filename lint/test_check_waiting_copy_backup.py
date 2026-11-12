@@ -16,10 +16,11 @@ command line only:
 
 A reader is a source file under skills/, hooks/, lint/ or bin/ (an extensionless file with a python or
 shell shebang counts too). A test path (hooks/guard.py is_test_rel) is not a tool. A reader names the copy
-folder as code (the string "waiting-data", or a call to waiting_copy()) and reads its content (open, read,
-load, grep, cat-file, show, readFileSync), both in one function; a non-Python file uses one line. Metadata
-reads do not count (log, ls-tree, rev-parse, isdir, isfile, exists, listdir, getmtime). Text in a string or
-a comment does not count, and "waiting-data-in-repo" names another file.
+folder by name (the string "waiting-data", the segment "waiting" in a path, or a call to waiting_copy()) and
+reads its content (open, read, read_text, load, grep, cat-file, show, readFileSync, cat, head, jq). The copy
+may reach the read through variables, attributes, closures, helper calls and imports. Metadata reads do not
+count (log, ls-tree, rev-parse, isdir, getmtime). A presence check of an item under the copy (isfile, exists,
+listdir) is a read. Text in a string or a comment does not count, and "waiting-data-in-repo" names another file.
 
 WAITING_COPY_CHECK_UNDER_TEST names the script to run instead, for the stub run (lint/waiting_copy_stub_test.py).
 """
@@ -399,6 +400,293 @@ class UnflaggedReaderCases(unittest.TestCase):
         self.assertEqual(rc, 0, "a read of the waiting-data key in lint/layout.json was flagged as a copy read: %r" % out)
 
 
+ROUTED_DOCS = '''from export_page import docs_in
+
+def items(layout, root):
+    return docs_in(layout.path(root, "waiting-data"), "items")
+'''
+
+ROUTED_LOAD = '''import os
+
+from export_page import load_json
+
+def item(layout, root):
+    return load_json(os.path.join(layout.path(root, "waiting-data"), "items", "1.json"))
+'''
+
+UNLISTED_DOCS = '\n\ndef peek_docs(folder):\n    return docs_in(folder, "items")\n'
+
+UNLISTED_READ = '\n\ndef peek_read(folder):\n    return read_copy(folder, ["items"])\n'
+
+GIT_HELPER_PARAM = '''import subprocess
+
+def git_items(root, folder):
+    return subprocess.run(["git", "-C", root, "grep", "-I", "-e", ".", "origin/main", "--", folder + "/items/"])
+
+def caller(layout, root):
+    return git_items(root, layout.path(root, "waiting-data"))
+'''
+
+ON_DISK_JOIN = '''import os
+
+def item(root):
+    with open(os.path.join(root, "waiting", "items", "1.json"), encoding="utf-8") as handle:
+        return handle.read()
+'''
+
+ON_DISK_PATHLIB = '''from pathlib import Path
+
+def item(root):
+    return (Path(root) / "waiting" / "items" / "1.json").read_text(encoding="utf-8")
+'''
+
+ON_DISK_CONCAT = '''def item(root):
+    with open(root + "/waiting/items/1.json", encoding="utf-8") as handle:
+        return handle.read()
+'''
+
+ON_DISK_SHELL = (
+    ("cat", "bin/on_disk_cat", "cat $ROOT/waiting/items/1.json"),
+    ("quoted", "bin/on_disk_quoted", 'cat "$ROOT/waiting/items/1.json"'),
+)
+
+LOCK_WAIT = '''import os, sys
+
+def take_lock(path):
+    if os.path.exists(path):
+        sys.stderr.write("waiting for lock\\n")
+    with open(path, encoding="utf-8") as handle:
+        return handle.read()
+'''
+
+TAINT_MODULE = '''import os
+
+COPY = "waiting-data"
+
+def read_item(layout, root):
+    with open(os.path.join(layout.path(root, COPY), "items", "1.json"), encoding="utf-8") as handle:
+        return handle.read()
+'''
+
+TAINT_SELF = '''import os
+
+class Items:
+    def __init__(self, layout, root):
+        self.folder = layout.path(root, "waiting-data")
+
+    def read(self, name):
+        with open(os.path.join(self.folder, "items", name), encoding="utf-8") as handle:
+            return handle.read()
+'''
+
+TAINT_CLOSURE = '''import os
+
+def make_reader(layout, root):
+    folder = layout.path(root, "waiting-data")
+
+    def read_item(name):
+        with open(os.path.join(folder, "items", name), encoding="utf-8") as handle:
+            return handle.read()
+
+    return read_item
+'''
+
+SHELL_LS_THEN_CAT = '#!/bin/sh\nls waiting-data/items\ncat notes.txt\n'
+
+GIT_SHOW_OTHER_PATH = '''import subprocess
+
+def doc_at_main(root):
+    return subprocess.run(["git", "-C", root, "show", "origin/main:docs/x.md"], capture_output=True)
+'''
+
+OPEN_OTHER_ATTRIBUTE = '''class Notes:
+    def __init__(self, other):
+        self.other = other
+
+    def read(self):
+        with open(self.other, encoding="utf-8") as handle:
+            return handle.read()
+'''
+
+JS_SLASHES_IN_STRING = ('const docs = "https://example.test/docs";\n'
+                        'const text = fs.readFileSync(path.join(layout.path(root, "waiting-data"), "items", "1.json"));\n')
+
+JSX_LONE_QUOTE_READER = ("const view = <p>Don't</p>;\n"
+                         'const text = fs.readFileSync(path.join(layout.path(root, "waiting-data"), "items", "1.json"));\n')
+
+JSX_LONE_QUOTE_MENTION = "const view = <p>Don't</p>;\n// the waiting-data folder is a backup\n"
+
+SHELL_HASH_IN_STRING = '#!/bin/sh\necho "step #2 of the copy"\ncat $ROOT/waiting-data/items/1.json\n'
+
+SHELL_HASH_LABEL = '#!/bin/sh\necho "#waiting-data is a label"\n'
+
+SHELL_COMMENT_QUOTE = "#!/bin/sh\n# don't read the copy here\ncat $ROOT/waiting-data/items/1.json\n"
+
+SHELL_DOUBLE_QUOTE_APOSTROPHE = '#!/bin/sh\necho "it\'s the copy"\ncat $ROOT/waiting-data/items/1.json\n'
+
+SUMMARY = re.compile(r"^checked (\d+) source files?\b.*: 0 findings?$")
+
+
+class ReaderRouteCases(unittest.TestCase):
+    """A copy read reached through an import from export_page.py, a new export_page.py function, or a parameter."""
+
+    def test_docs_in_imported_from_export_page_fails(self):
+        root = tree(self._testMethodName, {"hooks/routed_docs.py": ROUTED_DOCS})
+        rc, out = check(root)
+        self.assertEqual(rc, 1, "docs_in of the copy, imported from export_page.py, passed: %r" % out)
+        self.assertTrue(reader_named(out, "hooks/routed_docs.py"), "hooks/routed_docs.py was not flagged as a live reader")
+
+    def test_load_json_imported_from_export_page_fails(self):
+        root = tree(self._testMethodName, {"hooks/routed_load.py": ROUTED_LOAD})
+        rc, out = check(root)
+        self.assertEqual(rc, 1, "load_json of the copy, imported from export_page.py, passed: %r" % out)
+        self.assertTrue(reader_named(out, "hooks/routed_load.py"), "hooks/routed_load.py was not flagged as a live reader")
+
+    def test_unlisted_export_function_calling_docs_in_fails(self):
+        self.assert_export_reader(UNLISTED_DOCS, "def peek_docs", "docs_in")
+
+    def test_unlisted_export_function_calling_read_copy_fails(self):
+        self.assert_export_reader(UNLISTED_READ, "def peek_read", "read_copy")
+
+    def assert_export_reader(self, appended, marker, callee):
+        with open(os.path.join(ROOT, *EXPORT.split("/")), encoding="utf-8") as handle:
+            text = handle.read() + appended
+        root = tree(self._testMethodName, {EXPORT: text})
+        rc, out = check(root)
+        at = next(i for i, line in enumerate(text.split("\n"), 1) if marker in line)
+        self.assertEqual(rc, 1, "an unlisted export_page.py function that calls %s on a folder passed in passed: %r" % (callee, out))
+        numbers = reader_line_numbers(out, EXPORT)
+        self.assertTrue(any(at <= n <= at + 2 for n in numbers),
+                        "%s in export_page.py (line %d) was not the flagged reader, found %r" % (marker, at, numbers))
+
+    def test_git_helper_taking_the_folder_fails(self):
+        root = tree(self._testMethodName, {"hooks/git_helper.py": GIT_HELPER_PARAM})
+        rc, out = check(root)
+        self.assertEqual(rc, 1, "a git helper that reads a folder passed in passed: %r" % out)
+        self.assertTrue(reader_named(out, "hooks/git_helper.py"), "hooks/git_helper.py was not flagged as a live reader")
+
+
+class OnDiskNameCases(unittest.TestCase):
+    """The copy's on-disk folder is `waiting` (layout COPY_PATH), as well as its kind name `waiting-data`."""
+
+    def test_on_disk_join_of_the_waiting_folder_fails(self):
+        root = tree(self._testMethodName, {"hooks/on_disk_join.py": ON_DISK_JOIN})
+        rc, out = check(root)
+        self.assertEqual(rc, 1, "os.path.join of the waiting folder's items passed: %r" % out)
+        self.assertTrue(reader_named(out, "hooks/on_disk_join.py"), "hooks/on_disk_join.py was not flagged as a live reader")
+
+    def test_on_disk_pathlib_of_the_waiting_folder_fails(self):
+        root = tree(self._testMethodName, {"hooks/on_disk_pathlib.py": ON_DISK_PATHLIB})
+        rc, out = check(root)
+        self.assertEqual(rc, 1, "a Path join of the waiting folder's items passed: %r" % out)
+        self.assertTrue(reader_named(out, "hooks/on_disk_pathlib.py"), "hooks/on_disk_pathlib.py was not flagged as a live reader")
+
+    def test_on_disk_concatenated_path_fails(self):
+        root = tree(self._testMethodName, {"hooks/on_disk_concat.py": ON_DISK_CONCAT})
+        rc, out = check(root)
+        self.assertEqual(rc, 1, "a concatenated /waiting/ path into the copy's items passed: %r" % out)
+        self.assertTrue(reader_named(out, "hooks/on_disk_concat.py"), "hooks/on_disk_concat.py was not flagged as a live reader")
+
+    def test_on_disk_shell_read_fails(self):
+        for form, rel, command in ON_DISK_SHELL:
+            with self.subTest(form=form):
+                root = tree("%s-%s" % (self._testMethodName, form), {rel: "#!/bin/sh\n" + command + "\n"})
+                rc, out = check(root)
+                self.assertEqual(rc, 1, "a shell %s of the waiting folder's items passed: %r" % (form, out))
+                self.assertTrue(reader_named(out, rel), "%s was not flagged as a live reader" % rel)
+
+    def test_lock_wait_message_is_not_the_copy(self):
+        root = tree(self._testMethodName, {"hooks/lock_wait.py": LOCK_WAIT})
+        rc, out = check(root)
+        self.assertEqual(rc, 0, "a 'waiting for lock' message and a lock-file read were flagged as the copy: %r" % out)
+
+
+class TaintCases(unittest.TestCase):
+    """The copy reached through a module constant, an attribute or a closure, read in another scope."""
+
+    def test_module_constant_naming_the_copy_then_read_fails(self):
+        root = tree(self._testMethodName, {"hooks/taint_module.py": TAINT_MODULE})
+        rc, out = check(root)
+        self.assertEqual(rc, 1, "a module constant naming the copy, read in a function, passed: %r" % out)
+        self.assertTrue(reader_named(out, "hooks/taint_module.py"), "hooks/taint_module.py was not flagged as a live reader")
+
+    def test_attribute_set_in_one_method_and_read_in_another_fails(self):
+        root = tree(self._testMethodName, {"hooks/taint_self.py": TAINT_SELF})
+        rc, out = check(root)
+        self.assertEqual(rc, 1, "self.folder set to the copy in one method, read in another, passed: %r" % out)
+        self.assertTrue(reader_named(out, "hooks/taint_self.py"), "hooks/taint_self.py was not flagged as a live reader")
+
+    def test_closure_over_the_copy_folder_fails(self):
+        root = tree(self._testMethodName, {"hooks/taint_closure.py": TAINT_CLOSURE})
+        rc, out = check(root)
+        self.assertEqual(rc, 1, "a closure that reads the copy folder passed: %r" % out)
+        self.assertTrue(reader_named(out, "hooks/taint_closure.py"), "hooks/taint_closure.py was not flagged as a live reader")
+
+
+class FalseAlarmCases(unittest.TestCase):
+    """Reads that are not the copy must not be flagged."""
+
+    def test_shell_listing_of_the_copy_with_an_unrelated_cat_passes(self):
+        root = tree(self._testMethodName, {"bin/notes_list": SHELL_LS_THEN_CAT})
+        rc, out = check(root)
+        self.assertEqual(rc, 0, "an unrelated cat of notes.txt beside a listing of the copy was flagged: %r" % out)
+
+    def test_git_show_of_another_path_passes(self):
+        root = tree(self._testMethodName, {"hooks/doc_at_main.py": GIT_SHOW_OTHER_PATH})
+        rc, out = check(root)
+        self.assertEqual(rc, 0, "git show of docs/x.md was flagged as a copy read: %r" % out)
+
+    def test_open_of_an_attribute_in_a_class_without_the_copy_passes(self):
+        root = tree(self._testMethodName, {"hooks/notes_reader.py": OPEN_OTHER_ATTRIBUTE})
+        rc, out = check(root)
+        self.assertEqual(rc, 0, "open(self.other) in a class that never names the copy was flagged: %r" % out)
+
+
+class ScannerStringCases(unittest.TestCase):
+    """Strings and comments are not code: a comment opener, a lone quote or a '#' in text must not crash the
+    scan, flag text that is not a read, or hide a read that follows."""
+
+    def test_double_slash_in_a_javascript_string_hides_no_reader(self):
+        root = tree(self._testMethodName, {"skills/waiting-page/url_reader.mjs": JS_SLASHES_IN_STRING})
+        rc, out = check(root)
+        self.assertEqual(rc, 1, "a reader after '//' inside a string was not flagged: %r" % out)
+        self.assertTrue(reader_named(out, "skills/waiting-page/url_reader.mjs"), "url_reader.mjs was not flagged")
+
+    def test_jsx_lone_quote_does_not_hide_a_later_reader(self):
+        root = tree(self._testMethodName, {"skills/waiting-page/jsx_reader.mjs": JSX_LONE_QUOTE_READER})
+        rc, out = check(root)
+        self.assertEqual(rc, 1, "a reader after a JSX lone quote was not flagged: %r" % out)
+        self.assertTrue(reader_named(out, "skills/waiting-page/jsx_reader.mjs"), "jsx_reader.mjs was not flagged")
+
+    def test_jsx_lone_quote_with_only_a_mention_passes(self):
+        root = tree(self._testMethodName, {"skills/waiting-page/jsx_mention.mjs": JSX_LONE_QUOTE_MENTION})
+        rc, out = check(root)
+        self.assertEqual(rc, 0, "a JSX lone quote with only a mention of the copy was flagged: %r" % out)
+
+    def test_shell_hash_in_a_string_hides_no_reader(self):
+        root = tree(self._testMethodName, {"bin/hash_echo": SHELL_HASH_IN_STRING})
+        rc, out = check(root)
+        self.assertEqual(rc, 1, "a reader after '#' inside a shell string was not flagged: %r" % out)
+        self.assertTrue(reader_named(out, "bin/hash_echo"), "bin/hash_echo was not flagged")
+
+    def test_shell_hash_in_a_label_string_passes(self):
+        root = tree(self._testMethodName, {"bin/hash_label": SHELL_HASH_LABEL})
+        rc, out = check(root)
+        self.assertEqual(rc, 0, "a '#waiting-data' label in a shell string was flagged: %r" % out)
+
+    def test_shell_comment_with_a_lone_quote_hides_no_reader(self):
+        root = tree(self._testMethodName, {"bin/comment_quote": SHELL_COMMENT_QUOTE})
+        rc, out = check(root)
+        self.assertEqual(rc, 1, "a reader after a shell comment with a lone quote was not flagged: %r" % out)
+        self.assertTrue(reader_named(out, "bin/comment_quote"), "bin/comment_quote was not flagged")
+
+    def test_shell_double_quoted_apostrophe_hides_no_reader(self):
+        root = tree(self._testMethodName, {"bin/apostrophe_echo": SHELL_DOUBLE_QUOTE_APOSTROPHE})
+        rc, out = check(root)
+        self.assertEqual(rc, 1, "a reader after a double-quoted apostrophe was not flagged: %r" % out)
+        self.assertTrue(reader_named(out, "bin/apostrophe_echo"), "bin/apostrophe_echo was not flagged")
+
+
 class ProseCases(unittest.TestCase):
     def test_prose_without_backup_names_all_three_files(self):
         root = tree(self._testMethodName, {
@@ -439,6 +727,10 @@ class RealRepoCases(unittest.TestCase):
 
     def test_real_repo_has_no_live_reader(self):
         rc, out = check(ROOT)
+        self.assertEqual(rc, 0, "the checker exited %d on the real tree: %r" % (rc, out))
+        summary = [line for line in out.splitlines() if SUMMARY.match(line)]
+        self.assertTrue(summary, "the checker printed no summary line for the real tree, so its run is not shown: %r" % out)
+        self.assertGreater(int(SUMMARY.match(summary[0]).group(1)), 0, "the summary counts no source files: %r" % summary[0])
         self.assertEqual(reader_lines(out), [], "the real tree has a live reader of the copy folder: %r" % out)
 
 
