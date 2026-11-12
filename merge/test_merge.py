@@ -474,12 +474,12 @@ class Env(unittest.TestCase):
     def worktrees(self):
         return sh(self.co, "git", "worktree", "list").count("\n") + 1
 
-    def competitor_push(self):
+    def competitor_push(self, msg="rival"):
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
         sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
         put(os.path.join(o, "rival.txt"), "someone else pushed\n")
-        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "rival"); sh(o, "git", "push", "-q", "origin", "feat")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", msg); sh(o, "git", "push", "-q", "origin", "feat")
         return sh(o, "git", "rev-parse", "HEAD")
 
     def main_moves(self):
@@ -944,23 +944,16 @@ class ConfirmHead(Env):
         self.assertEqual(self.claims(), 0, "a claim was pushed for a bad head")
         self.assertFalse(self.lock_ref(), "the lock was left behind")
 
-    def claim_push(self):
-        """The tool's own claim on origin's feat: one commit on its head with a Record-claim trailer, as head_claim writes it. -> its sha."""
-        o = self.other
-        sh(o, "git", "fetch", "-q", "origin")
-        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
-        sh(o, "git", "commit", "-q", "--allow-empty", "-m", "Claim record numbers", "-m", "Record-claim: D-9")
-        sh(o, "git", "push", "-q", "origin", "feat")
-        return sh(o, "git", "rev-parse", "HEAD")
+    CLAIM = "Claim record numbers\n\nRecord-claim: D-9"  # the subject and trailer head_claim gives the tool's own commit
 
     def test_a_claim_on_the_relayed_head_holds_with_no_racing_fetch(self):
         relayed = self.head()  # the head the relay named
-        live = self.claim_push()  # the tool's own claim on it: the one commit relayed_head_holds allows above the relayed head
+        live = self.competitor_push(self.CLAIM)  # the tool's own claim on it: the one commit relayed_head_holds allows above the relayed head
         self.assertTrue(merge.relayed_head_holds(self.co, "feat", relayed, live), "a claim on the relayed head does not hold the relayed yes")
 
     def test_a_racing_fetch_of_another_ref_does_not_change_the_relayed_head_verdict(self):
         relayed = self.head()
-        live = self.claim_push()
+        live = self.competitor_push(self.CLAIM)
         sh(self.other, "git", "push", "-q", "origin", f"{relayed}:refs/heads/side")  # another ref whose fetch moves FETCH_HEAD in this clone
         real, raced = merge.git, []
         def racing(cwd, *a, input=None):
