@@ -1597,11 +1597,14 @@ _COMMENT_TOOL = "mcp__github__add_issue_comment"
 _AGENT_TOOL = "Agent"
 _SHELL_TOOLS = ("Bash", "PowerShell")
 # Tool names sit in call lines, the notice and hand-back tags in message lines, a gh call in its command text.
-_REVIEW_RECORD_MARKS = ('"Agent"', _CREATE_PR_TOOL, _COMMENT_TOOL, TASK_NOTIFICATION_TAG, HAND_BACK_TAG.lstrip("<"),
-                        "gh pr create", "gh pr comment", "gh api")
+_REVIEW_RECORD_MARKS = ('"Agent"', _CREATE_PR_TOOL, _COMMENT_TOOL, TASK_NOTIFICATION_TAG, HAND_BACK_TAG.lstrip("<"))
+# A gh call that opens or comments on a PR, or an api call, with a repo flag before the verb or after `pr`
+# (`gh -R o/r pr create`, `gh pr --repo o/r comment`): the verb sits after the flag, so the words are not adjacent.
+_GH_MARK = re.compile(r"gh(?:\.exe)?\s+(?:-R|--repo|api\b|pr\s+(?:create|comment|-R|--repo)\b)")
 _RESULT_IDS = re.compile(r'"tool_use_id":\s*"([^"]+)"')
-_GH_POST = re.compile(r"\bgh\s+(?:pr\s+comment\b|api\b[^\n]*/comments)")
 _GH_HEAD = re.compile(r"(?:--head|-H)[ =]+[\"']?([^\s\"']+)")
+# Same pattern as PR_NUM_URL in hooks/decision_watch.py. Not imported: that module loads guard.py and the lint
+# transcript reader at import, and this file is loaded by guard.py.
 _PR_URL = re.compile(r"/pull/(\d+)")
 # The Done line, markdown leads and indent allowed. The verdict word is checked against the merge tool's own
 # constants (REVIEW_VERDICTS), so none is named here.
@@ -1623,12 +1626,22 @@ _HEAD_WORD = re.compile(r"\bhead\b[\s:`*]*(?:at\s+)?([0-9a-f]{7,40})\b", re.I)
 _HAND_FRAMES = tuple(tag for tag in MACHINE_TAGS if "<agent-message" in tag)
 
 
-def _gh_pr_create_segment(command: str, tool: str, depth: int = 0) -> str:
-    """The segment of `command` that runs `gh pr create`, else ''. It reads the way the push path does: `strip_heredoc_bodies`
-    (hooks/guard_core.py, the one home) is read first: a `gh pr create` in the text it returns counts, and one it
-    removes does not. Each segment is tokenized (so a quoted mention and a `#` comment run
-    nothing), each command word of a segment is resolved, and the script a shell or runner gets is read again. A
-    PowerShell call is read with PowerShell's rules."""
+def _is_pr_create(call) -> bool:
+    return call[:2] == ["pr", "create"]
+
+
+def _is_comment_post(call) -> bool:
+    """`gh pr comment`, or a `gh api` call that names a `/comments` endpoint."""
+    return call[:2] == ["pr", "comment"] or (call[:1] == ["api"] and any("/comments" in word for word in call[1:]))
+
+
+def _gh_segment(command: str, tool: str, wanted, depth: int = 0) -> str:
+    """The segment of `command` that runs a gh call `wanted` accepts, else ''. `wanted` gets the tokens after `gh`
+    that `gh_call_of` (hooks/guard_merge.py, the one reader of gh's three repo-flag spellings) returns. It reads the way the
+    push path does: `strip_heredoc_bodies` (hooks/guard_core.py, the one home) is read first: a call in the text it
+    returns counts, and one it removes does not. Each segment is tokenized (so a quoted mention and a `#` comment run
+    nothing), and the script a shell or runner gets is read again. A PowerShell call is read with PowerShell's rules."""
+    from guard_merge import gh_call_of   # here, not at the top: guard_merge imports this file
     text = strip_heredoc_bodies(command)
     if tool == "PowerShell":
         text = PowerShellScript(text)
@@ -1636,19 +1649,19 @@ def _gh_pr_create_segment(command: str, tool: str, depth: int = 0) -> str:
         tokens = segment_tokens(segment)
         if not tokens:
             continue
-        for at in command_indexes(tokens):
-            if basename(tokens[at]) in ("gh", "gh.exe") and tokens[at + 1:at + 3] == ["pr", "create"]:
-                return segment
+        call = gh_call_of(segment)
+        if call is not None and wanted(call):
+            return segment
         if depth < 3:
             for inner in inner_commands(tokens):
-                found = _gh_pr_create_segment(inner, tool, depth + 1)
+                found = _gh_segment(inner, tool, wanted, depth + 1)
                 if found:
                     return found
             # `_substitutions` (hooks/guard_env.py, the one home) cuts each `$(...)`, backtick pair and
             # process substitution met outside single quotes, so an assigned or double-quoted one is read as a
             # command. A single-quoted one is text and is not cut. The last text is the segment itself.
             for inner, _in_message in _substitutions(segment, powershell=tool == "PowerShell")[0][:-1]:
-                found = _gh_pr_create_segment(inner, tool, depth + 1)
+                found = _gh_segment(inner, tool, wanted, depth + 1)
                 if found:
                     return found
     return ""
@@ -1707,6 +1720,11 @@ def _done_verdict(text: str):
     return None
 
 
+def _sha_like(word: str) -> bool:
+    """True for a 40-character hex word, or a 7-39 character one with a digit and a letter in it."""
+    return len(word) == 40 or bool(re.search(r"\d", word) and re.search(r"[a-f]", word))
+
+
 def _named_sha(body: str):
     """The commit sha candidates a report names, in order, at most _HELD_SHA_CAP: the distinct hex words of 7-40
     characters in its text above its `agentId:` trailer. A word of 7-39 hex characters counts only with a digit
@@ -1716,7 +1734,7 @@ def _named_sha(body: str):
         pass
     found = []
     for word in _SHA_WORD.findall(body[:trailer.start()] if trailer else body):
-        if word not in found and (len(word) == 40 or (re.search(r"\d", word) and re.search(r"[a-f]", word))):
+        if word not in found and _sha_like(word):
             found.append(word)
             if len(found) == _HELD_SHA_CAP:
                 break
@@ -1729,7 +1747,7 @@ def _reviewed_heads(body: str):
     for trailer in _AGENT_ID.finditer(body):
         pass
     found = _HEAD_WORD.findall(body[:trailer.start()] if trailer else body)
-    return tuple(dict.fromkeys(word.lower() for word in found))
+    return tuple(dict.fromkeys(word.lower() for word in found if _sha_like(word.lower())))
 
 
 def _same_sha(one: str, other: str) -> bool:
@@ -1852,7 +1870,7 @@ def _transcript_events(path: str):
     events, calls, roles, agents, posts, pr_heads = [], {}, {}, {}, {}, {}
     with open(path, encoding="utf-8", errors="replace") as handle:
         for line in handle:
-            if not any(mark in line for mark in _REVIEW_RECORD_MARKS) and not (
+            if not any(mark in line for mark in _REVIEW_RECORD_MARKS) and not _GH_MARK.search(line) and not (
                     '"tool_result"' in line and any(call in calls for call in _RESULT_IDS.findall(line))):
                 continue
             try:
@@ -1876,11 +1894,11 @@ def _transcript_events(path: str):
                     elif name == _COMMENT_TOOL and isinstance(given.get("body"), str):
                         posts[block.get("id")] = (given["body"], False)
                     elif name in _SHELL_TOOLS and "create" in command and (
-                            created := _gh_pr_create_segment(command, name)):
+                            created := _gh_segment(command, name, _is_pr_create)):
                         head = _GH_HEAD.search(created)
                         pr_heads[block.get("id")] = head.group(1).rpartition(":")[2] if head else None
                         calls[block.get("id")] = _CREATE_PR_TOOL
-                    elif name in _SHELL_TOOLS and _GH_POST.search(command):
+                    elif name in _SHELL_TOOLS and _gh_segment(command, name, _is_comment_post):
                         posts[block.get("id")] = (command, True)
                 elif block.get("type") == "tool_result" and not block.get("is_error"):
                     call, body = block.get("tool_use_id"), _blocks_text(block.get("content"))
@@ -1972,12 +1990,12 @@ def review_record_hit(transcript: str, destinations=lambda: [], where: str = "")
                 if record["fix"]:
                     fixed.append(record["n"])
                 pending = [report for report in pending if report not in held]
-        if pending:
-            return "%s %s %s report, no posted record" % pending[0][:3], REVIEW_RECORD_REASON
-        for number in fixed:
+        for number in fixed:   # before the pending ask: a denied push stays denied while a report waits
             if number in heads:
                 if heads[number] in destinations():
                     return "push to the head branch of PR %d, fix check recorded" % number, REVIEW_RECORD_FIX_REASON
+        if pending:
+            return "%s %s %s report, no posted record" % pending[0][:3], REVIEW_RECORD_REASON
     except Exception:
         pass
     return "", ""
