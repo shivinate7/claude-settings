@@ -444,6 +444,18 @@ def case_brief_model_error_is_refused_as_unknown():
     check("brief model error: the send is refused under rule check-refuter",
           r.deny() is not None and r.reason().startswith("check-refuter"), detail(r))
     check("brief model error: the reason says unknown", "unknown" in r.reason().lower(), detail(r))
+    check("brief model error: the reason names no fetch command, since a fetch cannot mend a model error",
+          "git fetch" not in r.reason(), detail(r))
+
+
+def case_brief_odd_answer_is_refused_as_unknown_with_no_fetch():
+    repo = ask_repo("refuter-origin")
+    r = tcj.run_hook(send_input(brief_text(), repo), answer=json.dumps({"verdict": "MAYBE"}))
+    check("brief odd answer: the send is refused under rule check-refuter",
+          r.deny() is not None and r.reason().startswith("check-refuter"), detail(r))
+    check("brief odd answer: the reason says unknown", "unknown" in r.reason().lower(), detail(r))
+    check("brief odd answer: the reason names no fetch command, since a fetch cannot mend an odd answer",
+          "git fetch" not in r.reason(), detail(r))
 
 
 def case_brief_without_done_check_is_refused_with_no_call():
@@ -535,6 +547,13 @@ def case_non_lane_create_session_is_not_judged():
     check("non-brief create_session: check_refuter is not imported", "check_refuter" not in r.imports, detail(r))
     r = tcj.run_hook(start_input("", repo, tags=()), answer=GAP_ANSWER)
     check("empty create_session prompt: no model call and allowed", r.calls == [] and r.deny() is None, detail(r))
+
+
+def case_non_lane_create_session_with_brief_marker_is_not_judged():
+    repo = ask_repo("refuter-origin")
+    r = tcj.run_hook(start_input(brief_text(done=None), repo, tags=()), answer=ALLOW_ANSWER)
+    check("non-lane create_session (tags=()) whose prompt opens with the Lane brief marker and has no Done check: "
+          "no model call and no deny", r.calls == [] and r.deny() is None, detail(r))
 
 
 # ------------------------------------------------------------------ every unknown names the fetch command (hook)
@@ -752,13 +771,15 @@ def main():
                  case_ask_for_step_missing_field_is_unknown, case_ask_for_step_record_branch_key,
                  case_done_check_line_reads_the_line_start_line,
                  case_brief_gap_is_refused_and_names_the_case, case_brief_matching_check_is_allowed_with_one_call,
-                 case_brief_model_error_is_refused_as_unknown, case_brief_without_done_check_is_refused_with_no_call,
+                 case_brief_model_error_is_refused_as_unknown, case_brief_odd_answer_is_refused_as_unknown_with_no_fetch,
+                 case_brief_without_done_check_is_refused_with_no_call,
                  case_brief_missing_ask_is_refused_as_unknown, case_brief_prompt_is_blind,
                  case_non_brief_send_is_not_judged,
                  case_grant_led_brief_without_done_check_is_refused_with_no_call,
                  case_grant_led_brief_with_done_check_reaches_the_reader,
                  case_lane_start_without_done_check_is_refused_with_no_call,
                  case_lane_start_with_done_check_reaches_the_reader, case_non_lane_create_session_is_not_judged,
+                 case_non_lane_create_session_with_brief_marker_is_not_judged,
                  case_unknown_without_checkout_names_the_fetch_command,
                  case_unknown_missing_field_names_the_fetch_command, case_unknown_bad_json_names_the_fetch_command,
                  case_refute_passes_the_effort_setting, case_refute_prompt_asks_for_a_realistic_case,
