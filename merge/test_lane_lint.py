@@ -1782,7 +1782,11 @@ class GuardSliceLint(BatchLintFixture):
             patch = unittest.mock.patch.dict(os.environ, {"PATH": shim + os.pathsep + os.environ.get("PATH", "")})
             patch.start()
             self.addCleanup(patch.stop)
-        files = {".github/workflows/checks.yml": guard_workflow_text(self.found), GUARD_SCRIPT: self.guard_stub(0)}
+        with open(tm.SCOPE_SCRIPT, encoding="utf-8") as f:  # the real ci-scope.sh, read as SmallBaseMove.scoped reads it
+            scope = f.read()
+        # ci-scope.sh turns every flag on when landed-dirs.txt is unreadable, so the docs-only control needs both files
+        files = {".github/workflows/checks.yml": guard_workflow_text(self.found), GUARD_SCRIPT: self.guard_stub(0),
+                 merge.CI_SCOPE: scope, "landed-dirs.txt": "hooks\n"}
         for name, ci_step in self.found:
             if name != STE:
                 files[script_of(ci_step)] = CALL_STUB % self.call_log(script_of(ci_step))
