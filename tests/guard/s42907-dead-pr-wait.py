@@ -4,8 +4,9 @@ FAMILY = "dead-pr-wait"
 # The placement end of step dead-pr-waits (part b). The step write path refuses a roadmap step whose title, why,
 # note or ask waits on a bare PR number (#N) with no blockedBy step slug. It refuses a write that adds such a wait,
 # and a write that leaves one with no slug where the old step named a slug. Matcher, as the step states it:
-# (after|waits? on|waiting for|blocked on|once|until|when) #N, or `PR #N`, read without case. Each refusal names the
-# rule dead-pr-wait and the remedy blockedBy.
+# (after|waits? on|waits? for|waiting (on|for)|blocked on|once|until|when) #N, or `PR #N`, read without case. A match
+# followed by closed, merged, landed, was or "is on main" is history, not a wait ("Reopened when #50 was merged").
+# Each refusal names the rule dead-pr-wait and the remedy blockedBy.
 # Pinned as passing: a wait inside a fenced code block, a double-quoted phrase, a blockquote line or an inline
 # code span, since it is quoted text, not a wait. That reading is to confirm. A wait the old step already held
 # passes, so a legacy step stays editable.
@@ -90,6 +91,16 @@ add("dead-pr-wait: a MultiEdit that adds a wait on #42 to a step on disk with bl
     edits=[{"old_string": '"note": "Brief is written."',
             "new_string": '"note": "Brief is written. The lint lane waits on #42."'}])
 
+# DENY: a wait in a phrase the matcher lacked (waiting on, waits for, wait for), added by an Edit to a step on disk with
+# blockedBy empty. Each is refused as the bare phrases are. The control "Reopened after #50." has no history word, so it
+# stays a wait and is refused too.
+for dpw_word, dpw_text in (("waiting on", "Lane is waiting on #42."), ("waits for", "Lane waits for #42."),
+                           ("wait for", "Both lanes wait for #42.")):
+    add("dead-pr-wait: an edit that adds '%s #42' to a step on disk with blockedBy empty is refused" % dpw_word, "deny",
+        rule=DPW_RULE, tool="Edit", cwd=NOGIT, carries=(DPW_REMEDY,), file_path=DPW_BARE,
+        old_string='"note": "Brief is written."', new_string='"note": "Brief is written. %s"' % dpw_text)
+dpw_write("a new step reopened after #50 with no history word is refused", "deny", "Reopened after #50.")
+
 # DENY: an edit to a legacy step that adds a second wait, so the file is read and judged, not passed unread. And an
 # edit that clears blockedBy from a step whose bare wait stays: the wait is left with no slug (the red case).
 add("dead-pr-wait: an edit that adds a wait on #43 to a legacy step with blockedBy empty is refused", "deny",
@@ -118,6 +129,15 @@ add("dead-pr-wait: a status-only edit of a legacy step that keeps its bare wait 
     tool="Edit", cwd=NOGIT, file_path=DPW_LEGACY, old_string='"status": "todo"', new_string='"status": "ready"')
 add("dead-pr-wait: a Write of a legacy step that keeps its bare wait and changes its status is allowed", "allow",
     tool="Write", cwd=NOGIT, file_path=DPW_LEGACY, content=dpw_step(DPW_LEGACY_WAIT, [], status="ready"))
+
+# ALLOW: history, not a wait: a PR that landed, was merged or is on main, named after a wait word. The control
+# "Reopened after #50." (no history word) is refused above. Each is a new step with blockedBy left out.
+dpw_write("a new step reopened after #50 that landed, with no blockedBy, is allowed", "allow",
+          "Reopened after #50 landed.")
+dpw_write("a new step reopened when #50 was merged, with no blockedBy, is allowed", "allow",
+          "Reopened when #50 was merged.")
+dpw_write("a new step reopened after #50 that is on main, with no blockedBy, is allowed", "allow",
+          "Reopened after #50 is on main.")
 
 # ALLOW: text that is not a wait on a bare #N. An ordinary mention, quoted, fenced or coded text, a slug wait,
 # a step with no wait, and a path that is not a step file (the control for the deny cases above).

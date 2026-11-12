@@ -2777,6 +2777,26 @@ class WaitOnClosedPull(UpkeepFixture):
         self.assertNotIn("fix-check-chain (#46)", self.listed(out),
                          "a note that says a lane continued after #46 merged is listed as a wait on #46")
 
+    def test_history_landed_was_merged_or_on_main_is_not_a_wait(self):
+        """The legacy row reads the same matcher, so it skips the same history. The bare 'Reopened after #49.' is the
+        control: it has no history word, so it is listed."""
+        history = (("fix-landed", "Reopened after #46 landed.", 46),
+                   ("fix-was-merged", "Reopened when #47 was merged.", 47),
+                   ("fix-on-main", "Reopened after #48 is on main.", 48))
+        self.commit_step(self.CONTROL, note="Waits on #41 to land.")
+        for sid, note, _ in history:
+            self.commit_step(sid, note=note)
+        self.commit_step("fix-bare", note="Reopened after #49.")
+        self.publish(landed=[self.closed(41), self.closed(49)] + [self.closed(n) for _, _, n in history])
+        out = self.out_with_live()
+        self.assert_control_listed(out)
+        self.assertIn("fix-bare (#49)", self.listed(out),
+                      "the bare 'Reopened after #49.' is not listed, so the history cases prove nothing")
+        for sid, _, n in history:
+            with self.subTest(step=sid):
+                self.assertNotIn("%s (#%d)" % (sid, n), self.listed(out),
+                                 "history on closed unmerged #%d (%s) is listed as a wait" % (n, sid))
+
     def test_wait_phrases_until_when_and_wait_on_are_listed_bare_and_with_PR(self):
         # The PR form is the one the regex took later; each bare form is the control at every sha that has the row.
         waits = (("until", "Held until #61 lands."), ("until PR", "Held until PR #62 lands."),
@@ -4336,9 +4356,11 @@ class DeadPrWaits(UpkeepFixture):
     on a bare PR number (#N, or PR #N) when the live file's prStates list (the publisher's one read per build) shows
     that PR closed and unmerged. The flag line names the step and the PR, and the build exits 1. A wait with no usable
     state reads unknown and exits 0, never clean. A state is usable only when it is open or closed. Matcher: the words
-    of DEAD_PR_WAIT_PHRASES (after, waits on, wait on, waiting for, blocked on, once, until, when). Every not-flagged
-    case sits beside a flagged control in the same build, so a quiet check cannot pass as clean. The read time and the
-    step times are fixed: no case reads the clock."""
+    of DEAD_PR_WAIT_PHRASES (after, waits on, wait on, waiting on, waits for, wait for, waiting for, blocked on, once,
+    until, when). A note that says the PR landed, was merged or is on main is history, not a wait. The build prints one
+    summary line, not one per step, when no prStates list can judge any wait. Every not-flagged case sits beside a
+    flagged control in the same build, so a quiet check cannot pass as clean. The read time and the step times are
+    fixed: no case reads the clock."""
 
     READ_AT = "2026-11-12T13:00:00Z"
     CONTROL = "dead-pr-control"
@@ -4349,6 +4371,9 @@ class DeadPrWaits(UpkeepFixture):
         "after": "Runs after #42 lands.",
         "waits on": "The lint lane waits on #42.",
         "wait on": "Both lanes wait on #42.",
+        "waiting on": "The lint lane is waiting on #42.",
+        "waits for": "The lint lane waits for #42.",
+        "wait for": "Both lanes wait for #42.",
         "waiting for": "The lint lane is waiting for #42.",
         "blocked on": "The lint lane is blocked on #42.",
         "once": "Starts once #42 is in.",
@@ -4484,17 +4509,27 @@ class DeadPrWaits(UpkeepFixture):
         missed = [sid for sid in notes if not self.flagged(out, sid, 42)]
         self.assertEqual(missed, [], "these waits on closed #42 were not flagged:\n%s" % out)
 
+    UNKNOWN_SIDS = ("wait-unknown-a", "wait-unknown-b", "wait-unknown-c")
+
+    def assert_one_unknown_summary(self, out, sids):
+        """With no usable prStates list the build prints one dead-PR-wait line for all its waits, and it reads unknown.
+        The line names no step: the build has no state to judge any one wait by."""
+        lines = [line for line in out.splitlines() if build.DEAD_WAIT_LINE in line]
+        self.assertEqual(len(lines), 1,
+                         "want one dead PR wait line for the whole build, got %d:\n%s" % (len(lines), out))
+        self.assertIn("unknown", lines[0], "the dead PR wait line does not read unknown:\n%s" % out)
+        for sid in sids:
+            self.assertNotIn(sid, lines[0], "the dead PR wait line names the step %s:\n%s" % (sid, out))
+
     def test_no_pr_states_key_reads_unknown(self):
-        self.add_steps({"wait-unknown": "The lint lane waits on #42."})
+        self.add_steps({sid: "The lint lane waits on #42." for sid in self.UNKNOWN_SIDS})
         out = self.run_build(None, expect=(0,))
-        self.assertTrue([line for line in self.lines_for(out, "wait-unknown", 42) if "unknown" in line],
-                        "the wait on #42 did not read unknown with no prStates key:\n%s" % out)
+        self.assert_one_unknown_summary(out, self.UNKNOWN_SIDS + (self.CONTROL,))
 
     def test_empty_pr_states_reads_unknown(self):
-        self.add_steps({"wait-unknown": "The lint lane waits on #42."})
+        self.add_steps({sid: "The lint lane waits on #42." for sid in self.UNKNOWN_SIDS})
         out = self.run_build([], expect=(0,))
-        self.assertTrue([line for line in self.lines_for(out, "wait-unknown", 42) if "unknown" in line],
-                        "a wait on #42 with an empty prStates did not read unknown:\n%s" % out)
+        self.assert_one_unknown_summary(out, self.UNKNOWN_SIDS + (self.CONTROL,))
 
     def test_number_with_no_entry_reads_unknown(self):
         self.add_steps({"wait-unknown": "The lint lane waits on #42."})
@@ -4505,10 +4540,10 @@ class DeadPrWaits(UpkeepFixture):
         self.assertEqual(self.flagged(out, "wait-unknown", 42), [], "a wait with no entry was flagged closed:\n%s" % out)
 
     def test_unreadable_pr_states_reads_unknown(self):
-        self.add_steps({"wait-unknown": "The lint lane waits on #42."})
+        """A prStates that is not a list reads the same as a missing one: one summary line, exit 0."""
+        self.add_steps({sid: "The lint lane waits on #42." for sid in self.UNKNOWN_SIDS})
         out = self.run_build("closed", expect=(0,))
-        self.assertTrue([line for line in self.lines_for(out, "wait-unknown", 42) if "unknown" in line],
-                        "a wait on #42 with an unreadable prStates did not read unknown:\n%s" % out)
+        self.assert_one_unknown_summary(out, self.UNKNOWN_SIDS + (self.CONTROL,))
 
     def test_open_wait_only_exits_zero(self):
         """A green control: a wait on an open PR, and no closed one, leaves the build clean."""
@@ -4553,6 +4588,23 @@ class DeadPrWaits(UpkeepFixture):
         out = self.run_build([self.CLOSED, self.CONTROL_PR])
         self.assert_control_flagged(out)
         self.assertTrue(self.flagged(out, "ask-wait", 42), "a wait in the ask field on closed #42 was not flagged:\n%s" % out)
+
+    def test_history_after_a_wait_word_is_not_flagged(self):
+        """History is not a wait, as the guard reads it: a PR that landed, was merged or is on main is skipped. The bare
+        'Reopened after #42.' has no history word, so it stays a wait and is flagged in the same build."""
+        history = {"landed": "Reopened after #42 landed.", "was-merged": "Reopened when #42 was merged.",
+                   "on-main": "Reopened after #42 is on main."}
+        notes = {"history-" + kind: note for kind, note in history.items()}
+        notes["history-control"] = "Reopened after #42."
+        self.add_steps(notes)
+        out = self.run_build([self.CLOSED, self.CONTROL_PR])
+        self.assert_control_flagged(out)
+        self.assertTrue(self.flagged(out, "history-control", 42),
+                        "the bare 'Reopened after #42.' was not flagged, so the history case proves nothing:\n%s" % out)
+        for kind in history:
+            with self.subTest(history=kind):
+                self.assertEqual(self.flagged(out, "history-" + kind, 42), [],
+                                 "history on closed #42 (%s) was flagged as a wait:\n%s" % (kind, out))
 
 
 if __name__ == "__main__":
