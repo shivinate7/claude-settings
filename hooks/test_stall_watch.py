@@ -1582,6 +1582,66 @@ def one_pause_then_one_command_is_a_lone_pause():
     return lone_pause_problems("sleep 420; gh api x", True) + lone_pause_problems("sleep 5 && cat f", True)
 
 
+# A script's ps comm is its own file name on Linux, not its shell, so the watcher must not read the comm as the
+# shell: a script that sleeps is a shell copy, hung on its child.
+SCRIPT_BODY = ": > started\nsleep 100\n"
+
+
+def write_script(folder, shebang):
+    """./deploy.sh in folder, executable: a `#!<shebang>` line, then SCRIPT_BODY. Return its path."""
+    path = os.path.join(folder, "deploy.sh")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("#!%s\n%s" % (shebang, SCRIPT_BODY))
+    os.chmod(path, 0o755)
+    return path
+
+
+def script_stall_problems(shebang):
+    """Run `cd <dir> && ./deploy.sh` under a 2 s quiet, the script written with `shebang`. Scope first: the script
+    ran its first line. Then the watcher reports the hung script: one STALL line, exit 3, and a sleep 100 under the
+    pid the report names."""
+    if not os.path.exists(shebang.split()[0]):
+        raise Skip("%s is not installed" % shebang.split()[0])
+    folder = new_dir()
+    write_script(folder, shebang)
+    try:
+        rc, text, _secs, _cmd = run_rewritten("cd %s && ./deploy.sh" % shlex.quote(folder), timeout=20)
+        if not os.path.exists(os.path.join(folder, "started")):
+            return ["the script never ran its first line, so the stall is not the script's"]
+        if not any(line.startswith("STALL:") for line in text.splitlines()):
+            return [f"the watcher printed no STALL for a hung script (shebang {shebang!r}, sleep 100 running)"]
+        problems = expect(rc == 3, f"exit {rc}, want 3")
+        m = PID_RE.search(text)
+        if not m:
+            return problems + ["report names no pid="]
+        job = int(m.group(1))
+        problems += expect(any(a.startswith("sleep 100") for _p, a in tree(job)),
+                           f"no sleep 100 under pid {job}, the job's pid in the report")
+        return problems
+    finally:
+        reap()
+
+
+@posix_case
+def sh_shebang_script_that_sleeps_is_hung():
+    """28n. `cd D && ./deploy.sh`, deploy.sh a `#!/bin/sh` script whose body is `sleep 100`, under a 2 s quiet: the
+    script is a shell copy, not a waiter, so STALL and exit 3 come after the quiet age"""
+    return script_stall_problems("/bin/sh")
+
+
+@posix_case
+def bash_shebang_script_that_sleeps_is_hung():
+    """28o. as 28n with a `#!/bin/bash` shebang: STALL and exit 3 after the quiet age"""
+    return script_stall_problems("/bin/bash")
+
+
+@posix_case
+def env_bash_script_that_sleeps_is_hung():
+    """28p. control, passes on the branch: as 28n with `#!/usr/bin/env bash`, whose comm is bash, a shell: STALL and
+    exit 3 after the quiet age"""
+    return script_stall_problems("/usr/bin/env bash")
+
+
 # Parity table. A row is one case body from above, and keeps its label. A failing row
 # prints that label before its problem. A row that raises names itself too.
 @posix_case
