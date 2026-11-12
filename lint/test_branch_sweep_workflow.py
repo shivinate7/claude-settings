@@ -7,10 +7,15 @@ It prints `clean` when the workflow passes, else one line per finding: `<rule>: 
   permissions  only the contents scope is named; the top level is contents read; a job may request contents write
   secrets      no evaluated expression reads the secrets context; the token is github.token
   triggers     only push to main and workflow_dispatch
-  pin          each uses: is pinned by a full commit SHA, except a $/ local action
-  checkout     each actions/checkout step sets persist-credentials: false
+  pin          each uses: is pinned by a full commit SHA, except a ./ local action
+  checkout     each actions/checkout step sets persist-credentials: false under its with:
   timeout      each job sets timeout-minutes
-The last three are ci-hygiene rules (skills/ci-hygiene, steps 7 to 9).
+  read         the open-PR read step cannot fail silently: no || true in its run, no continue-on-error
+  injection    no ${{ }} expression inside a run block
+  concurrency  a concurrency block is set at the top level
+  condition    a job-level if: limits the job to main
+  argv         --open-head takes its value as --open-head=VALUE, so a value that starts with - is not an option
+pin, checkout and timeout are ci-hygiene rules (skills/ci-hygiene, steps 7 to 9).
 
 GitHub does not evaluate an expression in a YAML comment. It does evaluate one in a quoted value, a plain value, or a
 run: block, even after a `#` or beside a lone quote.
@@ -45,10 +50,17 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: branch-sweep
+  cancel-in-progress: false
 jobs:
   sweep:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    if: github.ref == 'refs/heads/main'
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
     permissions:
       contents: write
     steps:
@@ -56,17 +68,24 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Read the heads of open pull requests
+        run: gh api --paginate "repos/$REPO/pulls?state=open&per_page=100" --jq '.[].head.ref' > "$RUNNER_TEMP/open-heads.txt"
       - name: Delete the branches the Oct 30 grant allows
         env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
-          python3 actions/branch-sweep/sweep.py --repo . > verdicts.txt
+          args=()
+          while IFS= read -r head; do
+            if [ -n "$head" ]; then
+              args+=(--open-head="$head")
+            fi
+          done < "$RUNNER_TEMP/open-heads.txt"
+          python3 actions/branch-sweep/sweep.py --repo . --default "$DEFAULT_BRANCH" "${args[@]}" > "$RUNNER_TEMP/verdicts.txt"
           while read -r verb name reason; do
             if [ "$verb" = delete ]; then
               gh api -X DELETE "repos/$REPO/git/refs/heads/$name"
             fi
-          done < verdicts.txt
+          done < "$RUNNER_TEMP/verdicts.txt"
 """
 
 
@@ -131,6 +150,11 @@ class Workflow(unittest.TestCase):
         self.assertFinding(variant("          persist-credentials: false\n", ""), "checkout",
                            "a checkout that keeps its token")
 
+    def test_persist_credentials_under_env_is_flagged(self):
+        text = variant("        with:\n          fetch-depth: 0\n          persist-credentials: false\n",
+                       "        env:\n          persist-credentials: false\n        with:\n          fetch-depth: 0\n")
+        self.assertFinding(text, "checkout", "persist-credentials under env:, so checkout keeps its token")
+
     def test_job_without_timeout_is_flagged(self):
         self.assertFinding(variant("    timeout-minutes: 10\n", ""), "timeout", "a job with no timeout-minutes")
 
@@ -149,6 +173,43 @@ class Workflow(unittest.TestCase):
     def test_yaml_comment_with_a_secret_is_clean(self):
         text = variant("      - name: Delete", "      # don't read ${{ secrets.SHIV_GITHUB_TOKEN }} here\n      - name: Delete")
         self.assertClean(text, "an expression in a YAML comment is not evaluated, so it is no finding")
+
+    def test_read_step_with_or_true_is_flagged(self):
+        text = variant('> "$RUNNER_TEMP/open-heads.txt"\n', '> "$RUNNER_TEMP/open-heads.txt" || true\n')
+        self.assertFinding(text, "read", "the open-PR read ends in || true, so a failed read passes")
+
+    def test_read_step_with_continue_on_error_is_flagged(self):
+        text = variant("      - name: Read the heads of open pull requests\n",
+                       "      - name: Read the heads of open pull requests\n        continue-on-error: true\n")
+        self.assertFinding(text, "read", "the open-PR read continues on error")
+
+    def test_expression_in_a_run_block_is_flagged_whatever_the_text_around_it(self):
+        lines = {
+            "a plain echo": 'echo "${{ github.event.head_commit.message }}"',
+            "a # inside quotes": 'echo "# ${{ github.event.head_commit.message }}"',
+            "a lone quote": "echo don't ${{ github.event.head_commit.message }}",
+            "a shell comment": "# ${{ github.event.head_commit.message }}",
+        }
+        for label, line in lines.items():
+            with self.subTest(label):
+                text = variant("          args=()\n", "          " + line + "\n          args=()\n")
+                self.assertFinding(text, "injection", "%s: the expression is evaluated in the run block" % label)
+
+    def test_yaml_comment_with_an_expression_is_clean(self):
+        text = variant("      - name: Delete", "      # echo ${{ github.event.head_commit.message }}\n      - name: Delete")
+        self.assertClean(text, "an expression in a YAML comment is not evaluated, so it is no finding")
+
+    def test_missing_concurrency_is_flagged(self):
+        text = variant("concurrency:\n  group: branch-sweep\n  cancel-in-progress: false\n", "")
+        self.assertFinding(text, "concurrency", "no concurrency block, so two runs can delete the same branches")
+
+    def test_missing_job_condition_is_flagged(self):
+        text = variant("    if: github.ref == 'refs/heads/main'\n", "")
+        self.assertFinding(text, "condition", "no job-level if:, so the job can run off main")
+
+    def test_split_open_head_argument_is_flagged(self):
+        text = variant('args+=(--open-head="$head")', 'args+=(--open-head "$head")')
+        self.assertFinding(text, "argv", "--open-head with a separate value: a head named -x reads as an option")
 
 
 def tearDownModule():
