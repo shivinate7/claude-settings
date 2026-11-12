@@ -560,6 +560,12 @@ MUTATIONS = [
     ("push-agent-branch: the refusal is not wired",
      '                elif kind == "agent":',
      '                elif kind == "agent-off":', "guard", 'agent branch, HEAD asks'),
+    # push-batch-held: the push-batch-unread line is the only record of a batch read that could not be judged.
+    # Dropping it must turn the unread cases red, on the missing line.
+    ("push-batch-held: an unread batch is allowed without a log line",
+     '        record(tool, "noted", "push-batch-unread",',
+     '        (lambda *_: None)(tool, "noted", "push-batch-unread",', "guard",
+     'an open list that cannot be read allows the push, and logs push-batch-unread'),
     # The all-agent kind (rule push-all-main, decision plain-push-asks): a --all, --branches or glob push that sends a
     # local branch named like an agent worktree while the tracking refs show no update. Its code is split across
     # guard_push_delete.py (_local_agent_branches, _glob_sends, push_ask_hit, PUSH_ALL_AGENT_REASON) and guard.py (the
