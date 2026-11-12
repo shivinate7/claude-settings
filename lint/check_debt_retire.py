@@ -87,19 +87,38 @@ def scratch(wt, head):
 
 
 def link_packages(wt, tree):
-    """Link the checkout's installed `node_modules` into the scratch tree, at the root and beside each package.json the tree holds.
+    """Link the installed `node_modules` into the scratch tree, at the root and beside each package.json the tree holds.
     A fresh worktree has none, so a test that imports a package would exit "module not found" and read red (decision debt-close-runs-retire).
-    The link is the checkout's own folder, so a Retire test that writes or deletes inside `node_modules` changes the checkout's install (repaired by an install; decision debt-close-runs-retire). It reads the checkout's install, never head's lockfile.
-    A folder `wt` lacks is not linked, so a test that needs it still fails. Best effort: a link that cannot be made leaves the test to run without it."""
+    Each folder comes from `wt` when `wt` has it, else from the main checkout of `wt`'s repository: the merge tool's `wt` is itself a
+    fresh worktree, and the install lives in the checkout it was made from. No other place is read.
+    The link is that install's own folder, so a Retire test that writes or deletes inside `node_modules` changes it (repaired by an install;
+    decision debt-close-runs-retire). It reads the installed packages, never head's lockfile.
+    A folder neither place has is not linked, so a test that needs it still fails. Best effort: a link that cannot be made leaves the test to run without it."""
+    homes = [os.path.abspath(wt)]  # absolute: a relative link target would resolve inside the scratch tree, to itself
+    main = installed_checkout(wt)
+    if main and main not in homes:
+        homes.append(main)
     listed = _nowindow.run(["git", "-C", tree, "ls-files", "-z", "--", "package.json", "*/package.json"], capture_output=True, encoding="utf-8", errors="replace")
     for pkg in listed.stdout.split("\0"):
         rel = os.path.join(os.path.dirname(pkg), "node_modules")
-        src, dst = os.path.join(wt, rel), os.path.join(tree, rel)
-        if pkg and os.path.isdir(src) and not os.path.lexists(dst):
+        dst = os.path.join(tree, rel)
+        src = next((s for s in (os.path.join(h, rel) for h in homes) if os.path.isdir(s)), None)
+        if pkg and src and not os.path.lexists(dst):
             try:
                 os.symlink(src, dst, target_is_directory=True)
             except OSError:
                 pass
+
+
+def installed_checkout(wt):
+    """The absolute path of the main checkout of `wt`'s repository: the folder that holds its `.git`, from git's common dir.
+    None when git cannot say, or when the repository is bare (its common dir is not a `.git` folder), so no path is guessed."""
+    got = _nowindow.run(["git", "-C", wt, "rev-parse", "--git-common-dir"], capture_output=True, encoding="utf-8", errors="replace")
+    common = got.stdout.strip()
+    if got.returncode or not common:
+        return None
+    common = os.path.abspath(os.path.join(wt, common))  # a relative answer is relative to `wt`
+    return os.path.dirname(common) if os.path.basename(common) == ".git" else None
 
 
 def run_span(wt, span, timeout):
