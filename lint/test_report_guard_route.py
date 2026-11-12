@@ -43,16 +43,21 @@ def tearDownModule():
 
 ON_PAGE = "on the page, item"  # the form a reply names once its question is on the page (item 3, page-wakes-and-relays)
 NOT_SENT = "was not sent to the page writer"  # the Pick guard's reason, which a counted send keeps out
+SENT_FACT = "a send or items write to the waiting page went out this turn"  # what the page form's reason checks
+OLD_CLAIM = "already on the waiting page"  # the old wording, which said the question was on the page
 
 
 def assert_on_the_page(test, out):
     """The send counted, and the block is the on-the-page form. Scope first: no Pick guard reason, so the send
-    counted. Then the subject: the reason names the page item. A copy of test_report_guard's assert_on_the_page;
-    the red run here imports main's test_report_guard, which has no such helper, so this file defines its own."""
+    counted. Then the subject: the reason says what was checked, a send or items write that went out, and not that the
+    question is on the page. A copy of test_report_guard's assert_on_the_page; the red run here imports main's
+    test_report_guard, which has no such helper, so this file defines its own."""
     test.assertIsNotNone(out, "the question passed; expected a block")
     test.assertEqual(out.get("decision"), "block", out)
     reason = out.get("reason", "")
     test.assertNotIn(NOT_SENT, reason, "the Pick guard refused it, so its send did not count: %r" % reason)
+    test.assertIn(SENT_FACT, reason, "the reason does not say what was checked: %r" % reason)
+    test.assertNotIn(OLD_CLAIM, reason, "the reason says the question is on the page, not what was sent: %r" % reason)
     test.assertIn(ON_PAGE, reason, "the block does not name the on-the-page form: %r" % reason)
 
 

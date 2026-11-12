@@ -1883,17 +1883,22 @@ class CompactionCarryCostTests(unittest.TestCase):
 
 ON_PAGE = "on the page, item"  # the form a reply names once its question is on the page (item 3, page-wakes-and-relays)
 NOT_SENT = "was not sent to the page writer"  # the Pick guard's reason, which a counted send keeps out
+SENT_FACT = "a send or items write to the waiting page went out this turn"  # what the page form's reason checks
+OLD_CLAIM = "already on the waiting page"  # the old wording, which said the question was on the page
 
 
 def assert_on_the_page(test, out):
     """The question's send counted, and the block is the on-the-page form. Scope first: the Pick guard's reason is
-    absent, so the send counted. Then the subject: the reason names the page item. The page holds the question, so
-    the reply holds only the form, and a reply with options beside it is not a pass. test_report_guard_route keeps
-    its own copy, since its red run imports this file as main has it."""
+    absent, so the send counted. Then the subject: the reason says what was checked, a send or items write that went
+    out, and not that the question is on the page. The form words stay in the reason, as the fact's item. The page
+    holds the question, so the reply holds only the form, and a reply with options beside it is not a pass.
+    test_report_guard_route keeps its own copy, since its red run imports this file as main has it."""
     test.assertIsNotNone(out, "the question passed; expected a block")
     test.assertEqual(out.get("decision"), "block", out)
     reason = out.get("reason", "")
     test.assertNotIn(NOT_SENT, reason, "the Pick guard refused it, so its send did not count: %r" % reason)
+    test.assertIn(SENT_FACT, reason, "the reason does not say what was checked: %r" % reason)
+    test.assertNotIn(OLD_CLAIM, reason, "the reason says the question is on the page, not what was sent: %r" % reason)
     test.assertIn(ON_PAGE, reason, "the block does not name the on-the-page form: %r" % reason)
 
 
@@ -2282,14 +2287,15 @@ class SameTurnWriter:
             recs.append(rec)
         return recs
 
-    def send(self, session_id=None, to=None, result=None, is_error=False, tool_use_result=None):
+    def send(self, session_id=None, to=None, result=None, is_error=False, tool_use_result=None, message="pick"):
         """A send: send_message names its target by session_id, SendMessage by to. `result` is the send's tool
-        result text, None when the transcript holds none. is_error and tool_use_result go to call as given."""
+        result text, None when the transcript holds none. is_error and tool_use_result go to call as given. `message`
+        is the send's text; the check reads the target only, so the default stands for any question."""
         out = {"result": result, "is_error": is_error, "tool_use_result": tool_use_result}
         if to is None:
             return self.call("mcp__claude-code-remote__send_message",
-                             {"session_id": session_id, "message": "pick"}, **out)
-        return self.call("SendMessage", {"to": to, "message": "pick"}, **out)
+                             {"session_id": session_id, "message": message}, **out)
+        return self.call("SendMessage", {"to": to, "message": message}, **out)
 
     def writer_read(self, writer, collection="meta", doc_id="page"):
         """An ArtifactData get whose result carries the writer id."""
@@ -2448,6 +2454,28 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                 out = self.stop([human("decide"), *self.writer_read(self.WRITER), *send,
                                  assistant_text(self.reply(self.PICK))])
                 assert_on_the_page(self, out)
+
+    def status_then_pick(self):
+        """A turn whose only send to the writer is a status, and whose reply offers a pick in chat."""
+        status = self.send(session_id=self.WRITER, message="Status: the batch is merged. Nothing is asked.")
+        return [human("decide"), *self.writer_read(self.WRITER), *status, assistant_text(self.reply(self.PICK))]
+
+    def test_qm_red_status_send_with_a_pick_says_what_was_checked(self):
+        # Catches: the reason saying the question is already on the waiting page when the turn's send to the writer was a
+        # status. The reason names what was checked, a send that went out, and holds the form (item 2 of
+        # page-wakes-and-relays).
+        assert_on_the_page(self, self.stop(self.status_then_pick()))
+
+    def test_qm_green_status_send_with_a_pick_still_blocks_on_the_form(self):
+        # Control: the status send counts as the writer's send, so the pick is blocked on the page form. It is not a
+        # Pick guard refusal for a send that missed the writer. The wording is pinned by the case above.
+        out = self.stop(self.status_then_pick())
+        self.assertIsNotNone(out, "the pick passed after a status send to the writer")
+        self.assertEqual(out.get("decision"), "block", out)
+        reason = out.get("reason", "")
+        self.assertIn("Pick guard", reason, "the block is not the Pick guard: %r" % reason)
+        self.assertNotIn(NOT_SENT, reason, "the status send to the writer did not count: %r" % reason)
+        self.assertIn(ON_PAGE, reason, "the block does not name the on-the-page form: %r" % reason)
 
     def test_qm_red_send_to_another_session_blocks(self):
         # Catches: a send to a session that is not the writer passing as the question's send.
