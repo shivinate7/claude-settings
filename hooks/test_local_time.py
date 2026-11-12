@@ -2144,16 +2144,21 @@ def case_opus_ask_exclusion_words_grant_nothing():
 
 def case_opus_ask_plain_lists_still_grant_both():
     # Guard, passes on the build too: a plain list (and, a comma, or) between two roles names both roles.
-    for prompt, minutes in (("send opus builders and reviewers", 120), ("send opus builders, reviewers", 120),
+    for prompt, minutes in (("send opus builders and reviewers", None), ("send opus builders, reviewers", None),
                             ("use opus for builders or reviewers for 30m", 30)):
         cfg, calls, _, _ = opus_type(prompt, answer={"ok": True})
         got = opus_override(cfg)
         check("opus ask: %r reaches the judge once" % prompt, len(calls) == 1, "judge calls %d" % len(calls))
         check("opus ask: %r names builder and reviewer, as the sorted list" % prompt,
               got is not None and got[2] == ["builder", "reviewer"], "got %r" % (got,))
-        check("opus ask: %r ends %d minutes after the grant" % (prompt, minutes),
-              got is not None and abs((got[1] - (OV_NOW + timedelta(minutes=minutes))).total_seconds()) <= 1,
-              "got %r" % (got,))
+        if minutes is None:
+            check("opus ask: %r has no length, so no end time: it lasts until session end" % prompt,
+                  got is not None and far_or_none(got[1]), "got %r" % (got,))
+        else:
+            check("opus ask: %r ends %d minutes after the grant" % (prompt, minutes),
+                  got is not None and got[1] is not None
+                  and abs((got[1] - (OV_NOW + timedelta(minutes=minutes))).total_seconds()) <= 1,
+                  "got %r" % (got,))
 
 
 def case_opus_scope_cloud_seed_record_is_not_context():
