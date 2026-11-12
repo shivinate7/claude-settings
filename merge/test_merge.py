@@ -13482,7 +13482,7 @@ class StandingGrantSwitch(CloudSession):
 
 
 class GuardRolesAreTheToolsSet(unittest.TestCase):
-    """hooks/guard_merge.py ROLE_TIERS is the tiers the guard admits for `merge --role`. Its one home is merge.py's MERGE_ROLES (rule
+    """hooks/guard_merge.py ROLE_TIERS is the session roles the guard admits for `merge --role`. Its one home is merge.py's MERGE_ROLES (rule
     building-allow-list-is-the-constant), so the guard's list is that object and never a copy of it. This pins the reference, not the
     value: the value stays batch-runner alone (G2 and G10, owner 2026-11-10 14:23 and 14:33 CST)."""
 
