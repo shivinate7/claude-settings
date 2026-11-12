@@ -538,7 +538,7 @@ while True:
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
             clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
-            inner_commands, nested_script, norm, python_runs_body,
+            inner_commands, interpreter_bodies, nested_script, norm, python_runs_body,
             _segment_cd_target, _strip_heredoc_bodies_unconditionally, _RUNNER,
             path_is_inside, primary_checkout, record, refuse, resolve_command,
             resolve_default_base,  # noqa: F401  re-exported: janitor/test_sweep.py calls guard.resolve_default_base
@@ -587,7 +587,7 @@ while True:
         _loading = "guard_env"
         from guard_env import (
             ENV_ADVICE, ENV_TOOL_REASON, _substitutions, env_heredoc_refusal, env_refusal, is_env,
-            substitution_commands,
+            script_spots, substitution_commands,
         )
         _loading = "guard_kill"
         from guard_kill import (
@@ -5097,8 +5097,9 @@ def shell_run_texts(raw: str) -> list:
     reads stays whole; an unquoted heredoc body or an expandable here-string joins as the `$(...)` and
     backticks it runs. A quoted body that only an interpreter keeps in view, and that holds a backtick, joins
     as its pieces split at every backtick, since perl, ruby and node run a backtick span as a shell. A body
-    that python alone runs adds nothing. The limits: a body with no backtick is not read, and a body with
-    one is read anywhere, unless python alone runs it.
+    that python alone runs adds no pieces. A quoted python or node body adds the text of each of its shell
+    calls (`script_spots`), where a double-quoted `$(` or backtick span runs. The limits: a body with no
+    backtick is read only at those calls, and a body with one is read anywhere, unless python alone runs it.
     A here-string that iex, Invoke-Expression, pwsh, a scriptblock or a POSIX shell's `-c` runs
     (`_here_string_is_run`) joins as its lines. One held in a variable is not read. A later line that runs the
     variable does not change that."""
@@ -5129,6 +5130,12 @@ def shell_run_texts(raw: str) -> list:
                 for piece in body.split("`"):
                     texts.append(piece)
                     texts.extend(t for t, _ in _substitutions(piece, heredoc=True)[0][:-1])
+        for lang, body, quote in interpreter_bodies(raw):
+            if quote and lang in ("py", "js"):
+                # A python or node script hands a string to a shell only at a shell call (`os.system`,
+                # `subprocess` with a shell, `execSync`), and a double-quoted `$(` or backtick span in that
+                # string runs there. Every other string of the script is data.
+                texts.extend(script_spots(body, lang))
     return texts
 
 

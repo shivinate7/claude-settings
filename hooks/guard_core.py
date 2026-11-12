@@ -1004,7 +1004,12 @@ _SCRIPT_RUNNER = re.compile(r"(?:python[\d.]*|perl|ruby|node|nodejs|bun|deno)(?:
 
 # The runners a body of python, or of anything else, can have: python alone, and the rest.
 _PYTHON_RUNNER = re.compile(r"python[\d.]*(?:\.exe|\.cmd)?").fullmatch
-_OTHER_INTERPRETERS = "|".join(word for word in _INTERPRETERS.split("|") if not word.startswith("python"))
+# ash is no member of _SHELLS (a file only ash runs is read as on main), so it joins here by name: a file python runs
+# and ash then runs is not python's alone.
+_ASH = "ash"
+_OTHER_INTERPRETERS = "|".join(
+    [word for word in _INTERPRETERS.split("|") if not word.startswith("python")] + [_ASH])
+_ASH_RUNNER = re.compile(_ASH + r"(?:\.exe|\.cmd)?").fullmatch
 _OTHER_INTERPRETER = re.compile(r"(?:" + _OTHER_INTERPRETERS + r")(?:\.exe|\.cmd)?").fullmatch
 _OTHER_RUNNER =re.compile(r"(?:" + _OTHER_INTERPRETERS + "|" + _WRAPPERS + r")(?:\.exe|\.cmd)?").fullmatch
 
@@ -1077,8 +1082,8 @@ def python_runs_body(raw: str, header: str, nth: int = 0) -> bool:
     to a file that only a bare python word runs. Words decide, never a path: `python/t.pl` holds no python
     word, and a written file's own name is no runner. A python word in another stage of the line, or beside a
     second heredoc, makes nothing python. A runner word the guard does not know stands apart: `stdbuf -o0
-    python3 f.py` is python's, and so is `python3 f.py && ash f.py`. A body fed to python stays python's behind
-    a known wrapper (`env python3 -`). A written file run through one (`env python3 f`), `./f`, or a shell or
+    python3 f.py` is python's. A body fed to python stays python's behind
+    a known wrapper (`env python3 -`). A written file run through one (`env python3 f`), `./f`, or a shell, ash or
     other interpreter word is not python, so the body stays in view."""
     header = _without_message_values(header)
     heads = len(heredoc_heads(header)[0])
@@ -1114,7 +1119,9 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False, per_body: bool = F
     # The per-body reading starts from main's whole-command test, which both its callers read before.
     whole = shells_only and not per_body   # a bare python, perl, ruby or node run of a written file is no shell
     if (SHELL_HEREDOC if whole else INTERPRETER_HEREDOC)(text) or _runs_written_file(
-            text, headers, _SHELL_RUNNER if whole else _RUNNER):
+            text, headers, _SHELL_RUNNER if whole else _RUNNER) or (
+            whole and any(_runs_written_file(text, [header], _PYTHON_RUNNER)
+                          and _runs_written_file(text, [header], _ASH_RUNNER) for header in headers)):
         # The body may be executed, so keep it under inspection. With the two walks reading these headers
         # differently, no body can be told apart from another; a heredoc that eval or source runs may open
         # on a line before its header.

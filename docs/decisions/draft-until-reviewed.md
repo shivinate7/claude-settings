@@ -22,19 +22,20 @@ Limits:
 
 - A shell-run heredoc body is read whole. An unquoted body's `$(` is read, because bash runs it while writing the file.
 - A quoted body that python, perl, ruby or node runs is not read as shell lines. A bare `gh pr create` line in a body with no backtick is allowed.
-- A quoted perl, ruby or node body with any backtick is read whole, split at each backtick. A body with none is not read.
-- A body that python alone runs adds no text, even with a backtick. Python can still hand text to a shell through `os.system`, which the guard does not read.
+- A quoted perl, ruby or node body with any backtick is read whole, split at each backtick. A body with none is not read, except a node body at its shell calls (the line below).
+- A body that python alone runs adds none of its own lines, even with a backtick. A quoted python or node body adds the text of each shell call it makes (`os.system`, `os.popen`, `subprocess` with a shell, node's `exec`, `execSync`, `spawnSync`), read through `script_spots`. A double-quoted `$(` or backtick span in that call runs, so a `gh pr create` in it is refused. A string the script only prints is data and is allowed. A call whose argument is no literal reads the whole script.
 - A body piped into a shell (`python3 - <<'EOF' | sh`) is read only when the body itself holds the words as shell text. A body that only prints them is allowed, as on main.
 - Each body is judged by its own stage of the header line, or for a written file by the stages that run it.
 - Words decide who runs a body, never a path. A file named `python/t.pl` that perl runs is read, and a written file's own name is no runner.
 - Perl and ruby run a backtick span as a shell. Node does so through `execSync` and the like.
 - The guard pairs no backticks, so a lone backtick in a string cannot hide a real span.
 - A false alarm exists: a backtick span in a perl, ruby or node body that runs nothing is refused. A perl print of a string holding a span is one.
-- The impeccable rule shares this read.
+- The impeccable rule shares this read. So does the ask-alone count (`settle_ask`), which reads the same narrowed text (`strip_heredoc_bodies` with `shells_only`): a written file that only python, perl, ruby or node runs counts as one command, not one per body line. A file that python runs and ash then runs counts line by line, as a shell's file does.
 - A written file run through a known wrapper word (`env python3 f`, `sudo python3 f`) or as `./f` keeps its body read.
 - A body fed to python on stdin stays python's, even behind a known wrapper word.
 - A runner word the guard does not know in front of python (`stdbuf -o0 python3 f.py`) leaves the body python's, so it is allowed.
-- A runner word outside the guard's interpreter list (ash, nodejs, perl5.36) is not known, so `python3 f.py && ash f.py` is allowed.
+- A runner word outside the guard's interpreter list (nodejs, perl5.36) is not known, so `python3 f.py && nodejs f.py` is allowed.
+- ash is named only beside python. A file that python runs and ash then runs (`ash f`, `busybox ash f`, `cat f | ash`, `ash -c "$(cat f)"`) is read as shell lines, so a bare `gh pr create` line in it is refused. A file that only ash runs is not read, as on main.
 - An unknown runner drops the body, as on main, for a non-.sh file name and for stdin. A .sh name stays read, so `mysh f.sh` is refused.
 - A PowerShell here-string is read as shell lines when `iex` or `Invoke-Expression` takes it after a space.
 - It is also read when `[scriptblock]::Create(` builds a block from it, or when `pwsh` or `powershell` takes it after `-Command` or `-c`.
