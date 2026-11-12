@@ -16571,8 +16571,11 @@ def aged_pull(n, sha, seconds, draft=True, body=LANE_BODY):
     return batch_pull(n, sha, draft=draft, created_at=utc_before(seconds), body=body)
 
 def read_at(host, now):
-    """-> reviewed_read's lines at the clock `now` (epoch seconds)."""
-    return merge.reviewed_read(host, now=now)[0]
+    """-> reviewed_read's lines at the clock `now` (epoch seconds). A reviewed_read with no clock parameter is the read before the age rule, which
+    gives the same lines at any clock, so it runs without one."""
+    if "now" in inspect.signature(merge.reviewed_read).parameters:
+        return merge.reviewed_read(host, now=now)[0]
+    return merge.reviewed_read(host)[0]
 
 def assert_off_the_list(test, lines, n):
     """Pull request n is on the read (scope first), and no line still lists it as before: neither its state line nor the `no record:` line."""
@@ -16655,7 +16658,8 @@ class ReviewedSendBack(ReviewEnv):
         self.assertEqual(self.read([aged_pull(7, REVIEW_HEAD, 11 * SEND_BACK_HOUR)]), ["no record: #7"])
 
     def test_a_draft_13_hours_old_with_a_done_record_keeps_its_state_line(self):
-        lines = self.read([aged_pull(7, REVIEW_HEAD, 13 * SEND_BACK_HOUR)], [review_comment(1, 7, record_text(rounds=REVIEW_PASS))])
+        comments = [review_comment(1, 7, record_text(rounds=REVIEW_PASS)), lint_of(7, REVIEW_HEAD)]  # a done record needs the lane-lint PASS at its head
+        lines = self.read([aged_pull(7, REVIEW_HEAD, 13 * SEND_BACK_HOUR)], comments)
         self.assertEqual(len(lines), 1, "\n".join(lines))
         self.assertRegex(lines[0], rf"^#7 feat7 {REVIEW_HEAD[:9]} done: .*; CI draft, no run$")
 
