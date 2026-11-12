@@ -2,12 +2,13 @@
 FAMILY = "frozen"
 #
 # The sed operand reader. The frozen-path rule must refuse a write to a frozen file whatever flags,
-# wrapper, `w` command or pipe feed the `sed` takes, and must allow a sed that only names the file
-# as text or reads it. Each CONTROL pins a form the rule refuses or allows. The cost of a long
-# command is judged in section 35200.
+# wrapper, `w` command, delimiter or pipe feed the `sed` takes, and must allow a sed that only names
+# the file as text or reads it. Each CONTROL pins a form the rule refuses or allows. The cost of a
+# long command is judged in section 35200.
 #
 # Failure classes, one per group: flag-cluster, flag-suffix, flag-long, flag-after-operand,
-# w-command, wrapper, pipe-feed, false-alarm, script-as-target, script-file, scanner-strings.
+# w-command, wrapper, pipe-feed, false-alarm, script-as-target, script-file, scanner-strings,
+# delimiter, quoted-command.
 
 # --- flag-cluster: -i inside a cluster of short flags is a write (class: flag-cluster) ---
 sh("sed-operand flag-cluster: sed -ni onto a frozen hook is refused",
@@ -112,3 +113,17 @@ sh("sed-operand scanner-strings: -ni with a lone quote in the script, onto a fro
    "sed -ni \"s/don't/do not/\" " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
 sh("sed-operand scanner-strings: -ni with a quoted newline in the script, onto a frozen hook is refused",
    "sed -ni '1i\\\ntext' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
+
+# --- delimiter: an s command takes any character as its delimiter, so its w flag reads after that character (class: delimiter) ---
+sh("sed-operand delimiter: sed s with a | delimiter and a w flag to a frozen hook is refused",
+   "sed 's|a|b|w " + CFG_HOOK + "' x", "deny", "frozen-path", cwd=NOGIT)
+sh("sed-operand delimiter: sed s with a # delimiter and a w flag to a frozen hook is refused",
+   "sed 's#a#b#w " + CFG_HOOK + "' x", "deny", "frozen-path", cwd=NOGIT)
+sh("sed-operand delimiter: sed s with a : delimiter and a w flag to a frozen hook is refused",
+   "sed 's:a:b:w " + CFG_HOOK + "' x", "deny", "frozen-path", cwd=NOGIT)
+sh("sed-operand delimiter: sed s with a @ delimiter and a w flag to a frozen hook is refused",
+   "sed 's@a@b@w " + CFG_HOOK + "' x", "deny", "frozen-path", cwd=NOGIT)
+
+# --- quoted-command: a double-quoted sed name is still sed, so its -ni is a write (class: quoted-command) ---
+sh("sed-operand quoted-command: a double-quoted sed name with -ni onto a frozen hook is refused",
+   "\"sed\" -ni 's/a/b/' " + CFG_HOOK, "deny", "frozen-path", cwd=NOGIT)
