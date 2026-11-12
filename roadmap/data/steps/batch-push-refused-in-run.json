@@ -1,0 +1,15 @@
+{
+ "id": "batch-push-refused-in-run",
+ "title": "A push to a lane branch inside a running batch is refused",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Plan R26 (batch freeze) and R55 (owner 13:21 CST Nov 12, merge flow first).",
+ "source": "lane batch-freeze-lane-set-enforce 13:22 CST Nov 12",
+ "note": "Split from step batch-freeze-lane-set-enforce so its built part can merge: main has the frozen set, blame-limited --batch-drop and --ready; the lane built the FREEZE_CITE swap and a settings entry for the three flags (commit 3e17eb534). Left: a guard that refuses a push to a lane branch inside a running batch. It must read the batch PR body at push time, and the cloud has no gh for that read, so the route is open (MCP read, or a record the merge tool writes at batch build). State its cost per push. Red first.",
+ "updatedAt": "2026-11-12T13:23:35-06:00",
+ "order": -316
+}

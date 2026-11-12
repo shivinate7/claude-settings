@@ -1,11 +1,12 @@
 {
   "title": "Fix the 14 small rows and 13 prose-Fix notes from the kept-notes re-check",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 1.2,
   "owner": "coordinator",
   "why": "Coordinator, 14:23 CST Nov 7: notes-keep-reverify re-checked 146 rows. 18 to fix, 18 to delete, 110 to keep (86 rare and harmless, 18 for the owner to decide, 6 that need the Mac).",
   "note": " Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-notes-fix-reverify-small]).",
-  "lane": "",
-  "updatedAt": "2026-11-12T07:22:00-06:00"
+  "lane": "session_013NEJKzkcpx9EGjr8ctAJbs",
+  "updatedAt": "2026-11-12T13:23:35-06:00",
+  "paused": false
 }
