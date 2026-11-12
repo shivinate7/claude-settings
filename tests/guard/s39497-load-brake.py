@@ -824,6 +824,17 @@ for _tool, _given in LB_WRITES:
 lb_add("an agent's Bash, memory 97.2%: full, refused, names the reading",
        lb_decision_check("Bash", lb_reading(memory_pct=97.2), "deny", LB_MEM_FULL + (LB_STOP_AGENT,),
                          tool_input={"command": "echo hi"}, agent=LB_AGENT))
+# The Monitor tool's command is a shell command, so an agent's Monitor write at full is braked as its Bash
+# twin is. Both take the same reading and the same command, so only the tool differs.
+LB_RUN_WRITE = "echo x > zz-probe.txt"
+lb_add("Monitor: an agent's Monitor write, 3.1 GB free of 926 GB: full, refused, names the reading, says stop",
+       lb_decision_check("Monitor", lb_reading(disk_free_gb=3.1, disk_total_gb=926.0), "deny",
+                         (lb_gb(3.1, 926), LB_STOP_AGENT, LB_RUN_CITE),
+                         tool_input={"command": LB_RUN_WRITE, **MON_FIELDS}, agent=LB_AGENT))
+lb_add("Bash twin of the Monitor case: an agent's Bash write, 3.1 GB free of 926 GB: full, refused",
+       lb_decision_check("Bash", lb_reading(disk_free_gb=3.1, disk_total_gb=926.0), "deny",
+                         (lb_gb(3.1, 926), LB_STOP_AGENT, LB_RUN_CITE),
+                         tool_input={"command": LB_RUN_WRITE}, agent=LB_AGENT))
 lb_add("an agent's Bash, memory 91.7% and 9.4 GB free of 926 GB: busy, allowed, one read",
        lb_decision_check("Bash", lb_reading(memory_pct=91.7, disk_free_gb=9.4, disk_total_gb=926.0), "allow",
                          tool_input={"command": "echo hi"}, agent=LB_AGENT))

@@ -1181,6 +1181,28 @@ add("background-end: a PowerShell cd with a quoted backslash path before ; still
     "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY, tool="PowerShell",
     command=r'cd "C:\x\"; npm run dev', run_in_background=True)
 
+# --- the Monitor tool: the stream family never refuses it (decision agents-wait-with-monitor). Each
+# "Bash twin" pins that the same text is refused in a Bash call, so the Monitor allow beside it is a real
+# exemption. The Bash twins of the narrated merge and of the server are the cases "narrate: merge --confirm
+# piped to tail hides its heartbeat" and "background-end: a python http.server under run_in_background with
+# no note is refused", above.
+MON_STREAM = "tail -f /tmp/x.log | grep --line-buffered ERROR"
+MON_LOOP = "while true; do gh pr checks 1; sleep 30; done"
+monitor("Monitor: a followed log piped to grep is allowed", MON_STREAM, "allow", silent=True)
+sh("Bash twin of the Monitor case: the followed log is refused", MON_STREAM, "deny", "live-stream",
+   cwd=NOGIT)
+monitor("Monitor: a polling loop with a pause is allowed", MON_LOOP, "allow", silent=True)
+sh("Bash twin of the Monitor case: the polling loop is refused", MON_LOOP, "deny", "waiter",
+   cwd=NOGIT)
+monitor("Monitor: a narrated merge piped to tail is allowed", "merge 12 --confirm 2>&1 | tail -18",
+        "allow", silent=True)
+monitor("Monitor: a server with no end note is allowed", "python3 -m http.server 3202", "allow",
+        silent=True)
+# A stream exempts only its own rules. A hard reset after it is still refused, so the exemption cannot
+# return early from the whole judge: rule shared-tree (judge_shell, before rule 3) still denies.
+monitor("Monitor: a followed log, then a hard reset, is refused as the reset",
+        MON_STREAM + "; " + VCS + " reset --hard origin/main", "deny", "shared-tree")
+
 
 # =========================================================================== 2c-bis. the WSL launch allow list
 #
