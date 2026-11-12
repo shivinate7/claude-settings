@@ -5,9 +5,14 @@ Plan: docs/decisions/session-messages.md#build-in-work-order (all)
 
 Status: draft until build step 2 and the 20-message trial run. Q1 to Q4, page item 153 (the mailbox ruling) and page item 308 (the store) are answered.
 The mailbox build is on main: PR #1371 merged 2026-11-08 inside batch-65g (PR #2236). Follow-up PR #2484 merged 2026-11-10 in batch 71.
-Next step: build step 2, the Mac and Windows auth check for `ls-remote`. Step 2 and the 20-message trial
-(step 5) need a Mac session. `MAILBOX_REPO` has no settings.json default until step 2 measures Mac and
-Windows auth. The default needs the owner's typed words. A session sets it in its env until then.
+Next step: the Mac round trip (the owner's check card). A Windows round trip passed (request 8933ab505319 to the cloud, reply
+7292c549f4ee, both taken, 11:52 CST Nov 12; record: branch roadmap, commit b21c5d3dc). Cloud works for the owner's account; ssemwal-cdc is unmeasured.
+`MAILBOX_REPO` has a settings.json `env` default, set by the owner's ruling (page item 556 a, 2026-11-12 12:04 CST), not by
+measurement. A session with an address reads mail at turn start. A failed read prints "mail unknown: <reason>". A session
+with no address, or a store with no mail ref, prints nothing. A Mac gets nothing from the default until its round trip passes
+(page item 556 a; batch runner 10 relaying the coordinator, 12:56 CST Nov 12: `HELD_PLATFORMS` in `hooks/mail.py`). Its turn start
+prints nothing and `mail` exits 2. The owner's check card must set `MAILBOX_HOLD_OFF=1` for the one command, so it still runs there.
+The 20-message trial (step 5) is still open.
 
 ## Ruling
 
@@ -208,12 +213,12 @@ Design:
    `cloud/session_rtripb`), 2026-11-09 19:34 CST: send message 2979e0b314d0 (request), read, take (exit 0),
    reply message 60884f559348, reply read and taken by the sender (exit 0), second take of 2979e0b314d0
    refused "taken by another" (exit 1). Cloud only; Mac and Windows auth still not measured.
-   Not yet measured: Mac and Windows auth for `ls-remote`.
+   Not yet measured then: Mac and Windows auth for `ls-remote` (later: Windows round trip passed 2026-11-12; Mac open).
 3. Test-author: red cases against a `file://` bare `MAILBOX_REPO`: round trip, push race, take race,
    inform close, offline, cost counts.
 4. Builder, PR #1371 merged 2026-11-08 inside batch-65g (PR #2236): `hooks/mail.py`, `bin/mail`, `bin/mail.cmd` and the
-   `hooks/local_time.py` call. The `settings.json` env default stays unset until step 2 measures Mac and
-   Windows auth for `ls-remote`.
+   `hooks/local_time.py` call. The `settings.json` env default was left unset here. The owner set it by
+   ruling on 2026-11-12 (page item 556 a), before the Mac measure.
 5. Skill section rewrite. Check: a two-session trial of 20 messages, cloud to a local computer, on a Mac and on a Windows PC, none lost, none acted
    on twice.
 
