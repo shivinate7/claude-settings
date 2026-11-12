@@ -380,4 +380,73 @@ roles_refuse("the brief template with its session id placeholders unfilled is re
              role_path("step-topic-lane"), fill_template(BRIEF_TEMPLATE), ["Coordinator", "Triage", "Batch runner"])
 
 
+# ---- A lane start names a session id for each role too (rule lane-one-topic). The start's prompt is the owner's grant,
+# then the brief, and its ids may sit on any line. The constants below live here, not in the rule-9 section (s29666),
+# because sections load in number order and this one loads first; s29666 and s30130 read them from here.
+LANE_GRANT = "Grant: B is good, 13:19 CST Nov 10"
+LANE_EFFORT_FIELD = "medium"
+# A lane call names the model it starts on and the repo it starts from. Each allowed start below carries both.
+LANE_SOURCE_URL = "https://github.com/shivinate7/claude-settings"
+OWN_LANE_TAGS = ["cs-build:lane", "cs-repo:shivinate7/claude-settings"]
+# A start is built as the rule-9 starts are. Its cwd is NOGIT, not a checkout: a full cs-repo tag passes the repo-tag rule
+# with no origin read, so no fixture repo is needed here.
+START_TOPIC_TAGS = OWN_LANE_TAGS + ["cs-topic:alpha"]
+OLD_START_TAGS = OWN_LANE_TAGS + ["cs-step:icon-a"]
+START_BRIEF = LANE_GRANT + "\nLane brief: icon-a. Topic: alpha."
+START_TOPIC_REASON = ("names a topic that the start's cs-topic tag does not hold",)
+# A role refusal of a start carries the form and the gap limit, names no step-steer, and names none of the test's ids.
+# The topic refusal of a start names no session id, so `session id` tells the two reasons apart.
+ROLE_START_LACKS = ("start one with create_session", COORD_ID, TRIAGE_ID, RUNNER_ID)
+
+
+def start_refuse(name, prompt, tags=START_TOPIC_TAGS, carries=(), lacks=(), names=()):
+    """A create_session start the guard refuses under lane-one-topic. It carries the effort, model and source that the
+    other start rules judge, so the refusal is this rule's alone."""
+    add("lane-one-topic: " + name, "deny", rule=LANE_ONE_TOPIC, tool=CREATE_SESSION, cwd=NOGIT, prompt=prompt,
+        tags=tags, effort=LANE_EFFORT_FIELD, model="sonnet", source_url=LANE_SOURCE_URL,
+        carries=carries, lacks=lacks, names=names)
+
+
+def start_allow(name, prompt, tags=START_TOPIC_TAGS):
+    """A create_session start the guard lets through."""
+    add("lane-one-topic: " + name, "allow", tool=CREATE_SESSION, cwd=NOGIT, prompt=prompt, tags=tags,
+        effort=LANE_EFFORT_FIELD, model="sonnet", source_url=LANE_SOURCE_URL)
+
+
+def start_roles_refuse(name, prompt, missing, tags=START_TOPIC_TAGS):
+    """A start that clears the topic or step check and misses a role id: refused. The reason names each missing role
+    outside the form, carries the form and the gap limit, and names none of the test's ids."""
+    start_refuse(name, prompt, tags=tags, carries=ROLE_CARRIES, lacks=ROLE_START_LACKS, names=missing)
+
+
+# Refused: a start that clears the topic check and names no id for any role. The reason names all three roles.
+start_roles_refuse("a start for topic alpha, with its brief and no role ids, is refused",
+                   START_BRIEF, ["Coordinator", "Triage", "Batch runner"])
+# Refused: a start that misses one role id. Each keeps the other two ids valid, so a failure names one cause.
+start_roles_refuse("a start for topic alpha with no Coordinator id is refused, though its Triage and Batch runner ids are named",
+                   START_BRIEF + TRIAGE_LINE + RUNNER_LINE, ["Coordinator"])
+start_roles_refuse("a start for topic alpha with no Triage id is refused",
+                   START_BRIEF + COORD_LINE + RUNNER_LINE, ["Triage"])
+start_roles_refuse("a start for topic alpha with no Batch runner id is refused",
+                   START_BRIEF + COORD_LINE + TRIAGE_LINE, ["Batch runner"])
+# Refused: an older lane, with a cs-step tag and no cs-topic, is judged by its step, and its start names no role id.
+start_roles_refuse("an older-lane start for step icon-a with no role ids is refused",
+                   LANE_GRANT + "\nLane brief: icon-a. Topic: icons.", ["Coordinator", "Triage", "Batch runner"],
+                   tags=OLD_START_TAGS)
+# Allowed: the controls for the refusals above. The same start for topic alpha, and the same older-lane start, each with
+# all three ids.
+start_allow("a start for topic alpha with the coordinator, triage and batch runner ids is allowed",
+            START_BRIEF + IDS_LINES)
+start_allow("an older-lane start for step icon-a with the three role ids is allowed",
+            LANE_GRANT + "\nLane brief: icon-a. Topic: icons." + IDS_LINES, tags=OLD_START_TAGS)
+# Refused on the topic, as before: a start whose brief names topic colors on a lane of topic alpha. The ids do not rescue
+# a wrong topic, and with no ids the topic reason still wins over the role reason.
+start_refuse("a start for topic colors on a lane of topic alpha, with all three role ids, is refused on the topic",
+             LANE_GRANT + "\nLane brief: icon-a. Topic: colors." + IDS_LINES,
+             carries=START_TOPIC_REASON, lacks=("session id",))
+start_refuse("a start for topic colors on a lane of topic alpha, with no role ids, is refused on the topic",
+             LANE_GRANT + "\nLane brief: icon-a. Topic: colors.",
+             carries=START_TOPIC_REASON, lacks=("session id",))
+
+
 # =========================================================================== a header stamp matches the clock

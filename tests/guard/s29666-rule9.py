@@ -25,14 +25,10 @@ LANE_ORIGINS = {
 # The container's global git config rewrites an scp origin to https, through GIT_CONFIG_* in the environment.
 # A case that pins the scp parse arm clears those variables for its own guard run, so the raw origin is read.
 RAW_ORIGIN_ENV = {name: None for name in os.environ if name.startswith("GIT_CONFIG_")}
-OWN_LANE_TAGS = ["cs-build:lane", "cs-repo:shivinate7/claude-settings"]
-# A lane call names the model it starts on and the repo it starts from. Each allow case below carries both.
-LANE_SOURCE_URL = "https://github.com/shivinate7/claude-settings"
 # The lane start's prompt: the owner's grant as its first non-blank line, then the brief. The lane's effort is
 # the `effort` field. Every lane case below carries both, so a case that expects another rule names only its own cause.
-LANE_GRANT = "Grant: B is good, 13:19 CST Nov 10"
+# LANE_GRANT, LANE_EFFORT_FIELD, LANE_SOURCE_URL and OWN_LANE_TAGS are defined in the lane-one-topic section (s15173).
 LANE_PROMPT = LANE_GRANT + "\nDo the task in the brief file."
-LANE_EFFORT_FIELD = "medium"
 
 
 def _build_origins(origins):
@@ -111,7 +107,7 @@ add("lane-one-topic: lane tag with cs-topic alpha and a brief for topic colors i
     model="sonnet", source_url=LANE_SOURCE_URL)
 add("lane-one-topic: lane tag with cs-topic alpha and a brief for topic alpha is allowed", "allow",
     tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS + ["cs-topic:alpha"],
-    prompt=LANE_GRANT + "\nLane brief: icon-a. Topic: alpha.", effort=LANE_EFFORT_FIELD,
+    prompt=LANE_GRANT + "\nLane brief: icon-a. Topic: alpha." + IDS_LINES, effort=LANE_EFFORT_FIELD,
     model="sonnet", source_url=LANE_SOURCE_URL)
 # A start's brief marker must sit on the first line after the Grant line. A marker past a preamble line is read by
 # no one, so this start names topic colors on a lane of topic alpha and passes. The marker-first starts above are
