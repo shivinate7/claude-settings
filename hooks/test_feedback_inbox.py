@@ -4112,8 +4112,8 @@ def case_batch_bound_does_not_clear_a_standing_word_elsewhere():
 
 
 # The lane brief that a once: home must pass (lane mailbox-wake-routes), in full. Its one owner grant, "start it", covers one
-# helper session, and the once: item names that session. "Hand in any PR to the batch runner" is a task instruction: a
-# handoff verb leads its sentence, so "any PR" bars nothing.
+# helper session, and the once: item names that session. In "Hand in any PR to the batch runner" the handoff verb takes
+# "any PR" as its object, and no act verb follows it in the clause, so the noun bars nothing.
 FB1338_BRIEF = (
     "Grant: owner 13:37 CST Nov 12, relayed by the retrospective, to \"start mailbox-wake-routes; it needs one extra cloud session to post test comments\": \"ya yes start it\". Covers one short-lived helper session that only posts test comments for the measure; you archive it when done.",
     "",
@@ -4129,7 +4129,7 @@ FB1338_BRIEF = (
 REPRO_ITEM = ("- fb-1338-1 [note] -> once:start helper session for mailbox-wake-routes "
               "(one short-lived cloud session, archive when done)")
 REPRO_BRIEF = "Clean up every test PR, comment and branch you make.\nNever wait on the owner here."  # two sentences of the brief
-TASK_PHRASE_SENTENCE = "approved. Hand in any PR."  # the shortest sentence that refuses: a grant word and a task phrase
+TASK_PHRASE_SENTENCE = "approved. Hand in any PR."  # the shortest one-shot sentence with a handoff object and no act verb
 MERGE_ANY_PR_SENTENCE = "approved. Merge any PR."  # the same scope with a merge act: a standing approval
 STANDING_WORDINGS = (  # real standing wordings: each keeps its once: home barred
     "approved, merge every PR.",
@@ -4149,17 +4149,17 @@ def case_you_make_bound_does_not_lift_the_standing_bar():
 
 
 def case_one_shot_brief_in_full_with_a_task_phrase_passes():
-    """The lane brief in full, with its one-shot grant and its once: home. "Hand in any PR to the batch runner" is a task
-    instruction, not a standing approval, so the home passes."""
+    """The lane brief in full, with its one-shot grant and its once: home. "Hand in any PR to the batch runner" gives
+    "any PR" to a handoff verb as its object, with no act verb after it in the clause, so the home passes."""
     mod = guard_module()
     out = mod.problems(mod.parse(render_block("\n".join(FB1338_BRIEF), items=(REPRO_ITEM,))), "")
-    check("lane brief in full, one-shot grant with its once: home: not refused for 'any PR' in a task line",
+    check("lane brief in full, one-shot grant with its once: home: not refused for 'any PR' as a handoff object",
           not any("has no home" in s for s in out), out)
 
 
 def case_shortest_task_phrase_sentence_passes():
-    """The one-shot sentence "approved. Hand in any PR." holds a grant word and a task phrase, and no approval to merge any
-    PR. Its once: home passes."""
+    """The one-shot sentence "approved. Hand in any PR." has a grant word, a handoff verb with "any PR" as its object, and no
+    act verb. Its once: home passes."""
     mod = guard_module()
     out = mod.problems(mod.parse(render_block(TASK_PHRASE_SENTENCE, items=(REPRO_ITEM,))), "")
     check("task-phrase sentence, one-shot grant with its once: home: not refused",
@@ -4202,9 +4202,11 @@ def case_real_standing_wordings_stay_refused_with_a_once_home():
               any("has no home" in s and "bars a once:" in s for s in out), out)
 
 
-# Pick (a), the scope-noun rule. A scope noun (all, any or every before repo, PR, branch, open, green, new or future)
-# bars a once: home wherever it sits, except in a sentence that a named handoff verb ("Hand", "Send", "Post") leads.
-# The sentence split is on sentence ends only: not on a newline, an abbreviation or a URL's trailing period.
+# The scope-noun rule. A scope noun (all, any or every before repo, PR, branch, open, green, new or future) bars a
+# once: home, except when it stands IMMEDIATELY as the object of a handoff verb (hand in, hand, send, post, report) in
+# the same clause (no comma, semicolon, colon or dash between them), and the rest of that clause holds no act verb stem
+# (merge, merging, push, delete, deploy, release, publish, ship, land, close, approve). No sentence split: an
+# abbreviation, a URL, a newline or a bullet changes nothing.
 SCOPE_REFUSED_TEXTS = (
     "Approved. Merge any\nPR.",
     "Approved. Merge all\nopen PRs.",
@@ -4218,11 +4220,14 @@ SCOPE_REFUSED_TEXTS = (
     "Approved, i.e. any PR.",
     "Approved v2. Any PR.",
 )
-HANDOFF_PASSES_TEXTS = (  # a scope noun in a sentence a handoff verb leads: the once: home passes
+HANDOFF_PASSES_TEXTS = (  # the scope noun is the handoff object, and no act verb follows it in its clause
     "Approved. Send any PR to triage.",
     "approved. Post any PR to triage.",
+    "Approved. Hand in any PR for review.",
+    "Approved. Hand in any PR to the batch runner.",
+    "Approved. Hand in any PR, then review it.",
 )
-NO_SPLIT_TEXTS = (  # no abbreviation, newline or URL period ends a sentence, so no handoff sentence starts here
+HANDOFF_OBJECT_ANY_FORM_TEXTS = (  # the verb stands right before the noun, so what comes before the verb changes nothing
     "Approved, e.g. send any PR to triage.",
     "Approved, i.e. send any PR to triage.",
     "Approved etc. send any PR to triage.",
@@ -4230,12 +4235,26 @@ NO_SPLIT_TEXTS = (  # no abbreviation, newline or URL period ends a sentence, so
     "Approved\nSend any PR to triage.",
     "Approved, see https://example.com/pr/12. Send any PR to triage.",
 )
+SCOPE_NOT_HANDOFF_OBJECT_TEXTS = (  # the noun is no handoff object: a comma, a URL, a newline, "etc." or "to" sits before it
+    "Approved. Send it to triage, any PR is fine.",
+    "Approved. Hand the PR at https://github.com/x/y/pull/3. Any PR is fine.",
+    "Approved. Send PRs etc. Any PR is fine.",
+    "Approved. Send PRs\nAny PR is fine.",
+    "Approved. Send it to every repo.",
+)
+HANDOFF_ACT_STEM_TEXTS = (  # the handoff object is followed by an act verb stem in its clause
+    "Approved. Hand in any PR for merging.",
+    "Approved. Hand in any PR and land it.",
+)
+HANDOFF_STILL_BARRED_TEXTS = (  # a merge after the handoff's clause, or later in the same sentence, still bars the noun
+    "Approved.\n- Send any PR to triage and merge it.",
+    "Approved. Send any PR to triage, then merge all PRs.",
+)
 
 
 def case_scope_noun_bars_a_once_home_wherever_it_sits():
-    """A scope noun bars a once: home in a sentence no handoff verb leads, wherever it sits: after a newline, in a short
-    clause, or after "Approved to merge." Each text's noun sits in such a sentence, and its reason names the standing
-    word."""
+    """A scope noun bars a once: home where no handoff verb stands right before it in its clause: after a newline, in a
+    short clause, or after "Approved to merge." Each text's reason names the standing word."""
     mod = guard_module()
     for text in SCOPE_REFUSED_TEXTS:
         out = mod.problems(mod.parse(render_block(text, items=(REPRO_ITEM,))), "")
@@ -4243,25 +4262,68 @@ def case_scope_noun_bars_a_once_home_wherever_it_sits():
               any("has no home" in s and "bars a once:" in s for s in out), out)
 
 
-def case_handoff_led_scope_noun_keeps_its_once_home():
-    """Green control: a scope noun in a sentence that "Send" or "Post" leads does not bar the once: home. "Hand in any PR"
-    is the lane brief's case, above."""
+def case_handoff_object_keeps_its_once_home():
+    """Green control: a scope noun that a handoff verb takes as its object, with no act verb after it in the clause, keeps
+    its once: home. Each text is a grant first, so the pass is the rule's, not a non-grant's."""
     mod = guard_module()
     for text in HANDOFF_PASSES_TEXTS:
+        check("handoff object %r: is a grant" % text, mod.is_grant(text), text)
         out = mod.problems(mod.parse(render_block(text, items=(REPRO_ITEM,))), "")
-        check("handoff-led scope noun %r: its once: home passes" % text,
-              not any("has no home" in s for s in out), out)
+        check("handoff object %r: its once: home passes" % text, not any("has no home" in s for s in out), out)
 
 
-def case_split_never_starts_a_handoff_sentence_at_an_abbreviation_newline_or_url():
-    """The sentence split is on sentence ends only: not after "e.g.", "i.e.", "etc.", "v2.", a newline or a URL's
-    trailing period. A split there would make "send any PR to triage." a handoff sentence. Each text's sentence is led
-    by "Approved", so its once: home is barred."""
+def case_scope_noun_not_a_handoff_object_bars_a_once_home():
+    """A scope noun bars a once: home unless a handoff verb stands right before it in its clause. Each text puts a comma,
+    a URL, "etc.", a newline, "to" or a sentence stop between the handoff verb and the noun, so the noun is not its object."""
     mod = guard_module()
-    for text in NO_SPLIT_TEXTS:
+    for text in SCOPE_NOT_HANDOFF_OBJECT_TEXTS:
+        check("scope noun not a handoff object %r: is a grant" % text, mod.is_grant(text), text)
         out = mod.problems(mod.parse(render_block(text, items=(REPRO_ITEM,))), "")
-        check("no split inside %r: its once: home is barred" % text,
+        check("scope noun not a handoff object %r: its once: home is barred" % text,
               any("has no home" in s and "bars a once:" in s for s in out), out)
+
+
+def case_second_scope_noun_after_a_handoff_clause_bars_a_once_home():
+    """In "Hand in any PR, then ship every branch", "any PR" is the handoff object, but "every branch" after the comma is
+    not, so the once: home is barred. The control "Hand in any PR, then review it." passes."""
+    mod = guard_module()
+    text = "Approved. Hand in any PR, then ship every branch."
+    check("second scope noun: is a grant", mod.is_grant(text), text)
+    out = mod.problems(mod.parse(render_block(text, items=(REPRO_ITEM,))), "")
+    check("second scope noun %r: its once: home is barred" % text,
+          any("has no home" in s and "bars a once:" in s for s in out), out)
+
+
+def case_act_stem_in_the_handoff_clause_bars_its_object():
+    """A handoff verb takes "any PR" as its object, but an act verb stem later in the same clause ("for merging", "and
+    land it") makes the clause an act, so the once: home is barred. The control, "for review", passes."""
+    mod = guard_module()
+    for text in HANDOFF_ACT_STEM_TEXTS:
+        check("act stem in the handoff clause %r: is a grant" % text, mod.is_grant(text), text)
+        out = mod.problems(mod.parse(render_block(text, items=(REPRO_ITEM,))), "")
+        check("act stem in the handoff clause %r: its once: home is barred" % text,
+              any("has no home" in s and "bars a once:" in s for s in out), out)
+
+
+def case_handoff_with_a_later_merge_stays_barred():
+    """Green control: a merge after the handoff object still bars the once: home, in its clause or a later one of the same
+    sentence. Each text is a grant first."""
+    mod = guard_module()
+    for text in HANDOFF_STILL_BARRED_TEXTS:
+        check("handoff with a later merge %r: is a grant" % text, mod.is_grant(text), text)
+        out = mod.problems(mod.parse(render_block(text, items=(REPRO_ITEM,))), "")
+        check("handoff with a later merge %r: its once: home is barred" % text,
+              any("has no home" in s and "bars a once:" in s for s in out), out)
+
+
+def case_handoff_object_passes_after_any_form():
+    """The handoff verb stands right before the scope noun in the same clause, so the noun is its object. An abbreviation,
+    a newline or a URL before the verb changes nothing: each text's once: home passes."""
+    mod = guard_module()
+    for text in HANDOFF_OBJECT_ANY_FORM_TEXTS:
+        check("handoff object after %r: is a grant" % text, mod.is_grant(text), text)
+        out = mod.problems(mod.parse(render_block(text, items=(REPRO_ITEM,))), "")
+        check("handoff object after %r: its once: home passes" % text, not any("has no home" in s for s in out), out)
 
 
 # --------------------------------------------------------------------------- page-form-to-template cases
@@ -4742,8 +4804,12 @@ CASES = (
     case_one_shot_brief_with_clean_up_and_never_wait_passes_control,
     case_real_standing_wordings_stay_refused_with_a_once_home,
     case_scope_noun_bars_a_once_home_wherever_it_sits,
-    case_handoff_led_scope_noun_keeps_its_once_home,
-    case_split_never_starts_a_handoff_sentence_at_an_abbreviation_newline_or_url,
+    case_handoff_object_keeps_its_once_home,
+    case_scope_noun_not_a_handoff_object_bars_a_once_home,
+    case_second_scope_noun_after_a_handoff_clause_bars_a_once_home,
+    case_act_stem_in_the_handoff_clause_bars_its_object,
+    case_handoff_with_a_later_merge_stays_barred,
+    case_handoff_object_passes_after_any_form,
     case_page_form_asked_comment_with_a_note_blocks,
     case_page_form_step_without_the_template_blocks,
     case_page_form_step_naming_the_template_passes,
