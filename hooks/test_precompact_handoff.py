@@ -472,6 +472,51 @@ def case_agent_reorient_prints_nothing():
         c.cleanup()
 
 
+def case_agent_precompact_fresh_session_writes_nothing():
+    """The empty state: no digest or state exists yet when an agent's PreCompact runs from its worktree. It writes nothing
+    under state/handoff. The parent's own PreCompact after it, at the lane cwd, is the live control."""
+    c = Case("agent_fresh")
+    try:
+        wt = worktree_at(c, AGENT_WORKTREE)
+        check("agent precompact, fresh session: scope, the run's cwd is .claude/worktrees/agent-*", is_agent_worktree(wt), wt)
+        agent_t = os.path.join(c.root, "agent.jsonl")
+        write_transcript(agent_t, [transcript_line("user", [{"type": "text", "text": "AGENTTEXT"}])])
+        proc = c.run_precompact(agent_t, cwd=wt)
+        check("agent precompact, fresh session: exits 0", proc.returncode == 0,
+              "rc=%r stderr=%r" % (proc.returncode, proc.stderr[-300:]))
+        written = handoff_state_files(c)
+        check("agent precompact, fresh session: nothing is written under state/handoff", written == {},
+              "written: %s" % changed_names({}, written))
+        lane_t = os.path.join(c.root, "lane.jsonl")
+        write_transcript(lane_t, [transcript_line("user", [{"type": "text", "text": "PARENTTEXT"}])])
+        lane = c.run_precompact(lane_t)
+        check("agent precompact, fresh session: live control, the parent's PreCompact then writes its digest and state",
+              lane.returncode == 0 and c.read_digest() is not None and c.read_state() is not None,
+              "rc=%r stderr=%r" % (lane.returncode, lane.stderr[-300:]))
+    finally:
+        c.cleanup()
+
+
+def case_agent_reorient_fresh_session_prints_nothing():
+    """The empty state: no state exists yet when an agent's SessionStart compact hook runs from its worktree. It prints
+    no reorient text and writes nothing under state/handoff. The parent's own reorient at the lane cwd, after it, prints
+    the reorient text: the live control."""
+    c = Case("agent_fresh_reorient")
+    try:
+        wt = worktree_at(c, AGENT_WORKTREE)
+        check("agent reorient, fresh session: scope, the run's cwd is .claude/worktrees/agent-*", is_agent_worktree(wt), wt)
+        proc = c.run_reorient(cwd=wt)
+        check("agent reorient, fresh session: prints no reorient text", (proc.stdout or "").strip() == "",
+              "stdout: %r" % (proc.stdout or "")[-300:])
+        check("agent reorient, fresh session: nothing is written under state/handoff",
+              handoff_state_files(c) == {}, "written: %s" % changed_names({}, handoff_state_files(c)))
+        live = c.run_reorient()
+        check("agent reorient, fresh session: live control, the parent's reorient still prints its handoff",
+              c.handoff_path() in (live.stdout or ""), "stdout: %r" % (live.stdout or "")[-300:])
+    finally:
+        c.cleanup()
+
+
 def case_lane_worktree_reorient_still_prints():
     """Control: a SessionStart compact hook from a worktree that is not an agent's still prints the reorient text."""
     c = Case("lane_reorient")
@@ -2502,6 +2547,8 @@ def main() -> int:
     case_lane_worktree_precompact_still_writes()
     case_agent_reorient_prints_nothing()
     case_lane_worktree_reorient_still_prints()
+    case_agent_precompact_fresh_session_writes_nothing()
+    case_agent_reorient_fresh_session_prints_nothing()
 
     if FAILED:
         print()
