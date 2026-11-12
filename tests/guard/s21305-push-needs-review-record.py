@@ -7,8 +7,8 @@
 # PARTIAL, a round or a fix check), that has no later posted review record clearing it. A record clears a report
 # only when it parses, its comment call returned no error (add_issue_comment, or a Bash `gh pr comment` or
 # `gh api .../comments` call that succeeded), and it holds a line with that report's role, verdict and round
-# (a Round line, or the Fix check line for a fix check). When the report names its reviewed head, the record's
-# Head line must be that head too. A fix check is cleared by its own sha, not by the Head line. One record that
+# (a Round line, or the Fix check line for a fix verifier). When the report names its reviewed head, that head
+# must be the record's Head line, or for a fix verifier the sha of its Fix check line. One record that
 # holds all the lines clears every report before it. A push asks until each report has its record. A deny is
 # left for a push to a PR's head branch once its fix check is recorded.
 # A report reads from the Agent result, from a later task-notification, from a queued_command
@@ -17,9 +17,9 @@
 # indented. A line inside a code fence is never a verdict. A PASS needs its own record as much as a FAIL does: a
 # push waits for the record of every report. A session with no PR known is allowed: the first push is never
 # blocked on a transcript that shows no PR (a known miss, pinned below).
-FAMILY = "push-needs-review-record"
+FAMILY = "push-needs-review-record"  # glossary-ok: the family name hooks/test_guard.py keys on, a literal
 
-PFR_RULE = "push-needs-review-record"
+PFR_RULE = "push-needs-review-record"  # glossary-ok: the rule id the guard prints, a literal
 PFR_BRANCH = "notes-delete-pass"   # the lane's branch: a refusal never names it (rule git-remedy-never-names-target)
 PFR_PUSH = VCS + " push origin HEAD:" + PFR_BRANCH
 PFR_MODEL = "claude-sonnet-5-5"
@@ -225,7 +225,7 @@ PFR_LINES = {
     "incident-notice": pfr_pr() + pfr_background("toolu_rev1") + pfr_notice("toolu_rev1", PFR_FAIL),
     "incident-attachment": pfr_pr() + pfr_background("toolu_rev1")
                            + pfr_notice("toolu_rev1", PFR_FAIL, attachment=True),
-    "fix-check": pfr_pr() + pfr_call("toolu_rev1", pfr_report(pfr_fix_verdict("FAIL"), PFR_FINDING), blocks=True),
+    "fix-verifier": pfr_pr() + pfr_call("toolu_rev1", pfr_report(pfr_fix_verdict("FAIL"), PFR_FINDING), blocks=True),
     "partial": pfr_pr() + pfr_call("toolu_rev1", PFR_PARTIAL),
     "design-fail": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL, role="design-reviewer"),
     "design-partial": pfr_pr() + pfr_call("toolu_rev1", PFR_PARTIAL, role="design-reviewer"),
@@ -259,7 +259,7 @@ PFR_LINES = {
     "fail-then-fail-record": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL) + pfr_post("toolu_c1", PFR_FAIL_RECORD),
     "partial-then-partial-record": pfr_pr() + pfr_call("toolu_rev1", PFR_PARTIAL)
                                    + pfr_post("toolu_c1", PFR_PARTIAL_RECORD),
-    "fix-check-record": pfr_pr() + pfr_call("toolu_rev1", pfr_report(pfr_fix_verdict("FAIL"), PFR_FINDING), blocks=True)
+    "fix-verifier-record": pfr_pr() + pfr_call("toolu_rev1", pfr_report(pfr_fix_verdict("FAIL"), PFR_FINDING), blocks=True)
                         + pfr_post("toolu_c1", pfr_record(fix=(PFR_FIX_SHA, "reviewer", PFR_MODEL, "FAIL"))),
     # A fix check FAIL, then a fix check PASS whose record is posted. The PASS record clears only its own line.
     "fix-fail-then-fix-pass": pfr_pr()
@@ -290,8 +290,8 @@ PFR_LINES = {
         + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL_2871, "FAIL")], head=PFR_HEAD_A))
         + pfr_call("toolu_rev2", pfr_report(pfr_verdict("FAIL", 2, PFR_MODEL_2871),
                                             "Reviewed at head %s" % PFR_HEAD_B, PFR_FINDING)),
-    # A fix check is cleared by its own reviewed sha, not by the record's Head line: the round 1 record at head B
-    # holds both lines, and the fix check reviewed head A.
+    # A fix verifier is cleared by its reviewed head A, the sha of the record's Fix check line. The record's Head line
+    # (B) is another head, and the round 1 record at head B holds both lines.
     "round-head-b-fix-head-a": pfr_pr() + pfr_call("toolu_rev1", pfr_report(
         pfr_verdict("FAIL", 1), "Reviewed at head %s" % PFR_HEAD_B, PFR_FINDING))
         + pfr_call("toolu_rev2", pfr_report(pfr_fix_verdict("PASS"), "Reviewed at head %s" % PFR_HEAD_A, PFR_FINDING),
@@ -347,7 +347,7 @@ PFR_LINES = {
     "fix-pass-unknown-head": pfr_post("toolu_c1", PFR_FIX_PASS_RECORD, n=PFR_FIX_PR),
     "gh-pr-create-fail": pfr_gh_pr("toolu_pr1") + pfr_call("toolu_rev1", PFR_FAIL),
     # A round report is cleared only by a record line of the same round: a line of any other round never clears it.
-    "round-scoped-deny": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL)
+    "round-scoped-refuse": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL)
                          + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL, "PASS"),
                                                             (2, "reviewer", PFR_MODEL, "FAIL")])),
     "round-scoped-allow": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL)
@@ -549,7 +549,7 @@ pfr_ask("the incident: the FAIL read from a task-notification user record, then 
 pfr_ask("the incident: the FAIL read from a queued_command attachment, then the push", PFR_PUSH,
            pfr_path("incident-attachment"))
 pfr_ask("the incident from the PowerShell tool, then the push", PFR_PUSH, pfr_path("incident"), tool="PowerShell")
-pfr_ask("a FAIL fix check report, then the push", PFR_PUSH, pfr_path("fix-check"))
+pfr_ask("a FAIL fix check report, then the push", PFR_PUSH, pfr_path("fix-verifier"))
 pfr_ask("a reviewer PARTIAL round 1, then the push", PFR_PUSH, pfr_path("partial"))
 pfr_ask("a design-reviewer FAIL round 1, then the push", PFR_PUSH, pfr_path("design-fail"))
 pfr_ask("a design-reviewer PARTIAL round 1, then the push", PFR_PUSH, pfr_path("design-partial"))
@@ -591,7 +591,7 @@ pfr_ask("a PR opened by gh --repo o/r pr create, a reviewer FAIL with no record,
 pfr_ask("a PR opened by gh pr -R o/r create, a reviewer FAIL with no record, then the push", PFR_PUSH,
            pfr_path("gh-group-flag-pr-create-fail"))
 pfr_ask("a FAIL round 1, then a record whose only FAIL line is round 2, then the push", PFR_PUSH,
-           pfr_path("round-scoped-deny"))
+           pfr_path("round-scoped-refuse"))
 # Each record clears only the reports it holds, so a later FAIL with no record of its own stays refused.
 pfr_ask("a round 3 FAIL after rounds 1 and 2 were recorded, with no record of its own, then the push", PFR_PUSH,
            pfr_path("fail-after-recorded-rounds"))
@@ -600,7 +600,7 @@ pfr_allow("a FAIL round 1, then a FAIL record posted, then the push", PFR_PUSH, 
 pfr_allow("a PARTIAL round 1, then a PARTIAL record posted, then the push", PFR_PUSH,
           pfr_path("partial-then-partial-record"))
 pfr_allow("a fix check FAIL with its Fix check record posted, then a push to another branch", PFR_NEXT_PUSH,
-          pfr_path("fix-check-record"))
+          pfr_path("fix-verifier-record"))
 pfr_allow("a FAIL round 1, then a PASS round 2 with its record posted, then the push", PFR_PUSH,
           pfr_path("fail-then-pass-record"))
 pfr_allow("a PASS whose findings mention FAIL, with its PASS record posted, then the push", PFR_PUSH,
@@ -740,7 +740,7 @@ def pfr_held_cost_case():
 
         with mock.patch.object(push.guard_core, "_git", counting_git), \
                 mock.patch.object(push, "_held_counts", watching_held):
-            verdict = push.review_record_hit(transcript, lambda: [], PFR_HIST)
+            verdict = push.review_log_hit(transcript, lambda: [], PFR_HIST)
         return verdict, reads, entries
 
     problems = []
@@ -799,7 +799,7 @@ pfr_ask("the #2921 shape: a round 1 FAIL report and no record at all, then the p
 # PR #2871's real history: the round 1 record is at head A, and a round 2 report names the later head B with no record.
 pfr_ask("the #2871 shape: a round 1 record at head A, then a round 2 FAIL at head B with no record, then the push",
         PFR_PUSH, pfr_path("2871-round2-unrecorded"))
-# A fix check is cleared by its own reviewed sha: the round 1 record's Head line (head B) does not decide it.
+# A fix verifier is cleared by its reviewed head: here A, the sha of the Fix check line. The record's Head (B) does not match it.
 pfr_allow("a round 1 FAIL at head B and a fix check PASS at head A, the record at head B holds both, "
           "then a push to another branch", PFR_NEXT_PUSH, pfr_path("round-head-b-fix-head-a"))
 # A fix check reviewed at head B, recorded at head B with its Fix check line at A: the fix record's Head is the one

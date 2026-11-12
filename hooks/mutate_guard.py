@@ -400,7 +400,7 @@ MUTATIONS = [
      'push.default matching'),
     # The review-record rule: each mutant removes one link of the chain, and one named case must go red.
     ("push-needs-review-record: the guard.py call is dropped",
-     'review_record_hit(transcript, lambda: push_destinations(args, where, overrides), where)',
+     'review_log_hit(transcript, lambda: push_destinations(args, where, overrides), where)',
      '(False, "")', "guard", 'the incident: a reviewer FAIL in the foreground result'),
     ("push-needs-review-record: a posted record never clears its report",
      'pending = [report for report in pending if report not in held]',
