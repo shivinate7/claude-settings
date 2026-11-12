@@ -11,7 +11,7 @@ State: live until the cutover (decision `all-repos-switch-together`). After the 
 - A red run drops the one lane that blame names (one search per lane merge commit, pull request 2358), and any lane that depends on it, as step 8 already said. A lane red on form is dropped the same way, with no fix-and-re-merge. CI restarts at once. No lane that stays is linted again. Each lane was linted at hand-off and once at the join, before the build, and the batch head once, before ready.
 - The batch is built as a draft. The batch-head lane lint runs, then the integration PR goes ready, with no rebuild between (decision `draft-until-reviewed`). A draft run skips every job, so a draft batch is never rebuilt only to close it.
 
-Where it lives: step 8 (Merge lanes) of skill `ci-hygiene`, under its until-the-cutover part, the batch runner's one home for this. No second copy.
+Where it lives: step 8 (Batch lanes) of skill `ci-hygiene`, under its until-the-cutover part, the batch runner's one home for this. No second copy.
 
 Why: batch 66 merged nothing in 5.5 hours (Nov 8, 14:50-20:20 CST). Runner 8 rebuilt it 6 or more times (66 through 66l) whenever a late release, hold or drop arrived mid-build. Each build with its suites took about 10 minutes. It also linted every lane again after each red, about 14 minutes per lane lint (n=4). It never built on top of the batch in CI. These figures come from runner 8's report, relayed in the coordinator's brief. They are unmeasured by the session that wrote this record, which did not re-read the batch's runs.
 
