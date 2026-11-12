@@ -74,9 +74,12 @@ def shown_of(options):
 
 
 def decision(options, shown=ABSENT, **over):
-    """An open waiting-page decision with `options`. `shown` is set when given, and left out when it is ABSENT."""
-    data = tql.label_item(ITEM, options=copy.deepcopy(options))
-    if shown is not ABSENT:
+    """An open waiting-page decision with `options`. `shown` is set when given, and left out when it is ABSENT. The
+    options keep the ids they were given (ids=False): a bare option in a case must stay bare."""
+    data = tql.label_item(ITEM, options=copy.deepcopy(options), ids=False)
+    if shown is ABSENT:
+        data.pop("shown", None)
+    else:
         data["shown"] = copy.deepcopy(shown)
     data.update(over)
     return data
