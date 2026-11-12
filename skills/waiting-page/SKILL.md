@@ -255,9 +255,10 @@ extras key `page-writer`; the pick guard uses it when the transcript has no `met
 ## Chat first
 
 A session that talks with the owner sends each question to the writer in the turn it asks it
-(decision questions-go-to-owner, "Same turn to the page", owner 2026-11-01 23:31 CST). The chat ask is
-the reply. A repo with no waiting page asks in the reply or, with nothing running, the terminal question box. The
-writer writes the item, and "Add an item" step 3 tells the owner where it is.
+(decision questions-go-to-owner, "Same turn to the page", owner 2026-11-01 23:31 CST). Before the reply,
+read the item back (ArtifactData get items/<id>) for its number. The chat reply holds `on the page, item <n>`;
+the options stay only on the page. A repo with no waiting page asks in the reply or, with nothing running, the
+terminal question box. The writer writes the item, and "Add an item" step 3 tells the owner where it is.
 
 - The Stop report guard (`lint/report_guard.py`) blocks a reply whose Input Needed offers a pick or
   asks a yes/no. It passes only when the same turn sent the question to the writer or wrote a page item.

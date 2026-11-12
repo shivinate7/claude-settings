@@ -887,13 +887,12 @@ LANE_REFUSAL = owner_line(
     "a question was asked in a lane session, whose own chat does not reach the owner, and it was not sent to "
     "its parent")
 NO_PAGE_NOTE = "pick not sent: this repo has no waiting page"
-# One home per answer (item 3, step page-wakes-and-relays): once an owner-facing turn put its question on the page,
-# the reply holds only this form. A fixed string, so the Stop path finds it by equality and places it last.
+# One home per answer (item 3, step page-wakes-and-relays): once an owner-facing turn sent or wrote to the page,
+# the reply names this form. A fixed string, so the Stop path finds it by equality and places it last.
 PAGE_FORM_REASON = owner_line(
     "Pick guard",
-    "the question is already on the waiting page, so the chat reply holds only the form `on the page, item N` "
-    "and carries no options and no question text; N is the number of the item on the page (owner ruling, "
-    "2026-11-10 16:57 CST)")
+    "a send or items write to the waiting page went out this turn; the form for a reply is "
+    "`on the page, item N` (owner ruling, 2026-11-10 16:57 CST)")
 PARENT_TARGETS = set(layout.PARENT_TARGETS)
 # A "?" ends a question unless a word character follows it, so a URL query (a?b=1) never counts. Quoted
 # text, backticked text and a blockquoted line are past words, never a question asked now. A straight
