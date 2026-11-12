@@ -59,8 +59,11 @@ class ClosedHost(PullsHost):
 
 
 def closed_host(repo, pulls=(), comments=(), closed=(), check_rows=None, **kw):
-    """The fake host of one --root repo: its open pulls, its comments, its check runs, and the closed pulls `pulls/<n>` answers."""
-    return ClosedHost(list(pulls), check_rows or {}, closed=closed, comments=list(comments), repo=repo, **kw)
+    """The fake host of one --root repo: its open pulls, its comments, its check runs, and the closed pulls `pulls/<n>` answers.
+    Each open pull also gets a lane-lint PASS at its head, since a done record counts only with one (lint_state)."""
+    pulls = list(pulls)
+    lints = [tm.lint_of(d["number"], d["head"]["sha"]) for d in pulls]
+    return ClosedHost(pulls, check_rows or {}, closed=closed, comments=list(comments) + lints, repo=repo, **kw)
 
 
 def block_of(test, out, name):
