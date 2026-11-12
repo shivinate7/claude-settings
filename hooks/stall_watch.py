@@ -541,7 +541,7 @@ def stopped_ids(content):
     return [m.group(1)] if m else []
 
 
-AGENT_ID = re.compile(r"[\w-]+\Z")
+TRANSCRIPT_AGENT_ID = re.compile(r"[\w-]+\Z")  # an id safe to put in a transcript file name
 TAIL_BYTES = 64 * 1024  # the first read of an agent transcript's end; it doubles to hold the last record
 TAIL_MAX = 32 * 1024 * 1024
 AGENT_REMEDY = "Stop it, then resume it by name, or send a fresh reviewer the prior report."
@@ -552,7 +552,7 @@ def agent_transcripts(session, agent, output):
     (<dir>/<stem>/subagents/agent-<id>.jsonl), then the launch's outputFile. An id with a separator
     has no path beside the session."""
     paths = []
-    if AGENT_ID.match(agent):
+    if TRANSCRIPT_AGENT_ID.match(agent):
         paths.append(own_session.agent_transcript_path(session, agent))
     if output and output not in paths:
         paths.append(output)
