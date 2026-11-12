@@ -9,6 +9,10 @@ inputs:
   needs:
     description: "Pass toJSON(needs) from the calling job, written as an expression in its with: block."
     required: true
+  strict:
+    description: "'true': a failed post fails the step (the caller acts on the post). Default: a failed post only warns."
+    required: false
+    default: "false"
 runs:
   using: composite
   steps:
@@ -17,6 +21,7 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
         NEEDS: ${{ inputs.needs }}
+        CI_DONE_STRICT: ${{ inputs.strict == 'true' && '1' || '' }}
         PR: ${{ github.event.pull_request.number }}
         REPO: ${{ github.repository }}
         SHA: ${{ github.event.pull_request.head.sha }}
