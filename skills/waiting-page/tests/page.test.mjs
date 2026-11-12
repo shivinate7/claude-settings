@@ -4370,12 +4370,14 @@ test("ask-phase-out states: a read closed item whose writer replied after the ma
 });
 
 // rail-chips: Mark read on a closed item's line takes its chip out of the rail's Answered row.
+// AP_NEWER keeps the Answered row in the rail after the press, so the chip's absence is read from a row that is still drawn.
 test("ask-phase-out states: Mark read on a closed item's line takes its chip out of the rail's Answered row", async (t) => {
-  const page = await open(t, { items: [AP_OPEN, AP_CLOSED] }); if (!page) return;
+  const page = await open(t, { items: [AP_OPEN, AP_CLOSED, AP_NEWER] }); if (!page) return;
   assert.ok((await railChipsIn(page, "answered")).includes(AP_CLOSED.id), `the rail's Answered row has no chip for closed No. ${AP_CLOSED.n}, with a closed time, before Mark read`);
   await (await needButton(page.locator(`#tier-answered #line-${AP_CLOSED.n}`), new RegExp(`^Mark read: No\\. ${AP_CLOSED.n},`), `Mark read on the line of No. ${AP_CLOSED.n}`)).click();
   const marked = await page.waitForFunction((n) => { const l = document.getElementById("line-" + n); return !!l && l.textContent.includes("Marked read."); }, AP_CLOSED.n, { timeout: 3000 }).then(() => true, () => false);
   assert.equal(marked, true, `No. ${AP_CLOSED.n} did not draw as Marked read.`);
+  await mustHave(page, '#rail a.ov-head[href="#tier-answered"]', `the rail's Answered row after Mark read, which still holds No. ${AP_NEWER.n}`);
   assert.ok(!(await railChipsIn(page, "answered")).includes(AP_CLOSED.id), `the chip of No. ${AP_CLOSED.n} is still in the rail's Answered row after Mark read`);
 });
 
