@@ -2603,7 +2603,7 @@ def case_challenged_reason_names_the_refuter():
           "inputs and the line", not missing, "missing from the reason: %s" % (missing or sorted(table)))
 
 
-# Round 2. Text that reads as a placeholder but is only a word: none, TBD, todo, n/a, an ellipsis and a lone em dash.
+# Text that reads as a placeholder but is only a word: none, TBD, todo, n/a, an ellipsis and a lone em dash.
 # Real text that holds one of those words is not a placeholder, and an edit that empties the text is refused.
 CHALLENGED_PLACEHOLDER_TEXTS = ("none", "TBD", "todo", "n/a", "...", "—")
 CHALLENGED_REAL_TEXT = "Against the pick (sonnet): none of the options keep the lint gate"

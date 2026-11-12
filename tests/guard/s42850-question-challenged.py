@@ -124,7 +124,7 @@ add("question challenged: a batch of decisions that each carry the line is allow
             {"op": "set", "collection": "items", "doc_id": "challenged-second",
              "data": qc_item(id="challenged-second")}])
 
-# Round 2. A str_replace that empties the text of the line, and placeholder text that reads as a word: none, TBD,
+# A str_replace that empties the text of the line, and placeholder text that reads as a word: none, TBD,
 # todo, n/a, an ellipsis and a lone em dash. Real text that holds one of those words is not a placeholder.
 QC_PLACEHOLDER_TEXTS = ("none", "TBD", "todo", "n/a", "...", "—")
 
