@@ -550,6 +550,8 @@ CLOCK_HOOKS = {
 # The model-table row for the script: one names an event in its first cell, one names none.
 CLOCK_NAMES_EVENT = "| clock (`hooks/clock.py`, UserPromptSubmit only) | haiku, through `decision_watch.invoke_model` | low |\n"
 CLOCK_NAMES_NO_EVENT = "| clock (`hooks/clock.py`) | haiku, through `decision_watch.invoke_model` | low |\n"
+# A row that names an event clock.py is never registered under: Stop, where only other.py is.
+CLOCK_NAMES_STOP = "| clock (`hooks/clock.py`, Stop only) | haiku, through `decision_watch.invoke_model` | low |\n"
 
 
 # ---- the records page: readers and fixture texts ------------------------------------------------
@@ -944,6 +946,15 @@ class Fixtures(Tree):
         self.assertEqual(got, [("PostToolUse", "haiku", "low"), ("SubagentStart", "haiku", "low"),
                                ("UserPromptSubmit", "haiku", "low")],
                          "a row that names no event must give its model to every row of the script")
+
+    # Case F32. A row that names an event its script never registers is a problem line. The check
+    # reads the registrations, so a row for Stop on a script registered under other events fails.
+
+    def test_f32_a_table_row_that_names_an_event_its_script_never_registers_is_a_problem(self):
+        self.assert_problem(files(hooks={**CLOCK_HOOKS, "Stop": [{"hooks": [command("hooks/other.py")]}]}, extra={
+            "hooks/clock.py": CLOCK_DOC, "hooks/other.py": '"""Does one other thing."""\nprint("ok")\n',
+            "decisions/agent-model-cap.md": TABLE_TEXT + CLOCK_NAMES_STOP}),
+            "hooks/clock.py", "Stop")
 
 
 # ---- the records page: the generator on temp trees ---------------------------------------------
