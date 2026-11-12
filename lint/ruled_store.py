@@ -15,10 +15,12 @@ An entry is open until its ruling is on main. It closes when `status` is "closed
 `lands_in.contains` is found, whitespace-normalised, in the blob of `lands_in.path` on origin/main. Triage writes
 the entries, and the restart plan cites them. The decision record is ruled-store-one-home.
 
-ENTRIES_LIFT_GUARDS is the one switch. True (decision ruled-store-one-home) lets an open entry govern the guard rules it
-names in its `supersedes` (kind "guard-rule"): ruling_for_guard finds the entry, and guard_ruling_line words the note
-a guard prints when it lets the ruled act through. False makes an entry text only. No guard calls ruling_for_guard yet;
-a follow-up step wires it into the shared guard core.
+ENTRIES_LIFT_GUARDS is the one switch. True (decision ruled-store-one-home) lets an entry govern the guard rules it
+names in its `supersedes` (kind "guard-rule"). ruling_for_guard(rule id, entries) returns the newest entry that governs
+that rule, or None. An entry governs only when its status is "open", check_entry flags nothing in it, and it is not
+unchecked. guard_ruling_line(entry) words the note a guard prints when it lets the ruled act through. False makes
+every entry text only. A guard rule id is the first token of the ref, with a trailing ":" cut, in kebab-case
+(guard_rule_id); a ref with no such token names no rule.
 
 Cost: this module keeps no process and no timer and writes no file. ruled_entries starts two read-only git processes
 (one ls-tree, one cat-file --batch). open_entries starts one more cat-file --batch, and only when an open entry
@@ -43,6 +45,8 @@ MAIN_REF = "origin/main"
 STORE_DIR = "roadmap/rulings/"
 STEP_DIR = "roadmap/data/steps/"  # one JSON file per roadmap step on STORE_REF; its `status` is "done" once landed
 STEP_SLUG = re.compile(r"^[\w.-]+$")
+RULE_ID = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+STATUSES = ("open", "closed")
 REQUIRED = ("id", "at", "ruling", "source")
 SESSION_ENTRIES = 5  # entry lines after the header; with the header and the command line, at most 7 of the 8 allowed
 RULING_CUT = 100
@@ -101,32 +105,43 @@ def entry_instant(entry):
     return parse_at(entry.get("at")) or _FAR_PAST
 
 
+def _load(repo_dir, ref):
+    """(entries, state, bad) of the store at `ref` in repo_dir. `bad` lists a problem line for each store file that is
+    not a JSON object. See read_store for the rest."""
+    try:
+        code, listing = _git(repo_dir, ["ls-tree", "-z", "--name-only", ref, STORE_DIR])
+        if code is None:
+            return [], "unreadable", []
+        names = [n.decode("utf-8", "replace") for n in listing.split(b"\0") if n.endswith(b".json")]
+        if code != 0 or not names:
+            return [], "absent", []
+        specs = ["%s:%s" % (ref, name) for name in names]
+        blobs = _batch_blobs(repo_dir, specs)
+        if not blobs:
+            return [], "unreadable", []
+        entries, bad = [], []
+        for name, spec in zip(names, specs):
+            if spec not in blobs:
+                continue
+            try:
+                body = json.loads(blobs[spec].decode("utf-8"))
+            except ValueError:
+                bad.append("%s is not valid JSON" % name)
+                continue
+            if isinstance(body, dict):
+                entries.append(body)
+            else:
+                bad.append("%s is not a JSON object" % name)
+        return sorted(entries, key=entry_instant), "ok", bad
+    except Exception:
+        return [], "unreadable", []
+
+
 def read_store(repo_dir, ref=STORE_REF):
     """(entries, state) of the store at `ref` in repo_dir, oldest first by instant. state is "ok" (also an empty
     folder that exists), "absent" (no such ref, folder or repo) or "unreadable" (git cannot start, or fails after the
     listing worked). A file that is not a JSON object is skipped. Never raises."""
-    try:
-        code, listing = _git(repo_dir, ["ls-tree", "-z", "--name-only", ref, STORE_DIR])
-        if code is None:
-            return [], "unreadable"
-        names = [n.decode("utf-8", "replace") for n in listing.split(b"\0") if n.endswith(b".json")]
-        if code != 0 or not names:
-            return [], "absent"
-        specs = ["%s:%s" % (ref, name) for name in names]
-        blobs = _batch_blobs(repo_dir, specs)
-        if not blobs:
-            return [], "unreadable"
-        entries = []
-        for spec in specs:
-            try:
-                body = json.loads(blobs[spec].decode("utf-8"))
-            except (KeyError, ValueError):
-                continue
-            if isinstance(body, dict):
-                entries.append(body)
-        return sorted(entries, key=entry_instant), "ok"
-    except Exception:
-        return [], "unreadable"
+    return _load(repo_dir, ref)[:2]
 
 
 def ruled_entries(repo_dir, ref=STORE_REF):
@@ -171,36 +186,39 @@ def _supersedes(entry):
     return [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []
 
 
+def guard_rule_id(ref):
+    """The guard rule id a "guard-rule" ref names, or "": the ref's first whitespace token with a trailing ":" cut,
+    when that is kebab-case. A ref may carry prose after the id. The one matcher for both lookups and check_store."""
+    parts = ref.split() if isinstance(ref, str) else []
+    token = parts[0].rstrip(":") if parts else ""
+    return token if RULE_ID.match(token) else ""
+
+
+def _governs(entry):
+    """True when an entry may govern a guard: status "open", nothing in it that check_entry flags, and not unchecked."""
+    return entry.get("status") == "open" and not check_entry(entry) and not is_unchecked(entry)
+
+
+def _guard_ids(entry):
+    return [guard_rule_id(i.get("ref")) for i in _supersedes(entry) if i.get("kind") == "guard-rule"]
+
+
 def lifted_guards(entries):
-    """The guard rules the open entries lift: each `supersedes` ref of kind "guard-rule". [] while ENTRIES_LIFT_GUARDS
-    is False."""
+    """The guard rule ids that the governing entries name (see _governs). [] while ENTRIES_LIFT_GUARDS is False."""
     if not ENTRIES_LIFT_GUARDS:
         return []
     lifted = []
     for entry in entries:
-        if entry.get("status") == "closed" or is_unchecked(entry):
-            continue
-        for item in _supersedes(entry):
-            ref = item.get("ref")
-            if item.get("kind") == "guard-rule" and isinstance(ref, str) and ref not in lifted:
-                lifted.append(ref)
+        if _governs(entry):
+            lifted += [rid for rid in _guard_ids(entry) if rid and rid not in lifted]
     return lifted
 
 
-def _guard_name(ref):
-    """The guard rule a `supersedes` ref names: its first token, since a ref may carry trailing prose."""
-    parts = ref.split() if isinstance(ref, str) else []
-    return parts[0] if parts else ""
-
-
 def ruling_for_guard(guard_rule, entries):
-    """The newest open entry whose `supersedes` names `guard_rule` (kind "guard-rule", first token of the ref), or None.
-    None while ENTRIES_LIFT_GUARDS is False. A closed or unchecked entry in `entries` is ignored."""
+    """The newest entry that governs `guard_rule` (a rule id), or None. None while ENTRIES_LIFT_GUARDS is False."""
     if not ENTRIES_LIFT_GUARDS:
         return None
-    named = [e for e in entries if e.get("status") != "closed" and not is_unchecked(e)
-             and any(i.get("kind") == "guard-rule" and _guard_name(i.get("ref")) == guard_rule
-                     for i in _supersedes(e))]
+    named = [e for e in entries if guard_rule and _governs(e) and guard_rule in _guard_ids(e)]
     return max(named, key=entry_instant) if named else None
 
 
@@ -211,8 +229,8 @@ def guard_ruling_line(entry):
 
 
 def check_entry(entry):
-    """One problem line per defect: a missing or empty required key, an `at` that is unreadable or has no zone, and
-    neither a listed `supersedes` nor a `supersedes_none` reason."""
+    """One problem line per defect: a missing or empty required key, an `at` that is unreadable or has no zone, a
+    `status` outside open and closed, and neither a listed `supersedes` nor a `supersedes_none` reason."""
     problems = []
     for key in REQUIRED:
         value = entry.get(key)
@@ -226,6 +244,8 @@ def check_entry(entry):
         else:
             if moment.tzinfo is None:
                 problems.append("at has no time zone: %r" % entry["at"])
+    if entry.get("status") not in STATUSES:
+        problems.append("status is not open or closed: %r" % entry.get("status"))
     reason = entry.get("supersedes_none")
     if not _supersedes(entry) and not (isinstance(reason, str) and reason.strip()):
         problems.append("neither supersedes nor supersedes_none is set")
@@ -289,19 +309,42 @@ def _joined(ids):
     return ids[0] if len(ids) == 1 else ", ".join(ids[:-1]) + " and " + ids[-1]
 
 
+def _ref_key(item):
+    """What a supersedes ref names, for the shared-ref check: a guard rule id, a quoted main sentence whole (its first
+    token, often a file name, names nothing alone), else the ref's first token."""
+    ref = item.get("ref")
+    if item.get("kind") == "guard-rule":
+        return guard_rule_id(ref)
+    if item.get("kind") == "main-sentence" and isinstance(ref, str):
+        return _norm(ref)
+    parts = ref.split() if isinstance(ref, str) else []
+    return parts[0] if parts else ""
+
+
+def _steps_of(entry):
+    """The step slugs an entry names: its `steps` list when it has one, else its `step`."""
+    listed = entry.get("steps")
+    raw = listed if isinstance(listed, list) and listed else [entry.get("step")]
+    return [s for s in raw if isinstance(s, str) and STEP_SLUG.match(s)]
+
+
 def check_store(repo_dir):
-    """One problem line per defect in the store: each check_entry problem (prefixed by the entry's id); two or more open
-    entries that supersede one ref of one kind (the ref's first token); an open entry whose `step` file on origin/roadmap
-    says "done". A step file that is missing or unreadable is no problem. [] when the store is clean or absent."""
-    entries = ruled_entries(repo_dir)
-    problems = ["%s: %s" % (e.get("id", "?"), p) for e in entries for p in check_entry(e)]
+    """One problem line per defect in the store: a file that is not a JSON object; each check_entry problem (prefixed by
+    the entry's id); a guard-rule ref that names no rule id; two or more open entries that supersede one ref of one
+    kind; an open entry whose `step` (or, with a `steps` list, every listed step) is done on origin/roadmap. A step file
+    that is missing or unreadable is not done. [] when the store is clean or absent."""
+    entries, _state, bad = _load(repo_dir, STORE_REF)
+    problems = list(bad)
+    for entry in entries:
+        rid = entry.get("id", "?")
+        problems += ["%s: %s" % (rid, p) for p in check_entry(entry)]
+        if any(not rule for rule in _guard_ids(entry)):
+            problems.append("entry %s: guard-rule ref names no rule id" % rid)
     opened = open_entries(entries, repo_dir)
     shared = {}
     for entry in opened:
         for item in _supersedes(entry):
-            # A main-sentence ref quotes a sentence, so its first token (often a file name) names nothing alone.
-            ref = item.get("ref")
-            name = _norm(ref) if item.get("kind") == "main-sentence" and isinstance(ref, str) else _guard_name(ref)
+            name = _ref_key(item)
             if name:
                 ids = shared.setdefault((item.get("kind"), name), [])
                 if entry.get("id") not in ids:
@@ -309,16 +352,21 @@ def check_store(repo_dir):
     for (_kind, name), ids in shared.items():
         if len(ids) > 1:
             problems.append("entries %s both supersede %s" % (_joined(ids), name))
-    stepped = [e for e in opened if isinstance(e.get("step"), str) and STEP_SLUG.match(e["step"])]
-    specs = ["%s:%s%s.json" % (STORE_REF, STEP_DIR, e["step"]) for e in stepped]
+    stepped = [(e, _steps_of(e)) for e in opened]
+    specs = sorted({"%s:%s%s.json" % (STORE_REF, STEP_DIR, slug) for _e, slugs in stepped for slug in slugs})
     blobs = _batch_blobs(repo_dir, specs)
-    for entry, spec in zip(stepped, specs):
+
+    def is_done(slug):
+        spec = "%s:%s%s.json" % (STORE_REF, STEP_DIR, slug)
         try:
-            done = json.loads(blobs[spec].decode("utf-8")).get("status") == "done"
+            return json.loads(blobs[spec].decode("utf-8")).get("status") == "done"
         except (KeyError, ValueError, AttributeError):
-            continue
-        if done:
-            problems.append("step %s is done but entry %s is still open" % (entry["step"], entry.get("id", "?")))
+            return False
+
+    for entry, slugs in stepped:
+        if slugs and all(is_done(slug) for slug in slugs):
+            noun = "step %s is" % slugs[0] if len(slugs) == 1 else "steps %s are" % _joined(slugs)
+            problems.append("%s done but entry %s is still open" % (noun, entry.get("id", "?")))
     return problems
 
 

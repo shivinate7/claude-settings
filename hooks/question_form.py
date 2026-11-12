@@ -1701,9 +1701,11 @@ def _step_rulings(steps, words):
 def _ruled_candidates(roots, unknown, words):
     """The open entries of the ruled store (lint/ruled_store.py, the one reader) whose ruling shares a word with the
     question (`words`, the step rulings' word test), as
-    `ruled:<id>: <ruling> (owner <at>; open, not on main; supersedes <refs>)`, newest first, at most RULED_TOP. An unchecked entry (supersedes_none starts with "unread") ends with " (unchecked, not law)". The store is read from the
-    first root that has one: the repo, else the claude-settings checkout. No store anywhere adds "ruled store
-    (absent)"; a store git failed to read adds "ruled store (unreadable: git)"."""
+    `ruled:<id>: <ruling> (owner <at>; open, not on main; supersedes <refs>)`, the most shared words first and the
+    newest first among equal counts, at most RULED_TOP. An unchecked entry (supersedes_none starts with "unread") ends
+    with " (unchecked, not law)". The store is read from the first root that has one: the repo, else the
+    claude-settings checkout. No store anywhere adds "ruled store (absent)"; a store git failed to read adds
+    "ruled store (unreadable: git)"."""
     lint = os.path.join(HERE, "..", "lint")
     if lint not in sys.path:
         sys.path.append(lint)
@@ -1718,8 +1720,11 @@ def _ruled_candidates(roots, unknown, words):
         if state == "ok":
             opened = ruled_store.open_entries(entries, root)
             lines = []
-            related = [e for e in opened if _words(str(e.get("ruling", ""))) & words]
-            for entry in sorted(related, key=ruled_store.entry_instant, reverse=True)[:RULED_TOP]:
+            scored = [(len(_words(str(e.get("ruling", ""))) & words), e) for e in opened]
+            newest = sorted((pair for pair in scored if pair[0]), key=lambda pair: ruled_store.entry_instant(pair[1]),
+                            reverse=True)
+            # The sort is stable: most shared words first, and the newest first among equal counts.
+            for _count, entry in sorted(newest, key=lambda pair: -pair[0])[:RULED_TOP]:
                 ruling = " ".join(str(entry.get("ruling", "")).split())[:INDEX_CAP]
                 mark = " (unchecked, not law)" if ruled_store.is_unchecked(entry) else ""
                 lines.append("ruled:%s: %s (owner %s; open, not on main; supersedes %s)%s"
