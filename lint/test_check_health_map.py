@@ -294,7 +294,8 @@ class HealthMapTests(unittest.TestCase):
     def test_22_too_broad_covers_glob_exits_2(self):
         # A glob with no literal character matches by shape alone, so it covers every part. It must not pass.
         self.write_parts()
-        for glob in ("*", "*/*", "?", "*.*"):
+        # A bracket class is not a literal: [a-z]* and [!x]* hold no literal character either.
+        for glob in ("*", "*/*", "?", "*.*", "[a-z]*", "[!x]*"):
             with self.subTest(glob=glob):
                 self.write_map(rows_for(NARROW_COVERS + [[glob]]))
                 rc, out = self.check()
@@ -345,6 +346,35 @@ class HealthMapTests(unittest.TestCase):
         self.fixture()  # the base fixture has no janitor/ and no merge/ folder
         rc, out = self.check()
         self.assert_clear(rc, out, 5)
+
+    def test_30_no_part_row_that_also_covers_exits_2(self):
+        # A parked row names no part, so it may not also cover one.
+        self.fixture()
+        parked = row(6, ["hooks/guard*.py"])
+        parked["no_part"] = "a part not built yet"
+        self.write_map(rows_for(NARROW_COVERS) + [parked])
+        rc, out = self.check()
+        self.assert_unknown(rc, out, "no_part")
+
+    def test_31_no_part_with_a_blank_reason_exits_2(self):
+        self.fixture()
+        for reason in ("", "   "):
+            with self.subTest(reason=reason):
+                parked = row(6, [])
+                parked["no_part"] = reason
+                self.write_map(rows_for(NARROW_COVERS) + [parked])
+                rc, out = self.check()
+                self.assert_unknown(rc, out, "no_part")
+
+    def test_32_no_part_that_is_not_text_exits_2(self):
+        self.fixture()
+        for reason in (5, True, ["a reason"]):
+            with self.subTest(reason=repr(reason)):
+                parked = row(6, [])
+                parked["no_part"] = reason
+                self.write_map(rows_for(NARROW_COVERS) + [parked])
+                rc, out = self.check()
+                self.assert_unknown(rc, out, "no_part")
 
 
 if __name__ == "__main__":
