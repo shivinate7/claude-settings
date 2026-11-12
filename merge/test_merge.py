@@ -18836,6 +18836,7 @@ class BatchFreeze(CloudSession):
             rc, out = self.run_batch("--batch-build", "nightly", "101", "--ready")
         self.assertIn("#102 is frozen in batch nightly and is left out of this request", out, "the refusal does not name the frozen lane left out: %s" % out)
         self.assertIn("decision batch-freeze-lane-set", out, "the freeze refusal does not cite decision batch-freeze-lane-set: %s" % out)
+        self.assertNotIn("no-merge-during-batch-ci", out, "the freeze refusal still cites the batch brake's decision: %s" % out)
         self.assertIn("a frozen set never changes except by --batch-drop", out, "the refusal does not say the frozen set changes only by a drop: %s" % out)
         self.assertEqual(rc, 1, "--ready with a PR list other than the frozen set exited %s, not 1: %s" % (rc, out))
         self.assertEqual(self.lint_calls(mocks), [], "a refused --ready linted the batch head: %s" % out)
