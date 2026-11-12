@@ -18,7 +18,7 @@ from guard_core import (
     is_cloud, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import BUILD_TAG, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import BUILD_TAG, DATA_TOOL, bare_pr_waits, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -2054,6 +2054,108 @@ def written_time_hit(tool: str, tool_input, cwd: str = ""):
                     utc=now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"))
     except (ImportError, ValueError, OverflowError):
         return None
+
+# ------------------------------------------------------------------ dead-pr-wait
+#
+# A roadmap step whose text waits on a bare PR number (`waits on #42`) with no blockedBy slug (rule dead-pr-wait,
+# step dead-pr-waits). The PR may close unmerged, and then nobody acts on the step. The words come from
+# shared_names.bare_pr_waits, the one matcher the roadmap build's check shares. Judged: the title, why and note of
+# the step a Write, Edit or MultiEdit leaves in a roadmap/data/steps/<name>.json file. Only a wait the write ADDS is
+# refused, so a step with an old bare wait stays editable. Cost: one read of the step file, only for a write to a step
+# file; no process, no log.
+DEAD_PR_WAIT_FIELDS = ("title", "why", "note")
+DEAD_PR_WAIT_REASON = (
+    "Rule (roadmap): this step's text waits on {what} with no step in blockedBy. A pull request can close unmerged, "
+    "and then nobody acts on the wait. "
+    "Remedy: name the step slug it waits on in the step's blockedBy list, or drop the wait. "
+    "(step dead-pr-waits, owner 2026-11-10 13:10 CST: place a wait on a step slug, never a bare PR number)"
+)
+_JSON_STRING = re.compile(r'"((?:[^"\\]|\\.)*)"')
+_BLOCKED_BY_SLUG = re.compile(r'"blockedBy"\s*:\s*\[\s*"[^"\s]')
+
+
+def _step_waits(step) -> list:
+    return [n for f in DEAD_PR_WAIT_FIELDS for n in bare_pr_waits(step.get(f))] if isinstance(step, dict) else []
+
+
+def _step_blocked(step) -> bool:
+    blocked = step.get("blockedBy") if isinstance(step, dict) else None
+    return isinstance(blocked, list) and any(isinstance(b, str) and b.strip() for b in blocked)
+
+
+def _json_object(text):
+    try:
+        value = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _fragment_waits(text: str) -> list:
+    """The waits in a piece of JSON text that is no whole document: each quoted string read as a note, else the text itself."""
+    strings = []
+    for found in _JSON_STRING.finditer(text):
+        try:
+            strings.append(json.loads(found.group(0)))
+        except ValueError:
+            strings.append(found.group(1))
+    return [n for part in (strings or [text]) for n in bare_pr_waits(part)]
+
+
+def _applied(disk: str, tool_input: dict):
+    """The file text after an Edit or MultiEdit on `disk`, or None when an old_string is not found in it."""
+    edits = [tool_input] if tool_input.get("old_string") is not None else [e for e in tool_input.get("edits") or [] if isinstance(e, dict)]
+    text = disk
+    for edit in edits:
+        old, new = edit.get("old_string"), edit.get("new_string")
+        if not isinstance(old, str) or not isinstance(new, str) or old not in text:
+            return None
+        text = text.replace(old, new) if edit.get("replace_all") else text.replace(old, new, 1)
+    return text
+
+
+def dead_pr_wait_hit(tool: str, tool_input, cwd: str = ""):
+    """Return (matched, reason) when a Write, Edit or MultiEdit to a roadmap step file adds a wait on a bare #N that
+    the step's old text did not hold, and the step it leaves names no step in blockedBy; else None. The old text is
+    the file on disk. An Edit whose result cannot be built (no file on disk, or an old_string not in it) is judged
+    on its new_string alone, less the waits its old_string held. Fails open: an unreadable file is an empty old text."""
+    if tool not in WRITE_TOOLS or not isinstance(tool_input, dict):
+        return None
+    path = tool_input.get("file_path")
+    if not isinstance(path, str) or not _STEP_FILE.search(path.replace("\\", "/")):
+        return None
+    try:
+        with open(os.path.join(cwd, path) if cwd else path, encoding="utf-8") as handle:
+            disk = handle.read()
+    except OSError:
+        disk = None
+    old_step = _json_object(disk) if disk is not None else None
+    old_waits = _step_waits(old_step) if old_step is not None else (_fragment_waits(disk) if disk else [])
+    if tool == "Write":
+        content = tool_input.get("content")
+        if not isinstance(content, str):
+            return None
+        text = content
+    else:
+        text = _applied(disk, tool_input) if disk is not None else None
+    step = _json_object(text) if text is not None else None
+    if step is not None:
+        new_waits, blocked = _step_waits(step), _step_blocked(step)
+    else:
+        pieces = [text] if text is not None else [tool_input.get("new_string")] + [
+            e.get("new_string") for e in tool_input.get("edits") or [] if isinstance(e, dict)]
+        pieces = [x for x in pieces if isinstance(x, str)]
+        new_waits = [n for x in pieces for n in _fragment_waits(x)]
+        blocked = any(_BLOCKED_BY_SLUG.search(x) for x in pieces)
+        if text is None:
+            olds = [tool_input.get("old_string")] + [e.get("old_string") for e in tool_input.get("edits") or [] if isinstance(e, dict)]
+            old_waits = old_waits + [n for x in olds if isinstance(x, str) for n in _fragment_waits(x)]
+    added = [n for n in new_waits if n not in old_waits]
+    if added and not blocked:
+        what = "#" + str(added[0])
+        return what, DEAD_PR_WAIT_REASON.format(what=what)
+    return None
+
 
 # ------------------------------------------------------------------ hook-bypass
 #

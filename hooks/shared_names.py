@@ -170,3 +170,33 @@ def route_flags_path(session_id: object) -> Optional[str]:
     if not isinstance(session_id, str) or not re.fullmatch(r"[\w.-]+", session_id) or session_id.startswith("."):
         return None
     return os.path.join(config_dir(), STATE_DIR_NAME, "route-flags", session_id + ".json")
+
+
+# The one home of the words that say a roadmap step waits on pull request #N (step dead-pr-waits). The guard's
+# placement end (rule dead-pr-wait) and the roadmap build's check end (skills/roadmap/build.py) both read it.
+# build.WAIT_ON_PULL_PHRASES adds its own longer list on top of these.
+DEAD_PR_WAIT_PHRASES = ("after", "once", "until", "when", "blocked on", "wait on", "waits on", "waiting for")
+
+
+def wait_regex(phrases: tuple[str, ...], optional_pr: bool = False) -> "re.Pattern[str]":
+    """The pattern for `<phrase> #N` (group 1 is N), read without case. `optional_pr` lets `PR ` sit before #N.
+    A match followed by closed or merged is history ("continues here after #46 closed"), not a wait."""
+    words = "|".join(r"\s+".join(map(re.escape, phrase.split())) for phrase in phrases)
+    return re.compile(r"\b(?:%s)\s+%s#(\d+)\b(?!\s+(?:closed|merged)\b)" % (words, r"(?:PR\s+)?" if optional_pr else ""), re.I)
+
+
+DEAD_PR_WAIT = wait_regex(DEAD_PR_WAIT_PHRASES)
+# Text that quotes a wait, not makes one: a fenced block (an unclosed fence runs to the end), an inline code span, a
+# blockquote line and a double-quoted phrase on one line. Removed before the match, in this order.
+_QUOTED = (re.compile(r"```.*?(?:```|\Z)", re.S), re.compile(r"`[^`\n]*`"), re.compile(r"^[ \t]*>.*$", re.M),
+           re.compile(r'"[^"\n]*"|“[^\n”]*”'))
+
+
+def bare_pr_waits(text: object) -> list[int]:
+    """The PR numbers N, each once and in order, that `text` waits on with a bare `<phrase> #N` (DEAD_PR_WAIT_PHRASES).
+    Quoted, fenced and coded text holds none. Anything that is not a string holds none."""
+    if not isinstance(text, str):
+        return []
+    for pattern in _QUOTED:
+        text = pattern.sub(" ", text)
+    return list(dict.fromkeys(int(n) for n in DEAD_PR_WAIT.findall(text)))

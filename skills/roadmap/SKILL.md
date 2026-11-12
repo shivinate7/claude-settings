@@ -297,6 +297,13 @@ After each build the roadmap build script prints the upkeep list for the triage 
   a summary line. It exits 1, with no summary line, when every entry is unknown;
 - `Step:` trailers that name no step;
 - `open step waits on a closed unmerged PR`: an open step whose title, why or note waits on PR #N. A wait is a phrase in `WAIT_ON_PULL_PHRASES` in `build.py`. The word `PR` may sit before `#N`. A `#N` followed by `closed` or `merged` is history, not a wait. The row lists the step when `landedPulls` has a row for #N with `merged` false. It skips #N when `landedPulls` has a `merged` true row for #N, or when #N is an open pull. It also skips #N when the head of its `merged` false row is on main (`head_on_main`, as for the landed rows). A PR closed before the 14-day `landedPulls` window is not seen. Each entry is `<step id> (#N)`. The row reads `unknown (the live file has no landedPulls list)` when the live file has no `landedPulls` key. A live read that is unknown, such as no `--live` file, makes the row unknown too. An empty `landedPulls` list reads none. The fix is to name the step slug it waits on in the step's `blockedBy` list (owner, 2026-11-10 13:10 CST);
+- `dead PR wait` lines, printed before the upkeep list (step dead-pr-waits): one per open step and PR #N where the step's
+  title, why or note waits on a bare `#N` (a phrase in `DEAD_PR_WAIT_PHRASES`, `hooks/shared_names.py`, the same matcher the
+  guard's rule `dead-pr-wait` uses when a step is written). The line reads `closed and not merged` and the build exits 1
+  when the live file's optional `prStates` list (`[{number, state, merged}]`, one GitHub read per build by the publisher)
+  shows #N closed with `merged` false. It reads `unknown (why)` and the build exits 0 when `prStates` is missing, not a list,
+  empty, has no valid row for #N, or has rows for #N that disagree. A PR shown open or merged adds no line. With no
+  readable live file one unknown line stands for all the waits. The fix is the step's `blockedBy` slug.
 - `done without check`: a `done` step updated on or after the cutoff (`DONE_CHECK_SINCE`, in the build script) that names no Done check. It is also listed when its note, why and ask hold no `Done check green on main:` (any case) with a `#N`, `PR N`, URL or commit hash right after it. Triage's close writes that line, such as `Done check green on main: #1312.` The instruction is in the Triage bullet of the operating model (skill `project-ops`). A `done` step updated before the cutoff is not judged, because the Done check line had not shipped then.
 
 ## Cost

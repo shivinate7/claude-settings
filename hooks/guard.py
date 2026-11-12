@@ -219,6 +219,12 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        ready; `gh issue` create, comment, edit or close; `gh api` with a write method, or with a field
                        or input flag and no method. Judged per segment from the command word. A read, `gh api` with an
                        explicit GET and the merge tool pass. A local session skips it. An override lifts it.
+  dead-pr-wait         deny. A Write, Edit or MultiEdit to roadmap/data/steps/<name>.json that adds, to the step's
+                       title, why or note, a wait on a bare PR number (`waits on #42`; the words are
+                       shared_names.DEAD_PR_WAIT_PHRASES, read without case) when the step it leaves has no slug in
+                       blockedBy. A wait the old file held, and a wait quoted, fenced, in code or in a blockquote,
+                       pass. The remedy names blockedBy. One read of the step file, no process. An override lifts it.
+                       (step dead-pr-waits)
   records-page-ready   deny. Marking a pull request ready (MCP update_pull_request with draft false, or the gh ready
                        command without --undo) while its head's records page is stale, or when that read cannot run, in
                        a repo that uses the merge tool. A base that is not the default branch, a head holding a
@@ -575,7 +581,7 @@ while True:
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit, dead_pr_wait_hit,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
         _loading = "guard_frozen"
@@ -6236,6 +6242,11 @@ def judge(payload) -> None:
     written = written_time_hit(tool, tool_input, cwd)
     if written:
         refuse(tool, "deny", "message-time-matches-clock", written[1], written[0])
+
+    # A roadmap step that waits on a bare #N with no blockedBy slug (rule dead-pr-wait).
+    dead_wait = dead_pr_wait_hit(tool, tool_input, cwd)
+    if dead_wait:
+        refuse(tool, "deny", "dead-pr-wait", dead_wait[1], dead_wait[0])
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)
