@@ -2562,10 +2562,10 @@ def model_calls_of_call_judge(checked):
 
 
 def case_cross_repo_writer_call_judge():
-    """(xxi) call_judge.py reads the writer's session the way guard.py does. A checked_with equal to the cloud session's
-    record id is a hit, so call_judge asks no model about the write. The red: on a build that passes the payload's UUID,
-    the write is no hit there and the model is asked. The control, another lane's slug, is not refused, so the model is
-    asked and the model call is seen. A session id is refused before any model call (case (3))."""
+    """(xxi) A write whose checked_with is a session id makes no model call in call_judge.py's run: the refusal comes
+    before call_judge asks the model. Every session id is refused, so this case does not tell a build that reads the
+    writer's session from one that does not. That read is pinned by the guard and page-item cases above. The control,
+    another lane's slug, is not refused, so the model is asked, and the call count is seen at all."""
     refused = model_calls_of_call_judge(CLOUD_RECORD)
     check("(xxi) call_judge: checked_with is this cloud session's record id, no model call", refused == 0,
           "want no model call for a write the rule refuses, got %d call(s)" % refused)
@@ -2658,6 +2658,26 @@ def case_cross_repo_curly_apostrophe_is_refused_with_shape():
           "want the slug's characters, separator and 32-character limit in the printed reason, got %r" % (printed,))
     cross("(8 control) checked_with is the straight-apostrophe role owner's-computer, passes", "set",
           ma144(checked="owner's-computer"), PAGE_REPO_NAME)
+
+
+# Values outside the lane slug shape and not placeholder words: a capital letter, a leading, trailing or doubled hyphen,
+# a trailing space, a trailing newline. The shape alone refuses each one.
+SHAPE_REFUSED = ("None", "TBD", "-", "a--b", "-a", "a-", "duo-tab ", "duo-tab\n")
+
+
+def case_cross_repo_lane_slug_shape_is_refused():
+    """(9) A value outside the lane slug shape is refused as checked_with on another repo's open decision. Each value is
+    outside the placeholder words, so the shape refuses it. A pattern made case-insensitive passes None and TBD. A
+    pattern loosened to letters, digits and hyphens passes -, a--b, -a and a-. A match with no end anchor passes a--b,
+    a-, the trailing space and the newline. Control: duo-tab-2, digits and single hyphens, passes."""
+    scope_open_foreign_item("(9)")
+    offending = [v for v in SHAPE_REFUSED if v in PLACEHOLDER_WORDS]
+    check("(9) fixture: no shape value is a placeholder word", not offending,
+          "want no placeholder word in the shape values, got %r" % (offending,))
+    for value in SHAPE_REFUSED:
+        cross("(9) checked_with is %r" % (value,), "set", ma144(checked=value), PAGE_REPO_NAME, ("checked_with",))
+    cross("(9 control) checked_with is the lane slug duo-tab-2, passes", "set", ma144(checked="duo-tab-2"),
+          PAGE_REPO_NAME)
 
 
 # ------------------------------------------------------- judged_item_writes reads a file_path at the payload cwd
@@ -2775,6 +2795,7 @@ def main():
                  case_cross_repo_writer_call_judge, case_cross_repo_update_checked_with_needs_repo,
                  case_cross_repo_placeholder_is_no_lane_slug, case_cross_repo_session_id_on_own_repo_is_refused,
                  case_cross_repo_lane_slug_over_32_is_refused, case_cross_repo_curly_apostrophe_is_refused_with_shape,
+                 case_cross_repo_lane_slug_shape_is_refused,
                  case_cross_repo_remedy_detector_is_calibrated, case_cross_repo_role_checked_with_passes,
                  case_cross_repo_lane_slug_checked_with_passes, case_cross_repo_session_id_is_refused,
                  case_cross_repo_missing_checked_with_names_role_or_slug,
