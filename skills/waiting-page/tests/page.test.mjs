@@ -625,6 +625,43 @@ test("the guard's CHALLENGED_LINE takes each table case against the pick as a ca
   AGAINST_TABLE.forEach((row, i) => assert.equal(guard[i], row.draws === "case", `${JSON.stringify(row.line)}: the guard's pattern says ${guard[i] ? "case" : "context"}, the table says ${row.draws}`));
 });
 
+// ---- Round 2 of the case against the pick: a task, an answered decision, and the fold of a card with no case.
+test("R2: a task's case against the pick line stays in its context and draws no block", async (t) => {
+  const it = { ...TASK, id: "ag-task", n: 7, context: "Plug it in.\nAgainst the pick (sonnet): x" };
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const s = await againstOf(page, it);
+  assert.ok(s, `${it.id}: the card is not drawn`);
+  assert.ok(s.ctxLines.includes("Against the pick (sonnet): x"), `${it.id}: the task's Against line is missing from its context`);
+  assert.equal(s.blocks.length, 0, `${it.id}: a case block is drawn on a task`);
+});
+
+test("R2: a case against the pick on an answered decision shows its words on its block once Change opens it", async (t) => {
+  const it = mk("ag-answered", 1, { context: "Goal: keep it.\nAgainst the pick (sonnet): Merging adds one more push wait." });
+  const page = await open(t, { items: [it], answers: { [it.id]: { item: it.id, n: it.n, at: "2026-10-26T01:00:00Z", choice: "a", note: "" } } }); if (!page) return;
+  const c = card(page, it);
+  assert.equal(await c.getByRole("button", { name: "Change" }).count(), 1, `${it.id}: the answered decision has no Change control`);
+  await c.getByRole("button", { name: "Change" }).click();
+  const s = await againstOf(page, it);
+  assert.ok(s, `${it.id}: the card is not drawn`);
+  assert.equal(s.blocks.length, 1, `${it.id}: ${s.blocks.length} case blocks once Change opens it, want one`);
+  assert.deepEqual(s.blocks[0].srWords, [false], `${it.id}: the first block on the screen hides Against the pick from sight`);
+});
+
+// One case per cause: a trailing newline (trim), CRLF line ends (joined as LF), and three newlines (collapsed to two).
+for (const [label, context] of [
+  ["a newline at its end", "x".repeat(220) + "\n"],
+  ["CRLF line ends", "a".repeat(218) + "\r\nb"],
+  ["three newlines inside", "a".repeat(217) + "\n\n\nb"],
+]) test(`R2: a card with no case against the pick folds a 221-character context with ${label} as it did before`, async (t) => {
+  const it = mk("fold-one", 1, { context });
+  assert.equal(it.context.length, 221, `${it.id}: the fixture is not 221 characters`);
+  const page = await open(t, { items: [it] }); if (!page) return;
+  const s = await againstOf(page, it);
+  assert.ok(s, `${it.id}: the card is not drawn`);
+  assert.equal(s.ctx, it.context, `${it.id}: the context is drawn changed, not as written`);
+  assert.equal(s.more, true, `${it.id}: a 221-character context does not fold`);
+});
+
 test("A to C pick on the focused card, and Ctrl+Enter sends", async (t) => {
   const page = await open(t, { items: [DECISION] }); if (!page) return;
   await card(page, DECISION).locator(".title").click();
