@@ -2234,6 +2234,15 @@ class LiveStatusPhase(UpkeepFixture):
                 self.assertNotIn("nophase-todo", stale, "a step with no phase is never listed in the stale row")
                 self.assertNotIn("nophase-todo", empty, "a step with no phase is never listed in the empty row")
 
+    def test_a_doing_step_and_an_active_step_are_listed_in_both_rows(self):
+        self.commit_step("build-doing", status="doing", phase="build", note="", updatedAt=self.ten_days_ago(), order=1)
+        self.commit_step("legacy-active", status="active", phase="legacy", note="", updatedAt=self.ten_days_ago(), order=2)
+        (stale_count, stale), (empty_count, empty) = self.stale_and_empty()
+        self.assertEqual((stale_count, stale), (2, ["build-doing", "legacy-active"]),
+                         "doing and active are live statuses, so both steps are listed in the stale row")
+        self.assertEqual((empty_count, empty), (2, ["build-doing", "legacy-active"]),
+                         "doing and active are live statuses, so both steps are listed in the empty row")
+
     def test_a_phase_holding_only_a_ready_step_is_not_live(self):
         self.commit_step("build-doing", status="doing", phase="build", note="Working.", updatedAt=iso_ago(5), order=1)
         self.commit_step("build-todo", status="todo", phase="build", note="", updatedAt=self.ten_days_ago(), order=2)
