@@ -30,7 +30,8 @@ Part 1, hooks/precompact_handoff.py:
                  and prompt. HANDOFF_PY is copied below, verbatim, and is not parsed.
 
 Part 2, hooks/reread_check.py (new file):
-  --post-compact (PostCompact; session_id, trigger, cwd). Sets the session's flag.
+  --post-compact (PostCompact; session_id, trigger, cwd). Sets the session's flag. A cwd under
+                 .claude/worktrees/agent-* sets nothing: an agent shares its parent's session id.
   --pre-read     (PreToolUse, tool Read; session_id, tool_name, tool_input.file_path, cwd).
                  Clears the flag when the path names this session's handoff, in any spelling:
                  full path, forward slashes (Windows only), 8.3 short name (Windows only),
@@ -310,10 +311,10 @@ class Case(object):
         t = time.time() - age
         os.utime(path, (t, t))
 
-    def post_compact(self, sid):
+    def post_compact(self, sid, cwd=None):
         return self.run(READ_CHECK, "--post-compact", {
             "session_id": sid, "hook_event_name": "PostCompact", "trigger": "auto",
-            "cwd": self.proj})
+            "cwd": cwd or self.proj})
 
     def read(self, sid, file_path, extra=None):
         payload = {
@@ -728,6 +729,36 @@ def case_agent_read_keeps_flag():
         c.cleanup()
 
 
+def case_agent_post_compact_sets_no_flag():
+    """An agent shares its parent's session id, so an agent's PostCompact, run from its own worktree
+    (.claude/worktrees/agent-*), must not set the parent's re-read flag: the parent would be refused until it reads a
+    handoff it did not write (the handoff lock report, Part 1). The lane PostCompact is the live control, and a worktree
+    that is not an agent's still sets the flag."""
+    c = Case("agent_post")
+    try:
+        lane = c.post_compact("ag-lane")
+        check("agent post-compact: live control, a lane's PostCompact sets its own flag",
+              lane.returncode == 0 and os.path.isfile(c.state("ag-lane.reread")),
+              "rc=%r, no flag at %s" % (lane.returncode, c.state("ag-lane.reread")))
+        c.seed_handoff("ag-1")
+        agent_wt = os.path.join(c.proj, ".claude", "worktrees", "agent-a1634141822b8dc54")
+        os.makedirs(agent_wt, exist_ok=True)
+        check("agent post-compact: scope, the cwd is .claude/worktrees/agent-*",
+              agent_wt.endswith(os.path.join(".claude", "worktrees", "agent-a1634141822b8dc54")), agent_wt)
+        proc = c.post_compact("ag-1", cwd=agent_wt)
+        check("agent post-compact: exits 0", proc.returncode == 0,
+              "rc=%r err=%r" % (proc.returncode, tail(proc.stderr)))
+        check("agent post-compact: the parent's re-read flag is not set", not os.path.isfile(c.state("ag-1.reread")),
+              "the flag is set at %s" % c.state("ag-1.reread"))
+        lane_wt = os.path.join(c.proj, ".claude", "worktrees", "lane-handoff")
+        os.makedirs(lane_wt, exist_ok=True)
+        c.post_compact("ag-wt", cwd=lane_wt)
+        check("agent post-compact: control, a worktree that is not an agent's still sets the flag",
+              os.path.isfile(c.state("ag-wt.reread")), "no flag at %s" % c.state("ag-wt.reread"))
+    finally:
+        c.cleanup()
+
+
 def case_stop_hook_active_passes():
     """stop_hook_active true passes, so a block cannot loop. Its twin, the same flagged
     state without the flag, must block."""
@@ -1075,6 +1106,7 @@ def main() -> int:
     case_read_of_handoff_clears_flag()
     case_read_of_other_file_keeps_flag()
     case_agent_read_keeps_flag()
+    case_agent_post_compact_sets_no_flag()
     case_stop_hook_active_passes()
     case_stop_no_flag_passes()
     case_sibling_import_failure_exits_zero()
