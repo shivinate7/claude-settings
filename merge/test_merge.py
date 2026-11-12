@@ -1401,11 +1401,11 @@ class LockRetake(Env):
         Other git calls run for real. -> (the patch, the list that receives each faked push)."""
         self.assertTrue(merge.is_net(128, self.NET_DROP), "scope: the faked push output is no network error line")
         real, pushes = merge.git, []
-        def git(cwd, *args, input=None):
+        def git(cwd, *args, input=None, **k):
             if args[:1] == ("push",):
                 pushes.append(args)
                 return 128, self.NET_DROP
-            return real(cwd, *args, input=input)
+            return real(cwd, *args, input=input, **k)
         return unittest.mock.patch.object(merge, "git", side_effect=git), pushes
 
     def assert_dropped_push_is_net_stop(self, pushes):
@@ -3502,10 +3502,10 @@ class ClaimSurvivesUnknown(Env):
             self.main_moves()
         self.host.on_wait = main_moves_during_the_wait
         real_git = merge.git
-        def base_unreadable(cwd, *a, input=None):
+        def base_unreadable(cwd, *a, input=None, **k):
             if claimed and a == ("rev-parse", "origin/main"):
                 return 128, "fatal: ambiguous argument 'origin/main': unknown revision"
-            return real_git(cwd, *a, input=input)
+            return real_git(cwd, *a, input=input, **k)
         with unittest.mock.patch.object(merge, "git", base_unreadable), tempfiles_in_run_folder():
             rc, out = self.run_merge("7", "--confirm")
         assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
@@ -3515,10 +3515,10 @@ class ClaimSurvivesUnknown(Env):
         claimed = []
         self.host.on_wait = lambda: claimed.append(self.head())
         real_git = merge.git
-        def listing_unreadable(cwd, *a, input=None):
+        def listing_unreadable(cwd, *a, input=None, **k):
             if claimed and a[:3] == ("ls-tree", "--name-only", "origin/main"):
                 return 128, "fatal: not a tree object"
-            return real_git(cwd, *a, input=input)
+            return real_git(cwd, *a, input=input, **k)
         with unittest.mock.patch.object(merge, "git", listing_unreadable):
             rc, out = self.run_merge("7", "--confirm")
         assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
@@ -3528,10 +3528,10 @@ class ClaimSurvivesUnknown(Env):
         claimed = []
         self.host.on_wait = lambda: claimed.append(self.head())
         real_git = merge.git
-        def config_unreadable(cwd, *a, input=None):
+        def config_unreadable(cwd, *a, input=None, **k):
             if claimed and a == ("show", "origin/main:.github/stamp.json"):
                 return 128, "fatal: path '.github/stamp.json' does not exist"
-            return real_git(cwd, *a, input=input)
+            return real_git(cwd, *a, input=input, **k)
         with unittest.mock.patch.object(merge, "git", config_unreadable):
             rc, out = self.run_merge("7", "--confirm")
         assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
@@ -3541,10 +3541,10 @@ class ClaimSurvivesUnknown(Env):
         claimed = []
         self.host.on_wait = lambda: claimed.append(self.head())
         real_git = merge.git
-        def merge_fails_without_a_conflict(cwd, *a, input=None):
+        def merge_fails_without_a_conflict(cwd, *a, input=None, **k):
             if claimed and "--no-commit" in a:  # the records proof's merge: it fails, and leaves no unmerged file
                 return 1, "fatal: unable to write new index file"
-            return real_git(cwd, *a, input=input)
+            return real_git(cwd, *a, input=input, **k)
         with unittest.mock.patch.object(merge, "git", merge_fails_without_a_conflict):
             rc, out = self.run_merge("7", "--confirm")
         assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
