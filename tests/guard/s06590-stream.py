@@ -1182,6 +1182,72 @@ add("background-end: a PowerShell cd with a quoted backslash path before ; still
     command=r'cd "C:\x\"; npm run dev', run_in_background=True)
 
 
+# --- a roster command run bare, with no verdict wrapper (rule bare-check)
+#
+# The roster is the check-tail roster, run in the foreground: `merge --lane-lint`, `merge --review-record`,
+# `merge --release-check`, and `bin/ci-job`. A bare run prints the check's own output, so the agent reads
+# whatever ends the line. The incident form read `echo $?` as "lane lint passes". The remedy is
+# `verdict <cmd>` inline. A roster command under verdict, a merge preview, a grep that names the script
+# and a bare test run are no bare run. A pipe into tail or head stays check-tail's refusal, so those rows
+# assert check-tail and lack bare-check: the reason is printed once.
+BARE_CHECK = "bare-check"
+BARE_REMEDY = "verdict <cmd>"
+
+
+for _name, _command in (
+    ("merge --lane-lint", "merge --lane-lint 7"),
+    ("merge --review-record", "merge --review-record 7"),
+    ("merge --release-check", "merge --release-check 5 6"),
+    ("the bin path, merge --lane-lint", "~/.claude/bin/merge --lane-lint 7"),
+    ("merge.cmd --lane-lint", "merge.cmd --lane-lint 7"),
+    ("the script run by python3", "python3 merge/merge.py --lane-lint 7"),
+    ("the launcher run by python3", "python3 merge/launch.py --lane-lint 7"),
+    ("the script run by python3.11", "python3.11 merge/merge.py --review-record 7"),
+    ("the script run by uv run", "uv run merge/merge.py --lane-lint 7"),
+    ("the script run by uv run python", "uv run python merge/merge.py --lane-lint 7"),
+    ("merge --lane-lint behind env", "env FOO=1 merge --lane-lint 7"),
+    ("merge --lane-lint behind a VAR=x prefix", "FOO=1 merge --lane-lint 7"),
+    ("merge --lane-lint with 2>&1 and no pipe", "merge --lane-lint 7 2>&1"),
+    ("ci-job checks --lint, as bin/ci-job", "bin/ci-job checks --lint"),
+    ("ci-job checks --lint, by name", "ci-job checks --lint"),
+    ("ci-job run by python3", "python3 bin/ci-job checks --lint"),
+    ("the incident form, merge --lane-lint then echo $?", "merge --lane-lint 7; echo $?"),
+    ("merge --lane-lint then && echo ok", "merge --lane-lint 7 && echo ok"),
+    ("ci-job checks --lint then echo $?", "bin/ci-job checks --lint; echo $?"),
+):
+    sh("bare-check: " + _name + " with no verdict wrapper is refused", _command, "deny", BARE_CHECK,
+       cwd=NOGIT, carries=BARE_REMEDY)
+
+for _name, _command in (
+    ("verdict wraps merge --lane-lint", "verdict merge --lane-lint 7"),
+    ("verdict wraps merge --review-record", "verdict merge --review-record 7"),
+    ("verdict wraps ci-job checks --lint", "verdict bin/ci-job checks --lint"),
+    ("verdict wraps the script run by python3", "verdict python3 merge/merge.py --lane-lint 7"),
+    ("the bin verdict wraps merge --lane-lint", "~/.claude/bin/verdict merge --lane-lint 7"),
+    ("merge preview with no flag", "merge 1234"),
+    ("grep that names the script", "grep x merge/merge.py"),
+    ("python3 -m pytest that names the script", "python3 -m pytest -k merge/merge.py"),
+    ("a bare test run, pytest", "pytest lint/test_x.py"),
+    ("a bare test run, python3 on a test file", "python3 lint/test_report_guard.py"),
+    ("echo that names the roster command", "echo merge --lane-lint 7"),
+):
+    sh("bare-check: " + _name + " is no bare run, so it is allowed", _command, "allow", cwd=NOGIT)
+
+# Control: a background ci-job with no pipe is not a bare-check run (the rule covers the foreground, the
+# brief's roster). Its background end needs the until note, which TAIL_BG_UNTIL gives.
+add("bare-check: ci-job checks --lint backgrounded with an until note, no pipe, is allowed", "allow",
+    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL, command="bin/ci-job checks --lint")
+
+# The pipe forms stay check-tail's refusal, and the reason is printed once: bare-check does not add a second.
+sh("bare-check: merge --lane-lint piped to tail stays check-tail, not refused twice",
+   "merge --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT, lacks=BARE_CHECK)
+sh("bare-check: merge --review-record piped to head stays check-tail, not refused twice",
+   "merge --review-record 7 | head -5", "deny", "check-tail", cwd=NOGIT, lacks=BARE_CHECK)
+add("bare-check: ci-job checks --lint piped to head, backgrounded, stays check-tail, not refused twice",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="bin/ci-job checks --lint | head -5", lacks=BARE_CHECK)
+
+
 # =========================================================================== 2c-bis. the WSL launch allow list
 #
 # Owner ruling 2026-10-13 15:20: an agent may run a fixed list of Linux test commands through WSL.
