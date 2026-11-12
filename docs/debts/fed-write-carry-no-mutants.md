@@ -6,4 +6,4 @@
 
 **Decision.** `mutation-report-scores-suites`, the mutation report scores suites with mutants.
 
-**Retire.** Closed when the test-author adds a row for the carry, its mutant is killed by cases s20369, s22868, s18211 and s21922, and the row's family name passes the check that every row's family is a key of the test_guard families. Test file: `hooks/test_mutate_ci.py`.
+**Retire.** Closed when the test-author adds a row for the carry and its mutant is killed by cases s20369, s22868, s18211 and s21922. The row's family name must pass the check that every row's family is a key of the test_guard families. Test file: `hooks/test_mutate_ci.py`.
