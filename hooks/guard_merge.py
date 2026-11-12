@@ -1074,9 +1074,10 @@ def conflict_markers_hit(stripped: str, cwd: str):
 # ---- merge --role: the tier is read from this session's own get_session record
 ROLE_TIERS = ("batch-runner",)
 ROLE_TAG_PREFIX = BUILD_TAG
+SOLO_HAT_TIER = ROLE_TIERS[0]  # the one tier a solo session may wear
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge tier it claims. "
-    "If this session is the batch runner: run get_session (no argument) alone in its own "
+    "If this session is the batch runner, or a solo session with no parent_session_id and no cs-build tag: run get_session (no argument) alone in its own "
     "turn, then retry. Any other session, the coordinator too: post the review record on the PR for your branch; the batch runner finds it "
     "(list_sessions, tag cs-build:batch-runner, same cs-repo, names the runner)."
 )
@@ -1145,9 +1146,15 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
             from override import remote_session_id
             own_id = remote_session_id()
             if own_id and transcript:
-                tags = _own_get_session_tags(transcript, own_id)
-                if tier in ROLE_TIERS and tags is not None and ROLE_TAG_PREFIX + tier in tags:
-                    continue
+                tags, tagged_after, parent = own_session.own_session_read(transcript, own_id)
+                if tier in ROLE_TIERS and tags is not None:
+                    if ROLE_TAG_PREFIX + tier in tags:
+                        continue
+                    # roles are hats (decision session-tiers): a solo session, the newest own record with no parent and no
+                    # cs-build tag, wears the batch-runner hat for its own merge. A tag call after that record makes it stale.
+                    if tier == SOLO_HAT_TIER and parent is None and not tagged_after \
+                            and not any(tag.startswith(ROLE_TAG_PREFIX) for tag in tags if isinstance(tag, str)):
+                        continue
         except Exception:
             pass
         return "merge role " + tier
