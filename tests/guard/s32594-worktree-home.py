@@ -764,7 +764,10 @@ def worktree_home_cross_checkout_heredoc_text_case():
     through os, subprocess, shutil, exec, eval or __import__, under any alias, is refused, and so is a
     body that does not parse. A perl or ruby body that writes into another checkout is refused, and so
     is a perl in-place edit of a file there. A comment opener, a quote or a write word inside a perl or
-    ruby string is text, so a body that only quotes a write passes. Why:
+    ruby string is text, so a body that only quotes a write passes. A text file a python body writes
+    holds a copy as text, but a later call that runs that file must not pass the pair. A non-literal
+    open mode and io.FileIO are writes. A ruby File.new in write mode and a perl qq{} hiding a write
+    are read. Why:
     docs/decisions/an-agent-outside-its-home-tree-must-stop.md.
     """
     primary, lane_a, lane_b, _ = _cross_checkout_fixture("xcoheredoc")
@@ -921,6 +924,56 @@ def worktree_home_cross_checkout_heredoc_text_case():
                   % other)
     check("a python heredoc writes an extensionless gen holding a copy into another checkout, alone",
           "deny", "Bash", lane_a, command="python3 - <<'PY'\nopen('gen','w').write('cp x %s/y')\nPY" % other)
+
+    # A text file a python body writes is text alone, but a later call that runs that file is a run of the
+    # copy. The two calls are judged one at a time, so the pair passes only if both calls are allowed.
+    def pair(label, first, second):
+        got_first, _ = _decide_full("Bash", lane_a, command=first)
+        got_second, _ = _decide_full("Bash", lane_a, command=second)
+        if got_first == "allow" and got_second == "allow":
+            problems.append("%s: both calls allowed, so the copy the first writes runs through the second" % label)
+
+    for ext in (".txt", ".json", ".md", ".csv"):
+        pair("pair: a python heredoc writes n%s holding a copy into another checkout, then sh runs n%s" % (ext, ext),
+             "python3 - <<'PY'\nopen('n%s','w').write('cp a %s/x')\nPY" % (ext, other), "sh n%s" % ext)
+    check("control: a python heredoc writes n.txt with no copy in it", "allow", "Bash", lane_a,
+          command="python3 - <<'PY'\nopen('n.txt','w').write('hello')\nPY")
+    check("control: sh n.txt runs a text file that names no copy", "allow", "Bash", lane_a, command="sh n.txt")
+    check("control: the same heredoc and sh n.txt in one call are refused", "deny", "Bash",
+          lane_a, command="python3 - <<'PY'\nopen('n.txt','w').write('cp a %s/x')\nPY\nsh n.txt" % other)
+
+    # A write whose open mode is not a literal, and an io.FileIO write, are not text: the body stays in view.
+    check("python heredoc opens x.sh in a non-literal mode and writes a copy into another checkout", "deny",
+          "Bash", lane_a, command="python3 - <<'PY'\nm = 'w'\nopen('x.sh', m).write('cp a %s/x')\nPY" % other)
+    check("python heredoc writes x.sh through io.FileIO and holds a copy into another checkout", "deny",
+          "Bash", lane_a, command="python3 - <<'PY'\nimport io\nio.FileIO('x.sh', 'w').write(b'cp a %s/x')\nPY"
+                                  % other)
+    check("control: python heredoc opens x.sh in a literal mode and writes a copy into another checkout",
+          "deny", "Bash", lane_a, command="python3 - <<'PY'\nopen('x.sh', 'w').write('cp a %s/x')\nPY" % other)
+
+    # re.compile is an attribute, not the compile builtin, so a body that holds one is still text.
+    check("control: the same print of a copy with no re.compile line is text, so allowed", "allow", "Bash",
+          lane_a, command="python3 - <<'PY'\nprint('cp a %s/x')\nPY" % other)
+    check("re.compile beside a print of a copy into another checkout is text, so allowed", "allow", "Bash",
+          lane_a, command="python3 - <<'PY'\nimport re\npat = re.compile('x')\nprint('cp a %s/x')\nPY" % other)
+    check("re.compile beside a json write that holds a copy into another checkout is text, so allowed",
+          "allow", "Bash", lane_a,
+          command="python3 - <<'PY'\nimport json, re\npat = re.compile('x')\n"
+                  "open('notes.json','w').write(json.dumps({'n': 'cp a %s/x'}))\nPY" % other)
+    check("control: the bare compile builtin beside a json write that holds a copy is refused", "deny",
+          "Bash", lane_a,
+          command="python3 - <<'PY'\nimport json\npat = compile('1', 'f', 'eval')\n"
+                  "open('notes.json','w').write(json.dumps({'n': 'cp a %s/x'}))\nPY" % other)
+
+    # A ruby File.new in write mode, and a perl qq{} whose quote hides the open after it, are writes.
+    check("ruby heredoc body writes a file in another checkout through File.new in write mode", "deny",
+          "Bash", lane_a, command="ruby - <<'RB'\nFile.new(\"%s/x\", \"w\").write(\"1\")\nRB" % other)
+    check("control: ruby File.new in write mode on a path in its own checkout", "allow", "Bash", lane_a,
+          command="ruby - <<'RB'\nFile.new(\"x\", \"w\").write(\"1\")\nRB")
+    check("perl body with a double quote inside qq{} hides an open for write into another checkout", "deny",
+          "Bash", lane_a, command="perl - <<'PL'\nprint qq{\"}; open(F, \">\", \"%s/x\");\nPL" % other)
+    check("control: perl qq{} with no quote inside, then an open for write into another checkout", "deny",
+          "Bash", lane_a, command="perl - <<'PL'\nprint qq{x}; open(F, \">\", \"%s/x\");\nPL" % other)
 
     if problems:
         return False, "; ".join(problems)
