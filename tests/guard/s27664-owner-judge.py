@@ -48,8 +48,8 @@ def decide(case):
     # The home clone that other-checkout's stranded-cwd act reads from CLAUDE_PROJECT_DIR. The runner's own
     # value would reach every case, so it is dropped here, and a case that names one sets it through `env`.
     env.pop("CLAUDE_PROJECT_DIR", None)
-    # A cloud session (CLAUDE_CODE_REMOTE "true") is braked as a local one is, except its session start. Every run
-    # judges a local machine, as lb_run does.
+    # A cloud session (CLAUDE_CODE_REMOTE "true") brakes a new start as a local one does, except the session start. Its
+    # running agents' and lanes' own calls are not braked there. Every run judges a local machine, as lb_run does.
     env.pop("CLAUDE_CODE_REMOTE", None)
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())   # the suite stands in for `claude`
     for name, value in (case.get("env") or {}).items():   # a case that fixes the guard's clock (LOCAL_TIME_NOW)
