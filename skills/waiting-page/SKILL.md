@@ -328,7 +328,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
 A save on the page sends a comment to Claude when the page allows it. The comment wakes the
 sessions that watch the page. Only the owning session reads, routes and closes its items, except that the writer closes an item on a park answer. On a `lane` item, the park branch has it tell first. It reads
 the answers at each wake, and at the start of each turn while it has an item open (the writer also
-while `meta/page.parked` is not empty): `ArtifactData list answers`. That read is the fallback when no wake comes. The writer ends each wake with the end check, its own run
+while `meta/page.parked` is not empty): `ArtifactData list answers`. That read is the fallback when no wake comes. After the writer takes or routes each ask with no `owner`, it runs the end check, its own run
 `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --asks <asks>` ("Keep the page on main's code", step 2). A peer session never
 relays an answer's text. It sends only the page URL, the item id and the act, and the receiver checks the answer itself (decision relayed-grant-read-from-page). An answer typed in the chat counts the same. A chat answer to an open item: the
 writer adds the answer and its time to the item's `context`, and the writer closes it. Nothing is
