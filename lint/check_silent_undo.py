@@ -666,7 +666,8 @@ def lane_undos(cwd, upstream, head):
     touched = collections.Counter(p for c in lane for p in c.files)
     found = []
     for c in lane:
-        paths = sorted(p for p in c.files if touched[p] > 1)
+        moved = {p for p, (_, was, now) in renamed(cwd, c.parent, c.sha, c.files).items() if was == now}  # a pure move puts nothing back
+        paths = sorted(p for p in c.files if touched[p] > 1 and p not in moved)
         if not paths:
             continue
         ancestors = set(git(cwd, "rev-list", "--no-merges", "%s..%s" % (upstream, c.parent))[1].split())
@@ -682,7 +683,7 @@ def lane_undos(cwd, upstream, head):
 
 
 def fmt_lane(path, how, e, c):
-    return "lane undo, %s: %s by %s, undoing %s %s" % (path, how, c.sha[:9], e.sha[:9], e.subject[:60])
+    return "lane undo, %s: %s by %s, undoing %s %s; excuse with a \"%s: %s -- <why>\" trailer" % (path, how, c.sha[:9], e.sha[:9], e.subject[:60], TRAILER, path)
 
 
 # --------------------------------------------------------------------- revived
