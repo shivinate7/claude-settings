@@ -1887,9 +1887,9 @@ NOT_SENT = "was not sent to the page writer"  # the Pick guard's reason, which a
 
 def assert_on_the_page(test, out):
     """The question's send counted, and the block is the on-the-page form. Scope first: the Pick guard's reason is
-    absent, so the send counted. Then the subject: the reason names the page item. Owner ruling R18 (one home per
-    answer; 16:46-16:57 CST Nov 10, points 1-4 agreed) makes this the expectation where a passing reply with options
-    stood. test_report_guard_route keeps its own copy, since its red run imports this file as main has it."""
+    absent, so the send counted. Then the subject: the reason names the page item. The page holds the question, so
+    the reply holds only the form, and a reply with options beside it is not a pass. test_report_guard_route keeps
+    its own copy, since its red run imports this file as main has it."""
     test.assertIsNotNone(out, "the question passed; expected a block")
     test.assertEqual(out.get("decision"), "block", out)
     reason = out.get("reason", "")

@@ -11,9 +11,9 @@ These cases pin three gaps the check had:
 - an owner-facing session, with its own record, whose question goes to @parent, which reaches no one there;
 - a question box alone in a repo that has a waiting page, with or without a remote id.
 
-OnThePageFormTests pins item 3 of step page-wakes-and-relays (owner ruling R18, one home per answer; 16:46-16:57
-CST Nov 10, points 1-4 agreed). Once the owner-facing turn sends its question to the page writer, or writes the
-page's items, the chat reply holds only `on the page, item N`. It carries no options and no question text.
+OnThePageFormTests pins item 3 of step page-wakes-and-relays, one home per answer. Once the owner-facing turn sends
+its question to the page writer, or writes the page's items, the page holds the question, so the chat reply holds
+only `on the page, item N`. It carries no options and no question text.
 
 The fixture, the transcript helpers and the run folder come from lint/test_report_guard.py, the one home.
 They are borrowed by name here, so this file adds only its cases. Run with:
