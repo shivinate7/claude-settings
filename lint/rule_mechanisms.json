@@ -337,6 +337,13 @@
         "reason": "lint/ste_lint.py checks sentence style, not whether a published number or path has a reader that actually checked it."
       }
     },
+    "verification-counts-from-rest": {
+      "mechanism": {
+        "kind": "check",
+        "ref": "hooks/test_reply_judge.py",
+        "test": "hooks/test_reply_judge.py::case_search_total_reply_is_judged_off_sample"
+      }
+    },
     "verification-report-unknown-reads": {
       "mechanism": {
         "kind": "check",

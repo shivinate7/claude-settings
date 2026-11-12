@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""At Stop, a model (Haiku) judges the final reply against eight rules. It runs on every fifth Stop and on every Stop whose reply carries an Input Needed label, the words "blocked on" or a Markdown table, and never refuses. A finding comes back as a note on the next turn and writes one guard.log line.
+"""At Stop, a model (Haiku) judges the final reply against nine rules. It runs on every fifth Stop and on every Stop whose reply carries an Input Needed label, the words "blocked on", a Markdown table or a GitHub search total, and never refuses. A finding comes back as a note on the next turn and writes one guard.log line.
 
 It is a command hook, not a `type: prompt` hook, because a prompt hook cannot exit on a field
 in code. This hook does: `stop_hook_active` true means this Stop is already a rewrite, so it
@@ -25,6 +25,14 @@ existing app's behaviour answers (rule questions-go-to-owner). Code finds the wo
 Tables: a reply that holds a Markdown table (a separator row such as |---|---|) is judged on every
 Stop too, so the model can check that a comparison table carries a gold-standard or target
 column. Code finds the table; the model decides whether it compares.
+
+Search totals: a reply that holds `total_count`, a `search/<endpoint>` path (issues, code, commits,
+repositories, users) or the word "search" within 60 characters of a digit is judged on every Stop too,
+so the model can check that a count or a state (open, closed, merged, CI status) comes from REST and
+not from a search total (rule verification-counts-from-rest). Code finds the words in the whole reply,
+before the clip; the model decides. Cost: no new process start, no new file; the match is one regex
+over the reply and runs before the model module loads, and only a Stop that holds the trigger words
+reaches the model beyond the one-in-five sample.
 
 A finding writes one line to guard.log through `guard_core.record` (decision `noted`; rule = the
 first judged rule id the reason names, else `reply-judge`; matched = `stop=<n> <reason>`). The
@@ -67,10 +75,13 @@ TAIL = re.compile(r"^\s*(?:\*\*)?\s*:?\s*(?:\*\*)?\s*")
 EMPTY_ITEM = re.compile(r"^[\W_]*(none|n/a|nothing)?[\W_]*$", re.I)
 TABLE_SEPARATOR = re.compile(r"^[\s>]*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$", re.M)
 BLOCKED_ON = re.compile(r"\bblocked\s+on\b", re.I)
+SEARCH_TOTAL = re.compile(r"total_count|search/(?:issues|code|commits|repositories|users)\b"
+                          r"|\bsearch\b.{0,60}\d|\d.{0,60}\bsearch\b", re.I | re.S)
 JUDGED_RULES = ("output-start-with-point", "style-cut-narration",
                 "output-never-paste-passing-output", "output-never-hand-off-doable-step",
                 "style-table-gold-column", "questions-go-to-owner",
-                "style-limits-kept-silently", "style-question-form")
+                "style-limits-kept-silently", "style-question-form",
+                "verification-counts-from-rest")
 JUDGE_RULE = "reply-judge"  # the guard.log rule when the reason names none of JUDGED_RULES
 REPLY_MAX = 12000  # the prompt rides stdin, so no argv cap; the clip bounds cost and latency only (unmeasured)
 
@@ -81,7 +92,7 @@ GH_SWITCH_SENTENCE = ("A block that hands the owner a gh command starts, after a
                       % (GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN, GH_DEFAULT_LOGIN))
 
 INSTRUCTIONS = (
-    "Judge the final reply below against eight rules. "
+    "Judge the final reply below against nine rules. "
     "output-start-with-point: the first sentence is the point, not a preamble. "
     "style-cut-narration: cut narration and recaps; narration means lines like \"I will now...\" or \"Let me...\"; "
     "a Done/Deviations/Input Needed/Next report is never narration. "
@@ -130,6 +141,12 @@ INSTRUCTIONS = (
     + WIDENS_LABEL_SENTENCE +
     "Never flag an option where the repo changes to match the shared format. "
     "Judge only options the reply offers the owner to pick; never flag a reply that describes the rule itself. "
+    "verification-counts-from-rest: flag a reply that quotes a GitHub search total, such as total_count or a search result count, "
+    "as a count; "
+    "also flag a search total quoted as a state, open, closed, merged or CI status; "
+    "the fix is to read the count or state from REST and confirm each candidate with REST. "
+    "Never flag a count read from REST. "
+    "Never flag a search used only to find candidates that REST then confirms. "
     "Flag only on a clear breach; when unsure answer {\"ok\": true}. "
     "Reply JSON only: {\"ok\": true} or {\"ok\": false, \"reason\": \"<rule id and the fix, one line>\"}."
 )
@@ -297,7 +314,8 @@ def main():
             return 0
         stop_n = count_this_stop(hook.get("session_id"))
         if (stop_n - 1) % SAMPLE_EVERY and not TABLE_SEPARATOR.search(reply) \
-                and not BLOCKED_ON.search(reply) and not has_input_needed(reply):
+                and not BLOCKED_ON.search(reply) and not SEARCH_TOTAL.search(reply) \
+                and not has_input_needed(reply):
             return 0
         import decision_watch
         verdict, error = decision_watch.invoke_model(
