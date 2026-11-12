@@ -26,7 +26,7 @@ Agents called claude-code-remote tools. Those tools act outside the session. Thr
 
 ## The guard
 
-- The guard refuses a call that carries a non-empty `agent_id` and names a tool in `REMOTE_OUTWARD_TOOLS`. The tuple holds 20 of the server's 32 tools. These are the tools that start, message, tag or archive sessions, set scheduled tasks, or attach repos and computers.
+- The guard refuses a call that carries a non-empty `agent_id` and names a tool in `REMOTE_OUTWARD_TOOLS`. The tuple holds 21 names: 20 of the server's 32 tools, and `start_session` of the session server (`mcp__ccd_session__start_session`, named once as `START_SESSION_TOOL`). These are the tools that start, message, tag or archive sessions, set scheduled tasks, or attach repos and computers.
 - The guard reads the key, not the agent file. So it also refuses an agent with no agent file.
 - Any non-empty `agent_id` counts, in any shape.
 - The guard stops a mistake, not an attacker (`guard-guards-mistakes-only`). The mistake is an agent that misreads its brief. That is why the guard exists (`building-guard-needs-incident`).
