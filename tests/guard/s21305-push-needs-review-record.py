@@ -209,6 +209,15 @@ def pfr_fix_after_round1(report_head):
             + pfr_post("toolu_c2", pfr_record(fix=(PFR_HEAD_A, "reviewer", PFR_MODEL, "PASS"), head=PFR_HEAD_B)))
 
 
+def pfr_base_head_report(record_head):
+    """A round 1 FAIL whose text reads `Base: main head B, reviewed A`, then a record posted at `record_head`. Only the
+    record's head varies: the report's reviewed head is A either way."""
+    return (pfr_pr() + pfr_call("toolu_rev1", pfr_report(pfr_verdict("FAIL", 1),
+                                                         "Base: main head %s, reviewed %s" % (PFR_HEAD_B, PFR_HEAD_A),
+                                                         PFR_FINDING))
+            + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL, "FAIL")], head=record_head)))
+
+
 # The session's own files, one per case, each a list of JSON lines. An empty list is a zero-byte file.
 PFR_LINES = {
     # The incident: the PR is open, the FAIL comes back in the foreground, then the push.
@@ -294,10 +303,9 @@ PFR_LINES = {
     "fix-head-b-record-fix-a": pfr_fix_after_round1(PFR_HEAD_B),
     "fix-head-a-record-fix-a": pfr_fix_after_round1(PFR_HEAD_A),
     # A round report whose text reads `Base: main head B, reviewed A`: its reviewed head is A, and a record at A holds
-    # it.
-    "round-base-head-b-reviewed-a-record-a": pfr_pr() + pfr_call("toolu_rev1", pfr_report(
-        pfr_verdict("FAIL", 1), "Base: main head %s, reviewed %s" % (PFR_HEAD_B, PFR_HEAD_A), PFR_FINDING))
-        + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL, "FAIL")], head=PFR_HEAD_A)),
+    # it. A record at B alone does not: B is the base, not the reviewed head.
+    "round-base-head-b-reviewed-a-record-a": pfr_base_head_report(PFR_HEAD_A),
+    "round-base-head-b-reviewed-a-record-b-only": pfr_base_head_report(PFR_HEAD_B),
     # A Fix check line clears no round report, and it denies a push to its PR's head branch before the round ask.
     "round-fail-fix-record": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL)
                              + pfr_post("toolu_c1", pfr_record(fix=(PFR_FIX_SHA, "reviewer", PFR_MODEL, "FAIL"))),
@@ -803,6 +811,9 @@ pfr_allow("the same fix check reviewed at head A, then a push to another branch"
 # A round report whose text reads `Base: main head B, reviewed A` is reviewed at A, and the record at A clears it.
 pfr_allow("a round 1 FAIL whose text reads Base main head B, reviewed A, with its record at A, then the push", PFR_PUSH,
           pfr_path("round-base-head-b-reviewed-a-record-a"))
+# The same report, with its only record at head B. B is the base, not the reviewed head, so the push asks.
+pfr_ask("a round 1 FAIL whose text reads Base main head B, reviewed A, with its record at B only, then the push",
+        PFR_PUSH, pfr_path("round-base-head-b-reviewed-a-record-b-only"))
 
 pfr_ask("a fix check FAIL unrecorded, then a fix check PASS with its record posted, then the push", PFR_NEXT_PUSH,
            pfr_path("fix-fail-then-fix-pass"))
