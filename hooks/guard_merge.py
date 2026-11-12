@@ -1720,8 +1720,8 @@ _BRIEF_MARKER_LINE = re.compile(_MARKDOWN_LEAD + re.escape(LANE_BRIEF_MARKER), r
 _BRIEF_LINE = re.compile(
     _MARKDOWN_LEAD + re.escape(LANE_BRIEF_MARKER) + r"[\s*_]*(?P<step>[A-Za-z0-9_-]+)\s*\.(?:\s*Topic:\s*(?P<topic>[A-Za-z0-9_-]+))?",
     re.IGNORECASE)
-ROLE_LABELS = ("Coordinator", "Triage", "Batch runner")  # a lane brief names each role, so the lane knows whom to ask
-# A label stands as a whole word, without case: `_Triage_` and `**Batch runner:**` count, `Triaged` and `Coordinators-only` do not.
+ROLE_LABELS = ("Coordinator",)  # a lane brief names the Coordinator, the only role a lane asks; Triage and the batch runner are not lane contacts
+# A label stands as a whole word, without case: `_Coordinator_` and `**Coordinator:**` count, `Coordinators-only` does not.
 _ROLE_WORDS = {label: re.compile("(?<![A-Za-z0-9])" + re.escape(label) + "(?![A-Za-z0-9])", re.IGNORECASE)
                for label in ROLE_LABELS}
 BRIEF_NO_RECORD_REASON = (
@@ -1765,9 +1765,9 @@ BRIEF_GRANT_REASON = (
     "after `Grant:`. A template placeholder is no grant. Put the grant and its time after `Grant:`, as the "
     "owner gave them. (decision agent-model-cap, the lane start)"
 )
-BRIEF_IDS_REASON = (
-    "this brief does not name {missing} by role, so the lane cannot tell whom to ask. Name each of "
-    + ", ".join(ROLE_LABELS) + " once, as a whole word in any case (for example `Ask: Coordinator, Triage, Batch runner`). "
+BRIEF_ROLE_REASON = (
+    "this brief does not name {missing} by role, so the lane cannot tell whom to ask. Name "
+    + ", ".join(ROLE_LABELS) + " once, as a whole word in any case (for example `Ask: Coordinator, for scope and merges.`). "
     "A role's session id may follow, and none is required. (decision session-tiers, a lane holds one topic)"  # glossary-ok: session-tiers is the decision's file name
 )
 
@@ -1795,13 +1795,13 @@ def topic_hit(first: str, tags, start: bool = False):
 
 def brief_hit(tool: str, tool_input, transcript: str):
     """Return (matched, reason) when this send_message is a lane brief for a topic the target lane does not
-    hold, or one that names no role in ROLE_LABELS by its label, else None. Only a message whose first non-blank line (after its Grant line, if any) starts with
+    hold, or one that does not name the Coordinator (ROLE_LABELS) by its label, else None. Only a message whose first non-blank line (after its Grant line, if any) starts with
     LANE_BRIEF_MARKER is read; the transcript is read for that message alone. A Grant line before such a brief
     must hold the owner's words (grant_line_holds_words). A target whose newest record (get_session, or the
     create_session that made it) has no cs-build:lane tag passes. A lane with a cs-topic tag is judged by the
     brief's Topic, an older lane without one by the brief's step against its cs-step tags (topic_hit). A
     create_session call that tags a lane is judged the same way, by its prompt against its own tags and for its
-    role labels (_brief_ids_hit), with no transcript read. Fails closed: any error in the reads is a refusal, because the guard-wide crash path fails open."""
+    role labels (_brief_role_hit), with no transcript read. Fails closed: any error in the reads is a refusal, because the guard-wide crash path fails open."""
     if not isinstance(tool_input, dict):
         return None
     if tool == BRIEF_TOOL:
@@ -1825,7 +1825,7 @@ def brief_hit(tool: str, tool_input, transcript: str):
         held = topic_hit(first, lane_tags(tool_input), start=True)
         if held:
             return held
-        return _brief_ids_hit(text)
+        return _brief_role_hit(text)
     target = tool_input.get("session_id")
     try:  # cost: one transcript read per brief
         tags, tagged_after = _own_session_read(transcript, target, created=True) \
@@ -1841,17 +1841,17 @@ def brief_hit(tool: str, tool_input, transcript: str):
     held = topic_hit(first, tags)
     if held:
         return held
-    return _brief_ids_hit(text)
+    return _brief_role_hit(text)
 
 
-def _brief_ids_hit(message: str):
-    """A brief that cleared the topic or step check is refused when its text lacks a role in ROLE_LABELS as a
+def _brief_role_hit(message: str):
+    """A brief that cleared the topic or step check is refused when its text lacks the Coordinator (ROLE_LABELS) as a
     whole word. A session id is optional. cost: message text only, no extra transcript read."""
     missing = [label for label in ROLE_LABELS if not _ROLE_WORDS[label].search(message)]
     if not missing:
         return None
     return ("lane brief with no " + ", ".join(missing) + " role label",
-            BRIEF_IDS_REASON.format(missing=", ".join(missing), them="it" if len(missing) == 1 else "them"))
+            BRIEF_ROLE_REASON.format(missing=", ".join(missing)))
 
 
 # ---- send_message: a header stamp matches the clock (rule message-time-matches-clock)
