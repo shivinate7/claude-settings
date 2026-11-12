@@ -3124,10 +3124,10 @@ import decision_watch
 
 
 def stub(prompt, model=decision_watch.MODEL, timeout=decision_watch.MODEL_TIMEOUT, shape=None,
-         effort="xhigh"):
+         effort="xhigh", session_id=None):
     with open(os.environ["FG_STUB_LOG"], "a", encoding="utf-8") as f:
         f.write(json.dumps({"prompt": prompt, "model": model, "timeout": timeout,
-                            "effort": effort}) + "\n")
+                            "effort": effort, "session_id": session_id}) + "\n")
     if os.environ.get("FG_STUB_DROP"):
         path, prefix = json.loads(os.environ["FG_STUB_DROP"])
         with open(path, encoding="utf-8") as f:
@@ -3434,6 +3434,19 @@ def case_repeat_model_error_fails_open_and_is_not_retried():
           inbox_line(cfg, sid, ITEM_ID))
     p2, calls2 = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
     check("error: the next Stop makes zero model calls", calls2 == [], len(calls2))
+
+
+def case_repeat_judge_call_names_the_session_whose_inbox_it_judges():
+    """The repeat judge's model call passes the session id, so a failed call counts against the session
+    whose Stop made it. The id is the inbox's name minus its suffix."""
+    root = repeat_repo("repeat-session-id", step=True)
+    cfg, sid = new_cfg(), "repeat-session-id"
+    capture(cfg, sid, MSG_ONE, cwd=root)
+    add_item(cfg, sid)
+    p, calls = stop(cfg, sid, root, answer=ANSWER_NONE)
+    check("session id: one model call on the Stop", len(calls) == 1, p.desc())
+    got = calls[0].get("session_id") if calls else None
+    check("session id: the model call names the session", got == sid, "session_id=%r, want %r" % (got, sid))
 
 
 def case_repeat_old_inboxes_bind_by_sidecar_and_capture_writes_it_once():
@@ -4439,6 +4452,7 @@ CASES = (
     case_repeat_removed_mark_is_not_flagged_again,
     case_repeat_upgrade_stop_judges_nothing_already_there,
     case_repeat_model_error_fails_open_and_is_not_retried,
+    case_repeat_judge_call_names_the_session_whose_inbox_it_judges,
     case_repeat_old_inboxes_bind_by_sidecar_and_capture_writes_it_once,
     case_repeat_backlog_debt_text_is_in_the_prompt,
     case_repeat_cost_one_call_one_grep_and_two_files,

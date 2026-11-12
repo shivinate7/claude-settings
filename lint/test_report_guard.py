@@ -291,6 +291,34 @@ class ReportGuardTests(unittest.TestCase):
             "stop_hook_active": stop_hook_active,
         }
 
+    def test_r4_past_ruling_model_call_carries_the_hook_session_id(self):
+        # Catches: the past-ruling call drops the Stop hook's session id, so a failed call leaves no record for the
+        # session. decision_watch writes that record under CLAUDE_CONFIG_DIR, which this case gives its own folder.
+        cfg = os.path.join(self.tmp.name, "config")
+        os.makedirs(cfg)
+        calls_path = os.path.join(self.tmp.name, "calls.jsonl")
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=cfg, CJ_RECORD=calls_path, CJ_MODEL_FAIL="1")
+        question = "Should the lane ship now?"
+        transcript = write_transcript([human("ship the lane"), assistant_text(question)], self.tmp.name)
+        hook = {"hook_event_name": "Stop", "session_id": "r4-session", "stop_hook_active": False,
+                "transcript_path": transcript, "cwd": self.tmp.name, "last_assistant_message": question}
+        run = run_guard(REPORT_GUARD, hook, env=env)
+        calls = []
+        if os.path.exists(calls_path):
+            with open(calls_path, encoding="utf-8") as f:
+                calls = [json.loads(line) for line in f if line.strip()]
+        past = [c for c in calls if "Review this text, which a session sends the owner" in c.get("prompt", "")]
+        self.assertTrue(past, "control: the past-ruling model call did not run (%d model calls, rc %s): %s"
+                        % (len(calls), run.returncode, run.stderr[-300:]))
+        found = []
+        for root, _dirs, names in os.walk(cfg):
+            for name in names:
+                with open(os.path.join(root, name), encoding="utf-8", errors="replace") as f:
+                    if "stub model failure" in f.read():
+                        found.append(name)
+        self.assertTrue(found, "the failed past-ruling call left no record for the hook session: %s"
+                        % run.stderr[-300:])
+
     def test_01_landed_git_commit_good_report_passes(self):
         rows = [
             # Catches: a landed turn with a good report is blocked.

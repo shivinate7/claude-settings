@@ -1687,6 +1687,41 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
           "Unvetted:" in r.reason(), detail(r))
 
 
+def case_opus_judges_name_the_hook_session_in_their_model_call():
+    """opus_ask and opus_scope name the session in their model call, through a session_id keyword. Each control
+    call without one still makes one model call. A signature with no session_id fails its check, not a call."""
+    import inspect
+    import call_judge  # lazy: the one home of the opus judges and their model
+    session = "ses-opus-call"
+    seen = []
+
+    def record(prompt, *args, **kwargs):
+        seen.append(kwargs)
+        return {"ok": True, "roles": ["Explore"]}, None
+
+    prior = call_judge.invoke_model
+    call_judge.invoke_model = record
+    try:
+        for name, call_args in (("opus_ask", ("send opus judges",)),
+                                ("opus_scope", ("send opus judges", ["an earlier ask"]))):
+            fn = getattr(call_judge, name)
+            del seen[:]
+            fn(*call_args)
+            check(name + ": control: one model call with no session id", len(seen) == 1,
+                  "%d calls" % len(seen))
+            if "session_id" not in inspect.signature(fn).parameters:
+                check(name + ": takes a session_id", False,
+                      "%s takes no session_id, so its model call cannot name the hook session" % name)
+                continue
+            del seen[:]
+            fn(*call_args, session_id=session)
+            got = seen[0].get("session_id") if len(seen) == 1 else None
+            check(name + ": the model call names the hook session", got == session,
+                  "session_id=%r, want %r" % (got, session))
+    finally:
+        call_judge.invoke_model = prior
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -1712,7 +1747,8 @@ def main():
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
                  case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
                  case_page_relative_file_path_reaches_the_review, case_page_relative_file_path_passing_item_passes,
-                 case_page_absolute_file_path_is_judged):
+                 case_page_absolute_file_path_is_judged,
+                 case_opus_judges_name_the_hook_session_in_their_model_call):
         try:
             case()
         except Exception as exc:
