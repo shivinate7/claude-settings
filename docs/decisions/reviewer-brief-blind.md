@@ -18,9 +18,9 @@ and confirms it, so a defect the builder argued past reaches main.
 reviewer and whose brief holds a report-shaped block or a verdict line. The rule is
 `reviewer-brief-blind`. It goes through `guard_core.refuse()`, so the owner's override lifts it.
 
-- A report-shaped block: two or more of the report labels (Done, Deviations, Input Needed, Next) at line
-  start, each with a body (text after it, or a non-label line under it), or a BUILT or RECORDED item at
-  line start, with or without a `Done:` label before it. A bare label list, such as `Report with:` and then
+- A report-shaped block is one of two shapes. Two or more of the report labels (Done, Deviations, Input
+  Needed, Next) at line start, each with a body (text after it, or a non-label line under it). Or a BUILT
+  or RECORDED item at line start, with or without a `Done:` label before it. A bare label list, such as `Report with:` and then
   `- Done`, `- Deviations`, asks for a report's shape and passes.
 - A verdict line begins at line start and takes one of three forms. A line with the word `verdict`
   anywhere before its colon. A round label (`Round 1`, `Prior round`) before a colon or a dash, with or
