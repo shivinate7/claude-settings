@@ -730,7 +730,7 @@ def open_asks_mode(args, state, item_problem, code):
         print("FAIL: the open asks could not be read; do not treat the page as clear")
         return code or 2
     if lines:
-        print("FAIL: %d owner ask%s or item%s with no reply; answer each on the page before this wake ends"
+        print("FAIL: %d owner ask%s or item%s with no reply; route each, or name its holder, before this wake ends"
               % (len(lines), "" if len(lines) == 1 else "s", "" if len(lines) == 1 else "s"))
         return code or 1
     return code
