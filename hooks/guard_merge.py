@@ -1416,8 +1416,9 @@ def record_push_hit(stripped: str, cwd: str, transcript: str, record_branch_of, 
                 roadmap-artifact-cites). `detail` is the reason's find. Only a push the writer check allowed
                 is read, so a lane keeps the writer refusal.
       'unknown' the pushed head or the registry could not be read (rule roadmap-artifact-cites), allowed.
-    Cost beyond the writer check: git's `ls-tree` and `cat-file` of the pushed head, once per ref sent, and none
-    for a dry run or a push to another branch."""
+    Cost beyond the writer check: git's `ls-tree` and `cat-file` of the pushed head, plus up to two `git show` of the
+    registry on origin's default branch per read of it (twice per ref when no cite is found), once per ref sent,
+    and none for a dry run or a push to another branch."""
     proved = None
     unread = ""
     for root, source, every in _record_pushes(stripped, cwd, record_branch_of, read_verb):

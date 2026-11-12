@@ -364,6 +364,20 @@ def _default_branch_extras(root):
     return None
 
 
+def default_branch_artifact_ids(root):
+    """The ids in the registry of the extras file on the repo's default branch, a set, else None. For a push judged
+    from a checkout whose own registry is older than the branch's, or that holds none. It lists ids only and leaves
+    the rest of each entry unchecked, so one entry that fails `artifacts` hides no other page. None when that file
+    cannot be read or lists no id, so a caller keeps the checkout's own file. Cost and reads: `_default_branch_extras`."""
+    held = _default_branch_extras(root)
+    if held is None:
+        return None
+    found = held[0].get(ARTIFACTS)
+    if not isinstance(found, list):
+        return None
+    return {item["id"] for item in found if isinstance(item, dict) and isinstance(item.get("id"), str)} or None
+
+
 def _page_in(root, keys, where):
     """The waiting page URL held by the extras dict `keys` (read from `where`), else "unknown"."""
     for entry in _registry(root, keys.get(ARTIFACTS), where):

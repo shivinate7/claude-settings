@@ -135,8 +135,13 @@ def ref_step_files(root, ref):
 
 
 def registry_ids(root):
-    """The set of registered ids, or None when the checkout at `root` holds no registry file (a worktree on the record
-    branch does not hold the untracked one). LayoutError when the file cannot be read."""
+    """The set of registered ids, or None when no registry can be found. The registry of origin's default branch is read
+    first, since a pushed cite is judged against what is registered there, and a checkout may be behind it or, as a
+    worktree on the record branch, hold no file. Its own file is the fallback when origin's cannot be read. LayoutError
+    when that file cannot be read."""
+    held = layout.default_branch_artifact_ids(root)
+    if held is not None:
+        return held
     if not layout.has_extras(root):
         return None
     return {entry["id"] for entry in layout.artifacts(root)}
@@ -144,8 +149,9 @@ def registry_ids(root):
 
 def pushed_step_findings(root, ref):
     """[(step path, what)] for each find in the steps at the revision `ref` (a pushed head), judged against the registry
-    of the working tree at `root`: the one test `check` applies to the record branch. With no registry file, each bare
-    link is judged and no cite: an empty registry would call every cite unregistered, and a caller reads
+    of origin's default branch, else of the working tree at `root` (`registry_ids`): the one test `check` applies to the
+    record branch. With no registry file, each bare link is judged and no cite: an empty registry would call every cite
+    unregistered, and a caller reads
     `registry_ids` for the note. A registry that cannot be read still judges each bare link, since no registry makes
     one safe; with no bare link found, Unknown. Unknown too when the revision cannot be read, never an empty list."""
     try:
