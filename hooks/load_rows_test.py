@@ -4,7 +4,8 @@ and bin/sim-lease (lint/test_sim_lease.py). Plain data, no test cases.
 Each row names the readings and the level the ruling gives them (decision one-load-definition, "Levels"), written
 here by hand. Neither suite derives the level from guard_load.load_verdict, so a wrong verdict fails the rows and
 is not hidden by the same code on both sides. Disk values are GB: free and total of the drive that holds the home
-folder. A reading set to None is unread.
+folder. A reading set to None, or to a value that is not a number (a bool included), is unread, as guard_load
+counts it.
 
 Each caller's act on a row, from the ruling:
   guard, an Agent or Task call with run_in_background true, and any Workflow: refused unless the level is normal.
@@ -64,9 +65,15 @@ ROWS = (
                                                                 "disk_total_gb": 926.0}, "level": "normal"},
     {"name": "both unread", "reading": {"memory_pct": None, "disk_free_gb": None, "disk_total_gb": None},
      "level": "normal"},
+    # A bool is not a number: guard_load reads it as unread, not as 1.0 (memory) or 1.0 GB (disk).
+    {"name": "memory a bool, disk normal", "reading": {"memory_pct": True, "disk_free_gb": 500.0,
+                                                       "disk_total_gb": 926.0}, "level": "normal"},
+    {"name": "disk free a bool, disk total known", "reading": {"memory_pct": 40.0, "disk_free_gb": True,
+                                                              "disk_total_gb": 926.0}, "level": "normal"},
 )
 
 
 def unread(row):
-    """True when a row holds an unread reading (a None value)."""
-    return any(value is None for value in row["reading"].values())
+    """True when a row holds an unread reading: a None value, or a value that is not a number (a bool included)."""
+    return any(value is None or isinstance(value, bool) or not isinstance(value, (int, float))
+               for value in row["reading"].values())
