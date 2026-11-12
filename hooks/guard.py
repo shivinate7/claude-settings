@@ -3039,15 +3039,18 @@ MESSAGE_PR = re.compile(r"\b(PRs?|pull\s+requests?)\b[\s:*`(]*(?:number\s+)?(#?)
 # right before its number (`pull #N`) or in `pull request`, so the verb (`pull the list at #8`) is no PR word.
 MESSAGE_PR_WORD = re.compile(
     r"(?<![\w/.-])(PRs?|pull\s+requests?|pull(?=\s*#\d))(?![\w-]|\.\w)", re.IGNORECASE)
-MESSAGE_PR_GAP = re.compile(r"([^#\d.;!?]*?)#(?!(?:\d{6}|\d{8})(?!\d))(\d+)(?!\w)")
+# The gap is capped at 200 characters: a PR word with no `#N` near it then costs a bounded scan, not one to the line end.
+MESSAGE_PR_GAP = re.compile(r"([^#\d.;!?]{0,200}?)#(?!(?:\d{6}|\d{8})(?!\d))(\d+)(?!\w)")
 MESSAGE_PR_GAP_WORDS = 6   # most words between the PR word and its `#N`; a longer gap is a different sentence
-# A word in the gap that says the `#N` is an issue or another item, so `PR merged, see issue #3` names no PR. A verb
-# that closes an issue (`This PR closes #8`) says the same.
+# A word that says the `#N` is an issue or another item, so `PR merged, see issue #3` names no PR. A verb that closes
+# an issue (`This PR closes #8`, `Fixed #8`) says the same.
+MESSAGE_ISSUE_WORDS = r"issues?|tickets?|bugs?|items?|findings?|debts?"
+MESSAGE_CLOSING_WORDS = r"closes|closed|closing|fixes|fixed|fixing|resolves|resolved|resolving"
 MESSAGE_PR_GAP_NOT = re.compile(
-    r"\b(?:issues?|tickets?|bugs?|items?|findings?|debts?|closes|fixes|resolves)\b", re.IGNORECASE)
-# The issue word right before an `owner/repo#N`, so `Issue o/r#5` names no PR.
+    r"\b(?:%s|%s)\b" % (MESSAGE_ISSUE_WORDS, MESSAGE_CLOSING_WORDS), re.IGNORECASE)
+# The issue word or closing verb right before an `owner/repo#N`, so `Issue o/r#5` and `Fixes o/r#5` name no PR.
 MESSAGE_ISSUE_BEFORE = re.compile(
-    r"\b(?:issues?|tickets?|bugs?|items?|findings?|debts?)\W{0,3}$", re.IGNORECASE)
+    r"\b(?:%s|%s)\W{0,3}$" % (MESSAGE_ISSUE_WORDS, MESSAGE_CLOSING_WORDS), re.IGNORECASE)
 # This repo's own `owner/repo#N`, the owner/repo to be compared with the origin.
 MESSAGE_OWN_REF = re.compile(r"(?<![\w./@:-])([\w.-]+)/([\w.-]+)#(\d+)")
 MESSAGE_PR_NUMBERED = re.compile(r"#(\d+)\s*\(\s*(?:PR|pull\s+request)\s*\)", re.IGNORECASE)
@@ -3157,7 +3160,8 @@ def message_line_prs(line: str) -> list:
         # Each `#N` after the word is judged by the same gap rule, so `PR #7 is #8` names both.
         while True:
             gap = MESSAGE_PR_GAP.match(line, at)
-            if not gap or MESSAGE_PR_GAP_NOT.search(gap.group(1)) \
+            # A PR word inside the gap starts its own pass, so the numbers after it are not claimed again here.
+            if not gap or MESSAGE_PR_GAP_NOT.search(gap.group(1)) or MESSAGE_PR_WORD.search(gap.group(1)) \
                     or len(re.findall(r"[A-Za-z']+", gap.group(1))) > MESSAGE_PR_GAP_WORDS:
                 break
             prs.append(gap.group(2))
@@ -3198,8 +3202,12 @@ def message_refs(text: str, where: str):
         if (found or numbers) and MESSAGE_REPO_MARKED.search(line) and this() is not None \
                 and message_names_other_repo(line, this()):
             continue
-        shas += [sha for sha in found if sha not in shas]
-        prs += [n for n in numbers if n not in prs]
+        for sha in found:
+            if sha not in shas:
+                shas.append(sha)
+        for n in numbers:
+            if n not in prs:
+                prs.append(n)
     text = "\n".join(kept)
     if re.search(r"github\.com", text, re.IGNORECASE):
         for owner, repo, kind, ident, comment in MESSAGE_GH_URL.findall(text):
