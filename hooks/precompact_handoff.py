@@ -353,7 +353,21 @@ def _write_state(session_id, digest_path_, repo_top, ok, failure):
     os.replace(tmp, path)
 
 
+def in_agent_worktree(cwd):
+    """True when `cwd` is an agent's worktree or inside one (`.claude/worktrees/agent-*`). An agent shares its
+    parent's session id, so the handoff hooks run from an agent's compaction would write the parent's digest and
+    state or tell the agent to rewrite the parent's handoff. The hooks skip such a run (decision precompact-handoff,
+    item 16). An agent with no worktree is not seen here; guard rule handoff-agent-write catches its write."""
+    if not isinstance(cwd, str) or not cwd:
+        return False
+    parts = cwd.replace("\\", "/").split("/")
+    return any(parts[i] == ".claude" and parts[i + 1] == "worktrees" and parts[i + 2].startswith("agent-")
+               and len(parts[i + 2]) > len("agent-") for i in range(len(parts) - 2))
+
+
 def run_precompact(payload):
+    if in_agent_worktree(payload.get("cwd")):
+        return 0
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
     cwd = payload.get("cwd") or os.getcwd()
@@ -806,6 +820,8 @@ def premise_note(path, everyone):
 
 
 def run_reorient(payload):
+    if in_agent_worktree(payload.get("cwd")):
+        return 0
     try:
         return _run_reorient(payload)
     finally:

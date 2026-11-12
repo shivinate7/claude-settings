@@ -2,7 +2,8 @@
 """Claude Code hook: after compaction, check the session re-read its handoff.
 
 Modes:
-- --post-compact: After compaction, sets the session's flag that its handoff is not read.
+- --post-compact: After compaction, sets the session's flag that its handoff is not read. A run from an agent's
+  worktree (`.claude/worktrees/agent-*`) sets nothing: the agent shares its parent's session id.
 - --pre-read: Before a Read, clears the session's flag that its handoff is not read, when the
   file is that handoff. Never refuses the read. A payload with `agent_id` (the hook
   fired inside an agent) clears nothing: only the session's own Read counts.
@@ -75,6 +76,8 @@ def main():
     args = sys.argv[1:]
     try:
         if "--post-compact" in args:
+            if ph.in_agent_worktree(payload.get("cwd")):   # an agent shares the parent's id: set no flag for it
+                return 0
             os.makedirs(os.path.dirname(flag), exist_ok=True)
             with open(flag, "w", encoding="utf-8") as f:
                 f.write("1")
