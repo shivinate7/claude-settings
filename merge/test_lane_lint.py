@@ -1519,6 +1519,13 @@ NO_LINT_STEPS = (("Build", "      - name: Build\n        run: make build\n"),
                  ("Unit tests", "      - name: Unit tests\n        run: python3 -m pytest -q\n"))
 BATCH_PUSH_ONLY = "batch-lint-flags-push-only"  # a batch whose checks job adds one lint step that runs only off a pull request
 NO_CI = "batch-lint-flags-no-ci"  # a head with no workflow at all: ci-job finds no checks job to run
+NO_CHECKS = "batch-lint-flags-no-checks-job"  # a head whose one workflow has no checks job: ci-job's unknown, which a flag lifts
+UNREADABLE = "batch-lint-flags-unreadable-checks"  # a head whose checks.yml is not UTF-8: its own unknown, which a flag lifts
+STARTER_HEAD = "batch-lint-flags-starter-ci"  # a head that carries the starter CI as the template ships it, its pins replaced
+STARTER_TEMPLATE = os.path.join(REPO, "skills", "project-ops", "templates", "starter-ci", "checks.yml")
+STARTER_PIN = "3b5d2f1a9c8e7f60b4a2d1c0e9f8a7b6c5d4e3f2"  # the commit the starter's placeholder pins are replaced with
+NO_CHECKS_WORKFLOW = "name: lint\non: push\njobs:\n  lint:\n    runs-on: ubuntu-latest\n    steps:\n      - name: Lint\n        run: python3 lint/check.py\n"
+LATIN1_CHECKS = b"# caf\xe9\nname: checks\non: pull_request\njobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo hi\n"
 STARTER_STEP = "Add the starter CI"  # the step of skill project-ops that a no-CI refusal names; a copy, because a red copy of this suite imports the old test_merge
 PUSH_ONLY = "Push-only lint"
 PUSH_ONLY_STEP = (PUSH_ONLY, "      - name: Push-only lint\n        if: ${{ github.event_name != 'pull_request' }}\n"
@@ -1647,12 +1654,24 @@ class BatchLintFlags(tm.Env):
         tm.sh(o, "git", "push", "-q", "origin", branch)
         return tm.sh(o, "git", "rev-parse", "HEAD")
 
-    def lane_lint(self, target, out):
+    def lane_lint(self, target, out, unknown_ok=""):
         """merge.lane_lint of `target` against BASE, in the lane checkout, through the copy of ci-job. Its output goes to `out`. A refusal raises."""
         env = {"VERDICT_LOG": os.path.join(self.t, "verdict.log")}  # one log for the run: no ci-job log lands in the system temp dir
         with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER), unittest.mock.patch.object(merge, "CI_JOB", self.ci_job), \
                 unittest.mock.patch.dict(os.environ, env), contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
-            return merge.lane_lint(self.co, target, self.host, base=BASE)
+            return merge.lane_lint(self.co, target, self.host, base=BASE, unknown_ok=unknown_ok)
+
+    def lane_lint_outcome(self, target, unknown_ok=""):
+        """What the lint of `target` does: ("liftable", text) when merge.Liftable stops it, ("stop", text) for any other refusal,
+        ("pass", text) when it returns 0. The text is the refusal, or the output printed."""
+        out = io.StringIO()
+        try:
+            self.lane_lint(target, out, unknown_ok)
+        except merge.Liftable as raised:
+            return "liftable", str(raised) + out.getvalue()
+        except merge.Stop as raised:
+            return "stop", str(raised) + out.getvalue()
+        return "pass", out.getvalue()
 
     def test_lane_lint_runs_each_batch_check_once_with_the_argv_checks_yml_gives(self):
         head = self.push_batch(BATCH)
@@ -1716,19 +1735,30 @@ class BatchLintFlags(tm.Env):
         self.assertIn("no lint CI step ran", str(raised.exception), out.getvalue())
         self.assertEqual(pass_lines(out.getvalue()), [], "a lint run that picked no lint step read as a pass: " + out.getvalue())
 
-    def push_no_ci_head(self, files, workflows_listed):
-        """Push NO_CI: main plus `files`, and assert the scope first: a head that has no workflow file is the no-CI case, one that has a workflow is not."""
+    def push_head(self, branch, files):
+        """Push `branch`: main plus `files` (path -> text, or bytes written as given), in one commit. -> (the head sha, the head's tracked paths)."""
         o = self.other
         tm.sh(o, "git", "fetch", "-q", "origin")
-        tm.sh(o, "git", "checkout", "-q", "-B", NO_CI, "origin/" + BASE)
-        for path, text in files.items():
-            tm.put(os.path.join(o, path), text)
+        tm.sh(o, "git", "checkout", "-q", "-B", branch, "origin/" + BASE)
+        for path, data in files.items():
+            full = os.path.join(o, path)
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            if isinstance(data, bytes):
+                with open(full, "wb") as f:
+                    f.write(data)
+            else:
+                tm.put(full, data)
         tm.sh(o, "git", "add", "-A")
-        tm.sh(o, "git", "commit", "-q", "-m", NO_CI + ": a head with no CI")
-        tm.sh(o, "git", "push", "-q", "origin", NO_CI)
+        tm.sh(o, "git", "commit", "-q", "-m", branch + ": a head for the lane lint")
+        tm.sh(o, "git", "push", "-q", "origin", branch)
         head = tm.sh(o, "git", "rev-parse", "HEAD")
-        listed = tm.sh(o, "git", "ls-tree", "-r", "--name-only", head)
-        self.assertEqual(".github/workflows/" in listed, workflows_listed, "scope: the head's workflow files are not the ones this case names:\n" + listed)
+        return head, tm.sh(o, "git", "ls-tree", "-r", "--name-only", head)
+
+    def push_no_ci_head(self, files, has_yml):
+        """Push NO_CI: main plus `files`. Assert the scope first: the head holds a workflow .yml file or it does not."""
+        _, listed = self.push_head(NO_CI, files)
+        found = any(p.startswith(".github/workflows/") and p.endswith((".yml", ".yaml")) for p in listed.splitlines())
+        self.assertEqual(found, has_yml, "scope: the head's workflow .yml files are not the ones this case names:\n" + listed)
 
     def assert_no_ci_refusal(self):
         """The lint of NO_CI refuses: it names the starter CI step (decision same-check-kinds, plan R17), offers no --lint-unknown-ok lift
@@ -1743,14 +1773,44 @@ class BatchLintFlags(tm.Env):
         self.assertNotIn("--lint-unknown-ok", text, "the no-CI refusal offers --lint-unknown-ok, the exemption the owner refused")
 
     def test_a_head_with_no_workflow_folder_refuses_as_no_ci_and_names_the_starter_step(self):
-        self.push_no_ci_head({"notes.md": "# Notes\n"}, workflows_listed=False)
+        self.push_no_ci_head({"notes.md": "# Notes\n"}, has_yml=False)
         self.assert_no_ci_refusal()
 
-    def test_a_head_whose_workflow_has_no_checks_job_refuses_as_no_ci_and_names_the_starter_step(self):
-        self.push_no_ci_head({".github/workflows/lint.yml": "name: lint\non: push\njobs:\n  lint:\n    runs-on: ubuntu-latest\n"
-                                                          "    steps:\n      - name: Lint\n        run: python3 lint/check.py\n"},
-                             workflows_listed=True)
+    def test_a_head_whose_workflow_folder_holds_no_yml_file_refuses_as_no_ci_and_names_the_starter_step(self):
+        self.push_no_ci_head({".github/workflows/README.md": "# Workflows\n"}, has_yml=False)
         self.assert_no_ci_refusal()
+
+    def test_a_head_whose_workflow_has_no_checks_job_is_a_liftable_unknown(self):
+        # A repo that has a workflow, but none with a checks job, is an unknown a flag lifts. Only a repo with no workflow is the no-CI refusal.
+        _, listed = self.push_head(NO_CHECKS, {".github/workflows/lint.yml": NO_CHECKS_WORKFLOW})
+        self.assertIn(".github/workflows/lint.yml", listed, "scope: the head has no workflow file for this case to read")
+        kind, text = self.lane_lint_outcome(NO_CHECKS)
+        self.assertEqual(kind, "liftable", "a workflow with no checks job is not a liftable unknown: %s" % text)
+        self.assertNotIn(STARTER_STEP, text, "a workflow with no checks job names the starter step, which is the no-CI refusal: " + text)
+        kind, text = self.lane_lint_outcome(NO_CHECKS, unknown_ok="shellcheck is not on this box")
+        self.assertEqual(kind, "pass", "--lint-unknown-ok did not lift the unknown: " + text)
+        self.assertEqual(pass_lines(text), [], "a lifted unknown printed a PASS line: " + text)
+        self.assertIn("is unknown, not a pass", text, "the lifted unknown does not say it is not a pass: " + text)
+
+    def test_an_unreadable_checks_yml_is_a_liftable_unknown_that_names_the_file(self):
+        with self.assertRaises(UnicodeDecodeError):  # scope: the fixture really is not UTF-8
+            LATIN1_CHECKS.decode("utf-8")
+        self.push_head(UNREADABLE, {".github/workflows/checks.yml": LATIN1_CHECKS})
+        kind, text = self.lane_lint_outcome(UNREADABLE)
+        self.assertEqual(kind, "liftable", "an unreadable checks.yml is not its own liftable unknown: %s" % text)
+        self.assertNotIn(STARTER_STEP, text, "an unreadable checks.yml reads as the no-CI refusal: " + text)
+        self.assertIn("checks.yml", text, "the unknown does not name the unreadable checks.yml: " + text)
+
+    def test_a_head_with_the_starter_ci_passes_the_lint(self):
+        with open(STARTER_TEMPLATE, encoding="utf-8") as f:
+            template = f.read()
+        self.assertIn("@" + "0" * 40, template, "scope: the starter template has no placeholder pin to replace")
+        self.push_head(STARTER_HEAD, {".github/workflows/checks.yml": template.replace("@" + "0" * 40, "@" + STARTER_PIN)})
+        # The remote quick-checks action resolves beside bin/ci-job, as in an install: this copy of ci-job's tree holds it.
+        shutil.copytree(os.path.join(REPO, "actions", "quick-checks"), os.path.join(self.t, "ci", "actions", "quick-checks"))
+        kind, text = self.lane_lint_outcome(STARTER_HEAD)
+        self.assertEqual(kind, "pass", "the starter CI's head does not pass the lint: %s" % text)
+        self.assertEqual(len(pass_lines(text)), 1, "the starter CI's head: want one PASS line: " + text)
 
     def test_a_lint_step_that_runs_only_off_a_pull_request_is_named_on_the_pass_line(self):
         self.push_batch(BATCH_PUSH_ONLY, found=self.found + [PUSH_ONLY_STEP])
