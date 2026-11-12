@@ -213,3 +213,56 @@ for _cull_script, _cull_why in (
 sh("builder run: shadowed run_folder control, a helper call inside a function with no rebind, is allowed",
    "verdict python3 " + os.path.join(CULL_SHADOW_DIR, "control_inner.py").replace(os.sep, "/"), "allow",
    **CULL_BUILDER)
+
+# THE PYTHON 3.9 FLOOR. _py_run_folder_is_helper (hooks/guard_frozen.py) names ast.MatchAs and ast.MatchStar in an
+# isinstance tuple, and ast.MatchMapping, on each node that is none of the kinds before it. Python 3.9 has no match
+# statement, so those names are absent there. The helper then raises on every script, and interpreter_write_hit reads
+# the crash as no hit, so a heredoc write to a test path is allowed. No CI job runs the guard on 3.9: the 3.9 job
+# (checks.yml, "Python 3.9 floor check") reads the source only. The guard runs as a child process, so the three names
+# are hidden there by a sitecustomize.py on PYTHONPATH, the shim s10425 uses.
+CULL_PY39_DIR = os.path.join(ROOT, "cull-43518-py39")
+write(os.path.join(CULL_PY39_DIR, "sitecustomize.py"), '''import ast
+
+for _name in ("MatchAs", "MatchStar", "MatchMapping"):
+    if hasattr(ast, _name):
+        delattr(ast, _name)
+''')
+CULL_PY39_ENV = {"PYTHONPATH": os.pathsep.join(filter(None, (CULL_PY39_DIR, os.environ.get("PYTHONPATH"))))}
+
+# THE HELPER FAILS FOR ANOTHER REASON. The verdict must stay a refusal whatever the helper's exception is: the same
+# crash reads as no hit. The shim raises a RuntimeError from ast.walk only while the helper is on the stack, so the
+# raise sits in the helper's own walk, and a sub-helper that the helper calls raises too. A fix that stops walking
+# inside the helper leaves nothing to raise, so this case then passes without showing the fail-closed rule.
+CULL_RAISE_DIR = os.path.join(ROOT, "cull-43518-raise")
+write(os.path.join(CULL_RAISE_DIR, "sitecustomize.py"), '''import ast
+import sys
+
+_walk = ast.walk
+
+
+def _walk_that_fails_in_the_helper(tree):
+    frame = sys._getframe(1)
+    while frame is not None:
+        if frame.f_code.co_name == "_py_run_folder_is_helper":
+            raise RuntimeError("injected: _py_run_folder_is_helper fails for another reason")
+        frame = frame.f_back
+    return _walk(tree)
+
+
+ast.walk = _walk_that_fails_in_the_helper
+''')
+CULL_RAISE_ENV = {"PYTHONPATH": os.pathsep.join(filter(None, (CULL_RAISE_DIR, os.environ.get("PYTHONPATH"))))}
+
+# The heredoc both cases judge: a plain `python3 -` heredoc that writes a test path, with no run_folder call. The
+# control runs it with no shim, where the helper works, so it is refused on the head.
+CULL_HEREDOC = "python3 - <<'EOF'\nopen('tests/guard/x.py', 'w').write('x')\nEOF"
+sh("builder run: a heredoc write of tests/guard/x.py is refused (control, the helper works)",
+   CULL_HEREDOC, "deny", rule=BT, carries=("test-author",), **CULL_BUILDER)
+sh("builder run: a heredoc write of tests/guard/x.py is refused on Python 3.9, where the match names are absent",
+   CULL_HEREDOC, "deny", rule=BT, carries=("test-author",), env=CULL_PY39_ENV, **CULL_BUILDER)
+sh("builder run: a heredoc write of tests/guard/x.py is refused when _py_run_folder_is_helper fails for another reason",
+   CULL_HEREDOC, "deny", rule=BT, carries=("test-author",), env=CULL_RAISE_ENV, **CULL_BUILDER)
+# The shim alone must not stop the guard: a shell edit the helper never reads is still refused under it.
+sh("builder-test: sed -i on lint/test_rule_audit.py is still refused under the 3.9 shim",
+   "sed -i 's/a/b/' lint/test_rule_audit.py", "deny", rule=BT, carries=("test-author",), env=CULL_PY39_ENV,
+   **CULL_BUILDER)
