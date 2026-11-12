@@ -455,6 +455,9 @@ jobs:
       - name: Waiting page splice fixture suite
         run: python3 skills/waiting-page/test_splice.py
 
+      - name: Waiting page field table suite (and the generated block is current)
+        run: python3 skills/waiting-page/test_field_table.py
+
       - name: Waiting page grant check suite
         run: python3 skills/waiting-page/test_page_grant.py
       - name: Waiting page park relay prose suite
