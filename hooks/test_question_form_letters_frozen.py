@@ -11,8 +11,10 @@ Rule option-letters-frozen refuses a set or update of an open decision on this r
   - it carries no `shown`;
   - an option has no non-empty string `id`, or two options share one;
   - an option at position i < len(shown) differs from shown[i] in key, id or label (a reorder, a relabel, a changed id);
-  - there are fewer options than shown.
-A first set with options must carry shown equal to its own options (key, id and label). An update may append options.
+  - there are fewer options than shown; or
+  - the options and shown differ in length, so an option appended on an update is shown on the same write (ruling R60).
+A first set with options must carry shown equal to its own options (key, id and label). An update that appends options
+carries shown extended by them.
 A note on an option, with key, id and label unchanged, passes. Tasks, notes, closed items and writes with no options pass,
 and so does a write to another artifact (item_hit runs the rule on the waiting page only).
 
@@ -164,6 +166,13 @@ def case_fn_fewer_options_is_refused():
             frozen("update", decision([RED], shown=shown_of(OPTIONS))), "option b")
 
 
+def case_fn_append_must_extend_shown():
+    """R60: an option appended on an update is shown on the same write, so shown is as long as the options. The append
+    that leaves shown short is refused; the one that extends it passes (case_fn_passes)."""
+    refuses("fn: an update that appends an option without extending shown is refused",
+            frozen("update", decision(OPTIONS + [GREEN], shown=shown_of(OPTIONS))), "shown")
+
+
 def case_fn_first_set_must_equal_its_shown():
     """A first set's shown equals its own options, so an option the shown list does not hold is refused. This reads the
     brief's strict rule for a first set; an update may append (case_fn_passes). Flagged in the report."""
@@ -264,7 +273,8 @@ def case_fn_options_that_is_not_a_list_is_refused():
 
 CASES = (case_fn_options_that_is_not_a_list_is_refused, case_fn_no_shown_is_refused, case_fn_item_646_swap_is_refused, case_fn_control_letter_rule_reads_the_swap_as_valid,
          case_fn_two_labels_swapped_is_refused, case_fn_relabel_is_refused, case_fn_changed_id_is_refused,
-         case_fn_fewer_options_is_refused, case_fn_first_set_must_equal_its_shown, case_fn_option_id_rules,
+         case_fn_fewer_options_is_refused, case_fn_append_must_extend_shown, case_fn_first_set_must_equal_its_shown,
+         case_fn_option_id_rules,
          case_fn_empty_and_full_size, case_fn_passes, case_fn_other_artifact_passes,
          case_wire_swap_is_refused, case_wire_no_shown_update_is_refused, case_wire_matching_set_is_allowed,
          case_wire_note_is_allowed, case_wire_reason_names_no_target, case_page_lists_shown)
