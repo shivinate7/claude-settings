@@ -267,7 +267,8 @@ Other tools, in `judge` order:
                        extras file, and to that file itself: a Write family call, a shell write (redirect, `tee`,
                        `sed -i`, `rm`, `mv`, `cp`, `touch`, `unlink`, `shred`, `sort -o`, `rsync`, `find -delete`,
                        `git restore` or `git checkout` of the path, after a leading `cd`) or a python or node
-                       script's own write or removal. These extra forms count for this rule alone. The list read
+                       script's own write, and a python script's removal (a node removal passes). These extra
+                       forms count for this rule alone. The list read
                        is the target's checkout's. A read, a copy out and a malformed list pass; a malformed list
                        is noted once. The reason quotes the entry's why. An override lifts it. (protected-path)
   other-checkout       deny. Any session's write whose target sits in a checkout of this clone
