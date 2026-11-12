@@ -244,8 +244,8 @@ def run_id(run):
     return m.group(1) if m else run
 
 UNKNOWN_CITE = "(rule verification-report-unknown-reads, a read that could not run is reported as unknown, never as clear)"
-# The two role cites name no tier: a lane must not learn which tier may claim a merge.
-ROLE_CITE = "(decision session-tiers, a session's tier decides whether it may merge)"
+# The two role cites name no session role: a lane must not learn which session role may claim a merge.
+ROLE_CITE = "(decision session-tiers, the session role decides whether a session may merge)"
 LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a head that passes `merge --lane-lint`)"
 # The paths a review record's `--guard no` refuses: the rule dirs, then the tool and the hooks, as folder prefixes. GUARD_FILES match a whole path.
 # It reads RULE_DIRS, never a copy.
@@ -5011,7 +5011,7 @@ def write_merge_role(tier):
     if not sid:
         raise Stop("--role needs CLAUDE_CODE_REMOTE_SESSION_ID, and it is not set. " + ROLE_CITE)
     if tier not in MERGE_ROLES:
-        raise Stop("this session's tier may not record a merge role. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + OWNER_LANE_ASK + ". " + ROLE_CITE)  # names no valid tier: a lane must not learn which to claim
+        raise Stop("this session's role may not record a merge role. Run `merge --lane-lint <pr>` first. Then post the review log on the pull request; the batch runner finds it. " + OWNER_LANE_ASK + ". " + ROLE_CITE)  # names no valid session role: a lane must not learn which to claim
     path = role_path()
     tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")  # replace, so a reader never sees half a file
     try:
@@ -5279,7 +5279,7 @@ def main(argv, host=None, lock=None, hosts=None):
             say(*lines)
             return 0 if ok else 1
         if (a.confirm or batch) and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():  # before any host read or lock
-            raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + OWNER_LANE_ASK + ". " + ROLE_CITE)
+            raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first. Then post the review log on the pull request; the batch runner finds it. " + OWNER_LANE_ASK + ". " + ROLE_CITE)
         if a.confirm and not a.head and read_merge_role() == "batch-runner":  # before the lock, a claim or any write
             raise Stop(BATCH_RUNNER_NEEDS_HEAD)
         c, root = sh(["git", "rev-parse", "--show-toplevel"], cwd=a.repo_dir)

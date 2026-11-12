@@ -1076,7 +1076,7 @@ ROLE_TAG_PREFIX = BUILD_TAG
 LONE_LANE_REPO = "shivinate7/claude-settings"  # the one repo a lane the owner started may merge in (standing-merge-grant: the grant holds there alone)
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge role it claims. "
-    "If this session is the batch runner, or a lane the owner started (no parent_session_id, no cs-build tag, sources naming this repo): "
+    "If this session is the batch runner, or a lane the owner started: "
     "run get_session (no argument) alone in its own turn, then retry. " + OWNER_LANE_ASK + ". "
     "Post the review log on the PR for your branch; the batch runner finds it "
     "(list_sessions, tag cs-build:batch-runner, same cs-repo, names the runner)."
@@ -1086,7 +1086,7 @@ ROLE_REASON = (
 def __getattr__(name):
     """The merge roles `merge --role` admits are merge.py's MERGE_ROLES itself (rule building-allow-list-is-the-constant), read on
     first use: the merge tool is large, and most guard runs never name a role. A tool that cannot load leaves the attribute missing."""
-    if name == "ROLE_TIERS":  # glossary-ok: merge/test_merge.py RoleTiersAreTheToolsSet pins this attribute name
+    if name == "ROLE_TIERS":  # glossary-ok: merge/test_merge.py GuardRolesAreTheToolsSet pins this attribute name
         module = merge_module()
         if module is not None:
             return module.MERGE_ROLES
@@ -1254,6 +1254,13 @@ def _merge_target_repo(segments, number: int, cwd: str, ends, repo_dir):
     `cd -` with no earlier directory, `popd`): None here is a refusal. `command_root` is not used: it reads the last `cd` of the whole
     command, and its other callers want that."""
     import git_reads
+    where = _merge_target_dir(segments, number, cwd, ends, repo_dir)
+    return git_reads.github_repo(where) if where and os.path.isdir(where) else None
+
+
+def _merge_target_dir(segments, number: int, cwd: str, ends, repo_dir):
+    """The directory of the checkout the merge in `segments[number]` acts in, or None when it cannot be followed: the one reader that
+    _merge_target_repo and the head check of a lane the owner started share, so the two judge the same checkout."""
     where = dir_before_segment(segments, number, cwd, ends)
     if repo_dir is not None:
         if not repo_dir:
@@ -1263,7 +1270,15 @@ def _merge_target_repo(segments, number: int, cwd: str, ends, repo_dir):
             where = repo_dir
         else:
             where = os.path.join(where, repo_dir) if where else None
-    return git_reads.github_repo(where) if where and os.path.isdir(where) else None
+    return where
+
+
+def _head_is_own_tip(head, where) -> bool:
+    """True when `head` is the tip of a branch (refs/heads) of the checkout at `where`. A lane the owner started builds and pushes its
+    branch from this checkout, so the head its confirm names is one of its own tips. The tips that cannot be read are a no."""
+    import git_reads
+    tips = git_reads.branch_tips(where) if where and os.path.isdir(where) else None
+    return tips is not None and head in tips
 
 
 def repo_proof_hit(stripped: str, cwd: str, transcript: str) -> str:
@@ -1324,8 +1339,14 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
                 tags, tagged_after, parent = own_session.own_session_read(transcript, own_id)
                 if tags is not None and not tagged_after and any(repo_tag_names(tag, repo) for tag in tags):
                     # A lane the owner started may merge only in LONE_LANE_REPO, which its own sources name: a tag it set itself moves nothing.
-                    if not _lone_shape(tags, parent) or (repo.lower() == LONE_LANE_REPO.lower() and _lone_scope(
-                            own_session.own_session_ccr(transcript, own_id))):
+                    # Its confirm's --head must be a branch tip of this checkout: the merge tool requires the head of the batch-runner
+                    # role and compares it with the PR's live head, so the PR's head is then this session's own. A confirm with no
+                    # --head is left to the tool, which refuses it before any claim. A role other than a lane the owner started is not judged here.
+                    if not _lone_shape(tags, parent):
+                        continue
+                    if repo.lower() == LONE_LANE_REPO.lower() and _lone_scope(own_session.own_session_ccr(transcript, own_id)) \
+                            and (flags.head is None or _head_is_own_tip(
+                                flags.head, _merge_target_dir(segments, number, cwd, ends, flags.repo_dir))):
                         continue
         except Exception:
             pass

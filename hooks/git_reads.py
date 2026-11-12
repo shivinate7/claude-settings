@@ -314,6 +314,15 @@ def github_repo(root, extras=_READ_EXTRAS):
     return origin_slug(done.stdout)
 
 
+def branch_tips(where: str):
+    """The set of commit shas that the local branches (refs/heads) of the checkout at `where` point at, or None when git could not
+    tell. A worktree reads the branches of its whole clone. The one home of this read."""
+    answer = _git(where, "for-each-ref", "--format=%(objectname)", "refs/heads")
+    if answer is None or answer.returncode != 0:
+        return None
+    return {line.strip() for line in answer.stdout.splitlines() if line.strip()}
+
+
 def is_shallow(where: str):
     """True in a shallow clone, False in a full one, None when git could not tell. The one home of the
     shallow probe: a shallow clone cuts history, so an ancestry exit 1 there proves nothing."""
