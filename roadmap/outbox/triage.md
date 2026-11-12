@@ -869,3 +869,6 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - batch-freeze-lane-set-enforce 13:39 CST Nov 12: Built half: PR #2882 (draft, head a810af538; round 2 running, round 3 net value owed, settings.json). Close the built half when #2882 merges; the lane keeps only the R55 express lane and cancel (coordinator split 13:36 CST Nov 12). Owner page item on the red-run flags.
 - review-fix-check-round 13:39 CST Nov 12: Coordinator split 13:36 CST Nov 12: rule text dropped (rounds-rules-one-record owns it); keeps --fix-check --round and the 3 Grant cases.
 - judge-timeout-retries-once 13:39 CST Nov 12: Coordinator audit 13:36 CST Nov 12: shares one log with past-ruling-timeout.
+- ended-session-id-sweep: Lane cleared 13:42 CST Nov 12 (retrospective 13:39 CST sweep): lane "-" matches no live session tag and no branch.
+- no-undo-brief-rule-sentence: Lane cleared 13:42 CST Nov 12 (retrospective 13:39 CST sweep): lane "fan-prose-unmapped-3" matches no live session tag and no branch.
+- Name-lane sweep 13:42 CST Nov 12: lane field set from the cs-step tag on 22 steps; close-replaced-at-open, cloud-branch-delete and dead-pr-waits keep doing (branches on origin, no live tag).

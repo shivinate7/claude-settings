@@ -4,12 +4,12 @@
  "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
- "lane": "waiting-page-sorting",
+ "lane": "session_013NEJL3fCEUUibxozV7CUtJ",
  "owner": "triage",
  "blockedBy": [],
  "why": "The tiers have grown long, and the owner reads them unsorted, so the item that matters most is not where he looks first.",
  "source": "owner 11:19 CST Nov 12 via the retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ): \"the questions in there are not sorted in an order ... those sections are getting MASSIVE and never unsorted within those categories\"; owner page thread be1a03d4 (Nov 10 22:05 CST)",
  "note": "Today page.html sorts the Answered section newest first (answeredOrder) and leaves each open tier in filing order. Sort key is the designer's call, from the owner's outcome: what blocks the most work first, then oldest. Pairs with step answered-sections-by-repo (one sub-group per repo inside each tier). A screen change: designer before the builder, design reviewer after. Template change reaches every repo's page only through step c121. Placed ahead of the older ready steps in now (triage re-weigh, owner ask 11:19 CST Nov 12). Ready, no lane.",
- "updatedAt": "2026-11-12T11:32:11-06:00",
+ "updatedAt": "2026-11-12T13:42:08-06:00",
  "order": -299
 }

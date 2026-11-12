@@ -3,13 +3,13 @@
   "title": "The merge tool reads main's ruleset first, then the old branch protection",
   "status": "doing",
   "repo": "shivinate7/claude-settings",
-  "lane": "merge-flow-after-anthropic",
+  "lane": "session_013NEJL2oxYMVKoXseeKacVG",
   "blockedBy": [],
   "why": "Once the sweep moves a repo's main to a ruleset and removes the old protection, the merge tool, which reads only the old protection, would refuse every merge in that repo.",
   "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
   "source": "Owner 19:49 CST Nov 11, page item 519 pick c (\"c is prob best\"), relayed by the retrospective; plan restart-plan 1cce54a, R45 Rulesets paragraph",
   "note": "merge/merge.py protection_names reads GET rules/branches/<base> first and branches/<base>/protection second (today it reads only protection, lines 1257 and 1275, and stops with \"has no branch protection\"). skills/project-ops/scripts/protect.py sets the ruleset. Lands before the R44 sweep removes any repo's old protection. Once every repo has a ruleset, the old-protection read is deleted. The lane rewrites decision main-branch-protection, which says \"The repo has no rulesets\". The grant on branch grant-shared-ruleset stays as written. Waits for the fan-out (owner 13:51). Placed ahead of the older ready steps in now (triage re-weigh 11:17 CST Nov 12, plans/reweigh-2026-11-12.md): an owner ruling not yet started.",
-  "updatedAt": "2026-11-12T11:28:45-06:00",
+  "updatedAt": "2026-11-12T13:42:08-06:00",
   "phase": "now",
   "order": -200
 }
