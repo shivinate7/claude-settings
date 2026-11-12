@@ -1196,7 +1196,8 @@ add("background-end: a PowerShell cd with a quoted backslash path before ; still
 # --- a roster command run bare, with no verdict wrapper (rule bare-check)
 #
 # The roster is the check-tail roster, run in the foreground or the background (coordinator ruling, 11:23 CST):
-# `merge --lane-lint`, `merge --review-record`, `merge --release-check`, and `bin/ci-job`. A bare run prints the
+# `merge --lane-lint`, `merge --release-check`, and `bin/ci-job`. A bare `merge --review-record` is allowed (rule 8): its
+# output is a record to post, and a verdict run would hide it. A bare run prints the
 # check's own output, so the agent reads whatever ends the line. The incident form read `echo $?` as "lane lint
 # passes". The remedy is `verdict <cmd>` inline. A roster command under verdict, a merge preview, a grep that names
 # the script and a bare test run are no bare run. A background roster run piped into tail or head stays check-tail's
@@ -1206,13 +1207,11 @@ add("background-end: a PowerShell cd with a quoted backslash path before ; still
 
 for _name, _command in (
     ("merge --lane-lint", "merge --lane-lint 7"),
-    ("merge --review-record", "merge --review-record 7"),
     ("merge --release-check", "merge --release-check 5 6"),
     ("the bin path, merge --lane-lint", "~/.claude/bin/merge --lane-lint 7"),
     ("merge.cmd --lane-lint", "merge.cmd --lane-lint 7"),
     ("the script run by python3", "python3 merge/merge.py --lane-lint 7"),
     ("the launcher run by python3", "python3 merge/launch.py --lane-lint 7"),
-    ("the script run by python3.11", "python3.11 merge/merge.py --review-record 7"),
     ("the script run by uv run", "uv run merge/merge.py --lane-lint 7"),
     ("the script run by uv run python", "uv run python merge/merge.py --lane-lint 7"),
     ("merge --lane-lint behind env", "env FOO=1 merge --lane-lint 7"),
@@ -1240,6 +1239,9 @@ for _name, _command in (
     ("a bare test run, pytest", "pytest lint/test_x.py"),
     ("a bare test run, python3 on a test file", "python3 lint/test_report_guard.py"),
     ("echo that names the roster command", "echo merge --lane-lint 7"),
+    # merge --review-record is no roster run: its output is a record to post, and a verdict run would hide it.
+    ("merge --review-record, its output is a record to post", "merge --review-record 7"),
+    ("the script run by python3.11, review-record", "python3.11 merge/merge.py --review-record 7"),
 ):
     sh("bare-check: " + _name + " is no bare run, so it is allowed", _command, "allow", cwd=NOGIT)
 
@@ -1264,7 +1266,6 @@ for _name, _command in (
 # the until note, so background-end decides nothing. A run under verdict stays allowed in the background.
 for _name, _command in (
     ("merge --lane-lint", "merge --lane-lint 7"),
-    ("merge --review-record", "merge --review-record 7"),
     ("merge --release-check", "merge --release-check 5 6"),
     ("ci-job checks --lint", "bin/ci-job checks --lint"),
 ):
@@ -1277,6 +1278,9 @@ for _name, _command in (
 ):
     add("bare-check: " + _name + " under verdict, backgrounded, is allowed", "allow", cwd=NOGIT,
         run_in_background=True, description=TAIL_BG_UNTIL, command=_command)
+
+add("bare-check: merge --review-record with no verdict wrapper, backgrounded, is allowed", "allow", cwd=NOGIT,
+    run_in_background=True, description=TAIL_BG_UNTIL, command="merge --review-record 7")
 
 # A background roster run piped into tail stays check-tail's refusal, and bare-check does not add a second.
 add("bare-check: merge --lane-lint piped to tail, backgrounded, stays check-tail, not refused twice", "deny",
