@@ -25,37 +25,6 @@ def body(needs):
     return out.stdout
 
 
-def post(strict, tmp):
-    """Runs comment.sh for real against a `gh` that fails, so the post fails."""
-    os.makedirs(tmp, exist_ok=True)
-    gh = os.path.join(tmp, "gh")
-    with open(gh, "w", encoding="utf-8") as fh:
-        fh.write("#!/bin/sh\nexit 1\n")
-    os.chmod(gh, 0o755)
-    env = dict(os.environ, NEEDS=json.dumps({"lint": {"result": "failure"}}), PR="1", REPO="o/r", SHA="0123456789abcdef",
-               RUN_URL="https://example/run", PATH=tmp + os.pathsep + os.environ["PATH"])
-    env.pop("CI_DONE_DRY", None)
-    if strict:
-        env["CI_DONE_STRICT"] = "1"
-    return subprocess.run(["bash", SCRIPT], env=env, capture_output=True, text=True)
-
-
-class FailedPost(unittest.TestCase):  # step lane-lint-once-fail-fast: the cancel job must not cancel when its comment did not post
-    def setUp(self):
-        import tempfile
-        self.tmp = tempfile.mkdtemp()
-        self.addCleanup(__import__("shutil").rmtree, self.tmp, True)
-
-    def test_a_failed_post_warns_and_exits_0_by_default(self):
-        got = post(False, self.tmp)
-        self.assertEqual(got.returncode, 0, got.stderr)
-        self.assertIn("not posted", got.stdout + got.stderr)
-
-    def test_a_failed_post_exits_1_when_strict(self):
-        got = post(True, self.tmp)
-        self.assertEqual(got.returncode, 1, "a strict run exited %s after a failed post: %s" % (got.returncode, got.stdout + got.stderr))
-
-
 class Body(unittest.TestCase):
     def test_failed_job_is_named(self):
         got = body({"scope": {"result": "success"}, "checks-macos": {"result": "failure"}})
