@@ -67,8 +67,8 @@ add("draft-pr: MCP create with draft true is allowed", "allow",
     repo="x", owner="y", draft=True)
 # A heredoc body is data unless a shell reads it. A python, perl or node run reads the file it names in its
 # own language, so a `gh pr create` line in that file runs nothing (a python syntax error stops it). Main
-# refuses these as draft-pr: a false alarm, so the four must-allow cases are red on main. The deny cases
-# below are the same body run by a shell, or a body a shell expands while it writes, and stay refused.
+# would refuse these as draft-pr, a false alarm. The four must-allow cases below pin that such a file is allowed.
+# The deny cases below are the same body run by a shell, or a body a shell expands while it writes, and stay refused.
 PR_BODY = "gh pr create --title x"
 sh("draft-pr: a python file from a quoted heredoc, holding a backslash-n string, is allowed",
    "\n".join(["cat > probe.py <<'EOF'", r'C = "cat <<EOF\n$(gh pr create --title x)\nEOF"', "EOF",
