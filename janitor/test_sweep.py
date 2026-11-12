@@ -4123,6 +4123,9 @@ class _VirtualClock:
     def flush(self):
         pass
 
+    def __getattr__(self, name):
+        return getattr(time, name)
+
 
 class AgentEndLogReadTests(unittest.TestCase):
     """janitor/agent_end_reap.py log(), the read before the rewrite. The log is read under its lock and
@@ -5873,24 +5876,6 @@ class HostChildStopsEndToEndTests(unittest.TestCase):
                               "an unmarked session sleep in the same tree did not make the proof None")
 
 
-class _VirtualClock:
-    """Stands in for the `time` module inside agent_end_reap. `monotonic()` reads a virtual now and
-    `sleep()` advances it, so a settle's deadline passes with no real wait (P5). Every other name is
-    the real `time` module."""
-
-    def __init__(self):
-        self.now = 0.0
-
-    def monotonic(self):
-        return self.now
-
-    def sleep(self, seconds):
-        self.now += seconds
-
-    def __getattr__(self, name):
-        return getattr(time, name)
-
-
 # A marked child. It writes its ready file once its SIGTERM disposition is set; argument 2 is "trap"
 # to ignore SIGTERM, anything else to keep the default.
 _MARKED_CHILD = ("import os, signal, sys, time\n"
@@ -5928,7 +5913,7 @@ class AgentEndFailSafeSettleTests(_AgentEndFixture):
         transcript. The deadline is one virtual second away (see _VirtualClock). Returns the rows."""
         own = self.add(self.ENDING)
         self.write_stop_row(self.AGENT, tree)
-        self.age_subagent_transcript(self.AGENT, 31)
+        self.age_agent_transcript(self.AGENT, 31)
         payload = {"hook_event_name": "SubagentStop", "agent_id": self.ENDING, "cwd": own,
                    "session_id": "agent-end-wt-cases"}
         payload.update(self.payload_extra(self.running_elsewhere()))
