@@ -222,6 +222,10 @@ sh("ln: a hard link over a directory name is not symbolic", "ln /opt/tool/x real
 # Every backgrounded case names an until note, so background-end decides none of them. sh() takes no
 # run_in_background, so the backgrounded cases use add(), the form the background-end section uses.
 TAIL_BG_UNTIL = "Lane lint in the background. until: the lint prints its verdict"
+# The bare-check rule and its remedy. The check-tail rows above and the bare section below both name them, so they
+# are defined once, here, before the first row that uses them.
+BARE_CHECK = "bare-check"
+BARE_REMEDY = "verdict <cmd>"
 
 add("check-tail: the incident line, backgrounded, is refused", "deny",
     "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
@@ -268,13 +272,18 @@ add("check-tail: a python3 verdict wrapper with no pipe, backgrounded, is allowe
 add("check-tail: wait-pid piped to tail, backgrounded, is allowed", "allow",
     cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/wait-pid 1836 2>&1 | tail -3")
-add("check-tail: output kept in a file, then grep piped to tail, backgrounded, is allowed",
-    "allow", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+add("bare-check: output kept in a file, then grep piped to tail, backgrounded, is refused, not check-tail",
+    "deny", BARE_CHECK, cwd=NOGIT, lacks="check-tail", run_in_background=True, description=TAIL_BG_UNTIL,
+    carries=BARE_REMEDY,
     command="~/.claude/bin/merge --lane-lint 1476 > /tmp/x/lanelint.log 2>&1; echo \"rc=$?\"; "
             "grep -E '^(PASS|FAIL)' /tmp/x/lanelint.log | tail -15")
-add("check-tail: merge --lane-lint piped to tee, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="merge --lane-lint 1476 2>&1 | tee run.out")
+add("verdict: merge --lane-lint via verdict, output kept in a file, grep piped to tail, backgrounded, is allowed",
+    "allow", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/verdict ~/.claude/bin/merge --lane-lint 1476 > /tmp/x/lanelint.log 2>&1; echo \"rc=$?\"; "
+            "grep -E '^(PASS|FAIL)' /tmp/x/lanelint.log | tail -15")
+add("bare-check: merge --lane-lint piped to tee, backgrounded, is refused, not check-tail", "deny",
+    BARE_CHECK, cwd=NOGIT, lacks="check-tail", run_in_background=True, description=TAIL_BG_UNTIL,
+    carries=BARE_REMEDY, command="merge --lane-lint 1476 2>&1 | tee run.out")
 add("check-tail: a tee between the check and grep and tail, backgrounded, is refused", "deny",
     "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="merge --lane-lint 1476 2>&1 | tee x | grep FAIL | tail -3")
@@ -284,9 +293,9 @@ add("check-tail: merge --lane-lint through tee and tail, backgrounded, is refuse
 add("check-tail: ci-job checks --lint through tee and head, backgrounded, is refused", "deny",
     "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tee lint.log | head -20")
-add("check-tail: merge --lane-lint through tee with nothing after it, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="merge --lane-lint 7 2>&1 | tee lint.log")
+add("bare-check: merge --lane-lint through tee with nothing after it, backgrounded, is refused, not check-tail",
+    "deny", BARE_CHECK, cwd=NOGIT, lacks="check-tail", run_in_background=True, description=TAIL_BG_UNTIL,
+    carries=BARE_REMEDY, command="merge --lane-lint 7 2>&1 | tee lint.log")
 add("check-tail: grep naming the script, piped to tail, backgrounded, is allowed", "allow",
     cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command='grep -n "--lane-lint" merge/merge.py | tail -20')
@@ -1193,8 +1202,6 @@ add("background-end: a PowerShell cd with a quoted backslash path before ; still
 # the script and a bare test run are no bare run. A background roster run piped into tail or head stays check-tail's
 # refusal: those rows assert check-tail and lack bare-check, so the reason is printed once. A bare ci-job piped into
 # tail in the foreground is bare-check's refusal.
-BARE_CHECK = "bare-check"
-BARE_REMEDY = "verdict <cmd>"
 
 
 for _name, _command in (
