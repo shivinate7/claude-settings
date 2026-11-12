@@ -1751,6 +1751,8 @@ RSHA_LANE = os.path.join(ROOT, "rsha-lane")        # a worktree on branch work, 
 RSHA_SHALLOW = os.path.join(ROOT, "rsha-shallow")  # a shallow clone of main: its last commit only
 RSHA_OTHER = os.path.join(ROOT, "rsha-other")      # another repo, with a commit no repo above holds
 RSHA_AGENT = os.path.join(RSHA_OTHER, ".claude", "worktrees", "agent-a632f54b2f884e669")  # an agent's own worktree
+RSHA_CLONE = os.path.join(ROOT, "rsha-clone")      # a full clone of main, cut before "main moves on": it never fetches that commit
+RSHA_FETCHED = os.path.join(ROOT, "rsha-fetched")  # the same kind of clone, which runs git fetch origin after that commit
 RSHA_SHA = {}                                      # the shas rsha_build records: base, main, tree, other
 
 
@@ -1776,13 +1778,17 @@ def _rsha_commit(where, text, message, date):
 def rsha_build():
     """The sha fixtures, built on first use. Each assert reads the scope a case relies on, before the case
     reads it (P7): the clone is shallow and has lost the base commit, and the commit on main is not an
-    ancestor of the lane's HEAD."""
+    ancestor of the lane's HEAD. The unfetched clone is a full clone with an origin that lacks the commit on
+    main, and the fetched clone holds it after git fetch origin."""
     os.makedirs(RSHA_MAIN, exist_ok=True)
     _rsha_git(RSHA_MAIN, "init", "-q", "-b", "main", ".")
     RSHA_SHA["base"] = _rsha_commit(RSHA_MAIN, "x = 1\n", "base", RSHA_DATE)
     _rsha_git(RSHA_MAIN, "worktree", "add", "-q", "-b", "work", RSHA_LANE)
+    _rsha_git(ROOT, "clone", "-q", "file://" + slash(RSHA_MAIN), RSHA_CLONE)
+    _rsha_git(ROOT, "clone", "-q", "file://" + slash(RSHA_MAIN), RSHA_FETCHED)
     RSHA_SHA["main"] = _rsha_commit(RSHA_MAIN, "x = 2\n", "main moves on", RSHA_DATE_TWO)
     RSHA_SHA["tree"] = _rsha_git(RSHA_LANE, "rev-parse", "HEAD^{tree}")
+    _rsha_git(RSHA_FETCHED, "fetch", "-q", "origin")
     _rsha_git(ROOT, "clone", "-q", "--depth", "1", "file://" + slash(RSHA_MAIN), RSHA_SHALLOW)
     os.makedirs(RSHA_OTHER, exist_ok=True)
     _rsha_git(RSHA_OTHER, "init", "-q", "-b", "main", ".")
@@ -1798,9 +1804,19 @@ def rsha_build():
                               cwd=RSHA_LANE, capture_output=True)
     if ancestor.returncode != 1:
         sys.exit("fixture setup failed in rsha_build: the commit on main is an ancestor of the lane's HEAD")
+    if _rsha_git(RSHA_CLONE, "rev-parse", "--is-shallow-repository") != "false":
+        sys.exit("fixture setup failed in rsha_build: the unfetched clone is shallow")
+    if _rsha_git(RSHA_CLONE, "remote") != "origin":
+        sys.exit("fixture setup failed in rsha_build: the unfetched clone has no origin")
+    lacks = subprocess.run([VCS, "cat-file", "-e", RSHA_SHA["main"] + "^{commit}"], cwd=RSHA_CLONE, capture_output=True)
+    if lacks.returncode == 0:
+        sys.exit("fixture setup failed in rsha_build: the unfetched clone already holds the commit on main")
+    holds = subprocess.run([VCS, "cat-file", "-e", RSHA_SHA["main"] + "^{commit}"], cwd=RSHA_FETCHED, capture_output=True)
+    if holds.returncode != 0:
+        sys.exit("fixture setup failed in rsha_build: git fetch origin did not bring in the commit on main")
 
 
-lazy_fixture([RSHA_MAIN, RSHA_LANE, RSHA_SHALLOW, RSHA_OTHER, RSHA_AGENT], rsha_build)
+lazy_fixture([RSHA_MAIN, RSHA_LANE, RSHA_SHALLOW, RSHA_OTHER, RSHA_AGENT, RSHA_CLONE, RSHA_FETCHED], rsha_build)
 RSHA_BUILDER = diff_repo("rsha-builder", _put("tests/test_a.py", "pass\n"))
 
 
@@ -2197,6 +2213,92 @@ LOG_CHECKS_EXTRA.append(("report-sha-missing: a 12-character sha that resolves i
 LOG_CHECKS_EXTRA.append(("report-sha-missing: a clean hand-back from an agent's worktree starts no git process",
                          rsha_agent_clean_cost_case))
 FIXTURELESS_CHECKS.update((rsha_short12_real_case, rsha_agent_clean_cost_case))
+
+
+# --- a commit the clone has not fetched: the clone is cut before the commit exists, so it holds no such object, and
+# its origin does. A refusal of it must name a route to the commit and say it is unresolved in this checkout. Either
+# route is a remedy: `git fetch origin`, or a branch name. The fetched clone holds the same commit after its fetch.
+RSHA_ROUTES = ("git fetch origin", "branch name")
+RSHA_MADE_UP_WORDS = ("made up", "made-up", "fabricat", "invent")
+
+
+def rsha_route_problem(got, reason):
+    """'' when the refusal of an unfetched commit names a route to it; else the one cause."""
+    problem = rsha_refused(got, reason, [])
+    if problem:
+        return problem
+    if not any(route in reason for route in RSHA_ROUTES):
+        return "the reason names no route to the commit (no `git fetch origin` and no branch name): %s" % reason[:90]
+    return ""
+
+
+def rsha_checkout_problem(got, reason):
+    """'' when the refusal of an unfetched commit says it is unresolved in this checkout and does not call it made up."""
+    problem = rsha_refused(got, reason, [])
+    if problem:
+        return problem
+    low = reason.lower()
+    if "this checkout" not in low:
+        return "the reason does not say the sha is unresolved in this checkout: %s" % reason[:90]
+    for word in RSHA_MADE_UP_WORDS:
+        if word in low:
+            return "the reason calls a commit the clone has not fetched %r: %s" % (word, reason[:90])
+    return ""
+
+
+def rsha_unfetched_hand_back_route_case():
+    """A hand-back naming a commit the clone has not fetched is refused, and the refusal names a route to it."""
+    rsha_ready()
+    got, reason = rsha_judge(RSHA_CLONE, "Fixed in %s, the commit on main." % RSHA_SHA["main"])
+    problem = rsha_route_problem(got, reason)
+    return (False, problem) if problem else (True, "a hand-back naming an unfetched commit names a route to it")
+
+
+def rsha_unfetched_hand_back_checkout_case():
+    """A hand-back naming a commit the clone has not fetched says it is unresolved in this checkout, not made up."""
+    rsha_ready()
+    got, reason = rsha_judge(RSHA_CLONE, "Fixed in %s, the commit on main." % RSHA_SHA["main"])
+    problem = rsha_checkout_problem(got, reason)
+    return (False, problem) if problem else (True, "a hand-back naming an unfetched commit says it is unresolved here")
+
+
+def rsha_unfetched_stop_route_case():
+    """A first stop naming a commit the clone has not fetched is blocked, and the block names a route to it."""
+    rsha_ready()
+    got, reason = rsha_judge(RSHA_CLONE, tool="SubagentStop", raw=rsha_stop(
+        RSHA_CLONE, "Done. Fixed in %s, the commit on main." % RSHA_SHA["main"]))
+    problem = rsha_route_problem(got, reason)
+    return (False, problem) if problem else (True, "a stop naming an unfetched commit names a route to it")
+
+
+def rsha_unfetched_stop_checkout_case():
+    """A first stop naming a commit the clone has not fetched says it is unresolved in this checkout, not made up."""
+    rsha_ready()
+    got, reason = rsha_judge(RSHA_CLONE, tool="SubagentStop", raw=rsha_stop(
+        RSHA_CLONE, "Done. Fixed in %s, the commit on main." % RSHA_SHA["main"]))
+    problem = rsha_checkout_problem(got, reason)
+    return (False, problem) if problem else (True, "a stop naming an unfetched commit says it is unresolved here")
+
+
+def rsha_fetched_hand_back_case():
+    """A commit that git fetch origin brought into the clone is allowed: the route the refusal names resolves."""
+    rsha_ready()
+    got, reason = rsha_judge(RSHA_FETCHED, "Fixed in %s, the commit on main." % RSHA_SHA["main"])
+    return rsha_allowed(got, reason, "a commit that git fetch origin brought into the clone")
+
+
+LOG_CHECKS_EXTRA.append(("report-sha-missing: a hand-back naming a commit the clone has not fetched names a route to it",
+                         rsha_unfetched_hand_back_route_case))
+LOG_CHECKS_EXTRA.append(("report-sha-missing: a hand-back naming a commit the clone has not fetched says it is unresolved "
+                         "in this checkout", rsha_unfetched_hand_back_checkout_case))
+LOG_CHECKS_EXTRA.append(("report-sha-missing: a stop naming a commit the clone has not fetched names a route to it",
+                         rsha_unfetched_stop_route_case))
+LOG_CHECKS_EXTRA.append(("report-sha-missing: a stop naming a commit the clone has not fetched says it is unresolved "
+                         "in this checkout", rsha_unfetched_stop_checkout_case))
+LOG_CHECKS_EXTRA.append(("report-sha-missing: a commit that git fetch origin brought into the clone is allowed",
+                         rsha_fetched_hand_back_case))
+FIXTURELESS_CHECKS.update((rsha_unfetched_hand_back_route_case, rsha_unfetched_hand_back_checkout_case,
+                           rsha_unfetched_stop_route_case, rsha_unfetched_stop_checkout_case, rsha_fetched_hand_back_case))
 
 
 # =========================================================================== failing open
