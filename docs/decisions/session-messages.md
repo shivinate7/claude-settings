@@ -5,8 +5,8 @@ Plan: docs/decisions/session-messages.md#build-in-work-order (all)
 
 Status: draft until build step 2 and the 20-message trial run. Q1 to Q4, page item 153 (the mailbox ruling) and page item 308 (the store) are answered.
 The mailbox build is on main: PR #1371 merged 2026-11-08 inside batch-65g (PR #2236). Follow-up PR #2484 merged 2026-11-10 in batch 71.
-Next step: the Mac round trip (the owner's check card). A Windows round trip passed (owner's Windows helper, relayed by the
-coordinator at 11:52 CST Nov 12; no other record yet). Cloud works for the owner's account; ssemwal-cdc is unmeasured.
+Next step: the Mac round trip (the owner's check card). A Windows round trip passed (request 8933ab505319 to the cloud, reply
+7292c549f4ee, both taken, 11:52 CST Nov 12; record: branch roadmap, commit b21c5d3dc). Cloud works for the owner's account; ssemwal-cdc is unmeasured.
 `MAILBOX_REPO` has a settings.json `env` default, set by the owner's ruling (page item 556 a, 2026-11-12 12:04 CST), not by
 measurement. A session with an address reads mail at turn start. A failed read prints "mail unknown: <reason>". A session
 with no address, or a store with no mail ref, prints nothing. The 20-message trial (step 5) is still open.
