@@ -2161,6 +2161,20 @@ def case_fallback_unknown_shows_once_per_session():
           other.startswith(dw.UNKNOWN_PREFIX), other)
 
 
+def case_fallback_unknown_without_session_id_shows_every_time():
+    # Control: a session with no id has no seen store (_seen_store_path returns None), so the UNKNOWN is said on every
+    # turn. Passes on the unchanged build. The mod's own mark for an empty id is the red case in decision-watch.test.mjs.
+    key = "fallback_unknown_no_session_id"
+    hook, cfg, given = _unfound_hook(key)
+    hook = dict(hook)
+    hook.pop("session_id")
+    first, _ = _judge_given(key, hook, given, _one_config(cfg))
+    second, _ = _judge_given(key, hook, given, _one_config(cfg))
+    check("%s: the first turn shows the UNKNOWN" % key, first.startswith(dw.UNKNOWN_PREFIX), first)
+    check("%s: the second turn, with no session id, shows the UNKNOWN again" % key,
+          second.startswith(dw.UNKNOWN_PREFIX), second)
+
+
 def main():
     case_flag_unapproved()
     case_flag_deleted_protected_file()
@@ -2242,6 +2256,7 @@ def main():
         case_fallback_control_real_path_is_judged,
         case_fallback_unknown_names_the_path_tried,
         case_fallback_unknown_shows_once_per_session,
+        case_fallback_unknown_without_session_id_shows_every_time,
     ):
         run_case(case)
 
