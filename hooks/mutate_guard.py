@@ -3665,7 +3665,7 @@ def add_profile_group(parser) -> None:
 
 def load_profile(args) -> dict:
     """The profile `add_profile_group` chose. A file that cannot be read raises OSError, or ValueError when it is no JSON, no
-    object, or holds a `code`, `code_not` or `tests` that is no regex: the replays route and select by them, so a bad one
+    object, or holds a `code`, `code_not` or `tests` that is no regex: the report selects suites by them, so a bad one
     reads as an unreadable profile here, not as a traceback later."""
     import json
     import re
