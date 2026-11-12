@@ -15,9 +15,11 @@ output style load in each session on each repo.
 
 - **Acts the cloud refuses** (owner, 2026-10-30 16:20 CDT; changed by Cockpit item 219 a,
   2026-11-04 17:44 CST, and its follow-up pick a, 17:55 CST; until withdrawn). When any repo's
-  coordinator asks, a session on Shivam's computer may do two acts. It may set branch protection to
-  the shared form, with only the all-jobs-passed check required. It may delete a branch whose last
-  commit is on the default branch or on an archive branch. A request for any other act needs his word.
+  coordinator asks, a session on Shivam's computer may do two acts. It may move main to the shared
+  ruleset (owner, 2026-11-11 16:43 CST, ruling r): only the all-jobs-passed check required, and
+  deletion and force-push of main blocked. Once the ruleset is on, it may remove main's old branch
+  protection. It may delete a branch whose last commit is on the default branch or on an archive
+  branch. A request for any other act needs his word.
 - **Relayed yes** (owner, 2026-11-07 13:10 CST, coordinator-reported; typed in lane relayed-yes-allow,
   13:19 CST). An owner yes to merge a named pull request, which a coordinator (tag `cs-build:coordinator`)
   relays to its batch runner, is the owner's grant for that merge. The batch runner merges it with the merge tool,
