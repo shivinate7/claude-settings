@@ -1869,6 +1869,33 @@ def case_ruled_store_caps_matching_entries_at_eight_newest_first():
           listed == expected, "listed %r, want %r" % (listed, expected))
 
 
+def case_ruled_store_ranks_by_shared_words_before_recency():
+    import question_form  # the one form check (hooks/question_form.py)
+    fn = getattr(question_form, "past_rulings", None)
+    check("ruled store rank: question_form.past_rulings exists", callable(fn), "missing function")
+    if not callable(fn):
+        return
+    many = "ruled-many-words"
+    entries = {many: fixture.entry(many, at="2026-10-20T09:00:00-06:00",
+                                   ruling="Owner: keep the GitHub apps' access to claude-settings as it is.")}
+    # Nine newer entries, each sharing only the word "apps" with the question: recency alone would list them first.
+    for day in range(4, 13):
+        rid = "ruled-one-word-%02d" % day
+        entries[rid] = fixture.entry(rid, at="2026-11-%02dT09:00:00-06:00" % day,
+                                     ruling="Owner: the apps menu changes on Fridays, item %02d." % day)
+    repo = tcj.make_repo("ruled-rank", decisions={tcj.APPS_SLUG: tcj.APPS_RULING})
+    fixture.point_ref(repo, fixture.STORE_REF, fixture.ruling_files(entries), tcj.ROOT)
+    with mock.patch.object(guard_pointer, "pointer_checkout", return_value=repo):
+        candidates, _unknown = fn(tcj.APPS_GOAL, repo)
+    listed = ruled_ids(candidates)
+    check("ruled store rank: the entry that shares the most words with the question is listed",
+          many in listed, str(listed))
+    check("ruled store rank: the entry that shares the most words is the first candidate, ahead of newer ones",
+          bool(listed) and listed[0] == many, str(listed))
+    check("ruled store rank: still at most %d ruled entries" % RULED_CAP_MAX,
+          len(listed) <= RULED_CAP_MAX, "listed %d: %r" % (len(listed), listed))
+
+
 class _BrokenPipeGit:
     """A git child that dies before its stdin is read: the write raises BrokenPipeError, and stderr holds the text."""
 
@@ -2661,6 +2688,7 @@ def main():
                  case_ruled_store_words_filter_leaves_out_an_unrelated_entry,
                  case_ruled_store_caps_matching_entries_at_eight_newest_first,
                  case_ruled_store_marks_an_unread_entry_unchecked,
+                 case_ruled_store_ranks_by_shared_words_before_recency,
                  case_roadmap_broken_pipe_not_a_repo_is_absent, case_roadmap_broken_pipe_other_stderr_stays_unreadable,
                  case_task_why_cited_reds, case_task_why_cited_greens,
                  case_press_link_links_not_a_list_on_a_step, case_press_link_links_not_a_list_on_an_option,
