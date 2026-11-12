@@ -2180,3 +2180,4 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
+- sim-lease-busy-now-swallows-api-drift: `busy_now` in `bin/sim-lease` returns [] (grants) when a loaded brake lacks or breaks `load_busy`. CI catches a rename (the Brake and MemoryBrake cases go red), so no live hole. Found in review round 2 of sim-lease-load-brake. Decision: roles-findings-are-debts-or-notes.

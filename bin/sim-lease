@@ -36,7 +36,8 @@ while sleeping.
 Cost: per call, one `uname` and one `ps` per recorded pid. Per process, take and status load hooks/guard.py and its family
 modules once (about 0.2 s, measured on one machine); then each call, or each poll of a waiting take, adds one memory
 counter read (Mac, ctypes) and one statfs, with no `sysctl` and no child process. Files written:
-leases.json, only when its content changes, plus the empty lock file. No daemon, no timer, no log.
+leases.json, only when its content changes, plus the empty lock file. No daemon, no timer, no log of its own. On a broken
+install (no loadable brake) each take and status costs about 5 s and appends one guard-crash line to guard.log.
 Reader: the guard calls live_leases() (SLOT_UDID maps a slot to its device) to let a session's MCP launch boot the device
 its own live lease holds. It takes no flock and writes nothing: one read of leases.json and one `ps` per lease.
 macOS only in effect; it runs under python3's standard library alone.
