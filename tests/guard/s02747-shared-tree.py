@@ -422,6 +422,31 @@ sh("scratchpad, temp elsewhere: a hard reset in a real dirty checkout is refused
    VCS + " reset --hard", "deny", "shared-tree", cwd=SUBJDIRTY, session=FAKE_SESSION)
 sh("scratchpad, temp elsewhere: another session's throwaway repo is refused",
    VCS + " reset --hard", "deny", "shared-tree", cwd=PRIVREPO, session=OTHER_SESSION)
+# THE SHELL CWD IN THE SCRATCHPAD. The shell starts in this session's scratchpad folder, TMPDIR names another
+# folder, and the command cds into a real checkout before `git -C .`. Git reads `-C .` from the folder the cd
+# left, so the scratchpad pass must need BOTH the cd folder and the -C folder under the scratchpad.
+SHELL_SCRATCH = os.path.dirname(PRIVREPO)   # this session's scratchpad folder, the shell's cwd below
+if os.path.realpath(SUBJDIRTY).startswith(os.path.realpath(SHELL_SCRATCH) + os.sep):   # scope before subject
+    sys.exit("fixture setup failed: SUBJDIRTY sits under this session's scratchpad, so the shell cwd cases prove nothing")
+sh("scratchpad, shell cwd in the scratchpad: cd into a dirty checkout, then git -C . reset --hard is refused",
+   "cd %s && %s -C . reset --hard" % (slash(SUBJDIRTY), VCS), "deny", "shared-tree",
+   cwd=SHELL_SCRATCH, session=FAKE_SESSION)
+sh("scratchpad, shell cwd in the scratchpad: cd lane && -C . restore, cd shared, the same -C . restore, is refused",
+   "cd " + slash(GITWT) + " && " + VCS + " -C . restore f.txt && cd " + slash(GITMAIN) + " && "
+   + VCS + " -C . restore f.txt && echo done", "deny", "shared-tree", cwd=SHELL_SCRATCH, session=FAKE_SESSION)
+sh("scratchpad, shell cwd in the scratchpad: cd lane; -C . restore; cd shared; the same -C . restore, is refused",
+   "cd " + slash(GITWT) + "; " + VCS + " -C . restore f.txt; cd " + slash(GITMAIN) + "; "
+   + VCS + " -C . restore f.txt", "deny", "shared-tree", cwd=SHELL_SCRATCH, session=FAKE_SESSION)
+# CONTROLS, green on the old code. The same reset in this session's own repo is allowed; a -C into a real
+# checkout stays refused from the scratchpad; and a cd into the dirty checkout with no -C is refused, which
+# shows the checkout is built dirty and read as dirty, so the red row above cannot be a fixture gap.
+sh("scratchpad, shell cwd in the scratchpad: cd into this session's throwaway repo, then git -C . reset --hard is allowed",
+   "cd %s && %s -C . reset --hard" % (slash(PRIVREPO), VCS), "allow", cwd=SHELL_SCRATCH, session=FAKE_SESSION)
+sh("scratchpad, shell cwd in the scratchpad: cd into the throwaway repo, then git -C <dirty checkout> reset --hard is refused",
+   "cd %s && %s -C %s reset --hard" % (slash(PRIVREPO), VCS, slash(SUBJDIRTY)), "deny", "shared-tree",
+   cwd=SHELL_SCRATCH, session=FAKE_SESSION)
+sh("scratchpad, shell cwd outside the scratchpad: cd into the dirty checkout, then git reset --hard is refused",
+   "cd %s && %s reset --hard" % (slash(SUBJDIRTY), VCS), "deny", "shared-tree", cwd=NOGIT)
 TEMP_DIR = None
 # AN UNREADABLE SUBJECT IS ALLOWED, and logged under its own rule (checked in
 # subject_unread_log_case). The cwd is the REAL dirty repository, so the only difference from the

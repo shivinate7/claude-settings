@@ -491,6 +491,47 @@ spo_register("scratchpad-owner: resume 1 agent B's Write over the file of agent 
              "refused", fin_resumed_case)
 
 
+# Rule scratchpad-owner, the removal form. A finished writer's file may be overwritten (finish 1 and 2), but
+# a remover verb (`rm`, `mv`) that names it is still refused: removing it destroys the file for the agent
+# that wrote it. A removal of a running writer's file refuses as before, and a writer may remove its own file.
+
+def rm_running_case():
+    """Agent A writes msg.txt and keeps running; agent B removes msg.txt with rm: refused."""
+    fx = spo_fixture("r0")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "r0", msg)] + spo_wrote(fx, "r0", SPO_WRITER, msg, "from A\n")
+    got, reason = spo_run(fx, SPO_OTHER, "rm %s" % msg)
+    problems.append(spo_refused("r0", got, reason, (fx["scratch"], "msg.txt")))
+    return spo_result(problems, "agent B's rm of the file of running agent A is refused")
+
+
+def rm_finished_case():
+    """Agent A writes msg.txt and finishes; agent B removes msg.txt with rm: refused."""
+    fx = spo_fixture("r1")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "r1", msg)] + spo_wrote(fx, "r1", SPO_WRITER, msg, "from A\n")
+    problems += spo_finish(fx, "r1", SPO_WRITER)
+    got, reason = spo_run(fx, SPO_OTHER, "rm %s" % msg)
+    problems.append(spo_refused("r1", got, reason, (fx["scratch"], "msg.txt")))
+    return spo_result(problems, "agent B's rm of the file of finished agent A is refused")
+
+
+def rm_own_case():
+    """Agent B writes msg.txt itself and removes it with rm: allowed."""
+    fx = spo_fixture("r2")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "r2", msg)] + spo_wrote(fx, "r2", SPO_OTHER, msg, "from B\n")
+    got, reason = spo_run(fx, SPO_OTHER, "rm %s" % msg)
+    problems.append(spo_allowed("r2", got, reason))
+    return spo_result(problems, "agent B removes its own file with rm and is allowed")
+
+
+spo_register("scratchpad-owner: remove 1 agent B's rm of agent A's file, which is still running: refused",
+             rm_running_case)
+spo_register("scratchpad-owner: remove 2 agent B's rm of agent A's file, which finished: refused", rm_finished_case)
+spo_register("scratchpad-owner: remove 3 agent B's rm of its own file: allowed", rm_own_case)
+
+
 # Rule scratchpad-owner, more cases. Each case's label says refused, allowed or passes,
 # and each control beside it stays green: the writer runs the same call, so a red case names this rule's gap.
 
