@@ -974,6 +974,64 @@ spo_register("scratchpad-owner: argument control 2, agent B's uv run python F wi
              lambda: spo_run_case("arg-ctl-uv-python", "argument control 2, uv run python F", "probe2.py",
                                   lambda fx, p: "uv run python %s" % p,
                                   "agent B's uv run python F, the file as the program, is refused"))
+
+
+def spo_data_case(tag, name, data_name, text, command_of, passed):
+    """Agent A writes `data_name` as a data file. Agent B's call `command_of(path)` passes it after the script, or as
+    a flag's value, and runs no scratchpad file: allowed."""
+    fx = spo_fixture(tag)
+    path = os.path.join(fx["scratch"], data_name)
+    problems = [spo_scope(fx, name, path)] + spo_wrote(fx, name, SPO_WRITER, path, text)
+    got, reason = spo_run(fx, SPO_OTHER, command_of(path))
+    problems.append(spo_allowed(name, got, reason))
+    return spo_result(problems, passed)
+
+
+# A file after a verb runner's script is an argument of that script (`uv run -q mine.py F`, `npx tsx --watch s.ts F`,
+# `deno run -A mine.ts F`), and a file a flag takes as its value is not run (`uv run --env-file F python mine.py`).
+# Agent B's own script is relative, so it lies outside the scratchpad, and agent A's file is the only one named.
+spo_register("scratchpad-owner: argument 5, agent B's uv run -q mine.py with agent A's data.csv as an argument: "
+             "allowed", lambda: spo_data_case("arg-5", "argument 5, uv run -q mine.py D", "data.csv", "a,b\n",
+                                             lambda p: "uv run -q mine.py %s" % p,
+                                             "agent B's uv run -q mine.py D, with D as an argument, is allowed"))
+spo_register("scratchpad-owner: argument 6, agent B's uv run --no-sync mine.py with agent A's data.csv as an "
+             "argument: allowed", lambda: spo_data_case("arg-6", "argument 6, uv run --no-sync mine.py D",
+                                                      "data.csv", "a,b\n",
+                                                      lambda p: "uv run --no-sync mine.py %s" % p,
+                                                      "agent B's uv run --no-sync mine.py D is allowed"))
+spo_register("scratchpad-owner: argument 7, agent B's npx tsx --watch s.ts with agent A's data.csv as an argument: "
+             "allowed", lambda: spo_data_case("arg-7", "argument 7, npx tsx --watch s.ts D", "data.csv", "a,b\n",
+                                             lambda p: "npx tsx --watch s.ts %s" % p,
+                                             "agent B's npx tsx --watch s.ts D is allowed"))
+spo_register("scratchpad-owner: argument 8, agent B's deno run -A mine.ts with agent A's data.csv as an argument: "
+             "allowed", lambda: spo_data_case("arg-8", "argument 8, deno run -A mine.ts D", "data.csv", "a,b\n",
+                                             lambda p: "deno run -A mine.ts %s" % p,
+                                             "agent B's deno run -A mine.ts D is allowed"))
+spo_register("scratchpad-owner: argument 9, agent B's uv run --env-file with agent A's e.txt as its value, then "
+             "python mine.py: allowed", lambda: spo_data_case("arg-9", "argument 9, uv run --env-file D", "e.txt",
+                                                            "A=1\n",
+                                                            lambda p: "uv run --env-file %s python mine.py" % p,
+                                                            "agent B's uv run --env-file D python mine.py is allowed"))
+spo_register("scratchpad-owner: argument 10, agent B's uv run --with-requirements with agent A's r.txt as its value, "
+             "then python x.py: allowed", lambda: spo_data_case("arg-10", "argument 10, uv run --with-requirements D",
+                                                              "r.txt", "requests\n",
+                                                              lambda p: "uv run --with-requirements %s python x.py"
+                                                              % p,
+                                                              "agent B's uv run --with-requirements D python x.py is "
+                                                              "allowed"))
+spo_register("scratchpad-owner: argument control 3, agent B's uv run -q F, the file as the script word: refused",
+             lambda: spo_run_case("arg-ctl-uv-q", "argument control 3, uv run -q F", "f.py",
+                                  lambda fx, p: "uv run -q %s" % p,
+                                  "agent B's uv run -q F, the file as the script word, is refused"))
+spo_register("scratchpad-owner: argument control 4, agent B's npx tsx --watch F, the file as the script word: refused",
+             lambda: spo_run_case("arg-ctl-npx-watch", "argument control 4, npx tsx --watch F", "probe2.ts",
+                                  lambda fx, p: "npx tsx --watch %s" % p,
+                                  "agent B's npx tsx --watch F, the file as the script word, is refused",
+                                  text=TS_TEXT))
+spo_register("scratchpad-owner: argument control 5, agent B's deno run -A F, the file as the script word: refused",
+             lambda: spo_run_case("arg-ctl-deno-a", "argument control 5, deno run -A F", "probe2.ts",
+                                  lambda fx, p: "deno run -A %s" % p,
+                                  "agent B's deno run -A F, the file as the script word, is refused", text=TS_TEXT))
 spo_register("scratchpad-owner: runner x=$(python3 F), an open substitution in an assignment: agent B's run is "
              "refused", spo_runner_case("subst-open-ctl", "x=$(python3 F)", "probe2.py", PY_TEXT, "x=$(python3 %s)"))
 spo_register("scratchpad-owner: cp-mv 1 agent B's run of a script agent A copied into the scratchpad with cp: "
@@ -994,6 +1052,30 @@ spo_register("scratchpad-owner: one-call 2 agent B's cp to x.tmp and mv to x.py 
              "x.py is refused", spo_one_call_cp)
 spo_register("scratchpad-owner: two-call control, agent B's heredoc to x.tmp, then its mv to x.py in the next call: "
              "agent A's run of x.py is refused", spo_two_call_case)
+
+
+def spo_rm_cp_case(tag, name, with_rm, passed):
+    """Agent B's one call copies src.py over t.py, after `rm -f t.py` when `with_rm`. No t.py is there before the call.
+    The rm names t.py, and the cp that writes it discards that name, so the copy is B's: agent A's run of t.py is
+    refused, and B's own run is the control, which is allowed."""
+    fx = spo_fixture(tag)
+    src = os.path.join(fx["work"], "src.py")   # outside the scratchpad, in this case's folder
+    write(src, PY_TEXT)
+    dest = os.path.join(fx["scratch"], "t.py")
+    copy = "cp %s %s" % (src, dest)
+    command = "rm -f %s && %s" % (dest, copy) if with_rm else copy
+    problems = [spo_scope(fx, name, dest)]
+    problems += spo_wrote(fx, name, SPO_OTHER, dest, PY_TEXT, tool="Bash", command=command)
+    problems += spo_b_file_runs(fx, name, dest, "t.py")
+    return spo_result(problems, passed)
+
+
+spo_register("scratchpad-owner: one-call 3, agent B's rm -f t.py and cp src t.py in one call: agent A's run of t.py is "
+             "refused", lambda: spo_rm_cp_case("one-call-rm", "one-call 3", True,
+                                              "agent B's rm and cp of t.py in one call: A's run of t.py is refused"))
+spo_register("scratchpad-owner: one-call control 1, agent B's cp src t.py with no rm: agent A's run of t.py is refused",
+             lambda: spo_rm_cp_case("one-call-cp", "one-call control 1", False,
+                                   "agent B's cp of t.py with no rm: A's run of t.py is refused"))
 
 
 # Rule scratchpad-owner, the refusal's remedy and the record. A refused call has decision deny, and its remedy
