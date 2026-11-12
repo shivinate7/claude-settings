@@ -53,11 +53,18 @@ body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 s
     <button data-s="owed-off">Owed card: no Reply</button>
     <button data-s="line-inside">Line inside the thread box</button>
   </div>
+  <div class="row" id="rowS4"><span>Item closed</span>
+    <button data-s="line-on">Reply on its line</button>
+    <button data-s="line-folded">Its line folded, reply waiting</button>
+    <button data-s="line-asks">Reply in the Asks list</button>
+  </div>
   <div class="row" id="rowH"><span>Options</span>
     <button class="hide" data-hide="owed" data-name="Answered and owed cards"></button>
     <button class="hide" data-hide="owed-off" data-name="Answered cards only"></button>
     <button class="hide" data-hide="just-sent" data-name="Under the thread"></button>
     <button class="hide" data-hide="line-inside" data-name="Inside the thread box"></button>
+    <button class="hide" data-hide="line-on" data-name="On its line"></button>
+    <button class="hide" data-hide="line-asks" data-name="In the Asks list"></button>
   </div>
   <div class="row" id="rowW"><span>Size</span>
     <button data-w="all">All three</button><button data-w="390">Phone 390</button><button data-w="800">Mid 800</button><button data-w="1280">Wide 1280</button>
@@ -67,7 +74,7 @@ body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 s
     <button id="labBtn">Labels on</button>
   </div>
   <p id="cap"></p>
-  <p>Deep links: <code>#s=closed|open-empty|open-typed|open-over|just-sent|undone|waiting|answered|folded-waiting|failed|owed|owed-off|line-inside</code>, <code>&amp;w=all|390|800|1280</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;hide=&lt;state&gt;,...</code>. In the frames, Reply opens the reply box and Close shuts it. Drawn from page.html at main 5cc641f7. Notes: item-reply-back-notes.md.</p>
+  <p>Deep links: <code>#s=closed|open-empty|open-typed|open-over|just-sent|undone|waiting|answered|folded-waiting|failed|owed|owed-off|line-inside|line-on|line-folded|line-asks</code>, <code>&amp;w=all|390|800|1280</code>, <code>&amp;t=light|dark</code>, <code>&amp;lab=off</code>, <code>&amp;hide=&lt;state&gt;,...</code>. In the frames, Reply opens the reply box and Close shuts it. Drawn from page.html at main 39e378f1. Notes: item-reply-back-notes.md.</p>
 </header>
 <main id="stage"></main>
 
@@ -78,6 +85,7 @@ body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.5 s
   <i data-state="just-sent" id="pick-under"></i><i data-state="undone"></i><i data-state="waiting"></i><i data-state="answered"></i>
   <i data-state="folded-waiting"></i><i data-state="failed"></i>
   <i data-state="owed" id="pick-owed"></i><i data-state="owed-off" id="pick-answered-only"></i><i data-state="line-inside" id="pick-inside"></i>
+  <i data-state="line-on" id="pick-online"></i><i data-state="line-folded"></i><i data-state="line-asks" id="pick-asksrow"></i>
 </div>
 
 <script type="text/plain" id="pagecss">
@@ -160,6 +168,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .ov-tier { display: grid; gap: 8px; align-items: start; padding-top: 12px; border-top: 1px solid var(--line); }
 .ov-head { display: flex; align-items: center; gap: 7px; min-height: 32px; color: var(--ink); text-decoration: none; font: 700 16px var(--body); font-variant-numeric: tabular-nums; }
 .ov-head .ct { margin-left: auto; padding-left: 8px; color: var(--muted); font-weight: 600; }
+@media (pointer: coarse) { .ov-head { min-height: 44px; } }
 .chips-n { display: flex; flex-wrap: wrap; gap: 6px; }
 .nchip { width: 48px; height: 32px; padding: 0; border-radius: 8px; border: 1.5px solid var(--line); background: var(--surface); color: var(--ink); font: 600 13.5px var(--mono); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 .nchip:hover { border-color: var(--acc); }
@@ -181,6 +190,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
   .nchip .no { flex: none; min-width: 2ch; text-align: end; font-variant-numeric: tabular-nums; }
   .nchip .nt { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13px var(--body); }
 }
+@media (pointer: coarse) { .nchip, .pairchips .nchip { height: 44px; } }
 @media (max-width: 960px) { .main { grid-template-columns: minmax(0, 1fr); } .main > .rail { position: static; padding: 12px; gap: 10px; } .ov-tier { padding-top: 8px; } }
 
 .list { display: grid; gap: 30px; min-width: 0; grid-column: 2; }
@@ -323,7 +333,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .btn { min-height: 44px; padding: 8px 16px; border-radius: var(--r); border: 1.5px solid var(--acc); background: var(--acc); color: var(--on-acc); font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
 .btn.alt { background: transparent; color: var(--acc); }
 .btn.quiet { border-color: transparent; background: transparent; color: var(--muted); font-weight: 500; padding-inline: 10px; }
-.btn.dash { border: 1.5px dashed var(--line); background: transparent; color: var(--muted); font-weight: 500; }
+.btn.dash { border: 1.5px dashed var(--faint); background: transparent; color: var(--muted); font-weight: 500; }
 .btn.dash[aria-pressed="true"] { border-style: solid; border-color: var(--ink); color: var(--ink); }
 .btn:disabled { opacity: .45; cursor: default; }
 .note { display: grid; gap: 6px; }
@@ -418,12 +428,9 @@ ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 4px; min-width: 0;
 .pkb .on, .pkb[aria-pressed="true"] .off { visibility: hidden; }
 .pkb[aria-pressed="true"] .on { visibility: visible; }
 .btn.alt.pkb[aria-pressed="true"] { background: var(--acc); color: var(--on-acc); }
-/* Drop's dashed edge reads at 3:1 (a11y.md, control edge): --faint, where .btn.dash elsewhere uses --line. */
-.btn.dash.pkb { border-color: var(--faint); }
-.btn.dash.pkb[aria-pressed="true"] { border-color: var(--ink); }
 /* Off: still focusable, with a solid --faint edge (3:1, a11y.md state cue) and a struck label, so an off act never rests on colour alone.
    This strike marks an off button. A staged Drop strikes the line text, never its button. The reason shows as .pk-why under the line.
-   This rule stays after .btn.dash.pkb: both have the same weight, so the source order decides. */
+   This rule stays after .btn.dash[aria-pressed="true"]: both have the same weight, so the source order decides. */
 .btn.pkb[aria-disabled="true"] { border-style: solid; border-color: var(--faint); background: transparent; color: var(--muted); cursor: default; font-weight: 500; }
 .btn.pkb[aria-disabled="true"] .off { text-decoration: line-through; text-decoration-thickness: 1.5px; }
 /* The Sent panel names a parked act by its act, where an item shows "No. n". */
@@ -528,6 +535,8 @@ body.sheet-open { overflow: hidden; }
 .live summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 8px 14px; min-height: 44px; font-size: 14.5px; }
 .live summary .lh { font-weight: 700; }
 .live summary .asof { margin-left: auto; font-size: 13px; color: var(--muted); padding: 0; }
+/* nowrap keeps the ring and "threads unknown" on one line at phone width. */
+.live summary .thr-unk { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .live h4 { padding: 8px 14px 4px; font-size: 13px; font-weight: 600; color: var(--muted); border-top: 1px solid var(--line); }
 .live ul { list-style: none; margin: 0; padding: 0; }
 .live li { display: grid; grid-template-columns: 130px minmax(0, 1fr); gap: 10px; padding: 7px 14px; border-top: 1px solid var(--line); font-size: 14px; }
@@ -584,6 +593,8 @@ body.sheet-open { overflow: hidden; }
 .now h3 { font: 600 13.5px/1.3 var(--body); color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
 .now .ph { font: 700 19px/1.2 var(--body); }
 .now .lead { padding: 0; font-size: 14px; color: var(--muted); }
+/* The count line breaks only between groups ("2 in progress,"): a group never splits. */
+.now .lead .grp { white-space: nowrap; }
 .now ul, .now ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
 .now li { display: flex; gap: 8px; align-items: center; min-width: 0; font-size: 14.5px; }
 .now li .id { flex: none; font-size: 13px; color: var(--muted); }
@@ -600,6 +611,8 @@ body.sheet-open { overflow: hidden; }
 .segbar i.done { background: var(--acc); }
 .segbar i.act { background: color-mix(in srgb, var(--acc) 45%, transparent); }
 .segbar i.blk { background: var(--holds); }
+.segbar i.stl { background: repeating-linear-gradient(135deg, var(--holds) 0 2px, transparent 2px 4px); }
+.segbar i.pzd { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
 
 /* The view switch sits right above the view it changes. What every view shares sits above the switch. */
 .views { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; padding: 3px; max-width: 520px; background: var(--chip); border-radius: 11px; }
@@ -678,7 +691,10 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .rsteps .active > .rrow { background: var(--acc-soft); box-shadow: inset 3px 0 0 var(--acc); }
 .rsteps .active .ttl { font-weight: 700; }
 .rsteps .blocked > .rrow { box-shadow: inset 3px 0 0 var(--holds); }
-.rsteps .stl-row > .rrow { box-shadow: inset 3px 0 0 var(--holds); }
+.rsteps .stl-row > .rrow { background: color-mix(in srgb, var(--holds) 14%, var(--surface)); box-shadow: inset 3px 0 0 var(--holds); }
+/* A paused step keeps status active: no tint, and a muted edge in the paused band's grey. */
+.rsteps .pzd-row > .rrow { background: none; box-shadow: inset 3px 0 0 var(--muted); }
+.rsteps .pzd-row > .rrow:hover { background: color-mix(in srgb, var(--chip) 60%, transparent); }
 .rsteps .done .ttl { text-decoration: line-through; text-decoration-color: var(--line); color: var(--muted); }
 .rbody { display: none; padding: 2px 14px 12px 70px; font-size: 14px; color: var(--muted); }
 .rsteps li.open .rbody { display: block; }
@@ -952,17 +968,17 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .askc.folded .fwait .ftext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .askc.folded .fwait .astate { grid-column: 2; }
 @media (max-width: 520px) { .askc.folded .fwait .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; } }
-/* Dismiss: it shares the thread's end with Reply, Reply first. It is the quieter act, kept 44 px. Off while a reply waits: a dashed edge, with the reason beside it. */
+/* Mark read: it shares the thread's end with Reply, Reply first. It is the quieter act, kept 44 px. Off while a reply waits: a dashed edge, with the reason beside it. */
 .replyend .endrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; min-width: 0; }
 .replyend .endrow > .btn { min-height: 44px; }
 .btn.dismiss, .btn.restore { min-height: 44px; }
 .btn.dismiss[aria-disabled="true"] { border: 1.5px dashed var(--faint); color: var(--muted); cursor: default; }
 .endrow .dwhy { font-size: 14px; color: var(--muted); min-width: 0; }
-/* A folded row with a side press: the row button and Dismiss (or Restore) are siblings, never one inside the other. */
+/* A folded row with a side press: the row button and Mark read (or Mark unread) are siblings, never one inside the other. */
 .askc.folded.withd { grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 4px; padding-inline-end: 8px; }
 .askc.folded.withd > .fwait { grid-column: 1 / -1; }
 .askc.folded.withd > .sline, .askc.folded > .sline.dline { grid-column: 1 / -1; padding: 0 16px 8px; }
-/* The Dismissed line keeps the row's place until the next load, at the folded row's height. */
+/* The Marked read line keeps the row's place until the next load, at the folded row's height. */
 .askc.dropped { padding: 2px 8px 2px 16px; background: transparent; border-style: dashed; border-color: var(--faint); }
 .askc.dropped:focus-visible { outline: 2px solid var(--acc); outline-offset: 2px; }
 .askc.dropped .sline { min-height: 44px; }
@@ -982,6 +998,43 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 .asks .empty.unk { color: var(--due); border-color: var(--due); }
 /* The rail row for asks: the head of an overview tier, no chips. With no waiting ask it is grey, as an empty tier is. */
 .ov-tier.zero .ov-head { color: var(--muted); }
+/* The routed line extends the ask's folded row with a side press (.askc.folded.withd), so an ask and an item share one shape.
+   The row button holds two text lines: what it was with its home, then the short reply. Mark read is the side press. */
+.askc.folded.withd.rline .frow { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: auto auto; align-items: start; row-gap: 2px; padding-block: 8px; }
+.askc.rline .frow > .g { margin-top: 7px; }
+.frow .fhead { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.frow .fhead .ftext { flex: 0 1 auto; }
+/* From 701px the head is one row: a long text shrinks and is cut with an ellipsis, so the number, the new mark and the home keep their place. Under 701px the head wraps. With the New reply mark drawn, a one-row head leaves the title under 60 px below about 665px, so the break sits at 701px, a round figure above that width with a margin. Its other widths are 520px and 960px, so 701px is this rule's own choice. */
+@media (min-width: 701px) {
+  .frow .fhead { flex-wrap: nowrap; }
+  .frow .fhead .ftext { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .frow .fhead .fno, .frow .fhead .newmark { flex: none; }
+  .frow .fhead .hometag { flex: 0 0 auto; max-width: 40%; }
+}
+.frow .fno { font: 600 13.5px var(--mono); color: var(--acc); white-space: nowrap; }
+.frow .freply { grid-column: 2; grid-row: 2; min-width: 0; font-size: 14.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.askc.folded.withd.rline .frow .fgo { grid-column: 3; grid-row: 1 / span 2; align-self: center; }
+/* The home: a neutral pill, its word "Home:" in a .sr span. A line with no home says so on a dashed edge. */
+.hometag { display: inline-flex; align-items: center; min-height: 22px; max-width: 100%; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--chip); color: var(--ink); font-size: 13px; font-weight: 600; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hometag.none { background: transparent; border-style: dashed; border-color: var(--faint); color: var(--muted); }
+.frow .newmark { min-height: 22px; font-size: 13px; line-height: 19px; }
+/* Mark read keeps the box of its widest label (.fixw), so "Marking…" moves nothing. */
+.rline > .btn.dismiss { white-space: nowrap; }
+/* The opened line: the open ask card's shape, with its home and number in the head. */
+.askc.rline.ropen .ahead .fno { font: 600 13.5px var(--mono); color: var(--acc); }
+.askc.rline.ropen .rtitle { margin: 0; font: 600 16px/1.4 var(--body); max-width: 70ch; }
+.askc.rline.ropen .thread { display: grid; gap: 6px; padding: 10px 12px; border-radius: 8px; background: var(--ground); min-width: 0; }
+.askc .thread .filed a { color: var(--acc); }
+/* An item line sits in the Answered section's list, beside the cards that still wait to be filed. */
+.tier.sunk .rlist > .askc { scroll-margin-top: 64px; }
+.rlist > .older { margin-top: 2px; }
+.asklist.dlist.items { margin: 0; }
+.allread { margin: 0; font-size: 15px; color: var(--ink); }
+@media (max-width: 520px) {
+  .askc.folded.withd.rline .frow { grid-template-columns: auto minmax(0, 1fr); }
+  .askc.folded.withd.rline .frow .freply { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .askc.folded.withd.rline .frow .fhead .ftext { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+}
 </script>
 
 <script type="text/plain" id="newcss">
@@ -1029,8 +1082,9 @@ const KBD = '<span class="kbd"> Ctrl+Enter sends.</span>';
 const joinAnd = (xs) => (xs.length < 2 ? xs.join("") : xs.slice(0, -1).join(", ") + " and " + xs[xs.length - 1]);
 
 // The answered item the owner replies to (the case of item 278). Its session replied with a question; he Sent its answer before, so the card is in Answered.
+// Filing pending: main draws a filed answer as one line (page.html routedOpen), so the card states use an answer not yet filed. closed: the line states.
 const I41 = { id: "sweep-cadence", n: 41, owner: "lane page-upkeep", home: "the sweep decision", title: "Run the stale-page sweep daily or weekly",
-  what: "You chose A: Daily.", note: "Daily, but skip weekends.", filed: "Nov 6, 09:40 CST",
+  what: "You chose A: Daily.", note: "Daily, but skip weekends.", sent: "Nov 6, 09:40 CST", closed: "Nov 7, 10:00 CST",
   last: { at: "Nov 4, 14:00 CST", what: "You chose B: Weekly." },
   reply: "Daily from Monday. Weekends skip, as you asked. One question stays: should a skipped weekend run on Monday instead?" };
 // The one key of an item's reply box: "item." + the item id. Every DOM id and the draft key derive from it (notes item 7).
@@ -1103,7 +1157,7 @@ function thread41({ mine = "none", inside = "", lab, tlab, tkind = "new", mlab }
 function card41({ open = true, mark = false, mine = "none", end = "", inside = false, fwait = "", lab, tlab, tkind, mlab, markTag, fwTag }) {
   const w = joinAnd(foldParts(mine));
   const mk = mark ? `<span class="newmark"${lbl(lab, markTag)}>New reply<span class="sr"> since your last Send</span></span>` : "";
-  const top = `<div class="top"><span class="num" aria-label="No. 41, decision, from ${I41.owner}" title="From ${I41.owner}">No. 41</span>${mk}<span class="ans filed">Filed in ${I41.home} <span class="t">${I41.filed}</span></span></div>`;
+  const top = `<div class="top"><span class="num" aria-label="No. 41, decision, from ${I41.owner}" title="From ${I41.owner}">No. 41</span>${mk}<span class="ans">Filing pending, sent <span class="t">${I41.sent}</span></span></div>`;
   const rc = `<div class="receipt"><div class="line">${G("done")}<b>${esc(I41.what)}</b><button class="btn quiet changebtn" type="button" id="b-change-${I41.id}">Change</button></div></div>`;
   const uf = `<button type="button" class="unfold" id="unfold-${I41.id}" aria-expanded="${open}" aria-controls="fold-${I41.id}"><span class="chev" aria-hidden="true"></span><span class="uf-labels"><span class="uf-show">Show ${w}</span><span class="uf-hide">Hide ${w}</span><span class="uf-lock">Stays open: your answer is ready</span></span><span class="sr"> for No. 41</span></button>`;
   const fw = fwait && !open ? `<p class="fwait"${lbl(lab, fwTag)}>${G("wait")}<span class="ftext">Your reply: ${esc(RP.text)}</span><span class="astate">${fwait}</span></p>` : "";
@@ -1119,8 +1173,32 @@ function card22({ end = "", lab, tlab, noteId, noteTag }) {
   const note = `<div class="note"${noteId ? ` id="${noteId}"` : ""}${lbl(lab, noteTag, "today")}><label for="n-${I22.id}">Note to the session (optional)</label><textarea id="n-${I22.id}" placeholder="Anything the session should know"></textarea></div>`;
   return `<article class="card calm" id="item-${I22.id}" aria-labelledby="t-${I22.id}">${top}<h3 class="title" id="t-${I22.id}">${esc(I22.title)}</h3>${th}${end}<p class="ctx">${esc(I22.ctx)}</p>${steps}${alts}${note}<p class="dest">Lands in ${I22.home}. Added ${I22.added}.</p></article>`;
 }
-// A sunk card with no reply: no thread, so no Reply.
-const card15 = (lab) => `<article class="card answered" id="item-${I15.id}" aria-labelledby="t-${I15.id}" data-sunk="true"${lbl(lab, "no reply on the card, so no Reply", "today")}><div class="top"><span class="num" aria-label="No. 15, decision, from ${I15.owner}" title="From ${I15.owner}">No. 15</span><span class="ans filed">Filed in ${I15.home} <span class="t">${I15.filed}</span></span></div><h3 class="title" id="t-${I15.id}">${esc(I15.title)}</h3><div class="receipt"><div class="line">${G("done")}<b>${esc(I15.what)}</b><button class="btn quiet changebtn" type="button">Change</button></div></div></article>`;
+/* ---------- Lines: main's lineEl. A filed answer (routedOpen) and a closed item each show as one line ---------- */
+const homeTag = (home) => `<span class="hometag"><span class="sr">Home: </span>${esc(home)}</span>`;
+// Mark read: main's markPress ("quiet dismiss", id idis-<item id>). off: a reply waits, so it is off with the reason beside it (dismissBtns, ASK_DIS_OFF).
+const DIS_OFF = "your reply waits: no Mark read until it has its answer";
+const markBtn = (pre, id, name, off = false) => `<button class="btn quiet dismiss fixw" type="button" id="${pre}${id}" aria-label="Mark read: ${esc(name)}"${off ? ` aria-disabled="true" aria-describedby="dw-${id}"` : ""}><span>Mark read</span><span class="sz" aria-hidden="true">Marking…</span></button>${off ? `<span class="dwhy" id="dw-${id}">${DIS_OFF}</span>` : ""}`;
+// No. 15: a filed answer with no reply. Main draws it as one folded line with Mark read beside it.
+const line15 = (lab) => `<article class="askc folded withd rline" id="line-15" aria-labelledby="lt-15"${lbl(lab, "a filed answer is one line: no reply, so no Reply", "today")}><button class="frow" type="button" id="lrow-${I15.id}" aria-expanded="false">${G("done")}<span class="fhead"><span class="fno">No. 15</span><span class="ftext" id="lt-15">${esc(I15.title)}</span>${homeTag(I15.home)}</span><span class="freply">Filed 15:30 CST.</span><span class="fgo">Show answer<span class="sr"> for No. 15</span></span></button>${markBtn("idis-", I15.id, "No. 15, " + I15.title)}</article>`;
+// No. 41 once its session closed it: a closed line (isClosedLine). reps: option "On its line" draws the item's reply records on it.
+// open: opened in place (lineEl's .ropen); wait: his reply waits (the close hold ran out), so the folded line shows it and has no Mark read.
+function line41({ open = false, reps = false, wait = false, lab, tag, endTag, fwTag }) {
+  const name = "No. 41, " + I41.title, mark = !wait ? `<span class="newmark">New reply</span>` : "";
+  const where = `Closed ${I41.closed}. The record stays in ${I41.home}.`;
+  if (!open) {
+    const fw = reps && wait ? `<p class="fwait"${lbl(lab, fwTag)}>${G("wait")}<span class="ftext">Your reply: ${esc(RP.text)}</span><span class="astate">Read by ${RPA.owner} <span class="t">13:07 CST</span>. Waiting for its answer.</span></p>` : "";
+    const side = reps && wait ? "" : markBtn("idis-", I41.id, name);
+    return `<article class="askc folded${side ? " withd" : ""} rline" id="line-41" aria-labelledby="lt-41"${lbl(lab, tag, reps ? "new" : "today")}><button class="frow" type="button" id="lrow-${I41.id}" aria-expanded="false">${G("done")}<span class="fhead"><span class="fno">No. 41</span><span class="ftext" id="lt-41">${esc(I41.title)}</span>${mark}${homeTag(I41.home)}</span><span class="freply">Daily from Monday.</span><span class="fgo">Show answer<span class="sr"> for No. 41</span></span></button>${side}${fw}</article>`;
+  }
+  const la = `<div class="receipt last"><p class="lhead">Your last answer, ${I41.sent}</p><div class="line"><b>${esc(I41.what)}</b></div></div>`;
+  const mine = reps ? myReply("answered") + sessionReply() : "";
+  return `<article class="askc rline ropen" id="line-41" aria-labelledby="lt-41"><div class="ahead">${G("done")}<span class="fno">No. 41</span>${homeTag(I41.home)}${mark}<button class="morebtn" type="button" id="lfold-${I41.id}" aria-expanded="true">Fold</button></div>
+    <h3 class="rtitle" id="lt-41">${esc(I41.title)}</h3>
+    <div class="thread" id="pick-online"${lbl(lab, tag)}>${la}<p class="lhead">Reply from ${I41.owner}</p><p class="reply">${esc(I41.reply)}</p>${mine}<p class="filed">${where}</p></div>
+    ${replyEnd(K41, `<div class="endrow">${replyBtn(K41, 41)}${markBtn("idis-", I41.id, name)}</div>`, { lab, labText: endTag })}</article>`;
+}
+// Option "In the Asks list" (the branch today): itemHere reads state.items only, so the closed item's reply is an Asks row of its own.
+const goneRow = (lab) => `<li class="askc" id="pick-asksrow"${lbl(lab, "says the item is gone, but its line is in Answered", "today")}><div class="ahead">${G("done")}<span class="aby">You asked, Nov 6, ${RP.at} CST</span><span class="newmark">New answer</span><button class="morebtn" type="button" aria-expanded="true">Fold</button></div><p class="reline">Re: an item no longer on this page</p><p class="atext">${esc(RP.text)}</p><div class="thread"><p class="lhead">Answer from ${RPA.owner}, Nov 6, ${RPA.answered} CST</p><p class="reply">${esc(RPA.reply)}</p></div><div class="replyend" data-end="${RP.id}"><div class="endrow"><button class="btn alt replybtn" type="button" id="reply-${RP.id}">Reply</button>${markBtn("dis-", RP.id, RP.text)}</div></div></li>`;
 
 /* ---------- The Ask section: unchanged. An item reply never shows in its list or counts in its pill ---------- */
 function askBox({ hint, val = "", add = false, lab, labText }) {
@@ -1135,25 +1213,27 @@ function askBox({ hint, val = "", add = false, lab, labText }) {
 const H_ASK = `<span>Add to list and Send ask turn on once you type. Asks go to ${WRITER}, which answers here or passes them on.${KBD}</span>`;
 const waitingAsk = (a) => `<li class="askc"><div class="ahead">${G("wait")}<span class="aby">You asked, ${esc(a.at)}</span><span>waited ${esc(a.waited)}</span></div><p class="atext">${esc(a.text)}</p><p class="astate">Waiting for ${WRITER} to read it.</p></li>`;
 const foldedAsk = (a) => `<li class="askc folded"><button class="frow" type="button" aria-expanded="false">${G("done")}<span class="ftext">${esc(a.text)}</span><span class="fwhen">Answered ${esc(a.answered)}</span><span class="fgo">Show answer</span></button></li>`;
-function asksSection(box, lab, listTag) {
+function asksSection(box, lab, listTag, gone = "") {
   return `<section class="in asks" id="asks" aria-labelledby="asksH">
     <div class="asks-head"><h2 id="asksH">${G("wait")}Ask<span class="ct" aria-label="1 ask waiting for an answer">1</span></h2>
       <p>A question, feedback, anything. A session answers under your ask, so you need not watch the chat.</p></div>
-    <div class="asks-body">${box}<div id="askList"><ol class="asklist" aria-label="Your asks, newest first"${lbl(lab, listTag, "today")}>${[waitingAsk(N1), ...SEEN.map(foldedAsk)].join("")}</ol></div></div></section>`;
+    <div class="asks-body">${box}<div id="askList"><ol class="asklist" aria-label="Your asks, newest first"${lbl(lab, listTag, "today")}>${[gone, waitingAsk(N1), ...SEEN.map(foldedAsk)].join("")}</ol></div></div></section>`;
 }
 
 /* ---------- The screen ---------- */
+// The rail chip: main's renderRail chip classes and words.
 function chip(n, title, st) {
-  const cls = "nchip" + (st === "filed" ? " sent filed" : "");
-  const say = st === "filed" ? ", answered, filed" : ", open";
+  const cls = "nchip" + (st === "filed" || st === "closed" ? " sent filed" : st === "sent" ? " sent" : "");
+  const say = { filed: ", answered, filed", closed: ", closed", sent: ", answered, filing pending" }[st] || ", open";
   return `<button type="button" class="${cls}" aria-label="${esc("No. " + n + ", " + title + say)}" title="${esc(title)}"><span class="no">${n}</span><span class="nt">${esc(title)}</span></button>`;
 }
-const rail = () => `<nav class="rail" id="rail" aria-label="Overview"><div class="ov-prog"><div class="big"><b>2</b>of 3 sent</div><div class="sub none"><i class="sw"></i>0 ready to send</div><div class="track" aria-hidden="true"><i class="s" style="width:66.7%"></i><i class="r" style="width:0%"></i></div></div>
+// closed: No. 41 is a closed line, so it leaves the sent count (main counts state.items only).
+const rail = (closed) => `<nav class="rail" id="rail" aria-label="Overview"><div class="ov-prog"><div class="big"><b>${closed ? 1 : 2}</b>of ${closed ? 2 : 3} sent</div><div class="sub none"><i class="sw"></i>0 ready to send</div><div class="track" aria-hidden="true"><i class="s" style="width:${closed ? 50 : 66.7}%"></i><i class="r" style="width:0%"></i></div></div>
   <div class="ov-tier"><a class="ov-head" href="#tier-calm" aria-label="1 open, Whenever">${G("calm")}Whenever<span class="ct">1</span></a><div class="chips-n">${chip(22, I22.title)}</div></div>
-  <div class="ov-tier"><a class="ov-head" href="#tier-answered" aria-label="2 answered">${G("done")}Answered<span class="ct">2</span></a><div class="chips-n">${chip(41, I41.title, "filed")}${chip(15, I15.title, "filed")}</div></div>
+  <div class="ov-tier"><a class="ov-head" href="#tier-answered" aria-label="2 answered">${G("done")}Answered<span class="ct">2</span></a><div class="chips-n">${chip(41, I41.title, closed ? "closed" : "sent")}${chip(15, I15.title, "filed")}</div></div>
   <div class="ov-tier"><a class="ov-head" href="#asks" aria-label="1 ask waiting for an answer, Ask">${G("wait")}Ask<span class="ct">1</span></a></div></nav>`;
 const tierCalm = (card) => `<section class="tier" id="tier-calm" aria-labelledby="th-calm"><header><h2 id="th-calm">${G("calm")}Whenever<span class="ct">1</span></h2></header>${card}</section>`;
-const answeredSec = (cards) => `<section class="tier sunk" id="tier-answered" aria-labelledby="th-answered"><header><h2 id="th-answered"><button class="rhead" type="button" id="b-answered" aria-expanded="true" aria-controls="ab"><span class="chev" aria-hidden="true"></span>${G("done")}Answered<span class="ct">2</span></button></h2><p class="rsub">Sent before this visit, newest first. Each leaves the page once its session closes it.</p></header><div class="sunklist" id="ab">${cards.join("")}</div></section>`;
+const answeredSec = (cards) => `<section class="tier sunk" id="tier-answered" aria-labelledby="th-answered"><header><h2 id="th-answered"><button class="rhead" type="button" id="b-answered" aria-expanded="true" aria-controls="ab"><span class="chev" aria-hidden="true"></span>${G("done")}Answered<span class="ct">2</span></button></h2><p class="rsub">Your sent answers, newest first. A line you mark read stays as Marked read until the next load.</p></header><div class="rlist" id="ab">${cards.join("")}</div></section>`;
 const hdr = () => `<header class="hdr"><div class="in"><div class="mark" aria-hidden="true">S</div><div class="who"><h1 class="repo">sample-repo</h1></div></div></header>`;
 const tabs = () => `<nav class="in tabs" aria-label="Page"><div class="tl" role="tablist" aria-label="Page parts"><a href="#" role="tab" aria-selected="true">Questions <span class="cnt">1</span></a><a href="#" role="tab" aria-selected="false" tabindex="-1">Status</a></div></nav>`;
 // The answer bar does not change: Send answers never takes a reply.
@@ -1186,15 +1266,19 @@ function parts(s, lab) {
   } else if (s === "failed") P.c41 = { mark: true, end: replyEnd(K41, replyForm({ k: K41, h: "Not saved (permission-denied). Your reply is still in the box: copy it and paste it in chat.", bad: true, val: RP.text, on: true, copy: true, lab, labText: "Copy reply: “re No. 41:” and the words" })) };
   else if (s === "owed") P.c22 = { end: replyEnd(K22, replyForm({ k: K22, h: hTyped(22, OWED_TAIL(22)), val: RP22, on: true }), { id: "pick-owed", lab, labText: "a question back; No. 22 stays owed" }) };
   else if (s === "owed-off") P.c22 = { end: "", lab, noteId: "pick-answered-only", noteTag: "the only way back: a note, sent as an answer" };
+  // No. 41 closed after its session answered his reply: it is a closed line in Answered.
+  else if (s === "line-on") { P.l41 = { open: true, reps: true, lab, tag: "your reply and its answer, on the item's line", endTag: "Reply and Mark read, as an ask's thread end" }; P.listTag = "no Re: row: the reply is on its line"; }
+  else if (s === "line-folded") { P.l41 = { reps: true, wait: true, lab, tag: "folded line: no Mark read while a reply waits", fwTag: "the waiting reply, outside the fold" }; P.listTag = "no Re: row: the reply is on its line"; }
+  else if (s === "line-asks") { P.l41 = { lab, tag: "the line shows no reply of yours" }; P.gone = goneRow(lab); }
   return P;
 }
 const screen = (s, lab) => {
-  const P = parts(s, lab);
-  return `${hdr()}${tabs()}<div class="in main">${rail()}<div class="list" id="list">${tierCalm(card22(P.c22))}${answeredSec([card41(P.c41), card15(lab && s === "closed")])}<p class="checked">Checked against main at 5cc641f7</p></div></div>${asksSection(P.box, lab, P.listTag)}${bar()}`;
+  const P = parts(s, lab), ans = P.l41 ? [line41(P.l41), line15(false)] : [card41(P.c41), line15(lab && s === "closed")];
+  return `${hdr()}${tabs()}<div class="in main">${rail(!!P.l41)}<div class="list" id="list">${tierCalm(card22(P.c22))}${answeredSec(ans)}<p class="checked">Checked against main at 39e378f1</p></div></div>${asksSection(P.box, lab, P.listTag, P.gone)}${bar()}`;
 };
 
 const CAP = {
-  closed: "No. 41 is answered and filed. Its session replied after your last Send, so the card opened at load with New reply. Reply sits at the end of its thread. No. 22 is owed and has a reply too, so it has Reply (pick 1).",
+  closed: "No. 41 is answered; its filing waits on the session's question. Its session replied after your last Send, so the card opened at load with New reply. Reply sits at the end of its thread. No. 22 is owed and has a reply too, so it has Reply (pick 1).",
   "open-empty": "Reply opens the ask reply box in place, inside the open fold, with focus in it. Send reply is off until you type, and the hint says why.",
   "open-typed": "Words typed. Send reply is on. The hint says where the reply goes: to the writer, which passes it to the session that asked No. 41.",
   "open-over": "A paste over 4000 characters. Nothing is cut. Send reply is off and the hint gives the length.",
@@ -1207,10 +1291,13 @@ const CAP = {
   failed: "The write failed. The words stay in the box, Send reply tries again, and Copy reply gives “re No. 41:” and the words, for chat.",
   owed: "Option \"Answered and owed cards\" (pick). No. 22 is still owed. You ask a question back without marking it done. The hint says No. 22 stays open.",
   "owed-off": "Option \"Answered cards only\". No. 22 has no Reply. The only way back is the note, and a note sends as an answer: Send answers would send \"Not marked done\" with it.",
+  "line-on": "Option \"On its line\" (pick). Nov 7: the session answered your reply, then closed No. 41. It stays as one line until you mark it read. Opened, the line holds the whole thread: your reply and its answer too. Reply and Mark read end it, as on an ask. The Asks list has no row for it.",
+  "line-folded": "Option \"On its line\", folded. The close hold ran out while your reply still waited. The waiting reply shows under the line, outside the fold, and the line has no Mark read until the reply has its answer.",
+  "line-asks": "Option \"In the Asks list\" (the branch today). The same moment: No. 41's line shows only the item's reply. Your reply and its answer are an Asks row that says the item is no longer on this page, while its line is still in Answered.",
 };
 
 /* ---------- Harness ---------- */
-const STATES = ["closed", "open-empty", "open-typed", "open-over", "just-sent", "undone", "waiting", "answered", "folded-waiting", "failed", "owed", "owed-off", "line-inside"];
+const STATES = ["closed", "open-empty", "open-typed", "open-over", "just-sent", "undone", "waiting", "answered", "folded-waiting", "failed", "owed", "owed-off", "line-inside", "line-on", "line-folded", "line-asks"];
 const WIDTHS = [390, 800, 1280], WNAME = { 390: "Phone", 800: "Mid", 1280: "Wide" };
 const P = { s: STATES[0], w: "all", t: "", lab: "on", hide: [] };
 function readHash() {
@@ -1235,13 +1322,15 @@ function wire(doc) {
     const t = e.target.closest ? e.target : null; if (!t) return;
     const end = t.closest(".replyend"); if (!end) return;
     const k = end.dataset.end, n = nOf[k], line = end.querySelector(".sline"), keep = line ? line.outerHTML : "", d = drafts[k] || "";
+    if (!n) return; // the Asks row's Reply is today's ask reply, not drawn here
     const tail = k === K22 ? OWED_TAIL(22) : "";
     if (t.closest(".replybtn")) {
+      if (!end.dataset.orig) end.dataset.orig = end.innerHTML; // Close puts back the thread's end as it was (with Mark read on a line)
       end.innerHTML = keep + replyForm({ k, h: d ? hTyped(n, tail) : hEmpty(n, tail), val: d, on: !!d });
       const ta = end.querySelector("textarea"); if (ta) ta.focus();
     } else if (t.closest(".rx")) {
       const ta = end.querySelector("textarea"); drafts[k] = ta ? ta.value : "";
-      end.innerHTML = keep + replyBtn(k, n);
+      end.innerHTML = end.dataset.orig || keep + replyBtn(k, n);
       const b = end.querySelector(".replybtn"); if (b) b.focus();
     }
   });

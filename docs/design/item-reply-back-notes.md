@@ -1,8 +1,8 @@
 # Waiting page, step item-reply-back: reply to Claude's reply on an item (design notes)
 
-Mockup: `docs/design/item-reply-back.html`. Screen: `skills/waiting-page/page.html` at main 5cc641f7. Its CSS (lines 8–908)
-is copied whole into the mockup. Only `#newcss` is new.
-Deep links: `#s=closed|open-empty|open-typed|open-over|just-sent|undone|waiting|answered|folded-waiting|failed|owed|owed-off|line-inside`,
+Mockup: `docs/design/item-reply-back.html`. Screen: `skills/waiting-page/page.html` at main 39e378f1. Its CSS (lines 8–953)
+is copied whole into the mockup, with main's Mark read words. Only `#newcss` is new.
+Deep links: `#s=closed|open-empty|open-typed|open-over|just-sent|undone|waiting|answered|folded-waiting|failed|owed|owed-off|line-inside|line-on|line-folded|line-asks`,
 `&w=all|390|800|1280`, `&t=light|dark`, `&lab=off`, `&hide=<state>,...`. Each state is a `data-state` element in `#pics`.
 Sizes: phone 390, mid 800 and wide 1280, as the brief names. `layout.py devices` prints `unknown` for this repo.
 Themes: light and dark. In the frames, Reply opens the box and Close shuts it.
@@ -13,8 +13,11 @@ Settled by the brief (not options here): an item reply is a new `asks/<id>` reco
 The writer routes it to the item's `owner`, or takes it when that session has ended. The session answers on that ask record
 (`reply`, `answered`), never on the item's `reply`. While its item is on the page, the record shows only on the item's card. It is not in the Asks list, it does not count in the ask pill,
 and it makes no "Re: an ask not on this page" row. The writer holds the item's close for at most 7 days while a reply waits. After that the item is
-gone, and the reply is its own Asks row, marked "Re: an item no longer on this page". Dismiss works on that row, as on any ask row. A new answer marks the card "New reply"
-and opens a sunk card, as `replied` does today.
+gone, and the reply is its own Asks row, marked "Re: an item no longer on this page". Mark read works on that row, as on any ask row. A new answer marks the card "New reply"
+and opens a sunk card, as `replied` does today. Item 11 asks what "gone" means while the closed item is still a line.
+
+No. 41 in the card states is answered with its filing pending ("Filing pending, sent"). Main draws a filed answer as one line
+(page.html `routedOpen`, `entryFor`), so a filed No. 41 would not be a card. No. 15 is drawn as main's filed line.
 
 ## 1. Which cards get Reply. Owner grant: yes
 
@@ -147,16 +150,43 @@ and opens a sunk card, as `replied` does today.
 - SKILL.md "Route and close": a writer never closes an item while one of its reply records has no `reply`. The close hold lasts at most 7 days. Until then
   the reply stays on its item's card. After that, a reply whose item is gone is its own Asks row. Owner grant: yes.
 
+## 11. A reply on an item that is now a line. Owner grant: yes
+
+On main a closed item stays as one line (`state.lines`, `isClosedLine`) until he marks it read. `itemHere` (page.html, beside `askAll`)
+reads `state.items` only. So the moment the item closes, his reply and its answer move to an Asks row "Re: an item no longer
+on this page", while the item's line still sits in Answered. `lineEl` draws no reply records and no Reply.
+
+- Option "On its line" (pick; `#s=line-on`, focus `#pick-online`; folded: `#s=line-folded`).
+  - `itemHere` reads `state.items` and `state.lines`, as `homeLink` already does for "on this page".
+  - The opened line's thread adds the reply records after "Reply from <owner>", before "Closed …" (`askMine(r, "Reply from ")`, as `threadEl`).
+  - Its thread end is Reply, then Mark read (`askReplyEnd`'s order). Reply writes the same `{text, item}` record.
+  - Folded: a waiting reply, or a new answer to one, shows under the row, outside the fold (`itemFolded` / `askFoldedMine`).
+  - While a reply waits, Mark read is off: absent on the folded row, off with `ASK_DIS_OFF` beside it when opened (`dismissBtns`, `askWaitsIn`).
+    Otherwise a read line would hide a waiting reply behind "Show N read items".
+  - Builder: `isRead` checks only `it.replied`. An `answered` on a reply record later than `dismissed` must bring the line back too.
+  - The Asks row "Re: an item no longer on this page" stays for an item whose record has left the store.
+  - Gain: one conversation in one place; the words never say "gone" about an item on the page. Lose: `lineEl` grows a thread end and a fold line.
+- Option "In the Asks list" (the branch today; `#s=line-asks`, focus `#pick-asksrow`).
+  - Gain: no new code. Lose: the conversation splits in two places, and "no longer on this page" is false while the line shows.
+- Other option, not drawn: keep the Asks row, but say "Re: No. 41, closed" with a link to the line (`homeLink`). Gain: small. Lose: still split.
+- Pick: "On its line". It covers both kinds of line: a closed item and a routed open one (below).
+- Departs from: the brief's "once the item is gone" (SKILL.md "Route and close"). Not blocking.
+
+Defect for the builder (not a design choice): an open item that is answered and filed is a routed line (`routedOpen`).
+`itemHere` is true for it (it is in `state.items`), so its reply records are kept out of Asks, and `lineEl` does not draw them.
+His reply then shows nowhere, and the line has no Reply. That is item 278's own case. Pick "On its line" fixes it the same way.
+
 ## Checked
 
-- Playwright, Chromium (headless): 13 states at 390, 800 and 1280, light and dark (78 runs).
+- Playwright, Chromium (headless): 16 states at 390, 800 and 1280, light and dark (96 runs). Each run reloads the frame.
   - Result: no script error or console error, no sideways scroll in the page or the frame, no element past the frame edge.
   - Every Reply, reply-box button, live Undo and fold control is 44 px or taller.
   - The check went red on a broken copy (a 900 px thread, a 30 px Reply): 1648 misses.
 - `check_designs.mjs` on main's page, with this mockup in `designData`. Each pick ran as a two-option item:
   - Pick 1's test item used `owed` / `#pick-owed` and `owed-off` / `#pick-answered-only`.
   - Pick 4's test item used `just-sent` / `#pick-under` and `line-inside` / `#pick-inside`.
-  - Both exited 0 with `problem: null`.
+  - Pick 11's test item (Nov 12, on the branch's page.html) used `line-on` / `#pick-online` and `line-asks` / `#pick-asksrow`.
+  - All exited 0 with `problem: null`.
 - `label_once.py` on the frame HTML at 390 (labels off) of `closed`, `just-sent`, `answered`, `folded-waiting`, `owed` and `failed`: no hit.
 - impeccable critique ran single-context, because no agent tool was open. The guard refused the context launcher, so it read the docs directly.
   The detector found nothing, but it reads only the static markup, not the screen the script draws.
