@@ -1,0 +1,14 @@
+{
+ "id": "stamp-guard-send-message",
+ "title": "The time-stamp check reads send_message text too",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 12:43 CST Nov 12: its send_message stamps ran up to 12 minutes ahead of now-central (stamped 12:42-12:53 CST, read 12:42) and no guard refused them; triage caught it by hand.",
+ "source": "coordinator 12:43 CST Nov 12",
+ "note": "Mistake: a session guesses a clock time in a send_message body (\"[coordinator HH:MM CST]\") instead of reading now-central. Harm: the receiver files wrong times and orders events wrongly. Fix: the stamp check that refuses a written time more than 1 minute off the clock also reads send_message text, including the \"[role HH:MM CST]\" form. Red first on a 12:53 stamp sent at 12:41.",
+ "updatedAt": "2026-11-12T12:45:49-06:00"
+}

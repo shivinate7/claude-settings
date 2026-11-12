@@ -1,11 +1,11 @@
 {
   "title": "q_max browser runs in parallel shards",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 2,
   "why": "q_max's browser run is one job; its last finished run took 3 h 15 min.",
-  "note": "Owner, 16:52 CST Nov 6 (chat, to the coordinator): why are q_max's browser runs still long? Lane [ended:lane:-qmax-browser-shard] splits browser.yml into parallel shards balanced by measured check times, and reports the wall-clock before and after. Owner ruling 12:27 CST Nov 7 (runner 9 chat): a lane may start q_max browser.yml as a debug run, audited for efficiency by a debater agent; home is a scoped exception to D-542 in q_max, written by lane qmax-browser-debug-run ([ended:lane:-qmax-browser-debug-run]). Page item 329 closed by it. Unclear: q_max repo; not readable from claude-settings (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-qmax-browser-debug-run]). Lane prose-unmapped-4 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Lane fan-prose-unmapped-4 finished 12:37 CST Nov 12 without starting it; ready (q_max repo, runner 11 scope).",
+  "note": "Owner, 16:52 CST Nov 6 (chat, to the coordinator): why are q_max's browser runs still long? Lane [ended:lane:-qmax-browser-shard] splits browser.yml into parallel shards balanced by measured check times, and reports the wall-clock before and after. Owner ruling 12:27 CST Nov 7 (runner 9 chat): a lane may start q_max browser.yml as a debug run, audited for efficiency by a debater agent; home is a scoped exception to D-542 in q_max, written by lane qmax-browser-debug-run ([ended:lane:-qmax-browser-debug-run]). Page item 329 closed by it. Unclear: q_max repo; not readable from claude-settings (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:lane:-qmax-browser-debug-run]). Lane prose-unmapped-4 started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Lane fan-prose-unmapped-4 finished 12:37 CST Nov 12 without starting it; ready (q_max repo, runner 11 scope). Lane started by the coordinator 12:42 CST Nov 12.",
   "owner": "coordinator",
-  "updatedAt": "2026-11-12T12:41:07-06:00",
-  "lane": ""
+  "updatedAt": "2026-11-12T12:45:49-06:00",
+  "lane": "session_013NEJL2nXUAXdNPZ2uUY2q2"
 }
