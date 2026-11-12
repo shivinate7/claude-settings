@@ -540,6 +540,70 @@ caseV() {
   fi
 }
 
+# stable_404_curl <case>: a fake curl that answers 404 (exit 22, as curl -f does) for the stable branch's install.sh, and
+# serves a stub install.sh for main's, which writes agents/builder.md so the setup reads installed. Every call's argv goes
+# to <case>/curl.log. Coordinator ruling, act 2 round 1 (2026-11-12 11:34 CST): a stable 404 falls back to main with one WARN.
+stable_404_curl() {
+  printf '#!/bin/sh\nmkdir -p "$CLAUDE_CONFIG_DIR/agents" && : > "$CLAUDE_CONFIG_DIR/agents/builder.md"\n' > "$1/served-install.sh"
+  cat > "$1/bin/curl" <<EOF
+#!/bin/sh
+printf '%s\n' "\$*" >> "$1/curl.log"
+case "\$*" in
+  *"/stable/install.sh"*) exit 22 ;;
+  *"/main/install.sh"*)
+    out=""; prev=""
+    for a in "\$@"; do [ "\$prev" = -o ] && out="\$a"; prev="\$a"; done
+    cp "$1/served-install.sh" "\$out" ;;
+  *) exit 7 ;;
+esac
+EOF
+  chmod +x "$1/bin/curl"
+}
+
+# ---- vf1: with the stable branch's install.sh a 404, the setup fetches main's install.sh instead ----
+caseVF1() {
+  name="vf1: with the stable branch's install.sh a 404, the setup fetches main's install.sh instead"
+  c=$(new_case caseVF1)
+  stable_404_curl "$c"
+  run_setup "$c" vf1 "CLAUDE_SETTINGS_RAW="
+  if ! grep -qF "raw.githubusercontent.com/shivinate7/claude-settings/main/install.sh" "$c/curl.log" 2>/dev/null; then
+    bad "$name" "no fetch of main's install.sh after the stable 404; curl was called with: $(brief "$c/curl.log")"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- vf2: the same 404 is said once, in a WARN line naming stable, and the setup still installs ----
+caseVF2() {
+  name="vf2: with the stable branch's install.sh a 404, the setup says so in one WARN line naming stable and still installs"
+  c=$(new_case caseVF2)
+  stable_404_curl "$c"
+  run_setup "$c" vf2 "CLAUDE_SETTINGS_RAW="
+  warns=$(grep -c 'WARN.*stable' "$c/out-vf2.txt" 2>/dev/null)
+  if [ "${warns:-0}" -ne 1 ]; then
+    bad "$name" "want one WARN line naming stable, got ${warns:-0}: $(brief "$c/out-vf2.txt")"
+  elif ! grep -q '^claude-settings setup: installed$' "$c/out-vf2.txt"; then
+    bad "$name" "the setup did not install after the fallback: $(verdict_text "$c/out-vf2.txt")"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- vref: with CLAUDE_SETTINGS_REF=main, the setup fetches main's install.sh and never stable's ----
+caseVREF() {
+  name="vref: with CLAUDE_SETTINGS_REF=main, the setup fetches main's install.sh and never stable's"
+  c=$(new_case caseVREF)
+  fake_curl "$c" fail
+  run_setup "$c" vref "CLAUDE_SETTINGS_RAW= CLAUDE_SETTINGS_REF=main"
+  if grep -qF "raw.githubusercontent.com/shivinate7/claude-settings/stable/install.sh" "$c/curl.log" 2>/dev/null; then
+    bad "$name" "the stable branch's install.sh was fetched under CLAUDE_SETTINGS_REF=main; curl was called with: $(brief "$c/curl.log")"
+  elif ! grep -qF "raw.githubusercontent.com/shivinate7/claude-settings/main/install.sh" "$c/curl.log" 2>/dev/null; then
+    bad "$name" "no fetch of main's install.sh under CLAUDE_SETTINGS_REF=main; curl was called with: $(brief "$c/curl.log")"
+  else
+    ok "$name"
+  fi
+}
+
 caseSweep() {
   name="sweep: the first request of a run removes an old sibling run folder and keeps a new one"
   sroot="$RUN/sweep-root"
@@ -587,6 +651,9 @@ run caseIVa
 run caseIVb
 run caseIVc
 run caseV
+run caseVF1
+run caseVF2
+run caseVREF
 run caseSweep
 
 printf '%s passed, %s failed\n' "$PASS" "$FAIL"
