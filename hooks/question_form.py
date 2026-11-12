@@ -1068,6 +1068,11 @@ def waiting_page_root(tool_input, cwd):
     return root if root and layout.is_waiting_page_url(root, tool_input.get("url")) else None
 
 
+def names_no_artifact(url):
+    """True when `url` names no artifact (no string, empty, or a bare .../artifact/ link), by lint/layout.py artifact_id."""
+    return not _layout().artifact_id(url)
+
+
 def has_waiting_page(cwd):
     """True when cwd's repo has a waiting page (lint/layout.py, the one home); a repo with no page reads as unknown."""
     root = _git_root_of(cwd)
