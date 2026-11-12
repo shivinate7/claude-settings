@@ -166,9 +166,11 @@ for _name, _cmd, _dir in (
 
 # A ref wrapped in shell syntax the read check must still see: a subshell's closing paren, a redirect written onto
 # the ref, and a `;` inside a $( ) text, which the text order walks before the fetch that follows it.
-fetch_head_refused("fetch-head read in a subshell after a cd, the closing paren does not hide the ref, denies",
-                   "(cd lane && " + VCS + " rev-parse FETCH_HEAD)", cwd=ROOT)
-fetch_head_refused("fetch-head read in a subshell, the closing paren does not hide the ref, denies",
+fetch_head_refused("fetch-head read in a subshell after a cd, the subshell's parens do not hide the ref, denies",
+                   "(cd lane && " + VCS + " rev-parse FETCH_HEAD)", cwd=GITWT)
+fetch_head_refused("fetch-head read after a cd, with no subshell parens, denies",
+                   "cd lane && " + VCS + " rev-parse FETCH_HEAD", cwd=GITWT)
+fetch_head_refused("fetch-head read in a subshell, the subshell's parens do not hide the ref, denies",
                    "(" + VCS + " show FETCH_HEAD)", cwd=GITWT)
 fetch_head_refused("fetch-head read with a redirect written onto the ref, denies",
                    VCS + " rev-parse FETCH_HEAD>out", cwd=GITWT)
@@ -196,8 +198,14 @@ for _name, _cmd in (
 ):
     fetch_head_refused("fetch-head read by %s, denies" % _name, _cmd, cwd=GITWT)
 
-# -m takes a message in merge and tag, so the ref after the message is the read.
+# -m and -F take a value in merge and tag, so the ref after that value is the read. In log, -F is a flag with no value.
 fetch_head_refused("fetch-head read after merge -m, whose value is a message, denies",
                    VCS + " merge -m msg FETCH_HEAD", cwd=GITWT)
 fetch_head_refused("fetch-head read after tag -m, whose value is a message, denies",
                    VCS + " tag -m msg v1 FETCH_HEAD", cwd=GITWT)
+fetch_head_refused("fetch-head read after merge -F, whose value is a file, denies",
+                   VCS + " merge -F msg.txt FETCH_HEAD", cwd=GITWT)
+fetch_head_refused("fetch-head read after tag -F, whose value is a file, denies",
+                   VCS + " tag -F msg.txt v1 FETCH_HEAD", cwd=GITWT)
+fetch_head_refused("fetch-head read after log -F, a flag with no value, denies",
+                   VCS + " log -F FETCH_HEAD", cwd=GITWT)
