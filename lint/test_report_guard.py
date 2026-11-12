@@ -5692,19 +5692,33 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
         with open(log, encoding="utf-8") as f:
             return [json.loads(line) for line in f if line.strip()]
 
-    def test_pe_pin_git_calls_are_bounded_per_reply(self):
-        # Catches: the rule's git cost grows past its bound: a reply with no run-form hash runs git, one run-form hash
-        # runs more than 5 git calls, a repeated hash adds calls, or two distinct hashes run more than 10. Item 571.
+    def test_pe_pin_git_calls_per_path_are_exact(self):
+        # Catches: the rule's git cost moves off its measured paths. A reply with no run-form hash runs git, and so does a
+        # line that names main with no hash. One hash costs 4 git calls for the newest main commit C, 5 for A (older than the
+        # merge base), 3 for the PR head P (the ancestor test fails, then the shallow probe), and 4 for the merge base B.
+        # A hash repeated on a second line adds none (the per-hash cache). Two distinct hashes cost their sum. Item 571.
         self.assert_fixture_shape()
+
+        def line(sha):
+            return "The failure is pre-existing; it fails on main at %s." % sha
+
         none = self.git_calls("The failure is pre-existing.")
         self.assertEqual(none, [], "a reply with no run-form hash ran git: %d calls" % len(none))
-        one = self.git_calls("The failure is pre-existing; it fails on main at %s." % self.C)
-        self.assertLessEqual(len(one), 5, "one run-form hash ran %d git calls" % len(one))
-        twice = self.git_calls("The failure is pre-existing; it fails on main at %s. It also fails on main at %s."
-                               % (self.C, self.C))
-        self.assertEqual(len(twice), len(one), "the same hash repeated in one reply ran more git calls")
-        two = self.git_calls("The failure is pre-existing; it fails on main at %s and on main at %s." % (self.P, self.A))
-        self.assertLessEqual(len(two), 10, "two distinct hashes ran %d git calls" % len(two))
+        on_main = self.git_calls("The failure is pre-existing on main.")
+        self.assertEqual(on_main, [], "a line that names main with no hash ran git: %d calls" % len(on_main))
+        newest = self.git_calls(line(self.C))
+        self.assertEqual(len(newest), 4, "the newest main hash ran %d git calls, not 4" % len(newest))
+        older = self.git_calls(line(self.A))
+        self.assertEqual(len(older), 5, "the main hash older than the merge base ran %d git calls, not 5" % len(older))
+        pr_head = self.git_calls(line(self.P))
+        self.assertEqual(len(pr_head), 3, "the PR-head hash ran %d git calls, not 3" % len(pr_head))
+        base = self.git_calls(line(self.B))
+        self.assertEqual(len(base), 4, "the merge-base hash ran %d git calls, not 4" % len(base))
+        repeat = self.git_calls(line(self.C) + "\n" + line(self.C))
+        self.assertEqual(len(repeat), len(newest), "the same hash on a second line ran %d git calls, not %d"
+                         % (len(repeat), len(newest)))
+        two = self.git_calls("The failure is pre-existing; it fails on main at %s and on main at %s." % (self.A, self.P))
+        self.assertEqual(len(two), 8, "two distinct hashes ran %d git calls, not 8" % len(two))
 
     def test_pe_pin_run_hash_is_read_by_git(self):
         # Catches: a run-form hash passes with no git call, so nothing reads whether the sha is on the base. The bound
