@@ -194,6 +194,7 @@ NARRATED_TAIL_REASON = (
 CHECK_COMMANDS = ("ci-job", "ci-job.cmd")
 CHECK_FLAGS = ("--lane-lint", "--review-record", "--release-check")
 CHECK_SCRIPT_TAIL = "bin/ci-job"
+BARE_EXEMPT_FLAG = "--review-record"   # check-tail reads it, the bare run does not
 # The `uv` and `uv run` flags that take the next word as their value (`uv run --help`, uv 0.11), so
 # `uv run -w pytest python x.py` skips `pytest`. The global flags that sit before `run` are in this list too.
 UV_VALUE_FLAGS = frozenset((
@@ -230,9 +231,66 @@ def _skip_uv_run(tokens, index: int) -> int:
     return index
 
 
-def check_stage(segment: str, background: bool, ci_job_foreground: bool = False) -> str:
-    """The command word when one segment runs a named check, else ''. `ci-job` counts
-    only in the background, or in the foreground too when `ci_job_foreground` is set (rule bare-check)."""
+# The test runs the bare roster adds (rule bare-check; coordinator, owner R20 part 2, 2026-11-12 12:55 CST). Only
+# the bare run reads them: a test piped into tail is bare-check's refusal, so check-tail never sees them. A script
+# operand counts by its file name, so `python3 -m py_compile hooks/test_guard.py` and `grep -n x hooks/test_guard.py`
+# run no test.
+TEST_SCRIPT_PREFIXES = ("test_", "_test_")
+TEST_SCRIPT_SUFFIXES = ("_test.py", ".test.ps1", ".test.mjs")
+TEST_MODULES = ("pytest", "unittest")
+TEST_SUBCOMMAND_RUNNERS = ("npm", "swift")          # `npm test`, `swift test`: the word right after the program
+TEST_SCRIPT_SHELLS = re.compile(r"(?:bash|sh|zsh|node|pwsh|powershell)$")
+POWERSHELL_FILE_FLAGS = ("-file", "-f")
+
+
+def _program_flags(tokens, index: int):
+    """The (flag, next word) pairs an interpreter at `index` gets before its script operand, and the
+    index of that operand. The flags that take a value skip it, as `_script_operand` does."""
+    at = index + 1
+    flags = []
+    while at < len(tokens) and tokens[at].startswith("-"):
+        flags.append((tokens[at], tokens[at + 1] if at + 1 < len(tokens) else ""))
+        if tokens[at] in ("-m", "-c"):
+            break
+        at += 2 if tokens[at] in INTERPRETER_VALUE_FLAGS else 1
+    return flags, at
+
+
+def _test_run_word(tokens, index: int) -> str:
+    """The program word when the command at `index` runs a test, else ''. Read through the same
+    interpreter-operand reader as the check roster (`_script_operand`): a script whose name is a test's,
+    `pytest`, `python -m pytest|unittest`, `node --test`, `npm test`, `swift test`, `xcodebuild test`."""
+    program = basename(tokens[index]).removesuffix(".exe")
+    rest = tokens[index + 1:]
+    if program == "pytest":
+        return program
+    if program in TEST_SUBCOMMAND_RUNNERS:
+        return program + " test" if rest[:1] == ["test"] else ""
+    if program == "xcodebuild":
+        return program + " test" if "test" in rest else ""
+    is_python = bool(SCRIPT_INTERPRETER.match(program))
+    if not is_python and not TEST_SCRIPT_SHELLS.match(program):
+        return ""
+    flags, at = _program_flags(tokens, index)
+    if is_python:
+        module = next((value for flag, value in flags if flag == "-m"), "")
+        if module in TEST_MODULES:
+            return program + " -m " + module
+    if program == "node" and any(flag == "--test" for flag, _ in flags):
+        return "node --test"
+    script = _script_operand(tokens, index)
+    if program in ("pwsh", "powershell"):
+        script = next((value for flag, value in flags if flag.lower() in POWERSHELL_FILE_FLAGS), script)
+    name = basename(script.replace("\\", "/"))
+    if name.startswith(TEST_SCRIPT_PREFIXES) or name.endswith(TEST_SCRIPT_SUFFIXES):
+        return program + " " + name
+    return ""
+
+
+def check_stage(segment: str, background: bool, bare: bool = False) -> str:
+    """The command word when one segment runs a named check, else ''. `ci-job` counts only in the
+    background, or in the foreground too when `bare` is set (rule bare-check). A bare run also counts a test
+    run and leaves out `merge --review-record`, whose output is a record to post; check-tail still reads it."""
     tokens = segment_tokens(segment)
     if not tokens:
         return ""
@@ -240,13 +298,18 @@ def check_stage(segment: str, background: bool, ci_job_foreground: bool = False)
     if index is None:
         return ""
     index = _skip_uv_run(tokens, index)
-    ci_job_counts = background or ci_job_foreground
+    ci_job_counts = background or bare
     if basename(tokens[index]) in CHECK_COMMANDS:
         return basename(tokens[index]) if ci_job_counts else ""
     if SCRIPT_INTERPRETER.match(basename(tokens[index]).removesuffix(".exe")) and _script_operand(
             tokens, index).replace("\\", "/").endswith(CHECK_SCRIPT_TAIL):
         return CHECK_COMMANDS[0] if ci_job_counts else ""
-    if "--confirm" in tokens or not any(flag in tokens for flag in CHECK_FLAGS):
+    if bare:
+        test = _test_run_word(tokens, index)
+        if test:
+            return test
+    flags = [flag for flag in CHECK_FLAGS if not (bare and flag == BARE_EXEMPT_FLAG)]
+    if "--confirm" in tokens or not any(flag in tokens for flag in flags):
         return ""
     return _roster_word(tokens, index, interpreter_only=True)
 
@@ -361,17 +424,19 @@ VERDICT_PIPE_REASON = (
 
 # A NAMED CHECK RUN BARE (rule bare-check, decision background-check-through-verdict). The roster is
 # check_stage's, so the spellings and wrappers match check-tail's, with `ci-job` counted in the foreground
-# too. A bare run prints the check's own output and the agent reads whatever ends the line: `merge
-# --lane-lint 7; echo $?` read as "lane lint passes". The run is refused unless `verdict` stands in the
-# call ahead of the program (`verdict merge --lane-lint 7`, `timeout 60 verdict bin/ci-job checks`). A
-# pipe into tail or head is check-tail's refusal, judged first, so it is never refused twice. A
-# background run is refused too (coordinator ruling, 2026-11-12 11:23 CST). Tests are not in the roster
-# (no incident names a test command).
+# too, `merge --review-record` left out (its output is a record to post), and test runs added
+# (`_test_run_word`; coordinator, owner R20 part 2, 2026-11-12 12:55 CST). A bare run prints the check's own
+# output and the agent reads whatever ends the line: `merge --lane-lint 7; echo $?` read as "lane lint
+# passes". The run is refused unless `verdict` stands in the call ahead of the program (`verdict merge
+# --lane-lint 7`, `timeout 60 verdict bin/ci-job checks`). A named check piped into tail or head is
+# check-tail's refusal, judged first, so it is never refused twice; a test piped into tail is this rule's,
+# since check-tail does not read tests. A background run is refused too (coordinator ruling, 2026-11-12
+# 11:23 CST). Not read: `make test`, `./gradlew test`, `./test_x.py`, and a bare run followed by a read.
 def bare_check_hit(stripped: str, background: bool) -> str:
     """The matched text when a segment, foreground or background, runs a named check with no `verdict`
     ahead of the program, else ''."""
     for segment in split_segments(stripped):
-        stage = check_stage(segment, background, ci_job_foreground=True)
+        stage = check_stage(segment, background, bare=True)
         if not stage:
             continue
         tokens = segment_tokens(segment)
@@ -383,7 +448,7 @@ def bare_check_hit(stripped: str, background: bool) -> str:
 
 
 BARE_CHECK_REASON = (
-    "this check runs bare, so you read whatever its output ends on, and an exit code echoed after it "
+    "this check or test run is bare, so you read whatever its output ends on, and an exit code echoed after it "
     "is no verdict (decision background-check-through-verdict). "
     "Remedy: `verdict <cmd>`. It keeps the full log and prints one PASS or FAIL line."
 )
