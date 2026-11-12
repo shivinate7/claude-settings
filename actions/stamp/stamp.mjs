@@ -36,7 +36,7 @@
 import { realpathSync, readFileSync, writeFileSync, unlinkSync, readdirSync, statSync, lstatSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { join, resolve, relative, posix, dirname, extname } from "node:path";
+import { join, resolve, relative, posix, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as headingFormat from "./formats/heading.mjs";
 
@@ -511,19 +511,13 @@ function nearMissCites(rel, text, config, pattern, prefixBySlug) {
 // cite.excludeGlobs does not cover. A cite of a pending slug in any other tracked text file stays
 // `[[slug]]` after the claim, and a check elsewhere in the repo then goes red with no line that says
 // why. So --claim and --check refuse here, before anything is written, and name the file, the line
-// and the config entry to change. A cite inside a code span or a fence is an example of the syntax,
-// not a cite (the same reading as the dangling-cite check), so a file that only teaches the syntax
-// stays silent. A file git does not track, a symlink, a binary file (a NUL byte) and a file over
-// UNREAD_MAX_BYTES are not read. Without git, no file is tracked and nothing is checked.
+// and the config entry to change. The match is the rewrite's own (rewriteCites skips no code span,
+// fence, frontmatter or link target), so a pending cite in any of them refuses too. A file that
+// teaches the syntax writes a placeholder slug that is not a pending cite. A file git does not
+// track, a symlink, a binary file (a NUL byte) and a file over UNREAD_MAX_BYTES are not read.
+// Without git, no file is tracked and nothing is checked.
 const UNREAD_MAX_BYTES = 4 * 1024 * 1024;
 const UNREAD_LINES_SHOWN = 5;
-
-// A glob for the file's own directory and suffix, such as plugins/_shared/*.block. A file with no
-// suffix gets its exact path.
-function scanGlobFor(rel) {
-  const ext = extname(rel);
-  return ext ? `${posix.dirname(rel) === "." ? "" : posix.dirname(rel) + "/"}*${ext}` : rel;
-}
 
 function trackedFiles(root) {
   try {
@@ -558,10 +552,8 @@ function unreadPendingCites(root, config, pattern, pendingSlugs, prefixBySlug) {
     } catch { continue; }
     if (buf.includes(0)) continue;
     const text = buf.toString("utf8").replace(/\r\n/g, "\n");
-    const guarded = protectedRanges(text);
     const hits = [];
     for (const m of text.matchAll(pattern)) {
-      if (inSpans(guarded, m.index)) continue;
       const slug = m[config.cite.slugGroup ?? 1];
       if (!pendingSlugs.has(slug)) continue;
       if (config.cite.prefixGroup && m[config.cite.prefixGroup] !== prefixBySlug.get(slug)) continue;
@@ -573,13 +565,15 @@ function unreadPendingCites(root, config, pattern, pendingSlugs, prefixBySlug) {
     const rest = hits.length - 1 > more.length ? `, and ${hits.length - 1 - more.length} more` : "";
     const also = hits.length > 1 ? ` Also at line ${more.join(", ")}${rest}.` : "";
     const where = `${rel}:${first.line} cites pending record "${first.slug}".${also}`;
-    const syntaxOnly = "If the text only teaches the cite syntax, put each example in a code span or a fence, which this check skips.";
+    const syntaxOnly = "If the text only teaches the cite syntax, write each example with a placeholder slug that is not a pending cite.";
     if (excluded) {
       const entry = excludeGlobs.find((g) => globToRegExp(g).test(rel));
-      const scanToo = scanned ? "" : ` The file is also outside cite.scanGlobs: add "${scanGlobFor(rel)}" to it.`;
-      out.push(`${where} cite.excludeGlobs entry "${entry}" covers this file, so --claim would leave the cite unrewritten. Narrow or drop that entry in ${cfgPath}, and the claim passes.${scanToo} ${syntaxOnly}`);
+      const fix = scanned
+        ? `Narrow or drop that entry in ${cfgPath}, and the claim passes.`
+        : `The file is also outside cite.scanGlobs, so two steps are needed: narrow or drop that entry in ${cfgPath}, and add "${rel}" to cite.scanGlobs. The claim passes only after both.`;
+      out.push(`${where} cite.excludeGlobs entry "${entry}" covers this file, so --claim would leave the cite unrewritten. ${fix} ${syntaxOnly}`);
     } else {
-      out.push(`${where} cite.scanGlobs does not read this file, so --claim would leave the cite unrewritten. Fix: add "${scanGlobFor(rel)}" to cite.scanGlobs in ${cfgPath}. ${syntaxOnly}`);
+      out.push(`${where} cite.scanGlobs does not read this file, so --claim would leave the cite unrewritten. Fix: add "${rel}" to cite.scanGlobs in ${cfgPath}. ${syntaxOnly}`);
     }
   }
   return out;
