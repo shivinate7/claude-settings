@@ -244,13 +244,13 @@ class RaisingOrHangingSweepFailsOpen(unittest.TestCase):
     def test_hanging_sweep_still_exits_0_and_does_not_wait_out_the_hang(self):
         # The fuse is 3 s, the hook's own sweep timeout. It must clear MIN_USEFUL_SWEEP_SECONDS (2 s), or
         # the hook skips the sweep and this case passes without testing the hang. The start marker proves
-        # the sweep ran. The hang guard of run_hook starts once the marker exists, so a slow start cannot
-        # spend it, and a hang the fuse does not cut off ends in that guard.
+        # the sweep ran. The 10 s cap counts from that marker, so a slow start cannot spend it. The fuse
+        # must end the hook well inside the cap: a fuse honoured late reads as the hang, and the cap ends it.
         try:
             result = run_hook(
                 {"hook_event_name": "SessionEnd", "cwd": self.repo},
                 env_extra={"JANITOR_SWEEP_PATH": self.hanging_sweep, "JANITOR_SWEEP_TIMEOUT": "3"},
-                timeout=20,
+                timeout=10,
                 start_after=self.hanging_started,
             )
         except AssertionError as hang:
