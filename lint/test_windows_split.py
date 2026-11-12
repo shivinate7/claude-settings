@@ -4,8 +4,8 @@
 WindowsSplit proves: (1) each suite command in REQUIRED runs in exactly one `windows-latest` job (none
 dropped, none run twice); (2) at least MIN_JOBS `windows-latest` jobs carry those suites.
 Cut F adds: the guard suite has its own Windows job (GUARD_JOB) and runs off it nowhere else; its
-slice (GUARD_TESTS=windows-slice) runs only on pull_request; the guard mutation test has its own
-Linux job (MUTATE_JOB) and runs nowhere else; both jobs skip on the `guard` scope flag. A scoped job's
+slice (GUARD_TESTS=windows-slice) runs only on pull_request; the guard mutation test runs in its
+two Linux shard jobs (MUTATE_SHARD, one shard each) and nowhere else; those jobs skip on the `guard` scope flag. A scoped job's
 job-level if, if any, holds only the draft guard; its scope condition sits in each step
 (read_scope_condition, step_rest), so a step cannot run outside the scope condition.
 
@@ -315,6 +315,9 @@ def shard_base(name):
 # The guard mutation test moves off `checks` (Linux) to its own Linux job (cut F).
 MUTATE_CMD = "python3 hooks/mutate_guard.py"
 MUTATE_JOB = "checks-mutate-guard"
+# The guard mutation test runs in two Linux shard jobs, one shard each (MUTATE_SHARD): every mutant runs in exactly one of them.
+MUTATE_SHARD = {MUTATE_JOB: "1/2", "checks-mutate-guard-2": "2/2"}
+MUTATE_IF = "needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request'"
 # The bin/shoot suite and its browser install have their own Linux job, off the `checks` lint job.
 SHOOT_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test lint/test_shoot.mjs'
 SHOOT_JOB = "checks-shoot"
@@ -326,7 +329,7 @@ WAITING_PAGE_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test skil
 WAITING_PAGE_JOB = "checks-waiting-page"
 ROADMAP_CMD = 'NODE_PATH="$PWD/.github/shoot/node_modules" node --test skills/roadmap/tests/page.test.mjs'
 # The scope flag each job skips on when the flag is not its own name.
-FLAG_OF = {GUARD_JOB: "guard", MUTATE_JOB: "guard", SHOOT_JOB: "shoot", "checks-macos-b": "checks_macos",
+FLAG_OF = {GUARD_JOB: "guard", **{job: "guard" for job in MUTATE_SHARD}, SHOOT_JOB: "shoot", "checks-macos-b": "checks_macos",
            "checks-guard-2": "checks_guard"}
 FLAG_OF[WAITING_PAGE_JOB] = "shoot"
 # The lint jobs run on every PR with no scope condition: the Linux pair, read from its one home CHECKS_SUITE_JOBS.
@@ -683,14 +686,21 @@ def guard_problems(text):
 
 
 def mutate_problems(text):
-    """Cut F. The guard mutation test runs in MUTATE_JOB on Linux, and in no other job."""
+    """The guard mutation test runs in exactly the MUTATE_SHARD jobs, one shard each, on Linux, and in no other job. Each
+    shard step is pinned as the Linux guard shards are (pin_problems): the scope `if:`, no shell, and its MUTATE_SHARD value
+    as its only env. No job sets MUTATE_SHARD for all its steps, which would reach the lint steps too (job_env_problems)."""
     jobs = all_jobs(text)
-    homes = [n for n, j in jobs.items() for st in j["steps"] if st.get("run") == MUTATE_CMD]
-    problems = []
-    if homes != [MUTATE_JOB]:
-        problems.append(f"{MUTATE_CMD!r} runs in {homes}, want exactly [{MUTATE_JOB!r}]")
-    if MUTATE_JOB in jobs and not (jobs[MUTATE_JOB]["os"] or "").startswith("ubuntu"):
-        problems.append(f"{MUTATE_JOB} runs on {jobs[MUTATE_JOB]['os']}, want ubuntu-latest")
+    homes = [(n, st) for n in jobs for st in step_blocks(job_block(text, n)) if MUTATE_CMD in run_lines(st)]
+    names = sorted(job for job, _ in homes)
+    problems = job_env_problems(text, tuple(MUTATE_SHARD))
+    if names != sorted(MUTATE_SHARD):
+        problems.append(f"{MUTATE_CMD!r} runs in {names}, want one shard in each of {sorted(MUTATE_SHARD)}")
+    for job, st in homes:
+        if job in MUTATE_SHARD:
+            problems += pin_problems(job, st, MUTATE_CMD, MUTATE_IF, None, {"MUTATE_SHARD": MUTATE_SHARD[job]})
+    for job in MUTATE_SHARD:
+        if job in jobs and not (jobs[job]["os"] or "").startswith("ubuntu"):
+            problems.append(f"{job} runs on {jobs[job]['os']}, want ubuntu-latest")
     return problems
 
 
@@ -900,8 +910,7 @@ class WindowsSplit(unittest.TestCase):
     def test_each_suite_runs_exactly_once(self):
         bad = [p for p in placement_problems(self.text) if "times" in p]
         self.assertEqual(bad, [])
-        # The mutation test is placed
-        # once in its own job. Named failure: a mutation test dropped or doubled, so mutants go unrun.
+        # The mutation test runs once in each shard job, MUTATE_SHARD. Named failure: a shard dropped or doubled, so mutants go unrun.
         self.assertEqual(mutate_problems(self.text), [])
 
     def test_the_shoot_suite_has_its_own_job(self):
@@ -990,7 +999,7 @@ class WindowsSplit(unittest.TestCase):
         # The guard and mutate jobs skip on the
         # guard flag. Named failure: a cut job runs or never runs on push, schedule and dispatch.
         jobs = all_jobs(self.text)
-        for name in (GUARD_JOB, MUTATE_JOB):
+        for name in (GUARD_JOB, *MUTATE_SHARD):
             self.assertIn(name, jobs, f"no job named {name}")
             self.assertEqual(job_check_problems(name, jobs[name], FLAG_OF[name]), [])
         # checks-guard-2 is the Linux guard shard, on checks_guard through FLAG_OF. Named failure: its steps name another flag,
@@ -1208,14 +1217,17 @@ class WindowsSplit(unittest.TestCase):
         self.assertTrue(guard_problems(doc(more="  checks-windows:\n    runs-on: windows-latest\n    needs: scope\n"
                                                "    if: ${{ needs.scope.outputs.checks_windows == 'true' }}\n"
                                                "    steps:\n      - run: python hooks/test_guard.py\n")))
-        checks = "jobs:\n  checks-mutate-guard:\n    runs-on: ubuntu-latest\n    steps:\n      - run: python3 hooks/mutate_guard.py\n"
-        self.assertEqual(mutate_problems(checks), [])
-        self.assertTrue(mutate_problems(checks.replace("checks-mutate-guard", "checks")))  # in the lint job
-        self.assertTrue(mutate_problems(checks.replace("ubuntu-latest", "windows-latest")))  # on Windows
-        self.assertTrue(mutate_problems("jobs:\n  checks:\n    runs-on: ubuntu-latest\n    steps:\n"
-                                        "      - run: python3 hooks/mutate_guard.py\n"
-                                        "  checks-mutate-guard:\n    runs-on: ubuntu-latest\n    steps:\n"
-                                        "      - run: python3 hooks/mutate_guard.py\n"))  # runs twice
+        shards = {"checks-mutate-guard": ("ubuntu-latest", [mutate_shard("1/2")]),
+                  "checks-mutate-guard-2": ("ubuntu-latest", [mutate_shard("2/2")])}
+        self.assertEqual(mutate_problems(split_doc(shards)), [])
+        self.assertTrue(mutate_problems(split_doc({**shards, "checks": ("ubuntu-latest", [mutate_shard("1/2")])})))  # in the lint job
+        self.assertTrue(mutate_problems(split_doc({**shards, "checks-mutate-guard": ("windows-latest", [mutate_shard("1/2")])})))  # on Windows
+        self.assertTrue(mutate_problems(split_doc({"checks-mutate-guard": ("ubuntu-latest", [mutate_shard("1/2")])})))  # second shard missing
+        self.assertTrue(mutate_problems(split_doc({**shards, "checks-mutate-guard-2": ("ubuntu-latest", [mutate_shard("1/2")])})))  # both 1/2
+        self.assertTrue(mutate_problems(split_doc({**shards, "checks-mutate-guard-2": ("ubuntu-latest", [mutate_shard("2/2", env={})])})))  # value dropped
+        self.assertTrue(mutate_problems(split_doc({**shards, "checks-mutate-guard-2": ("ubuntu-latest", [mutate_shard("2/2", if_=None)])})))  # if dropped
+        job_level = split_doc(shards).replace("    needs: scope\n    steps:", "    needs: scope\n    env:\n      MUTATE_SHARD: 1/2\n    steps:", 1)
+        self.assertTrue(mutate_problems(job_level))  # a job-level MUTATE_SHARD reaches the lint steps too
 
 
 def split_doc(jobs):
@@ -1234,6 +1246,11 @@ def split_doc(jobs):
                 out += [f"          {k}: {v}" for k, v in env.items()]
             out.append(f"        run: {cmd}")
     return "\n".join(out) + "\n"
+
+
+def mutate_shard(value, if_=MUTATE_IF, env=None):
+    """One guard mutation step for split_doc: the mutation test with its MUTATE_SHARD value, or the `env` given in its place."""
+    return (MUTATE_CMD, if_, None, {"MUTATE_SHARD": value} if env is None else env)
 
 
 def linux_guard_shard(value, if_=LINUX_GUARD_IF, shell=None, env=None):
