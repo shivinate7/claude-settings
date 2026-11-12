@@ -686,7 +686,7 @@
         "reason": "Whether an act can be undone, and whether the ask is one yes or no on the exact act with its cleanup named, are content judgments on the act and the reply."
       }
     },
-    "style-hand-off-block-runs": {
+    "style-hand-off-runs-as-is": {
       "mechanism": {
         "kind": "unmechanized",
         "reason": "Whether a block is runnable as is, with its `cd`, no blank lines and no admin step, is a judgment on the reply and the tools available. The Stop reply judge (hooks/reply_judge.py, a model, never blocks) flags a command left to the owner without its own fenced code block, ready to run as is, outside the report blockquote, and files the finding under the id output-never-hand-off-doable-step, because JUDGED_RULES and its prompt name only that id; a finding writes one guard.log line."

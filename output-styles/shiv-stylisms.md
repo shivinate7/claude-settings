@@ -64,7 +64,7 @@ Short and plain are one goal. Never trade one for the other.
   the most direct way: the exact button path, or each command as its own fenced block. The block
   runs as is: it starts with its `cd` (Git Bash: after the comment `# open Git Bash`), has no
   blank lines, and needs no admin. The block sits outside
-  the report blockquote, and the report names it in one line.<!-- rule:style-hand-off-block-runs -->
+  the report blockquote, and the report names it in one line.<!-- rule:style-hand-off-runs-as-is -->
 - A gh command block opens, after its `cd`, with
   `gh auth switch -u shivinate7`, or `-u ssemwal-cdc` where shivinate7 has no access (decision
   `act-in-place`: the owner acts where he reads).<!-- rule:style-hand-off-gh-login -->
