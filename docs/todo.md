@@ -19,4 +19,3 @@ Tasks a session caught and did not do. One line each.
 - Add the retired names to the retired-names lint. The names are in the Not column of GLOSSARY (coordinator, term recheck, 2026-11-02 14:22 CST).
 - The lane-undo check reads two shapes of undo (owner, 2026-11-02 14:19 CST; it grants the 11:26 CST narrowing).
 - Build the child-repo lanes from the term recheck and the merge-line pointers. A coordinator may run them in any child repo with no per-repo grant. An exception a child wants needs the owner's grant (owner, 2026-11-02 15:43 CST).
-- Let a solo session merge. The merge tool's cloud confirm needs the batch-runner role today (owner, 2026-11-02 14:02 CST).

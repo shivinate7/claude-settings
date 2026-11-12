@@ -703,6 +703,19 @@ def remote_session_id():
     return LANE_PREFIX + rest if rest else None
 
 
+LOCAL_ENV = "CLAUDE_CODE_SESSION_ID"  # a local session's own id, a bare UUID (the form hooks/guard_shared_tree.py reads)
+
+
+def session_record_id():
+    """The one id this session files its merge role under and the roster names it by: the record id of a cloud session
+    (remote_session_id), else a local session's own id, else None. The merge tool and the guard both read it here."""
+    own = remote_session_id()
+    if own:
+        return own
+    local = os.environ.get(LOCAL_ENV) or ""
+    return local if SESSION_ID.fullmatch(local) and local[0] != "." else None
+
+
 def _lane_id(session_id):
     """The lane's id as a step's `lane` field names it, or None. A set env value of another shape is no id."""
     if os.environ.get(LANE_ENV):

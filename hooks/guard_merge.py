@@ -1072,7 +1072,7 @@ def conflict_markers_hit(stripped: str, cwd: str):
 
 
 # ---- merge --role: the tier is read from this session's own get_session record
-ROLE_TIERS = ("batch-runner",)
+PROVABLE_ROLES = ("batch-runner",)
 ROLE_TAG_PREFIX = BUILD_TAG
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge tier it claims. "
@@ -1133,24 +1133,57 @@ def _own_get_session_tags(transcript: str, session_id: str):
     return _own_session_read(transcript, session_id)[0]
 
 
-def role_proof_hit(stripped: str, transcript: str) -> str:
-    """Return the matched call when a segment runs the merge tool with a role the own record does not
-    prove, else ''. Fails closed inside the clause: any error in the reads is a refusal, because the
-    allow rule has no classifier behind it and the guard-wide crash path fails open."""
-    for segment in split_segments(stripped):
-        tier = role_call_of(segment) if segment.strip() else None
-        if tier is None:
+ROSTER_REF = "refs/remotes/origin/roadmap"  # the record branch as the session last fetched it; never fetched here
+ROSTER_HEADING = "## Standing sessions"
+# One roster line: `- Batch runner: "<title>", <session id>, since <time>.` (a scope may follow the role, before the colon).
+ROSTER_RUNNER = re.compile(r'^- Batch runner(?:, [^:"]*)?: "[^"]*", ([^,\s]+),')
+
+
+def roster_batch_runner(cwd: str, own_id: str) -> bool:
+    """True when a Batch runner line under Standing sessions on the local ref origin/roadmap (read in cwd) names own_id in its id slot.
+
+    The title is no id slot, so an id quoted in a title proves nothing. No ref, no file, no section or a failed read is False.
+    Cost: one `git show`, only on a role-flag call."""
+    import git_reads
+    shown = git_reads._git(cwd, "show", ROSTER_REF + ":CLAUDE.md") if cwd and os.path.isdir(cwd) else None
+    if shown is None or shown.returncode != 0:
+        return False
+    inside = False
+    for line in shown.stdout.splitlines():
+        if line.startswith("#"):
+            inside = line.strip() == ROSTER_HEADING
             continue
-        try:  # cost: one transcript read, only on a role-flag call
-            from override import remote_session_id
-            own_id = remote_session_id()
-            if own_id and transcript:
-                tags = _own_get_session_tags(transcript, own_id)
-                if tier in ROLE_TIERS and tags is not None and ROLE_TAG_PREFIX + tier in tags:
+        found = ROSTER_RUNNER.match(line) if inside else None
+        if found and found.group(1) == own_id:
+            return True
+    return False
+
+
+def role_proof_hit(stripped: str, transcript: str, cwd: str = "") -> str:
+    """Return the matched call when a segment runs the merge tool with a role the session does not prove, else ''.
+
+    One proof on local and cloud: the roster (the Batch runner line of the roadmap's Standing sessions names this session's id), else the
+    own get_session record (cloud tags are optional): a cs-build:batch-runner tag, or a lone lane (cs-build:lane with no
+    parent_session_id, which merges as the batch runner). A lane a coordinator started names a parent and stays refused.
+    Fails closed inside the clause: any error in the reads is a refusal, because the allow rule has no classifier behind it
+    and the guard-wide crash path fails open."""
+    for segment in split_segments(stripped):
+        role = role_call_of(segment) if segment.strip() else None
+        if role is None:
+            continue
+        try:  # cost: one transcript read and one git show, only on a role-flag call
+            from override import session_record_id
+            own_id = session_record_id()
+            if own_id and role in PROVABLE_ROLES:
+                if roster_batch_runner(cwd, own_id):
                     continue
+                if transcript:
+                    tags, _, parent = own_session.own_session_read(transcript, own_id)
+                    if tags is not None and (ROLE_TAG_PREFIX + role in tags or (LANE_TAG in tags and parent is None)):
+                        continue
         except Exception:
             pass
-        return "merge role " + tier
+        return "merge role " + role
     return ""
 
 

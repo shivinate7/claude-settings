@@ -125,19 +125,19 @@
                           they go in the pull request body between two marker lines. A second build of NAME is allowed only for that same
                           set and leaves the pull request as it is, draft or ready; a late PR, a moved head or a lane left out is refused,
                           and nothing is pushed or edited. Runs no lane lint and no ready check, waits for no CI, takes no lock.
-                          A cloud run needs the batch-runner role.
+                          A run needs the batch-runner role.
   merge --batch-build NAME [PR ...] --ready [--lint-unknown-ok REASON]
                           lint the head of batch-NAME once (the lint of --lane-lint), run the repo's ready checks on it, and record the
                           head that passed (Linted:). Then it asks the host to mark the draft ready. Host.ready sends nothing, so on a
                           real host the run stops there and names the session's route to mark it ready. A FAIL of the lint or of a ready
                           check stores each lane it names (Blamed:) and prints its drop command. A FAIL, or an unknown with no reason,
                           leaves the draft and exits 1. A PR list, if given, must be the frozen set. A ready pull request whose head is the
-                          Linted head is left as it is. Takes no lock. A cloud run needs the batch-runner role.
+                          Linted head is left as it is. Takes no lock. A run needs the batch-runner role.
   merge --batch-build NAME --blame PR --run URL
                           store Blamed: #PR in batch-NAME's block, so --batch-drop may take PR off. URL is the Actions run that blames it:
                           it must be completed, concluded failure, and on the batch pull request's current head, and PR must be a frozen
                           lane. Any other run, or a lane outside the batch, is refused and nothing is stored. Runs no lint and no ready
-                          check, pushes nothing, takes no lock. A cloud run needs the batch-runner role.
+                          check, pushes nothing, takes no lock. A run needs the batch-runner role.
   merge --batch-drop NAME PR
                           take PR, and each frozen lane whose head contains PR's head, off batch-NAME. PR must have a stored blame
                           (Blamed:, from --ready or --blame); any other lane is refused. Rebuild the branch from the batch's
@@ -145,7 +145,7 @@
                           batch that says `On: batch-NAME` on the new head. Before the push it asks the host to return a ready pull
                           request to draft; Host.to_draft sends nothing, so it says so and the push restarts CI. The batch then needs
                           `--batch-build NAME --ready` again. Runs no lane lint and no ready check, takes no lock.
-  merge --role TIER       cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`
+  merge --role TIER       record this session's merge role, local or cloud (batch-runner only; the coordinator never merges). `--confirm`
                           runs only when that role is recorded for the session (read_merge_role).
 
 Git half: the merge lock, the temporary worktree, the claim, the push, the revert, resume, the
@@ -5094,7 +5094,12 @@ def batch_drop(root, h, name, number):
     needs_ready(name, drafted)
     return 1 if restack(root, h, branch, new, {n: lanes[n] for n in dropping}) else 0
 
-MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
+MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm`, local or cloud; the coordinator never merges
+
+def session_record_id():
+    """The id this session's role file is read and written under: hooks/override.py session_record_id, the one form the guard reads too."""
+    from override import session_record_id as one_home  # hooks/, on sys.path from the top of this file
+    return one_home()
 
 def role_path():
     return pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")) / "state" / "merge-role.json"
@@ -5102,7 +5107,7 @@ def role_path():
 def read_merge_role():
     """This session's recorded merge role, or None: no session id, no file, unreadable or malformed, another session's, or a tier outside MERGE_ROLES.
     Every failure is None, so the check fails closed. An absent id never equals an absent record."""
-    sid = os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID")
+    sid = session_record_id()
     if not sid:
         return None
     try:
@@ -5115,12 +5120,10 @@ def read_merge_role():
     return role if isinstance(role, str) and role in MERGE_ROLES else None  # a list is unhashable: test the type first
 
 def write_merge_role(tier):
-    """Record `tier` as this cloud session's merge role. Refuses outside the cloud, with no session id, or for a tier outside MERGE_ROLES; nothing is written then."""
-    sid = os.environ.get("CLAUDE_CODE_REMOTE_SESSION_ID")
-    if os.environ.get("CLAUDE_CODE_REMOTE") != "true":
-        raise Stop("--role records a merge role in a cloud session only. " + ROLE_CITE)
+    """Record `tier` as this session's merge role, local or cloud. Refuses with no session id, or for a tier outside MERGE_ROLES; nothing is written then."""
+    sid = session_record_id()
     if not sid:
-        raise Stop("--role needs CLAUDE_CODE_REMOTE_SESSION_ID, and it is not set. " + ROLE_CITE)
+        raise Stop("--role needs a session id (CLAUDE_CODE_SESSION_ID, or CLAUDE_CODE_REMOTE_SESSION_ID in the cloud), and none is set. " + ROLE_CITE)
     if tier not in MERGE_ROLES:
         raise Stop("this session's tier may not record a merge role. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)  # names no valid tier: a lane must not learn which to claim
     path = role_path()
@@ -5203,7 +5206,7 @@ def build_parser():
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
     p.add_argument("--with", dest="with_prs", default=None, metavar="PR,PR,...", help="with --lane-lint on a PR number: also check the head against each named open PR (a comma list), even one of another session")
     p.add_argument("--touched-tests", action="store_true", help="with --lane-lint: after the lint passes, run the test files the diff touches in the lint worktree; a failing test refuses, a timeout is unknown (lifted by --lint-unknown-ok)")
-    p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")
+    p.add_argument("--role", metavar="ROLE", help="record this session's merge role, local or cloud (batch-runner only)")
     p.add_argument("--batch-build", nargs="+", metavar=("NAME", "PR"), help="build batch-NAME and its one draft pull request from these lane PRs, or allow the same set again; stands alone; takes no lock")
     p.add_argument("--batch-drop", nargs=2, metavar=("NAME", "PR"), help="take PR, and each frozen lane that stacks on it, off batch-NAME; stands alone; takes no lock")
     p.add_argument("--on", metavar="BRANCH", help="with --batch-build: stack the batch on this running batch's head")
@@ -5395,7 +5398,7 @@ def main(argv, host=None, lock=None, hosts=None):
             lines, ok = reviewed_roots(a.root, hosts, a.config)
             say(*lines)
             return 0 if ok else 1
-        if (a.confirm or batch) and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and not read_merge_role():  # before any host read or lock
+        if (a.confirm or batch) and not read_merge_role():  # before any host read or lock
             raise Stop("this session may not merge. Run `merge --lane-lint <pr>` first. Then post the review record on the pull request; the batch runner finds it. " + ROLE_CITE)
         if a.confirm and not a.head and read_merge_role() == "batch-runner":  # before the lock, a claim or any write
             raise Stop(BATCH_RUNNER_NEEDS_HEAD)
@@ -5478,14 +5481,14 @@ def main(argv, host=None, lock=None, hosts=None):
                 h.refuse_pinned_mismatch()
             say(*reviewed_lines(h))
             return 0
-        if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and cfg["merge"].get("standingGrant", True) is False:
+        if a.confirm and cfg["merge"].get("standingGrant", True) is False:
             raise Stop("The owner's standing merge grant is off for this repo, so ask the owner to merge this PR. " + OFF_CITE)
         ignore = ignore_checks(cfg)
         if not host:
             h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore
             h.refuse_pinned_mismatch()
         checked = None  # the head the lane-lint PASS names; confirm refuses any other
-        if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and isinstance(h, Host) and not info["draft"]:  # a scripted host that is no Host brings its own reads; a draft is the records step, never a join
+        if a.confirm and isinstance(h, Host) and not info["draft"]:  # a scripted host that is no Host brings its own reads; a draft is the records step, never a join
             lint_check(h, a.pr, info, root, a.config)
             checked = info["head"]
         if a.confirm:
