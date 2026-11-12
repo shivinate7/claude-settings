@@ -27,8 +27,10 @@ import sys
 REMOTE = "refs/remotes/origin/"
 # Names kept whatever their history. roadmap holds the roadmap record and is never merged into main. stable moves with green main (restart-plan R42 part 2), so its tip is always on main's history.
 PROTECTED = ("main", "master", "roadmap", "stable")
-# GitHub requests the delete step leaves unspent. The step reads the remaining budget once, counts two requests per branch (tip read,
-# DELETE), and before each delete stops green when the budget is below this. Other runs in the repo share the pool.
+# GitHub requests the delete step aims to leave unspent. The step reads the remaining budget once per run and counts two requests per
+# branch (tip read, DELETE) locally, not a fresh read per delete. It stops green when the count is below this before a delete; a check
+# at the reserve passes and the delete spends 2, so the real floor is 298. The next run finishes the rest only after the hourly reset,
+# on a later push to main or a dispatch. Other runs in the repo share the pool.
 BUDGET_RESERVE = 300
 SAFE_NAME = re.compile(r"[A-Za-z0-9._/-]+")
 

@@ -49,8 +49,10 @@ jobs:
         shell: bash
         run: |
           # The delete step spends 2 requests a branch (tip read, DELETE) from the repo's shared hourly pool. One read
-          # of the pool now, then the loop counts down; below the reserve it stops green and the next run finishes.
-          # A budget that cannot be read stops the same way: the sweep cannot tell what is left.
+          # of the pool now, then a local count goes down; it is not a fresh read per delete. Below the reserve the
+          # step stops green; the next run finishes the rest after the hourly reset, on a later push or a dispatch.
+          # A budget that cannot be read stops the same way: the sweep cannot tell what is left. done counts a
+          # branch only when its DELETE succeeded or its ref was already gone; a kept branch counts as left.
           reserve=$(python3 actions/branch-sweep/sweep.py --budget-reserve)
           remaining=$(gh api rate_limit --jq .resources.core.remaining 2> "$RUNNER_TEMP/budget-err.txt" < /dev/null || true)
           args=()
@@ -77,7 +79,6 @@ jobs:
               fi
               # Spent before the tip read, so every path out of this branch has paid for both requests.
               remaining=$((remaining - 2))
-              done_n=$((done_n + 1))
               # About 60 lanes push in parallel, so a branch can gain a commit after the checkout. The verdict
               # holds for the checkout's tip, so a branch whose tip moved is kept. The read narrows the race to one
               # API call; the delete has no sha condition, so a push in that gap still loses.
@@ -92,6 +93,7 @@ jobs:
                   # The ref is already gone, so there is nothing to delete.
                   *"HTTP 404"* | *"HTTP 422"*)
                     echo "already gone: $name"
+                    done_n=$((done_n + 1))
                     continue
                     ;;
                   # A refusal for rate or scope repeats on every later call, so stop. A red run on main trips
@@ -123,6 +125,7 @@ jobs:
                   # The ref is already gone, so the delete is done.
                   *"HTTP 404"* | *"HTTP 422"*)
                     echo "already gone: $name"
+                    done_n=$((done_n + 1))
                     continue
                     ;;
                   # A refusal for rate or scope repeats on every later delete, so stop. A red run on main trips
@@ -136,6 +139,8 @@ jobs:
                 echo "$err" >&2
                 echo "::warning::could not delete $name"
                 failed=1
+              else
+                done_n=$((done_n + 1))
               fi
             fi
           done < "$RUNNER_TEMP/verdicts.txt"

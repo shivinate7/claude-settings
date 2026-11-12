@@ -20,8 +20,9 @@ Rules:
                same loop; a comment or a quoted string is no call. It does not check the value, the read's exit
                handling or the compare
   budget       the run block that deletes reads the request budget with gh api rate_limit before its delete loop, and
-               takes the reserve from sweep.py --budget-reserve; a comparison against a number literal is a copy of
-               the reserve. A comment or a quoted string, one that spans lines included, is no call
+               takes the reserve from sweep.py --budget-reserve; in that block a comparison against a number literal,
+               quoted or in (( )), is a copy of the reserve. A comment or a quoted string, one that spans lines
+               included, is no call
 
 The reader is line based, with no YAML library: CI installs none for lint. It needs only the block style this
 repo's workflows use. GitHub evaluates an expression in a quoted value, a plain value, or a run: block, even after a
@@ -334,17 +335,20 @@ def check_tip(runs, found):
 
 BUDGET_READ = re.compile(r"\brate_limit\b")
 BUDGET_RESERVE_CALL = re.compile(r"\bsweep\.py\s+--budget-reserve\b")
-LITERAL_COMPARE = re.compile(r"-(?:lt|le|gt|ge)\s+\d+(?=\s|\]|;|$)")
+# A test-command compare (-lt 300, -lt "300") or an arithmetic compare, `(( remaining < 300 ))` or `(( 300 > remaining ))`, against a number.
+LITERAL_COMPARE = re.compile(r"-(?:lt|le|gt|ge)\s+([\"']?)\d+\1(?=\s|\]|;|$)")
+ARITH_COMPARE = re.compile(r"\(\((?:(?!\)\)).)*?(?:(?<![\w$])\d+\s*[<>]|[<>]=?\s*\d+(?!\w))")
 
 
 def mask_block(block):
     """[(n, masked)] for a run block's lines: each shell comment cut and each quoted span blanked, like mask_shell,
     but a quote left open at the end of a line stays open on the next, so text inside a multi-line string is no
     command. A quote opens only where a word starts, so `don't` opens nothing. A backslash in double quotes skips
-    the next character."""
+    the next character. A span on one line that holds only digits, such as "300", is kept: it is a number literal
+    in a compare, not text."""
     out, quote = [], None
     for n, text in block:
-        chars, skip = [], False
+        chars, skip, opened = [], False, None
         for i, ch in enumerate(text):
             if quote:
                 chars.append(" ")
@@ -353,9 +357,12 @@ def mask_block(block):
                 elif ch == "\\" and quote == '"':
                     skip = True
                 elif ch == quote:
+                    if opened is not None and text[opened + 1:i].isdigit():
+                        chars[opened:i + 1] = text[opened:i + 1]
                     quote = None
             elif ch in "\"'" and (i == 0 or text[i - 1] in " \t=;&|(<>"):
                 quote = ch
+                opened = i
                 chars.append(" ")
             elif ch == "#" and (i == 0 or text[i - 1] in " \t;&|("):
                 break
@@ -371,7 +378,7 @@ def check_budget(runs, found):
     pool down to nothing, and other runs in the repo then fail."""
     for block in run_blocks(runs):
         masked = mask_block(block)
-        reads, reserves, first_delete = [], [], None
+        reads, reserves, compares, first_delete = [], [], [], None
         stack = []  # open loops' first lines
         for n, text in logical_lines(masked):
             one_line = bool(LOOP_OPEN.match(text) and LOOP_ONE_LINE.search(text))
@@ -387,12 +394,13 @@ def check_budget(runs, found):
                     reads.append(n)
             if BUDGET_RESERVE_CALL.search(text):
                 reserves.append(n)
-            for m in LITERAL_COMPARE.finditer(text):
-                found.append((n, "budget", text.strip()))
+            if LITERAL_COMPARE.search(text) or ARITH_COMPARE.search(text):
+                compares.append((n, "budget", text.strip()))
             if LOOP_OPEN.match(text) and not one_line:
                 stack.append(n)
         if first_delete is None:
             continue
+        found.extend(compares)  # a number compare in a block with no delete, such as the pulls step, copies no reserve
         n, loop_start = first_delete
         if not any(r < loop_start for r in reads):
             found.append((n, "budget", "no gh api rate_limit read before the delete loop"))
