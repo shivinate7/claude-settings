@@ -1,0 +1,65 @@
+name: branch-sweep
+
+# Deletes each remote branch whose last commit is on main or on an archive/* branch, the set the owner's
+# Oct 30 grant allows (actions/branch-sweep/sweep.py holds the rule). It runs with GitHub's own token, so no
+# personal token exists. Lint: lint/check_branch_sweep_workflow.py. Cost: one run per push to main, no timer.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Two runs would delete the same branches twice and fail on the second.
+concurrency:
+  group: branch-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # The token has no pull-requests scope, so this read relies on the repo being public. A failed read stops
+      # the job before any delete: a sweep that cannot see open pull requests could close one.
+      - name: Read the heads of open pull requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          gh api --paginate "repos/$REPO/pulls?state=open&per_page=100" --jq '.[].head.ref' > "$RUNNER_TEMP/open-heads.txt"
+
+      - name: Delete the branches the Oct 30 grant allows
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        shell: bash
+        run: |
+          args=()
+          while IFS= read -r head; do
+            if [ -n "$head" ]; then
+              args+=(--open-head "$head")
+            fi
+          done < "$RUNNER_TEMP/open-heads.txt"
+          python3 actions/branch-sweep/sweep.py --repo . --default "$DEFAULT_BRANCH" "${args[@]}" > "$RUNNER_TEMP/verdicts.txt"
+          cat "$RUNNER_TEMP/verdicts.txt"
+          failed=0
+          while read -r verb name reason; do
+            if [ "$verb" = delete ]; then
+              if ! gh api -X DELETE "repos/$REPO/git/refs/heads/$name"; then
+                echo "::warning::could not delete $name"
+                failed=1
+              fi
+            fi
+          done < "$RUNNER_TEMP/verdicts.txt"
+          exit "$failed"
