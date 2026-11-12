@@ -2230,24 +2230,26 @@ def hook_bypass_hit(texts):
     return None
 
 
-# ---- the review record after a round (rule review-record-after-round, decision pr-review-record)
+# ---- the review log after a round (rule review-log-after-round, decision pr-review-record)
 RECORD_SPAWN_TOOLS = ("Agent", "Task")
 RECORD_REVIEWER_ROLES = ("reviewer", "design-reviewer")  # a spawn of one of these is a round
 RECORD_TRIGGER_ROLES = ("builder", "test-author")  # a spawn of one of these, or a send_message, moves past the round
 RECORD_COMMENT_TOOL = "mcp__github__add_issue_comment"
 # The remedy's merge call takes the flags merge/merge.py's --review-record takes (its usage line and argparse), each as a placeholder.
-REVIEW_RECORD_CALL = "merge <pr> --review-record --head <sha> --kind <kind> --guard <yes|no> --round <n>:<role>:<model>:<verdict>"
-REVIEW_RECORD_REASON = (
-    "review-record-after-round: the last reviewer spawn in this session has no review record after it, so the "
-    "round is not on the pull request yet. Run `" + REVIEW_RECORD_CALL + "` with the reviewed sha, post the body "
+MERGE_REVIEW_FLAG = "--review-record"  # the merge tool's own flag, an external contract (merge/merge.py)
+REVIEW_LOG_DECISION = "pr-review-record"  # the decision's slug stays (GLOSSARY.md, review log row)
+REVIEW_LOG_CALL = "merge <pr> " + MERGE_REVIEW_FLAG + " --head <sha> --kind <kind> --guard <yes|no> --round <n>:<role>:<model>:<verdict>"
+REVIEW_LOG_REASON = (
+    "review-log-after-round: the last reviewer spawn in this session has no review log after it, so the "
+    "round is not on the pull request yet. Run `" + REVIEW_LOG_CALL + "` with the reviewed sha, post the body "
     "it prints with the GitHub comment tool (add_issue_comment), then retry. "
-    "(decision pr-review-record, a lane posts the record after each round)"
+    "(decision " + REVIEW_LOG_DECISION + ", a lane posts the record after each round)"
 )
-REVIEW_RECORD_DESIGN_NOTE = (
+REVIEW_LOG_DESIGN_NOTE = (
     " The last reviewer spawn was a design-reviewer: add its line, `Round <n>: design-reviewer, <model>, <verdict>`, "
-    "to that round's record, with `" + REVIEW_RECORD_CALL.replace("<role>", "design-reviewer") + "`."
+    "to that round's record, with `" + REVIEW_LOG_CALL.replace("<role>", "design-reviewer") + "`."
 )
-REVIEW_RECORD_DESIGN_REASON = REVIEW_RECORD_REASON + REVIEW_RECORD_DESIGN_NOTE
+REVIEW_LOG_DESIGN_REASON = REVIEW_LOG_REASON + REVIEW_LOG_DESIGN_NOTE
 
 
 def _transcript_reader():
@@ -2378,7 +2380,7 @@ def _anchor_at(index, use, launched, done):
     return index if agent is None else done.get(agent)
 
 
-def review_record_hit(tool: str, tool_input, transcript: str, agent: bool = False):
+def review_log_hit(tool: str, tool_input, transcript: str, agent: bool = False):
     """(reason, matched, unknown): the refusal when this builder or test-author spawn, or this send_message (the
     remote tool or the built-in SendMessage), comes after the session's last completed reviewer spawn and no later call posted
     a review record, else ("", "", unknown). A reviewer spawn whose result is an error never ran and anchors nothing.
@@ -2414,10 +2416,10 @@ def review_record_hit(tool: str, tool_input, transcript: str, agent: bool = Fals
         return "", "", True
     if any(_posts_record(ev[1], marker) for ev in events[anchor + 1:] if ev[0] == "use"):
         return "", "", False
-    matched = "%s after a reviewer spawn with no review record" % tool
+    matched = "%s after a reviewer spawn with no review log" % tool
     if role_key(last["input"].get("subagent_type")) == "design-reviewer":
-        return REVIEW_RECORD_DESIGN_REASON, matched, False
-    return REVIEW_RECORD_REASON, matched, False
+        return REVIEW_LOG_DESIGN_REASON, matched, False
+    return REVIEW_LOG_REASON, matched, False
 
 
 # ---- a resume of a finished agent (rule resume-finished-reviewer, rule roles-resume-by-name)
@@ -2497,7 +2499,7 @@ def resume_finished_hit(tool: str, tool_input, transcript: str, isolation_pin=No
     record has the wrong shape (a line that is not JSON is dropped by the reader, so a half-written last line passes), else ("", "", "", ...).
     `to` names the spawn by its launch result's toolUseResult.agentId or by its call's `name`; the latest spawn with
     the name wins. One trailing ` [<ref>]` is stripped from `to` first: SendMessage writes `name [ref]` when a name is
-    ambiguous, and the ref is an opaque listing ref that cannot be mapped to a spawn, so the name alone is judged. A spawn whose result is an error ran no agent and is skipped, as review_record_hit skips it. A send
+    ambiguous, and the ref is an opaque listing ref that cannot be mapped to a spawn, so the name alone is judged. A spawn whose result is an error ran no agent and is skipped, as review_log_hit skips it. A send
     to main, a name no spawn holds, a finished spawn with no worktree that is not a reviewer, and a running spawn pass.
     A call with an agent_id is judged as the main session's is, against the parent's transcript (its `transcript_path`).
     A name no spawn in the transcript holds is then looked up as a Workflow agent (_transcript.workflow_agent: the
@@ -2509,7 +2511,7 @@ def resume_finished_hit(tool: str, tool_input, transcript: str, isolation_pin=No
     be judged finds no transcript to read (it passes), RESUME_UNPARSED_NOTE when a parsed record has the wrong shape
     (it asks). The state read is _transcript.agent_state, the one reader of an Agent or Task spawn's finish;
     _transcript.workflow_agent is the one reader of a Workflow agent's, which has no spawn. Cost: one transcript
-    read per judged send, shared with review_record_hit (_main_records), and, only when no spawn holds the name, one
+    read per judged send, shared with review_log_hit (_main_records), and, only when no spawn holds the name, one
     directory listing and one read per journal in the transcript's own workflows folder, then one meta read and, for an
     agent with no result line, one run-record read. No subprocess, no network."""
     target = tool_input.get("to") if isinstance(tool_input, dict) else None
