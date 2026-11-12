@@ -29,6 +29,10 @@ More incidents, 2026-11-06, from the batch of PR #1034 (a batch of lanes), each 
 
 False-alarm measure, 2026-11-06, on head d96d8821a: 41 real reports with a Deviations item, from 28 cloud sessions. The check refused 2. Both were real mistakes (a wrong commit SHA sent to the batch runner) with no guard named. It had no false alarms. An early draft that matched any first-person verb such as "I ran" or "I pushed", or a bare fault word, fired on 8, of which 3 were false alarms.
 
+## The promise guard
+
+The report guard (`promise_problem`) refuses a reply line that promises "from now on" and names only a handoff as its home. A PR, a commit, `step:<slug>` or a repo path on the line clears it. It runs on every turn, landed or not. Incident: roadmap step export-after-page-write. Cost: one regex pass over the reply per Stop, inside the Stop hook process. It starts no process and writes no file. Known limits are in the debt notes (promise-guard-limits).
+
 ## The inbox incident's guard
 
 The lane `state-file-parse-check` (a parse check after each edit to a state file, such as an inbox fence or a JSON file) owns the guard for the inbox incident. This lane does not build it.
