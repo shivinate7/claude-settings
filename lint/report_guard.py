@@ -2584,8 +2584,8 @@ REVIEW_HISTORY_RE = re.compile(
     r"|\b(?:was|were)\s+(?:\w+\s+){0,2}(?:before|prior|earlier)\b)")
 REVIEW_CLAUSE_SPLIT_RE = re.compile(r"[,;]|--")
 REVIEW_PR_RE = re.compile(r"(?<![\w&])#(\d+)\b|\bPRs?\s*#?(\d+)\b|/pull/(\d+)\b", re.I)
-REVIEW_READ_TIMEOUT = 30  # seconds for one gh read
-REVIEW_CHECK_BUDGET = 70  # seconds for the whole review check of one reply, under the Stop hook's 80 s timeout (settings.json); the question and relay checks run outside this budget
+REVIEW_READ_TIMEOUT = 25  # seconds for one gh read: two slow reads of a PR (50 s) still leave the clean-merge walk some of REVIEW_CHECK_BUDGET
+REVIEW_CHECK_BUDGET = 55  # seconds for the whole review check of one reply: STOP_BUDGET less RULING_REFUTER_TIMEOUT, so a spent review leaves the ruling-skip refuter its full limit (the question and relay checks run outside this budget)
 REVIEW_NO_PR = (
     "Review-record guard: a line of this reply claims a review PASS but names no pull request. Name it as #<n> on that "
     "line, and give it a review record for its live head (`merge <pr> --review-record ...`, then post the record on the PR)."
@@ -2756,13 +2756,14 @@ MIN_CALL = 3
 _granted = 0.0  # seconds granted to model calls so far in this run
 
 
-def call_timeout(limit, model=False):
+def call_timeout(limit, model=False, reserve=0):
     """Seconds one call may run: `limit`, or what is left of the Stop budget when that is less. A model call is
-    capped by the budget less the grants of earlier model calls. None when under MIN_CALL seconds are left."""
+    capped by the budget less the grants of earlier model calls, and less `reserve`, the seconds a later model call
+    of the same Stop still needs. None when under MIN_CALL seconds are left."""
     global _granted
     left = STOP_BUDGET - (time.monotonic() - _STARTED)
     if model:
-        left = min(left, STOP_BUDGET - _granted)
+        left = min(left, STOP_BUDGET - _granted) - reserve
     if left < MIN_CALL:
         return None
     timeout = min(limit, left)
@@ -2922,8 +2923,9 @@ def cannot_run(asked, why):
     return "" if question_form.has_unvetted(asked) else UNVETTED_REASON % why
 
 
-def past_ruling_problem(asked, cwd):
-    """The refusal text for asked text that a past ruling settles, or that could not be checked, else ''."""
+def past_ruling_problem(asked, cwd, reserve=0):
+    """The refusal text for asked text that a past ruling settles, or that could not be checked, else ''. `reserve`
+    is the model time the same Stop's ruling-skip refuter needs after this call."""
     _hooks_on_path()
     import question_form
     candidates, unknown = question_form.past_rulings(asked, repo_root(cwd) or cwd or os.getcwd())
@@ -2938,7 +2940,7 @@ def past_ruling_problem(asked, cwd):
               "it asks.\n8. " + call_judge.PAST_RULING_ITEM + "\nReply JSON only: {\"ok\": true} or {\"ok\": false, "
               "\"reason\": \"<the listed id, the ruling's date, and what it decides, one line>\"}."
               + question_form.candidates_block(candidates, unknown))
-    timeout = call_timeout(call_judge.PAST_RULING_TIMEOUT, model=True)
+    timeout = call_timeout(call_judge.PAST_RULING_TIMEOUT, model=True, reserve=reserve)
     if timeout is None:
         return cannot_run(asked, "the Stop time ran out before the model review")
     verdict, error = decision_watch.invoke_model(prompt, model=call_judge.PAST_RULING_MODEL, timeout=timeout,
@@ -3023,7 +3025,7 @@ RULING_CUE_RE = re.compile(r"\brulings?\b(?![-\w])", re.I)  # a slug such as rul
 RULING_UNDER_RE = re.compile(r"\bunder (?:the )?(?:owner'?s? )?rulings?\b", re.I)
 RULING_UNIT_START_RE = re.compile(r"\s*(?:[-*+]\s|\d+[.)]\s|#{1,6}\s)")
 RULING_REF_RE = re.compile(
-    r"\s*(?:(?P<item>item\s+(?P<n>\d+)\s+(?P<key>[a-f]))\b|`?(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)`?(?![\w-]))"
+    r"\s*(?:on\s+)?(?:(?P<item>item\s+(?P<n>\d+)\s+(?P<key>[a-f]))\b|`?(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)`?(?![\w-]))"
     r"\s*\(\s*(?P<stamp>[^()\n]{1,40}?)\s*\)")
 RULING_REASON = (
     "Ruling-skip guard (rule ruling-skip-check): %s Remedy: ask the owner (the waiting page, or Input Needed), or "
@@ -3034,6 +3036,45 @@ RULING_REASON = (
 def _ruling_stamp_ok(stamp):
     m = STAMP_FULL_RE.fullmatch(stamp) or STAMP_CLOCK_RE.fullmatch(stamp)
     return bool(m) and m.groups()[-1] in ("CST", "CDT")
+
+
+# Words after a pick word that leave it a pick: a preposition that links it to its ruling, or a determiner.
+PICK_LINK_WORDS = frozenset(("under", "per", "by", "from", "over", "on", "as", "since", "following", "because", "via",
+                             "with", "after"))
+PICK_DETERMINERS = frozenset(("the", "a", "an", "that", "this", "it", "which", "each", "every"))
+PICK_NEXT_RE = re.compile(r"\s*([A-Za-z']+)")
+
+
+def _is_pick(act, match):
+    """Whether a RULING_PICK_RE match in `act` names a pick. A past-tense verb or `skipped asking` always does. A pick
+    noun (pick, option, key, choice) or an option letter does only when no other word follows it, or a preposition
+    that links it to its ruling does: "pick list", "key ruling" and "took a look" name no pick."""
+    text = match.group(0).lower()
+    if text.endswith(("picked", "chose", "asking", "ask")):
+        return True
+    following = PICK_NEXT_RE.match(act, match.end())
+    word = following.group(1).lower() if following else ""
+    if re.fullmatch(r"[a-f]", text.split()[-1]):  # an option letter
+        return not word or word in PICK_LINK_WORDS
+    return not word or word in PICK_LINK_WORDS or word in PICK_DETERMINERS or bool(re.fullmatch(r"[a-f]", word))
+
+
+def _is_pick_claim(act):
+    """Whether a Done item claims a pick under a ruling: a pick and a ruling cue in one clause (clauses end at `;`)."""
+    for clause_start, clause_end in _clause_spans(act):
+        if RULING_CUE_RE.search(act, clause_start, clause_end) and any(
+                _is_pick(act, m) for m in RULING_PICK_RE.finditer(act, clause_start, clause_end)):
+            return True
+    return False
+
+
+def _clause_spans(act):
+    """(start, end) of each `;` clause of `act`."""
+    spans, start = [], 0
+    for m in re.finditer(r";", act):
+        spans.append((start, m.start()))
+        start = m.end()
+    return spans + [(start, len(act))]
 
 
 def _done_texts(block):
@@ -3053,7 +3094,7 @@ def ruling_claims(text):
     `why_bad` says the claim has no usable ref or stamp. A claim with no cite at all is one None entry."""
     claims = []
     for act in _done_texts(block_text(text, keep_indent=True)):
-        if not (RULING_PICK_RE.search(act) and RULING_CUE_RE.search(act)):
+        if not _is_pick_claim(act):
             continue
         cited = []
         for m in RULING_CUE_RE.finditer(act):
@@ -3200,8 +3241,10 @@ def _scrub_reason(reason):
     return text
 
 
-def ruling_skip_problem(text, cwd):
-    """The refusal text when a Done item claims a pick under a ruling and cites no ruling that names its act, else ''."""
+def ruling_skip_problem(text, cwd, rewrite=False):
+    """The refusal text when a Done item claims a pick under a ruling and cites no ruling that names its act, else ''.
+    On a rewrite, a refuter that cannot run (no time, an error or an odd answer) passes the claim with one stderr line:
+    the first Stop already refused it, and refusing every rewrite under one outage would loop."""
     if not RULING_CUE_RE.search(text):
         return ""
     claims = ruling_claims(text)
@@ -3238,11 +3281,17 @@ def ruling_skip_problem(text, cwd):
     names = ", ".join(sorted({name for name, _, _ in pairs}))
     timeout = call_timeout(RULING_REFUTER_TIMEOUT, model=True)
     if timeout is None:
+        if rewrite:
+            print("ruling-skip check: UNKNOWN on a rewrite, the Stop time ran out before the refuter.", file=sys.stderr)
+            return ""
         return RULING_REASON % ("the Stop time ran out before the refuter could judge the cite of %s, so the claim is "
                                 "refused." % names)
     verdict, error = decision_watch.invoke_model(prompt, model=RULING_REFUTER_MODEL, timeout=timeout,
                                                  shape=call_judge.OK_SHAPE, effort=None)
     if error or not isinstance(verdict, dict) or not isinstance(verdict.get("ok"), bool):
+        if rewrite:
+            print("ruling-skip check: UNKNOWN on a rewrite, the refuter could not judge the cite.", file=sys.stderr)
+            return ""
         return RULING_REASON % ("the refuter could not judge the cite of %s, so the claim is refused." % names)
     if verdict["ok"]:
         return ""
@@ -3251,10 +3300,21 @@ def ruling_skip_problem(text, cwd):
     return RULING_REASON % ("the refuter finds that %s does not name the act the Done item claims: %s" % (names, reason))
 
 
-def relay_reasons(after, text, cwd):
+def _refuter_reserve(text):
+    """RULING_REFUTER_TIMEOUT when `text` holds a cited ruling claim, which the refuter will judge after the
+    past-ruling call, else 0."""
+    try:
+        claims = ruling_claims(text) if RULING_CUE_RE.search(text) else []
+    except Exception:
+        return 0
+    return RULING_REFUTER_TIMEOUT if claims and all(c[1] is not None for c in claims) else 0
+
+
+def relay_reasons(after, text, cwd, rewrite=False):
     """Refusals for the questions the reply relays to the owner, read from every assistant text since the last
     human message. An error in the option-key check allows, with one stderr line. An error in the past-ruling check
-    is a check that could not run, so it refuses as Unvetted."""
+    is a check that could not run, so it refuses as Unvetted. On a `rewrite`, a ruling-skip refuter that cannot run
+    does not refuse again."""
     reasons = []
     try:
         reasons.append(question_keys_problem(after, text))
@@ -3264,14 +3324,14 @@ def relay_reasons(after, text, cwd):
         asked = asked_text("\n\n".join(earlier_replies(since_last_message(after), text) + [text]))
         if asked:
             try:
-                reasons.append(past_ruling_problem(asked, cwd))
+                reasons.append(past_ruling_problem(asked, cwd, _refuter_reserve(text)))
             except Exception as exc:
                 print("past-ruling check failed: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
                 reasons.append(cannot_run(asked, "the check failed with " + type(exc).__name__))
     except Exception as exc:
         print("past-ruling check could not start: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
     try:
-        reasons.append(ruling_skip_problem(text, cwd))
+        reasons.append(ruling_skip_problem(text, cwd, rewrite))
     except Exception as exc:  # an unknown read is red (ci-unknown-is-red): a claim that could not be checked refuses
         print("ruling-skip check failed: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
         if RULING_CUE_RE.search(text):
@@ -3285,7 +3345,7 @@ def rewrite_relay(hook):
     try:
         path = hook.get("transcript_path")
         records = read_transcript(path) if path and os.path.exists(path) else []
-        return relay_reasons(records_after_last_human(records), last_reply(hook), hook.get("cwd"))
+        return relay_reasons(records_after_last_human(records), last_reply(hook), hook.get("cwd"), rewrite=True)
     except Exception as exc:
         print("relay check on a rewrite failed open: %s: %s" % (type(exc).__name__, exc), file=sys.stderr)
         return []
