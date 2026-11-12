@@ -175,8 +175,8 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   the open work. A question, standing, page, repo or note item is left as it is, and so is a home only a lane branch
   holds. The proof is kept per item line, from the home check's own reads, so a grant in one block never settles a
   plain ruling to the same path in another. Cost: the close adds no read of its own. The home check it rides on starts
-  one `cat-file` per open or closed ruling or task item it checks, and one `rev-parse` and one `for-each-ref` per
-  repo, inside the Stop process that already runs; a line judged earlier in the same Stop costs nothing
+  one `cat-file` per open or closed ruling or task item it checks, one `rev-parse` per repo and per absolute home, and
+  one `for-each-ref` per repo, inside the Stop process that already runs; a line judged earlier in the same Stop costs nothing
   more. The inbox is read twice and written once, only when a line changed; the close re-reads it right before the
   write, so a message captured during the reads is kept. A refusal for a standing id missing from the handoff names `[closed]` as a way out. A closed note
   needs a home: a file some branch tracks, `step:<slug>` (the file `roadmap/data/steps/<slug>.json` on

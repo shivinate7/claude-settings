@@ -1209,7 +1209,7 @@ def judge(homes, inbox, blocks, new):
         return [], None
     labels = {ref: label for ref, label, _ in found}
     prompt = (PROMPT + "\nNEW ITEMS\n"
-              + "".join("[%s] %s\n" % (i, (blocks[n]["text"] or "")[:MESSAGE_CUT]) for i, n in new)
+              + "".join("[%s] %s\n" % (i, norm(blocks[n]["text"])[:MESSAGE_CUT]) for i, n in new)
               + "\nCANDIDATES\n" + "".join("[%s] %s\n" % (ref, text) for ref, _, text in found))
     answer, err = invoke_model(prompt, model=REPEAT_MODEL, timeout=REPEAT_TIMEOUT, shape=REPEAT_SHAPE,
                                effort=None)

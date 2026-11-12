@@ -390,8 +390,8 @@ def _cut_on_questions(text, questions):
 
 
 def _cut_on_marks(text):
-    """The answers in `text` cut at each `"="` alone, for a result that holds none of the payload's question strings.
-    A bandaid: a question or answer that holds `", "` or `"="` is cut wrong here. None when the text holds no `"="`."""
+    """The answers in `text` cut at each `"="` alone, for a one-question result that does not hold the payload's question
+    string. A bandaid: an answer that holds `"="` is cut wrong here. None when the text holds no `"="`."""
     parts = text.split('"="')
     if len(parts) < 2:
         return None
@@ -429,7 +429,9 @@ def answers_of(hook):
         answers = [_answer_value(given[k]) for k in keys]
         return [a for a in answers if a is not None and a.strip()]
     texts = list(_strings(response))
-    cuts = ([lambda t: _cut_on_questions(t, questions)] if questions else []) + [_cut_on_marks]
+    # The `"="` cut only for one question or none: with two or more, a cut inside a question's `", "` would save its words.
+    cuts = ([lambda t: _cut_on_questions(t, questions)] if questions else []) + (
+        [_cut_on_marks] if len(questions) <= 1 else [])
     for cut in cuts:
         for text in texts:
             answers = cut(text)
