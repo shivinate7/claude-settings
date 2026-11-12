@@ -1339,7 +1339,7 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
     def test_a_remote_whose_main_was_deleted_refreshes_trunk_and_drops_the_stale_main(self):
         # origin/HEAD names trunk, origin has no main, and this checkout still holds a stale origin/main.
         stale = self.head_sha()
-        remote_tip = self.tip_with(GRANT_TRUNK, GRANT_FRESH_DOT)
+        remote_tip = self.tip_with(GRANT_TRUNK, GRANT_STALE_DOT)
         vcs(self.primary, "push", "-q", "origin", "%s:refs/heads/trunk" % remote_tip)
         vcs(self.primary, "update-ref", "refs/remotes/origin/trunk", stale)
         vcs(self.primary, "update-ref", "refs/remotes/origin/main", self.tip_with(GRANT_FRESH, GRANT_STALE_DOT))
