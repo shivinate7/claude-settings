@@ -6,7 +6,10 @@ it never fails a run (decision plain-prose-lint).
 
     python lint/test_ste_one_term.py -v
 """
+import contextlib
+import io
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -15,10 +18,25 @@ import unittest
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import ste_lint  # noqa: E402
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (the one home, lint/_test_temp.py)
+
+RUN_FOLDER = _test_temp.run_folder()
 
 
 def lint(text, path="t.md"):
     return [f for f in ste_lint.Linter(dict(ste_lint.DEFAULT_CONFIG)).check_text(path, text) if f.code == "STE022"]
+
+
+def _mirror_lint(root):
+    """A lint folder under `root` with ste_lint.py, the modules it imports when it loads, and no check_glossary.py.
+
+    ste_lint reads GLOSSARY.md from the parent of its real folder, so that path is `root/GLOSSARY.md`, which is never written.
+    layout.json is read on each run, so the copy carries it too."""
+    lint_dir = os.path.join(root, "lint")
+    os.makedirs(lint_dir)
+    for name in ("ste_lint.py", "ui_suffixes.py", "layout.py", "layout.json"):
+        shutil.copy(os.path.join(HERE, name), os.path.join(lint_dir, name))
+    return lint_dir
 
 
 class OneTermTests(unittest.TestCase):
@@ -66,10 +84,23 @@ class OneTermTests(unittest.TestCase):
     def test_missing_glossary_gives_no_finding(self):
         old = ste_lint.GLOSSARY_PATH
         ste_lint.GLOSSARY_PATH = os.path.join(HERE, "no-such-glossary.md")
+        ste_lint.reset_one_term_cache()
+        err = io.StringIO()
         try:
-            self.assertEqual(lint("The gate runs.\n"), [])
+            with contextlib.redirect_stderr(err):
+                self.assertEqual(lint("The gate runs.\n"), [])
+                with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as root:
+                    md = os.path.join(root, "a.md")
+                    with open(md, "w", encoding="utf-8") as f:
+                        f.write("The gate runs.\n")
+                    with contextlib.redirect_stdout(io.StringIO()):
+                        rc = ste_lint.main([md])
+            self.assertEqual(rc, 0, "run exits %d with GLOSSARY.md missing" % rc)
         finally:
             ste_lint.GLOSSARY_PATH = old
+            ste_lint.set_gloss_pattern(None)  # main sets it from the repo's decisions folder; restore the default
+        unknown = [line for line in err.getvalue().splitlines() if "unknown" in line]
+        self.assertEqual(len(unknown), 1, "stderr holds %d 'unknown' lines, want one: %s" % (len(unknown), err.getvalue()))
 
     def test_never_fails_a_run(self):
         with tempfile.TemporaryDirectory() as d:
@@ -124,6 +155,53 @@ class OneTermTests(unittest.TestCase):
                 f.write("The gate refuses the push.\n")
             r = subprocess.run([sys.executable, link, a], capture_output=True, text=True)
             self.assertIn("STE022", r.stdout)
+
+    def test_platform_name_behind_punctuation_passes(self):
+        self.assertEqual(len(lint("A subagent runs.\n")), 1)  # control: the retired name still warns
+        for text in ("Hooks (SubagentStop, SubagentStart) run.\n",
+                     "(CLAUDE_CODE_SUBAGENT_MODEL) is set.\n",
+                     "**SubagentStop** runs.\n"):
+            with self.subTest(text=text):
+                self.assertEqual(lint(text), [])
+
+    def test_missing_check_glossary_does_not_crash_the_run(self):
+        with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as root:
+            lint_dir = _mirror_lint(root)
+            env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+            # Scope before subject: the copy loads, GLOSSARY.md is not beside it, and check_glossary does not load.
+            self.assertFalse(os.path.exists(os.path.join(root, "GLOSSARY.md")), "GLOSSARY.md is beside the copy")
+            scope = subprocess.run([sys.executable, "-c", "import ste_lint"], cwd=lint_dir, env=env,
+                                   capture_output=True, text=True)
+            self.assertEqual(scope.returncode, 0, "the copy does not load: " + scope.stderr)
+            gone = subprocess.run([sys.executable, "-c", "import check_glossary"], cwd=lint_dir, env=env,
+                                  capture_output=True, text=True)
+            self.assertNotEqual(gone.returncode, 0, "check_glossary loads from the copy's folder")
+            md = os.path.join(root, "a.md")
+            with open(md, "w", encoding="utf-8") as f:
+                f.write("They'd finished.\n")
+            r = subprocess.run([sys.executable, os.path.join(lint_dir, "ste_lint.py"), md],
+                               cwd=root, env=env, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, "exit %d when check_glossary is missing; stderr: %s"
+                             % (r.returncode, r.stderr))
+            self.assertIn("STE008", r.stdout)
+            self.assertNotIn("Traceback", r.stderr)
+
+    def test_finding_is_not_placed_when_the_spelling_is_not_found(self):
+        self.assertEqual([f.col for f in lint("The gate runs.\n")], [5])  # control: a spelled name is placed on its word
+        with self.subTest(case="theGate, camelCase inside a word"):
+            got = lint("First line.\nThe theGate runs.\n")
+            self.assertTrue({f.line for f in got} <= {2},
+                            "STE022 for theGate placed on lines %s; line 1 is 'First line.'" % sorted({f.line for f in got}))
+        with self.subTest(case="GATEWAY, a longer word that starts with gate"):
+            text = "The GATEWAY runs and a gate too.\n"
+            want = text.index(" gate ") + 2
+            cols = [f.col for f in lint(text)]
+            self.assertTrue(all(c == want for c in cols),
+                            "STE022 placed at cols %s; only the standalone gate, at col %d, may be" % (cols, want))
+
+
+def tearDownModule():
+    shutil.rmtree(RUN_FOLDER, ignore_errors=True)  # test-temp-standard: teardown removes the run folder
 
 
 if __name__ == "__main__":

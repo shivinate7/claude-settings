@@ -3887,7 +3887,7 @@ class RewriteStampTests(unittest.TestCase):
 
 # These errors fail CI's STE lint on changed lines (plain-prose-lint):
 ERROR_CODES = ("STE001", "STE011", "STE013")
-# These six are advisory: reported as warnings, never a failed run.
+# These seven are advisory: reported as warnings, never a failed run.
 ADVISORY_CODES = ("STE003", "STE007", "STE008", "STE009", "STE015", "STE017", "STE022")
 # One input per advisory code. Each holds that code's finding and no error finding, and none is
 # text a fixer rewrites, so a failing run comes from the severity alone.
