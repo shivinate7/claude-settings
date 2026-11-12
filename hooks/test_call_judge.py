@@ -59,11 +59,10 @@ Interface the hook must match:
   question a standing ruling already decides. Each case builds its own real git repo (make_repo), and a fixture
   ruling is found in the prompt with the call's JSON cut out. A search that cannot read a source prints one stderr
   line, `past-ruling search unknown:`, and never says clear.
-- A challenge to a past ruling (R39 in docs/plans/restart-plan.md, rule outcomes-stale-decision-protocol; owner ruling,
-  page item 579 pick b, 12:54 CST Nov 12): item 8 passes a question that names the record and brings a new fact. The
-  outcome protected, what protects it now and a proposed fix are optional. It refuses a re-ask that brings no new fact.
-  A denial tells the session how to challenge, never to withdraw. A challenge is a question, never a grant (see the
-  section "a challenge to a past ruling").
+- A challenge to a past ruling (decision `question-form`, rule outcomes-stale-decision-protocol): item 8 passes a
+  question that names the record and brings a new fact. The outcome protected, what protects it now and a proposed fix
+  are optional. It refuses a re-ask that brings no new fact. A denial tells the session how to challenge, never to
+  withdraw. A challenge is a question, never a grant (see the section "a challenge to a past ruling").
 - A relative file_path on an items set or update with no `data`: the file is read against the payload's `cwd`, as
   question_form._write_data reads it, so that write is judged like inline data (the section "a relative file_path").
 """
@@ -1694,11 +1693,11 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
 
 # ------------------------------------------------------------------ a challenge to a past ruling (R39)
 #
-# R39 in docs/plans/restart-plan.md, rule outcomes-stale-decision-protocol. Owner ruling, page item 579 pick b (12:54 CST
-# Nov 12): a question that names the record and brings a new fact passes, and the other parts are optional. Item 8 refuses
-# a re-ask that brings no new fact. A denial tells the session how to challenge, never to withdraw. A challenge reaches the
-# owner as a question, never as a grant. The model is mocked, so these cases read the text the code gives the model, the
-# denial text the code appends, and the grant readers that no question path calls.
+# Decision `question-form` and rule outcomes-stale-decision-protocol: a question that names the record and brings a new
+# fact passes, and the other parts are optional. Item 8 refuses a re-ask that brings no new fact. A denial tells the
+# session how to challenge, never to withdraw. A challenge reaches the owner as a question, never as a grant. The model is
+# mocked, so these cases read the text the code gives the model, the denial text the code appends, and the grant readers
+# that no question path calls.
 CHAL_GOAL = "Goal: decide whether the GitHub apps keep access to claude-settings, now the audit counts more of them"
 CHAL_PROBLEM = ("Problem (risk): %s says 'keep the apps' access to claude-settings as is', which protected easy calls "
                 "into the repo; the monthly audit now protects that, and it counts 14 apps where the ruling named 9, "
