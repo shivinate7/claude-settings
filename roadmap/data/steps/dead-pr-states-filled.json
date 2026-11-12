@@ -1,0 +1,14 @@
+{
+ "id": "dead-pr-states-filled",
+ "title": "The publisher that fills landedPulls also writes prStates, so the dead-PR wait check has data",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL3nz3ETqgU4E5fN9TJ",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Nothing fills the live prStates key that the dead-PR wait check (PR #2729, dead-pr-waits) reads; the roadmap build has no GitHub read, so the publisher that fills landedPulls must write it.",
+ "source": "coordinator 08:39 CST Nov 12, from lane fan-prose-unmapped-1",
+ "note": "Starts after #2729 merges, on lane fan-prose-unmapped-1. Triage does not fill prStates in its page publish today.",
+ "updatedAt": "2026-11-12T08:37:00-06:00"
+}
