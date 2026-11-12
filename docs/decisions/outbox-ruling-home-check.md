@@ -6,7 +6,7 @@ When triage reports status, a check lists each owner ruling in the outbox. For e
 whether the ruling's home on main holds its words.
 
 - The outbox is `roadmap/outbox/<session-slug>.md` on the record branch, one file per session (skill
-  `project-ops`). It is not the per-session feedback inbox (decision `owner-feedback-inbox`).
+  `project-ops`). It is not the feedback log (term `feedback log` in GLOSSARY.md).
 - Whether the outbox stays the place for rulings is open. No pick yet.
 
 Owner, 2026-11-10 15:22 CST, restart plan R6: "yes but it's tbd if an outbox is the right spot right?
