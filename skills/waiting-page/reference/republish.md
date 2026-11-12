@@ -18,8 +18,9 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
    `wait:` line per open item with `waits` (`ended`, `waiting` or `unknown`), and one `waiting` lane line per open item with
    `lane` and `lastAnswer` and no `waits`. Last, one `kept-answer:` line per closed item whose `answers/<id>` is still kept
    (never an open item, an arbiter ruling or a park answer). A closed item with `waits` gets a line that says it is closed with waits. The exit code stays the page's.
-   Save the asks first with `ArtifactData list asks`, with `out_dir` set to one new folder and `query.limit` 1000: follow `next_cursor` until it is empty, then touch `.complete` in that folder ("Keep a copy in the repo" step 2 saves the same list).
-   After the writer takes or routes each ask with no `owner` ("Route an ask"), run the end check as its own run, apart from the plain run and never with `--write`:
+   After the writer routes each ask and the holder replies ("Route an ask"), save the asks into one new folder with `ArtifactData list asks`
+   (`query.limit` 1000, follow `next_cursor` until it is empty), touching `.complete` in that folder ("Keep a copy in the repo" step 2 saves the same list).
+   Right after that, run the end check as its own run, apart from the plain run and never with `--write`:
    `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --asks <asks>` (`<asks>` is the folder saved in this step). It prints one
    `open-ask:` line per ask with no `reply`, a routed ask included. If an ask is listed or the asks list cannot be read, it also prints a `FAIL:` line.
    On a current page, exit 1 means that an ask is open, and exit 2 means that the asks list could not be read. The session that holds an ask answers it ("Route an ask"); the writer routes it or names the holder.
@@ -46,7 +47,7 @@ publish of main's page stamps main's page version, and the next session start sa
 
 Cost: on demand, inside a wake already running. One `Artifact read` and two python processes: the plain run and the end check.
 Each python process starts at most one short read-only git process, with no fetch. The plain run makes one gh call per open item with `waits`. With `--answers`, one more `ArtifactData list answers` read.
-One `ArtifactData list asks` read per page of 1000 asks; that save writes one file per ask and the `.complete` marker. The python processes write `<out>` only, and no file without
+One `ArtifactData list asks` read for the end check, per page of 1000 asks; that save writes one file per ask and the `.complete` marker. The python processes write `<out>` only, and no file without
 `--write`. No timer, no watcher. `test_stale_pages.py` proves the file count.
 
 ## Rebuild a page from the repo
