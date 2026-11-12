@@ -12661,6 +12661,37 @@ class RulesetFirst(unittest.TestCase):
         self.assertTrue(any(r.endswith("/rules/branches/main") for r in reads), "the merge must read main's ruleset before the classic list")
         self.assertTrue(stopped, "a 404 on the ruleset read reads as no ruleset, so the classic list answered for it (got %r): the merge must stop" % (names,))
 
+class RulesReadNetwork(unittest.TestCase):
+    """A network error on the rules read is a NetStop: Host.gh raises it once its retries fail. The rules read must keep it a NetStop. A plain Stop
+    is read by the pinned-list check as an unreadable protection, so the run would go on where a network error must stop it."""
+
+    def host(self):
+        return merge.Host(required=["checks"], base="main", pause=lambda s: None)
+
+    def net_down(self):
+        """Every gh call fails with a network text, as a dropped connection does."""
+        return unittest.mock.patch.object(merge, "sh", lambda argv, cwd=None: (1, NET_DEADLINE))
+
+    def test_a_network_error_on_the_rules_read_is_a_net_stop_out_of_protection_names(self):
+        with self.net_down():
+            try:
+                names = self.host().protection_names()
+            except merge.NetStop:
+                return
+            except merge.Stop as e:
+                self.fail("a network error on the rules read stopped as a plain Stop, not a NetStop: %s" % e)
+        self.fail("a network error on the rules read named %r instead of stopping" % (names,))
+
+    def test_a_network_error_on_the_rules_read_is_a_net_stop_out_of_the_pinned_check(self):
+        with self.net_down(), contextlib.redirect_stdout(io.StringIO()):
+            try:
+                self.host().refuse_pinned_mismatch()
+            except merge.NetStop:
+                return
+            except merge.Stop as e:
+                self.fail("a network error on the rules read stopped the pinned check as a plain Stop: %s" % e)
+        self.fail("a network error on the rules read let the pinned check go on as an unreadable protection, not a stop")
+
 @unittest.skipIf(os.name == "nt", "a Windows process gets no SIGTERM handler run")
 class SignalReleasesLock(Env):
     """c189 part 3: a run stopped by SIGTERM or SIGINT releases the merge lock (#746 left one live for 2.7 h)."""
