@@ -35,6 +35,7 @@
     "skills": {"path": "skills"},
     "testing": {"path": "testing"},
     "tests-guard": {"path": "tests/guard"},
+    "tests-held": {"path": "tests/held", "why": "Red cases for open debts, outside the CI section folder tests/guard. Only their retire files run them."},
     "tools": {"path": "tools"}
   },
   "rolled-out": true,

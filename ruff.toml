@@ -16,3 +16,4 @@ select = ["F", "E9"]
 # name a section uses from the runner as undefined. The follow-up is a ruff step over the joined sections in order.
 "hooks/test_guard.py" = ["F821"]
 "tests/guard/*" = ["F821"]
+"tests/held/*" = ["F821"]  # same cause: hooks/manifest_hunk_edit_test.py execs each held file in the section globals
