@@ -27,6 +27,7 @@ SAFE_NAME = re.compile(r"[A-Za-z0-9._/-]+")
 
 
 def git(repo, *args, stdin=None):
+    # nowindow: runs on an ubuntu runner only, and the workflow test copies actions/branch-sweep alone, so hooks/_nowindow.py is not on the path
     done = subprocess.run(["git", "-C", repo, *args], input=stdin, capture_output=True, text=True)
     if done.returncode:
         raise RuntimeError("git %s failed: %s" % (" ".join(args), done.stderr.strip()))
