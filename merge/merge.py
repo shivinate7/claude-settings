@@ -3123,7 +3123,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), integrati
                     host.add_label(n, PR_BATCH_LABEL)
                 except Stop as e:  # the lint stands; only the label is missing, so say how to add it
                     say(f"merge: the `{PR_BATCH_LABEL}` label was not added to #{n}: {' '.join(str(e).split())} The ledger reads #{n} as `none`, red, until it is. "
-                        f"Run `merge --lane-lint {n} --integration` again, or add the `{PR_BATCH_LABEL}` label by the session's route (cloud: MCP issue_write replaces the whole label set, so pass the PR's existing labels with `{PR_BATCH_LABEL}`).")
+                        f"Run `merge --lane-lint {n} --integration` again, or add the `{PR_BATCH_LABEL}` label by the session's route (cloud: MCP issue_write, passing the PR's existing labels with `{PR_BATCH_LABEL}` so none is lost).")
         return 0
     if state == "fail":
         raise LintFail("\n".join([f"the lint of {short} against {base} FAILs:", *lines, *log, LANE_LINT_REMEDY]), lines, log)
