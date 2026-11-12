@@ -3082,7 +3082,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), integrati
         info = fetch_pr_head(root, info, base, host, n)  # a lane lints right after its push, when GitHub may still show the old head
         if integration and not info["branch"].startswith(BATCH_PREFIX):  # before the worktree and the lint: a lane PR must never read as a batch run
             raise Stop(f"--integration labels a batch's integration pull request, whose head branch starts with `{BATCH_PREFIX}`; #{n} has the head {info['branch']}. "
-                       f"Run `merge --lane-lint {n}` without --integration. Nothing was linted or labelled.")
+                       f"Run `merge --lane-lint {n}` without --integration. Nothing was linted or labelled. {LANE_LINT_CITE}")
         head = info["head"]
         tmp, wt = add_worktree(root, head)
     else:

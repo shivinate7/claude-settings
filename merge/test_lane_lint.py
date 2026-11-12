@@ -2074,7 +2074,7 @@ class LintSetsBatchLabel(LintPostsPassComment):
         self.assertIn("lane/feat", out)
         self.assertIn("without --integration", out)
         self.assertEqual(self.labeled(), [], "a lane PR got the batch label:\n" + out)
-        self.assertEqual(self.posts, [], "the refusal still ran the lint and posted its comment:\n" + out)
+        self.assertEqual(tm.GhHalf.gh_state(self, "posted") or [], [], "the refusal still ran the lint and posted its comment:\n" + out)  # the real host posts through the shim, not self.posts
 
     def test_an_integration_fail_adds_no_label(self):
         self.as_batch_pr()
