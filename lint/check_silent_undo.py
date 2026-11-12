@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fails when a merge or branch silently drops or reverts earlier work. Stdlib and git only.
 
-    python3 lint/check_silent_undo.py [--upstream BASE] [--head HEAD] [--strict]   # BASE: the tracked upstream, else origin/main
+    python3 lint/check_silent_undo.py [--upstream BASE] [--head HEAD] [--strict]   # no BASE: the branch's tracked upstream; its own pushed copy, a gone upstream or none: origin/main
     python3 lint/check_silent_undo.py --history [REV] [--window 60]   # audit, always exit 0
 
 Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
@@ -679,17 +679,33 @@ DEFAULT_BASE = "origin/main"
 
 def default_base(cwd, head):
     """(base, why) for a run with no --upstream: the branch's tracked upstream, so a branch stacked on another is judged
-    against the branch it stacks on. The branch's own pushed copy (branch.<name>.merge names its own name) is no base:
-    that and no tracking at all give origin/main. A head that is no branch (a sha, a detached HEAD) tracks nothing."""
-    name = git(cwd, "rev-parse", "--abbrev-ref", head, ok=(0, 128))[1].strip()
-    if name and name != "HEAD":
-        merge = git(cwd, "config", "--get", "branch.%s.merge" % name, ok=(0, 1))[1].strip()
-        up = git(cwd, "rev-parse", "--abbrev-ref", "%s@{upstream}" % name, ok=(0, 128))[1].strip()
-        if up and merge != "refs/heads/" + name:
-            return up, "the branch's tracked upstream"
-        if up:
-            return DEFAULT_BASE, "%s tracks its own pushed copy %s" % (name, up)
-    return DEFAULT_BASE, "no tracked upstream"
+    against the branch it stacks on. The branch's own pushed copy is no base, and gives origin/main. The one rule: the
+    upstream is the branch's own copy when branch.<name>.merge names the branch itself (refs/heads/<name>), or when the
+    upstream's tip is the branch's tip (a branch pushed under another name, which keeps the old name in that key).
+    A gone upstream (the key stays, the remote ref is pruned) and no tracking at all give origin/main too. A branch
+    that is ahead of a copy pushed under another name reads as stacked: only the PR's base tells them apart.
+    The branch is read by its full name (refs/heads/<name>), so a tag named like it cannot make the name ambiguous;
+    `<name>@{upstream}` looks up the branch only, and the upstream comes back as a full ref for the same reason."""
+    if head == "HEAD":
+        ref = git(cwd, "symbolic-ref", "-q", "HEAD", ok=(0, 1))[1].strip()
+    else:
+        ref = next((r for r in (head, "refs/heads/" + head) if r.startswith("refs/heads/")
+                    and git(cwd, "rev-parse", "--verify", "-q", r + "^{commit}", ok=(0, 1))[0] == 0), "")
+    if not ref:
+        return DEFAULT_BASE, "no tracked upstream: %s is no branch" % head
+    name = ref[len("refs/heads/"):]
+    merge = git(cwd, "config", "--get", "branch.%s.merge" % name, ok=(0, 1))[1].strip()
+    if not merge:
+        return DEFAULT_BASE, "no tracked upstream"
+    rc, up = git(cwd, "rev-parse", "--symbolic-full-name", name + "@{upstream}", ok=(0, 128))
+    up = up.strip()
+    if rc != 0 or not up:
+        return DEFAULT_BASE, "the upstream of %s, %s, is gone" % (name, merge)
+    if merge == ref:
+        return DEFAULT_BASE, "%s tracks its own pushed copy" % name
+    if git(cwd, "rev-parse", ref + "^{commit}")[1] == git(cwd, "rev-parse", up + "^{commit}", ok=(0, 128))[1]:
+        return DEFAULT_BASE, "%s tracks its own pushed copy %s" % (name, up)
+    return up, "the branch's tracked upstream"
 
 
 def generated_page(cwd, head, paths, upstream="origin/main", tool=None):
@@ -831,7 +847,7 @@ def main(argv):
     try:
         if a.upstream is None and not a.history:
             a.upstream, why = default_base(a.repo, a.head)
-            say("silent-undo: base: %s (%s)" % (a.upstream, why))
+            say("silent-undo: base: %s (%s)" % (re.sub("^refs/(heads|remotes)/", "", a.upstream), why))
         if a.history:
             n, hits = history(a.repo, a.history, a.window)
             say("\n".join(hits))
