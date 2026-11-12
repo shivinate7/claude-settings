@@ -421,6 +421,9 @@ ARTREC = os.path.join(ROOT, "artrec")
 # checkout a worktree on the record branch is.
 ARTCLEAN = os.path.join(ROOT, "artclean")
 ARTNOREG = os.path.join(ROOT, "artnoreg")
+# ARTOLD is its own repository, a checkout behind origin's default branch: its registry is older than origin's. Its own
+# origin/main is built by _artcite_build_older_checkout, so ARTREC's origin/main (no registry) is left as it is.
+ARTOLD = os.path.join(ROOT, "artold")
 
 # WTMAIN is the primary checkout of its own small repository. Every linked worktree below is a
 # real one, because the rule reads `git worktree list --porcelain` and `git status --porcelain`
@@ -2191,6 +2194,7 @@ def _build_push():
     run_vcs(ARTREC, "update-ref", "refs/remotes/origin/main", "HEAD")
     run_vcs(ARTREC, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
     _artcite_build_branches()
+    _artcite_build_older_checkout()
 
 
 def _build_worktrees():
@@ -2498,7 +2502,7 @@ lazy_fixture([PUSHFEAT, PUSHMAIN, PUSHTRUNK, PUSHTRUNKLOCAL, PUSHNOHEAD, PUSHDET
               PUSHSTRAY, PUSHLANE, PUSHLANEMASTER, PUSHSELF, PUSHMAINUP, PUSHSTACK, PUSHOWNREF,
               PUSHLOCAL, PUSHLOCALSTRAY, PUSHLOCALMAIN, PUSHSSH, PUSHNOREMOTE,
               PUSHAGENT, PUSHAGENTWT, PUSHAGENTBARE, PUSHAGENTNOTES, PUSHAGENTMYABC, PUSHAGENTMYHEX,
-              PUSHAGENTSHORT, PUSHAGENTEIGHT, PUSHAGENTCFG, ARTREC, ARTCLEAN, ARTNOREG,
+              PUSHAGENTSHORT, PUSHAGENTEIGHT, PUSHAGENTCFG, ARTREC, ARTCLEAN, ARTNOREG, ARTOLD,
               PUSHAHEAD, PUSHAHEADLANE, PUSHAHEADDET, PUSHAHEADAGENT, PUSHNOTRACK, PUSHBEHIND,
               PUSHMASTERAHEAD, PUSHNOMAIN, PUSHLOCALAHEAD,
               PUSHALLNOAGENT, PUSHALLAGENT, PUSHALLAGENTWT, PUSHALLAGENTCLAUDE, PUSHALLAGENTAHEAD, PUSHALLBROKEN],

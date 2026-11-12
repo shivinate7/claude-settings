@@ -1118,6 +1118,17 @@ ARTCITE_EXTRAS_PATH = ".claude/layout-extras.json"
 ARTCITE_EXTRAS = json.dumps({"kinds": {}, "rolled-out": True,
                              "artifacts": [{"id": ARTCITE_ID, "url": ARTCITE_BARE, "role": "waiting-page",
                                             "account": "work"}]}, indent=2) + "\n"
+# ARTOLD, a checkout behind origin's default branch: origin's registry adds ARTCITE_NEWER, which the checkout's older
+# registry does not hold. ARTCITE_GHOST is in neither registry.
+ARTCITE_NEWER = "page02"
+ARTCITE_GHOST = "page03"
+ARTCITE_NEWER_EXTRAS = json.dumps({"kinds": {}, "rolled-out": True,
+                                   "artifacts": [{"id": ARTCITE_ID, "url": ARTCITE_BARE, "role": "waiting-page",
+                                                  "account": "work"},
+                                                 {"id": ARTCITE_NEWER, "url": "https://claude.ai/artifact/" + ARTCITE_NEWER,
+                                                  "role": "waiting-page", "account": "work"}]}, indent=2) + "\n"
+ARTCITE_NEWER_STEP = json.dumps({"title": "Step", "ask": "artifact:" + ARTCITE_NEWER})
+ARTCITE_GHOST_STEP = json.dumps({"title": "Step", "ask": "artifact:" + ARTCITE_GHOST})
 # One step per branch, as (file name, text). The branch name says the shape the case needs.
 ARTCITE_STEPS = {
     "steps-cites": ("c1.json", json.dumps({"title": "Step", "ask": ARTCITE_CITE})),
@@ -1155,20 +1166,20 @@ def artcite_allow(name, command, cwd=ARTREC, transcript=TRIAGE_TRANSCRIPT):
        cwd=cwd)
 
 
-def _artcite_commit(branch, files, start):
-    """Commit `files` ({path: text}) on `branch`, made from `start`, in ARTREC. Each named path is written in full."""
-    if run_vcs(ARTREC, "checkout", "-q", "-B", branch, start).returncode != 0:
-        sys.exit("fixture setup failed in build_fixtures: ARTREC cannot start %s from %s" % (branch, start))
+def _artcite_commit(branch, files, start, repo=ARTREC):
+    """Commit `files` ({path: text}) on `branch` of `repo`, made from `start`. Each named path is written in full."""
+    if run_vcs(repo, "checkout", "-q", "-B", branch, start).returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: %s cannot start %s from %s" % (repo, branch, start))
     for rel, text in files.items():
-        write(os.path.join(ARTREC, *rel.split("/")), text)
-    run_vcs(ARTREC, "add", "-A")
-    if run_vcs(ARTREC, *IDENT, "commit", "-q", "-m", branch).returncode != 0:
-        sys.exit("fixture setup failed in build_fixtures: ARTREC cannot commit %s" % branch)
+        write(os.path.join(repo, *rel.split("/")), text)
+    run_vcs(repo, "add", "-A")
+    if run_vcs(repo, *IDENT, "commit", "-q", "-m", branch).returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: %s cannot commit %s" % (repo, branch))
 
 
-def _artcite_shows(ref, rel, want):
-    """Read `rel` at `ref` back with git. The build stops when it is not `want`, so no case runs on a wrong head."""
-    got = run_vcs(ARTREC, "show", "%s:%s" % (ref, rel))
+def _artcite_shows(ref, rel, want, repo=ARTREC):
+    """Read `rel` at `ref` of `repo` back with git. The build stops when it is not `want`, so no case runs on a wrong head."""
+    got = run_vcs(repo, "show", "%s:%s" % (ref, rel))
     if got.returncode != 0 or got.stdout != want:
         sys.exit("fixture setup failed in build_fixtures: %s at %s is not the step the cases need" % (rel, ref))
 
@@ -1214,6 +1225,32 @@ def _artcite_build_branches():
     with open(os.path.join(ARTCLEAN, "roadmap", "data", "steps", "c1.json"), encoding="utf-8") as handle:
         if handle.read() != ARTCITE_STEPS["steps-cites"][1]:
             sys.exit("fixture setup failed in build_fixtures: ARTCLEAN is not on the cites-only step")
+
+
+def _artcite_build_older_checkout():
+    """ARTOLD, a checkout behind origin's default branch. Its checkout (on `steps-behind`) holds the older registry, which
+    registers ARTCITE_ID only. origin/main and origin/HEAD name a commit on top of that one, whose registry also holds
+    ARTCITE_NEWER. `steps-behind` cites ARTCITE_NEWER, and `steps-ghost` cites ARTCITE_GHOST, which neither registry holds.
+    The build stops when a head or a registry is not what the cases need."""
+    make_repo(ARTOLD, {"base.txt": "base\n"})
+    run_vcs(ARTOLD, "remote", "add", "origin", PUSHREMOTE)
+    _artcite_commit("older", {ARTCITE_EXTRAS_PATH: ARTCITE_EXTRAS}, "main", repo=ARTOLD)
+    _artcite_commit("newer", {ARTCITE_EXTRAS_PATH: ARTCITE_NEWER_EXTRAS}, "older", repo=ARTOLD)
+    _artcite_commit("steps-behind", {"roadmap/data/steps/c1.json": ARTCITE_NEWER_STEP}, "older", repo=ARTOLD)
+    _artcite_commit("steps-ghost", {"roadmap/data/steps/c1.json": ARTCITE_GHOST_STEP}, "older", repo=ARTOLD)
+    if run_vcs(ARTOLD, "update-ref", "refs/remotes/origin/main", "newer").returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: ARTOLD cannot set origin/main")
+    if run_vcs(ARTOLD, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main").returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: ARTOLD cannot set origin/HEAD")
+    if run_vcs(ARTOLD, "checkout", "-q", "steps-behind").returncode != 0:
+        sys.exit("fixture setup failed in build_fixtures: ARTOLD cannot put HEAD on steps-behind")
+    _artcite_shows("refs/remotes/origin/main", ARTCITE_EXTRAS_PATH, ARTCITE_NEWER_EXTRAS, repo=ARTOLD)
+    _artcite_shows("steps-behind", ARTCITE_EXTRAS_PATH, ARTCITE_EXTRAS, repo=ARTOLD)
+    _artcite_shows("steps-behind", "roadmap/data/steps/c1.json", ARTCITE_NEWER_STEP, repo=ARTOLD)
+    _artcite_shows("steps-ghost", "roadmap/data/steps/c1.json", ARTCITE_GHOST_STEP, repo=ARTOLD)
+    with open(os.path.join(ARTOLD, *ARTCITE_EXTRAS_PATH.split("/")), encoding="utf-8") as handle:
+        if handle.read() != ARTCITE_EXTRAS:
+            sys.exit("fixture setup failed in build_fixtures: ARTOLD's checkout does not hold the older registry")
 
 
 def _artcite_config(tag):
@@ -1422,6 +1459,12 @@ artcite_refuse("a bare link in a head with no registry file is refused, and the 
 artcite_refuse("a literal bare-link branch is refused from a clean head", VCS + " push origin steps-bare:roadmap",
                cwd=ARTCLEAN)
 artcite_allow("HEAD:roadmap from a clean head is allowed silently", VCS + " push origin HEAD:roadmap", cwd=ARTCLEAN)
+# The checkout is behind origin's default branch (ARTOLD). A cite of a page origin registers, which the checkout's older
+# registry does not, is allowed: the registry is read from origin's default branch. A cite of a page in neither is refused.
+artcite_allow("a triage push of a cite of a page on origin's default branch is allowed from a checkout behind it",
+              VCS + " push origin steps-behind:roadmap", cwd=ARTOLD)
+artcite_refuse("a triage push of a cite of a page in neither registry is still refused from a checkout behind origin",
+               VCS + " push origin steps-ghost:roadmap", cwd=ARTOLD)
 FAMILY = "merge"  # the family the cases after this section have always run in
 
 
@@ -1495,9 +1538,9 @@ def record_push_cost_case():
         # current branch (the agent test), one for-each-ref of the tracking refs, and one for-each-ref of the local
         # branches when the tracking refs show no update. A glob reads the config and the same two for-each-ref reads.
         # A local-path origin stops after the config read. The guard's other checks add to those counts
-        # on the same call: record_writer_hit reads the bare destination of a push with no refspec (a --all push is one:
-        # symbolic-ref and push.default), and the conflict-markers check reads its bases, three for a glob, which names
-        # no tracking ref, with the default base's symbolic-ref and rev-parse.
+        # on the same call: record_push_hit, the record-branch check, reads the bare destination of a push with no refspec
+        # through push_destinations (a --all push is one: symbolic-ref and push.default), and the conflict-markers check
+        # reads its bases, three for a glob, which names no tracking ref, with the default base's symbolic-ref and rev-parse.
         ("a --all push to a network remote", "push --all origin",
          {"rev-parse": 1, "symbolic-ref": 2, "config": 2, "for-each-ref": 2}),
         ("a glob push to a network remote", "push origin refs/heads/*:refs/heads/*",
