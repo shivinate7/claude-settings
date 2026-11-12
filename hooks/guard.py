@@ -4718,6 +4718,12 @@ def data_tool_hit(tool_input, cwd="", session_id=None):
 # it would drop the live page's data. A first publish, with no url, is not judged. A current page with data writes the stamp
 # (stale_pages.STAMP, main's blob sha) that hooks/session_start.sh reads back.
 PAGE_TOOL = "Artifact"
+COMMENTS_TOOL = "ArtifactComments"
+# Rule `page-thread-reply` (decision questions-go-to-owner, "Answer on the page, not in a comment thread"). A reply into a
+# comment thread on this repo's waiting page is refused; reads, watches, resolves and other artifacts pass.
+PAGE_THREAD_REPLY_REASON = ("answer on the waiting page, not in a comment thread: rewrite the item the comment is about, "
+                            "and say in one line in the session what changed. "
+                            "(decision questions-go-to-owner, the answer goes on the page)")
 PAGE_STALE_REASON = ("this file is behind main's skills/waiting-page/page.html, so a publish would put old page code on the "
                      "waiting page. Read the live page (Artifact action read), run the waiting-page skill's "
                      "stale_pages.py with `--page <saved live page> --write <out>`, and publish <out> to the same url. "
@@ -6286,6 +6292,12 @@ def judge(payload) -> None:
             unseen = page_design_hit(item_writes, tool_input, cwd)
             if unseen:
                 refuse(tool, "deny", "page-item-design", unseen[0], unseen[1])
+        return
+
+    if tool == COMMENTS_TOOL:
+        import question_form
+        if tool_input.get("action") == "reply" and question_form.is_waiting_page(tool_input, cwd):
+            refuse(tool, "deny", "page-thread-reply", PAGE_THREAD_REPLY_REASON, str(tool_input.get("thread_id") or "?")[:120])
         return
 
     if tool == PAGE_TOOL:
