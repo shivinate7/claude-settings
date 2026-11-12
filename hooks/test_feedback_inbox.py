@@ -4415,6 +4415,27 @@ def case_page_form_other_repo_not_the_writer_passes():
         expect_silent(name, p)
 
 
+def non_github_repo():
+    """acme_repo with its origin off GitHub: layout.repo_name reads no slug from it, so it is None. Its record branch
+    holds the template step as acme_repo's does, so the origin is the only difference."""
+    return record_repo("gitlab-widgets", {"roadmap/data/steps/%s.json" % TEMPLATE_STEP: TEMPLATE_STEP_TEXT},
+                       origin="https://gitlab.example.com/acme/widgets.git")
+
+
+def case_page_form_no_github_origin_stands_down():
+    """The same Asked comment, in a repo whose origin is not GitHub, with only a note. layout.repo_name is None there,
+    and the rule stands down when it is None: the Stop does not block. The repo-name fact is asserted first, since it
+    is the one that sets this case apart from the other-repo cases."""
+    import layout  # lint/layout.py: the one home of the repo's slug
+    cfg, sid = new_cfg(), "page-form-no-github"
+    root = non_github_repo()
+    name = "page-form stand-down: origin is not GitHub, Asked wake, [note] -> noted"
+    p = page_comment_run(cfg, sid, ASKED_WAKE, ["- fb-0961-12 [note] -> noted"], cwd=root)
+    check(name + ": scope repo_name is None", layout.repo_name(root) is None, layout.repo_name(root))
+    if expect_facts(name, page_comment_facts(cfg, sid, root, PAGE_CODE_URL, ASKED_WAKE), OUTSIDE_SCOPE):
+        check(name + ": not blocked", p.code == 0 and block_reason(p) is None, block_reason(p) or p.desc())
+
+
 CASES = (
     case_every_owner_message_is_captured,
     case_notices_are_never_captured,
@@ -4617,6 +4638,7 @@ CASES = (
     case_page_form_other_repo_saved_wake_passes,
     case_page_form_other_repo_other_artifact_passes,
     case_page_form_other_repo_not_the_writer_passes,
+    case_page_form_no_github_origin_stands_down,
 )
 
 
