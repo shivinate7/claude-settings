@@ -3926,7 +3926,7 @@ def role_model_one(tool_input):
                                                     ", ".join("`Round %s of 3`" % n for n in ROLE_REVIEWER_FREE_ROUNDS))
                 extra += ROLE_REVIEWER_FIX_CHECK_REMEDY % (FIX_CHECK_MARKER, " or ".join(ROLE_REVIEWER_FREE_ROUNDS))
             if tool_input.get(BRIEF_UNREAD):
-                extra += ", or " + BRIEF_LITERAL_REMEDY
+                extra += ", or " + BRIEF_MARKER_REMEDY
             if role == "reviewer":
                 extra += ROLE_TEST_AUTHOR_NOTE if "1" in ROLE_REVIEWER_FREE_ROUNDS else ROLE_REVIEWER_FIRST_ROUND_NOTE
             return ROLE_MODEL_REASON % extra, model, False
