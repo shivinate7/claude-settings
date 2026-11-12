@@ -795,11 +795,11 @@ class ReopenClosed(CloseEnv):
                               extra_comments=[review_comment(90, 4, "Carried by #9")])
         self.assertEqual(lines, ["reopen: o/alpha #4 (replacer #9 dropped)"], "\n".join(lines))
 
-    @unittest.expectedFailure  # Known gap, debt docs/debts/carrier-lost-head-stays-closed.md: reopen_lines reopens a carried PR only when its carrier
-    # closes unmerged. Owner ruling 2026-11-09 21:29 CST says it "reopens if the carrier is dropped". This flips to passing when the code reopens it.
+    @unittest.expectedFailure  # Known gap, debt docs/debts/carrier-lost-head-stays-closed.md: reopen_lines reopens a carried PR only when its
+    # carrier closes unmerged. Also expected: the PR reopens when its open carrier has moved off its head. This flips to passing when the code does.
     def test_a_carried_link_whose_open_carrier_lost_its_head_reopens_the_pr(self):
         # #4 is closed with the note `Carried by #9`. Open #9 has moved off #4's head: its head is head_of(9), and its compare with #4's head is
-        # diverged. The ruling says #4 reopens. The closed-carrier control is the one in test_a_closed_carried_pr_reopens_when_its_carrier_is_closed_unmerged.
+        # diverged. #4 should reopen here. The closed-carrier case is test_a_closed_carried_pr_reopens_when_its_carrier_is_closed_unmerged.
         host = closed_host("o/alpha", pulls=[named_pull(5, head_of(5)), named_pull(9, head_of(9))],
                            comments=[record_of(5, head_of(5)), review_comment(90, 4, "Carried by #9")], closed=[closed_pull(4, head_of(4))],
                            check_rows={head_of(5): green()}, compares={(head_of(4), head_of(9)): "diverged"})
@@ -926,9 +926,9 @@ class ReopenClosed(CloseEnv):
         self.assertEqual(lines, [], "#5 reopened while open #12 still names it, so the next wake closes it again:\n" + "\n".join(lines))
 
     def test_a_note_older_than_every_open_pr_is_not_read(self):
-        # Pin of the stated limit: the comment list starts at the oldest open pull request, so #4's note of 2026-09-01 is never read and #4 does
-        # not reopen, though its replacer #7 is closed unmerged. Why it stays so: an older note needs an earlier comment read on every wake,
-        # and each quiet run would pay for it. Control: #6's note is inside the window, and it reopens.
+        # Pins a named limit: the comment list starts at the oldest open pull request, so a note older than all of them is never read.
+        # #4's note is older than every open pull request, so #4 does not reopen, though its replacer #7 is closed unmerged. Why it stays so:
+        # an older note needs an earlier comment read on every wake, and each quiet run pays for it. Control: #6's note is in the window and reopens.
         closed = [closed_pull(4, head_of(4)), closed_pull(6, head_of(6)), closed_pull(7, head_of(7)), closed_pull(8, head_of(8))]
         notes = [review_comment(90, 4, "Replaced by #7", created="2026-09-01T00:00:00Z"), review_comment(91, 6, "Replaced by #8")]
         lines = kind_lines(self.block_for_alpha(pulls=[named_pull(5, head_of(5))], comments=notes, closed=closed), REOPENED)
