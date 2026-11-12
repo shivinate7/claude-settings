@@ -428,9 +428,9 @@ body.sheet-open { overflow: hidden; }
 .tabs .cnt { display: inline-block; min-width: 3.5ch; font-variant-numeric: tabular-nums; text-align: start; }
 /* Three tabs fit a 320 phone on one row: the label is 15px and each count box holds two digits. The row wraps when a wide fallback font makes them too wide. It wraps in reverse so the tab list stays on the bottom row, on the border. */
 @media (max-width: 400px) { .tabs a { padding-inline: 5px; gap: 3px; font-size: 15px; } .tabs .cnt { min-width: 2.5ch; } .tabs, .tabs .tl { gap: 2px; } .tabs { flex-wrap: wrap-reverse; } }
-/* With Designs shown the bar is four tabs. They stay on one row at every width, never wrapped and never scrolled sideways: below 500px the padding, gaps and reserved count boxes shrink, and below 400px the label shrinks too. */
+/* With Designs shown the bar is four tabs. They stay on one row while they fit, and wrap with Designs above the tab list when they do not, never scrolled sideways: below 500px the padding, gaps and reserved count boxes shrink, and below 400px the label shrinks too. The wrap is in reverse so the tab list stays on the bottom row, on the border. */
 @media (max-width: 500px) {
-  .tabs:has(#tabD:not([hidden])) { flex-wrap: nowrap; gap: 2px; }
+  .tabs:has(#tabD:not([hidden])) { flex-wrap: wrap-reverse; gap: 2px; }
   .tabs:has(#tabD:not([hidden])) .tl { gap: 2px; }
   .tabs:has(#tabD:not([hidden])) a { padding-inline: 6px; gap: 3px; font-size: 15px; }
   .tabs:has(#tabD:not([hidden])) .cnt { min-width: 2.5ch; }

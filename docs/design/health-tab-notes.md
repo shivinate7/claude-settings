@@ -28,9 +28,10 @@ an option. The choice sits on `#healthTab`, `#healthViewBtn` and `#healthTable`.
    - Health tab (pick): Questions, Status, Health in the tab row. Gain: it answers a different
      question from Status. Status says what is moving now. Health says how well the parts are built.
      One press from any tab. The tab carries the broken mark and count (3), so a broken part shows from
-     every tab. It fits a 320 phone: with Designs shown the bar is four tabs, and they keep one row at
-     every width. Below 500 px the padding, gaps and reserved count boxes shrink, and below 400 px the
-     label shrinks too (`.tabs:has(#tabD:not([hidden]))` rules in page.html). Designs does not wrap above.
+     every tab. It fits a 320 phone: with Designs shown the bar is four tabs. They keep one row while they
+     fit, and Designs wraps above the tabs when they do not (as main does). The page never scrolls
+     sideways. Below 500 px the padding, gaps and reserved count boxes shrink, and below 400 px the
+     label shrinks too (`.tabs:has(#tabD:not([hidden]))` rules in page.html).
      Each tab stays 44 px tall. Loss: one more tab.
      It changes the one-page ruling (Oct 27, 12:15 CDT; `one-page-notes.md` item 2), which names
      Questions, Status and Designs.
