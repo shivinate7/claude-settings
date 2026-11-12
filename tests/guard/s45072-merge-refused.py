@@ -105,6 +105,9 @@ ready_case("ready-lane: update_pull_request with no draft key stays allowed in a
            "mcp__github__update_pull_request", dict(owner="y", repo="x", pullNumber=5, title="x"), None)
 ready_case("ready-lane: update_pull_request with draft true stays allowed in a lane session", "allow", "lane",
            "mcp__github__update_pull_request", dict(owner="y", repo="x", pullNumber=5, draft=True), None)
+# A record that cannot be read proves no lane, so the mark is judged as main judges it. `unreadable` is a folder (13406).
+ready_case("ready-lane: a ready mark with an unreadable own record is allowed (fails open)", "allow", "unreadable",
+           "mcp__github__update_pull_request", dict(owner="y", repo="x", pullNumber=5, draft=False), None)
 for _label, _command, _expected in call_shapes("gh pr ready 5"):
     ready_case("ready-lane: gh pr ready 5 %s is %s" % (_label, "refused in a lane" if _expected == "deny" else "no call"),
                _expected, "lane", "Bash", {}, _command)
