@@ -1,14 +1,14 @@
 {
  "id": "main-push-wakes-runner",
  "title": "A CI alarm on a push to main wakes the batch runner",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL11UY3p6jnSXrTspmu",
  "owner": "triage",
  "blockedBy": [],
  "why": "Plan R53 (owner 13:07 CST Nov 12): a CI or merge alarm (red main, a job at its time cap, a dropped check run) wakes the batch runner and opens no GitHub issue.",
  "source": "lane red-job-wakes-runner 13:11 CST Nov 12",
- "note": "Gap: step red-job-wakes-runner covers only the PR-comment wake (actions/ci-done-comment, `job:` input, needs a PR number); a run on a push to main has no PR, so no channel reaches the runner. Its repeat-skip memory is PR-comment markers only, nothing for main, so this step also keeps the record of run ids already alarmed (stands item 608). One home: the main-run wake; PR #2745 (cap alarm, lane fan-code-workflows) calls it and does not build its own. Red first.",
- "updatedAt": "2026-11-12T13:12:04-06:00"
+ "note": "Gap: step red-job-wakes-runner covers only the PR-comment wake (actions/ci-done-comment, `job:` input, needs a PR number); a run on a push to main has no PR, so no channel reaches the runner. Its repeat-skip memory is PR-comment markers only, nothing for main, so this step also keeps the record of run ids already alarmed (stands item 608). One home: the main-run wake; PR #2745 (cap alarm, lane fan-code-workflows) calls it and does not build its own. Red first. Coordinator pick 13:12 CST (stands item 611): the cap alarm on main comments on the merged PR behind the run's head commit (comment.sh); a run-id marker in the comment is the record of runs already alarmed; a commit with no PR ends the alarm job red with the reason in its summary, no issue. Runner 10 stays subscribed to a merged integration PR until main's push run on it ends. Lane fan-code-workflows builds it (coordinator 13:12 CST); main-job-cap-alarm unblocks when it lands.",
+ "updatedAt": "2026-11-12T13:15:51-06:00"
 }
