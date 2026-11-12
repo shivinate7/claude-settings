@@ -17,8 +17,8 @@ session-messaging-plan and peer-message-turn-cap.
 ## One route (owner, 2026-11-10 09:33 CST)
 
 Ruling: every message between sessions goes through the git mailbox, cloud to cloud included.
-The doorbell is open (owner unsure, 2026-11-10 09:36 CST): a cloud-only doorbell would not reach every device, and no wake route is known for a local computer.
-The mailbox is read at turn start, so it cannot wake anyone.
+The doorbell is a background `mail wait` (owner, 2026-11-12 14:17 CST, "I'm okay with A for Q1"; section "The doorbell: mail wait"). The owner rejected a `send_message` doorbell and a trusted-device route at 14:14 CST: a cloud-only doorbell would not reach every device.
+The mailbox is read at turn start, and `mail wait` wakes an idle session.
 The design is device-neutral (owner, 2026-11-10 09:34 CST, "the device shouldn't matter"): local sessions are addressed `pc/<host>/<owner>-<repo>/<session id>` on any Mac or Windows computer.
 Local-computer checks: measured on a Mac only; Windows unmeasured.
 
@@ -42,6 +42,23 @@ Home of the measurement: roadmap step `mailbox-wake-routes` (the wake-route meas
 
 State: the code still sends cloud to cloud by `send_message` until a build lands. No build is started.
 Timed check-ins: Q4, see its bullet.
+
+## The doorbell: mail wait
+
+Ruling: owner, 2026-11-12 14:17 CST, "I'm okay with A for Q1"; plan R57 (the mail doorbell is a background mail-wait) in plans/restart-plan.md on origin/restart-plan. Wake routes (a) `send_message` doorbell and the trusted-device route are rejected (owner, 14:14 CST); (b) and (c) are not built.
+Rule: CLAUDE.md rule `outcomes-mechanize-rules` bans timers and long-lived processes. Ruling 3.15 (owner, 2026-11-11 13:22 CST; step timer-rule-reason-only) allows a waiting process whose record shows it costs less than it saves. This section is that record.
+
+What it is. `mail wait [--interval S] [--max-seconds S]` in `bin/mail`, code in `hooks/mail.py`. A session starts it with `run_in_background` when its turn ends idle. It blocks until a message it has not seen is open under the session's own addresses, then prints `mail: new <id> from <addr> kind <kind>: <first body line>` and exits 0. Claude Code wakes the session on the exit. Same on cloud, Mac and Windows. The message has no subject field, so the first body line is the subject.
+How it reads. At start, one fetch and `open_messages` give the baseline of open ids. Then one `git ls-remote` per interval. The mail ref moves on every send and take by any session, so a moved sha alone is not mail: only then it fetches, runs `open_messages`, and wakes on an id not in the baseline. It writes no `listing-*.json`.
+Exit codes: 0 new mail; 2 not started (`MAILBOX_REPO` unset, no address, or a live waiter holds the lock), at once, printing `mail wait: not started: <reason>`; 3 ended at `--max-seconds` with no mail, printing `mail wait: ended, no mail`. A poll that fails keeps polling.
+Lock. `<cache>/wait-<address with / as _>.lock`, created exclusively, JSON `{pid, ppid, session, started, deadline}`. Stale when its pid is dead, its deadline has passed, or its start time differs from the pid's. A stale lock is replaced. The waiter removes it on every exit, SIGTERM included, and exits when the lock is gone or its parent pid is dead.
+Wakes with no mail. Every exit wakes the session, so the instruction (skill `waiting-page`, "Message another session") tells a session to start it only when idle, with `MAILBOX_REPO` set; never again after exit 2; at most once after exit 3. The default limit is 6600 s, under the 2 h background cap.
+
+Cost, measured. Interval 30 s, chosen from a measured `ls-remote`: 316 to 404 ms over 6 runs (Checked Nov 12 on main 2deb827ad, from this cloud session against the claude-settings origin through the proxy; the store itself was not reachable from this session, so the Nov 6 store figure of 391 to 608 ms, 5 runs, is cited and not re-run). 120 reads an hour is about 40 s of git time an hour per idle session. A wake is at most 30 s late.
+Doorbell cost: processes 1; interval 30 s; reads per hour 120; files written 1 (lock)
+Beyond that line: each read is one short git process (`ls-remote`); a moved sha adds one fetch and one grep and writes only the existing cache; the waiter keeps no log and starts no second long-lived process. With the default limit an idle session with no mail wakes once per 110 min (about 0.55 a hour). Test: hooks/test_mail_wait.py, case "the decision states the measured doorbell cost", reads this line and compares each number to a simulated hour.
+Saves: an idle session otherwise never reads mail until a person types; a message to any session now wakes it with no device-specific route.
+Unmeasured: Windows. The git timeout branch is tested by injection only (debt mail-windows-timeout-hang stays open). Whether a background exit wakes the session was not re-run from this lane: the cloud lane's shell refused every background command inside a worktree ("too complex to verify"). Another session must run one short `run_in_background` command and report the wake.
 
 ## The 10-message stop on the Mac
 
