@@ -4,8 +4,9 @@
  "ruling": "- **R5.** Owner 15:04 CST Nov 10: \"i'd say option e works for now with a revisit maybe to threshold lanes if it turns out to be problematic\". One cull lane fixes or deletes each guard or check with a recorded wrong refusal (60 \"false alarm\" lines in docs/debts/notes.md). It fixes each one, and deletes it only when its wrong refusals cost more than the harm it stops (rule building-guard-needs-incident stays; owner 15:23 CST: \"b ... this is fine\"). The list also covers the lane pick guard's wrong fires and the Departs-from separator and Recovered-line fires (owner 15:18 CST: \"A is fine -- but the coordinator probably has way more data on how hooks have been acting than your small sample size does\"); the coordinator sends triage its record of hook fires for the same list. After it, wrong refusals are notes only. If they turn out to be a problem again, revisit a threshold (a guard with 3 recorded wrong refusals gets its own lane). Home: new decision cull-guard-wrong-refusals, beside cull-rules (PR #2568, branch cull-false-alarms-once). The cull also judges the message guard between sessions, #1805, with its fix #1849, as one pair. Owner 09:12 CST Nov 11, in the coordinator's chat: \"q2 B\" (take #1805 out of the drain; both go to stage 3). Alone, #1805 wrongly refuses 136 of 204 ordinary coordinator messages; with #1849, 13 of 204 (#1849's round 3).",
  "quote": "i'd say option e works for now with a revisit maybe to threshold lanes if it turns out to be problematic; false alarm; b ... this is fine; A is fine -- but the coordinator probably has way more data on how hooks have been acting than your small sample size does",
  "source": "plans/restart-plan.md@restart-plan, R5",
- "status": "open",
+ "status": "closed",
  "supersedes": [],
  "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": ""
+ "title": "",
+ "closed_reason": "absorbed on main: docs/decisions/cull-guard-wrong-refusals.md: 'After the cull, a wrong refusal is a note only: one line in the notes file.' The 09:12 Nov 11 'q2 B' tail on #1805/#1849 is not in that record; it is a drain act, not a rule. The cull act itself is step guard-false-alarm-cull (doing)."
 }

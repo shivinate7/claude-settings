@@ -6,6 +6,8 @@
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 20",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "at_estimated": true
+ "supersedes_none": "One-off owner decision on one held change; the hold rule stays.",
+ "at_estimated": true,
+ "step": "guard-false-alarm-cull",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Item 615 a: restart held family 8b in one fix lane at round 1, safe on Python 3.9 with a 3.9 test. One-off release of one held change; main's CLAUDE.md:38 \"A held change is parked. It gets no fix lane and no more work until the owner decides.\" stays true. Step guard-false-alarm-cull is doing."
 }

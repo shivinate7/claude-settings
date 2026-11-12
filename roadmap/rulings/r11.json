@@ -5,7 +5,13 @@
  "quote": "A -- but also i kinda meant how when questions reach triage, do the pre tool question use stuff run on it just like it would when uqestions used to come in line in the chats?; runs on; /effort medium; its weird a lane can be spawned without its brief first preprovided; maybe we enforce cloud sessions to restart often mechanically based on certain conditions like certain items landing on main; yes sorry i meant reinstall not restart i agree",
  "source": "plans/restart-plan.md@restart-plan, R11",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": ""
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/hook-catalog-page.md: '`docs/catalog.md` lists every hook, judge, mod and skill.' (widened to every setting, with a runs-on column)"
+  }
+ ],
+ "title": "",
+ "step": "hook-catalog-whole",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: docs/catalog.md on main lists hooks, judges, mods and skills only: no runs-on column, no permissions, autoMode, env, githooks. The reinstall-when-stale part is not in main either (decision merge-reinstalls-from-main covers merges only); step cloud-hooks-stale-copy (doing) carries it."
 }

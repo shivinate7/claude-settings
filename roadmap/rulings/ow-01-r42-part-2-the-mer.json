@@ -4,8 +4,9 @@
  "ruling": "Q1, 09:42 CST: option a. All repos, the child repos too, switch to per-lane merge together; each child repo",
  "quote": "",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 1",
- "status": "open",
+ "status": "closed",
  "supersedes": [],
  "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "at_estimated": true
+ "at_estimated": true,
+ "closed_reason": "duplicate of r42 (a restatement, not a later change): Q1; full text read from plans/owner-rulings-2026-11-12.md@roadmap bullet 1 (store ruling is truncated); same as store r42. Main holds no per-lane merge for any repo: docs/decisions/uniform-over-variants.md (named home) has no merge text, docs/plans/r42-part2-design.md is absent on origin/main."
 }

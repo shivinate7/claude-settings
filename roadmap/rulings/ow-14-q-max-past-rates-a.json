@@ -4,8 +4,9 @@
  "ruling": "12:33 and 12:35 CST, relayed by the coordinator and the retrospective: \"it's weird that ure making half-baked calls\", then \"sure approved\" on the retrospective's diagnosis. Plan R51, \"A pick reads its ruling before it is sent\", home plans/restart-plan.md on branch restart-plan (a2b2c8b52): a coordinator pick cites a ruling or \"no ruling found: <search>\" (step pick-ack-past-ruling); a pick that never reached the page is caught (step-pick-claims-match-page); lanes send hand-ins to the batch runner and questions to triage, so the coordinator gets only picks; a step slug that does not exist is caught (send-message-refs-resolve).",
  "quote": "it's weird that ure making half-baked calls; sure approved; A pick reads its ruling before it is sent; no ruling found: <search>",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 14",
- "status": "open",
+ "status": "closed",
  "supersedes": [],
  "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "at_estimated": true
+ "at_estimated": true,
+ "closed_reason": "duplicate of r51 (a restatement, not a later change): R51; same as store r51. Main's past-ruling check judges questions only (docs/decisions/question-form.md:20-21); no main file has a pick citing a ruling or \"no ruling found\", and no main file routes lane hand-ins to the batch runner and questions to triage. Steps pick-ack-past-ruling, step-pick-claims-match-page, send-message-refs-resolve are doing."
 }

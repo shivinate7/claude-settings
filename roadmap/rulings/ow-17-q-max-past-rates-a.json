@@ -6,6 +6,7 @@
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 17",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "at_estimated": true
+ "supersedes_none": "Three accepted picks of new behaviour; main holds none of them. 606 is not a ruling.",
+ "at_estimated": true,
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: 608 a, 609 a, 610 a are accepted coordinator picks (cap alarm skips a run an earlier alarm named; Mac mail hold opt-out; install and launch fall back to main with a warning when the stable branch is missing). Grep of main for stable branch, already named, mail hold finds nothing. 606 got answer none"
 }

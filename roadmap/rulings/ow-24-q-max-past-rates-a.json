@@ -5,7 +5,13 @@
  "quote": "Merge Tool Read Checks",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 24",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "at_estimated": true
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "settings.json:61 (autoMode.allow, Merge Tool Read Checks): \"On a PASS for a pull request number it posts one owner-authored lint comment on that pull request.\""
+  }
+ ],
+ "at_estimated": true,
+ "step": "batch-label-setter",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: 618 b widens the \"Merge Tool Read Checks\" allow text to name the label a lane-lint PASS with --integration adds; main text names only the comment. 617 a is an accepted lane-audit pick (one-off)."
 }

@@ -5,7 +5,13 @@
  "quote": "im wondering whether i properly keep claude.md's just at the repo level and claude-settings level as its parent and no where further; yes that's fine it would need my sign off (the actual results of the review) but just marking it as an item for review is good to dos onow",
  "source": "plans/restart-plan.md@restart-plan, R35",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "The global CLAUDE.md loads only what each session needs."
+ "supersedes": [
+  {
+   "kind": "test",
+   "ref": "lint/check_claude_md_size.py: 'Warns when a CLAUDE.md passes 200 lines' (MAX = 200, counts lines, not words)"
+  }
+ ],
+ "title": "The global CLAUDE.md loads only what each session needs.",
+ "step": "global-claude-md-scope-audit",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: The size check still counts lines only. Step global-claude-md-scope-audit is doing; the owner has not signed off the audit."
 }

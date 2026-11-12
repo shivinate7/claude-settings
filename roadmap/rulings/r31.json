@@ -5,7 +5,17 @@
  "quote": "as long as it's well defined and doesn't create loop holes builder plus check definitely seems ideal no?; yea that check should just protect it as the hand off happens usper often and it's for sure a point of contetnion",
  "source": "plans/restart-plan.md@restart-plan, R31",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "A builder resolves a test merge conflict; a check proves no test was lost."
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/builders-cannot-edit-tests.md:57: 'A merge conflict in a test file is not the builder's to resolve ...'"
+  },
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/builders-cannot-edit-tests.md:36: 'A test conflict mid-merge is refused. The route is `git merge --abort`, then report to the orchestrator ...'"
+  }
+ ],
+ "title": "A builder resolves a test merge conflict; a check proves no test was lost.",
+ "step": "merge-conflict-mixed-roles",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Main still routes a test conflict to a test-author. Step merge-conflict-mixed-roles is blocked; mixed-merge-resolver is doing; brief-role-scope-check is todo."
 }

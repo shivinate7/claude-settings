@@ -5,7 +5,13 @@
  "quote": "a model's meaning match, no glossary; yes on the fix !",
  "source": "plans/restart-plan.md@restart-plan, R38",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "The repeat judge skips its own thread and marks without blocking."
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/owner-feedback-inbox.md:~131-145: 'One call per Stop covers all of them' and 'the block reason names it'"
+  }
+ ],
+ "title": "The repeat judge skips its own thread and marks without blocking.",
+ "step": "repeat-judge-never-blocks",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Main repeat judge still makes one call per Stop for all items and the mark blocks. Step repeat-judge-never-blocks is doing; its step note says #2781 is built, not on main."
 }

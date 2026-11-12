@@ -6,6 +6,8 @@
  "source": "plans/restart-plan.md@restart-plan, R43",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "A usage brake on accounts with a rate limit."
+ "supersedes_none": "new decision record usage-brake; replaces no main sentence",
+ "title": "A usage brake on accounts with a rate limit.",
+ "step": "usage-brake",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: No usage-brake record, hook or rule on main (git grep for 'usage brake' finds nothing in CLAUDE.md, docs/decisions, hooks, lint, skills). docs/decisions/session-tiers.md:28 'There is no usage limit' is about session length and stays. Step usage-brake is doing."
 }

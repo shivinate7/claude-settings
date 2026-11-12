@@ -6,6 +6,8 @@
  "source": "plans/restart-plan.md@restart-plan 9064e3c1, R59; item 646 (ruling-governs-guards-now) closed 15:08 CST",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "main: a guard obeys only main's code; triage fills the guard rules each later entry lifts",
- "title": "A ruling governs at once, guards included."
+ "supersedes_none": "adds a store and a guard-governs path; replaces no main sentence (docs/decisions/owner-override.md stays; each later entry names the guard rule it lifts)",
+ "title": "A ruling governs at once, guards included.",
+ "step": "ruled-store-one-home",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: No ruling store read by sessions, and no guard that lets a ruled act through, on main; the guard obeys only main code. Steps ruled-store-one-home and ruled-prose-express are doing."
 }

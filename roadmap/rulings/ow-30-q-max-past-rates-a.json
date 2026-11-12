@@ -5,8 +5,14 @@
  "quote": "q2: ya C",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 30",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/session-messages.md:20: \"The doorbell is open (owner unsure, 2026-11-10 09:36 CST)\""
+  }
+ ],
  "at_estimated": true,
- "see": "r57"
+ "see": "r57",
+ "step": "mail-doorbell-wait",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: R57 route a, a background mail-wait, same as the second half of store r57. Main still calls the doorbell open. It leans on store entry timer-allowed-when-cheaper (Nov 11 13:22); main CLAUDE.md:11 still reads \"starts no new long-lived process\" without that carve-out."
 }

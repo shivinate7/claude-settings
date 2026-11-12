@@ -5,7 +5,13 @@
  "quote": "i think in general we heavily prioritize these merge actions (bringing them all express way to main before letting other work get in its way, like even if there's a batch rn looking to go to main it waits; Express lane, and cancel a running batch for it too; that needs to join the express list; CI fixes need to be right up there in the express lane with the merging fixes given they go hand in hand",
  "source": "plans/restart-plan.md@restart-plan, R55",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "Merge-flow fixes take an express lane."
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/no-merge-during-batch-ci.md: \"The refusal names the other PR, and the check with its link or the workflow that runs. It says to wait.\""
+  }
+ ],
+ "title": "Merge-flow fixes take an express lane.",
+ "step": "busy-file-stacked-batches",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: docs/decisions/no-merge-during-batch-ci.md has no express lane or cancel-a-running-batch text; ci-hygiene step 8 (SKILL.md:59) has no pointer to it. Carried by step busy-file-stacked-batches note (also ci-batch-mac-runner, mutate-guard-split and others on the express list)."
 }

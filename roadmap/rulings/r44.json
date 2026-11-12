@@ -5,7 +5,13 @@
  "quote": "on r44 yea agreed A build all 3; i don't want it to be that the repoos like Q_max have adopted a ton of old rules and they just stick in them and claude-settings comes and is unable to bring that lift immediately; no bot, no schedule; Check how far each child repo is from claude-settings main; audits feel more like one-timey than they are mechanical ... i'd allow for example one quick scan of a part of q_max; npm run lint runs the same lint, at the same pinned commit",
  "source": "plans/restart-plan.md@restart-plan, R44",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "Child repos follow claude-settings, with cited exceptions only."
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/action-pins-follow-sessions.md: \"Pins stay current on demand: the session that runs the tool sees the drift and moves the pin. No bot and no schedule.\""
+  }
+ ],
+ "title": "Child repos follow claude-settings, with cited exceptions only.",
+ "step": "child-repo-gap",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: No child-CI check or stable-branch action pin on main; decision action-pins-follow-sessions still says pins move only when a session sees drift. The mandate in docs/decisions/session-tiers.md:7 stays. Step child-repo-gap is todo and R44 folds into it."
 }

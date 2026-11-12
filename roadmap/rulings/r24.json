@@ -6,6 +6,8 @@
  "source": "plans/restart-plan.md@restart-plan, R24",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "Every refusal names a way out that works."
+ "supersedes_none": "adds a requirement (each refusal carries a Remedy, a test runs it through the guard); guard_core.refuse() takes free text and no main sentence is replaced",
+ "title": "Every refusal names a way out that works.",
+ "step": "refusal-names-way-out",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: No requirement or test on main; the step is todo. Only some refusals carry a Remedy."
 }

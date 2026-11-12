@@ -5,7 +5,13 @@
  "quote": "keep mail only; a whole other route that's translataable anywhere",
  "source": "plans/restart-plan.md@restart-plan, R57",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "The mail doorbell is a background mail-wait."
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/session-messages.md:20: \"The doorbell is open (owner unsure, 2026-11-10 09:36 CST)\""
+  }
+ ],
+ "title": "The mail doorbell is a background mail-wait.",
+ "step": "mail-doorbell-wait",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: docs/decisions/session-messages.md:20 still 'The doorbell is open (owner unsure, 2026-11-10 09:36 CST)'; :34 and :119 say not built. Step mail-doorbell-wait is doing. Needs the timer-allowed-when-cheaper wording on main for a waiting process."
 }

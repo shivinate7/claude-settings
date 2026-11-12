@@ -5,7 +5,13 @@
  "quote": "windows as well now that windows works -- we're just waiting on mac i believe",
  "source": "plans/restart-plan.md@restart-plan, R49",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "The mailbox default is on for cloud and Windows."
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/session-messages.md:9-10: \"`MAILBOX_REPO` has no settings.json default until step 2 measures Mac and Windows auth. The default needs the owner's typed words.\""
+  }
+ ],
+ "title": "The mailbox default is on for cloud and Windows.",
+ "step": "session-mailbox-followups",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: docs/decisions/session-messages.md:9-10 still says there is no default and it needs the owner's typed words; settings.json has no MAILBOX_REPO. r49 is those words. Step session-mailbox-followups is doing."
 }

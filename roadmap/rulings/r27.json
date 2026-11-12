@@ -5,7 +5,17 @@
  "quote": "this should've been a trigger for something that should've been mechanizable remember, we can't have sesisons fualting themselves for something that could bve cvorrected?; it seems like basically this was a good idea but it's execution was a little half baked in that it's never cleaned up after or tended to?; put them in the handoff; mark [closed]",
  "source": "plans/restart-plan.md@restart-plan, R27",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "The feedback log tends itself."
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/owner-feedback-inbox.md:160: 'An item closes when its inbox line gains `[closed]`, after its work is done or its home holds it for good.'"
+  },
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/owner-feedback-inbox.md: 'The compact hook lists open item ids.'"
+  }
+ ],
+ "title": "The feedback log tends itself.",
+ "step": "feedback-log-tends-itself",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Main closes an item by hand-typed [closed]; no self-close, and the compact hook lists all open ids. Step feedback-log-tends-itself is doing."
 }

@@ -5,7 +5,13 @@
  "quote": " name.** Owner 12:54 CST Nov 11: ; . Read 12:55 CST: decision plain-prose-lint keeps STE001, a CI error on a sentence over 30 words (max_words 30). The name survives in lint/ste_lint.py, actions/ste-lint, the STE0nn codes and rule anchor output-write-in-ste, against his 2026-11-02 13:22 CST ruling ; . 73 of 3561 commits on main since Nov 4 fix the lint. Owner 12:56 CST: ; . 1. STE001 stops failing; wordiness and repetition go to reviewers and judges, which never count. 2. The lint, its action, its codes and the rule anchor drop ;  from their names. 3. A read-only census (started 12:57 CST) lis",
  "source": "plans/restart-plan.md@restart-plan, R37",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "No fixed word cap, and no \"STE\" name."
+ "supersedes": [
+  {
+   "kind": "guard-rule",
+   "ref": "docs/decisions/plain-prose-lint.md:15,25: 'STE001 (one budget of 30 words ...)' / 'STE001 reads one key, `max_words`, set to 30' (lint/ste_lint.py, a CI error)"
+  }
+ ],
+ "title": "No fixed word cap, and no \"STE\" name.",
+ "step": "fixed-number-limits-census",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Main still fails STE001 at 30 words and keeps the STE names. Step fixed-number-limits-census is doing; ste-lint-rename is todo."
 }

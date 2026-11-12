@@ -5,7 +5,21 @@
  "quote": "r41 yes on all; tell me how my mods and skills work ... are they even good to keep around anymore, are they under the right folders/locations; no transcript; i also frankly dont see some mods that i do see on local claude like the weather context thing",
  "source": "plans/restart-plan.md@restart-plan, R41",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "Mods, skills and the output style: keep all, fix seven defects."
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "hooks/decision_watch.py:773: UNKNOWN_PREFIX + \"transcript_path is missing or does not exist.\""
+  },
+  {
+   "kind": "main-sentence",
+   "ref": "install.sh:844 tree_hash: find . -type f (hashes __pycache__ too)"
+  },
+  {
+   "kind": "main-sentence",
+   "ref": "settings.json:459: \"ponytail\" marketplace source DietrichGebert/ponytail"
+  }
+ ],
+ "title": "Mods, skills and the output style: keep all, fix seven defects.",
+ "step": "decision-watch-finds-transcript",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Main lacks items 1, 2 and 6: hooks/decision_watch.py:773 still returns UNKNOWN 'transcript_path is missing or does not exist.'; install.sh:844 tree_hash hashes every file; settings.json:459 still lists the ponytail marketplace. Item 5 is on main (docs/decisions/question-form.md:17 'Every question ca"
 }

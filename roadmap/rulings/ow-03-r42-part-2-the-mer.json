@@ -4,8 +4,9 @@
  "ruling": "Q3, 09:46 CST, confirmed 09:48 CST (\"q3 correct\"): option i. A red main stops merges only until the revert",
  "quote": "q3 correct",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 3",
- "status": "open",
+ "status": "closed",
  "supersedes": [],
  "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "at_estimated": true
+ "at_estimated": true,
+ "closed_reason": "duplicate of r42 (a restatement, not a later change): Q3 (09:46, confirmed 09:48); same as store r42 and as ow-29 (14:17, same ruling, not a change). Main's brake lifts on a completed green run; the ruling lifts it when the revert merges. Decision no-merge-onto-red-main not yet rewritten."
 }

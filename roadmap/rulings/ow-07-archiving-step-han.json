@@ -4,8 +4,9 @@
  "ruling": "09:47 CST: the lane also leaves its handoff where it can be found: it commits it to",
  "quote": "",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 7",
- "status": "open",
+ "status": "closed",
  "supersedes": [],
  "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "at_estimated": true
+ "at_estimated": true,
+ "closed_reason": "duplicate of r46 (a restatement, not a later change): Lane commits its handoff to roadmap/outbox/<slug>-handoff.md before tagging archive-ready; full text from source bullet 7; same as store r46. Main still puts the handoff on a branch; skills/project-ops/templates/brief.md has no outbox path."
 }

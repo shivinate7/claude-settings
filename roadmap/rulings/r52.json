@@ -6,6 +6,8 @@
  "source": "plans/restart-plan.md@restart-plan, R52",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "The batch runner runs Sonnet 5.5 at medium effort."
+ "supersedes_none": "adds table rows; replaces no main sentence",
+ "title": "The batch runner runs Sonnet 5.5 at medium effort.",
+ "step": "model-table-one-home",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: docs/decisions/agent-model-cap.md table has no batch runner, coordinator or triage row (only the 'separate sessions ... main model unless the owner names one' default). Step model-table-one-home is doing."
 }

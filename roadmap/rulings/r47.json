@@ -6,6 +6,8 @@
  "source": "plans/restart-plan.md@restart-plan, R47",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "The queue re-ranks itself."
+ "supersedes_none": "adds a score and an agent check; replaces no main sentence (step c55 is folded and was the earlier home)",
+ "title": "The queue re-ranks itself.",
+ "step": "queue-score-plus-agent",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: No step scoring or triage re-rank agent on main (git grep 'score' in skills/roadmap/build.py finds only compliance scores). Step queue-score-plus-agent is blocked by upkeep-keys-live-status (doing)."
 }

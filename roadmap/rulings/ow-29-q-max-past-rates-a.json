@@ -4,8 +4,9 @@
  "ruling": "14:17 CST item 622 b, picked by the retrospective on his 14:13 CST instruction: merges resume when the revert merges (his 09:46 CST answer). Home: decision no-merge-onto-red-main.",
  "quote": "",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 29",
- "status": "open",
+ "status": "closed",
  "supersedes": [],
  "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "at_estimated": true
+ "at_estimated": true,
+ "closed_reason": "duplicate of ow-03 (a restatement, not a later change): Item 622 b, chosen by the retrospective on his 14:13 instruction: merges resume when the revert merges (his 09:46 answer). Same ruling as ow-03, not a change; he answered 622 none and asked the retrospective to decide. Main still lifts the brake on a green run."
 }

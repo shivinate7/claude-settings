@@ -5,7 +5,13 @@
  "quote": "should coordinator just be responsible for all with batch runner getting a subset?; on archivals option A is best; on archivals option A is best -- with not only the tag of archive ready but it should also kinda show where it's leaving its handoff so it's referenceable if needed right",
  "source": "plans/restart-plan.md@restart-plan, R46",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "Who archives finished sessions."
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/session-tiers.md:80: \"The batch runner archives each lane after its merge ... The coordinator archives a lane it decides to stop.\""
+  }
+ ],
+ "title": "Who archives finished sessions.",
+ "step": "handoff-lands-tracked-first",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: docs/decisions/session-tiers.md:80 still holds the older archiving scope; no 'whoever starts it archives it', no archive-ready tag, no roadmap/outbox handoff on main. ow-06 and ow-07 restate r46 (same day). Step lane-tags-archive-ready has no file; it folded into handoff-lands-tracked-first (doing)."
 }

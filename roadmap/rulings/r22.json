@@ -5,7 +5,13 @@
  "quote": "its moreso that a session ended coordinwtor and all and a new coordinator and sessions respawned and somehow no one rewrote the session ids to now be the new ones; so keep no second copy in the repo",
  "source": "plans/restart-plan.md@restart-plan, R22",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "A respawn rewrites every session id at once."
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "skills/project-ops/SKILL.md:51-52: 'The roster's home is the project instructions, so keep no second copy in the repo.'"
+  }
+ ],
+ "title": "A respawn rewrites every session id at once.",
+ "step": "roster-on-record-branch",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: project-ops still keeps the roster in the project instructions; the step is doing."
 }

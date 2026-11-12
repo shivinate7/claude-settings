@@ -5,7 +5,13 @@
  "quote": "on #1 -- A seems best",
  "source": "plans/restart-plan.md@restart-plan, R8",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": ""
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/agent-model-cap.md: 'The guard enforces the ceiling and the role rows.'"
+  }
+ ],
+ "title": "",
+ "step": "model-table-one-home",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: docs/decisions/agent-model-cap.md on main says only 'The guard enforces the ceiling and the role rows'; hooks/guard.py role-model row (9b3, ROLE_NO_MODEL_REASON) refuses a spawn above its row or with no model where nothing sets one. It does not require or fill the row's model and effort, and no sent"
 }

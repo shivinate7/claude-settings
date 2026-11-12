@@ -6,5 +6,6 @@
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 19",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main"
+ "supersedes_none": "Two accepted picks of new behaviour (the refusal-draft pick changes a report-guard text, rule id not read); 594 and 613 add no ruling.",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Store at reads 2026-11-10 13:26; wrong: items 611 and 612 say Nov 12 and the source bullet sits between 13:20 and 13:31 Nov 12. 611 a (alarm on main wakes the runner through the merged PR) and 612 a (a report refusal carries a draft of the line) are accepted picks, new on main. 594 none is moot. 613"
 }

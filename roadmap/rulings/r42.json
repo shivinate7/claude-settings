@@ -5,7 +5,17 @@
  "quote": "a report is still just a report yanno that's something for me to read rather than something to act upon; Redesigning source control at Anthropic; A proper merge queue, for example, doesn't make much sense at agent scale; lanes compete more for the machine isn't a real problem on cloud sessions where each spawns its own machine right? and then it is true for local machines though (which is why we have load brakes for local right; r42 part 2: i'm pretty open to this radical approach -- A; A seems fine; none of the child repos are running rihgt now -- so if that makes A easier to do right now tha",
  "source": "plans/restart-plan.md@restart-plan, R42",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "Rulings get acted on, and main moves the way Anthropic moves its own."
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "git-integration-branch-merge: \"Batch lane PRs that pass their local checks into one integration branch.\""
+  },
+  {
+   "kind": "main-sentence",
+   "ref": "git-no-merge-during-batch-ci: \"While a batch's integration PR has a CI run in progress, nothing merges to main\""
+  }
+ ],
+ "title": "Rulings get acted on, and main moves the way Anthropic moves its own.",
+ "step": "merge-flow-after-anthropic",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: CLAUDE.md lines 54-58 still hold the batch flow and the no-merge lock; no main text on per-lane merge, stable branch or a coordinator queue of ruled steps. ow-01..ow-05 restate parts of r42 (same day, same answers, not later changes). Part 1 is step ruled-step-coordinator-queue (ready)."
 }

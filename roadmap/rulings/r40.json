@@ -6,6 +6,8 @@
  "source": "plans/restart-plan.md@restart-plan, R40",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "Compaction trigger tested higher."
+ "supersedes_none": "adds an env key to settings.json and records the test result; replaces no main sentence",
+ "title": "Compaction trigger tested higher.",
+ "step": "compact-pct-override",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: settings.json has no CLAUDE_AUTOCOMPACT_PCT_OVERRIDE; precompact-handoff.md:7 still says the cloud sets it per session. Step compact-pct-override is todo and waits on the fresh start. Related but not replaced: r32's per-model compact window."
 }

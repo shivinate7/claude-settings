@@ -5,7 +5,17 @@
  "quote": "yes this statement of opus 4h etc also feels super arbitrary; i dont want to do such rigid word grants moreso like if i say send a swarm of opus agents that just works too yanno? A is good though but it should be override <anytime> or override not just override and override 4h; override 15m please; may an override travel by relay?; q1 -- yes; An override covers only the session where the owner typed it",
  "source": "plans/restart-plan.md@restart-plan, R12",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": ""
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/owner-override.md:26: 'An override covers only the session where the owner typed it.'"
+  },
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/owner-override.md:40: 'a reason form stays one-act, and `override 15m please` grants nothing.'"
+  }
+ ],
+ "title": "",
+ "step": "owner-override-one-route",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: docs/decisions/owner-override.md on main still has fixed forms, the 'opus 2h' form, and 'prints nothing' on a grant (no receipt line). Step owner-override-one-route is doing; ow-15 (601 a) refines its end rules only. r59 and r18 point 5 do not change this question."
 }

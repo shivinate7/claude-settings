@@ -6,6 +6,8 @@
  "source": "plans/restart-plan.md@restart-plan, R56",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "A silent lane on a step others wait on gets one nudge."
+ "supersedes_none": "adds a one-line nudge; replaces no main sentence",
+ "title": "A silent lane on a step others wait on gets one nudge.",
+ "step": "coordinator-session-board",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: No nudge of a silent lane on main; r56 extends the r54 read. Step coordinator-session-board (doing) carries both."
 }

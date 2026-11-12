@@ -5,7 +5,17 @@
  "quote": "yes on r39; my rules are to be challenged/questioned and never read as absolutes given im imperfect; how can we fix the defference in claude.md or whever it is taht's causing it; the owner is never asked twice; a re-ask the ruling allows; maybe the judge hooks that run on our sesisons should identify it frankly just like how it identifies when shared mistakes and other stuff happens",
  "source": "plans/restart-plan.md@restart-plan, R39",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "A past ruling is challenged, never deferred to."
+ "supersedes": [
+  {
+   "kind": "guard-rule",
+   "ref": "hooks/call_judge.py:131-138 PAST_RULING_ITEM: refuses a question a listed ruling decides; the only pass is a 'Based on (ruling)' line"
+  },
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/question-form.md:21: 'It refuses a question that asks what a listed ruling already decides.'"
+  }
+ ],
+ "title": "A past ruling is challenged, never deferred to.",
+ "step": "ruling-challenge-passes",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Item 8 still refuses any re-ask without a Based on (ruling) line and cannot pass a challenge. Step ruling-challenge-passes is doing."
 }

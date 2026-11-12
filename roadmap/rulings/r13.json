@@ -5,7 +5,13 @@
  "quote": "I need it to be that lanes that coordinator spawns are either A) banned from ever having any sort of popup / request that interrupts them, or B) in the artifact i get hyperlinks to those sessions that then show me their erequest and clear them -- I strongly lean towards A though; trying to make sure u dont misunderstand this into opening a large hole;  to the form. Outcome: a popup inside a lane is a stall the owner cannot see, which costs speed and buys no accuracy. Every popup becomes a refusal plus a routed question, never a silent allow, so safety stays the same or stricter. 1. A lane neve",
  "source": "plans/restart-plan.md@restart-plan, R13",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": ""
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "questions-go-to-owner: 'A session that started another session never opens the box. The started session may wait on it.'"
+  }
+ ],
+ "title": "",
+ "step": "lane-no-popup",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: CLAUDE.md on main (questions-go-to-owner) still reads 'A session that started another session never opens the box. The started session may wait on it.' hooks/question_form.py has no refusal by parent session. Step lane-no-popup is todo; its note says relays never grant, but r13 point 3 and r12 allow"
 }

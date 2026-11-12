@@ -5,7 +5,17 @@
  "quote": "i do think these roles that have defaults need to have decided models and why -- similarly maybe an evaluation of what else can be a first try haiku vs what needs to go higher and at what effort levels; separate sessions; i'd say all three stay on opus for now until 3.7",
  "source": "plans/restart-plan.md@restart-plan, R33",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "Every role has a chosen model and effort, with a reason."
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/agent-model-cap.md:39: '| main session | unset, account default | model default |'"
+  },
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/agent-model-cap.md:44: '| skills | no `model:` pin | none |' (and the per-skill rows)"
+  }
+ ],
+ "title": "Every role has a chosen model and effort, with a reason.",
+ "step": "model-table-one-home",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Model table (docs/decisions/agent-model-cap.md:38-55) has no coordinator, triage or batch runner row; skills have no pin. Later entry r52 (Nov 12 13:07) ends only the batch-runner Opus hold; the rest of r33 stands. Step doing."
 }

@@ -6,6 +6,7 @@
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 8",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "at_estimated": true
+ "supersedes_none": "One-off act (close listed PRs, no comments, no branch deletes); replaces no sentence on main.",
+ "at_estimated": true,
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: One-off act, already executed: plans/stale-drafts-2026-11-12.md@roadmap says 439 of 439 closed at 10:10 CST, and the close also took #1755 and #1725, which the ruling excluded (the 09:49 hold sat unread). GitHub state not re-read by me. Nothing on main to hold it."
 }

@@ -4,8 +4,9 @@
  "ruling": "12:10 CST, relayed by the coordinator: \"Custom connectors are not allowed -- so we can do route B\". Page item 558 closed; decision waiting-page-one-store moves to route B (lane page-data-one-store); steps page-git-connector-probe and page-one-store-answers folded.",
  "quote": "Custom connectors are not allowed -- so we can do route B",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 10",
- "status": "open",
+ "status": "closed",
  "supersedes": [],
  "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "at_estimated": true
+ "at_estimated": true,
+ "closed_reason": "superseded by a later entry: Superseded by ow-13 (12:40 CST, page item 593 pick a): the page database is the one store with a timely git export; route B parked as the fallback. This 12:10 entry moved decision waiting-page-one-store to route B. Steps page-git-connector-probe (folded) and page-one-store-answers (blocked) hang on it."
 }

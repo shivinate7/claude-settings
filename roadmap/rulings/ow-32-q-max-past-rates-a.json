@@ -6,6 +6,7 @@
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 32",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "at_estimated": true
+ "supersedes_none": "One-off act (start one lane); replaces no sentence.",
+ "at_estimated": true,
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Typed yes in the coordinator to start the records lane for answers 632 and 633 (item 638). A one-off start grant; nothing on main to hold it."
 }

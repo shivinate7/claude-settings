@@ -5,7 +5,13 @@
  "quote": "in general if sessions create options triage should hold those letters the same (or they shd be referenced by IDs each option rather than A B which can be arbitrarily swapped)",
  "source": "plans/restart-plan.md@restart-plan c92e5bca, R60; home decision question-form",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "main: no rule fixes an option letter once shown; decision question-form (docs/decisions/question-form.md) is the record step option-keys-match-chat rewrites",
- "title": "An option keeps its letter and carries an id."
+ "supersedes": [
+  {
+   "kind": "guard-rule",
+   "ref": "option-letter-keys:  \"A waiting-page option's key is the letter the page shows\""
+  }
+ ],
+ "title": "An option keeps its letter and carries an id.",
+ "step": "option-keys-match-chat",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: docs/decisions/option-keys-are-letters.md:1 and guard rule option-letter-keys still require key = lowercase letter of position; no option id or held letter on main. Step option-keys-match-chat is doing."
 }

@@ -6,6 +6,8 @@
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 5",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "at_estimated": true
+ "supersedes_none": "A yes to a design file that lands as a new file with its first PR; the rules it replaces are carried by ow-01 and ow-02.",
+ "at_estimated": true,
+ "step": "merge-flow-after-anthropic",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Owner yes to docs/plans/r42-part2-design.md with the refuter's six changes. File is absent on origin/main; branch claude/ecstatic-euler-capib9 is not in this checkout's remote refs (unmeasured). Step note says the design would retire rule git-no-merge-during-batch-ci, but R55 (ow-18) says that rule "
 }

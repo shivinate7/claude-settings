@@ -6,6 +6,8 @@
  "source": "plans/restart-plan.md@restart-plan, R36",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "Agents write little that no one reads."
+ "supersedes_none": "adds one line to each agent role file and the lane start text, plus a check; replaces no main sentence",
+ "title": "Agents write little that no one reads.",
+ "step": "agent-output-terse-line",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: No short-output line in agents/*.md on main. Step agent-output-terse-line is doing."
 }

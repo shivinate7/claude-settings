@@ -5,7 +5,17 @@
  "quote": "i also wonder when the coordinator spawns lanes if there's ways to be more token efficient (here, and elsewhere tbh -- worried i overuse tokens in some ways); Audit now; /effort medium; the first message in cloud sessions spawns is often just ;  and then they get messaged their brief rather htan it being preloaded; given my spend says i spent like thousands of dollars on like nov 8 -- i feel like u didn't properly catch where all my spend has gone. also remember, dollar savings shouldn't come at the cost of speed -- speed is more important (but it's all relative and not absolute); Finish measu",
  "source": "plans/restart-plan.md@restart-plan, R32",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "A token audit, then cuts."
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "git-ci-wait-checks-in: 'and again after each red job, each wider apart' (no 55-minute cap)"
+  },
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/idle-resume-compacts.md:37: '`/autocompact` with a token count also moves it' (listed as a cloud lever)"
+  }
+ ],
+ "title": "A token audit, then cuts.",
+ "step": "token-spend-sources",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Cuts not on main. The coordinator and triage rows are missing from the model table. Steps: token-spend-sources blocked; model-table-one-home, stop-checks-one-message, ci-wait-cap-55 doing; idle-resume-compacts-rewrite todo. No later entry changes it."
 }

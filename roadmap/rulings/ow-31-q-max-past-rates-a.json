@@ -4,9 +4,10 @@
  "ruling": "R58, 14:19 CST (plan 0a36899): batch macOS jobs on his MacBook (label claude-settings-mac, GitHub fallback, no fork PR); drafts skip macOS while a batch runs. Home: decision no-merge-during-batch-ci; step ci-batch-mac-runner.",
  "quote": "",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 31",
- "status": "open",
+ "status": "closed",
  "supersedes": [],
  "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
  "at_estimated": true,
- "see": "r58"
+ "see": "r58",
+ "closed_reason": "duplicate of r58 (a restatement, not a later change): R58; same as store r58. Main runs a draft's touched tests on macOS with no skip during a batch, and has no claude-settings-mac label (grep of .github, docs/decisions, CLAUDE.md finds none). Step ci-batch-mac-runner is doing."
 }

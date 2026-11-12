@@ -5,7 +5,13 @@
  "quote": "i thought i've already set something really high up in claude.md or elsewhere that sessions/agents should never assume an error is their own and instead should strongly be raised awareness that any error they make might be a strong INDICATOR that a guard/something-0mechanical should be in place?; yes agreed-- that or we create a hook taht looks for this kind of prose when the session says it so taht way the HOOK/judge files it not the session itself; Read a mistake first as a missing guard or check, never as a fault to own: the way we work should make accidents hard.",
  "source": "plans/restart-plan.md@restart-plan, R16",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "A mistake is filed as a missing guard, by a hook."
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "building-mistake-names-its-guard: 'The report names the guard that would have stopped it: built (PR or commit), queued as `step:<slug>`, or a debt.'"
+  }
+ ],
+ "title": "A mistake is filed as a missing guard, by a hook.",
+ "step": "mistake-prose-files-guard",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: CLAUDE.md:85 on main says 'A mistake you made is a strong sign that a guard or check is missing', close in meaning to the ruled opening (step mistake-rule-opening closed on that basis). Missing: the Cause:/Guard: report lines and the Stop-hook judge that files the guard; no 'Cause:' mistake line exi"
 }

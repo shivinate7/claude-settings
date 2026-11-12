@@ -4,8 +4,9 @@
  "ruling": "12:14 CST, in chat, relayed by the retrospective: \"ah ok C is good go for it\": page item 559 pick c, each failing required job wakes the batch runner as it fails, no cancel; R4's lint-first cancel stays. Step red-job-wakes-runner; plan R50.",
  "quote": "ah ok C is good go for it",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 11",
- "status": "open",
+ "status": "closed",
  "supersedes": [],
  "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "at_estimated": true
+ "at_estimated": true,
+ "closed_reason": "duplicate of r50 (a restatement, not a later change): R50 (page item 559 pick c); same as store r50. Main's ci-done job needs every other job and comments once when the run ends red; the ruling posts the notice as each required job fails, no cancel. Step red-job-wakes-runner is doing (draft PR #2860), not on main."
 }

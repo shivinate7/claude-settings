@@ -4,8 +4,9 @@
  "ruling": "13:07 CST, chat (relayed by the retrospective 13:08 CST): R52, batch runners on Sonnet 5.5 at medium effort; it becomes the default if no issues arise (home decision agent-model-cap; step model-table-one-home). R53, CI and merge alarms wake the batch runner and open no GitHub issue (steps main-job-cap-alarm, red-job-wakes-runner). Both in plans/restart-plan.md, branch restart-plan 4c91998.",
  "quote": "",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 16",
- "status": "open",
+ "status": "closed",
  "supersedes": [],
  "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "at_estimated": true
+ "at_estimated": true,
+ "closed_reason": "duplicate of r52 (a restatement, not a later change): R52 plus R53; same as store r52 and r53. agent-model-cap table on main has no batch runner row (main session row: unset, account default). Main's CI alarm opens an issue; R53 says no GitHub issue, wake the batch runner. Steps model-table-one-home, main-job-cap-alarm, red-job-wakes-runner are doing."
 }

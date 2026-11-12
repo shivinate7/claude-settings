@@ -5,7 +5,30 @@
  "quote": "isn't all four parts overkill; you're taking my ruling no hard fixed numbers too broadly and seriously...",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 15",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "at_estimated": true
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/opus-grant-expires.md:12: \"at most 24 hours ahead\" (602 a)"
+  },
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/owner-override.md:27: \"A one-act override that nothing uses ends after 10 minutes.\" (601 a)"
+  },
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/claude-md-change-is-flagged.md:8: \"The files are `CLAUDE.md`, `.claude/CLAUDE.md` and each file under `output-styles/`\" (597 a)"
+  },
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/ci-job-caps.md:1: \"Each CI job's cap leaves its slowest run under 80%\" (586 a; step note says its job limits are replaced)"
+  }
+ ],
+ "at_estimated": true,
+ "step": "time-limits-end-hangs-only",
+ "steps": [
+  "time-limits-end-hangs-only",
+  "owner-override-one-route",
+  "ruling-challenge-passes"
+ ],
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Five page-save answers; none on main. 602 a (item 602 = agent-cap lift end time): main undoes an end time over 24 h. 601 a: override ends on use, off or next typed message. 597 a: moved rule files keep the merge flag. 586 a: cut run counts as a sample (step time-limits-end-hangs-only, doing). 579 b "
 }

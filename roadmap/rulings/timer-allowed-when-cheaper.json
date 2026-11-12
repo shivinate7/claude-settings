@@ -8,11 +8,13 @@
  "supersedes": [
   {
    "kind": "main-sentence",
-   "ref": "CLAUDE.md rule:outcomes-mechanize-rules: \"Tracking, logging, monitoring or measuring reads on demand inside a process already running, never on a timer or on every tool call, and starts no new long-lived process.\""
+   "ref": "outcomes-mechanize-rules: \"reads on demand inside a process already running, never on a timer or on every tool call, and starts no new long-lived process.\""
   }
  ],
  "lands_in": {
   "path": "CLAUDE.md",
   "contains": "a timer is allowed when its record shows it costs less than it saves"
- }
+ },
+ "step": "timer-rule-reason-only",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: CLAUDE.md:11 (origin/main bcbeaa26a) still says 'never on a timer'; git grep 'less than it saves' finds nothing on main. Step timer-rule-reason-only is doing (draft #2671 not merged)."
 }

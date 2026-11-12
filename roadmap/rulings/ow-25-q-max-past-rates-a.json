@@ -4,9 +4,10 @@
  "ruling": "R56, asked 13:46 CST, \"go\" 13:52 CST (via retrospective, plan a853c38): targeted nudge to silent lanes others wait on (blockedBy target or R55 express), once per R54 read, no broadcast. Home: decision session-tiers; step coordinator-session-board.",
  "quote": "",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 25",
- "status": "open",
+ "status": "closed",
  "supersedes": [],
  "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
  "at_estimated": true,
- "see": "r56"
+ "see": "r56",
+ "closed_reason": "duplicate of r56 (a restatement, not a later change): R56 targeted nudge to silent lanes others wait on; same as store r56. Main session-tiers.md has no nudge rule (line 179 is about unrelated work sent to an idle lane). Step coordinator-session-board is doing."
 }

@@ -6,6 +6,8 @@
  "source": "plans/restart-plan.md@restart-plan, R34",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "The page shows how the system works and how healthy each part is."
+ "supersedes_none": "adds a new tab to the roadmap page; replaces no main sentence",
+ "title": "The page shows how the system works and how healthy each part is.",
+ "step": "owner-health-tab",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: No health tab on main (no hit in skills/roadmap, docs/decisions, docs/map). Step owner-health-tab is doing."
 }

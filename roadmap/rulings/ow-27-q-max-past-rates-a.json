@@ -5,7 +5,21 @@
  "quote": "for now at least",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 27",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "at_estimated": true
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "roles-review-cap-three: \"A FAIL or a wider diff starts a new lane at round 1.\" (633 b)"
+  },
+  {
+   "kind": "main-sentence",
+   "ref": "hooks/guard_core.py:1589: \"git -C folder reads first-wins\" (621 a)"
+  },
+  {
+   "kind": "main-sentence",
+   "ref": ".claude/CLAUDE.md:23: \"delete a branch whose last commit is on the default branch or on an archive branch\" (632 a adds the repo scope)"
+  }
+ ],
+ "at_estimated": true,
+ "step": "fix-check-records-carry",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Page save with several answers, none on main. 633 b: records-only fix-check FAIL carries (step fix-check-records-carry, doing). 621 a: guard reads each command's own folder. 632 a: delete grant covers any repo his logins reach (shivinate7, ssemwal-cdc); main grant names no login. 624 b session stamp"
 }

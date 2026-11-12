@@ -6,6 +6,8 @@
  "source": "plans/restart-plan.md@restart-plan, R48",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "Every part of a ruling has a step."
+ "supersedes_none": "new check plus rule text in session-tiers; replaces no main sentence",
+ "title": "Every part of a ruling has a step.",
+ "step": "ruling-parts-cite-steps",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: No check on main that each ruling part names its step:<slug>. Step ruling-parts-cite-steps is doing."
 }

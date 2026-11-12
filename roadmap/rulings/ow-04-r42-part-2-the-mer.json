@@ -4,8 +4,9 @@
  "ruling": "Q4, 09:46 CST (\"g is fine\"): a revert is an ordinary lane PR merged with --base-red-ok; no `merge --revert`",
  "quote": "g is fine",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 4",
- "status": "open",
+ "status": "closed",
  "supersedes": [],
  "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "at_estimated": true
+ "at_estimated": true,
+ "closed_reason": "duplicate of r42 (a restatement, not a later change): Q4; same as store r42. Main already has --base-red-ok as the way out (no-merge-onto-red-main.md) but its ci-hygiene \"Never revert\" line (about integration-branch drops) does not yet say a revert of main is an ordinary lane PR under --base-red-ok with no `merge --revert`."
 }

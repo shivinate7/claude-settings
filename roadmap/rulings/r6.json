@@ -6,6 +6,8 @@
  "source": "plans/restart-plan.md@restart-plan, R6",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "Triage's outbox is read against main."
+ "supersedes_none": "adds a check run at triage status and a sentence to decision owner-feedback-inbox; replaces no main sentence",
+ "title": "Triage's outbox is read against main.",
+ "step": "outbox-ruling-home-check",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: decision owner-feedback-inbox on main has no outbox-against-main check; no code reads outbox rulings. Draft #2767 (step outbox-ruling-home-check) is not merged. r59's ruled store later moves where rulings live, so the check may need to read the store too (step note: 'a later change')."
 }

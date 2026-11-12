@@ -5,7 +5,13 @@
  "quote": "time limits as a rule make little to no sense when they feel arbitrary and are not outcomes related ... I understand keeping time limits at some point for letting hung tests end; yes, that three-part form matches what I meant; , never ; : never red, never a merge refusal; retried once, then reported. 3. A total-time limit that must stay (CI billing) comes from measured green runs each time, never a number stored in code. Details, owner 14:24 CST Nov 10 (answers to triage's four points): - A check that gives a verdict (lint, tests, Retire) stops on silence, reads ; , retries once. Any other bac",
  "source": "plans/restart-plan.md@restart-plan, R3",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": ""
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/ci-job-caps.md: 'The merge tool's lane lint bound, `LINT_SECONDS` in `merge/merge.py`: 1200 s to 3600 s.' (and the Retire, Python floor and mutation-run bounds listed beside it)"
+  }
+ ],
+ "title": "",
+ "step": "time-limits-end-hangs-only",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: decision time-limits-end-hangs-only is not on main. ci-job-caps.md and the code still hold fixed limits (lint/check_debt_retire.py:35 TIMEOUT 1800; merge/merge.py:1940 LINT_SECONDS 3600). ow-15 (586 a) only adds to it."
 }

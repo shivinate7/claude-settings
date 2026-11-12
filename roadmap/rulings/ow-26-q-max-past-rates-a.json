@@ -6,6 +6,7 @@
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 26",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "at_estimated": true
+ "supersedes_none": "Adds steps to the express order; replaces no main sentence.",
+ "at_estimated": true,
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: CI wall-time fixes join the R55 express list; same as the 14:05 clause of store r55. Nothing on main; decision no-merge-during-batch-ci has no express text. Steps are listed in r55 (mutate-guard-split, convert-time-pinned-tests and others)."
 }

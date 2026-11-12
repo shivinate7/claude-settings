@@ -6,6 +6,7 @@
  "source": "plans/restart-plan.md@restart-plan, R25",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "Stage 4 runs with stage 3."
+ "supersedes_none": "schedule ordering only; replaces no main sentence, test or guard rule",
+ "title": "Stage 4 runs with stage 3.",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Plan-order ruling held only in docs/plans/restart-plan.md:16,835, not in any decision, rule or skill. Likely spent: stage-4 step roster-on-record-branch is already doing."
 }

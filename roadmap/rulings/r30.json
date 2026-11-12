@@ -5,7 +5,13 @@
  "quote": "im able to spawn a retrospective or a consultant, basically someone like you who's literally a course correction vehicle for me to chat with from a more outsider lens -- or realistically should i be working wiht a coordinator for this; Add consultant role; advisor",
  "source": "plans/restart-plan.md@restart-plan, R30",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "A consultant role, started by the owner."
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/session-tiers.md:8: 'The session roles are the same on local and cloud: coordinator, triage, batch runner, lane and arbiter.'"
+  }
+ ],
+ "title": "A consultant role, started by the owner.",
+ "step": "consultant-role-record",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: No 'consultant' in CLAUDE.md, GLOSSARY.md, docs/decisions, skills, hooks or agents on main. Steps consultant-role-record and consultant-role-placement are ready."
 }

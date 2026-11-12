@@ -5,7 +5,13 @@
  "quote": "everything that marks prose should share the same ;  mechanism ... it should be more uniform, standardized, and shared as much as possible to avoid stale duplication and to ensure shared best practrices; i agree the fix is in r28; still true?; is the live page being used correctly then if the data in there needs to be manually copied in and out? i figured it's just temporally same as with git? it feels weird that it's partitioned steps; ya if anything the actual page gets its database disableed if that's possible and then it's never an issue ... remember ij just care about the outcomes not the",
  "source": "plans/restart-plan.md@restart-plan, R28",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "Every prose store is tended one shared way."
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "skills/waiting-page/SKILL.md:281: 'The writer keeps a copy of the page's data in the repo (see \"Keep a copy in the repo\").'"
+  }
+ ],
+ "title": "Every prose store is tended one shared way.",
+ "step": "page-data-one-store",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: No shared tending contract or 'still true?' test on main (no hit in decisions, lint/layout.json, skills). Main still has the page-first copy step. Steps page-data-one-store and prose-tending-contract are doing."
 }

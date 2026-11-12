@@ -5,7 +5,17 @@
  "quote": "i never want my hook to have one spew out the whole thing again after -- as i fixed long ago in how the done deviations inputneeded hook works, that should be viewed as a best practice for other hooks that make you regurgitate output again; post only the corrected lines ... Never send the report again; i really dislike when the hook makes my sesison repeat everyhting and add an edit in to the output, i really want that each of these hooks/guards only adds the necessary additional text",
  "source": "plans/restart-plan.md@restart-plan, R10",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": ""
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "lint/report_guard.py:36: 'When the report is there, no refusal holds correction text; the step lives in decision guard-remedy-not-to-owner.'"
+  },
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/guard-remedy-not-to-owner.md:177: 'Correction rule, no text in any refusal: after any refusal but a missing report, post only the corrected lines'"
+  }
+ ],
+ "title": "",
+ "step": "refusal-ends-short-fix-line",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Main states the opposite: refusals carry no correction text (lint/report_guard.py:36). The words 'post only the corrected lines' appear on main only in that decision and in tests, not in a refusal text."
 }

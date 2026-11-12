@@ -6,6 +6,8 @@
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 23",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "at_estimated": true
+ "supersedes_none": "Adds a lane to the express order; replaces no main sentence.",
+ "at_estimated": true,
+ "step": "merge-batch-split-and-pipeline",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Auto-build half of merge-batch-split-and-pipeline joins the express list; same as the 13:45 clause of store r55. No express list on main (git grep express finds none in rules or decisions)."
 }

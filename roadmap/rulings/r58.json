@@ -6,6 +6,8 @@
  "source": "plans/restart-plan.md@restart-plan, R58",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "Batch macOS jobs get their own machine."
+ "supersedes_none": "adds a self-hosted route and a draft skip; replaces no main sentence",
+ "title": "Batch macOS jobs get their own machine.",
+ "step": "ci-batch-mac-runner",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Nothing on main about a claude-settings-mac runner or skipping a draft's macOS job during a batch run (git grep finds none in no-merge-during-batch-ci.md or ci-hygiene). docs/decisions/draft-until-reviewed.md:15 only measures the 5 GitHub macOS slots. Step ci-batch-mac-runner is doing."
 }

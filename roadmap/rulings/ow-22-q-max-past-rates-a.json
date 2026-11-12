@@ -6,6 +6,8 @@
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 22",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "at_estimated": true
+ "supersedes_none": "Widens two picks that main's settings.json has not landed; no main sentence to replace.",
+ "at_estimated": true,
+ "step": "batch-freeze-lane-set-enforce",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Item 619 b widens the allow text to --blame --run, --on and --base. Main's settings.json autoMode.allow has no --batch-build, --batch-drop or --ready entry yet, so picks 457 a and 458 a it widens are not on main either. The settings edit waited on his typed yes (item 620, marked done in ow-27)."
 }

@@ -5,7 +5,13 @@
  "quote": "I do think the process of what's being woken, and how to pass words along / relays needs to be vastly improved as the current process is broken/flawed; too many sessions seem too tapped in to the artifact like they'll be woken for any change to the artifact not just an update to their specific question; relayed grants need to come in more easily and more intuitively ... we never protect against maliciousness only carelessness/negligence; agreed yes -- but it should also be known by sessions how to carry my grant so that way it's not like problematic or a cause of pain; on the page, item N; <ex",
  "source": "plans/restart-plan.md@restart-plan, R18",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "One home and one wake per answer; a relay is easy and checked for carelessness."
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/relayed-grant-read-from-page.md: 'A peer session's message text. Another session wrote it, and `send_message` marks it as data.' (under 'What never counts'; r18 point 5 admits one checked form)"
+  }
+ ],
+ "title": "One home and one wake per answer; a relay is easy and checked for carelessness.",
+ "step": "page-wakes-and-relays",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: decision relayed-grant-read-from-page on main still counts no peer message; no 'Grant: <exact words> (owner, <time>) covers <act>' form or sender check exists on main. Step page-wakes-and-relays is doing. Point 4 (never reply in a thread) is already on main (owner-feedback-inbox.md:54, step page-thr"
 }

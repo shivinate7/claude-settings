@@ -5,7 +5,13 @@
  "quote": "id say open an issue too but who reads issues?; i think any ci / merge relaterd thing should be just an alert for batch runner to either then address or bring to coordinator right",
  "source": "plans/restart-plan.md@restart-plan, R53",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "A CI or merge alarm goes to the batch runner."
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "actions/ci-alarm/action.yml:3: \"Opens (or comments on) one issue when the newest completed run of any workflow on a branch is red\""
+  }
+ ],
+ "title": "A CI or merge alarm goes to the batch runner.",
+ "step": "main-job-cap-alarm",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: actions/ci-alarm/action.yml:3 still 'Opens (or comments on) one issue' when a run is red; no wake of the batch runner for CI or merge alarms on main. Steps main-job-cap-alarm (doing) and red-job-wakes-runner (doing)."
 }

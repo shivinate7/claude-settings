@@ -6,6 +6,8 @@
  "source": "plans/restart-plan.md@restart-plan, R20",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "A pass claim needs a verdict line."
+ "supersedes_none": "adds enforcement for rule tokens-run-through-verdict, which main enforces nowhere; no main sentence or test changes",
+ "title": "A pass claim needs a verdict line.",
+ "step": "pass-claim-cites-verdict",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Main has no check that a pass claim cites a verdict line: lint/report_guard.py checks review-record PASS claims only, and hooks/guard_stream.py only quotes verdict in a remedy. Step pass-claim-cites-verdict is doing."
 }

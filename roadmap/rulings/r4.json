@@ -5,7 +5,17 @@
  "quote": "is there no truly fast way that retains accuracy?; yes D is approved",
  "source": "plans/restart-plan.md@restart-plan, R4",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": ""
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/lanes-run-no-full-ci-job.md: 'The batch runner runs it on each lane head before the join. It refuses a red lane, and that lane fixes and hands off again.'"
+  },
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/lanes-run-no-full-ci-job.md: 'The batch runner runs `merge --lane-lint <integration PR number>` on the batch head, after the draft step's page push and before it marks the integration PR ready.'"
+  }
+ ],
+ "title": "",
+ "step": "lane-lint-once-fail-fast",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: decision lanes-run-no-full-ci-job on main still has the batch runner run lane lint before the join and on the batch head. ow-11 (12:14 Nov 12) says 'R4's lint-first cancel stays'. r42 part 2 does not rule this question."
 }

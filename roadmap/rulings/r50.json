@@ -5,7 +5,13 @@
  "quote": "Is it possible to just rerun the jobs that went red on teh second try, or anyways everything would rerun? If latter, then it should fail fast no?; ah ok C is good go for it",
  "source": "plans/restart-plan.md@restart-plan, R50",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "A red job wakes the batch runner at once."
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "git-ci-done-comment-wakes: \"A run that ends red posts one PR comment, which wakes the session that watches the PR\""
+  }
+ ],
+ "title": "A red job wakes the batch runner at once.",
+ "step": "red-job-wakes-runner",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: CLAUDE.md:54 still wakes only when the run ends red; skills/ci-hygiene/SKILL.md:237 ci-done-comment posts when the run ends. Step red-job-wakes-runner is doing; lint-first cancel is step lane-lint-once-fail-fast (doing)."
 }

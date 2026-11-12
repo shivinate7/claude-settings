@@ -6,6 +6,8 @@
  "source": "plans/restart-plan.md@restart-plan, R51",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "A pick reads its ruling before it is sent."
+ "supersedes_none": "adds a check on coordinator send_message picks; replaces no main sentence",
+ "title": "A pick reads its ruling before it is sent.",
+ "step": "pick-ack-past-ruling",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: No 'no ruling found' text or send_message pick check on main; decision question-form (docs/decisions/question-form.md:20) vets page questions only. Steps pick-ack-past-ruling, step-pick-claims-match-page, send-message-refs-resolve exist."
 }

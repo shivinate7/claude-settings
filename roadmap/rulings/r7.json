@@ -5,7 +5,13 @@
  "quote": "if we develop some sorta express pass for the entirety of prose to be fast to review i'd be open to considering that; this is very key yes",
  "source": "plans/restart-plan.md@restart-plan, R7",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": ""
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/docs-only-prs-skip-review.md: 'A record in it that files an owner ruling gets the short round below.'"
+  }
+ ],
+ "title": "",
+ "step": "express-pass-owner-quotes",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: docs/decisions/docs-only-prs-skip-review.md on main has no exact-quote express pass; every record that files an owner ruling still gets the short round. Draft #2900 not merged; part 2 waits on page item 624 (picked b)."
 }

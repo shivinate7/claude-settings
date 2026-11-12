@@ -7,5 +7,6 @@
  "status": "open",
  "supersedes": [],
  "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "at_estimated": true
+ "at_estimated": true,
+ "audit": "unclear at the 2026-11-12 audit: Ruling is about q_max's repo (EPI2B-3 check re-point at 1440 px, debt on q_max decision D-649 in q_max's debt store). claude-settings main has no D-649, EPI2B or Past Rates text; q_max is not readable here, so unmeasured. Step qmax-browser-main-red is status ready with no live lane. Store slug q-max"
 }

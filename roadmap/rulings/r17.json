@@ -6,6 +6,8 @@
  "source": "plans/restart-plan.md@restart-plan, R17",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "A repo with no CI gets a starter CI, not an exemption."
+ "supersedes_none": "adds a project-ops step and a refusal remedy; replaces no main sentence (same-check-kinds is kept)",
+ "title": "A repo with no CI gets a starter CI, not an exemption.",
+ "step": "no-ci-starter",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: skills/project-ops on main writes no starter CI; no refusal for 'no CI' names it. Step no-ci-starter is doing. decision same-check-kinds stays as is."
 }

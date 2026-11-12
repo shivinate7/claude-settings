@@ -5,7 +5,13 @@
  "quote": "im good with either an actions workflow or a github token -- github token seems better? im very ambivalent to tokens being in all my cloud sessions its just a github token; Write access to this GitHub API path is not permitted through this proxy; i think my answer is G right -- the table view isn't too releveant if we have other ways around it right?; sure k is fine; . In the R44 child-repo sweep, a session on the owner's computer moves every repo's main to a ruleset that requires only all-jobs-passed and blocks deletion and force-push of main. Cause: a classic rule with many checks failed to ",
  "source": "plans/restart-plan.md@restart-plan, R45",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "How cloud sessions delete branches."
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "merge/merge.py:1286: \"{self.base} has no branch protection, so it names no required checks.\""
+  }
+ ],
+ "title": "How cloud sessions delete branches.",
+ "step": "merge-reads-ruleset",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Partly absorbed: ruleset grant at .claude/CLAUDE.md:24 and no-Issues p' at docs/decisions/stalled-steps.md:9. Not landed: merge/merge.py:1286 still stops with 'has no branch protection'; no branch-sweep action on main; step merge-reads-ruleset and cloud-branch-delete are both doing."
 }

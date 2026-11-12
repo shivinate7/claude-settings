@@ -6,6 +6,12 @@
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 12",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "at_estimated": true
+ "supersedes_none": "New mechanical checks; main has none for a pick reaching the page or a message claim checked against git.",
+ "at_estimated": true,
+ "step": "pick-reaches-page",
+ "steps": [
+  "pick-reaches-page",
+  "msg-claims-vs-git"
+ ],
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Owner wants coordinator picks visible to him and claims of queued work checked against git. Steps pick-reaches-page and msg-claims-vs-git are doing; neither slug appears on main. Posting the picks as stands items 560-583 is done."
 }

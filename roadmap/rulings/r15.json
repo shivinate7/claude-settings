@@ -4,8 +4,9 @@
  "ruling": "- **R15. One PR template.** Owner 16:22 CST Nov 10: \"no pr template: yes that seems like a must have\". .github/pull_request_template.md holds the PR-body lines the merge tool reads (`Retire-run:`, `Drops-lines:`), so every PR has one shape and no session reports \"no PR template\". Other repos get it through skill project-ops. Unmeasured: how many PRs are refused today for a missing line. Step pr-template-merge-lines. Home: decision debt-close-runs-retire.",
  "quote": "no pr template: yes that seems like a must have; no PR template",
  "source": "plans/restart-plan.md@restart-plan, R15",
- "status": "open",
+ "status": "closed",
  "supersedes": [],
  "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "One PR template."
+ "title": "One PR template.",
+ "closed_reason": "absorbed on main: .github/pull_request_template.md on main holds 'Retire-run: <slug> -- <run URL>' and 'Drops-lines: <path> -- <reason>'; skills/project-ops/SKILL.md ships it. Step pr-template-merge-lines is done (batch 95)."
 }

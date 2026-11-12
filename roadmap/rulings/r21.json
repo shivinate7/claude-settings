@@ -5,7 +5,13 @@
  "quote": "ive found repos in cloud sessions of triage of repos requesting for me to permit this when it should just always be allowed this needs to be fixed too; Allow Claude to use db write (claude-artifacts)?; even this artifact write needed my permission; only allow once for these; always allow; so the triage session pulled it off [agents] which sskrf for permission on every repopulate and instead did it in batches of like hundred each but each batch still need my approvsl; thats still not optimal; claude also added new artifact commands that start with db (surf the web) that im guessing we need to a",
  "source": "plans/restart-plan.md@restart-plan, R21",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "A page write never asks."
+ "supersedes": [
+  {
+   "kind": "guard-rule",
+   "ref": "settings.json:271,376: hook matchers 'Agent|AskUserQuestion|ArtifactData' and 'ArtifactData' skip mcp__claude-artifacts__db_write"
+  }
+ ],
+ "title": "A page write never asks.",
+ "step": "page-write-no-card",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Allow list landed (settings.json:14-21 db_write, db_usage, read_artifact). Hook matchers still name ArtifactData only (settings.json:271,376). No cloud-card repro or test. Step page-write-no-card is ready, no lane; artifact-guard-matcher-names is doing."
 }

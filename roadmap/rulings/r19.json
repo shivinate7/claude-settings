@@ -6,6 +6,8 @@
  "source": "plans/restart-plan.md@restart-plan, R19",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "Debts and notes are kept in place, like the roadmap."
+ "supersedes_none": "adds a triage review duty and page views; no main sentence is contradicted (roles-findings-are-debts-or-notes gains a sentence)",
+ "title": "Debts and notes are kept in place, like the roadmap.",
+ "step": "triage-owns-debts-notes",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: CLAUDE.md roles-findings-are-debts-or-notes on main is filing only; docs/debts/README.md has no triage review rule. Step triage-owns-debts-notes is todo; notes-sightings-expiry and page-time-field-valid are doing. r28 adds a shared tending contract and does not conflict."
 }

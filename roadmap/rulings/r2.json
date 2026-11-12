@@ -5,7 +5,13 @@
  "quote": "i agree speed maximization is a good idea",
  "source": "plans/restart-plan.md@restart-plan, R2",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": ""
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/debt-close-runs-retire.md: 'The shared merge tool reads the debt's Retire text at base. It runs each runnable check that text names, on the PR head, in preview and in confirm.'"
+  }
+ ],
+ "title": "",
+ "step": "retire-check-whole-suite",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Main still runs Retire in the merge tool (merge/merge.py:498-508, decision debt-close-runs-retire); nothing moves it into CI. r3 later replaces only the 600 s limit, not this move."
 }

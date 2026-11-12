@@ -6,6 +6,8 @@
  "source": "plans/restart-plan.md@restart-plan, R54",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "Triage keeps the list of the sessions the coordinator starts."
+ "supersedes_none": "adds a triage-written list and nudge; replaces no main sentence",
+ "title": "Triage keeps the list of the sessions the coordinator starts.",
+ "step": "coordinator-session-board",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: No coordinator session list or flagged-line send on main (docs/decisions/session-tiers.md has no session board text). Step coordinator-session-board is doing."
 }

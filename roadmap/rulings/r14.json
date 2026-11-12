@@ -5,7 +5,13 @@
  "quote": "fixed my notes question: yes",
  "source": "plans/restart-plan.md@restart-plan, R14",
  "status": "open",
- "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "A fix to a session's own notes prints nothing."
+ "supersedes": [
+  {
+   "kind": "main-sentence",
+   "ref": "docs/decisions/guard-remedy-not-to-owner.md:177: 'after any refusal but a missing report, post only the corrected lines, as a short correction.' (narrowed for a refusal about the session's own notes)"
+  }
+ ],
+ "title": "A fix to a session's own notes prints nothing.",
+ "step": "notes-fix-no-owner-line",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: Main has no carve-out: decision guard-remedy-not-to-owner.md:177 tells the session to post corrected lines after any refusal but a missing report. Step notes-fix-no-owner-line is doing; no merged change."
 }

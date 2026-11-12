@@ -6,6 +6,8 @@
  "source": "plans/restart-plan.md@restart-plan, R29",
  "status": "open",
  "supersedes": [],
- "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "title": "One job, one shared home, across all repos."
+ "supersedes_none": "adds a cross-repo meaning match beside lint/find_copies.py; replaces no main sentence",
+ "title": "One job, one shared home, across all repos.",
+ "step": "shared-job-finder",
+ "audit": "read against origin/main and later entries, 2026-11-12 15:20 CST: No meaning-match job finder on main; lint/find_copies.py finds word-for-word copies. Step shared-job-finder is todo, blocked by prose-tending-move-stores."
 }

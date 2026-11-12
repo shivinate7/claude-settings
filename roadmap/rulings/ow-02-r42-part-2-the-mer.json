@@ -4,8 +4,9 @@
  "ruling": "Q2, 09:44 CST: a lane moves its PR from draft to ready by judgment: once, after its last review and lane lint",
  "quote": "",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 2",
- "status": "open",
+ "status": "closed",
  "supersedes": [],
  "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "at_estimated": true
+ "at_estimated": true,
+ "closed_reason": "duplicate of r42 (a restatement, not a later change): Q2; full text from source bullet 2; same as store r42. Main still reads lane PRs stay drafts and one integration PR goes ready; decision draft-until-reviewed is not yet rewritten (ruling says it is rewritten when the switch lands)."
 }

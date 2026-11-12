@@ -4,8 +4,9 @@
  "ruling": "13:20 CST, chat (relayed by the retrospective 13:21 CST): R54 pick a, \"this is good, it can be an active nudger / checker against coordinator too right\" (step coordinator-session-board rewritten; plan aa190fd). 13:19 and 13:21 CST: R55 pick d, \"Express lane, and cancel a running batch for it too\" (merge-flow lanes go to main first; plan 4fefc9f; home decision no-merge-during-batch-ci, which skill ci-hygiene step 8 points to (plan b152ca6); seven steps cite it).",
  "quote": "this is good, it can be an active nudger / checker against coordinator too right; Express lane, and cancel a running batch for it too",
  "source": "plans/owner-rulings-2026-11-12.md@roadmap, bullet 18",
- "status": "open",
+ "status": "closed",
  "supersedes": [],
  "supersedes_none": "unread at migration (2026-11-12): triage fills supersedes when it reads this entry against main",
- "at_estimated": true
+ "at_estimated": true,
+ "closed_reason": "duplicate of r54 (a restatement, not a later change): R54 pick a (triage board that nudges the coordinator) and R55 pick d (express lane, cancel a running batch); same as store r54 and r55. Main session-tiers has no started-session list or nudge. R55 keeps CLAUDE.md:54 true by cancelling first, so only the late-lane sentence yields, for merge-flow lanes alone."
 }
