@@ -427,11 +427,11 @@ def _gcx_scope_problem(fix):
     return _gcx_listed(fix)
 
 
-def _gcx_row(expect, cwd_key, template, agent=GCX_HOME, session=None, scope=None):
+def _gcx_row(expect, cwd_key, template, agent=GCX_HOME, session=None, scope=None, rule="other-checkout"):
     """One case: the verdict on the command TEMPLATE from the folder named CWD_KEY ("home" or "primary"),
-    as the agent GCX_HOME, or as a top-level call when AGENT is None. A deny must name other-checkout and
-    no path. An allow must pass. SCOPE is the scope check of a top-level row, run where an agent row
-    runs `_gcx_scope_problem`."""
+    as the agent GCX_HOME, or as a top-level call when AGENT is None. A deny must name RULE (other-checkout
+    unless a row names another rule that refuses the same call) and no path. An allow must pass. SCOPE is
+    the scope check of a top-level row, run where an agent row runs `_gcx_scope_problem`."""
     def check():
         fix = _gcx_fixture()
         if agent:
@@ -451,8 +451,8 @@ def _gcx_row(expect, cwd_key, template, agent=GCX_HOME, session=None, scope=None
             return True, "allowed"
         names = [ROOT, slash(ROOT), GCX_TEMP, slash(GCX_TEMP)]
         names += list(fix.values()) + [slash(path) for path in fix.values()]
-        problems = _other_checkout_problems(command, got, reason, names)
-        return (False, "; ".join(problems)) if problems else (True, "refused as other-checkout, no path named")
+        problems = _other_checkout_problems(command, got, reason, names, rule=rule)
+        return (False, "; ".join(problems)) if problems else (True, "refused as %s, no path named" % rule)
     return check
 
 
@@ -599,10 +599,11 @@ LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C read-tree in the pri
                          _gcx_row("deny", "home", "git -C @PRIMARY read-tree HEAD")))
 LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C checkout-index in the primary checkout is refused",
                          _gcx_row("deny", "home", "git -C @PRIMARY checkout-index -a")))
-# The cd form of the rm row is refused, and the git -C rm above is refused the same way.
+# The cd form of the rm row is still refused. The rule that names the refusal is worktree-home, not
+# other-checkout, so this row expects worktree-home. The git -C rm above is still refused by other-checkout.
 LOG_CHECKS_EXTRA.append(("the cd form of the git -C rm row: an agent's cd into the primary checkout, then git rm, is "
-                         "refused",
-                         _gcx_row("deny", "home", "cd @PRIMARY && git rm f")))
+                         "refused by worktree-home",
+                         _gcx_row("deny", "home", "cd @PRIMARY && git rm f", rule="worktree-home")))
 # Allowed: the reads of the primary checkout, by an absolute path and by a relative one.
 LOG_CHECKS_EXTRA.append(("other-checkout: an agent's git -C ls-files of the primary checkout is allowed",
                          _gcx_row("allow", "home", "git -C @PRIMARY ls-files")))
@@ -755,6 +756,205 @@ LOG_CHECKS_EXTRA.append(("other-checkout guard: _run_dir reads the last env -C f
                          _run_dir_row("env -C %s git status && env -C %s git log" % (slash(RUN_DIR_PRIM), slash(RUN_DIR_CLEAN)),
                                       RUN_DIR_CLEAN,
                                       "with an env -C on every git segment, the first env -C folder was read, not the last")))
+
+
+# --------------------------------------------------------------------------- relative escape
+# worktree-home, the shell write act: a shell write by an agent with a recorded home, whose RELATIVE
+# target resolves outside that home, is refused. An agent with no record keeps main's behaviour (item
+# 425 c), so its writes are not refused here. A row that another rule already refuses names both rules
+# (`any_of`), so it pins the deny and does not depend on which rule judges first. Each row is its own
+# case, so a failure names one cause. The incident: an agent's `mkdir ../tmp` from its home, and from a
+# checkout it shared with its caller, made a folder outside the clone.
+RELESC_AGENT = "wthomew1"                        # an agent with a recorded home (_home_fixture)
+RELESC_FREE = "wthomew2"                         # an agent with no home record
+RELESC_TMP = os.path.join(ROOT, "wthomew_tmp")   # the temp folder the guard runs read, apart from every target
+RELESC_CACHE = {}
+
+
+def _relesc_fixture():
+    """Built once per run. The recorded home of RELESC_AGENT, with a `sub` folder, a file `t.py` and the
+    agent's red-run folder beside it. A primary checkout of RELESC_FREE, which has no record, with a linked
+    checkout of it. A folder in no checkout. Returns (folders, problems)."""
+    if "folders" not in RELESC_CACHE:
+        primary, home, problems = _home_fixture(RELESC_AGENT)
+        if not problems:
+            os.makedirs(os.path.join(home, "sub"), exist_ok=True)
+            write(os.path.join(home, "t.py"), "print(1)\n")
+            sh_add_lane(primary, "agent-" + RELESC_AGENT + "-red")
+        free = os.path.join(ROOT, "wthomew_free_primary")
+        make_repo(free, {"src/app.py": "print(1)\n"})
+        free_lane, _branch = sh_add_lane(free, "wthomew_lane")   # a linked checkout the no-record agent stands in
+        nogit = os.path.join(ROOT, "wthomew_nogit")
+        os.makedirs(nogit, exist_ok=True)
+        RELESC_CACHE["folders"] = {
+            "primary": primary, "home": home, "sub": os.path.join(home, "sub"),
+            "free": free, "free_src": os.path.join(free, "src"), "nogit": nogit, "free_lane": free_lane,
+            "abs_scratch": os.path.join(ROOT, "relesc_scratch"),
+            "abs_outside": os.path.join(ROOT, "relesc_outside"),
+        }
+        RELESC_CACHE["problems"] = problems
+    return RELESC_CACHE["folders"], RELESC_CACHE["problems"]
+
+
+def _relesc_scope(agent, folders):
+    """The scope a row judges within (assert the scope before the subject, P7): RELESC_AGENT has its home
+    record, and RELESC_FREE has none. Returns the problem, or ''."""
+    if agent == RELESC_AGENT:
+        record = os.path.join(folders["primary"], ".git", "agent-homes", agent)
+        return "" if os.path.isfile(record) else "scope: no home record for the agent at %r" % record
+    if agent == RELESC_FREE:
+        record = os.path.join(folders["free"], ".git", "agent-homes", agent)
+        return "scope: the agent with no record has a home record at %r" % record if os.path.exists(record) else ""
+    return ""
+
+
+def _relesc_add(label, expect, command, cwd_key, agent=RELESC_AGENT, rule=None, any_of=(), tool="Bash"):
+    """Register one row: `command` as a call of `tool` from folders[cwd_key], as `agent`, judged `expect`.
+    `command` takes the folder paths as %(name)s keys. The row asserts its scope first. The check builds its
+    own folders under ROOT and reads no lazy fixture, so it is fixtureless."""
+    def check():
+        folders, problems = _relesc_fixture()
+        if problems:
+            return False, "fixture: " + "; ".join(problems)
+        scope = _relesc_scope(agent, folders)
+        if scope:
+            return False, scope
+        shell = {key: slash(value) for key, value in folders.items()}
+        found = []
+        _expect_call(found, label, expect, tool, folders[cwd_key], agent, command % shell, rule=rule,
+                     temp=RELESC_TMP, any_of=any_of, unnamed=(ROOT, slash(ROOT)))
+        return (not found), ("; ".join(found) if found else "as the row names")
+
+    FIXTURELESS_CHECKS.add(check)
+    LOG_CHECKS_EXTRA.append((label, check))
+
+
+# Deny, from the recorded home. A relative target that lands outside the home is refused, whatever the
+# command. mkdir and touch are not in the mutating-command list, so only the new clause sees them.
+_relesc_add("worktree-home relative escape: mkdir ../tmp from the home is refused", "deny",
+            "mkdir ../tmp", "home", rule="worktree-home")
+_relesc_add("worktree-home relative escape: mkdir -p ../../../tmp from the home, a folder in the clone "
+            "but outside the home, is refused", "deny", "mkdir -p ../../../tmp", "home", rule="worktree-home")
+_relesc_add("worktree-home relative escape: mkdir -p ../../../../tmp from the home, a folder outside "
+            "the clone, is refused", "deny", "mkdir -p ../../../../tmp", "home", rule="worktree-home")
+_relesc_add("worktree-home relative escape: cd sub && mkdir ../../x, a climb out of the home after a "
+            "cd inside it, is refused", "deny", "cd sub && mkdir ../../x", "home", rule="worktree-home")
+_relesc_add("worktree-home relative escape: touch ../f from the home is refused", "deny",
+            "touch ../f", "home", rule="worktree-home")
+_relesc_add("worktree-home relative escape: a lone quote in text, then mkdir ../x, is refused", "deny",
+            "echo don't; mkdir ../x", "home", rule="worktree-home")
+# Already refused by another rule today (other-checkout judges a relative climb and a redirect). These
+# rows pin the deny; the reason may name either rule.
+_relesc_add("worktree-home relative escape: cd .. && mkdir tmp is refused", "deny",
+            "cd .. && mkdir tmp", "home", any_of=("worktree-home", "other-checkout"))
+_relesc_add("worktree-home relative escape: echo x > ../f from the home is refused", "deny",
+            "echo x > ../f", "home", any_of=("worktree-home", "other-checkout"))
+# No record: main's behaviour (owner ruling, page item 425 c, 2026-11-08 10:19 CST). An agent with no
+# recorded home keeps main's behaviour, so worktree-home lets its writes through, from the primary and
+# from a linked checkout. main's guard allows each row below, so each expects allow.
+_relesc_add("worktree-home relative escape: no-record: main's behaviour (item 425 c): mkdir ../tmp from "
+            "the primary, by an agent with no home record, is allowed", "allow", "mkdir ../tmp", "free",
+            agent=RELESC_FREE)
+_relesc_add("worktree-home relative escape: no-record: main's behaviour (item 425 c): mkdir "
+            "../../../hooks/zz from a linked checkout into the primary is allowed", "allow",
+            "mkdir ../../../hooks/zz", "free_lane", agent=RELESC_FREE)
+_relesc_add("worktree-home relative escape: no-record: main's behaviour (item 425 c): touch "
+            "../../../f from a linked checkout into the primary is allowed", "allow",
+            "touch ../../../f", "free_lane", agent=RELESC_FREE)
+# Deny, from the recorded home: a parenthesis glued to the verb does not hide the write.
+_relesc_add("worktree-home relative escape: (mkdir ../tmp) from the home is refused", "deny",
+            "(mkdir ../tmp)", "home", rule="worktree-home")
+_relesc_add("worktree-home relative escape: (touch ../f) from the home is refused", "deny",
+            "(touch ../f)", "home", rule="worktree-home")
+_relesc_add("worktree-home relative escape: (rm -rf ../../../../tmp) from the home is refused", "deny",
+            "(rm -rf ../../../../tmp)", "home", rule="worktree-home")
+# Allow, from the recorded home: the controls that must stay green.
+_relesc_add("worktree-home relative escape: (mkdir fresh) inside the home is allowed", "allow",
+            "(mkdir fresh)", "home")
+_relesc_add("worktree-home relative escape: a write into the clone's common git directory, echo x >> "
+            "../../../.git/info/exclude, is allowed as other-checkout allows it", "allow",
+            "echo x >> ../../../.git/info/exclude", "home")
+_relesc_add("worktree-home relative escape: mkdir fresh inside the home is allowed", "allow",
+            "mkdir fresh", "home")
+_relesc_add("worktree-home relative escape: mkdir -p a/../b inside the home is allowed", "allow",
+            "mkdir -p a/../b", "home")
+_relesc_add("worktree-home relative escape: cd sub && mkdir ../c, which stays in the home, is allowed",
+            "allow", "cd sub && mkdir ../c", "home")
+_relesc_add("worktree-home relative escape: mkdir -p in an absolute folder outside the clone is allowed",
+            "allow", "mkdir -p %(abs_scratch)s/x", "home")
+_relesc_add("worktree-home relative escape: echo x > an absolute file outside the clone is allowed",
+            "allow", "echo x > %(abs_outside)s/f", "home")
+_relesc_add("worktree-home relative escape: cp t.py ../agent-" + RELESC_AGENT + "-red/, into the "
+            "agent's own red-run folder, is allowed", "allow", "cp t.py ../agent-" + RELESC_AGENT + "-red/",
+            "home")
+_relesc_add("worktree-home relative escape: a lone cd into the home, from the primary, is allowed",
+            "allow", "cd %(home)s", "primary")
+_relesc_add("worktree-home relative escape: ls .. from the home, a read, is allowed", "allow",
+            "ls ..", "home")
+_relesc_add("worktree-home relative escape: cat ../t.py from the home, a read, is allowed", "allow",
+            "cat ../t.py", "home")
+_relesc_add("worktree-home relative escape: echo \"mkdir ../tmp\", text in quotes, is allowed",
+            "allow", 'echo "mkdir ../tmp"', "home")
+_relesc_add("worktree-home relative escape: a comment holding mkdir ../tmp is text, and is allowed",
+            "allow", "echo ok # mkdir ../tmp", "home")
+_relesc_add("worktree-home relative escape: a heredoc body holding mkdir ../x is text, and is allowed",
+            "allow", "cat <<'EOF'\nmkdir ../x\nEOF", "home")
+_relesc_add("worktree-home relative escape: a call with no agent_id, mkdir ../tmp from the primary, is "
+            "allowed as on main", "allow", "mkdir ../tmp", "primary", agent=None)
+# Allow, no record: main's behaviour (item 425 c). A folder in no checkout, and a target in the src.
+_relesc_add("worktree-home relative escape: an agent with no record, mkdir ../x in a folder in no "
+            "checkout, is allowed", "allow", "mkdir ../x", "nogit", agent=RELESC_FREE)
+_relesc_add("worktree-home relative escape: an agent with no record, mkdir ../x from the primary's src, "
+            "lands in its own checkout and is allowed", "allow", "mkdir ../x", "free_src", agent=RELESC_FREE)
+
+
+# The cost pins, measured on the unchanged code: the git spawns and worktree-list spawns each call makes
+# today. The new clause may not add to either; a count above its pin fails. Rows: label, agent, cwd key,
+# command, most spawns, most worktree lists.
+RELESC_COST = (
+    ("mkdir -p ../tmp from the home", RELESC_AGENT, "home", "mkdir -p ../tmp", 4, 0),
+    ("touch ../f from the home", RELESC_AGENT, "home", "touch ../f", 4, 0),
+    ("echo x > ../f from the home", RELESC_AGENT, "home", "echo x > ../f", 9, 1),
+    ("cd sub && mkdir ../../x from the home", RELESC_AGENT, "home", "cd sub && mkdir ../../x", 4, 0),
+    ("mkdir ../tmp from the primary, no record", RELESC_FREE, "free", "mkdir ../tmp", 4, 0),
+    ("mkdir fresh from the home, allowed", RELESC_AGENT, "home", "mkdir fresh", 4, 0),
+)
+
+
+def _relesc_cost_case():
+    """worktree-home, the cost of the shell write act: a shell write judged against the agent's own checkout
+    spends no more git than the same call spends today. A stand-in git first on PATH logs each spawn, and
+    each row's pin is the most that call may spend. Decision: an-agent-outside-its-home-tree-must-stop (Cost)."""
+    if os.name == "nt":
+        return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
+    folders, problems = _relesc_fixture()
+    if problems:
+        return False, "fixture: " + "; ".join(problems)
+    log, path = _stand_in_git("relesccost")
+    if path is None:
+        return False, "no git on PATH"
+    shell = {key: slash(value) for key, value in folders.items()}
+    failed, seen = [], []
+    for label, agent, cwd_key, command, most_all, most_list in RELESC_COST:
+        if os.path.exists(log):
+            os.remove(log)
+        decide({"raw": None, "tool": "Bash", "cwd": folders[cwd_key], "session": None, "env_path": path,
+                "config": None, "agent_id": agent, "tool_input": {"command": command % shell},
+                "temp": RELESC_TMP, "env": None})
+        spawns = open(log, encoding="utf-8").read().splitlines() if os.path.exists(log) else []
+        listed = sum(1 for line in spawns if "worktree list" in line)
+        seen.append("%s: %d spawn(s), %d list" % (label, len(spawns), listed))
+        if len(spawns) > most_all or listed > most_list:
+            failed.append("%s: %d spawn(s) and %d list, most allowed %d and %d" % (
+                label, len(spawns), listed, most_all, most_list))
+    if failed:
+        return False, "; ".join(failed)
+    return True, "; ".join(seen)
+
+
+LOG_CHECKS_EXTRA.append(("worktree-home relative escape: a shell write's own-checkout check adds no git "
+                         "spawn to the call", _relesc_cost_case))
+FIXTURELESS_CHECKS.add(_relesc_cost_case)
 
 
 # The checkers that read the log. THE COUNT IS READ FROM THIS LIST, never written beside it: a
