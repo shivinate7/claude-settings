@@ -162,11 +162,12 @@ _MAC_DB_WRITE_OPS = {"set": "set", "merge": "update", "update": "update", "delet
 
 
 def _split_doc_path(path: object) -> Optional[tuple]:
-    """(collection, doc_id) of a `collection/doc_id` path, the doc id being the rest of the path, else None."""
+    """(collection, doc_id) of a `collection/doc_id` path, the doc id being the rest of the path, else None. A leading
+    slash is dropped and the collection is lower-cased, so `Items/a` and `/items/a` reach the checks `items/a` does."""
     if not isinstance(path, str):
         return None
-    collection, _, doc_id = path.partition("/")
-    return (collection, doc_id) if collection and doc_id else None
+    collection, _, doc_id = path.lstrip("/").partition("/")
+    return (collection.lower(), doc_id) if collection and doc_id else None
 
 
 def _canonical_mac_call(short: str, tool_input: dict) -> Optional[tuple]:
@@ -178,16 +179,20 @@ def _canonical_mac_call(short: str, tool_input: dict) -> Optional[tuple]:
             return None
         writes = []
         for op in ops:
+            # Each op stands alone: one the page cannot run (an unknown op, an unreadable path) is left out, so it
+            # cannot hide the readable ops beside it from the checks.
             if not isinstance(op, dict) or op.get("op") not in _MAC_DB_WRITE_OPS:
-                return None
+                continue
             parts = _split_doc_path(op.get("path"))
             if parts is None:
-                return None
+                continue
             write = {"op": _MAC_DB_WRITE_OPS[op["op"]], "collection": parts[0], "doc_id": parts[1]}
             for key in ("data", "ifVersion"):
                 if key in op:
                     write[key] = op[key]
             writes.append(write)
+        if ops and not writes:  # no op is readable: nothing to judge, and no batch to claim
+            return None
         return DATA_TOOL, dict(rest, action="batch", writes=writes)
     if short in ("db_get", "db_str_replace"):
         parts = _split_doc_path(rest.pop("path", None))
@@ -200,7 +205,8 @@ def _canonical_mac_call(short: str, tool_input: dict) -> Optional[tuple]:
     if short in ("db_list", "db_query"):
         if not isinstance(rest.get("collection"), str) or not rest["collection"]:
             return None
-        return DATA_TOOL, dict(rest, action="list" if short == "db_list" else "query")
+        return DATA_TOOL, dict(rest, action="list" if short == "db_list" else "query",
+                               collection=rest["collection"].lstrip("/").lower())
     if short == "publish_files":
         files = rest.pop("files", None)
         if not isinstance(files, list):

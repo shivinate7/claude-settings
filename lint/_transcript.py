@@ -16,6 +16,38 @@ ARTIFACT_DATA = ("ArtifactData", "mcp__ArtifactData")
 WRITE_VERBS = ("set", "update", "batch")
 
 
+_CANONICALIZER = []  # one element once looked up: the function, or None when shared_names cannot be read
+
+
+def _canonicalizer():
+    """shared_names.canonical_artifact_call, the one home of the Mac-to-cloud mapping, or None when shared_names cannot
+    be imported (the readers then see the call as sent, as they did before the mapping existed)."""
+    if not _CANONICALIZER:
+        found = None
+        try:
+            from shared_names import canonical_artifact_call as found
+        except ImportError:
+            try:
+                import importlib.util
+                path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks", "shared_names.py")
+                spec = importlib.util.spec_from_file_location("shared_names", path)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                found = module.canonical_artifact_call
+            except Exception:
+                found = None
+        _CANONICALIZER.append(found)
+    return _CANONICALIZER[0]
+
+
+def data_call(use):
+    """(name, input) of a tool_use, a Mac claude-artifacts call mapped to the ArtifactData or Artifact shape of the
+    same call, so a Mac item write counts as an ArtifactData write for every reader. Any other call comes back as sent."""
+    name, inp = use.get("name") or "", use.get("input")
+    mapper = _canonicalizer()
+    return mapper(name, inp) if mapper else (name, inp)
+
+
 def read_transcript(path):
     records = []
     with open(path, encoding="utf-8") as f:
@@ -423,8 +455,8 @@ def _page_reads(records):
         if rec.get("isSidechain"):
             continue
         for use in tool_uses(rec):
-            inp = use.get("input")
-            if (str(use.get("name", "")).startswith(ARTIFACT_DATA) and isinstance(inp, dict)
+            name, inp = data_call(use)
+            if (str(name).startswith(ARTIFACT_DATA) and isinstance(inp, dict)
                     and inp.get("action") == "get"
                     and (inp.get("path") == "meta/page"
                          or (inp.get("collection") == "meta" and inp.get("doc_id") == "page"))):
