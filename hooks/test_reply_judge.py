@@ -1331,7 +1331,7 @@ def case_prompt_flags_a_recommended_option_that_widens():
                    "to fit a repo",)),
           sentences)
     check("prompt: a sentence spares an option where the repo changes to match",
-          has_pin(sentences, ("never flag",), ("repo",), ("match",)), sentences)
+          has_pin(sentences, ("never flag", "do not flag"), ("repo",), ("match",)), sentences)
     check("prompt: a sentence judges only offered options and spares a reply that describes the rule",
           has_pin(sentences, ("judge only",), ("options",), ("offers",)), sentences)
     check("prompt: a sentence never flags a reply that describes the rule itself",
