@@ -19,6 +19,7 @@ Rule `brief-write-needs-writer` in `hooks/guard.py` refuses an Agent, Task or Wo
     - "make sure" and "ensure" are wrappers, not verbs. Inside one, a passive ("is saved to a.md") orders a write; "Make sure the rule in docs/x.md matches the code" does not.
     - Also: "create a file"; a `tee <path>` in prose outside a backtick span; "use", "call" or "invoke" the Write tool.
 - Passes: a negator in the verb's clause before it (`_brief_prohibits`) or between it and the destination ("Write nothing to a.md"). Also a `Must deny:` or `Add a case:` line, a negating heading's cover, "write-up", and a word that holds a command name inside it ("committee").
+  - A negating heading's cover needs a run verb within two words after the negator, so "Do not:" alone does not cover its list.
 - The refusal names the remedy: a writer role (record-writer, builder or test-author), or have the agent report the text in its reply.
 - The override lifts it (`owner-override`).
 - Limits. These orders pass, and Claude could write each in normal work:
