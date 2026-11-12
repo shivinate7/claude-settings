@@ -21,15 +21,26 @@ Minutes are whole seconds over 60, read from the fixtures' own timestamps. No cl
 The module under test loads from CI_LIMITS_UNDER_TEST when set (the red-run stand-in, ci_limits_stub_test.py),
 else from ci_limits.py beside this file.
 """
+import builtins
 import datetime
 import importlib.util
+import inspect
 import io
 import json
 import os
 import re
+import shutil
+import subprocess
+import sys
+import tempfile
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
+import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+
 UNDER_TEST = os.environ.get("CI_LIMITS_UNDER_TEST") or os.path.join(HERE, "ci_limits.py")
 _spec = importlib.util.spec_from_file_location("ci_limits_under_test", UNDER_TEST)
 ci_limits = importlib.util.module_from_spec(_spec)
@@ -260,6 +271,244 @@ class Cli(unittest.TestCase):
         got = json.loads(out)
         for key in ("lint-a", "lint-b", "checks", "docs", "deadlineMinutes"):
             self.assertEqual(got.get(key), 360, key + " is not 360 after an API error")
+
+
+RUN_FOLDER = None
+
+
+def setUpModule():
+    global RUN_FOLDER
+    RUN_FOLDER = _test_temp.run_folder()  # test-temp-standard: this run's folder, old siblings swept
+
+
+def tearDownModule():
+    if RUN_FOLDER and os.path.isdir(RUN_FOLDER):
+        shutil.rmtree(RUN_FOLDER, ignore_errors=True)
+
+
+class MedianFloor(unittest.TestCase):
+    def test_green_40_second_job_takes_the_median_not_one_minute(self):
+        caps = {"tiny": 5, "lint-a": 30, "checks": 75}
+        runs = [run(1, job("tiny", 40 / 60), job("lint-a", 20), job("checks", 50))]
+        limits, _ = ci_limits.job_limits(runs, caps)
+        self.assertEqual(limits["tiny"], 30,
+                         "tiny ran 40 s and got %r minute(s): every limit is at least the median of all limits, 30"
+                         % (limits["tiny"],))
+
+    def test_job_cut_at_61_seconds_on_a_1_minute_cap_cannot_get_1(self):
+        caps = {"cut-job": 1, "lint-a": 30, "checks": 75}
+        runs = [run(2, job("cut-job", 61 / 60, "cancelled")),
+                run(1, job("cut-job", 40 / 60), job("lint-a", 20), job("checks", 50))]
+        limits, _ = ci_limits.job_limits(runs, caps)
+        self.assertGreaterEqual(limits["cut-job"], 2,
+                                "cut-job was cut at 61 s on a 1 min cap and got %r: the cut is a sample of 61 s, "
+                                "so its limit is at least 2" % (limits["cut-job"],))
+
+
+class CutRule(unittest.TestCase):
+    def test_cut_at_62_minutes_on_a_60_minute_cap_is_a_sample(self):
+        runs = [run(2, job("checks-guard", 62, "cancelled")), run(1, job("checks-guard", 20))]
+        limits, _ = ci_limits.job_limits(runs, {"checks-guard": 60})
+        self.assertEqual(limits["checks-guard"], 93,
+                         "a 62 min cut on a 60 min cap is a sample: 62 x 1.5 = 93, got %r" % (limits["checks-guard"],))
+
+    def test_cancelled_at_5_minutes_on_a_60_minute_cap_is_not_a_sample(self):
+        runs = [run(2, job("checks-guard", 5, "cancelled")), run(1, job("checks-guard", 20))]
+        limits, _ = ci_limits.job_limits(runs, {"checks-guard": 60})
+        self.assertEqual(limits["checks-guard"], 30,
+                         "a cancel at 5 min, short of the 60 min cap, is no sample: 20 x 1.5 = 30, got %r"
+                         % (limits["checks-guard"],))
+
+    def test_new_job_cancelled_at_5_minutes_is_not_misjudged(self):
+        runs = [run(3, job("lint-b", 5, "cancelled"))] + OLD_RUNS
+        limits, misjudged = ci_limits.job_limits(runs, CAPS, KINDS)
+        self.assertEqual(misjudged, [], "a new job cancelled at 5 min, short of its cap, was flagged misjudged")
+        self.assertEqual(limits["lint-b"], 45, "lint-b cancelled at 5 min is new: its estimate 45 stands, got %r"
+                         % (limits["lint-b"],))
+
+
+SKIPPED_CAPS = {"all-jobs-passed": 60, "lint-a": 30, "checks": 75}
+
+
+def skipped_runs():
+    """all-jobs-passed is skipped in every run of the window: a skipped job has zero minutes on the jobs API."""
+    return [run(2, job("all-jobs-passed", 0, "skipped"), job("lint-a", 20), job("checks", 50)),
+            run(1, job("all-jobs-passed", 0, "skipped"), job("lint-a", 20), job("checks", 50))]
+
+
+def runs_without_skipped_job():
+    return [run(2, job("lint-a", 20), job("checks", 50)), run(1, job("lint-a", 20), job("checks", 50))]
+
+
+class NotMeasured(unittest.TestCase):
+    def test_job_skipped_in_every_run_has_no_limit(self):
+        runs = skipped_runs()
+        self.assertTrue(all(j["conclusion"] == "skipped" for r in runs for j in r["jobs"]
+                            if j["name"] == "all-jobs-passed"), "fixture: all-jobs-passed is not skipped in every run")
+        limits, _ = ci_limits.job_limits(runs, SKIPPED_CAPS)
+        self.assertIn("all-jobs-passed", limits, "all-jobs-passed has no key at all")
+        self.assertIsNone(limits["all-jobs-passed"],
+                          "all-jobs-passed was skipped in every run and got %r: it never ran on main, so no limit"
+                          % (limits["all-jobs-passed"],))
+
+    def test_table_says_not_measured_on_main(self):
+        out, err = io.StringIO(), io.StringIO()
+        rc = ci_limits.main(["--table"], fetch=lambda: skipped_runs(), caps=SKIPPED_CAPS, out=out, err=err)
+        self.assertEqual(rc, 0, "--table exited %r, want 0" % (rc,))
+        rows = [line for line in out.getvalue().splitlines() if line.startswith("| all-jobs-passed |")]
+        self.assertEqual(len(rows), 1, "no table row for all-jobs-passed: %r" % (out.getvalue(),))
+        self.assertIn("| not measured on main |", rows[0],
+                      "the all-jobs-passed row does not say 'not measured on main': %r" % (rows[0],))
+
+    def test_json_prints_null_for_a_job_skipped_in_every_run(self):
+        out, err = io.StringIO(), io.StringIO()
+        rc = ci_limits.main(["--json"], fetch=lambda: skipped_runs(), caps=SKIPPED_CAPS, out=out, err=err)
+        self.assertEqual(rc, 0, "--json exited %r, want 0" % (rc,))
+        got = json.loads(out.getvalue())
+        self.assertIn("all-jobs-passed", got, "the JSON has no all-jobs-passed key")
+        self.assertIsNone(got["all-jobs-passed"],
+                          "the JSON gives all-jobs-passed %r, want null" % (got["all-jobs-passed"],))
+
+    def test_skipped_job_joins_no_median(self):
+        with_, _ = ci_limits.job_limits(skipped_runs(), SKIPPED_CAPS)
+        without, _ = ci_limits.job_limits(runs_without_skipped_job(), {"lint-a": 30, "checks": 75})
+        for name in ("lint-a", "checks"):
+            self.assertEqual(with_[name], without[name],
+                             "%s is %r with the skipped job in the window and %r without: a job skipped in every run "
+                             "must join no median" % (name, with_[name], without[name]))
+
+    def test_skipped_job_adds_nothing_to_the_deadline(self):
+        with_, _, _ = ci_limits.read_limits(skipped_runs, SKIPPED_CAPS)
+        without, _, _ = ci_limits.read_limits(runs_without_skipped_job, {"lint-a": 30, "checks": 75})
+        self.assertEqual(with_["deadlineMinutes"], without["deadlineMinutes"],
+                         "the deadline is %r with the skipped job and %r without: a job skipped in every run must "
+                         "not raise it" % (with_["deadlineMinutes"], without["deadlineMinutes"]))
+
+    def test_job_skipped_in_only_some_runs_keeps_a_limit(self):
+        runs = [run(2, job("all-jobs-passed", 0, "skipped"), job("lint-a", 20)),
+                run(1, job("all-jobs-passed", 10), job("lint-a", 20))]
+        limits, _ = ci_limits.job_limits(runs, SKIPPED_CAPS)
+        self.assertIsNotNone(limits["all-jobs-passed"],
+                             "all-jobs-passed ran green in one run of the window and lost its limit")
+
+
+def job_rows(count):
+    return [job("checks-%d" % i, 1) for i in range(count)]
+
+
+def fake_jobs_api(rows_by_run, calls):
+    """A gh_api stand-in: the run list (newest first), then each run's job rows, paged as the jobs API pages
+    (`page`, `per_page`, `total_count`). A call without `page` reads page 1."""
+    def api(path, *fields):
+        calls.append(path)
+        if path.endswith("/runs"):
+            return {"workflow_runs": [{"id": rid} for rid in rows_by_run]}
+        run_id = int(path.split("/actions/runs/")[1].split("/")[0])
+        kv = dict(f.split("=", 1) for f in fields)
+        per_page, page = int(kv.get("per_page", 30)), int(kv.get("page", 1))
+        rows = rows_by_run[run_id]
+        start = (page - 1) * per_page
+        return {"total_count": len(rows), "jobs": rows[start:start + per_page]}
+    return api
+
+
+def fetch_with(rows_by_run, calls):
+    with mock.patch.object(ci_limits, "gh_api", fake_jobs_api(rows_by_run, calls)):
+        return ci_limits.fetch_runs()
+
+
+class FetchRuns(unittest.TestCase):
+    def test_fetch_runs_reads_all_130_job_rows_of_a_run(self):
+        rows = job_rows(130)
+        runs = fetch_with({1: rows, 2: job_rows(5)}, [])
+        self.assertEqual([r["run_id"] for r in runs], [1, 2], "fixture: the runs are not listed newest first")
+        self.assertEqual(len(runs[0]["jobs"]), 130,
+                         "run 1 has 130 job rows and fetch_runs kept %d: the jobs are read one page only"
+                         % len(runs[0]["jobs"]))
+        self.assertEqual([j["name"] for j in runs[0]["jobs"]], [j["name"] for j in rows],
+                         "the 130 job rows came back out of order or changed")
+
+    def test_fetch_runs_makes_one_list_call_plus_one_per_run_plus_extra_pages(self):
+        calls = []
+        fetch_with({1: job_rows(130), 2: job_rows(5)}, calls)
+        self.assertEqual(len(calls), 4,
+                         "1 list call + 2 run calls + 1 extra page of run 1 = 4 calls, got %d" % len(calls))
+
+    def test_fetch_runs_starts_no_process_of_its_own(self):
+        spawned = []
+
+        def refuse(*args, **kwargs):
+            spawned.append(args)
+            raise OSError("fetch_runs started a process of its own")
+
+        with mock.patch.object(subprocess, "Popen", side_effect=refuse), \
+                mock.patch.object(subprocess, "run", side_effect=refuse):
+            fetch_with({1: job_rows(130), 2: job_rows(5)}, [])
+        self.assertEqual(spawned, [], "fetch_runs started %d process(es) of its own" % len(spawned))
+
+    def test_fetch_runs_writes_nothing(self):
+        writes = []
+        real_open = builtins.open
+
+        def recording_open(file, mode="r", *args, **kwargs):
+            if any(c in mode for c in "wax+"):
+                writes.append((str(file), mode))
+            return real_open(file, mode, *args, **kwargs)
+
+        with mock.patch.object(builtins, "open", recording_open):
+            fetch_with({1: job_rows(130), 2: job_rows(5)}, [])
+        self.assertEqual(writes, [], "fetch_runs opened a file for writing: %r" % (writes,))
+
+    def test_run_with_no_jobs_reads_one_page(self):
+        calls = []
+        runs = fetch_with({1: []}, calls)
+        self.assertEqual(runs[0]["jobs"], [], "an empty run came back with jobs")
+        self.assertEqual(len(calls), 2, "1 list call + 1 page for an empty run = 2 calls, got %d" % len(calls))
+
+    def test_run_of_exactly_100_rows_reads_one_page(self):
+        calls = []
+        runs = fetch_with({1: job_rows(100)}, calls)
+        self.assertEqual(len(runs[0]["jobs"]), 100, "a run of 100 rows came back with %d" % len(runs[0]["jobs"]))
+        self.assertEqual(len(calls), 2, "1 list call + 1 page for 100 rows = 2 calls, got %d" % len(calls))
+
+
+CHECKS_YML = ("name: checks\non: push\njobs:\n  checks:\n    runs-on: ubuntu-latest\n"
+              "    timeout-minutes: %d\n    steps:\n      - run: echo ok\n")
+
+
+def git(cwd, *args):
+    subprocess.run(["git", "-c", "user.name=ci-limits-test", "-c", "user.email=ci-limits-test@example.invalid", *args],
+                   cwd=cwd, check=True, capture_output=True, text=True)
+
+
+class WorkflowCapsRef(unittest.TestCase):
+    """main has 60, HEAD (branch work) has 20, the checkout has 5 uncommitted: each reading is a different number."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(dir=RUN_FOLDER)
+        self.checks_yml(60)
+        git(self.root, "init", "-q")
+        git(self.root, "checkout", "-q", "-b", "main")
+        git(self.root, "add", ".github")
+        git(self.root, "commit", "-q", "-m", "main: timeout 60")
+        git(self.root, "checkout", "-q", "-b", "work")
+        self.checks_yml(20)
+        git(self.root, "commit", "-q", "-am", "work: timeout 20")
+        self.checks_yml(5)
+
+    def checks_yml(self, minutes):
+        folder = os.path.join(self.root, ".github", "workflows")
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "checks.yml"), "w", encoding="utf-8") as f:
+            f.write(CHECKS_YML % minutes)
+
+    def test_workflow_caps_reads_the_named_ref_not_the_checkout(self):
+        params = inspect.signature(ci_limits.workflow_caps).parameters
+        self.assertIn("ref", params, "workflow_caps takes no ref: it reads the checkout's checks.yml, not a named ref")
+        self.assertIn("root", params, "workflow_caps takes no root: it cannot read another repo's ref")
+        caps = ci_limits.workflow_caps("main", self.root)
+        self.assertEqual(caps.get("checks"), 60,
+                         "checks on main is 60 (the checkout says 5, HEAD says 20), got %r" % (caps.get("checks"),))
 
 
 if __name__ == "__main__":
