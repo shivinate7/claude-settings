@@ -5,9 +5,9 @@ Modes:
 - UserPromptSubmit: Tells the session the time in US Central, and saves the owner's message to the
   session's inbox file (decision owner-feedback-inbox).
   A prompt whose first word is `override` also grants a one-act owner override, and the rest is the
-  reason, logged to guard.log. `override` plus a length (`15`, `15m`, `2 hours`, `4h`), with any words after it, grants
-  a timed one with no model call. `override off` means that only as the whole prompt. A grant prints one receipt line
-  (override_line).
+  reason, logged to guard.log. `override` plus a length is timed, with no model call: `15m`, `2 hours` or `4h`, with
+  any words after it, or a bare `15` as the whole rest. `override 15 please` is a reason, not a length. `override off`
+  means that only as the whole prompt. A grant prints one receipt line (override_line).
   A plain typed ask that holds the word `override` may grant one too, after a model call
   (decision owner-override; hooks/override.py). It prints one more line.
 - --agent: At SubagentStart, gives the agent the time in US Central as context.

@@ -381,13 +381,15 @@ def _tail_prompts(transcript, any_origin=False):
 
 def _owner_text(rec):
     """The words of a record that is an owner's typed turn, else None: the one test for the seed check and the scope
-    context. Not an isMeta record, a promptSource "system" record, a record whose origin kind is not human, a command
+    context. Not an isMeta record, a promptSource "system" record, a record or queued_command attachment whose origin is
+    a string or has a kind that is not human (a task notification, a loop wakeup, a peer), a command
     record (`/effort`) or a fired scheduled task's block."""
     if not isinstance(rec, dict) or rec.get("isMeta") or rec.get("promptSource") == "system":
         return None
-    origin = rec.get("origin")
-    if isinstance(origin, dict) and origin.get("kind", "human") != "human":
-        return None
+    att = rec.get("attachment")  # a queued_command carries its own origin on the attachment
+    for origin in (rec.get("origin"), att.get("origin") if isinstance(att, dict) else None):
+        if isinstance(origin, str) or (isinstance(origin, dict) and origin.get("kind", "human") != "human"):
+            return None
     text = _text_of(rec)
     if text is None or text.lstrip().startswith(COMMAND_RECORDS) or FIRED_TASK.search(text):
         return None
@@ -549,9 +551,10 @@ def _keyword_typed(prompt, source, transcript):
 
 
 def _fast_length(reason):
-    """(number, unit letter or None) for a keyword reason that starts with one length (`15`, `15m`, `4h`, `2 hours`,
-    `90 minutes`), False when it starts with a decimal or compound length or holds a second length, else None (the
-    reason starts with no length). The words after the length may be anything but another length."""
+    """(number, unit letter or None) for a keyword reason that starts with one length (`15m`, `4h`, `2 hours`,
+    `90 minutes`, or a bare `15` that is the whole rest), False when it starts with a decimal or compound length or
+    holds a second length, else None (the reason starts with no length, or with a bare number and words, which
+    grant defers). The words after a length with a unit may be anything but another length."""
     first = ASK_LENGTH.match(reason)
     if first:
         number, unit, rest = first.group(1), (first.group(2) or first.group(3))[0], reason[first.end():]
@@ -560,6 +563,8 @@ def _fast_length(reason):
         if not first:
             return False if LEADING_UNCLEAR.match(reason) else None
         number, unit, rest = first.group(1), None, reason[first.end():]
+        if rest.strip():  # a bare number is minutes only as the whole rest: with words after it, the plain ask judges it
+            return False if _ask_lengths(rest) != [] else None
     return False if _ask_lengths(rest) != [] else (number, unit)
 
 
@@ -568,11 +573,12 @@ def grant(session_id, prompt, at, defer=True, transcript=None, source=None):
     new override, ("off", None) when `override off` removed one, the _grant_opus result for the Opus word,
     else None: the prompt is not a word. The keyword route (decision owner-override):
       `override`, or `override <reason>`: a one-act override, the reason logged.
-      `override <length>`, with any words after the length (_fast_length): a timed override. This is the fast path: no
-        model call. A second length, a decimal or a compound length: nothing.
+      `override <length>`, with any words after a length with a unit, or a bare number as the whole rest (_fast_length):
+        a timed override. This is the fast path: no model call. A second length, a decimal or a compound length:
+        nothing. A bare number with words (`override 15 please`) is no fast-path length.
       `override off`: ends the override, as the whole prompt only; a word after `off` grants nothing.
     A grant needs _keyword_typed on the payload's `source` and `transcript`; `off` needs no check. With `defer`, a first
-    word `override` whose rest starts with no length and holds one returns None, so the plain ask (grant_override_ask)
+    word `override` whose rest starts with no length and holds one, or starts with a bare number and words, returns None, so the plain ask (grant_override_ask)
     judges it; grant_override_ask calls again with `defer` False for main's result."""
     opus = OPUS_PROMPT.match(prompt) if isinstance(prompt, str) else None
     if opus:
@@ -593,8 +599,8 @@ def grant(session_id, prompt, at, defer=True, transcript=None, source=None):
     length = _fast_length(reason)
     if length is False:
         return None
-    if length is None and defer and ASK_LENGTH.search(reason):
-        return None  # a plain ask with a length: grant_override_ask judges it
+    if length is None and defer and (ASK_LENGTH.search(reason) or BARE_NUMBER.match(reason)):
+        return None  # a plain ask with a length, or a bare number and words: grant_override_ask judges it
     if not _keyword_typed(prompt, source, transcript):
         return None
     if length is None:
@@ -668,6 +674,8 @@ def grant_override_ask(session_id, prompt, at, judge=None, transcript=None, sour
     if gated is None or length is False:
         return main()
     try:
+        if not keyword and not _keyword_typed(prompt, source, transcript):
+            return None  # the prompt's own record is no owner turn (a harness or peer queued command): no judge call
         if judge is None:
             from call_judge import override_ask as judge
         said_yes = judge(gated[0]) is True
