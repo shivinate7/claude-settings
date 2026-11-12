@@ -173,8 +173,9 @@ class Case(unittest.TestCase):
     def change(self, files):
         self.commit("change", files)
 
-    def lint(self, *args, path_tools=False, env=None):
+    def lint(self, *args, path_tools=False, env=None, exclude=()):
         args = args or ("--base", "origin/main")
+        args = (*args, *(x for prefix in exclude for x in ("--exclude", prefix)))
         run_env = dict(GIT_ENV, **(env or {}))
         run_env.pop("CODE_CHECK_TOOLS", None)
         if path_tools:
@@ -428,10 +429,11 @@ class MovedLines(Case):
     BLOCK_A = "def a():\n    x = 1\n    # owner ruling applies here\n    return x\n"
     BLOCK_B = "def b():\n    y = 2\n    # fixed in round 2\n    return y\n"
     BLOCK_C = "def c():\n    z = 3\n    # MEASURED 40 ms\n    return z\n"
+    PROBE = "w = 9\n# see PR 1234\n"  # flagged; under an excluded prefix it must stay out of the run
 
-    def cut(self, pieces, keep=None, source="old.py"):
+    def cut(self, pieces, keep=None, source="old.py", exclude=()):
         """Base: `source` holds BLOCK_A, BLOCK_B and BLOCK_C. The change keeps `keep` in it (None deletes it) and
-        adds `pieces`. Returns the check's (exit code, output)."""
+        adds `pieces`. Returns the check's (exit code, output), run with each `exclude` prefix."""
         self.base({source: "\n\n".join((self.BLOCK_A, self.BLOCK_B, self.BLOCK_C))})
         self.change({source: keep, **pieces})
         status = self.git("diff", "-M", "--name-status", "origin/main")
@@ -442,7 +444,27 @@ class MovedLines(Case):
             if block not in (keep or ""):
                 comment = next(row for row in block.splitlines() if "#" in row)
                 self.assertIn("\n-" + comment + "\n", patch, "fixture state: the base comment is not deleted: " + comment)
-        return self.lint()
+        return self.lint(exclude=exclude)
+
+    def cut_past_exclude(self, source):
+        """cut() with `--exclude legacy/`, a BLOCK_B copy in src/b.py, and PROBE in legacy/probe.py. PROBE is a hit
+        with no prefix, so its absence under the prefix shows the prefix reached the check."""
+        rc, out = self.cut({"src/b.py": self.BLOCK_B, "legacy/probe.py": self.PROBE}, source=source,
+                           exclude=("legacy/",))
+        _, unscoped = self.lint()
+        self.assertHit(unscoped, "legacy/probe.py", 2)
+        return rc, out
+
+    def test_deletion_from_an_excluded_folder_does_not_excuse_a_copy_in_code(self):
+        rc, out = self.cut_past_exclude("legacy/a.py")
+        self.assertNoHit(out, "legacy/probe.py", 2)
+        self.assertEqual(rc, 1, "a deletion from an excluded folder excused its copy in scanned code\n" + out)
+        self.assertHit(out, "src/b.py", 3)
+
+    def test_deletion_from_a_scanned_folder_still_excuses_its_copy_past_the_same_exclude(self):
+        rc, out = self.cut_past_exclude("kept/a.py")
+        self.assertNoHit(out, "legacy/probe.py", 2)
+        self.assertEqual(rc, 0, "a deletion from a scanned folder stopped excusing its moved copy\n" + out)
 
     def test_comments_moved_out_of_a_deleted_file_are_clean(self):
         rc, out = self.cut({"parts/a.py": self.BLOCK_A, "parts/b.py": self.BLOCK_B, "parts/c.py": self.BLOCK_C})
