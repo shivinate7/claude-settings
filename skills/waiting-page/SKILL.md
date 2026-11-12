@@ -121,7 +121,8 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     `gain` and `lose`. `context` also has a line that starts "Departs from: <what on main> — <what changes>"; a change that restates main does not count. The writer refuses a decision without it (guard rules `question-form`, `owner-judge` and `question-departs`). A decision with a `pick` also carries the line "Against the pick (sonnet): <case>" (guard rule `question-challenged`). A decision with
     `status: "closed"` needs none; decision `question-form` holds the other exemptions. An update that
     carries `kind: decision` and `context` carries the lines again, and one that carries `options` carries each `gain` and `lose` again:
-    the guard cannot see the stored fields.
+    the guard cannot see the stored fields. An update that carries `kind: decision`, `pick` and `context` also carries the Against line,
+    and carries `stands: true` again on a stood pick.
   - A task adds `steps` (a list of strings), `links` (a list of `{label, url}`), `command` (`{powershell, mac}`, two
     strings) and `minutes` (a number, or text such as `3 min`). `powershell` is PowerShell 5.1-safe: no `&&`, `||`,
     `<<`, `<<<`, `/dev/null` or `export`. `mac` is bash or zsh. Never mix shells in one. The item shows each in a closed disclosure with a Copy
@@ -476,7 +477,8 @@ delete of `answers/<id>` wait for the done report. A Park is the exception (see 
      recommendation.
    - `context` with this line first: "The arbiter ruled <label>; you overturned it at <time>." Then a
      "Your stake:" line that states the goal, money, risk, rule or what cannot be undone. The owner-judge
-     guard refuses an update with `kind` `decision` and `context` that lacks it.
+     guard refuses an update with `kind` `decision` and `context` that lacks it. This update carries a new `pick`, so it also needs the
+     case against that pick: spawn the Sonnet agent for the new pick (see "Add an item") and add the line "Against the pick (sonnet): <the case>".
 
    Then delete `answers/<id>` (pinned to its version). The ruling's record stands until the new answer is filed.
 

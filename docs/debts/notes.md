@@ -2180,3 +2180,5 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
+- challenged-update-without-pick: `challenged_hit` judges an update only when it carries `pick`, since the stored pick is unseen, so an update with `kind: decision` and a `context` that drops the Against line, with no `pick`, passes. Found in review round 1 of the question-challenged lane. Decision: question-form.
+- challenged-exempt-stood-port: a stood, port or no-pick item gets no case against its pick, even when it touches a rule; the guard cannot read the rule stake. Found in review round 1 of the question-challenged lane. Decision: question-form.
