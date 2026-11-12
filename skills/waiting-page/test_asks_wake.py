@@ -10,12 +10,22 @@ Reads prose only and runs none of the skill's code. Each claim has one case:
   2b. The same step has a sentence that says exit 2 means the asks list could not be read.
   3. SKILL.md's "## Read the answers" section (the wake text) names the same run, in a sentence that says end or last.
   4. The end check runs after the step that saves the asks, or step 2 saves them first.
-  5. The FAIL line appears only when an ask is listed.
+  5. A FAIL sentence in step 2 says FAIL prints when an ask is listed, and a FAIL sentence says it prints when the
+     asks list cannot be read (stale_pages.py prints FAIL on both).
   6. The session that holds an ask answers it, and the writer routes or names it; the writer does not answer each ask.
   7. The comment-wake save list in "## Read the answers" names asks.
   8. The "in full" list in "## Read the answers" names asks, so a cut asks list is not read as clear.
+  9. A sentence in "Keep the page on main's code" names the end check and says routing comes first: it has route, and
+     after, once, following or first.
+ 10. SKILL.md's end-check sentence and republish.md agree on where the check runs: the step the sentence names, and
+     whether it says the check ends the wake (republish.md runs it in its step 2 of 5, so the two cannot both say last).
+ 11. A sentence in "Keep the page on main's code" says `<asks>` is the list saved in the same step.
+ 12. A sentence in that section that saves the asks says the save touches the `.complete` marker.
+ 13. The one Cost: paragraph of that section names the second run, the end check's python process.
+ 14. The one Cost: paragraph names the asks list read.
 The controls pass on the text as it stands. They show that each read finds its section, that the copy step saves
-the asks, and that the span reader takes a lone apostrophe, comment-like characters and a line break as plain text.
+the asks, that the Cost: paragraph is found once, and that the span reader takes a lone apostrophe, comment-like
+characters and a line break as plain text.
 """
 import re
 import unittest
@@ -45,6 +55,24 @@ ROUTE = re.compile(r"\broutes?\b|\bnames?\b", re.I)
 WRITER_ANSWERS = re.compile(r"\banswer each\b|\bthe writer answers?\b", re.I)
 SAVE = re.compile(r"\b(?:save|saves|saved|fetch|fetches)\b", re.I)
 IN_FULL = re.compile(r"\bin full\b", re.I)
+# Case 5: the FAIL line also prints when the asks list cannot be read (stale_pages.py open_asks_mode, unknown path).
+UNREADABLE_CLAUSE = re.compile(r"\bcannot be read\b|\bcould not be read\b|\bunreadable\b|\bcut[- ]short\b|\bunknown\b", re.I)
+# Case 9: the check is ordered after routing when its sentence says so.
+END_REF = re.compile(r"\bend check\b", re.I)
+ROUTING = re.compile(r"\broute[sd]?\b|\brouting\b", re.I)
+AFTER = re.compile(r"\bafter\b|\bonce\b|\bfollowing\b|\bfirst\b", re.I)
+# Case 10: a claim that the check comes last, either at the wake's end or as the section's last step.
+STEP_NUMBER = re.compile(r"\bstep (\d+)\b", re.I)
+LAST_CLAIM = re.compile(r"\bends? (?:each|every|the) wake\b|\bend of (?:each|every|the) wake\b|\blast (?:in|of) (?:each|every|the) wake\b"
+                        r"|\blast step\b|\bfinal step\b", re.I)
+# Case 11: the list the check reads is the one saved in the same step.
+SAME_STEP = re.compile(r"\b(?:same|this) step\b", re.I)
+SAVED = re.compile(r"\bsav\w*", re.I)
+ASKS_WORD = re.compile(r"\basks?\b", re.I)
+COMPLETE = ".complete"  # Case 12: the marker's text, in prose or in a code span
+# Case 13: the Cost: paragraph names the end check's own python process, a second run beside the plain one.
+SECOND_RUN = re.compile(r"\bend check\b|\bsecond (?:python|run|process)\b|\btwo (?:python )?(?:processes|runs)\b|\bper run\b"
+                        r"|\banother (?:python )?(?:process|run)\b|\bone more (?:python )?(?:process|run)\b", re.I)
 
 
 def spans(text):
@@ -88,11 +116,26 @@ def read_answers():
     return section(read(SKILL), READ_HEADING)
 
 
+def step_section():
+    """The whole "Keep the page on main's code" section of republish.md, from its heading to the next section."""
+    return skill_file_with(STEP_HEADING).split(STEP_HEADING, 1)[1].split("\n## ", 1)[0]
+
+
+def section_sentences():
+    """Every sentence of the section, each block's sentences in order, one line each."""
+    return [s for b in blocks(step_section()) for s in sentences(b)]
+
+
+def cost_text():
+    """The one Cost: paragraph of the section, on one line, or "" when the section has no single one."""
+    found = [b for b in blocks(step_section()) if b.lstrip().startswith("Cost:")]
+    return " ".join(found[0].split()) if len(found) == 1 else ""
+
+
 def numbered_steps():
     """(n, text) for each numbered step of "Keep the page on main's code", each text on one line."""
-    body = skill_file_with(STEP_HEADING).split(STEP_HEADING, 1)[1].split("\n## ", 1)[0]
     found = []
-    for part in re.split(r"\n(?=\d+\. )", body):
+    for part in re.split(r"\n(?=\d+\. )", step_section()):
         m = re.match(r"(\d+)\. ", part)
         if m:
             found.append((int(m.group(1)), " ".join(part.split())))
@@ -153,13 +196,16 @@ class EndCheckInRepublishStep(unittest.TestCase):
                         "\"Keep a copy in the repo\"), so the check reads an asks list not yet saved"
                         % (first_run[0], first_save[0]))
 
-    def test_5_the_fail_line_appears_only_when_an_ask_is_listed(self):
+    def test_5_the_fail_line_names_both_the_listed_ask_and_the_unreadable_list(self):
         step = step_two()
         fail = [s for s in sentences(step) if FAIL.search(s)]
         self.assertTrue(fail, "republish.md step 2 names no FAIL line. Step 2:\n" + step)
-        only = [s for s in fail if ONLY.search(prose(s)) and ASK.search(prose(s)) and LISTED.search(prose(s))]
-        self.assertTrue(only, "republish.md step 2 has no sentence that says the FAIL line appears only when an ask is listed; "
-                        "as written it reads as printed on every run. Step 2:\n" + step)
+        listed = [s for s in fail if ASK.search(prose(s)) and LISTED.search(prose(s))]
+        self.assertTrue(listed, "republish.md step 2's FAIL sentence does not say FAIL prints when an ask is listed. "
+                        "Step 2:\n" + step)
+        unreadable = [s for s in fail if UNREADABLE_CLAUSE.search(prose(s))]
+        self.assertTrue(unreadable, "republish.md step 2 does not say FAIL also prints when the asks list cannot be read: "
+                        "stale_pages.py prints FAIL on an unreadable or cut-short list (exit 2). Step 2:\n" + step)
 
     def test_6_the_session_that_holds_an_ask_answers_it_and_the_writer_routes_it(self):
         step = step_two()
@@ -169,6 +215,37 @@ class EndCheckInRepublishStep(unittest.TestCase):
         self.assertTrue(holder and not writer,
                         "republish.md step 2 must say the session that holds an ask answers it, with the writer routing or "
                         "naming it, and must not have the writer answer each ask. Step 2:\n" + step)
+
+    def test_9_a_sentence_says_the_end_check_runs_after_routing(self):
+        self.assertTrue(numbered_steps(), "republish.md's \"Keep the page on main's code\" section has no numbered steps")
+        ordered = [s for s in section_sentences()
+                   if (END_REF.search(prose(s)) or any(own_run(c) for c in spans(s)))
+                   and ROUTING.search(prose(s)) and AFTER.search(prose(s))]
+        self.assertTrue(ordered, "republish.md's \"Keep the page on main's code\" section has no sentence that puts the end "
+                        "check after the writer routes the asks it takes (end check or its run, with route, and after, "
+                        "once, following or first)")
+
+    def test_10_skill_md_and_republish_agree_on_where_the_end_check_runs(self):
+        self.assertTrue(numbered_steps(), "republish.md's \"Keep the page on main's code\" section has no numbered steps")
+        ends = [s for b in blocks(read_answers()) for s in sentences(b)
+                if any(own_run(c) for c in spans(s)) and END.search(prose(s))]
+        self.assertTrue(ends, "SKILL.md's '## Read the answers' section has no sentence that names the end check run")
+        skill = ends[0]
+        saves_runs = save_and_run_positions()
+        self.assertTrue(saves_runs[1], "republish.md's \"Keep the page on main's code\" section has no own run")
+        run_step = min(saves_runs[1])[0]
+        last_step = max(n for n, _ in numbered_steps())
+        named = STEP_NUMBER.search(prose(skill))
+        claims_last = LAST_CLAIM.search(prose(skill))
+        self.assertTrue(named or claims_last, "SKILL.md's end-check sentence names no position (no step, no end of the "
+                        "wake). Sentence:\n" + skill)
+        if named:
+            self.assertEqual(int(named.group(1)), run_step, "SKILL.md's end-check sentence names step %s, but republish.md "
+                             "runs the check in step %d. Sentence:\n%s" % (named.group(1), run_step, skill))
+        self.assertEqual(bool(claims_last), run_step == last_step,
+                         "SKILL.md and republish.md disagree on where the end check runs: SKILL.md says it ends the wake (%s), "
+                         "republish.md runs it in step %d of %d. Sentence:\n%s"
+                         % (bool(claims_last), run_step, last_step, skill))
 
 
 class WakeTextNamesTheCheck(unittest.TestCase):
@@ -198,6 +275,40 @@ class WakeSaveListNamesAsks(unittest.TestCase):
         named = [s for s in full if any(names_asks(c) for c in spans(s))]
         self.assertTrue(named, "the 'in full' list names no asks, so a cut asks list can read as clear. Sentence:\n"
                         + "\n".join(full))
+
+
+class AsksListAndCost(unittest.TestCase):
+    def test_11_a_sentence_says_the_asks_span_is_the_list_saved_in_the_same_step(self):
+        self.assertTrue(numbered_steps(), "republish.md's \"Keep the page on main's code\" section has no numbered steps")
+        span_sentences = [s for s in section_sentences() if "<asks>" in spans(s)]
+        self.assertTrue(span_sentences, "republish.md's \"Keep the page on main's code\" section has no sentence with an "
+                        "`<asks>` span, so the end check's list is not named")
+        says = [s for s in span_sentences if SAVED.search(prose(s)) and SAME_STEP.search(prose(s))]
+        self.assertTrue(says, "republish.md's \"Keep the page on main's code\" section does not say `<asks>` is the list "
+                        "saved in the same step. Sentences:\n" + "\n".join(span_sentences))
+
+    def test_12_the_asks_save_says_it_touches_the_complete_marker(self):
+        self.assertTrue(numbered_steps(), "republish.md's \"Keep the page on main's code\" section has no numbered steps")
+        asks_saves = [s for s in section_sentences()
+                      if SAVE.search(prose(s)) and (ASKS_WORD.search(prose(s)) or any(names_asks(c) for c in spans(s)))]
+        self.assertTrue(asks_saves, "republish.md's \"Keep the page on main's code\" section has no sentence that saves the asks")
+        marked = [s for s in asks_saves if COMPLETE in s]
+        self.assertTrue(marked, "republish.md's asks save does not touch the `.complete` marker, so a partial asks list can "
+                        "read as the whole. Save sentences:\n" + "\n".join(asks_saves))
+
+    def test_13_the_cost_paragraph_names_the_second_run(self):
+        cost = cost_text()
+        self.assertTrue(cost, "republish.md's \"Keep the page on main's code\" section has no single Cost: paragraph")
+        second = [s for s in sentences(cost) if SECOND_RUN.search(prose(s)) or any(own_run(c) for c in spans(s))]
+        self.assertTrue(second, "the Cost: paragraph does not name the second run, the end check's python process. Cost:\n" + cost)
+
+    def test_14_the_cost_paragraph_names_the_asks_list_read(self):
+        cost = cost_text()
+        self.assertTrue(cost, "republish.md's \"Keep the page on main's code\" section has no single Cost: paragraph")
+        read_asks = [s for s in sentences(cost)
+                     if ASKS_WORD.search(prose(s)) or any(c.startswith("ArtifactData list asks") for c in spans(s))]
+        self.assertTrue(read_asks, "the Cost: paragraph does not name the asks list read (`ArtifactData list asks`). Cost:\n"
+                        + cost)
 
 
 class Controls(unittest.TestCase):
@@ -230,6 +341,10 @@ class Controls(unittest.TestCase):
         self.assertTrue(any(names_asks(c) for c in spans(copy_step_two())),
                         "\"Keep a copy in the repo\" step 2 no longer fetches `asks`, so test 4 has no save to order against. "
                         "Step 2:\n" + copy_step_two())
+
+    def test_c7_the_cost_paragraph_is_found_once(self):
+        self.assertTrue(cost_text(), "republish.md's \"Keep the page on main's code\" section has no single Cost: paragraph, "
+                        "so tests 13 and 14 read nothing")
 
 
 if __name__ == "__main__":
