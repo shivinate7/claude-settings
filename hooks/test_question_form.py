@@ -1594,6 +1594,75 @@ def test_update_of_task_options_with_context_is_judged():
     _judged(case_update_task_options_with_context_is_judged)
 
 
+# A write with steps and no kind is read as a task by judged_item_writes, since steps are task-only. An update of
+# one is judged for its Departs from line as a task's. A set with no kind keeps the decision form on main, so it
+# is refused for its Goal line; these cases leave that as it is.
+
+def steps_no_kind(context=TASK_WHY):
+    """A set with steps and options and no kind. A context of None leaves the key out."""
+    item = {"title": "Merge the batch", "status": "open", "steps": ["Open Terminal"],
+            "options": copy.deepcopy(TASK_OPTIONS)}
+    if context is not None:
+        item["context"] = context
+    return item
+
+
+def steps_no_kind_update(context=TASK_WHY):
+    """An update with steps and options and no kind. It carries context only when `context` is not None."""
+    item = {"steps": ["Open Terminal"], "options": copy.deepcopy(TASK_OPTIONS)}
+    if context is not None:
+        item["context"] = context
+    return item
+
+
+def refused_by_some_rule(name, op, entry):
+    """A write that some rule refuses, by item_hit and by the guard. A crash or a missing name is no refusal."""
+    for surface, got in (("page item_hit", call("item_hit", op, entry)), ("page guard", guard_hit(op, entry))):
+        check(surface + ": " + name, got[0] not in ("", "RAISED", "MISSING"),
+              "want a refusal by some rule, got %r" % (got,))
+
+
+def case_steps_no_kind_update_departs_missing_is_refused():
+    page("an update with steps, options and no kind, and no Departs from line, is refused as question-departs",
+         "update", entry_of(steps_no_kind_update()), DEPARTS_REFUSAL)
+
+
+def case_steps_no_kind_set_stays_refused():
+    # A set with no kind keeps the decision form on main, so it is refused for its Goal line. Steps do not change
+    # that, and a valid Departs from line does not pass it.
+    refused_by_some_rule("a set with steps, options and no kind, and no Departs from line, is refused", "set",
+                         entry_of(steps_no_kind()))
+    refused_by_some_rule("a set with steps, options and no kind, and a valid Departs from line, is still refused",
+                         "set", entry_of(steps_no_kind(context=TASK_WHY + "\n" + DEPARTS)))
+
+
+def case_steps_no_kind_update_valid_departs_passes():
+    page("an update with steps, options and no kind, and a valid Departs from line, passes", "update",
+         entry_of(steps_no_kind_update(context=TASK_WHY + "\n" + DEPARTS)), None)
+
+
+def case_task_non_list_options_is_not_judged_for_departs():
+    # options is a string, not a list: only a non-empty list of options takes the Departs from check.
+    page("a task whose options is a string, with a Why yours line and no Departs from line, passes", "set",
+         entry_of(task_with_options(context=TASK_WHY, options="Keep it — gain")), None)
+
+
+def test_steps_no_kind_update_without_departs_line_is_refused():
+    _judged(case_steps_no_kind_update_departs_missing_is_refused)
+
+
+def test_steps_no_kind_set_stays_refused():
+    _judged(case_steps_no_kind_set_stays_refused)
+
+
+def test_steps_no_kind_update_with_valid_departs_line_passes():
+    _judged(case_steps_no_kind_update_valid_departs_passes)
+
+
+def test_task_with_non_list_options_is_not_judged_for_departs():
+    _judged(case_task_non_list_options_is_not_judged_for_departs)
+
+
 # ------------------------------------------------------------------ a port's main side
 
 def case_port_main_side():
@@ -2613,6 +2682,9 @@ def main():
                  case_task_without_options_is_not_judged_for_departs, case_task_options_without_context_is_refused,
                  case_closed_task_options_passes, case_update_task_options_without_context_passes,
                  case_update_task_options_with_context_is_judged,
+                 case_steps_no_kind_update_departs_missing_is_refused, case_steps_no_kind_set_stays_refused,
+                 case_steps_no_kind_update_valid_departs_passes,
+                 case_task_non_list_options_is_not_judged_for_departs,
                  case_port_main_side, case_port_departs_shapes, case_call_judge,
                  case_widens_text_is_the_set_words, case_widens_reasons_carry_no_topic_id,
                  case_widens_words_in_every_home, case_widens_words_in_the_reply_judge_prompt,
