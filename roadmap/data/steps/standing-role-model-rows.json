@@ -1,14 +1,14 @@
 {
  "id": "standing-role-model-rows",
  "title": "Model-per-role table rows for coordinator, triage and batch runner",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
- "phase": "next",
- "lane": "",
+ "phase": "now",
+ "lane": "session_013NEJKzYpAVhp5MdKD5Cvfe",
  "owner": "triage",
  "blockedBy": [],
  "why": "Rulings R33 and R52 name models for the standing roles; step model-table-one-home did not build these rows.",
  "source": "coordinator 17:57 CST Nov 12, from lane model-table-one-home",
- "note": "Add the coordinator, triage and batch-runner rows to the agent-model-cap table, from R33 and R52, with their sources.",
- "updatedAt": "2026-11-12T17:58:20-06:00"
+ "note": "Add the coordinator, triage and batch-runner rows to the agent-model-cap table, from R33 and R52, with their sources. Coordinator 17:59 CST Nov 12: started; builds on #3010's table.",
+ "updatedAt": "2026-11-12T17:59:33-06:00"
 }
