@@ -190,7 +190,7 @@ test("a writer's update and a Send on the open page move no Blocking card", asyn
   await choose(page, pick, "a");
   await page.click("#send");
   await page.waitForFunction((id) => !document.querySelector(`#tier-calm #item-${id}`), pick.id);
-  assert.deepEqual(await tierIds(page, "holds"), [first.id, second.id], "a writer's update and a Send re-sorted Blocking");
+  assert.deepEqual(await tierIds(page, "holds"), [first.id, second.id], "Blocking was worked out again while the page was open");
 });
 
 // ---------------------------------------------------------------- the count on the card, the group head, and the tier key lines
@@ -204,10 +204,19 @@ test("a Blocking card's top row shows stops N, N the length of its list", async 
 });
 
 test("a card with no stops, or an empty list, shows no count", async (t) => {
-  const none = blk("no-stops", 1, { added: at(1) });
-  const empty = blk("empty-stops", 2, { added: at(2), stops: [] });
+  const none = blk("bare-card", 1, { added: at(1) });
+  const empty = blk("empty-list", 2, { added: at(2), stops: [] });
   const page = await open(t, { items: [none, empty] }); if (!page) return;
-  for (const it of [none, empty]) assert.doesNotMatch(await topIn(page, "holds", it), /stops/, `No. ${it.n} shows a count`);
+  for (const it of [none, empty]) assert.doesNotMatch(await topIn(page, "holds", it), /\bstops \d/, `No. ${it.n} shows a count`);
+});
+
+test("a Blocking card with stops shows no 'does not draw' note, since the page lists the field", async (t) => {
+  const counted = blk("drawn-stops", 1, { added: at(1), stops: ["lane a", "lane b"] });
+  const page = await open(t, { items: [counted] }); if (!page) return;
+  const scope = page.locator(`#tier-holds #item-${counted.id}`);
+  assert.equal(await scope.count(), 1, `No. ${counted.n} is not in tier-holds`);
+  const notes = await scope.locator('[role="status"]', { hasText: "does not draw" }).count();
+  assert.equal(notes, 0, `No. ${counted.n} carries a "does not draw" note: the page does not list the stops field`);
 });
 
 test("a group shows its count once, in its head, and no member card shows one", async (t) => {
@@ -216,7 +225,8 @@ test("a group shows its count once, in its head, and no member card shows one", 
   const page = await open(t, { items: [one, two] }); if (!page) return;
   const frame = page.locator("#tier-holds section.bundle#group-pair");
   assert.equal(await frame.count(), 1, "the two members are not one frame in Blocking");
-  const head = await frame.locator("header").first().textContent();
+  // The head's text as the eye reads it: its screen-reader words (.sr) are left out.
+  const head = await frame.locator("header").first().evaluate((h) => { const c = h.cloneNode(true); c.querySelectorAll(".sr").forEach((n) => n.remove()); return c.textContent; });
   assert.equal((head.match(/stops \d+/g) || []).length, 1, "the group head does not show its count once: " + head);
   // Three distinct entries across the two members: the shared lane counts once.
   assert.match(head, /\bstops 3\b/, "the group head count is not 3: " + head);
