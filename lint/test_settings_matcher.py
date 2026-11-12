@@ -252,6 +252,14 @@ class Matcher(unittest.TestCase):
         self.assertTrue(any(re.fullmatch(m, "Artifact") for m in matchers),
                         "no guard matcher covers Artifact: %r" % matchers)
 
+    def test_guard_matcher_covers_artifact_comments(self):
+        # Rule page-thread-reply refuses a reply into a comment thread on the waiting page, made by the
+        # ArtifactComments tool, so the guard must see that call. Matchers are whole-name regexes, so
+        # Artifact and ArtifactData do not reach it.
+        matchers = guard_matchers()
+        self.assertTrue(any(re.fullmatch(m, "ArtifactComments") for m in matchers),
+                        "no guard matcher covers ArtifactComments: %r" % matchers)
+
     def test_guard_matcher_covers_trust_card_tools(self):
         # Rule trust-card-in-build refuses these two calls in a cs-build session, so the first guard.py
         # matcher must fire on both full tool names.
