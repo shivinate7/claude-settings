@@ -50,6 +50,7 @@ LINT_A = "lint/a.py"
 LINT_B = "lint/b.py"
 X_FILE = "lint/x.py"
 X_TEXT = "X = 2\n"
+NEVER = "lint/never.py"  # a path no case commits, so a report that names it must be flagged
 
 RUN_FOLDER = None
 
@@ -182,6 +183,12 @@ class CheckCase(Fixture):
         diff = self.diff_names(self.origin_head(branch))
         for name in names:
             self.assertIn(name, diff, "the pushed head of %s lacks %s from its diff" % (branch, name))
+
+    def scope_absent(self, branch, *names):
+        """Scope first: the pushed head's diff lacks each name, so a case that expects a flag has a path to flag."""
+        diff = self.diff_names(self.origin_head(branch))
+        for name in names:
+            self.assertNotIn(name, diff, "the pushed head of %s holds %s in its diff" % (branch, name))
 
     def assertPasses(self, branch, report, args=(), cwd=None):
         rc, out = self.run_check(branch, report, args, cwd)
@@ -504,6 +511,77 @@ class CheckCase(Fixture):
         for report in ("Files: 10-20\n", "Files: 10-20, %s\n" % WIDGET):
             with self.subTest(report=report):
                 self.assertUnknown(BRANCH, report, named=["UNKNOWN"])
+
+
+    def test_a_files_line_wrapped_onto_a_continuation_line_flags_a_path_not_in_the_diff(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.scope(BRANCH, WIDGET)
+        self.scope_absent(BRANCH, NEVER)
+        self.assertFlags(BRANCH, "Files: %s,\n  %s\n" % (WIDGET, NEVER), missing=[NEVER])
+
+    def test_a_files_line_wrapped_onto_a_continuation_line_passes_when_its_path_is_in_the_diff(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT, OTHER: OTHER_TEXT})
+        self.scope(BRANCH, WIDGET, OTHER)
+        self.assertPasses(BRANCH, "Files: %s,\n  %s\n" % (WIDGET, OTHER))
+
+    def test_a_bullet_after_the_files_line_flags_a_path_not_in_the_diff(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.scope(BRANCH, WIDGET)
+        self.scope_absent(BRANCH, NEVER)
+        for bullet in ("- %s", "* %s"):
+            with self.subTest(bullet=bullet):
+                self.assertFlags(BRANCH, "Files: %s\n%s\n" % (WIDGET, bullet % NEVER), missing=[NEVER])
+
+    def test_a_bullet_after_the_files_line_passes_when_its_path_is_in_the_diff(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT, OTHER: OTHER_TEXT})
+        self.scope(BRANCH, WIDGET, OTHER)
+        for bullet in ("- %s", "* %s"):
+            with self.subTest(bullet=bullet):
+                self.assertPasses(BRANCH, "Files: %s\n%s\n" % (WIDGET, bullet % OTHER))
+
+    def test_a_prose_bullet_after_the_files_line_is_not_read_as_a_path(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.scope(BRANCH, WIDGET)
+        self.assertPasses(BRANCH, "Files: %s\n- Done: widget edited, tests pass\n" % WIDGET)
+
+    def test_a_parenthesised_path_not_in_the_diff_is_flagged(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.scope(BRANCH, WIDGET)
+        self.scope_absent(BRANCH, NEVER)
+        forms = ("%s (%s)" % (WIDGET, NEVER), "%s (see %s)" % (WIDGET, NEVER), "%s, (%s)" % (WIDGET, NEVER))
+        for form in forms:
+            with self.subTest(form=form):
+                self.assertFlags(BRANCH, "Files: %s\n" % form, missing=[NEVER])
+
+    def test_a_parenthesised_path_in_the_diff_passes(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT, OTHER: OTHER_TEXT})
+        self.scope(BRANCH, WIDGET, OTHER)
+        forms = ("%s (%s)" % (WIDGET, OTHER), "%s (see %s)" % (WIDGET, OTHER), "%s, (%s)" % (WIDGET, OTHER))
+        for form in forms:
+            with self.subTest(form=form):
+                self.assertPasses(BRANCH, "Files: %s\n" % form)
+
+    def test_a_path_followed_by_a_note_in_the_diff_passes(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.scope(BRANCH, WIDGET)
+        for note in (": new helper", " - added"):
+            with self.subTest(note=note):
+                self.assertPasses(BRANCH, "Files: %s%s\n" % (WIDGET, note))
+
+    def test_a_note_after_a_path_not_in_the_diff_still_flags_it(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.scope(BRANCH, WIDGET)
+        self.scope_absent(BRANCH, NEVER)
+        for note in (": new helper", " - added"):
+            with self.subTest(note=note):
+                self.assertFlags(BRANCH, "Files: %s, %s%s\n" % (WIDGET, NEVER, note), missing=[NEVER])
+
+    def test_a_files_line_in_another_form_is_unknown_and_names_the_accepted_form(self):
+        self.pushed_branch(BRANCH, {WIDGET: WIDGET_TEXT})
+        self.scope(BRANCH, WIDGET)  # the branch is valid, so only the report's form can fail
+        for report in ("1. Files: %s\n" % WIDGET, "Files (changed): %s\n" % WIDGET):
+            with self.subTest(report=report):
+                self.assertUnknown(BRANCH, report, named=["Files:"])
 
 
 class ControlCase(Fixture):
