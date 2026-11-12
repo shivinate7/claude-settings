@@ -2117,9 +2117,10 @@ class BatchLintFlags(tm.Env):
         tm.sh(o, "git", "push", "-q", "origin", branch)
         return tm.sh(o, "git", "rev-parse", "HEAD")
 
-    def lane_lint(self, target, out, missing=()):
+    def lane_lint(self, target, out, missing=(), unknown_ok=""):
         """merge.lane_lint of `target` against BASE, in the lane checkout, through the copy of ci-job. Its output goes to `out`. A refusal raises.
-        `missing` names paths the lint tree lacks once it is made, as the incident's tree did: the branch holds them, the tree on disk does not."""
+        `missing` names paths the lint tree lacks once it is made, as the incident's tree did: the branch holds them, the tree on disk does not.
+        `unknown_ok` is the --lint-unknown-ok reason, passed as the command line passes it."""
         env = {"VERDICT_LOG": os.path.join(self.t, "verdict.log")}  # one log for the run: no ci-job log lands in the system temp dir
         made = merge.add_worktree
 
@@ -2132,7 +2133,7 @@ class BatchLintFlags(tm.Env):
         with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER), unittest.mock.patch.object(merge, "CI_JOB", self.ci_job), \
                 unittest.mock.patch.object(merge, "add_worktree", add_worktree_without), \
                 unittest.mock.patch.dict(os.environ, env), contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
-            return merge.lane_lint(self.co, target, self.host, base=BASE)
+            return merge.lane_lint(self.co, target, self.host, base=BASE, unknown_ok=unknown_ok)
 
     def test_lane_lint_runs_each_batch_check_once_with_the_argv_checks_yml_gives(self):
         head = self.push_batch(BATCH)
@@ -2199,17 +2200,34 @@ class BatchLintFlags(tm.Env):
             calls = self.stub_calls(script)
             self.assertEqual(len(calls), 1, "%s ran %d times, want once: %s" % (script, len(calls), text))
 
-    def test_a_missing_check_file_in_the_lint_tree_refuses_as_a_fail_that_names_the_file(self):
+    def test_a_missing_check_file_in_the_lint_tree_refuses_as_unknown_that_names_the_file(self):
         head = self.push_batch(BATCH_FLOOR, found=self.floor_steps())
         self.assertEqual(tm.sh(self.other, "git", "ls-tree", "--name-only", head, "--", FLOOR_CHECK), FLOOR_CHECK,
                          "the branch does not hold the check file the lint tree is made without")
         out = io.StringIO()
         with self.assertRaises(merge.Stop) as raised:
             self.lane_lint(BATCH_FLOOR, out, missing=(FLOOR_CHECK,))
-        self.assertNotIsInstance(raised.exception, merge.Liftable, "a missing check file reads as unknown, not as a FAIL: " + out.getvalue())
-        self.assertIn("FAILs:", str(raised.exception), "the refusal does not say the lint FAILs: " + out.getvalue())
+        self.assertIn("is unknown", str(raised.exception), "a missing check file did not read as unknown: " + out.getvalue())
+        self.assertNotIsInstance(raised.exception, merge.Liftable, "a missing check file is liftable by --lint-unknown-ok: " + out.getvalue())
         self.assertIn(FLOOR_CHECK, str(raised.exception), "the refusal does not name the missing check file: " + out.getvalue())
         self.assertEqual(pass_lines(out.getvalue()), [], "a lint of a tree missing its check file read as a pass: " + out.getvalue())
+
+    def test_a_missing_check_file_in_the_lint_tree_prints_no_floor_step_verdict(self):
+        self.push_batch(BATCH_FLOOR, found=self.floor_steps())
+        out = io.StringIO()
+        with self.assertRaises(merge.Stop) as raised:
+            self.lane_lint(BATCH_FLOOR, out, missing=(FLOOR_CHECK,))
+        text = str(raised.exception) + out.getvalue()  # the refusal carries the ci-job lines it read
+        verdicts = [line for line in text.splitlines() if FLOOR_NAMES[0] in line and line.lstrip().startswith(("FAIL", "PASS", "unknown"))]
+        self.assertEqual(verdicts, [], "the floor check printed a verdict, so a step ran before the lint refused the missing file: " + text)
+
+    def test_a_reason_does_not_lift_a_missing_check_file_in_the_lint_tree(self):
+        self.push_batch(BATCH_FLOOR, found=self.floor_steps())
+        out = io.StringIO()
+        with self.assertRaises(merge.Stop) as raised:
+            self.lane_lint(BATCH_FLOOR, out, missing=(FLOOR_CHECK,), unknown_ok="a reason the lint must not take")
+        self.assertIn("is unknown", str(raised.exception), "a missing check file did not read as unknown with a reason given: " + out.getvalue())
+        self.assertNotIsInstance(raised.exception, merge.Liftable, "a --lint-unknown-ok reason lifted a missing check file: " + out.getvalue())
 
     def test_a_missing_check_file_in_the_lint_tree_runs_no_later_floor_suite(self):
         self.push_batch(BATCH_FLOOR, found=self.floor_steps())
@@ -2218,15 +2236,15 @@ class BatchLintFlags(tm.Env):
             self.lane_lint(BATCH_FLOOR, out, missing=(FLOOR_CHECK,))
         self.assertEqual(self.stub_calls(FLOOR_SUITE), [], "the floor suite ran after its check file was found missing: " + out.getvalue())
 
-    def test_a_missing_workflow_file_in_the_lint_tree_refuses_as_a_fail_that_names_the_file(self):
+    def test_a_missing_workflow_file_in_the_lint_tree_refuses_as_unknown_that_names_the_file(self):
         head = self.push_batch(BATCH_FLOOR, found=self.floor_steps())
         self.assertEqual(tm.sh(self.other, "git", "ls-tree", "--name-only", head, "--", WORKFLOW_PATH), WORKFLOW_PATH,
                          "the branch does not hold the workflow file the lint tree is made without")
         out = io.StringIO()
         with self.assertRaises(merge.Stop) as raised:
             self.lane_lint(BATCH_FLOOR, out, missing=(WORKFLOW_PATH,))
-        self.assertNotIsInstance(raised.exception, merge.Liftable, "a missing workflow file reads as unknown, not as a FAIL: " + out.getvalue())
-        self.assertIn("FAILs:", str(raised.exception), "the refusal does not say the lint FAILs: " + out.getvalue())
+        self.assertIn("is unknown", str(raised.exception), "a missing workflow file did not read as unknown: " + out.getvalue())
+        self.assertNotIsInstance(raised.exception, merge.Liftable, "a missing workflow file is liftable by --lint-unknown-ok: " + out.getvalue())
         self.assertIn(WORKFLOW_PATH, str(raised.exception), "the refusal does not name the missing workflow file: " + out.getvalue())
         self.assertEqual(pass_lines(out.getvalue()), [], "a lint of a tree missing its workflow file read as a pass: " + out.getvalue())
 
