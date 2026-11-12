@@ -21,7 +21,7 @@ A skill matches on its folder name or its `name`, so a renamed skill with a new 
 through its files.
 
 Files inside a reported skill copy are not reported again. License and lock files, parent
-files under an examples/ or templates/ folder, small files and files over MAX_BYTES are skipped. A child file at a path in OWN_FILES (its own PR template) is skipped when it matches the parent file at that same path, however near-equal; a copy elsewhere, or of another parent file at that path, is still reported. Exit 0: no copies. Exit 1: copies found.
+files under an examples/ or templates/ folder, small files and files over MAX_BYTES are skipped. A child file at a path in OWN_FILES (its own PR template) is not reported against the parent's template at that path, or a byte-equal twin of it, however near-equal; a copy elsewhere, or of another parent file, is still reported. Exit 0: no copies. Exit 1: copies found.
 Exit 2: the child or parent cannot be read, so the result is unknown.
 Cost: one `git ls-files` per tree and one read of each listed file. No process stays running.
 """
@@ -156,9 +156,8 @@ def find_file_copies(parent, pfiles, child, cfiles, skip_folders, threshold):
 
         same = by_hash.get(hashlib.sha256(data).hexdigest()) if len(data) >= MIN_BYTES else None
         if same:
-            parent_rel = min(same, key=rank)
-            if not (rel in OWN_FILES and parent_rel == rel):
-                found.append({"child": rel, "parent": parent_rel, "kind": "byte-equal", "score": 1.0})
+            if not (rel in OWN_FILES and rel in same):
+                found.append({"child": rel, "parent": min(same, key=rank), "kind": "byte-equal", "score": 1.0})
             continue
         clines = significant_lines(data)
         if not clines:
@@ -170,14 +169,17 @@ def find_file_copies(parent, pfiles, child, cfiles, skip_folders, threshold):
                 for p in hits:
                     counts[p] = counts.get(p, 0) + 1
         best = None
+        own = read(parent, rel) if rel in OWN_FILES else None
         for p in counts:
+            if own is not None and (p == rel or read(parent, p) == own):
+                continue
             plines = lines_of[p]
             if len(clines) > CHILD_GROWTH * len(plines):
                 continue
             score = len(plines & clines) / len(plines)
             if score >= threshold and (best is None or (-score, rank(p)) < (-best[1], rank(best[0]))):
                 best = (p, score)
-        if best and not (rel in OWN_FILES and best[0] == rel):
+        if best:
             found.append({"child": rel, "parent": best[0], "kind": "near-equal", "score": round(best[1], 2)})
     return found
 
