@@ -228,7 +228,7 @@ def added_lines(base, std):
     git("rev-parse", "--verify", "--quiet", base + "^{commit}")
     fork = git("merge-base", base, "HEAD").strip()
     diff = git("diff", "-U0", "-M", "--no-color", "--no-ext-diff", fork)
-    left = diff_moves.deleted_texts(diff)
+    left = diff_moves.deleted_texts(diff, lambda old: language_of(old, std) is not None)
     added, path, header, line = {}, None, False, 0
     for row in diff.split("\n"):
         if row.startswith("diff --git "):
@@ -243,7 +243,8 @@ def added_lines(base, std):
         elif (m := HUNK.match(row)):
             header, line = False, int(m.group(1))
         elif not header and row.startswith("+"):
-            if path and not diff_moves.take_move(left, row[1:]):
+            moved = diff_moves.take_move(left, row[1:])  # a copy in an unscanned file uses its deleted copy up too
+            if path and not moved:
                 added[path][1].add(line)
             line += 1
     return added

@@ -640,14 +640,7 @@ def untracked():
     return once("untracked", find)
 
 
-def unquote(name):
-    """A path as git printed it, unquoted when git quoted it; None when it cannot be read."""
-    if name.startswith('"'):
-        try:
-            return ast.literal_eval(name).encode("latin-1").decode("utf-8")
-        except (SyntaxError, ValueError, UnicodeError):
-            return None
-    return name
+unquote = diff_moves.unquote  # the one home of a git-quoted path (lint/diff_moves.py)
 
 
 def diff_path(header):
@@ -690,7 +683,7 @@ def patch_lines(diff):
     A `+++ ` header that yields no path is an unknown, never a skip. `+++ /dev/null` is no unknown: it heads a
     delete, which git prints before the create of a type change. A `+++ ` row is a header only between
     `diff --git` and the first `@@`: past that, it is an added line that starts with `++`."""
-    left = diff_moves.deleted_texts(diff)
+    left = diff_moves.deleted_texts(diff, lambda old: not old.startswith(SKIP_CODE))
     out, unknown, path, header, line = {}, [], None, False, 0
     for row in diff.split("\n"):
         if row.startswith("diff --git "):
@@ -707,7 +700,8 @@ def patch_lines(diff):
             if m:
                 line = int(m.group(1))
         elif not header and row.startswith("+"):
-            if path and not diff_moves.take_move(left, row[1:]):
+            moved = diff_moves.take_move(left, row[1:])
+            if path and not moved:
                 out[path].add(line)
             line += 1
     return out, unknown
