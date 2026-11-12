@@ -17,3 +17,9 @@ def echo_ssh_case():
 
 
 LOG_CHECKS_EXTRA.append(("push: 2000 ssh words before a nested forced push stay linear in CPU", echo_ssh_case))
+LOG_CHECKS_EXTRA.append(("roadmap-one-writer: a push starts one rev-parse, one more for a stray push, symbolic-ref for a refspec, "
+                         "HEAD and bare, push.default for bare only, one config read of the remote for a literal main destination, "
+                         "no read for HEAD:<branch>, a --all or glob push reads the remote's URL and its tracking refs, "
+                         "one rev-list for each pushed ref not to main or master, "
+                         "and reads the transcript only at the record branch",
+                         record_push_cost_case))

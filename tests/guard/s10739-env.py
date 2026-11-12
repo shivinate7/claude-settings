@@ -1894,3 +1894,5 @@ FIXTURELESS_CHECKS.add(incident_write_strip_case)  # it loads the module and bui
 # Incident (q_max, 2026-10-14 02:41-02:47 CDT): an agent set $env:GIT_DIR and $env:GIT_WORK_TREE,
 # then ran a test whose child `git init` inherited both, and git wrote core.worktree into the
 # shared .git/config. Reading a variable, unsetting it, and text that only names it stay allowed.
+LOG_CHECKS_EXTRA.append(("env: heredoc-allow-strip: strip_heredoc_bodies keeps no body line of the incident cat write",
+                         incident_write_strip_case))

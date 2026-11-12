@@ -2439,3 +2439,38 @@ FIXTURELESS_CHECKS.update((
 #
 # Each row is its own case, so a failure names one cause. A refusal row is red on a guard that lets the
 # act through.
+LOG_CHECKS_EXTRA.append(("log: the refused file is named in the log and nowhere else", log_env_case))
+LOG_CHECKS_EXTRA.append(("merge-checks: a merge tool that cannot load is unknown, and denies", merge_tool_missing_case))
+LOG_CHECKS_EXTRA.append(("merge-checks: a merge tool that exits at import is unknown or pending, and denies",
+                         merge_import_exits_case))
+LOG_CHECKS_EXTRA.append(("merge-checks: a gh that never answers still denies, well inside the hook's 60s budget",
+                         merge_hang_timeout_case))
+LOG_CHECKS_EXTRA.append(("powershell: a backslash path survives tokenizing, a Bash one does not", powershell_backslash_case))
+LOG_CHECKS_EXTRA.append(("wsl: a PowerShell script tag keeps its backslashes in segment_tokens", wsl_script_tag_keeps_backslash_case))
+LOG_CHECKS_EXTRA.append(("wsl: a split segment keeps the PowerShell tag its script had", wsl_split_tag_keeps_backslash_case))
+LOG_CHECKS_EXTRA.append(("stack: the refusal never names the action it refused", stack_reason_hygiene_case))
+LOG_CHECKS_EXTRA.append(("playwright: the refusal names the stale __dirlock and pgrep, and no other path",
+                         playwright_remedy_case))
+LOG_CHECKS_EXTRA.append(("split_segments: a comment starting a word ends its line, "
+                         "letter-before-# and quoted-# stay literal", split_segments_comment_case))
+LOG_CHECKS_EXTRA.append(("liveness: process_start_ms splits alive/dead/unreadable apart", process_start_ms_case))
+LOG_CHECKS_EXTRA.append(("liveness: process_start_ms reads a repeated-hour start (01:30 CDT) as its instant, in Chicago",
+                         process_start_ms_repeated_hour_cdt_case))
+LOG_CHECKS_EXTRA.append(("liveness: process_start_ms reads a repeated-hour start (01:30 CST) as its instant, in Chicago",
+                         process_start_ms_repeated_hour_cst_case))
+LOG_CHECKS_EXTRA.append(("liveness: windows arm splits dead (error 87) from unreadable (error 5)",
+                         process_start_ms_windows_case))
+LOG_CHECKS_EXTRA.append(("liveness: session_is_live carries True/False/None, never coercing unreadable to False",
+                         session_is_live_case))
+LOG_CHECKS_EXTRA.append(("liveness: session_is_live says True for a repeated-hour start (01:30 CDT) in Chicago",
+                         session_is_live_repeated_hour_cdt_case))
+LOG_CHECKS_EXTRA.append(("liveness: session_is_live says True for a repeated-hour start (01:30 CST) in Chicago",
+                         session_is_live_repeated_hour_cst_case))
+LOG_CHECKS_EXTRA.append(("liveness: worktree_live_session answers None on an unreadable record under target",
+                         worktree_live_session_unreadable_case))
+LOG_CHECKS_EXTRA.append(("liveness: worktree_live_session matches two spellings of one identity as under target",
+                         worktree_live_session_two_spellings_case))
+LOG_CHECKS_EXTRA.append(("liveness: worktree_live_session answers None when the identity fallback can't tell",
+                         worktree_live_session_path_unresolvable_case))
+LOG_CHECKS_EXTRA.append(("liveness: session_is_live reads an implied backwards clock step as unreadable, not dead",
+                         session_is_live_backwards_clock_step_case))

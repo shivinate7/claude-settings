@@ -193,6 +193,9 @@ class _TaggedLogs(list):
         list.append(self, item)
 
 
+LOG_CHECKS_EXTRA = _TaggedLogs()
+
+
 # A case this platform does not run is a SKIP row with its reason: never a PASS, never a silent drop.
 # skip_case records it here, and the rows join LOG_CHECKS with the other log checks, further down.
 SKIP_ROWS = []
