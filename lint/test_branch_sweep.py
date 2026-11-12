@@ -20,9 +20,9 @@ filter (jq) and refuses or accepts each DELETE. Before each DELETE the workflow 
 that read from a map of branch to the response body, or to an "HTTP <status>" refusal. The body holds the checkout's
 tip unless a case moves it, or a case makes it "empty" (no body), "null" (an object with no sha) or "array" (a prefix
 match of two refs). Any other gh call the fake does not know fails loudly.
-The budget cases (coordinator ruling, 2026-11-12 10:02 CST): the delete step reads the request budget with one
+The budget cases: the delete step reads the request budget with one
 `gh api rate_limit` before its delete loop, and stops green when the budget falls below the reserve. The reserve is the
-constant BUDGET_RESERVE in actions/branch-sweep/sweep.py; RESERVE below is the ruling's 300, and
+constant BUDGET_RESERVE in actions/branch-sweep/sweep.py; RESERVE below is 300, and
 test_reserve_home_is_the_ruling_value holds the two equal. The reserve is read from the sweep, never written inline.
 Cost model, which the fake follows: each tip read and each DELETE spends one request, and a rate_limit read spends
 none. Branch k's delete is judged on the budget that stands before its own tip read, so it goes ahead when that budget
