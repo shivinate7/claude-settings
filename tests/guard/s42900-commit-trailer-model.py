@@ -216,6 +216,17 @@ CTM_REPO_HAIKU54ID = ctm_repo("haiku54id", [ctm_value("claude-haiku-5-4")],
                               local=[ctm_message(ctm_trailer("claude-haiku-5-4"))])
 CTM_REPO_CLAUDE54HAIKU = ctm_repo("claude54haiku", [ctm_value("Claude 5-4 Haiku")],
                                   local=[ctm_message(ctm_trailer("Claude 5-4 Haiku"))])
+# One value that names two families: the first may be the agent's own, the second is not. A second name that is no
+# model passes.
+CTM_REPO_MULTI = ctm_repo("multifamily", [ctm_value("Claude Haiku 5.5 & Claude Opus 5.5")],
+                          local=[ctm_message(ctm_trailer("Claude Haiku 5.5 & Claude Opus 5.5"))])
+CTM_REPO_MULTICODE = ctm_repo("multicode", [ctm_value("Claude Haiku 5.5 & Claude Code 2.1")],
+                              local=[ctm_message(ctm_trailer("Claude Haiku 5.5 & Claude Code 2.1"))])
+# A name in angle brackets with no address in it is still a name, so the model it names is read. The value is written
+# as given, with no noreply address.
+CTM_REPO_BRACKET = ctm_repo("bracket", ["Claude <Opus 5.5>"], local=[ctm_message("Co-Authored-By: Claude <Opus 5.5>")])
+CTM_REPO_BRACKETOWN = ctm_repo("bracketown", ["Claude <Haiku 5.5>"],
+                               local=[ctm_message("Co-Authored-By: Claude <Haiku 5.5>")])
 
 
 def ctm_case(name, repo, expected, agent, command=CTM_PUSH, transcript=CTM_TRANSCRIPT):
@@ -334,5 +345,80 @@ ctm_case("a flock-wrapped push of an Opus-trailer commit from a Haiku agent is r
          CTM_HAIKU, command="flock /tmp/l git push origin HEAD:x")
 ctm_case("a command-substituted push of an Opus-trailer commit from a Haiku agent is refused", CTM_REPO_INCIDENT,
          "deny", CTM_HAIKU, command="echo $(git push origin HEAD:x)")
+
+
+# CHAINED. An agent's commit and its push in one Bash call. The guard judges the push before the commit exists, so the
+# only text it can read about that commit is the call's own: the -m message or a heredoc, or a -F file already on
+# disk. A message that names another model is refused in each of those forms, and a message naming the agent's own
+# model passes. CTM_REPO_NOTHING holds no unsent commit, so the message is the only place a model can be named.
+def ctm_commit_cmd(model=None, amend=False):
+    """`git commit` with a -m message carrying `model`'s trailer, or with no trailer when `model` is None."""
+    cmd = VCS + " commit -q" + (" --amend" if amend else "") + " -m Work"
+    return cmd + (' -m "%s"' % ctm_trailer(model) if model else "")
+
+
+def ctm_heredoc_cmd(model):
+    """A commit whose message is a heredoc in the same call, then the push."""
+    return VCS + " commit -q -F - <<'EOF'\nWork\n\n" + ctm_trailer(model) + "\nEOF\n" + CTM_PUSH
+
+
+# A message file that exists before the call is judged, so the guard can read the trailer in it.
+CTM_MSG_OPUS = os.path.join(CTM_ROOT, "msg", "opus.txt")
+CTM_MSG_HAIKU = os.path.join(CTM_ROOT, "msg", "haiku.txt")
+write(CTM_MSG_OPUS, "Work\n\n" + ctm_trailer("Claude Opus 5.5") + "\n")
+write(CTM_MSG_HAIKU, "Work\n\n" + ctm_trailer("Claude Haiku 5.5") + "\n")
+# --force-with-lease alone is refused by the force-push rule whatever the commit holds. The guard's own remedy adds
+# --force-if-includes, and the form with both is the one a force push can take.
+CTM_AMEND_PUSH = " && " + VCS + " push --force-with-lease --force-if-includes origin HEAD:" + CTM_BRANCH
+ctm_case("a commit with an Opus trailer chained to a push with && from a Haiku agent is refused", CTM_REPO_NOTHING,
+         "deny", CTM_HAIKU, command=ctm_commit_cmd("Claude Opus 5.5") + " && " + CTM_PUSH)
+ctm_case("a commit with an Opus trailer chained to a push with ; from a Haiku agent is refused", CTM_REPO_NOTHING,
+         "deny", CTM_HAIKU, command=ctm_commit_cmd("Claude Opus 5.5") + "; " + CTM_PUSH)
+ctm_case("an amend with an Opus trailer chained to a force-with-lease push from a Haiku agent is refused",
+         CTM_REPO_NOTHING, "deny", CTM_HAIKU, command=ctm_commit_cmd("Claude Opus 5.5", amend=True) + CTM_AMEND_PUSH)
+ctm_case("a heredoc message with an Opus trailer, chained to a push, from a Haiku agent is refused", CTM_REPO_NOTHING,
+         "deny", CTM_HAIKU, command=ctm_heredoc_cmd("Claude Opus 5.5"))
+ctm_case("a -F file with an Opus trailer, chained to a push, from a Haiku agent is refused", CTM_REPO_NOTHING,
+         "deny", CTM_HAIKU, command=VCS + " commit -q -F " + CTM_MSG_OPUS + " && " + CTM_PUSH)
+
+# The same shapes with the agent's own model, and one with no trailer: each passes, so the refusal above is the
+# message's model and not the chain.
+ctm_case("a commit with a Haiku trailer chained to a push with && from a Haiku agent passes", CTM_REPO_NOTHING,
+         "allow", CTM_HAIKU, command=ctm_commit_cmd("Claude Haiku 5.5") + " && " + CTM_PUSH)
+ctm_case("a commit with a Haiku trailer chained to a push with ; from a Haiku agent passes", CTM_REPO_NOTHING,
+         "allow", CTM_HAIKU, command=ctm_commit_cmd("Claude Haiku 5.5") + "; " + CTM_PUSH)
+ctm_case("an amend with a Haiku trailer chained to a force-with-lease push from a Haiku agent passes",
+         CTM_REPO_NOTHING, "allow", CTM_HAIKU, command=ctm_commit_cmd("Claude Haiku 5.5", amend=True) + CTM_AMEND_PUSH)
+ctm_case("a heredoc message with a Haiku trailer, chained to a push, from a Haiku agent passes", CTM_REPO_NOTHING,
+         "allow", CTM_HAIKU, command=ctm_heredoc_cmd("Claude Haiku 5.5"))
+ctm_case("a -F file with a Haiku trailer, chained to a push, from a Haiku agent passes", CTM_REPO_NOTHING,
+         "allow", CTM_HAIKU, command=VCS + " commit -q -F " + CTM_MSG_HAIKU + " && " + CTM_PUSH)
+ctm_case("a commit with no trailer chained to a push with && from a Haiku agent passes", CTM_REPO_NOTHING,
+         "allow", CTM_HAIKU, command=ctm_commit_cmd() + " && " + CTM_PUSH)
+
+# A trailer that names a second family after the first is refused, and each name in the value is read. A second name
+# that is no model passes, so the same shape with it is the control.
+ctm_case("a Claude Haiku 5.5 & Claude Opus 5.5 trailer from a Haiku agent is refused", CTM_REPO_MULTI, "deny",
+         CTM_HAIKU)
+ctm_case("a Claude Haiku 5.5 & Claude Code 2.1 trailer from a Haiku agent passes (the second name is no model)",
+         CTM_REPO_MULTICODE, "allow", CTM_HAIKU)
+
+# A name in angle brackets with no address in it names its model, so a Haiku agent's Claude <Opus 5.5> is refused.
+ctm_case("a Claude <Opus 5.5> trailer from a Haiku agent is refused", CTM_REPO_BRACKET, "deny", CTM_HAIKU)
+ctm_case("a Claude <Haiku 5.5> trailer from a Haiku agent passes", CTM_REPO_BRACKETOWN, "allow", CTM_HAIKU)
+
+# A dry run sends nothing, so it passes even when a commit it would send names another model. A real push of that
+# commit is still refused, which pins the exemption to the dry run alone. The Haiku repository is the control: the
+# same dry run with the agent's own model passes.
+ctm_case("a git push -n of an Opus-trailer commit from a Haiku agent passes (a dry run sends nothing)",
+         CTM_REPO_INCIDENT, "allow", CTM_HAIKU, command=VCS + " push -n origin HEAD")
+ctm_case("a git push --dry-run of an Opus-trailer commit from a Haiku agent passes (a dry run sends nothing)",
+         CTM_REPO_INCIDENT, "allow", CTM_HAIKU, command=VCS + " push --dry-run origin HEAD")
+ctm_case("a git push -n of a Haiku-trailer commit from a Haiku agent passes", CTM_REPO_HAIKU, "allow", CTM_HAIKU,
+         command=VCS + " push -n origin HEAD")
+ctm_case("a git push --dry-run of a Haiku-trailer commit from a Haiku agent passes", CTM_REPO_HAIKU, "allow", CTM_HAIKU,
+         command=VCS + " push --dry-run origin HEAD")
+ctm_case("a git push origin HEAD of an Opus-trailer commit from a Haiku agent is still refused", CTM_REPO_INCIDENT,
+         "deny", CTM_HAIKU, command=VCS + " push origin HEAD")
 
 
