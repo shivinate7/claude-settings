@@ -279,6 +279,35 @@ class PrBodyEscape(unittest.TestCase):
         self.assertEqual(got, [])
         self.assertEqual(notes, ["ALLOWED app.txt: the owner wants Card back"])
 
+    # A ./ in front of a path names the same file. The guard accepts that spelling, so the lint must too.
+    def test_a_dot_slash_commit_trailer_excuses_its_path(self):
+        r = self.r
+        r.sh("commit", "-q", "--amend", "-m", "Bring Card back\n\nDrops-lines: ./app.txt -- the owner wants Card back")
+        self.assertEqual(r.sh("log", "-1", "--format=%(trailers:key=Drops-lines,valueonly)", "HEAD").strip(),
+                         "./app.txt -- the owner wants Card back", "git must read the ./ line as a trailer first")
+        got, notes = C.check(r.dir, "origin/main", "HEAD")
+        self.assertEqual(got, [], "a ./ Drops-lines path must excuse the file git names without the ./")
+        self.assertEqual(notes, ["ALLOWED app.txt: the owner wants Card back"])
+
+    def test_a_dot_slash_pr_body_line_excuses_its_path(self):
+        got, notes = C.check(self.r.dir, "origin/main", "HEAD",
+                             pr_body="Drops-lines: ./app.txt -- the owner wants Card back\n")
+        self.assertEqual(got, [], "a ./ Drops-lines line in the PR body must excuse the file git names without the ./")
+        self.assertEqual(notes, ["ALLOWED app.txt: the owner wants Card back"])
+
+    def test_a_dot_dot_path_excuses_nothing(self):  # control: removing every leading dot would wrongly excuse this
+        got, notes = C.check(self.r.dir, "origin/main", "HEAD",
+                             pr_body="Drops-lines: ../app.txt -- the owner wants Card back\n")
+        self.assertTrue(any("app.txt" in p and "undoing" in p for p in got), got)
+        self.assertFalse(any(n.startswith("ALLOWED") for n in notes), notes)
+
+    def test_a_dot_slash_path_with_no_reason_excuses_nothing(self):  # control
+        for body in ("Drops-lines: ./app.txt\n", "Drops-lines: ./app.txt --\n"):
+            with self.subTest(body=body):
+                got, notes = C.check(self.r.dir, "origin/main", "HEAD", pr_body=body)
+                self.assertTrue(any("app.txt" in p and "undoing" in p for p in got), got)
+                self.assertFalse(any(n.startswith("ALLOWED") for n in notes), notes)
+
     # Trailer rule for the body: drop fenced blocks and <!-- --> comments first, then only the last paragraph counts.
     LINE = "Drops-lines: app.txt -- the owner wants Card back"
 

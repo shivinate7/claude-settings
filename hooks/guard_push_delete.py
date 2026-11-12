@@ -9,6 +9,7 @@ import re
 import stat
 
 import guard_core
+from guard_rm_var import _rm_target_bad
 from guard_core import (
     CMD_EXE_NAMES, GIT_OPT_WITH_VALUE, _absolute, _segment_cd_move, _segment_cd_target,
     _segment_git_c_target, shell_abs, CONTRACTION, quote_advance, _git_subcommand_index,
@@ -1109,6 +1110,25 @@ DESTRUCTIVE_DELETE = (
 RM_WIDE_TARGET = re.compile(WIDE_TARGET)
 
 
+_GLOB_CHAR = re.compile(r"[*?\[]")
+
+
+def _home_literal(target: str) -> bool:
+    """True when `target` is the session's home written out as a path (`/root`, `/root/`, `/root/*`),
+    which deletes the home as `~` does. A glob on a name under the home (`/root/b*`) is no home. The
+    working-folder and parent cases of `_rm_target_bad` are `_parent_target`'s, so its cwd is `/`."""
+    path = target[:-2] if target.endswith("/*") else target
+    if not path or _GLOB_CHAR.search(path) or not (path.startswith("/") or re.match(r"[A-Za-z]:/", path)):
+        return False
+    # A drive-letter home is a name, not a path this platform can resolve (off Windows `C:/x` is a folder
+    # under the working folder), so it is compared as text: slashes and case folded, trailing slash dropped.
+    if re.match(r"[A-Za-z]:/", path):
+        home = os.path.expanduser("~").replace("\\", "/")
+        if re.match(r"[A-Za-z]:/", home) and path.rstrip("/").lower() == home.rstrip("/").lower():
+            return True
+    return _rm_target_bad(path, "/")
+
+
 def _rm_args_wide(args) -> str:
     """The first wide target of `rm`'s arguments when they hold a recursive flag, else ''. Long
     flags count, `--` ends the flags, and one letter cluster may hold R or r. Force is no part of it."""
@@ -1124,7 +1144,7 @@ def _rm_args_wide(args) -> str:
         else:
             recursive = recursive or "r" in arg or "R" in arg
     if recursive:
-        return next((t for t in targets if RM_WIDE_TARGET.fullmatch(t)), "")
+        return next((t for t in targets if RM_WIDE_TARGET.fullmatch(t) or _home_literal(t)), "")
     return ""
 
 
@@ -1529,7 +1549,7 @@ def cmd_exe_delete_hit(segment: str) -> str:
     if not any(arg.lower() == "/s" for arg in rest):
         return ""
     for arg in rest:
-        if re.fullmatch("(?i)" + WIDE_TARGET, arg):
+        if re.fullmatch("(?i)" + WIDE_TARGET, arg) or _home_literal(arg):
             return word + " /s " + arg
     return ""
 
