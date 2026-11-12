@@ -674,7 +674,7 @@ def _elide_substitutions(text: str) -> str:
 
 # A python or node body that runs a shell: a call that hands a string to one. A perl or ruby body always counts,
 # since its backtick and `qx` run a shell. A body that names none of these is text to the shell, so a `$( )` or a
-# backtick in it runs nothing, unless a shell runs the body's output (`_output_runs`).
+# backtick in it runs nothing, unless a shell runs the body's output (`_without_text_bodies`).
 _SHELL_OUT = re.compile(r"\b(?:system|popen|subprocess|spawn\w*|exec\w*|shell|Popen|check_output|check_call|getoutput"
                         r"|create_subprocess\w*|child_process|run_command|sh)\b|shell\s*=|\$`")
 
@@ -685,10 +685,14 @@ def _without_text_bodies(raw: str, stripped: str) -> str:
     backtick in its prose runs nothing."""
     if "<<" not in raw:
         return stripped
-    kept, bodies = _split_heredocs(raw)
+    owners = []
+    kept, bodies, _ = _walk_heredocs(raw, own_heads=owners)
     text = "\n".join(kept)
-    for quote, body, header in bodies:
-        lang = script_language(header) or script_language(_runs_written_file(text, [header], _SCRIPT_RUNNER))
+    if len(owners) != len(bodies):
+        return stripped
+    for (quote, body, header), owner in zip(bodies, owners):
+        # The language is the heredoc's own command, never the line: `python3 -V && bash <<'EOF'` is a shell body.
+        lang = script_language(owner) or script_language(_runs_written_file(text, [header], _SCRIPT_RUNNER))
         if (quote and lang in ("py", "js") and body and not _SHELL_OUT.search(body) and not _PIPED_SHELL(header)
                 and not _runs_written_file(text, [header], _SHELL_RUNNER)):
             stripped = stripped.replace(body, "")

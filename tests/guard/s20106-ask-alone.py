@@ -407,6 +407,13 @@ sh("ask-alone: (h) a python body printing a forced push in $( ), written to x.sh
 sh("ask-alone: (h) a python body printing a forced push in $( ), piped to sh, denies as force-push",
    "python3 - <<'PY' | sh\nprint(\"" + PY_PUSH + "\")\nPY", "deny", "force-push", cwd=PUSHFEAT,
    carries=REMEDY, lacks=(CHAIN_ASK,))
+# A shell heredoc on a line that also names python or node is still a shell body: its own command decides.
+sh("ask-alone: (h) a python step, then a bash heredoc holding a forced push in $( ), denies as force-push",
+   "python3 --version && bash <<'EOF'\n" + BODY_PUSH + "\nEOF", "deny", "force-push", cwd=PUSHFEAT,
+   carries=REMEDY, lacks=(CHAIN_ASK,))
+sh("ask-alone: (h) a node step, then a bash heredoc holding a forced push in $( ), denies as force-push",
+   "node build.js && bash <<'EOF'\n" + BODY_PUSH + "\nEOF", "deny", "force-push", cwd=PUSHFEAT,
+   carries=REMEDY, lacks=(CHAIN_ASK,))
 # Two more ways a script hands a string to a shell: a zx template (a dollar sign then a backtick) and os.spawnl.
 sh("ask-alone: (h) a node body running a zx template around a forced push in $( ), denies as force-push",
    "node - <<'JS'\nawait $`echo " + PY_PUSH + "`\nJS", "deny", "force-push", cwd=PUSHFEAT,
