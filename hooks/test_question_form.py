@@ -1663,6 +1663,18 @@ def test_task_with_non_list_options_is_not_judged_for_departs():
     _judged(case_task_non_list_options_is_not_judged_for_departs)
 
 
+def case_decision_update_with_steps_stays_on_the_form():
+    # A decision that carries steps is still a decision: its update's context is judged by the form (the Goal line
+    # first), not by the task's Departs from check. Pins the kind clause of decision_form_hit's task routing.
+    page("an update with kind decision, steps, options and a context with no Goal line is refused as question-form",
+         "update", entry_of({"kind": "decision", "steps": ["Open Terminal"], "options": copy.deepcopy(TASK_OPTIONS),
+                             "context": TASK_WHY}), (FORM_RULE, "Goal"))
+
+
+def test_update_kind_decision_with_steps_is_judged_by_the_form():
+    _judged(case_decision_update_with_steps_stays_on_the_form)
+
+
 # ------------------------------------------------------------------ a port's main side
 
 def case_port_main_side():
@@ -2684,7 +2696,7 @@ def main():
                  case_update_task_options_with_context_is_judged,
                  case_steps_no_kind_update_departs_missing_is_refused, case_steps_no_kind_set_stays_refused,
                  case_steps_no_kind_update_valid_departs_passes,
-                 case_task_non_list_options_is_not_judged_for_departs,
+                 case_task_non_list_options_is_not_judged_for_departs, case_decision_update_with_steps_stays_on_the_form,
                  case_port_main_side, case_port_departs_shapes, case_call_judge,
                  case_widens_text_is_the_set_words, case_widens_reasons_carry_no_topic_id,
                  case_widens_words_in_every_home, case_widens_words_in_the_reply_judge_prompt,
