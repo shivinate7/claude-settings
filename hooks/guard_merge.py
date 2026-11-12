@@ -1430,7 +1430,8 @@ ARCHIVE_READ_REASON = (
 )
 ARCHIVE_SCOPE_REASON = (
     "the repo {repo} is outside this session's GitHub scope, so its pull requests and branches could not be read from "  # glossary-ok: session-tiers is the decision's file name
-    "here, and waiting will not change that. Either run the archive again after add_repo (read access) for {repo}, "
+    "here, and waiting will not change that. Either run the archive again after add_repo for {repo} "
+    "(read access for a private repo; access \"push\" for a public repo, because a read add attaches nothing for a public repo), "
     "or route the archive to the batch runner whose session holds {repo}. "
     "(decision session-tiers, a lane closes only after its records pull request has landed)"
 )  # the repo that failed (ScopeStop.repo), which may be a source-only repo no cs-repo tag names; "a repo of the lane" when the read named none
