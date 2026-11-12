@@ -28,7 +28,8 @@ pids. A shape that a shell cannot parse, such as `time while` in dash, runs in t
 
 Waiting rules the cases encode (see the 28-cases): a process that waits on a quiet child is not hung
 (A); a lone `sleep N` followed by one command is not hung, and neither is that command while it runs
-quietly (B); any other quiet tree is hung, and the report names it after the quiet age.
+quietly (B), until a named log it writes grows (28i, 28j); any other quiet tree is hung, and the report
+names it after the quiet age.
 
 Every case runs the real hook and the real rewritten command, the way the harness runs them. No
 case imports the module. Two environment variables steer the run:
@@ -1518,6 +1519,67 @@ def hung_cat_on_a_dead_pipe_is_still_ended():
     if not problems:
         problems += hung_end_problems(rc, text)
     return problems
+
+
+def lone_pause_problems(command, want):
+    """Problems when lone_pause_command(command) is not want. The row names its command."""
+    got = load_module().lone_pause_command(command)
+    return expect(got is want, f"lone_pause_command({command!r}) is {got!r}, want {want!r}")
+
+
+def lone_pause_scope_problems(cmd):
+    """Problems when the rewrite is not a lone pause that names a log: then a case on the pause's end proves nothing."""
+    if "--lone-pause 1" not in cmd or "--also" not in cmd:
+        return ["the rewrite is not a lone pause with a named log, so the case cannot test the pause's end"]
+    return []
+
+
+@posix_case
+def lone_pause_then_a_named_log_write_then_a_hang_is_stalled():
+    """28i. B: `sleep 1; python3 -c ... > build.log 2>&1` prints once into build.log, then hangs, under a 2 s quiet:
+    the named log's growth ends the lone pause, so STALL and exit 3 come after the quiet age"""
+    code = "import time\nprint('built', flush=True)\ntime.sleep(60)"
+    orig = "sleep 1; %s -c %s > build.log 2>&1" % (shlex.quote(PY), shlex.quote(code))
+    rc, text, _secs, cmd = run_rewritten(orig, timeout=20)
+    reap()
+    problems = lone_pause_scope_problems(cmd)
+    if not problems:
+        problems += hung_end_problems(rc, text)
+    return problems
+
+
+@posix_case
+def lone_pause_then_a_named_log_write_then_an_end_is_no_stall():
+    """28j. control, passes on the branch: `sleep 1; python3 -c "print('built')" > build.log 2>&1` prints once into
+    build.log and ends: no STALL, exit 0"""
+    orig = "sleep 1; %s -c %s > build.log 2>&1" % (shlex.quote(PY), shlex.quote("print('built')"))
+    rc, text, _secs, cmd = run_rewritten(orig)
+    reap()
+    problems = lone_pause_scope_problems(cmd)
+    if not problems:
+        problems += expect(rc == 0, f"exit {rc}, want 0: the job ended after its write")
+        problems += expect("STALL:" not in text, "a STALL report came for a job that ended")
+    return problems
+
+
+@case
+def second_pause_after_a_pause_is_not_a_lone_pause():
+    """28k. `sleep 420; sleep 420` is two pauses, not one pause and one command: lone_pause_command is False, so
+    the job is an ordinary one, ended after the quiet age"""
+    return lone_pause_problems("sleep 420; sleep 420", False)
+
+
+@case
+def second_long_pause_after_a_pause_is_not_a_lone_pause():
+    """28l. `sleep 420; sleep 99999` is two pauses too: lone_pause_command is False"""
+    return lone_pause_problems("sleep 420; sleep 99999", False)
+
+
+@case
+def one_pause_then_one_command_is_a_lone_pause():
+    """28m. control, passes on the branch: `sleep 420; gh api x` and `sleep 5 && cat f` are one pause and one
+    command: lone_pause_command is True"""
+    return lone_pause_problems("sleep 420; gh api x", True) + lone_pause_problems("sleep 5 && cat f", True)
 
 
 # Parity table. A row is one case body from above, and keeps its label. A failing row
