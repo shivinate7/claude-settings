@@ -323,18 +323,22 @@ class GhUnread(Exception):
 def gh_run(args, cwd=None, timeout=10):
     """-> (returncode, stdout, stderr) of one `gh` call. The one gh runner: the CI wake hook (hooks/ci_wake.py) and the
     guard's open pull request read both call it. gh is found with shutil.which, since a list-form call of a bare "gh"
-    misses a .cmd launcher on Windows. Raises GhUnread when gh is missing, will not start or times out."""
+    misses a .cmd launcher on Windows. Raises GhUnread when gh is missing, will not start or times out.
+    A timeout kills gh and never waits on its pipes: subprocess.run waits after its kill, and on Windows a .cmd shim's
+    grandchild can hold the pipes open past the cap."""
     exe = shutil.which("gh")
     if exe is None:
         raise GhUnread("gh is not on PATH")
     try:
-        done = _nowindow.run([exe, *args], stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                             encoding="utf-8", errors="replace", cwd=cwd, timeout=timeout)
+        p = _nowindow.Popen([exe, *args], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, cwd=cwd)
+        out, err = p.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
+        p.kill()
         raise GhUnread("gh %s timed out" % " ".join(args[:2]))
     except OSError as exc:
         raise GhUnread("gh %s failed: %s" % (" ".join(args[:2]), type(exc).__name__))
-    return done.returncode, done.stdout, done.stderr
+    return p.returncode, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
 
 
 # One page of open pull requests, by REST (the cloud proxy refuses the GraphQL `gh pr list`). A page of this size

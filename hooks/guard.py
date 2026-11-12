@@ -3101,9 +3101,12 @@ def lane_start_settings_hit(tool: str, tool_input) -> str:
 
 # A step marker in a pull request body: `Step`, `Lane` or `cs-step`, at a line start (after a heading mark, list or
 # quote marks) or after a sentence's full stop, with `*` or `_` emphasis, a colon and backticks allowed around it, then
-# the slug (appended per call).
+# the slug (appended per call), then _STEP_MARKER_TAIL.
 _STEP_MARKER_HEAD = (r"(?:^|(?<=\.)[ \t]+)[ \t]*(?:#{1,6}[ \t]+)?(?:(?:[-*+>]|\d+[.)])[ \t]+)*[*_]{0,3}`?"
                      r"(?:cs-step|step|lane)(?![A-Za-z0-9-])[*_]{0,3}`?[ \t]*:?[ \t]*[*_]{0,3}[ \t]*`?")
+# The slug's end: closing `_` emphasis may follow (`_Step: <slug>_`), but a hyphen, letter or digit after it, even past
+# underscores, means a longer slug (`<slug>-2`, `<slug>_2`).
+_STEP_MARKER_TAIL = r"(?=_*(?![\w-]))"
 
 
 def step_slug_in(text, slug: str) -> bool:
@@ -3116,7 +3119,7 @@ def step_marker_holds(body, slug: str) -> bool:
     """True when a line of a pull request body is a step marker for `slug` (see _STEP_MARKER_HEAD)."""
     if not isinstance(body, str):
         return False
-    return bool(re.search(_STEP_MARKER_HEAD + re.escape(slug) + r"(?![\w-])", body, re.I | re.M))
+    return bool(re.search(_STEP_MARKER_HEAD + re.escape(slug) + _STEP_MARKER_TAIL, body, re.I | re.M))
 
 
 def cited_pr_numbers(prompt) -> set:

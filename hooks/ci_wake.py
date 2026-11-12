@@ -36,8 +36,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-# The sibling modules (guard_core, guard_env, guard_merge, _nowindow) load inside main() and gh(), so a
-# failed import ends in an unknown line, never a traceback and exit 1.
+# The sibling modules (guard_core, guard_env, guard_merge, git_reads, _nowindow) load inside the functions that use
+# them, so a failed import ends in an unknown line, never a traceback and exit 1.
 
 MCP_READY_TOOL = "mcp__github__update_pull_request"   # the cloud's ready route: draft false marks a PR ready
 DEFAULT_DEADLINE = 3300   # seconds; the hook timeout in settings.json is 3600
@@ -74,8 +74,8 @@ def emit(lines):
 
 
 def gh(args, cwd, timeout=READ_TIMEOUT):
-    """-> (rc, stdout, stderr). gh is found with shutil.which: a list-form call of a bare "gh"
-    misses a .cmd launcher on Windows. A timeout kills gh and never waits on its pipes."""
+    """-> (rc, stdout, stderr) from git_reads.gh_run, the one gh runner (shared with the guard); a GhUnread from it,
+    such as a missing gh or a timeout, is raised here as Unknown."""
     try:
         import git_reads  # the one gh runner (git_reads.gh_run)
     except ImportError as e:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
