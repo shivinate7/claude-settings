@@ -92,6 +92,9 @@ STEP_TAG = "cs-step:"
 TOPIC_TAG = "cs-topic:"
 BUILD_TAG = "cs-build:"
 LANE_TAG = BUILD_TAG + "lane"
+# A lane that wrote its handoff carries ARCHIVE_READY_TAG plus the handoff's slug; the lanes-to-archive list checks that
+# roadmap/outbox/<slug>-handoff.md is on the record branch before the lane is archived.
+ARCHIVE_READY_TAG = "cs-archive-ready:"
 # A lane start prompt opens with `Grant: <owner words>, <time>`; the guard reads the line by this marker (rules
 # lane-effort-pin and lane-one-topic).
 LANE_GRANT_MARKER = "Grant:"
