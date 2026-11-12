@@ -1,0 +1,14 @@
+{
+ "id": "guard-run-slow-long-command",
+ "title": "The guard run on a long command stays under the hook timeout",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "guard-run-slow-long-command",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A long command makes the guard run pass the 20 s hook timeout, so the guard may not judge it at all.",
+ "source": "coordinator 11:34 CST Nov 12, from lane tier-boundaries-carry's measure",
+ "note": "Measure (lane tier-boundaries-carry, main 2deb827ad): the whole guard run on a plain 6000-word echo takes 21-24 s with TMPDIR unset (6.5 s at 3000 words), and 1.7-2.2 s with TMPDIR set. The hook timeout is 20 s. Cause not yet named. Lane guard-run-slow-long-command started 11:34 CST.",
+ "updatedAt": "2026-11-12T11:37:01-06:00"
+}

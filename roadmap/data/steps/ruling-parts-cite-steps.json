@@ -1,15 +1,15 @@
 {
  "id": "ruling-parts-cite-steps",
  "title": "Each part of a plan ruling cites its step, a check flags a missing one, and the re-rank agent reads plan against roadmap",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
- "lane": "",
+ "lane": "ruling-parts-cite-steps",
  "owner": "triage",
  "blockedBy": [],
  "why": "A ruling's part can drop with no step and nobody sees it: R28's one-store part had none until page-data-one-store.",
  "source": "owner 11:31 CST Nov 12 in chat, relayed by the retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ) 11:32 CST, page item 555 ruling-parts-to-steps: \"probably both is fine -- and note that the id's probably need good tagging right slugs or whatever or that won't matter here?\"",
- "note": "Both parts ruled. (a) Each numbered part of a plan ruling names its step as step:<slug>; an opaque id (239 of 1,529 steps, such as c55) carries a short gloss; a check on the plan, at each push, flags a part with no step or a cited step that no longer exists, and accepts either form. (b) The agent from step queue-score-plus-agent reads the plan's rulings against the steps at each batch merge and files what is missing. Home: decision session-tiers, beside queue-score-plus-agent. The retrospective adds step ids to the plan's ruling parts as it writes them. Part (b) waits on queue-score-plus-agent. Ready, no lane.",
- "updatedAt": "2026-11-12T11:33:32-06:00",
+ "note": "Both parts ruled. (a) Each numbered part of a plan ruling names its step as step:<slug>; an opaque id (239 of 1,529 steps, such as c55) carries a short gloss; a check on the plan, at each push, flags a part with no step or a cited step that no longer exists, and accepts either form. (b) The agent from step queue-score-plus-agent reads the plan's rulings against the steps at each batch merge and files what is missing. Home: decision session-tiers, beside queue-score-plus-agent. The retrospective adds step ids to the plan's ruling parts as it writes them. Part (b) waits on queue-score-plus-agent. Ready, no lane. Lane ruling-parts-cite-steps started 11:34 CST Nov 12 (coordinator), part a only; part b waits on queue-score-plus-agent.",
+ "updatedAt": "2026-11-12T11:37:01-06:00",
  "order": -303
 }
