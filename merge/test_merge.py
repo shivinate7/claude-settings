@@ -984,6 +984,90 @@ class ShallowMain(unittest.TestCase):
         self.assertEqual(sh(self.shallow, "git", "rev-parse", "refs/heads/main"), main_before, "main moved")
 
 
+class ShallowStackedCheck(Env):
+    """The stacked check reads one commit graph for the request's heads and the open pull requests' heads (commits_outside). A shallow clone
+    cuts main's history, so a graph read that does not first make the clone complete sees main's older commits as outside the request. Origin
+    holds main m0..m7, lane-l1 (m3 and one commit) and pr-h1 (m1 and one commit). The shallow clone is cut at depth 2, then both branches are
+    fetched, so it holds m7 and m6 and the history of the two branches."""
+
+    def setUp(self):
+        super().setUp()
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "checkout", "-q", "-B", "main", "origin/main")
+        self.m = {0: sh(self.other, "git", "rev-parse", "HEAD")}
+        for i in range(1, 8):
+            self.m[i] = self.commit_file(f"m{i}.txt", f"m{i}\n", f"m{i}")
+        self.l1 = self.branch_commit("lane-l1", self.m[3], "l1.txt", "l1")
+        self.h1 = self.branch_commit("pr-h1", self.m[1], "h1.txt", "h1")
+        sh(self.other, "git", "push", "-q", "origin", "main", "lane-l1", "pr-h1")
+        self.shallow = os.path.join(self.t, "shallow")
+        sh(self.t, "git", "clone", "-q", "--depth", "2", "--no-local", self.bare, self.shallow)
+        sh(self.shallow, "git", "fetch", "-q", "origin", "lane-l1", "pr-h1")
+
+    def commit_file(self, path, text, message):
+        """One commit on the branch `other` has checked out, adding `path` with `text`. -> its sha."""
+        put(os.path.join(self.other, path), text)
+        sh(self.other, "git", "add", "-A")
+        sh(self.other, "git", "commit", "-q", "-m", message)
+        return sh(self.other, "git", "rev-parse", "HEAD")
+
+    def branch_commit(self, branch, start, path, message):
+        """A branch of `other` at `start`, with one commit adding `path`. -> its head sha."""
+        sh(self.other, "git", "checkout", "-q", "-B", branch, start)
+        return self.commit_file(path, message + "\n", message)
+
+    def is_ancestor(self, cwd, old, new):
+        """The exit code of `git merge-base --is-ancestor old new` in cwd: 0 when old is an ancestor of new, 1 when it is not."""
+        return subprocess.run(["git", "merge-base", "--is-ancestor", old, new], cwd=cwd, capture_output=True).returncode
+
+    def refusal(self, root, heads, rows):
+        """The stacked check of the request `heads` ({PR: head}) against `rows`, the open pull requests as (PR, info) pairs, run in the clone
+        `root`. -> None when the check passes, else the text of its refusal."""
+        host = types.SimpleNamespace(open_prs=lambda: list(rows))
+        with contextlib.redirect_stdout(io.StringIO()):
+            try:
+                merge.stacked_without_base(root, host, "main", heads, None)
+            except merge.Stop as e:
+                return str(e)
+        return None
+
+    def assert_main_cut_in_the_shallow_clone(self):
+        """The scope of the shallow cases: the clone is shallow, and it reads m1, which main holds, as not an ancestor of main."""
+        self.assertEqual(sh(self.shallow, "git", "rev-parse", "--is-shallow-repository"), "true", "scope: the clone is not shallow")
+        self.assertEqual(self.is_ancestor(self.shallow, self.m[1], "origin/main"), 1,
+                         "scope: the clone does not cut main's path to m1, so it is not the shallow read the case is about")
+
+    def test_the_stacked_check_in_a_shallow_clone_does_not_refuse_a_lane_when_main_is_the_first_head(self):
+        """Main's tip is the first head, and it is already an ancestor of main, so the old read fetched nothing and the graph walk ran on the cut
+        history: the older commits of main read as outside the request, and lane #102 read as holding a commit of #103."""
+        self.assert_main_cut_in_the_shallow_clone()
+        refusal = self.refusal(self.shallow, {101: self.m[7], 102: self.l1}, [(103, {"head": self.h1, "base": "main"})])
+        self.assertIsNone(refusal, "the check refused lane #102 in a shallow clone, though it holds only history that main holds: %s" % refusal)
+
+    def test_the_stacked_check_in_a_shallow_clone_does_not_refuse_a_lane_when_the_lane_is_the_first_head(self):
+        """The same request with the lane first. Its read is not True, so the clone is made whole before the walk, and the walk sees the full graph."""
+        self.assert_main_cut_in_the_shallow_clone()
+        refusal = self.refusal(self.shallow, {102: self.l1, 101: self.m[7]}, [(103, {"head": self.h1, "base": "main"})])
+        self.assertIsNone(refusal, "the check refused lane #102 in a shallow clone when it is the first head, though it holds only history that main "
+                          "holds: %s" % refusal)
+
+    def test_a_two_commit_lane_stacked_with_an_outside_pr_on_its_head_is_not_refused(self):
+        """Lane A is a1 then a2. Lane B and the outside pull request #103 both stack on a2, so a2 is their newest common commit, and it is A's head,
+        frozen in the request. a1, the parent of a2, is not a commit that B holds of #103: the parent subtraction drops it."""
+        a1 = self.branch_commit("lane-a", self.m[7], "a1.txt", "a1")
+        a2 = self.commit_file("a2.txt", "a2\n", "a2")
+        b = self.branch_commit("lane-b", a2, "b.txt", "b")
+        p = self.branch_commit("pr-p", a2, "p.txt", "p")
+        sh(self.other, "git", "push", "-q", "origin", "lane-a", "lane-b", "pr-p")
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertEqual(sh(self.co, "git", "rev-parse", a2 + "^"), a1, "scope: lane A's head a2 does not have a1 as its parent")
+        self.assertEqual(self.is_ancestor(self.co, a2, b), 0, "scope: lane B does not hold lane A's head a2")
+        self.assertEqual(self.is_ancestor(self.co, a2, p), 0, "scope: outside #103 does not hold lane A's head a2")
+        refusal = self.refusal(self.co, {101: a2, 102: b}, [(103, {"head": p, "base": "main"})])
+        self.assertIsNone(refusal, "the check refused lane #102 for a commit of #103 that is not in the request, though their newest common commit "
+                          "is lane #101's frozen head: %s" % refusal)
+
+
 class ClaudeMdFlag(Env):
     """A CLAUDE.md change is flagged and only reported (decision claude-md-change-is-flagged).
     After a merge, one line per changed rule file (CLAUDE.md, .claude/CLAUDE.md, each file under output-styles/). Never a hold.
