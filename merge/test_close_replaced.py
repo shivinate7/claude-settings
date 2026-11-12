@@ -4,7 +4,7 @@
 Run: python3 merge/test_close_replaced.py
 The lines, per root, after the batch line:
   close as replaced: OWNER/NAME #N by #R    an open PR R whose body holds `Replaces #N`, N another open PR
-  close as carried: OWNER/NAME #A by #B     an open PR A with a done record whose head open PR B holds
+  close as carried: OWNER/NAME #A by #B     an open draft PR A with a done record whose head open PR B holds
   close as carried unknown (REASON)         the compare that decides a carried close failed; exit 1
   reopen: OWNER/NAME #N (replacer #R dropped)                 a closed N whose replacer R is closed, unmerged
   reopen: OWNER/NAME #N (replacer #R no longer names it)      a closed N whose replacer R is open and no longer names N
@@ -15,7 +15,7 @@ so its own cases run in merge/test_merge.py and not again here.
 import collections, json, re, unittest
 
 import test_merge as tm  # the one home of the fixtures (merge/test_merge.py)
-from test_merge import PullsHost, batch_pull, batch_lines_of, green, record_of, review_comment
+from test_merge import PullsHost, batch_pull, batch_lines_of, green, running, record_of, review_comment
 
 REPLACED, CARRIED, REOPENED = "close as replaced: ", "close as carried: ", "reopen: "
 
@@ -240,7 +240,7 @@ class CloseAsReplaced(CloseEnv):
 
 
 class CloseAsCarried(CloseEnv):
-    """`close as carried: OWNER/NAME #A by #B`: a done A whose head an open B on the base holds. Draft or ready B both count."""
+    """`close as carried: OWNER/NAME #A by #B`: a done draft A whose head an open B on the base holds. Draft or ready B both count; a ready A never does."""
 
     def test_a_done_lane_under_a_ready_carrier_closes(self):
         # #9 is the ready carrier and holds #5. #6 is done and held by nothing, so it does not close.
@@ -343,6 +343,47 @@ class CloseAsCarried(CloseEnv):
         self.assertRegex(unknown[0], r"^close as carried unknown \(.+\)$", "the unknown line gives no reason:\n" + unknown[0])
         self.assertEqual(rc, 1, "a carried close with an unknown compare exits 0:\n" + out + err)
         self.assertEqual([l for l in lines if l.startswith(CARRIED)], [], "a close line printed although its compare is unknown:\n" + out)
+
+
+class CarryOnlyDrafts(CloseEnv):
+    """Only a draft done PR is carried. A ready one that an open PR holds closes nothing, and stays off the batch line as on main: the hold keeps
+    it off, and no close line is printed for it."""
+
+    def held_block(self, a_draft, checks, b=9, b_draft=True):
+        """-> the alpha block when done #5 (a draft when `a_draft`, with `checks` on its head) is held by open #b (a draft when `b_draft`, no record)."""
+        pulls = [named_pull(5, head_of(5), draft=a_draft), named_pull(b, head_of(b), draft=b_draft)]
+        host = closed_host("o/alpha", pulls=pulls, comments=[record_of(5, head_of(5))], check_rows={head_of(5): checks},
+                           compares={(head_of(5), head_of(b)): "ahead"})
+        return block_of(self, self.reviewed(host), "o/alpha")
+
+    def test_a_ready_done_pr_under_a_draft_holder_closes_nothing_while_ci_runs(self):
+        self.assertEqual(kind_lines(self.held_block(True, running()), CARRIED), ["close as carried: o/alpha #5 by #9"],
+                         "control: the draft done #5 under draft #9 prints no close line")
+        self.assertEqual(kind_lines(self.held_block(False, running()), CARRIED), [],
+                         "a ready done #5 closed as carried by draft #9 while its CI runs")
+
+    def test_a_ready_done_pr_under_a_draft_holder_closes_nothing_when_green(self):
+        self.assertEqual(kind_lines(self.held_block(True, green()), CARRIED), ["close as carried: o/alpha #5 by #9"],
+                         "control: the draft done #5 under draft #9 prints no close line")
+        self.assertEqual(kind_lines(self.held_block(False, green()), CARRIED), [],
+                         "a ready done #5 closed as carried by draft #9 once its CI is green")
+
+    def test_a_ready_done_pr_held_by_a_draft_stays_off_the_batch_line(self):
+        # Pin, as on main: main's batch line drops a done PR that another open PR on the base holds. The carry change must keep that.
+        # Passes today.
+        self.assertEqual(batch_lines_of(self.held_block(False, green())), [], "a ready done #5 that draft #9 holds is on the batch line")
+
+    def test_a_ready_done_pr_with_an_identical_lower_head_closes_nothing(self):
+        # Equal heads: #5 and #9 hold each other. Control: a draft #9 is carried by #5. A ready #9 is not.
+        same = head_of(5)
+
+        def closes(draft9):
+            pulls = [named_pull(5, same), named_pull(9, same, draft=draft9)]
+            host = closed_host("o/alpha", pulls=pulls, comments=[record_of(5, same), record_of(9, same)], check_rows={same: green()})
+            return kind_lines(block_of(self, self.reviewed(host), "o/alpha"), CARRIED)
+
+        self.assertEqual(closes(True), ["close as carried: o/alpha #9 by #5"], "control: the draft #9 with the head of #5 prints no close line")
+        self.assertEqual(closes(False), [], "a ready #9 with the head of the lower #5 closed as carried")
 
 
 class BatchSkipsClosed(CloseEnv):
@@ -476,6 +517,53 @@ class ReopenClosed(CloseEnv):
         lines = kind_lines(self.block_for_alpha(pulls=[named_pull(5, head_of(5))], comments=notes, closed=closed), REOPENED)
         self.assertIn("reopen: o/alpha #6 (replacer #8 dropped)", lines, "control: the note inside the window does not reopen #6:\n" + "\n".join(lines))
         self.assertFalse([l for l in lines if l.startswith("reopen: o/alpha #4 ")], "#4 reopened from a note older than the oldest open pull request")
+
+    def test_a_reopen_line_repeats_on_every_wake_after_a_hand_close(self):
+        # Pin of a named limit, not the desired end. The desired end: #4 stays closed after the owner closes it by hand. Today its closing note still
+        # names #7, which is closed unmerged, so each wake prints the reopen line again. The limit is `reopened-then-closed-by-hand-reopens-again`
+        # in docs/debts/notes.md, and it becomes a debt after a real incident. Passes today.
+        closed = [closed_pull(4, head_of(4)), closed_pull(7, head_of(7))]
+        notes = [review_comment(90, 4, "Replaced by #7")]
+        want = ["reopen: o/alpha #4 (replacer #7 dropped)"]
+
+        def wake():
+            return kind_lines(self.block_for_alpha(pulls=[named_pull(5, head_of(5))], comments=[record_of(5, head_of(5)), *notes], closed=closed,
+                                                   check_rows={head_of(5): green()}), REOPENED)
+
+        self.assertEqual(wake(), want, "the first wake prints no reopen line for #4")
+        self.assertEqual(wake(), want, "the next wake, after a hand close, did not repeat the reopen line for #4 (the named limit is gone)")
+
+
+class CarryCost(CloseEnv):
+    """The gh reads of the carry check. Only a draft carries, so a busy ready done PR reads no compare with the open PRs on its base, and no compare
+    with main for the PR that holds it. Main reads no compare for a busy ready PR."""
+
+    def compare_reads(self, pulls, comments, check_rows, compares=None):
+        """-> the compare routes of one run of `merge --reviewed` over alpha, each read once per call (count_gh)."""
+        host = closed_host("o/alpha", pulls=pulls, comments=comments, check_rows=check_rows, compares=compares or {}, count_gh=True)
+        rc, out, err = self.run_args("--reviewed", "--root", self.alpha, hosts={self.alpha: host})
+        self.assertEqual(rc, 0, out + err)
+        return [route for route in host.gh_calls if route.startswith("compare/")]
+
+    def test_a_busy_ready_done_pr_with_no_holder_reads_no_compare(self):
+        # Control: the same done PR as a draft reads its compares with the two open drafts, so the count sees the reads.
+        def reads(draft):
+            pulls = [named_pull(5, head_of(5), draft=draft), named_pull(6, head_of(6), draft=True), named_pull(7, head_of(7), draft=True)]
+            return self.compare_reads(pulls, [record_of(5, head_of(5))], {head_of(5): running()})
+
+        self.assertTrue(reads(True), "control: the draft done #5 read no compare, so the count below proves nothing")
+        self.assertEqual(reads(False), [], "a busy ready done #5 with no holder read a compare; main reads none")
+
+    def test_a_busy_ready_done_pr_with_a_holder_pays_no_base_compare(self):
+        # Control: the same done PR as a draft pays the compare with main, because its holder makes it a carry candidate.
+        head5 = head_of(5)
+
+        def reads(draft):
+            pulls = [named_pull(5, head5, draft=draft), named_pull(6, head_of(6), draft=True)]
+            return self.compare_reads(pulls, [record_of(5, head5)], {head5: running()}, compares={(head5, head_of(6)): "ahead"})
+
+        self.assertIn(f"compare/{head5}...main", reads(True), "control: the draft done #5 with a holder paid no compare with main")
+        self.assertNotIn(f"compare/{head5}...main", reads(False), "a busy ready done #5 paid a compare with main for its holder")
 
 
 class ReplacesCycles(CloseEnv):
