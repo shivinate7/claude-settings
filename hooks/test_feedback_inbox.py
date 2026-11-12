@@ -4110,6 +4110,60 @@ def case_batch_bound_does_not_clear_a_standing_word_elsewhere():
               any("has no home" in s for s in out), out)
 
 
+# The lane brief that refused a once: home (lane mailbox-wake-routes). Only its two sentences below are known; the rest
+# of the brief is not. A bounded clean-up sentence holds no standing word, so it does not bar the home. A bare "every PR"
+# stays refused, so a bound is what the wanted accept turns on.
+REPRO_ITEM = ("- fb-1338-1 [note] -> once:start helper session for mailbox-wake-routes "
+              "(one short-lived cloud session, archive when done)")
+REPRO_BRIEF = "Clean up every test PR, comment and branch you make.\nNever wait on the owner here."
+# The shortest refusing sentence: "approved" is a grant word, "merge" an act word, "every PR" a standing word.
+REPRO_BOUNDED_GRANT = "approved, merge every PR you make."
+STANDING_WORDINGS = (  # real standing wordings: each keeps its once: home barred
+    "approved, merge every PR.",
+    "approved, merge every open PR.",
+    "approved, merge whenever green.",
+    "approved, merge each time.",
+)
+
+
+def case_one_shot_brief_bounded_to_its_own_work_passes():
+    """Red today: a one-shot approval for the lane's own PRs, with the repro item. "every PR" is a standing word, so the
+    once: home is barred and the message is refused. Wanted: accepted, since "you make" bounds the set to this lane's
+    work."""
+    mod = guard_module()
+    text = REPRO_BOUNDED_GRANT + "\n" + REPRO_BRIEF
+    out = mod.problems(mod.parse(render_block(text, items=(REPRO_ITEM,))), "")
+    check("repro brief, bounded one-shot approval: its once: home is not barred by 'every PR'",
+          not any("has no home" in s for s in out), out)
+
+
+def case_repro_brief_sentences_alone_pass_control():
+    """Green control, passing on the head: the repro item with the two known brief sentences and no grant word is not a
+    grant, so nothing refuses it."""
+    mod = guard_module()
+    out = mod.problems(mod.parse(render_block(REPRO_BRIEF, items=(REPRO_ITEM,))), "")
+    check("repro item, the two brief sentences alone: not refused", out == [], out)
+
+
+def case_one_shot_brief_with_clean_up_and_never_wait_passes_control():
+    """Green control, passing on the head: a one-shot approval with the clean-up sentence and "Never wait on the owner
+    here." holds no standing word, so its once: home passes."""
+    mod = guard_module()
+    text = "approved, merge it.\n" + REPRO_BRIEF
+    out = mod.problems(mod.parse(render_block(text, items=(REPRO_ITEM,))), "")
+    check("one-shot brief with the clean-up and never-wait sentences: its once: home passes", out == [], out)
+
+
+def case_real_standing_wordings_stay_refused_with_a_once_home():
+    """Green control, refusing on the head: each real standing wording keeps its once: home barred. The reason names the
+    bar, so a standing word is what refuses it."""
+    mod = guard_module()
+    for text in STANDING_WORDINGS:
+        out = mod.problems(mod.parse(render_block(text, items=(REPRO_ITEM,))), "")
+        check("standing wording %r: its once: home is barred" % text,
+              any("has no home" in s and "bars a once:" in s for s in out), out)
+
+
 # --------------------------------------------------------------------------- page-form-to-template cases
 # A waiting-page comment is answered by rewriting its item, never by a thread reply (ruling c164). So each
 # comment's item routes to the shared template, skills/waiting-page: a task homed to a step file that names it,
@@ -4580,6 +4634,10 @@ CASES = (
     case_measured_one_shot_sentence_passes_control,
     case_unbounded_standing_scope_still_refuses_a_once_home,
     case_batch_bound_does_not_clear_a_standing_word_elsewhere,
+    case_one_shot_brief_bounded_to_its_own_work_passes,
+    case_repro_brief_sentences_alone_pass_control,
+    case_one_shot_brief_with_clean_up_and_never_wait_passes_control,
+    case_real_standing_wordings_stay_refused_with_a_once_home,
     case_page_form_asked_comment_with_a_note_blocks,
     case_page_form_step_without_the_template_blocks,
     case_page_form_step_naming_the_template_passes,
