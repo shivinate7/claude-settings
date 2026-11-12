@@ -1620,15 +1620,17 @@ class Host:
         """The breaking merge of a red base (decision no-merge-onto-red-main, the revert route), read from the page base_state already read: -> a detail
         segment, or None. `judged` is newest first. From `newest_red`, walk the runs of its workflow file and event group, newest first, past every red run
         to the first green one; the oldest red run before it is the first red run with a green parent. A cancelled, skipped or neutral run proves nothing
-        and is stepped over. With no green parent on the page (a lone red run, or a page that is red to its end) nothing is named.
+        and is stepped over; a run not completed (a re-run in flight) stops the walk with a segment that says the breaking run is unknown. With no green parent on the page (a lone red run, or a page that is red to its end) nothing is named.
         A first red (`run_attempt` 1) is not blamed: its segment names `gh run rerun <id> --failed`, and red_base puts that before the reason flag, because a
         flaky run is the likelier cause. Red again on a re-run (`run_attempt` above 1), the segment names the run's commit and its pull request, read from
-        the number in the head commit's first line: `Merge pull request #N` for a merge commit, `(#N)` last for a squash."""
+        the number in the head commit's first line: `Merge pull request #N` for a merge commit, `(#N)` last for a squash. A schedule run names neither: it tests the head at run time."""
         key = (newest_red["path"], self.BASE_EVENTS[newest_red["event"]])
         first = None
         for r in judged[judged.index(newest_red):]:
-            if (r["path"], self.BASE_EVENTS[r["event"]]) != key or r["status"] != "completed":
+            if (r["path"], self.BASE_EVENTS[r["event"]]) != key:
                 continue
+            if r["status"] != "completed":  # an older run still going (a re-run in flight): the run under it may be red or green, so no run is blamed
+                return f"the run that broke the base is unknown: run {r['id']} (attempt {r.get('run_attempt')}) is still going, so the walk to the first red run after a green one stops there. Run again once it ends"
             if r["conclusion"] == "success":
                 break
             if r["conclusion"] not in ("skipped", "neutral", "cancelled"):
@@ -1641,6 +1643,8 @@ class Host:
         if (first.get("run_attempt") or 1) <= 1:
             return (f"run {first['id']} is the first red run after a green one, at {sha}: `{RERUN_REMEDY} {first['id']} --failed` re-runs its failed jobs, "
                     "and it is blamed on its pull request only if that re-run is red again")
+        if first["event"] == "schedule":  # a nightly tests the base's head at run time, not the commit that started it: that commit is no suspect
+            return (f"run {first['id']} is a schedule run, red again on its re-run: it tested the base's head when it ran, so no commit or pull request is named for it")
         head = (first.get("head_commit") or {}).get("message") or first.get("display_title") or ""
         line = head.splitlines()[0] if head else ""
         m = re.match(r"Merge pull request #(\d+)\b", line) or re.search(r"\(#(\d+)\)\s*$", line)
@@ -3372,9 +3376,11 @@ def red_base(root, host, base, red_ok=""):
     first_red = FIRST_RED_RERUN.search(detail) if verdict == "red" else None
     broke = verdict == "red" and BREAKING_MERGE in detail
     carries = f"if this batch carries the fix, or the unknown read has a known cause, run again with the reason flag {RED_FLAG} \"<reason>\"."
-    if broke:  # the revert PR is the batch that carries the fix: its own Drops-lines trailer covers each file it deletes, and the reason flag lifts no silent-undo finding
-        way = (f"Open a revert PR for the breaking merge named above and merge it with the reason flag {RED_FLAG} \"<reason>\". Merges resume once the revert merges. "
-               f"The revert PR needs a Drops-lines trailer for each file it deletes (the silent-undo check, which the reason flag {RED_FLAG} does not lift); a revert of a revert needs none. "
+    if broke:  # the revert PR is the batch that carries the fix: its own Drops-lines trailer covers each file the silent-undo check names, and the reason flag lifts no silent-undo finding
+        way = (f"Open a revert PR for the breaking merge named above (`git revert -m 1 <commit>` for a merge commit) and merge it with the reason flag {RED_FLAG} \"<reason>\". "
+               f"Merges resume once the revert's run on main is green: until then its run is pending and the breaking red stays the newest. "
+               f"The revert PR needs a Drops-lines trailer for each file the silent-undo check names (a revert of a merge that edits and adds files is flagged \"whole file restored\" and \"file deleted\"), "
+               f"and so does a re-land that reverts the revert; the reason flag {RED_FLAG} does not lift that check. "
                f"Or, {carries}")
     else:
         way = (f"Re-run the first red run: `{RERUN_REMEDY} {first_red.group(1)} --failed`, then run again. Or, " if first_red else
