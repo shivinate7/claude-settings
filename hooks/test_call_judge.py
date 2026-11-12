@@ -2547,6 +2547,7 @@ def case_past_ruling_rule_name_is_question_forms_rule():
 # not a session's own call or an incident. Each sentence must be in the item-8 text verbatim. The text is one home,
 # call_judge.PAST_RULING_ITEM, and two calls send it: the chat box's judged call and the dedicated past-ruling call.
 ITEM8_SENTENCES = (
+    ("R", "A listed decision or debt record is a ruling by its kind, so cite it with no owner marker."),
     ("S1", "A step line is a ruling when it says the owner ruled, answered, picked or granted."),
     ("S2", "A line where a session made the call, such as a recommended option, a proposed pick, or a lane's call, "
            "is not a ruling."),
@@ -2567,9 +2568,6 @@ def item8_text(prompt):
 
 
 def check_item8_sentences(label, item8):
-    sentences = re.split(r"(?<=[.!?;])\s+", item8)
-    check("%s: a sentence says a decision or debt record is a ruling by its kind" % label,
-          any("decision" in s and "debt" in s and "record" in s for s in sentences), item8[:300])
     for name, sentence in ITEM8_SENTENCES:
         check("%s: sentence %s is in the item-8 text verbatim" % (label, name), sentence in item8,
               "missing: " + sentence)
@@ -2577,8 +2575,8 @@ def check_item8_sentences(label, item8):
         check("%s: %s is not in the item-8 text" % (label, name), phrase not in item8, "present: " + phrase)
 
 
-def case_item8_prompt_names_record_kinds_and_owner_markers():
-    # The chat box's one judged call carries item 8, with the record-kind sentence and each ITEM8_SENTENCES sentence.
+def case_item8_prompt_names_ruling_sentences_on_the_chat_call():
+    # The chat box's one judged call carries item 8, with each ITEM8_SENTENCES sentence (R is the record-kind one).
     box = good_box(goal=CI_GOAL, problem=CI_PROBLEM, based=CI_BASED, options=CI_CHAT_OPTIONS)
     r = run_hook(question_input(box=box), answer=ALLOW)
     calls = form_calls(r)
@@ -2657,7 +2655,7 @@ def main():
                  case_capped_questions_starts_each_cut_unit_on_its_own_line,
                  case_unrun_fallback_prints_the_marker_remedy,
                  case_past_ruling_rule_name_is_question_forms_rule,
-                 case_item8_prompt_names_record_kinds_and_owner_markers,
+                 case_item8_prompt_names_ruling_sentences_on_the_chat_call,
                  case_item8_prompt_names_ruling_sentences_on_the_dedicated_call):
         try:
             case()
