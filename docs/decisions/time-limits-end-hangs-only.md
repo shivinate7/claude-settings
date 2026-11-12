@@ -19,7 +19,7 @@ Details, owner 2026-11-10 14:24 CST (answers to triage's four points):
 New jobs, owner 14:36 and 14:37 CST, agreed at 15:03 CST ("yes thats fine agreed"):
 
 - A job is new until its first green run. A new job takes the limit of its nearest job of the same kind (lint, test, mutation, build) times 1.5. With no such job, it takes the largest current limit times 1.5.
-- A new job cut at that limit was misjudged ("if it was just made and it then fails in its first run or two that's a sign it was misjudged"). It moves to the largest current limit times 1.5, and the report flags it.
+- A new job cut at that limit was misjudged: the owner read a failure in a new job's first run or two as a sign of a wrong limit. It moves to the largest current limit times 1.5, and the report flags it.
 
 Premises of the script:
 

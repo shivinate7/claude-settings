@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Eight templates any repo can adopt, and one script that only this repo runs, live in one home and one shape: a composite action under
+Eight templates any repo can adopt, and one script that only this repo runs, live in one home. Each has one shape: a composite action under
 `actions/<name>/`, or a plain file where the template is no CI step.
 
 | Template | Home |

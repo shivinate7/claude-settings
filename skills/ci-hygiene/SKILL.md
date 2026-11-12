@@ -34,8 +34,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    a ready run. Runners with a low concurrency cap, such as hosted macOS, queue first.
 5. **Cap each job's time.** A CI job's total-time limit ends a hang and nothing else, so it is generous
    and computed from recent green runs (the slowest times 1.5), never a number stored by hand. A new job
-   takes its nearest similar job's limit x 1.5, else the largest job's x 1.5, and is flagged misjudged if
-   a cut ends it. Decision `time-limits-end-hangs-only` holds the rule. Only claude-settings has the
+   takes its nearest similar job's limit x 1.5, else the largest job's x 1.5. If a cut ends it, flag it
+   as misjudged. Decision `time-limits-end-hangs-only` holds the rule. Only claude-settings has the
    script, `actions/ci-limits/ci_limits.py`, which reads this repo's runs and caps; in another repo,
    measure the same way with `gh run view`. Decision `ci-job-caps` holds this repo's table.
    The merge tool's `warn` mode flags a job past 70% of its cap.

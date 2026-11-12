@@ -26,11 +26,12 @@ import importlib.util
 import json
 import os
 import re
-import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.normpath(os.path.join(HERE, "..", ".."))
+sys.path.insert(0, os.path.join(ROOT, "hooks"))
+import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py); this script runs in this repo only
 WORKFLOW = "checks.yml"
 WINDOW = 30
 CLAMP = 360  # GitHub-hosted jobs run at most 6 hours (docs.github.com/en/actions/reference/limits), so no limit is worth more
@@ -216,7 +217,7 @@ def gh_api(path, *fields):
     cmd = ["gh", "api", path, "-X", "GET"]
     for f in fields:
         cmd += ["-f", f]
-    done = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    done = _nowindow.run(cmd, capture_output=True, text=True, timeout=120)
     if done.returncode:
         raise OSError("gh api %s: %s" % (path, done.stderr.strip() or "exit %d" % done.returncode))
     return json.loads(done.stdout)
