@@ -712,16 +712,20 @@ class BatchBuildAndDropIsAllowed(unittest.TestCase):
         for act in ("--confirm", "--base-red-ok", "--undo-check-unknown-ok", "--lint-unknown-ok", "--config", "--unlock", "--with"):
             self.assertIn(act, clause, "Never covers does not name %s" % act)
 
-    def test_covers_names_the_three_added_flags_and_the_pick(self):
+    def test_covers_names_each_added_form_and_the_pick(self):
         covers = bounds_text(self.entry())
-        for flag in ("--blame", "--run", "--on", "--base"):
-            self.assertIn(flag, covers, "the entry does not name %s" % flag)
+        for form in ("`merge --batch-build NAME --blame PR --run URL`", "`--on BRANCH`", "`--base BRANCH`"):
+            self.assertIn(form, covers, "the entry does not name the form %s" % form)
         self.assertIn("2026-11-12 13:40 CST, pick b", covers, "the entry does not cite the owner's pick b")
 
-    def test_a_flag_outside_the_five_is_not_covered(self):
+    def test_covers_binds_the_repo_owner(self):
+        self.assertIn("a repo owned by shivinate7", bounds_text(self.entry()), "the entry does not bind the repo owner shivinate7")
+
+    def test_a_flag_outside_the_six_is_not_covered(self):
         covers = bounds_text(self.entry())
-        for flag in ("--config", "--unlock", "--with", "--confirm", "--idle-lanes", "--session"):
-            self.assertNotIn(flag, covers, "Covers names %s, a flag outside the five" % flag)
+        for flag in ("--config", "--unlock", "--with", "--confirm", "--base-red-ok", "--undo-check-unknown-ok", "--lint-unknown-ok",
+                     "--idle-lanes", "--session"):
+            self.assertNotIn(flag, covers, "Covers names %s, a flag outside the six" % flag)
 
 
 if __name__ == "__main__":

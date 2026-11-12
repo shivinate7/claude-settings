@@ -25,7 +25,7 @@ Each entry keeps `$defaults`, the classifier's built-in exceptions.
 | "Owner Session Message" (`settings.json` `autoMode.allow`) | `send_message` to a session in the owner's own account, including the session that started this one (its parent or coordinator). A message that asks for no act is covered. A message that asks is limited to acts the owner already granted. A coordinator may send a batch runner it created a merge go (owner, 2026-11-03 15:58 CST) | this record |
 | "Relayed Merge Yes" (`settings.json` `autoMode.allow`) | `~/.claude/bin/merge <pr> --confirm --head <sha>` by a session tagged `cs-build:batch-runner`, for the one pull request that a session tagged `cs-build:coordinator` named when it relayed the owner's yes to merge it, under every merge check | this record |
 | "Batch Runner Merge" (`settings.json` `autoMode.allow`) | `~/.claude/bin/merge <pr> --confirm --head <sha>` by a session tagged `cs-build:batch-runner`, for a pull request its coordinator named in a merge go, under the coordinator's standing grant and every merge check | this record |
-| "Batch Build and Drop" (`settings.json` `autoMode.allow`) | In a `shivinate7` repo: `merge --batch-build NAME PR...`, `--batch-build NAME --ready`, `--batch-drop NAME PR`, and `--blame PR --run URL`, `--on BRANCH` and `--base BRANCH` with `--batch-build`. Never a merge, `--confirm`, a check-lifting flag, `--config`, `--unlock` or `--with` | this record |
+| "Batch Build and Drop" (`settings.json` `autoMode.allow`) | In a `shivinate7` repo: `merge --batch-build NAME PR...`, `--batch-build NAME --ready`, `--batch-drop NAME PR`, and `--batch-build NAME --blame PR --run URL`, `--on BRANCH` and `--base BRANCH` with `--batch-build`. Never a merge, `--confirm`, a check-lifting flag, `--config`, `--unlock` or `--with` | this record |
 | `mcp__claude-code-remote__add_repo` (`settings.json` `permissions.allow`) | Attach a GitHub repo to the session | this record |
 | `mcp__claude-code-remote__archive_session` (`settings.json` `permissions.allow`) | Archive a session in the owner's account | this record |
 | `mcp__claude-code-remote__send_message` (`settings.json` `permissions.allow`) | Any `send_message` call. No bound is checked (see Send message allow rule) | this record |
@@ -80,11 +80,11 @@ Gap update (coordinator, 2026-11-08 12:55 CST): in a session that recorded the b
 
 ### Batch Build and Drop
 
-The entry lets the batch flow of decision `batch-freeze-lane-set` run without a prompt, in a `shivinate7` repo. Five flag forms: `--batch-build NAME PR...` (with `--ready`), `--batch-drop NAME PR`, `--blame PR --run URL`, `--on BRANCH` and `--base BRANCH`. Never covers a merge, `--confirm`, `--base-red-ok`, `--undo-check-unknown-ok`, `--lint-unknown-ok`, `--config`, `--unlock`, `--with`, or any other flag that lifts a check.
+The entry lets the batch flow of decision `batch-freeze-lane-set` run without a prompt, in a `shivinate7` repo. Six flag forms: `--batch-build NAME PR...` (with `--ready`), `--batch-drop NAME PR`, `--blame PR --run URL`, `--on BRANCH` and `--base BRANCH`. Never covers a merge, `--confirm`, `--base-red-ok`, `--undo-check-unknown-ok`, `--lint-unknown-ok`, `--config`, `--unlock`, `--with`, or any other flag that lifts a check.
 
-Owner pick, waiting-page item 458 a (2026-11-09 13:09 CST): the first three forms. Owner 2026-11-12 13:40 CST, pick b: also allow --blame --run, --on and --base. Typed again by the owner in lane session batch-freeze-lane-set-enforce at 13:51 CST: "yes: allow --blame --run, --on and --base in the Batch Build and Drop entry".
+Owner pick, waiting-page item 458 a (2026-11-09 13:09 CST): the first three forms. Owner 2026-11-12 13:40 CST, pick b (relayed by the coordinator): also allow --blame --run, --on and --base. Typed again by the owner in lane session batch-freeze-lane-set-enforce at 13:51 CST: "yes: allow --blame --run, --on and --base in the Batch Build and Drop entry".
 
-Departs from: main, which has no entry for these flags. Goes against the owner's ruling "a repo changes to fit a shared tool, never the tool to fit a repo", which the owner chose knowingly.
+Departs from: main, which has no entry for these flags. Goes against the owner's ruling "a repo changes to fit a shared tool, never the tool to fit a repo", which the owner chose knowingly. This is the one exception to decision `uniform-over-variants` for this entry, on the owner's typed word.
 
 ### Archived Branch Delete
 
