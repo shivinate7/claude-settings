@@ -24,7 +24,9 @@ Interface the module must match (the lane's form contract):
   (rule question-departs), after the form passes. Both sides are non-empty, and the change side says a change,
   not a restatement of main (none, nothing, n/a, no change, unchanged, stays, keeps, as today, as on main,
   same as, already; word match) before the change side's first ";", or anywhere when it has none. The chat
-  box judges it in `question`; a page decision in `context`.
+  box judges it in `question`; a page decision in `context`, and a page task that carries a non-empty `options`
+  list in `context` too (a task with no options is not judged; a set with no context is refused; an update is
+  judged only when it carries `context`). Cases: the task-options cases in the Departs from section.
 - A widening option: page `widens: true`, never in `pick`; chat `Goes against your ruling: a repo changes to
   fit a shared tool, never the tool to fit a repo` in its label or description, and never `(Recommended)` in
   its label (rule uniform-pick).
@@ -1495,6 +1497,184 @@ def case_departs_str_replace_forms():
                     "Departs from: x — adds X", "Departs from: x — adds X; the old call keeps its timeout", None)
 
 
+# ------------------------------------------------------------------ a task with options states its departure
+#
+# A task with options is a choice put to the owner, so its context carries a Departs from line, as a decision's
+# does (rule question-departs). Only that check judges a task: the Goal, Problem and Based on form is for
+# decisions. Each case gives the task a Why yours line, so task-names-check passes it and the Departs from
+# check decides it. The no-context case is the exception: with no context, task-names-check refuses first.
+
+TASK_OPTIONS = [
+    {"label": "Keep it as is", "how": "The coordinator merges each batch.", "key": "a",
+     "gain": "No new form on the allow list.", "lose": "Each batch waits for the coordinator."},
+    {"label": "Let the runner merge", "how": "The batch runner merges each batch alone.", "key": "b",
+     "gain": "Batches land sooner.", "lose": "The allow list grows by one form."},
+]
+TASK_RESTATES = "Departs from: lint/stamp.py:run_stamp — none"
+
+
+def task_with_options(context=TASK_WHY, options=None, **over):
+    """A waiting-page task with options. `context` None leaves the key out. `options` None gives TASK_OPTIONS, and []
+    gives an empty list. `over` sets or replaces any other field."""
+    item = {"kind": "task", "title": "Merge the batch", "status": "open", "steps": ["Open Terminal"],
+            "options": copy.deepcopy(TASK_OPTIONS) if options is None else options}
+    if context is not None:
+        item["context"] = context
+    item.update(over)
+    return item
+
+
+def case_task_options_departs_missing_is_refused():
+    page("a task with options and no Departs from line is refused as question-departs", "set",
+         entry_of(task_with_options(context=TASK_WHY)), DEPARTS_REFUSAL)
+    page("a task with options whose Departs from line says no change is refused as question-departs", "set",
+         entry_of(task_with_options(context=TASK_WHY + "\n" + TASK_RESTATES)), DEPARTS_REFUSAL)
+
+
+def case_task_options_valid_departs_passes():
+    page("a task with options and a valid Departs from line passes", "set",
+         entry_of(task_with_options(context=TASK_WHY + "\n" + DEPARTS)), None)
+
+
+def case_task_without_options_is_not_judged_for_departs():
+    page("a task with no options and no Departs from line passes", "set",
+         entry_of(task_item(["Open Terminal"])), None)
+    page("a task with an empty options list and no Departs from line passes", "set",
+         entry_of(task_with_options(context=TASK_WHY, options=[])), None)
+
+
+def case_task_options_without_context_is_refused():
+    # On a set the Why yours check runs first and refuses a context with no such line (task-names-check). Either id
+    # is the refusal here: no context holds no Departs from line, so question-departs refuses it too.
+    page("a task with options and no context is refused", "set",
+         entry_of(task_with_options(context=None)), (("task-names-check", DEPARTS_RULE), None))
+
+
+def case_closed_task_options_passes():
+    page("a closed task with options and no Departs from line passes", "set",
+         entry_of(task_with_options(context=TASK_WHY, status="closed")), None)
+
+
+def case_update_task_options_without_context_passes():
+    # An update is judged for the fields it carries: the options alone are no context, so nothing is judged.
+    page("an update of a task's options with no context field passes", "update",
+         entry_of({"kind": "task", "options": copy.deepcopy(TASK_OPTIONS)}), None)
+
+
+def case_update_task_options_with_context_is_judged():
+    page("an update of a task's options with a context that has no Departs from line is refused", "update",
+         entry_of({"kind": "task", "options": copy.deepcopy(TASK_OPTIONS), "context": TASK_WHY}), DEPARTS_REFUSAL)
+
+
+def test_task_with_options_and_no_departs_line_is_refused():
+    _judged(case_task_options_departs_missing_is_refused)
+
+
+def test_task_with_options_and_valid_departs_line_passes():
+    _judged(case_task_options_valid_departs_passes)
+
+
+def test_task_without_options_is_not_judged_for_departs():
+    _judged(case_task_without_options_is_not_judged_for_departs)
+
+
+def test_task_with_options_and_no_context_is_refused():
+    _judged(case_task_options_without_context_is_refused)
+
+
+def test_closed_task_with_options_passes():
+    _judged(case_closed_task_options_passes)
+
+
+def test_update_of_task_options_without_context_passes():
+    _judged(case_update_task_options_without_context_passes)
+
+
+def test_update_of_task_options_with_context_is_judged():
+    _judged(case_update_task_options_with_context_is_judged)
+
+
+# A write with steps and no kind is read as a task by judged_item_writes, since steps are task-only. An update of
+# one is judged for its Departs from line as a task's. A set with no kind keeps the decision form on main, so it
+# is refused for its Goal line; these cases leave that as it is.
+
+def steps_no_kind(context=TASK_WHY):
+    """A set with steps and options and no kind. A context of None leaves the key out."""
+    item = {"title": "Merge the batch", "status": "open", "steps": ["Open Terminal"],
+            "options": copy.deepcopy(TASK_OPTIONS)}
+    if context is not None:
+        item["context"] = context
+    return item
+
+
+def steps_no_kind_update(context=TASK_WHY):
+    """An update with steps and options and no kind. It carries context only when `context` is not None."""
+    item = {"steps": ["Open Terminal"], "options": copy.deepcopy(TASK_OPTIONS)}
+    if context is not None:
+        item["context"] = context
+    return item
+
+
+def refused_by_some_rule(name, op, entry):
+    """A write that some rule refuses, by item_hit and by the guard. A crash or a missing name is no refusal."""
+    for surface, got in (("page item_hit", call("item_hit", op, entry)), ("page guard", guard_hit(op, entry))):
+        check(surface + ": " + name, got[0] not in ("", "RAISED", "MISSING"),
+              "want a refusal by some rule, got %r" % (got,))
+
+
+def case_steps_no_kind_update_departs_missing_is_refused():
+    page("an update with steps, options and no kind, and no Departs from line, is refused as question-departs",
+         "update", entry_of(steps_no_kind_update()), DEPARTS_REFUSAL)
+
+
+def case_steps_no_kind_set_stays_refused():
+    # A set with no kind keeps the decision form on main, so it is refused for its Goal line. Steps do not change
+    # that, and a valid Departs from line does not pass it.
+    refused_by_some_rule("a set with steps, options and no kind, and no Departs from line, is refused", "set",
+                         entry_of(steps_no_kind()))
+    refused_by_some_rule("a set with steps, options and no kind, and a valid Departs from line, is still refused",
+                         "set", entry_of(steps_no_kind(context=TASK_WHY + "\n" + DEPARTS)))
+
+
+def case_steps_no_kind_update_valid_departs_passes():
+    page("an update with steps, options and no kind, and a valid Departs from line, passes", "update",
+         entry_of(steps_no_kind_update(context=TASK_WHY + "\n" + DEPARTS)), None)
+
+
+def case_task_non_list_options_is_not_judged_for_departs():
+    # options is a string, not a list: only a non-empty list of options takes the Departs from check.
+    page("a task whose options is a string, with a Why yours line and no Departs from line, passes", "set",
+         entry_of(task_with_options(context=TASK_WHY, options="Keep it — gain")), None)
+
+
+def test_steps_no_kind_update_without_departs_line_is_refused():
+    _judged(case_steps_no_kind_update_departs_missing_is_refused)
+
+
+def test_steps_no_kind_set_stays_refused():
+    _judged(case_steps_no_kind_set_stays_refused)
+
+
+def test_steps_no_kind_update_with_valid_departs_line_passes():
+    _judged(case_steps_no_kind_update_valid_departs_passes)
+
+
+def test_task_with_non_list_options_is_not_judged_for_departs():
+    _judged(case_task_non_list_options_is_not_judged_for_departs)
+
+
+def case_decision_update_with_steps_stays_on_the_form():
+    # A decision that carries steps is still a decision: its update's context is judged by the form (the Goal line
+    # first), not by the task's Departs from check. Pins the kind clause of decision_form_hit's task routing.
+    page("an update with kind decision, steps, options and a context with no Goal line is refused as question-form",
+         "update", entry_of({"kind": "decision", "steps": ["Open Terminal"], "options": copy.deepcopy(TASK_OPTIONS),
+                             "context": TASK_WHY}), (FORM_RULE, "Goal"))
+
+
+def test_update_kind_decision_with_steps_is_judged_by_the_form():
+    _judged(case_decision_update_with_steps_stays_on_the_form)
+
+
 # ------------------------------------------------------------------ a port's main side
 
 def case_port_main_side():
@@ -2510,6 +2690,13 @@ def main():
                  case_departs_ids_and_order, case_departs_reasons,
                  case_departs_no_change_word_before_the_semicolon, case_departs_placeholders_are_refused,
                  case_departs_line_forms_pass, case_departs_str_replace_forms,
+                 case_task_options_departs_missing_is_refused, case_task_options_valid_departs_passes,
+                 case_task_without_options_is_not_judged_for_departs, case_task_options_without_context_is_refused,
+                 case_closed_task_options_passes, case_update_task_options_without_context_passes,
+                 case_update_task_options_with_context_is_judged,
+                 case_steps_no_kind_update_departs_missing_is_refused, case_steps_no_kind_set_stays_refused,
+                 case_steps_no_kind_update_valid_departs_passes,
+                 case_task_non_list_options_is_not_judged_for_departs, case_decision_update_with_steps_stays_on_the_form,
                  case_port_main_side, case_port_departs_shapes, case_call_judge,
                  case_widens_text_is_the_set_words, case_widens_reasons_carry_no_topic_id,
                  case_widens_words_in_every_home, case_widens_words_in_the_reply_judge_prompt,
