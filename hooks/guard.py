@@ -4483,6 +4483,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         if poller:
             refuse(tool, "deny", "waiter", PATTERN_POLLER_REASON, poller + " " + matched)
         refuse(tool, "deny", "waiter", WAITER_REASON, matched)
+    # No program runs a `gh` watch, so the Monitor exemption stops there (decision ci-wait-reads-run-status).
+    matched = waiter_verdict(split_segments(stripped), background, watch_only=True) if not stream_family else ""
+    if matched:
+        refuse(tool, "deny", "waiter", WAITER_REASON, matched)
     matched = narrated_tail_hit(stripped)
     if matched and stream_family:
         refuse(tool, "deny", "live-stream", NARRATED_TAIL_REASON, matched)
@@ -5897,7 +5901,7 @@ def scratchpad_writes(payload, tool: str, tool_input: dict, cwd: str):
                 full = target if os.path.isabs(target) else os.path.join(cwd, target)
                 if SCRATCHPAD_WORD in full and under_session_scratchpad(full, session):
                     files.append(full)
-        elif tool in SHELL_TOOLS:
+        elif tool in SHELL_COMMAND_TOOLS:
             command = str(tool_input.get("command", "") or "")
             if SCRATCHPAD_WORD not in command and SCRATCHPAD_WORD not in cwd:
                 return agent, session, files, removed
@@ -5958,7 +5962,7 @@ def scratchpad_owner_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:
     run: the segments come from `split_segments` over the heredoc-stripped command, its variables read
     as `_shell_write_hit` reads them (`_resolve_vars`)."""
     agent, session = scratchpad_agent(payload), session_id_of(payload)
-    command = str(tool_input.get("command", "") or "") if tool in SHELL_TOOLS else ""
+    command = str(tool_input.get("command", "") or "") if tool in SHELL_COMMAND_TOOLS else ""
     if not agent or not session or (SCRATCHPAD_WORD not in command and SCRATCHPAD_WORD not in cwd):
         return ""
     ends = []
