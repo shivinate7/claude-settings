@@ -523,6 +523,13 @@ if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ -e "$SRC/
     own_how=
     own_head=$(git -C "$SRC" rev-parse -q --verify HEAD 2>/dev/null)
     own_ref=$(git -C "$SRC" rev-parse -q --verify "refs/remotes/origin/$REF" 2>/dev/null)
+    # The checkout holds no origin/$REF and origin cannot give one (no stable branch, or no origin): the run follows main
+    # from here, as it did before stable existed, so a clean checkout at origin/main stays the source.
+    if [ -z "$own_ref" ] && [ "$REF" != main ] \
+       && ! cloud_git -C "$SRC" fetch -q origin "+refs/heads/$REF:refs/remotes/origin/$REF" 2>/dev/null; then
+      fall_back_to_main
+    fi
+    own_ref=$(git -C "$SRC" rev-parse -q --verify "refs/remotes/origin/$REF" 2>/dev/null)
     if [ -z "$(git -C "$SRC" status --porcelain 2>/dev/null)" ] && [ -n "$own_ref" ] \
        && git -C "$SRC" merge-base --is-ancestor "$own_ref" "$own_head" 2>/dev/null; then
       if [ -z "$(git -C "$SRC" config --get remote.origin.url 2>/dev/null)" ]; then
