@@ -420,10 +420,56 @@ def past_ruling_check(payload, asked, marked, tool=None):
     relay = problem.startswith(report_guard.RELAY_RULE_REASON.split("%", 1)[0])
     if not relay and tool == DATA_TOOL:
         problem += " For a page item, put the line in `context`."
-    return (PAST_RULING_RULE_NAME if relay else QUESTION_RULE), problem
+    return PAST_RULING_RULE_NAME, problem  # the Unvetted refusal of this check is rule past-ruling too
+
+
+# lint/report_guard.py UNVETTED_REASON, copied here because that module is what may have failed to import. It holds no
+# record cite: refuse() adds the one this hook's refusals carry.
+UNRUN_REASON = ("Unvetted guard (rule past-ruling): a question to the owner went out without the past-ruling check, "
+                "which could not run (%s)")
+
+
+def text_leaves(value):
+    """Every string inside `value`, one per line, for the marker read of a call whose own reader could not run."""
+    if isinstance(value, str):
+        return [value]
+    items = value.values() if isinstance(value, dict) else value if isinstance(value, (list, tuple)) else ()
+    return [leaf for item in items for leaf in text_leaves(item)]
+
+
+def refuse_unrun(payload, tool, args, exc, text):
+    """The outcome of an owner question whose check raised `exc` (a module that did not import, a reader that failed):
+    refused as Unvetted, rule past-ruling, unless `text` carries its own `Unvetted:` line. It never allows, because
+    a check that cannot run says nothing. The marker is read with plain regexes in question_form, and a refusal
+    follows when even that cannot import."""
+    why = " ".join(("%s: %s" % (type(exc).__name__, exc)).split())
+    print("call judge: the past-ruling check could not run: %s" % why, file=sys.stderr)
+    try:
+        import question_form
+        if question_form.has_unvetted(text):
+            return 0
+    except Exception:
+        pass
+    return refuse(payload, tool, args, PAST_RULING_RULE_NAME, UNRUN_REASON % why)
 
 
 SEND_HEADING_MARK = re.compile(r"^#{1,6}[ \t]+")  # a Markdown heading mark, cut like a list bullet
+
+
+def form_body(line):
+    """A prose line without the marks a page uses (`**`, `*`, `_`, a list bullet, a heading mark)."""
+    import report_guard
+    line = report_guard.LIST_ITEM.sub("", line.replace("*", "").replace("_", ""), count=1).strip()
+    return SEND_HEADING_MARK.sub("", line, count=1)
+
+
+def form_kind(line):
+    """"goal" for a Goal line, "problem" for a Problem line (with or without a stake), else None. report_guard.prose_lines
+    takes it as `keep`, so an indented Goal or Problem line is not hidden as code: question_form's regexes accept
+    leading tabs, and a send holds a form line there as often as prose."""
+    import question_form
+    body = form_body(line)
+    return "goal" if question_form.GOAL_LINE.search(body) else "problem" if question_form.PROBLEM_LABEL.search(body) else None
 
 
 def send_question(message):
@@ -434,9 +480,9 @@ def send_question(message):
     a list bullet, a heading mark; prose_lines cuts `>`), and outside a code fence, through report_guard.prose_lines,
     the one reader of what is code. The Problem line is question_form.PROBLEM_LABEL, with or without a stake, so a
     plain `Problem:` line or a `Problem (<any word>):` line counts. question_form's regexes are unchanged.
-    The cap rule: a message up to report_guard.ASK_TEXT_MAX characters goes whole. A longer one goes as the
-    ASK_TEXT_MAX characters that start at its first form line (a Goal, Problem, Based on or Departs from line), because
-    the question sits there and the tail of a long send is its log.
+    The cap rule: a message up to report_guard.ASK_TEXT_MAX characters goes whole. A longer one goes as the start of
+    each question's unit, from its first form line (a Goal, Problem, Based on or Departs from line), in at most
+    ASK_TEXT_MAX characters (capped_questions), because the question sits there and the tail of a long send is its log.
     Each question needs its own `Unvetted:` line, as each page write does. The message is split into one unit per
     Goal/Problem pair, read in the whole message; a unit runs from the line that opens it to the line that opens the
     next, so a marker counts for the question above it."""
@@ -450,11 +496,9 @@ def send_question(message):
     import report_guard
     forms = []  # (line index, kind) of each Goal and Problem line, in order
     first = None  # the first form line of any kind: where the capped text starts
-    for index, body in report_guard.prose_lines(message):
-        body = report_guard.LIST_ITEM.sub("", body.replace("*", "").replace("_", ""), count=1).strip()
-        body = SEND_HEADING_MARK.sub("", body, count=1)
-        kind = ("goal" if question_form.GOAL_LINE.search(body) else
-                "problem" if question_form.PROBLEM_LABEL.search(body) else None)
+    for index, body in report_guard.prose_lines(message, keep=form_kind):
+        kind = form_kind(body)
+        body = form_body(body)
         if kind:
             forms.append((index, kind))
         if kind or question_form.BASED_LABEL.search(body) or question_form.DEPARTS_LINE.search(body):
@@ -474,17 +518,45 @@ def send_question(message):
     marked = all(question_form.has_unvetted("".join(lines[bounds[i]:bounds[i + 1]])) for i in range(len(whole)))
     asked = message
     if len(message) > report_guard.ASK_TEXT_MAX:
-        start = sum(len(line) for line in lines[:first])
-        asked = message[start:start + report_guard.ASK_TEXT_MAX]
+        asked = capped_questions(lines, [first] + whole[1:] + [len(lines)], report_guard.ASK_TEXT_MAX)
     return asked, marked
+
+
+def capped_questions(lines, bounds, cap):
+    """The text of a send past `cap` characters, as the start of each question's unit (`bounds`: the line index where
+    each unit opens, then the end). Each unit gets an equal share of `cap` and a short unit's unused share goes to the
+    longer ones, so a question past a long first unit still reaches the call. One unit is the cap from its first line."""
+    units = ["".join(lines[bounds[i]:bounds[i + 1]]) for i in range(len(bounds) - 1)]
+    shares, left = {}, cap
+    for count, i in enumerate(sorted(range(len(units)), key=lambda i: len(units[i]))):
+        shares[i] = min(len(units[i]), left // (len(units) - count))
+        left -= shares[i]
+    return "".join(units[i][:shares[i]] for i in range(len(units)))
+
+
+def send_asks_owner(message):
+    """Whether a send looks like an owner question when report_guard's reader is not there: a Goal and a Problem line
+    in its text, read with question_form's own regexes. Fences are not read, so it may say yes to a fenced pair."""
+    if not isinstance(message, str):
+        return False
+    import question_form
+    low = message.replace("*", "").replace("_", "")
+    return bool(question_form.GOAL_LINE.search(low) and question_form.PROBLEM_LABEL.search(low))
 
 
 def judge_send(payload, tool, args):
     """An owner question sent by a send tool gets the dedicated past-ruling call before it goes."""
+    message = args.get("message")
     try:
-        question = send_question(args.get("message"))
+        question = send_question(message)
         found = past_ruling_check(payload, question[0], question[1]) if question else None
     except Exception as exc:
+        try:
+            asks = send_asks_owner(message)
+        except Exception:
+            asks = isinstance(message, str)  # not even the regexes load: a send with both words is unchecked and "goal:" in message.lower() and "problem" in message.lower()
+        if asks:
+            return refuse_unrun(payload, tool, args, exc, message)
         print("call judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()),
               file=sys.stderr)
         return 0
@@ -492,6 +564,8 @@ def judge_send(payload, tool, args):
 
 
 def main():
+    asking = False  # set once the call is known to ask the owner: a check that then fails refuses, never allows
+    args = None
     try:
         payload = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
         tool, args = payload.get("tool_name"), payload.get("tool_input")
@@ -505,6 +579,7 @@ def main():
         units = []  # (Unvetted marker text, words) of each question this call asks the owner
         reask = widening = False
         if tool == "AskUserQuestion":
+            asking = True
             import question_form
             code_rule, matched = question_form.chat_hit(args)
             if code_rule:
@@ -515,6 +590,7 @@ def main():
         elif tool == DATA_TOOL:
             if args.get("action") not in PAGE_WRITE_ACTIONS or not writes_an_item(args):
                 return 0
+            asking = True
             import question_form
             import override  # the writer's record id, as guard.py reads it; the payload's id is a local UUID
             hit, writes = question_form.page_item_hit(args, payload.get("cwd") or "", override.remote_session_id())
@@ -544,6 +620,8 @@ def main():
             full += "\n" + widening_rule()
         verdict, error = invoke_model(full + tail, model=model, timeout=timeout, shape=OK_SHAPE, effort=None)
     except Exception as exc:
+        if asking:
+            return refuse_unrun(payload, tool, args, exc, "\n".join(text_leaves(args)))
         print("call judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()),
               file=sys.stderr)
         return 0

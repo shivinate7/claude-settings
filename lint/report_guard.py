@@ -2818,17 +2818,25 @@ UNVETTED_AFTER_SENTENCE = re.compile(r"([.?!][*_)\"']*)[ \t]+(?=Unvetted:[ \t]*\
 LIST_ITEM = re.compile(r"^[ ]{0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)")
 
 
-def prose_lines(text):
+def prose_lines(text, keep=None):
     """(line index, text) of each prose line: outside fenced code and indented code, the blockquote mark and the edge
     spaces cut. Indented code opens after a blank line or another code line, as in CommonMark; inside a list an
-    indented line is list text, never code. The one reader of what is code, for prose_questions and for the send gate
+    indented line is list text, never code. A fence line that never closes opens no fence: the lines after it are
+    prose, so a question under a stray ``` is still read. `keep` is a predicate on an indented line's text: a line it
+    accepts is prose, not indented code. The one reader of what is code, for prose_questions and for the send gate
     of hooks/call_judge.py."""
+    lines = text.splitlines()
+    fences = [i for i, line in enumerate(lines) if QUOTE_PREFIX.sub("", line, count=1).strip().startswith("```")]
+    unclosed = fences[-1] if len(fences) % 2 else None
     fenced, code_ok, in_list = False, True, False
-    for index, line in enumerate(text.splitlines()):
+    for index, line in enumerate(lines):
         inner = QUOTE_PREFIX.sub("", line, count=1)
         body = inner.strip()
         if body.startswith("```"):
-            fenced, code_ok = not fenced, True
+            if index != unclosed:
+                fenced, code_ok = not fenced, True
+            else:
+                code_ok = True
             continue
         if fenced:
             continue
@@ -2836,7 +2844,7 @@ def prose_lines(text):
             code_ok = True
             continue
         indented = bool(INDENTED_CODE.match(inner))
-        if code_ok and indented and not in_list:
+        if code_ok and indented and not in_list and not (keep and keep(body)):
             continue  # code_ok stays True: the next indented line is code too
         code_ok = False
         if LIST_ITEM.match(inner):
