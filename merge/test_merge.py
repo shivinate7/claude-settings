@@ -20109,7 +20109,7 @@ class BatchFreeze(CloudSession):
     # --ready run also hands the lint's ci-job the log as its VERDICT_LOG. A session's temp folder is swept once its transcript is idle 24 hours
     # (decision windows-temp-sweep), so a log kept there is lost with a timed-out run. Each case reads the log by its path, never through
     # merge.batch_build_log_path, so a run on code without the log fails at the missing log, not at a missing name.
-    OLD_LOG_MTIME = 1_600_000_000  # 2020-09-13 UTC: the prune's fixture logs carry their own mtimes below this, far older than any real build
+    OLD_LOG_MTIME = 1_600_000_000  # older than the sweep's idle limit, so each fixture log sorts before any real build's log
     IDLE_TRANSCRIPT_SECONDS = 25 * 3600  # over the temp step's 24-hour limit, with a wide margin
 
     def batch_log(self, name="nightly"):
