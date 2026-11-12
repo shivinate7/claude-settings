@@ -234,14 +234,19 @@ archive_refuse("a get_session result whose content is an int before the lane's r
 # The branch read. The record's current_branches names each branch of the lane. A branch that is ahead of its repo's
 # default branch, on no pull request in any state, refuses the archive. The refusal names that shape, never a branch.
 # Each repo answers for itself: a 404 on a compare means the branch is not in that repo, and any other failed read refuses.
-# The stranded-branch remedy also covers a branch archived under another name: one more copy under the lane's own name,
-# archive/<branch> (or archive/<branch>-<n> when taken), at the branch tip, then retry. Every stranded refusal names it.
-ARCHIVE_NOPR_REMEDY = ("another name", "own name")
+# The stranded-branch remedy also covers a branch archived under another name: one more copy under the stranded branch's
+# own name, archive/<branch> (or archive/<branch>-<n> when taken), at the branch tip, then retry. Every stranded refusal names it.
+ARCHIVE_NOPR_REMEDY = ("another name", "the stranded branch's own name")
 ARCHIVE_NOPR_PIN = ("has no pull request",) + ARCHIVE_NOPR_REMEDY
 ARCHIVE_NO_BRANCH = (ARCH_BRANCH, ARCH_BRANCH_OTHER, "could not be read")  # a no-pull-request refusal names neither branch
 ARCHIVE_READ_LACKS = (ARCHIVE_NOPR_PIN[0], ARCH_BRANCH)  # a read-failure refusal is not the no-pull-request one
 archive_refuse("an incident lane: its branch is ahead of main in q_max, on no pull request, and claude-settings has no such branch: refused",
                role_path("archive-inc"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
+# The numbered copy and the branch tip are two parts of the remedy. This case pins each on its own, so a refusal that
+# drops either one goes red here and names that one fragment.
+ARCHIVE_NOPR_FRAGMENTS = ("has no pull request", "archive/<branch>-<n>", "taken", "at the branch tip")
+archive_refuse("an incident lane: the stranded-branch refusal names the numbered copy for when the exact name is taken, and the branch tip",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_NOPR), carries=ARCHIVE_NOPR_FRAGMENTS, lacks=ARCHIVE_NO_BRANCH)
 archive_refuse("a lane whose branch has no pull request, while another branch of its repo has an open one: refused",
                role_path("archive-inc"), fake_gh_path(ARCHINC_OTHERPR), carries=ARCHIVE_NOPR_PIN, lacks=ARCHIVE_NO_BRANCH)
 archive_refuse("a lane with two branches, the first on an open pull request and the second on none: refused for the second",
