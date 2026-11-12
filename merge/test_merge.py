@@ -13077,6 +13077,21 @@ class MergeRoleCheck(CloudSession):
             os.makedirs(self.role_file)  # a folder at the path: open() fails on every platform, as for an unreadable file (chmod proves nothing as root)
             self.assertIsNone(merge.read_merge_role())
 
+    # coordinator pick, 16:32 CST Nov 7 (option C): a solo owner session's role is "solo-owner", and the reader gives it only to the session that recorded it
+    def test_the_reader_gives_solo_owner_for_its_own_session(self):
+        self.put_role("solo-owner")
+        with self.cloud():
+            self.assertEqual(self.read_role_file(), (ROLE_SESSION, "solo-owner"), "the case did not record the solo-owner role for this session")  # P7: the scope is read back first
+            self.assertEqual(os.environ["CLAUDE_CODE_REMOTE_SESSION_ID"], ROLE_SESSION)
+            self.assertEqual(merge.read_merge_role(), "solo-owner", "read_merge_role refuses the solo-owner role recorded for this session")
+
+    def test_the_reader_gives_no_role_for_solo_owner_recorded_for_another_session(self):
+        self.put_role("solo-owner", session="cse_another_session")
+        with self.cloud():
+            self.assertEqual(self.read_role_file(), ("cse_another_session", "solo-owner"), "the case did not record another session's solo-owner role")  # P7: the scope is read back first
+            self.assertEqual(os.environ["CLAUDE_CODE_REMOTE_SESSION_ID"], ROLE_SESSION)  # the caller is not the session the file names
+            self.assertIsNone(merge.read_merge_role(), "read_merge_role gave a solo-owner role recorded for another session")
+
     # ---- the role check refuses
     def test_no_role_file_refuses_before_any_host_read_or_lock(self):
         self.assert_refused()
