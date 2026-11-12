@@ -5859,8 +5859,11 @@ class PassClaimCitesVerdictTests(unittest.TestCase):
     # Rule 5: a cite in each shell form backs its claim. The PASS line names the command as the shell passed it on.
 
     def test_red_a_cite_with_the_shell_expanded_path_backs_its_claim(self):
+        # The PASS line holds `~` expanded as the hook expands it (os.path.expanduser), so the path is the home folder
+        # of the platform: /root, /Users/<name> or a drive path.
+        expanded = os.path.expanduser("~/.claude/bin/merge")
         calls = [self.call("~/.claude/bin/verdict ~/.claude/bin/merge --lane-lint 7",
-                           "PASS /root/.claude/bin/merge --lane-lint 7 (1.2s)", "tu_e")]
+                           "PASS %s --lane-lint 7 (1.2s)" % expanded, "tu_e")]
         self.assert_passes(self.report("Lint passed."), calls=calls)
 
     def test_red_a_uv_run_verdict_cite_backs_its_claim(self):

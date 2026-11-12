@@ -166,8 +166,8 @@ pass_allow("control, a roster cite backs a checks claim, to @parent", "SendMessa
 
 # Rule 5: a cite in its shell-expanded form backs its claim. The PASS line names the command as the shell passed it on.
 EXPANDED_CITE = transcript_file("expanded-cite.jsonl", [HUMAN] + call_records(
-    "~/.claude/bin/verdict ~/.claude/bin/merge --lane-lint 7", "PASS /root/.claude/bin/merge --lane-lint 7 (1.2s)",
-    "tu_e"))
+    "~/.claude/bin/verdict ~/.claude/bin/merge --lane-lint 7",
+    "PASS %s --lane-lint 7 (1.2s)" % os.path.expanduser("~/.claude/bin/merge"), "tu_e"))
 pass_allow("cite form, the shell-expanded path backs its claim, to @parent", "SendMessage", "Lint passed.",
            EXPANDED_CITE, to=SEND_TO)
 
