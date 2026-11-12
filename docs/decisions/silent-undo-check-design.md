@@ -15,15 +15,16 @@
   commit added on the branch alone is the branch's. A merge of three or more parents is not read, and the
   check reports it as UNKNOWN only after the other reads finish. The merge tool refuses an UNKNOWN that
   carries a finding, and the reason flag cannot lift it (step notes-union-batch-revival).
-- **Lane undo.** A non-merge commit of the branch undoes an earlier non-merge commit of the same branch. Two
-  shapes only (owner ruling, Cockpit item 167 a, 2026-11-04). One: the commit puts a file, or a `-U0` hunk, back
-  to the text the earlier commit's parent held, when the earlier commit changed six lines or more there. The
-  file counts within one non-blank line, the hunk on all but one line. Off a test path, the file must exist on
-  both sides. Two: on a test path (`is_test_rel`, `hooks/guard.py`), a hunk takes out more of the lines the
-  earlier commit added than it adds back, and not every one is a rewrite. Only lines the earlier commit added
-  count, and only while head holds fewer of them than the undoing commit's parent did, so a later restore clears
-  it. A lane of one commit has nothing to read. Not read here: moves, renames, merges. A lane move or rename that
-  drops lines is a finding, and a `Drops-lines` trailer excuses it. The list below covers the other reads.
+- **Lane undo.** A non-merge commit of the branch undoes an earlier non-merge commit of the same branch. Two shapes only (owner ruling, Cockpit item 167 a, 2026-11-04).
+  - **Put back.** The commit puts a file, or a `-U0` hunk, back to the text the earlier commit's parent held. The earlier commit must have changed six lines or more there. The file counts within one non-blank line, the hunk on all but one line. Off a test path, the file must exist on both sides. Only lines the earlier commit added count, and only while head holds fewer of them than the undoing commit's parent did. So a later restore clears it.
+  - **Lines lost.** On a test path (`is_test_rel`, `hooks/guard.py`), a hunk takes out more lines the earlier commit added than it adds back. Not every one is a rewrite. A line counts only if no copy is left in the whole file at head.
+  - **Renames.** A file git pairs as renamed (50% similar or more) is read across the rename, so a pure move puts nothing back. A file a third commit renames between the two is not read. Merges are not read. A lane of one commit has nothing to read. A `Drops-lines` trailer excuses a finding.
+  - **Ruling.** The coordinator ruling (2026-11-12 09:35 CST) set the lines lost rule above, paired renames, and required the 40-PR read.
+  - **40-PR read.** `lane_undos` ran over the last 40 merged PRs on main.
+    - Result: 24 of 40 red. 159 findings: 119 lines lost, 17 files put back whole, 23 hunks put back.
+    - Ten sampled reds: five false alarms, where the lane refactored or re-pointed its own test lines. Five were real drops that the lane meant and stated, with no trailer.
+  - **Report-only.** Lane undo ships report-only. Findings print, marked report-only. They never change the exit code or the merge refusal.
+  - **Outcome.** It protects a lane from silently undoing its own work. What protects it now: the printed report and the reviewer.
 - **Revived note.** A note the branch deleted is back at head, because a union merge of main put it back
   (decision `notes-merge-union`). The check replays the branch's own commits and counts copies per note.
   A note is its slug, or its whole line when it has no slug form. A rebase leaves no merge, so it is not read
@@ -47,8 +48,8 @@ an unflagged close gets no run read. It starts no long-lived process.
   Claude Code attribution line. Read only the last paragraph left, with the trailer rules above.
 - **Why the body.** A repo that squashes, or writes its reasons in the PR, could not declare a dropped
   line. A session in another repo that uses `bin/merge` asked for this.
-- **Verdict.** When the check finds a dropped line, `bin/merge preview` prints one `BLOCKED: <reason>`
-  line and exits 1. An unreadable history is a plain refusal with no BLOCKED line.
+- **Verdict.** When the lost-line, reversal or revived-note reads find a dropped line, `bin/merge preview` prints one `BLOCKED: <reason>`
+  line and exits 1. A lane undo finding never does. An unreadable history is a plain refusal with no BLOCKED line.
 
 **The window starts at the fork point,** not at the plain merge-base, which moves to main's tip once the
 branch merges main. There is no `--since` time. Reason: a commit-time window let the same shape pass or
@@ -65,7 +66,7 @@ fail by its timestamp, and a commit-count floor read old main work that a branch
 **Required or advisory.** The check is required here, where lanes are short and land through integration
 batches. It is advisory in a repo whose long-lived lanes merge main in and then edit main's lines.
 Advisory means that the check runs and prints its flags. The batch reviewer marks each flag real or
-deliberate, and a real flag stops the merge. It moves to required when a rule separates a deliberate
+deliberate, and a real flag stops the merge. Lane undo flags are report-only in both modes. It moves to required when a rule separates a deliberate
 edit of main's lines from a stale overwrite, with every incident fixture still red.
 
 **The stale green PR.** An older PR overwrites a newer change to the same file. `merge/merge.py` runs the
