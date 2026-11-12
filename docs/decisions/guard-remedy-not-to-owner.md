@@ -8,12 +8,13 @@ Question: where does a Stop refusal's remedy live when the owner sees the refusa
 - The steps live under that check's heading in `## Steps per check`.
 - No verdict changes. Only the text moves.
 - Scope: Stop refusals only. `hooks/question_form.py` keeps its own text, `DEPARTS_REASON` included. A Stop refusal shows only the miss that `departs_hit` names.
+- Ruling for the Recovered guard: owner pick b on restart plan item R32 (token audit and cuts), part 2 (waiting-page item 506 b), relayed by the coordinator 2026-11-12 13:18 CST. Its refusal may also carry draft carry lines. See Build.
 
 ## Incident, risk and cost
 
 Incident: owner ask `ask-mw6pwif5wv`, 2026-11-07 12:09 CST. A past-ruling model call timed out. The Unvetted refusal reached the owner in chat, though its steps were for the session. Risk kind: named incident.
 
-Build: done in `lint/report_guard.py`. `owner_line()` is the one home of the owner line and the cite. The suite `lint/test_report_guard_remedy.py` checks each block path it has a fixture for. Its docstring lists the rest. Each refusal text holds facts only: which check, what is wrong, which Done line, which model.
+Build: done in `lint/report_guard.py`. `owner_line()` is the one home of the owner line and the cite. The suite `lint/test_report_guard_remedy.py` checks each block path it has a fixture for. Its docstring lists the rest. Each refusal text holds facts only: which check, what is wrong, which Done line, which model. Exception: the Recovered guard's refusal may also carry a ready-to-paste draft of each missing carry line (`Recovered:`, `Handoff gave:`), each on its own line after the owner line.
 
 Cost: none at run time. No process starts, no file is written and no timer runs. Unmeasured: how often a session reads this record before it acts on a refusal.
 
@@ -70,6 +71,7 @@ Text: two inline facts in `recovered_problem`. The two line forms below live her
   - `Recovered: <each fact, with its source: git, page or digest>`, or `Recovered: none`.
   - `Handoff gave: <facts the handoff supplied that the summary did not>`, or `Handoff gave: none`.
 - If a Recovered item names no source, end it with git, page or digest. Items split on ";" outside parentheses. An item that starts with "none" or "nothing" needs no source.
+- The refusal may also carry a draft of each missing line (see Build). The steps stay in this record.
 
 ### Departs-from guard (any reply with a pick)
 
