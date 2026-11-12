@@ -607,7 +607,8 @@ def copied_runner(tmp, child=None):
 
 class UnknownReadsRed(unittest.TestCase):
     """A read the check cannot make prints unknown: exit 0 locally, non-zero when env CI is set (decision
-    ci-unknown-is-red). Each red case names its cause in its precondition; each control stays green on main."""
+    ci-unknown-is-red). Each red case names its cause in its precondition. Each control runs the same input
+    with the read made, or with CI unset, and must exit 0, so only the named cause can turn a case red."""
     BASE = {".code-check.json": config(["a.py"]), "a.py": GOOD_PY}
 
     def test_base_not_in_clone_under_ci_is_red(self):
