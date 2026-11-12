@@ -5912,10 +5912,16 @@ class BuildDirReapTests(unittest.TestCase):
         write(os.path.join(base, "DerivedData", "payload.bin"), "x\n")
         link = os.path.join(primary, ".claude", "worktrees", "agent-x")
         make_junction(link, base)
-        self.assertEqual(self.reap.reap_build_dirs(link, []), [])
-        deadline = time.monotonic() + 2  # a detached child, if one ran, would act inside this window
-        while time.monotonic() < deadline:
-            time.sleep(0.2)  # kept: a detached child acts over time, and this window is its only check; a spawn count proves less
+        spawned = []
+
+        def refuse(argv, **kwargs):
+            # a start is recorded and refused: a detached child can act on the target only once started
+            spawned.append(argv)
+            return mock.MagicMock()
+
+        with mock.patch.object(self.reap._nowindow, "Popen", side_effect=refuse):
+            self.assertEqual(self.reap.reap_build_dirs(link, []), [])
+        self.assertEqual(spawned, [], "a junction worktree path started a detached child")
         self.assertEqual(os.listdir(base), ["DerivedData"], "the target was renamed or gained a trash name")
         self.assertTrue(os.path.isfile(os.path.join(base, "DerivedData", "payload.bin")),
                         "the target's DerivedData lost its file")
