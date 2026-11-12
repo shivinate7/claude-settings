@@ -1641,5 +1641,74 @@ class SessionStartStopHookPatchTests(SessionStartAgentWorktreeNoticeTests):
         self.assertEqual(self.last_stderr, "", "the hook wrote to stderr: %r" % self.last_stderr)
 
 
+# The freshness line for the pointer checkout, once origin has a stable branch (the pin follows it; decision
+# merge-reinstalls-from-main). A pin behind origin/stable is counted against it. A pin at its tip counts as on main.
+# With no origin/stable the count stays against origin/main, as before stable existed.
+STALE_LINE = re.compile(r"^claude-settings: .+ is (\d+) commits behind (origin/\S+); global rules and hooks are stale$")
+
+
+class SessionStartStableFreshnessTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTests):
+    """The primary checkout is the pointer, detached or on main, with a local origin. Each case fixes what origin's
+    main and stable hold, then runs the hook once and reads its stale line."""
+
+    # The 51-worktree case builds 51 worktrees; this class does not repeat it.
+    test_no_notice_at_fifty_and_one_notice_at_fifty_one = None
+
+    def setUp(self):
+        super().setUp()
+        self.origin_repo = os.path.join(self.root, "origin.git")
+        vcs(self.root, "init", "-q", "--bare", "-b", "main", "origin.git")
+        vcs(self.primary, "remote", "add", "origin", self.origin_repo)
+        vcs(self.primary, "push", "-q", "origin", "main")
+        self.put(os.path.join(self.config, "CLAUDE.md"), "@%s/CLAUDE.md\n" % self.primary.replace("\\", "/"))
+
+    def other_commit(self, message, refspec):
+        """Another clone commits once and pushes HEAD to `refspec` on origin. Returns the new commit's sha."""
+        other = os.path.join(self.root, "other")
+        if not os.path.isdir(other):
+            vcs(self.root, "clone", "-q", self.origin_repo, other)
+        vcs(other, "commit", "-q", "--allow-empty", "-m", message)
+        vcs(other, "push", "-q", "origin", "HEAD:%s" % refspec)
+        return vcs(other, "rev-parse", "HEAD").stdout.strip()
+
+    def stale_lines(self, lines):
+        return [(found.group(1), found.group(2)) for found in map(STALE_LINE.match, lines) if found]
+
+    def test_a_pin_behind_origin_stable_prints_the_count_against_origin_stable(self):
+        stable = self.other_commit("stable", "stable")
+        self.other_commit("main moves on", "main")
+        vcs(self.primary, "checkout", "-q", "--detach")
+        self.assertIsNone(self.resolve("origin/stable"), "scope: the primary already holds origin/stable")
+        self.assertEqual(self.resolve("origin/main"), self.resolve("main"), "scope: the hook's fetch already moved origin/main")
+        lines = self.run_hook()
+        self.assertEqual(self.resolve("origin/stable"), stable, "the hook did not fetch origin's stable")
+        self.assertEqual(self.stale_lines(lines), [("1", "origin/stable")],
+                         "want one stale line counting the pin 1 behind origin/stable, got %r" % lines)
+
+    def test_a_pin_at_origin_stable_tip_counts_as_main_and_prints_no_stale_line(self):
+        stable = self.other_commit("stable", "stable")
+        self.other_commit("main moves on", "main")
+        vcs(self.primary, "fetch", "-q", "origin", "stable")
+        vcs(self.primary, "checkout", "-q", "--detach", stable)
+        self.assertEqual(self.head_sha(), self.resolve("origin/stable"), "scope: the pin is not at origin/stable")
+        self.assertEqual(self.resolve("origin/main"), self.resolve("main"), "scope: the hook's fetch already moved origin/main")
+        lines = self.run_hook()
+        self.assertEqual([line for line in lines if "not main" in line], [],
+                         "the pin at origin/stable's tip printed a pointer-not-main line: %r" % lines)
+        self.assertEqual(self.stale_lines(lines), [],
+                         "the pin at origin/stable's tip printed a stale line: %r" % lines)
+
+    def test_no_origin_stable_counts_the_pin_behind_origin_main(self):
+        # Characterization of the fallback (the builder's; a reviewer rules on it): with no origin/stable the stale
+        # line counts main..origin/main, as it did before stable existed.
+        self.other_commit("main one", "main")
+        self.other_commit("main two", "main")
+        self.assertIsNone(self.resolve("origin/stable"), "scope: origin has a stable branch")
+        self.assertEqual(self.resolve("origin/main"), self.resolve("main"), "scope: the hook's fetch already moved origin/main")
+        lines = self.run_hook()
+        self.assertEqual(self.stale_lines(lines), [("2", "origin/main")],
+                         "want one stale line counting main 2 behind origin/main, got %r" % lines)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
