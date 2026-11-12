@@ -2180,3 +2180,4 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
+- coordinator-cd-into-agent-worktree-skipped: the handoff hooks skip a run whose `cwd` is an agent's worktree (decision precompact-handoff, item 16). The payload `cwd` follows the shell, so a coordinator whose shell `cd`'d into an agent worktree would have its PreCompact skipped. Unmeasured: no such run was seen. Decision: roles-findings-are-debts-or-notes.
