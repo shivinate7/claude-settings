@@ -1575,24 +1575,55 @@ def reset_one_term_cache():
     _ONE_TERM_CACHE.clear()
 
 
+_MODULE_KEY = ("check_glossary",)  # the cache key of the module, apart from the path keys of the table
+# Word edges as check_glossary.words reads them: a non-alphanumeric run, or a case step (batchBranch). Case is
+# read in the edges even under re.I, so GATEWAY is one word and holds no `gate`.
+_CASE_STEP = r"(?-i:(?<=[a-z0-9])(?=[A-Z]))"
+_EDGE_BEFORE = r"(?:(?<![A-Za-z0-9])|%s)" % _CASE_STEP
+_EDGE_AFTER = r"(?:(?![A-Za-z0-9])|%s)" % _CASE_STEP
+_WORD_JOIN = r"(?:[^A-Za-z0-9]+|%s)" % _CASE_STEP
+
+
+def reset_one_term_cache():
+    _ONE_TERM_CACHE.clear()
+
+
+def _check_glossary():
+    """The check_glossary module, or None when it does not load (said once on stderr): STE022 is then off,
+    and every other check runs as before."""
+    if _MODULE_KEY not in _ONE_TERM_CACHE:
+        try:
+            import check_glossary
+        except ImportError as e:
+            check_glossary = None
+            print("ste_lint: unknown: lint/check_glossary.py does not load (%s), so STE022 did not run" % e,
+                  file=sys.stderr)
+        _ONE_TERM_CACHE[_MODULE_KEY] = check_glossary
+    return _ONE_TERM_CACHE[_MODULE_KEY]
+
+
 def _glossary_table():
     """The glossary table, read once per run and path, or None when it cannot be read (said once on stderr)."""
     if GLOSSARY_PATH not in _ONE_TERM_CACHE:
         table = None
-        try:
-            import check_glossary
-            with open(GLOSSARY_PATH, encoding="utf-8-sig") as f:
-                table = check_glossary.rows(f.read())
-        except (ImportError, OSError, ValueError, IndexError):
-            print("ste_lint: unknown: GLOSSARY.md is unreadable at %s, so STE022 did not run" % GLOSSARY_PATH,
-                  file=sys.stderr)
+        check_glossary = _check_glossary()
+        if check_glossary is not None:
+            try:
+                with open(GLOSSARY_PATH, encoding="utf-8-sig") as f:
+                    table = check_glossary.rows(f.read())
+            except (OSError, ValueError, IndexError):
+                print("ste_lint: unknown: GLOSSARY.md is unreadable at %s, so STE022 did not run" % GLOSSARY_PATH,
+                      file=sys.stderr)
         _ONE_TERM_CACHE[GLOSSARY_PATH] = table
     return _ONE_TERM_CACHE[GLOSSARY_PATH]
 
 
 def one_term_skip(path):
-    """True for a file that names the retired words on purpose or is vendored: the list check_glossary keeps."""
-    import check_glossary
+    """True for a file that names the retired words on purpose or is vendored: the list check_glossary keeps.
+    True also when check_glossary does not load, since STE022 cannot run."""
+    check_glossary = _check_glossary()
+    if check_glossary is None:
+        return True
     p = path.replace("\\", "/")
     return any(p.endswith(e) if not e.endswith("/") else e in p for e in check_glossary.SKIP_CODE)
 
@@ -1604,22 +1635,27 @@ def one_term_findings(text):
     table = _glossary_table()
     if table is None:
         return []
-    import check_glossary
+    check_glossary = _check_glossary()
+
+    def platform(word):
+        return word in check_glossary.PLATFORM_NAMES or word.startswith(check_glossary.PLATFORM_PREFIXES)
     out = []
     for problem in check_glossary.name_problems("", text, table, plain=True):
         m = _USES_RE.search(problem)
         if not m:
             continue
         name, term = m.group(1), m.group(2)
-        if name in check_glossary.PLATFORM_NAMES or name.startswith(check_glossary.PLATFORM_PREFIXES):
+        if platform(name):
             continue
-        # A spelling of the name: whole words, plural too, or a camelCase run of the same words.
+        # A spelling of the name: its words between word edges, plural too, or a camelCase run of the same words.
+        # A name with no spelling found is not reported, so no finding lands on a word that is not the name.
         parts = [re.escape(w) for w in re.split(r"[^A-Za-z0-9]+", name) if w]
-        pattern = r"(?<![A-Za-z0-9])" + r"[^A-Za-z0-9]?".join(parts) + r"(?:e?s)?(?-i:(?![a-z0-9]))"
-        hits = [h.start() for h in re.finditer(pattern, text, re.I)]
-        for at in hits or [0]:
-            token = re.match(r"\w*", text[max(0, text.rfind(" ", 0, at) + 1):]).group(0)
-            if token in check_glossary.PLATFORM_NAMES or token.startswith(check_glossary.PLATFORM_PREFIXES):
+        pattern = _EDGE_BEFORE + _WORD_JOIN.join(parts) + r"(?:e?s)?" + _EDGE_AFTER
+        for hit in re.finditer(pattern, text, re.I):
+            at = hit.start()
+            # The whole identifier around the spelling, so `(SubagentStop` reads as SubagentStop.
+            ident = re.search(r"\w*\Z", text[:at]).group(0) + re.match(r"\w*", text[at:]).group(0)
+            if platform(ident):
                 continue  # Claude Code's own name, kept by check_glossary.PLATFORM_NAMES
             out.append((at, name, term))
     return out
