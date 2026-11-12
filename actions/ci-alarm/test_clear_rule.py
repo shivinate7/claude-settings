@@ -193,14 +193,14 @@ class ClearRuleNightly(unittest.TestCase):
     if can run in the newer run is kept needed, and its skip there blocks the clear. They pin the classification the gate
     relies on: a skipped nightly never supersedes a red one."""
     MAC_IF = "if: ${{ github.event_name != 'push' }}"
-    GATE_IF = "if: ${{ github.event_name == 'schedule' }}"
+    SKIP_IF = "if: ${{ github.event_name == 'schedule' }}"
 
-    def test_a_skipped_nightly_behind_a_green_gate_does_not_clear_a_red_macos_nightly(self):
+    def test_a_skipped_nightly_behind_a_green_skip_does_not_clear_a_red_macos_nightly(self):
         # The red nightly failed checks-macos. The newer scheduled run's gate read skip: its checks-macos and checks were skipped,
         # and only the gate passed. Named failure: the skipped jobs read as passed, and the skipped run clears the red one.
-        r = [job("checks-macos", "failure"), job("nightly-gate", "success"), job("checks", "success")]
-        n = [job("nightly-gate", "success"), job("checks-macos", "skipped"), job("checks", "skipped")]
-        text = workflow(("nightly-gate", ["runs-on: ubuntu-latest", self.GATE_IF, *STEPS]),
+        r = [job("checks-macos", "failure"), job("nightly-skip", "success"), job("checks", "success")]
+        n = [job("nightly-skip", "success"), job("checks-macos", "skipped"), job("checks", "skipped")]
+        text = workflow(("nightly-skip", ["runs-on: ubuntu-latest", self.SKIP_IF, *STEPS]),
                         ("checks", [RUNS_ON, *STEPS]),
                         ("checks-macos", ["runs-on: macos-latest", self.MAC_IF, *STEPS]))
         self.assertFalse(clear_rule.clears(r, n, "schedule", text),

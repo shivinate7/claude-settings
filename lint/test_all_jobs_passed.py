@@ -159,9 +159,9 @@ class AllJobsPassedJob(unittest.TestCase):
 MAC_JOBS = ("shell-macos", "checks-macos", "checks-macos-b")
 PUSH_GUARD_IF = "    if: ${{ github.event_name != 'push' }}\n"
 SCOPE_IF = "    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}\n"
-GATED_SCOPE_IF = ("    if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) "
-                  "&& needs.nightly-gate.outputs.skip != 'true' }}\n    needs: nightly-gate\n")
-GATE_JOB = """  nightly-gate:
+SKIPD_SCOPE_IF = ("    if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) "
+                  "&& needs.nightly-skip.outputs.skip != 'true' }}\n    needs: nightly-skip\n")
+SKIP_JOB = """  nightly-skip:
     if: ${{ github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -169,7 +169,7 @@ GATE_JOB = """  nightly-gate:
       actions: read
       contents: read
     outputs:
-      skip: ${{ steps.gate.outputs.skip }}
+      skip: ${{ steps.decide.outputs.skip }}
     steps:
       - id: gate
         run: echo skip=false >> "$GITHUB_OUTPUT"
@@ -187,14 +187,14 @@ def planned_mac_push_guard(text):
     return text
 
 
-def planned_nightly_gate(text):
+def planned_nightly_skip(text):
     """`text` with the nightly gate job before `checks`, and scope needing it with its if reading the gate's skip output."""
-    if "\n  nightly-gate:\n" in text:
+    if "\n  nightly-skip:\n" in text:
         return text
     assert text.count(SCOPE_IF) == 1, "scope's if changed: this fixture must follow it"
     assert text.count("\n  checks:\n") == 1, "the checks job's key changed: this fixture must follow it"
-    text = text.replace(SCOPE_IF, GATED_SCOPE_IF, 1)
-    return text.replace("\n  checks:\n", "\n" + GATE_JOB + "  checks:\n", 1)
+    text = text.replace(SCOPE_IF, SKIPD_SCOPE_IF, 1)
+    return text.replace("\n  checks:\n", "\n" + SKIP_JOB + "  checks:\n", 1)
 
 
 class MacOnceByBatchRollup(unittest.TestCase):
@@ -221,9 +221,9 @@ class MacOnceByBatchRollup(unittest.TestCase):
         rollup = needs_of(job_block(self.text, "all-jobs-passed") or "") or []
         self.assertEqual([j for j in MAC_JOBS if j not in rollup], [], "all-jobs-passed does not need every macOS job")
 
-    def test_the_nightly_gate_is_no_rollup_member_and_scope_reads_its_skip(self):
+    def test_the_nightly_skip_is_no_rollup_member_and_scope_reads_its_skip(self):
         # Named failure: the gate is an off-rollup job that is not a shard, and scope's if reads the gate's skip output.
-        planned = planned_nightly_gate(self.text)
+        planned = planned_nightly_skip(self.text)
         self.assertEqual(off_problems(planned), [])
         self.assertEqual(needs_problems(planned), [])
         self.assertEqual(scope_if_problems(planned), [])

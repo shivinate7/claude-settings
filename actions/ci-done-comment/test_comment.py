@@ -118,30 +118,30 @@ class ChecksCaller(unittest.TestCase):
                 self.assertNotEqual(ci_done_problems(text), [], name)
 
 
-class ScheduledGate(unittest.TestCase):
+class ScheduledSkip(unittest.TestCase):
     """R61 part 3: the nightly gate is a schedule-only job, which ci-done need not name. Controls: the rule holds with the gate
     beside ci-done, with or without its name in ci-done's needs, and a job that a pull_request run needs is still required."""
-    GATE = "  nightly-gate:\n    if: ${{ github.event_name == 'schedule' }}\n    runs-on: x\n"
+    SKIP = "  nightly-skip:\n    if: ${{ github.event_name == 'schedule' }}\n    runs-on: x\n"
 
-    def test_a_schedule_only_gate_beside_ci_done_needs_no_entry_there(self):
-        self.assertEqual(ci_done_problems(GOOD.replace("  ci-done:", self.GATE + "  ci-done:", 1)), [])
+    def test_a_schedule_only_skip_beside_ci_done_needs_no_entry_there(self):
+        self.assertEqual(ci_done_problems(GOOD.replace("  ci-done:", self.SKIP + "  ci-done:", 1)), [])
 
-    def test_a_schedule_only_gate_named_in_ci_done_is_accepted(self):
-        text = GOOD.replace("  ci-done:", self.GATE + "  ci-done:", 1).replace("    needs:\n      - a\n", "    needs:\n      - a\n      - nightly-gate\n")
+    def test_a_schedule_only_skip_named_in_ci_done_is_accepted(self):
+        text = GOOD.replace("  ci-done:", self.SKIP + "  ci-done:", 1).replace("    needs:\n      - a\n", "    needs:\n      - a\n      - nightly-skip\n")
         self.assertEqual(ci_done_problems(text), [])
 
-    def test_a_trailing_comment_on_the_gates_if_keeps_the_exemption(self):
+    def test_a_trailing_comment_on_the_skips_if_keeps_the_exemption(self):
         # A trailing comment on the if: line is text to YAML, so the gate is still a schedule-only job that ci-done need not name.
-        gate = self.GATE.replace("'schedule' }}\n", "'schedule' }}  # nightly only\n")
-        self.assertEqual(ci_done_problems(GOOD.replace("  ci-done:", gate + "  ci-done:", 1)), [])
+        nightly_skip = self.SKIP.replace("'schedule' }}\n", "'schedule' }}  # nightly only\n")
+        self.assertEqual(ci_done_problems(GOOD.replace("  ci-done:", nightly_skip + "  ci-done:", 1)), [])
 
-    def test_a_hash_inside_a_quoted_step_of_the_gate_keeps_the_exemption(self):
+    def test_a_hash_inside_a_quoted_step_of_the_skip_keeps_the_exemption(self):
         # A `#` inside quotes is text, not a comment: the gate's step still reads, and the gate stays exempt.
-        gate = self.GATE + "    steps:\n      - run: echo \"skip=false # not a comment\" >> \"$GITHUB_OUTPUT\"\n"
-        self.assertEqual(ci_done_problems(GOOD.replace("  ci-done:", gate + "  ci-done:", 1)), [])
+        nightly_skip = self.SKIP + "    steps:\n      - run: echo \"skip=false # not a comment\" >> \"$GITHUB_OUTPUT\"\n"
+        self.assertEqual(ci_done_problems(GOOD.replace("  ci-done:", nightly_skip + "  ci-done:", 1)), [])
 
-    def test_a_pull_request_job_left_out_beside_the_gate_is_still_flagged(self):
-        text = GOOD.replace("  ci-done:", "  b:\n    runs-on: x\n" + self.GATE + "  ci-done:", 1)
+    def test_a_pull_request_job_left_out_beside_the_skip_is_still_flagged(self):
+        text = GOOD.replace("  ci-done:", "  b:\n    runs-on: x\n" + self.SKIP + "  ci-done:", 1)
         self.assertTrue(ci_done_problems(text), "a job a pull_request run needs is left out of ci-done's needs and is not flagged")
 
 
