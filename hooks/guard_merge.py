@@ -404,7 +404,19 @@ def gh_write_view(raw: str) -> str:
         saw_python = True
     if not saw_python:
         return stripped
-    return strip_heredoc_bodies(raw, shells_only=True, per_body=True)
+    view = strip_heredoc_bodies(raw, shells_only=True, per_body=True)
+    # An unquoted delimiter lets bash run each substitution of the body while it writes it, whatever reads the
+    # body after; the shell reading above skips an interpreter header, so those lines join the view here.
+    from guard_core import interpreter_bodies
+    from guard_env import _substitutions
+    runs = []
+    for lang, body, quote in interpreter_bodies(raw):
+        if lang == "py" and not quote and ("$(" in body or "`" in body):
+            texts, too_deep = _substitutions(body, heredoc=True)
+            if too_deep:
+                return raw   # unreadable: every line stays in view
+            runs += [text for text, _ in texts[:-1]]   # the last text is the body around them
+    return "\n".join([view] + runs)
 
 
 def gh_write_of(segment: str) -> str:
