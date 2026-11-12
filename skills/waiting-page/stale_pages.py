@@ -103,7 +103,8 @@ does not clear it (the check reads `read` only, never `filed`). With no `woke` (
 no such receipt is listed, and the last field reads `before wake: none recorded`. With none listed,
 `unread: clean` and exit 0. A missing or unreadable file, a file of the wrong shape (meta not an object, the others
 not a list), an unreadable `woke`, an answer with no readable `at`, a compared receipt with no readable `read`,
-or a listed answer whose item has malformed `wakes` prints an `unknown:` line and exits 2.
+a listed answer whose item has malformed `wakes`, or a hooks/own_session.py (the one home of the session id shape) that
+cannot be imported prints an `unknown:` line and exits 2.
 The mode reads no clock and has no time bound: what it lists depends on the saved files alone. `woke` is the writer's
 own optional field in meta/page. The incident: an answer that sat unread 10.5 h (owner's report).
 Write `read` and `filed` as ISO UTC with a trailing Z: a time with no zone is read in the host's zone.
@@ -128,7 +129,6 @@ sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
 sys.path.insert(1, os.path.join(os.path.expanduser("~"), ".claude", "lint"))
 sys.path.insert(2, os.path.join(HERE, "..", "..", "hooks"))
 sys.path.insert(3, os.path.join(os.path.expanduser("~"), ".claude", "hooks"))
-SESSION_ID = re.compile(r"session_[A-Za-z0-9_-]+")  # the one shape a `wakes` entry may take, matched whole (hooks/own_session.py)
 import splice  # noqa: E402  the one home of the roadmap block's markers (beside this script)
 
 TEMPLATE = os.path.join(HERE, "page.html")
@@ -743,6 +743,11 @@ def unread_mode(argv):
     ap = argparse.ArgumentParser(prog="stale_pages.py", allow_abbrev=False)
     ap.add_argument("--unread", required=True)
     args = ap.parse_args(argv)
+    try:
+        from own_session import _CREATED_ID as SESSION_ID  # the one home of the session id shape a `wakes` entry takes, matched whole
+    except ImportError as err:  # without the one shape no `wakes` can be read, and no copy stands in for it
+        print("unknown: hooks/own_session.py cannot be imported (%s)" % err)
+        return 2
     try:
         loaded = {}
         for name in ("meta", "items", "answers", "receipts"):
