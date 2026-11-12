@@ -1,0 +1,16 @@
+{
+ "id": "challenge-followups",
+ "title": "The ruling-challenge check agrees with the stale-decision rule on \"unmeasured\", and its judge tail carries both exclusions",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "ruling-challenge-passes"
+ ],
+ "why": "Lane ruling-challenge-passes hand-in (item 579 b built, head 1c2b164ca), via coordinator 13:35 CST Nov 12.",
+ "source": "coordinator 13:35 CST Nov 12",
+ "note": "Clash: rule outcomes-stale-decision-protocol (CLAUDE.md) allows \"Measure the claim, or say unmeasured\", but the check's item 8 refuses a challenge that only says unmeasured. The owner's rule text wins unless he rules otherwise; fix item 8 to accept it, or bring a page question if the lane finds a harm. Also: the judge tail (call_judge.py about line 152) omits the two exclusions. Unstarted after merge: R39 item 3; cases for items 528-531 and 537; item 8 unshown-record test. Starts after the 1c2b164ca head merges.",
+ "updatedAt": "2026-11-12T13:35:10-06:00"
+}
