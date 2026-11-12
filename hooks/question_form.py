@@ -304,10 +304,10 @@ def _write_data(entry, cwd=""):
     return data
 
 
-# ------------------------------------------------------------------ a pick never widens a shared tool
+# ------------------------------------------------------------------ a pick should not widen a shared tool
 #
 # docs/decisions/uniform-over-variants.md, rule `uniform-pick`, built against a named incident
-# (incident in the record): the owner's ruling is that a repo should change to fit the shared tool,
+# (incident in the record): a repo should change to fit the shared tool,
 # rather than the tool change to fit a repo. An option marked `widens: true` is not the item's `pick`
 # (a str or any key in a list `pick`). Widening is judged by scope: a change that applies the same way
 # to every repo is not widening. In the chat box the mark is the words below in an option's label or

@@ -47,6 +47,10 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 from shared_names import GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN  # noqa: E402  stdlib only; the one home of the gh logins
 
+# The widening scope sentences come from call_judge, their one home; the model judges share them.
+from call_judge import (WIDENING_ACCEPTS_CLAUSE, WIDENING_SAME_CHANGE_SENTENCE,  # noqa: E402
+                        WIDENING_UNMARKED_SENTENCE)
+
 # The widening words come from question_form.WIDENS_TEXT, the one home. If the import fails, the prompt
 # keeps its sentence without the quoted words, one stderr line says so, and the hook still runs.
 try:
@@ -126,9 +130,8 @@ INSTRUCTIONS = (
     "\"verdict: clear\" or \"harness passes\", is a result, not narration; never flag it. "
     "Flag only a limit or rule named as a note on the session's own conduct. "
     "style-question-form: flag a reply whose recommended option widens what a shared tool accepts, "
-    "meaning the tool changes to fit one repo: it accepts a second form, an allow-list entry "
-    "or an exception for that repo's sake. "
-    "A change made the same way for every repo, for every repo's sake, is not widening. "
+    "meaning the tool changes to fit one repo: " + WIDENING_ACCEPTS_CLAUSE + " "
+    + WIDENING_UNMARKED_SENTENCE + " " + WIDENING_SAME_CHANGE_SENTENCE + " "
     + WIDENS_LABEL_SENTENCE +
     "Do not flag an option where the repo changes to match the shared format. "
     "Do not flag an option that names a repo and changes nothing in the tool. "

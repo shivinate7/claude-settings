@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner, 2026-10-27 12:51 CDT, topic t18 (one home, then variants): when a repo differs from a shared format, the repo changes to match it. The shared tool never grows a second accepted form to fit one repo.
+Owner, 2026-10-27 12:51 CDT, topic t18 (one home, then variants): when a repo differs from a shared format, the repo changes to match it. The shared tool never grows a second accepted form to fit one repo. (The owner's words that day; the 2026-11-06 entry below sets the strength.)
 
 Owner, 2026-11-06 12:41 CST, item 278: the ruling reads as a guideline, not a fixed rule. A mark on an option goes by scope.
 
