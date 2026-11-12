@@ -690,13 +690,17 @@ need "no record line" test "$(record_lines)" -eq 0
 end_case "52 reuse path: the Duo it reuses gets no sim-boots.jsonl line"
 
 # A copy of the tool and its sim-lease, with a hooks folder that holds every guard module but the record hook: the brake loads, so the take boots, and the record
-# call finds no hook. It must print nothing, and the run must still boot, test and shut down with xcodebuild's exit code.
+# call finds no hook. The hooks come from the tool under test, as copy_tool in lint/test_sim_lease.py takes them. It must print nothing, and the run must still
+# boot, test and shut down with xcodebuild's exit code.
 fresh; ps_stub; devices_json "$DUO1"
 /bin/mkdir -p "$work/nohooks/bin"; cp "$script" "$work/nohooks/bin/sim-test"; cp "$sim_lease" "$work/nohooks/bin/sim-lease"; chmod +x "$work/nohooks/bin/sim-test" "$work/nohooks/bin/sim-lease"
-/bin/mkdir -p "$work/nohooks/hooks"; cp "$root"/hooks/*.py "$work/nohooks/hooks/"; /bin/rm -f "$work/nohooks/hooks/sim_boot_record.py"
+/bin/mkdir -p "$work/nohooks/hooks"; cp "$(dirname "$script")/../hooks/"*.py "$work/nohooks/hooks/"; /bin/rm -f "$work/nohooks/hooks/sim_boot_record.py"
 saved_script=$script; script=$work/nohooks/bin/sim-test
 run PATH="$work/psbin:$PATH"
 script=$saved_script
+need "scope: the copy has its brake's guard.py" test -e "$work/nohooks/hooks/guard.py"
+need "scope: the copy has no record hook" test ! -e "$work/nohooks/hooks/sim_boot_record.py"
+need "scope: the record call wrote no line" test "$(record_lines)" -eq 0
 need "exit code is xcodebuild's" rc_is 0
 need "steps are boot run shutdown" steps_are "boot run shutdown "
 need "no hook message on stderr" no_hook_message
