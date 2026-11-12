@@ -1,14 +1,14 @@
 {
  "id": "stop-checks-one-message",
  "title": "All end-of-turn checks speak in one merged message, so one fix turn answers them all",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
- "lane": "",
+ "lane": "stop-checks-one-message",
  "owner": "triage",
  "blockedBy": [],
  "why": "Each end-of-turn check refuses on its own, so one report can take several fix turns.",
  "source": "plan restart-plan (main), coordinator 11:46 CST Nov 12 for lane ruling-parts-cite-steps; R32 part 2 (owner pick b, Nov 11)",
- "note": "R32 part 2 has two halves. (1) Every end-of-turn check speaks in one merged message, so one fix turn answers them all. (2) After a compaction the hook drafts the \"Recovered\" and \"Handoff gave\" lines, so they are not retyped after a refusal. Half 2 meets the coordinator's 11:22 CST cull pick (lane guard-false-alarm-cull deletes the Recovered-line report check): with that check gone there is nothing to retype, so the outcome R32 part 2 protects holds; this step builds half 1 only and drops half 2 when the cull lands. Step token-spend-sources only measures. Ready, no lane.",
- "updatedAt": "2026-11-12T11:48:16-06:00"
+ "note": "R32 part 2 has two halves. (1) Every end-of-turn check speaks in one merged message, so one fix turn answers them all. (2) After a compaction the hook drafts the \"Recovered\" and \"Handoff gave\" lines, so they are not retyped after a refusal. Half 2 meets the coordinator's 11:22 CST cull pick (lane guard-false-alarm-cull deletes the Recovered-line report check): with that check gone there is nothing to retype, so the outcome R32 part 2 protects holds; this step builds half 1 only and drops half 2 when the cull lands. Step token-spend-sources only measures. Ready, no lane. Lane stop-checks-one-message started 11:48 CST Nov 12 (coordinator), half 1 only.",
+ "updatedAt": "2026-11-12T11:49:16-06:00"
 }
