@@ -1241,7 +1241,7 @@ def _join_path(head: str, tail: str) -> str:
 
 
 _PY_TEMP = "\0temp"   # a folder a python or node temp call made: no path of the repo, so nothing under it is judged
-_PY_TEMP_CALLS = ("mkdtemp", "mkstemp", "gettempdir", "TemporaryDirectory")
+_PY_TEMP_CALLS = ("mkdtemp", "mkstemp", "gettempdir", "TemporaryDirectory", "run_folder")
 
 
 def _py_call_name(node):
@@ -1264,6 +1264,8 @@ def _py_temp_head(node, env):
         return _py_temp_head(node.left, env)
     if isinstance(node, ast.Call):
         name = _py_call_name(node)
+        if name == "run_folder":   # lint/_test_temp.py: its one argument is the root, so only the bare call is a temp folder
+            return not node.args and not node.keywords
         if name in _PY_TEMP_CALLS:
             return len(node.args) < 3 and not any(isinstance(arg, ast.Starred) for arg in node.args) \
                 and not any(keyword.arg in ("dir", None) for keyword in node.keywords)
