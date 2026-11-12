@@ -395,6 +395,9 @@ jobs:
       - name: Plan refuter fixture suite
         run: python3 lint/test_check_plan_refuter.py
 
+      - name: Plan step cite fixture suite
+        run: python3 lint/test_check_plan_step_cites.py
+
       - name: Copy finder fixture suite
         run: python3 lint/test_find_copies.py
 
