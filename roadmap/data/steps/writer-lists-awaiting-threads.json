@@ -1,0 +1,15 @@
+{
+ "id": "writer-lists-awaiting-threads",
+ "title": "At each wake the page writer lists comment threads awaiting its reply",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "An owner comment sent to Claude can sit unanswered for days: thread be1a03d4 waited 37 hours (Nov 10 22:05 to Nov 12 11:22 CST).",
+ "source": "triage, 11:25 CST Nov 12, after the retrospective relayed the owner's 11:19 CST question",
+ "note": "Incident: the owner's thread be1a03d4 (Nov 10 22:05 CST) on the claude-settings page got no reply until 11:22 CST Nov 12. At that point 19 of 52 threads were open, and 3 had the owner's comment as the last word. ArtifactComments read marks a thread \"awaiting reply\". Fix: skill waiting-page's wake routine reads the threads and puts each awaiting one in the writer's report under Input Needed until it is answered. A check reads the writer's report for a missing count. Cost: one comments read per wake, which already happens. Red case first. Ready, no lane.",
+ "updatedAt": "2026-11-12T11:25:24-06:00",
+ "order": -295
+}
