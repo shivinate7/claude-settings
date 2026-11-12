@@ -368,6 +368,13 @@ class StaleCase(unittest.TestCase):
         self.assertFalse(has_object(clone, rng.base), "scope: the base is cut from the clone")
         return clone
 
+    def root_repo(self):
+        """A full clone whose one commit is the root. Its base, HEAD~1, names nothing."""
+        rng = self.tree("# Notes\n")._replace(base="HEAD~1")
+        self.assertFalse(has_object(rng.repo, "HEAD~1"), "scope: the root commit has no parent")
+        self.assertEqual(git(rng.repo, "rev-parse", "--is-shallow-repository"), "false", "scope: the repo is a full clone")
+        return rng
+
     def run_copy_of_script(self, rng, args):
         """Run a copy of the script's folders with `args` in the repo. Returns (exit code, output, the files before,
         the files after), so a file the run writes in the repo or beside the script shows as a change."""
@@ -886,13 +893,6 @@ class UnknownTests(StaleCase):
         self.assertRegex(out, r"(?m)^stale-cites: UNKNOWN, .*" + re.escape(orphan),
                          "under CI the stale-cites line is not UNKNOWN naming the base sha\n" + out)
 
-    def root_repo(self):
-        """A full clone whose one commit is the root. Its base, HEAD~1, names nothing."""
-        rng = self.tree("# Notes\n")._replace(base="HEAD~1")
-        self.assertFalse(has_object(rng.repo, "HEAD~1"), "scope: the root commit has no parent")
-        self.assertEqual(git(rng.repo, "rev-parse", "--is-shallow-repository"), "false", "scope: the repo is a full clone")
-        return rng
-
     def assert_root_range_exits_zero(self, rng, spec):
         rc, out = self.run_check(rng, spec=spec)
         self.assertNotIn("stale-cites: UNKNOWN,", out, "a root commit's first push printed the exit-2 read failure\n" + out)
@@ -1105,6 +1105,34 @@ class CiHistoryTests(StaleCase):
         self.assertIn("stale-cites: UNKNOWN", out, "an unreachable origin under CI printed no final UNKNOWN line\n" + out)
         self.assertNotEqual(rc, 0, "an unreachable origin under CI exited 0, not red\n" + out)
         self.assertNotIn("stale-cites: PASS", out, "an unreachable origin under CI printed PASS\n" + out)
+
+    def assert_first_push_exits_zero_under_ci(self, rng):
+        """A first push, spelled HEAD~1..HEAD as run.sh passes it, under CI: exit 0 and a plain line that says there is
+        no base. Not UNKNOWN, and not PASS, since nothing was read (decision ci-unknown-is-red)."""
+        rc, out = self.run_check(rng, spec="HEAD~1..HEAD", extra_env={"CI": "1"})
+        self.assertEqual(rc, 0, "a first push (HEAD~1..HEAD) under CI exited %d, not 0\n%s" % (rc, out))
+        self.assertNotIn("UNKNOWN", out, "a first push under CI printed UNKNOWN for a base that cannot exist\n" + out)
+        self.assertNotIn("stale-cites: unknown", out, "a first push under CI printed the local unknown line\n" + out)
+        self.assertNotIn("stale-cites: PASS", out, "a first push under CI printed PASS over a range nothing read\n" + out)
+        self.assertRegex(out, r"(?m)^stale-cites: .*no base",
+                         "a first push under CI printed no plain line that says there is no base\n" + out)
+
+    def test_a_first_push_in_a_full_clone_under_ci_exits_zero_with_a_no_base_line(self):
+        """The root commit has no parent, so the range is empty by construction and no fetch can supply a base. A
+        reachable origin is set first, so a red here is not the failed fetch."""
+        rng = self.root_repo()
+        git(rng.repo, "remote", "add", "origin", rng.repo)
+        self.assertEqual(git(rng.repo, "remote", "get-url", "origin"), rng.repo,
+                         "scope: the origin is not the source repo, so the fetch has nothing to reach")
+        self.assert_first_push_exits_zero_under_ci(rng)
+
+    def test_a_first_push_in_a_depth_one_clone_under_ci_exits_zero_with_a_no_base_line(self):
+        """The shape CI checks out by default: a depth-1 clone of a first push, with its origin reachable."""
+        rng = self.root_repo()
+        clone = self.depth_one_clone(rng)
+        self.assertEqual(git(clone, "remote", "get-url", "origin"), rng.repo,
+                         "scope: the clone's origin is not the source repo, so the fetch has nothing to reach")
+        self.assert_first_push_exits_zero_under_ci(rng._replace(repo=clone))
 
     def test_with_ci_unset_the_same_clone_keeps_the_local_unknown_and_exit_zero(self):
         rng = self.removed_name_range()
