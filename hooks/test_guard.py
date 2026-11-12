@@ -444,7 +444,7 @@ def chained_ask(name, command, **kw):
 
 
 # The cases after the helpers above are section files in tests/guard/. A section file's first line is
-# `# section <n>`, where n is the line its FAMILY statement had in the single-file suite, so n orders them.
+# `# section <n>`, where n orders them. n need not be a FAMILY line: a section with no FAMILY statement, such as s00442, keeps the module's default family, misc.
 # They run here, in this module's globals, in n order: the case and log-check order is the one-file order.
 SECTION_DIR = os.path.join(HERE, "..", "tests", "guard")
 
@@ -536,10 +536,11 @@ def build_empty(folder):
 
 
 def build_two_with_one_number(folder):
-    """Every real section file, linked in, and one more file that claims the number of the first section."""
+    """Every real section file, copied in, and one more file that claims the number of the first section."""
+    # A copy, not a link: a symlink needs a privilege the Windows run does not hold.
     for name in os.listdir(SECTION_DIR):
         if name.endswith(".py"):
-            os.symlink(os.path.join(SECTION_DIR, name), os.path.join(folder, name))
+            shutil.copyfile(os.path.join(SECTION_DIR, name), os.path.join(folder, name))
     with open(os.path.join(folder, "s00442-second.py"), "w", encoding="utf-8") as f:
         f.write("# section 442\n")
 
