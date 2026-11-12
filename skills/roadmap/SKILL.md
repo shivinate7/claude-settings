@@ -283,7 +283,7 @@ After each build the roadmap build script prints the upkeep list for the triage 
 
   An idle lane that can never be judged reads `hold (<reason>; lane <session id>)`, and is never archived. The reason
   is `no cs-step tag` (the archive guard refuses such a lane), or a step id that is off the record branch with no
-  `Step:` trailer on main (naming any other `cs-repo:` tag the lane carries). A lane that waits (a step not done, an
+  `Step:` trailer on main; when the lane also carries another repo's `cs-repo:` tag, the reason ends `; also tagged <those tags>`. A lane that waits (a step not done, an
   open pull, an open item) prints no line. The row's count leaves holds out. A live file with no `items` list makes the row unknown. An `items` row with the
   wrong shape makes the row unknown. Each entry reads `<session id> (<steps>; topic <cs-topic or ->)`,
   sorted. The row reads one `unknown (<why>)` entry, never an empty list, when:

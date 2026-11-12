@@ -1542,7 +1542,8 @@ def done_without_check(steps):
 def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=None, trailer_ids=None):
     """Entries for each idle lane of this repo, sorted: `<session id> (<steps>; topic <topic or ->)` to archive, or
     `hold (<reason>; lane <session id>)` for a lane that can never be judged, which is never archived: no cs-step tag,
-    or a step that is neither on the record branch nor named by a Step trailer on main. A lane that waits (step not
+    or a step that is neither on the record branch nor named by a Step trailer on main (that reason ends
+    `; also tagged <tags>` when the lane carries another repo's cs-repo tag). A lane that waits (step not
     done, open pull, open item) has no line. `unknown (<why>)` is only for a whole read that could not run.
 
     A session is listed only when it carries cs-build:lane and this repo's cs-repo tag, is not archived, has status
