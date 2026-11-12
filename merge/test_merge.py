@@ -20323,6 +20323,47 @@ class BatchFreeze(CloudSession):
         for n in (101, 102):
             self.assertTrue(self.on_origin(self.heads[n], "batch-nightly"), "batch-nightly does not hold lane #%d: %s" % (n, out))
 
+    def test_busy_file_two_sibling_lanes_stacked_on_one_lane_in_one_build_share_it_only_through_the_stack_and_are_allowed(self):
+        """#102 and #103 each stack on #101, which changes src/busy.py, and each adds only its own file. In one build with #101, the busy
+        change reaches #102 and #103 only through the stack. They are siblings with no file of their own in common, so the build is allowed."""
+        self.busy_config(["src/busy.py"])
+        self.busy_lane(101, "src/busy.py", "lane 101\n")
+        for n in (102, 103):
+            self.lane(n, on=101)  # each adds lanes/<n>.txt only, and its head contains #101's head
+        sh(self.co, "git", "fetch", "-q", "origin")
+        self.assertFalse(self.ancestor(self.heads[102], self.heads[103]) or self.ancestor(self.heads[103], self.heads[102]),
+                         "setup: #102 and #103 stack on each other, so they are not siblings")
+        for n in (102, 103):
+            self.assertTrue(self.ancestor(self.heads[101], self.heads[n]), "setup: #%d's head does not contain #101's head" % n)
+            self.assertNotIn("src/busy.py", sh(self.co, "git", "diff", "--name-only", self.heads[101], self.heads[n]).splitlines(),
+                             "setup: lane #%d changes src/busy.py itself, past its stack on #101" % n)
+            self.assertIn("src/busy.py", self.changed(n), "setup: lane #%d's diff against main does not hold the busy change its stack brings" % n)
+        rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "103")
+        self.assertEqual(rc, 0, "#102 and #103, siblings stacked on #101 in one build, were refused for the busy file they share only through the stack: %s" % out)
+        for n in (101, 102, 103):
+            self.assertTrue(self.on_origin(self.heads[n], "batch-nightly"), "batch-nightly does not hold lane #%d: %s" % (n, out))
+
+    def test_busy_file_two_sibling_lanes_stacked_on_one_lane_in_one_build_that_each_edit_it_are_still_refused(self):
+        """Control, green on the current head: #102 and #103 each stack on #101 and each edits src/busy.py itself, past #101's edit. They
+        are siblings with the busy file of their own in common, so the build is refused whatever #101 holds."""
+        self.busy_config(["src/busy.py"])
+        self.busy_lane(101, "src/busy.py", "lane 101\n")
+        for n in (102, 103):
+            self.busy_lane(n, "src/busy.py", "same edit\n", on=101)
+        sh(self.co, "git", "fetch", "-q", "origin")
+        for n in (102, 103):
+            self.assertIn("src/busy.py", sh(self.co, "git", "diff", "--name-only", self.heads[101], self.heads[n]).splitlines(),
+                          "setup: lane #%d does not change src/busy.py past its stack on #101" % n)
+        self.record_pushes()
+        rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "103")
+        self.assertEqual(rc, 1, "two sibling lanes that each edit the busy file in one build were not refused with exit 1: %s" % out)
+        self.assertIn("merge.busyFiles names these files", out, "the refusal is not the busy-file rule's: %s" % out)
+        self.assertIn("src/busy.py", out, "the refusal does not name src/busy.py: %s" % out)
+        self.assertIn("#102", out, "the refusal does not name lane #102: %s" % out)
+        self.assertIn("#103", out, "the refusal does not name lane #103: %s" % out)
+        self.assertEqual(self.pushes(), [], "the refused build pushed: %s" % out)
+        self.assertEqual(self.head("batch-nightly"), "", "the refused build put batch-nightly on origin: %s" % out)
+
     def test_busy_file_two_stacked_lanes_that_each_edit_it_on_a_running_batch_are_still_refused(self):
         """Control, green on the current head: #102 and #103 both stack on #101 and each edits src/busy.py itself, so they collide on it
         whatever the running batch holds. The build is refused, so the stacked route is no way round the rule."""
