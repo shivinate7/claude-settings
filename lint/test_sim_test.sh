@@ -580,8 +580,7 @@ need "lock folder kept" test -d "$lockdir"
 need "holder's pid file unchanged" test "$(cat "$lockdir/pid")" = "$$"
 end_case "25 live holder that never ends: refused at the wait bound, no boot, no xcodebuild, lock kept"
 
-# Case 26 (gap-5 contract, owner 2026-11-02 14:23 CST, applied 2026-11-07 13:41 CST): the lease, not the lock, is held through
-# xcodebuild and to the shutdown. The lock covers the list and the boot only. The lease checks come first, so a mutant that
+# Case 26: the lease, not the lock, is held through xcodebuild and to the shutdown. The lock covers the list and the boot only. The lease checks come first, so a mutant that
 # gives the lease back early fails on the lease, not on the lock.
 fresh; run
 need "the slot's lease is held through xcodebuild" lease_at_xc_holds
@@ -896,8 +895,7 @@ need "shuts down nothing" no_shutdown
 need "stderr names the booted Duo" grep -Fq "iPhone Duo" "$work/run.err"
 end_case "60 pro run with a Duo booted: refused, boots and runs nothing, exit 1"
 
-# Control: the pro role reuses the booted 18 Pro, as it did before the role flag existed. The reuse takes the pro lease
-# (owner, 2026-11-07 12:31 CST, page item 336).
+# Control: the pro role reuses the booted 18 Pro, and the reuse takes the pro lease.
 fresh; booted "iPhone 18 Pro" $PRO; ARGS=(--device pro -scheme X); run; ARGS=(-scheme X)
 need "exit code" rc_is 0
 need "steps are run only" steps_are "run "
@@ -1078,7 +1076,7 @@ need "the Duo's boot is recorded" record_names "$DUO1"
 end_case "77 TERM to the tool during a slow simctl boot: the Duo still comes up, and is shut down and recorded"
 
 # Case 78: a Duo booted during the wait, then the pro holder dies: the queued duo run reuses that Duo after its grant, and
-# holds the lease of its slot during xcodebuild (owner, 2026-11-07 12:31 CST, page item 336).
+# holds the lease of its slot during xcodebuild.
 pro_dies_during_duo_wait duo
 need "exit code" rc_is 0
 need "steps are run only" steps_are "run "
@@ -1421,7 +1419,7 @@ ARGS=(-scheme X)
 end_case "104 both Duos booted, each leased by another live pid: the run queues, then exits 1 at the lease wait limit, with no xcodebuild and no boot"
 
 # Case 105: a run whose xcodebuild outlives SIM_LEASE_MAX keeps its slot-1 lease. The run renews it every SIM_TEST_RENEW
-# seconds (owner, 2026-11-07 13:00: a holder that stops answering loses its turn). Here SIM_LEASE_MAX=3, renew every 1 s,
+# seconds, so a holder that stops answering loses its turn. Here SIM_LEASE_MAX=3, renew every 1 s,
 # and xcodebuild runs 6 s. At second 5 a take for Duo 1's slot is not granted while the run lives. The 5 s is the
 # stimulus's timing; the assert is the take's outcome.
 fresh; start_tool SIM_LEASE_MAX=3 SIM_TEST_RENEW=1 STUB_HANG=1 STUB_HANG_SECS=6
