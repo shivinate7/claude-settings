@@ -19,9 +19,9 @@
 # latest spawn with that name wins. A background
 # spawn is running while its launch result is async_launched and no later record holds a finish notice for its id.
 # Any other result, a foreground spawn's included, is finished. A result of unknown shape asks. An errored spawn never
-# ran, so it is skipped: the spawn before it governs, as review_record_hit skips it. The refusal says to
+# ran, so it is skipped: the spawn before it governs, as review_log_hit skips it. The refusal says to
 # spawn a fresh reviewer and pass it the prior report (rule roles-resume-by-name). Each transcript also holds the
-# round's review record after its reviewer spawn, so review-record-after-round does not refuse first.
+# round's review log after its reviewer spawn, so review-log-after-round does not refuse first.
 FAMILY = "resume-finished-reviewer"
 RF_RULE = "resume-finished-reviewer"
 RF_CARRIES = ("fresh reviewer", "prior report")
@@ -249,7 +249,7 @@ RF_TRANSCRIPTS = {
     "running-then-errored-spawn": rr_session(
         rf_launch("r1", "reviewer", RF_ERR_RUNNING, RF_ERR_RUNNING_AGENT), rr_comment("c1", rr_record()),
         rr_spawn_error("r2", "reviewer", name=RF_ERR_RUNNING)),
-    # A reviewer named `rev` that finished, and one that runs, each with the round's review record after its spawn.
+    # A reviewer named `rev` that finished, and one that runs, each with the round's review log after its spawn.
     "bg-rev-finished": rr_session(rf_launch("r1", "reviewer", RF_REV, RF_REV_AGENT), rf_finish("r1"),
                                   rr_comment("c1", rr_record())),
     "bg-rev-running": rr_session(rf_launch("r1", "reviewer", RF_REV, RF_REV_AGENT),
@@ -548,7 +548,7 @@ rf_ask("a reviewer whose launch result holds a bare string asks",
        {"to": RF_UNKNOWN, "message": RF_MSG}, rf_path("reviewer-unknown-result"))
 rf_ask("a reviewer whose notice names its id with no status asks",
        {"to": RF_NOTICE_AGENT, "message": RF_MSG}, rf_path("reviewer-notice-no-status"))
-# An errored spawn never ran, so it is skipped, as review_record_hit skips it. Its name resolves to nothing, or to the
+# An errored spawn never ran, so it is skipped, as review_log_hit skips it. Its name resolves to nothing, or to the
 # spawn before it: the older finished spawn is refused, and the older running spawn is allowed.
 rf_allow("a reviewer whose spawn result is an error is allowed: that spawn never ran",
          {"to": RF_ERRORED, "message": RF_MSG}, rf_path("reviewer-spawn-errored"))
@@ -636,7 +636,7 @@ def rf_unparsed_case():
 
 
 def rf_cost_case():
-    """One SendMessage from the main session to a finished reviewer opens the transcript once: review_record_hit and
+    """One SendMessage from the main session to a finished reviewer opens the transcript once: review_log_hit and
     resume_finished_hit share one read. The control is a send to main, which only the review reader judges: it opens the
     transcript once too. The control and the deny are asserted before the count, so a count is read only where the
     rule reached its read."""

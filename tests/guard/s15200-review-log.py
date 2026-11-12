@@ -1,23 +1,23 @@
 # section 15200
-# =========================================================================== 5i. the review record after a round
+# =========================================================================== 5i. the review log after a round
 #
-# Rule review-record-after-round, decision pr-review-record. A lane's own builder or test-author spawn, or its
+# Rule review-log-after-round, decision pr-review-record. A lane's own builder or test-author spawn, or its
 # send_message (the remote tool or the built-in SendMessage), is refused when the session's last reviewer or
-# design-reviewer spawn has no review record after it. A reviewer spawn whose result is an error never ran, so it
-# gates nothing, and a call inside a sidechain record is not the lane's. A review record is a comment on the pull
+# design-reviewer spawn has no review log after it. A reviewer spawn whose result is an error never ran, so it
+# gates nothing, and a call inside a sidechain record is not the lane's. A review log is a comment on the pull
 # request that holds the record marker: an add_issue_comment call, or a Bash call that posts one (gh api or
 # gh pr comment) whose body either holds the marker or comes from a file. A Bash call that only names the marker,
 # such as a read, is no record. The marker is read from the merge tool, so no case copies it. The rule reads the
 # transcript for those calls only: an agent's own call, an Explore or Plan spawn and a session with no reviewer spawn
 # are not judged. A missing or unreadable transcript is allowed.
-FAMILY = "review-record-after-round"
-RR_RULE = "review-record-after-round"
+FAMILY = "review-log-after-round"
+RR_RULE = "review-log-after-round"
 # The remedy names the merge tool's record flags and the decision, and the comment tool by its name or its tool id.
 RR_CARRIES = ("--review-record", "--head", "pr-review-record", ("add_issue_comment", "GitHub comment"))
 RR_HEAD = "9f3c2b1e7a4d5c6b8e0f1a2b3c4d5e6f7a8b9c0d"
 RR_TARGET = "session_RRTARGET01"
 RR_AGENT = "agent-RR0001"
-RR_DIR = os.path.join(ROOT, "reviewrec")
+RR_DIR = os.path.join(ROOT, "reviewlog")
 RR_MARK = "@@MARKER@@"   # the writer puts the merge tool's record marker here, so the marker is read from one home
 ADD_COMMENT = "mcp__github__add_issue_comment"
 RR_BUILDER = {"subagent_type": "builder", "prompt": "Fix the review findings on PR #12.", "model": "sonnet"}
@@ -104,7 +104,7 @@ def rr_sidechain(lines):
 
 
 def rr_record(rnd=1):
-    """A review record for RR_HEAD, round `rnd`, in the form the merge tool writes."""
+    """A review log for RR_HEAD, round `rnd`, in the form the merge tool writes."""
     return "\n".join([RR_MARK, "PR: #12", "Head: " + RR_HEAD, "Kind: normal", "Guard or check: no",
                       "Round %d: reviewer, sonnet, PASS" % rnd, "CI: read live by merge --reviewed"])
 
@@ -151,7 +151,7 @@ RR_TRANSCRIPTS = {
 
 def write_transcripts(transcripts, folder):
     """Write each transcript in `transcripts` as JSONL under `folder`, with the merge tool's record marker where
-    RR_MARK stands. One home for the marker: every review-record fixture is written here."""
+    RR_MARK stands. One home for the marker: every review-log fixture is written here."""
     import guard_merge  # the merge tool's loader: the guard reads the marker through the same one
     tool = guard_merge.merge_module()
     if tool is None:
@@ -163,7 +163,7 @@ def write_transcripts(transcripts, folder):
 
 
 def write_rr_transcripts():
-    """Write the review-record transcripts. `unreadable` is a folder, so the guard's open() fails on it. `missing` is
+    """Write the review-log transcripts.`unreadable` is a folder, so the guard's open() fails on it. `missing` is
     never written."""
     write_transcripts(RR_TRANSCRIPTS, RR_DIR)
     os.makedirs(rr_path("unreadable"), exist_ok=True)
@@ -174,22 +174,22 @@ lazy_fixture([rr_path(name) for name in RR_TRANSCRIPTS] + [rr_path("unreadable")
 
 def rr_refuse(name, tool, tool_input, transcript, agent_id=None, carries=RR_CARRIES):
     """A call the guard refuses for the rule: the reason names the rule, the remedy and the decision, and `carries`."""
-    add("review-record-after-round: " + name, "deny", rule=RR_RULE, tool=tool, cwd=NOGIT, transcript=transcript,
+    add("review-log-after-round: " + name, "deny", rule=RR_RULE, tool=tool, cwd=NOGIT, transcript=transcript,
         carries=carries, agent_id=agent_id, env=ROLE_ENV, **tool_input)
 
 
 def rr_allow(name, tool, tool_input, transcript, agent_id=None):
     """A call the guard lets through silently."""
-    add("review-record-after-round: " + name, "allow", tool=tool, cwd=NOGIT, transcript=transcript, silent=True,
+    add("review-log-after-round: " + name, "allow", tool=tool, cwd=NOGIT, transcript=transcript, silent=True,
         agent_id=agent_id, env=ROLE_ENV, **tool_input)
 
 
 # Refused: a builder, test-author or handoff after a reviewer spawn that has no record after it.
-rr_refuse("a builder spawn after a reviewer spawn with no review record is refused",
+rr_refuse("a builder spawn after a reviewer spawn with no review log is refused",
           "Agent", RR_BUILDER, rr_path("reviewer"))
-rr_refuse("a test-author spawn after a reviewer spawn with no review record is refused",
+rr_refuse("a test-author spawn after a reviewer spawn with no review log is refused",
           "Agent", RR_TEST_AUTHOR, rr_path("reviewer"))
-rr_refuse("a send_message handoff after a reviewer spawn with no review record is refused",
+rr_refuse("a send_message handoff after a reviewer spawn with no review log is refused",
           SEND_MESSAGE, RR_SEND, rr_path("reviewer"))
 rr_refuse("a design-reviewer spawn counts like a reviewer: a builder spawn after it with no record is refused",
           "Agent", RR_BUILDER, rr_path("design-reviewer"))
@@ -226,7 +226,7 @@ rr_allow("an unreadable transcript (a folder) is allowed, never refused", "Agent
 import _transcript as _transcript_home  # noqa: E402  the one home of the send-tool names (lint/_transcript.py SEND_TOOLS)
 RR_BUILTIN_SEND = next(name for name in _transcript_home.SEND_TOOLS if name != SEND_MESSAGE)
 RR_BUILTIN_HANDOFF = {"to": "builder-pr12", "message": "Handoff: PR #12 is ready for the batch."}
-rr_refuse("a built-in SendMessage handoff after a reviewer spawn with no review record is refused",
+rr_refuse("a built-in SendMessage handoff after a reviewer spawn with no review log is refused",
           RR_BUILTIN_SEND, RR_BUILTIN_HANDOFF, rr_path("reviewer"))
 rr_allow("a built-in SendMessage handoff after a reviewer spawn and a comment with the record marker is allowed",
          RR_BUILTIN_SEND, RR_BUILTIN_HANDOFF, rr_path("record"))
@@ -307,7 +307,7 @@ def rr_cost_case():
     return True, "the deny names the rule, and the run starts no child process and makes no network call"
 
 
-RR_COST_LABEL = "review-record-after-round: a refused builder spawn starts no child process and makes no network call"
+RR_COST_LABEL = "review-log-after-round: a refused builder spawn starts no child process and makes no network call"
 
 
 def review_send_matcher_case():
@@ -325,7 +325,7 @@ def review_send_matcher_case():
     return True, "a guard matcher covers every send tool"
 
 
-RR_SEND_MATCHER_LABEL = "review-record-after-round: a settings.json matcher routes every send tool to the guard"
+RR_SEND_MATCHER_LABEL = "review-log-after-round: a settings.json matcher routes every send tool to the guard"
 RR_SPAN_FLAGS = ("--review-record", "--head") + RR_REMEDY_FLAGS
 RR_MERGE_COMMAND = re.compile(r"`(merge [^`]*)`")
 
@@ -351,7 +351,7 @@ def rr_remedy_case():
     return True, "every merge command the reason prints names %s" % ", ".join(RR_SPAN_FLAGS)
 
 
-RR_REMEDY_LABEL = ("review-record-after-round: every merge command the design-reviewer refusal prints names "
+RR_REMEDY_LABEL = ("review-log-after-round: every merge command the design-reviewer refusal prints names "
                    "--review-record, --head, --kind, --guard and --round")
 
 
