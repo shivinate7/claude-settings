@@ -97,8 +97,11 @@ CLEAN = [
     "rates valid until 2027-01-01", "skip previously seen keys", "cache the previously computed hash",
     "changed files only", "the user changed the value", "added to the queue after review of the input",
     "round 3 places", "used to compute the total",
-    # An example id names no commit, in a docstring or a comment.
+    # An example id names no commit, in a docstring or a comment. Each example marker before an id is its own case:
+    # dropping that marker from EXAMPLE flags its line. A list of ids after the marker joins it.
     "e.g. a short id such as `41ddef83`",
+    "e.g. 41ddef83", "i.e. 41ddef83", "for example 41ddef83", "for instance 41ddef83", "like 41ddef83",
+    "e.g. `aa11bb22`, 41ddef83",
     "Effective date 2024-07-01 (per state rule)", "Effective: 2024-07-01", "Tax rule effective on 2024-07-01",
     "Expires 2027-01-01", "Keep the old behaviour for legacy accounts so existing invoices still match",
     "Skip when previously it was seen in this loop",
@@ -176,7 +179,7 @@ class Case(unittest.TestCase):
     def change(self, files):
         self.commit("change", files)
 
-    def lint(self, *args, path_tools=False, env=None, exclude=()):
+    def lint(self, *args, path_tools=False, env=None, exclude=(), timeout=None):
         args = args or ("--base", "origin/main")
         args = (*args, *(x for prefix in exclude for x in ("--exclude", prefix)))
         run_env = dict(GIT_ENV, **(env or {}))
@@ -185,7 +188,7 @@ class Case(unittest.TestCase):
             run_env["CODE_CHECK_TOOLS"] = "path"
         r = subprocess.run([sys.executable, os.path.join(self.tree, "lint", "check_comment_narration.py"), *args],
                            cwd=self.tree, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                           env=run_env)
+                           env=run_env, timeout=timeout)
         return r.returncode, r.stdout + r.stderr
 
     def fake_tool(self, name, body):
@@ -608,6 +611,45 @@ def f():
         self.base({"keep.py": "x = 1\n"})
         self.change({"hash.py": 's = "a # b"\nt = "// /* # round 2"\nu = \'#\'\nv = """#"""\n# fine\n'})
         self.assertClean()
+
+
+class ExampleIds(Case):
+    """A comma list of ids after an example marker is clean. A long list of ids, comma or space separated, finishes."""
+    # The bound is a hang guard on the run, not a timed assert. A run past it fails with the bound named.
+    BOUND = 2  # seconds
+
+    @staticmethod
+    def example_id(i):
+        """An 8-character hex id with a letter and a digit, distinct for each i below 4096."""
+        return "%03xa%04d" % (i, i)
+
+    def scan_bounded(self, name, line):
+        self.base({"keep.py": "x = 1\n"})
+        self.change({name: "x = 1\n# %s\ny = 2\n" % line})
+        try:
+            return self.lint(timeout=self.BOUND)
+        except subprocess.TimeoutExpired:
+            self.fail("the check ran past %d s on a %d-character comment line" % (self.BOUND, len(line)))
+
+    def test_short_list_after_an_example_marker_is_clean(self):
+        ids = [self.example_id(i) for i in range(3)]
+        rc, out = self.scan_bounded("short.py", "e.g. " + ", ".join(ids))
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(rc, 0, out)
+        self.assertNoHit(out, "short.py", 2)
+
+    def test_comma_list_of_400_ids_after_an_example_marker_is_clean_and_fast(self):
+        ids = [self.example_id(i) for i in range(400)]
+        rc, out = self.scan_bounded("comma.py", "e.g. " + ", ".join(ids))
+        self.assertNotIn("Traceback", out)
+        self.assertEqual(rc, 0, out)
+        self.assertNoHit(out, "comma.py", 2)
+
+    def test_space_separated_list_of_4000_ids_after_an_example_marker_finishes_in_time(self):
+        ids = [self.example_id(i) for i in range(4000)]
+        rc, out = self.scan_bounded("spaces.py", "e.g. " + " ".join(ids))
+        self.assertNotIn("Traceback", out)
+        self.assertIn(rc, (0, 1), out)
 
 
 class Scanner(Case):
