@@ -13135,7 +13135,7 @@ class MergeRoleCheck(CloudSession):
         rc, out, err = self.run_main("7", "--confirm")
         self.assertEqual(rc, 1, out + err)
         # Ruling 113 a, pr-review-record: the handoff text (the pull request number and its head) is retired. The lint step is not.
-        self.assertRegex(err, r"(?i)review record")
+        self.assertRegex(err, r"(?i)review log")
         self.assertRegex(err, r"(?i)batch[ -]runner finds")
         self.assertNotRegex(out, r"(?i)batch[ -]runner")  # stdout carries no part of the refusal
         # git-remedy-never-names-target: the text never names the command it refused
@@ -14640,6 +14640,13 @@ class ReviewArgs(ReviewEnv):
         rc, out, err = self.run_args("--reviewed", host=PullsHost([], {}))
         self.assertEqual(rc, 0, out + err)
 
+    def test_help_names_the_review_log_that_reviewed_reads(self):
+        # Catches: the --reviewed help naming the retired record while its output names the log. --help prints the flag help.
+        rc, out, err = self.run_args("--help")
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn("with their review log state", out, out)
+        self.assertNotIn("review record", out, out)
+
     def test_review_record_needs_a_pr_number(self):
         self.assert_usage_error("--review-record", *self.flags())
         rc, out, err = self.run_args("7", "--review-record", *self.flags())
@@ -15623,7 +15630,7 @@ class ReleaseCheck(ReviewEnv):
     def test_two_failing_checks_share_one_line_joined_by_semicolons(self):
         _, lines, err, _ = self.release([8], pulls=[self.live(8)], comments=[], lint=[])
         line = self.line_of(lines, 8)
-        self.assertIn("no review record", line, err)
+        self.assertIn("no review log", line, err)
         self.assertIn("lint", line, err)
         self.assertEqual(line.count("; "), 1, "the reasons are not joined by one '; ': " + line)
 
@@ -15631,7 +15638,7 @@ class ReleaseCheck(ReviewEnv):
 
     def test_incident_a_pr_with_no_record_beside_a_done_one_prints_no_record(self):
         rc, lines, err, _ = self.release([7, 8], comments=[self.review(7)])
-        self.assertEqual(lines, ["#7 PASS", "#8 FAIL: no review record"], err)
+        self.assertEqual(lines, ["#7 PASS", "#8 FAIL: no review log"], err)
         self.assertEqual(rc, 1, err)
 
     # Check 1: the pull request is open
@@ -15829,8 +15836,14 @@ class ReleaseCheck(ReviewEnv):
     def test_check_3_an_edited_newest_record_fails_alone_and_an_unedited_one_passes(self):
         _, lines, err, _ = self.release([7], comments=[self.review(7, updated="2026-10-03T00:00:00Z")])
         self.assert_fails_alone(self.line_of(lines, 7), 7, r"edit")
+        self.assertIn("the newest review log was edited after it was posted", self.line_of(lines, 7), err)
         _, lines, err, _ = self.release([7])
         self.assertEqual(lines, ["#7 PASS"], err)
+
+    def test_check_3_a_record_with_no_timestamps_names_the_log_it_cannot_date(self):
+        undated = review_comment(7, 7, record_text(n=7, head=self.head()), created=None)
+        _, lines, err, _ = self.release([7], comments=[undated])
+        self.assertIn("the newest review log gave no timestamps", self.line_of(lines, 7), err)
 
     def test_check_3_only_the_newest_record_is_read_for_an_edit(self):
         older = self.review(7, rounds=("Round 1: reviewer, sonnet, FAIL",), updated="2026-10-03T00:00:00Z")
@@ -15855,7 +15868,7 @@ class ReleaseCheck(ReviewEnv):
     def test_check_4_the_unknown_at_cap_suffix_is_for_a_pass_only(self):
         _, lines, err, _ = self.release([7, 8], comments=[self.review(7)], lint=self.lints([7, 8], "UNKNOWN-AT-CAP"))
         self.assertEqual(self.line_of(lines, 7), "#7 PASS (lint unknown at cap)", err)
-        self.assertEqual(self.line_of(lines, 8), "#8 FAIL: no review record", err)  # 8 fails its review check: no suffix on a FAIL line
+        self.assertEqual(self.line_of(lines, 8), "#8 FAIL: no review log", err)  # 8 fails its review check: no suffix on a FAIL line
 
     def test_check_4_a_lint_for_another_head_fails_alone_and_names_both_shas(self):
         live, other = self.head("feat"), REVIEW_OLD_HEAD  # the feature branch's head, and a sha that is not it
@@ -15923,7 +15936,7 @@ class ReleaseCheck(ReviewEnv):
         feat8 = self.stacked()
         pulls = [self.live(7), self.live(8, base="feat7", head=feat8)]
         _, lines, err, _ = self.release([8, 7], pulls=pulls, comments=[self.review(8, head=feat8)])  # no record for #7
-        self.assertEqual(self.line_of(lines, 7), "#7 FAIL: no review record", err)
+        self.assertEqual(self.line_of(lines, 7), "#7 FAIL: no review log", err)
         self.assert_fails_alone(self.line_of(lines, 8), 8, r"#7|feat7")
 
     def test_check_6_a_closed_pr_on_the_base_head_does_not_fail_a_stacked_pr_whose_open_base_passes(self):
