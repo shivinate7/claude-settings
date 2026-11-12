@@ -64,6 +64,13 @@ class PerJob(unittest.TestCase):
         got = body({"checks": {"result": "failure"}}, announced="checks")
         self.assertEqual(got.strip(), "No red job: no comment.")
 
+    def test_run_end_still_wakes_when_all_red_jobs_announced(self):
+        # all-jobs-passed fails with any red job and has no wake step, so the run-end comment names it.
+        needs = {"checks": {"result": "failure"}, "all-jobs-passed": {"result": "failure"}}
+        got = body(needs, announced="checks")
+        self.assertIn("all-jobs-passed (failure)", got)
+        self.assertNotIn("checks (failure)", got)
+
     def test_run_end_still_names_unannounced_cancelled_job(self):
         # A timeout cancels a job before any step can post, so only the run-end comment can name it.
         got = body({"checks": {"result": "cancelled"}}, announced="")

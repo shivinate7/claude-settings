@@ -2,7 +2,7 @@ name: CI done comment
 description: >
   Posts one PR comment when a run ends with a failed or cancelled job. A watched PR wakes its
   session on a new comment, and a run with a red job sends no "all checks done" wake. A green run
-  posts nothing. The caller job MUST set `needs: [...]` (every other job) and
+  posts nothing. The run-end caller job MUST set `needs: [...]` (every other job) and
   an `if:` of `!cancelled()` on a pull_request event, with
   `permissions: {pull-requests: write}`. A cancelled run is superseded, so it posts nothing.
 inputs:
