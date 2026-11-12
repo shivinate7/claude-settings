@@ -17,7 +17,8 @@ was written has no zone: `when` is its naked time and `at` is None, never assume
 --between START END (aware ISO 8601 times) prints the rows whose `at` falls in [START, END], and the
 count of old lines that could fall in it under some zone, for the batch pace read (window()).
 --rule narrows --between to one rule id (the pace read uses load-brake).
-A cloud session reads it the same way: the brake runs there too (owner, 14:36 CST Nov 10)."""
+A cloud session reads it the same way (the brake runs there too, owner 14:36 CST Nov 10) and the read ends with a caveat
+line: guard.log is per container, so cloud lanes in other containers are not counted. It never claims a fleet-wide count."""
 import argparse
 import os
 import re
@@ -28,13 +29,15 @@ from datetime import datetime, timedelta, timezone
 # One home for the placeholder: hooks/guard_core.py. lint/ and hooks/ land side by side, in the
 # repo and under ~/.claude, so the hop holds in both places (lint/report_guard.py does the same).
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
-from guard_core import LOG_CUT_MARK, SESSION_LOG_PLACEHOLDER  # noqa: E402
+from guard_core import LOG_CUT_MARK, SESSION_LOG_PLACEHOLDER, is_cloud  # noqa: E402
 
 COUNTED = ("deny", "ask", "noted")
 OVERRIDE = "override"  # a refusal an owner override lifted: counted, and a key only when present
 FIRST = "first line"  # the --all-rules column: YYYY-MM-DD of the rule's first line in the whole log, or "never"
 COMBINED = re.compile(r"STE\d+(,STE\d+)+")  # one id the removed STE guard wrote for several codes found at once
 UNKNOWN = "unknown session"
+BRAKE_RULE = "load-brake"
+CLOUD_CAVEAT = "cloud session: guard.log is per container, so cloud lanes in other containers are not counted"
 BY_SESSION_ROWS = 200
 Row = namedtuple("Row", "line when tool decision rule matched session at", defaults=(None,))
 MAX_ZONE_HOURS = 14  # the widest UTC offset in use is +14:00, the narrowest -12:00
@@ -214,6 +217,7 @@ def main(argv):
         sys.stdout.reconfigure(errors="replace")
     if args.between and any(t.tzinfo is None for t in args.between):
         ap.error("--between takes times with a UTC offset, such as 2026-11-01T16:55:00-06:00")
+    caveat = bool(args.between) and args.rule == BRAKE_RULE and is_cloud()
     ids = None
     if args.all_rules:
         sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # `python -I` leaves the script folder off the path
@@ -225,12 +229,14 @@ def main(argv):
                 rows, unknown = window(handle, args.between[0], args.between[1], args.rule)
                 print("\n".join(row.line for row in rows))
                 print("unknown (old lines with no zone that could fall inside): %d" % unknown)
-                return 0
-            print(render(summarize(handle, args.days, datetime.now(), args.session), args.by_session, ids))
+            else:
+                print(render(summarize(handle, args.days, datetime.now(), args.session), args.by_session, ids))
     except FileNotFoundError:
         print("unreadable: log not found")
     except OSError as err:
         print("unreadable: log not readable (%s)" % type(err).__name__)
+    if caveat:
+        print(CLOUD_CAVEAT)
     return 0
 
 

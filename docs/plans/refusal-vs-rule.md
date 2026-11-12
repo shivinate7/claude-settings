@@ -249,7 +249,8 @@ Each stricter or looser row becomes one step. Triage owns the steps. This record
     link on a press the session makes.
   - `silent-write`: no step. The guard holds part of its rule, and CLAUDE.md holds the rest. See note
     silent-write-ref-gaps.
-  - `load-brake` and `create_session`: no step. A cloud session adds no load to this machine. See note
+  - `load-brake` and `create_session`: no step. The brake runs in the cloud as it does locally. `create_session` starts a
+    session in another container, a split the platform forces, and it is read nowhere. See note
     load-brake-skips-create-session.
 - **Uncited, rule rewrite:** the merge-lock decision, `env-file`, `config-edit`,
   `ln-over-directory`, `role-diff-main-checkout`, `role-diff-unresolved`, `merge:pinned-mismatch`,

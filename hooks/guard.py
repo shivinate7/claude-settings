@@ -372,7 +372,8 @@ Other tools, in `judge` order:
                        session's own shell or file write, when the machine is busy (lane starts only) or full. A
                        lane session is one whose own newest get_session record carries `cs-build:lane` and no other
                        `cs-build:` tag; the coordinator, triage and the batch runner are never braked on their own
-                       calls. The transcript is read only at full. Only a session start skips it in the cloud. An override lifts it.
+                       calls. The transcript is read only at full. Only start_session skips it in the cloud; create_session is read nowhere.
+                       An override lifts it.
                        (machine-load-brake)
   workflow-args-shape-check
                        deny. A Workflow call whose `args` is, or holds as an array item or object value (one
@@ -3877,10 +3878,13 @@ def role_model_one(tool_input):
 # and the field is not offered, so busy does not slow an Agent call there.) Full (memory over 95%, disk free
 # under the smaller of 5% of the disk and 5 GB) refuses every start call. A reading that cannot be read counts as normal. Only an
 # agent's shell or file write also reads load (RUNNING_AGENT_TOOLS, below). The brake is the same in a cloud session
-# (owner, 14:36 CST Nov 10, glossary topic 1: no rule-chosen local/cloud split). Only a session start skips it there,
-# because the new session runs in another container. A cloud disk does not drain while a session waits, so a full
-# cloud reading adds a steer (cloud_steer). Measured in a cloud container, 14:00 CST Nov 12: a 252 GB disk with 29.7 GB
-# free let writes fail at about 29 GB, so shutil.disk_usage free is the true allowance and the disk lines stay.
+# (owner, 14:36 CST Nov 10, glossary topic 1: no rule-chosen local/cloud split; a split the platform forces lives only
+# inside the tool). Two start tools run the new session in another container or machine, so this one's load says nothing
+# about it: start_session (SESSION_TOOL, read here and skipped in the cloud) and create_session (CREATE_SESSION_TOOL, not
+# in START_TOOLS, so read nowhere today). A cloud disk does not drain while a session waits, so a full cloud disk reading
+# swaps "Wait, then retry" for a steer (cloud_steer). Measured in a cloud container, 14:00 CST Nov 12: writes of about
+# 29 GB failed on a 252 GB disk that showed 29.7 GB free, so shutil.disk_usage free is the true allowance and the disk
+# lines stay.
 START_TOOLS = SPAWN_TOOLS + ("Workflow", SESSION_TOOL)
 LOAD_BUSY_MEMORY = 85.0
 LOAD_FULL_MEMORY = 95.0
@@ -3892,14 +3896,15 @@ LOAD_LANE_CITE = "(decision machine-load-brake, a full machine stops a running a
 LOAD_BUSY_REASON = "the machine is busy (%s). %s " + LOAD_CITE
 LOAD_BUSY_AGENT_FORM = ", or make this an Agent call that leaves run_in_background out or sets it false"
 LOAD_BUSY_NO_FOREGROUND = "A Workflow has no foreground form. "
-LOAD_FULL_REASON = "the machine is full (%s). No new lane or agent starts until the load drops. Wait, then retry. " + LOAD_CITE
-LOAD_CLOUD_STEER = (" A cloud disk does not drain by waiting: free disk space you created, or end this session and "
-                    "tell the parent.")
+LOAD_FULL_REASON = "the machine is full (%s). No new lane or agent starts until the load drops. %s" + LOAD_CITE
+LOAD_WAIT = "Wait, then retry. "
+LOAD_CLOUD_STEER = ("A cloud disk does not drain by waiting: free disk space you created, or end this session and "
+                    "tell the parent. ")
 
 
 def cloud_steer(full) -> str:
-    """The extra remedy a cloud session's full reading carries, or "". A cloud disk does not drain while a session
-    waits, so waiting alone strands it; a memory reading drains as processes end, so it gets none."""
+    """The remedy a cloud session's full disk reading carries in place of waiting, or "". A cloud disk does not drain
+    while a session waits, so waiting alone strands it; a memory reading drains as processes end, so it gets none."""
     return LOAD_CLOUD_STEER if is_cloud() and any(t.startswith("disk") for t in full) else ""
 
 
@@ -3934,9 +3939,9 @@ def _read_memory():
 
 
 def _read_linux_memory():
-    """Percent of memory in use on Linux: 100 * (MemTotal - MemAvailable) / MemTotal from /proc/meminfo. A cgroup
-    memory.max that is a number below MemTotal is the total instead, with the cgroup's memory.current as the use;
-    `max` or no file leaves MemTotal. A file that does not read, or a MemTotal of 0, is None."""
+    """Percent of memory in use on Linux: 100 * (MemTotal - MemAvailable) / MemTotal from /proc/meminfo. A container
+    memory limit is unmeasured, so no cgroup file is read. A file that does not read, a missing field or a MemTotal of
+    0 is None."""
     kb = {}
     with open("/proc/meminfo") as f:
         for line in f:
@@ -3946,20 +3951,7 @@ def _read_linux_memory():
     total, available = kb["MemTotal"], kb["MemAvailable"]
     if total <= 0:
         return None
-    used = total - available
-    try:
-        with open("/sys/fs/cgroup/memory.max") as f:
-            limit = f.read().strip()
-        if limit.isdigit() and 0 < int(limit) < total:
-            total = int(limit)
-            try:
-                with open("/sys/fs/cgroup/memory.current") as f:
-                    used = int(f.read().strip())
-            except (OSError, ValueError):
-                used = min(used, total)
-    except OSError:
-        pass
-    return 100.0 * used / total
+    return 100.0 * (total - available) / total
 
 
 def _read_disk():
@@ -3996,8 +3988,8 @@ def _load_value(reading: dict, key: str):
 def load_hit(tool: str, tool_input) -> tuple:
     """(rule reason, matched) when the machine's load refuses this start call, else ("", ""). The one
     read of the call: a failed read or an unread value counts as normal. A cloud session is braked as a local one is,
-    except for a session start: the new session runs in another container, so this container's load says nothing
-    about it."""
+    except for start_session: that new session runs in another container, so this container's load says nothing
+    about it. create_session is not in START_TOOLS and is read nowhere."""
     if tool not in START_TOOLS or (tool == SESSION_TOOL and is_cloud()):
         return "", ""
     try:
@@ -4015,7 +4007,7 @@ def load_hit(tool: str, tool_input) -> tuple:
 
     full = load_full(reading)
     if full:
-        return LOAD_FULL_REASON % ", ".join(full) + cloud_steer(full), ", ".join(full)
+        return LOAD_FULL_REASON % (", ".join(full), cloud_steer(full) or LOAD_WAIT), ", ".join(full)
     # An Agent or Task call that leaves run_in_background out or sets it false passes busy. Any other present value
     # is a background request. A session start has no such field, and no ruling covers it at busy.
     if tool == SESSION_TOOL or (tool in SPAWN_TOOLS and (
@@ -4041,7 +4033,7 @@ def load_hit(tool: str, tool_input) -> tuple:
 # carries the lane tag, lane_session_hit) is braked the same way on its own calls, since it is a lane too.
 RUNNING_AGENT_TOOLS = ("Bash", "PowerShell") + WRITE_TOOLS
 LOAD_LANE_FULL_REASON = ("the machine is full (%s). Stop this agent now: end your turn and report the reading to "
-                         "your orchestrator, which frees space or waits for the load to drop. " + LOAD_LANE_CITE)
+                         "your orchestrator, which frees space or waits for the load to drop. %s" + LOAD_LANE_CITE)
 
 
 def running_agent_hit(payload, tool: str) -> tuple:
@@ -4056,12 +4048,12 @@ def running_agent_hit(payload, tool: str) -> tuple:
     except Exception:
         return "", ""
     full = load_full(reading)
-    return (LOAD_LANE_FULL_REASON % ", ".join(full) + cloud_steer(full), ", ".join(full)) if full else ("", "")
+    return (LOAD_LANE_FULL_REASON % (", ".join(full), cloud_steer(full)), ", ".join(full)) if full else ("", "")
 
 
 LOAD_SESSION_FULL_REASON = ("the machine is full (%s). You are a lane: end your turn now and send this "
                             "reading to your parent with send_message to @parent, which frees space or waits for the "
-                            "load to drop. " + LOAD_LANE_CITE)
+                            "load to drop. %s" + LOAD_LANE_CITE)
 
 
 def lane_session_hit(payload, tool: str) -> tuple:
@@ -4086,7 +4078,7 @@ def lane_session_hit(payload, tool: str) -> tuple:
             return "", ""
     except Exception:
         return "", ""
-    return LOAD_SESSION_FULL_REASON % ", ".join(full) + cloud_steer(full), ", ".join(full)
+    return LOAD_SESSION_FULL_REASON % (", ".join(full), cloud_steer(full)), ", ".join(full)
 
 
 def load_full(reading) -> list:
