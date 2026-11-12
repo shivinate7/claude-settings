@@ -11,7 +11,7 @@ The refusal names the placeholder and says to replace it with the real value.
 
 These pass: a call with no `args` and empty `args`. A sentence that holds a placeholder (`MAILBOX_REPO is off`) passes. So do a short all-caps word with no underscore (`OK`) and a path that holds a dunder (`hooks/__init__.py`).
 
-Known false alarm: a real value can have the shape, such as a bare env var name (`MAILBOX_REPO`) as the whole value. The guard refuses it. The owner's override lifts it (decision `guard-guards-mistakes-only`, guards stop Claude's mistakes).
+Known false alarm: a real value can have the shape, such as a bare env var name (`MAILBOX_REPO`) as the whole value. The guard refuses it. The owner's override lifts it (decision `guard-guards-mistakes-only`; rule `roles-review-cap-three` gives the scope: Claude's mistakes, not attacks).
 
 Known gap: a placeholder nested more than one level down, and a placeholder in any other shape (`TODO`, `<fill me>`), pass.
 

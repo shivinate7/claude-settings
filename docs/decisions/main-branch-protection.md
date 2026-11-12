@@ -51,8 +51,8 @@ Reason: agent rules alone did not stop red merges.
   role skip the checks on pull requests only. Under this ruling, admins are not bound by the checks there.
 - Planned form, not an owner ruling (step ruleset-pr-bypass, coordinator's plan): PR required; only `all-jobs-passed`; 0 approvals; not strict; no linear history; no signed commits. `strict` is planned false. That is not an owner ruling. Step merge-reads-ruleset's lane may still pick it.
 - Step merge-reads-ruleset (the merge tool reads rulesets; owner ruling c, 19:49 CST Nov 11: "c is prob best").
-  The merge tool reads `main`'s ruleset first and the old protection second. The owner chose c over the ruling that a
-  repo changes to fit a shared tool, never the tool to fit a repo. The step lands before any sweep removes old protection.
+  The merge tool reads `main`'s ruleset first and the old protection second. The owner chose c over the shared-tool ruling in
+  rule `style-question-form` (the repo fits the tool, not the reverse). The step lands before any sweep removes old protection.
 - `protect.py` (`skills/project-ops/scripts/protect.py`) sets classic protection today. Ruled: it sets the ruleset.
 - Old-protection removal: a session on the owner's computer may remove old protection only after step
   merge-reads-ruleset has merged and the ruleset is on. PR #2606 (draft, not merged) carries the standing-grant text for it.

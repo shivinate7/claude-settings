@@ -949,8 +949,8 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
   Today merge/merge.py protection_names reads main's old branch protection and stops every merge when it
   is gone. Step merge-reads-ruleset makes it read main's ruleset first and the old protection second;
   skills/project-ops/scripts/protect.py, which sets classic protection today, will set the ruleset. It lands before the sweep removes any old
-  protection. Once every repo has a ruleset, the old-protection read is deleted. Option c carried the label
-  "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo"; he
+  protection. Once every repo has a ruleset, the old-protection read is deleted. Option c carried the widening label that rule
+  `style-question-form` gives; he
   chose it over that ruling.
   No GitHub Issues, ruled p', owner 16:44 CST Nov 11: "agreed on p", then "yea" when asked whether he meant
   the refuter's revised p'. g is
