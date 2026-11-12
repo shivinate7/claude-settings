@@ -1,0 +1,16 @@
+{
+ "id": "lane-start-open-pr-mutants",
+ "title": "Mutation rows for guard rule lane-start-open-pr",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "lane-start-checks-open-pr"
+ ],
+ "why": "Lane lane-start-checks-open-pr 16:23 CST Nov 12 (PR #2983 handed to the batch runner at 2ce83361f): the rule has no mutation rows.",
+ "source": "lane lane-start-checks-open-pr 16:23 CST Nov 12",
+ "note": "Add rows in hooks/mutate_guard.py, one mutant per clause: step tag, whole-token slug, marker grammar, cite, uncited, fail-open, full page. Starts after #2983 merges.",
+ "updatedAt": "2026-11-12T16:25:07-06:00"
+}

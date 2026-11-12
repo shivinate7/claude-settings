@@ -9,7 +9,7 @@
  "blockedBy": [],
  "why": "Coordinator 14:54 CST Nov 12: it started lanes outbox-ruling-home-check and round1-sonnet-guard-table without checking open PRs; draft #2767 and #1552 already held the work, so one lane stopped and one carries the old PR.",
  "source": "coordinator 14:54 CST Nov 12 (its own miss)",
- "note": "At create_session for a cs-step tag, search open PRs naming the step (title, body, branch) and refuse the start when one is found unless the brief cites that PR. Red first on today's two starts. Rule building-mistake-names-its-guard. Lane started 14:55 CST Nov 12 (coordinator).",
- "updatedAt": "2026-11-12T14:58:30-06:00",
+ "note": "At create_session for a cs-step tag, search open PRs naming the step (title, body, branch) and refuse the start when one is found unless the brief cites that PR. Red first on today's two starts. Rule building-mistake-names-its-guard. Lane started 14:55 CST Nov 12 (coordinator). PR #2983 handed to the batch runner at 2ce83361f (lane 16:23 CST Nov 12); no owner overrides printed. Follow-up step lane-start-open-pr-mutants.",
+ "updatedAt": "2026-11-12T16:25:07-06:00",
  "order": -310
 }
