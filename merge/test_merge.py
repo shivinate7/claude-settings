@@ -19117,6 +19117,7 @@ class BatchFreeze(CloudSession):
         with self.no_lint_or_ready_check():
             rc, out = self.run_batch("--batch-build", "nightly", "--blame", "102", "--run", url)
         self.assertRegex(out, r"current head|older head", "a blame from a run on an older head is not refused as one: %s" % out)
+        self.assertIn("Nothing was stored.", out, "a blame from a run on an older head does not say nothing was stored: %s" % out)
         self.assertEqual(rc, 1, "a blame from a run on an older head exited %s, not 1: %s" % (rc, out))
         self.assert_untouched(pr, snap, out)
 
@@ -19130,6 +19131,7 @@ class BatchFreeze(CloudSession):
         with self.no_lint_or_ready_check():
             rc, out = self.run_batch("--batch-build", "nightly", "--blame", "102", "--run", url)
         self.assertRegex(out, r"success|green|not (a )?failed", "a blame from a green run is not refused as one that is not failed: %s" % out)
+        self.assertIn("Nothing was stored.", out, "a blame from a green run does not say nothing was stored: %s" % out)
         self.assertEqual(rc, 1, "a blame from a green run exited %s, not 1: %s" % (rc, out))
         self.assert_untouched(pr, snap, out)
 
@@ -19143,6 +19145,7 @@ class BatchFreeze(CloudSession):
         with self.no_lint_or_ready_check():
             rc, out = self.run_batch("--batch-build", "nightly", "--blame", "102", "--run", url)
         self.assertRegex(out, r"running|not completed|not finished|in progress|pending", "a blame from a run still running is not refused as one: %s" % out)
+        self.assertIn("Nothing was stored.", out, "a blame from a run still running does not say nothing was stored: %s" % out)
         self.assertEqual(rc, 1, "a blame from a run still running exited %s, not 1: %s" % (rc, out))
         self.assert_untouched(pr, snap, out)
 
@@ -19360,6 +19363,107 @@ class BatchFreeze(CloudSession):
         self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
         self.assertRegex(out, r"unknown|unmapped", "a job with a line that names neither a case nor a file is not refused: %s" % out)
         self.assertEqual(rc, 1, "a split with a line that names neither exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
+    def test_batch_split_of_a_case_named_only_in_a_note_drops_nothing(self):
+        self.main_holds(os.path.join("lanes", "test_it_main.txt"), "def test_it(self):\n")  # main holds the case; no lane adds a def of it
+        self.lane(101)
+        self.lane(102)
+        self.lane_commit(102, os.path.join("notes", "flaky.txt"), "# test_it is flaky\n", "lane 102: a note on test_it")  # its one + line that holds the case
+        self.lane(103)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        url = self.split_run(7130, {"unit-tests": ["FAIL: test_it (__main__.C.test_it)"]})
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        self.assertRegex(out, r"unmapped", "a case that a lane names only in a note is not refused as unmapped: %s" % out)
+        self.assertEqual(rc, 1, "a split whose case only a note names exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
+    def test_batch_split_of_a_common_word_named_only_in_a_comment_drops_nothing(self):
+        self.lane(101)
+        self.lane(102)
+        self.lane_commit(102, os.path.join("notes", "steps.txt"), "# run the checks first\n", "lane 102: a comment on run")
+        self.lane(103)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        url = self.split_run(7131, {"unit-tests": ["FAIL: run (__main__.C.run)"]})
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        self.assertRegex(out, r"unmapped", "a common word that a lane names only in a comment is not refused as unmapped: %s" % out)
+        self.assertEqual(rc, 1, "a split whose common-word case only a comment names exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
+    def test_batch_split_of_a_def_only_in_a_comment_or_a_string_drops_nothing(self):
+        self.lane(101)
+        self.lane(102)
+        self.lane_commit(102, os.path.join("notes", "forms.txt"),
+                         '# def test_it(self):\nx = \'def test_it(self):\'\n# don\'t run test_it: it is flaky\n',  # a comment, a string, a lone quote
+                         "lane 102: three mentions of test_it")
+        self.lane(103)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        url = self.split_run(7135, {"unit-tests": ["FAIL: test_it (__main__.C.test_it)"]})
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        self.assertRegex(out, r"unmapped", "a def that only a comment or a string holds is not refused as unmapped, so its lane would be dropped: %s" % out)
+        self.assertEqual(rc, 1, "a split whose case only comments and strings name exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
+    def test_batch_split_of_a_def_at_any_indent_still_drops_its_lane(self):  # pin: a def indented in a class names its lane
+        self.lane(101)
+        self.lane(102)
+        self.lane_commit(102, os.path.join("lanes", "102-tests.txt"), "class TestIt(unittest.TestCase):\n    def test_it(self):\n        pass\n",
+                         "lane 102: a test in a class")
+        self.lane(103)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        url = self.split_run(7132, {"unit-tests": ["FAIL: test_it (__main__.C.test_it)"]})
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        self.assertEqual(rc, 0, "a split whose case is an indented def in #102 exited %s, not 0: %s" % (rc, out))
+        self.assertEqual(self.frozen_lanes(pr), [101, 103], "the split did not drop #102, whose indented def names the case: %s" % out)
+
+    def test_batch_split_where_one_line_of_a_job_names_no_lane_drops_nothing(self):
+        self.lane(101)
+        self.case_lane(102, "test_it")
+        self.lane(103)
+        pr = self.frozen_batch("nightly", [101, 102, 103])
+        url = self.split_run(7133, {"unit-tests": ["FAIL: test_it (__main__.C.test_it)", "FAIL: test_gone (__main__.C.test_gone)"]})  # no lane defines test_gone
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        self.assertRegex(out, r"unmapped", "a job with a line that no lane names is not refused as unmapped, though another line names #102: %s" % out)
+        self.assertIn("unit-tests", out, "the refusal does not name the job whose line no lane names: %s" % out)
+        self.assertIn("test_gone", out, "the refusal does not name the line that no lane names: %s" % out)
+        self.assertEqual(rc, 1, "a split with a line that no lane names exited %s, not 1: %s" % (rc, out))
+        self.assert_untouched(pr, snap, out)
+
+    def test_batch_split_of_a_frozen_lane_with_no_merge_on_the_tip_names_the_blame_route(self):
+        self.case_lane(102, "test_it")
+        self.lane(101, on=102)  # stacked on #102: its head holds #102's head
+        pr = self.frozen_batch("nightly", [101, 102])  # the build merges #101 first, which brings #102 in: #102 has no merge commit of its own
+        self.assertEqual(self.second_parents("batch-nightly"), {self.heads[101]}, "setup: batch-nightly does not hold only #101's merge commit")
+        self.assertTrue(self.on_origin(self.heads[102], "batch-nightly"), "setup: batch-nightly does not hold #102's commits")
+        url = self.split_run(7134, {"unit-tests": ["FAIL: test_it (__main__.C.test_it)"]})
+        snap = self.snapshot(pr)
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-split", "nightly", "--run", url)
+        self.assert_split_knows_the_flag(out, "--batch-split nightly --run URL")
+        route = f"store the blame of the lane the run is caused by with `merge --batch-build nightly --blame <PR> --run {url}`, then run its `merge --batch-drop nightly <PR>`"
+        self.assertIn(route, out, "the refusal of a lane with no merge commit does not name the blame route, then the drop: %s" % out)
+        self.assertLess(out.find("--blame"), out.find("--batch-drop"), "the route names the drop before the blame: %s" % out)
+        self.assertRegex(out, r"no merge commit", "the refusal of a lane with no merge commit does not say so: %s" % out)
+        self.assertEqual(rc, 1, "a split of a lane with no merge commit exited %s, not 1: %s" % (rc, out))
         self.assert_untouched(pr, snap, out)
 
     def test_batch_split_whose_named_lane_with_its_dependents_is_every_lane_drops_nothing(self):
