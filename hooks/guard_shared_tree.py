@@ -680,9 +680,9 @@ def _brace_group(text: str, start: int):
 def expand_shell_braces(word: str, cap: int = SCRATCHPAD_BRACE_CAP):
     """The words brace expansion makes of `word`: `S/{a,b}` is `S/a` and `S/b`, a list nests, and a `{1..3}` or
     `{a..c}` range counts. A one-element `{x}`, a `${x}`, an escaped brace and an unclosed one stay as written, as
-    in bash. It differs from bash where bash keeps padding (`{01..03}` gives `1 2 3`) or a step (`{1..3..1}` stays
-    literal); the list stops at `cap` words (the rest is unread). Quotes are not known here: a quoted brace list
-    expands too, which can only widen a refusal."""
+    in bash. Unlike bash, it drops a range's zero padding (`{01..03}` gives `1 2 3`) and keeps a stepped range
+    (`{1..3..1}`) literal; the list stops at `cap` words (the rest is unread). Quotes are not known here: a quoted
+    brace list expands too, which can only widen a refusal."""
     for at, char in enumerate(word):
         if char == "\\":
             continue
