@@ -264,3 +264,5 @@ background knowledge.
   knowledge says it is a copy-paste detector with a minimum token count.
 - Renovate presets, tsconfig `extends`, Kustomize overlays and OPA bundles. Unverified. Not
   fetched.
+
+Refuter: refuter opus, 2026-11-12, revise (stale premises fixed above; code half filed as debt one-home-code-half; copies cite their rule per decision uniform-over-variants)

@@ -59,8 +59,13 @@ Paraphrase pass, `python3 lint/find_copies.py --measure lint/paraphrase_labelled
 ## The parts
 
 - In-repo copies: `python3 lint/find_copies.py --in-repo`, code COPY001, 8-word floor. On
-  2026-11-07, on main 5cc641f78, it found 85 copies in 44 files. Lane `one-home-check` cleared them all: each now
-  names its rule id.
+  2026-11-12, on main 2deb827ad, it found 106 copies in 52 files; 61 sit in decision records. Lane
+  `one-home-check` cleared them all: each now cites its rule by id instead of quoting it. A decision
+  record gets no exemption: decision `uniform-over-variants` (coordinator, 13:46 CST Nov 12) rules that a
+  repo changes to fit the shared format, so a record cites its rule by anchor. Not every hit was labelled
+  true or false: the ones read were true copies, and the 61 record hits are the likely false-alarm class.
+- Code half: the check reads Markdown only. Debt `one-home-code-half` holds the gap, and the mechanism
+  row `building-one-home-per-capability` proves the Markdown half only (coordinator pick 13:45 CST Nov 12).
 - Reworded rule text: `lint/stale_cites.py`, code STALE006, 5-word floor (item 340). It skips a
   rule sentence that only gained words.
 - Child repos: the ste-lint step runs `find_copies.py --in-repo --parent` from its own checkout.
