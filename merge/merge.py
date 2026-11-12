@@ -108,7 +108,7 @@
                           case: a PR posted under another session id is not found as this lane's, unless --with names it. A PR body
                           with no session URL has no lane PRs, so only --with finds any. A commit or ref target is measured against its base only, and is not cross-measured.
                           --touched-tests: after the lint passes, also runs each test file the diff against the base touches, once,
-                          in that worktree (the batch runner passes it on the integration branch). HEAVY and needs-setup tests and
+                          in that worktree, after the lint steps (any lane-lint target takes it; the batch ready route does not). HEAVY and needs-setup tests and
                           .ps1 tests print `skip <test>: <reason>`. A failing test refuses, with its last output; a timeout, an
                           unloadable selector or an unreadable diff is an unknown, lifted by --lint-unknown-ok. The PASS line names
                           the run and skipped counts. Extra cost: the touched tests' own run time, bounded in all by LINT_SECONDS.
@@ -3058,8 +3058,7 @@ TOUCHED_RUNNERS = {".py": sys.executable, ".sh": "bash", ".mjs": "node", ".js": 
 TOUCHED_TAIL_LINES = 15  # last output lines a failing test shows; the whole log would bury the assertion
 
 def run_touched_tests(wt, base, head):
-    """Run the test files the diff base...head touches, inside the lint worktree `wt`, once the lint has passed. The batch's merged tree can fail a test
-    that no lane failed alone, so this runs on the integration head. A test the selector keeps out (HEAVY, NEEDS_SETUP) or a .ps1 with no pwsh on the PATH is
+    """Run the test files the diff base...head touches, inside the lint worktree `wt`, once the lint has passed. A test the selector keeps out (HEAVY, NEEDS_SETUP) or a .ps1 with no pwsh on the PATH is
     skipped with its reason, never run and never a pass. The whole stage shares one LINT_SECONDS bound.
     -> (run count, skip lines, fail texts, unknown lines). An unreadable diff, an unloadable selector and a timeout are unknowns, not passes."""
     c, diff = git(wt, "diff", "--name-only", "--no-renames", "-z", f"origin/{base}...{head}")  # -z: git quotes a non-ASCII or spaced name otherwise
@@ -3146,7 +3145,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names.
     A PASS on a pull request number posts the lane-lint comment (lint_body) naming the head it read, which `--reviewed` and the join require; a failed post
     prints a reason line and still exits 0. A FAIL, an unknown and a ref or commit target post nothing.
-    `touched_tests` (--touched-tests): after a lint pass only, run_touched_tests runs the batch's touched tests in the same tree. A failing test refuses always;
+    `touched_tests` (--touched-tests): after a lint pass only, run_touched_tests runs the tests the head's diff touches in the same tree. A failing test refuses always;
     an unknown (timeout, unloadable selector, unreadable diff) refuses unless `unknown_ok` gives a reason. The PASS line then also names the run and skipped counts."""
     if target.isdigit():
         host = host or Host(cwd=root)
