@@ -7,7 +7,7 @@
 set -u
 
 REPO="shivinate7/claude-settings"
-RAW="${CLAUDE_SETTINGS_RAW:-https://raw.githubusercontent.com/${REPO}/main}"
+RAW="${CLAUDE_SETTINGS_RAW:-https://raw.githubusercontent.com/${REPO}/stable}"
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 CAP="${CLAUDE_SETTINGS_SETUP_CAP:-240}"
 

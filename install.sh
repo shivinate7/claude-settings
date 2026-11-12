@@ -20,7 +20,7 @@ set -u
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) echo "install.sh does not run on Windows. Use install.ps1: powershell -ExecutionPolicy Bypass -File ./install.ps1"; exit 0;; esac
 
 REPO="shivinate7/claude-settings"
-REF="${CLAUDE_SETTINGS_REF:-main}"
+REF="${CLAUDE_SETTINGS_REF:-stable}"   # stable: the branch sessions install from. CLAUDE_SETTINGS_REF=main is the recovery.
 RAW="https://raw.githubusercontent.com/${REPO}/${REF}"
 TARBALL="https://github.com/${REPO}/archive/refs/heads/${REF}.tar.gz"
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
@@ -199,7 +199,7 @@ else
 fi
 
 # Cloud, a run of the pin's own install.sh (merge/install_from_main.sh runs it there): the pin stays the source,
-# at the local main the merge set. Only that script moves the pin, so both cloud blocks below skip this source,
+# at the commit the merge set. Only that script moves the pin, so both cloud blocks below skip this source,
 # and the pin_off_main refusal below still checks it.
 FROM_LIVE_PIN=0
 if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$SRC" = "$SCRIPT_DIR" ] && live_pin_clone "$SRC" >/dev/null; then
@@ -207,9 +207,26 @@ if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$SRC" = "$SCRIPT_DIR" ] && live_pin_c
   log "the source $SRC is the live pin; the cloud steps leave it as it is"
 fi
 
-# True when the pinned checkout $1 is not detached at the clone's local main commit.
+# The commit the pinned checkout of the clone $1 belongs at: origin's $REF (stable) as last fetched, which
+# merge/install_from_main.sh keeps current. A clone that holds no origin/$REF, and CLAUDE_SETTINGS_REF=main (the
+# recovery), pin the clone's local main as before. Prints nothing when there is no such commit.
+pin_commit() {
+  pc=""
+  [ "$REF" = main ] || pc=$(git -C "$1" rev-parse --verify -q "refs/remotes/origin/$REF^{commit}")
+  [ -n "$pc" ] || pc=$(git -C "$1" rev-parse --verify -q refs/heads/main)
+  printf '%s' "$pc"
+}
+# The words for pin_commit's answer in a message.
+pin_what() {
+  if [ "$REF" != main ] && git -C "$1" rev-parse --verify -q "refs/remotes/origin/$REF^{commit}" >/dev/null; then
+    printf 'origin/%s' "$REF"
+  else
+    printf 'local main'
+  fi
+}
+# True when the pinned checkout $1 is not detached at the commit pin_commit names.
 pin_off_main() {
-  main_commit=$(git -C "$1" rev-parse --verify -q refs/heads/main)
+  main_commit=$(pin_commit "$1")
   git -C "$1" symbolic-ref -q HEAD >/dev/null || [ -z "$main_commit" ] \
     || [ "$(git -C "$1" rev-parse HEAD)" != "$main_commit" ]
 }
@@ -217,7 +234,7 @@ pin_off_main() {
 # An install from a linked worktree would point the global config at a temp
 # checkout. Refuse before any write, whether the source came from the script or from the cwd.
 # Decision merge-reinstalls-from-main: the pinned checkout <clone>-live is the one linked
-# worktree allowed, and only on a detached HEAD at the clone's local main commit. <clone>-live
+# worktree allowed, and only on a detached HEAD at the commit pin_commit names (origin's stable). <clone>-live
 # may be a link to such a worktree (merge/install_from_main.sh moves it), so paths compare resolved.
 if [ -n "$SRC" ] && is_linked_worktree "$SRC"; then
   m=$(clone_of "$SRC")
@@ -226,7 +243,7 @@ if [ -n "$SRC" ] && is_linked_worktree "$SRC"; then
     exit 1
   fi
   if pin_off_main "$SRC"; then
-    log "ERROR: the pinned checkout $SRC is not detached at local main; run merge/install_from_main.sh from the clone $m to move it."
+    log "ERROR: the pinned checkout $SRC is not detached at $(pin_what "$SRC"); run merge/install_from_main.sh from the clone $m to move it."
     exit 1
   fi
 fi
@@ -312,16 +329,16 @@ take_install_lock() {
 take_install_lock
 
 # Local install from a clone that has a branch named main: the links point at the pinned
-# checkout <clone>-live, a worktree on a detached HEAD at main's commit, never at the clone,
-# whose branch changes. Made here when missing; only merge/install_from_main.sh moves it. Cloud
+# checkout <clone>-live, a worktree on a detached HEAD at origin's stable commit (local main when the clone
+# holds no origin/stable), never at the clone, whose branch changes. Made here when missing; only merge/install_from_main.sh moves it. Cloud
 # mode and a clone with no main branch stay unpinned.
 if [ "$CLOUD" != 1 ] && [ -n "$SRC" ] && [ -e "$SRC/.git" ] && ! is_linked_worktree "$SRC"; then
-  if main_commit=$(git -C "$SRC" rev-parse --verify -q refs/heads/main); then
+  if main_commit=$(pin_commit "$SRC") && [ -n "$main_commit" ]; then
     PIN="$SRC-live"
     if [ ! -e "$PIN" ]; then
       err=$(git -C "$SRC" worktree add -q --detach --lock --reason "claude-settings live pin" "$PIN" "$main_commit" 2>&1) \
         || { log "ERROR: cannot make the pinned checkout $PIN: $err; fix that and run the installer again."; exit 1; }
-      log "made the pinned checkout $PIN at main"
+      log "made the pinned checkout $PIN at $(pin_what "$SRC")"
     else
       pin_common=$(canon "$(common_dir "$PIN")")
       if [ -z "$pin_common" ] || [ "$pin_common" != "$(canon "$(common_dir "$SRC")")" ]; then
@@ -329,7 +346,7 @@ if [ "$CLOUD" != 1 ] && [ -n "$SRC" ] && [ -e "$SRC/.git" ] && ! is_linked_workt
         exit 1
       fi
       if pin_off_main "$PIN"; then
-        log "ERROR: the pinned checkout $PIN is not detached at local main; run merge/install_from_main.sh from the clone $SRC to move it."
+        log "ERROR: the pinned checkout $PIN is not detached at $(pin_what "$SRC"); run merge/install_from_main.sh from the clone $SRC to move it."
         exit 1
       fi
       # Lock an unlocked pin, so the janitor sweep never removes it; a locked one stays as it is.
@@ -1023,7 +1040,7 @@ if [ "$CLOUD" = 1 ]; then
       if [ "${n:-0}" -gt 0 ] 2>/dev/null; then
         log "wrote $TARGET_JSON (repo settings + cloud refresh hook + $n merge allow rules from $SRC at $SRC_SHA)"
       else
-        log "WARNING: wrote $TARGET_JSON with no merge allow rules: $SRC at $SRC_SHA has no rules in merge/cloud_allow.json, so the auto-mode classifier judges each merge --confirm. Move $SRC to origin/main, then resume the session."
+        log "WARNING: wrote $TARGET_JSON with no merge allow rules: $SRC at $SRC_SHA has no rules in merge/cloud_allow.json, so the auto-mode classifier judges each merge --confirm. Move $SRC to origin/$REF, then resume the session."
       fi
     else
       rm -f "$TARGET_JSON.tmp"
