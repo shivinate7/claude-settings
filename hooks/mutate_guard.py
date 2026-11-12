@@ -3366,6 +3366,72 @@ MUTATIONS = [
      '    return clause\n\n\ndef _claim_clause',
      '    return None\n\n\ndef _claim_clause',
      "guard", 'brief-claim: test-author brief where main refuses all three today'),
+    # ---- review-record-after-round (decision pr-review-record): one mutant per arm. The anchors sit in
+    # hooks/guard_merge.py and hooks/guard.py.
+    ("review-record-after-round: a design-reviewer spawn is no round",
+     'RECORD_REVIEWER_ROLES = ("reviewer", "design-reviewer")',
+     'RECORD_REVIEWER_ROLES = ("reviewer",)',
+     "guard", "a design-reviewer spawn counts like a reviewer"),
+    ("review-record-after-round: a test-author spawn is not judged",
+     'RECORD_TRIGGER_ROLES = ("builder", "test-author")',
+     'RECORD_TRIGGER_ROLES = ("builder",)',
+     "guard", "a test-author spawn after a reviewer spawn with no review record is refused"),
+    ("review-record-after-round: a send_message handoff is not judged",
+     '        judged = tool in reader.SEND_TOOLS or (tool in RECORD_SPAWN_TOOLS',
+     '        judged = (tool in RECORD_SPAWN_TOOLS',
+     "guard", "a send_message handoff after a reviewer spawn with no review record is refused"),
+    ("review-record-after-round: a Task spawn is neither a round nor a trigger",
+     'RECORD_SPAWN_TOOLS = ("Agent", "Task")',
+     'RECORD_SPAWN_TOOLS = ("Agent",)',
+     "guard", "a reviewer spawned by Task, then a builder spawned by Task"),
+    ("review-record-after-round: the marker is a copy, not the merge tool's",
+     '        marker = merge_module().REVIEW_MARKER',
+     '        marker = "<!-- not-the-marker -->"',
+     "guard", "a builder spawn after a reviewer spawn and a comment with the record marker is allowed"),
+    ("review-record-after-round: a Bash call is never a post",
+     '    return name == "Bash" and isinstance(command, str) and _bash_posts_record(command, marker)',
+     '    return False',
+     "guard", "a gh api post whose body comes from a file after a reviewer spawn lets a builder spawn through"),
+    ("review-record-after-round: the built-in SendMessage is not judged",
+     '        judged = tool in reader.SEND_TOOLS or (tool in RECORD_SPAWN_TOOLS',
+     '        judged = tool == BRIEF_TOOL or (tool in RECORD_SPAWN_TOOLS',
+     "guard", "a built-in SendMessage handoff after a reviewer spawn with no review record is refused"),
+    ("review-record-after-round: a call that only names the marker is a post",
+     '    for segment in split_segments(command):\n        args = gh_call_of(segment)\n        if args and _gh_posts_record(args, marker):',
+     '    for segment in split_segments(command):\n        args = gh_call_of(segment)\n        if marker in segment or (args and _gh_posts_record(args, marker)):',
+     "guard", "a Bash read that names the record marker after a reviewer spawn is no record"),
+    ("review-record-after-round: an inline body without the marker is a post",
+     'any(marker in body for body in _flag_values(args, _GH_BODY_FLAGS))',
+     'bool(_flag_values(args, _GH_BODY_FLAGS))',
+     "guard", "a gh pr comment with an inline body that lacks the record marker is no record"),
+    ("review-record-after-round: a reviewer spawn that errored gates",
+     ' and ev[1].get("id") not in failed]',
+     ']',
+     "guard", "a reviewer spawn whose result is an error does not gate"),
+    ("review-record-after-round: the design-reviewer note is dropped",
+     '    if role_key(last["input"].get("subagent_type")) == "design-reviewer":',
+     '    if False:',
+     "guard", "the refusal names the design-reviewer line"),
+    ("review-record-after-round: a record before the reviewer spawn counts",
+     '    if any(_posts_record(ev[1], marker) for ev in events[anchor + 1:] if ev[0] == "use"):',
+     '    if any(_posts_record(ev[1], marker) for ev in events if ev[0] == "use"):',
+     "guard", "a record posted before the last reviewer spawn is stale"),
+    ("review-record-after-round: the first reviewer spawn decides, not the last",
+     '    anchor, last = max(anchors, key=lambda g: g[0])',
+     '    anchor, last = min(anchors, key=lambda g: g[0])',
+     "guard", "round two: the round-one record does not cover a second reviewer spawn"),
+    ("review-record-after-round: a background reviewer counts at launch, not at completion",
+     '    return index if agent is None else done.get(agent)',
+     '    return index',
+     "guard", "an async reviewer with no completion yet: a builder spawn is allowed"),
+    ("review-record-after-round: an agent's own call is judged",
+     '    if agent or not isinstance(tool_input, dict) or not transcript:',
+     '    if not isinstance(tool_input, dict) or not transcript:',
+     "guard", "builder spawn (payload with agent_id) is not judged by this rule"),
+    ("review-record-after-round: the caller never passes the agent_id",
+     'trust_transcript if isinstance(trust_transcript, str) else "", bool(payload.get("agent_id")))',
+     'trust_transcript if isinstance(trust_transcript, str) else "", False)',
+     "guard", "builder spawn (payload with agent_id) is not judged by this rule"),
 ]
 
 
@@ -4163,10 +4229,12 @@ def lay_out(sources, work: str, target: str, name: str, old: str, new: str) -> s
         copy_path = os.path.join(tree, "guard.py")
         # The guard family reads the folders beside its hooks folder as a checkout has them: ../lint (layout.py,
         # the role-model table: without it every role-model arm passes unjudged), ../janitor (the simulator
-        # refusal fails open without sweep.py) and ../skills (waiting-page, impeccable). Git's own list of each
+        # refusal fails open without sweep.py), ../skills (waiting-page, impeccable), ../merge (the review record
+        # marker, which guard_merge loads) and actions/ci-alarm (the events merge.py reads). Git's own list of each
         # folder fills them, so a file the guard starts to read cannot be left out. git is read from the source
         # checkout, never from this scaffold.
-        tracked_tree.copy_tracked(root, "lint", "janitor", "skills", root=os.path.dirname(HERE))
+        tracked_tree.copy_tracked(root, "lint", "janitor", "merge", "skills", "actions/ci-alarm",
+                                  root=os.path.dirname(HERE))
     else:
         copy_path = os.path.join(work, "%s_%s.py" % (stem, mutate_shared.safe_name(name)))
         mutated = sources[target].replace(old, new, 1)

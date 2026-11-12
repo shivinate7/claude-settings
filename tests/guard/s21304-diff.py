@@ -513,6 +513,18 @@ BASE_COPY_COST_LABEL = ("base copies: the pushed-copy read on the incident tree 
                         "starts and writes no file")
 LOG_CHECKS_EXTRA.append((BASE_COPY_COST_LABEL, base_copies_read_cost_case))
 LOG_FAMILY[BASE_COPY_COST_LABEL] = "branch-worktree"
+# The review-record checks are appended here too, for the same reason. The cost check builds its own folders.
+LOG_CHECKS_EXTRA.append((RR_COST_LABEL, rr_cost_case))
+LOG_FAMILY[RR_COST_LABEL] = "review-record-after-round"
+FIXTURELESS_CHECKS.add(rr_cost_case)
+LOG_CHECKS_EXTRA.append((RR_SEND_MATCHER_LABEL, review_send_matcher_case))
+LOG_FAMILY[RR_SEND_MATCHER_LABEL] = "review-record-after-round"
+FIXTURELESS_CHECKS.add(review_send_matcher_case)
+LOG_CHECKS_EXTRA.append((RR_REMEDY_LABEL, rr_remedy_case))
+LOG_FAMILY[RR_REMEDY_LABEL] = "review-record-after-round"
+FIXTURELESS_CHECKS.add(rr_remedy_case)
+
+
 # The two MCP updates that mark nothing ready, read by _rpr_no_read (records-page-ready). They sit here because
 # LOG_CHECKS_EXTRA is defined here.
 for _label, _check in (
