@@ -15353,8 +15353,8 @@ class ReviewRoundModel(ReviewEnv):
         self.assertEqual(record_state(self, haiku), record_state(self, sonnet), "a posted round 2 on haiku reads a different state from its sonnet twin")
 
     def test_a_round_one_on_sonnet_is_accepted_with_guard_yes_as_with_guard_no(self):
-        # Control, green on main: the --round check floors sonnet at round 2, never at round 1, so round 1 on sonnet passes for a
-        # guard or check change too (decision agent-model-cap, the reviewer row).
+        # Control: the --round check floors sonnet at the second round, never at the first, so a first-round reviewer on sonnet is
+        # accepted with the guard flag yes as with it no (decision agent-model-cap, the reviewer row).
         for guard in ("yes", "no"):
             with self.subTest(guard=guard):
                 flags = ("--kind", "normal", "--guard", guard, "--head", self.head(), "--round", "1:reviewer:sonnet:PASS")
@@ -15363,8 +15363,9 @@ class ReviewRoundModel(ReviewEnv):
                 parse_text(self, posted_body(self, out))
 
     def test_round_two_on_opus_is_accepted_when_the_record_round_row_names_opus(self):
-        # One home (decision agent-model-cap): the --round check reads the round row of the record the guard reads, so a changed row
-        # changes this verdict with no code edit. Main reads no round row and refuses round 2 on opus under any record, so this is red there.
+        # One home (decision agent-model-cap): the --round check reads the round rows of the record the guard reads, so a changed row
+        # changes this verdict with no code edit. Without a second-round row, the --round check refuses an opus reviewer, so this case
+        # passes only because the record's row lifts that refusal.
         root = tempfile.mkdtemp(dir=run_folder())
         pointer = os.path.join(root, "pointer")
         os.makedirs(os.path.join(pointer, "docs", "decisions"))

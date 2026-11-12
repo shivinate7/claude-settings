@@ -1183,41 +1183,42 @@ workflow_refuse("role-model: Workflow reviewer on opus with the guard marker is 
                 _step_flow("'%s. Check the guard diff.'" % REVIEW_GUARD_MARKER, "agentType: 'reviewer', model: 'opus'"))
 
 
-# ---- J: the round rows, one home (decision agent-model-cap). The record's round table names the model of each review
-# round, and the guard reads it, so a changed row changes the verdict with no code edit. A record with no round row, or no
-# record at all, keeps the verdicts the role row and the step-up give today.
+# ---- J: the round rows, one home (decision agent-model-cap). The record's round table names the model each round runs on, and
+# the guard reads it, so a changed row changes the verdict with no code edit. A record with no round row, or no record at all,
+# keeps the verdicts the role row and the step-up give.
 ROUND_TABLE_HEAD = "| Role | Round | Model | Effort |\n|---|---|---|---|\n"
 ROUND_HAIKU_TWO_POINTER = role_table("roundhaiku", ROLE_TABLE_RULES + "\n" + ROUND_TABLE_HEAD + "| reviewer | 2 | haiku | high |\n")
 ROUND_HAIKU_TWO_CFG = role_config("roundhaiku", ROUND_HAIKU_TWO_POINTER)
-# Case 3: the record's round 2 row names haiku, so a round 2 reviewer on haiku is allowed. Main reads no round row and
-# refuses it at the constant step-up, so this case goes red on main for that reason.
+# Case 3: the record's second-round row names haiku, so a second-round reviewer on haiku is allowed. Without that row, the
+# constant step-up refuses it, so this case passes only because the row lifts that refusal.
 role_model_allow("role-model: round row: a record whose reviewer round 2 row names haiku lets a round 2 reviewer run haiku",
                  "reviewer", "haiku", "Round 2 of 3. Re-check the diff.", config=ROUND_HAIKU_TWO_CFG)
-# The same record does not open round 1 without the guard marker: the round 1 row does not lift an unmarked brief.
+# The same record does not open the first round without the guard marker: the first-round row does not lift an unmarked brief.
 role_model_refuse("role-model: round row: a record whose reviewer round 2 row names haiku still denies an unmarked round 1 "
                   "reviewer on sonnet", "reviewer", "sonnet", "Round 1 of 3. Check the diff.", config=ROUND_HAIKU_TWO_CFG,
                   carries=(ROLE_REMEDY,))
-# The record's round 1 row names sonnet, so the first round is among the rows that lift a reviewer on sonnet. The refusal names
-# round 1 among those rounds and says the test-author runs on its role's model. The fallback's free-rounds literal is not read.
+# The record's first-round row names sonnet, so the first round is among the rows that lift a reviewer on sonnet. The refusal names
+# the first round among those rounds and says the test-author runs on its role's model. The fallback's free-rounds literal is not read.
 ROUND_SONNET_ONE_POINTER = role_table("roundsonnetone", ROLE_TABLE_RULES + "\n" + ROUND_TABLE_HEAD + "| reviewer | 1 other | sonnet | xhigh |\n")
 ROUND_SONNET_ONE_CFG = role_config("roundsonnetone", ROUND_SONNET_ONE_POINTER)
 add("role-model: round 1 free: reviewer on sonnet names round 1 among the free rounds, and says the test-author runs on its role's model",
     "deny", ROLE_RULE, tool="Agent", config=ROUND_SONNET_ONE_CFG,
     carries=("the test-author runs on its role's model", "review round 1 or 2 or 3", ROLE_REMEDY),
     lacks=ROLE_LACKS + (ROUND_ONE_SENTENCE,), **role_input("reviewer", "sonnet", "Check the diff for typos."))
-# The record's round 3 row names haiku, the reviewer's own row, so a round 3 reviewer on sonnet is not lifted. The step-up does not
-# decide first: round 3 is not the exact round, and sonnet is not below haiku. The table read in role_model_one decides it.
+# The record's third-round row names haiku, the reviewer's own row, so a third-round reviewer on sonnet is not lifted. The step-up
+# does not decide first: the third round is not the exact round, and sonnet is not below haiku. The table read in role_model_one
+# decides it.
 ROUND_HAIKU_THREE_POINTER = role_table("roundhaikuthree", ROLE_TABLE_RULES + "\n" + ROUND_TABLE_HEAD + "| reviewer | 3 | haiku | xhigh |\n")
 ROUND_HAIKU_THREE_CFG = role_config("roundhaikuthree", ROUND_HAIKU_THREE_POINTER)
 role_model_refuse("role-model: round row: a record whose reviewer round 3 row names haiku denies a round 3 reviewer on sonnet",
                   "reviewer", "sonnet", "Round 3 of 3. Re-check the diff.", config=ROUND_HAIKU_THREE_CFG,
                   carries=(ROLE_REMEDY, "`Round 2 of 3`"), lacks=ROLE_LACKS + ("`Round 3 of 3`",))
 
-# Case 4: with no decision record the round rows read as absent, and the spawn passes as it does today.
+# Case 4: with no decision record the round rows read as absent, and the spawn passes on the fallback rows.
 role_model_allow("role-model: no decision record, a reviewer round 1 on sonnet with the guard marker passes silently",
                  "reviewer", "sonnet", "Round 1 of 3. Check the guard diff.\n" + REVIEW_GUARD_MARKER, config=ROLE_MISSING_CFG)
-# A missing record must not turn the step-up's refusal of a round 2 reviewer on haiku into an allow. Today the constant
-# refuses it, and the record's absence changes nothing. The builder that reads the round rows must keep this refusal.
+# A missing record must not turn the step-up's refusal of a second-round reviewer on haiku into an allow. The constant
+# refuses it, and the record's absence changes nothing. The round-row reader must keep this refusal.
 add("role-model: no decision record still refuses a round 2 reviewer on haiku at the step-up", "deny", STEP_UP,
     tool="Agent", config=ROLE_MISSING_CFG, carries=("Reviewer round 2 runs on Sonnet.",),
     **role_input("reviewer", "haiku", "Round 2 of 3. Re-check the diff."))
