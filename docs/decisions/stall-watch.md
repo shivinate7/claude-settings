@@ -121,8 +121,8 @@ transcript, for a quiet agent only. The read is the last 64 KB. It doubles until
 record. An empty transcript, or one whose every tool_use in the read window has its tool_result, is listed when quiet. A transcript that cannot be
 read is listed.
 Cost (`outcomes-mechanize-rules`): one `stat` per running agent at each Stop, and one read of the
-transcript's end for each agent that is quiet and not yet listed (unmeasured). No new process, timer or file. Case
-`A8_cost_one_stat_per_running_agent_and_a_read_only_when_quiet` counts both.
+transcript's end for each quiet agent not yet listed, pinned by `A8_cost_one_stat_per_running_agent_and_a_read_only_when_quiet` in
+`hooks/test_stall_watch_stop.py`. No new process, timer or file.
 Limits: a session that is idle with no Stop sees nothing until its next Stop. A TaskStop or a terminal
 notice (completed, failed, killed or stopped) closes an agent id for the whole transcript. So an agent
 stopped or finished, then resumed under the same id, is never listed again (debt `agent-resume-reads-closed`,
