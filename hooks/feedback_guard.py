@@ -1215,13 +1215,13 @@ def candidates(root, inbox, blocks):
 
 def stamp_time(stamp):
     """The instant of an inbox stamp, read with its own UTC offset so a DST change cannot skew a gap. None
-    when the stamp does not match local_time.STAMP_FORMAT and its offset text."""
+    when the stamp is not a string or does not match local_time.STAMP_FORMAT and its offset text."""
     try:
         m = re.search(r"\(UTC([+-])(\d{2}):(\d{2})\)$", stamp)
         zone = timezone(timedelta(hours=int(m.group(2)), minutes=int(m.group(3)))
                         * (-1 if m.group(1) == "-" else 1))
         return datetime.strptime(stamp[:16], local_time.STAMP_FORMAT).replace(tzinfo=zone)
-    except (AttributeError, ValueError):
+    except (AttributeError, TypeError, ValueError):
         return None
 
 
