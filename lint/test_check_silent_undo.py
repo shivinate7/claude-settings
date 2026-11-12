@@ -1094,6 +1094,19 @@ class LaneUndo(unittest.TestCase):
         self.assertNotIn("scratch.txt", r.sh("ls-tree", "-r", "--name-only", b).split())  # scope: B deletes the file
         self.assertEqual(r.verdict(), [])
 
+    def test_a_lane_that_cuts_a_block_out_of_a_non_test_file_it_created_is_green(self):
+        """E creates the file, so no text of it is before E. Taking E's block back out, with a later line kept, is the lane
+        editing its own new file, not a put back. Only a test file is read at the hunk level here."""
+        r = self.r
+        e = r.commit("E: add a notes file with an eight-line block", cards_txt=self.EIGHT)
+        m = r.commit("M: add a kept line under the block", cards_txt=self.EIGHT + "kept line\n")
+        c = r.commit("C: take the block back out", cards_txt="kept line\n")
+        self.assertEqual(self.lane(), [e, m, c])  # scope: C is the third lane commit
+        self.assertNotIn("cards.txt", r.sh("ls-tree", "-r", "--name-only", e + "^").split())  # scope: E's parent lacks the file
+        self.assertNotIn("eight test line 3", r.sh("show", c + ":cards.txt"))  # scope: C takes the block out
+        self.assertIn("kept line", r.sh("show", c + ":cards.txt"))  # scope: C keeps M's line
+        self.assertEqual(r.verdict(), [], "a non-test file the lane created is not read as a hunk put back")
+
 
 class IntegrationBase(unittest.TestCase):
     """This repo merges through integration branches. A PR based on `integ` is checked against
