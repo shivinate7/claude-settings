@@ -176,8 +176,9 @@ Text: inline, in the main check.
 Text: inline, in the main check, and `PASS_CLAIM_REASON` in `hooks/guard.py` for a send.
 
 - Run the check through verdict, as `verdict <cmd>`. Its `PASS <cmd> (<secs>s)` line, in the result of that call, is the cite.
+- The command must match the claim: a roster command (`merge --lane-lint`, `ci-job`) for lint, a test command for tests, either for checks.
 - A SKIP line, a FAIL after the PASS, a line in an Agent result or a sidechain, and a line you wrote yourself are no cite.
-- A claim an agent made reads as its own: write "builder reports green". Text in backticks, a negation, a question and a count ("12 passed") are no claim.
+- A claim an agent made reads as its own: write "builder reports green". A sentence in backticks, a negation in the claim's clause, a question and a count ("12 passed") are no claim.
 
 ## Shared tails
 
