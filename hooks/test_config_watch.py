@@ -102,7 +102,7 @@ VALID_UNTIL = _iso(1)     # one hour ahead: current
 PASSED_UNTIL = _iso(-1)   # one hour ago: expired
 
 # TEST_CLOCK_ENV must match `config_watch.TEST_CLOCK_ENV`. It is the only way a fixture can put
-# `_agentCapUntil` EXACTLY on the 24-hour boundary: `datetime.now()` called once to build the
+# `_agentCapUntil` EXACTLY on the deadline instant: `datetime.now()` called once to build the
 # fixture and once more, later, inside `expiry_problem`, are never the same instant on their own,
 # so the watch under test must read a clock the fixture also controls.
 TEST_CLOCK_ENV = "CONFIG_WATCH_TEST_CLOCK"
@@ -146,6 +146,7 @@ def _utc(text):
 
 WINTER_WANT = local_time.central_hhmm(_utc(WINTER_UNTIL))  # 21:30 CST, on the 14th
 SUMMER_WANT = local_time.central_hhmm(_utc(SUMMER_UNTIL))  # 22:30 CDT, on the 14th
+FAR_30H_WANT = local_time.central_hhmm(_utc(FAR_30H_UNTIL))  # the end 30 hours ahead, as the ask names it
 
 
 def cap_json(model=None, force=None, until=None, extra=None):
@@ -550,8 +551,8 @@ chain_case("a second approved lift keeps the ORIGINAL pre-lift content as prior,
            "revert never installs the first lift's own content")
 
 # The edges of the deadline, pinned exactly with TEST_CLOCK_ENV (see REFERENCE_NOW above). A
-# deadline is current at the instant itself and passed one second after it. The 24-hour edge no
-# longer revokes anything, so the 24-hour and 86401-second instants read as current too.
+# deadline is current at the instant itself and passed one second after it, at any length: the
+# 24-hour and 86401-second instants read as current, as do instants far beyond them.
 approved_case("an approved lift with _agentCapUntil exactly 24 hours ahead is accepted",
               cap_json(model="opus", force="1", until=BOUNDARY_24H_UNTIL), "valid",
               clock=CLOCK_AT_REFERENCE)
@@ -570,9 +571,31 @@ approved_case("an approved lift with _agentCapUntil one second past the deadline
               cap_json(model="opus", force="1", until=BOUNDARY_PAST_UNTIL), "bad",
               clock=CLOCK_AT_REFERENCE)
 
+# The end the guard shows and the end the watch revokes at must be one instant. The same end,
+# 03:30 UTC on 15 January 2099 (21:30 CST on the 14th), is written in each form below. A form with
+# no offset reads as UTC, so each form stays lifted one second before that instant and is revoked one
+# second after it. The guard's ask for the same forms is pinned in tests/guard/s19328-model-cap.py.
+ZONE_END_2099 = "2099-01-15T03:30:00Z"
+ZONE_FORMS = {
+    "Z": ZONE_END_2099,
+    "-05:00": "2099-01-14T22:30:00-05:00",
+    "space": "2099-01-15 03:30:00",
+    "naive": "2099-01-15T03:30:00",
+}
+for _form, _text in sorted(ZONE_FORMS.items()):
+    approved_case("an approved lift whose end is written in the %s form stays lifted one second "
+                  "before the end" % _form,
+                  cap_json(model="opus", force="1", until=_text), "valid",
+                  clock="2099-01-15T03:29:59Z")
+    approved_case("an approved lift whose end is written in the %s form is revoked one second "
+                  "after the end" % _form,
+                  cap_json(model="opus", force="1", until=_text), "bad",
+                  clock="2099-01-15T03:30:01Z")
 
-@case("a deadline-only Edit that moves an approved lift's end to 30 hours ahead leaves it lifted "
-      "and silent", "expiry", kind="far")
+
+@case("a deadline-only Edit that moves an approved lift's end to 30 hours ahead is asked under "
+      "agent-model-cap, names the end in Central, and leaves it lifted and silent", "expiry",
+      kind="extended", want=FAR_30H_WANT)
 def extended_deadline_edit(project):
     project.settle()
     near = cap_json(model="opus", force="1", until=NEAR_UNTIL)
@@ -582,10 +605,10 @@ def extended_deadline_edit(project):
     old = '"%s": "%s"' % (EXPIRY_FIELD, NEAR_UNTIL)
     new = '"%s": "%s"' % (EXPIRY_FIELD, FAR_30H_UNTIL)
     tool_input = {"file_path": project.settings, "old_string": old, "new_string": new}
-    decision = project.pre("Edit", tool_input)
+    decision, reason = project.pre_full("Edit", tool_input, CLOCK_AT_REFERENCE_ISO)
     write(project.settings, project.content().replace(old, new))
     message = project.post("Edit", tool_input, CLOCK_AT_REFERENCE)
-    return {"pre": decision, "lifted": project.lifted(), "message": message}
+    return {"pre": decision, "reason": reason, "lifted": project.lifted(), "message": message}
 
 
 # --------------------------------------------------------------------------- the deadline ask
@@ -719,12 +742,28 @@ def expectation(entry, result):
                     message else "a valid, current deadline was mishandled")
         if kind == "far":
             if not lifted:
-                return (False, "reverted a deadline more than 24 hours ahead: the ceiling still "
-                        "applies")
+                return (False, "reverted a current deadline far ahead: the watch should revoke only "
+                        "a passed or unreadable end, at any length")
             if message:
-                return (False, "spoke about a deadline more than 24 hours ahead: the ceiling still "
-                        "applies")
+                return (False, "spoke about a current deadline far ahead: the watch should stay "
+                        "silent until the end passes")
             return (True, "stayed lifted and silent: any length stands once asked")
+        if kind == "extended":
+            decision, reason = result["pre"], result["reason"]
+            if decision != "ask":
+                return (False, "the Edit that moves the end 30 hours ahead was %s, not asked: the "
+                        "guard must ask about any deadline write" % decision)
+            if not reason.startswith("agent-model-cap:"):
+                return (False, "asked, but not under agent-model-cap: %r" % reason[:80])
+            if entry["want"] not in reason:
+                return (False, "the ask does not show the 30-hour end as %r in Central with its "
+                        "zone" % entry["want"])
+            if not lifted:
+                return (False, "reverted a current deadline 30 hours ahead after the Edit")
+            if message:
+                return (False, "spoke about a current deadline 30 hours ahead after the Edit")
+            return (True, "asked under agent-model-cap, shows the end as %r, and stays lifted "
+                    "and silent" % entry["want"])
         if kind == "nocap":
             return ((not lifted) and not message,
                     "untouched and silent" if (not lifted and not message)
@@ -838,6 +877,52 @@ def sweep_session_check():
     return True, "the revert line ends in the session_id, and in '-' with none"
 
 
+# --------------------------------------------------------------------------- one parser
+#
+# The guard and the watch read the cap-lift end from the same text. Both must do it through one
+# parser in hooks/shared_names.py: a read that calls no function there parses the end alone, and the
+# two readings can then disagree about one text. The check records which shared_names functions one
+# call of each module's read actually runs, so it names no parser and needs no name agreed first.
+
+SHARED_NAMES = os.path.normcase(os.path.abspath(os.path.join(HERE, "shared_names.py")))
+
+
+def shared_calls(fn, *args):
+    """The names of the functions in hooks/shared_names.py that one call of `fn` runs."""
+    called = set()
+
+    def tracer(frame, event, _arg):
+        if event == "call" and os.path.normcase(os.path.abspath(frame.f_code.co_filename)) == SHARED_NAMES:
+            called.add(frame.f_code.co_name)
+
+    sys.setprofile(tracer)
+    try:
+        fn(*args)
+    finally:
+        sys.setprofile(None)
+    return called
+
+
+def one_parser_checks():
+    """[(ok, label, note)] for the guard's and the watch's read of one end text."""
+    import guard
+    import config_watch
+    text = "2099-01-15 03:30:00"
+    instant = datetime(2099, 1, 15, 3, 30, tzinfo=timezone.utc)
+    guard_calls = shared_calls(guard.cap_deadline_end, [json.dumps({EXPIRY_FIELD: text})])
+    watch_calls = shared_calls(config_watch.expiry_problem,
+                               json.dumps({EXPIRY_FIELD: text}).encode("utf-8"),
+                               instant - timedelta(hours=1))
+    checks = []
+    for who, called in (("the guard", guard_calls), ("the watch", watch_calls)):
+        ok = bool(called)
+        note = ("reads the end through hooks/shared_names.py: %s" % ", ".join(sorted(called))
+                if ok else "reads the end with no function in hooks/shared_names.py, so it can "
+                "disagree with the other module about the same text")
+        checks.append((ok, "%s reads the cap-lift end through the one shared parser" % who, note))
+    return checks
+
+
 def main() -> int:
     print("config_watch cases, %d in all" % len(CASES))
     print()
@@ -883,6 +968,9 @@ def main() -> int:
         failed += 0 if sweep_ok else 1
         print("%s  [sweep]  config_watch names the session in its revert line  (%s)" % (
             "PASS" if sweep_ok else "FAIL", sweep_note))
+        for parser_ok, label, parser_note in one_parser_checks():
+            failed += 0 if parser_ok else 1
+            print("%s  [parser]  %s  (%s)" % ("PASS" if parser_ok else "FAIL", label, parser_note))
     print()
     if failed:
         print("test_config_watch FAIL: %d of %d cases wrong" % (failed, len(CASES)))
