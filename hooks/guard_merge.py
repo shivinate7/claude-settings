@@ -1072,9 +1072,9 @@ def conflict_markers_hit(stripped: str, cwd: str):
 
 
 # ---- merge --role: the tier is read from this session's own get_session record
-ROLE_TIERS = ("batch-runner",)
+MERGE_ROLES = ("batch-runner",)
 ROLE_TAG_PREFIX = BUILD_TAG
-HAT_ROLE = ROLE_TIERS[0]  # the batch-runner role, which a lane on its own wears as a hat for its own merge
+HAT_ROLE = MERGE_ROLES[0]  # the batch-runner role, which a lane on its own wears as a hat for its own merge
 ROLE_REASON = (
     "merge-role-proof: this session's own record does not prove the merge role it claims. "
     "If this session is the batch runner, or a lane on its own with no parent_session_id and no cs-build tag, which wears the batch-runner hat: "
@@ -1135,15 +1135,15 @@ def role_proof_hit(stripped: str, transcript: str, agent: bool = False) -> str:
     allow rule has no classifier behind it and the guard-wide crash path fails open.
     `agent` is a call by an agent: one role per agent, so the batch-runner hat is not its to take."""
     for segment in split_segments(stripped):
-        tier = role_call_of(segment) if segment.strip() else None
-        if tier is None:
+        role = role_call_of(segment) if segment.strip() else None
+        if role is None:
             continue
         try:  # cost: one transcript read, only on a role-flag call
             from override import remote_session_id
             own_id = remote_session_id()
             if own_id and transcript:
                 tags, tagged_after, parent = own_session.own_session_read(transcript, own_id)
-                if tier in ROLE_TIERS and tags is not None and ROLE_TAG_PREFIX + tier in tags:
+                if role in MERGE_ROLES and tags is not None and ROLE_TAG_PREFIX + role in tags:
                     continue
                 # roles are hats (decision session-tiers): a lane on its own, the newest own record with no parent and no
                 # cs-build tag, wears the batch-runner hat for its own merge. A tag call after that record makes it stale.
@@ -1152,7 +1152,7 @@ def role_proof_hit(stripped: str, transcript: str, agent: bool = False) -> str:
                     continue
         except Exception:
             pass
-        return "merge role " + tier
+        return "merge role " + role
     return ""
 
 
