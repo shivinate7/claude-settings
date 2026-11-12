@@ -4312,7 +4312,7 @@ try:
             raise Refused(api_error(404, "Branch not protected"))
         finish(one({"strict": True, "contexts": S["contexts"], "checks": [{"context": c, "app_id": None} for c in S["contexts"]]}, jq), 0, include)
 
-    elif method == "GET" and rel == "rules/branches/main":  # GitHub's reply when no ruleset applies is []; a case sets S["main_rules"] for the rules
+    elif method == "GET" and re.fullmatch(r"rules/branches/[^/]+", rel):  # any base: GitHub's reply when no ruleset applies is []; a case sets S["main_rules"] for the rules
         answer_list(S.get("main_rules") or [], None)
 
     else:
