@@ -2236,5 +2236,114 @@ class LintCheckJoin(tm.CloudSession):
         self.assert_refused([lint_comment(2, side)], "a lint PASS for a head that is not an ancestor of the live head")
 
 
+# A non-merge commit on a guard or check path, after the head the last review record names, is refused by `merge --lane-lint` unless a
+# review record names that commit (debt merge-commit-skips-review). The debt allows lane lint or the batch runner's join; this suite pins lane lint.
+GUARD_PATH = "lint/report_guard.py"  # a guard path: under lint/, one of stale_cites.RULE_DIRS
+DOCS_PATH = "docs/scratch-notes.md"  # on no guard path
+ALL_PASS = ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS", "Round 3: reviewer, opus, PASS")
+RECORD_TIME = "2026-10-02T00:00:00Z"
+
+
+class ReviewHost(tm.FakeHost):
+    """A FakeHost whose repo comments are scripted: `records` holds the review record comments of pull request 7, oldest first, as
+    (body, created_at, updated_at). Each review read goes through issue_comments, the one home of the comment read, and no lint comment is listed."""
+
+    def __init__(self, root, other):
+        super().__init__(root, other)
+        self.records = []
+
+    def issue_comments(self, since):
+        return {7: list(self.records)}, {}
+
+    def review_records(self, since):
+        return self.issue_comments(since)[0]
+
+    def review_comments(self, since):
+        return {n: [row[0] for row in rows] for n, rows in self.review_records(since).items()}
+
+
+class PostReviewCommit(LaneFixture):
+    """`merge --lane-lint 7` refuses a non-merge commit on a guard or check path.
+    The commit must come after the head the last review record names.
+    A review record that names the commit lets it through.
+    A clean merge of main, a commit under the reviewed head, and a commit off the guard paths pass.
+    A refusal posts no lane-lint PASS. The ci-job stub passes in every case, so only the new check can refuse."""
+
+    commit_on = CrossMeasure.commit_on  # one home: the second clone's commit and push
+
+    def setUp(self):
+        super().setUp()
+        self.host = ReviewHost(self.co, self.other)
+        self.assertTrue(GUARD_PATH.startswith(merge.GUARD_PATHS), "fixture: %s is not on a guard path" % GUARD_PATH)
+        self.assertFalse(DOCS_PATH.startswith(merge.GUARD_PATHS) or DOCS_PATH in merge.GUARD_FILES, "fixture: %s is on a guard path" % DOCS_PATH)
+
+    def record(self, head, guard, rounds, net):
+        """Post the review record of `head` on pull request 7. It is the newest record from here on."""
+        body = tm.record_text(rounds=rounds, head=head, guard=guard, net=net)
+        self.host.records.append((body, RECORD_TIME, None))
+
+    def lint_pr(self):
+        """-> (rc, output) of `merge --lane-lint 7` in the lane checkout, with the ci-job stub passing."""
+        self.use_ci_job(PASSING, 0)
+        return self.run_lane("--lane-lint", "7")
+
+    def test_a_guard_commit_on_the_lane_head_after_the_last_review_is_refused(self):
+        reviewed = self.head("feat")
+        self.record(reviewed, "no", tm.REVIEW_PASS, "not owed")
+        self.commit_on("feat", {GUARD_PATH: "a guard path, after the review\n"}, "origin/feat")
+        rc, out = self.lint_pr()
+        self.assertEqual(rc, 1, "lane lint passed a non-merge commit on a guard path that comes after the last review record:\n" + out)
+        self.assertIn(GUARD_PATH, out, "the refusal does not name the guard path it refuses:\n" + out)
+        self.assertEqual(self.host.posted, [], "the refused head posted a lane-lint PASS:\n" + out)
+
+    def test_a_guard_commit_under_later_commits_is_refused_and_named_by_its_sha(self):
+        reviewed = self.head("feat")
+        self.record(reviewed, "no", tm.REVIEW_PASS, "not owed")
+        self.commit_on("feat", {DOCS_PATH: "a docs note before the guard change\n"}, "origin/feat")
+        guard = self.commit_on("feat", {GUARD_PATH: "a guard path, after the review\n"}, "origin/feat")
+        self.commit_on("feat", {DOCS_PATH: "a docs note after the guard change\n"}, "origin/feat")
+        rc, out = self.lint_pr()
+        self.assertEqual(rc, 1, "lane lint passed a guard commit that lies under later commits after the last review record:\n" + out)
+        self.assertIn(guard[:7], out, "the refusal does not name the guard commit %s it refuses:\n%s" % (guard[:7], out))
+        self.assertIn(GUARD_PATH, out, "the refusal does not name the guard path it refuses:\n" + out)
+
+    def test_a_review_record_that_names_the_guard_commit_lets_it_through(self):  # control: green on the old code
+        guard = self.commit_on("feat", {GUARD_PATH: "a guard path, reviewed\n"}, "origin/feat")
+        self.record(guard, "yes", ALL_PASS, "positive")
+        rc, out = self.lint_pr()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        self.assertEqual(len(self.host.posted), 1, "the PASS for the reviewed guard commit did not post its lane-lint comment:\n" + out)
+
+    def test_a_guard_commit_under_the_last_review_head_passes(self):  # control: green on the old code
+        self.commit_on("feat", {GUARD_PATH: "a guard path, before the review\n"}, "origin/feat")
+        reviewed = self.commit_on("feat", {DOCS_PATH: "a docs note, the reviewed head\n"}, "origin/feat")
+        self.record(reviewed, "yes", ALL_PASS, "positive")
+        rc, out = self.lint_pr()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_a_docs_commit_after_the_last_review_record_passes(self):  # control: green on the old code
+        self.record(self.head("feat"), "no", tm.REVIEW_PASS, "not owed")
+        self.commit_on("feat", {DOCS_PATH: "a docs note after the review\n"}, "origin/feat")
+        rc, out = self.lint_pr()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_a_clean_merge_of_main_with_a_guard_edit_passes(self):  # control: green on the old code
+        reviewed = self.head("feat")
+        self.record(reviewed, "no", tm.REVIEW_PASS, "not owed")
+        self.commit_on("main", {GUARD_PATH: "a guard path on main\n"}, "origin/main")
+        # The merge is clean and touches a guard path against its first parent.
+        merged = self.merge_into_feat("origin/main")
+        parents = tm.sh(self.other, "git", "rev-list", "--parents", "-n", "1", merged).split()
+        self.assertEqual(len(parents), 3, "fixture: %s is no merge commit" % merged)
+        changed = tm.sh(self.other, "git", "diff", "--name-only", reviewed, merged).splitlines()
+        self.assertIn(GUARD_PATH, changed, "fixture: the merge does not touch a guard path against its first parent")
+        rc, out = self.lint_pr()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+
 if __name__ == "__main__":
     unittest.main()
