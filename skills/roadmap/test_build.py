@@ -4648,6 +4648,26 @@ class SessionBoard(UpkeepFixture):
             self.assertSameEntries(self.board_entries(), [],
                                    "a wrong-form bucket row beside only recent working rows is read as an entry")
 
+    def test_list_valued_bucket_beside_a_blocked_row_is_skipped_not_raised(self):
+        # live_work turns a non-string bucket into None, so a live file never hands the board a list. This case hands
+        # session_board the raw row, as its docstring allows a wrong-form bucket. The board must skip that row and list
+        # the blocked one. The control is the blocked row alone, and the scope check is the raw row in the work.
+        self.publish(sessions=[self.board_row("session_a", BUCKET_BLOCKED, self.LANE, "cs-step:c1")])
+        work, steps = self.read()
+        self.assertSameEntries(self.board(work, steps), ["session_a (waiting for action; c1; no PR)"],
+                               "control: the blocked session is not listed beside no raw row")
+        work["laneSessions"].append({"id": "session_list", "session_status": "SESSION_STATUS_IDLE",
+                                     "tags": [self.REPO, self.LANE, "cs-step:c2"], "status_bucket": [BUCKET_BLOCKED],
+                                     "updated_at": None})
+        self.assertIsInstance(work["laneSessions"][-1]["status_bucket"], list,
+                              "scope: the raw list-valued row did not reach the work the board reads")
+        try:
+            entries = self.board(work, steps)
+        except TypeError as err:
+            self.fail("session_board raised %r on a list-valued status_bucket beside a blocked row" % (err,))
+        self.assertSameEntries(entries, ["session_a (waiting for action; c1; no PR)"],
+                               "session_board does not skip a list-valued status_bucket row beside a blocked row")
+
     def test_working_session_with_no_updated_at_reads_one_unknown_entry(self):
         # The control is the same file with updated_at on the working row: the board reads the blocked session only.
         self.publish(sessions=[self.board_row("session_b", BUCKET_BLOCKED, self.LANE, "cs-step:c2"),
