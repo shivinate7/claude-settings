@@ -794,10 +794,15 @@ class LaneUndo(unittest.TestCase):
         r.push()
         r.sh("checkout", "-q", "-B", "lane", "origin/main")
 
+    def drop_app_lines(self):
+        """The drop shape: A adds a test case to app.txt, and B rewrites app.txt from the old copy, taking it back out."""
+        a = self.r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
+        b = self.r.commit("B: rewrite app.txt from the old copy", app_txt=self.CARD)
+        return a, b
+
     def test_a_commit_that_drops_lines_an_earlier_lane_commit_added_is_red(self):
         r = self.r
-        a = r.commit("A: add a test case", app_txt=self.CARD + self.CASE)
-        b = r.commit("B: rewrite app.txt from the old copy", app_txt=self.CARD)
+        a, b = self.drop_app_lines()
         self.assertEqual(self.lane(), [a, b])
         assert_finding(self, r.verdict(), "app.txt", b, a)
 
@@ -1106,6 +1111,37 @@ class LaneUndo(unittest.TestCase):
         self.assertNotIn("eight test line 3", r.sh("show", c + ":cards.txt"))  # scope: C takes the block out
         self.assertIn("kept line", r.sh("show", c + ":cards.txt"))  # scope: C keeps M's line
         self.assertEqual(r.verdict(), [], "a non-test file the lane created is not read as a hunk put back")
+
+    def test_a_pure_git_mv_of_a_test_file_an_earlier_lane_commit_edited_is_green(self):
+        """A rename with the content unchanged moves the lines; it puts none back. A edits the test file, B only moves it."""
+        kept = "card test kept line\n"
+        self.main_then_lane("tests/card.txt", kept)
+        r = self.r
+        a = r.commit("A: add a block of test lines", tests__card_txt=kept + self.BLOCK)
+        r.sh("mv", "tests/card.txt", "tests/card_moved.txt")
+        b = r.commit("B: rename the test file, content unchanged")
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertIn("R100", r.sh("show", "--format=", "-M", "--name-status", b))  # scope: B is a pure rename
+        self.assertEqual(r.sh("rev-parse", b + ":tests/card_moved.txt"), r.sh("rev-parse", a + ":tests/card.txt"))  # scope: same blob
+        self.assertEqual(r.verdict(), [], "a pure git mv of a test file an earlier lane commit edited is read as a put back")
+
+    def test_a_pure_git_mv_of_a_non_test_file_an_earlier_lane_commit_edited_is_green(self):  # control
+        r = self.r
+        a = r.commit("A: add a block to app.txt", app_txt=self.CARD + self.BLOCK)
+        r.sh("mv", "app.txt", "app_moved.txt")
+        b = r.commit("B: rename app.txt, content unchanged")
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        self.assertIn("R100", r.sh("show", "--format=", "-M", "--name-status", b))  # scope: B is a pure rename
+        self.assertEqual(r.verdict(), [], "a pure git mv of a non-test file is read as a put back")
+
+    def test_a_lane_undo_finding_names_the_drops_lines_trailer_that_excuses_it(self):
+        """One finding line names the trailer that excuses it, so a lane that hits the finding adds that one line and retries once."""
+        a, b = self.drop_app_lines()
+        self.assertEqual(self.lane(), [a, b])  # scope: B is the second lane commit
+        found = [p for p in self.r.verdict() if "app.txt" in p and b[:9] in p]
+        self.assertTrue(found, "scope: the lane reads a finding on app.txt that undoes B")
+        self.assertIn(C.TRAILER, found[0], "the finding does not name the trailer that excuses it: %r" % found[0])
+        self.assertNotIn("\n", found[0], "the finding is not one line: %r" % found[0])
 
 
 class IntegrationBase(unittest.TestCase):
@@ -1539,6 +1575,23 @@ class Unknown(unittest.TestCase):
         code, out = self.run_main(False, "--strict")
         self.assertEqual(code, 1)
         self.assertIn("UNKNOWN", out)
+
+    def test_a_checkout_without_hooks_is_unknown_and_refused_under_strict(self):
+        """A lane that touches one file twice reaches the test-path rule. A copy of the checker with no hooks/ cannot read
+        hooks/guard.py, so the check says UNKNOWN and exits 1 under --strict. A pin: the current code already does this."""
+        r = base_repo()
+        r.sh("checkout", "-q", "-b", "lane")
+        r.commit("A: add a line", app_txt=BODY + "lane line one\n")
+        r.commit("B: add another line", app_txt=BODY + "lane line one\nlane line two\n")
+        tree = os.path.join(r.tmp.name, "checker")
+        tracked_tree.copy_tracked(tree, "lint")  # the checker and its imports, from lint/ only
+        self.assertFalse(os.path.isdir(os.path.join(tree, "hooks")), "scope: the copy has no hooks/ folder")
+        run = subprocess.run([sys.executable, os.path.join(tree, "lint", "check_silent_undo.py"), "--repo", r.dir, "--strict"],
+                             cwd=r.dir, capture_output=True, text=True, env=dict(ENV, PYTHONDONTWRITEBYTECODE="1"))
+        out = run.stdout + run.stderr
+        self.assertIn("UNKNOWN", out, out)
+        self.assertIn("cannot be read", out, out)  # the cause: the test-path rule, not some other read
+        self.assertEqual(run.returncode, 1, out)
 
 
 class History(unittest.TestCase):
