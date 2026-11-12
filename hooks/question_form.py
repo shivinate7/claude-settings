@@ -407,14 +407,30 @@ COMMAND_VERB = re.compile(_RUN_VERB + r"[^.\n]{0,40}\bcommands?\b(?!\s+below)"
 # A task's `command` is {powershell, mac}, each a non-empty string, so the owner's own shell gets a
 # block that runs in it. PowerShell 5.1 has none of the bash syntax below: the operators, the
 # /dev/null path and an export statement, at a line start or after `;`. A line holding one fails there.
+# Four more bash forms are read on the text with strings, comments and here-strings blanked out
+# (_ps_bash_form), so PowerShell text that only looks like one passes: a pipe to a Unix-only program
+# (PowerShell has `Sort-Object`, `Tee-Object` and `more`, so those are left out; `jq` and `less` are in), a leading `NAME=value`
+# before a command (a `}` ends the value, so a hashtable's `b=2}` is none, unless it closes a `${...}` expansion, nested
+# one deep as in `${A:-${B}}`; each expansion holds no other `{` or `;`, so a failed read backtracks in linear time), a `[ ... ]` or `[[ ... ]]` test after a statement start or `if`, and a backslash that ends a line
+# after a space with a line after it (a `C:\repo\` path ends in no space before its backslash, and a
+# lone backslash argument ends the text: `cd \`, and a `cd \` line before a line with no flag is a path).
 COMMAND_SHELLS = ("powershell", "mac")
 PS_BASH_OPERATOR = re.compile(r"&&|\|\||<<|/dev/null|(?:^|;)\s*export\s", re.M)
+PS_BASH_FORMS = re.compile(
+    r"\|[ \t]*(?:head|tail|grep|xargs|sed|awk|cut|wc|uniq|tr|tac|jq|less)(?![\w-])"
+    r"|(?:^|;)[ \t]*[A-Za-z_][A-Za-z0-9_]*=(?:\$\{(?:\$\{[^{}\s;]*\}|[^{}\s;])*\}|[^\s;}])*[ \t]+[A-Za-z./]"
+    r"|(?:^|[;(]|\b(?:if|elif|while|until)\b)[ \t]*(?:\[[ \t]+[^\]\n]*[ \t]\]|\[\[[ \t]+[^\]\n]*[ \t]\]\])",
+    re.M | re.I)
+# A backslash that ends a line after a space, with a line after it. When the backslash is the line's only
+# argument (`cd \`, the drive root) and the next line does not start with a flag, it is a path, not a continuation.
+PS_BASH_CONTINUATION = re.compile(r"^([^\n]*[ \t])\\[ \t]*\r?\n[ \t]*(\S)", re.M)
 # A shell line in a step's backtick span or fence, read by guard_core's quote-aware reader. A span
 # with a chain (an operator, or two lines) is a shell line when one segment plainly runs a command:
 # its command word, after any `VAR=value`, `env`, `time`, `sudo` or `$(` prefix, is in SHELL_PROGRAMS,
 # is a hyphenated cmdlet (`get-process`), or is a lowercase word with an argument after it (`grep -n
 # x`, `cmd /c git log`). A span with no chain is a shell line when its command is a Verb-Noun cmdlet,
-# or a SHELL_PROGRAMS program with an argument. Plain text is no command: `foo|bar` (no space), `title;
+# or a SHELL_PROGRAMS program with an argument, or a lowercase word whose second word is a flag
+# (`chmod +x f`). Plain text is no command: `foo|bar` (no space), `title;
 # subtitle`, `// a | b` and a markdown table row. A program alone (`git`) names the tool in prose, and
 # any other backticked word (`main`) or a file name is not a shell line. A path that starts ./ or ../ is
 # a shell line when an argument follows it, when its name has no extension (`./build`), or when it ends
@@ -423,7 +439,12 @@ PS_BASH_OPERATOR = re.compile(r"&&|\|\||<<|/dev/null|(?:^|;)\s*export\s", re.M)
 SHELL_PROGRAMS = frozenset(("git", "gh", "cd", "npm", "npx", "node", "python", "python3", "pip", "curl",
                             "brew", "bash", "sh", "zsh", "pwsh", "powershell", "claude", "rm", "mv", "cp",
                             "ls", "cat", "echo", "export", "sudo", "make", "pytest", "docker", "mkdir",
-                            "gcloud", "bq", "winget"))
+                            "gcloud", "bq", "winget", "gsutil", "kubectl", "terraform", "yarn", "pnpm", "aws",
+                            "az", "helm"))
+# A span whose command word is any lowercase word and whose second word is a flag (`grep -r x`, `chmod +x
+# f`) is a shell line too, as is one whose program is listed. A command word with a path is read by its
+# basename, so `/usr/bin/chmod +x f` and `scripts/run.py --x` are shell lines.
+SPAN_FLAG = re.compile(r"(?:--?|\+)[A-Za-z]")
 SHELL_CMDLET = re.compile(r"[A-Z][a-z]+-[A-Z][A-Za-z]+")
 # In a chain a cmdlet may be any case (`get-process`), and a command may be any lowercase word.
 CHAIN_CMDLET = re.compile(r"[A-Za-z]+-[A-Za-z]+")
@@ -524,7 +545,11 @@ def _press_field_ok(text, links, context="", press_text=None) -> bool:
     page = text if WEB_MARKER.search(text) else context
     if not WEB_MARKER.search(page):
         return True
-    urls = [l["url"] for l in (links if isinstance(links, list) else []) if isinstance(l, dict) and isinstance(l.get("url"), str)]
+    # A link counts as the page draws it: a string url and a string label (skills/waiting-page/page.html
+    # isLink). A link the page does not draw shows the owner nothing to press. `links` that is not a
+    # list holds no link.
+    urls = [l["url"] for l in (links if isinstance(links, list) else [])
+            if isinstance(l, dict) and isinstance(l.get("url"), str) and isinstance(l.get("label"), str)]
     if not urls:
         return False
     return all(any(re.search(r"/(?:pull|issues)/%s(?!\d)" % n, u) for u in urls)
@@ -640,7 +665,29 @@ def _shell_line(span, run) -> bool:
             return True
         elif chained and _chain_command(word, len(words) - 1):
             return True
-        elif word in SHELL_PROGRAMS and len(words) >= 2:
+        elif len(words) >= 2 and (word in SHELL_PROGRAMS
+                                  or (CHAIN_COMMAND.fullmatch(word) and SPAN_FLAG.match(words[1]))):
+            return True
+    return False
+
+
+def _ps_bash_form(text) -> bool:
+    """True when PowerShell text holds a bash-only form. PS_BASH_OPERATOR reads the text as it stands;
+    PS_BASH_FORMS reads it with each quoted string, here-string and comment blanked to `_` (newlines kept),
+    found by guard_core's PowerShell quote walk, the one home of that reading."""
+    if PS_BASH_OPERATOR.search(text):
+        return True
+    import guard_core   # loads only for a task that has a command
+    script = guard_core.PowerShellScript(text)
+    out = []
+    for index, char, quote in guard_core.walk_quotes(script, line_comments=True):
+        out.append("_" if quote and char != "\n" else char)
+    blanked = "".join(out)
+    if PS_BASH_FORMS.search(blanked):
+        return True
+    for match in PS_BASH_CONTINUATION.finditer(blanked):
+        lone = len(match.group(1).split()) == 1
+        if not (lone and match.group(2) != "-"):
             return True
     return False
 
@@ -656,7 +703,7 @@ def command_in_item_hit(data) -> str:
     has_command = _command_ok(data.get("command"))
     if "command" in data and not has_command:
         return "command is not {powershell, mac}"
-    if has_command and PS_BASH_OPERATOR.search(data["command"]["powershell"]):
+    if has_command and _ps_bash_form(data["command"]["powershell"]):
         return "powershell command holds a bash operator"
     steps = data.get("steps")
     if not isinstance(steps, list):
@@ -1414,7 +1461,8 @@ def _chat_question_hit(question, options):
             return "uniform-pick", "recommended option goes against the uniform ruling"
     for o in options:
         label, desc = _option_text(o, "label"), _option_text(o, "description")
-        links = [{"url": u} for u in CHAT_URL.findall(desc)]
+        # a url in the description shows as its own text, so it is its own label
+        links = [{"label": u, "url": u} for u in CHAT_URL.findall(desc)]
         # the page scans label and how; Gain and Lose text says what the pick does to the owner, not what he presses
         text, press_text = _owner_press_text(label, EFFECT_TEXT.sub("", desc))
         if not _press_field_ok(text, links, press_text=press_text):
