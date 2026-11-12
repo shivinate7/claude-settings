@@ -106,6 +106,12 @@ class JobSteps(unittest.TestCase):
         with open(CHECKS, encoding="utf-8") as fh:
             self.assertEqual(per_job_problems(fh.read()), [])
 
+    def test_all_jobs_passed_has_no_wake_step(self):
+        # all-jobs-passed fails with any red job, so the run-end comment is its wake; a step of its own would double it.
+        with open(CHECKS, encoding="utf-8") as fh:
+            job = checks_jobs(fh.read())["all-jobs-passed"]
+        self.assertNotRegex(job, r"uses:\s*\$/actions/ci-done-comment")
+
     def test_detector_goes_red(self):
         good = ("jobs:\n  a:\n    permissions:\n      contents: read\n      pull-requests: write\n    steps:\n"
                 "      - run: x\n      - name: Wake\n        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}\n"
