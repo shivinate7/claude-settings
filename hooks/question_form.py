@@ -1037,6 +1037,9 @@ def item_hit(op, entry, cwd="", session_id=None):
     hit = option_letter_hit(op, data)
     if hit:
         return "option-letter-keys", hit
+    hit = frozen_letters_hit(op, data)
+    if hit:
+        return FROZEN_RULE, hit
     hit = rework_off_page_hit(data)
     if hit:
         return "rework-off-page", hit
@@ -1299,6 +1302,71 @@ def option_letter_hit(op: str, data) -> str:
             if m and next(v for v in m.groupdict().values() if v).lower() != key:
                 return "option label that opens with a letter tag other than its key: " + m.group(0).strip()
     return key_named_hit(_item_text_fields(data))
+
+
+# ------------------------------------------------------------------ an option keeps the letter it was shown with
+#
+# docs/decisions/option-keys-are-letters.md, rule `option-letters-frozen`, ruling R60 (roadmap r60, owner 15:07 CST
+# Nov 12), built against a named incident (incident in the record): triage reordered item 646 after the chat question
+# went out, so chat a became page b, and the owner's "a" could have been filed as the opposite pick. option_letter_hit
+# cannot see that: after the swap each key is still its position's letter. The item therefore carries `shown`, the
+# options as first shown, in order, each as {key, id, label}. A later write keeps each shown position's key, id and
+# label, may add a `note` to an option, and may append options. Each option carries a unique `id` that a stored answer
+# records, so a later move of the letters cannot change which option the owner meant (page_grant.py holds such an
+# answer for his word).
+FROZEN_RULE = "option-letters-frozen"
+FROZEN_REASON = ("An option keeps the letter it was first shown with. Carry `shown`, the options as first shown, in "
+                 "order, each as {key, id, label}. Give each option a short unique `id` that is never a lone letter. "
+                 "Keep each shown option's key, id and label and its position: never reorder, relabel or drop one. "
+                 "A rule-driven change adds a `note` to the option and moves nothing. A new option goes at the end. "
+                 "(decision option-keys-are-letters, ruling R60: an option keeps its letter and carries an id)")
+SHOWN_FIELDS = ("key", "id", "label")
+
+
+def _option_id_hit(options) -> str:
+    """The matched text when an option has no non-empty string id, an id that is a lone letter, or an id another option
+    already has, else "". A lone letter would read as a key."""
+    seen = set()
+    for i, option in enumerate(options):
+        found = option.get("id") if isinstance(option, dict) else None
+        if not isinstance(found, str) or not found.strip():
+            return "option %s has no id" % _letter_of(i)
+        if re.fullmatch(r"[A-Za-z]", found):
+            return "option %s has an id that is a lone letter" % _letter_of(i)
+        if found in seen:
+            return "option %s has an id that repeats" % _letter_of(i)
+        seen.add(found)
+    return ""
+
+
+def _shown_entry(entry):
+    """(key, id, label) of one shown entry or option, else None when it is no mapping."""
+    return tuple(entry.get(f) for f in SHOWN_FIELDS) if isinstance(entry, dict) else None
+
+
+def frozen_letters_hit(op: str, data) -> str:
+    """The matched text when this write of an open waiting-page decision that carries `options` breaks the freeze:
+    an option with no unique id (or an id that is a lone letter), no `shown` list, an option at a shown position
+    that differs from the shown entry in key, id or label, or fewer options than shown. A `set` is a first write,
+    so its `shown` must equal its options. An update may append. A task, a note, a closed item and a write with no
+    `options` pass. The stored item is unseen: a write that carries `shown` is trusted, as the record says."""
+    if not _open_decision(data) or not isinstance(data.get("options"), list):
+        return ""
+    options = data["options"]
+    hit = _option_id_hit(options)
+    if hit:
+        return hit
+    shown = data.get("shown")
+    if not isinstance(shown, list) or any(not isinstance(entry, dict) for entry in shown):
+        return "the options carry no shown list"
+    if len(options) < len(shown):
+        return "option %s is missing: fewer options than shown" % _letter_of(len(options))
+    for i, entry in enumerate(shown):
+        if _shown_entry(options[i]) != _shown_entry(entry):
+            return "option %s differs from the option shown at its letter" % _letter_of(i)
+    if op == "set" and len(shown) != len(options):
+        return "shown holds fewer options than a first set carries"
+    return ""
 
 
 # ------------------------------------------------------------------ the page's option letters mean the chat's
@@ -1735,7 +1803,7 @@ PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "pr
                 "item-field-page-only": PAGE_ONLY_REASON,
                 DEPARTS_RULE: PAGE_DEPARTS_REASON,
                 "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON,
-                LABELS_RULE: LABELS_REASON}
+                LABELS_RULE: LABELS_REASON, FROZEN_RULE: FROZEN_REASON}
 CHAT_STAKE_REASON = ("A question is the owner's only when he can judge it. Write the Problem line as "
                      "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s. "
                      "(decision owner-judge-test, a decision reaches the owner only when he can judge it)"

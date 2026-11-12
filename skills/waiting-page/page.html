@@ -173,6 +173,7 @@ h1, h2, h3 { text-wrap: balance; margin: 0; }
 .opt.sel .key { background: var(--acc); border-color: var(--acc); color: var(--on-acc); }
 .opt .lab { font-weight: 700; line-height: 1.3; padding-top: 2px; }
 .opt .how { margin: 0; font-size: 14.5px; color: var(--muted); }
+.opt .how .optnote { display: block; margin-top: 4px; font-weight: 600; color: var(--ink); }
 .opt .tr { margin: 0; display: grid; gap: 4px; font-size: 14.5px; align-content: start; }
 .opt .tr div { display: grid; grid-template-columns: 18px minmax(0, 1fr); }
 .opt .tr .s { font: 600 15px/1.4 var(--mono); }
@@ -1011,7 +1012,7 @@ button.tile:hover { background: color-mix(in srgb, var(--chip) 60%, var(--surfac
 
 <!-- The one list of top-level item fields. The page warns on a field outside it, and the guard (rule item-field-rendered) refuses a write of one.
      Add a field here when the page draws it. A key inside options or steps is not listed. -->
-<script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "recommended", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "replied", "lastAnswer", "lane", "waits", "repo", "checked_with", "closed", "dismissed"]</script>
+<script type="application/json" id="itemFields">["id", "n", "kind", "status", "added", "ref", "title", "short", "owner", "home", "context", "holds", "by", "stands", "arbiter", "ruled", "rank", "group", "port", "look", "designs", "options", "recommended", "pick", "why", "multi", "ranked", "steps", "links", "command", "minutes", "reply", "replied", "lastAnswer", "lane", "waits", "repo", "checked_with", "closed", "dismissed", "shown"]</script>
 
 <!-- The roadmap build writes only this block (skills/roadmap/build.py --block). The page writer replaces it on each publish
      (splice.py) and keeps designData. Empty, the Status tab says the plan is unknown. -->
@@ -1429,8 +1430,20 @@ function answerBody(it, d, at) {
   const typed = d.note != null ? d.note : "";
   if (d.act === "park") return { item: it.id, n: it.n, at, act: "park", note: typed };
   const body = { item: it.id, n: it.n, at, note: typed || (d.auto ? "accepted pick" : "") };
-  if (isRuling(it)) body.choice = OVERTURN; else if (it.kind === "decision") { body.choice = d.choice || NONE; body.label = choiceLabel(it, body.choice); } else if (d.done) body.done = true;
+  if (isRuling(it)) body.choice = OVERTURN; else if (it.kind === "decision") {
+    body.choice = d.choice || NONE; body.label = choiceLabel(it, body.choice);
+    const oid = choiceOptionId(it, body.choice);
+    if (oid != null) body.optionId = oid;
+  } else if (d.done) body.done = true;
   return body;
+}
+// The id of the option picked (a list of ids for a multi item), saved beside the key so a later move of the letters cannot change which option the owner meant (ruling R60). Absent when an option has no id, and for none of these.
+function choiceOptionId(it, choice) {
+  if (choice === NONE) return null;
+  const one = (k) => { const o = (it.options || []).find((x) => x.key === k); return o && typeof o.id === "string" && o.id ? o.id : null; };
+  if (!Array.isArray(choice)) return one(choice);
+  const ids = choice.map(one);
+  return ids.every((x) => x !== null) ? ids : null;
 }
 // The saved answer's words, so a reader sees what the letter meant on the page: "A: Red" for a pick, a list of those for a multi item, "none of these" for none. `choice` stays the key and alone decides the answer.
 function choiceLabel(it, choice) {
@@ -1526,7 +1539,8 @@ function optCard(it, o, chosen) {
   // On a ranked item the tick box holds the rank number.
   const headKids = multi ? [h("span", { class: "tick" + (ranked ? "" : " mark"), "aria-hidden": "true" }, ranked && sel ? String(at + 1) : ""), key, lab] : [key, lab];
   const body = [
-    h("p", { class: "how" + (on("how") ? " dif" : ""), id: "h-" + sfx }, mark("how"), o.how, tail("how")),
+    h("p", { class: "how" + (on("how") ? " dif" : ""), id: "h-" + sfx }, mark("how"), o.how, tail("how"),
+      typeof o.note === "string" && o.note.trim() ? h("span", { class: "optnote" }, o.note) : null),
     hasOptLinks(it) ? (linksOf(o).length ? h("div", { class: "links", id: "k-" + sfx }, linksOf(o).map(linkEl)) : h("span", { class: "nolinks" })) : null,
     h("div", { class: "tr", id: "t-" + sfx }, o.widens === true ? h("p", { class: "stake due dwarn widens" }, glyph("due"), h("span", {}, "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo")) : null, h("div", { class: "gain" + (on("gain") ? " dif" : "") }, mark("gain"), h("span", { class: "s", "aria-label": "You gain" }, "+"), h("span", {}, o.gain), tail("gain")), h("div", { class: "lose" + (on("lose") ? " dif" : "") }, mark("lose"), h("span", { class: "s", "aria-label": "You lose" }, "−"), h("span", {}, o.lose), tail("lose"))),
     pi >= 0 ? h("div", { class: "pick", id: "p-" + sfx }, sparkle(), !multi ? it.why : ranked ? ordinal(pi + 1) + "." + (pi === 0 ? " " + (it.why || "") : "") : pi === 0 ? it.why : "Also recommended.") : h("span", { class: "nopick" })];
