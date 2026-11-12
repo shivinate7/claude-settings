@@ -2507,7 +2507,7 @@ _STOPS_PAGE = []
 def stops_fields_page():
     """A page whose itemFields block is the real page's list plus `stops`. The list is read from the page, never copied, and
     the seam GUARD_ITEM_FIELDS_PAGE points the check at it, so a stops write is judged by the stops rule, not by
-    item-field-rendered (the page does not list stops yet)."""
+    item-field-rendered. The real page lists `stops` now (page.html itemFields), so the seam adds nothing it does not already list."""
     if not _STOPS_PAGE:
         fields = question_form._item_fields(question_form.ITEM_FIELDS_PAGE)
         check("stops: the page's itemFields list reads", fields is not None, "no itemFields list in the page")
@@ -2529,12 +2529,12 @@ def stops_refused(name, got, fragment):
     check(name, ok, "want a refusal naming %r, got %r" % (fragment, got))
 
 
-def stops_page(name, data, fragment=None):
+def stops_page(name, data, fragment=None, op="set"):
     """One page write judged by item_hit and by the guard, with the stops seam. A fragment is a refusal that names it;
-    None is a pass."""
+    None is a pass. `op` is the write's verb: set by default, or update for a write that carries only the fields it changes."""
     with mock.patch.dict(os.environ, {question_form.ITEM_FIELDS_SEAM: stops_fields_page()}):
-        for surface, got in (("page item_hit", call("item_hit", "set", entry_of(data))),
-                             ("page guard", guard_hit("set", entry_of(data)))):
+        for surface, got in (("page item_hit", call("item_hit", op, entry_of(data))),
+                             ("page guard", guard_hit(op, entry_of(data)))):
             if fragment is None:
                 check("%s: %s passes" % (surface, name), got == ("", ""), "want a pass, got %r" % (got,))
             else:
@@ -2562,8 +2562,8 @@ def case_stops_consistent_items_pass():
 
 
 def case_stops_item_passes_the_real_page_fields():
-    """No seam: the check reads the real page's itemFields list. A consistent stops item passes on both surfaces only once
-    the page lists stops, so until then it is refused as item-field-rendered, naming the field."""
+    """No seam: the check reads the real page's itemFields list, which lists `stops`, so a consistent stops item passes on
+    both surfaces. A page that dropped `stops` from that list would refuse it as item-field-rendered, naming the field."""
     page("a consistent stops item passes the page's own field list", "set",
          entry_of(stops_item(holds=STOPS_HOLDS, stops=["lane fix-proxy", "PR #1201"])), None)
 
@@ -2591,6 +2591,37 @@ def case_stops_refusal_prints_its_table_text():
         if rule in table:
             printed = printed_reason(tool_input)
             check("stops reason: the refusal prints its rule's table text", table[rule] in printed, printed[:200])
+
+
+def case_stops_update_judged_by_the_fields_it_carries():
+    """An update that sets stops with no holds is refused, as a set is. An update that removes stops passes, and so does
+    one that carries holds alone: the stored stops is unseen, so the update is judged by what it carries."""
+    stops_page("an update that sets stops with no holds", {"stops": ["lane fix-proxy"]}, "stops", op="update")
+    stops_page("an update that sets stops and holds that names both", {"stops": ["lane fix-proxy", "PR #1201"], "holds": STOPS_HOLDS},
+               None, op="update")
+    stops_page("an update that removes stops", {"stops": {"__delete__": True}}, None, op="update")
+    stops_page("an update that carries holds only", {"holds": "Lane fix-proxy waits on your word."}, None, op="update")
+
+
+def case_stops_batch_judged_per_write():
+    """A batch that holds a stops write with no holds is refused by the stops rule. A batch of consistent stops writes passes."""
+    def batch(writes):
+        with mock.patch.dict(os.environ, {question_form.ITEM_FIELDS_SEAM: stops_fields_page()}):
+            return page_batch(writes)
+    good = {"op": "set", "collection": "items", "doc_id": "stops-batch-ok", "data": stops_item(holds=STOPS_HOLDS, stops=["lane fix-proxy", "PR #1201"])}
+    bad = {"op": "set", "collection": "items", "doc_id": "stops-batch-bad", "data": stops_item(stops=["lane fix-proxy"])}
+    verdict("page guard: a batch with a stops write and no holds is refused", batch([good, bad]),
+            (getattr(question_form, "STOPS_RULE", "<STOPS_RULE missing from hooks/question_form.py>"), "stops"))
+    verdict("page guard: a batch of consistent stops writes passes", batch([good]), None)
+
+
+def case_stops_str_replace_on_holds_is_a_known_gap():
+    """KNOWN GAP, pinned so it is on record: a str_replace that drops an entry from holds passes, since stops_hit judges a
+    set and an update only, and the stored stops is unseen. This case passes today. A fix that judges the edit turns it red,
+    and the case is re-pointed then."""
+    page("KNOWN GAP: a str_replace that drops PR #1201 from holds passes while stops still lists it", "str_replace",
+         {"collection": "items", "doc_id": DOC, "field": "holds", "old_str": STOPS_HOLDS,
+          "new_str": "Lane fix-proxy waits on your word."}, None)
 
 
 def main():
@@ -2638,7 +2669,9 @@ def main():
                  case_judged_mixed_writes_all_returned,
                  case_stops_names_each_entry_in_holds, case_stops_consistent_items_pass,
                  case_stops_item_passes_the_real_page_fields,
-                 case_stops_needs_holds_and_a_list, case_stops_refusal_prints_its_table_text):
+                 case_stops_needs_holds_and_a_list, case_stops_refusal_prints_its_table_text,
+                 case_stops_update_judged_by_the_fields_it_carries, case_stops_batch_judged_per_write,
+                 case_stops_str_replace_on_holds_is_a_known_gap):
         try:
             case()
         except Exception as exc:
