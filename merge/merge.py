@@ -197,7 +197,10 @@ class NetStop(Stop):
     """A `gh` call kept failing with a network error. Not a refusal: the caller must not revert a claim for it."""
 
 class ScopeStop(Stop):
-    """A read that failed because the repo is outside this session's GitHub scope (is_scope). Waiting and retrying from this session never pass it."""
+    """A read that failed because the repo is outside this session's GitHub scope (is_scope). Waiting and retrying from this session never pass it.
+    `repo` is the OWNER/NAME of the repo whose read failed, or None when the read named none: the archive guard names it, so the refusal routes to the session that holds it."""
+    repo = None
+    by_404 = False  # True when only the 404 rule made it scope (is_scope with repo_level); Host.flow_pages turns that into a plain Stop
 
 class Unproven(NetStop):
     """A read after the claim push could not run, so the result is unknown. Not a refusal: the claim stays (decision standing-merge-grant)."""
@@ -357,7 +360,8 @@ def is_net(c, out):
 # body, then its own tail line, which ends the output (`gh: Not Found (HTTP 404)`). Anchored on that tail or on the start of the JSON body,
 # never free text: a PR title that quotes the sentence is no match. A 5xx or a rate limit is is_net, never scope.
 _SCOPE_TEXT = "GitHub access to this repository is not enabled for this session"
-SCOPE_DENIED = re.compile(r"gh: " + _SCOPE_TEXT + r"\b[^\n]*\(HTTP 403\)\s*\Z|\A\s*\{\s*\"message\"\s*:\s*\"" + _SCOPE_TEXT)
+SCOPE_DENIED = re.compile(r"gh: " + _SCOPE_TEXT + r"\b[^\n]*\(HTTP 403\)\s*\Z|\A\s*\{\s*\"message\"\s*:\s*\"" + _SCOPE_TEXT
+                          + r"|\bHTTP 403: " + _SCOPE_TEXT + r"\b")  # last: gh's wrapped form, `HTTP 403: <sentence> (<url>)`. Only a failed call is asked (is_scope), so the sentence after the status is safe
 NOT_FOUND = re.compile(r"gh: [^\n]*\(HTTP 404\)\s*\Z")
 
 def is_scope(c, out, repo_level=True):
@@ -983,13 +987,17 @@ class Host:
         """-> every item of a list read, all pages. `key` names the field that holds the page in an object reply (check_runs, statuses); None is an array reply.
         Each page is asked for by number (`page=n`) with -i, and the read goes on to page n+1 only while its `Link` header has rel="next". The last page has none,
         so a read costs one call per page. gh's own paging and the Link URL are not used: that URL is a numeric `repositories/<id>/...` route, which the cloud agent proxy refuses with 403.
-        A failed read is a Stop: never an empty list, which would read as no checks or no pull requests. More than PAGE_CEILING pages is a Stop too."""
+        A failed read is a Stop: never an empty list, which would read as no checks or no pull requests. More than PAGE_CEILING pages is a Stop too.
+        A 404 is a ScopeStop with `by_404` set (the repo read itself is out of reach); flow_pages turns that one into a plain Stop."""
         items = []
         for n in range(1, PAGE_CEILING + 1):
             c, out = self.api(rel, "-i", fields={**(fields or {}), "per_page": 100, "page": n})
             headers, out = split_headers(out)
             if is_scope(c, out):
-                raise ScopeStop(f"reading {rel} from GitHub failed on page {n}: {out}")  # typed, so the archive guard tells it from a transient failure
+                stop = ScopeStop(f"reading {rel} from GitHub failed on page {n}: {out}")  # typed, so the archive guard tells it from a transient failure
+                stop.repo = self.repo
+                stop.by_404 = not is_scope(c, out, repo_level=False)  # scope only because of the 404 rule
+                raise stop
             try:
                 if c:
                     raise ValueError(out)
@@ -1007,9 +1015,19 @@ class Host:
             why = f": more than {PAGE_CEILING} pages of 100"
         raise Stop(f"reading {rel} from GitHub failed{why}")
 
+    def flow_pages(self, rel, key=None, fields=None):
+        """pages, for a merge-flow read of a commit or a pull request (checks, pull_files, open_pulls). Its 404 means the item is missing, never that the
+        repo is out of this session's scope, so a ScopeStop that rests on the 404 alone is a plain Stop. The proxy's 403 stays a ScopeStop."""
+        try:
+            return self.pages(rel, key, fields)
+        except ScopeStop as e:
+            if e.by_404:
+                raise Stop(str(e)) from None
+            raise
+
     def pull_files(self, n):
         """-> the changed files of pull request n, every page of pulls/N/files: dicts with `filename` and, for a text file, `patch`."""
-        return self.pages(f"pulls/{n}/files")
+        return self.flow_pages(f"pulls/{n}/files")
 
     def failed_lines(self, run_id):
         """-> the failing lines (see failing_line) of the log of each failed job of run RUN_ID: the jobs read (its pages), then one log read per
@@ -1069,7 +1087,7 @@ class Host:
 
     def open_pulls(self):
         """-> the open pull requests (drafts too), every page, as `GET pulls` lists them. A failed read is a Stop, never an empty list."""
-        return self.pages("pulls", fields={"state": "open"})
+        return self.flow_pages("pulls", fields={"state": "open"})
 
     def pr(self, n):
         """-> {head, branch, base, state, mergeable, merge_state, draft, body, created, changed_files}"""
@@ -1329,9 +1347,9 @@ class Host:
         The rows of a superseded workflow run are dropped (`superseded`); statuses and rows with no run link stay."""
         sha = sha or self.pr(n)["head"]
         rows = []
-        for r in self.pages(f"commits/{sha}/check-runs", "check_runs"):
+        for r in self.flow_pages(f"commits/{sha}/check-runs", "check_runs"):
             rows.append(self.run_row(r, r.get("details_url")))
-        for s in self.pages(f"commits/{sha}/status", "statuses"):
+        for s in self.flow_pages(f"commits/{sha}/status", "statuses"):
             rows.append({"name": s["context"], "bucket": self.STATE_BUCKET.get(s["state"], "fail"), "status": True, "link": s.get("target_url")})
         return self.buckets(rows, warn, sha)
 
