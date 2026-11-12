@@ -4,8 +4,9 @@
 Run: python3 lint/test_sim_lease.py. SIM_LEASE=PATH picks the tool; the default is bin/sim-lease in this repo.
 No case reads this machine's load, memory or disk. PATH shims for uname and sysctl read files in the case's own folder,
 and the ps shim passes through to the real ps except for a start time that a case sets. The brake's disk is the fake one
-in tests/sim_lease/sitecustomize.py, which is put on PYTHONPATH and also makes memory unread. CI and GITHUB_ACTIONS are
-unset for each run. A holder is a live `sleep` child or a child already reaped, so no case depends on a pid being free.
+in tests/sim_lease/sitecustomize.py, which is put on PYTHONPATH. Memory is unread unless a case sets it. CI and
+GITHUB_ACTIONS are unset for each run. A holder is a live `sleep` child or a child already reaped, so no case depends on
+a pid being free.
 Temp files follow decisions/test-temp-standard.md: one run folder from lint/_test_temp.py per run, removed at the end.
 """
 import importlib.machinery
@@ -104,6 +105,7 @@ class LeaseCase(unittest.TestCase):
         self.load_log = os.path.join(base, "load_reads")
         self.disk_file = os.path.join(base, "disk")
         self.disk_log = os.path.join(base, "disk_reads")
+        self.memory_file = os.path.join(base, "memory")
         self.spawn_log = os.path.join(base, "spawned")
         for d in (self.cfg, self.home, self.shims, self.ps_dir):
             os.makedirs(d)
@@ -130,6 +132,15 @@ class LeaseCase(unittest.TestCase):
 
     def set_disk_unreadable(self):
         with open(self.disk_file, "w") as f:
+            f.write("unreadable\n")
+
+    def set_memory(self, pct):
+        """The memory reading the brake gets, in percent in use. The seam in tests/sim_lease/sitecustomize.py reads it."""
+        with open(self.memory_file, "w") as f:
+            f.write("%s\n" % pct)
+
+    def set_memory_unreadable(self):
+        with open(self.memory_file, "w") as f:
             f.write("unreadable\n")
 
     @staticmethod
@@ -166,7 +177,7 @@ class LeaseCase(unittest.TestCase):
                    PATH=self.shims + os.pathsep + os.environ.get("PATH", ""), SIM_LEASE_POLL="1",
                    PYTHONPATH=os.pathsep.join(p for p in (SHIM, os.environ.get("PYTHONPATH", "")) if p),
                    SIM_LEASE_TEST_DISK=self.disk_file, SIM_LEASE_TEST_DISKLOG=self.disk_log,
-                   SIM_LEASE_TEST_SPAWNLOG=self.spawn_log,
+                   SIM_LEASE_TEST_MEMORY=self.memory_file, SIM_LEASE_TEST_SPAWNLOG=self.spawn_log,
                    SIM_LEASE_TEST_LOAD=self.load_file, SIM_LEASE_TEST_LOADLOG=self.load_log,
                    SIM_LEASE_TEST_PS=self.ps_dir, SIM_LEASE_TEST_REAL_PS=REAL_PS)
         env.update(extra)
@@ -555,6 +566,70 @@ class Brake(LeaseCase):
                 else:
                     self.assertEqual(r.returncode, 1,
                                      "a %s GB disk with %s GB free is not busy: the take is granted" % (total, free))
+
+
+class MemoryBrake(LeaseCase):
+    """The brake's memory bar (decision machine-load-brake): memory over 85% is busy, and busy refuses every grant. A case
+    sets the reading in percent through SIM_LEASE_TEST_MEMORY. Each case first checks that status shows the reading it
+    set (scope before subject), so a refusal can come only from that reading."""
+
+    def set_and_check(self, pct):
+        self.set_memory(pct)
+        self.assertIn("memory %.1f%% in use" % pct, self.status().stdout,
+                      "scope: status does not show the memory reading the case set")
+
+    def assert_refused_on_memory(self, r, pct, label):
+        self.assertEqual(r.returncode, 1, "%s: a take on memory %.1f%% is granted: the memory bar is not read" % (label, pct))
+        self.assertEqual(r.stdout.strip(), "", "%s: a refused take prints a slot" % label)
+        lines = [line for line in r.stderr.splitlines() if line.strip()]
+        self.assertEqual(len(lines), 1, "%s: the refusal is not one stderr line" % label)
+        self.assertIn("busy: memory %.1f%% in use" % pct, lines[0],
+                      "%s: the refusal does not name memory as the busy reading: %s" % (label, lines[0]))
+
+    def test_memory_is_unread_until_a_case_sets_it(self):
+        self.assertIn("memory unread", self.status().stdout, "memory is read though no case sets it")
+
+    def test_memory_at_85_0_is_not_busy(self):
+        self.set_and_check(85.0)
+        pid = self.spawn().pid
+        self.assertEqual(grant(self.take("duo", pid)), (0, "1"), "memory at 85.0% is busy: the bar is over 85%")
+
+    def test_memory_at_85_1_refuses_a_take_and_names_memory(self):
+        self.set_and_check(85.1)
+        pid = self.spawn().pid
+        self.assert_refused_on_memory(self.take("duo", pid), 85.1, "slot 1")
+
+    def test_memory_at_the_empty_and_full_ends(self):
+        for pct, granted in ((0.0, True), (100.0, False)):
+            with self.subTest(pct=pct):
+                self.set_and_check(pct)
+                pid = self.spawn().pid
+                r = self.take("duo", pid)
+                self.give(pid)  # a grant must not hold slot 1 for the next subtest
+                if granted:
+                    self.assertEqual(grant(r), (0, "1"), "memory at %.1f%% is busy: the take is refused" % pct)
+                else:
+                    self.assert_refused_on_memory(r, pct, "slot 1")
+
+    def test_memory_busy_refuses_slot_1(self):
+        self.set_and_check(90.0)
+        pid = self.spawn().pid
+        self.assert_refused_on_memory(self.take("duo", pid), 90.0, "slot 1")
+
+    def test_memory_busy_refuses_slot_2_while_slot_1_is_held(self):
+        self.set_and_check(50.0)
+        first, second = self.spawn(), self.spawn()
+        self.assertEqual(grant(self.take("duo", first.pid)), (0, "1"), "the first duo take is not granted slot 1 at 50%")
+        self.set_and_check(90.0)
+        self.assert_refused_on_memory(self.take("duo", second.pid), 90.0, "slot 2")
+
+    def test_an_unreadable_memory_grants_a_take_when_the_brake_is_loaded(self):
+        self.set_memory_unreadable()
+        pid = self.spawn().pid
+        r = self.take("duo", pid)
+        self.assertGreaterEqual(self.brake_reads(), 1,
+                                "the brake did not read the disk: it is not loaded, so the grant proves nothing")
+        self.assertEqual(grant(r), (0, "1"), "an unreadable memory reading refuses the take: a read error counts as normal")
 
 
 SYNTAX_BROKEN = "def read_load(:\n    pass\n"
