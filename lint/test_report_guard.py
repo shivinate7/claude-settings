@@ -5085,6 +5085,7 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
         cls.P = cls.commit("P")
         tcj.git(cls.repo, "update-ref", "refs/remotes/origin/main", cls.C)
         tcj.git(cls.repo, "update-ref", "refs/remotes/origin/silent-undo-ci-body", cls.C)
+        tcj.git(cls.repo, "update-ref", "refs/remotes/origin/pr", cls.P)  # the PR's own branch, as a base (known debt)
         tcj.git(cls.repo, "branch", "master", cls.C)
         cls.bare = os.path.join(cls.root, "bare")
         os.makedirs(cls.bare)
@@ -5658,6 +5659,81 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
         probe = subprocess.run(["git", "-C", self.repo, "cat-file", "-e", unknown], capture_output=True, env=tcj.GIT_ENV)
         self.assertNotEqual(probe.returncode, 0, "fixture: git knows the hash")
         self.assert_allowed("The failure is pre-existing; it fails on main at %s." % unknown)
+
+    # Item 571, round 1: the rule's git cost, the shallow-clone limit, and the known debt of a PR's own branch as a base.
+
+    # Runs the guard under a wrapper that logs each git process it starts. Every git read the guard makes goes through
+    # subprocess.Popen, so the log holds the git calls of one run.
+    COUNT_GIT_CODE = (
+        "import json, os, runpy, subprocess, sys\n"
+        "real = subprocess.Popen\n"
+        "class Counting(real):\n"
+        "    def __init__(self, args, *rest, **kwargs):\n"
+        "        argv = [str(a) for a in args] if isinstance(args, (list, tuple)) else [str(args)]\n"
+        "        if argv and os.path.basename(argv[0]).lower() in ('git', 'git.exe'):\n"
+        "            with open(os.environ['GIT_COUNT_LOG'], 'a', encoding='utf-8') as f:\n"
+        "                f.write(json.dumps(argv) + '\\n')\n"
+        "        super().__init__(args, *rest, **kwargs)\n"
+        "subprocess.Popen = Counting\n"
+        "sys.argv = sys.argv[1:2]\n"
+        "runpy.run_path(sys.argv[0], run_name='__main__')\n"
+    )
+
+    def git_calls(self, reply, cwd=None):
+        """The git processes one guard run starts for `reply`, as argv lists. The hook is the one the class drives."""
+        hook = self.hook(reply, cwd=cwd)
+        log = os.path.join(tempfile.mkdtemp(dir=RUN_FOLDER), "git.log")
+        env = dict(os.environ, GIT_COUNT_LOG=log)
+        run = subprocess.run([sys.executable, "-c", self.COUNT_GIT_CODE, REPORT_GUARD], input=json.dumps(hook),
+                             capture_output=True, text=True, timeout=30, env=env)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        if not os.path.exists(log):
+            return []
+        with open(log, encoding="utf-8") as f:
+            return [json.loads(line) for line in f if line.strip()]
+
+    def test_pe_pin_git_calls_are_bounded_per_reply(self):
+        # Catches: the rule's git cost grows past its bound: a reply with no run-form hash runs git, one run-form hash
+        # runs more than 5 git calls, a repeated hash adds calls, or two distinct hashes run more than 10. Item 571.
+        self.assert_fixture_shape()
+        none = self.git_calls("The failure is pre-existing.")
+        self.assertEqual(none, [], "a reply with no run-form hash ran git: %d calls" % len(none))
+        one = self.git_calls("The failure is pre-existing; it fails on main at %s." % self.C)
+        self.assertLessEqual(len(one), 5, "one run-form hash ran %d git calls" % len(one))
+        twice = self.git_calls("The failure is pre-existing; it fails on main at %s. It also fails on main at %s."
+                               % (self.C, self.C))
+        self.assertEqual(len(twice), len(one), "the same hash repeated in one reply ran more git calls")
+        two = self.git_calls("The failure is pre-existing; it fails on main at %s and on main at %s." % (self.P, self.A))
+        self.assertLessEqual(len(two), 10, "two distinct hashes ran %d git calls" % len(two))
+
+    def test_pe_pin_run_hash_is_read_by_git(self):
+        # Catches: a run-form hash passes with no git call, so nothing reads whether the sha is on the base. The bound
+        # above is met at zero calls; this lower bound is what makes it a read. Item 571.
+        self.assert_fixture_shape()
+        calls = self.git_calls("The failure is pre-existing; it fails on main at %s." % self.C)
+        self.assertGreaterEqual(len(calls), 1, "one run-form hash ran no git call: the sha was not read")
+
+    def test_pe_green_shallow_clone_fails_open_on_a_pr_head_hash(self):
+        # Catches: the record's 'now refused' claim must name the shallow limit; item 571.
+        # A shallow clone cuts history, so an ancestry exit 1 there proves nothing: the rule fails open, and a PR-head
+        # sha passes. The pass is that named limit, pinned as today's behaviour, not a bypass.
+        clone = os.path.join(self.root, "shallow")
+        subprocess.run(["git", "clone", "-q", "--no-single-branch", "--depth", "2", "file://" + self.repo, clone],
+                       capture_output=True, env=tcj.GIT_ENV, check=True)
+        shallow = subprocess.run(["git", "-C", clone, "rev-parse", "--is-shallow-repository"], capture_output=True,
+                                 text=True, env=tcj.GIT_ENV).stdout.strip()
+        self.assertEqual(shallow, "true", "fixture: the clone is not shallow")
+        cut = subprocess.run(["git", "-C", clone, "merge-base", "--is-ancestor", self.P, "origin/main"],
+                             capture_output=True, env=tcj.GIT_ENV)
+        self.assertNotEqual(cut.returncode, 0, "fixture: P is reachable from origin/main in the clone")
+        self.assert_allowed("The failure is pre-existing; it fails on main at %s." % self.P, cwd=clone)
+
+    def test_pe_green_known_debt_pr_own_branch_as_base_passes(self):
+        # Catches: a sha on the PR's own head passes when the PR's own branch is named as the base. Known debt, pinned as
+        # today's behaviour and not fixed here: the base ref is the PR's own branch, so it always holds the head.
+        self.assert_fixture_shape()
+        self.assertTrue(self.ancestor(self.P, "origin/pr"), "fixture: origin/pr does not hold P")
+        self.assert_allowed("The failure is pre-existing; it fails on origin/pr at %s." % self.P)
 
 
 class PendingRefusalTests(unittest.TestCase):
