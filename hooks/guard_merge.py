@@ -1838,10 +1838,11 @@ _STAMP_HEADER = re.compile(
     _MARKDOWN_LEAD + r"[^\s,:]+(?:\s+[^\s,:]+){0,3}(?:[,:]|\s[-\u2014\u2013])\s*"
     r"(?:(?P<date>\d{4}-\d{2}-\d{2})\s+)?"
     r"(?P<hour>\d{1,2}):(?P<minute>\d{2})(?::\d{2})?\s+(?P<zone>CST|CDT)\b", re.IGNORECASE)
-# The bracket header, `[label HH:MM CST]`: a label of 1 to 4 words with no `,` or `:` after it, the same stamp
-# inside square brackets (the 2026-11-12 coordinator incident form). It shares the group names above.
+# The bracket header, `[label HH:MM CST]`: a label of 1 to 4 words (a word may hold a digit, as in `triage 6`) with
+# no separator needed after it, the same stamp inside square brackets (the 2026-11-12 coordinator incident form).
+# A list bullet (`- ` or `+ `) may lead. It shares the group names above.
 _STAMP_BRACKET = re.compile(
-    _MARKDOWN_LEAD + r"\[\s*[^\s\[\]\d,:][^\s\[\]]*(?:\s+[^\s\[\]\d,:][^\s\[\]]*){0,3}\s+"
+    _MARKDOWN_LEAD + r"(?:[-+]\s+" + _MARKDOWN_LEAD + r")?\[\s*[^\s\[\]]+(?:\s+[^\s\[\]]+){0,3}\s+"
     r"(?:(?P<date>\d{4}-\d{2}-\d{2})\s+)?"
     r"(?P<hour>\d{1,2}):(?P<minute>\d{2})(?::\d{2})?\s+(?P<zone>CST|CDT)\s*\]", re.IGNORECASE)
 _STAMP_OFFSET_HOURS = {"CST": -6, "CDT": -5}
