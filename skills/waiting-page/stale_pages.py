@@ -63,9 +63,9 @@ an item with `arbiter` true, a park answer (`park.<id>`, `parked: true` or `act:
 unreadable items, an items folder without the marker, or --answers without --items print one `kept-answer: unknown (...)` line, with no other kept-answer line.
 The folder loader is export_page.docs_in, the one home of reading that folder.
 --asks names the asks the session saved with `ArtifactData list asks`, in the same two shapes. After the other lines, one `open-ask: <id> at <time>: <text>`
-line per ask with no non-blank `reply` (a root the owner dismissed is not listed; an owner reply under an answer, with `re`, waits like an ask), and, with --items and --answers, one `open-item:`
+line per ask with no non-blank `reply` (a dismissed, Mark read, root with no reply is listed; one with a reply is not; an owner reply under an answer, with `re`, waits like an ask), and, with --items and --answers, one `open-item:`
 line per open item that holds a kept answers/<id> and has no `reply`, `lane` or `waits` (--items alone, or an unreadable or cut-short list, is `open-item: unknown`). Then one `FAIL:` line. A waiting ask turns exit 0 into 1; a cut-short or unreadable asks list prints `open-ask: unknown`
-and turns exit 0 into 2 (never clear). Behind (1) and unknown (2) keep their codes. Cost: one more file read at the wake already running; no process, file written, timer or log.
+and turns exit 0 into 2 (never clear). Behind (1) and unknown (2) keep their codes. Cost: a folder read opens every <id>.json in it, once, at the wake already running; no process, file written, timer or log.
 Session-start mode, run by hooks/session_start.sh in a repo whose extras name a waiting page:
 
     python3 ~/.claude/skills/waiting-page/stale_pages.py --session-line <repo toplevel> [--main-checkout <dir>]
@@ -590,8 +590,8 @@ def has_text(value):
 
 
 def open_ask_lines(asks, complete=True):
-    """One open-ask line per ask with no session reply, oldest first: id, time, text. A dismissed root is the owner's own
-    close and is not listed. An ask the owner wrote as a reply under an answer (`re`) waits like any other. With `complete` False
+    """One open-ask line per ask with no session reply, oldest first: id, time, text. Marking an ask read (`dismissed`) is not
+    a reply, so a dismissed ask with no reply is listed; a dismissed ask with a reply is not. An ask the owner wrote as a reply under an answer (`re`) waits like any other. With `complete` False
     (that folder may be cut short), or an entry that is not an object, one unknown line, never a clear."""
     if not complete:
         return ["open-ask: unknown (the asks folder has no .complete marker, so its list may be cut short)"]
@@ -601,7 +601,7 @@ def open_ask_lines(asks, complete=True):
         if not isinstance(data, dict):
             unreadable = True
             continue
-        if has_text(data.get("reply")) or data.get("dismissed"):
+        if has_text(data.get("reply")):
             continue
         waiting.append((str(data.get("at") or ""), doc_id if doc_id is not None else data.get("id"), data.get("text")))
     lines = ["open-ask: %s at %s: %s" % (ask_id, at or "unknown", " ".join(str(text or "").split()) or "(no text)")
@@ -621,8 +621,10 @@ def open_item_lines(items, answers, complete=True, answers_complete=True):
     """One open-item line per open item whose kept answers/<id> has no `reply`, `lane` or `waits` beside it: the owner spoke and the writer has
     not routed, replied or closed (SKILL.md, "Route and close"). `lastAnswer` is not the signal: it outlives a consumed answer.
     A `lane` or a `reply` still counts as handled unless the kept answer is strictly later than `lastAnswer.at` or `replied`: the owner answered
-    again. A missing or unreadable time keeps the marker. An item with both stays out while either marker holds.
-    A park answer, an arbiter item and an answer with no item are never named. A cut-short list gives one unknown line."""
+    again. A missing or unreadable marker time keeps the marker. An item with a `lane` or a `reply` whose kept answer time is missing or unreadable is
+    unknown, never handled and never clear: nothing shows the owner did not answer later. An item with both stays out while either marker holds.
+    A park answer, an arbiter item and an answer with no item are never named. A cut-short list, or an unreadable kept answer time on an item
+    with a marker, gives one unknown line."""
     if not (complete and answers_complete):
         return ["open-item: unknown (the %s folder has no .complete marker, so its list may be cut short)" % ("items" if not complete else "answers")]
     kept = {}
@@ -633,6 +635,7 @@ def open_item_lines(items, answers, complete=True, answers_complete=True):
         if isinstance(doc_id, str) and not doc_id.startswith("park.") and data.get("parked") is not True and data.get("act") != "park":
             kept[doc_id] = data
     lines = []
+    unreadable = False
     for doc_id, item in items:
         if not isinstance(item, dict):
             continue
@@ -641,11 +644,16 @@ def open_item_lines(items, answers, complete=True, answers_complete=True):
             continue
         answer_at = kept[item_id].get("at")
         last = item.get("lastAnswer")
+        if (has_text(item.get("lane")) or has_text(item.get("reply"))) and parse_utc(answer_at) is None:
+            unreadable = True
+            continue
         lane_holds = has_text(item.get("lane")) and not answered_after(answer_at, last.get("at") if isinstance(last, dict) else None)
         reply_holds = has_text(item.get("reply")) and not answered_after(answer_at, item.get("replied"))
         if not (lane_holds or reply_holds):
             lines.append("open-item: item %s (%s): the owner answered at %s and the item has no reply"
                          % (item.get("n", item_id), item_id, kept[item_id].get("at") or "unknown"))
+    if unreadable:
+        lines.append("open-item: unknown (a kept answer time is missing or unreadable on an item with a lane or reply, so it may hide a new answer)")
     return lines
 
 
@@ -797,10 +805,8 @@ PARK_ANSWER_MAX_AGE = 600  # seconds: a park answer the writer has not closed in
 
 def parse_utc(text):
     """An ISO time with a Z (as the store writes it) as epoch seconds, or None when it cannot be read."""
-    if not isinstance(text, str):
-        return None
     try:
-        return datetime.datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+        return datetime.datetime.fromisoformat(str(text).replace("Z", "+00:00")).timestamp()
     except (ValueError, OverflowError, OSError):
         return None
 
