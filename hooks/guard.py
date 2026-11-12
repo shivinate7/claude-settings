@@ -5045,8 +5045,9 @@ def shell_run_texts(raw: str) -> list:
         for quote, body, _ in _split_heredocs(raw)[1]:
             if not quote:
                 texts.extend(t for t, _ in _substitutions(body, heredoc=True)[0][:-1])
-            elif "`" in body and body.strip() not in shells:
-                # An interpreter runs this body, and perl, ruby and node run a backtick span as a shell.
+            elif "`" in body and body.strip() not in shells and body.strip() in strip_heredoc_bodies(raw):
+                # Only an interpreter keeps this body in view: it runs it, and perl, ruby and node run a
+                # backtick span as a shell.
                 # `$(` and `<(` stay text there: no interpreter reads them as a shell. Python's own
                 # backtick span is read too, a rare false alarm.
                 texts.extend(t for t, _ in _substitutions(re.sub(r"([$<>])\(", r"\1 (", body),
