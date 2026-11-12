@@ -1,12 +1,12 @@
 {
   "title": "q_max: redo #970's rewrite of stale rulings from main",
   "why": "#970 (closed) rewrote stale rulings in place. 175 of its 219 decision-file edits target files main has not touched since its base 7f7bbd5ca, so those rulings are likely still stale (lane qmax-revive-idle).",
-  "note": "Find them: git diff --name-only 7f7bbd5ca origin/claude/rework-round-a -- docs/decisions, kept to files with no commit in git log 7f7bbd5ca..origin/main. #970 also touched 36 rule and spec files. A lane redoes the work from main; branch claude/rework-round-a stays on origin for reference. Each rewrite follows q_max's rule that an entry changes only on a new ruling or for accuracy. Done: each listed file is rewritten or marked still true. Filed under pr-backlog-clear. Built in q_max #1082 (head 559e66de1), with runner 9 to merge (coordinator, 14:22 CST Nov 7). Lane cleared 08:59 CST Nov 12: its session (was \"lane: qmax-stale-rulings-redo\") is archived (coordinator ask 08:57 CST Nov 12, sweep of ended session ids).",
+  "note": "Find them: git diff --name-only 7f7bbd5ca origin/claude/rework-round-a -- docs/decisions, kept to files with no commit in git log 7f7bbd5ca..origin/main. #970 also touched 36 rule and spec files. A lane redoes the work from main; branch claude/rework-round-a stays on origin for reference. Each rewrite follows q_max's rule that an entry changes only on a new ruling or for accuracy. Done: each listed file is rewritten or marked still true. Filed under pr-backlog-clear. Built in q_max #1082 (head 559e66de1), with runner 9 to merge (coordinator, 14:22 CST Nov 7). Lane cleared 08:59 CST Nov 12: its session (was \"lane: qmax-stale-rulings-redo\") is archived (coordinator ask 08:57 CST Nov 12, sweep of ended session ids). Closed 13:28 CST Nov 12 (lane session_013NEJKzia3Rm6beUVbLwtoE): no work left. q_max #1082 (the redo) merged Nov 7 (main 32d43737d); the step's find rule gives 0 of 175 decision files and 0 of 36 rule/spec files untouched since #970's base 7f7bbd5ca. Runner 11 may archive claude/rework-round-a; #970 is already closed.",
   "phase": "now",
-  "status": "doing",
+  "status": "done",
   "order": 0.26,
   "owner": "coordinator",
-  "updatedAt": "2026-11-12T13:23:35-06:00",
-  "lane": "session_013NEJKzia3Rm6beUVbLwtoE",
+  "updatedAt": "2026-11-12T13:26:59-06:00",
+  "lane": "",
   "paused": false
 }

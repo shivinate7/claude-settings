@@ -1,11 +1,11 @@
 {
   "title": "q_max: the live cancel banner shows the server's own cancel reason",
   "phase": "now",
-  "status": "ready",
+  "status": "doing",
   "order": 41,
   "owner": "coordinator",
-  "lane": "",
+  "lane": "session_013NEJKz4Rs37eZBEdaTVMa7",
   "why": "The check aChatPanelCanStopItsOwnRun is re-pointed, not re-ruled: D-055 (owner, 2026-10-07) hides provider text only, and D-519 says the live banner carries the server's own reason, so the live cancel banner shows cancelReason's sentence.",
   "note": "Coordinator reading, 19:01 CST Nov 7, can be undone; no page item. Stacked on q_max #1104. Unclear: q_max repo (stacked on q_max #1104); not readable from claude-settings (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:Lane:-qmax-d369-failed-reason]).",
-  "updatedAt": "2026-11-12T07:22:00-06:00"
+  "updatedAt": "2026-11-12T13:26:59-06:00"
 }

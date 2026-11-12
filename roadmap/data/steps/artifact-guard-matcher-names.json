@@ -4,8 +4,8 @@
   "note": "Coordinator 11:16 CST Nov 8: lane started. Lane 11:19 CST Nov 8: no gap in the cloud; the live names are Artifact, ArtifactData and ArtifactComments, and main names no claude-artifacts tool. Mac side unread: page task 434 asks the owner to get the names from the Home coordinator. The lane holds changes. Item 434 done (owner paste 18:22Z = 12:22 CST Nov 8): Mac sessions call mcp__claude-artifacts__* tools: db_get 31, db_list 24, db_query 3, db_str_replace 2, db_usage 1, db_write 30, declare_capabilities 1, describe_capabilities 2, get_artifact 4, guide 2, list_artifacts 1, publish_files 9, read_artifact 1, read_comments 5, watch 2. Gap confirmed; routed to the lane 12:23 CST. Lane 12:25 CST Nov 8: a matcher alone fires nothing; the guards read ArtifactData fields (action, collection, doc_id, data). Needs nested input shapes of db_write (ops), db_str_replace (path, field), db_get (path) and publish_files (files). Owner task 440 (home-artifact-input-shapes) posted 12:26 CST. Owner answered item 440 at 12:28 CST Nov 8 (from Home transcripts): db_write ops entries are {op, path, data, ifVersion}, op in set/merge/update/delete, collection is path's first segment (items, receipts, groups, meta); db_str_replace path items/<id> plus field; db_get path <collection>/<id>; publish_files files is a list of {as, path} (uri optional); db_query and db_list take a bare collection. Routed to the lane 12:33 CST. Triage sweep 04:49 CST Nov 10: back to ready. Lane [ended:lane:-artifact-guard-matcher-names] is archived or finished; no open PR (725 read), no cited PR merged, no cited commit and no slug on main. Coordinator started lane [ended:artifact-guard-matcher-names] at 04:53 CST Nov 10. Fold (12:21 CST Nov 10, outbox sweep, owner pick 493 a): home main docs/debts/notes.md:120 artifact-hook-matcher-names (daffb31); gap confirmed here. Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was [ended:artifact-guard-matcher-names]).",
   "phase": "now",
   "owner": "claude-settings",
-  "lane": "",
-  "status": "ready",
+  "lane": "session_013NEJL3MTsrgkbccEjnK2Lf",
+  "status": "doing",
   "order": 750,
-  "updatedAt": "2026-11-12T07:22:00-06:00"
+  "updatedAt": "2026-11-12T13:26:59-06:00"
 }
