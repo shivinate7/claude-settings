@@ -1514,19 +1514,25 @@ def case_departs_line_forms_pass():
 
 
 # A line with no dash splits at its first space, so a no-change word can sit in the main side ("same as main",
-# "keeps the check"), where the change side never shows it. Its main side can also be the template's placeholder.
+# "keeps the check"), where the change side never shows it. In "main; no change" the change side is "no change",
+# and the ";" after the first word must not hide it. Its main side can also be the template's placeholder.
 NO_DASH_NO_CHANGE = [
     "Departs from: same as main",
     "Departs from: no change",
     "Departs from: nothing changes",
     "Departs from: already done",
     "Departs from: keeps the check",
+    "Departs from: main; no change",
+    "Departs from: main; same as before",
+    "Departs from: main; the same as main",
 ]
 NO_DASH_PLACEHOLDER = ["Departs from: <what on main> moves the check to lint"]
 # No-dash lines that pass: a real main side, and a no-change word only after the first ";".
 NO_DASH_PASS = [
     "Departs from: lint/stamp.py:run_stamp moves the stamp check to the lint job",
     "Departs from: lint/stamp.py:run_stamp moves the list; it already loads from cache",
+    "Departs from: main; adds a check to the lint job",
+    "Departs from: lint/stamp.py:run_stamp moves the stamp check to the lint job; no change to the verdict",
 ]
 
 
