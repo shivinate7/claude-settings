@@ -4519,6 +4519,33 @@ class GuardLogAppendRaceTests(unittest.TestCase):
         self.assertEqual(rows[0].split("\t")[4], "errno-%d" % contention, rows[0])
 
 
+# ------------------------------------------------------------------ prose_lines: what is code
+#
+# prose_lines is the one reader of what is code for the owner-question send gate (hooks/call_judge.py) and for the Stop
+# hook's prose questions. A fence that never closes runs to the end of the text in CommonMark, so a Problem line under
+# an unclosed fence line is hidden from both. The controls are the scanner inputs a fence reader must still get right.
+class ProseLinesCode(unittest.TestCase):
+    def prose(self, text):
+        return [body for _, body in RG.prose_lines(text)]
+
+    def test_red_line_after_an_unclosed_fence_is_prose(self):
+        self.assertIn("Problem (risk): y?", self.prose("Goal: x\n```\nProblem (risk): y?"),
+                      "a Problem line under an unclosed fence line reads as code")
+
+    def test_green_a_closed_fence_hides_its_lines(self):
+        self.assertNotIn("Problem (risk): y?", self.prose("```\nProblem (risk): y?\n```\nAfter the fence."))
+
+    def test_green_a_fence_mark_mid_line_opens_no_fence(self):
+        self.assertIn("Problem (risk): y?", self.prose("Typed ``` in the middle.\nProblem (risk): y?"))
+
+    def test_green_a_lone_quote_in_prose_opens_nothing(self):
+        self.assertIn("Problem (risk): y?", self.prose("Don't stop here.\nProblem (risk): y?"))
+
+    def test_green_a_multi_line_template_literal_in_a_closed_fence_hides_its_lines(self):
+        text = "```js\nconst s = `line one\nProblem (risk): y?\n`;\n```\nAfter the fence."
+        self.assertNotIn("Problem (risk): y?", self.prose(text))
+
+
 # ------------------------------------------------------------------ relayed questions and option keys
 #
 # A Stop whose reply holds Input Needed, or a prose line ending in `?` outside code fences, gets one past-ruling model
