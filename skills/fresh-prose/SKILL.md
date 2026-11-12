@@ -52,6 +52,14 @@ The ste-lint CI step refuses a pull request that leaves stale prose (`lint/stale
 STALE001 fires on a tracked Markdown line that names a file the same pull request deleted or renamed.
 STALE002 fires on a line that cites a Python file and a name the pull request removed from that file.
 
+## Record rules
+
+Never allocate a numbered record on a branch. Write a slug of 32 characters or fewer. Claim the number at merge. Name a lane by its branch slug, never by a session number.<!-- rule:git-slug-then-claim-number --> Ids, not paths. A path breaks when its file moves.<!-- rule:git-cite-by-id --> Give each record its own file, one folder per kind.<!-- rule:git-record-own-file-per-kind --> One record per question. When its ruling changes, rewrite the record in place. Open a record only for a new question.<!-- rule:git-one-record-per-question -->
+
+## Published numbers
+
+If this repo lints markdown, give every published number and path a checked reader.<!-- rule:verification-checked-reader-for-numbers -->
+
 ## Proof
 
 Proof (`verification-trust-guard-after-red`): break the target on a scratch copy, watch the

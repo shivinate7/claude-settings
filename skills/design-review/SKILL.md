@@ -98,6 +98,10 @@ It is not a review of a built screen.
 4. When a blind mockup is `same`, the orchestrator reads that designer's brief against the template
    (`blind_brief.py`) and names any fault beside the verdict.
 
+## Verdict per screen
+
+If the repo has screens, check each screen at every size and theme it ships in. Give a verdict per screen, never a description.<!-- rule:verification-screens-verdict -->
+
 ## Rules
 
 - No conformity either way. The repo does not silence a skill. A skill does not restyle the
