@@ -139,7 +139,7 @@ def override_line(result):
         return "Opus override: the model-cap refusal is lifted for Opus %s until %s." % (who, central_hhmm(until))
     if kind == "once":
         return "Override: one act, ends at %s if unused." % central_hhmm(until)
-    return "Override: until %s." % central_hhmm(until)
+    return "Override: until %s" % central_hhmm(until)
 
 
 def inbox_paths(session_id):

@@ -12,8 +12,8 @@ writes, so a session cannot grant itself an override. It is valid only while now
          never spends it. The reason, on one line, goes to guard.log.
   timed  `override 15m`, `override 2h`, `override 15` (minutes): every refused act until the end.
          It reaches agents. The owner picks the length, so there is no cap.
-  `override off` ends any override at once. `override`, `override <n>[m|h]` and `override off` mean
-  that only as the whole prompt: a word after the length or after `off` is ambiguous, so it grants
+  `override off` ends any override at once. `override off` means that only as the whole prompt: a
+  word after `off` is ambiguous, so it grants
   nothing on this route (an intended "off" must never become a grant). A later line starting with the word grants
   nothing.
   A plain ask (`yes override that`, `override that for 15 minutes please`) writes the same file when a model judges the
@@ -536,20 +536,15 @@ def grant_opus_ask(session_id, prompt, at, judge=None, transcript=None, source=N
 
 def _keyword_typed(prompt, source, transcript):
     """True when the keyword route may grant `prompt`: the owner typed it. The payload `source` is absent or the owner's
-    (OPUS_ASK_SOURCES), and the prompt's own record in the transcript tail (the last owner prompt record with the same
-    text, _own_record's test) is no harness turn (promptSource "system"), no isMeta record and has no origin kind but
-    human (a peer, a task notification). No transcript, or no such record: no evidence against, so True. Cost: one
+    (OPUS_ASK_SOURCES), and the prompt's own record in the transcript tail (the last prompt record with the same text,
+    a peer's too) passes _owner_text. No transcript, or no such record: no evidence against, so True. Cost: one
     tail read, only for a prompt that would grant."""
     if source not in OPUS_ASK_SOURCES:
         return False
     for _, rec in reversed(_tail_prompts(transcript, any_origin=True)):
         if _text_of(_unpeered(rec)).strip() != prompt.strip():
             continue
-        origin = rec.get("origin")
-        att = rec.get("attachment")
-        att_origin = att.get("origin") if isinstance(att, dict) else None
-        return not (rec.get("isMeta") or rec.get("promptSource") == "system"
-                    or any(isinstance(o, dict) and o.get("kind", "human") != "human" for o in (origin, att_origin)))
+        return _owner_text(rec) is not None  # the one owner-turn test: no peer, system, isMeta or non-human origin
     return True
 
 
@@ -652,8 +647,8 @@ def grant_override_ask(session_id, prompt, at, judge=None, transcript=None, sour
     ask alone.
     A first word `override` is a keyword form grant() deferred. Every outcome but a judge yes for a timed override
     (a gate, unclear words, a judge no, an error or an odd answer) returns grant(defer=False): a reason form stays a
-    one-act override with its reason logged, `override 15m please` stays nothing. A judge error never widens it. A first word `override` prompt that is no owner-typed turn (_keyword_typed)
-    returns None before any judge call."""
+    one-act override with its reason logged. A judge error never widens it. A first word `override` prompt that is no
+    owner-typed turn (_keyword_typed) returns None before any judge call."""
     path = _path(session_id)
     if path is None or not isinstance(prompt, str):
         return None
