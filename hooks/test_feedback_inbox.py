@@ -2867,6 +2867,16 @@ def guard_parse(text):
     return guard_module().parse(text)
 
 
+def hook_context(p):
+    """The hookSpecificOutput a page-note run printed as PostToolUse JSON: a dict, or {} when it printed none or another shape.
+    One home of this parse: the save-failure case and the skip-signal cases read it."""
+    try:
+        hso = json.loads(p.out)["hookSpecificOutput"]
+    except (ValueError, KeyError, TypeError):
+        return {}
+    return hso if isinstance(hso, dict) else {}
+
+
 def case_page_note_get_saves_one_block():
     cfg, sid = new_cfg(), "pn-save"
     p = page_note(cfg, sid, response_of([("a-7k2", answer_data())]))
@@ -3035,12 +3045,7 @@ def case_page_note_write_failure_says_not_saved():
     os.makedirs(inbox_of(cfg, sid))  # a directory at the inbox path: no write can land
     p = page_note(cfg, sid, response_of([("a-7k2", answer_data())]))
     check("page note write failure: exit 0", p.code == 0, p.desc())
-    try:
-        hso = json.loads(p.out)["hookSpecificOutput"]
-    except (ValueError, KeyError, TypeError):
-        hso = None
-    if not isinstance(hso, dict):
-        hso = {}
+    hso = hook_context(p)
     ctx = str(hso.get("additionalContext", ""))
     check("page note write failure: a PostToolUse JSON says the note was not saved",
           hso.get("hookEventName") == "PostToolUse" and "not saved" in ctx.lower(), p.desc())
@@ -3117,6 +3122,7 @@ def case_page_note_own_session_answer_saves():
     check("page note own session: the mode ran", ran_page_note(p), p.desc())
     check("page note own session: saves the note", captured_texts(cfg, sid) == [label_of(3, "it-4f2a", PAGE_NOTE)],
           captured_texts(cfg, sid))
+    check("page note own session: prints no signal line", p.out.strip() == "", p.desc())
 
 
 def case_page_note_answer_without_session_saves():
@@ -3135,6 +3141,7 @@ def case_page_note_unset_env_saves_a_session_answer():
     check("page note env unset: the mode ran", ran_page_note(p), p.desc())
     check("page note env unset: saves the note", captured_texts(cfg, sid) == [label_of(3, "it-4f2a", PAGE_NOTE)],
           captured_texts(cfg, sid))
+    check("page note env unset: prints no signal line, since no skip applies", p.out.strip() == "", p.desc())
 
 
 def case_page_note_env_without_an_id_saves_a_session_answer():
@@ -3156,6 +3163,41 @@ def case_page_note_non_string_session_saves():
         check("page note session %s: the mode ran" % label, ran_page_note(p), p.desc())
         check("page note session %s: saves the note" % label, captured_texts(cfg, sid) == [label_of(3, "it-4f2a", PAGE_NOTE)],
               captured_texts(cfg, sid))
+
+
+def case_page_note_skipped_answer_names_its_item():
+    """An answer another session owns saves nothing, and this session is told: one stdout line, in PostToolUse
+    JSON, names the skipped item and never the note's text."""
+    cfg, sid = new_cfg(), "pn-signal"
+    p = page_note(cfg, sid, response_of([("a-7k2", answer_data(session=OTHER_SESSION))]), extra_env=OWN_ENV)
+    check("page note skip signal: the mode ran", ran_page_note(p), p.desc())
+    check("page note skip signal: the skip saves nothing", captured_texts(cfg, sid) == [], captured_texts(cfg, sid))
+    lines = [ln for ln in p.out.split("\n") if ln.strip()]
+    check("page note skip signal: one stdout line", len(lines) == 1, p.desc())
+    hso = hook_context(p)
+    check("page note skip signal: the line is PostToolUse JSON", hso.get("hookEventName") == "PostToolUse", p.desc())
+    ctx = str(hso.get("additionalContext", ""))
+    check("page note skip signal: the context names the skipped item", "it-4f2a" in ctx, ctx)
+    check("page note skip signal: the stdout carries no note text", PAGE_NOTE not in p.out, p.desc())
+
+
+def case_page_note_skipped_answers_share_one_signal_line():
+    """Two answers another session owns are skipped in one get: one stdout line names both skipped items,
+    and not the item this session saves."""
+    cfg, sid = new_cfg(), "pn-signal-two"
+    first = answer_data(session=OTHER_SESSION)
+    second = answer_data(item="it-7c", n=5, note="move it to Friday", session=OTHER_SESSION)
+    mine = answer_data(item="it-9b", n=4, note="take the Thursday slot", session=OWN_SESSION)
+    p = page_note(cfg, sid, response_of([("a-7k2", first), ("c-2m4", second), ("b-9x1", mine)]), extra_env=OWN_ENV)
+    check("page note skip signal two: the mode ran", ran_page_note(p), p.desc())
+    check("page note skip signal two: only this session's note is saved",
+          captured_texts(cfg, sid) == [label_of(4, "it-9b", "take the Thursday slot")], captured_texts(cfg, sid))
+    lines = [ln for ln in p.out.split("\n") if ln.strip()]
+    check("page note skip signal two: one stdout line", len(lines) == 1, p.desc())
+    ctx = str(hook_context(p).get("additionalContext", ""))
+    check("page note skip signal two: the context names the first skipped item", "it-4f2a" in ctx, ctx)
+    check("page note skip signal two: the context names the second skipped item", "it-7c" in ctx, ctx)
+    check("page note skip signal two: the context names no saved item", "it-9b" not in ctx, ctx)
 
 
 # --------------------------------------------------------------------------- repeat cases
@@ -4518,6 +4560,8 @@ CASES = (
     case_page_note_unset_env_saves_a_session_answer,
     case_page_note_env_without_an_id_saves_a_session_answer,
     case_page_note_non_string_session_saves,
+    case_page_note_skipped_answer_names_its_item,
+    case_page_note_skipped_answers_share_one_signal_line,
     case_repeat_roadmap_step_marks_the_item_and_blocks,
     case_repeat_stop_hook_active_marks_and_tells_the_owner,
     case_repeat_judged_items_are_not_judged_again,
