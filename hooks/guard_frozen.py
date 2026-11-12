@@ -217,7 +217,7 @@ def is_project_config(path: str, cwd: str) -> bool:
 MUTATING_COMMAND = (
     r"\b(?i:rm|mv|cp|chmod|truncate|tee|install|ln"
     r"|set-content|add-content|clear-content|out-file|new-item|remove-item|move-item|copy-item"
-    r"|rename-item|set-itemproperty|ri|rd|rmdir|del|erase|move|copy|ren)\b"
+    r"|rename-item|set-itemproperty|ri|rd|rmdir|del|erase|move|copy|ren|sc|ac|cpi|ni)\b"
 )
 
 
@@ -755,6 +755,7 @@ _UNSAFE_MARK = re.compile(r"""`|\\["']|\$['"(]|[<>]\(|<#""")
 # PowerShell reads these as quote marks. They end or open a quote that the scanner does not see.
 _SMART_QUOTES = frozenset(PS_DOUBLE_QUOTES + PS_SINGLE_QUOTES)
 _GROUP_MARK = re.compile(r"[&(){}]")
+_STATEMENT_END = re.compile(r"[;|\n]")
 _FD_DUP = re.compile(r"\d*>&\d*|&>")
 _COMMAND_WORD_HOLDS = re.compile(r"""['"$`(){}\[\]!&]""")
 # A command that can run stored text, or rename what a printer is, makes no text data (review r2
@@ -940,13 +941,67 @@ def _cp_start(raw) -> int:
     return start if start is not None and _name(raw[start]) == "cp" else -1
 
 
-def _copy_reads(raw, predicate, cwd):
-    """The indexes of the words of a `cp` segment that are only read, else an empty set."""
-    words = [_unquoted(word) for word in raw]
-    start = _cp_start(raw)
-    if start < 0:
+# The PowerShell twins of `cp` and of a write of text. `Copy-Item SRC DEST` writes only DEST. `Add-Content`
+# and `Set-Content PATH TEXT...` write only PATH: a quoted word after it is the text written. Only the
+# switches below and plain positional words are read; any other parameter (`-Destination`, `-Value`,
+# `-Path`) or a redirect fails closed to a hit, as `-Destination` does for `cp`.
+_PS_COPY = frozenset(("copy-item", "copy", "cpi"))
+_PS_CONTENT = frozenset(("add-content", "set-content", "ac", "sc"))
+_PS_SWITCH = re.compile(r"-(?i:recurse|force|container|passthru|verbose|confirm|whatif|nonewline)")
+
+
+def _only_read(operands, words, target, predicate, cwd, is_folder=False):
+    """The copy operands (indexes into `words`) that are only read. A copy into a folder (`is_folder`, a
+    trailing slash, or a folder that exists) writes `FOLDER/<each source's name>`, so a source whose
+    name that folder path makes a hit is written, not read."""
+    if not is_folder:
+        try:
+            is_folder = target.endswith(("/", "\\")) or os.path.isdir(_expanded(target, cwd))
+        except (OSError, ValueError):
+            is_folder = False
+    if not is_folder:
+        return set(operands)
+    head = target.rstrip("/\\")
+    return {i for i in operands
+            if not predicate(head + "/" + re.split(r"[/\\]", words[i].rstrip("/\\"))[-1], cwd)}
+
+
+def _ps_reads(name, raw, words, start, predicate, cwd, plain):
+    """`_copy_reads` for a PowerShell `Copy-Item` (its sources) or `Add-Content` / `Set-Content` (the
+    quoted text after the path): the indexes of the words that are only read or only text. A `;`, `|` or
+    newline outside quotes means the segment holds a second statement the split missed: none is read."""
+    if _GROUP_MARK.search(_FD_DUP.sub("", plain)) or _STATEMENT_END.search(plain):
         return set()
-    operands, target, index, shown = [], None, start + 1, ""
+    operands = []
+    for index in range(start + 1, len(words)):
+        word = words[index]
+        if ">" in word or "<" in word or (word.startswith("-") and not _PS_SWITCH.fullmatch(word)):
+            return set()
+        if not _PS_SWITCH.fullmatch(word):
+            operands.append(index)
+    if name in _PS_CONTENT:
+        return {i for i in operands[1:] if _has_quote(raw[i])}
+    if len(operands) < 2:
+        return set()
+    target = words[operands[-1]]
+    if _CP_DEST_UNSAFE.search(target) or predicate(target, cwd) or predicate(target.rstrip("/\\") + "/_", cwd):
+        return set()
+    return _only_read(operands[:-1], words, target, predicate, cwd)
+
+
+def _copy_reads(raw, predicate, cwd, plain=""):
+    """The indexes of the words of a `cp` segment that are only read, else an empty set. `plain` is the
+    segment's text outside quotes, for the PowerShell twins (`_ps_reads`)."""
+    words = [_unquoted(word) for word in raw]
+    start = resolve_command(tuple(raw))
+    if start is None:
+        return set()
+    name = _name(raw[start])
+    if name in _PS_COPY or name in _PS_CONTENT:
+        return _ps_reads(name, raw, words, start, predicate, cwd, plain)
+    if name != "cp":
+        return set()
+    operands, target, index, shown, is_folder = [], None, start + 1, "", False
     while index < len(words):
         word = words[index]
         if _NULL_REDIRECT.fullmatch(word):
@@ -970,15 +1025,15 @@ def _copy_reads(raw, predicate, cwd):
                 name.startswith(word[2:].split("=")[0]) for name in _CP_LINK_LONG):
             return set()
         if _CP_TARGET.fullmatch(word):
-            target, index = (words[index + 1] if index + 1 < len(words) else None), index + 2
+            target, index, is_folder = (words[index + 1] if index + 1 < len(words) else None), index + 2, True
             if target is None:
                 return set()
             shown = raw[index - 1]
             continue
         if word.startswith("--target-directory="):
-            target, shown = word.split("=", 1)[1], ""
+            target, shown, is_folder = word.split("=", 1)[1], "", True
         elif word.startswith("-t") and len(word) > 2 and word[1] != "-":
-            target, shown = word[2:], ""
+            target, shown, is_folder = word[2:], "", True
         elif _CP_FLAGS.fullmatch(word):
             pass
         elif word.startswith("-") or ">" in word or "<" in word:
@@ -995,7 +1050,7 @@ def _copy_reads(raw, predicate, cwd):
         return set()
     if predicate(target, cwd) or predicate(target.rstrip("/\\") + "/_", cwd):
         return set()
-    return set(operands)
+    return _only_read(operands, words, target, predicate, cwd, is_folder)
 
 
 def _cp_link_source(raw, holds, cwd) -> str:
@@ -1074,6 +1129,18 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                if command_position else parsed)
     closed = any(unsafe or _runs_stored_text(segment, words, plain)
                  for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
+    # A copy or a written text is read through PowerShell's own quotes: a smart quote is a quote there, so the
+    # straightened text is what PowerShell sees. Only a printer's data stays closed by a smart quote.
+    straight = [_scan(_straight(segment)) for segment in segments]
+    reading_closed = any(unsafe or _runs_stored_text(segment, words, plain)
+                         for segment, words, (unsafe, plain) in zip(segments, parsed, straight))
+    # The reads come from the same straightened text, so a copy or a written text is cut where PowerShell cuts it.
+    # An index into those words is an index into the segment's words only when they are the ones judged below.
+    read_words = [[_typed(word, segment) for word in _quoted_words(_straight(segment))]
+                  if is_powershell(segment) else words for segment, words in zip(segments, parsed)]
+    read_scripts = ([[_typed(word, segment) for word in _quoted_words(_straight(segment), True)]
+                     if is_powershell(segment) else words for segment, words in zip(segments, scripts)]
+                    if command_position else read_words)
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
     quiet = all(kind in ("printer", "cd") or not words for kind, words in zip(kinds, parsed))
     inner = []
@@ -1081,7 +1148,10 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
         linked = _cp_link_source(raw, holds, cwd)
         if linked:
             return linked
-        data = set() if closed else _copy_reads(raw, predicate, cwd)
+        data = set() if reading_closed else _copy_reads(read_words[number], predicate, cwd, straight[number][1])
+        from_reads = bool(data)
+        if from_reads:
+            raw = read_words[number]
         found = None if closed or not script_data else _inline_script_at([_unquoted(word) for word in raw])
         if found:
             data.add(found[1])
@@ -1118,22 +1188,27 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 pieces = [_typed(piece.rstrip("`") or piece, piece) for piece in pieces]
                 words.extend(pieces)
                 shown.extend(pieces)
-                kept = scripts[number][index]
+                kept = (read_scripts if from_reads else scripts)[number][index]
                 script.extend(_words_of(kept) if _has_quote(kept) else [kept])
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
-        for nested in _powershell_scripts_of(segments[number]):
+        scripts_run = _powershell_scripts_of(segments[number])
+        for nested in scripts_run:
             # a script pwsh, `cmd /c` or iex runs is PowerShell text: judge it by PowerShell's rules too
             hit = _shell_write_hit(nested, at, predicate, holds, follow_cd, command_position, predicate_command)
             if hit:
                 return hit
+        command_args = _segment_command(script) if command_position else ()
+        if command_args and scripts_run and command_args[0] in _PS_SHELLS:
+            # the script this shell runs was judged above by PowerShell's own rules; only a redirect on the shell is left
+            command_args = ("", ())
         for word in words:
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
             if not word or word in (">", ">>"):
                 continue
-            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(script) if command_position else ())):
+            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *command_args):
                 return word
     for text in inner:
         hit = _shell_write_hit(text, cwd, predicate, holds, follow_cd, command_position)
@@ -1142,6 +1217,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     return ""
 
 
+_PS_SHELLS = frozenset(("pwsh", "powershell", "cmd"))
 _PS_LAUNCHER = re.compile(r"pwsh|powershell|cmd|iex|invoke-expression", re.IGNORECASE)
 
 
@@ -1162,7 +1238,12 @@ def _powershell_scripts_of(segment: str) -> list:
 
 
 def _segment_command(words):
-    """(resolved command name, plain words after it) of a segment, for `writes_to`'s command position."""
+    """(resolved command name, plain words after it) of a segment, for `writes_to`'s command position.
+    `env -S STRING` runs STRING, with the words after it appended: that command is the one read."""
+    inner = guard_core._env_split_string(tuple(words))
+    tokens = segment_tokens(inner) if inner else None
+    if tokens:
+        return _segment_command(tokens)
     index = resolve_command(tuple(words))
     if index is None:
         index = next((i for i, word in enumerate(words) if not _ASSIGNMENT.match(word)), len(words))
