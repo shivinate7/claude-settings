@@ -1827,7 +1827,7 @@ def pick_tool_input(tool, message):
     return {"session_id": PICK_TARGET, "message": message}
 
 
-PICK_AGENT_ID = "a7c41e90"  # the agent_id of a sub-agent's call: the payload field that a coordinator's own call does not carry
+PICK_AGENT_ID = "a7c41e90"  # the agent_id of an agent's call: the payload field that a coordinator's own call does not carry
 
 
 def pick_input(tool, tool_input, transcript, cwd, agent=None):
