@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.realpath
 import mail  # noqa: E402  hooks/mail.py
 
 TRIES = 6  # the first push and at most 5 retries, each only after a non-fast-forward
+WAIT_CEILING = 7000  # the most --max-seconds a wait may ask for, in seconds
 
 
 def stamp():
@@ -106,8 +107,11 @@ def main(argv):
     args = parser.parse_args(argv)
     env = dict(os.environ)
     if args.command == "wait":
-        if args.interval < 1 or args.max_seconds < 1:
-            parser.error("--interval and --max-seconds must be at least 1")
+        # The 7000 s ceiling keeps a run under the 2 h background cap, which would end it with no line for the session.
+        for name, value, top in (("--interval", args.interval, None), ("--max-seconds", args.max_seconds, WAIT_CEILING)):
+            if value < 1 or (top and value > top):
+                print("mail wait: not started: %s %s" % (name, "below 1" if value < 1 else "above %d" % top))
+                return 2
         addrs = mail.own_addrs(env.get("CLAUDE_CODE_SESSION_ID"), os.getcwd(), env) if env.get("MAILBOX_REPO") else []
         return mail.wait(env, addrs, clock=time.time, sleep=time.sleep, interval=args.interval, max_seconds=args.max_seconds)
     if not env.get("MAILBOX_REPO"):

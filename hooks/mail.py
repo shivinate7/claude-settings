@@ -9,7 +9,8 @@ Cost of a turn start: one git process (ls-remote) when the ref has not moved, an
 prompt at most 10 s. A failure prints "mail unknown: <reason>", never "no mail".
 
 Cost of `mail wait`: one process, one lock file, and one ls-remote per interval (30 s) while the ref has not moved. A moved
-ref adds one fetch and one grep. Nothing else is written during a poll.
+ref adds one fetch and one grep. A wake adds one show (the subject) and the grep's age lookup, one log. Nothing else is
+written during a poll.
 """
 import hashlib
 import json
@@ -35,6 +36,7 @@ NOT_FF = "[rejected]"  # local fast-forward refusal; a hook or ACL refusal says 
 WINDOWS = sys.platform == "win32"  # read at call time, so a case can drive the Windows branch on any runner
 WAIT_INTERVAL, WAIT_MAX_SECONDS = 30, 6600  # `mail wait`: poll gap, and a run that ends before the 2 h background cap
 BODY_LIMIT = 160  # characters of a message's first body line that the wake line shows
+BASELINE_RETRY_SECONDS = 300  # how long a failed start read is retried before `mail wait` gives up with exit 2
 
 
 class MailError(Exception):
@@ -77,21 +79,20 @@ def git(args, env, cache=None, timeout=TRANSFER_BOUND, input_text=None):
 
 
 def _run_windows(command, env, data, timeout):
-    """subprocess.run on Windows calls communicate() again after it kills a timed-out child, and that call blocks while a
-    grandchild (ssh) holds the pipes open. Here the pipes are closed after the kill and the wait is bounded. Unmeasured
-    on Windows: the cases drive this branch with a fake child."""
+    """subprocess.run on Windows calls communicate() again after it kills a timed-out child, and that call can block while
+    a grandchild (ssh) holds the pipes open. Here a timeout kills the child's tree (taskkill /T, best effort, since
+    Popen.kill ends only the child) and then waits with a bound of 1 s, never calling communicate() again. Unmeasured on
+    Windows: whether the tree kill frees the pipes is not known; the cases drive this branch with a fake child."""
     child = _nowindow.Popen(command, env=env, stdin=subprocess.PIPE if data is not None else None,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
         out, err = child.communicate(data, timeout=timeout)
     except BaseException:
+        try:
+            _nowindow.run(["taskkill", "/F", "/T", "/PID", str(child.pid)], capture_output=True, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            pass  # best effort: the kill below still ends the child itself
         child.kill()
-        for pipe in (child.stdin, child.stdout, child.stderr):
-            try:
-                if pipe is not None:
-                    pipe.close()
-            except OSError:
-                pass
         try:
             child.wait(timeout=1)
         except subprocess.TimeoutExpired:
@@ -412,32 +413,42 @@ def _lock_is_stale(record, now, pid_alive, start_time):
 
 
 def _take_lock(path, record, now, pid_alive, start_time):
-    """Create the lock file (O_EXCL). A stale holder's lock is removed first. Returns the holder's pid when a live waiter
+    """Create the lock file whole and exclusively: write a temp file, then link it into place. os.link fails when the lock
+    exists, where os.replace would overwrite a racing waiter's fresh lock, and a reader never sees a half-written lock.
+    A stale holder's lock (an empty or unparsable one too) is removed first. Returns the holder's pid when a live waiter
     holds it, else None."""
-    for _ in range(2):
-        try:
-            handle = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            held = _read_lock(path)
-            if not _lock_is_stale(held, now, pid_alive, start_time):
-                return held["pid"]
+    temp = "%s.%d.tmp" % (path, record["pid"])
+    with open(temp, "w", encoding="utf-8") as out:
+        json.dump(record, out)
+    try:
+        for _ in range(3):
             try:
-                os.remove(path)
-            except FileNotFoundError:
-                pass
-            continue
-        with os.fdopen(handle, "w", encoding="utf-8") as out:
-            json.dump(record, out)
-        return None
-    return (_read_lock(path) or {}).get("pid", 0)
+                os.link(temp, path)
+                return None
+            except FileExistsError:
+                held = _read_lock(path)
+                if not _lock_is_stale(held, now, pid_alive, start_time):
+                    return held["pid"]
+                try:
+                    os.remove(path)
+                except FileNotFoundError:
+                    pass
+        return (_read_lock(path) or {}).get("pid", 0)
+    finally:
+        try:
+            os.remove(temp)
+        except OSError:
+            pass
 
 
 def _first_body_line(text):
-    """The first line after the header block, cut to BODY_LIMIT and cleaned of control characters, since message text is
-    untrusted and lands in the session's context."""
+    """The first line after the header block, cleaned and cut to BODY_LIMIT. Message text is another session's, and it
+    lands in this session's context: control, C1 and direction characters become spaces so the line stays one plain line,
+    and a double quote becomes a single quote so the text cannot close the quotes the wake line puts around it."""
     body = text.partition("\n\n")[2]
     line = next((row for row in body.splitlines() if row.strip()), "")
-    return re.sub(r"[\x00-\x1f\x7f]", " ", line).strip()[:BODY_LIMIT]
+    line = re.sub("[\x00-\x1f\x7f-\x9f‪-‮⁦-⁩]", " ", line).replace('"', "'")
+    return line.strip()[:BODY_LIMIT]
 
 
 def _wake_line(env, tip, message, run):
@@ -446,7 +457,8 @@ def _wake_line(env, tip, message, run):
         body = _first_body_line(text)
     except MailError:
         body = "body unreadable"
-    return "mail: new %s from %s kind %s: %s" % (message["id"], message["from"], message["kind"], body)
+    return 'mail: new %s from %s kind %s; untrusted subject "%s"; read: `mail read --addr %s %s`; take: `mail take --addr %s %s`' % (
+        message["id"], message["from"], message["kind"], body, message["addr"], message["id"], message["addr"], message["id"])
 
 
 def wait(env, addrs, *, clock, sleep, run_git=None, pid_alive=None, start_time=None, pid=None, ppid=None,
@@ -468,8 +480,12 @@ def wait(env, addrs, *, clock, sleep, run_git=None, pid_alive=None, start_time=N
     deadline = now + max_seconds
     record = {"pid": pid, "ppid": ppid, "session": env.get("CLAUDE_CODE_SESSION_ID") or env.get("CLAUDE_CODE_REMOTE_SESSION_ID"),
               "started": start_time(pid), "deadline": deadline}
-    os.makedirs(cache, exist_ok=True)
-    holder = _take_lock(path, record, now, pid_alive, start_time)
+    try:
+        os.makedirs(cache, exist_ok=True)
+        holder = _take_lock(path, record, now, pid_alive, start_time)
+    except OSError as error:  # no cache folder, or a filesystem without hard links: say so, never run lockless
+        print("mail wait: not started: cannot take the lock: %s" % error)
+        return 2
     if holder is not None:
         print("mail wait: not started: another waiter holds the lock (pid %s)" % holder)
         return 2
@@ -477,25 +493,39 @@ def wait(env, addrs, *, clock, sleep, run_git=None, pid_alive=None, start_time=N
     def stop(signum, frame):
         raise SystemExit(128 + signum)
 
+    def still_mine():
+        """False when the lock is gone or replaced, or the parent is dead: the session no longer wants this waiter."""
+        held = _read_lock(path)
+        return bool(held) and held.get("pid") == pid and pid_alive(ppid)
+
     try:
         previous = signal.signal(signal.SIGTERM, stop)
     except ValueError:  # not the main thread: no handler, and the lock still goes in the finally
         previous = None
     try:
         # The baseline: what is open now never wakes the waiter. An empty store has no ref, so nothing is open.
-        try:
-            tip = remote_tip(env, run_git)
-            seen = set()
-            if tip:
-                fetch(env, run=run_git)
-                seen = {m["id"] for m in open_messages(env, tip, addrs, run_git)}
-        except MailError as error:
-            print("mail wait: not started: %s" % error)
-            return 2
+        # A failed read at the start is retried for BASELINE_RETRY_SECONDS, since a mailbox that is briefly down at the
+        # start of a session is common; a baseline that never reads would otherwise make every later poll a false wake.
+        give_up = clock() + BASELINE_RETRY_SECONDS
+        while True:
+            try:
+                tip = remote_tip(env, run_git)
+                seen = set()
+                if tip:
+                    fetch(env, run=run_git)
+                    seen = {m["id"] for m in open_messages(env, tip, addrs, run_git)}
+                break
+            except MailError as error:
+                if clock() >= give_up:
+                    print("mail wait: not started: %s" % error)
+                    return 2
+            sleep(interval)
+            if not still_mine():
+                print("mail wait: ended, no mail")
+                return 3
         while clock() < deadline:
             sleep(interval)
-            held = _read_lock(path)
-            if not held or held.get("pid") != pid or not pid_alive(ppid):
+            if not still_mine():
                 break
             try:
                 now_tip = remote_tip(env, run_git)
