@@ -12,7 +12,7 @@ from guard_core import (
     ASSIGNMENT, DURATION, ENV_PATTERN_COMMANDS, FIND_EXEC_ACTIONS, INTERPRETER_HEREDOC, NODE_WORDS,
     POWERSHELL_CALL, PYTHON_WORDS, REDIRECT, SHELL_HEREDOC, TIMEOUT_FLAGS_BARE, TIMEOUT_FLAGS_WITH_VALUE,
     _interpreter_command, _split_heredocs, _walk_heredocs, _without_message_values, is_powershell, norm,
-    script_language, segment_tokens, split_segments,
+    script_language, segment_tokens, split_segments, interpreter_bodies,
 )
 
 
@@ -672,6 +672,24 @@ def _elide_substitutions(text: str) -> str:
     return "".join(out)
 
 
+# A python or node body that runs a shell: a call that hands a string to one. A perl or ruby body always counts,
+# since its backtick and `qx` run a shell. A body that names none of these is text to the shell, so a `$( )` or a
+# backtick in it runs nothing.
+_SHELL_OUT = re.compile(r"\b(?:system|popen|subprocess|spawn|exec\w*|shell|Popen|check_output|check_call|getoutput"
+                        r"|create_subprocess\w*|child_process|run_command|sh)\b|shell\s*=")
+
+
+def _without_text_bodies(raw: str, stripped: str) -> str:
+    """`stripped` less each quoted python or node heredoc body that calls no shell: it stays in `stripped` so
+    the rules that read a script's shell spots see it, but a `$( )` or a backtick in its prose runs nothing."""
+    if "<<" not in raw:
+        return stripped
+    for lang, body, quote in interpreter_bodies(raw):
+        if quote and lang in ("py", "js") and body and not _SHELL_OUT.search(body):
+            stripped = stripped.replace(body, "")
+    return stripped
+
+
 def substitution_commands(raw: str, stripped: str, outer: bool = False):
     """The texts a shell runs INSIDE the command, each a command of its own: every `$(...)`, backtick
     and process substitution in `stripped`, plus those in an unquoted heredoc body of `raw`. A quoted
@@ -681,7 +699,13 @@ def substitution_commands(raw: str, stripped: str, outer: bool = False):
     the env-file rule refuses it. The one home of this cut: judge_shell and git_env_command_hit call it.
     """
     found, too_deep = _substitutions(stripped, powershell=POWERSHELL_CALL[0])
-    inner = [text for text, _in_message in found[:-1]]
+    seen = _without_text_bodies(raw, stripped)
+    if seen != stripped:   # the `$( )` and backticks of a script that calls no shell are text, not runs
+        inner_found, inner_deep = _substitutions(seen, powershell=POWERSHELL_CALL[0])
+        too_deep = too_deep and inner_deep
+    else:
+        inner_found = found
+    inner = [text for text, _in_message in inner_found[:-1]]
     for quote, body, _ in _split_heredocs(raw)[1]:
         if not quote:
             body_found, body_deep = _substitutions(body, heredoc=True)
