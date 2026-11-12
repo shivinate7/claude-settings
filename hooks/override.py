@@ -287,8 +287,7 @@ def _strip_blocks(prompt):
 
 def _override_rest(prompt, source=None, transcript=None):
     """The text after the word `override` for one owner prompt, or None when the prompt holds no override word.
-    A machine block (a status block the app puts before the owner's words) is not the owner's, so the word may follow
-    one. Two reads, in order: the raw start; the last non-blank line alone, which grants only as a bare word, `off` or
+    The status block the app puts before the owner's words is not the owner's, so the word may follow it. Two reads, in order: the raw start; the last non-blank line alone, which grants only as a bare word, `off` or
     a length, so a reason or the Opus word there grants nothing. The last-line read cuts pasted blocks and closed
     machine blocks first (CLOSED_BLOCKS), so their text never supplies the line, and an unclosed machine block before
     the form does not hide it. An unclosed code fence before the form grants nothing: that line is quoted. The
