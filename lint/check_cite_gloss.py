@@ -12,6 +12,8 @@ A record is a decision or a debt (lint/_record_diff.py). A record id is the slug
 A cite is a backticked span. Its text, with quote marks and spaces dropped, is a record id.
 A gloss is ` (` or `,` and a word right after the span (the form actions/stamp writes). A colon is no gloss.
 The first use is the first cite in the file, from the top. A heading or a fenced block holds no use.
+A record's own slug needs no gloss: a record names itself.
+A backtick fence has no backtick in its info string, so a line that starts with a code span is no fence.
 """
 import re
 import sys
@@ -39,6 +41,8 @@ def first_uses(lines, ids):
     seen, found, fence = set(), [], None
     for number, line in enumerate(lines, 1):
         opener = FENCE.match(line)
+        if opener and opener.group(1)[0] == "`" and "`" in opener.group(2):
+            opener = None  # an info string with a backtick makes the line a code span (CommonMark)
         if fence:
             if opener and opener.group(1)[0] == fence[0] and len(opener.group(1)) >= len(fence) and not opener.group(2).strip():
                 fence = None
@@ -67,7 +71,7 @@ def failures(root, base, only=None):
                 only[path] = {number for number, _text in rows}
     out = []
     for path in sorted(only):
-        for number, slug, after in first_uses(rd.head_lines(root, path), ids):
+        for number, slug, after in first_uses(rd.head_lines(root, path), ids - {rd.slug_of(path)}):
             if number in only[path] and not GLOSS.match(after):
                 out.append("%s:%d: first cite of `%s` has no gloss: put ` (what it says)` or `, what it says` right after it"
                            % (path, number, slug))

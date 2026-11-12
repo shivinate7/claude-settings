@@ -47,21 +47,23 @@ def head_lines(root, path):
 
 
 def changes(root, base, kind):
-    """(added, lines) for the record files of kind `kind` the change adds or edits against `base`.
+    """(added, lines, edited) for the record files of kind `kind` the change adds or edits against `base`.
     `added` holds the paths the change adds. A rename in from outside the folder counts as an add.
     `lines` is {path: [(number, text)]} for the lines the change adds.
+    `edited` holds the paths the change modifies or renames inside the folder, even when no line is added.
     Raises Unknown when git cannot say."""
     keep = is_record(root, kind)
     adds, moved = slugs.changes(root, base)
     added = [f for f in adds if keep(f)] + [new for status, old, new in moved
                                             if status in "RC" and keep(new) and not keep(old)]
+    edited = [new for status, old, new in moved if status in "MRC" and keep(new) and keep(old)]
     r = _nowindow.run(["git", "-c", "core.quotepath=off", "diff", "-U0", "-M", "--no-color", "--no-ext-diff",
                        "--src-prefix=a/", "--dst-prefix=b/", base + "...HEAD", "--", *layout.candidates(root, kind)],
                       cwd=root, capture_output=True, encoding="utf-8", errors="replace")
     if r.returncode:
         raise Unknown("git diff failed: %s" % r.stderr.strip())
     lines = {path: rows for path, rows in stale_cites.added_markdown_lines(r.stdout).items() if keep(path)}
-    return added, lines
+    return added, lines, edited
 
 
 def run_check(name, doc, find, argv):
