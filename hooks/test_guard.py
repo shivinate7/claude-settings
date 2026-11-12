@@ -129,6 +129,7 @@ FAMILIES = {
     "paths": "path rules, builders and the test-author",
     "diff": "the diff judged at commit, push and stop",
     "builder-refuse": "a builder's diff refused at commit and push and blocked at the first stop, the deny names no path, and a test-author's diff still allowed",
+    "brief-scope": "an agent's commit, push and stop against the paths its brief names: a modified or deleted file outside them is refused, and a new file or a brief that names no path or cannot be read is logged and allowed",
     "impeccable": "impeccable is review-only",
     "port-question": "the page writer: a port question carries a Departs from line and holds nothing",
     "page-stale": "the waiting page: a publish of a page behind main's page.html is refused, a republish of main's page with empty designData and roadmap blocks is refused, a page with its own title and empty blocks is allowed, and an allowed publish of a page with live data writes the stamp",

@@ -281,30 +281,38 @@ def role_log_case():
     return (not problems), ("; ".join(problems) or "each unjudged stop is logged")
 
 
-def _diff_log_run(folder, repo, agent_type, agent_id, commit=True):
-    """Run commit, push and stop for one agent in `repo`, or push and stop alone when `commit` is False.
-    Returns (stdout seen, guard.log rows)."""
-    materialize(repo)
+def _log_run(folder, bodies):
+    """Each payload through the guard, with `folder` as its config folder and guard.log. Returns each call's
+    stdout, in order, and the log's rows. A call that prints nothing is an allow."""
     os.makedirs(folder, exist_ok=True)
     path = os.path.join(folder, "guard.log")
     if os.path.exists(path):
         os.remove(path)
     env = dict(os.environ)
-    env.pop("CLAUDE_CODE_REMOTE", None)
+    for name in ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_REMOTE_SESSION_ID",
+                 "CLAUDE_PROJECT_DIR"):
+        env.pop(name, None)
     env["CLAUDE_CONFIG_DIR"] = folder
-    env.pop("CLAUDE_CODE_SESSION_ID", None)
     env["CLAUDE_GUARD_ROOT_PID"] = str(os.getpid())
+    outs = []
+    for body in bodies:
+        got = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True,
+                             text=True, env=env, timeout=120)
+        outs.append(got.stdout.strip())
+    text = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+    return outs, [line.split("\t") for line in text.splitlines() if line.strip()]
+
+
+def _diff_log_run(folder, repo, agent_type, agent_id, commit=True):
+    """Run commit, push and stop for one agent in `repo`, or push and stop alone when `commit` is False.
+    Returns (stdout seen, guard.log rows)."""
+    materialize(repo)
     bodies = [{"tool_name": "Bash", "tool_input": {"command": c}, "cwd": repo,
                "agent_id": agent_id, "agent_type": agent_type} for c in ((COMMIT, PUSH) if commit else (PUSH,))]
     bodies.append({"hook_event_name": "SubagentStop", "cwd": repo, "agent_id": agent_id,
                    "agent_type": agent_type})
-    out = ""
-    for body in bodies:
-        got = subprocess.run([sys.executable, GUARD], input=json.dumps(body), capture_output=True,
-                             text=True, env=env, timeout=120)
-        out += got.stdout.strip()
-    text = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
-    return out, [line.split("\t") for line in text.splitlines() if line.strip()]
+    outs, rows = _log_run(folder, bodies)
+    return "".join(outs), rows
 
 
 def _guard_answers(text):
