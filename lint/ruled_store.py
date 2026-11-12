@@ -40,8 +40,13 @@ import sys
 from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
-import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
+# A caller that already put hooks/ on the path (report_guard puts a stamped guard.d copy first) keeps its order: this
+# module adds hooks/ last, and only when _nowindow is not importable yet, as a script run from lint/ needs.
+try:
+    import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
+except ImportError:
+    sys.path.append(os.path.join(HERE, "..", "hooks"))
+    import _nowindow  # noqa: E402
 
 ENTRIES_LIFT_GUARDS = True  # an open entry governs the guard rules it names
 STORE_REF = "origin/roadmap"
