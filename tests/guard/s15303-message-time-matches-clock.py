@@ -565,7 +565,8 @@ mtc_set("an added 14 minutes ahead in items, at a CDT clock of 09:26, is refused
 # A time field must hold an ISO time. A write whose value is empty, spaces only or null, or a string that does not parse
 # as ISO 8601, is refused, and the reason prints the remedy: read the time with `~/.claude/bin/now-central --iso`. The
 # fields and their homes (skills/waiting-page/SKILL.md, the database section): `added`, `replied` and `ruled` in items;
-# `read` and `filed` in receipts and asks; `answered` in asks; `updatedAt` in a roadmap step file, in a Write, an Edit or
+# `read` and `filed` in receipts; `read` and `answered` in asks (`filed` in asks is plain words, not judged); `updatedAt`
+# in a roadmap step file, in a Write, an Edit or
 # a MultiEdit. A valid ISO value, with or without an offset, passes; so does a blank or prose value in a field that is no
 # time, and an edit that leaves the time out of its text. The cases name each home collection.
 NOW_CENTRAL_ISO = "~/.claude/bin/now-central --iso"  # the remedy a blank or unparseable time prints
@@ -704,5 +705,27 @@ mtc_set("an update that sets dismissed to null in items is allowed: dismissed is
 # Passes: items `closed` is no field this rule judges, so an empty value passes.
 mtc_set("an update that blanks closed in items is allowed: closed is no field this rule judges", "allow",
         {"closed": ""}, action="update")
+
+# The key-less step Edit, judged on its old text too: a quoted instant is a whole instant. These cases use a clock
+# after 2026-11-10, so each instant they name is behind the clock, and only the value the write lands is judged.
+MTC_LATER_CLOCK = "2026-11-12T07:55:00-06:00"  # 07:55 CST on Nov 12, later than every instant in the cases below
+
+# Refused: a key-less Edit that replaces a quoted instant with an empty string. The value the write lands is blank.
+mtc_write("a key-less roadmap step Edit that replaces a quoted time with an empty string is refused: the value lands blank",
+          "deny", "Edit", clock=MTC_LATER_CLOCK, file_path=MTC_STEP,
+          old_string='"2026-11-10T12:00:00-06:00"', new_string="", carries=MTC_BLANK_CARRIES)
+# Refused: the same quoted instant replaced by the quoted prose time 2026-11-12 07:50 CST.
+mtc_write("a key-less roadmap step Edit that replaces a quoted time with the quoted prose time 2026-11-12 07:50 CST is refused",
+          "deny", "Edit", clock=MTC_LATER_CLOCK, file_path=MTC_STEP,
+          old_string='"2026-11-10T12:00:00-06:00"', new_string='"2026-11-12 07:50 CST"', carries=MTC_BLANK_CARRIES)
+# Passes: a quoted instant replaced by a quoted valid ISO instant, both behind the clock.
+mtc_write("a key-less roadmap step Edit that replaces a quoted time with a quoted valid ISO time is allowed",
+          "allow", "Edit", clock=MTC_LATER_CLOCK, file_path=MTC_STEP,
+          old_string='"2026-11-10T12:00:00-06:00"', new_string='"2026-11-10T12:30:00-06:00"')
+# Passes: a note edit whose old text is the date 2026-11-10 with no key, and whose new text is the prose Nov 10. The
+# write replaces no instant, so nothing is judged. Red today: the date-only old text reads as an instant.
+mtc_write("a key-less roadmap step Edit that replaces the date 2026-11-10 with the prose Nov 10 is allowed: no instant is replaced",
+          "allow", "Edit", clock=MTC_LATER_CLOCK, file_path=MTC_STEP,
+          old_string="2026-11-10", new_string="Nov 10")
 
 # =========================================================================== 5i. SendMessage to a cloud session
