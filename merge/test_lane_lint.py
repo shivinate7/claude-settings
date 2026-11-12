@@ -7,8 +7,11 @@ prints scripted step lines and exits with a scripted code, so no real lint runs.
 case reads what the tool ran, in which tree, at which head. The repo builder, the fakes and the cloud-session
 fixture come from merge/test_merge.py: a case extends that fixture, it does not copy it. The draft step's ready check
 (class ReadyChecks) runs the same stub, through CiJobStub.
-The SIGTERM case runs merge in a subprocess through HARNESS, which names the same stub; it is the one case that does not patch CI_JOB.
-BatchLintFlags runs the real bin/ci-job through merge.lane_lint on a batch's four checks.yml lint CI steps, each script logged once with its argv; cost per case: one ci-job copy and run, one worktree, four CI step runs, 0.5 s measured (3 runs of 2 cases). Its two lint-set cases (no lint step; a step that runs only off a pull request) run the same way with their own checks job.
+The SIGTERM case and the slot cases run merge in a subprocess through HARNESS, which names the same stub; they do not patch CI_JOB
+in this process. The slot cases (lint slots: a lane lint waits for one of merge.lint_slots() slots) set the slot count and the bound
+(merge.LINT_SECONDS) in that subprocess, and read the order of the stub's starts and ends, never the clock.
+BatchLintFlags runs the real bin/ci-job through merge.lane_lint on a batch's four checks.yml lint CI steps, each script logged once with its argv. Its lint-set cases (no lint step; a step that runs only off a pull request) run the same way with their own checks job.
+Its slot-hold cases hold every lane-lint slot, or none, in the default config folder of a scratch home (HOME moved there), and run the ci-job once; the lint runs in this run's config folder (self.cfg). Its unlock case runs no ci-job: it drives merge.lint_slot and probes the slot file. No case sleeps: FirstPollStops stops a wait at its first poll.
 Temp files: this run's folder (lint/_test_temp.py), removed at exit.
 """
 import ast, atexit, contextlib, io, json, os, re, shlex, shutil, signal, subprocess, sys, tempfile, time, unittest, unittest.mock, uuid
@@ -41,13 +44,22 @@ PIN_NOTE_DRIFT = ("CI pins ste-lint at abc1234 (2026-10-01, .github/workflows/ch
                   "A line can pass here and fail CI. Move the pin to claude-settings main, in a lane of its own.")
 
 STUB = '''import json, os, subprocess, sys, time
-LOG, STEPS, RC, STEP_LOG, SLEEP, PARENT = __LOG__, __STEPS__, __RC__, __STEP_LOG__, __SLEEP__, os.getppid()
+LOG, STEPS, RC, STEP_LOG, SLEEP, PARENT, HOLD = __LOG__, __STEPS__, __RC__, __STEP_LOG__, __SLEEP__, os.getppid(), __HOLD__
 DETAILS = __DETAILS__  # step name -> the text after its verdict word; a step not named here reads `stub step`
 def git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
+def alive(pid):  # os.kill(pid, 0) only tests the pid on POSIX; a case that sets HOLD skips on Windows, where a signal ends the process
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:  # a process this user may not signal is alive
+        return True
+    return True
 detached = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], capture_output=True).returncode != 0
 with open(LOG, "a", encoding="utf-8") as f:
-    print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached}), file=f)
+    print(json.dumps({"argv": sys.argv[1:], "cwd": os.getcwd(), "head": git("rev-parse", "HEAD"), "detached": detached,
+                      "pid": os.getpid(), "holder_alive": alive(HOLD) if HOLD is not None and os.name != "nt" else None}), file=f)
 if "--plan" in sys.argv:
     for state, name in STEPS:
         print("would run " + name)
@@ -55,6 +67,8 @@ if "--plan" in sys.argv:
 end = time.time() + SLEEP  # a lint that runs long: it ends after SLEEP s, or at once when the run that started it is gone
 while time.time() < end and os.getppid() == PARENT:
     time.sleep(0.05)
+with open(LOG, "a", encoding="utf-8") as f:  # this run's end: the slot cases read the order of starts and ends, never a clock
+    print(json.dumps({"pid": os.getpid(), "end": True}), file=f)
 lines = ["%-15s %s: %s" % (state, name, DETAILS.get(name, "stub step")) for state, name in STEPS]
 print("\\n".join(lines))
 if RC == 1:
@@ -101,6 +115,32 @@ jobs:
 def pass_lines(text):
     return [line for line in text.splitlines() if line.startswith("PASS:")]
 
+def wait_lines(text):
+    """The lines of `text` that say a lint is waiting for a slot: each says both `wait` and `slot`."""
+    return [line for line in text.splitlines() if "wait" in line.lower() and "slot" in line.lower()]
+
+def most_running(events):
+    """The most ci-job runs at once, read from the order of CiJobStub.lint_events: a run is running from its start to its end."""
+    running, most = set(), 0
+    for e in events:
+        if e["kind"] == "start":
+            running.add(e["pid"])
+        else:
+            running.discard(e["pid"])
+        most = max(most, len(running))
+    return most
+
+def harness_text(stub, slots=None, bound=None):
+    """HARNESS, with the seams a case gives set before main runs: merge.lint_slots (the slot count) and merge.LINT_SECONDS (the bound).
+    Both are plain assignments, so a name the code lacks still takes the value: a case reads the behaviour, never a missing name."""
+    seams = ""
+    if slots is not None:
+        seams += "merge.lint_slots = lambda: %d\n" % slots
+    if bound is not None:
+        seams += "merge.LINT_SECONDS = %d\n" % bound
+    text = HARNESS.replace("merge.CI_JOB = __STUB__\n", "merge.CI_JOB = __STUB__\n" + seams)
+    return text.replace("__HERE__", repr(HERE)).replace("__STUB__", repr(stub))
+
 
 class NoLock:
     """The lane run takes no merge lock: a lock call fails the case."""
@@ -136,13 +176,19 @@ class CiJobStub:
         self.stub = os.path.join(self.t, "ci-job-stub.py")
         self.step_log = os.path.join(self.t, "ci-job-step.log")
 
-    def write_stub(self, steps, rc, sleep=0, details=None):
-        """Write the stub ci-job: it prints `steps` ((state, step name) pairs), exits with `rc`, and runs `sleep` s first when it is set.
-        `details` maps a step name to the text its line prints after the verdict word (default `stub step`)."""
+    def stub_text(self, steps, rc, sleep=0, details=None, hold=None):
+        """The text of a stub ci-job (STUB), each argument written as its Python literal."""
         text = STUB.replace("__STEP_LOG__", repr(self.step_log)).replace("__LOG__", repr(self.log))
-        tm.put(self.stub, text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(sleep))
-               .replace("__DETAILS__", repr(details or {})))
-        return self.stub
+        return (text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(sleep))
+                .replace("__DETAILS__", repr(details or {})).replace("__HOLD__", repr(hold)))
+
+    def write_stub(self, steps, rc, sleep=0, details=None, hold=None, path=None):
+        """Write the stub ci-job: it prints `steps` ((state, step name) pairs), exits with `rc`, and runs `sleep` s first when it is set.
+        `details` maps a step name to the text its line prints after the verdict word (default `stub step`).
+        `hold` is the pid of a run ahead of it: the stub's start record reads back whether that run is alive. -> the stub's path."""
+        path = path or self.stub
+        tm.put(path, self.stub_text(steps, rc, sleep, details, hold))
+        return path
 
     def use_ci_job(self, steps, rc, details=None):
         """merge.CI_JOB becomes a stub that prints `steps` ((state, step name) pairs) and exits with `rc`."""
@@ -152,12 +198,29 @@ class CiJobStub:
         self.addCleanup(patch.stop)
 
     def lint_calls(self):
-        """The stub's calls that ran the lint, not the plan."""
+        """The stub's calls that ran the lint, not the plan. The end records the stub writes after each run carry no argv."""
         if not os.path.exists(self.log):
             return []
         with open(self.log, encoding="utf-8") as f:
             calls = [json.loads(line) for line in f if line.strip()]
-        return [c for c in calls if "--plan" not in c["argv"]]
+        return [c for c in calls if "argv" in c and "--plan" not in c["argv"]]
+
+    def lint_events(self):
+        """The stub's lint runs in the order they were written: {"kind": "start", ...the start record} when a run's ci-job starts,
+        {"kind": "end", "pid": pid} when it ends. A run killed before its end has no end event. The plan is no run."""
+        events = []
+        if not os.path.exists(self.log):
+            return events
+        with open(self.log, encoding="utf-8") as f:
+            for line in f:
+                if not line.endswith("\n"):  # a record still being written
+                    break
+                rec = json.loads(line)
+                if "argv" in rec and "--plan" not in rec["argv"]:
+                    events.append({"kind": "start", **rec})
+                elif "end" in rec:
+                    events.append({"kind": "end", "pid": rec["pid"]})
+        return events
 
 
 WAIT_LINE ="GitHub to show the pushed head"  # the progress text of the wait for a pushed head (merge.py wait_checks)
@@ -268,8 +331,7 @@ class LaneLint(LaneFixture):
         stderr is read live: the case creates the GO file at the first `start:` line, so a stderr that merge captures
         instead of passing on reads to the end only after the stub's bound."""
         go = os.path.join(self.t, "go")
-        text = STUB.replace("__STEP_LOG__", repr(self.step_log)).replace("__LOG__", repr(self.log))
-        text = text.replace("__STEPS__", repr(steps)).replace("__RC__", repr(rc)).replace("__SLEEP__", repr(0)).replace("__DETAILS__", "{}")
+        text = self.stub_text(steps, rc)
         tm.put(self.stub, text.replace("lines = [", PROGRESS.replace("__GO__", repr(go)) + "lines = [", 1))
         harness = os.path.join(self.t, "lane_lint_progress.py")
         tm.put(harness, HARNESS.replace("__HERE__", repr(HERE)).replace("__STUB__", repr(self.stub)))
@@ -836,6 +898,170 @@ class LaneLint(LaneFixture):
         self.assertNotIn("coordinator", err.lower())
         self.assertNotIn("batch-runner", err.lower())
         self.assertFalse(os.path.exists(self.role_file), "a refused role wrote the role file")
+
+    def lane_checkout(self, name):
+        """A clone of origin of its own, for one lint: a lane has a checkout of its own. Concurrent lints in one shared clone race
+        in git's fetch and worktree calls, which is not the claim these cases test."""
+        path = os.path.join(self.t, name)
+        tm.sh(self.t, "git", "clone", "-q", self.bare, path)
+        return path
+
+    def start_lane(self, stub, *argv, checkout=None, slots=None, bound=None):
+        """Start `merge <argv>` in `checkout` (default: the lane checkout), in a process of its own, with the ci-job stub at `stub` and
+        the seams of harness_text. Its temp files land in this case's folder. -> the Popen; finish() reads its result."""
+        harness = os.path.join(self.t, "lane-lint-%s.py" % uuid.uuid4().hex)
+        tm.put(harness, harness_text(stub, slots, bound))
+        tmp = os.path.join(self.t, "tmp")
+        os.makedirs(tmp, exist_ok=True)
+        env = {**os.environ, "CLAUDE_CONFIG_DIR": self.cfg, "TMPDIR": tmp, "TMP": tmp, "TEMP": tmp}
+        env.pop("CLAUDE_CODE_REMOTE", None)
+        proc = subprocess.Popen([sys.executable, harness, *argv], cwd=checkout or self.co, env=env,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(self.stop_run, proc)
+        return proc
+
+    def finish(self, proc):
+        """-> (rc, stdout, stderr) of a start_lane process, once it has ended."""
+        out, err = proc.communicate(timeout=120)
+        return proc.returncode, out, err
+
+    def quick_stub(self, hold=None):
+        """A stub that ends at once, for a lint that runs after the holder. `hold` is the pid of the run ahead of it."""
+        return self.write_stub(PASSING, 0, path=os.path.join(self.t, "ci-job-quick.py"), hold=hold)
+
+    def wait_for_starts(self, n):
+        """Poll the stub's log until `n` lint runs have started, for 60 s at most. -> the start events read so far."""
+        deadline = time.time() + 60
+        while True:
+            starts = [e for e in self.lint_events() if e["kind"] == "start"]
+            if len(starts) >= n or time.time() > deadline:
+                return starts
+            time.sleep(0.05)
+
+    def lint_ended(self, pid):
+        return any(e["kind"] == "end" and e["pid"] == pid for e in self.lint_events())
+
+    def test_four_lane_lints_at_once_run_at_most_two_ci_jobs_with_two_slots(self):
+        """With two slots, four lane lints at once run their ci-jobs two at a time, and each passes."""
+        stub = self.write_stub(PASSING, 0, sleep=3)
+        head = self.head("feat")
+        procs = [self.start_lane(stub, "--lane-lint", head, checkout=self.lane_checkout("lane-%d" % i), slots=2) for i in range(4)]
+        results = [self.finish(proc) for proc in procs]
+        events = self.lint_events()
+        self.assertEqual(len([e for e in events if e["kind"] == "start"]), 4,
+                         "not all four lints reached ci-job: " + "".join(out + err for _, out, err in results))
+        for rc, out, err in results:
+            self.assertEqual(rc, 0, "a lint did not pass: " + out + err)
+            self.assertEqual(len(pass_lines(out)), 1, out + err)
+        self.assertLessEqual(most_running(events), 2, "%d ci-job runs ran at once; with 2 slots at most 2 may" % most_running(events))
+
+    def test_two_lane_lints_with_two_slots_run_their_ci_jobs_together(self):
+        """The control for the overlap count: with two slots, two lints run at once, and the count reads two."""
+        stub = self.write_stub(PASSING, 0, sleep=3)
+        head = self.head("feat")
+        procs = [self.start_lane(stub, "--lane-lint", head, checkout=self.lane_checkout("lane-%d" % i), slots=2) for i in range(2)]
+        results = [self.finish(proc) for proc in procs]
+        events = self.lint_events()
+        self.assertEqual(len([e for e in events if e["kind"] == "start"]), 2,
+                         "not both lints reached ci-job: " + "".join(out + err for _, out, err in results))
+        for rc, out, err in results:
+            self.assertEqual(rc, 0, out + err)
+            self.assertEqual(len(pass_lines(out)), 1, out + err)
+        self.assertEqual(most_running(events), 2, "two lints with two slots did not run their ci-jobs together")
+
+    def test_a_lint_that_waits_for_a_slot_keeps_the_full_bound_for_its_own_run(self):
+        """The bound starts when the slot is held. The first assert is the wait: the second ci-job starts only after the first one
+        ends. Then both lints pass: a run that fits the bound by itself must not time out for the time it waited."""
+        stub = self.write_stub(PASSING, 0, sleep=3.5)
+        head = self.head("feat")
+        procs = [self.start_lane(stub, "--lane-lint", head, checkout=self.lane_checkout("lane-%d" % i), slots=1, bound=6) for i in range(2)]
+        results = [self.finish(proc) for proc in procs]
+        events = self.lint_events()
+        starts = [e for e in events if e["kind"] == "start"]
+        self.assertEqual(len(starts), 2, "the two lints did not both reach ci-job: " + "".join(out + err for _, out, err in results))
+        order = [(e["kind"], e["pid"]) for e in events]
+        self.assertIn(("end", starts[0]["pid"]), order, "the first lint's ci-job never ended")
+        self.assertLess(order.index(("end", starts[0]["pid"])), order.index(("start", starts[1]["pid"])),
+                        "the second lint's ci-job started before the first's ended: two ci-jobs ran with one slot")
+        for rc, out, err in results:
+            self.assertEqual(rc, 0, "a lint whose run fits the bound did not pass: " + out + err)
+            self.assertEqual(len(pass_lines(out)), 1, out + err)
+
+    def test_a_lint_whose_run_fits_the_bound_passes_with_one_slot(self):
+        """The control for the bound: the stub's run fits the bound by itself, so a timeout in the case above comes from the wait."""
+        stub = self.write_stub(PASSING, 0, sleep=3.5)
+        rc, out, err = self.finish(self.start_lane(stub, "--lane-lint", self.head("feat"), slots=1, bound=6))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(len(pass_lines(out)), 1, out + err)
+
+    def test_a_hung_lint_ends_at_the_bound_and_frees_its_slot_for_the_next_lint(self):
+        """A hung ci-job ends unknown at the bound and frees its slot. The next lint's ci-job starts only then: its start record
+        reads that the hung run is no longer alive (holder_alive). The next lint then passes."""
+        hung = self.write_stub(PASSING, 0, sleep=60)  # it runs past the bound, so the bound ends it
+        head = self.head("feat")
+        first = self.start_lane(hung, "--lane-lint", head, checkout=self.lane_checkout("holder"), slots=1, bound=8)
+        holders = self.wait_for_starts(1)
+        self.assertEqual(len(holders), 1, "the hung lint's ci-job never started")
+        second = self.start_lane(self.quick_stub(hold=holders[0]["pid"]), "--lane-lint", head, checkout=self.lane_checkout("next"), slots=1, bound=8)
+        rc1, out1, err1 = self.finish(first)
+        rc2, out2, err2 = self.finish(second)
+        starts = [e for e in self.lint_events() if e["kind"] == "start"]
+        self.assertEqual(len(starts), 2, "the next lint's ci-job never ran: " + out2 + err2)
+        self.assertIs(starts[1]["holder_alive"], False,
+                      "the next lint's ci-job started while the hung one still ran: no slot was held")
+        self.assertEqual(rc1, 1, out1 + err1)
+        self.assertIn("did not finish", out1 + err1)
+        self.assertEqual(pass_lines(out1), [], out1)
+        self.assertEqual(rc2, 0, out2 + err2)
+        self.assertEqual(len(pass_lines(out2)), 1, out2 + err2)
+
+    def test_with_two_slots_a_lint_starts_beside_a_hung_one_and_reads_it_alive(self):
+        """The control for the holder check: a hung run that still holds its slot reads as alive to the next lint's start."""
+        hung = self.write_stub(PASSING, 0, sleep=60)
+        head = self.head("feat")
+        first = self.start_lane(hung, "--lane-lint", head, checkout=self.lane_checkout("holder"), slots=2, bound=8)
+        holders = self.wait_for_starts(1)
+        self.assertEqual(len(holders), 1, "the hung lint's ci-job never started")
+        second = self.start_lane(self.quick_stub(hold=holders[0]["pid"]), "--lane-lint", head, checkout=self.lane_checkout("next"), slots=2, bound=8)
+        rc2, out2, err2 = self.finish(second)
+        self.finish(first)
+        starts = [e for e in self.lint_events() if e["kind"] == "start"]
+        self.assertEqual(len(starts), 2, "the next lint's ci-job never ran: " + out2 + err2)
+        self.assertIs(starts[1]["holder_alive"], True, "the next lint's start read the hung run as ended while it still ran")
+        self.assertEqual(rc2, 0, out2 + err2)
+        self.assertEqual(len(pass_lines(out2)), 1, out2 + err2)
+
+    def test_a_lint_that_waits_for_a_slot_prints_one_wait_line_on_stderr_while_it_waits(self):
+        """The waiting lint prints one stderr line that says it waits for a slot, and prints it while the holder's ci-job still runs."""
+        busy = self.write_stub(PASSING, 0, sleep=5)
+        head = self.head("feat")
+        first = self.start_lane(busy, "--lane-lint", head, checkout=self.lane_checkout("holder"), slots=1)
+        holders = self.wait_for_starts(1)
+        self.assertEqual(len(holders), 1, "the holding lint's ci-job never started")
+        second = self.start_lane(self.quick_stub(), "--lane-lint", head, checkout=self.lane_checkout("next"), slots=1)
+        err_lines, held_when_read = [], []
+        for line in second.stderr:  # read live: each line is judged when it arrives, not at the end
+            err_lines.append(line)
+            if wait_lines(line) and not held_when_read:
+                held_when_read.append(not self.lint_ended(holders[0]["pid"]))
+        out, rest = second.communicate(timeout=120)
+        rc = second.returncode
+        err = "".join(err_lines) + rest
+        self.finish(first)
+        waits = wait_lines("".join(err_lines))
+        self.assertEqual(len(waits), 1, "the waiting lint printed %d stderr lines that say it waits for a slot, want one: %s" % (len(waits), err))
+        self.assertEqual(held_when_read, [True], "the wait line came after the holder's ci-job had ended")
+        self.assertEqual(wait_lines(out), [], "the wait line went to stdout, not stderr: " + out)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(len(pass_lines(out)), 1, out + err)
+
+    def test_a_lint_that_finds_a_free_slot_prints_no_wait_line(self):
+        """The control for the wait line: a lint with a free slot prints none."""
+        stub = self.write_stub(PASSING, 0)
+        rc, out, err = self.finish(self.start_lane(stub, "--lane-lint", self.head("feat"), slots=1))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(len(pass_lines(out)), 1, out + err)
+        self.assertEqual(wait_lines(err), [], "a lint with a free slot printed a wait line: " + err)
 
 
 # The stack cross-measure (roadmap step stack-cross-measure): `merge --lane-lint <pr>` checks the PR's head against each other open PR of its
@@ -1595,6 +1821,31 @@ def link_or_copy(src, dst):
         (shutil.copytree if os.path.isdir(src) else shutil.copy2)(src, dst)
 
 
+def home_env(home):
+    """The env that moves the default config folder (<home>/.claude) to `home`: expanduser reads HOME on POSIX and USERPROFILE on Windows."""
+    return {"HOME": home, "USERPROFILE": home}
+
+
+class SlotWaitBound(Exception):
+    """A wait for a lane-lint slot, stopped at its first poll. A plain Exception, so take_lint_slot's `except OSError` does not swallow it."""
+
+
+class FirstPollStops:
+    """merge's `time` for one case. Its sleep raises SlotWaitBound at the first lane-slot poll and returns at once for any other pause,
+    so a wait for a slot that never frees ends in this run and no case sleeps. Every other name is the real time module."""
+
+    def __init__(self):
+        self.polls = 0
+
+    def sleep(self, seconds):
+        if seconds == merge.LINT_SLOT_POLL:
+            self.polls += 1
+            raise SlotWaitBound("a lane-lint slot wait polled")
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+
 class BatchLintFlags(tm.Env):
     """`merge --lane-lint <batch>` runs the real bin/ci-job on the batch's checks job: each of its four lint CI steps runs once, with the argv checks.yml gives it."""
 
@@ -1605,6 +1856,7 @@ class BatchLintFlags(tm.Env):
         self.calls = os.path.join(self.t, "calls")
         os.makedirs(self.calls)
         self.ci_job = self.copy_ci_job()
+        self.cfg = tempfile.mkdtemp(dir=RUN_FOLDER)  # the config folder the lint is given: its lane-lint slots are this run's, never the user's
 
     def call_log(self, script):
         return os.path.join(self.calls, os.path.basename(script) + ".jsonl")
@@ -1647,7 +1899,8 @@ class BatchLintFlags(tm.Env):
 
     def lane_lint(self, target, out):
         """merge.lane_lint of `target` against BASE, in the lane checkout, through the copy of ci-job. Its output goes to `out`. A refusal raises."""
-        env = {"VERDICT_LOG": os.path.join(self.t, "verdict.log")}  # one log for the run: no ci-job log lands in the system temp dir
+        env = {"CLAUDE_CONFIG_DIR": self.cfg,  # the lint takes its lane-lint slots here, never in the default folder (the user's own)
+               "VERDICT_LOG": os.path.join(self.t, "verdict.log")}  # one log for the run: no ci-job log lands in the system temp dir
         with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER), unittest.mock.patch.object(merge, "CI_JOB", self.ci_job), \
                 unittest.mock.patch.dict(os.environ, env), contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
             return merge.lane_lint(self.co, target, self.host, base=BASE)
@@ -1723,6 +1976,116 @@ class BatchLintFlags(tm.Env):
         lines = pass_lines(text)
         self.assertEqual(len(lines), 1, text)
         self.assertIn(PUSH_ONLY, lines[0], text)
+
+    def hold_default_folder_slots(self, count):
+        """Hold `count` lane-lint slots in the default config folder of a scratch home, with merge.take_lint_slot itself. A lint with no
+        CLAUDE_CONFIG_DIR looks in that folder. The locks are released at teardown. -> (the scratch home, the held fds)."""
+        home = os.path.join(self.t, "home")
+        os.makedirs(home)
+        with unittest.mock.patch.dict(os.environ, home_env(home)):
+            held = [merge.take_lint_slot() for _ in range(count)]
+        self.addCleanup(lambda: [os.close(fd) for fd in held if fd is not None])
+        return home, held
+
+    def lane_lint_at_home(self, home, out):
+        """self.lane_lint with the default config folder at `home`, and a wait for a slot stopped at its first poll. -> (rc, the
+        exception raised or None, the polls made)."""
+        clock = FirstPollStops()
+        rc, raised = None, None
+        with unittest.mock.patch.dict(os.environ, home_env(home)), unittest.mock.patch.object(merge, "time", clock):
+            try:
+                rc = self.lane_lint(BATCH, out)
+            except Exception as e:  # a refusal or the stopped wait: the asserts name which one
+                raised = e
+        return rc, raised, clock.polls
+
+    def assert_batch_lint_starts_at_once(self, held_count):
+        """With `held_count` lane-lint slots held in the default config folder, the batch's lint polls for no slot and passes."""
+        self.push_batch(BATCH)
+        home, held = self.hold_default_folder_slots(held_count)
+        # the scope first (P7): the default folder holds exactly the slots this case means it to hold
+        self.assertNotIn(None, held, "the default config folder could not be given %d lane-lint slots" % held_count)
+        self.assertEqual(len(held), held_count, "the default config folder holds %d lane-lint slots, want %d" % (len(held), held_count))
+        if held_count:
+            self.assertTrue(os.path.isdir(os.path.join(home, ".claude", "state", "lane-lint-slots")),
+                            "the held slots are not in the default config folder of the scratch home")
+        out = io.StringIO()
+        rc, raised, polls = self.lane_lint_at_home(home, out)
+        text = out.getvalue()
+        self.assertEqual(polls, 0, "the batch's lint waited for a lane-lint slot that the default config folder holds: %r\n%s" % (raised, text))
+        self.assertEqual(rc, 0, "the batch's lint refused: %r\n%s" % (raised, text))
+        self.assertEqual(len(pass_lines(text)), 1, text)
+
+    def test_every_slot_the_default_config_folder_holds_is_no_wait_for_the_batch_lint(self):
+        """The batch's lint runs in the config folder it is given, not the default one: with every lane-lint slot held in the default
+        folder, it takes a slot of its own at once and passes."""
+        self.assert_batch_lint_starts_at_once(merge.lint_slots())
+
+    def test_with_no_slot_held_in_the_default_config_folder_the_batch_lint_passes_at_once(self):
+        """The control for the hold: with no slot held in the default folder, the batch's lint starts at once and passes."""
+        self.assert_batch_lint_starts_at_once(0)
+
+    def test_lint_slot_unlocks_its_fd_before_closing_it_and_frees_the_slot_when_the_unlock_raises(self):
+        """The release calls guard_core.unlock_fd on the slot's own fd while that fd is still open, then closes it. When the unlock
+        raises OSError, the close still happens and the slot is free after it. The probe opens the slot file anew and try-locks it:
+        a lock the slot's fd holds reads as taken, and each body checks that first."""
+        import guard_core  # hooks/, on sys.path from the top of this file
+        slot = os.path.join(self.cfg, "state", "lane-lint-slots", "slot-0.lock")
+        real_take = merge.take_lint_slot
+        taken, unlocks = [], []
+
+        def recording_take():
+            fd = real_take()
+            taken.append(fd)
+            return fd
+
+        def fd_open(fd):
+            try:
+                os.fstat(fd)
+            except OSError:
+                return False
+            return True
+
+        def record_unlock(fd):
+            unlocks.append((fd, fd_open(fd)))
+
+        def refuse_unlock(fd):
+            raise OSError("simulated unlock failure")
+
+        def slot_held():  # True while a lock on the slot file is held: a newly opened file cannot take it
+            fd = os.open(slot, os.O_RDWR)
+            try:
+                return not guard_core.try_lock_fd(fd)
+            finally:
+                os.close(fd)
+
+        def one_slot_with(unlock):  # lint_slot over one slot in this case's config folder, with guard_core.unlock_fd set to `unlock`
+            stack = contextlib.ExitStack()
+            stack.enter_context(unittest.mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.cfg}))
+            stack.enter_context(unittest.mock.patch.object(merge, "lint_slots", return_value=1))
+            stack.enter_context(unittest.mock.patch.object(merge, "take_lint_slot", recording_take))
+            stack.enter_context(unittest.mock.patch.object(guard_core, "unlock_fd", unlock))
+            return stack
+
+        with one_slot_with(record_unlock):
+            with merge.lint_slot():
+                held = slot_held()
+        self.assertTrue(held, "the probe read the slot free while lint_slot held it, so the probe proves nothing")
+        self.assertTrue(unlocks, "lint_slot released the slot without calling unlock_fd")
+        self.assertEqual(unlocks[0][0], taken[0], "unlock_fd ran on an fd other than the slot's")
+        self.assertTrue(unlocks[0][1], "unlock_fd ran after the slot's fd was closed")
+        self.assertFalse(fd_open(taken[0]), "lint_slot did not close the slot's fd after it unlocked it")
+
+        del taken[:]
+        with one_slot_with(refuse_unlock):
+            try:
+                with merge.lint_slot():
+                    held = slot_held()
+            except OSError as e:
+                self.fail("an OSError from unlock_fd escaped lint_slot: %s" % e)
+        self.assertTrue(held, "the probe read the slot free while lint_slot held it, so the probe proves nothing")
+        self.assertFalse(fd_open(taken[0]), "lint_slot did not close the slot's fd after its unlock raised")
+        self.assertFalse(slot_held(), "the slot is still held after lint_slot released it")
 
 
 class ReadyChecks(CiJobStub, tm.RecordsEnv):

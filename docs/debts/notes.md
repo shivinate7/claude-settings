@@ -2180,3 +2180,9 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
+- lint-slot-windows-hung-pipe: on Windows, `sh`'s timeout kill calls `communicate()` again. A grandchild that holds the stdout pipe can block it, so the lane-lint slot never frees and later lints wait forever. Unverified on Windows (merge/merge.py `sh`). Decision: merge-lock.
+- lint-slot-orphan-run: on POSIX, a timed-out ci-job's children run on after the slot frees, so the next lint shares the CPU with them (merge/merge.py `sh`). Decision: none.
+- lint-slot-count-uncased: no case pins the default count, `os.cpu_count()`, and it ignores a cgroup CPU limit (merge/merge.py `lint_slots`). Decision: none.
+- lint-slot-fallback-uncased: an unusable slot folder runs the lint ungated with one stderr line; no case covers it (merge/merge.py `take_lint_slot`). Decision: none.
+- session-start-fetch-load-flaky: `hooks/test_install_src.sh` caseF4 (no reachable origin) and caseF6 (a fetch killed by its timeout) FAILed in 3 of 8 identical lane lints run at once on 4 CPUs, and passed at 4 or fewer. Decision: none.
+- lane-lint-shared-clone-race: one of over 300 parallel lane lints in a shared clone failed its `git fetch origin main` with `bad object worktrees/tree2/HEAD`, before its slot; not reproduced (merge/merge.py `lane_head_and_base`). Decision: none.
