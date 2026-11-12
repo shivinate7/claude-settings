@@ -12520,14 +12520,37 @@ class PinnedMismatchStopsMain(Env):
         self.assertIn("pins gates", err.getvalue())
         self.assertFalse(self.lock_ref())
 
+def github_read(args, rules, contexts, read_error=None):
+    """-> (code, output) of one `gh api` read of main's rules and classic protection, as GitHub answers it. `rules` is main's effective rules, []
+    when no ruleset applies: the rules/branches/main read gives them, and the rulesets route gives the one ruleset that holds them, then its own
+    read. `contexts` is the classic required checks, None for no classic protection (a 404). `read_error`, when set, is the (code, output) that
+    fails every ruleset read. Any other call fails the case."""
+    rel = args[1].split("/", 3)[-1]  # repos/{owner}/{repo}/<rel>
+    jq = args[args.index("--jq") + 1] if "--jq" in args else None
+    if rel == "branches/main/protection/required_status_checks":
+        if contexts is None:
+            return 1, rest_err(404, "Branch not protected")
+        return 0, REST.one({"contexts": contexts}, jq)
+    if rel in ("rules/branches/main", "rulesets", "rulesets/9") and read_error:
+        return read_error
+    if rel == "rules/branches/main":
+        return 0, REST.one(rules, jq)
+    if rel == "rulesets":
+        return 0, REST.one([{"id": 9, "name": "ruleset-9", "target": "branch"}] if rules else [], jq)
+    if rel == "rulesets/9":
+        return 0, REST.one({"id": 9, "target": "branch", "conditions": {"ref_name": {"include": ["refs/heads/main"], "exclude": []}},
+                            "rules": rules}, jq)
+    raise AssertionError("unexpected gh call: " + " ".join(args))
+
 class ProtectionHost(merge.Host):
-    """Host whose branch protection read answers `contexts` (a list) or fails (None); no gh."""
+    """Host whose reads of main answer as GitHub does with no ruleset (see github_read): `contexts` (a list) is the classic required checks,
+    None for no classic protection (a 404). No other gh call is answered."""
     def __init__(self, required, contexts):
         super().__init__(required=required, base="main", pause=lambda s: None)
         self.contexts = contexts
 
     def gh(self, args, cwd=None):
-        return (0, json.dumps(self.contexts)) if self.contexts is not None else (1, "HTTP 404: Not Found")
+        return github_read(args, [], self.contexts)
 
 class MergeChecksFromProtection(unittest.TestCase):
     """c189 part 1: main's own stamp.json reads the required checks from branch protection, and a pinned list that disagrees with it is refused."""
@@ -12571,22 +12594,7 @@ class RulesHost(merge.Host):
         self.rules, self.contexts, self.read_error = rules, contexts, read_error
 
     def gh(self, args, cwd=None):
-        rel = args[1].split("/", 3)[-1]  # repos/{owner}/{repo}/<rel>
-        jq = args[args.index("--jq") + 1] if "--jq" in args else None
-        if rel == "branches/main/protection/required_status_checks":
-            if self.contexts is None:
-                return 1, rest_err(404, "Branch not protected")
-            return 0, REST.one({"contexts": self.contexts}, jq)
-        if rel in ("rules/branches/main", "rulesets", "rulesets/9") and self.read_error:
-            return self.read_error
-        if rel == "rules/branches/main":
-            return 0, REST.one(self.rules, jq)
-        if rel == "rulesets":
-            return 0, REST.one([{"id": 9, "name": "ruleset-9", "target": "branch"}] if self.rules else [], jq)
-        if rel == "rulesets/9":
-            return 0, REST.one({"id": 9, "target": "branch", "conditions": {"ref_name": {"include": ["refs/heads/main"], "exclude": []}},
-                                "rules": self.rules}, jq)
-        raise AssertionError("unexpected gh call: " + " ".join(args))
+        return github_read(args, self.rules, self.contexts, self.read_error)
 
 class RulesetFirst(unittest.TestCase):
     """Owner ruling c (19:49 CST Nov 11): the merge tool reads main's ruleset first and the classic protection second, so a repo whose ruleset
@@ -12635,6 +12643,19 @@ class RulesetFirst(unittest.TestCase):
         except merge.Stop:
             return
         self.fail("a failed ruleset read must stop the merge, not fall back to the classic list (got %r)" % (names,))
+
+    def test_an_http_404_on_the_ruleset_read_stops_the_merge(self):
+        host = RulesHost([], contexts=["checks"], read_error=(1, rest_err(404, "Not Found")))
+        reads = []
+        answer = host.gh
+        host.gh = lambda args, cwd=None: (reads.append(args[1]), answer(args, cwd))[1]  # the scope: the routes the merge reads
+        stopped, names = False, None
+        try:
+            names = host.protection_names()
+        except merge.Stop:
+            stopped = True
+        self.assertTrue(any(r.endswith("/rules/branches/main") for r in reads), "the merge must read main's ruleset before the classic list")
+        self.assertTrue(stopped, "a 404 on the ruleset read reads as no ruleset, so the classic list answered for it (got %r): the merge must stop" % (names,))
 
 @unittest.skipIf(os.name == "nt", "a Windows process gets no SIGTERM handler run")
 class SignalReleasesLock(Env):
