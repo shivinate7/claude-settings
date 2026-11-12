@@ -11,7 +11,7 @@ from guard_core import (
     HEREDOC_HEADER, PS_DOUBLE_QUOTES, PS_SINGLE_QUOTES, PS_STRAIGHT_QUOTES, REDIRECT, SCRIPT_HEADERS,
     PowerShellScript, _expanded, _resolved, _split_heredocs, _strip_heredoc_bodies_unconditionally, basename,
     dir_before_segment, heredoc_delimiter, interpreter_bodies, is_powershell, nested_script, norm, resolve_command,
-    segment_tokens, split_segments, strip_heredoc_bodies,
+    py_import_bindings, segment_tokens, split_segments, strip_heredoc_bodies,
 )
 from guard_env import _quoted_words, _substitutions, script_spots
 
@@ -1472,13 +1472,11 @@ def _py_hit(body: str, cwd: str, predicate, script: str = "", cut: bool = False)
     return ""
 
 
-# A python script acts on files and processes only through the modules in `_PY_ACTING`. `py_spots` reads it with
+# A python script acts on files and processes only through the modules in `PY_ACTING` (guard_core, shared with `_python_runs`). `py_spots` reads it with
 # `ast`: each name an import binds to one of them must be the callee of a shell call of os or subprocess with
 # literal arguments (an alias resolves: `import subprocess as sp`, `from os import system`), or a name that acts
 # on nothing (`_py_inert`). Any other use (shutil.copy, os.chmod, a call held in a variable) cannot be told, so
 # the script reads whole, as a shell reads it. A comment or a plain string is text.
-_PY_ACTING = ("os", "subprocess", "shutil", "pty", "asyncio", "posix", "nt", "sys", "importlib", "ctypes",
-              "multiprocessing", "pathlib", "builtins", "runpy", "_posixsubprocess")
 _OS_SPOT = re.compile(r"system|popen|startfile|exec\w*|spawn\w*|posix_spawn\w*")
 _SUBPROCESS_SPOTS = ("run", "call", "check_call", "check_output", "Popen", "getoutput", "getstatusoutput")
 _PY_INERT = ("subprocess.PIPE", "subprocess.DEVNULL", "subprocess.STDOUT")
@@ -1510,30 +1508,9 @@ def _py_literal(node) -> bool:
     return isinstance(node, (ast.List, ast.Tuple)) and all(_py_literal(each) for each in node.elts)
 
 
-def _py_import_bindings(tree):
-    """{name: dotted name} for each name an import binds to an acting module or a name of one: `import os.path`
-    binds `os` to os, `import os.path as p` binds `p` to os.path, `from shutil import copy as c` binds `c` to
-    shutil.copy. None for a `from` import of every name, which binds names that cannot be told."""
-    import ast
-    bound = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for each in node.names:
-                top = each.name.split(".")[0]
-                if top in _PY_ACTING:
-                    bound[each.asname or top] = each.name if each.asname else top
-        elif (isinstance(node, ast.ImportFrom) and node.module and not node.level
-              and node.module.split(".")[0] in _PY_ACTING):
-            for each in node.names:
-                if each.name == "*":
-                    return None
-                bound[each.asname or each.name] = node.module + "." + each.name
-    return bound
-
-
 def py_spots(script: str):
     """The shell text of each call of a python script that hands a string to a shell, as `os.system('...')`,
-    or None when the script cannot be told: it uses an acting module another way (`_PY_ACTING`), reaches code by
+    or None when the script cannot be told: it uses an acting module another way (`PY_ACTING`), reaches code by
     another route (`eval`, `__import__`), or a shell call takes an argument that is no literal. The caller then
     reads the whole script as shell. A script that does not parse raises SyntaxError or ValueError: python
     runs none of it."""
@@ -1541,7 +1518,7 @@ def py_spots(script: str):
     import textwrap
     source = textwrap.dedent(script)
     tree = ast.parse(source)
-    bound = _py_import_bindings(tree)
+    bound = py_import_bindings(tree)
     if bound is None:
         return None
     calls, callee_names, parents = [], set(), {}

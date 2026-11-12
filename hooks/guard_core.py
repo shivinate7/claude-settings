@@ -2451,19 +2451,45 @@ def _folded_string(node):
     return "".join(parts)
 
 
+# The modules a python script acts through. One home: `py_import_bindings` reads the names an import binds to
+# them for both `_python_runs` (below) and `py_spots` (guard_frozen).
+PY_ACTING = ("os", "subprocess", "shutil", "pty", "asyncio", "posix", "nt", "sys", "importlib", "ctypes",
+             "multiprocessing", "pathlib", "builtins", "runpy", "_posixsubprocess")
+
+
+def py_import_bindings(tree):
+    """{name: dotted name} for each name an import binds to an acting module or a name of one: `import os.path`
+    binds `os` to os, `import os.path as p` binds `p` to os.path, `from shutil import copy as c` binds `c` to
+    shutil.copy. None for a `from` import of every name, which binds names that cannot be told."""
+    bound = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for each in node.names:
+                top = each.name.split(".")[0]
+                if top in PY_ACTING:
+                    bound[each.asname or top] = each.name if each.asname else top
+        elif (isinstance(node, ast.ImportFrom) and node.module and not node.level
+              and node.module.split(".")[0] in PY_ACTING):
+            for each in node.names:
+                if each.name == "*":
+                    return None
+                bound[each.asname or each.name] = node.module + "." + each.name
+    return bound
+
+
 def _python_run_text(module: str, name: str, call):
     """The command text one call starts, else None: `subprocess.run`, `call`, `check_call`,
-    `check_output` or `Popen` with a list of foldable strings, or with a foldable string and
-    `shell=True`; `os.system` or `os.popen` with a foldable string."""
+    `check_output` or `Popen` with a list of foldable strings, or with a foldable string; `os.system`
+    or `os.popen` with a foldable string. A string with no `shell=True` is read as a command line too:
+    on Windows it is the line CreateProcess runs, so it starts the program it names. On POSIX it
+    names one program, so the read is wider than the run, and a verdict only judges the text."""
     keys = {kw.arg: kw.value for kw in call.keywords}
     if module == "subprocess" and name in _SUBPROCESS_RUNNERS:
         arg = call.args[0] if call.args else keys.get("args")
         if isinstance(arg, (ast.List, ast.Tuple)):
             words = [_folded_string(item) for item in arg.elts]
             return shlex.join(words) if words and None not in words else None
-        shell = keys.get("shell")
-        if arg is not None and isinstance(shell, ast.Constant) and shell.value is True:
-            return _folded_string(arg) or None
+        return (_folded_string(arg) if arg is not None else None) or None
     elif module == "os" and name in _OS_SHELLS:
         arg = call.args[0] if call.args else keys.get("command", keys.get("cmd"))
         return (_folded_string(arg) if arg is not None else None) or None
@@ -2472,28 +2498,32 @@ def _python_run_text(module: str, name: str, call):
 
 def _python_runs(code: str):
     """The command text of each process a Python `-c` body starts (`_python_run_text`), through
-    `subprocess.NAME`, `os.NAME`, or a bare name from `from subprocess import NAME`. Read with
+    `subprocess.NAME`, `os.NAME`, a module alias (`import subprocess as sp`) or a bare name an import
+    binds (`from subprocess import run as r`). The names come from `py_import_bindings`, the one
+    reader the frozen-file guard shares; plain `subprocess` and `os` are seeded, as a body with no
+    import, or with a `from x import *` that leaves its bindings untold, read before. Read with
     Python's own parser, so text that only names a command, such as a `print`, runs nothing. A call
-    that does not fold is no read, and a body that does not parse, or is too deep to read, is none."""
+    that does not fold is no read."""
     try:
         tree = ast.parse(code)
-        names = {(alias.asname or alias.name): (node.module, alias.name)
-                 for node in ast.walk(tree)
-                 if isinstance(node, ast.ImportFrom) and node.module in ("subprocess", "os") and not node.level
-                 for alias in node.names}
+        names = {"subprocess": "subprocess", "os": "os", **(py_import_bindings(tree) or {})}
         found = []
         for node in ast.walk(tree):
             func = node.func if isinstance(node, ast.Call) else None
-            if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-                target = (func.value.id, func.attr)
-            elif isinstance(func, ast.Name):
-                target = names.get(func.id)
+            if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name) and func.value.id in names:
+                dotted = names[func.value.id] + "." + func.attr
+            elif isinstance(func, ast.Name) and func.id in names:
+                dotted = names[func.id]
             else:
-                target = None
-            text = _python_run_text(*target, node) if target else None
+                continue
+            module, _, name = dotted.rpartition(".")
+            text = _python_run_text(module, name, node) if module else None
             if text:
                 found.append(PosixScript(text))
         return found
+    # Fail open for only these: a body that does not parse (SyntaxError, ValueError) or is too deep or
+    # large to read (RecursionError, MemoryError) is a body python itself cannot run, or one the guard
+    # cannot read. Any other error is a bug in this reader and must raise, so a test sees it.
     except (SyntaxError, ValueError, RecursionError, MemoryError):
         return []
 
