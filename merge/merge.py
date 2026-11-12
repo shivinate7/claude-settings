@@ -5034,10 +5034,15 @@ def is_doc(path):
     low = path.lower()
     return low.endswith(".md") and (low.startswith("docs/") or low == "readme.md")
 
+DECISIONS_DIR = "docs/decisions/"
+
 def kind_misfits(kind, files):
-    """-> the sorted paths that break the kind, over (path, status, additions) triples. docs-only: a path that is not a doc: a .md under docs/, or the root README.md. delete-only: a path that adds lines or is new (added, renamed, copied)."""
+    """-> the sorted paths that break the kind, over (path, status, additions) triples.
+    docs-only: a path that is not a doc (a .md under docs/, or the root README.md), or a decision record (a path under DECISIONS_DIR) that is added or modified.
+    A decision record is a rule's source, and decision docs-only-prs-skip-review keeps it out of a docs-only change.
+    delete-only: a path that adds lines or is new (added, renamed, copied)."""
     if kind == "docs-only":
-        return sorted(p for p, _, _ in files if not is_doc(p))
+        return sorted(p for p, st, _ in files if not is_doc(p) or (p.startswith(DECISIONS_DIR) and st in ("added", "modified")))
     if kind == "delete-only":
         return sorted(p for p, st, add in files if add > 0 or st in ("added", "renamed", "copied"))
     return []
