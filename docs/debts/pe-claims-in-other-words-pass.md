@@ -6,4 +6,4 @@
 
 **Decision.** `pre-existing-needs-main-run`, a pre-existing claim names a run on main (the Known limit).
 
-**Retire.** Read a failure said to predate this change, in other words, as the claim and ask for the run on the base branch, with a hash on the base and no older than the merge base (item 571). Closed when a red case in `lint/test_report_guard.py` refuses each form above with no run named, and the green cases still pass.
+**Retire.** Read a failure said to predate this change, in other words, as the claim and ask for the run on the base branch. The hash must be on the base and past the merge base (item 571). Closed when a red case in `lint/test_report_guard.py` refuses each form above with no run named, and the green cases still pass.
