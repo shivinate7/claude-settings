@@ -3,9 +3,11 @@
 
 Each agent role file (the ten named roles, and any other agents/*.md) and the lane start text
 (skills/project-ops/templates/operating-model.md) must hold TERSE_LINE, the one short-output line the
-check exports. The line counts as body text only. A line inside a code fence (``` or ~~~) or inside an
-HTML comment does not count. A comment opener or a fence marker inside inline code or in the middle of a
-line opens nothing, and a lone quote in prose hides nothing. The line may wrap over a line break.
+check exports. The line counts as body text only. A line inside a code fence (``` or ~~~), an HTML
+comment, a code span or a 4-space indented code block does not count, and neither does a line in an
+agent file's frontmatter. A code span stays inside one paragraph. A list item's 4-space continuation
+counts. A comment opener or a fence marker inside inline code or in the middle of a line opens nothing,
+and a lone quote or backtick in prose hides nothing. The line may wrap over a line break.
 A file that cannot be read is unknown (exit 2, named), never clear.
 
 The no-argument run reads the module's ROOT when it runs. These cases patch ROOT to a fixture tree.
@@ -28,9 +30,16 @@ ROLES = ("builder", "claude-code-guide", "design-reviewer", "designer", "explore
 LANE_TEXT = os.path.join("skills", "project-ops", "templates", "operating-model.md")
 
 
-def doc(body):
-    """A file with frontmatter, then the body. The frontmatter holds no line the check reads."""
-    return "---\nname: fixture\n---\n# Fixture\n\n%s\n" % body
+def doc(body, front="name: fixture"):
+    """A file with frontmatter, then the body. front is the frontmatter's lines; None writes no frontmatter."""
+    if front is None:
+        return "# Fixture\n\n%s\n" % body
+    return "---\n%s\n---\n# Fixture\n\n%s\n" % (front, body)
+
+
+def long_prose(count=3000):
+    """A body of count prose lines: the full-size state of a fixture."""
+    return "\n".join("Prose line %d of the file." % n for n in range(count))
 
 
 def fixture_root():
@@ -82,9 +91,9 @@ class BodyCases:
     """The cases for one file's body. A subclass sets NAME, the file's path under the fixture root."""
     NAME = None
 
-    def verdict(self, body):
+    def verdict(self, body, **opts):
         root = fixture_root()
-        return check_files(write(root, self.NAME, doc(body)))
+        return check_files(write(root, self.NAME, doc(body, **opts)))
 
     def test_a_file_with_the_line_passes(self):
         self.assertEqual(self.verdict("Work the brief.\n\n" + TERSE_LINE), (0, ""),
@@ -102,8 +111,7 @@ class BodyCases:
         self.assertEqual(code, 1, "an empty file passed the check: %r" % out)
 
     def test_a_full_size_file_with_the_line_at_the_end_passes(self):
-        prose = "\n".join("Prose line %d of the file." % n for n in range(3000))
-        self.assertEqual(self.verdict(prose + "\n\n" + TERSE_LINE), (0, ""),
+        self.assertEqual(self.verdict(long_prose() + "\n\n" + TERSE_LINE), (0, ""),
                          "a long file with the line at its end is flagged")
 
     def test_a_line_wrapped_over_a_break_counts(self):
@@ -178,6 +186,36 @@ class BodyCases:
         self.assertEqual(self.verdict("Don't stop early. Say \"no.\n\n" + TERSE_LINE), (0, ""),
                          "a lone quote in prose hid the line")
 
+    def test_a_lone_backtick_does_not_pair_across_a_blank_line(self):
+        # Controls first: the same text without the lone backtick counts, and a one-line span still hides its line.
+        self.assertEqual(self.verdict("Don't skip this.\n\n" + TERSE_LINE + "\n\nUse `x` here."), (0, ""),
+                         "control: the line after a quote and a one-line span was hidden")
+        self.assertEqual(self.verdict("Quote `" + TERSE_LINE + "` here.")[0], 1,
+                         "control: a one-line code span holding the line counted as holding it")
+        self.assertEqual(self.verdict("Quote `" + wrapped(TERSE_LINE) + "` here.")[0], 1,
+                         "control: a code span wrapped over one line break counted as holding its line")
+        self.assertEqual(self.verdict("Don`t skip this.\n\n" + TERSE_LINE + "\n\nUse `x` here."), (0, ""),
+                         "a lone backtick paired with a backtick across a blank line hid the line")
+
+    def test_a_code_span_does_not_span_a_blank_line(self):
+        # Controls first: a span closed in its paragraph hides nothing after it; a span over one line break still hides its line.
+        self.assertEqual(self.verdict("Write `a\nb` here.\n\n" + TERSE_LINE), (0, ""),
+                         "control: a code span closed in its paragraph hid the line after it")
+        self.assertEqual(self.verdict("Write `a\n" + wrapped(TERSE_LINE) + "\nb` here.")[0], 1,
+                         "control: a code span across one line break did not hide the line it holds")
+        self.assertEqual(self.verdict("Write `a\n\n" + TERSE_LINE + "\n\nb` here."), (0, ""),
+                         "a code span opened in one paragraph and closed in another hid the line between them")
+
+    def test_a_four_space_indented_code_block_does_not_count(self):
+        # Controls first: three spaces is a paragraph, and a list item's four-space continuation counts.
+        self.assertEqual(self.verdict("Work the brief.\n\n   " + TERSE_LINE), (0, ""),
+                         "control: a three-space paragraph holding the line was flagged")
+        self.assertEqual(self.verdict("- Every lane keeps its prose short. "
+                                      + wrapped(TERSE_LINE).replace("\n", "\n    ")), (0, ""),
+                         "control: a list item's four-space continuation holding the line was flagged")
+        self.assertEqual(self.verdict("Work the brief.\n\n    " + TERSE_LINE)[0], 1,
+                         "a four-space indented code block holding the line counted as holding it")
+
     def test_a_file_that_cannot_be_read_is_unknown_not_clear(self):
         root = fixture_root()
         path = os.path.join(root, self.NAME)
@@ -190,6 +228,33 @@ class BodyCases:
 
 class RoleFileBody(BodyCases, unittest.TestCase):
     NAME = os.path.join("agents", "builder.md")
+
+    # The frontmatter cases hold for agents/*.md only: the lane text has no frontmatter.
+    def test_a_line_only_in_frontmatter_does_not_count(self):
+        # Controls first: the same line in the body after the closing --- counts.
+        self.assertEqual(self.verdict("Work the brief.\n\n" + TERSE_LINE,
+                                      front="name: fixture\ndescription: Work the brief."), (0, ""),
+                         "control: the line in the body after the frontmatter was flagged")
+        self.assertEqual(self.verdict("Work the brief.", front="name: fixture\ndescription: " + TERSE_LINE)[0], 1,
+                         "a line only in the frontmatter counted as holding the line")
+
+    def test_a_line_only_in_frontmatter_of_an_empty_body_does_not_count(self):
+        self.assertEqual(self.verdict("", front="name: fixture\ndescription: Work the brief.")[0], 1,
+                         "control: an empty body with no line passed")
+        self.assertEqual(self.verdict("", front="name: fixture\ndescription: " + TERSE_LINE)[0], 1,
+                         "a line only in the frontmatter of an empty body counted as holding the line")
+
+    def test_a_line_only_in_frontmatter_of_a_full_size_file_does_not_count(self):
+        self.assertEqual(self.verdict(long_prose() + "\n\n" + TERSE_LINE, front="name: fixture"), (0, ""),
+                         "control: a full-size file with the line in its body was flagged")
+        self.assertEqual(self.verdict(long_prose(), front="name: fixture\ndescription: " + TERSE_LINE)[0], 1,
+                         "a full-size file with the line only in its frontmatter counted as holding the line")
+
+    def test_a_file_with_no_frontmatter_is_read_whole(self):
+        self.assertEqual(self.verdict(TERSE_LINE, front=None), (0, ""),
+                         "a file with no frontmatter was not read whole: the line was missed")
+        self.assertEqual(self.verdict("Intro.\n\n---\n\n" + TERSE_LINE + "\n\n---", front=None), (0, ""),
+                         "a --- rule that is not on line 1 was read as frontmatter and hid the line")
 
 
 class LaneTextBody(BodyCases, unittest.TestCase):
