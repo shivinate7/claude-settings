@@ -4651,14 +4651,14 @@ def stacked_without_base(root, h, base, heads, running, own=None, remedy="Add th
     others = [(n, info["head"]) for n, info in h.open_prs() if n not in heads and n != own and info["base"] == base]
     unread = fetch_heads(root, [s for _, s in others])
     found, named = [], set()
-    own = {m: own_commits(root, heads[m], kept) for m in sorted(heads)}  # one read per lane and one per other head, none per pair
+    lane_own = {m: own_commits(root, heads[m], kept) for m in sorted(heads)}  # one read per lane and one per other head, none per pair
     for n, head in others:
         if head in unread:
             say(f"merge: #{n}'s head {head[:9] or '(none)'} cannot be fetched from origin, so this request was not checked against its commits.")
             continue
         theirs = own_commits(root, head, kept)
         # a pair that shares no commit outside `kept` has no common commit to hold, so only the pairs that share one take the full read
-        hit = [m for m in sorted(heads) if not own[m].isdisjoint(theirs) and holds_commit_of(root, heads[m], head, kept, frozen)]
+        hit = [m for m in sorted(heads) if not lane_own[m].isdisjoint(theirs) and holds_commit_of(root, heads[m], head, kept, frozen)]
         found += [f"#{m} holds a commit of #{n}, which is not in this request" for m in hit]
         named.update(hit)
     if found:
@@ -5300,7 +5300,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 return batch_drop(root, h, name, int(numbers[0]))
             if a.blame is not None:
                 return batch_blame(root, h, name, a.blame, a.run)
-            return batch_build(root, h, name, list(dict.fromkeys(map(int, numbers))), a.on, a.base, a.ready, a.lint_unknown_ok, a.config)
+            return batch_build(root, h, name, list(map(int, numbers)), a.on, a.base, a.ready, a.lint_unknown_ok, a.config)
         lock = lock or default_lock(root)
         if a.unlock is not None:
             b = a.unlock
