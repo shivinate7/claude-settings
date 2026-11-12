@@ -1093,8 +1093,10 @@ def is_waiting_page(tool_input, cwd) -> bool:
 # Rule `answers-session-write` (decision answers-session-write, pick 2 of waiting-page-one-store). An answer on the
 # waiting page is the owner's word, so no session writes one: the guard reads the same path and the same ArtifactData
 # fields here, for all three tools it judges (ArtifactData, Write and Edit, the shell). The collection's name is
-# lint/layout.py WAITING_ANSWERS, never a copy. A read passes; only a write op is judged.
+# lint/layout.py WAITING_ANSWERS, never a copy. A read and a delete pass; any other op is judged.
 ANSWERS_READ_OPS = ("get", "list", "query")
+# A delete removes a grant and forges none, and skills/waiting-page/SKILL.md "Route and close" orders it.
+ANSWERS_PASSED_OPS = ANSWERS_READ_OPS + ("delete",)
 
 
 def _names_answers(value) -> bool:
@@ -1109,7 +1111,7 @@ def _names_answers(value) -> bool:
 def answers_write_hit(tool_input) -> str:
     """What the ArtifactData call writes into the answers collection, else "".
     The call, or each write of a batch, may name the collection. It may also name a doc_id or path under answers/.
-    Any op but a read counts, so a new write op is judged too.
+    Any op but a read or a delete counts, so a new write op is judged too.
     The page does not matter: a session may not forge an answer on any waiting page."""
     if not isinstance(tool_input, dict):
         return ""
@@ -1118,7 +1120,7 @@ def answers_write_hit(tool_input) -> str:
     else:
         entries = [(tool_input.get("action"), tool_input)]
     for op, entry in entries:
-        if op in ANSWERS_READ_OPS:
+        if op in ANSWERS_PASSED_OPS:
             continue
         for field in ("collection", "doc_id", "path"):
             if _names_answers(entry.get(field)):

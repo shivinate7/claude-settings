@@ -4718,8 +4718,7 @@ def data_tool_hit(tool_input, cwd="", session_id=None):
 # a heredoc body or a comment, are no write. Cost: no process; a shell command that holds no "answers" is not read further.
 # A shell command is read with a leading `cd` followed, and an interpreter's script (`python -c`, a heredoc, `node -e`)
 # by `interpreter_write_hit`. A GitHub MCP write is read by `answers_github_hit`.
-# Known gaps: a `git add` of the whole waiting folder (the export copy needs it), and a write by an interpreter that
-# builds the path out of pieces.
+# Known gaps are listed in the decision answers-session-write.
 ANSWERS_REASON = ("this call would write an answer on the waiting page. An answer is the owner's own word, so a session "
                   "that writes one forges a grant he never gave. Reading the answers is free. To ask him something, write "
                   "a waiting item and let him answer on the page. (decision answers-session-write, a session never "
@@ -4735,21 +4734,38 @@ def _answers_word(word, cwd):
     return question_form.is_answers_path(word, cwd)
 
 
+def _git_value_cluster(arg):
+    """True when the short-option cluster `arg` (`-am`, `-sm`) ends in a letter that takes the next word as its value."""
+    return (len(arg) > 2 and arg[0] == "-" and arg[1] != "-" and arg[-1] in "mFCc"
+            and not any(letter in "mFCc" for letter in arg[1:-1]))
+
+
 def answers_git_hit(raw, cwd):
     """The answers path that a `git add`, `commit`, `stage`, `rm` or `mv` in the command names, else ''.
-    A commit message, or another option's value, is no path.
-    A whole-folder add that names no answers path is not read (known gap above)."""
-    for segment in split_segments(strip_heredoc_bodies(raw)):
-        for subcommand, args in git_calls(segment):
+    A commit message, or another option's value, is no path. A bare name is read from the folder the command
+    runs in: the folder a `cd` before it entered, then its own `git -C`. The same folder walk as the shell's.
+    A whole-folder add that names no answers path is not read (known gap, see the decision)."""
+    ends = []
+    segments = split_segments(strip_heredoc_bodies(raw), ends)
+    for number, segment in enumerate(segments):
+        calls = git_calls(segment)
+        if not calls:
+            continue
+        where = dir_before_segment(segments, number, cwd, ends, literal_cd=True) or cwd
+        tokens = segment_tokens(REDIRECTION.sub(" ", segment))
+        named = _segment_git_c_target(tokens) if tokens else None
+        if named is not None:
+            where = shell_abs(named, where)
+        for subcommand, args in calls:
             if subcommand not in ("add", "commit", "stage", "rm", "mv"):
                 continue
             skip = False
             for arg in args:
                 if skip:
                     skip = False
-                elif arg in GIT_VALUE_OPTIONS:
+                elif arg in GIT_VALUE_OPTIONS or _git_value_cluster(arg):
                     skip = True
-                elif not arg.startswith("-") and _answers_word(arg, cwd):
+                elif not arg.startswith("-") and _answers_path_at(arg, where):
                     return arg
     return ""
 

@@ -1097,9 +1097,10 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
             to_file = any(_writes_a_file(parsed[k]) for k in chain)
             if runs_nowhere and (quiet or not to_file):
                 data = data | _data_words(kinds[number], raw)
-        words, shown, script = [], [], []
+        words, shown, script, blanked = [], [], [], set()
         for index, word in enumerate(raw):
             if index in data:
+                blanked.add(len(words))   # a blanked word names no path: the predicate never reads it
                 words.append('""')   # data, or a `cp` source: no redirect or `tee` in it runs
                 shown.append('""')
                 script.append('""')
@@ -1130,8 +1131,8 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                                    literal_cd=literal_cd)
             if hit:
                 return hit
-        for word in words:
-            if word.startswith("-") or REDIRECT.fullmatch(word):
+        for position, word in enumerate(words):
+            if position in blanked or word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
             if not word or word in (">", ">>"):
                 continue
