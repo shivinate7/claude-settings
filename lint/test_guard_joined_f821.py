@@ -2,14 +2,15 @@
 """Joined-order F821 check for the guard runner's section files. Standard library, and ruff.
 
     python3 lint/test_guard_joined_f821.py              the cases
-    python3 lint/test_guard_joined_f821.py --root DIR   the check on the checkout at DIR: one line per undefined
-                                                        name, exit 1 on any, exit 2 when the join cannot be made
+    python3 lint/test_guard_joined_f821.py --root DIR   the check on the checkout at DIR: one line per finding,
+                                                        exit 1 on any, exit 2 when the join cannot be made
 
 The runner (hooks/test_guard.py) execs each section file of tests/guard/ in its own globals, at the line that
 calls load_sections. A name a section uses binds in the runner's globals at exec time, so ruff reads each file
-alone and reports the name undefined. The per-file ignore in ruff.toml hides that. This check joins the files
-the way the loader runs them: the runner's lines up to its load_sections call, each section in `# section <n>`
-order, then the runner's lines after the call. Ruff with F821 alone reads that one file.
+alone and reports the name undefined. ruff.toml excludes these files from plain ruff, so this check is the only
+lint they get. It joins the files the way the loader runs them: the runner's lines up to its load_sections call,
+each section in `# section <n>` order, then the runner's lines after the call. Ruff reads that one file under
+the codes ruff.toml selects.
 
 The join splices the sections at the call. A plain append, with the sections after the whole runner, reads
 wrong: the runner's lines after the call (LOG_CHECKS, LOG_CHECKS_EXTRA) would run after the sections they use.
@@ -39,8 +40,12 @@ CODE_CHECK = os.path.join("lint", "code_check_standard.json")
 CHECKS_YML = os.path.join(".github", "workflows", "checks.yml")
 RUNNER_NAME = "test_guard.py"
 SECTION_HEAD = re.compile(r"# section (\d+)\n")  # the loader's own pattern (hooks/test_guard.py, load_sections)
-F821_LINE = re.compile(r"^(?P<file>.+?):(?P<line>\d+):\d+: F821 Undefined name `(?P<name>[^`]+)`$")
-RUFF_TRAILER = ("Found ", "All checks passed")
+# One finding per line: `file:line:col: CODE message`, where a fixable finding puts `[*] ` before its message.
+# Ruff 0.17 prints a syntax error with the name `invalid-syntax` and no code.
+FINDING_LINE = re.compile(r"^(?P<file>.+?):(?P<line>\d+):\d+: (?P<code>[A-Z]\d+) (?:\[\*\] )?(?P<msg>.+)$")
+SYNTAX_LINE = re.compile(r"^(?P<file>.+?):(?P<line>\d+):\d+: invalid-syntax: (?P<msg>.+)$")
+UNDEFINED = re.compile(r"^Undefined name `([^`]+)`$")
+RUFF_TRAILER = ("Found ", "All checks passed", "[*] ")
 
 
 def split_lines(text):
@@ -103,32 +108,50 @@ def ruff_command():
     raise RuntimeError("no ruff: neither pipx nor ruff is on PATH")
 
 
-def undefined_names(runner_path, section_dir):
-    """[(name, file, line)] for each name the joined file reads as undefined (F821), in joined order.
-    `file` and `line` are where the name sits in its own file."""
+def selected_codes():
+    """The codes ruff.toml selects. The joined step selects the same, since ruff.toml no longer lints the guard files."""
+    with open(os.path.join(REPO, "ruff.toml"), "rb") as f:
+        return ",".join(tomllib.load(f)["lint"]["select"])
+
+
+def findings(runner_path, section_dir):
+    """[(file, line, code, text)] for each finding ruff reports on the joined file, in joined order. `file` and `line`
+    are where the finding sits in its own file. An undefined name is F821, with text `undefined name <name>`."""
     with open(runner_path, encoding="utf-8") as f:
         runner_text = f.read()
     text, origins = joined(runner_text, section_files(section_dir))
-    cmd = ruff_command() + ["check", "--isolated", "--no-cache", "--select", "F821",
+    cmd = ruff_command() + ["check", "--isolated", "--no-cache", "--select", selected_codes(),
                             "--output-format", "concise", "--stdin-filename", "joined.py", "-"]
     proc = subprocess.run(cmd, input=text, capture_output=True, text=True, encoding="utf-8")
     if proc.returncode not in (0, 1):
         raise RuntimeError("ruff failed (exit %d): %s" % (proc.returncode, proc.stderr.strip()))
-    hits = []
+    out = []
     for line in proc.stdout.splitlines():
         if not line.strip() or line.startswith(RUFF_TRAILER):
             continue
-        m = F821_LINE.match(line)
+        m = FINDING_LINE.match(line) or SYNTAX_LINE.match(line)
         if not m:
             raise RuntimeError("ruff printed a line this check does not read: %s" % line)
-        number = int(m.group("line"))
-        name, start = origins[number - 1][0], origins[number - 1][1]
-        hits.append((m.group("name"), name, start))
-    return hits
+        code = m.groupdict().get("code") or "invalid-syntax"
+        msg = m.group("msg")
+        if code == "F821":
+            undefined = UNDEFINED.match(msg)
+            if not undefined:
+                raise RuntimeError("ruff printed an F821 this check does not read: %s" % line)
+            msg = "undefined name " + undefined.group(1)
+        name, start = origins[int(m.group("line")) - 1]
+        out.append((name, start, code, msg))
+    return out
+
+
+def undefined_names(runner_path, section_dir):
+    """[(name, file, line)] for each name the joined file reads as undefined (F821), in joined order."""
+    return [(text[len("undefined name "):], name, start)
+            for name, start, code, text in findings(runner_path, section_dir) if code == "F821"]
 
 
 def check(root):
-    return undefined_names(os.path.join(root, RUNNER), os.path.join(root, SECTIONS))
+    return findings(os.path.join(root, RUNNER), os.path.join(root, SECTIONS))
 
 
 def read(root, rel):
@@ -202,6 +225,25 @@ class JoinedOrderF821(unittest.TestCase):
         self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
         self.assertIn("zz_planted.py:2: F821 undefined name FAMILES", proc.stdout)
 
+    def test_planted_unused_import_in_a_section_is_reported(self):
+        """ruff.toml excludes the guard files from plain ruff, so this step lints them under F and E9 too: an unused
+        import in a section is a finding, not a clean join."""
+        root = self.make_tree("unused-import", planted="import colorsys\n")
+        proc = subprocess.run([sys.executable, os.path.abspath(__file__), "--root", root],
+                              capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(proc.returncode, 1, "the planted unused import reads clean: " + proc.stdout + proc.stderr)
+        self.assertIn("zz_planted.py:2: F401", proc.stdout)
+
+    def test_planted_syntax_error_in_a_section_is_a_finding_not_a_failed_join(self):
+        """A syntax error in a section is reported with its place, and the join still holds. Ruff prints it with no
+        F or E9 code, so a parser that reads only coded lines stops the join with exit 2."""
+        root = self.make_tree("syntax", planted="_planted = )\n")
+        proc = subprocess.run([sys.executable, os.path.abspath(__file__), "--root", root],
+                              capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(proc.returncode, 1, "the planted syntax error did not read as a finding: " + proc.stdout
+                         + proc.stderr)
+        self.assertIn("zz_planted.py:2: invalid-syntax", proc.stdout)
+
     def test_ruff_toml_no_longer_ignores_f821_for_the_guard_files(self):
         with open(os.path.join(REPO, "ruff.toml"), "rb") as f:
             ignores = tomllib.load(f).get("lint", {}).get("per-file-ignores", {})
@@ -234,11 +276,11 @@ def main(argv):
         try:
             hits = check(argv[1])
         except (ValueError, RuntimeError) as err:
-            print("joined-order F821: the join could not be made: %s" % err)
+            print("joined-order lint: the join could not be made: %s" % err)
             return 2
-        for name, file, line in hits:
-            print("%s:%d: F821 undefined name %s" % (file, line, name))
-        print("joined-order F821: %d undefined name(s)" % len(hits))
+        for file, line, code, text in hits:
+            print("%s:%d: %s %s" % (file, line, code, text))
+        print("joined-order lint: %d finding(s)" % len(hits))
         return 1 if hits else 0
     unittest.main(argv=[sys.argv[0]])
     return 0
