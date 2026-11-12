@@ -214,6 +214,13 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        deny. A SendMessage whose `to` is a string starting `session_`: that is no agent name, and the
                        hand-off could go missing. A missing or non-string `to`, an agent name, @parent and the
                        mcp__claude-code-remote__send_message tool pass. An override lifts it.
+  relay-grant-words    deny. A send_message with a line that opens `Grant:` (after markdown lead characters) unless the
+                       line is `Grant: "<exact words>" (owner, <time>) covers <act>` (guard_merge.RELAY_FORM) and the
+                       quoted words sit in an owner message of the sender's own feedback log (local_time.inbox_paths,
+                       parsed by feedback_guard.parse). A sender with no id, and a missing or unreadable log, are
+                       refusals. A message with no such line is no relay: it reads no log and passes, relayed-yes prose
+                       included. The reason names the form. Cost: one inbox read for a message with a Grant line. An
+                       override lifts it.
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   gh-write-cloud       deny. In a cloud session, a gh write: `gh pr` create, merge, comment, edit, close, review or
                        ready; `gh issue` create, comment, edit or close; `gh api` with a write method, or with a field
@@ -6128,6 +6135,13 @@ def judge(payload) -> None:
     briefed = brief_hit(tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "")
     if briefed:
         refuse(tool, "deny", "lane-one-topic", briefed[1], briefed[0])
+
+    # A relayed grant that does not carry the owner's exact words from the sender's own log (rule relay-grant-words).
+    if tool == "mcp__claude-code-remote__send_message":
+        from guard_merge import relay_grant_hit
+        relayed = relay_grant_hit(tool, tool_input, session_id_of(payload))
+        if relayed:
+            refuse(tool, "deny", "relay-grant-words", relayed[1], relayed[0])
 
     # 8b. agent-no-remote-tools. An agent never starts, messages, tags or archives sessions, nor sets scheduled tasks;
     # the session that spawned it does. Keyed on a truthy agent_id of any shape, so a drifted id stays refused. After the

@@ -2229,6 +2229,63 @@ def hook_bypass_hit(texts):
     return None
 
 
+# ---- send_message: a relayed grant carries the owner's exact words (rule relay-grant-words)
+RELAY_FORM = 'Grant: "<exact words>" (owner, <time>) covers <act>'
+_RELAY_LINE = re.compile(_MARKDOWN_LEAD + re.escape(LANE_GRANT_MARKER))  # a line that opens `Grant:`, after optional markdown lead characters
+_RELAY_FORM_LINE = re.compile(
+    _MARKDOWN_LEAD + re.escape(LANE_GRANT_MARKER) + r'\s*"(?P<words>.+)"\s*\(owner,\s*(?P<time>[^()]*?)\s*\)\s*covers\s+(?P<act>\S.*)$')
+RELAY_REASON = (
+    "Rule relay-grant-words (decision relayed-grant-read-from-page, what a relay message carries): a relay of the "
+    "owner's grant carries the owner's exact words, never a paraphrase. The form is {form} {why} Copy the words "
+    "from the owner's message in this session's own chat, and the time of that message. A message with no line "
+    "that opens `Grant:` is no relay and is not judged."
+)
+
+
+def _relay_words_in_log(session_id, words):
+    """None when `words` sit verbatim in an owner message of the sender's own feedback log, else the reason they do
+    not. The log is <config dir>/handoffs/<session id>.inbox.md (local_time.inbox_paths), the file feedback_guard.py
+    reads and parses. A sender with no id, a missing or unreadable log, and a log that will not parse are refusals."""
+    try:
+        import local_time
+        import feedback_guard
+        paths = local_time.inbox_paths(session_id)
+        if paths is None:
+            return "this session's feedback log cannot be found, so the words cannot be shown in it."
+        with open(paths[0], encoding="utf-8") as f:  # cost: one file read, only for a message with a Grant line
+            blocks = feedback_guard.parse(f.read())
+    except Exception:
+        return "this session's feedback log is missing or cannot be read, so the words cannot be shown in it."
+    if any(words in (block["text"] or "") for block in blocks):
+        return None
+    return "the quoted words are in no owner message of this session's own feedback log."
+
+
+def relay_grant_hit(tool: str, tool_input, session_id: str):
+    """Return (matched, reason) when this send_message holds a line that opens `Grant:` and the line is not a relay of
+    the owner's grant in RELAY_FORM, or its quoted words are not in the sender's own feedback log, else None. Only a
+    line that opens `Grant:` is judged: a message with none reads no log, and prose that relays a yes passes. A line
+    with a `<` in its time or act is the unfilled form. Cost: one regex pass over the message, and for a message with
+    a Grant line one read of the sender's inbox file (no new file, process or timer). Fails closed on the log read:
+    a log that cannot be read shows no words."""
+    if tool != BRIEF_TOOL or not isinstance(tool_input, dict):
+        return None
+    message = tool_input.get("message")
+    if not isinstance(message, str):
+        return None
+    lines = [line.strip() for line in message.splitlines() if _RELAY_LINE.match(line)]
+    for line in lines:
+        found = _RELAY_FORM_LINE.match(line)
+        if not found or "<" in found.group("time") or "<" in found.group("act") or not found.group("words").strip():
+            return line[:120], RELAY_REASON.format(form=RELAY_FORM, why="This Grant line is not in that form.")
+    for line in lines:
+        words = _RELAY_FORM_LINE.match(line).group("words")
+        why = _relay_words_in_log(session_id, words)
+        if why:
+            return line[:120], RELAY_REASON.format(form=RELAY_FORM, why="This Grant line is refused: " + why)
+    return None
+
+
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
 # ids across the modules it loads. In the repo it stays a comment, which counts as a match.
 # INSTALL_ID = "uninstalled"
