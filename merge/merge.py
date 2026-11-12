@@ -19,7 +19,7 @@
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V] [--grant "#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT"]
                           [--quotes-matched]
                           print the review record for the head SHA that was reviewed. --quotes-matched (kind docs-only only) adds the `Quotes: matched` line and lets
-                          a decision record be added or modified: the sending session checked the owner quotes against its feedback file, and merge trusts the stamp as it trusts --reviewed. It refuses a Kind or Guard that the diff contradicts. Stops (exit 1) when the PR's live head is another
+                          a decision record be added or modified: the sending session checked the owner quotes against its feedback log, and merge trusts the stamp as it trusts --reviewed. It refuses a Kind or Guard that the diff contradicts. Stops (exit 1) when the PR's live head is another
                           sha. Posts nothing: the lane posts it as a PR comment. --fix-check adds the optional `Fix check:` line after
                           the rounds; HEAD is the reviewed head the fix diff starts from, and differs from SHA. It refuses (exit 2)
                           unless HEAD is the Head of the newest earlier record on the PR with no Fix check line, read from the
@@ -3839,7 +3839,7 @@ def grant_pr(text):
     m = re.fullmatch(r"#(\d+), (.*)", text, re.ASCII)
     return (int(m.group(1)), m.group(2)) if m and grant_valid(m.group(2)) else None
 
-REVIEW_QUOTES_LINE = "Quotes: matched"  # the sending session's stamp that the owner quotes in a docs-only diff match its feedback file (decision docs-only-prs-skip-review)
+REVIEW_QUOTES_LINE = "Quotes: matched"  # the sending session's stamp that the owner quotes in a docs-only diff match its feedback log (decision docs-only-prs-skip-review)
 
 def review_body(n, head, kind, guard, rounds, net, fix=None, grant=None, quotes=False):
     """-> the record text, one field per line, in the order of the form. `rounds` is a list of (number, role, model, verdict). `fix` is None or the
@@ -3957,7 +3957,7 @@ def review_state(rec, head):
     if rec["kind"] == "delete-only" and top == 1:
         return "open", "round 1 failed on a guard or check change, so rounds 2 and 3 are owed"
     if rec["kind"] == "docs-only" and not rounds:
-        return "done", "docs-only change, the owner quotes match the feedback file, no round owed" if rec.get("quotes") else "docs-only change, no round owed"
+        return "done", "docs-only change, the owner quotes match the feedback log, no round owed" if rec.get("quotes") else "docs-only change, no round owed"
     return "open", f"round {top} is not passed" if top else "no round is recorded"
 
 REVIEW_MERGE_WALK = 50  # the most commits (clean merges of main) clean_merges_after walks between a record's head and the live head
@@ -5048,7 +5048,7 @@ DECISIONS_DIR = repo_layout.layout()["kinds"]["decisions"]["path"].lower() + "/"
 def kind_misfits(kind, files, quotes=False):
     """-> the sorted paths that break the kind, over (path, status, additions) triples.
     docs-only: a path that is not a doc (a .md under docs/, or the root README.md), or a decision record (a path under DECISIONS_DIR, case ignored) with any status but removed.
-    A decision record is a rule's source, and decision docs-only-prs-skip-review keeps it out of a docs-only change, unless `quotes` (the sending session's stamp that the owner quotes match its feedback file) lets one be added or modified.
+    A decision record is a rule's source, and decision docs-only-prs-skip-review keeps it out of a docs-only change, unless `quotes` (the sending session's stamp that the owner quotes match its feedback log) lets one be added or modified.
     delete-only: a path that adds lines or is new (added, renamed, copied)."""
     if kind == "docs-only":
         ok = ("removed", "added", "modified") if quotes else ("removed",)
@@ -5126,7 +5126,7 @@ def build_parser():
     p.add_argument("--round", action="append", type=round_arg, default=[], metavar="N:ROLE:MODEL:VERDICT", help="with --review-record: one reviewer line; repeat it")
     p.add_argument("--fix-check", type=fix_verifier_arg, metavar="HEAD:reviewer:MODEL:VERDICT", help="with --review-record: the `Fix check:` line, after the rounds; HEAD is the reviewed head the fix diff starts from; a fix after a merge of main also qualifies: the newest review log reads done with a PASS Fix check line, and the head is a merge of the base into that Head with no edit beyond git's own merge")
     p.add_argument("--grant", type=grant_arg, metavar="TEXT", help="with --review-record: the owner's grant of round 4, `#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT`, with PR the pull request's own number; the rounds must then reach round 4")
-    p.add_argument("--quotes-matched", action="store_true", help="with --review-record --kind docs-only: the sending session matched the owner quotes in the diff against its feedback file; adds the `Quotes: matched` line and lets a decision record be added or modified")
+    p.add_argument("--quotes-matched", action="store_true", help="with --review-record --kind docs-only: the sending session matched the owner quotes in the diff against its feedback log; adds the `Quotes: matched` line and lets a decision record be added or modified")
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after the final round (round 3, or 4 with --grant)")
     p.add_argument("--touches", action="store_true", help="list the open pull requests that touch a failing case or a named file; takes no lock, merges and posts nothing")
     p.add_argument("--run", default=None, metavar="RUN", help="a workflow run, by its id or its Actions run URL. With --touches: the run whose failing log lines name the cases. With --batch-build NAME --blame PR: the failed run of the batch's current head that blames the lane")
@@ -5236,6 +5236,8 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--kind docs-only means no guard or check, so --guard must be no")
         if a.quotes_matched and a.kind != "docs-only":
             p.error("--quotes-matched goes with --kind docs-only only")
+        if a.quotes_matched and (a.round or a.grant):  # the stamp stands alone; named here, before the rounds parse, so the refusal is not the rounds' own
+            p.error("--quotes-matched goes with no --round and no --grant: a stamped docs-only record owes no round")
         if a.grant and grant_pr(a.grant)[0] != int(a.pr):
             p.error("--grant: the PR in the grant must be the pull request number")
         if a.fix_check and a.fix_check[0] == a.head:
