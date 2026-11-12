@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """PreToolUse judge for an Agent spawn, an AskUserQuestion call, an ArtifactData write of a
-waiting-page item and a lane brief sent by send_message. One command hook replaces the settings.json `prompt` hook on Agent and the `agent`
+waiting-page item and a lane brief sent by send_message or a lane start (create_session). One command hook replaces the settings.json `prompt` hook on Agent and the `agent`
 hook on AskUserQuestion. A prompt hook sees only the call's JSON. An agent hook reads files with tools and
 returns ok. Neither has a command field, so neither runs guard_core.refuse, the one home of the owner
 override (decision owner-override).
@@ -29,12 +29,14 @@ only plain words, unexplained ids and pointers outside the item, and never to fl
 option. The ArtifactData str_replace field is one top-level string key, so only `context` occurs in
 practice (note page-judge-dead-fragment-fields).
 
-A send_message whose first non-blank line carries the lane brief marker (shared_names.BRIEF_LINE) gets the check refuter
-(hooks/check_refuter.py, the one home): one blind Sonnet call that reads the step's title and why from the record and the
+A lane brief gets the check refuter (hooks/check_refuter.py, the one home): a send_message whose message, or a lane-tagged
+create_session (shared_names.is_lane_create_session) whose prompt, carries the lane brief marker (shared_names.BRIEF_LINE)
+on its first line after any Grant line. One blind Sonnet call reads the step's title and why from the record and the
 brief's Done check line, and asks whether the check could pass while the ask stays unmet. A gap, an unknown (a model
 error, an odd answer, a missing record or any crash of this branch) or a brief with no Done check line refuses under rule
-`check-refuter` through refuse(); only a met verdict allows. Any other send_message exits 0 before importing check_refuter,
-with no model call. Cost: one Sonnet call (REFUTER_TIMEOUT s) per lane brief, none per other message.
+`check-refuter` through refuse(); only a met verdict allows. Any other send_message or create_session exits 0 before
+importing check_refuter, with no model call. Cost: one Sonnet call (REFUTER_TIMEOUT s) per lane brief, none per other
+message.
 
 Veto (an act no override lifts): an Explore spawn whose model field is neither sonnet nor opus. That
 is the Explore row of agent-model-cap, a model guard. Every other refusal is liftable.
@@ -400,9 +402,9 @@ def refute_brief(payload, tool, args):
         found = BRIEF_LINE.match(first)
         check_line = check_refuter.done_check_line(message)
         if check_line is None:
-            verdict, case = "gap", "the brief has no `Done check:` line at a line start, so nothing says when the work is done"
+            verdict, case = "missing", "the brief has no `Done check:` line at a line start, so nothing says when the work is done."
         elif check_refuter.is_placeholder(check_line):
-            verdict, case = "gap", "the Done check line is still the template's `<...>` placeholder, so nothing says when the work is done"
+            verdict, case = "missing", "the Done check line is still the template's `<...>` placeholder, so nothing says when the work is done."
         else:
             if not found:
                 raise ValueError("the brief's first line names no step")
@@ -416,7 +418,9 @@ def refute_brief(payload, tool, args):
         verdict, case = "unknown", " ".join(("%s: %s" % (type(exc).__name__, exc)).split())
     if verdict == "met":
         return 0
-    if verdict == "gap":
+    if verdict == "missing":
+        reason = "%s Write a `Done check:` line whose pass proves the ask." % case
+    elif verdict == "gap":
         reason = "the Done check line could pass with the ask unmet: %s Rewrite the check so a pass proves the ask." % case
     else:
         reason = "the check refuter's verdict is unknown (%s), so the brief's Done check line is unchecked. Send again." % case

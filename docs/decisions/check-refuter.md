@@ -31,7 +31,7 @@ Check: `hooks/check_refuter.py`, the one home of the check refuter. `hooks/call_
 - Answers:
   - met: the send goes through.
   - gap: the send is refused. The reason is the model's case.
-  - unknown: the send is refused. Causes: a model error, an odd answer, or an unreadable step (a missing checkout, ref, file, title or why, or a step file that is not JSON). Each of those reasons names the fetch command: `git fetch origin +refs/heads/<record branch>:refs/remotes/origin/<record branch>`.
+  - unknown: the send is refused. Causes: a model error, an odd answer, or an unreadable step (a missing checkout, ref, file, title or why, or a step file that is not JSON). Only an unreadable step's reason names the fetch command, since a fetch can mend it: `git fetch origin +refs/heads/<record branch>:refs/remotes/origin/<record branch>`.
 - No Done check line, or a placeholder only: the send is refused, with no model call.
 - Override: the owner override (`docs/decisions/owner-override.md`) lifts each refusal: a gap, an unknown, or a missing line.
 
