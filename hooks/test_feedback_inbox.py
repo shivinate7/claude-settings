@@ -4111,9 +4111,9 @@ def case_batch_bound_does_not_clear_a_standing_word_elsewhere():
               any("has no home" in s for s in out), out)
 
 
-# The lane brief that refused a once: home (lane mailbox-wake-routes), in full. Its one owner grant, "start it", covers one
-# helper session, and the once: item names that session. The refusal comes from "any PR" in "Hand in any PR to the batch
-# runner": a task instruction to the lane, not an approval to act on every PR.
+# The lane brief that a once: home must pass (lane mailbox-wake-routes), in full. Its one owner grant, "start it", covers one
+# helper session, and the once: item names that session. "Hand in any PR to the batch runner" is a task instruction: a
+# handoff verb leads its sentence, so "any PR" bars nothing.
 FB1338_BRIEF = (
     "Grant: owner 13:37 CST Nov 12, relayed by the retrospective, to \"start mailbox-wake-routes; it needs one extra cloud session to post test comments\": \"ya yes start it\". Covers one short-lived helper session that only posts test comments for the measure; you archive it when done.",
     "",
@@ -4149,9 +4149,8 @@ def case_you_make_bound_does_not_lift_the_standing_bar():
 
 
 def case_one_shot_brief_in_full_with_a_task_phrase_passes():
-    """Red today: the lane brief in full, with its one-shot grant and its once: home. "Hand in any PR to the batch runner"
-    is a task instruction, not a standing approval, so the home passes. The guard bars it on "any PR" and refuses with
-    "has no home"."""
+    """The lane brief in full, with its one-shot grant and its once: home. "Hand in any PR to the batch runner" is a task
+    instruction, not a standing approval, so the home passes."""
     mod = guard_module()
     out = mod.problems(mod.parse(render_block("\n".join(FB1338_BRIEF), items=(REPRO_ITEM,))), "")
     check("lane brief in full, one-shot grant with its once: home: not refused for 'any PR' in a task line",
@@ -4159,8 +4158,8 @@ def case_one_shot_brief_in_full_with_a_task_phrase_passes():
 
 
 def case_shortest_task_phrase_sentence_passes():
-    """Red today: the shortest sentence that refuses, "approved. Hand in any PR.", holds a grant word and a task phrase,
-    and no approval to merge any PR. Its once: home passes."""
+    """The one-shot sentence "approved. Hand in any PR." holds a grant word and a task phrase, and no approval to merge any
+    PR. Its once: home passes."""
     mod = guard_module()
     out = mod.problems(mod.parse(render_block(TASK_PHRASE_SENTENCE, items=(REPRO_ITEM,))), "")
     check("task-phrase sentence, one-shot grant with its once: home: not refused",
@@ -4200,6 +4199,68 @@ def case_real_standing_wordings_stay_refused_with_a_once_home():
     for text in STANDING_WORDINGS:
         out = mod.problems(mod.parse(render_block(text, items=(REPRO_ITEM,))), "")
         check("standing wording %r: its once: home is barred" % text,
+              any("has no home" in s and "bars a once:" in s for s in out), out)
+
+
+# Pick (a), the scope-noun rule. A scope noun (all, any or every before repo, PR, branch, open, green, new or future)
+# bars a once: home wherever it sits, except in a sentence that a named handoff verb ("Hand", "Send", "Post") leads.
+# The sentence split is on sentence ends only: not on a newline, an abbreviation or a URL's trailing period.
+SCOPE_REFUSED_TEXTS = (
+    "Approved. Merge any\nPR.",
+    "Approved. Merge all\nopen PRs.",
+    "Approved. Any PR is fine.",
+    "Approved!\nAny PR is fine.",
+    "Approved. For all repos.",
+    "Any PR works. Go ahead.",
+    "Approved to merge. Any open PR is fine.",
+    "Approved, e.g. any PR.",
+    "Approved. etc. every PR.",
+    "Approved, i.e. any PR.",
+    "Approved v2. Any PR.",
+)
+HANDOFF_PASSES_TEXTS = (  # a scope noun in a sentence a handoff verb leads: the once: home passes
+    "Approved. Send any PR to triage.",
+    "approved. Post any PR to triage.",
+)
+NO_SPLIT_TEXTS = (  # no abbreviation, newline or URL period ends a sentence, so no handoff sentence starts here
+    "Approved, e.g. send any PR to triage.",
+    "Approved, i.e. send any PR to triage.",
+    "Approved etc. send any PR to triage.",
+    "Approved v2. Send any PR to triage.",
+    "Approved\nSend any PR to triage.",
+    "Approved, see https://example.com/pr/12. Send any PR to triage.",
+)
+
+
+def case_scope_noun_bars_a_once_home_wherever_it_sits():
+    """A scope noun bars a once: home in a sentence no handoff verb leads, wherever it sits: after a newline, in a short
+    clause, or after "Approved to merge." Each text's noun sits in such a sentence, and its reason names the standing
+    word."""
+    mod = guard_module()
+    for text in SCOPE_REFUSED_TEXTS:
+        out = mod.problems(mod.parse(render_block(text, items=(REPRO_ITEM,))), "")
+        check("scope noun %r: its once: home is barred" % text,
+              any("has no home" in s and "bars a once:" in s for s in out), out)
+
+
+def case_handoff_led_scope_noun_keeps_its_once_home():
+    """Green control: a scope noun in a sentence that "Send" or "Post" leads does not bar the once: home. "Hand in any PR"
+    is the lane brief's case, above."""
+    mod = guard_module()
+    for text in HANDOFF_PASSES_TEXTS:
+        out = mod.problems(mod.parse(render_block(text, items=(REPRO_ITEM,))), "")
+        check("handoff-led scope noun %r: its once: home passes" % text,
+              not any("has no home" in s for s in out), out)
+
+
+def case_split_never_starts_a_handoff_sentence_at_an_abbreviation_newline_or_url():
+    """The sentence split is on sentence ends only: not after "e.g.", "i.e.", "etc.", "v2.", a newline or a URL's
+    trailing period. A split there would make "send any PR to triage." a handoff sentence. Each text's sentence is led
+    by "Approved", so its once: home is barred."""
+    mod = guard_module()
+    for text in NO_SPLIT_TEXTS:
+        out = mod.problems(mod.parse(render_block(text, items=(REPRO_ITEM,))), "")
+        check("no split inside %r: its once: home is barred" % text,
               any("has no home" in s and "bars a once:" in s for s in out), out)
 
 
@@ -4680,6 +4741,9 @@ CASES = (
     case_repro_brief_sentences_alone_pass_control,
     case_one_shot_brief_with_clean_up_and_never_wait_passes_control,
     case_real_standing_wordings_stay_refused_with_a_once_home,
+    case_scope_noun_bars_a_once_home_wherever_it_sits,
+    case_handoff_led_scope_noun_keeps_its_once_home,
+    case_split_never_starts_a_handoff_sentence_at_an_abbreviation_newline_or_url,
     case_page_form_asked_comment_with_a_note_blocks,
     case_page_form_step_without_the_template_blocks,
     case_page_form_step_naming_the_template_passes,
