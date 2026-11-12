@@ -1514,6 +1514,28 @@ class LockRetake(Env):
         self.assertEqual(self.head("merge-lock/main"), taken[0], "unlock removed a lock a rival took after its read: the delete is not leased on the sha it read")
         self.assertTrue(reported, "unlock reports no failed delete when the lock it read was taken over")
 
+    def test_unlock_whose_lock_another_run_released_after_its_read_says_nothing_to_remove(self):  # a failed delete with no lock left is not a failed unlock
+        token = merge.GitLock(self.other, now=lambda: self.now).acquire("main", 600)
+        ref = merge.lock_ref("main")
+        self.assertEqual(self.head("merge-lock/main"), token, "scope: the lock is on origin before unlock reads it")
+        rival = merge.GitLock(self.other, now=lambda: self.now)
+        fired = []
+        def hook(args, run):
+            if args[:1] == ("push",) and args[-1] == f":{ref}" and not fired:
+                fired.append(True)  # the rival's own release makes git calls too: the hook passes them through
+                release_out(self, rival, token)  # another run releases the lock after unlock's listing, before unlock's delete
+            return run()
+        with self.git_hook(hook):
+            try:
+                rc, out = self.run_merge("--unlock")
+            except merge.Stop as e:
+                self.fail(f"unlock stopped after another run had released the lock it read, in place of 'nothing to remove': {e}")
+        self.assertTrue(fired, "unlock never reached its delete, so the release never raced it and the case proves nothing")
+        self.assertEqual(rc, 0, f"unlock failed after another run had released the lock it read: {out}")
+        self.assertIn("nothing to remove", out, "unlock did not say there was no lock left to remove")
+        self.assertNotIn("unlock failed", out)
+        self.assertFalse(self.lock_ref(), "unlock left a lock on origin after the release it read")
+
     def test_unlock_removes_the_lock_when_its_commit_cannot_be_read(self):
         listed = merge.GitLock(self.other, now=lambda: self.now).acquire("main", 600)
         ref = merge.lock_ref("main")
@@ -10622,6 +10644,7 @@ class GitLockExtendsForRateWaits(Env):
         self.gh = [(1, RATE_403), (0, "[]")]
         host.gh(["run", "list"])
         self.assertNotEqual(sh(self.co, "git", "ls-remote", "origin", "refs/heads/merge-lock/main").split()[0], self.token, "the lock was not extended")
+        return host
 
     def test_a_release_after_an_extension_deletes_the_lock(self):  # (e)
         self.extended()
@@ -10639,6 +10662,22 @@ class GitLockExtendsForRateWaits(Env):
         kept = sh(self.co, "git", "ls-remote", "origin", "refs/heads/merge-lock/main").split()[0]
         self.assertIn("not this run's", release_out(self, self.glock, "0" * 40))
         self.assertEqual(sh(self.co, "git", "ls-remote", "origin", "refs/heads/merge-lock/main").split()[0], kept)
+
+    def test_a_rate_wait_after_the_release_extends_nothing(self):  # guard: no lock is held after the release, so a wait after it extends none
+        host = self.extended()  # the lock expires at 1360
+        self.assertEqual(release_out(self, self.glock, self.token), "")
+        self.assertFalse(self.lock_ref(), "scope: the release left a lock on origin, so the wait below tests nothing")
+        self.clock.t = 1100  # the lock was live when it was released: a wait that needs until 2300 would extend it
+        before, pauses = len(self.cmds), len(self.seen)
+        self.gh_calls, self.gh = 0, [(1, self.rate_403_with_retry_after(900)), (0, "[]")]
+        try:
+            got = host.gh(["run", "list"])
+        except merge.NetStop as e:
+            self.fail(f"a rate wait after the release tried to extend the released lock, and the run stopped: {e}")
+        self.assertEqual(got, (0, "[]"))
+        self.assertEqual([c for c in self.cmds[before:] if "push" in c or "commit-tree" in c], [], "a rate wait after the release wrote a lock commit")
+        self.assertEqual(self.seen[pauses:], [(900, None, None)], "the wait after the release is not one plain pause")
+        self.assertIsNone(self.glock.until)
 
     def test_a_wait_that_needs_a_hold_past_six_hours_from_the_take_stops_the_run_before_any_write(self):
         """LOCK_MAX_HOLD counts from the take: a 900 s wait that needs the lock held past 6 h stops the run, with no push, no pause and no retry."""
