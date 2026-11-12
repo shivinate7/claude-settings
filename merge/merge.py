@@ -137,6 +137,11 @@
                           batch that says `On: batch-NAME` on the new head. Before the push it asks the host to return a ready pull
                           request to draft; Host.to_draft sends nothing, so it says so and the push restarts CI. The batch then needs
                           `--batch-build NAME --ready` again. Runs no lane lint and no ready check, takes no lock.
+  merge --batch-build NAME PR [PR ...] --on-running [--base BRANCH]
+                          the same build, stacked by the tool on the ready batch whose CI is running (a head `batch-*`, a frozen block, not a draft),
+                          or on the tip of a chain of them. With none running it builds on the base and says so. Two running batches that stack on
+                          nothing in common stop the run: nothing is pushed, and --on names the one. Goes with no --on and no --ready. Cost: one
+                          pull list, and one CI read per ready batch pull request.
   merge --role TIER       cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role).
 
@@ -1215,6 +1220,10 @@ class Host:
                 for k in pending if (names is None or k in names) and got.get(k)]
         running = self.judge_runs([r for r in self.runs(d["head"]["sha"]) if r["name"] not in ignore])[1]
         return (["required check " + "; ".join(hits)] if hits else []) + [w + " is not completed" for w in running]
+
+    def head_busy(self, n, sha):
+        """True when the head `sha` of open pull request `n` has CI running (busy_parts, the one home of that read). A failed read raises Stop."""
+        return bool(self.busy_parts({"number": n, "head": {"sha": sha}}, self.required_names(), self.ignore))
 
     def ready_busy(self, pulls, base):
         """-> the numbers of the ready (not draft) pull requests of `pulls` on `base` whose head has CI running (busy_parts). `pulls` is the open
@@ -4901,6 +4910,23 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", co
     say(f"merge: batch {name} built: PR #{pr} {'draft' if info['draft'] else 'ready'}, lanes {lane_list(heads)}")
     return rc
 
+def running_batch(h, base):
+    """-> the branch of the batch a new batch stacks on, or None: the ready batch pull requests on `base` (a head `batch-*`, a frozen block, not a draft)
+    whose head has CI running, less any that another of them names in its On line, so a chain of running batches gives its tip. More than one left is a
+    Stop that names them: the tool never picks between batches that stack on nothing in common."""
+    found = {}
+    for n, info in h.open_prs():
+        if info["base"] != base or info["draft"] or not info["branch"].startswith(BATCH_PREFIX):
+            continue
+        block = parse_freeze(info["body"])
+        if block and info["branch"] == integration_branch(block["name"]) and h.head_busy(n, info["head"]):
+            found[info["branch"]] = block
+    stacked = {b["on"][0] for b in found.values() if b["on"]}
+    tips = sorted(set(found) - stacked)
+    if len(tips) > 1:
+        raise Stop(f"more than one batch is running on {base} and none stacks on the others: {', '.join(tips)}. Name the one to stack on with --on. Nothing was pushed. {FREEZE_CITE}")
+    return tips[0] if tips else None
+
 def batch_blame(root, h, name, number, url):
     """merge --batch-build NAME --blame PR --run URL: store `Blamed: #PR` in batch-NAME's block, so a drop may take PR off. Only a completed run
     that concluded failure, on the batch pull request's current head, counts. A refusal writes nothing. Runs no lint and no ready check, and pushes nothing."""
@@ -5091,6 +5117,7 @@ def build_parser():
     p.add_argument("--batch-build", nargs="+", metavar=("NAME", "PR"), help="build batch-NAME and its one draft pull request from these lane PRs, or allow the same set again; stands alone; takes no lock")
     p.add_argument("--batch-drop", nargs=2, metavar=("NAME", "PR"), help="take PR, and each frozen lane that stacks on it, off batch-NAME; stands alone; takes no lock")
     p.add_argument("--on", metavar="BRANCH", help="with --batch-build: stack the batch on this running batch's head")
+    p.add_argument("--on-running", action="store_true", help="with --batch-build: stack the batch on the ready batch whose CI is running (the tip of a chain), found by the tool; with none running it builds on the base")
     p.add_argument("--ready", action="store_true", help="with --batch-build: lint the head of batch-NAME once and run the ready checks, then ask the host to mark its draft pull request ready; the PR list may be left out")
     p.add_argument("--blame", type=pr_arg, metavar="PR", help="with --batch-build NAME and --run: store that a failed CI run of the batch's current head blames lane PR, so a drop may take it off; nothing else")
     p.add_argument("--unlock", nargs="?", const=True, metavar="BRANCH")
@@ -5127,6 +5154,8 @@ def main(argv, host=None, lock=None, hosts=None):
                 else "--head, --kind, --guard, --round, --fix-check and --net-value go with --review-record (--head also goes with --confirm)")
     if a.ready and not a.batch_build:
         p.error("--ready goes with --batch-build")
+    if a.on_running and (not a.batch_build or a.on is not None or a.ready):
+        p.error("--on-running goes with --batch-build alone: it takes no --on and no --ready")
     if a.run is not None and a.blame is None and not a.touches:
         p.error("--run goes with --touches, or with --batch-build NAME --blame PR")
     if a.blame is not None:
@@ -5178,7 +5207,7 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error(f"argument pr: invalid int value: {a.pr!r}")
     # A batch route takes only these options; any other option set (a mode flag or a modifier) means it does not stand alone.
     if batch and (any(v != p.get_default(k) for k, v in vars(a).items()
-                      if k not in ("batch_build", "batch_drop", "ready", "on", "base", "lint_unknown_ok", "blame", "run",
+                      if k not in ("batch_build", "batch_drop", "on_running", "ready", "on", "base", "lint_unknown_ok", "blame", "run",
                                  "config", "session", "undo_check_unknown_ok", "base_red_ok"))
                   or (a.batch_build and a.batch_drop)):
         p.error("--batch-build and --batch-drop each stand alone")
@@ -5290,7 +5319,11 @@ def main(argv, host=None, lock=None, hosts=None):
                 return batch_drop(root, h, name, int(numbers[0]))
             if a.blame is not None:
                 return batch_blame(root, h, name, a.blame, a.run)
-            return batch_build(root, h, name, sorted(map(int, numbers)), a.on, a.base, a.ready, a.lint_unknown_ok, a.config)
+            on = a.on
+            if a.on_running:
+                on = running_batch(h, a.base or "main")
+                say(f"merge: batch {name} is built on the running batch {on}." if on else f"merge: no batch is running on {a.base or 'main'}; batch {name} is built on it.")
+            return batch_build(root, h, name, sorted(map(int, numbers)), on, a.base, a.ready, a.lint_unknown_ok, a.config)
         lock = lock or default_lock(root)
         if a.unlock is not None:
             b = a.unlock
