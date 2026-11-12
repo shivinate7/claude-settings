@@ -108,7 +108,8 @@ MAIL_HOOK = os.path.join(REPO, "hooks", "mail.py")
 REFUSED = "refs/heads/mail"
 SCRUBBED = ("CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "MAILBOX_REPO", "MAILBOX_CACHE",
             "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
-            "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_SSH", "GIT_SSH_COMMAND", "CLAUDE_CODE_EXECPATH", "AI_AGENT")
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_SSH", "GIT_SSH_COMMAND", "CLAUDE_CODE_EXECPATH", "AI_AGENT",
+            "MAILBOX_HOLD_OFF")
 IDENTITY = {"GIT_AUTHOR_NAME": "Mail Test", "GIT_AUTHOR_EMAIL": "mail-test@example.invalid",
             "GIT_COMMITTER_NAME": "Mail Test", "GIT_COMMITTER_EMAIL": "mail-test@example.invalid"}
 # A second machine's identity. Two takers with one identity and one address can build byte-identical
@@ -206,7 +207,6 @@ def load_hook():
 
 
 MAIL_MODULE = load_hook()
-REAL_HELD_PLATFORMS = getattr(MAIL_MODULE, "HELD_PLATFORMS", ())  # read before any case pins it
 
 
 def turn_start_lines(payload, env):
@@ -215,7 +215,9 @@ def turn_start_lines(payload, env):
 
 
 def scrubbed_environ():
-    return {key: value for key, value in os.environ.items() if key not in SCRUBBED}
+    env = {key: value for key, value in os.environ.items() if key not in SCRUBBED}
+    env["MAILBOX_HOLD_OFF"] = "1"  # a case never depends on the host platform; MacHold removes it
+    return env
 
 
 def fixture_env(home, extra=None):
@@ -537,15 +539,6 @@ class MailCase(unittest.TestCase):
         self.case = os.path.join(ROOT, digest)
         os.makedirs(self.case)
         self.counter = 0
-        # A case that reads a turn start must not depend on the host: a Mac holds the turn start (MacHold).
-        self.hold(())
-
-    def hold(self, platforms):
-        if MAIL_MODULE is None:  # no hooks/mail.py: each case fails on its own outcome assert (load_hook)
-            return
-        patcher = mock.patch.object(MAIL_MODULE, "HELD_PLATFORMS", platforms, create=True)
-        patcher.start()
-        self.addCleanup(patcher.stop)
 
     def tearDown(self):
         tracked_tree.rm_tree(self.case)
@@ -1084,33 +1077,68 @@ class SshBatchDefault(MailCase):
 
 
 class MacHold(MailCase):
-    """Step session-mailbox-followups: the Mac keeps the settings.json default but prints no turn-start mail line until its
-    own round-trip check passes. The `mail` command itself is not held, so the owner's check card still runs."""
+    """Step session-mailbox-followups: until its own round trip passes, a Mac gets nothing from the settings.json default.
+    The turn-start line and the `mail` command are both held there. MAILBOX_HOLD_OFF=1 lifts the hold, for the owner's
+    check card and for every other case in this file (fixture_env sets it)."""
 
-    def seeded_reader(self):
+    def seeded_reader(self, hold_off=False):
         store = self.store()
         mid = "0a1b2c3d4eaa"
         store.seed("cloud/sess-b", mid, "request", "cloud/sess-a", "Body marker: mac-hold\n")
-        return mid, self.machine("b", store, session="sess-b")
-
-    def setUp(self):
-        super().setUp()
-        self.hold(REAL_HELD_PLATFORMS)
+        reader = self.machine("b", store, session="sess-b")
+        if hold_off:
+            reader.env["MAILBOX_HOLD_OFF"] = "1"
+        else:
+            reader.env.pop("MAILBOX_HOLD_OFF")
+        return mid, store, reader
 
     def test_the_hold_names_darwin(self):
-        self.assertIn("darwin", REAL_HELD_PLATFORMS, "HELD_PLATFORMS does not name darwin: %r" % (REAL_HELD_PLATFORMS,))
+        self.assertIn("darwin", MAIL_MODULE.HELD_PLATFORMS, "HELD_PLATFORMS does not name darwin: %r" % (MAIL_MODULE.HELD_PLATFORMS,))
 
     def test_linux_turn_start_lists_the_message(self):
-        mid, reader = self.seeded_reader()
+        mid, _, reader = self.seeded_reader()
         with mock.patch.object(MAIL_MODULE.sys, "platform", "linux"):
             lines = turn(reader)
         self.assertEqual(len(listed_with(lines, mid)), 1, "control: a Linux turn does not list the message: %r" % lines)
 
     def test_mac_turn_start_prints_nothing_for_an_open_message(self):
-        mid, reader = self.seeded_reader()
+        mid, _, reader = self.seeded_reader()
         with mock.patch.object(MAIL_MODULE.sys, "platform", "darwin"):
             lines = turn(reader)
         self.assertEqual(lines, [], "a Mac turn start read the mailbox before its check passed: %r" % lines)
+
+    def test_mac_turn_start_lists_the_message_with_the_hold_off(self):
+        mid, _, reader = self.seeded_reader(hold_off=True)
+        with mock.patch.object(MAIL_MODULE.sys, "platform", "darwin"):
+            lines = turn(reader)
+        self.assertEqual(len(listed_with(lines, mid)), 1, "MAILBOX_HOLD_OFF=1 on a Mac did not lift the hold: %r" % lines)
+
+    def test_mac_send_is_refused_and_stores_nothing(self):
+        mid, store, reader = self.seeded_reader()
+        tip = store.tip()
+        with mock.patch.object(MAIL_MODULE.sys, "platform", "darwin"):
+            code, out, err = cli_in_process(reader, "send", "--to", "cloud/sess-a", "--kind", "inform",
+                                            "--body-file", self.body("held-send"))
+        self.assertEqual(code, 2, "a held Mac send exited %r, not 2: %r %r" % (code, out, err))
+        self.assertIn("held", err, "the refusal does not say the mailbox is held: %r" % err)
+        self.assertNotIn("sent", out, "a held Mac send printed sent: %r" % out)
+        self.assertEqual(store.tip(), tip, "a held Mac send moved the mail ref")
+
+    def test_mac_read_is_refused(self):
+        mid, _, reader = self.seeded_reader()
+        with mock.patch.object(MAIL_MODULE.sys, "platform", "darwin"):
+            code, out, err = cli_in_process(reader, "read", "--addr", "cloud/sess-b")
+        self.assertEqual(code, 2, "a held Mac read exited %r, not 2: %r %r" % (code, out, err))
+        self.assertNotIn(mid, out, "a held Mac read listed the message: %r" % out)
+
+    def test_mac_send_runs_with_the_hold_off(self):
+        mid, store, reader = self.seeded_reader(hold_off=True)
+        tip = store.tip()
+        with mock.patch.object(MAIL_MODULE.sys, "platform", "darwin"):
+            code, out, err = cli_in_process(reader, "send", "--to", "cloud/sess-a", "--kind", "inform",
+                                            "--body-file", self.body("open-send"))
+        self.assertEqual(code, 0, "the Mac check send exited %r with the hold off: %r %r" % (code, out, err))
+        self.assertNotEqual(store.tip(), tip, "the Mac check send stored nothing")
 
 
 class AgeUnknown(MailCase):

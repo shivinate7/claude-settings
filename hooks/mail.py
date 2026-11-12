@@ -27,9 +27,11 @@ TRANSFER_BOUND = 30  # bin/mail's own git calls, which no prompt waits on
 LOG_LIMIT = "200"  # commits the age lookup may walk
 HEADER = re.compile(r"^Msg (\S+) from (\S+) to (\S+) kind (\S+) re (\S+) try (\d+)")
 SAFE = re.compile(r"^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$")
-# Platforms whose turn start prints no mail line. The settings.json default reaches a Mac through the shared file, so the
-# hold lives here. The `mail` command is not held. Remove "darwin" when the Mac round trip passes (step session-mailbox-followups).
+# Platforms that get nothing from the settings.json default: no turn-start line, and `mail` refuses. A Mac's settings.json
+# is a symlink a pull updates, so the hold lives here. MAILBOX_HOLD_OFF=1 lifts it for one command, for the owner's check
+# card. Remove "darwin" when the Mac round trip passes (step session-mailbox-followups).
 HELD_PLATFORMS = ("darwin",)
+HOLD_OFF = "MAILBOX_HOLD_OFF"
 NOT_FF = "[rejected]"  # local fast-forward refusal; a hook or ACL refusal says "[remote rejected]" and is not retried
 
 
@@ -301,10 +303,15 @@ def read_listing(path):
         return {}
 
 
+def held(env):
+    """True on a held platform unless the caller sets MAILBOX_HOLD_OFF."""
+    return sys.platform in HELD_PLATFORMS and not env.get(HOLD_OFF)
+
+
 def turn_start_lines(payload, env):
     """The lines a UserPromptSubmit hook prints: one per open message, or one "mail unknown: <reason>". Nothing when
-    MAILBOX_REPO is unset, the session has no address, or the platform is held."""
-    if not env.get("MAILBOX_REPO") or sys.platform in HELD_PLATFORMS:
+    MAILBOX_REPO is unset, the session has no address, or the platform is held (`held`)."""
+    if not env.get("MAILBOX_REPO") or held(env):
         return []
     try:
         addrs = own_addrs((payload or {}).get("session_id"), (payload or {}).get("cwd"), env)
