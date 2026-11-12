@@ -4,7 +4,7 @@
 
 Orchestrator call (lane merge-repo-dir-flag); the owner may rule otherwise. Guard rule id `merge-confirm-repo`, verdict deny. It runs beside `merge-role-proof`, after the merge-checks guard.
 
-The mistake: a batch runner runs `merge <pr> --confirm` in a checkout that its own `cs-repo` tags do not name. The cloud allow rule for `merge * --confirm` (`merge/cloud_allow.json`) takes any arguments. Once the merge tool takes `-C PATH` / `--repo-dir PATH`, only the runner's own care keeps the merge in its own repo. The role check proves the tier, not the repo.
+The mistake: a batch runner runs `merge <pr> --confirm` in a checkout that its own `cs-repo` tags do not name. The cloud allow rule for `merge * --confirm` (`merge/cloud_allow.json`) takes any arguments. Once the merge tool takes `-C PATH` / `--repo-dir PATH`, only the runner's own care keeps the merge in its own repo. The role check proves the session role, not the repo.
 
 The harm: an unreviewed merge to another repo's main. The batch runner's grant is per build, and a build's reviews, lock and checks belong to one repo.
 
