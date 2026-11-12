@@ -4,6 +4,8 @@
 
 Git is each artifact's home. The claude.ai link is one account's view of it.
 
+- Overruled in part, owner R28, 2026-11-11 11:50 CST, by decision `waiting-page-one-store` (one store, no copy step, no lag): the waiting page's data lives only on the record branch, and the page reads and writes it there. The copy step below (the writer's export at each wake, its Stop check) stays live as the safety net until step `retire-page-copy` lands, and then this record is rewritten to match.
+
 - Owner, 2026-11-02 14:58 CST (feedback fb-1458-2): "A", which picks option a of coordinator event e7ccdec6. An artifact is published only from a file in a repo, and listed in that repo's registry.
 - Owner, 2026-11-02 14:56 CST (feedback fb-1456-1): artifacts are torn down and spun up as the owner switches accounts. Each must be cross-referencable across accounts. Committing them to GitHub is accepted.
 - Mockups are artifacts too. The same rules hold for them (fb-1456-1).
