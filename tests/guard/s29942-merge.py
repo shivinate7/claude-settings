@@ -150,7 +150,7 @@ repo_case("outside the cloud a merge is not judged", "allow", f"{MERGE_SHIM} --r
 # substitution (`$(...)` or backticks) is a value the guard cannot read. The refusal names the substitution and asks for the
 # literal sha. It never sends the session to get_session: that remedy is for a checkout the record does not name.
 MERGE_HEAD_SHA = "0123456789abcdef0123456789abcdef01234567"
-HEAD_SUBST_CARRIES = ("command substitution", "literal sha")
+HEAD_SUBST_CARRIES = ("command substitution", "literal 40-hex sha")
 HEAD_SUBST_LACKS = ("get_session",)
 # The scope control: the merge with a literal sha, in the same checkout and record, is allowed.
 repo_case("--head with a literal 40-hex sha and this checkout is allowed", "allow",
@@ -169,6 +169,29 @@ repo_case("--head with a literal 40-hex sha and another checkout keeps the exist
           f"{MERGE_SHIM} -C '{REPO_B}' 5 --confirm --head {MERGE_HEAD_SHA}", REPO_A, TX_A,
           carries=("run get_session (no argument) alone in its own turn", "hand the pull request to a batch runner"),
           lacks=("command substitution",))
+# A single-quoted or escaped `$(` is literal text: bash runs no substitution, so the ask is the repo remedy. The double-quoted and bare
+# `$(printf x)` beside it are the controls: the quotes are the only difference.
+HEAD_LITERAL_CARRIES = ("get_session",)
+HEAD_LITERAL_LACKS = ("command substitution",)
+repo_case("--head with a single-quoted $(...) is literal text and is denied with the repo remedy", "deny",
+          f"{MERGE_SHIM} 5 --confirm --head '$(printf x)'", REPO_A, TX_A,
+          carries=HEAD_LITERAL_CARRIES, lacks=HEAD_LITERAL_LACKS)
+repo_case("--head with an escaped dollar before (...) is literal text and is denied with the repo remedy", "deny",
+          rf"{MERGE_SHIM} 5 --confirm --head \$(printf x)", REPO_A, TX_A,
+          carries=HEAD_LITERAL_CARRIES, lacks=HEAD_LITERAL_LACKS)
+repo_case("--head with a double-quoted $(...) of printf is denied with the literal-sha remedy", "deny",
+          f'{MERGE_SHIM} 5 --confirm --head "$(printf x)"', REPO_A, TX_A,
+          carries=HEAD_SUBST_CARRIES, lacks=HEAD_SUBST_LACKS)
+repo_case("--head with a bare $(...) of printf is denied with the literal-sha remedy", "deny",
+          f"{MERGE_SHIM} 5 --confirm --head $(printf x)", REPO_A, TX_A,
+          carries=HEAD_SUBST_CARRIES, lacks=HEAD_SUBST_LACKS)
+repo_case("--head=$(...) substitution is denied with the literal-sha remedy", "deny",
+          f"{MERGE_SHIM} 5 --confirm --head=$(printf x)", REPO_A, TX_A,
+          carries=HEAD_SUBST_CARRIES, lacks=HEAD_SUBST_LACKS)
+# Bash runs a $(...) after other text in the same word, so the substitution reason still applies.
+repo_case("--head with a $(...) after other text is denied with the literal-sha remedy", "deny",
+          f"{MERGE_SHIM} 5 --confirm --head abc$(printf x)", REPO_A, TX_A,
+          carries=HEAD_SUBST_CARRIES, lacks=HEAD_SUBST_LACKS)
 
 
 # strip_redirections, read directly: each input has one escape, or none as a control. The quoted text must survive whole and the
