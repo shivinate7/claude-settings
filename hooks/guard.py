@@ -4689,7 +4689,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 # hooks/question_form.py is the one home of the rules (`port-question`, `uniform-pick`, `press-link`,
 # `command-in-item`, `gh-login-switch`, `task-names-check`, `task-why-cited`, `owner-judge`, `question-form`, `question-departs`). This check runs them only for a
 # write to this repo's waiting page.
-from shared_names import DATA_TOOL  # noqa: E402  the one home of the tool name, shared with hooks/call_judge.py
+from shared_names import COMMENTS_TOOL, DATA_TOOL  # noqa: E402  the one home of the tool name, shared with hooks/call_judge.py
 
 
 def data_tool_judge(tool_input, cwd="", session_id=None):
@@ -4718,7 +4718,6 @@ def data_tool_hit(tool_input, cwd="", session_id=None):
 # it would drop the live page's data. A first publish, with no url, is not judged. A current page with data writes the stamp
 # (stale_pages.STAMP, main's blob sha) that hooks/session_start.sh reads back.
 PAGE_TOOL = "Artifact"
-COMMENTS_TOOL = "ArtifactComments"
 # Rule `page-thread-reply` (decision questions-go-to-owner, "Answer on the page, not in a comment thread"). A reply into a
 # comment thread on this repo's waiting page is refused; reads, watches, resolves and other artifacts pass.
 PAGE_THREAD_REPLY_REASON = ("answer on the waiting page, not in a comment thread: rewrite the item the comment is about, "
@@ -6296,7 +6295,10 @@ def judge(payload) -> None:
 
     if tool == COMMENTS_TOOL:
         import question_form
-        if tool_input.get("action") == "reply" and question_form.is_waiting_page(tool_input, cwd):
+        # A reply with no url string names no artifact, so it is refused wherever the repo has a waiting page.
+        if tool_input.get("action") == "reply" and (question_form.is_waiting_page(tool_input, cwd)
+                                                    or (not isinstance(tool_input.get("url"), str)
+                                                        and question_form.has_waiting_page(cwd))):
             refuse(tool, "deny", "page-thread-reply", PAGE_THREAD_REPLY_REASON, str(tool_input.get("thread_id") or "?")[:120])
         return
 
