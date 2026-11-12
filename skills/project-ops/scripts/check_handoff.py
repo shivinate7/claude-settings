@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
-"""Checks a role handoff file. A writer's successor must be told to watch the page, so the writer hears each answer.
+"""Checks a role handoff file. A page writer's successor must be told to watch the page, so the page writer hears each answer.
 
     python3 check_handoff.py <handoff file>
 
-A save of the waiting page wakes only the writer, the one session that watches the page. A successor writer with
-no watch hears no answer on the items it inherits. Reason: measured incident, the owner's two test saves
-(rule building-guard-needs-incident). Every other role never watches the page: the writer messages it of an answer.
-The writer's handoff is told from the others by the word "Triage" in its title line (`# Triage handoff, <date>`).
+A save of the waiting page wakes only the page writer, the one session that watches the page. A successor page
+writer with no watch hears no answer on the items it inherits. Reason: measured incident, the owner's two test saves
+(rule building-guard-needs-incident). Every other role never watches the page: the page writer messages it of an
+answer. The check fails closed: a handoff is the page writer's unless its first heading line names the coordinator
+or the batch runner (`# Coordinator handoff, <date>`). A heading with no such word, or no heading, is the page
+writer's.
 The check reads the `## Pages` section of the handoff
 (templates/role-handoff.md). It needs an `Open items:` line: `none`, or the URL of the page's items
 collection. A handoff never carries item ids, which go stale after a compaction. An id, a number or a
-placeholder is a problem, and so is a number beside the URL. It needs a `Watch:` line. In the writer's handoff
+placeholder is a problem, and so is a number beside the URL. It needs a `Watch:` line. In the page writer's handoff
 that line holds a real page URL: the first http(s) URL in the value, with no `<` or `>`, and text may follow it.
-The one exception is `Watch: none` together with `Open items: none`. In any other role's handoff `Watch: none` is
-allowed with open items, since that role never watches. A `Watch:` line that is there but wrong
-is a problem that quotes its value.
+The one exception is `Watch: none` together with `Open items: none`. In a coordinator's or batch runner's handoff
+the line is `Watch: none`, with or without open items, since that role never watches: a real page URL there is a
+problem. A `Watch:` line that is there but wrong is a problem that quotes its value.
 Exit 0 ok, 1 a problem (each printed), 2 a bad argument or an unreadable file.
 """
 import re
@@ -26,8 +28,10 @@ PAGES = re.compile(r"^## Pages[ \t]*\n(.*?)(?=^## |\Z)", re.M | re.S)
 # `0` is none only alone: `05` and `0, 4` are ids.
 NONE = re.compile(r"(?:none\b|0(?![\w,]))", re.I)
 WATCH_NONE = re.compile(r"none\b", re.I)
-# The writer's handoff, by the word "Triage" in its first heading. Only the writer watches the page.
-WRITER_TITLE = re.compile(r"^#[ \t]+.*\bTriage\b", re.I | re.M)
+# The first heading line of a handoff. Only the page writer watches the page, so a handoff is the page writer's
+# unless that line names the coordinator or the batch runner.
+FIRST_HEADING = re.compile(r"^#{1,6}[ \t].*$", re.M)
+NON_WRITER_TITLE = re.compile(r"\b(?:coordinator|batch[ \t]+runner)\b", re.I)
 URL = re.compile(r"https?://\S+")
 # A standalone number, as `12` or `#12`, outside any URL: a copied item id.
 ID = re.compile(r"(?<!\w)#?\d+(?!\w)")
@@ -41,6 +45,12 @@ def _is_url(value):
     """True when the first http(s) URL in `value` holds no placeholder bracket."""
     m = URL.search(value)
     return bool(m) and "<" not in m.group(0) and ">" not in m.group(0)
+
+
+def _is_page_writer(text):
+    """True unless the first heading line names the coordinator or the batch runner (fails closed)."""
+    m = FIRST_HEADING.search(text)
+    return not (m and NON_WRITER_TITLE.search(m.group(0)))
 
 
 def handoff_problems(text):
@@ -59,23 +69,28 @@ def handoff_problems(text):
         return [f'The `Open items:` line holds no items collection URL: "{items}". {HOME}']
     if not no_items and ID.search(COUNT.sub(" ", URL.sub(" ", items))):
         return [f'The `Open items:` line copies ids beside the URL: "{items}". {HOME}']
-    writer = bool(WRITER_TITLE.search(text))
+    writer = _is_page_writer(text)
     watches = WATCH.findall(pages)
     if not watches:
         if not writer:
-            return ["No `Watch:` line in the Pages section. Add `Watch: none`: only the writer watches the page."]
+            return ["No `Watch:` line in the Pages section. Add `Watch: none`: only the page writer watches the page."]
         return ["No `Watch:` line in the Pages section. Add `Watch: <page URL>`, one line per page. "
-                "A successor writer with no watch hears no answer."]
+                "A successor page writer with no watch hears no answer."]
+    if not writer:
+        if any(not WATCH_NONE.match(w) for w in watches):
+            return ["Only the page writer watches a page, and this handoff is not the page writer's. "
+                    "Write `Watch: none`."]
+        return []
     found = []
     valid = any(_is_url(w) for w in watches)
     for w in watches:
         if _is_url(w):
             continue
         if WATCH_NONE.match(w):
-            if no_items or valid or not writer:
+            if no_items or valid:
                 continue
             found.append("`Watch: none` is allowed only with `Open items: none`, and these items are open. "
-                         "The writer watches the page: write the page URL on the `Watch:` line.")
+                         "The page writer watches the page: write the page URL on the `Watch:` line.")
         elif not w:
             found.append("The `Watch:` line is empty. Write the page URL.")
         else:
