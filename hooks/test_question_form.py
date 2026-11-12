@@ -787,6 +787,9 @@ CLAUDE_WAITS_ON_OWNER_PRESS = [
     "Claude waits for the owner's merge.",
     "Claude merges once the owner has to approve it.",
     "Claude merges after the owner reviews and approves it.",
+    # Twins of the approval-note and merge-queue cases below: a word or a comma after the press word is still his press.
+    "Claude merges after the owner's approval on GitHub.",
+    "Claude waits for the owner's merge, then tags it.",
 ]
 # A session or Claude clause that joins a press by "and" with no subject ("and approve it", "and approve on GitHub"),
 # or that waits on the owner's approval, leaves that press to the owner: the option needs a link.
@@ -799,12 +802,15 @@ SESSION_LEAVES_OWNER_PRESS = [
 # "the owner's merge commit" names a git object the session keeps, not a press the owner makes: it needs no link.
 SESSION_KEEPS_OWNER_MERGE = ["The session merges PR #374 keeping the owner's merge commit."]
 # The owner's rights, access, queue or method, and a press he has already made ("has hit Merge"), name no press he
-# makes now: the session merges, and he presses nothing. Each passes.
+# makes now: the session merges, and he presses nothing. Each passes. A press word followed by a noun or a hyphen
+# ("merge-queue", "approval note") names a thing too.
 SESSION_NAMES_OWNER_RIGHTS = [
     "The session merges PR #374 because the owner has merge rights.",
     "The session merges PR #374 because Shivam has merge access.",
     "The session merges PR #374 after the owner has hit Merge.",
     "The session merges PR #374 through the owner's merge queue.",
+    "The session merges PR #374 through the owner's merge-queue.",
+    "The session merges PR #374 once the owner's approval note is in.",
     "The session merges PR #374 with the owner's merge method.",
 ]
 # A label that asks him to click is his press whatever the how says: the session's click in the how leaves it his.
@@ -1294,7 +1300,8 @@ RESTATES = [
     "Departs from: lint/stamp.py:run_stamp — STAYS in the lint job",
     "Departs from: lint/stamp.py:run_stamp — already in the lint job",
 ]
-# A line with an empty side, no separator, or nothing after the colon. Each is refused.
+# A line with an empty side, one side only, or nothing after the colon. Each is refused. A missing dash alone is no
+# refusal (coordinator ruling, 2026-11-12 11:22 CST: the dash check is deleted); a missing side is.
 MALFORMED = [
     "Departs from:",
     "Departs from:   ",
@@ -1433,6 +1440,8 @@ REFUSED_NO_CHANGE = [
     "Departs from: x — no difference",
     "Departs from: x — identical to main",
     "Departs from: x — the phone app stays on the list when offline",
+    # No dash at all: the no-change word still refuses the line (the dash check is deleted, 2026-11-12 11:22 CST).
+    "Departs from: lint/stamp.py:run_stamp keeps the stamp check on main",
 ]
 PASS_AFTER_SEMICOLON = [
     "Departs from: x.py:f — adds a retry; the old call keeps its timeout",
@@ -1448,13 +1457,15 @@ PLACEHOLDERS = [
     "Departs from: <what on main> — adds y",
 ]
 # Line forms that a Departs from line may take: a bullet, a bold label, a star bullet, a double hyphen
-# as the separator, and an em dash with no spaces. Each passes.
+# as the separator, and an em dash with no spaces. Each passes. A line with no dash passes when both sides are filled
+# (coordinator ruling, 2026-11-12 11:22 CST: the dash check is deleted).
 LINE_FORMS = [
     "- Departs from: x — adds y",
     "**Departs from:** x — adds y",
     "* Departs from: x — adds y",
     "Departs from: x -- adds y",
     "Departs from: x—adds y",
+    "Departs from: lint/stamp.py:run_stamp moves the stamp check to the lint job",
 ]
 
 
