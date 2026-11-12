@@ -416,20 +416,21 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         """True when the sentence names the lane session: its cs-build:lane tag, or the words `lane session`."""
         return "cs-build:lane" in sentence or "lane session" in sentence
 
-    # the skip verb, the clause breaks and the other verbs that end a skip's reach, and the session kinds (for the helpers below)
-    SKIP_VERB = re.compile(r"\bskip\w*", re.IGNORECASE)
+    # the heads a term binds to, the clause breaks and the other verbs that end a binding, and the session kinds (for the helpers below)
+    SKIP_VERB = r"\bskip\w*"
+    NAME_VERB = r"\b(?:names?|naming)\b"
     CLAUSE_BREAK = re.compile(r"[,;:.()]")
     OTHER_VERB = re.compile(r"\b(?:archiv\w*|runs?|names?|naming|reports?)\b", re.IGNORECASE)
     SESSION_KIND = re.compile(r"\b(?:sessions?|tiers?|coordinators?|solo|one-lanes?|lanes?)\b", re.IGNORECASE)
 
     @staticmethod
-    def skip_verb_governs(sentence, term):
-        """True when a skip verb comes before the term (a regex), with no clause break and no other verb between them."""
+    def binds(sentence, head, term):
+        """True when the head (a regex) comes before the term (a regex), with no clause break and no other verb between them."""
         found = re.search(term, sentence)
         if found is None:
             return False
-        for skip in SessionStartMergeRoleTests.SKIP_VERB.finditer(sentence, 0, found.start()):
-            between = sentence[skip.end():found.start()]
+        for hit in re.compile(head, re.IGNORECASE).finditer(sentence, 0, found.start()):
+            between = sentence[hit.end():found.start()]
             if not SessionStartMergeRoleTests.CLAUSE_BREAK.search(between) and not SessionStartMergeRoleTests.OTHER_VERB.search(between):
                 return True
         return False
@@ -589,8 +590,7 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         self.assertTrue(told, "no sentence says to run merge --idle-lanes after each merge")
 
     def test_the_idle_lanes_sentence_says_to_run_get_session_on_each_listed_lane_alone(self):
-        told = [s for s in self.idle_lanes_sentences(hook_tier_line())
-                if "get_session" in s and re.search(r"\balone\b", s)]
+        told = [s for s in self.idle_lanes_sentences(hook_tier_line()) if self.binds(s, r"get_session", r"\balone\b")]
         self.assertTrue(told, "no sentence says to run get_session on each listed lane alone")
 
     def test_the_idle_lanes_sentence_says_to_archive_each_lane_after_its_get_session(self):
@@ -598,16 +598,17 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         self.assertTrue(told, "no sentence says to archive each lane after its get_session")
 
     def test_the_idle_lanes_sentence_says_to_skip_a_lane_with_a_hold_marker(self):
-        told = [s for s in self.idle_lanes_sentences(hook_tier_line()) if self.skip_verb_governs(s, r"\bHOLD\b")]
+        told = [s for s in self.idle_lanes_sentences(hook_tier_line()) if self.binds(s, self.SKIP_VERB, r"\bHOLD\b")]
         self.assertTrue(told, "no sentence says to skip a lane that carries a HOLD marker")
 
     def test_the_idle_lanes_sentence_says_to_skip_a_lane_that_needs_judgment(self):
-        told = [s for s in self.idle_lanes_sentences(hook_tier_line()) if self.skip_verb_governs(s, r"\bjudgment\b")]
+        told = [s for s in self.idle_lanes_sentences(hook_tier_line()) if self.binds(s, self.SKIP_VERB, r"\bjudgment\b")]
         self.assertTrue(told, "no sentence says to skip a lane that needs judgment")
 
     def test_the_idle_lanes_sentence_says_to_name_each_skipped_lane_in_its_report(self):
-        told = [s for s in self.idle_lanes_sentences(hook_tier_line()) if re.search(r"\breport\b", s, re.IGNORECASE)]
-        self.assertTrue(told, "no sentence says to name the skipped lanes in the report")
+        told = [s for s in self.idle_lanes_sentences(hook_tier_line())
+                if self.binds(s, self.NAME_VERB, r"\bskipped\b") and self.binds(s, self.NAME_VERB, r"\breport\b")]
+        self.assertTrue(told, "no sentence says to name each skipped lane in its report")
 
     def test_the_idle_lanes_sentence_names_the_livework_readme_that_builds_the_live_file(self):
         told = [s for s in self.idle_lanes_sentences(hook_tier_line()) if "roadmap/livework/README.md" in s]
@@ -619,15 +620,25 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         self.assertTrue(told, "no idle-lanes sentence says roadmap/livework/README.md is on the record branch")
 
     # green controls (P2): the helpers pass on the current code, so a red above is the sentence, not a broken helper
-    def test_the_skip_binding_helper_binds_the_verb_only_with_no_clause_break_or_verb_between(self):
-        self.assertTrue(self.skip_verb_governs("archives that lane, but skips any lane that shows a HOLD marker.", r"\bHOLD\b"),
+    def test_the_binding_helper_binds_a_head_to_its_term_only_with_no_clause_break_or_verb_between(self):
+        skip, name = self.SKIP_VERB, self.NAME_VERB
+        self.assertTrue(self.binds("archives that lane, but skips any lane that shows a HOLD marker.", skip, r"\bHOLD\b"),
                         "a skip verb before HOLD in its clause is not read")
-        self.assertFalse(self.skip_verb_governs("archives any lane that shows a HOLD marker, skipping nothing.", r"\bHOLD\b"),
+        self.assertFalse(self.binds("archives any lane that shows a HOLD marker, skipping nothing.", skip, r"\bHOLD\b"),
                          "a skip verb after a comma is read as governing HOLD")
-        self.assertFalse(self.skip_verb_governs("archives any lane that shows a HOLD marker; skipped lanes are named in its report.",
-                                                r"\bHOLD\b"), "a skip verb after HOLD is read as governing it")
-        self.assertFalse(self.skip_verb_governs("skips any lane that shows a HOLD marker or archives any lane that needs judgment.",
-                                                r"\bjudgment\b"), "an archive verb between skip and judgment is not blocked")
+        self.assertFalse(self.binds("archives any lane that shows a HOLD marker; skipped lanes are named in its report.", skip, r"\bHOLD\b"),
+                         "a skip verb after HOLD is read as governing it")
+        self.assertFalse(self.binds("skips any lane that shows a HOLD marker or archives any lane that needs judgment.", skip,
+                                    r"\bjudgment\b"), "an archive verb between skip and judgment is not blocked")
+        self.assertTrue(self.binds("names each skipped lane in its report.", name, r"\bskipped\b"),
+                        "a name verb before skipped is not read")
+        self.assertFalse(self.binds("archives each listed lane, but skips each one in its report.", name, r"\breport\b"),
+                         "a report with no name verb is read as named")
+        self.assertTrue(self.binds("runs get_session alone on each listed lane.", r"get_session", r"\balone\b"),
+                        "alone right after get_session is not read")
+        self.assertFalse(self.binds("runs get_session on each listed lane, and archives that lane; "
+                                    "names each skipped lane alone in its report.", r"get_session", r"\balone\b"),
+                         "an alone after a comma in the report is read as the get_session one")
 
     def test_the_archive_order_helper_takes_both_allowed_wordings_and_rejects_archive_first(self):
         self.assertTrue(self.archive_follows_get_session("runs get_session on each listed lane alone and archives that lane."),
