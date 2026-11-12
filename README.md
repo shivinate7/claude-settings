@@ -88,6 +88,23 @@ rm -f "$f"
 exit 0
 ```
 
+Also set these three as environment variables in the same cloud environment menu. They are
+three of the `env` keys of `settings.json` (read `settings.json` `env`; decision `agent-model-cap`),
+but a session can start without them. Measured 2026-11-11 22:56 CST in a cloud session:
+`settings.json` set `CLAUDE_CODE_SUBAGENT_MODEL`, and the session's environment did not. The
+SessionStart refresh rewrites `settings.json` after Claude Code has read it.
+
+* `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`
+* `CLAUDE_CODE_WORKFLOW_SUBAGENT_MODEL=sonnet`
+* `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=1`
+
+The cloud image already has Playwright's Chromium in `/opt/pw-browsers`. Sessions set
+`PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers` and `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`. A setup
+script's `playwright install` without that path downloads a second copy to the default cache,
+which sessions never read. Install only when the browser that the pinned Playwright needs is
+missing from `/opt/pw-browsers` (decision `playwright-install-once`: one install, never from an
+agent).
+
 Leave network access at Trusted, or add `raw.githubusercontent.com`, `github.com`, and
 `codeload.github.com` to a Custom list. The setup script cannot read the environment's
 variables or secrets. If this repo goes private, add it under the environment's Repositories.
@@ -100,7 +117,8 @@ re-fetches the files. To pin cloud sessions to one commit instead of `main`, set
 * `/context`, in any session, lists `~/.claude/CLAUDE.md` and the imported file under
   **Memory files**.
 * `/status` shows the `shiv-stylisms` output style.
-* In a cloud session, ask Claude to run `echo $CLAUDE_CODE_SUBAGENT_MODEL`. Expect `sonnet`.
+* In a cloud session, ask Claude to run `echo $CLAUDE_CODE_SUBAGENT_MODEL`. Expect `sonnet`. If
+  it prints nothing, set the variable as an environment variable, as above.
 * On Windows in copy mode, check `~\.claude\claude-settings-install.log` for a dated line from
   the last run.
   The line reads `settings.json=<mode> agents/lint=<mode>`. A mode is `symlink`, `copy`, or `kept`.
