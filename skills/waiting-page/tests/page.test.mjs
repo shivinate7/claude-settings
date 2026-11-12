@@ -1874,10 +1874,13 @@ test("a withdraw leaves an answer that changed since the page read it", async (t
   assert.deepEqual((await page.evaluate(() => window.__log)).filter((l) => l[0] === "delete"), []);
 });
 
-test("a note typed on an item whose pick stands sends the stood pick plus the note", async (t) => {
+test("a note on an item whose pick stands sends nothing until the pick is pressed, then sends both", async (t) => {
   const it = mk("stand-note", 7, { stands: true });
   const page = await open(t, { items: [it] }); if (!page) return;
   await addNote(page, it, "with a thought");
+  assert.equal(await page.locator("#send").isDisabled(), true, "a note alone sent an unpressed stood pick");
+  await choose(page, it, "a");
+  assert.equal(await page.isChecked(`#o-${it.id}-a`), true, "pressing the pick after a note unselected it");
   await send(page);
   await page.waitForFunction((id) => !!window.__answers()[id], it.id);
   const a = (await answers(page))[it.id];

@@ -1296,7 +1296,7 @@ function draftReady(it) {
   if (it.park) return ACTS.includes((state.draft[it.id] || {}).act);
   const d = eff(it); if (!d || blocked(it)) return false;
   if (d.act === "park") return true;
-  if (d.stood && !state.draft[it.id]) return false; // a stood pick the owner never touched is not an answer he gave
+  if (d.stood) return false; // a stood pick the owner never pressed is not an answer he gave, with a note or without
   if (isRuling(it)) return d.choice === OVERTURN;
   if (it.kind === "task") return !!d.done || !!(d.note || "").trim(); // a note alone is a note, not a done mark
   if (!d.choice || d.choice === NONE) return !!(d.note || "").trim(); // a note alone is a none answer
@@ -1428,7 +1428,7 @@ function answerBody(it, d, at) {
   if (it.park) return { parked: true, id: it.park.id, act: d.act, ref: String(it.park.ref == null ? "" : it.park.ref), note: String(it.park.note == null ? "" : it.park.note), at };
   const typed = d.note != null ? d.note : "";
   if (d.act === "park") return { item: it.id, n: it.n, at, act: "park", note: typed };
-  const body = { item: it.id, n: it.n, at, note: typed || (d.auto ? "accepted pick" : "") };
+  const body = { item: it.id, n: it.n, at, note: typed };
   if (isRuling(it)) body.choice = OVERTURN; else if (it.kind === "decision") body.choice = d.choice || NONE; else if (d.done) body.done = true;
   return body;
 }
@@ -1444,8 +1444,7 @@ function readyText(it) {
   if (d.act === "park") return "Ready to send: park.";
   if (isRuling(it)) return d.choice === OVERTURN ? "Ready to send: overturn." : "";
   if (it.kind === "task") return d.done ? "Ready to send: done." : (d.note || "").trim() ? "Ready to send: note, not done." : "";
-  if (d.stood && !state.draft[it.id]) return "My pick stands. Press it to send it.";
-  if (d.stood) return "My pick goes with your next Send.";
+  if (d.stood) return "My pick stands and is not sent. Press it to send it with your next Send.";
   if (!d.choice) return (d.note || "").trim() ? "Ready to send: none of these, with your note." : "";
   if (d.choice === NONE) return (d.note || "").trim() ? "Ready to send: none of these." : "Say what you want instead.";
   if (isMulti(it)) return validKeys(it, d.choice) ? "Ready to send: " + namesOf(it, d.choice) + (it.ranked === true ? ", your order." : ", your choice.") : "";
@@ -1517,7 +1516,7 @@ function optCard(it, o, chosen) {
   const input = multi
     ? h("input", { type: "checkbox", id, value: o.key, "aria-labelledby": "l-" + sfx, "aria-describedby": desc, checked: sel, onchange: () => toggle(it, o.key) })
     : h("input", { type: "radio", name: "g-" + it.id, id, value: o.key, "aria-labelledby": "l-" + sfx, "aria-describedby": desc, checked: sel, onchange: () => choose(it, o.key),
-      onclick: (e) => { const d = eff(it) || {}; if (d.choice === o.key) { e.preventDefault(); choose(it, d.stood && !state.draft[it.id] ? o.key : null); } } }); // a press on an unsent stood pick accepts it
+      onclick: (e) => { const d = eff(it) || {}; if (d.choice === o.key) { e.preventDefault(); choose(it, d.stood ? o.key : null); } } }); // a press on an unsent stood pick accepts it
   const key = h("span", { class: "key" }, letterOf(it, o.key)), lab = h("span", { class: "lab", id: "l-" + sfx }, o.label);
   // On a ranked item the tick box holds the rank number.
   const headKids = multi ? [h("span", { class: "tick" + (ranked ? "" : " mark"), "aria-hidden": "true" }, ranked && sel ? String(at + 1) : ""), key, lab] : [key, lab];
@@ -2401,7 +2400,7 @@ function answerLine() {
   answerable().sort((a, b) => a.n - b.n).forEach((it) => {
     if (blocked(it)) return;
     const a = savedOf(it), d = eff(it) || {};
-    const choice = d.choice || (a && a.choice), note = d.note != null ? d.note : (a && a.note);
+    const choice = d.stood ? (a && a.choice) : d.choice || (a && a.choice), note = d.note != null ? d.note : (a && a.note);
     if (state.draft[it.id] ? d.act === "park" : !!(a && a.act === "park")) parts.push(it.n + " park" + (note ? " (" + note + ")" : ""));
     else if ((it.kind === "decision" || isRuling(it)) && choice) parts.push(it.n + " " + choiceText(choice) + (note ? " (" + note + ")" : ""));
     else if (it.kind === "task") {
