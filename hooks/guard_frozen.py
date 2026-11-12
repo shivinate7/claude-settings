@@ -110,6 +110,19 @@ FROZEN_REASON = (
 )
 
 
+PROTECTED_REASON = (
+    "Rule (protected path): this repo lists this path as one a session does not write. Why: {why}. "
+    "Remedy: change what produces it, or ask the owner to lift the entry in the repo's layout extras file "
+    "(decision protected-path)."
+)
+
+
+def protected_reason(path: str) -> str:
+    """The deny text for `path`, which `is_protected` matched: the entry's why, cleaned for one printed line."""
+    why = guard_core.cap_safe(protected_why(path), 300).strip().rstrip(".") or "the repo lists it"
+    return PROTECTED_REASON.format(why=why)
+
+
 def _literal_resolved(path: str, cwd: str) -> str:
     """Same reading as `_resolved`, but stops short of following a symlink: `..`, a trailing
     slash and case are normalized, the path's own leaf is not.
@@ -215,7 +228,7 @@ def is_project_config(path: str, cwd: str) -> bool:
 # The list holds the PowerShell cmdlets (`Set-Content`, `Out-File`, `Add-Content`, `Remove-Item`) as
 # well as the POSIX commands. Matching folds case, as PowerShell does.
 MUTATING_COMMAND = (
-    r"\b(?i:rm|mv|cp|chmod|truncate|tee|install|ln"
+    r"\b(?i:rm|mv|cp|chmod|truncate|touch|rsync|tee|install|ln"
     r"|set-content|add-content|clear-content|out-file|new-item|remove-item|move-item|copy-item"
     r"|rename-item|set-itemproperty|ri|rd|rmdir|del|erase|move|copy|ren)\b"
 )
@@ -236,7 +249,10 @@ def _mutates_as_command(command: str, words) -> bool:
         return True
     if command == "git":
         rest = [word for word in words if not word.startswith("-")]
-        return any(word in ("mv", "rm") for word in rest[:2])
+        if "restore" in rest[:2]:   # `git restore --staged` alone rewrites the index, never the working tree
+            staged = any(word in ("--staged", "-S") for word in words)
+            return not staged or any(word in ("--worktree", "-W") for word in words)
+        return any(word in ("mv", "rm") for word in rest[:2]) or ("checkout" in rest[:2] and "--" in words)
     return bool(re.fullmatch(MUTATING_COMMAND, command))
 
 
@@ -259,6 +275,13 @@ def _script_mutates(script: str) -> bool:
     return False
 
 
+# `sed -i` and `perl -pi` rewrite the file they name. `%s` takes the escaped path.
+_IN_PLACE_EDIT = r"\b(?:sed|perl)\b[^\n;|&]*(?<![\w-])-[A-Za-z]*i\b[^\n;|&]*%s"
+# The version control tool's `restore <path>` and `checkout [<tree>] -- <path>` overwrite the working tree file.
+_GIT_PATH_WRITE = r"\bgit\b[^\n;|&]*(?:\brestore\b|\bcheckout\b[^\n;|&]*\s--(?=\s))"
+_FIND_WRITES = re.compile(r"\bfind\b[^\n;|&]*\s-(?:delete\b|(?:exec|execdir|ok|okdir)\s+" + MUTATING_COMMAND + ")")
+
+
 def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     """True when the command looks like it writes to the path, rather than merely naming it.
 
@@ -276,12 +299,17 @@ def writes_to(path: str, cmd: str, command=None, words=()) -> bool:
     # `command` is the segment's resolved command name, given by a caller that reads a mutating
     # word only in command position (`grep -n install tests/x.py` reads, never writes).
     if command is not None and not _mutates_as_command(command, words):
-        return command == "sed" and bool(re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd))
+        return command in ("sed", "perl") and bool(re.search(_IN_PLACE_EDIT % target, cmd))
+    if command == "rsync":   # only the destination, the last operand, is written
+        operands = [word for word in words if not word.startswith("-")]
+        return bool(operands) and operands[-1] == path
+    if re.search(_GIT_PATH_WRITE + r"[^\n;|&]*" + target, cmd):
+        return True
+    if _FIND_WRITES.search(cmd):   # a find that deletes or runs a mutating command writes what it walks
+        return True
     if re.search(MUTATING_COMMAND + r"[^\n;|&]*" + target, cmd):
         return True
-    if re.search(r"\bsed\b[^\n;|&]*-i\b[^\n;|&]*" + target, cmd):
-        return True
-    return False
+    return bool(re.search(_IN_PLACE_EDIT % target, cmd))
 
 
 # VARIABLE INDIRECTION. In `D=~/.claude/state/handoff/x.md; ...; cp "$S/handoff.md" "$D"` the parse
@@ -1206,6 +1234,78 @@ def project_config_shell_hit(cmd: str, cwd: str) -> str:
     return _shell_write_hit(cmd, cwd, is_project_config)
 
 
+# ------------------------------------------------------------------ the protected paths
+#
+# A repo lists, in its layout extras file, the files and folders a session may not write (lint/layout.py
+# protected_paths, decision protected-path). The list judged is that of the checkout that holds the TARGET, found by
+# walking up from the resolved target to the nearest `.git`, so a write from one repo into another is judged by the
+# other's list. One guard call is one process, so each checkout's list is read once, here: `_PROTECTED` maps a
+# checkout root to its entries, or to None for a list that could not be read (noted once, then allowed).
+_PROTECTED = {}
+_PROTECTED_WHY = {}   # the path text a predicate matched -> the why of the entry that matched it
+
+
+def _protected_entries(root: str):
+    """The entries of the checkout at `root`, [] for none. A list that cannot be read allows, and says so once."""
+    if root not in _PROTECTED:
+        try:
+            _PROTECTED[root] = guard_core.layout_module().protected_paths(root)
+        except Exception as err:
+            _PROTECTED[root] = []
+            guard_core.record("", "noted", "protected-path", guard_core.cap_safe("unread: %s" % err, 200))
+    return _PROTECTED[root]
+
+
+def _protected_why(reading: str) -> str:
+    """The why of the first entry of the holding checkout's list that `reading` (a normalised absolute path) sits under, else ''."""
+    root = guard_core._checkout_root_by_stat(reading)
+    if not root:
+        return ""
+    rel = norm(reading[len(root):]).strip("/")
+    if not rel:
+        return ""
+    for entry in _protected_entries(root):
+        listed = os.path.normcase(norm(entry["path"]))
+        while listed.startswith("./"):
+            listed = listed[2:]
+        folder = listed.endswith("/")
+        listed = listed.strip("/")
+        if not listed:
+            continue
+        if rel == listed or (folder and rel.startswith(listed + "/")):
+            return entry["why"]
+    return ""
+
+
+def is_protected(path: str, cwd: str) -> bool:
+    """True when the path is one the repo that holds it lists as protected. Both spellings are read, as `is_frozen`
+    reads them: the literal one (no symlink followed) and the resolved one. A backslash reads as a slash. A folder
+    entry matches the folder and what is under it, per path segment (`fixturesX/` is no part of `fixtures/`). The
+    entry's why is kept for `protected_why`."""
+    if not path:
+        return False
+    try:
+        spelled = norm(path)
+        for reading in (_literal_resolved(spelled, cwd), _resolved(spelled, cwd)):
+            why = _protected_why(reading)
+            if why:
+                _PROTECTED_WHY[path] = why
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def protected_why(path: str) -> str:
+    """The why of the entry that `is_protected` matched for `path`, else ''."""
+    return _PROTECTED_WHY.get(path, "")
+
+
+def protected_shell_hit(cmd: str, cwd: str) -> str:
+    """Return the protected path a shell command writes to, else ''. A leading `cd` moves the folder the path is read from."""
+    return _shell_write_hit(cmd, cwd, is_protected, follow_cd=True, command_position=True)
+
+
 # ------------------------------------------------------------------ an interpreter's own writes
 #
 # A python or node script, run from a heredoc body, from `-c` / `-e`, or from a file named on the
@@ -1230,9 +1330,11 @@ def _has_inline_flag(text: str) -> bool:
 _PATH_CTORS = ("Path", "PurePath", "PosixPath", "WindowsPath", "PurePosixPath", "PureWindowsPath")
 _PATH_PASS = ("resolve", "expanduser", "absolute")
 _COPY_NAMES = ("copy", "copy2", "copyfile", "copytree", "move")
+_REMOVE_NAMES = ("remove", "unlink", "rmdir", "removedirs")   # os.remove(path), os.unlink(path), ...
+_PATH_REMOVE_METHODS = ("unlink", "rmdir", "touch")           # Path(...).unlink(), a method of the path itself
 _PY_WRITE_CALL = re.compile(
-    r"""open\s*\([^)]*['"][rwabt]*[wax+][rwabt+]*['"]|write_text|write_bytes|shutil\s*\.\s*(?:copy|move)"""
-    r"""|os\s*\.\s*(?:replace|rename)""")
+    r"""open\s*\([^)]*['"][rwabt]*[wax+][rwabt+]*['"]|write_text|write_bytes|shutil\s*\.\s*(?:copy|move|rmtree)"""
+    r"""|os\s*\.\s*(?:replace|rename|remove|unlink|rmdir|removedirs)|\.\s*(?:unlink|rmdir)\s*\(""")
 _STRING_LITERAL = re.compile(r"""'([^'\n]+)'|"([^"\n]+)\"""")
 
 
@@ -1307,6 +1409,12 @@ def _py_paths(node, env):
         name = _py_call_name(node)
         if _py_temp_head(node, env):
             return [_PY_TEMP]
+        if isinstance(func, ast.Attribute) and func.attr == "joinpath":
+            out = _py_paths(func.value, env) or [""]
+            for options in (_py_paths(arg, env) for arg in node.args):
+                if options:
+                    out = [_join_path(a, b) for a in out for b in options]
+            return out if out != [""] else []
         if name in _PATH_CTORS or name == "join":
             out = [""]
             for options in (_py_paths(arg, env) for arg in node.args):
@@ -1398,6 +1506,8 @@ def _py_written(tree, env_at):
                 out.append((node, _py_arg(node, 0, "file")))
             elif func.id in _COPY_NAMES and len(node.args) >= 2:
                 out.append((node, node.args[1]))
+            elif (func.id in _REMOVE_NAMES or func.id == "rmtree") and node.args:
+                out.append((node, node.args[0]))   # `from os import remove`
         elif isinstance(func, ast.Attribute):
             attr, owner = func.attr, func.value
             module = isinstance(owner, ast.Name) and owner.id in ("os", "shutil", "io", "codecs", "gzip", "bz2")
@@ -1409,6 +1519,11 @@ def _py_written(tree, env_at):
                 out.append((node, owner))
             elif attr in _COPY_NAMES and isinstance(owner, ast.Name) and owner.id == "shutil" and len(node.args) >= 2:
                 out.append((node, node.args[1]))
+            elif (attr in _REMOVE_NAMES and isinstance(owner, ast.Name) and owner.id == "os"
+                  or attr == "rmtree" and isinstance(owner, ast.Name) and owner.id == "shutil") and node.args:
+                out.append((node, node.args[0]))
+            elif attr in _PATH_REMOVE_METHODS and not module and not node.args:
+                out.append((node, owner))
             elif attr in ("replace", "rename") and isinstance(owner, ast.Name) and owner.id == "os" \
                     and len(node.args) >= 2:
                 out.append((node, node.args[1]))
