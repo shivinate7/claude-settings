@@ -242,6 +242,66 @@ class CloseAsReplaced(CloseEnv):
                          "an empty repo printed other than its empty line and the reopen-not-checked line:\n" + out)
 
 
+class ReplacedSkipsFrozen(CloseEnv):
+    """A batch pull request that names a lane with `Replaces #N` does not close that lane as replaced when its frozen block lists the lane at
+    its current head: the batch holds it. A lane frozen at an older head, a lane frozen nowhere, and a lane named by a pull request that is not
+    a batch all still close. Once the batch is closed or merged, its block and its claims count for nothing. Batch #9 is a draft on BATCH_HEAD.
+    The lanes here are open drafts with no done record: the replaced close needs neither, so a case that reads the freeze only for a done lane
+    does not pass."""
+
+    def names(self, numbers):
+        """The lines of a batch body that name each lane in `numbers` with `Replaces #N`. They go after the block, outside its markers."""
+        return "".join(f"Replaces #{n}\n" for n in numbers)
+
+    def test_a_batch_that_names_lanes_frozen_at_their_heads_closes_none_of_them(self):
+        # Control: with no block, batch #9 closes lanes #5, #6 and #7. Probe: with the block freezing #5 and #6 at their heads, only #7 closes.
+        # #7 is named and frozen nowhere, so it still closes.
+        def lanes():
+            return [named_pull(n, head_of(n), draft=True) for n in (5, 6, 7)]
+
+        bare = named_pull(9, head_of(9), body=self.names([5, 6, 7]), draft=True, head_ref=BATCH_HEAD)
+        control = self.block_for_alpha(pulls=[*lanes(), bare])
+        self.assertEqual(kind_lines(control, REPLACED), [f"close as replaced: o/alpha #{n} by #9" for n in (5, 6, 7)],
+                         "control: batch #9 with no block does not close lanes #5, #6 and #7 as replaced:\n" + "\n".join(control))
+        frozen = freeze_body(freeze_inner("nightly", [(5, head_of(5)), (6, head_of(6))])) + self.names([5, 6, 7])
+        block = self.block_for_alpha(pulls=[*lanes(), named_pull(9, head_of(9), body=frozen, draft=True, head_ref=BATCH_HEAD)])
+        self.assertEqual(kind_lines(block, REPLACED), ["close as replaced: o/alpha #7 by #9"],
+                         "a lane frozen at its head in open batch #9 closed as replaced by batch #9:\n" + "\n".join(block))
+
+    def test_a_lane_moved_off_its_frozen_head_still_closes_under_its_batch(self):
+        # Control: lane #5 frozen in batch #9 at an older head (head_of(14)) still closes as replaced, since the lane has moved on.
+        # Probe: lane #5 frozen at its current head closes nothing.
+        def lines(frozen_head):
+            body = freeze_body(freeze_inner("nightly", [(5, frozen_head)])) + self.names([5])
+            pulls = [named_pull(5, head_of(5), draft=True), named_pull(9, head_of(9), body=body, draft=True, head_ref=BATCH_HEAD)]
+            return kind_lines(self.block_for_alpha(pulls=pulls), REPLACED)
+
+        self.assertEqual(lines(head_of(14)), ["close as replaced: o/alpha #5 by #9"],
+                         "a lane that moved off its frozen head did not close as replaced by the batch that froze its older head")
+        self.assertEqual(lines(head_of(5)), [], "a lane frozen at its current head closed as replaced by the batch that froze it")
+
+    def test_a_pull_request_that_is_not_a_batch_closes_its_lane_though_its_body_quotes_a_block(self):
+        # Probe: open #7 on head feat7 (not a batch) quotes a block that freezes lane #5 at its head, and names #5. #5 still closes under #7.
+        quote = freeze_body(freeze_inner("nightly", [(5, head_of(5))])) + self.names([5])
+        block = self.block_for_alpha(pulls=[named_pull(5, head_of(5), draft=True), named_pull(7, head_of(7), body=quote)])
+        self.assertEqual(kind_lines(block, REPLACED), ["close as replaced: o/alpha #5 by #7"],
+                         "a block quoted on a pull request that is not a batch held lane #5 from its replacer #7:\n" + "\n".join(block))
+
+    def test_once_the_batch_closes_or_merges_its_lanes_are_no_longer_skipped(self):
+        # Pin: batch #9 freezes lanes #5 and #6 at their heads and names both. Once #9 is closed, or merged, it is not read, so open #10, which
+        # names both, closes both as replaced. A block that a closed batch still held would keep them open.
+        body = freeze_body(freeze_inner("nightly", [(5, head_of(5)), (6, head_of(6))])) + self.names([5, 6])
+
+        def lanes():
+            return [named_pull(5, head_of(5), draft=True), named_pull(6, head_of(6), draft=True), named_pull(10, head_of(10), body=self.names([5, 6]))]
+
+        for merged in (False, True):
+            batch = closed_pull(9, head_of(9), body=body, merged=merged, head_ref=BATCH_HEAD)
+            lines = kind_lines(self.block_for_alpha(pulls=lanes(), closed=[batch]), REPLACED)
+            self.assertEqual(lines, ["close as replaced: o/alpha #5 by #10", "close as replaced: o/alpha #6 by #10"],
+                             "the lanes of a %s batch are still skipped, or #10 does not close them:\n%s" % ("merged" if merged else "closed", "\n".join(lines)))
+
+
 class CloseAsCarried(CloseEnv):
     """`close as carried: OWNER/NAME #A by #B`: a done draft A whose head an open B on the base holds. Draft or ready B both count; a ready A never does."""
 
@@ -573,14 +633,20 @@ class CloseThenBuild(CloseEnv, tm.CloudSession):
         super().setUp()
         self.heads = {}  # lane PR number -> its head on origin, as BatchFreeze.lane leaves it
 
-    def build(self, numbers, blamed=()):
-        """Lanes `numbers`, and their draft batch `nightly`. -> the batch pull request's number."""
+    def build(self, numbers, blamed=(), replaces=()):
+        """Lanes `numbers`, and their draft batch `nightly`. `replaces` are lanes the batch body also names with `Replaces #N`, after its block, as
+        ci-hygiene step 8 has an integration pull request do. -> the batch pull request's number."""
         for n in numbers:
             tm.BatchFreeze.lane(self, n)
-        return tm.BatchFreeze.frozen_batch(self, "nightly", list(numbers), draft=True, blamed=blamed)
+        pr = tm.BatchFreeze.frozen_batch(self, "nightly", list(numbers), draft=True, blamed=blamed)
+        if replaces:
+            body = self.host.batch_pulls[pr]["body"]
+            self.host.batch_pulls[pr]["body"] = body + "".join(f"Replaces #{n}\n" for n in replaces)
+        return pr
 
     def wake_and_close(self, pr):
-        """A wake over alpha reads the batch `pr` and its lanes. The batch runner closes each pull request a close line names. -> the close lines."""
+        """A wake over alpha reads the batch `pr` and its lanes. The batch runner closes each pull request a close line names, replaced or carried,
+        as the host would. -> the close lines."""
         bh = self.head("batch-nightly")
         lanes = sorted(self.heads)
         pulls = [named_pull(n, self.heads[n], draft=True) for n in lanes]
@@ -589,7 +655,8 @@ class CloseThenBuild(CloseEnv, tm.CloudSession):
         comments = [c for n in lanes for c in (record_of(n, self.heads[n]), lint_of(n, self.heads[n]))]
         checks = {self.heads[n]: green() for n in lanes}
         host = closed_host("o/alpha", pulls=pulls, comments=comments, check_rows=checks, compares=compares)
-        lines = kind_lines(block_of(self, self.reviewed(host), "o/alpha"), CARRIED)
+        block = block_of(self, self.reviewed(host), "o/alpha")
+        lines = kind_lines(block, REPLACED) + kind_lines(block, CARRIED)
         for line in lines:
             self.host.batch_pulls[int(re.search(r"#(\d+) by", line).group(1))]["state"] = "CLOSED"
         return lines
@@ -628,6 +695,19 @@ class CloseThenBuild(CloseEnv, tm.CloudSession):
         rc, out = self.ready()
         self.assertNotIn("CLOSED, not open", out, "the ready build after the same set again stopped on a closed lane:\n" + out)
         self.assertEqual(rc, 0, "the ready build after the same set again exited %s:\n%s" % (rc, out))
+
+    def test_the_ready_build_after_a_wake_does_not_stop_on_a_lane_its_batch_names(self):
+        # The batch body names lanes #5 and #6 with Replaces and freezes both at their heads, so no close line may name them. The wake closes
+        # whatever a line names, so a line that names them closes them and the ready build stops on "CLOSED, not open".
+        pr = self.build([5, 6], replaces=[5, 6])
+        body = self.host.batch_pulls[pr]["body"].split("\n")
+        self.assertEqual([x for x in body if x.startswith("Replaces #")], ["Replaces #5", "Replaces #6"],
+                         "setup: batch #%d does not name lanes #5 and #6 with Replaces, so the wake reads no claim" % pr)
+        self.wake_and_close(pr)
+        rc, out = self.ready()
+        self.assertNotIn("CLOSED, not open", out, "the ready build stopped on a lane that a wake closed as replaced by its batch:\n" + out)
+        self.assertEqual(rc, 0, "the ready build after a wake exited %s:\n%s" % (rc, out))
+        self.assertEqual(self.host.readies, [pr], "the ready build after a wake did not mark #%d ready:\n%s" % (pr, out))
 
 
 class BatchSkipsClosed(CloseEnv):
