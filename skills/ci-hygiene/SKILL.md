@@ -79,7 +79,7 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    changes the running batch's head, so the brake refuses that merge until the next batch is built
    on the new head.
    The merge tool enforces the freeze (decision `batch-freeze-lane-set`, a batch's lane set freezes at its build). `merge --batch-build NAME PR...`
-   builds the integration branch `batch-NAME` and its draft integration PR, and writes the frozen lane set into the PR body. A changed set is
+   builds the integration branch `batch-NAME` and its draft integration PR, and writes the frozen lane set into the PR body. It merges the lanes in PR-number order, the order the frozen block lists them; the hand-in order is kept nowhere. A lane that does not merge stops the build and is named, and nothing is pushed. A changed set is
    refused, so a late PR goes to the next batch. `merge --batch-build NAME --ready` runs the one lane lint on the batch head, then the ready
    checks, then records the head that passed. When the head moved since the last lint, it lints again. It does not mark the PR ready:
    the tool sends no GraphQL, so it names the route, and the batch runner marks the PR ready. A FAIL of the lint or of a ready check
