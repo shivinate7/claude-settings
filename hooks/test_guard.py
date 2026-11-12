@@ -93,7 +93,7 @@ GUARD_TESTS_MODES = ("", "windows-slice")
 # family's time. A case takes the family of the nearest FAMILY line above it (one per section),
 # except a case named "rm-var", which is its own family wherever it sits. Each family's row in
 # FAMILIES is set by the section that first sets its FAMILY, right after that line. An unknown name
-# stops the run once the sections are loaded, and the message lists these names.
+# stops the run before any section runs, and the message lists these names.
 FAMILIES = {}
 
 
@@ -394,6 +394,14 @@ def chained_ask(name, command, **kw):
 SECTION_DIR = os.path.join(HERE, "..", "tests", "guard")
 
 
+def family_names(text):
+    """The family names a section file sets: each `FAMILIES["<name>"] = ...` row, read from the file's syntax tree."""
+    return {node.slice.value for node in ast.walk(ast.parse(text))
+            if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Store)
+            and isinstance(node.value, ast.Name) and node.value.id == "FAMILIES"
+            and isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str)}
+
+
 def load_sections(section_dir):
     """Run each section file of section_dir here, in n order. No file, or two files with one n, stops the run."""
     found = []
@@ -413,12 +421,19 @@ def load_sections(section_dir):
     for n in sorted(set(numbers)):
         if numbers.count(n) > 1:
             sys.exit("fixture setup failed: section number %d is on %d section files" % (n, numbers.count(n)))
+    # A GUARD_FAMILY that no section sets is refused here, before any section runs: a section can start a process
+    # (the kill section's sleep), and a refusal after the sections would leave it running. The names are read from
+    # the files' FAMILIES rows, the rows the sections set when they run.
+    family = os.environ.get("GUARD_FAMILY", "")
+    known = set(FAMILIES).union(*(family_names(text) for _, _, text in found))
+    if family and family not in known:
+        sys.exit("GUARD_FAMILY=%r is not a family. Want one of: %s" % (family, ", ".join(sorted(known))))
     for _, path, text in sorted(found):
         exec(compile(text, path, "exec"), globals())
 
 
-load_sections(os.environ.get("GUARD_SECTION_DIR") or SECTION_DIR)
 FAMILIES["sections"] = "the section files: a set the loader refuses (no section file, two files with one number, a log check appended after the LOG_CHECKS_EXTRA join) stops a run before any case"
+load_sections(os.environ.get("GUARD_SECTION_DIR") or SECTION_DIR)
 GUARD_FAMILY = os.environ.get("GUARD_FAMILY", "")
 if GUARD_FAMILY and GUARD_FAMILY not in FAMILIES:
     sys.exit("GUARD_FAMILY=%r is not a family. Want one of: %s"

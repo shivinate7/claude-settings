@@ -469,6 +469,79 @@ class PlantedRows(unittest.TestCase):
                          "a named family's row was reported outside its section")
 
 
+UNKNOWN_FAMILY = "no-such-family"
+UNKNOWN_RUNS = {}  # one child run per run: the case reads the same outcome each time
+
+
+def unknown_family_run():
+    """The runner, in a child process, on the real sections plus one marker section that writes a file when it runs,
+    under a GUARD_FAMILY that names no family. -> (rc, output, marker written, a process left in the child's group).
+    The child leads its own process group, so a process a section starts is in that group, and the group is ended
+    here whatever the child did. The group reading is None off POSIX, where there is no group to read."""
+    if UNKNOWN_FAMILY not in UNKNOWN_RUNS:
+        folder = os.path.join(RUN_FOLDER, "unknown-family")
+        os.makedirs(folder)
+        for entry in os.listdir(os.path.join(REPO, SECTIONS)):
+            if entry.endswith(".py"):
+                os.symlink(os.path.join(REPO, SECTIONS, entry), os.path.join(folder, entry))
+        marker = os.path.join(folder, "ran.txt")
+        write(folder, "s99999-marker.py", '# section 99999\nopen(%r, "w").close()\n' % marker)
+        env = child_env()
+        env.update(GUARD_FAMILY=UNKNOWN_FAMILY, GUARD_SECTION_DIR=folder)
+        log = os.path.join(folder, "child-output.txt")
+        posix = os.name != "nt"
+        with open(log, "w", encoding="utf-8") as out:
+            child = subprocess.Popen([sys.executable, os.path.join(REPO, RUNNER)], env=env, stdout=out,
+                                     stderr=subprocess.STDOUT, **({"start_new_session": True} if posix else {}))
+            try:
+                try:
+                    rc = child.wait(timeout=300)
+                except subprocess.TimeoutExpired:
+                    rc = None
+                left = group_has_members(child.pid) if posix else None  # read before the group is ended below
+            finally:
+                if posix:
+                    try:
+                        os.killpg(child.pid, signal.SIGKILL)
+                    except OSError:
+                        pass  # the group has already ended
+                child.wait()
+        UNKNOWN_RUNS[UNKNOWN_FAMILY] = (rc, read(folder, "child-output.txt"), os.path.exists(marker), left)
+    return UNKNOWN_RUNS[UNKNOWN_FAMILY]
+
+
+def group_has_members(pgid):
+    """True while any process is still in the process group `pgid`, even after its leader has ended."""
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+class UnknownFamily(unittest.TestCase):
+    """GUARD_FAMILY names no family. The runner refuses it before any section runs, and a refusal leaves no process a
+    section started."""
+
+    def test_refusal_names_the_families_it_knows(self):
+        rc, out, _, _ = unknown_family_run()
+        self.assertEqual(rc, 1, "the run did not refuse the unknown family: " + out[-300:])
+        self.assertIn("is not a family. Want one of:", out)
+        self.assertIn("load-brake", out, "the refusal does not list the families it knows")
+
+    def test_refusal_comes_before_any_section_runs(self):
+        rc, out, marker, _ = unknown_family_run()
+        self.assertEqual(rc, 1, "the run did not refuse the unknown family: " + out[-300:])
+        self.assertFalse(marker, "a section ran before the refusal")
+
+    def test_refusal_leaves_no_child_process(self):
+        if os.name == "nt":
+            self.skipTest("a process group is read on POSIX only")
+        rc, out, _, left = unknown_family_run()
+        self.assertEqual(rc, 1, "the run did not refuse the unknown family: " + out[-300:])
+        self.assertFalse(left, "a process the sections started is still running after the refusal")
+
+
 RUN_FOLDER = None  # made in setUpModule, so an import leaks no folder
 
 
