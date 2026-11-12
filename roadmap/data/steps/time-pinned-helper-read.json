@@ -1,0 +1,14 @@
+{
+ "id": "time-pinned-helper-read",
+ "title": "The time-pinned test finder sees a clock read inside a helper function",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Incident 13:31 CST Nov 12 (lane fan-code-agents, via coordinator): lint/find_time_pinned.py missed a clock read inside a helper; two timing tests slipped past it and broke test-strategy-reset item 2.",
+ "source": "coordinator 13:31 CST Nov 12",
+ "note": "Fix: the finder follows a test's calls into helpers in the same file (and imported test helpers) and flags a clock read there. Red first on the two tests from the incident. Kin: finder-bare-date-cases, finder-deadline-poll. Start when ranked.",
+ "updatedAt": "2026-11-12T13:33:04-06:00"
+}
