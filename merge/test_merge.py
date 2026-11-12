@@ -19283,20 +19283,29 @@ class BatchFreeze(CloudSession):
         self.assertIn("#102 dropped too", out, "setup: #102 did not come off as a dependent: %s" % out)
         self.assertEqual([n for n, _ in self.host.posted], [101], "a marker was posted for a lane other than the blamed one")
 
-    def test_a_marker_post_refused_after_the_drop_is_posted_by_the_rerun(self):
+    def test_a_marker_post_refused_after_the_drop_leaves_the_drop_done_and_says_so(self):
         for n in (101, 102):
             self.lane(n)
-        self.frozen_batch("one", [101, 102], blamed=(102,))
-        real = self.host.post_comment
+        pr = self.frozen_batch("one", [101, 102], blamed=(102,))
         def refuse(n, body):
             raise merge.Stop("posting refused")
         self.host.post_comment = refuse
         rc, out = self.run_batch("--batch-drop", "one", "102")
-        self.assertNotEqual(rc, 0, "a refused marker post exited 0: %s" % out)
-        self.host.post_comment = real
-        rc, out = self.run_batch("--batch-drop", "one", "102")
-        self.assertEqual(rc, 0, "the rerun exited %s: %s" % (rc, out))
-        self.assertEqual(self.host.comment_bodies(102).__len__(), 1, "the rerun did not post the missing marker once")
+        self.assertEqual(rc, 0, "a refused marker post failed the drop: %s" % out)
+        self.assertIn("marker was not posted", out)
+        self.assertFalse(self.on_origin(self.heads[102], "batch-one"), "the drop did not take #102 off the branch: %s" % out)
+
+    def test_a_refused_marker_post_does_not_skip_the_restack_of_a_stacked_batch(self):
+        for n in (101, 103):
+            self.lane(n)
+        self.lane(104, on=101)
+        self.frozen_batch("bx", [101, 103], blamed=(101,))
+        self.frozen_batch("by", [104], on="batch-bx")
+        def refuse(n, body):
+            raise merge.Stop("posting refused")
+        self.host.post_comment = refuse
+        rc, out = self.run_batch("--batch-drop", "bx", "101")
+        self.assertIn("(batch-by)", out, "the restack of the stacked batch did not run after a refused marker post: %s" % out)
 
     # After the build, a drop takes off only a lane that a red run blamed (decision batch-freeze-lane-set). The control is
     # test_a_blamed_lane_dropped_leaves_a_draft_that_needs_ready_again_and_the_next_ready_lints_once, which drops a blamed lane.

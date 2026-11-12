@@ -4971,9 +4971,6 @@ def batch_drop(root, h, name, number):
     if number not in lanes and number in block["dropped"]:
         # a rerun: a kill after the body write leaves the branch holding the lane the body already drops
         say(f"merge: #{number} was dropped from batch {name} already; {branch} is checked against its frozen set.")
-        names = mark_dropped(h, number, name)  # a kill between the body write and the marker leaves none: the rerun posts it
-        if len(names) >= DROP_LIMIT:
-            say(fix_lane_line(number, names))
         rc = sync_batch(root, h, pr, info, block, block["on"][0] if block["on"] else None, info["base"])
         say(f"merge: batch {name} holds lanes {lane_list(lanes)}.")
         return rc
@@ -5008,11 +5005,16 @@ def batch_drop(root, h, name, number):
     new = build_integration_branch(root, name, start, sorted(kept.items()), lease=tip, body=(h, pr, info["body"], text))
     say(f"merge: #{number} dropped from batch {name}.", *(f"merge: #{n} dropped too: its head contains #{number}'s head." for n in dependents),
         f"merge: batch {name} now holds lanes {lane_list(kept)}.")
-    names = mark_dropped(h, number, name)  # after the body write: a refused post leaves a drop the rerun path above marks
-    if len(names) >= DROP_LIMIT:
-        say(fix_lane_line(number, names))
     needs_ready(name, drafted)
-    return 1 if restack(root, h, branch, new, {n: lanes[n] for n in dropping}) else 0
+    rc = 1 if restack(root, h, branch, new, {n: lanes[n] for n in dropping}) else 0
+    try:  # last: a refused post never skips the restack. It costs one count, which only loosens a speed rule
+        names = mark_dropped(h, number, name)
+    except Stop as e:
+        say(f"merge: the drop of #{number} is done, but its marker was not posted ({e}); it counts one drop less toward the fix lane.")
+    else:
+        if len(names) >= DROP_LIMIT:
+            say(fix_lane_line(number, names))
+    return rc
 
 MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
 
