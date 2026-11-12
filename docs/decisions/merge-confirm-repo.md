@@ -18,6 +18,7 @@ The rule:
 - The merge tool takes no flag prefix (`allow_abbrev=False`): `--conf` or `--repo` is an error, never the flag it starts, so the guard and the tool read one spelling. Main accepted prefixes; this lane refuses them.
 - The repo is `git_reads.github_repo` of that checkout, the one reading the roadmap build and `lane-repo-tag` share.
 - The merge passes only when a tag of the session's own newest `get_session` record names that repo (`shared_names.repo_tag_names`), and no `set_session_tags` call follows that record.
+- A lone lane the owner started (no parent, no `cs-build:` tag, sources that name claude-settings) also passes only when the `--head` its confirm names is a refs/heads tip of that checkout (`_head_is_own_tip`, `git_reads.branch_tips`). With no `--head` the guard passes the confirm, and the merge tool refuses it. A batch runner is exempt from this head condition. Source: coordinator pick, 11:22 CST Nov 12 (a pick, not an owner ruling). Detail: the standing merge grant decision, its Head check bullet.
 - It fails closed inside the clause: no record, an unreadable checkout, an empty flag value and flags the parser refuses are each a refusal, as in `merge-role-proof`.
 - The reason names the rule and the remedy (hand the pull request to a batch runner whose `cs-repo` tags name the repo, or run `get_session` alone first). It never names the refused path or repo, so a session does not learn a retry target.
 
