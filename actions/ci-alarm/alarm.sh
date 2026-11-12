@@ -8,7 +8,8 @@
 # `github.event_name == 'X'` with X not N's event (all-jobs-passed and ci-done run on pull_request only, so a push or schedule run
 # skips them). So a newer green push run clears a red nightly. An R with no red job (no jobs,
 # all passed, cancelled or skipped only) is never cleared this way. The same failed-run rule as Host.base_state.
-# A run that the merge tool calls clear opens no issue and names nothing, a cap end in it included.
+# A failure run that the merge tool calls clear opens no issue and names nothing, a cap end in it included. A cap end in a cancelled
+# run alarms even when the merge tool calls that run clear: the cancelled loop applies no clear (base_state does, `cleared(r, cancelled=True)`).
 # A group whose newest run is a re-run still going (queued or in progress, attempt above 1) is unknown: a warning, no issue, never
 # green, never the older run. A first attempt still going is skipped, and the older run is judged.
 # A job cancelled at its cap raises the alarm: it ran at least its job-level `timeout-minutes` (completed_at - started_at, from the
