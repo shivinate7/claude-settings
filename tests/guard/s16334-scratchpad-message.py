@@ -113,4 +113,40 @@ add("scratchpad-message: an orchestrator payload with agent_id and agent_type nu
     raw=json.dumps({"tool_name": "Bash", "tool_input": {"command": SCRATCH_CMD}, "cwd": NOGIT,
                     "session_id": FAKE_SESSION, "agent_id": None, "agent_type": None}))
 
+# A wrapper runs its command in a child shell: `bash -c`, `sh -c`, `sh -lc`. The commit inside is judged as the
+# plain form is, and a `cd` inside the wrapper sets the folder a relative path resolves from. The scanner cases
+# put a comment opener, a newline and a lone quote inside the wrapped string.
+WRAP_COMMIT = VCS + " commit -F " + slash(SCRATCH_MSG)
+scratch_refuse("scratchpad-message: an agent's bash -c commit -F of a scratchpad file is refused",
+               "bash -c '" + WRAP_COMMIT + "'")
+scratch_refuse("scratchpad-message: an agent's sh -c commit -F of a scratchpad file, in double quotes, is refused",
+               'sh -c "' + WRAP_COMMIT + '"')
+scratch_refuse("scratchpad-message: an agent's bash -c cd into its scratchpad, then a relative -F, is refused",
+               "bash -c 'cd " + SCRATCH_DIR + " && " + VCS + " commit -F commit_msg.txt'")
+scratch_refuse("scratchpad-message: an agent's sh -c cd into its scratchpad, then a relative -F, is refused",
+               'sh -c "cd ' + SCRATCH_DIR + " && " + VCS + ' commit -F commit_msg.txt"')
+scratch_refuse("scratchpad-message: an agent's sh -lc cd into its scratchpad, then a relative -F, is refused",
+               "sh -lc 'cd " + SCRATCH_DIR + " && " + VCS + " commit -F commit_msg.txt'")
+scratch_refuse("scratchpad-message: a comment opener in a bash -c string does not hide the -F scratchpad commit",
+               "bash -c 'echo \"# x\"; " + WRAP_COMMIT + "'")
+scratch_refuse("scratchpad-message: a comment opener on a line of a multi-line bash -c string does not hide the -F scratchpad commit",
+               "bash -c 'echo first\n# second\n" + WRAP_COMMIT + "'")
+scratch_refuse("scratchpad-message: a lone quote in text does not hide a bash -c -F scratchpad commit",
+               LONE_PAIR + "bash -c '" + WRAP_COMMIT + "'")
+# The controls. A wrapper with no scratchpad commit, an orchestrator's call, a file outside every scratchpad and
+# echoed text that is no command all stay allowed. The cd control is the wrapped form of the pushd control above.
+scratch_allow("scratchpad-message: an agent's bash -c commit -m is allowed", "bash -c '" + VCS + " commit -m title'")
+scratch_allow("scratchpad-message: an agent's bash -c commit -F - with a heredoc is allowed",
+              "bash -c '" + VCS + " commit -F -' <<'EOF'\ntitle\n\nclean body\nEOF")
+scratch_allow("scratchpad-message: an agent's bash -c commit -F of a file outside every scratchpad is allowed",
+              "bash -c '" + VCS + " commit -F " + slash(MSG_NOGIT) + "'")
+scratch_allow("scratchpad-message: an agent's bash -c cd outside every scratchpad, then a relative -F, is allowed",
+              "bash -c 'cd " + slash(NOGIT) + " && " + VCS + " commit -F msg_nogit.txt'")
+scratch_allow("scratchpad-message: an orchestrator's bash -c commit -F of the same scratchpad file is allowed",
+              "bash -c '" + WRAP_COMMIT + "'", agent_id=None)
+scratch_allow("scratchpad-message: an agent's echo of a commit -F of a scratchpad file is not a commit and is allowed",
+              'echo "' + WRAP_COMMIT + '"')
+scratch_allow("scratchpad-message: an agent's echo of a bash -c commit -F of a scratchpad file is not a commit and is allowed",
+              "echo \"bash -c '" + WRAP_COMMIT + "'\"")
+
 # =========================================================================== 5b2. the records page on a ready pull request
