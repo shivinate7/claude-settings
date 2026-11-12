@@ -1828,7 +1828,10 @@ def brief_hit(tool: str, tool_input, transcript: str):
     if grant is not None and not grant_line_holds_words(grant):
         return "lane brief under an empty or placeholder Grant line", BRIEF_GRANT_REASON
     if tool != BRIEF_TOOL:
-        return topic_hit(first, lane_tags(tool_input), start=True) or _brief_ids_hit(text)
+        held = topic_hit(first, lane_tags(tool_input), start=True)
+        if held:
+            return held
+        return _brief_ids_hit(text)
     target = tool_input.get("session_id")
     try:  # cost: one transcript read per brief
         tags, tagged_after = _own_session_read(transcript, target, created=True) \
