@@ -222,6 +222,16 @@ EXPORT_SCRIPT = "export_page.py"
 EXPORT_SAME = "same"  # the verdict export_page.py prints when nothing differs
 # A shell command that runs the export: an interpreter, then a path whose last part is export_page.py. A grep
 # of the script or a file such as test_export_page.py is no run.
+WRITER_TOKEN = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def _writer_names(writer, ids):
+    """True when the page `writer` string is one of `ids`, bare or inside a label such as "Triage (session_x)".
+    The cloud store writes the label form. Whole tokens only, so "session_9fa" is not "session_9f"."""
+    wanted = {i for i in ids if i}
+    return writer in wanted or any(t in wanted for t in WRITER_TOKEN.findall(writer))
+
+
 EXPORT_RUN = re.compile(r"(?:^|[\s;&|(])(?:python3?|py)(?:\.exe)?\s+(?:-\S+\s+)*[\"']?(?:\S*[/\\])?"
                         r"export_page\.py(?=[\"'\s]|$)")
 EXPORT_REASON = (
@@ -1352,7 +1362,7 @@ def export_check(cwd, transcript_path, session_id):
         return None, None  # nothing is read from the repo before a write is found
     writer = _transcript.page_writer_id(records)
     if writer:
-        is_writer = writer in (session_id, override.remote_session_id())
+        is_writer = _writer_names(writer, (session_id, override.remote_session_id()))
     else:
         is_writer = any(e[0] < max(w[0] for w in writes) for e in exports)
     if not is_writer:
