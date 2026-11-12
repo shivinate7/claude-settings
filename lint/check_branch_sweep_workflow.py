@@ -16,8 +16,9 @@ Rules:
   concurrency  a concurrency block is set at the top level
   condition    each job has an if: that limits it to refs/heads/main
   argv         --open-head takes its value as --open-head=VALUE, so a value that starts with - is no option
-  tip          each DELETE call has a gh api read of its branch's tip earlier in the same loop; a comment or a
-               quoted string is no call
+  tip          each DELETE call has a gh api read of a tip path that names the same branch variable earlier in the
+               same loop; a comment or a quoted string is no call. It does not check the value, the read's exit
+               handling or the compare
 
 The reader is line based, with no YAML library: CI installs none for lint. It needs only the block style this
 repo's workflows use. GitHub evaluates an expression in a quoted value, a plain value, or a run: block, even after a
@@ -283,31 +284,49 @@ def logical_lines(block):
 
 GH_API = re.compile(r"\bgh\s+api\b")
 DELETE_CALL = re.compile(r"(-X\s*|--method[\s=]+)DELETE\b", re.I)
-TIP_PATH = re.compile(r"git/ref/heads/")
+READ_BRANCH = re.compile(r"git/ref/heads/([^\s\"'?]+)")
+DELETE_BRANCH = re.compile(r"git/refs/heads/([^\s\"'?]+)")
 LOOP_OPEN = re.compile(r"^\s*(while|until|for)\b")
 LOOP_CLOSE = re.compile(r"^\s*done\b")
+LOOP_ONE_LINE = re.compile(r"\bdo\b.*\bdone\b")
+
+
+def branch_of(pattern, segment):
+    """The branch text in a ref path, `${name}` read as `$name`, or None when the segment has no such path."""
+    m = pattern.search(segment)
+    return re.sub(r"\$\{(\w+)\}", r"$\1", m.group(1)) if m else None
 
 
 def check_tip(runs, found):
-    """Each DELETE call has a read of its branch's tip earlier in the same loop. Between a read and the DELETE a
-    push moves the tip, and the verdict was computed on the old one. A call is a `gh api` outside quotes and
-    comments; a commented-out call or one named in a string is text."""
+    """Each DELETE call has a gh api read of the same branch variable's tip earlier in its loop. Between a read and
+    the DELETE a push moves the tip, and the verdict was computed on the old one. A call is a `gh api` outside
+    quotes and comments; a commented-out call or one named in a string is text. A one-line `do ... done` is its own
+    scope. The lint compares the branch text of the two paths, as `$name`, not what the variable holds."""
     for block in run_blocks(runs):
-        loops = [False]  # one flag per open loop, the run block itself first: has this loop read a tip
+        scopes_read = [set()]  # one set per open loop, the run block itself first: branch texts whose tip it read
         for n, text in logical_lines(block):
             masked = mask_shell(text)
-            if LOOP_CLOSE.match(masked) and len(loops) > 1:
-                loops.pop()
+            one_line = bool(LOOP_OPEN.match(masked) and LOOP_ONE_LINE.search(masked))
+            if one_line:
+                scopes_read.append(set())
+            elif LOOP_CLOSE.match(masked) and len(scopes_read) > 1:
+                scopes_read.pop()
             starts = [m.start() for m in GH_API.finditer(masked)]
             for k, start in enumerate(starts):
                 end = starts[k + 1] if k + 1 < len(starts) else len(masked)
                 if DELETE_CALL.search(masked[start:end]):
-                    if not loops[-1]:
+                    branch = branch_of(DELETE_BRANCH, text[start:end])
+                    read = scopes_read[-1]
+                    if not read or (branch is not None and branch not in read):
                         found.append((n, "tip", text.strip()))
-                elif TIP_PATH.search(text[start:end]):
-                    loops[-1] = True
-            if LOOP_OPEN.match(masked):
-                loops.append(False)
+                else:
+                    branch = branch_of(READ_BRANCH, text[start:end])
+                    if branch is not None:
+                        scopes_read[-1].add(branch)
+            if one_line:
+                scopes_read.pop()
+            elif LOOP_OPEN.match(masked):
+                scopes_read.append(set())
 
 
 def check(text):

@@ -89,6 +89,12 @@ jobs:
                 failed=1
                 continue
               fi
+              # A tip that is not a full lowercase sha (empty, null, a prefix-match array) is a failed read, not a moved tip.
+              if ! [[ "$tip" =~ ^[0-9a-f]{40}$ ]]; then
+                echo "::warning::the tip read of $name returned no sha; not deleted"
+                failed=1
+                continue
+              fi
               if [ "$tip" != "$want" ]; then
                 echo "tip moved since the checkout: $name (checkout $want, now $tip); kept. The next run decides again."
                 continue
