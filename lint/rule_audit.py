@@ -56,8 +56,15 @@ anchors, `unmechanized` rows or `judgment` rows (owner ruling R37, 2026-11-11: a
 that refuses without an owner ruling is retired). It measures instead. It prints the anchor
 count and both row counts from lint/rule_mechanisms.json, and it names each anchor removed
 since origin/main. A removal that takes its row with it passes. A removal that leaves its row
-fails as an orphan row. With no git history or no origin/main, the removed-anchor line says so
-and the count still prints.
+fails as an orphan row. With no git history, no git on PATH or no origin/main, the removed-anchor
+line says so and the count still prints.
+
+MOVE OFF A MECHANISM. A row that was `guard`, `check` or `ci` on origin/main and is now `unmechanized`
+or `judgment` is printed as "moved off a mechanism: <anchor>: <old kind> -> <new kind>". It fails
+when its reason text is the base row's reason, a move with no new explanation. It passes, still
+printed, when the reason changed. A new rule, with no base row, is never a move. This check replaced
+the pinned `unmechanized` and `judgment` counts and the reason word minimum: it names the one act
+that loses enforcement, and fails nothing else.
 
 WHAT THIS CANNOT SEE, BY NAME. It reads a citation, not the coverage behind it: a row can name
 a real guard rule, or a real test, that does not actually cover what the rule sentence
@@ -553,21 +560,78 @@ def check(
     return problems
 
 
+def _base_text(root: str, path: str):
+    """The text of `path` on origin/main, or None when it cannot be read: no repository, no origin/main, or no
+    git binary on PATH (OSError, FileNotFoundError among them). One home for both base reads."""
+    try:
+        r = _nowindow.run(["git", "-C", root, "show", "origin/main:" + path.replace(os.sep, "/")],
+                          capture_output=True, encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    return None if r.returncode else r.stdout
+
+
 def removed_anchor_line(anchors: List[str], root: str = ROOT) -> str:
     """One report line naming each anchor in origin/main's rule files that this tree no longer has.
-    It reads git only to measure a drop, never to refuse one: with no repository, no git or no
+    It reads git only to measure a drop, never to refuse one: with no repository, no git on PATH or no
     origin/main, it says it could not compare, and the anchor count still prints."""
     base = []
     for path in RULE_FILES:
-        r = _nowindow.run(["git", "-C", root, "show", "origin/main:" + path.replace(os.sep, "/")],
-                          capture_output=True, encoding="utf-8", errors="replace")
-        if r.returncode:
+        text = _base_text(root, path)
+        if text is None:
             return "rule_audit: removed anchors not compared, no origin/main to read."
-        base.append(r.stdout)
+        base.append(text)
     removed = sorted(set(claude_md_anchors("\n".join(base))) - set(anchors))
     if not removed:
         return "rule_audit: no anchors removed since origin/main."
     return "rule_audit: %d anchors removed since origin/main: %s." % (len(removed), ", ".join(removed))
+
+
+MECHANIZED_KINDS = {"guard", "check", "ci"}
+OFF_KINDS = {"unmechanized", "judgment"}
+
+
+def _mech(rules, slug) -> dict:
+    entry = rules.get(slug) if isinstance(rules, dict) else None
+    mech = entry.get("mechanism") if isinstance(entry, dict) else None
+    return mech if isinstance(mech, dict) else {}
+
+
+def moved_off_mechanism(rule_map: dict, root: str = ROOT):
+    """Compare each row's kind with the row on origin/main. Returns (lines, problems).
+    A row that was guard, check or ci and is now unmechanized or judgment gets a line naming it. It is also a
+    problem when its reason is the reason the base row carried: the move adds no explanation. A row with no base
+    row (a new rule) is never a move. With no repository, no git on PATH or no origin/main, nothing is compared,
+    one line says so, and nothing fails. This is the measure that replaced the fixed unmechanized and judgment
+    counts (owner ruling R37, 2026-11-11; item 595, 2026-11-12 12:54 CST)."""
+    not_compared = ["rule_audit: moves off a mechanism not compared, no origin/main to read."]
+    text = _base_text(root, os.path.join("lint", "rule_mechanisms.json"))
+    if text is None:
+        return not_compared, []
+    try:
+        base_rules = json.loads(text).get("rules")
+    except (ValueError, AttributeError):
+        return not_compared, []
+    rules = rule_map.get("rules") if isinstance(rule_map, dict) else None
+    if not isinstance(base_rules, dict) or not isinstance(rules, dict):
+        return not_compared, []
+    lines: List[str] = []
+    problems: List[str] = []
+    for slug in sorted(rules.keys() & base_rules.keys()):
+        old, new = _mech(base_rules, slug), _mech(rules, slug)
+        if old.get("kind") not in MECHANIZED_KINDS or new.get("kind") not in OFF_KINDS:
+            continue
+        move = "moved off a mechanism: %s: %s -> %s" % (slug, old["kind"], new["kind"])
+        old_reason, new_reason = old.get("reason"), new.get("reason")
+        same = (old_reason or "").strip() == (new_reason or "").strip() if isinstance(new_reason, str) else True
+        if same:
+            problems.append(move + ". The reason is the one the mechanized row carried. Say why the rule left "
+                            "its mechanism, or restore the mechanism.")
+        else:
+            lines.append("rule_audit: " + move + " (reason changed).")
+    if not lines and not problems:
+        lines.append("rule_audit: no row went from a mechanism to unmechanized or judgment since origin/main.")
+    return lines, problems
 
 
 def main() -> None:
@@ -596,11 +660,15 @@ def main() -> None:
     problems = check(claude_text, rule_map, guard_text(ROOT), workflow_text)
     anchors = claude_md_anchors(claude_text)
     removed_line = removed_anchor_line(anchors)
+    move_lines, move_problems = moved_off_mechanism(rule_map)
+    problems = problems + move_problems
     if problems:
         print("rule_audit: FAIL")
         for p in problems:
             print(" - " + p)
         print(removed_line)
+        for line in move_lines:
+            print(line)
         sys.exit(1)
 
     rules = rule_map["rules"]
@@ -613,6 +681,8 @@ def main() -> None:
         f"{judgment} are `judgment`."
     )
     print(removed_line)
+    for line in move_lines:
+        print(line)
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ Owner interview, 2026-10-17 (00:44 to 01:55 CDT), per rule:
 - `speak-cite-id-plus-gloss`: keep.
 - `output-write-in-ste`: separate lane.
 
-Why not every guarded rule: `CLAUDE.md` loads in every repo, and a check that is only a test or a CI step here enforces nothing in another repo. Several guards cover only part of their sentence. `lint/rule_audit.py` holds no pinned anchor count (owner, R37, 2026-11-11: a fixed number that refuses is retired). It prints the anchor count and names each anchor removed since origin/main. A removal that takes its row passes, and one that leaves the row fails.
+Why not every guarded rule: `CLAUDE.md` loads in every repo, and a check that is only a test or a CI step here enforces nothing in another repo. Several guards cover only part of their sentence. `lint/rule_audit.py` holds no pinned anchor count (owner, R37, 2026-11-11: a fixed number that refuses is retired). It prints the anchor count and names each anchor removed since origin/main. A removal that takes its row passes, and one that leaves the row fails. A row that moves from a guard, check or CI step to `unmechanized` or `judgment` is printed, and fails when its reason text is the base row's reason (a move with no new explanation).
 
 Kind: process
 Home: rule:outcomes-mechanize-rules
