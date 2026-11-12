@@ -209,3 +209,39 @@ fetch_head_refused("fetch-head read after tag -F, whose value is a file, denies"
                    VCS + " tag -F msg.txt v1 FETCH_HEAD", cwd=GITWT)
 fetch_head_refused("fetch-head read after log -F, a flag with no value, denies",
                    VCS + " log -F FETCH_HEAD", cwd=GITWT)
+
+# Grep pins. The first word that is no flag is grep's pattern, so a ref after it is the read. -e, -f and --file= give
+# the pattern, so the ref after them is the read. --file alone takes the next word as a file, so the ref after that
+# word is the read, and a file named FETCH_HEAD is no ref.
+fetch_head_refused("fetch-head read, git grep with a pattern before the ref, denies",
+                   VCS + " grep x FETCH_HEAD", cwd=GITWT)
+fetch_head_refused("fetch-head read, git grep -e gives the pattern, so the ref after it denies",
+                   VCS + " grep -e x FETCH_HEAD", cwd=GITWT)
+fetch_head_refused("fetch-head read, git grep -f gives the pattern file, so the ref after it denies",
+                   VCS + " grep -f pats FETCH_HEAD", cwd=GITWT)
+fetch_head_refused("fetch-head read, git grep --file gives the pattern file, so the ref after it denies",
+                   VCS + " grep --file pats FETCH_HEAD", cwd=GITWT)
+fetch_head_refused("fetch-head read, git grep --file= gives the pattern file, so the ref after it denies",
+                   VCS + " grep --file=pats FETCH_HEAD", cwd=GITWT)
+sh("fetch-head allowed, git grep --file takes a file named FETCH_HEAD, which is no ref",
+   VCS + " grep --file FETCH_HEAD x", "allow", cwd=GITWT)
+sh("fetch-head allowed, git grep -A takes a count, so the pattern after it is no ref",
+   VCS + " grep -A 3 FETCH_HEAD", "allow", cwd=GITWT)
+sh("fetch-head allowed, git grep -n takes no value, so the pattern after it is no ref",
+   VCS + " grep -n FETCH_HEAD", "allow", cwd=GITWT)
+sh("fetch-head allowed, git grep after -- reads a path named FETCH_HEAD, which is no ref",
+   VCS + " grep x -- FETCH_HEAD", "allow", cwd=GITWT)
+
+# Ref suffixes and a caret. A caret starts an exclusion, a tilde or a reflog brace names a commit of FETCH_HEAD.
+fetch_head_refused("fetch-head read, a caret before FETCH_HEAD in an exclusion denies",
+                   VCS + " log main ^FETCH_HEAD", cwd=GITWT)
+fetch_head_refused("fetch-head read, a tilde suffix on FETCH_HEAD denies",
+                   VCS + " show FETCH_HEAD~1", cwd=GITWT)
+fetch_head_refused("fetch-head read, a reflog brace suffix on FETCH_HEAD denies",
+                   VCS + " log FETCH_HEAD@{1}", cwd=GITWT)
+
+# git log -S and -G take a pattern, so the word after them is no ref.
+sh("fetch-head allowed, git log -S takes a string, so the name after it is no ref",
+   VCS + " log -S FETCH_HEAD", "allow", cwd=GITWT)
+sh("fetch-head allowed, git log -G takes a pattern, so the name after it is no ref",
+   VCS + " log -G FETCH_HEAD", "allow", cwd=GITWT)
