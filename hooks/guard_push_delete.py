@@ -1575,21 +1575,22 @@ PUSH_ASK_REASON = (
 # ------------------------------------------------------------------ push-needs-review-record
 #
 # A shell `git push` asks while the session's own transcript shows a PR known to the session and a
-# reviewer or design-reviewer report with no later posted record that holds a line with that report's role,
+# reviewer or design-reviewer report with no later posted review log that holds a line with that report's role,
 # verdict and round, and Head when the report names its reviewed head (decision push-needs-review-record).
-# A push to the head branch of a PR whose posted record holds a Fix check line is denied. Cost: one pass over the transcript per push, failing
+# A push to the head branch of a PR whose posted review log holds a `Fix check:` line is refused. Cost: one pass over the transcript per push, failing
 # open on any error. A line is parsed only when it holds a mark below, or a tool_result for a call already seen
 # (one dict lookup per id). The merge module loads only when the scan finds a report with the Done-line shape,
 # or a posted comment with a `Fix check:` line.
-REVIEW_RECORD_REASON = (
-    "push-needs-review-record: a reviewer report in this session has no posted review record at the head it "
+REVIEW_LOG_REASON = (
+    "push-needs-review-record: a reviewer report in this session has no posted review log at the head it "
     "reviewed, and a push now moves that head. Order: record first, then the push. Render the record with "
     "`merge <pr> --review-record --head <reviewed sha>` (it refuses once the head moves), post it with the "
     "GitHub MCP comment tool, then push. (decision push-needs-review-record)"
 )
-REVIEW_RECORD_FIX_REASON = (
-    "push-needs-review-record: the posted review record for this pull request already holds a Fix check line, "
-    "and the merge tool takes one fix check per record. Put the next fix on a new branch and open a new PR "
+REVIEW_LOG_FIX_REASON = (
+    "push-needs-review-record: the posted review log for this pull request already holds a "
+    "`Fix check:` line, "  # glossary-ok: the literal line text the merge tool writes
+    "and the merge tool takes one fix verifier per review log. Put the next fix on a new branch and open a new PR "
     "for it, then push that branch. (decision push-needs-review-record)"
 )
 _CREATE_PR_TOOL = "mcp__github__create_pull_request"
@@ -1597,7 +1598,7 @@ _COMMENT_TOOL = "mcp__github__add_issue_comment"
 _AGENT_TOOL = "Agent"
 _SHELL_TOOLS = ("Bash", "PowerShell")
 # Tool names sit in call lines, the notice and hand-back tags in message lines, a gh call in its command text.
-_REVIEW_RECORD_MARKS = ('"Agent"', _CREATE_PR_TOOL, _COMMENT_TOOL, TASK_NOTIFICATION_TAG, HAND_BACK_TAG.lstrip("<"))
+_REVIEW_LOG_MARKS = ('"Agent"', _CREATE_PR_TOOL, _COMMENT_TOOL, TASK_NOTIFICATION_TAG, HAND_BACK_TAG.lstrip("<"))
 # A gh call that opens or comments on a PR, or an api call, with a repo flag before the verb or after `pr`
 # (`gh -R o/r pr create`, `gh pr --repo o/r comment`): the verb sits after the flag, so the words are not adjacent.
 _GH_MARK = re.compile(r"gh(?:\.exe)?\s+(?:-R|--repo|api\b|pr\s+(?:create|comment|-R|--repo)\b)")
@@ -1611,7 +1612,7 @@ _PR_URL = re.compile(r"/pull/(\d+)")
 _DONE_LABEL = re.compile(r"[\s>*#_-]*Done\b[\s*_:]*")
 # A backtick may wrap the line, and `**` may wrap the verdict word or the whole line.
 _VERDICT_LINE = re.compile(r"[\s>*#_`-]*([A-Z]+)\**, (round \d+ of \d+|fix check), [\w.-]+[\s*_`]*")
-# A Done label line that holds its verdict in a word order the ruled line does not use: a round or fix check
+# A Done label line that holds its verdict in a word order the ruled line does not use: a round or fix verifier
 # marker in any case, and a verdict word among its all-capitals words, as in `Done: Round N reviewer haiku FAIL`.
 _LABEL_ROUND = re.compile(r"\bround (\d+)\b|\b(fix check)\b", re.I)
 _LABEL_WORD = re.compile(r"\b[A-Z]{4,}\b")
@@ -1680,7 +1681,7 @@ def _blocks_text(content) -> str:
 def _label_verdict(line: str):
     """The first all-capitals word of a Done label line that is a review verdict (the merge tool's REVIEW_VERDICTS),
     as a match, else None: `Done: HEAD round N FAIL` reads FAIL. Called only for a label line that holds a round
-    or fix check marker, so the merge module loads only then. An unloadable module reads no verdict."""
+    or fix verifier marker, so the merge module loads only then. An unloadable module reads no verdict."""
     from guard_merge import merge_module   # here, not at the top: guard_merge imports this file
     merge = merge_module()
     verdicts = merge.REVIEW_VERDICTS if merge is not None else ()
@@ -1761,11 +1762,12 @@ def _same_sha(one: str, other: str) -> bool:
 
 
 class _RecordLines:
-    """The lines a posted record holds, as a membership test for a pending report (role, word, kind, number,
-    heads). A round report is held by a Round line of its role, verdict and round, a fix check by the Fix check
-    line of its role and verdict. A report that names reviewed heads is held only when the record's Head is one of
-    them. A fix check may also match the record's Fix check sha: the merge tool records a fix check at the new
-    head with its Fix check line at the head the fix diff starts from, and a report may name either."""
+    """The lines a posted review log holds, as a membership test for a pending report (role, word, kind, number,
+    heads). A round report is held by a Round line of its role, verdict and round, a fix verifier report by the
+    `Fix check:` line of its role and verdict. A round report that names reviewed heads is held only when the log's
+    Head is one of them. A fix verifier report is held when a named head is either the log's Head or the sha of its
+    `Fix check:` line: the merge tool records a fix verifier at the new head with the `Fix check:` line at the head
+    the fix diff starts from, and a report may name either."""
 
     def __init__(self, record):
         self.head = record["head"]
@@ -1877,7 +1879,7 @@ def _transcript_events(path: str):
     events, calls, roles, agents, posts, pr_heads = [], {}, {}, {}, {}, {}
     with open(path, encoding="utf-8", errors="replace") as handle:
         for line in handle:
-            if not any(mark in line for mark in _REVIEW_RECORD_MARKS) and not _GH_MARK.search(line) and not (
+            if not any(mark in line for mark in _REVIEW_LOG_MARKS) and not _GH_MARK.search(line) and not (
                     '"tool_result"' in line and any(call in calls for call in _RESULT_IDS.findall(line))):
                 continue
             try:
@@ -1941,32 +1943,33 @@ def _record_of(merge, text: str, from_shell: bool):
     return merge.parse_review(text[start:end + len(merge.REVIEW_CI_LINE)]) if end >= 0 else None
 
 
-def review_record_hit(transcript: str, destinations=lambda: [], where: str = ""):
+def review_log_hit(transcript: str, destinations=lambda: [], where: str = ""):
     """Return (label, reason) for the first refusal the transcript earns, else ("", ""). `destinations()` gives the
-    branch names the push writes; it runs only when a posted record holds a Fix check line. `where` is the
+    branch names the push writes; it runs only when a posted review log holds a `Fix check:` line. `where` is the
     push's checkout, where a held report's sha is read against the PR's head.
     1. A PR known to the session and a reviewer report with no later posted record holding a line with that
-       report's role, verdict and round (a fix check: the Fix check line's role and verdict), and, when a report
-       read after the PR names its reviewed head, whose Head is that head (a fix check: the Fix check line's sha),
+       report's role, verdict and round (a fix verifier: the `Fix check:` line's role and verdict), and, when a report
+       read after the PR names its reviewed head, whose Head is that head (a fix verifier: that Head, or the
+       `Fix check:` line's sha),
        compared by prefix of 7+ characters either way. A report before any
        PR is known is held by its sha candidates, and counts when a PR becomes known for which one candidate
        counts (`_held_counts`); a report that PR does not count stays held for a later PR, and a report naming
-       no candidate is dropped. A design-reviewer fix check is not read: a record holds a Fix check line for the
+       no candidate is dropped. A design-reviewer fix verifier is not read: a review log holds a `Fix check:` line for the
        reviewer only.
-    2. A posted record, accepted by parse_review, with a Fix check line for PR n, and a push to n's head branch
+    2. A posted review log, accepted by parse_review, with a `Fix check:` line for PR n, and a push to n's head branch
        (from a PR-opening call's `head` and its result's number). With n's head unknown, the push passes.
     An unreadable transcript, or an unloadable merge module, passes."""
     if not transcript:
         return "", ""
     try:
         events = _transcript_events(transcript)
-        if not any(event[0] == "report" or (event[0] == "post" and "Fix check:" in event[1]) for event in events):
+        if not any(event[0] == "report" or (event[0] == "post" and "Fix check:" in event[1]) for event in events):  # glossary-ok: the literal line text the merge tool writes
             return "", ""
         from guard_merge import merge_module   # here, not at the top: guard_merge imports this file
         merge = merge_module()
         if merge is None:
             return "", ""
-        known, pending, fixed, heads = False, [], [], {}   # fixed: the PR numbers whose record holds a Fix check
+        known, pending, fixed, heads = False, [], [], {}   # fixed: the PR numbers whose review log holds a `Fix check:` line
         early = []   # reports read before any PR was known, each ending in its sha candidates
         for event in events:
             if event[0] == "pr":
@@ -2000,9 +2003,9 @@ def review_record_hit(transcript: str, destinations=lambda: [], where: str = "")
         for number in fixed:   # before the pending ask: a denied push stays denied while a report waits
             if number in heads:
                 if heads[number] in destinations():
-                    return "push to the head branch of PR %d, fix check recorded" % number, REVIEW_RECORD_FIX_REASON
+                    return "push to the head branch of PR %d, fix verifier recorded" % number, REVIEW_LOG_FIX_REASON
         if pending:
-            return "%s %s %s report, no posted record" % pending[0][:3], REVIEW_RECORD_REASON
+            return "%s %s %s report, no posted review log" % pending[0][:3], REVIEW_LOG_REASON
     except Exception:
         pass
     return "", ""
