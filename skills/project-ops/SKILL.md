@@ -50,7 +50,8 @@ that triage or the batch runner writes for its successor.
    writes. It refuses, and writes nothing, when one of those files exists.
 4. **Fill the tiers.** Copy `templates/operating-model.md` into the project's instructions on
    claude.ai. Fill each `<placeholder>`. The roster is not in the project instructions. Triage writes
-   it to `roster.md` at the record branch root, and rewrites its lines as sessions start.
+   it to `roster.md` at the record branch root, and rewrites a standing session's line when that
+   session's starter sends the new id.
 5. **Triage pushes the record branch.** The guard lets only the triage session push it (rule
    `roadmap-one-writer`, the record branch's one writer). The coordinator starts triage before any other
    session (decision `session-tiers`). Send triage the repo and the branch name. Triage does steps 2 and 3
