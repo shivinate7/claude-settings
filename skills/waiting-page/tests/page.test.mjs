@@ -625,8 +625,8 @@ test("the guard's CHALLENGED_LINE takes each table case against the pick as a ca
   AGAINST_TABLE.forEach((row, i) => assert.equal(guard[i], row.draws === "case", `${JSON.stringify(row.line)}: the guard's pattern says ${guard[i] ? "case" : "context"}, the table says ${row.draws}`));
 });
 
-// ---- Round 2 of the case against the pick: a task, an answered decision, and the fold of a card with no case.
-test("R2: a task's case against the pick line stays in its context and draws no block", async (t) => {
+// ---- The case against the pick on a task, on an answered decision, and the fold of a card with no case.
+test("task case: a task's case against the pick line stays in its context and draws no block", async (t) => {
   const it = { ...TASK, id: "ag-task", n: 7, context: "Plug it in.\nAgainst the pick (sonnet): x" };
   const page = await open(t, { items: [it] }); if (!page) return;
   const s = await againstOf(page, it);
@@ -635,7 +635,7 @@ test("R2: a task's case against the pick line stays in its context and draws no 
   assert.equal(s.blocks.length, 0, `${it.id}: a case block is drawn on a task`);
 });
 
-test("R2: a case against the pick on an answered decision shows its words on its block once Change opens it", async (t) => {
+test("answered case: a case against the pick on an answered decision shows its words on its block once Change opens it", async (t) => {
   const it = mk("ag-answered", 1, { context: "Goal: keep it.\nAgainst the pick (sonnet): Merging adds one more push wait." });
   const page = await open(t, { items: [it], answers: { [it.id]: { item: it.id, n: it.n, at: "2026-10-26T01:00:00Z", choice: "a", note: "" } } }); if (!page) return;
   const c = card(page, it);
@@ -652,7 +652,7 @@ for (const [label, context] of [
   ["a newline at its end", "x".repeat(220) + "\n"],
   ["CRLF line ends", "a".repeat(218) + "\r\nb"],
   ["three newlines inside", "a".repeat(217) + "\n\n\nb"],
-]) test(`R2: a card with no case against the pick folds a 221-character context with ${label} as it did before`, async (t) => {
+]) test(`no-case fold: a card with no case against the pick folds a 221-character context with ${label} as it did before`, async (t) => {
   const it = mk("fold-one", 1, { context });
   assert.equal(it.context.length, 221, `${it.id}: the fixture is not 221 characters`);
   const page = await open(t, { items: [it] }); if (!page) return;
