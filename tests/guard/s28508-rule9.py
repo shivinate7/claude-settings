@@ -644,6 +644,70 @@ for _order in WRITE_BYPASS_ORDERS:
         tool="Agent", prompt=_order, subagent_type="builder", model="sonnet")
     add("brief-write-needs-writer: control, Workflow builder agent, %r, is allowed" % _order, "allow",
         tool="Workflow", script=_step_flow(json.dumps(_order), "agentType: 'builder', model: 'sonnet'"))
+# Five debts in the brief-write reader (decision brief-write-needs-writer). Each debt's slug is in its case names. Its
+# red cases fail on today's reader; its controls pass today and must keep passing.
+# brief-write-phrasing-misses: a write phrasing the reader has no word for. Its negated and quoted forms pass.
+PHRASING_MISSES = (
+    ("write a report at a path", "Write a report at docs/review.md."),
+    ("write the report with a colon before the path", "Write the report: docs/review.md."),
+    ("create a file with a report", "Create docs/review.md with your report."),
+    ("an unfenced redirect in prose", "Then run cat findings.txt > audit.md and report."),
+)
+PHRASING_CONTROLS = (
+    ("a negated write a report", "Do not write a report at docs/review.md."),
+    ("a negated write the report", "Do not write the report: docs/review.md."),
+    ("a negated create with a report", "Do not create docs/review.md with your report."),
+    ("a negated unfenced redirect", "Do not run cat findings.txt > audit.md; report it."),
+    ("a quoted write a report", "Quote the phrase `write a report at docs/review.md` as text."),
+    ("a quoted create with a report", "Quote the phrase `create docs/review.md with your report` as text."),
+)
+for _name, _prompt in PHRASING_MISSES:
+    add("brief-write-needs-writer: brief-write-phrasing-misses: Explore brief that orders a write by %s is denied"
+        % _name, "deny", WRITE_BRIEF, tool="Agent", prompt=_prompt, subagent_type="Explore")
+    add("brief-write-needs-writer: brief-write-phrasing-misses: Workflow Explore agent that orders a write by %s is "
+        "denied" % _name, "deny", WRITE_BRIEF, tool="Workflow", script=_step_flow(json.dumps(_prompt), "agentType: 'Explore'"))
+for _name, _prompt in PHRASING_CONTROLS:
+    add("brief-write-needs-writer: brief-write-phrasing-misses control: Explore brief with %s is allowed" % _name,
+        "allow", tool="Agent", prompt=_prompt, subagent_type="Explore")
+    add("brief-write-needs-writer: brief-write-phrasing-misses control: Workflow Explore agent with %s is allowed" % _name,
+        "allow", tool="Workflow", script=_step_flow(json.dumps(_prompt), "agentType: 'Explore'"))
+# brief-write-long-line-cost: one 36 KB line of whole sentences, so the order ends a sentence. The limit is 1.0 s, a
+# generous bound: the reader's cost grows with each write verb in the line, and today the line takes seconds. The verdict
+# is the short brief's: deny with the order, allow without it.
+LONG_FILLER = "Write, add, make, log and record each note; put it in the list and save the rest. "
+LONG_LINE = LONG_FILLER * (36000 // len(LONG_FILLER))
+add("brief-write-needs-writer: brief-write-long-line-cost: a 36 KB one-line Explore brief that orders a write is denied "
+    "within 1.0 s", "deny", WRITE_BRIEF, tool="Agent", prompt=LONG_LINE + WRITE_CANONICAL, subagent_type="Explore",
+    max_seconds=1.0)
+add("brief-write-needs-writer: brief-write-long-line-cost: a 36 KB one-line Explore brief with no order is allowed "
+    "within 1.0 s", "allow", tool="Agent", prompt=LONG_LINE, subagent_type="Explore", max_seconds=1.0)
+# brief-write-tool-negator: a negator before "the Write tool" passes, and a test named for the tool passes. A use of the
+# tool to save a file still refuses.
+add("brief-write-needs-writer: brief-write-tool-negator: Explore brief that says you may not use the Write tool is allowed",
+    "allow", tool="Agent", prompt="You may not use the Write tool; report in your reply.", subagent_type="Explore")
+add("brief-write-needs-writer: brief-write-tool-negator: Explore brief that says you will not use the Write tool is allowed",
+    "allow", tool="Agent", prompt="You will not use the Write tool.", subagent_type="Explore")
+add("brief-write-needs-writer: brief-write-tool-negator: Explore brief that runs a test named the write tool test is allowed",
+    "allow", tool="Agent", prompt="Run the write tool test in tests/guard/s28508-rule9.py.", subagent_type="Explore")
+add("brief-write-needs-writer: brief-write-tool-negator control: Explore brief that uses the Write tool to save a path is denied",
+    "deny", WRITE_BRIEF, tool="Agent", prompt="Use the Write tool to save docs/a.md", subagent_type="Explore")
+# brief-write-dotted-word-path: a comparison whose right side is a dotted word is no redirect target. A redirect to a path
+# in a command span still refuses.
+add("brief-write-needs-writer: brief-write-dotted-word-path: Explore brief that keeps a comparison on a dotted word is allowed",
+    "allow", tool="Agent", prompt="Check that the guard keeps `count > total.length` as a comparison.",
+    subagent_type="Explore")
+add("brief-write-needs-writer: brief-write-dotted-word-path control: Explore brief that redirects a span to out.txt is denied",
+    "deny", WRITE_BRIEF, tool="Agent", prompt="Run `echo x > out.txt` and report.", subagent_type="Explore")
+add("brief-write-needs-writer: brief-write-dotted-word-path control: Explore brief that redirects a span to a bare path is denied",
+    "deny", WRITE_BRIEF, tool="Agent", prompt="Run `> docs/a.md` and report.", subagent_type="Explore")
+# brief-write-comma-prohibit: a comma inside a negated clause keeps the negator's window. A comma clause with no negator
+# still refuses.
+add("brief-write-needs-writer: brief-write-comma-prohibit: Explore brief that says do not, under any circumstances, write to "
+    "a path is allowed", "allow", tool="Agent", prompt="Do not, under any circumstances, write to docs/audit.md.",
+    subagent_type="Explore")
+add("brief-write-needs-writer: brief-write-comma-prohibit control: Explore brief with an unnegated comma clause that orders a "
+    "write is denied", "deny", WRITE_BRIEF, tool="Agent",
+    prompt="Under any circumstances, write the findings to docs/audit.md.", subagent_type="Explore")
 
 
 # ---- A spawn's brief that orders a discard of the working tree (rule brief-destructive-git, rule
