@@ -266,6 +266,9 @@ class FakeHost:
     def post_comment(self, n, body):  # the fake of Host.post_comment: a comment on pull request n, recorded for the case
         self.posted.append((n, body))
 
+    def issue_comments(self, since):  # the fake of Host.issue_comments: no record and no lint comment, so the lane lint's comment read finds none
+        return {}, {}
+
 MAILAUDIT_CHECK = "mailaudit-check"  # the required check a second checkout's stamp config names: a read of that config shows which checkout it came from
 
 class RepoHost(FakeHost):
