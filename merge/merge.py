@@ -107,13 +107,15 @@
                           is not open or not found, and the linted PR itself are each a stop; a repeated number is read once). Missed
                           case: a PR posted under another session id is not found as this lane's, unless --with names it. A PR body
                           with no session URL has no lane PRs, so only --with finds any. A commit or ref target is measured against its base only, and is not cross-measured.
-                          A head whose diff against the base touches hooks/mutate_*.py or hooks/mutate_*.mjs also runs the command of
-                          the head's checks-mutate-guard job (CI step "Guard mutation test") in that same worktree, after a passing lint.
+                          A head whose diff against the base touches hooks/mutate_*.py or hooks/mutate_*.mjs also runs, at this hand-off
+                          lint only, the command of the head's checks-mutate-guard job (CI step "Guard mutation test") in that same worktree, after a passing lint.
                           It FAILs on any survivor, on any wrong-cause or unknown mutant (as CI does), on a run past that job's
                           timeout-minutes, on a command that cannot start, on a report it cannot read at any exit, and on a tally at a
                           nonzero exit (a table is judged by its counts, not its exit code). It prints its wall time and killed,
                           survived and unknown counts, on the PASS line or in the FAIL text. Extra cost, only then: one run of that
-                          command (11 to 16 min, a reviewer's figure, unmeasured); on any other head, one `git diff --name-only`.
+                          command (11 to 16 min, a reviewer's figure, unmeasured); on any other head, one `git diff --name-only`. The batch head's
+                          lint (--batch-build --ready) starts no mutation test run: CI runs that job on the batch head. It prints "mutation test
+                          run skipped here: it runs at the lane's hand-off lint" when the diff touches a mutation test file.
   merge --idle-lanes --live FILE
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
@@ -3054,6 +3056,7 @@ def ci_job_run(wt, *args, notes=None):
 
 MUTATE_JOB, MUTATE_STEP = "checks-mutate-guard", "Guard mutation test"  # the job and step of checks.yml whose run: line and timeout-minutes the lint reads at the head
 MUTATE_TEST_FILE = re.compile(r"hooks/mutate_[^/]*\.(?:py|mjs)")
+MUTATE_SKIPPED = "mutation test run skipped here: it runs at the lane's hand-off lint"  # the batch head prints this where the run would start
 
 def mutate_report_counts(out):
     """-> (killed, survived, unknown, unread, tally, wrong) of a mutation test run's stdout, or None when it holds no report. Two forms: the per-file
@@ -3121,7 +3124,7 @@ def mutate_run_check(wt):
         failures.append("the run's own tally: " + re.search(r"^\d+ of \d+ mutations killed \(.*\)\s*$", out, re.M).group(0).strip())
     return f"mutation test run {wall} s, killed {killed}, survived {survived}, unknown {unknown}, {'fail' if failures else 'pass'}", failures
 
-def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
+def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), mutate_run=True):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
     A target of digits is a PR number: its head and base come from the PR, and a stacked PR (base other than main) whose head lacks its base's head stops first.
@@ -3132,7 +3135,9 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
     A FAIL above, and exit 1 of ci-job (a FAIL), refuse always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
     A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names.
     A PASS on a pull request number posts the lane-lint comment (lint_body) naming the head it read, which `--reviewed` and the join require; a failed post
-    prints a reason line and still exits 0. A FAIL, an unknown and a ref or commit target post nothing."""
+    prints a reason line and still exits 0. A FAIL, an unknown and a ref or commit target post nothing.
+    A head whose diff touches a mutation test file runs the mutation test only for `mutate_run` (the hand-off caller, `--lane-lint`). The batch head's
+    caller passes False: the lane's hand-off lint already ran it, and CI runs the job on the batch head. It prints MUTATE_SKIPPED instead."""
     if target.isdigit():
         host = host or Host(cwd=root)
         n = int(target)
@@ -3162,19 +3167,24 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
         if fails or stop:  # as on main, a counted FAIL or an unknown ends the run before the ci-job
             raise Stop("\n".join([*([f"the lint of {head[:9]} against {base} FAILs:", *fails] if fails else []), stop if stop else LANE_LINT_REMEDY]))
         state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes)
-        mutate, mutate_fails = "", []
+        mutate, mutate_fails, skipped = "", [], False
         if state == "pass" or (liftable and unknown_ok.strip()):  # a lint that fails or stays unknown stops without the run's minutes
             c, changed = git(root, "diff", "--no-renames", "--name-only", f"origin/{base}...{head}")  # no renames: a moved file lists its old path too, as CI's scope reads it
             if c:  # no merge base to list from (the clash check above reads an unrelated history as unknown, so this is a rare read failure): unknown, never a guess
                 raise Stop(f"cannot list the files the head changes against {base}: {changed} {LANE_LINT_REMEDY}")
             if any(MUTATE_TEST_FILE.fullmatch(f) for f in changed.splitlines()):
-                mutate, mutate_fails = mutate_run_check(wt)
+                if mutate_run:
+                    mutate, mutate_fails = mutate_run_check(wt)
+                else:
+                    skipped = True
     finally:
         drop_worktree(root, tmp, wt)
     short = head[:9]
     if mutate_fails:
         raise Stop("\n".join([f"the lint of {short} against {base} FAILs: the diff touches a mutation test file, and its {mutate}:", *mutate_fails, LANE_LINT_REMEDY]))
     report_lines = ["merge: clashes with other PRs that this lint does not count (report only):", *reports] if reports else []
+    if skipped and (state == "pass" or (liftable and unknown_ok.strip())):
+        say(MUTATE_SKIPPED)
     if state == "pass":
         named = f" ({len(lines)} CI step{'s' if len(lines) != 1 else ''} skipped: {', '.join(lines)})" if lines else ""
         tail = "The batch runner may take this head, or join it to a batch." if target.isdigit() else "No comment is posted for a ref or commit, so this does not satisfy the join."
@@ -4967,7 +4977,7 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", co
     if ready:
         cfg = load_config(root, base, config, " " + FREEZE_CITE)  # before the lint: a config that cannot be read stops the run before the 14 minutes
         try:
-            lane_lint(root, branch, h, base, unknown_ok)  # the one lint of the batch head: a build never lints, a lane's own lint is not repeated
+            lane_lint(root, branch, h, base, unknown_ok, mutate_run=False)  # the one lint of the batch head: a build never lints, a lane's own lint is not repeated, and the mutation test run is not either
             batch_ready_checks(root, cfg, pr, name, branch, base)  # a FAIL here blames by the same path as a lint FAIL
         except LintFail as e:
             blamed = blamed_lanes(root, e, heads, base)
