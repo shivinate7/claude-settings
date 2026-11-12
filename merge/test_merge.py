@@ -130,6 +130,11 @@ CONFIG = {
 def record(id_, slug):
     return f"---\nid: {id_}\nslug: {slug}\ntitle: {slug.title()}\n---\nbody\n"
 
+def complete_config(**fields):
+    """CONFIG with a complete merge block (requiredChecks set), so no defaults notice prints on the base; `fields` replace its merge keys.
+    CONFIG itself leaves requiredChecks out, and the notice is printed above the stop line a case reads."""
+    return json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=["checks"], **fields)))
+
 class FakeHost:
     """The GitHub half, scripted. `other` is a second clone that plays a competing pusher and the merger."""
     built = True
@@ -137,7 +142,7 @@ class FakeHost:
 
     def __init__(self, root, other, branch="feat"):
         self.root, self.other, self.branch = root, other, branch
-        self.checks, self.refuse, self.on_wait = (True, ""), None, None
+        self.checks, self.refuse, self.on_wait, self.on_claim = (True, ""), None, None, None  # on_claim: fires once after the claim push, wait or no wait
         self.head_override, self.mergeable = None, "MERGEABLE"
         self.pr_state = "OPEN"
         self.draft = False
@@ -199,7 +204,7 @@ class FakeHost:
 
     def wait_checks(self, n, sha, d, prior=None):
         self.waits.append((sha, prior))
-        if prior is not None and self.on_wait:  # on_wait plays the rival during the wait after the claim push
+        if prior is not None and self.on_wait:  # on_wait: a case whose premise is the wait itself. A claim-time hook is on_claim
             self.on_wait()
         return self.seq.pop(0) if self.seq else self.checks
 
@@ -351,18 +356,6 @@ class RepoDirRuns:
         sh(checkout, "git", "fetch", "-q", "origin")
         return sh(checkout, "git", "log", "origin/main", "--format=%s")
 
-def wait_sites(src):
-    """-> (count, in_loop) over the `wait_checks` calls in a Python source. A call inside a for or while may run many
-    times, so a caller trusts the count only when in_loop is False."""
-    found = []
-    def walk(node, looped):
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute) and child.func.attr == "wait_checks":
-                found.append(looped)
-            walk(child, looped or isinstance(child, (ast.For, ast.While, ast.AsyncFor)))
-    walk(ast.parse(src), False)
-    return len(found), any(found)
-
 class PipeOut(io.TextIOWrapper):
     """A Windows stdout piped to a reader (no PYTHONUTF8): cp1252, errors strict. getvalue() reads back what the pipe got."""
     def __init__(self):
@@ -434,12 +427,57 @@ class Env(unittest.TestCase):
         self.host = FakeHost(self.co, self.other)
         self.lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)  # a retry pause is a no-op: a test never sleeps
         self.addCleanup(lambda: os.environ.pop("MERGE_TEST_HOOK", None))
+        self.claim_fired = [False]  # one claim per run: reset by run_merge
+        self.claim_push_fires_on_claim()
+
+    def claim_push_fires_on_claim(self):
+        """Patch merge.git so that the claim push of a run fires the host's on_claim hook, once per run, right after the push succeeds.
+        A hook that moves the rival, the base, or a tree runs there, after the claim and before the merge's own reads, whether or not the
+        merge waits on a check. Each push is the real git call; a case that patches merge.git captures this wrapper as its real call."""
+        real = merge.git
+        def git(cwd, *a, **k):
+            c, out = real(cwd, *a, **k)
+            host = getattr(self, "host", None)
+            if (not c and a[:2] == ("push", "-q") and not self.claim_fired[0] and getattr(host, "on_claim", None)
+                    and f"HEAD:refs/heads/{getattr(host, 'branch', None)}" in a):
+                self.claim_fired[0] = True
+                host.on_claim()
+            return c, out
+        patch = unittest.mock.patch.object(merge, "git", git)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def merge_tree_faults(self, fault, after_claim=False):
+        """Every merge-tree call of the run returns `fault` instead: a (rc, out) pair, or an exception to raise. Both seams a merge-tree
+        can take are patched once per test, merge.git and merge.sh (the sh that merge_tree calls); a second call changes the fault only.
+        after_claim: only the calls made once this run's claim push has fired, the read the merge makes after its claim."""
+        self.tree_fault = (fault, after_claim)
+        if getattr(self, "tree_hooked", False):
+            return
+        self.tree_hooked = True
+        def faulted(argv):
+            fault, after = self.tree_fault
+            if fault is None or "merge-tree" not in argv or (after and not self.claim_fired[0]):
+                return False
+            if isinstance(fault, BaseException):
+                raise fault
+            return True
+        real_git, real_sh = merge.git, merge.sh
+        def git(cwd, *a, **k):
+            return self.tree_fault[0] if faulted(a) else real_git(cwd, *a, **k)
+        def sh(args, *a, **k):
+            return self.tree_fault[0] if faulted(args) else real_sh(args, *a, **k)
+        for name, fn in (("git", git), ("sh", sh)):
+            patch = unittest.mock.patch.object(merge, name, fn)
+            patch.start()
+            self.addCleanup(patch.stop)
 
     def run_merge(self, *args, host=None, lock=None, stdout=None, stderr=None, hosts=None, cwd=None):
         """-> (rc, stdout + stderr). Pass a StringIO as stderr to read the error stream on its own afterwards. `hosts` is the --root seam, one
         Host per --root string. It is passed only when merge.main takes it: on a main without it, argparse refuses --root first.
         `cwd` is the clone merge runs in; self.co when not given."""
         out, err = stdout or io.StringIO(), stderr or io.StringIO()
+        self.claim_fired[0] = False  # this run's claim push may fire the hook once
         prior = os.getcwd()
         os.chdir(cwd or self.co)
         seam = {"hosts": hosts} if hosts is not None and "hosts" in inspect.signature(merge.main).parameters else {}
@@ -540,23 +578,6 @@ class Flow(Env):
         self.host.state = "red: checks: fail"
         rc, out = self.run_merge("7")
         self.assertIn("head checks: red: checks: fail", out)
-
-    def test_the_lock_outlives_every_wait_one_run_can_take(self):
-        # Each wait_checks call site in merge.py is one wait, and none sits in a loop, so one run takes at most one wait per
-        # site: the head, the claim, the merge commit. Limit: a helper that wraps wait_checks and is called N times undercounts.
-        with open(merge.__file__, encoding="utf-8") as f:
-            sites, looped = wait_sites(f.read())
-        self.assertGreater(sites, 0)
-        self.assertFalse(looped, "a wait_checks call sits in a loop, so the site count is no bound")
-        d = merge.MERGE_DEFAULTS["deadlineMinutes"]  # the code's default deadline, set in the base config as the tool reads it
-        put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deadlineMinutes=d))))
-        ttls = []
-        acquire = self.lock.acquire
-        self.lock.acquire = lambda b, ttl: (ttls.append(ttl), acquire(b, ttl))[1]
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 0, out)
-        need = sites * d * 60
-        self.assertGreaterEqual(ttls[0], need, "lock ttl %d s; %d waits of %d min need %d s" % (ttls[0], sites, d, need))
 
     def test_head_red_claims_nothing_pushes_nothing_and_frees_the_lock(self):
         before = self.refs()
@@ -888,7 +909,7 @@ class ConfirmHead(Env):
 
     def test_a_head_that_moves_between_the_compare_and_the_put_merges_nothing(self):
         relayed = self.head()
-        self.host.on_wait = self.competitor_push  # the rival lands in the wait after the claim push: after every compare, before the PUT
+        self.host.on_claim = self.competitor_push  # the rival lands right after the claim push: after every compare, before the PUT
         rc, out, err = self.run_args("7", "--confirm", "--head", relayed)
         self.assertNotEqual(rc, 0, out + err)
         self.assertFalse(getattr(self.host, "merged", False), "the PUT merged a head that moved after the compare")
@@ -1497,7 +1518,7 @@ class Guards(Env):
             sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
             put(os.path.join(o, "docs/decisions/third.md"), record("D-002", "third"))
             sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "base takes D-002"); sh(o, "git", "push", "-q", "origin", "main")
-        self.host.on_wait = base_takes_d2
+        self.host.on_claim = base_takes_d2
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1)
         self.assertIn("stale", out)
@@ -1505,7 +1526,7 @@ class Guards(Env):
 
     def test_a_failed_base_fetch_stops_the_merge_and_never_checks_a_stale_base(self):
         self.host.merged = False
-        self.host.on_wait = lambda: sh(self.co, "git", "remote", "set-url", "origin", os.path.join(self.t, "gone.git"))
+        self.host.on_claim = lambda: sh(self.co, "git", "remote", "set-url", "origin", os.path.join(self.t, "gone.git"))
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1)
         self.assertIn("cannot fetch origin main", out)
@@ -1525,7 +1546,7 @@ class Guards(Env):
 
     def test_a_base_that_moves_during_the_wait_reverts_the_claim_and_merges_nothing(self):
         self.host.merged = False
-        self.host.on_wait = self.main_moves
+        self.host.on_claim = self.main_moves
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)
         self.assertIn("does not hold origin/main", out)
@@ -1592,9 +1613,9 @@ sys.exit(1 if os.path.exists(path) and "BROKEN" in open(path, encoding="utf-8").
 '''
 
 class SmallBaseMove(Env):
-    """The base-move cases that stay under the per-lane merge (act 4, owner 09:48 CST Nov 12): a conflicting base is refused, an unreadable
-    merge base is refused, and a read that fails after the claim push stops unknown and keeps the claim. The small-move suite run is removed,
-    so the cases that pinned it are retired; their table is in the commit message."""
+    """The base-move cases under the per-lane merge (act 4, owner 09:48 CST Nov 12): a conflicting base is refused, a merge-tree read that
+    cannot run before the claim is unknown, and a merge-tree read that cannot run after the claim push stops unknown and keeps the claim. The
+    small-move suite run is removed, so the cases that pinned it are retired; their table is in the commit message."""
 
     @classmethod
     def setUpClass(cls):
@@ -1650,71 +1671,46 @@ class SmallBaseMove(Env):
         self.on("main", {"docs/shared.md": "one\nmain\n"})
         self.refused()
 
-    def test_an_unreadable_merge_base_is_refused(self):
+    def test_an_unreadable_merge_tree_before_the_claim_is_unknown_and_claims_nothing(self):
+        """Re-point of the unreadable merge base (decision merge-needs-current-base, the per-lane read): the head is read against main's tip
+        with merge-tree, and a read that cannot run before the claim is unknown, with nothing pushed."""
         self.scoped()
-        self.on("main", {"docs/guide.md": "# Guide\n"})
-        real = merge.git
-        def git(cwd, *a, **k):
-            if a and a[0] == "merge-base" and "--is-ancestor" not in a:
-                return 128, "fatal: no merge base"
-            return real(cwd, *a, **k)
-        with unittest.mock.patch.object(merge, "git", git):
-            self.refused()
-
-    def move_main_after_the_claim(self, claimed, move=None):
-        """Main moves during the wait, after the claim push, so the green run needs the small-move proof. move: the push (default a docs-only commit)."""
-        def on_wait():
-            claimed.append(self.head())
-            (move or (lambda: self.on("main", {"docs/guide.md": "# Guide\n"})))()
-        self.host.on_wait = on_wait
-
-    def base_read_fails_after_the_claim(self, matches, cause, move=None):
-        """A git read in the small-move proof fails after the claim push: `matches(args)` picks it. The stop is unknown, keeps the claim and names `cause`."""
-        claimed = []
-        self.move_main_after_the_claim(claimed, move)
-        real = merge.git
-        def git(cwd, *a, **k):
-            if claimed and matches(a):
-                return 128, "fatal: unreadable"
-            return real(cwd, *a, **k)
-        with unittest.mock.patch.object(merge, "git", git), tempfiles_in_run_folder():
-            rc, out = self.run_merge("7", "--confirm")
-        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
-        self.assertIn(cause, out, "the stop does not name the read that could not run")
+        self.on("main", {"docs/guide.md": "# Guide\n"})  # main moved: the head lacks its tip, so the merge is read against it
+        before = self.refs()
+        self.merge_tree_faults((128, "fatal: unreadable"))
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertRegex(out.lower(), r"unknown", "the stop does not say the result is unknown")
+        self.assertEqual(self.refs(), before, "something was pushed for a read that could not run")
         self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
 
-    def test_a_merge_of_the_base_that_fails_without_a_conflict_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
-        self.scoped()
-        claimed = []
-        self.move_main_after_the_claim(claimed)
-        real = merge.git
-        def merge_fails(cwd, *a, **k):
-            if claimed and "Merge origin/main to read the lints" in a:  # the merge the lints run on: it fails, and no file conflicts
-                return 128, "fatal: unable to write new index file"
-            return real(cwd, *a, **k)
-        with unittest.mock.patch.object(merge, "git", merge_fails), tempfiles_in_run_folder():
-            rc, out = self.run_merge("7", "--confirm")
-        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
-        self.assertIn("does not merge cleanly", out, "the stop does not name the merge that failed")
-        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
-
-    def test_the_merge_base_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
-        self.base_read_fails_after_the_claim(lambda a: a[:1] == ("merge-base",), "the merge base cannot be read")
-
-    def test_the_worktree_head_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
-        self.base_read_fails_after_the_claim(lambda a: a == ("rev-parse", "HEAD"), "the worktree's HEAD cannot be read")
-
-    def test_the_trees_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
-        def empty_main_commit():  # main moves by a commit that changes no path, so the proof reads the trees of its commits
-            o = self.other
-            sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
-            sh(o, "git", "commit", "-q", "--allow-empty", "-m", "main: an empty commit"); sh(o, "git", "push", "-q", "origin", "main")
-        self.scoped()
-        self.base_read_fails_after_the_claim(lambda a: a[:2] == ("log", "--format=%T"), "the trees of main's commits since the merge base cannot be read",
-                                             move=empty_main_commit)
+    def test_a_merge_tree_after_the_claim_push_that_cannot_run_stops_unknown_and_keeps_the_claim(self):
+        """Re-point of the base reads the small-move proof made after its claim: a merge of the base that fails, the merge base, the worktree
+        HEAD, the trees of main's commits. The per-lane merge reads the head against main's tip with merge-tree after the claim, so each way
+        that read can fail is one subtest: the stop is unknown, the claim stays, and nothing is merged."""
+        faults = (("exit 128", (128, "fatal: unreadable")),
+                  ("exit 1 with no CONFLICT line", (1, "")),  # a failed merge that names no conflict is unknown, not a refusal (the old merge-that-fails case)
+                  ("OSError", OSError(5, "Input/output error")),
+                  ("timeout", subprocess.TimeoutExpired(["git", "merge-tree"], 30)),
+                  ("any other error, RuntimeError", RuntimeError("boom")))  # the old any-error-after-the-push case, which the wait used to carry
+        for name, fault in faults:
+            with self.subTest(read=name):
+                self.setUp()
+                self.scoped()
+                self.on("main", {"docs/guide.md": "# Guide\n"})  # main moved: the head lacks its tip, so the merge is read against it
+                claimed = []
+                self.host.on_claim = lambda: claimed.append(self.head())
+                self.merge_tree_faults(fault, after_claim=True)
+                with tempfiles_in_run_folder():
+                    rc, out = self.run_merge("7", "--confirm")
+                assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
+                self.assertNotIn("Traceback", out)
+                self.assertEqual(self.worktrees(), 1, "a worktree was left after the stop")
+                self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
 
     def test_a_real_conflict_with_the_base_is_still_a_refusal(self):
-        """Main and the batch both change the records page, which the shared-path check leaves out, so git conflicts. A refusal that names the merge, never unknown."""
+        """Main and the batch both change the records page. Re-point of the small-move call: the per-lane read is merge-tree of the head
+        against main's tip, and it names the conflicted page. A conflict is a result, never unknown."""
         repo, _ = self.batch_repo()
         page = os.path.join(*merge.RECORDS_PAGE.split("/"))
         sh(repo, "git", "checkout", "-q", "main"); put(os.path.join(repo, page), "main\n")
@@ -1722,11 +1718,9 @@ class SmallBaseMove(Env):
         sh(repo, "git", "checkout", "-q", "n"); put(os.path.join(repo, page), "batch\n")
         sh(repo, "git", "add", "-A"); sh(repo, "git", "commit", "-qm", "batch page")
         n_head = sh(repo, "git", "rev-parse", "HEAD")
-        with tempfiles_in_run_folder():
-            ok, why = merge.small_base_move(repo, "main", n_head)
-        self.assertFalse(ok, why)
-        self.assertNotIsInstance(why, merge.UnreadText, why)
-        self.assertIn("does not merge cleanly", why)
+        state, _, files = merge.merge_tree(repo, "main", n_head)
+        self.assertEqual(state, "conflict", (state, files))
+        self.assertIn(merge.RECORDS_PAGE, files)
 
 class PerLaneMerge(Env):
     """Per-lane merge (rule M3): a head that is green on its own base and merges cleanly with main's tip merges. No small-move suite run,
@@ -1749,6 +1743,7 @@ class PerLaneMerge(Env):
         self.push_on("main", self.FIRST.replace("body\n", "body on main\n"), "main: body")
 
     def test_a_green_head_behind_main_by_a_clean_merge_of_a_shared_path_merges_with_no_wait(self):
+        put_base_config(self, complete_config())  # first: head_takes_base then brings the config into feat, which the head edit builds on
         self.feat_edits_the_title()  # the head changes first.md's title
         self.main_edits_the_body()  # main changes first.md's body: a shared path, two hunks, a clean merge
         rc, out = self.run_merge("7", "--confirm")
@@ -1757,6 +1752,7 @@ class PerLaneMerge(Env):
         self.assertEqual(self.host.waits, [], "the head or its claim was waited on under the lock: %s" % (self.host.waits,))
 
     def test_a_green_head_behind_main_by_a_move_in_other_paths_merges_with_no_wait(self):
+        put_base_config(self, complete_config())  # the base's config is complete, so no defaults notice precedes the stop line
         self.main_moves()  # main gains elsewhere.txt, a path no lane touches
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)  # scope first: the merge landed
@@ -3035,19 +3031,8 @@ class AfterPush(Env):
         for name, hook, check in cases:
             with self.subTest(gone=name):
                 self.setUp()
-                self.host.on_wait = hook
+                self.host.on_claim = hook
                 check(*self.run_merge("7", "--confirm"))
-
-    def test_any_error_after_the_push_keeps_the_claim_and_says_unknown(self):
-        claimed = []
-        def boom():
-            claimed.append(self.head())  # the claim is on origin when the wait starts
-            raise RuntimeError("boom")
-        self.host.on_wait = boom
-        rc, out = self.run_merge("7", "--confirm")
-        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
-        self.assertNotIn("Traceback", out)
-        self.assertEqual(self.worktrees(), 1)
 
     def test_an_error_in_the_merge_call_reverts_the_claim(self):
         def boom(*a):
@@ -3057,7 +3042,7 @@ class AfterPush(Env):
 
     def test_the_tree_is_locked_while_the_run_waits(self):
         seen = []
-        self.host.on_wait = lambda: seen.append(sh(self.co, "git", "worktree", "list", "--porcelain"))
+        self.host.on_claim = lambda: seen.append(sh(self.co, "git", "worktree", "list", "--porcelain"))
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertIn("locked", seen[0])
@@ -3070,11 +3055,11 @@ def route_of(args):
 def assert_unknown_stop_keeps_the_claim(test, rc, out, claim):
     """A read that could not run after the claim push: the claim stays, nothing is pushed after it, and the one stop says the result is unknown and to rerun.
     Only a proven refusal reverts a claim (decision standing-merge-grant)."""
+    test.assertEqual(rc, 1, out)  # the scope first: a run that merged or refused is named here, before the branch reads below, which fail once it is deleted
     test.assertIsNotNone(claim, "the claim was never pushed, so this case proves nothing about it:\n" + out)
     test.assertNotIn("reverted on", out, "a claim was reverted for a read that could not run")
     test.assertNotIn("id: pending", test.show("feat", "docs/decisions/second.md"), "the claim's record is pending on feat: the claim was reverted")
     test.assertEqual(test.head(), claim, "feat moved after the claim push: something pushed or reverted")
-    test.assertEqual(rc, 1, out)
     test.assertRegex(out.lower(), r"unknown", "the stop does not say the result is unknown")
     test.assertRegex(out.lower(), r"re-?run|run again", "the stop does not say to rerun merge")
     test.assertFalse(test.lock_ref(), "the merge lock was left on origin")
@@ -3091,14 +3076,18 @@ class ClaimSurvivesUnknown(Env):
     """A read that could not run after the claim push keeps the claim, on the fake host. Only a proven refusal reverts it (standing-merge-grant)."""
 
     def unknown_at_the_claim_wait(self, error):
-        """The claim's wait raises `error`: the claim is pushed, then the read after it is unknown. -> (rc, out, the claim's sha)."""
+        """The stamp check that reads the base after the claim push raises `error`: the claim is pushed, then the read after it is unknown.
+        The check is a record check, which the per-lane merge keeps, so the fault holds on the old and the new code alike. -> (rc, out, the claim's sha)."""
         claimed = []
-        def unknown():
-            claimed.append(self.head())
-            raise error
-        self.host.on_wait = unknown
-        rc, out = self.run_merge("7", "--confirm")
-        self.host.on_wait = None  # the rerun waits on its own terms, not on this read
+        self.host.on_claim = lambda: claimed.append(self.head())
+        real = merge.node_stamp
+        def check_raises(wt, cfgrel, mode, base):
+            if claimed and mode == "check":
+                raise error
+            return real(wt, cfgrel, mode, base)
+        with unittest.mock.patch.object(merge, "node_stamp", check_raises), tempfiles_in_run_folder():
+            rc, out = self.run_merge("7", "--confirm")
+        self.host.on_claim = None  # the rerun runs on its own terms, not on this read
         return rc, out, (claimed[0] if claimed else None)
 
     def merge_main_onto_feat(self):
@@ -3110,7 +3099,7 @@ class ClaimSurvivesUnknown(Env):
 
     def test_an_unknown_base_check_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
         claimed = []
-        self.host.on_wait = lambda: claimed.append(self.head())
+        self.host.on_claim = lambda: claimed.append(self.head())
         real = merge.node_stamp
         def check_unknown(wt, cfgrel, mode, base):
             if claimed and mode == "check":  # the base check prove() makes after the claim push
@@ -3121,20 +3110,10 @@ class ClaimSurvivesUnknown(Env):
         assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
         self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
 
-    def test_a_failed_pulls_read_before_the_put_stops_unknown_and_keeps_the_claim(self):
-        claimed = []
-        def read_fails_after_the_claim():
-            claimed.append(self.head())
-            self.host.batch_error = merge.Stop("reading pulls from GitHub failed: boom")  # the pre-PUT batch read, after the claim push
-        self.host.on_wait = read_fails_after_the_claim
-        rc, out = self.run_merge("7", "--confirm")
-        assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
-        self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
-
     def test_a_debt_check_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
         import check_debt_retire  # the lint the merge tool's debt check runs; its read fails below, only after the claim push
         claimed = []
-        self.host.on_wait = lambda: claimed.append(self.head())
+        self.host.on_claim = lambda: claimed.append(self.head())
         real_check = check_debt_retire.check
         def check_unknown(*a, **k):
             if claimed:  # prove() runs the debt check after the claim push
@@ -3148,7 +3127,7 @@ class ClaimSurvivesUnknown(Env):
 
     def test_a_holds_base_read_that_fails_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
         claimed = []
-        self.host.on_wait = lambda: claimed.append(self.head())
+        self.host.on_claim = lambda: claimed.append(self.head())
         real_ancestor = merge.ancestor
         def ancestor_unknown(cwd, tip, base):
             if claimed and base == claimed[0]:  # holds_base asks whether the claim holds the base tip: git cannot tell
@@ -3168,7 +3147,7 @@ class ClaimSurvivesUnknown(Env):
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertIn("resumed", out)
-        self.assertEqual([sha for sha, _ in self.host.waits[before:]], [claim], "the rerun waited on a head other than its claim: it pushed")
+        self.assertEqual(self.host.waits[before:], [], "the rerun waited under the lock on its own claim: a claim-only commit is a green head")
         self.assertEqual(self.claims("main"), 1, "the rerun claimed again")
 
     def test_a_rerun_over_a_merge_commit_on_its_claim_claims_nothing_and_pushes_nothing(self):
@@ -3180,17 +3159,21 @@ class ClaimSurvivesUnknown(Env):
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertIn("nothing to claim", out, "the rerun did not say it claims nothing")
-        self.assertEqual([sha for sha, _ in self.host.waits[before:]], [merged], "the rerun waited on a head other than its merge commit: it pushed")
+        self.assertEqual(self.host.waits[before:], [], "the rerun waited under the lock on its merge commit: it has no wait to make")
         self.assertEqual(self.claims("main"), 1, "the rerun claimed again")
 
-    def test_an_unknown_read_in_the_wait_of_a_rerun_over_a_merge_commit_stops_unknown_and_pushes_nothing(self):
+    def test_an_unknown_read_of_a_rerun_over_a_merge_commit_stops_unknown_and_pushes_nothing(self):
+        """Re-point of the unknown read in the rerun's wait (the wait is removed): the rerun's base check gives no answer, which is unknown."""
         rc, out, claim = self.unknown_at_the_claim_wait(merge.NetStop("the read after the claim push failed"))
         self.assertEqual(rc, 1, out)  # precondition: the first run stopped and left its claim on feat
         merged = self.merge_main_onto_feat()
-        def read_fails(n, sha, deadline, prior=None):
-            raise merge.Stop("reading the checks of #7 failed: boom")
-        self.host.wait_checks = read_fails
-        rc, out = self.run_merge("7", "--confirm")
+        real = merge.node_stamp
+        def check_unknown(wt, cfgrel, mode, base):
+            if mode == "check":
+                return 0, "UNKNOWN: the stamp could not read origin/main"
+            return real(wt, cfgrel, mode, base)
+        with unittest.mock.patch.object(merge, "node_stamp", check_unknown), tempfiles_in_run_folder():
+            rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)
         self.assertRegex(out.lower(), r"unknown", "the stop does not say the result is unknown")
         self.assertRegex(out.lower(), r"re-?run|run again", "the stop does not say to rerun merge")
@@ -3219,7 +3202,7 @@ class ClaimSurvivesUnknown(Env):
         def main_moves_during_the_wait():
             claimed.append(self.head())
             self.main_moves()
-        self.host.on_wait = main_moves_during_the_wait
+        self.host.on_claim = main_moves_during_the_wait
         real_git = merge.git
         def base_unreadable(cwd, *a, input=None):
             if claimed and a == ("rev-parse", "origin/main"):
@@ -3232,7 +3215,7 @@ class ClaimSurvivesUnknown(Env):
 
     def test_a_base_config_listing_that_cannot_run_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
         claimed = []
-        self.host.on_wait = lambda: claimed.append(self.head())
+        self.host.on_claim = lambda: claimed.append(self.head())
         real_git = merge.git
         def listing_unreadable(cwd, *a, input=None):
             if claimed and a[:3] == ("ls-tree", "--name-only", "origin/main"):
@@ -3245,7 +3228,7 @@ class ClaimSurvivesUnknown(Env):
 
     def test_a_base_config_read_that_cannot_run_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
         claimed = []
-        self.host.on_wait = lambda: claimed.append(self.head())
+        self.host.on_claim = lambda: claimed.append(self.head())
         real_git = merge.git
         def config_unreadable(cwd, *a, input=None):
             if claimed and a == ("show", "origin/main:.github/stamp.json"):
@@ -3258,7 +3241,7 @@ class ClaimSurvivesUnknown(Env):
 
     def test_a_records_merge_that_fails_without_a_conflict_after_the_claim_push_stops_unknown_and_keeps_the_claim(self):
         claimed = []
-        self.host.on_wait = lambda: claimed.append(self.head())
+        self.host.on_claim = lambda: claimed.append(self.head())
         real_git = merge.git
         def merge_fails_without_a_conflict(cwd, *a, input=None):
             if claimed and "--no-commit" in a:  # the records proof's merge: it fails, and leaves no unmerged file
@@ -3277,14 +3260,14 @@ class ClaimSurvivesUnknown(Env):
                 path = line[len("worktree "):] if line.startswith("worktree ") else ""
                 if path and os.path.realpath(path) != os.path.realpath(self.co):
                     shutil.rmtree(path)  # swept or cleaned: the merge tool's tree is gone before the base proof
-        self.host.on_wait = tree_swept
+        self.host.on_claim = tree_swept
         rc, out = self.run_merge("7", "--confirm")
         assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
         self.assertFalse(getattr(self.host, "merged", False), "the PUT was made")
 
     def test_an_os_error_from_the_merge_call_after_the_claim_push_stops_unknown_and_says_it_may_have_landed(self):
         claimed = []
-        self.host.on_wait = lambda: claimed.append(self.head())
+        self.host.on_claim = lambda: claimed.append(self.head())
         def merge_fails(*a):
             raise OSError(5, "Input/output error")
         self.host.merge = merge_fails
@@ -3294,7 +3277,7 @@ class ClaimSurvivesUnknown(Env):
 
     def test_a_timeout_from_the_merge_call_after_the_claim_push_stops_unknown_and_says_it_may_have_landed(self):
         claimed = []
-        self.host.on_wait = lambda: claimed.append(self.head())
+        self.host.on_claim = lambda: claimed.append(self.head())
         def merge_times_out(*a):
             raise subprocess.TimeoutExpired(["gh", "api"], 30)
         self.host.merge = merge_times_out
@@ -7065,7 +7048,7 @@ class DebtRetire(Env):
                 raise error
             return "success", run_head
         self.host.cited_run = read
-        self.host.on_wait = lambda: claimed.append(self.head())
+        self.host.on_claim = lambda: claimed.append(self.head())
         rc, out = self.run_merge("7", "--confirm")
         assert_unknown_stop_keeps_the_claim(self, rc, out, claimed[0] if claimed else None)
         self.assertIn("could not be read", out, "the stop does not name the cited run that could not be read")
@@ -7083,7 +7066,7 @@ class DebtRetire(Env):
         run_head = self.head()
         self.host.body = "Retire-run: retire-target -- https://github.com/fixture/repo/actions/runs/42\n"
         claimed = []
-        self.host.on_wait = lambda: claimed.append(self.head())
+        self.host.on_claim = lambda: claimed.append(self.head())
         self.host.cited_run = lambda url: ("failure", run_head) if claimed else ("success", run_head)
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)
@@ -9339,7 +9322,7 @@ class RecordsRebuild(RecordsEnv):
         # would hold a stale page, so the merge must not happen.
         self.claim_head({"debts/gap-one.md": DEBT_TEXT})  # resumed, so the page commit is pushed and the proof runs after its wait
         before = self.head()
-        self.host.on_wait = lambda: self.on("main", {"debts/rival-gap.md": DEBT_TEXT.replace("Gap one", "Rival gap")}, "untooled push")
+        self.host.on_claim = lambda: self.on("main", {"debts/rival-gap.md": DEBT_TEXT.replace("Gap one", "Rival gap")}, "untooled push")
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)
         self.assertIn("records page", out.lower())
@@ -9354,7 +9337,7 @@ class RecordsRebuild(RecordsEnv):
         # The page is fresh, but no run tested the head with main's new commit (merge-needs-current-base).
         self.claim_head({"debts/gap-one.md": DEBT_TEXT})  # resumed, so the page commit is pushed and the proof runs after its wait
         before = self.head()
-        self.host.on_wait = lambda: self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")
+        self.host.on_claim = lambda: self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)
         self.assertIn("does not hold origin/main", out)
@@ -12631,9 +12614,11 @@ class BatchRunningReads(unittest.TestCase):
         self.assertEqual(host.compare_reads, [])
 
 class BatchBrake(Env):
-    """confirm reads the other ready pull requests before anything is pushed, and again before the PUT. preview prints the read."""
+    """The batch brake (act 4 removes it): no read of the other ready pull requests holds a merge. Kept as the cases that the merge
+    goes through with another ready pull request's check pending, and with that read unreadable."""
 
     def test_confirm_merges_while_another_ready_pr_has_a_required_check_pending(self):
+        put_base_config(self, complete_config())  # the base's config is complete, so the first line out is the stop, not the defaults notice
         self.host.batch = [BATCH_BLOCKER]  # the brake is gone: another ready PR's pending check does not hold this merge
         rc, out = self.run_merge("1", "--confirm")
         self.assertEqual(rc, 0, out)
@@ -12647,6 +12632,7 @@ class BatchBrake(Env):
         self.assertTrue(getattr(self.host, "merged", False))
 
     def test_a_batch_that_goes_ready_during_the_head_wait_does_not_refuse_the_put(self):
+        put_base_config(self, complete_config())  # the base's config is complete, so the first line out is the stop, not the defaults notice
         host, wait = self.host, self.host.wait_checks
         def wait_then_ready(n, sha, d, prior=None):
             ok = wait(n, sha, d, prior)
@@ -12659,23 +12645,17 @@ class BatchBrake(Env):
         self.assertFalse(self.lock_ref())
 
     def test_an_unreadable_pulls_list_does_not_refuse_confirm(self):
+        put_base_config(self, complete_config())  # the base's config is complete, so the first line out is the stop, not the defaults notice
         self.host.batch_error = merge.Stop("reading pulls from GitHub failed: boom")  # the read was the brake's: with no brake, no read holds the merge
         rc, out = self.run_merge("1", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertTrue(getattr(self.host, "merged", False))
 
-    def test_preview_prints_a_batch_line_that_is_clear(self):
-        rc, out = self.run_merge("1")
-        lines = [l for l in out.splitlines() if l.startswith("  batch:")]
-        self.assertEqual(len(lines), 1, out)
-        self.assertIn("clear", lines[0])
-
-    def test_preview_prints_the_blocker_on_its_batch_line(self):
+    def test_preview_of_a_lone_lane_names_no_batch(self):
+        """A lane is its own merge (act 4): the preview prints no batch line, even while another ready pull request has a check pending."""
         self.host.batch = [BATCH_BLOCKER]
         rc, out = self.run_merge("1")
-        lines = [l for l in out.splitlines() if l.startswith("  batch:")]
-        self.assertEqual(len(lines), 1, out)
-        self.assertIn("#2", lines[0])
+        self.assertEqual([l for l in out.splitlines() if l.startswith("  batch:")], [], "the preview of a lone lane printed a batch line: " + out)
 
 ROLE_SESSION = "cse_role_check_test"
 OLD_PARSER_ERRORS = ("unrecognized arguments", "invalid int value")  # what merge.py's parser says to `--role` before the writer exists
@@ -13021,7 +13001,7 @@ class StandingGrantSwitch(CloudSession):
 
     def grant_text(self, **fields):
         """The base's .github/stamp.json: a complete merge block, so no defaults notice prints, with `fields` set."""
-        return json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], requiredChecks=["checks"], **fields)))
+        return complete_config(**fields)
 
     def grant_config(self, **fields):
         put_base_config(self, self.grant_text(**fields))
@@ -18045,6 +18025,17 @@ class DraftReady(CloudSession):
         self.assertEqual(self.host.readies, [101], "passing ready checks did not let the draft confirm mark #101 ready once: %s" % out)
         self.assertFalse(self.host.batch_pulls[101]["draft"], "#101 is still a draft after its checks passed: %s" % out)
         self.assertEqual(rc, 0, "a draft confirm with its checks passing exited %s: %s" % (rc, out))
+
+    def test_ready_alone_marks_a_lane_draft_ready_once_and_merges_nothing(self):  # per-lane, from the Q2 pick: --ready is not batch-only
+        self.lane(101)
+        self.host.batch_pulls[101]["draft"] = True
+        rc, out, err = self.run_args("101", "--ready")
+        self.assertEqual(rc, 0, "--ready alone on a lane draft exited %s: %s" % (rc, out + err))  # old code: --ready goes with --batch-build only
+        self.assertEqual(self.host.readies, [101], "--ready alone did not ask the host to mark #101 ready once: %s" % (out + err))
+        self.assertFalse(self.host.batch_pulls[101]["draft"], "#101 is still a draft after --ready: %s" % (out + err))
+        self.assertFalse(getattr(self.host, "merged", False), "--ready merged #101: %s" % (out + err))
+        self.run_args("101", "--ready")  # the second run finds #101 ready already
+        self.assertEqual(self.host.readies, [101], "a second --ready on a ready lane asked the host to mark it ready again")
 
 # `merge --touches [--run RUN_ID] [--case TEXT]... [--file PATH]...`: the open pull requests that already touch a failing case or a named file.
 # The incident's fixtures: red main run 42559512356 failed two brief-destructive-git cases, and open pull 2390 already fixes them.
