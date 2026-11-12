@@ -73,6 +73,11 @@ def keyless_text():
     return json.dumps({"kinds": {}})
 
 
+def list_only_text(entries=ENTRIES):
+    """An extras file that holds the protected-paths key and no "kinds" beside it."""
+    return json.dumps({"protected-paths": entries})
+
+
 def git(cwd, *args):
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
 
@@ -190,6 +195,12 @@ class Guarded(unittest.TestCase):
     def assertAllowed(self, body, label):
         decision, reason = self.guard(body)
         self.assertEqual(decision, "allow", "%s: want allow, got %s: %s" % (label, decision, reason[:200]))
+
+    def assertDeniedBy(self, body, rule, label):
+        """The guard denies `body`, and the deny names `rule`, so a control shows which rule is live."""
+        decision, reason = self.guard(body)
+        self.assertEqual(decision, "deny", "%s: want deny, got %s: %s" % (label, decision, reason[:200]))
+        self.assertTrue(reason.startswith(rule + ": "), "%s: the deny names another rule: %s" % (label, reason[:200]))
 
     def assertLive(self):
         """Scope before subject: a protected write in this repo is denied by protected-path, so the rule is live here."""
@@ -521,6 +532,195 @@ class FalseAlarms(Guarded):
 
     def test_git_show_of_a_protected_file_at_head_is_allowed(self):
         self.assertReadAllowed("git show HEAD:fixtures/a", "git show HEAD:fixtures/a")
+
+
+class ListOnlyExtras(Guarded):
+    """A repo whose extras file holds only the "protected-paths" key, with no "kinds" beside it, still enforces the list."""
+
+    def setUp(self):
+        super().setUp()
+        self.only = self.make_repo("only", list_only_text())
+
+    def test_a_bash_redirect_over_a_listed_file_is_denied(self):
+        self.assertLive()
+        self.assertDenied(self.shell("echo x > fixtures/a.csv", cwd=self.only),
+                          "echo x > fixtures/a.csv in the repo whose extras file holds only the list")
+
+    def test_a_write_to_a_listed_file_is_denied(self):
+        self.assertLive()
+        self.assertDenied(self.write("fixtures/a.csv", repo=self.only),
+                          "Write fixtures/a.csv in the repo whose extras file holds only the list")
+
+
+class FolderEntryWithoutSlash(Guarded):
+    """An entry that names a folder with no trailing slash protects the files in that folder. The verdict is what is
+    tested here, not the shape the guard reads the entry into."""
+
+    def setUp(self):
+        super().setUp()
+        self.bare = self.make_repo("bare", keyed_text([{"path": "fixtures", "why": WHY}]))
+
+    def test_a_write_to_a_file_in_the_folder_is_denied(self):
+        self.assertLive()
+        self.assertDenied(self.write("fixtures/a.csv", repo=self.bare),
+                          "Write fixtures/a.csv under the entry fixtures, which has no trailing slash")
+
+    def test_a_write_to_a_new_nested_file_in_the_folder_is_denied(self):
+        self.assertLive()
+        self.assertDenied(self.write("fixtures/x/y.csv", repo=self.bare),
+                          "Write fixtures/x/y.csv under the entry fixtures, which has no trailing slash")
+
+    def test_a_write_to_a_sibling_named_like_the_folder_is_allowed(self):
+        self.assertLive()
+        self.assertAllowed(self.write("fixturesX/a.csv", repo=self.bare),
+                           "Write fixturesX/a.csv under the entry fixtures, which has no trailing slash")
+
+
+class GitCheckoutWithoutDoubleDash(Guarded):
+    """`git checkout <path>` and `git checkout <tree> <path>`, with no `--`, overwrite the listed file as `-- <path>` does."""
+
+    def test_git_checkout_of_a_listed_file_without_double_dash_is_denied(self):
+        self.assertLive()
+        self.assertDenied(self.shell("git checkout fixtures/a.csv"), "git checkout fixtures/a.csv")
+
+    def test_git_checkout_from_a_tree_of_a_listed_file_without_double_dash_is_denied(self):
+        self.assertLive()
+        self.assertDenied(self.shell("git checkout HEAD fixtures/a.csv"), "git checkout HEAD fixtures/a.csv")
+
+
+class ExtrasFileIsTheListsLever(Guarded):
+    """A non-empty list protects the repo's own extras file, so a session cannot edit the list out from under the rule.
+    A repo with no list keeps that file writable, because the rule is off there."""
+
+    def test_a_write_to_the_extras_file_is_denied_when_the_list_is_not_empty(self):
+        self.assertLive()
+        self.assertDenied(self.write(EXTRAS_REL), "Write to %s in a repo whose list is not empty" % EXTRAS_REL)
+
+    def test_an_edit_of_the_extras_file_is_denied_when_the_list_is_not_empty(self):
+        self.assertLive()
+        self.assertDenied(self.write(EXTRAS_REL, tool="Edit"), "Edit of %s in a repo whose list is not empty" % EXTRAS_REL)
+
+    def test_a_bash_redirect_over_the_extras_file_is_denied_when_the_list_is_not_empty(self):
+        self.assertLive()
+        self.assertDenied(self.shell("echo x > %s" % EXTRAS_REL), "echo x > %s in a repo whose list is not empty" % EXTRAS_REL)
+
+    def test_a_write_to_the_extras_file_is_allowed_when_the_repo_keeps_no_list(self):
+        self.assertLive()
+        plain = self.make_repo("plain", keyless_text())
+        self.assertAllowed(self.write(EXTRAS_REL, repo=plain), "Write to %s in a repo with no protected key" % EXTRAS_REL)
+
+
+class MoreShellWriteVerbs(Guarded):
+    """Shell writes the rule still misses: sed's long in-place flag, a find that runs sed -i, and unlink, shred and sort -o.
+    Each one writes the listed file it names, so each is denied."""
+
+    def assertShellDenied(self, command):
+        self.assertLive()
+        self.assertDenied(self.shell(command), command)
+
+    def test_sed_with_the_long_in_place_flag_on_a_listed_file_is_denied(self):
+        self.assertShellDenied("sed --in-place s/a/b/ fixtures/a.csv")
+
+    def test_find_that_runs_sed_in_place_over_a_listed_folder_is_denied(self):
+        self.assertShellDenied("find fixtures -type f -exec sed -i s/a/b/ {} \\;")
+
+    def test_unlink_of_a_listed_file_is_denied(self):
+        self.assertShellDenied("unlink fixtures/a.csv")
+
+    def test_shred_of_a_listed_file_is_denied(self):
+        self.assertShellDenied("shred -u fixtures/a.csv")
+
+    def test_sort_output_onto_a_listed_file_is_denied(self):
+        self.assertShellDenied("sort -o fixtures/a.csv in.txt")
+
+
+# Forms the protected-path rule added to the shared write reader. Each runs in a repo with no protected list. The
+# template takes the builder's test path (`target`), a source file (`src`), the frozen guard (`frozen`) and its folder
+# (`frozen_dir`). Each form here is one origin/main allows for that rule (checked on origin/main, not assumed).
+BUILDER_SCOPE_FORMS = (
+    ("git_restore", "git restore {target}"),
+    ("git_checkout_double_dash", "git checkout -- {target}"),
+    ("git_checkout_tree_double_dash", "git checkout HEAD -- {target}"),
+    ("rsync", "rsync -a {src} {target}"),
+    ("find_delete", "find tests -name x.py -delete"),
+    ("find_exec_rm", "find tests -name x.py -exec rm {{}} +"),
+    ("find_exec_sed_in_place", "find tests -name x.py -exec sed -i s/a/b/ {{}} \\;"),
+    ("perl_in_place", "perl -pi -e s/a/b/ {target}"),
+    ("python_c_os_remove", "python3 -c \"import os; os.remove('{target}')\""),
+    ("python_heredoc_os_remove", "python3 - <<'EOF'\nimport os\nos.remove('{target}')\nEOF"),
+    ("unlink", "unlink {target}"),
+    ("python_c_rmtree", "python3 -c \"import shutil; shutil.rmtree('tests')\""),
+    ("python_c_path_unlink", "python3 -c \"from pathlib import Path; Path('{target}').unlink()\""),
+    ("touch", "touch {target}"),
+)
+FROZEN_SCOPE_FORMS = (
+    ("git_restore", "git restore {frozen}"),
+    ("git_checkout_double_dash", "git checkout -- {frozen}"),
+    ("rsync", "rsync -a {src} {frozen}"),
+    ("find_delete", "find {frozen_dir} -name guard.py -delete"),
+    ("find_exec_rm", "find {frozen_dir} -name guard.py -exec rm {{}} +"),
+    ("perl_in_place", "perl -pi -e s/a/b/ {frozen}"),
+    ("python_c_os_remove", "python3 -c \"import os; os.remove('{frozen}')\""),
+    ("unlink", "unlink {frozen}"),
+    ("python_c_rmtree", "python3 -c \"import shutil; shutil.rmtree('{frozen_dir}')\""),
+    ("python_c_path_unlink", "python3 -c \"from pathlib import Path; Path('{frozen}').unlink()\""),
+    ("touch", "touch {frozen}"),
+)
+
+
+class ScopeAllows(Guarded):
+    """With no protected list in the repo, the write forms the protected-path rule added leave builder-test-edit and
+    frozen-path as origin/main has them. Each form origin/main allows is allowed here, after a live control on the same
+    rule: a builder's Write to a test file, and a Write to the frozen guard under the config folder."""
+
+    def setUp(self):
+        super().setUp()
+        self.plain = self.make_repo("plain", keyless_text())
+        write_file(self.plain, "tests/x.py", "x = 1\n")
+        git(self.plain, "add", "-A")
+        git(self.plain, "-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-q", "-m", "tests")
+        self.frozen = os.path.join(self.cfg, "hooks", "guard.py")
+        write_file(self.cfg, "hooks/guard.py", "# the frozen guard\n")
+
+    def command(self, template):
+        return template.format(target="tests/x.py", src="src/app.py", frozen=self.frozen,
+                               frozen_dir=os.path.dirname(self.frozen))
+
+    def builder_body(self, command):
+        body = shell_body(command, self.plain)
+        body.update(agent_id="bld1", agent_type="builder")
+        return body
+
+    def assertBuilderLive(self):
+        body = tool_body("Write", os.path.join(self.plain, "tests", "x.py"), self.plain)
+        body.update(agent_id="bld1", agent_type="builder")
+        self.assertDeniedBy(body, "builder-test-edit", "scope control: a builder's Write to tests/x.py, no protected list")
+
+    def assertFrozenLive(self):
+        self.assertDeniedBy(tool_body("Write", self.frozen, self.plain), "frozen-path",
+                            "scope control: a Write to the frozen guard under the config folder")
+
+
+def _builder_scope_case(template):
+    def case(self):
+        self.assertBuilderLive()
+        command = self.command(template)
+        self.assertAllowed(self.builder_body(command), "builder-test: %s" % command)
+    return case
+
+
+def _frozen_scope_case(template):
+    def case(self):
+        self.assertFrozenLive()
+        command = self.command(template)
+        self.assertAllowed(shell_body(command, self.plain), "frozen-path: %s" % command)
+    return case
+
+
+for _name, _template in BUILDER_SCOPE_FORMS:
+    setattr(ScopeAllows, "test_builder_%s_is_allowed" % _name, _builder_scope_case(_template))
+for _name, _template in FROZEN_SCOPE_FORMS:
+    setattr(ScopeAllows, "test_frozen_%s_is_allowed" % _name, _frozen_scope_case(_template))
 
 
 if __name__ == "__main__":
