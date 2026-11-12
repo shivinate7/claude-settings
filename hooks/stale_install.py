@@ -31,6 +31,10 @@ import re
 import signal
 import subprocess
 import sys
+try:
+    import _nowindow  # the one home of a no-window child start; a flat hooks/ file
+except ImportError:  # the helper lands a moment after the hook in an install; a hook never dies for it
+    _nowindow = subprocess
 
 RECORD_NAME = ".claude-settings-install.json"
 SHORT = 7
@@ -120,7 +124,7 @@ def remote_tip(url, ref):
     """(sha, None), or (None, reason). One git ls-remote of the recorded ref."""
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
     try:
-        done = subprocess.run(["git", "ls-remote", url, "refs/heads/" + ref], capture_output=True, text=True,
+        done = _nowindow.run(["git", "ls-remote", url, "refs/heads/" + ref], capture_output=True, text=True,
                               timeout=fetch_timeout(), env=env)
     except subprocess.TimeoutExpired:
         return None, "the read of origin timed out"
@@ -138,7 +142,7 @@ def remote_tip(url, ref):
 def git_out(source, *args):
     """The text of one git command in the source clone, or None when it fails."""
     try:
-        done = subprocess.run(["git", "-C", source, *args], capture_output=True, text=True, timeout=fetch_timeout())
+        done = _nowindow.run(["git", "-C", source, *args], capture_output=True, text=True, timeout=fetch_timeout())
     except (OSError, subprocess.TimeoutExpired):
         return None
     return done.stdout if done.returncode == 0 else None
@@ -190,7 +194,7 @@ def reinstall(record):
     limit = install_timeout()
     env = dict(os.environ, CLAUDE_SETTINGS_REF=record["ref"], CS_HOOK_INPUT=INSTALL_HOOK_INPUT)
     try:
-        proc = subprocess.Popen(["bash", record["installer"], "--cloud"], stdin=subprocess.DEVNULL,
+        proc = _nowindow.Popen(["bash", record["installer"], "--cloud"], stdin=subprocess.DEVNULL,
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env,
                                 start_new_session=True)
     except OSError as err:
