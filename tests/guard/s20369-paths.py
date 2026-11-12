@@ -887,6 +887,19 @@ SHELL_TEST_WRITES = (
      "sed -i \"s/don't/x/;w tests/a.py\" src/app.py"),
     ("sed script on two lines, w command on line 2 writes tests/a.py",
      "sed -i 's/a/b/\nw tests/a.py' src/app.py"),
+    # With no -i, sed still writes a file through its w command and the w flag of s, so a test named
+    # there is a test write (decision builders-cannot-edit-tests). The -n and -e forms count too.
+    ("sed -n w command writes tests/a.py, no -i, on src/x.py", "sed -n 'w tests/a.py' src/x.py"),
+    ("sed s flag w writes tests/a.py, no -i, on src/x.py", "sed 's/a/b/w tests/a.py' src/x.py"),
+    ("sed -e w command on line 1 writes tests/a.py, no -i, on src/x.py", "sed -e '1w tests/a.py' src/x.py"),
+    ("sed -n w command after an address writes tests/a.py, no -i, on src/x.py",
+     "sed -n '/x/w tests/a.py' src/x.py"),
+    # A loop copies each test to a destination that a variable or a substitution builds. Main refuses
+    # such a copy, so the test in the source is refused too.
+    ("for loop over tests/*.py, cp of \"$f\" to /tmp/backup/$f",
+     "for f in tests/*.py; do cp \"$f\" \"/tmp/backup/$f\"; done"),
+    ("for loop over tests/*.py, cp of $f to /tmp/bak_$(basename $f)",
+     "for f in tests/*.py; do cp $f /tmp/bak_$(basename $f); done"),
 )
 for _name, _command in SHELL_TEST_WRITES:
     sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
@@ -902,6 +915,74 @@ for _path in MUTATION_TESTS:
     ):
         sh("builder-test: shell %s onto %s is refused" % (_form, _path), _command, "deny", rule=BT,
            carries=("test-author",), **BR)
+
+# A sed script is read as sed reads it: a real newline ends a line, a label (`b`, `t`, `T`, `:`) ends at
+# `;` or the line's end, and an in-place flag is any cluster of letters that holds an `i`.
+SED_FORM_WRITES = (
+    ("sed -i script with a real newline before a w on tests/a.py",
+     "sed -i '# n\nw tests/a.py' src/app.py"),
+    ("sed -i b label ended by ; then a w on tests/a.py", "sed -i 'bx;w tests/a.py' src/x"),
+    ("sed -i :label ended by ; then a w on tests/a.py", "sed -i ':a;w tests/a.py' src/x"),
+    ("sed -i t ended by ; then a w on tests/a.py", "sed -i 's/a/b/;t;w tests/a.py' src/x"),
+    ("bash -c sed -Ei on tests/a.py", 'bash -c "sed -Ei s/a/b/ tests/a.py"'),
+    ("sed -ie on tests/a.py", "sed -ie s/a/b/ tests/a.py"),
+    # The plain -i inside bash -c is already refused: the control for the -Ei form beside it.
+    ("bash -c sed -i on tests/a.py, plain -i", 'bash -c "sed -i s/a/b/ tests/a.py"'),
+)
+for _name, _command in SED_FORM_WRITES:
+    sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **BR)
+# SCANNER PINS (rule building-scanner-respects-strings) for the sed script walk: a # inside a quoted
+# script, a script over several lines, and a lone apostrophe in text. Each pin holds its verdict.
+sh("builder-test: scanner, a # inside a quoted sed script ahead of a sed -i on tests/a.py, is refused",
+   "sed -i 's/#x/y/' src/app.py; sed -i s/a/b/ tests/a.py", "deny", rule=BT,
+   carries=("test-author",), **BR)
+sh("builder-test: scanner, a # inside a quoted sed script on src/app.py, is allowed",
+   "sed -i 's/#x/y/' src/app.py", "allow", **BR)
+sh("builder-test: scanner, a multi-line sed script whose w line names tests/a.py, is refused",
+   "sed -i 's/a/b/\nw tests/a.py' src/app.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: scanner, a multi-line sed script on src/app.py, is allowed",
+   "sed -i '1i\\\nnote' src/app.py", "allow", **BR)
+sh("builder-test: scanner, a lone apostrophe in echo ahead of a sed -i on tests/a.py, is refused",
+   "echo don't; sed -i s/a/b/ tests/a.py", "deny", rule=BT, carries=("test-author",), **BR)
+# The same scanner pins for a sed with no -i, whose w command still names a test.
+sh("builder-test: scanner, a lone apostrophe in echo ahead of a no-i sed w on tests/a.py, is refused",
+   "echo don't; sed -n 'w tests/a.py' src/x.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: scanner, a multi-line no-i sed script whose w line names tests/a.py, is refused",
+   "sed -n 'p\nw tests/a.py' src/x.py", "deny", rule=BT, carries=("test-author",), **BR)
+# A # inside a quoted no-i sed script is text, so the w in the next command is still judged.
+sh("builder-test: scanner, a # in a quoted no-i sed script ahead of a no-i sed w on tests/a.py, is refused",
+   "sed -n 's/#x/y/' src/x.py; sed -n 'w tests/a.py' src/x.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: scanner, a # in a quoted no-i sed script on src/x.py, is allowed",
+   "sed -n 's/#x/y/' src/x.py", "allow", **BR)
+
+# A sed whose last word is a flag that takes a value has no value after it. The walk ends at that word, and
+# the write in the segment before it is still refused.
+for _flag in ("-e", "-f", "-l", "--expression"):
+    sh("builder-test: shell write, echo onto tests/test_a.py ahead of sed -n ending in %s, is refused" % _flag,
+       "echo x > tests/test_a.py ; sed -n " + _flag, "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell, sed -n -e p on src/x.py, is allowed", "sed -n -e p src/x.py", "allow", **BR)
+# A redirect word ahead of a sed script is a redirect, not the script: the file it names is written. A
+# redirect after the script is judged as before, and a redirect to a product file stays allowed.
+sh("builder-test: shell write, sed > tests/test_a.py ahead of its script, is refused",
+   "sed > tests/test_a.py p src/app.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell write, sed -n >tests/test_a.py glued ahead of its script, is refused",
+   "sed -n >tests/test_a.py p src/app.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell write, sed -n p with > tests/test_a.py after its script, is refused",
+   "sed -n p src/app.py > tests/test_a.py", "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell write, sed > src/out.txt ahead of its script, is allowed",
+   "sed > src/out.txt p src/app.py", "allow", **BR)
+# The e command runs the rest of its line as a command. A read command (cat) that names a test reads it, so
+# the call is allowed. A write command (touch) that names a test is still refused.
+sh("builder-test: shell, sed e command runs cat on tests/x, no -i, on src/app.py, is allowed",
+   "sed 'e cat tests/x' src/app.py", "allow", **BR)
+sh("builder-test: shell write, sed e command runs touch on tests/x, no -i, on src/app.py, is refused",
+   "sed 'e touch tests/x' src/app.py", "deny", rule=BT, carries=("test-author",), **BR)
+# Text after a, i or c is text, not a command: a line of it that begins with w names a test as text, and writes nothing.
+sh("builder-test: shell, sed a with a text line that names tests/x, on src/app.py, is allowed",
+   "sed '1a\\\nw tests/x' src/app.py", "allow", **BR)
+sh("builder-test: shell write, sed w command on its own line names tests/x, no -i, on src/x.py, is refused",
+   "sed -n '1p\nw tests/x' src/x.py", "deny", rule=BT, carries=("test-author",), **BR)
 
 # The reads, the writes to product code, the quoted and commented text, and the recovery forms stay allowed.
 SHELL_TEST_ALLOWS = (
@@ -953,12 +1034,6 @@ SHELL_TEST_ALLOWS = (
      "n=$(grep -c \"def test\" tests/*.py | tail -1); sed -i \"s/N/$n/\" README.md"),
     ("variable from wc -l of tests/a.py, sed -i on src/app.py",
      "x=$(wc -l tests/a.py); sed -i \"s/N/$x/\" src/app.py"),
-    # A loop copies each test out to a destination outside tests. The test is read, and nothing in
-    # tests is written.
-    ("for loop over tests/*.py, cp of \"$f\" to /tmp/backup/$f",
-     "for f in tests/*.py; do cp \"$f\" \"/tmp/backup/$f\"; done"),
-    ("for loop over tests/*.py, cp of $f to /tmp/bak_$(basename $f)",
-     "for f in tests/*.py; do cp $f /tmp/bak_$(basename $f); done"),
     # A whole substitution that reads tests is a read when it is the cp source: quoted, in backticks,
     # or as a process substitution.
     ("cp of a quoted find over tests into /tmp/x/", "cp \"$(find tests -name a.py)\" /tmp/x/"),
@@ -969,6 +1044,10 @@ SHELL_TEST_ALLOWS = (
     ("cp of a into /tmp/$(basename tests/a.py)", "cp a /tmp/$(basename tests/a.py)"),
     # A sed pattern that holds --in-place is text, and -n writes nothing: the file is only read.
     ("sed -n with --in-place in its pattern, on tests/a.py", "sed -n \"/--in-place/p\" tests/a.py"),
+    # The controls for the no-i w forms: a p command writes nothing, and a w flag that names a non-test file
+    # writes that file, which a builder may do.
+    ("sed -n p, no -i, on src/x.py", "sed -n 'p' src/x.py"),
+    ("sed s flag w writes out.txt, a non-test file, no -i, on src/x.py", "sed 's/a/b/w out.txt' src/x.py"),
     # Pins: a sed -f script file is read, an inserted or substituted test name is text, and the file
     # sed -i writes is src/app.py.
     ("sed -i -f reads tests/s.sed, on src/app.py", "sed -i -f tests/s.sed src/app.py"),
@@ -1068,6 +1147,10 @@ def _build_dotroot():
                         "main.py": "x = 1\n",
                         # hooks/ holds a test beside product code, as this repo's hooks/ folder does.
                         "hooks/test_a.py": "def test_a():\n    assert True\n", "hooks/guard.py": "x = 1\n",
+                        # merge/ holds a test, so a git listing of that folder names one.
+                        "merge/test_cmd.py": "def test_cmd():\n    assert True\n",
+                        # The pathspecs of the 2>&1 case in DOT_ROOT_WRITES: a test file, and a docs folder.
+                        "hooks/test_guard.py": "def test_guard():\n    assert True\n", "docs/notes.md": "notes\n",
                         # docs/ holds no test. Its gen.py is product code, so a walk of docs reads one file.
                         "docs/gen.py": "x = 1\n"})
 
@@ -1100,6 +1183,11 @@ DOT_ROOT_WRITES = (
     ("git ls-files ':!README.md' piped to xargs, sed -i", "git ls-files ':!README.md' | xargs sed -i s/a/b/"),
     # Pinned by shape, as the 2>/dev/null case above: the redirect word is no pathspec.
     ("git ls-files &>/dev/null piped to xargs, sed -i", "git ls-files &>/dev/null | xargs sed -i s/a/b/"),
+    # -x drops only untracked files (git ls-files --others), so the tracked merge/test_cmd.py is still listed.
+    ("git ls-files -x '*.py' of merge piped to xargs, sed -i", "git ls-files -x '*.py' merge | xargs sed -i s/a/b/"),
+    # A redirect before the pathspecs is no pathspec either: hooks/test_guard.py is one, and the listing names it.
+    ("git ls-files 2>&1 hooks/test_guard.py docs piped to xargs, sed -i",
+     "git ls-files 2>&1 hooks/test_guard.py docs | xargs sed -i s/a/b/"),
     # A shell glob target that matches a test in hooks/ is a test write, whatever folder the glob names.
     ("sed -i over the hooks/*.py glob", "sed -i s/a/b/ hooks/*.py"),
     ("perl -pi over the hooks/*.py glob", "perl -pi -e s/a/b/ hooks/*.py"),
@@ -1148,7 +1236,8 @@ sh("builder-test: shell write, git ls-files of src/*.py piped to xargs, sed -i, 
    "git ls-files 'src/*.py' | xargs sed -i s/a/b/", "allow", **DR)
 sh("builder-test: shell write, git ls-files of the src folder piped to xargs, sed -i, is allowed",
    "git ls-files src | xargs sed -i s/a/b/", "allow", **DR)
-# The exclude drops every *.py under src, and src holds no test, so the listing names no test.
+# -x drops only untracked files, so the listing still names the tracked src/app.py. It is product code, not a
+# test, so the sed -i is allowed.
 sh("builder-test: shell write, git ls-files -x '*.py' of src piped to xargs, sed -i, is allowed",
    "git ls-files -x '*.py' src | xargs sed -i s/a/b/", "allow", **DR)
 # A glob over src names product files only, since src holds no test.
@@ -1212,5 +1301,38 @@ for _name, _command in (
 # test in tests/, so the case is refused.
 sh("builder-test: shell write, cd tests then sed -i on ../src/app.py, is allowed",
    "cd tests && sed -i 's/a/b/' ../src/app.py", "allow", **DR)
+# A listing that prints tracked paths is read by its pathspecs. A redirect word is no pathspec, and a
+# glob pathspec is matched against the tracked tree (DOTROOT holds tests/test_a.py).
+for _name, _command in (
+    ("git ls-files with a redirect piped to xargs, sed -i", "git ls-files 2>/dev/null | xargs sed -i s/a/b/"),
+    ("git ls-files of a glob piped to xargs, sed -i", "git ls-files '*.py' | xargs sed -i s/a/b/"),
+):
+    sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **DR)
+# A -name pattern limits the `.` root: this find reads only *.md files, so it writes no test, though the
+# tree holds one.
+sh("builder-test: shell write, find . with -name *.md, -exec sed -i, in a tree with a test, is allowed",
+   "find . -name '*.md' -exec sed -i s/a/b/ {} +", "allow", **DR)
+# A -name pattern names the test files a find writes, under any folder it searches. `gsed` is GNU sed on
+# macOS, and it writes the same way.
+for _name, _command in (
+    ("find hooks with -name test_*.py, -exec sed -i", "find hooks -name 'test_*.py' -exec sed -i s/a/b/ {} +"),
+    ("find hooks with -name test_*.py, -exec sed -i ended by \\;",
+     "find hooks -name 'test_*.py' -exec sed -i s/a/b/ {} \\;"),
+    ("gsed -i on hooks/test_a.py", "gsed -i s/a/b/ hooks/test_a.py"),
+):
+    sh("builder-test: shell write, %s, is refused" % _name, _command, "deny", rule=BT,
+       carries=("test-author",), **DR)
+# A listing that drops the tests folder names product files only: the pathspec `:!tests`, and the -not -path
+# that drops tests/, leave xargs no test to feed sed -i. The same listing with no exclusion is refused.
+sh("builder-test: shell write, git ls-files :!tests piped to xargs, sed -i, is allowed",
+   "git ls-files ':!tests' | xargs sed -i s/a/b/", "allow", **DR)
+sh("builder-test: shell write, find . excluding tests by -not -path, piped to xargs, sed -i, is allowed",
+   "find . -name '*.py' -not -path './tests/*' | xargs sed -i s/a/b/", "allow", **DR)
+sh("builder-test: shell write, find . for *.py with no exclusion, piped to xargs, sed -i, is refused",
+   "find . -name '*.py' | xargs sed -i s/a/b/", "deny", rule=BT, carries=("test-author",), **DR)
+# sed -n only prints. The pattern names --in-place, which is no flag of this sed run, so nothing is written.
+sh("builder-test: shell read, sed -n over a pattern that names --in-place, is allowed",
+   "sed -n '/use --in-place/p' hooks/test_guard.py", "allow", **DR)
 
 # ---- the diff, judged at commit, push and SubagentStop

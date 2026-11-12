@@ -51,6 +51,23 @@ sh("frozen: sed -i on the config-watch baseline store", "sed -i '' s/a/b/ " + CF
 # stay one write.
 sh("frozen: sed -i with a newline in its quoted script, onto the frozen settings",
    "sed -i '1i\\\ntext' " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+# The in-place cluster forms of sed, which carry an uppercase flag or a suffix after the i. Each is one
+# write to a frozen file, as the plain `sed -i` above is.
+for _name, _command in (
+    ("sed -Ei on the frozen settings", "sed -Ei s/a/b/ " + CFG_SETTINGS),
+    ("sed -ie on the frozen settings", "sed -ie s/a/b/ " + CFG_SETTINGS),
+    ("bash -c sed -Ei on the frozen settings", 'bash -c "sed -Ei s/a/b/ ' + CFG_SETTINGS + '"'),
+):
+    sh("frozen: %s is refused" % _name, _command, "deny", "frozen-path", cwd=NOGIT)
+# A sed whose last word is a value flag ends its walk at that word. The frozen write in the next command is
+# still refused, and a sed -n read of the same file stays allowed.
+sh("frozen: echo onto the frozen settings alone is refused", "echo x > " + CFG_SETTINGS, "deny",
+   "frozen-path", cwd=NOGIT)
+for _flag in ("-e", "-f", "-l", "--expression"):
+    sh("frozen: sed -n ending in %s, then echo onto the frozen settings, is refused" % _flag,
+       "sed -n " + _flag + "; echo x > " + CFG_SETTINGS, "deny", "frozen-path", cwd=NOGIT)
+sh("frozen: sed -n -e p, a read of the frozen settings, is allowed", "sed -n -e p " + CFG_SETTINGS,
+   "allow", cwd=NOGIT)
 add("frozen: Read of the config-watch baseline store is allowed", "allow", tool="Read",
     cwd=NOGIT, file_path=CFG_STATE)
 # OWNER RULING 2026-10-17 11:40 CDT: `cp` FROM a frozen path to a path outside the frozen set only
