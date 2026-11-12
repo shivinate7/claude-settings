@@ -4,8 +4,8 @@
   "status": "doing",
   "order": 0.108,
   "owner": "coordinator",
-  "lane": "session_013NEJL3pjhuGumnmrJ5gvqd",
+  "lane": "session_013NEJL3vXxo5hourgVYaUZb",
   "why": "#1634 moved merge.py lines, so the merge judge flagged 7 lines of decision claims-carry-backing (54, 56-60, 88) as unbacked.",
   "note": "Coordinator 21:33 CST Nov 7; filed 21:33 CST. Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose, first wave.",
-  "updatedAt": "2026-11-11T20:42:00-06:00"
+  "updatedAt": "2026-11-11T22:50:00-06:00"
 }

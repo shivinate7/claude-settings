@@ -6,9 +6,9 @@
   "phase": "next",
   "lane": "",
   "why": "An idle standing session that goes cold pays a full context rewrite; a ping every 55 minutes costs less for gaps under about 40 hours.",
-  "note": "Plan 3.15 (owner 13:22 CST Nov 11, \"A on keeping sessions warm too\", relayed by the retrospective; plan f05227a). 1. Rule outcomes-mechanize-rules keeps its reason, watching must cost less than what it watches, and drops the blanket \"never on a timer\": a timer is allowed when its record shows it costs less than it saves. 2. A standing session sets a one-time check-in 55 minutes after its last turn while it expects another wake within 40 hours; a lane whose PR merged is archived at once. 3. One night on one standing session measures the ping cost, hooks included, before it spreads. Owner 13:20: the old ban was never meant as a permanent hard ban. Homes: CLAUDE.md rule outcomes-mechanize-rules; this step.",
+  "note": "Plan 3.15 (owner 13:22 CST Nov 11, \"A on keeping sessions warm too\", relayed by the retrospective; plan f05227a). 1. Rule outcomes-mechanize-rules keeps its reason, watching must cost less than what it watches, and drops the blanket \"never on a timer\": a timer is allowed when its record shows it costs less than it saves. 2. A standing session sets a one-time check-in 55 minutes after its last turn while it expects another wake within 40 hours; a lane whose PR merged is archived at once. 3. One night on one standing session measures the ping cost, hooks included, before it spreads. Owner 13:20: the old ban was never meant as a permanent hard ban. Homes: CLAUDE.md rule outcomes-mechanize-rules; this step. Part 1, the rule change, is its own step, timer-rule-reason-only (coordinator 22:49 CST Nov 11); this step keeps parts 2 and 3.",
   "source": "owner 2026-11-11 13:20-13:22 CST, relayed by the retrospective session",
   "owner": "triage",
-  "updatedAt": "2026-11-11T13:30:00-06:00",
+  "updatedAt": "2026-11-11T22:50:00-06:00",
   "blockedBy": []
 }

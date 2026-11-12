@@ -1,12 +1,12 @@
 {
   "title": "README says a project's cloud thread runs no repo hooks, deny rules or SessionStart",
   "phase": "cleanup",
-  "status": "todo",
+  "status": "doing",
   "order": 0.111,
   "why": "A hand-off owed to claude-settings by another repo or by claude-settings' own outbox.",
   "note": "Filed by triage 12:21 CST Nov 10 from the outbox sweep (owner pick 493 a). Source: claude-settings outbox banchi-cloud-env.md bullet 2. Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose, first wave.",
-  "updatedAt": "2026-11-11T20:42:00-06:00",
+  "updatedAt": "2026-11-11T22:50:00-06:00",
   "owner": "triage",
-  "lane": "",
+  "lane": "session_013NEJL4FXU8ZofTh3kiuyAG",
   "blockedBy": []
 }

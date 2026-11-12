@@ -28,3 +28,4 @@ Lane briefs name these ids. Triage rewrites a line when a role changes hands.
 - Coordinator: "Claude settings coordinator onboarding", session_013NEJL1gw6EdrSyvHkTUEx6, since 2026-11-11 22:38 CST.
 - Triage: "cs triage: claude-settings (7)", session_013NEJKzCzoWhfP8FMCPtQU6, since 2026-11-11 22:38 CST.
 - Batch runner: "claude-settings batch runner 10", session_013NEJL2f1YCYsvLdpFqtWP3, since 2026-11-11 22:38 CST.
+- Batch runner, child repos: "batch runner 11 (child repos)", session_013NEJKzRugXqBZrZ8xwXmW7, since 2026-11-11 22:46 CST.

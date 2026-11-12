@@ -1,0 +1,14 @@
+{
+ "id": "grant-ruleset-2606",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJKzFZau8SCnXcut9xQw",
+ "owner": "triage",
+ "blockedBy": [],
+ "updatedAt": "2026-11-11T22:50:00-06:00",
+ "title": "Finish grant PR #2606 (ruleset grant)",
+ "why": "PR #2606 holds an open grant change; the coordinator started a lane to finish it.",
+ "source": "coordinator 22:49 CST Nov 11, from the retrospective order 22:44 CST",
+ "note": "Filed by triage when its lane started; the lane brief holds the task."
+}

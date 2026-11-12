@@ -6,9 +6,10 @@
   "lane": null,
   "blockedBy": [],
   "why": "An owner ruling in the restart plan has no step, so its prose change would be lost at the archive.",
-  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "owner": "triage",
   "source": "R16 prose half, owner 16:22 and 16:25 CST Nov 10; plan restart-plan 2c8af8f; retrospective 20:43 CST Nov 11",
   "note": "Rule building-mistake-names-its-guard opens by reading a mistake as a missing guard; the hook that files it stays a code step. Prose wave (owner 20:24 CST Nov 11, item 521): prose, first wave.",
   "order": 0.124,
-  "updatedAt": "2026-11-11T20:44:00-06:00"
+  "updatedAt": "2026-11-11T22:50:00-06:00",
+  "phase": "next"
 }

@@ -1,0 +1,14 @@
+{
+ "id": "handoff-lands-tracked-first",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "updatedAt": "2026-11-11T22:50:00-06:00",
+ "title": "An archived session's handoff lands somewhere tracked before the archive",
+ "why": "The drain handoffs were written only in their containers and were lost with them at the Nov 11 respawn, the old triage handoff among them.",
+ "source": "coordinator ask 22:49 CST Nov 11, from the retrospective order 22:44 CST",
+ "note": "Done when: the archive or the rotation steps refuse or warn while a session handoff exists only in its container; the handoff goes to handoffs/ on the record branch first. Related: step handoff-checkpoint-before-cloud-compact; operating-model rotation step 3."
+}

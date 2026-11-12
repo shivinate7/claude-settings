@@ -4,8 +4,8 @@
   "note": "Filed by triage, Nov 8 19:20 CST. The coordinator routes it. Split the sentence; no rule change. Owner ruling, given in the lane's chat (via the coordinator 19:27 CST Nov 8): fold the fix into PR #2268, not a separate PR; its home is #2268's body. Done when #2268 merges. Kept doing on: folded into #2268 (open draft, open-asks-at-wake-v3); lands when #2268 merges (triage reader agent, Explore Sonnet audit, read of origin/main 0e6509a96, 06:03 CST Nov 10). Prose wave (owner 20:24 CST Nov 11, item 521; retrospective's sort 20:41 CST): prose, first wave.",
   "phase": "now",
   "owner": "coordinator",
-  "lane": "session_013NEJL4DA5XcyP7kY5qkXP5",
+  "lane": "session_013NEJKzJG4GXQ3nzaHE94Ks",
   "status": "doing",
   "order": 0.115,
-  "updatedAt": "2026-11-11T20:42:00-06:00"
+  "updatedAt": "2026-11-11T22:50:00-06:00"
 }
