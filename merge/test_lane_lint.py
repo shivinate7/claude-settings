@@ -2322,7 +2322,7 @@ class LintCheckJoin(tm.CloudSession):
         lock is then refused by the linted-head check, before any merge call. Red on the old code: the lint refusal comes first, so no
         moved-head refusal is printed at all, and the skip that must keep it does not exist yet."""
         linted = self.head("feat")
-        self.competitor_push()
+        self.feat_commit({"rival.py": "rival = 1\n"}, "Add a rival change", "Record-claim: D-907")  # a claim commit: confirm's relayed-yes check passes it, so only the linted-head check refuses
         rc, out = self.join([], ran_on=linted, lag={"n": 1, "prior": linted}, checks_seq=[[("checks", "pass", ""), (REQUIRED_CHECK, "pass", "")]])
         self.assertEqual(rc, 1, "a head that moved after a green-rollup skip went ahead:\n" + out)
         self.assertIn("after its lane-lint was read", out, "the moved head was not refused by the linted-head check (the refusal is another one):\n" + out)
