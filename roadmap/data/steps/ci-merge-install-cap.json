@@ -1,0 +1,14 @@
+{
+ "id": "ci-merge-install-cap",
+ "title": "CI job checks-merge-install finishes inside its 30-minute cap, so main's push run is not cancelled",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "session_013NEJL1JKZGZ1f8ybkciY6K",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "checks-merge-install hit its 30-minute cap and main's push run 43164094808 on f024eae4e was cancelled, so the merge tool reads main as UNKNOWN and every merge waits.",
+ "source": "coordinator 01:01 CST Nov 12",
+ "note": "Stability fix. Lane started 01:01 CST Nov 12. Batch runner 10 re-runs the main run once meanwhile. Related: step ci-job-caps-line-count.",
+ "updatedAt": "2026-11-12T01:02:00-06:00"
+}
