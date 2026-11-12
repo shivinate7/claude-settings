@@ -28,7 +28,7 @@ The harm: a reviewed lane was lost without a word.
 ## The rule
 
 - A handed lane is an open lane PR on the integration PR's base. Its newest review record reads done. The base does not hold its head yet.
-- An integration PR has a `Lanes:` line in its body, or its head holds the head of a handed lane. A lone lane is not an integration PR. This check skips it and says nothing.
+- Every batch is checked, lone lanes included. A lone lane is its own integration PR, so its body is checked for handed lanes like any batch's.
 - Each handed lane is either merged or held. Merged: it is on `Lanes:`, and the integration head holds its head. Held: it is on a left-out line with a reason.
 
 ## The body grammar
