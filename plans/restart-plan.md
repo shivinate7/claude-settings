@@ -912,7 +912,8 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
      "so keep no second copy in the repo". No session can write there, so sessions copy ids into page
      items and briefs, and nothing rewrites those copies.
   2. The roster moves to the record branch, where triage writes it. The session that starts a standing
-     session or lane sends triage the new id in the same turn. Triage rewrites that roster line.
+     session sends triage the new id; triage rewrites that roster line. The session that starts a lane
+     sends triage its id; triage writes it to the step's `lane` field.
   3. A page item, brief or handoff names a lane slug or role, never a session id (CLAUDE.md
      git-slug-then-claim-number already says so for lanes). The wake path reads the id from the roster
      when it sends. A guard refuses a page write that stores a session id.
