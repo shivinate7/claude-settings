@@ -1770,6 +1770,12 @@ BRIEF_GRANT_REASON = (
     "after `Grant:`. A template placeholder is no grant. Put the grant and its time after `Grant:`, as the "
     "owner gave them. (decision agent-model-cap, the lane start)"
 )
+BRIEF_IDS_REASON = (
+    "this brief does not name a session id for {missing}, so the lane cannot reach {them}. Add each as "
+    "`" + "; ".join(label + ": session_<id>" for label in ROLE_LABELS) + "`, the three ids the coordinator copies from the "
+    "Standing sessions roster on the record branch. Between a label and its id sit at most " + str(ROLE_GAP_MAX) + " characters on the same line, holding no other "
+    "role label and no `session_`; an id holds a digit. (decision session-tiers, a lane holds one topic)"  # glossary-ok: session-tiers is the decision's file name
+)
 
 
 def topic_hit(first: str, tags, start: bool = False):
@@ -1791,12 +1797,6 @@ def topic_hit(first: str, tags, start: bool = False):
         return "lane brief for step " + str(step) + " to a lane with no topic tag", \
             BRIEF_START_STEP_REASON if start else BRIEF_STEP_REASON
     return None
-BRIEF_IDS_REASON = (
-    "this brief does not name a session id for {missing}, so the lane cannot reach {them}. Add each as "
-    "`" + "; ".join(label + ": session_<id>" for label in ROLE_LABELS) + "`, the three ids the coordinator copies from the "
-    "Standing sessions roster on the record branch. Between a label and its id sit at most " + str(ROLE_GAP_MAX) + " characters on the same line, holding no other "
-    "role label and no `session_`; an id holds a digit. (decision session-tiers, a lane holds one topic)"
-)
 
 
 def brief_hit(tool: str, tool_input, transcript: str):
@@ -1841,7 +1841,10 @@ def brief_hit(tool: str, tool_input, transcript: str):
         return None
     if tagged_after:  # a set_session_tags call on the target followed its record, so the topic or steps may have changed
         return "lane brief to a target whose record is stale", BRIEF_STALE_REASON
-    return topic_hit(first, tags) or _brief_ids_hit(text)
+    held = topic_hit(first, tags)
+    if held:
+        return held
+    return _brief_ids_hit(text)
 
 
 def _brief_ids_hit(message: str):
