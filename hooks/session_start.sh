@@ -52,14 +52,18 @@ bounded_git() {
 
 # bounded_fetch <dir>: one quiet, bounded `git fetch` in <dir> that names refs and never prunes or fetches all of
 # origin, so its cost does not grow with the remote's branch count (a prune fetch of a 429-branch remote did not finish
-# in 20 s; one ref takes well under a second). The refs: origin/HEAD's target when that is another branch, and
-# origin/main when origin/HEAD is unset or main, or when <dir> already has origin/main (a trunk repo that also has main
-# refreshes both). A remote with no main branch and origin/HEAD on another branch fetches that branch only, because
-# git fails the whole fetch on a refspec the remote lacks. Returns the fetch's status: 0 ran, else not. The one home
-# for every freshness check below. The first call per checkout runs the fetch; a later call for the same checkout
-# (resolved with pwd -P) returns that status again, so a session start fetches each checkout once, however many checks
-# ask. The refs are read from <dir>'s own origin/HEAD, because the pointer-clone check passes another checkout. The
-# caller must not run it in $( ), or the memo is lost with the subshell.
+# in 20 s; one ref takes well under a second). The refs: origin/main always, plus origin/HEAD's target when that is
+# another branch. Returns the fetch's status: 0 ran, else not. The one home for every freshness check below. The first
+# call per checkout runs the fetch; a later call for the same checkout (resolved with pwd -P) returns that status
+# again, so a session start fetches each checkout once, however many checks ask. The target is read from <dir>'s own
+# origin/HEAD, because the pointer-clone check passes another checkout. The caller must not run it in $( ), or the
+# memo is lost with the subshell.
+# Git fails a whole fetch on a refspec the remote lacks, so a remote with no main would never refresh. When the
+# two-ref fetch fails by itself (not killed by the bound), each ref is fetched alone, on the failure path only. The
+# target fetched and main did not: the remote has no main, so a stale origin/main (a remote-tracking ref only) is
+# deleted and the fetch counts as run. Any other failure counts as not run. Bound on the failure path: each fetch
+# has its own CLAUDE_SETTINGS_FETCH_TIMEOUT watchdog, a fetch the bound killed is never retried (and a killed main-alone fetch
+# deletes nothing), so a hung remote costs one bound and the worst case is three. The happy path is one fetch.
 fetch_memo=""
 fetch_reported=""
 bounded_fetch() {
@@ -72,17 +76,29 @@ bounded_fetch() {
 $fetch_memo
 EOF
   [ -n "$bf_hit" ] && return "$bf_hit"
+  bf_main="+refs/heads/main:refs/remotes/origin/main"
   bf_head=$(cd "$1" 2>/dev/null && git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)
   bf_head="${bf_head#origin/}"
   if [ -z "$bf_head" ] || [ "$bf_head" = main ]; then
-    bounded_git "$1" /dev/null fetch --quiet --no-tags origin +refs/heads/main:refs/remotes/origin/main
-  elif (cd "$1" 2>/dev/null && git rev-parse --verify -q refs/remotes/origin/main >/dev/null 2>&1); then
-    bounded_git "$1" /dev/null fetch --quiet --no-tags origin \
-      +refs/heads/main:refs/remotes/origin/main "+refs/heads/$bf_head:refs/remotes/origin/$bf_head"
+    bounded_git "$1" /dev/null fetch --quiet --no-tags origin "$bf_main"
+    bf_rc=$?
   else
-    bounded_git "$1" /dev/null fetch --quiet --no-tags origin "+refs/heads/$bf_head:refs/remotes/origin/$bf_head"
+    bf_tgt="+refs/heads/$bf_head:refs/remotes/origin/$bf_head"
+    bounded_git "$1" /dev/null fetch --quiet --no-tags origin "$bf_main" "$bf_tgt"
+    bf_rc=$?
+    # 137 and 143 are a kill by the bound (SIGKILL, SIGTERM): no retry then.
+    if [ "$bf_rc" -ne 0 ] && [ "$bf_rc" -ne 137 ] && [ "$bf_rc" -ne 143 ]; then
+      bounded_git "$1" /dev/null fetch --quiet --no-tags origin "$bf_tgt"
+      bf_rc=$?
+      if [ "$bf_rc" -eq 0 ]; then
+        bounded_git "$1" /dev/null fetch --quiet --no-tags origin "$bf_main"
+        bf_mrc=$?
+        if [ "$bf_mrc" -ne 0 ] && [ "$bf_mrc" -ne 137 ] && [ "$bf_mrc" -ne 143 ]; then
+          (cd "$1" 2>/dev/null && git update-ref -d refs/remotes/origin/main >/dev/null 2>&1)
+        fi
+      fi
+    fi
   fi
-  bf_rc=$?
   fetch_memo="$fetch_memo
 $bf_rc $bf_key"
   return "$bf_rc"
