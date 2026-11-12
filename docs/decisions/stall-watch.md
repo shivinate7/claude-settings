@@ -145,8 +145,8 @@ the first Stop after that crossing, against the previous Stop. A later write to 
 crossing, so the same hung call can be listed again after it. The quiet row behaves the same and keeps its
 own crossing.
 Cost: one `stat` per running agent, and one tail read of every quiet agent at every Stop, including one
-already listed. The read is 64 KB, doubled up to `TAIL_MAX`, 32 MB. The cost of a read for an agent that
-already has a summary is unmeasured.
+already listed. The read is 64 KB, doubled up to `TAIL_MAX`, 32 MB. Test A11 measures an already-listed agent:
+one `stat`, one open, and at most 64 KB read from a transcript over 64 KB.
 
 Fix: none — no progress signal in the parent transcript to tell hung from busy. Until: 2026-11-21
 (a hung Agent or MCP call).

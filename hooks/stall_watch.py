@@ -531,7 +531,9 @@ def agent_transcripts(session, agent, output):
 
 
 OPEN_CALL_CAP = 900  # seconds: Bash's 600 s maximum plus a margin; an older open Bash call is stuck
-CAPPED_TOOLS = ("Bash", "PowerShell")  # the only tools with a known maximum; others (Agent, Task, MCP) read busy
+# The cap applies to Bash and PowerShell (coordinator ruling, 19:19 CST Nov 7); only Bash's maximum is cited.
+# Other tools (Agent, Task, MCP) have no known maximum and read busy.
+CAPPED_TOOLS = ("Bash", "PowerShell")
 
 
 def open_call(path, size):
