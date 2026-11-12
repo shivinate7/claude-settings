@@ -263,9 +263,11 @@ MUTATIONS = [
      '    own_lock = False\n'
      '    if entry.get("locked_reason") is not None:\n'
      '        holder = entry.get("locked_reason") or "locked"\n'
-     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock)\n'
+     '        written = entry.get("locked_at_ms")\n'
+     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock, written, entry["path"])\n'
      '        if stale_agent_lock is not True:\n'
-     '            own_lock = (own_lock_rule and own_agent_lock_verdict(holder) is True\n'
+     '            own_lock = (own_lock_rule\n'
+     '                        and own_agent_lock_verdict(holder, written, entry["path"]) is True\n'
      '                        and (not fast or batch is not None)\n'
      '                        and _own_lock_ready(where, path, batch, lock_idle))\n'
      '            if not own_lock:\n'
@@ -289,9 +291,11 @@ MUTATIONS = [
      '    own_lock = False\n'
      '    if entry.get("locked_reason") is not None:\n'
      '        holder = entry.get("locked_reason") or "locked"\n'
-     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock)\n'
+     '        written = entry.get("locked_at_ms")\n'
+     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock, written, entry["path"])\n'
      '        if stale_agent_lock is not True:\n'
-     '            own_lock = (own_lock_rule and own_agent_lock_verdict(holder) is True\n'
+     '            own_lock = (own_lock_rule\n'
+     '                        and own_agent_lock_verdict(holder, written, entry["path"]) is True\n'
      '                        and (not fast or batch is not None)\n'
      '                        and _own_lock_ready(where, path, batch, lock_idle))\n'
      '            if not own_lock:\n'
@@ -311,8 +315,8 @@ MUTATIONS = [
     # and a general sweep reaps the tree with a shell the agent may have left inside.
     ("finish gate: a dead host's live lock frees its tree with no finish proof (ungated verdict)",
      "sweep",
-     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock)\n',
-     '        stale_agent_lock = stale_agent_lock_verdict(holder)\n',
+     '        stale_agent_lock = finish_gated_lock_verdict(holder, finished_host_lock, written, entry["path"])\n',
+     '        stale_agent_lock = stale_agent_lock_verdict(holder, written, entry["path"])\n',
      "test_a_dead_host_live_lock_with_no_stop_row_keeps_the_tree"),
 
     # ---- the keep rule, both directions (plan, "Phase 2") ----
@@ -667,8 +671,8 @@ MUTATIONS = [
     # such tree as unproven, so the half-removed tree is never restored and stays dirty.
     ("cut-short restore: a finished dead-host tree is not restored (the finish proof is read as absent)",
      "sweep",
-     '            entry.get("locked_reason") or "", bool(entry.get("finished"))) is not True):\n',
-     '            entry.get("locked_reason") or "", False) is not True):\n',
+     '            entry.get("locked_reason") or "", bool(entry.get("finished")),\n',
+     '            entry.get("locked_reason") or "", False,\n',
      "test_a_cut_short_finished_dead_host_tree_is_restored_by_the_next_end"),
     # `decide_listener`'s own three refusals, same shape as the branch/worktree refusals
     # above: each one is a keep this sweep must never lose, proven by mutating it out and
@@ -1009,13 +1013,40 @@ MUTATIONS = [
      '            return True\n'
      '    actual = git_reads._process_start_ms(pid)',
      "test_unreadable_lock_start_keeps"),
-    ("stale lock: a lock with no start time counts as stale, even when its host runs",
+    ("stale lock: a no-start lock whose live host is on Linux counts as stale, even when its host runs",
      "sweep",
-     '    if locked_ms is None:\n'
-     '        return False\n',
-     '    if locked_ms is None:\n'
-     '        return True\n',
+     '            return _no_start_holder_is_foreign_linux(pid, worktree)\n',
+     '            return True\n',
      "test_a_sibling_agent_tree_locked_by_the_same_host_pid_is_kept"),
+    # The write-time arm of a no-start lock (`stale_agent_lock_verdict`). Two entries, one per
+    # required case: each named case must be the one that kills the mutant (`required` is one name).
+    ("stale lock: a no-start lock whose holder started after its write is never freed (the reused-pid arm off)",
+     "sweep",
+     '        return actual - locked_at_ms > git_reads.SESSION_LIVE_TOLERANCE_MS',
+     '        return False',
+     "test_no_start_lock_held_by_a_reused_pid_is_stale"),
+    ("stale lock: a no-start lock whose holder started after its write is never freed end to end (the reused-pid arm off)",
+     "sweep",
+     '        return actual - locked_at_ms > git_reads.SESSION_LIVE_TOLERANCE_MS',
+     '        return False',
+     "test_no_start_lock_whose_holder_started_after_the_write_is_freed"),
+    ("stale lock: a no-start lock with an unreadable write time is freed",
+     "sweep",
+     '            if locked_at_ms is None:\n                return False\n',
+     '            if locked_at_ms is None:\n                return True\n',
+     "test_no_start_lock_with_an_unreadable_write_time_keeps"),
+    # The two call sites that pass a lock's write time on (`_lock_unlockable`, `_restore_cut_short`). Each
+    # call with the write time dropped keeps a reused pid's lock, and its named case must go red.
+    ("stale lock: the unlock re-read drops the write time, so a reused pid's lock is kept",
+     "sweep",
+     '            and (stale_agent_lock_verdict(reason, written, path) is True',
+     '            and (stale_agent_lock_verdict(reason, None, path) is True',
+     "test_unlock_for_removal_passes_the_write_time_to_the_lock_re_read"),
+    ("stale lock: the cut-short write-back drops the write time, so a reused pid's lock is kept",
+     "sweep",
+     '            entry.get("locked_at_ms"), path) is not True):',
+     '            None, path) is not True):',
+     "test_restore_cut_short_passes_the_write_time_of_a_reused_pid_lock"),
     ("stale lock: --confirm removes without unlocking first",
      "sweep",
      '        unlocked = git_reads._git(root, "worktree", "unlock", path)',
@@ -1193,9 +1224,11 @@ MUTATIONS = [
     ("stale lock: a lock reason of another form counts as stale",
      "sweep",
      '    if not found:\n'
-     '        return False',
+     '        return False\n'
+     '    pid, start = int(found.group(1)), found.group(2)',
      '    if not found:\n'
-     '        return True',
+     '        return True\n'
+     '    pid, start = int(found.group(1)), found.group(2)',
      "test_other_lock_reason_keeps"),
     ("stale lock: the decision no longer asks for an unlock",
      "sweep",
@@ -1448,6 +1481,101 @@ MUTATIONS = [
      'min(JUDGE_BUDGET_SECONDS, n - DEADLINE_TAIL_SECONDS))',
      'n - DEADLINE_TAIL_SECONDS)',
      "test_a_25_second_deadline_gives_a_12_second_budget"),
+
+    # ---- the Linux route and the darwin rule (the `worktree` argument of stale_agent_lock_verdict) ----
+    ("linux route: the cwd-outside test is flipped, so a holder inside its tree frees",
+     "sweep",
+     '        if cwd == tree or cwd.startswith(tree.rstrip(os.sep) + os.sep):\n'
+     '            return False\n',
+     '        if not (cwd == tree or cwd.startswith(tree.rstrip(os.sep) + os.sep)):\n'
+     '            return False\n',
+     "test_linux_no_start_lock_whose_holder_works_inside_its_tree_keeps_despite_a_write_time_gap"),
+    ("linux route: the cmdline test is dropped, so a holder whose argv names claude or agent frees",
+     "sweep",
+     '        return not any("claude" in part or "agent" in part for part in argv)\n',
+     '        return True\n',
+     "test_linux_no_start_lock_whose_holder_names_claude_or_agent_keeps_despite_a_write_time_gap"),
+    ("linux route: the unreadable /proc read is flipped to free, so an unreadable cwd or cmdline frees",
+     "sweep",
+     '        return not any("claude" in part or "agent" in part for part in argv)\n'
+     '    except Exception:\n'
+     '        return False\n',
+     '        return not any("claude" in part or "agent" in part for part in argv)\n'
+     '    except Exception:\n'
+     '        return True\n',
+     "test_linux_no_start_lock_with_an_unreadable_proc_read_keeps_despite_a_write_time_gap"),
+    ("linux route: an empty cmdline is flipped to free, so a holder with no argv to judge frees",
+     "sweep",
+     '        if not argv:\n'
+     '            return False\n',
+     '        if not argv:\n'
+     '            return True\n',
+     "test_linux_no_start_lock_whose_cmdline_reads_empty_keeps_despite_a_write_time_gap"),
+    ("linux route: a missing tree path is flipped to free, so a holder that cannot be placed frees",
+     "sweep",
+     '    if not worktree:\n'
+     '        return False\n',
+     '    if not worktree:\n'
+     '        return True\n',
+     "test_linux_no_start_lock_with_no_tree_path_keeps_despite_a_write_time_gap"),
+    ("linux route: the platform gate is removed, so Linux reads the write time again",
+     "sweep",
+     '        if sys.platform.startswith("win"):\n',
+     '        if True:\n',
+     "test_linux_no_start_lock_whose_holder_works_inside_its_tree_keeps_despite_a_write_time_gap"),
+    ("write time: the back-pointer compare is dropped, so another tree's admin dir lends its lock time",
+     "sweep",
+     '        if not back or named != os.path.normcase(os.path.realpath(own_git)):\n'
+     '            return None\n',
+     '        if not back:\n'
+     '            return None\n',
+     "test_lock_write_time_read_through_another_trees_git_file_keeps"),
+    ("darwin: a live no-start holder is freed on its write time",
+     "sweep",
+     '            return _no_start_holder_is_foreign_linux(pid, worktree)\n'
+     '        return False\n',
+     '            return _no_start_holder_is_foreign_linux(pid, worktree)\n'
+     '        if locked_at_ms is None:\n'
+     '            return False\n'
+     '        return actual - locked_at_ms > git_reads.SESSION_LIVE_TOLERANCE_MS\n',
+     "test_darwin_keeps_a_live_no_start_holder_whatever_the_write_time"),
+    ("darwin: the no-start fallback is flipped to free, so a live no-start holder frees",
+     "sweep",
+     '            return _no_start_holder_is_foreign_linux(pid, worktree)\n'
+     '        return False\n',
+     '            return _no_start_holder_is_foreign_linux(pid, worktree)\n'
+     '        return True\n',
+     "test_darwin_keeps_a_live_no_start_holder_whatever_the_write_time"),
+
+    # ---- the ancestry walk in `_no_start_holder_is_foreign_linux`: this process or an ancestor keeps, and
+    # so does an unreadable parent read or an exhausted MAX_CLIMB bound ----
+    ("ancestry walk: the ancestor match is dropped, so a live plain-argv ancestor frees",
+     "sweep",
+     '        if current == pid:\n'
+     '            return False\n',
+     '        if False:\n'
+     '            return False\n',
+     "test_linux_no_start_lock_held_by_a_plain_argv_ancestor_reads_live"),
+    ("ancestry walk: an unreadable parent read is flipped to free",
+     "sweep",
+     '        current = _parent_pid(current)\n'
+     '        if current is None:\n'
+     '            return False\n',
+     '        current = _parent_pid(current)\n'
+     '        if current is None:\n'
+     '            return True\n',
+     "test_linux_no_start_lock_whose_parent_read_fails_keeps"),
+    ("ancestry walk: an exhausted MAX_CLIMB bound is flipped to free",
+     "sweep",
+     '        if current is None:\n'
+     '            return False\n'
+     '    else:\n'
+     '        return False\n',
+     '        if current is None:\n'
+     '            return False\n'
+     '    else:\n'
+     '        return True\n',
+     "test_linux_no_start_lock_whose_ancestry_walk_exhausts_its_bound_keeps"),
 ]
 
 

@@ -21,11 +21,13 @@ import argparse
 import concurrent.futures
 import contextlib
 import errno
+import functools
 import gc
 import hashlib
 import io
 import json
 import os
+import shlex
 import shutil
 import signal
 import socket
@@ -1108,6 +1110,173 @@ class WorktreeDecisionTests(unittest.TestCase):
         self.assertEqual(decision["reason"], "unreadable-subject")
 
 
+@contextlib.contextmanager
+def _refusing_reads(refused):
+    """Every stat, lstat, readlink and open whose path REFUSED(path) names raises EACCES, and every other
+    path reads as usual. A file descriptor is no path, so it is never refused. A chmod would not do it:
+    this suite runs as root, which reads a mode-000 file."""
+    def refusing(real):
+        def call(target, *args, **kwargs):
+            if isinstance(target, (str, bytes, os.PathLike)) and refused(os.fsdecode(target)):
+                raise PermissionError(errno.EACCES, "unreadable for this case", os.fsdecode(target))
+            return real(target, *args, **kwargs)
+        return call
+
+    with mock.patch.object(os, "stat", new=refusing(os.stat)), \
+            mock.patch.object(os, "lstat", new=refusing(os.lstat)), \
+            mock.patch.object(os, "readlink", new=refusing(os.readlink)), \
+            mock.patch("builtins.open", new=refusing(open)), \
+            mock.patch("io.open", new=refusing(io.open)):
+        yield
+
+
+@contextlib.contextmanager
+def _unreadable_file(path):
+    """Every stat, lstat and open of PATH raises EACCES, and every other path reads as usual."""
+    named = os.path.normcase(os.path.abspath(path))
+    with _refusing_reads(lambda target: os.path.normcase(os.path.abspath(target)) == named):
+        yield
+
+
+@contextlib.contextmanager
+def _unreadable_proc(pid, name):
+    """Every read of /proc/PID/NAME (NAME: `cwd` or `cmdline`) raises EACCES. Every other path reads as usual."""
+    target = "/proc/%d/%s" % (pid, name)
+    with _refusing_reads(lambda path: os.path.normpath(path) == target):
+        yield
+
+
+@contextlib.contextmanager
+def _empty_proc_cmdline(pid):
+    """Every read of /proc/PID/cmdline returns no bytes, as a process that has cleared its argv reads. Every
+    other path reads as usual."""
+    target = "/proc/%d/cmdline" % pid
+    real_open = open
+
+    def emptied(path, *args, **kwargs):
+        if isinstance(path, str) and os.path.normpath(path) == target:
+            return io.BytesIO(b"")
+        return real_open(path, *args, **kwargs)
+
+    with mock.patch("builtins.open", new=emptied):
+        yield
+
+
+# ----------------------------------------------------------- a plain-argv ancestor holder
+#
+# A no-start lock held by this process's own chain. The holder is a `sh` whose argv is `sh` alone: its
+# program arrives on its stdin, so no path it runs can put "claude" or "agent" into its argv (a checkout
+# or worktree path may hold either). A probe is a python the holder runs (depth 1), or one a second shell
+# runs (depth 2), so the holder is the probe's parent or grandparent. The probe reports its own ancestry,
+# read raw from /proc, and a case asserts that scope before the verdict it judges.
+
+def probe_source(body):
+    """A probe program: put this suite's import roots first, read this process's ancestry, then BODY."""
+    paths = [HERE, os.path.join(REPO_ROOT, "hooks"), os.path.join(HERE, "..", "lint")]
+    return ("import json, os, sys\n"
+            "sys.path[:0] = " + repr(paths) + "\n"
+            "import sweep\n"
+            "chain = []\n"
+            "pid = os.getpid()\n"
+            "while pid > 1 and len(chain) < 64:\n"
+            "    with open('/proc/%d/stat' % pid, encoding='utf-8') as handle:\n"
+            "        pid = int(handle.read().rsplit(')', 1)[1].split()[1])\n"
+            "    chain.append(pid)\n") + body
+
+
+def verdict_body(reason, tree):
+    """The probe body for `stale_agent_lock_verdict` and `own_agent_lock_verdict` of a no-start REASON in TREE."""
+    return ("REASON = %r\nTREE = %r\n" % (reason, tree)
+            + "print(json.dumps({'chain': chain, 'stale': sweep.stale_agent_lock_verdict(REASON, None, TREE),"
+              " 'own': sweep.own_agent_lock_verdict(REASON, None, TREE)}))\n")
+
+
+def decision_body(repo, entry, attended):
+    """The probe body for `decide_worktree` on ENTRY, the one `parse_worktree_list` entry, in REPO."""
+    return ("REPO = %r\n" % repo
+            + "ENTRY = json.loads(%r)\n" % json.dumps(entry)
+            + "print(json.dumps({'chain': chain, 'decision': sweep.decide_worktree(REPO, ENTRY, attended=%r)},"
+              " default=str))\n" % attended)
+
+
+def write_probe(folder, body, depth):
+    """Write the probe for BODY under FOLDER and return the line the plain holder runs. Depth 2 runs the
+    probe from a second shell, so the holder is the probe's grandparent."""
+    os.makedirs(folder, exist_ok=True)
+    probe = os.path.join(folder, "probe.py")
+    write(probe, probe_source(body))
+    run = "%s %s\nexit $?\n" % (shlex.quote(sys.executable), shlex.quote(probe))
+    if depth == 1:
+        return run
+    middle = os.path.join(folder, "middle.sh")
+    write(middle, run)
+    return "sh %s\nexit $?\n" % shlex.quote(middle)
+
+
+def start_plain_holder(folder):
+    """A `sh` that runs the program written to its stdin, with its cwd in FOLDER (outside any tree a case locks)."""
+    os.makedirs(folder, exist_ok=True)
+    return subprocess.Popen(["sh"], cwd=folder, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True)
+
+
+def stop_plain_holder(holder):
+    if holder.poll() is None:
+        holder.kill()
+        holder.wait(timeout=10)
+
+
+def run_plain_holder(holder, line):
+    """Send LINE to the holder's shell and wait for it to finish. Returns (stdout, stderr)."""
+    return holder.communicate(input=line, timeout=60)
+
+
+def assert_holder_scope(test, holder, tree):
+    """Scope before subject, read raw while the holder still runs: its argv names neither claude nor agent,
+    and its cwd is outside TREE."""
+    test.assertIsNone(holder.poll(), "scope: the holder exited before its probe ran")
+    with open("/proc/%d/cmdline" % holder.pid, "rb") as handle:
+        argv = handle.read().lower()
+    test.assertFalse(b"claude" in argv or b"agent" in argv, "scope: the holder's argv names claude or agent")
+    cwd = os.path.normcase(os.path.realpath(os.readlink("/proc/%d/cwd" % holder.pid)))
+    tree_key = os.path.normcase(os.path.realpath(tree))
+    test.assertFalse(cwd == tree_key or cwd.startswith(tree_key.rstrip(os.sep) + os.sep),
+                     "scope: the holder's cwd is inside the tree")
+
+
+def probe_report(test, out, err):
+    """The probe's one JSON report, the last line it printed."""
+    test.assertTrue(out.strip(), "the probe printed no report; its stderr ends: %s" % err.strip()[-300:])
+    return json.loads(out.strip().splitlines()[-1])
+
+
+def verdict_on(platform):
+    """Decorator for one case: `stale_agent_lock_verdict` sees sys.platform as PLATFORM. Only the verdict
+    call is patched. A patch over the whole case would send every POSIX process read down its Windows
+    arm (`_process_start_ms` and `_nowindow` branch on the same name, and this runner has no
+    ctypes.windll), so the real process read is still made as this machine."""
+    def wrap(case):
+        @functools.wraps(case)
+        def run(self, *args, **kwargs):
+            machine = sys.platform
+            real_verdict = sweep.stale_agent_lock_verdict
+            real_read = sweep.git_reads._process_start_ms
+
+            def verdict_as_platform(reason, locked_at_ms=None, *rest, **more):
+                with mock.patch.object(sys, "platform", platform):
+                    return real_verdict(reason, locked_at_ms, *rest, **more)
+
+            def read_as_machine(pid):
+                with mock.patch.object(sys, "platform", machine):
+                    return real_read(pid)
+
+            with mock.patch.object(sweep, "stale_agent_lock_verdict", new=verdict_as_platform), \
+                    mock.patch.object(sweep.git_reads, "_process_start_ms", new=read_as_machine):
+                return case(self, *args, **kwargs)
+        return run
+    return wrap
+
+
 class StaleAgentLockTests(unittest.TestCase):
     """A claude agent lock (`claude agent agent-<id> (pid N start <UTC date>)`) is stale when its
     pid is dead, or alive with another start time. A stale lock no longer keeps the worktree; the
@@ -1292,6 +1461,534 @@ class StaleAgentLockTests(unittest.TestCase):
     def test_preview_never_unlocks(self):
         sweep.sweep_repo(self.root, confirm=False, restore_log_path=os.path.join(ROOT, "p.log"))
         self.assertTrue(guard.worktree_locked(self.root, self.wt["dead"]))
+
+    # A no-start lock (`claude agent agent-<id> (pid N)`) has no start time to compare. Its holder is
+    # stale when it is alive and started more than SESSION_LIVE_TOLERANCE_MS after the lock file was
+    # written: the pid was reused. The verdict takes that write time as LOCKED_AT_MS; None means the
+    # write time could not be read, and then a live holder keeps. The write time is the Windows arm
+    # alone: every case that reads it runs under `verdict_on("win32")`. Linux and darwin never read it.
+    LOCK_S = int(datetime(2026, 11, 12, 12, 0, tzinfo=timezone.utc).timestamp())
+    LOCK_MS = LOCK_S * 1000
+    DAY_S = 24 * 3600
+    DAY_MS = DAY_S * 1000
+
+    def no_start_verdict(self, actual_start_ms, locked_at_ms):
+        """The verdict on a no-start lock held by this process, read as started at ACTUAL_START_MS
+        (None: confirmed dead; PROCESS_START_UNREADABLE: could not tell)."""
+        reason = "claude agent agent-nostart (pid %d)" % os.getpid()
+        with mock.patch.object(sweep.git_reads, "_process_start_ms", return_value=actual_start_ms):
+            return sweep.stale_agent_lock_verdict(reason, locked_at_ms=locked_at_ms)
+
+    @verdict_on("win32")
+    def test_no_start_lock_held_by_a_reused_pid_is_stale(self):
+        got = self.no_start_verdict(self.LOCK_MS + sweep.git_reads.SESSION_LIVE_TOLERANCE_MS + 1000,
+                                    self.LOCK_MS)
+        self.assertIs(got, True, "holder started after its lock was written (a reused pid): verdict %r" % (got,))
+
+    @verdict_on("win32")
+    def test_no_start_lock_held_by_a_true_holder_is_held(self):
+        got = self.no_start_verdict(self.LOCK_MS - 3600 * 1000, self.LOCK_MS)
+        self.assertIs(got, False, "holder started before its lock was written (the true holder): verdict %r" % (got,))
+
+    @verdict_on("win32")
+    def test_no_start_lock_holder_started_within_tolerance_is_held(self):
+        got = self.no_start_verdict(self.LOCK_MS + sweep.git_reads.SESSION_LIVE_TOLERANCE_MS // 2, self.LOCK_MS)
+        self.assertIs(got, False, "holder started within tolerance after its lock was written: verdict %r" % (got,))
+
+    @verdict_on("win32")
+    def test_no_start_lock_with_no_write_time_is_held(self):
+        got = self.no_start_verdict(self.LOCK_MS + 10 * self.DAY_MS, None)
+        self.assertIs(got, False, "an unreadable write time kept no live holder's lock: verdict %r" % (got,))
+
+    def test_no_start_lock_with_an_unreadable_process_read_is_unknown(self):
+        got = self.no_start_verdict(sweep.git_reads.PROCESS_START_UNREADABLE, self.LOCK_MS)
+        self.assertIsNone(got, "an unreadable process read gave %r, not None" % (got,))
+
+    def test_no_start_lock_of_a_dead_holder_is_stale(self):
+        for written in (self.LOCK_MS, None):
+            with self.subTest(locked_at_ms=written):
+                got = self.no_start_verdict(None, written)
+                self.assertIs(got, True, "a confirmed dead holder kept its lock: verdict %r" % (got,))
+
+    def test_no_start_lock_leaves_the_dated_form_alone(self):
+        stamp = time.strftime("%a %b %d %H:%M:%S %Y", time.gmtime(self.LOCK_S))
+        reason = "claude agent agent-dated (pid %d start %s)" % (os.getpid(), stamp)
+        cases = ((self.LOCK_MS, False, "the holder is the one that wrote the lock"),
+                 (self.LOCK_MS + 10 * self.DAY_MS, True, "the holder started another time than the lock's date"))
+        for actual, want, why in cases:
+            for written in (None, self.LOCK_MS - self.DAY_MS, self.LOCK_MS + self.DAY_MS):
+                with self.subTest(actual=actual, locked_at_ms=written):
+                    with mock.patch.object(sweep.git_reads, "_process_start_ms", return_value=actual):
+                        got = sweep.stale_agent_lock_verdict(reason, locked_at_ms=written)
+                    self.assertIs(got, want, "%s: verdict %r, want %r (write time %r)" % (why, got, want, written))
+
+    @unittest.skipIf(not sys.platform.startswith("linux"), "the ticks form is read from /proc on Linux only")
+    def test_no_start_lock_leaves_the_ticks_form_alone(self):
+        ticks = _AgentEndFixture.host_start_ticks()
+        require(ticks is not None, "could not read this process's start ticks from /proc")
+        held = "claude agent agent-ticks (pid %d start %d)" % (os.getpid(), ticks)
+        reused = "claude agent agent-ticks (pid %d start %d)" % (os.getpid(), ticks + 1)
+        for reason, want in ((held, False), (reused, True)):
+            for written in (None, self.LOCK_MS - self.DAY_MS, self.LOCK_MS + self.DAY_MS):
+                with self.subTest(reason=reason, locked_at_ms=written):
+                    got = sweep.stale_agent_lock_verdict(reason, locked_at_ms=written)
+                    self.assertIs(got, want, "ticks form: verdict %r, want %r (write time %r)" % (got, want, written))
+
+    # The end-to-end no-start cases. The holder is a real sleeping child that is neither this process nor
+    # an ancestor, so no own-lock rule can free its lock; its real start time is the one the verdict reads.
+
+    def live_holder(self, cwd=None, argv=None):
+        """A real sleeping child, neither this process nor an ancestor: a plain python sleep unless ARGV
+        names another command, started in CWD (the fixture root unless given)."""
+        child = subprocess.Popen(argv or [sys.executable, "-c", "import time; time.sleep(300)"],
+                                 cwd=cwd or ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+
+        def reap_holder():
+            child.kill()
+            child.wait(timeout=10)
+
+        self.addCleanup(reap_holder)
+        require(child.poll() is None, "the holder exited before the lock")
+        require(child.pid not in (os.getpid(), os.getppid()), "the holder is an ancestor of this process")
+        return child
+
+    def no_start_tree(self, name, holder):
+        """A clean, merged, pushed tree locked by `claude agent agent-<name> (pid N)`, N the HOLDER."""
+        path = self.add(name, "claude agent agent-%s (pid %d)" % (name, holder.pid))
+        _age_admin_files(path, 2 * 60 * 60)
+        return path
+
+    @staticmethod
+    def lock_file(path):
+        """The `locked` file git keeps for PATH. Its write time is the one the verdict reads."""
+        admin = run_vcs(path, "rev-parse", "--absolute-git-dir").stdout.strip()
+        locked = os.path.join(admin, "locked")
+        require(os.path.isfile(locked), "git wrote no locked file at %s" % locked)
+        return locked
+
+    @staticmethod
+    def holder_start_s(holder):
+        started = sweep.git_reads._process_start_ms(holder.pid)
+        require(isinstance(started, int), "could not read the start time of pid %d" % holder.pid)
+        return started // 1000  # `ps` prints whole seconds
+
+    def fresh_entry(self, path):
+        """The one `parse_worktree_list` entry for PATH, read now."""
+        found = [e for e in sweep.parse_worktree_list(self.root) if _norm_path(e["path"]) == _norm_path(path)]
+        self.assertEqual(len(found), 1, "worktree %s is not listed once" % path)
+        return found[0]
+
+    def assert_no_start_scope(self, name, path, holder):
+        """Scope before subject: the holder runs, and the tree is listed locked in the no-start form."""
+        self.assertIsNone(holder.poll(), "the holder exited")
+        self.assertEqual(self.fresh_entry(path)["locked_reason"],
+                         "claude agent agent-%s (pid %d)" % (name, holder.pid),
+                         "the lock is not the no-start form")
+
+    @verdict_on("win32")
+    def test_no_start_lock_whose_holder_started_after_the_write_is_freed(self):
+        # Red on the unchanged code: a no-start lock has no pid-reuse check, so the alive holder keeps the
+        # tree as "locked: ...". The lock file was written a day before the holder started.
+        holder = self.live_holder()
+        path = self.no_start_tree("nsreuse", holder)
+        locked = self.lock_file(path)
+        started = self.holder_start_s(holder)
+        os.utime(locked, (started - self.DAY_S, started - self.DAY_S))
+        self.assert_no_start_scope("nsreuse", path, holder)
+        self.assertEqual(int(os.path.getmtime(locked)), started - self.DAY_S, "the lock file's time was not set")
+        decision = sweep.decide_worktree(self.root, self.fresh_entry(path), attended=True)
+        self.assertEqual(decision["action"], "reap", "kept: %s" % decision["reason"])
+        sweep.remove_worktree(self.root, path, decision)
+        self.assertEqual(decision["action"], "reap", "the removal re-read kept the tree: %s" % decision["reason"])
+        self.assertNotIn("error", decision)
+        self.assertFalse(os.path.exists(path), "the tree of a reused pid's lock is still on disk")
+
+    @verdict_on("win32")
+    def test_no_start_lock_written_after_its_holder_started_keeps(self):
+        # Green on the unchanged code and after the fix: the true holder wrote its lock after it started.
+        holder = self.live_holder()
+        path = self.no_start_tree("nsctl", holder)
+        locked = self.lock_file(path)
+        started = self.holder_start_s(holder)
+        self.assert_no_start_scope("nsctl", path, holder)
+        self.assertGreaterEqual(os.path.getmtime(locked), started,
+                                "the lock was not written after its holder started")
+        decision = sweep.decide_worktree(self.root, self.fresh_entry(path), attended=True)
+        self.assertEqual(decision["action"], "keep", "reaped a true holder's tree: %s" % decision["reason"])
+        self.assertTrue(decision["reason"].startswith("locked:"), "kept for another reason: %s" % decision["reason"])
+        self.assertTrue(os.path.isdir(path), "the tree of a live holder was removed")
+
+    @verdict_on("win32")
+    def test_no_start_lock_with_an_unreadable_write_time_keeps(self):
+        # The write time is the only thing that frees this lock. The same tree is freed with the write time
+        # readable (red on the unchanged code) and kept with it unreadable (green on both).
+        holder = self.live_holder()
+        path = self.no_start_tree("nsfail", holder)
+        locked = self.lock_file(path)
+        started = self.holder_start_s(holder)
+        os.utime(locked, (started - self.DAY_S, started - self.DAY_S))
+        self.assert_no_start_scope("nsfail", path, holder)
+        with self.subTest(arm="write time readable: the holder is a reused pid"):
+            decision = sweep.decide_worktree(self.root, self.fresh_entry(path), attended=True)
+            self.assertEqual(decision["action"], "reap", "kept: %s" % decision["reason"])
+        with self.subTest(arm="write time unreadable: keep"):
+            with _unreadable_file(locked):
+                decision = sweep.decide_worktree(self.root, self.fresh_entry(path), attended=True)
+            self.assertEqual(decision["action"], "keep", "reaped on an unreadable write time: %s" % decision["reason"])
+            self.assertTrue(decision["reason"].startswith("locked:"), "kept for another reason: %s" % decision["reason"])
+
+
+    # The write time of a lock comes from the admin dir the listing reported for that tree. The tree's
+    # `.git` file is only a pointer, and a pointer to another tree's admin dir must not supply the time.
+
+    def restore_git_file_after(self, path):
+        """Read PATH's `.git` file now, and put its bytes back after the case, whatever the case wrote."""
+        with open(os.path.join(path, ".git"), encoding="utf-8") as handle:
+            original = handle.read()
+        self.addCleanup(self.put_back_git_file, path, original)
+
+    @staticmethod
+    def put_back_git_file(path, original):
+        git_file = os.path.join(path, ".git")
+        if os.path.isdir(git_file):
+            shutil.rmtree(git_file)
+        elif os.path.lexists(git_file):
+            os.remove(git_file)
+        write(git_file, original)
+
+    def point_git_file_at(self, path, target):
+        """Rewrite PATH's `.git` file to `gitdir: TARGET`. The original comes back after the case."""
+        self.restore_git_file_after(path)
+        write(os.path.join(path, ".git"), "gitdir: %s\n" % target)
+
+    @verdict_on("win32")
+    def test_lock_write_time_read_through_another_trees_git_file_keeps(self):
+        # Red on the unchanged code. `_lock_written_ms` reads this tree's `.git` file, which here names
+        # another worktree's admin dir. That dir's `locked` file is a day before the holder started, so the
+        # no-start verdict reads a reused pid and frees a live holder's tree. The write time must come from
+        # the admin dir the listing reported for this entry, or be None, and None keeps the tree.
+        holder = self.live_holder()
+        path = self.no_start_tree("nsforeign", holder)
+        other = self.add("nsforeign-other", "held by lane-x")
+        _age_admin_files(other, 2 * 60 * 60)
+        locked = self.lock_file(path)
+        other_locked = self.lock_file(other)
+        other_admin = run_vcs(other, "rev-parse", "--absolute-git-dir").stdout.strip()
+        started = self.holder_start_s(holder)
+        for lock in (locked, other_locked):
+            os.utime(lock, (started - self.DAY_S, started - self.DAY_S))
+        self.assert_no_start_scope("nsforeign", path, holder)
+        self.assertEqual(int(os.path.getmtime(other_locked)), started - self.DAY_S,
+                         "the other tree's lock file time was not set")
+        with self.subTest(arm="control: the tree's own .git reads its own lock time, and the reused pid frees"):
+            decision = sweep.decide_worktree(self.root, self.fresh_entry(path), attended=True)
+            self.assertEqual(decision["action"], "reap", "the control kept: %s" % decision["reason"])
+        self.point_git_file_at(path, other_admin)
+        with self.subTest(arm="foreign .git: no write time for this tree"):
+            entry = self.fresh_entry(path)
+            self.assertEqual(entry["locked_reason"], "claude agent agent-nsforeign (pid %d)" % holder.pid,
+                             "the listing lost the holder's lock")
+            self.assertIsNone(entry["locked_at_ms"],
+                              "the write time came from another worktree's admin dir: %r" % entry["locked_at_ms"])
+        with self.subTest(arm="foreign .git: the verdict keeps the tree"):
+            decision = sweep.decide_worktree(self.root, self.fresh_entry(path), attended=True)
+            self.assertEqual(decision["action"], "keep", "freed a live holder's tree on another tree's write time")
+            self.assertTrue(decision["reason"].startswith("locked:"), "kept for another reason: %s" % decision["reason"])
+
+    def test_relative_gitdir_reads_the_same_lock_write_time(self):
+        holder = self.live_holder()
+        path = self.no_start_tree("nsrel", holder)
+        locked = self.lock_file(path)
+        started = self.holder_start_s(holder)
+        os.utime(locked, (started - self.DAY_S, started - self.DAY_S))
+        self.assert_no_start_scope("nsrel", path, holder)
+        absolute = self.fresh_entry(path)["locked_at_ms"]
+        self.assertIsNotNone(absolute, "precondition: the absolute gitdir gave no write time")
+        self.point_git_file_at(path, os.path.relpath(os.path.dirname(locked), path))
+        self.assertEqual(self.fresh_entry(path)["locked_at_ms"], absolute,
+                         "a relative gitdir read a different write time")
+
+    @verdict_on("win32")
+    def test_git_file_as_a_directory_reads_no_lock_write_time(self):
+        holder = self.live_holder()
+        path = self.no_start_tree("nsdir", holder)
+        locked = self.lock_file(path)
+        started = self.holder_start_s(holder)
+        os.utime(locked, (started - self.DAY_S, started - self.DAY_S))
+        self.assert_no_start_scope("nsdir", path, holder)
+        self.assertIsNotNone(self.fresh_entry(path)["locked_at_ms"], "precondition: the file read gave no write time")
+        self.restore_git_file_after(path)
+        git_dir = os.path.join(path, ".git")
+        os.remove(git_dir)
+        os.makedirs(git_dir)
+        # An old `locked` inside the directory: a reader that took `.git` for an admin dir would free the holder.
+        inner = os.path.join(git_dir, "locked")
+        write(inner, "")
+        os.utime(inner, (started - self.DAY_S, started - self.DAY_S))
+        entry = self.fresh_entry(path)
+        self.assertEqual(entry["locked_reason"], "claude agent agent-nsdir (pid %d)" % holder.pid,
+                         "the listing lost the holder's lock")
+        self.assertIsNone(entry["locked_at_ms"], "read a write time through a .git directory: %r" % entry["locked_at_ms"])
+        self.assertIsNot(sweep.stale_agent_lock_verdict(entry["locked_reason"], entry["locked_at_ms"]), True,
+                         "the verdict frees a tree whose .git is a directory")
+
+    @verdict_on("win32")
+    def test_missing_git_file_reads_no_lock_write_time(self):
+        holder = self.live_holder()
+        path = self.no_start_tree("nsnone", holder)
+        locked = self.lock_file(path)
+        started = self.holder_start_s(holder)
+        os.utime(locked, (started - self.DAY_S, started - self.DAY_S))
+        self.assert_no_start_scope("nsnone", path, holder)
+        self.assertIsNotNone(self.fresh_entry(path)["locked_at_ms"], "precondition: the file read gave no write time")
+        self.restore_git_file_after(path)
+        os.remove(os.path.join(path, ".git"))
+        entry = self.fresh_entry(path)
+        self.assertEqual(entry["locked_reason"], "claude agent agent-nsnone (pid %d)" % holder.pid,
+                         "the listing lost the holder's lock")
+        self.assertIsNone(entry["locked_at_ms"], "read a write time with no .git file: %r" % entry["locked_at_ms"])
+        self.assertIsNot(sweep.stale_agent_lock_verdict(entry["locked_reason"], entry["locked_at_ms"]), True,
+                         "the verdict frees a tree with no .git file")
+
+    @verdict_on("win32")
+    def test_unlock_for_removal_passes_the_write_time_to_the_lock_re_read(self):
+        # Red when `_lock_unlockable` drops the write time it passes to the stale verdict: the re-read then
+        # keeps a reused pid's lock. Green on the unchanged code.
+        holder = self.live_holder()
+        path = self.no_start_tree("nsunlock", holder)
+        locked = self.lock_file(path)
+        started = self.holder_start_s(holder)
+        os.utime(locked, (started - self.DAY_S, started - self.DAY_S))
+        self.assert_no_start_scope("nsunlock", path, holder)
+        decision = sweep.decide_worktree(self.root, self.fresh_entry(path), attended=True)
+        self.assertEqual(decision["action"], "reap", "kept before the re-read: %s" % decision["reason"])
+        self.assertTrue(decision.get("unlock"), "no unlock was planned for a reused pid's lock")
+        lifted = sweep.unlock_for_removal(self.root, path, decision)
+        self.assertTrue(lifted, "the unlock re-read kept a reused pid's lock: %s" % decision.get("reason"))
+        self.assertTrue(decision.get("unlocked"), "the lock was not taken off: %s" % decision.get("error"))
+        self.assertIsNone(self.fresh_entry(path)["locked_reason"], "git still lists the tree as locked")
+
+    @verdict_on("win32")
+    def test_restore_cut_short_passes_the_write_time_of_a_reused_pid_lock(self):
+        # Red when the cut-short write-back drops the write time it passes to the lock check: the deleted
+        # tracked file then stays deleted. Green on the unchanged code.
+        holder = self.live_holder()
+        path = self.no_start_tree("nscut", holder)
+        locked = self.lock_file(path)
+        started = self.holder_start_s(holder)
+        os.utime(locked, (started - self.DAY_S, started - self.DAY_S))
+        self.assert_no_start_scope("nscut", path, holder)
+        tracked = os.path.join(path, "f.txt")
+        self.assertTrue(os.path.isfile(tracked), "the fixture has no tracked file to cut")
+        os.remove(tracked)
+        write(os.path.join(os.path.dirname(locked), sweep.REMOVAL_MARKER), "")
+        sweep._restore_cut_short(self.root, self.fresh_entry(path))
+        self.assertTrue(os.path.isfile(tracked),
+                        "the cut-short write-back left the file deleted: the lock check got no write time")
+
+    # The Linux route for a no-start lock. The `worktree` argument names the tree, and Linux never reads
+    # the write time. A live holder is freed only when its cwd is outside the tree AND its argv names no
+    # claude or agent; any unreadable /proc read keeps. Every case runs through decide_worktree, a name the
+    # old code also has, so a red is an assertion on the keep, never a call the old code cannot take. The
+    # keep cases carry a write-time gap a day wide, the reading that frees the tree on Windows, so the route
+    # alone must keep the tree.
+
+    def held_tree(self, name, argv=None, inside=False):
+        """A clean, merged, idle tree locked `claude agent agent-<name> (pid N)`, N a live holder that started
+        a day after the lock file was written. INSIDE starts the holder with its cwd in the tree. Returns
+        (path, holder)."""
+        path = os.path.join(ROOT, "stale-lock-" + name)
+        require(run_vcs(self.root, "worktree", "add", "-q", path, "-b", "lane-stale-" + name).returncode == 0,
+                "worktree add %s failed" % name)
+        holder = self.live_holder(cwd=path if inside else None, argv=argv)
+        require(run_vcs(self.root, "worktree", "lock", path, "--reason",
+                        "claude agent agent-%s (pid %d)" % (name, holder.pid)).returncode == 0,
+                "lock %s failed" % name)
+        _age_admin_files(path, 2 * 60 * 60)
+        locked = self.lock_file(path)
+        started = self.holder_start_s(holder)
+        os.utime(locked, (started - self.DAY_S, started - self.DAY_S))
+        self.assert_no_start_scope(name, path, holder)
+        return path, holder
+
+    @unittest.skipIf(not sys.platform.startswith("linux"), "the /proc route is Linux only")
+    def test_linux_no_start_lock_of_a_reused_pid_running_another_program_is_freed(self):
+        # Red on the unchanged code: the lock was written after its holder started, so there is no write-time
+        # gap and the old verdict keeps the live holder. The route frees it: a `sleep` outside the tree, argv
+        # naming no claude or agent. The tree is clean, merged and idle (its admin files are aged), so it goes.
+        holder = self.live_holder(argv=["sleep", "300"] if shutil.which("sleep") else None)
+        path = self.no_start_tree("nsproc", holder)
+        self.assert_no_start_scope("nsproc", path, holder)
+        self.assertGreaterEqual(os.path.getmtime(self.lock_file(path)), self.holder_start_s(holder),
+                                "the lock was written before its holder started: a write-time gap")
+        decision = sweep.decide_worktree(self.root, self.fresh_entry(path), attended=True)
+        self.assertEqual(decision["action"], "reap",
+                         "kept a reused pid running another program: %s" % decision["reason"])
+        sweep.remove_worktree(self.root, path, decision)
+        self.assertNotIn("error", decision)
+        self.assertFalse(os.path.exists(path), "the tree of a reused pid running another program is still on disk")
+
+    @unittest.skipIf(not sys.platform.startswith("linux"), "the /proc route is Linux only")
+    def test_linux_no_start_lock_held_by_a_plain_argv_ancestor_reads_live(self):
+        # Red without the ancestry walk: the /proc route reads this process's own ancestor as a reused pid, because its argv is
+        # plain `sh` and its cwd is outside the tree, so the verdict is stale. An ancestor is the host whatever its
+        # argv: stale is False, and own_agent_lock_verdict is True. Depth 2 runs the probe under a second shell,
+        # so a check on the parent alone fails it.
+        for depth in (1, 2):
+            with self.subTest(depth=depth):
+                folder = os.path.join(ROOT, "ancestor-depth-%d" % depth)
+                tree = os.path.join(folder, "tree")
+                holder = start_plain_holder(folder)
+                self.addCleanup(stop_plain_holder, holder)
+                reason = "claude agent agent-ancestor%d (pid %d)" % (depth, holder.pid)
+                line = write_probe(folder, verdict_body(reason, tree), depth)
+                assert_holder_scope(self, holder, tree)
+                report = probe_report(self, *run_plain_holder(holder, line))
+                self.assertIn(holder.pid, report["chain"], "scope: the holder is not in the probe's ancestry")
+                self.assertIs(report["stale"], False,
+                              "the /proc route reads a live ancestor as a reused pid: stale %r" % report["stale"])
+                self.assertIs(report["own"], True,
+                              "a live ancestor is not this session's own lock: own %r" % report["own"])
+
+    @unittest.skipIf(not sys.platform.startswith("linux"), "the /proc route is Linux only")
+    def test_linux_no_start_lock_held_by_a_plain_argv_holder_outside_the_chain_is_stale_and_not_own(self):
+        # Green with and without the ancestry walk: the control for the ancestor case above. The holder is a `sleep`
+        # outside this process's ancestry, so the route still frees it (stale True), and it is not this session's
+        # own lock (own False).
+        holder = self.live_holder(argv=["sleep", "300"] if shutil.which("sleep") else None)
+        path = self.no_start_tree("nsown", holder)
+        self.assert_no_start_scope("nsown", path, holder)
+        reason = self.fresh_entry(path)["locked_reason"]
+        with self.subTest(arm="stale"):
+            self.assertIs(sweep.stale_agent_lock_verdict(reason, None, path), True,
+                          "a plain-argv holder outside the ancestry reads as live")
+        with self.subTest(arm="own"):
+            self.assertIs(sweep.own_agent_lock_verdict(reason, None, path), False,
+                          "a holder outside the ancestry is this session's own lock")
+
+    # The ancestry walk's two stops that keep. Each control arm is the same holder, outside the chain, with
+    # the walk intact: it frees (stale True). The subject arm breaks the walk, and the verdict must keep.
+
+    @unittest.skipIf(not sys.platform.startswith("linux"), "the /proc route is Linux only")
+    def test_linux_no_start_lock_whose_parent_read_fails_keeps(self):
+        # Red without the ancestry walk: the holder frees whatever the parent reads say.
+        # The subject arm makes every parent read return None, so the walk cannot rule out an ancestor: keep.
+        holder = self.live_holder(argv=["sleep", "300"] if shutil.which("sleep") else None)
+        path = self.no_start_tree("nsparent", holder)
+        self.assert_no_start_scope("nsparent", path, holder)
+        reason = self.fresh_entry(path)["locked_reason"]
+        with self.subTest(arm="control: the walk reads the parents"):
+            self.assertIs(sweep.stale_agent_lock_verdict(reason, None, path), True,
+                          "scope: a plain-argv holder outside the chain does not free with the walk intact")
+        with mock.patch.object(sweep, "_parent_pid", return_value=None) as read:
+            got = sweep.stale_agent_lock_verdict(reason, None, path)
+        with self.subTest(arm="subject: the parent read was made"):
+            self.assertTrue(read.called, "scope: the parent read was never made")
+        with self.subTest(arm="subject: an unreadable parent read keeps"):
+            self.assertIs(got, False, "an unreadable parent read freed a live holder: stale %r" % got)
+
+    @unittest.skipIf(not sys.platform.startswith("linux"), "the /proc route is Linux only")
+    def test_linux_no_start_lock_whose_ancestry_walk_exhausts_its_bound_keeps(self):
+        # Red without the ancestry walk: the holder frees. The subject arm makes every
+        # parent read return the walk's own pid, a cycle that never reaches the holder or PID 1. The walk runs
+        # out of MAX_CLIMB steps, and an exhausted bound keeps.
+        holder = self.live_holder(argv=["sleep", "300"] if shutil.which("sleep") else None)
+        path = self.no_start_tree("nsbound", holder)
+        self.assert_no_start_scope("nsbound", path, holder)
+        reason = self.fresh_entry(path)["locked_reason"]
+        with self.subTest(arm="control: the walk reads the parents"):
+            self.assertIs(sweep.stale_agent_lock_verdict(reason, None, path), True,
+                          "scope: a plain-argv holder outside the chain does not free with the walk intact")
+        with mock.patch.object(sweep, "_parent_pid", side_effect=lambda pid: pid) as read:
+            got = sweep.stale_agent_lock_verdict(reason, None, path)
+        with self.subTest(arm="subject: the walk ran out of its bound"):
+            self.assertEqual(read.call_count, sweep.MAX_CLIMB, "scope: the walk did not run to its bound")
+        with self.subTest(arm="subject: an exhausted bound keeps"):
+            self.assertIs(got, False, "an exhausted ancestry bound freed a live holder: stale %r" % got)
+
+    @unittest.skipIf(not sys.platform.startswith("linux"), "the /proc route is Linux only")
+    def test_linux_no_start_lock_whose_holder_works_inside_its_tree_keeps_despite_a_write_time_gap(self):
+        # Red on the unchanged code: the write time reads a reused pid, so the old verdict frees the tree.
+        # Linux does not read the write time, and a holder whose cwd is in the tree is the agent in it.
+        # The pre-removal process check would keep this tree anyway, after the lock check, so processes_in
+        # is stubbed to see nothing: the lock verdict is then the only keep, and the process rule has its own cases.
+        path, _holder = self.held_tree("nsinside", inside=True)
+        with mock.patch.object(sweep, "processes_in", return_value=([], [])):
+            decision = sweep.decide_worktree(self.root, self.fresh_entry(path), attended=True)
+        self.assertEqual(decision["action"], "keep", "freed a live holder inside its own tree: %s" % decision["reason"])
+        self.assertTrue(decision["reason"].startswith("locked:"), "kept for another reason: %s" % decision["reason"])
+        self.assertTrue(os.path.isdir(path), "the tree of a live holder inside it was removed")
+
+    @unittest.skipIf(not sys.platform.startswith("linux"), "the /proc route is Linux only")
+    def test_linux_no_start_lock_whose_holder_names_claude_or_agent_keeps_despite_a_write_time_gap(self):
+        # Red on the unchanged code: the write-time gap frees the tree. A holder whose argv names claude or
+        # agent is a host or an agent, whatever its cwd. The match is case-insensitive, so both spellings run.
+        for index, marker in enumerate(("claude-stub", "Agent-Stub")):
+            with self.subTest(marker=marker):
+                argv = [sys.executable, "-c", "import time; time.sleep(300)", marker]
+                path, _holder = self.held_tree("nsargv%d" % index, argv=argv)
+                decision = sweep.decide_worktree(self.root, self.fresh_entry(path), attended=True)
+                self.assertEqual(decision["action"], "keep",
+                                 "freed a holder whose argv names %r: %s" % (marker, decision["reason"]))
+
+    @unittest.skipIf(not sys.platform.startswith("linux"), "the /proc route is Linux only")
+    def test_linux_no_start_lock_with_an_unreadable_proc_read_keeps_despite_a_write_time_gap(self):
+        # Red on the unchanged code: the write-time gap frees the tree. With one /proc read unreadable the
+        # verdict cannot prove a reused pid, so it keeps, and it never falls back to the write time. The
+        # control reads the same tree with every read working, and that frees it.
+        path, holder = self.held_tree("nsunread")
+        entry = self.fresh_entry(path)
+        with self.subTest(arm="control: every /proc read works, so the reused pid frees"):
+            decision = sweep.decide_worktree(self.root, entry, attended=True)
+            self.assertEqual(decision["action"], "reap", "the control kept: %s" % decision["reason"])
+        for name in ("cwd", "cmdline"):
+            with self.subTest(arm="unreadable /proc/PID/%s keeps" % name):
+                with _unreadable_proc(holder.pid, name):
+                    decision = sweep.decide_worktree(self.root, entry, attended=True)
+                self.assertEqual(decision["action"], "keep",
+                                 "freed on an unreadable /proc/%d/%s: %s" % (holder.pid, name, decision["reason"]))
+                self.assertTrue(decision["reason"].startswith("locked:"),
+                                "kept for another reason: %s" % decision["reason"])
+
+    @unittest.skipIf(not sys.platform.startswith("linux"), "the /proc route is Linux only")
+    def test_linux_no_start_lock_with_no_tree_path_keeps_despite_a_write_time_gap(self):
+        # Red on the unchanged code: the write-time gap frees the holder. The route reads the holder's cwd
+        # against the tree's path, so with no path it cannot place the holder, and it keeps. The control
+        # gives the tree's path, and the same holder frees.
+        path, _holder = self.held_tree("nsnopath")
+        entry = self.fresh_entry(path)
+        with self.subTest(arm="control: the tree's path is given, so the reused pid frees"):
+            decision = sweep.decide_worktree(self.root, entry, attended=True)
+            self.assertEqual(decision["action"], "reap", "the control kept: %s" % decision["reason"])
+        with self.subTest(arm="no tree path: the holder is kept"):
+            got = sweep.stale_agent_lock_verdict(entry["locked_reason"], locked_at_ms=entry["locked_at_ms"])
+            self.assertIs(got, False, "freed a holder with no tree path on a write-time gap: verdict %r" % (got,))
+
+    @unittest.skipIf(not sys.platform.startswith("linux"), "the /proc route is Linux only")
+    def test_linux_no_start_lock_whose_cmdline_reads_empty_keeps_despite_a_write_time_gap(self):
+        # Red on the unchanged code: the write-time gap frees the tree. An empty cmdline names no argv to judge,
+        # so the route keeps and never falls back to the write time. The control reads the same tree with its
+        # cmdline working, and that frees it.
+        path, holder = self.held_tree("nsempty")
+        entry = self.fresh_entry(path)
+        with self.subTest(arm="control: the cmdline is read, so the reused pid frees"):
+            decision = sweep.decide_worktree(self.root, entry, attended=True)
+            self.assertEqual(decision["action"], "reap", "the control kept: %s" % decision["reason"])
+        with self.subTest(arm="an empty /proc/PID/cmdline keeps"):
+            with _empty_proc_cmdline(holder.pid):
+                decision = sweep.decide_worktree(self.root, entry, attended=True)
+            self.assertEqual(decision["action"], "keep",
+                             "freed on an empty /proc/%d/cmdline: %s" % (holder.pid, decision["reason"]))
+            self.assertTrue(decision["reason"].startswith("locked:"),
+                            "kept for another reason: %s" % decision["reason"])
+
+    @verdict_on("darwin")
+    def test_darwin_keeps_a_live_no_start_holder_whatever_the_write_time(self):
+        # Red on the unchanged code: the write-time arm frees a holder that started after its lock was
+        # written. Darwin has no measured clock-free route, so a live no-start holder keeps.
+        got = self.no_start_verdict(self.LOCK_MS + 10 * self.DAY_MS, self.LOCK_MS)
+        self.assertIs(got, False, "darwin freed a live no-start holder on its write time: verdict %r" % (got,))
 
 
 class ListenerDecisionTests(unittest.TestCase):
@@ -4745,29 +5442,70 @@ class _AgentEndFixture(unittest.TestCase):
         start = time.strftime("%a %b %e %H:%M:%S %Y", time.gmtime(this_process_start_ms() / 1000))
         return "claude agent agent-%s (pid %d start %s)" % (name, os.getpid(), start)
 
+    # The claude host: a real child whose argv names claude, as the harness's host does. The Linux route
+    # reads a no-start holder whose argv names no claude or agent as a reused pid, and this process's own argv
+    # names neither. The host runs one job per stdin line: a child with the job's argv, input and env.
+    _CLAUDE_HOST = (
+        "import json, subprocess, sys\n"
+        "for line in sys.stdin:\n"
+        "    job = json.loads(line)\n"
+        "    done = subprocess.run(job['argv'], input=job['input'], capture_output=True, text=True,\n"
+        "                          env=job['env'], cwd=job['cwd'], timeout=120)\n"
+        "    sys.stdout.write(json.dumps({'rc': done.returncode, 'err': done.stderr}) + '\\n')\n"
+        "    sys.stdout.flush()\n")
+
+    def claude_host(self):
+        """This case's claude host, started on first use and stopped at teardown. Its pid is the one host_lock
+        names, and the hook runs beneath it."""
+        if getattr(self, "_host", None) is None:
+            self._host = subprocess.Popen([sys.executable, "-c", self._CLAUDE_HOST, "claude"], cwd=self.root,
+                                          stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                          stderr=subprocess.DEVNULL, text=True)
+            self.addCleanup(self.stop_host, self._host)
+        return self._host
+
+    @staticmethod
+    def stop_host(host):
+        host.kill()
+        host.wait(timeout=10)
+        host.stdin.close()
+        host.stdout.close()
+
     def host_lock(self, name):
-        """The lock text `git worktree list --porcelain` shows now on agent trees: `claude agent
-        agent-<id> (pid N)`, N the claude host, with no start time. N is this test process, the
-        host that fire_under_host names."""
-        return "claude agent agent-%s (pid %d)" % (name, os.getpid())
+        """The lock text `git worktree list --porcelain` shows now on agent trees: `claude agent agent-<id>
+        (pid N)`, with no start time. N is this case's claude host (`claude_host`), an ancestor of every hook
+        that fire_under_host runs, and its argv names claude, so the Linux route keeps its lock as a live host."""
+        return "claude agent agent-%s (pid %d)" % (name, self.claude_host().pid)
+
+    def in_process_host_lock(self, name):
+        """The host lock of THIS process, for a case whose hook runs in this process (`run_in_process`), so the
+        process must be the hook's ancestor. On Linux the live form: this process's no-start form reads as a
+        reused pid there, since its argv names no claude. Elsewhere, the no-start form."""
+        return self.live_host_lock(name) or "claude agent agent-%s (pid %d)" % (name, os.getpid())
 
     def fire_under_host(self, agent, path, cwd=None, check=True, extra=None):
-        """Run the SubagentStop hook one process below an intermediate python, itself run by this test
-        process (the host). The measured chain is hook -> shell -> claude.exe, so the host is a
-        grandparent. CLAUDE_PID names the host, as the harness sets it (38784 in the tool shell).
-        CWD (default: the test root) is the working directory of the relay, and so of the hook. CHECK
-        False returns the answer without asserting its exit code. EXTRA adds payload fields, such as
-        a finished agent's transcript_path and background_tasks (see payload_extra)."""
+        """Run the SubagentStop hook beneath this case's claude host (`claude_host`). The measured chain is hook
+        -> shell -> claude.exe, so the host is a grandparent: hook -> relay -> host, the relay run by the host.
+        CLAUDE_PID names the host, as the harness sets it (38784 in the tool shell). CWD (default: the test
+        root) is the working directory of the relay, and so of the hook. CHECK False returns the answer without
+        asserting its exit code. EXTRA adds payload fields, such as a finished agent's transcript_path and
+        background_tasks (see payload_extra)."""
+        host = self.claude_host()
         fields = {"hook_event_name": "SubagentStop", "agent_id": agent,
                   "cwd": path, "session_id": "agent-end-wt-cases"}
         fields.update(extra or {})
         payload = json.dumps(fields)
-        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, CLAUDE_PID=str(os.getpid()))
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.cfg, CLAUDE_PID=str(host.pid))
         relay = ("import subprocess, sys; sys.exit(subprocess.run([sys.executable, sys.argv[1]], "
                  "input=sys.stdin.read(), text=True).returncode)")
-        answer = subprocess.run([sys.executable, "-c", relay, os.path.join(HERE, "agent_end_reap.py")],
-                                input=payload, capture_output=True, text=True, env=env,
-                                cwd=cwd or self.root, timeout=120)
+        job = {"argv": [sys.executable, "-c", relay, os.path.join(HERE, "agent_end_reap.py")],
+               "input": payload, "env": env, "cwd": cwd or self.root}
+        host.stdin.write(json.dumps(job) + "\n")
+        host.stdin.flush()
+        reply = host.stdout.readline()
+        require(reply != "", "the claude host exited before it ran the hook")
+        done = json.loads(reply)
+        answer = subprocess.CompletedProcess(job["argv"], done["rc"], "", done["err"])
         if check:
             self.assertEqual(answer.returncode, 0, "hook exited %d: %s" % (answer.returncode, answer.stderr[-300:]))
         return answer
@@ -5026,7 +5764,8 @@ class AgentEndOwnWorktreeTests(_AgentEndFixture):
         self.assert_own_left(own)
 
     def test_own_tree_locked_by_a_different_live_pid_is_kept_and_stays_locked(self):
-        other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)"], cwd=self.root,
+        # The other session's host: a live process whose argv names claude, so it is a live holder, not a reused pid.
+        other = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(120)", "claude"], cwd=self.root,
                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                  stderr=subprocess.DEVNULL)
         self.addCleanup(self.stop, other)
@@ -5299,7 +6038,8 @@ class AgentEndFinishedTreeTests(_AgentEndFixture):
                         "with open(sys.argv[1], 'w', encoding='utf-8') as handle:\n"
                         "    handle.write(str(child.pid))\n"
                         "time.sleep(120)\n")
-        sponsor = subprocess.Popen([sys.executable, "-c", sponsor_code, pidfile, tree], cwd=self.root,
+        # The sponsor's argv names claude: a live host that is not this session's, so its lock holds by the route.
+        sponsor = subprocess.Popen([sys.executable, "-c", sponsor_code, pidfile, tree, "claude"], cwd=self.root,
                                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                    stderr=subprocess.DEVNULL)
         self.addCleanup(self.stop, sponsor)
@@ -5365,7 +6105,7 @@ class AgentEndFinishedTreeTests(_AgentEndFixture):
         ending = name + "end"
         own = self.add(ending)
         control = self.control_tree(name + "ctl")
-        tree = self.finished_tree(name)
+        tree = self.finished_tree(name, lock=self.in_process_host_lock(name))
         self.write_stop_row(name, tree)
         self.age_agent_transcript(name, 31)
         self.age_control(control)
@@ -9980,9 +10720,10 @@ class OwnAgentLockTests(unittest.TestCase):
     has a cwd inside it, and no live session holds it. Any other lock keeps. An unreadable
     ancestor read keeps. Each case builds its own real repository, worktree and lock."""
 
-    def own_lock_tree(self, name, pid, prepare=None, check=None, age=2 * 60 * 60):
+    def own_lock_tree(self, name, pid, prepare=None, check=None, age=2 * 60 * 60, start=True):
         """A clean, pushed, merged worktree locked by `claude agent agent-<name> (pid PID start ...)`
-        with PID's real start time. PREPARE runs before the lock, CHECK after it, and the admin
+        with PID's real start time, or with no start time when START is false: `(pid PID)`, the form the
+        Linux route judges. PREPARE runs before the lock, CHECK after it, and the admin
         files are aged last, so a git read in CHECK cannot make the tree look active."""
         root = os.path.join(ROOT, "own-lock-" + name)
         make_repo(root, {"f.txt": "base\n"})
@@ -9992,16 +10733,29 @@ class OwnAgentLockTests(unittest.TestCase):
                 "worktree add %s failed" % name)
         if prepare is not None:
             prepare(path)
-        start = guard._process_start_ms(pid)
-        require(isinstance(start, int), "could not read the start time of pid %d" % pid)
-        stamp = time.strftime("%a %b %e %H:%M:%S %Y", time.gmtime(start / 1000))
-        reason = "claude agent agent-%s (pid %d start %s)" % (name, pid, stamp)
+        if start:
+            started = guard._process_start_ms(pid)
+            require(isinstance(started, int), "could not read the start time of pid %d" % pid)
+            stamp = time.strftime("%a %b %e %H:%M:%S %Y", time.gmtime(started / 1000))
+            reason = "claude agent agent-%s (pid %d start %s)" % (name, pid, stamp)
+        else:
+            reason = "claude agent agent-%s (pid %d)" % (name, pid)
         require(run_vcs(root, "worktree", "lock", path, "--reason", reason).returncode == 0,
                 "lock of %s failed" % name)
         if check is not None:
             check(root, path)
         _age_admin_files(path, age)
         return root, path
+
+    @staticmethod
+    def commit_ahead(path):
+        """One commit that main lacks, pushed to a lane branch: the tree is unmerged, but fully pushed."""
+        write(os.path.join(path, "lane.txt"), "ahead of main\n")
+        run_vcs(path, "add", "-A")
+        require(run_vcs(path, *IDENT, "commit", "-q", "-m", "lane work").returncode == 0,
+                "commit in %s failed" % path)
+        pushed = run_vcs(path, "push", "-q", "origin", "HEAD:refs/heads/lane-ahead")
+        require(pushed.returncode == 0, "push of the lane failed: %s" % pushed.stderr.strip())
 
     @staticmethod
     def entry_for(root, path):
@@ -10043,19 +10797,11 @@ class OwnAgentLockTests(unittest.TestCase):
 
     def test_own_lock_on_an_unmerged_pushed_tree_keeps(self):
         # Green today: the lock keeps. The rule must keep it too, because HEAD is not in main.
-        def commit_ahead(path):
-            write(os.path.join(path, "lane.txt"), "ahead of main\n")
-            run_vcs(path, "add", "-A")
-            require(run_vcs(path, *IDENT, "commit", "-q", "-m", "lane work").returncode == 0,
-                    "commit in %s failed" % path)
-            pushed = run_vcs(path, "push", "-q", "origin", "HEAD:refs/heads/lane-ahead")
-            require(pushed.returncode == 0, "push of the lane failed: %s" % pushed.stderr.strip())
-
         def subject(root, path):
             self.assertIs(sweep._merged_read(root, path), False, "HEAD is in main, not ahead of it")
             self.assertIs(sweep.fully_pushed(path), True, "the ahead commit is not pushed")
 
-        root, path = self.own_lock_tree("ahead", os.getppid(), prepare=commit_ahead, check=subject)
+        root, path = self.own_lock_tree("ahead", os.getppid(), prepare=self.commit_ahead, check=subject)
         decision = sweep.decide_worktree(root, self.entry_for(root, path))
         self.assertEqual(decision["action"], "keep", "reaped an unmerged tree: %s" % decision["reason"])
 
@@ -10111,6 +10857,38 @@ class OwnAgentLockTests(unittest.TestCase):
                 decision = sweep.decide_worktree(root, entry)
             self.assertTrue(read.called, "the ancestor read was never made")
             self.assertEqual(decision["action"], "keep", "reaped on an unreadable ancestor: %s" % decision["reason"])
+
+    @unittest.skipIf(not sys.platform.startswith("linux"), "the /proc route is Linux only")
+    def test_linux_no_start_lock_held_by_a_plain_argv_ancestor_follows_the_own_lock_rules(self):
+        # Red without the ancestry walk: the /proc route reads the ancestor's lock as a reused pid, so the tree goes on the stale
+        # route ("removable: stale agent lock") and never meets the own-lock gate (merged, idle 30 min). The probe
+        # runs under the holder, so the holder is its ancestor. Arm 1 frees as an own lock. Arms 2 and 3 keep as
+        # "locked:" under --attended, where the stale route reaps with no merge read and no idle read.
+        arms = [
+            ("merged and idle 2 h frees as an own lock", {}, False, "reap", "removable: own agent lock"),
+            ("unmerged, pushed, under --attended keeps", {"prepare": self.commit_ahead}, True, "keep", "locked:"),
+            ("merged, idle 5 min, under --attended keeps", {"age": 5 * 60}, True, "keep", "locked:"),
+        ]
+        for index, (label, options, attended, action, reason) in enumerate(arms):
+            with self.subTest(arm=label):
+                folder = os.path.join(ROOT, "own-plain-%d" % index)
+                holder = start_plain_holder(folder)
+                self.addCleanup(stop_plain_holder, holder)
+                root, path = self.own_lock_tree("plain%d" % index, holder.pid, start=False, **options)
+                entry = self.entry_for(root, path)
+                self.assertEqual(entry["locked_reason"], "claude agent agent-plain%d (pid %d)" % (index, holder.pid),
+                                 "the lock is not the no-start form")
+                line = write_probe(folder, decision_body(root, entry, attended), 1)
+                assert_holder_scope(self, holder, path)
+                report = probe_report(self, *run_plain_holder(holder, line))
+                self.assertIn(holder.pid, report["chain"], "scope: the holder is not in the probe's ancestry")
+                decision = report["decision"]
+                self.assertEqual(decision["action"], action,
+                                 "decided %s, want %s: %s" % (decision["action"], action, decision["reason"]))
+                self.assertTrue(decision["reason"].startswith(reason),
+                                "decided for the wrong reason: %s" % decision["reason"])
+                if action == "reap":
+                    self.assertTrue(decision.get("unlock"), "the own lock was not marked for unlock")
 
 
 if __name__ == "__main__":
