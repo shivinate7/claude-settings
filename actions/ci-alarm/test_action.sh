@@ -499,26 +499,23 @@ workflow_at 4952 checks scope-guard:37
 workflow_at 4953 checks scope-guard:37
 t green failure-run-cleared-by-a-newer-green-with-its-cap-end-under-the-cap-is-quiet "" "" ""
 
-# The cancelled-path cost sentence in action.yml: the one that starts "Cost of that check", in the first paragraph of the description.
-# Scope first: the sentence must be found. Then it may not claim that no process starts or no file is written, must say
-# "no long-lived process", and must count its reads: one jobs read per judged run (failed or cancelled), the workflow read
-# only when a job was cancelled, and the workflows-list read.
-action_yml="$root/actions/ci-alarm/action.yml"
-cost_sentence="$(awk '/^description: >/ { f = 1; next } f && /^[ \t]*$/ { exit } f' "$action_yml" | sed 's/^[ \t]*//' | tr '\n' ' ' | sed -n 's/.*\(Cost of that check.*\)/\1/p' | sed 's/\. .*$//')"
-if [ -z "$cost_sentence" ]; then echo "FAIL action-yml-cancelled-cost-sentence-not-found"; bad=1
-else
-  claim="$(grep -Eo 'no (new |local )?(process|file)' <<<"$cost_sentence" | head -n 1)"
-  if [ -n "$claim" ]; then echo "FAIL action-yml-cost-line-claims-$(tr ' ' '-' <<<"$claim")"; bad=1
-  else echo "ok   action-yml-cost-line-claims-no-process-start-or-file-write"; fi
-  if grep -qF 'no long-lived process' <<<"$cost_sentence"; then echo "ok   action-yml-cost-line-says-no-long-lived-process"
-  else echo "FAIL action-yml-cost-line-does-not-say-no-long-lived-process"; bad=1; fi
-  if grep -qF 'one jobs read per judged run (failed or cancelled)' <<<"$cost_sentence"; then echo "ok   action-yml-cost-line-counts-one-jobs-read-per-judged-run"
-  else echo "FAIL action-yml-cost-line-drops-the-jobs-read-per-judged-run"; bad=1; fi
-  if grep -Eq 'workflow[- ](file )?read (only )?when a job' <<<"$cost_sentence"; then echo "ok   action-yml-cost-line-keeps-the-workflow-read-when-a-job-was-cancelled"
-  else echo "FAIL action-yml-cost-line-drops-the-workflow-read-when-a-job-was-cancelled"; bad=1; fi
-  if grep -qF 'workflows-list read' <<<"$cost_sentence"; then echo "ok   action-yml-cost-line-keeps-the-workflows-list-read"
-  else echo "FAIL action-yml-cost-line-drops-the-workflows-list-read"; bad=1; fi
-fi
+# Reads per judged run, counted in the call log (the reads the alarm made, not the text of its description). One jobs read per
+# judged run. A failed run with a red job and no clear candidate starts no python3. A run cleared by a candidate reads the
+# candidate's jobs once and its workflow file once, and starts clear_rule.py twice (the red-stays step, then the clear step).
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/count-red-4960 push 4960)"
+jobs_of 4960 checks:failure
+t red one-judged-failed-run-reads-its-jobs-once "" "" "" "actions/runs/4960/jobs"
+cost one-judged-failed-run-reads-its-jobs-once-and-starts-no-python 1 0 0
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/count-capped-4963 push 4963)"
+jobs_of 4963 scope-guard:cancelled:40
+workflow_at 4963 scope-guard:37
+t red one-judged-failed-run-with-a-cap-end-reads-its-jobs-and-workflow-once "" "" "" "actions/runs/4963/jobs"
+cost one-judged-failed-run-with-a-cap-end-reads-one-workflow-file-and-starts-no-python 1 1 0
+runs_are "$(gh_run ci success 2026-01-02 https://runs/count-green-4962 schedule 4962)" "$(gh_run ci failure 2026-01-01 https://runs/count-red-4961 push 4961)"
+jobs_of 4961 checks:failure
+jobs_of 4962 checks:success
+t green one-red-run-cleared-by-a-candidate-reads-each-jobs-list-once "" "" "" "actions/runs/4961/jobs actions/runs/4962/jobs"
+cost one-red-run-cleared-by-a-candidate-reads-one-workflow-file-and-starts-python-twice 2 1 2
 
 # The scanner cases: a timeout-minutes line in a run block, a comment after the cap, a quoted timeout in a run line, a lone quote.
 scanner_wf() {
