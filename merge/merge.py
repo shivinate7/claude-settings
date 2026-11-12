@@ -1118,7 +1118,7 @@ class Host:
         marker is its whole first line, or when it has no marker but opens with the record's PR and Head fields (record_fields_only): a record
         whose marker line was cut off must read as a bad record, not vanish. A timestamp the read did not give is None.
         lints is {PR number: [lane-lint comment bodies, oldest first]}: the lint marker is the whole first line and the author is the repo's owner.
-        A failed read is a Stop. The one home of the comment read: review_records, review_comments and the lane-lint check each take their part."""
+        A failed read is a Stop. The one home of the comment read: review_logs, review_comments and the lane-lint check each take their part."""
         records, lints = {}, {}
         for c in self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
             body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
@@ -1129,7 +1129,7 @@ class Host:
                 lints.setdefault(int(m.group(1)), []).append(body)
         return records, lints
 
-    def review_records(self, since):
+    def review_logs(self, since):
         """-> {PR number: [(body, created_at, updated_at, id) of each review record comment, oldest first]}: the records half of issue_comments."""
         return self.issue_comments(since)[0]
 
@@ -1140,8 +1140,8 @@ class Host:
             raise Stop(f"posting the comment on #{n} failed {LANE_LINT_CITE}: {out}")
 
     def review_comments(self, since):
-        """-> {PR number: [review record bodies, oldest first]}: review_records without the timestamps."""
-        return {n: [row[0] for row in rows] for n, rows in self.review_records(since).items()}
+        """-> {PR number: [review record bodies, oldest first]}: review_logs without the timestamps."""
+        return {n: [row[0] for row in rows] for n, rows in self.review_logs(since).items()}
 
     def pr_files(self, n, changed):
         """-> [(path, status, additions)] of the pull request's changed files, one paged read of pulls/<n>/files; a missing additions counts 0. A rename also gives its old path as removed, with 0.
@@ -3062,7 +3062,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
         base = info["base"]
         info = fetch_pr_head(root, info, base, host, n)  # a lane lints right after its push, when GitHub may still show the old head
         head = info["head"]
-        review_note, review_fail = review_record_step(host, n, info)
+        review_note, review_fail = review_log_step(host, n, info)
         tmp, wt = add_worktree(root, head)
     else:
         head, base = lane_head_and_base(root, target, base)
@@ -3114,7 +3114,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
     raise Liftable("\n".join([head_line, *lines, *log,
                               'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
 
-def review_record_step(host, n, info):
+def review_log_step(host, n, info):
     """-> (notes, fails): the Review record step of `merge --lane-lint <pr>`, each a list of lines. It reads the newest record-shaped comment of pull request n from the one
     comment-list read the lint makes. A newest comment that does not parse is a fail, so a lane learns it before `--reviewed` shows the record bad. A missing
     record, a record for an older head, or a list that cannot be read is a note and the step passes: the lane may lint before its review, and a read that
@@ -4383,7 +4383,7 @@ def release_check(root, h, numbers, lints, root_why=None):
     records, records_why = {}, None
     if live:
         try:
-            records = h.review_records(min(i["created"] or "1970-01-01T00:00:00Z" for i in live.values()))
+            records = h.review_logs(min(i["created"] or "1970-01-01T00:00:00Z" for i in live.values()))
         except RELEASE_READ_ERRORS as e:
             records_why = unknown_reason(e)
     try:
@@ -5383,7 +5383,7 @@ def main(argv, host=None, lock=None, hosts=None):
             if misfits:
                 raise Stop(f"Kind: the diff breaks --kind {a.kind} at " + ", ".join(misfits) + ". Write the record with the kind the diff has. " + REVIEW_CITE)
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed
-                earlier = h.review_records(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])
+                earlier = h.review_logs(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])
                 last, why = newest_record_read(earlier, a.pr)  # the same read as the lane lint and --reviewed: a record for another PR is no base
                 if not last or last["head"] != a.fix_check[0]:
                     ok = False
