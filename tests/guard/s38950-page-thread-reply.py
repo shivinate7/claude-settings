@@ -17,7 +17,7 @@ PTR_TEXT = "The item is rewritten; the answer is on the page."
 PTR_OTHER = "https://claude.ai/artifact/otherpage"
 
 
-def ptr_deny(name, **fields):
+def ptr_refuse(name, **fields):
     add(PTR_NAME + name, "deny", PTR_RULE, carries=PTR_REMEDY, tool="ArtifactComments", cwd=PQ_REPO, **fields)
 
 
@@ -26,15 +26,15 @@ def ptr_allow(name, **fields):
 
 
 # Refused: any reply into a thread on this repo's waiting page, whatever its text or flags.
-ptr_deny("a reply into a thread on the waiting page is denied",
-         action="reply", url=PQ_URL, thread_id=PTR_THREAD, text=PTR_TEXT)
-ptr_deny("a one-word reply on the waiting page is denied",
-         action="reply", url=PQ_URL, thread_id=PTR_THREAD, text="Done.")
-ptr_deny("a reply sent with acknowledge_duplicate is denied",
-         action="reply", url=PQ_URL, thread_id=PTR_THREAD, text=PTR_TEXT, acknowledge_duplicate=True)
-ptr_deny("an empty reply on the waiting page is denied",
-         action="reply", url=PQ_URL, thread_id=PTR_THREAD, text="")
-ptr_deny("a reply of the largest size on the waiting page is denied",
+ptr_refuse("a reply into a thread on the waiting page is denied",
+           action="reply", url=PQ_URL, thread_id=PTR_THREAD, text=PTR_TEXT)
+ptr_refuse("a one-word reply on the waiting page is denied",
+           action="reply", url=PQ_URL, thread_id=PTR_THREAD, text="Done.")
+ptr_refuse("a reply sent with acknowledge_duplicate is denied",
+           action="reply", url=PQ_URL, thread_id=PTR_THREAD, text=PTR_TEXT, acknowledge_duplicate=True)
+ptr_refuse("an empty reply on the waiting page is denied",
+           action="reply", url=PQ_URL, thread_id=PTR_THREAD, text="")
+ptr_refuse("a reply of the largest size on the waiting page is denied",
          action="reply", url=PQ_URL, thread_id=PTR_THREAD, text="x" * 4096)
 
 # Passes: every call that is not a reply into a thread on the waiting page.
