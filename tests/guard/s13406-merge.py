@@ -534,15 +534,21 @@ def role_result(tool_id, text):
         {"type": "tool_result", "tool_use_id": tool_id, "content": [{"type": "text", "text": text}]}]}})
 
 
-def role_record(tags, session=ROLE_OWN, title="a lane session"):
-    """The text get_session returns: a JSON object whose ccr block holds the record."""
-    return json.dumps({"ccr": {"id": session, "title": title, "tags": list(tags),
-                               "parent_session_id": "session_PARENT01"}})
+ROLE_PARENT = "session_PARENT01"  # the parent every record here carries, unless a case names none
 
 
-def role_call(tool_id, tags, session=ROLE_OWN, title="a lane session"):
+def role_record(tags, session=ROLE_OWN, title="a lane session", parent=ROLE_PARENT):
+    """The text get_session returns: a JSON object whose ccr block holds the record. `parent` None leaves
+    parent_session_id out, as a session the owner started has none."""
+    ccr = {"id": session, "title": title, "tags": list(tags)}
+    if parent is not None:
+        ccr["parent_session_id"] = parent
+    return json.dumps({"ccr": ccr})
+
+
+def role_call(tool_id, tags, session=ROLE_OWN, title="a lane session", parent=ROLE_PARENT):
     """One paired get_session call whose record carries `tags`."""
-    return [role_use(tool_id, GET_SESSION), role_result(tool_id, role_record(tags, session, title))]
+    return [role_use(tool_id, GET_SESSION), role_result(tool_id, role_record(tags, session, title, parent))]
 
 
 def role_tag_call(tool_id, session=ROLE_OWN):
@@ -685,6 +691,20 @@ ROLE_LINES = {
     "tags-then-untagged": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1") + role_call("g2", ["cs-repo:o/r"]),
     "tags-then-coordinator": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1") + role_call("g2", COORD_TAGS),
     "untagged-then-lane": role_call("g1", ["cs-repo:o/r"]) + role_call("g2", LANE_TAGS),
+    # roles are hats (decision session-tiers): a session with no parent_session_id and no cs-build tag is solo, and may record
+    # the batch-runner role for its own merge. A parent, any cs-build tag, another session's record or a newer lane read keeps it
+    # out. A set_session_tags call on its own id after the solo read makes that read stale, as the trust card's read is.
+    "solo": role_call("g1", ["cs-repo:o/r"], parent=None),
+    "solo-null-parent": [role_use("g1", GET_SESSION), role_result("g1", json.dumps({"ccr": {
+        "id": ROLE_OWN, "title": "a solo session", "tags": ["cs-repo:o/r"], "parent_session_id": None}}))],
+    "solo-no-tags": role_call("g1", [], parent=None),
+    "solo-then-other-tags": role_call("g1", ["cs-repo:o/r"], parent=None) + role_tag_call("t1", session=ROLE_OTHER),
+    "solo-then-tags": role_call("g1", ["cs-repo:o/r"], parent=None) + role_tag_call("t1"),
+    "solo-then-lane": role_call("g1", ["cs-repo:o/r"], parent=None) + role_call("g2", LANE_TAGS),
+    "other-solo": role_call("g1", ["cs-repo:o/r"], session=ROLE_OTHER, parent=None),
+    "lane-solo": role_call("g1", LANE_TAGS, parent=None),
+    "coordinator-solo": role_call("g1", COORD_TAGS, parent=None),
+    "triage-solo": role_call("g1", TRIAGE_TAGS, parent=None),
     # roadmap-one-writer reads these too: a triage record, its tag set after, a title, another session, and
     # the newest own record in either order.
     "triage": role_call("g1", TRIAGE_TAGS),
@@ -897,6 +917,39 @@ for _role_prefix in ("", "cd somewhere && "):
         # decision session-tiers: the coordinator never merges, in any form, even on its own record
         _coord_cmd = _role_prefix + _role_form + " --role coordinator"
         role_refuse(_coord_cmd + " is refused on its own coordinator record", _coord_cmd, role_path("coordinator"))
+# roles are hats (decision session-tiers, owner 2026-11-10 14:33 CST): a solo session, with no parent_session_id and no cs-build
+# tag, records the batch-runner role for its own merge. Red on main, where merge-role-proof still asks for the batch-runner tag
+# (the ruling's "Not built" line).
+role_allow("a solo session with no parent_session_id and no cs-build tag records batch-runner", MERGE_SHIM + " --role batch-runner",
+           role_path("solo"))
+role_allow("a solo session whose parent_session_id is null records batch-runner", MERGE_SHIM + " --role batch-runner",
+           role_path("solo-null-parent"))
+role_allow("a solo session with an empty tag list records batch-runner", MERGE_SHIM + " --role batch-runner",
+           role_path("solo-no-tags"))
+role_allow("a solo read, then set_session_tags on another session, still records batch-runner",
+           MERGE_SHIM + " --role batch-runner", role_path("solo-then-other-tags"))
+for _role_prefix in ("", "cd somewhere && "):
+    for _role_form in (MERGE_SHIM, "bin/merge", "python3 merge/merge.py", "python3 merge/launch.py"):
+        _solo_cmd = _role_prefix + _role_form + " --role batch-runner"
+        role_allow(_solo_cmd + " allows a solo session's own record", _solo_cmd, role_path("solo"))
+# Green controls, refused on main and after the change: a parent, any cs-build tag, a stale read, a newer lane read, another
+# session's record and no session id each keep the solo hat out. The new allow must not widen past them.
+role_refuse("an untagged session with a parent_session_id is refused: a parent is a lane's or a triage's, not the solo hat",
+            MERGE_SHIM + " --role batch-runner", role_path("untagged"))
+role_refuse("a lane with no parent_session_id is refused: its cs-build:lane tag keeps it out",
+            MERGE_SHIM + " --role batch-runner", role_path("lane-solo"))
+role_refuse("a coordinator with no parent_session_id is refused: the coordinator never merges",
+            MERGE_SHIM + " --role batch-runner", role_path("coordinator-solo"))
+role_refuse("a triage session with no parent_session_id is refused: any cs-build tag keeps the solo hat out",
+            MERGE_SHIM + " --role batch-runner", role_path("triage-solo"))
+role_refuse("a solo read, then set_session_tags on its own id, is refused: that read is stale, as the trust card's is",
+            MERGE_SHIM + " --role batch-runner", role_path("solo-then-tags"))
+role_refuse("a solo read, then a newer lane read, is refused: the newest own record decides",
+            MERGE_SHIM + " --role batch-runner", role_path("solo-then-lane"))
+role_refuse("a solo record of another session is ignored, so the own record is missing and the role is refused",
+            MERGE_SHIM + " --role batch-runner", role_path("other-solo"))
+role_refuse("a solo record with no session id in the env is refused",
+            MERGE_SHIM + " --role batch-runner", role_path("solo"), env=None)
 # Nothing the guard cannot read as an own record allows.
 role_refuse("no get_session record in the transcript is refused", MERGE_SHIM + " --role batch-runner",
           role_path("no-record"))
