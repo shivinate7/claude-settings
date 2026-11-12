@@ -25,8 +25,10 @@ Four reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
               lines or more there: the whole file within one non-blank line, or one hunk on all but one line. Off a
               test path it needs the file on both sides. (2) On a test path (hooks/guard.py is_test_rel), a hunk of C
               takes out more of the lines E added than it adds back, and not every one is a rewrite (`rewritten`). Only
-              lines C takes out that E added count, and only while head still holds fewer of them than C's parent did.
-              Not read here: moves, renames, merges. The FAIL names the path, C and E.
+              lines C takes out that E added count: in (1) while head still holds fewer of them than C's parent did,
+              in (2) only a line with no copy left in the whole file at head. A file E or C renames is read across
+              the rename, so a move adds and puts back nothing. Not read here: merges, and a file renamed by a third
+              commit between E and C. The FAIL names the path, C and E.
   revived     A note the branch deleted is back at head. The notes file merges by union (decision
               notes-merge-union), so a merge of the base can put a deleted note back with no conflict. A note is
               its slug (`- <slug>:` at line start), so a reworded copy counts; a `- ` line with no slug form is its
@@ -517,6 +519,21 @@ class Commit:
             self._files = raw_files(self.cwd, *([self.parent] if self.parent else ["--root"]), self.sha)
         return self._files
 
+    @property
+    def pairs(self):
+        """{old path: (new path, old blob, new blob)}: the files this commit renames (see renamed)."""
+        if not hasattr(self, "_pairs"):
+            self._pairs = renamed(self.cwd, self.parent, self.sha, self.files) if self.parent else {}
+        return self._pairs
+
+    def side(self, path):
+        """(name before, name after, -U0 hunks) of this commit's change to path. A renamed file is read across its two
+        names, from either name: its hunks are its edits, so a pure move has none."""
+        for old, (new, ob, nb) in self.pairs.items():
+            if path in (old, new):
+                return old, new, hunks(self.cwd, ob, nb)
+        return path, path, hunks(self.cwd, self.parent, self.sha, path)
+
 
 def first_parent(cwd, rev, limit=0, walk="--first-parent"):
     """The commits of rev, newest first, each with its first parent. walk is the log's own selector: the first-parent
@@ -634,12 +651,15 @@ def distance(x, y):
     return max(sum((x - y).values()), sum((y - x).values()))
 
 
-def lane_reads(cwd, e, c, path):
-    """(how, lines of e that c takes out) for each way commit c undoes earlier commit e in path, before the head check."""
-    theirs, mine = hunks(cwd, e.parent, e.sha, path), hunks(cwd, c.parent, c.sha, path)
+def lane_reads(cwd, e, c, path, at_head):
+    """(how, lines of e that c takes out) for each way commit c undoes earlier commit e in path, before the head check.
+    Each commit is read across a rename it makes (Commit.side): E's text before is at its old name, C's text after at its
+    new name. A line counts toward lane lines lost only when no copy of it is left in the file at head (at_head)."""
+    e_before, _, theirs = e.side(path)
+    _, c_after, mine = c.side(path)
     added = collections.Counter(l for _, n in theirs for l in n)
-    test = is_test(path)
-    want, now = text_counts(cwd, e.parent, path), text_counts(cwd, c.sha, path)
+    test = is_test(path) or is_test(c_after)
+    want, now = text_counts(cwd, e.parent, e_before), text_counts(cwd, c.sha, c_after)
     if (test or (want and now)) and sum(len(o) + len(n) for o, n in theirs) >= BLOCK_LINES:
         d = distance(now, want)
         lost = collections.Counter(l for o, _ in mine for l in o) & added
@@ -653,7 +673,7 @@ def lane_reads(cwd, e, c, path):
                     yield "hunk put back", lost
     if test:
         for co, cn in mine:
-            lost = collections.Counter(co) & added
+            lost = collections.Counter({l: k for l, k in (collections.Counter(co) & added).items() if not at_head[l]})
             if sum(lost.values()) > len(cn) and any(not rewritten(l, [(co, cn)], modified=True) for l in lost):
                 yield "lane lines lost", lost
 
@@ -661,23 +681,33 @@ def lane_reads(cwd, e, c, path):
 def lane_undos(cwd, upstream, head):
     """[(path, how, earlier commit, undoing commit)]: a non-merge commit of upstream..head that undoes an earlier non-merge
     commit of the same range (see lane_reads), while head still holds fewer of the lines than the undoing commit's parent did.
-    One finding per undoing commit and path, naming the newest earlier commit it undoes. A lane of one commit has nothing to read."""
+    One finding per undoing commit and path, naming the newest earlier commit it undoes. A lane of one commit has nothing to read.
+    A file C renames is read at its old name, the one earlier commits name, and judged across the rename; its new name is not
+    read again. Head's copy is read at C's name after, or at the name a later rename gave it."""
     lane = [c for c in first_parent(cwd, "%s..%s" % (upstream, head), walk="--no-merges") if c.parent]
     touched = collections.Counter(p for c in lane for p in c.files)
     found = []
     for c in lane:
-        moved = {p for p, (_, was, now) in renamed(cwd, c.parent, c.sha, c.files).items() if was == now}  # a pure move puts nothing back
-        paths = sorted(p for p in c.files if touched[p] > 1 and p not in moved)
+        targets = {new for new, _, _ in c.pairs.values()}
+        paths = sorted(p for p in c.files if touched[p] > 1 and p not in targets)
         if not paths:
             continue
         ancestors = set(git(cwd, "rev-list", "--no-merges", "%s..%s" % (upstream, c.parent))[1].split())
         earlier = [e for e in lane if e.sha in ancestors]
+        later = None
         for path in paths:
+            after = c.side(path)[1]
+            at_head = text_counts(cwd, head, after)
+            if not at_head:  # gone at head under this name: a later rename moved it, or nothing is left
+                if later is None:
+                    later = renamed(cwd, c.sha, head, raw_files(cwd, c.sha, head))
+                if after in later:
+                    at_head = text_counts(cwd, head, later[after][0])
+            pre = text_counts(cwd, c.parent, path)
             for e in (e for e in earlier if path in e.files):
-                pre, at_head = text_counts(cwd, c.parent, path), text_counts(cwd, head, path)
-                how = next((how for how, lost in lane_reads(cwd, e, c, path) if not all(at_head[l] >= pre[l] for l in lost)), None)
+                how = next((how for how, lost in lane_reads(cwd, e, c, path, at_head) if not all(at_head[l] >= pre[l] for l in lost)), None)
                 if how:
-                    found.append((path, how, e, c))
+                    found.append((path, how + ("" if after == path else " (renamed to %s)" % after), e, c))
                     break
     return found
 
