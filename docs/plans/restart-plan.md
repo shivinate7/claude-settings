@@ -814,8 +814,8 @@ under about 40 hours. Unmeasured: what our Stop hooks and judges add to each pin
      the owner did not rule is retired, or derived from measured runs as in 3.2.
   Owner 13:10 CST: "on fixed numbers A". The census (scratchpad limits-census.md) lists about 45
   numbers; item 3 covers each one the owner did not rule. Two contradictions go in too: merge.py warns
-  at 70% of a job cap where decision ci-job-caps says 80%, and bin/sim-lease refuses on load average,
-  which decision machine-load-brake forbids.
+  at 70% of a job cap where decision ci-job-caps says 80%, and bin/sim-lease used to refuse on load average,
+  which decision machine-load-brake forbids. It now reads memory and disk (decision one-load-definition).
   Home: decision plain-prose-lint, rewritten in place.
 
 - **R35. The global CLAUDE.md loads only what each session needs.** Owner 12:38 CST Nov 11: "im

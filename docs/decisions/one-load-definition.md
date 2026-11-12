@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Owner, 2026-11-06 15:24 CST (waiting-page item 304, option a, plan `align-watchers` Q6): the guard and `sim-lease`
+Owner, 2026-11-06 15:24 CST (waiting-page item 304, option a, plan `align-watchers` Q6; attested by the coordinator's step record for step `one-load-definition`, not by a decision file): the guard and `sim-lease`
 share one definition of "the machine is loaded".
 
 - **The home.** `hooks/guard_load.py`. It holds the readings (`read_load`), the verdict (`load_verdict`) and the
@@ -27,10 +27,11 @@ share one definition of "the machine is loaded".
   counts as normal, since Linux memory is always unread and the brake must not refuse every Linux start.
 - **`sim-lease`** (decision `sim-lease-tool`): a grant needs a machine that is not full. Slot 2 needs a normal
   machine. An unread reading holds the grant, and `take` and `status` print it as unknown (coordinator,
-  2026-11-06 15:31 CST, from waiting-page item 276 a: a check that cannot read its input fails). The queue order
+  2026-11-06 15:31 CST). Applying the "a check that cannot read its input fails" ruling (item 276 a, which on main is only
+  the page-check ruling in decision `page-check-at-export`) to `sim-lease` is this lane's reading, awaiting owner confirmation. "Slot 2 needs a normal machine" is this lane's mapping too. The queue order
   and the 18 Pro's slot rules are not load rules.
-- **Changed by this ruling.** Owner, 2026-11-06 15:45 CST (waiting-page item 309, option a): the shared
-  definition reads memory and disk only, and `sim-lease` drops its load-average bars. So a Mac with a high load average but free
+- **Changed by this step.** The shared definition reads memory and disk only, and `sim-lease` drops its load-average bars. This is
+  carried from PR #1369's text (source unverified; awaiting owner confirmation), not an owner ruling. So a Mac with a high load average but free
   memory and disk grants a boot. The guard's verdicts are unchanged.
 
 Why: one capability has one home (`building-one-home-per-capability`), so the two readers can never disagree.

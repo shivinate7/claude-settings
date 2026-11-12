@@ -87,7 +87,7 @@ def start_time(pid):
 
 
 def read_load():
-    """(reading, verdict) from guard_load, or (None, None) when the reader itself raises."""
+    """(reading, verdict) from guard_load. guard_load.read_load puts each read in a try and cannot raise, so the except below is a backstop that gives (None, None), and the real reader never reaches it."""
     try:
         reading = guard_load.read_load()
         return reading, guard_load.load_verdict(reading)
