@@ -458,11 +458,39 @@ class ScannerCases(unittest.TestCase):
                       "a CRLF blank line did not end a comment opened above it, so the line below it was hidden")
 
 
+class CountingText(str):
+    """A str that counts the characters its find and slice calls scan. A regex search is not counted,
+    since its work is inside the engine."""
+    scanned = 0
+
+    def find(self, sub, *bounds):
+        found = str.find(self, sub, *bounds)
+        start = bounds[0] if bounds else 0
+        stop = found if found >= 0 else (bounds[1] if len(bounds) > 1 else len(self))
+        self.scanned += max(0, min(stop, len(self)) - start)
+        return found
+
+    def __getitem__(self, key):
+        part = str.__getitem__(self, key)
+        self.scanned += len(part) if isinstance(key, slice) else 1
+        return part
+
+
 class ScanCost(unittest.TestCase):
-    """The scan's cost grows no faster than its input. The bound is a same-process ratio, not a clock limit (P5)."""
+    """The scan's cost grows no faster than its input. The list case counts the characters that body_text's
+    find and slice calls scan, not a clock (test-strategy-reset, point 2). The paragraph case still times the scan,
+    since its cost is spent inside one regex search that no count sees."""
     NAME = os.path.join("agents", "builder.md")
     SMALL, BIG = 500, 2000  # repeats of a shape: the big input is 4 times the small one
     LIMIT = 8.0  # a linear scan takes about 4 times as long on 4 times the input; a quadratic one about 16
+    COUNT_SMALL = 250  # the counted list has this many repeats, then twice as many
+    COUNT_LIMIT = 2.5  # a linear scan doubles its count on a doubled input; a quadratic one nearly quadruples it
+
+    def work(self, body):
+        """The characters body_text's finds and slices scan on body."""
+        text = CountingText(body)
+        C.body_text(text)
+        return text.scanned
 
     def timed(self, body, runs):
         """The fastest of `runs` checks of one file. The file is written once, outside the timing."""
@@ -485,11 +513,16 @@ class ScanCost(unittest.TestCase):
                         "a paragraph of unclosed openers 4 times as long took %.1f times as long to read: "
                         "the scan is worse than linear" % ratio)
 
-    def test_a_long_list_of_line_start_comments_grows_no_faster_than_linear(self):
-        ratio = self.growth(lambda n: "- item\n" + "  <!-- x -->\n" * n + "\n" + TERSE_LINE)
-        self.assertLess(ratio, self.LIMIT,
-                        "a list of 4 times as many line-start comments took %.1f times as long to read: "
-                        "the scan is worse than linear" % ratio)
+    def test_a_long_list_of_line_start_comments_scans_no_more_than_linear(self):
+        small_body = "- item\n" + "  <!-- x -->\n" * self.COUNT_SMALL + "\n" + TERSE_LINE
+        big_body = "- item\n" + "  <!-- x -->\n" * (2 * self.COUNT_SMALL) + "\n" + TERSE_LINE
+        small, big = self.work(small_body), self.work(big_body)
+        # Control first: the counter saw at least the characters of the input, so a count of 0 cannot pass.
+        self.assertGreaterEqual(small, len(small_body),
+                                "the counter saw fewer characters than the input holds, so the ratio proves nothing")
+        self.assertLessEqual(big, self.COUNT_LIMIT * small,
+                             "a list of line-start comments twice as long scanned %d characters against %d: "
+                             "the scan is worse than linear" % (big, small))
 
     def test_both_long_shapes_still_count_the_line_after_them(self):
         paragraph = write(fixture_root(), self.NAME, doc("x <!-- " * self.SMALL + "\n\n" + TERSE_LINE))
