@@ -163,7 +163,7 @@ parent, or miss a message while busy.
   asked for something to be passed on.
 - Send non-urgent notes, findings and filing requests to the outbox: `roadmap/outbox/<session-slug>.md`
   on the record branch. Each session keeps one file and rewrites it to hold only what is unfiled.
-- Triage reads the outbox at each wake, files each item, and removes what it filed.
+- Triage reads the outbox at each wake, files each item, and removes what it filed, but keeps every `*-handoff.md` file.
 - The session that owns a waiting item reads its answer. Nobody relays it. Skill `waiting-page`
   holds the protocol.
 - A session re-reads the roster right before it sends to a standing session.
