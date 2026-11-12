@@ -136,10 +136,10 @@ PAST_RULING_ITEM = (
     "the question asks the owner to decide what a listed ruling already decides, or when its premise is "
     "something a standing decision already explains (such as asking what a rule means when a decision says why "
     "it was set so). A question whose `Based on (ruling): ...` line names that ruling (its id or slug) passes: "
-    "a re-ask the ruling allows is fine. A challenge that names the record passes on a new fact alone (rule "
-    "outcomes-stale-decision-protocol). A new fact is a measure or an observed harm that the ruling left "
-    "unweighed. A challenge that names the record and says the ruling's claim is unmeasured passes too (rule "
-    "outcomes-stale-decision-protocol: measure the claim, or say unmeasured). "
+    "a re-ask the ruling allows is fine. A challenge that names the record and brings a new fact passes: a "
+    "measure or an observed harm that the ruling left unweighed (rule outcomes-stale-decision-protocol). "
+    "A challenge that names the record, quotes the sentence of the ruling that states no measure, and says its "
+    "claim is unmeasured passes too (rule outcomes-stale-decision-protocol: name the record and the sentence). "
     "A restatement of the ruling's own claim is not a new fact. "
     "The outcome the ruling protected, what protects it now and a proposed fix are optional, never "
     "required. Refuse a re-ask that brings no new fact. "
@@ -151,10 +151,12 @@ PAST_RULING_ITEM = (
 # challenge. It never tells the session to give the question up: a ruling is an argument the owner may be asked to
 # revisit (R39 in docs/plans/restart-plan.md). The challenge is judged as a question and read by no grant reader.
 CHALLENGE_HOW = (
-    "To challenge the ruling, send the question again as a challenge that names the record and brings a new fact: "
-    "a measure, or an observed harm the ruling left unweighed. The outcome it protected, what protects it now and a "
-    "proposed fix are optional. A challenge with the record and a new fact passes this check. A restatement of the "
-    "ruling's own claim is not a new fact. A re-ask that does not name the record is not a challenge."
+    "To challenge the ruling, send the question again as a challenge that names the record and takes one of two "
+    "routes. Route one brings a new fact: a measure, or an observed harm the ruling left unweighed. Route two quotes "
+    "the sentence of the ruling that states no measure and says its claim is unmeasured; it names the record too. The "
+    "outcome it protected, what protects it now and a proposed fix are optional. A challenge on either route passes "
+    "this check. A restatement of the ruling's own claim is not a new fact. A re-ask that does not name the record is "
+    "not a challenge."
 )
 # The question-judge call of lint/report_guard.py (a Stop whose reply asks the owner something): Sonnet, 60 s.
 PAST_RULING_MODEL, PAST_RULING_TIMEOUT = SPAWN_MODEL, 60
