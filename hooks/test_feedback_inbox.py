@@ -4428,8 +4428,8 @@ GLUED_MARK_TEXTS = (  # a colon or a full stop glued to the verb is no clause bo
 RUNNER_TEXTS = (  # green control: "runner" is no act. A bare "run" stem would refuse it, and the measured brief with it
     "approved. Hand in any PR to the batch runner.",
 )
-# A hang guard, not a speed test. A linear scan of the 5,000-sentence message takes well under a second; the bound only
-# catches a scan that grows with the square of the message, which would stall the Stop hook.
+# A hang guard, not a speed test: the case fails only when the guard gives no verdict within the bound, as a stalled
+# scan would.
 HANG_BOUND_S = 10
 HANG_CHILD = (
     "import importlib.util, sys\n"
