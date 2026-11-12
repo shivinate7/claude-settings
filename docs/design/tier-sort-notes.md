@@ -56,7 +56,7 @@ Options. Each draws the same five Blocking items of one repo. Picture ids: `#ord
 - Builder note: the order is worked out once at load, with `freezeSeen`, and kept. A writer update while the
   page is open moves no card until reload (ux-order-holds-still). An arrival still goes first.
 
-## 2. One sub-group per repo inside each tier
+## 2. One sub-group per repo inside each tier. Owner grant: yes (the `meta/page` field `repo`)
 
 - Pick (`#s=page`): inside each tier, one sub-group per repo. The head is the answered-sink point 5 shape:
   a neutral letter tile (`--chip`, `--ink`), the repo name, a count and a solid rule. It is `role="group"`
@@ -89,7 +89,8 @@ Picture ids: `#repos-pin`, `#repos-free`, `#repos-az`. Each draws one Blocking t
 ## 4. Why the order is what it is
 
 - Pick: one line under each tier head names that tier's key (`.tsub`, the words of the rulings' `p.rsub`).
-  Wide, it sits beside the head; on a phone it wraps under it. With two repos or more it starts "This repo first."
+  Wide, it sits beside the head; on a phone it wraps under it. When the tier holds this repo and another, it
+  starts "This repo first." A tier that holds only another repo has no such words, since they would be false.
   The keys differ, so no sentence repeats (ux-label-once).
   - Blocking: "Most stopped work first, then triage's order, then oldest."
   - Upcoming: "Triage's order first, then nearest deadline, then oldest."

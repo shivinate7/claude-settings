@@ -1101,8 +1101,10 @@ const joinAnd = (xs) => xs.length < 2 ? xs.join("") : xs.slice(0, -1).join(", ")
 
 /* ---------- Today's parts, as buildCard() builds them. A seen card keeps every answer part open (SKILL.md, "Inside a tier"). ---------- */
 // The first divider on the page shows "Asked before"; each later one shows the eye and the rule, its words in a .sr span and in title (stale-asks-sink 1A).
+// tag: "today:<words>" for what exists, else the words are new.
 function seenDiv(first, tag) {
-  return `<p class="seenhead"${first ? "" : ' title="Asked before"'}${lab("today", tag)}>${EYE}<span class="${first ? "w" : "sr"}">Asked before</span><span class="seenrule" aria-hidden="true"></span></p>`;
+  const today = tag && tag.startsWith("today:");
+  return `<p class="seenhead"${first ? "" : ' title="Asked before"'}${lab(today ? "today" : "new", today ? tag.slice(6) : tag)}>${EYE}<span class="${first ? "w" : "sr"}">Asked before</span><span class="seenrule" aria-hidden="true"></span></p>`;
 }
 function optCard(it, o) {
   const sfx = it.n + "-" + o.key;
@@ -1234,9 +1236,10 @@ const LINES = {
   due: "Triage's order first, then nearest deadline, then oldest.",
   calm: "Triage's order first, then decisions, then oldest.",
 };
-function lineFor(k, multi, o = {}) {
+// The repo words show only when the tier holds this repo and at least one other, so the line is always true.
+function lineFor(k, groups, o = {}) {
   const base = k === "holds" ? LINES.holds[o.key || "stops"] : LINES[k];
-  if (!multi) return base;
+  if (groups.length < 2 || !groups.some(([r]) => r === THIS)) return base;
   if (o.order === "free") return "Repos and items: " + base[0].toLowerCase() + base.slice(1);
   if (o.order === "az") return "This repo first, then repos A to Z. Inside each: " + base[0].toLowerCase() + base.slice(1);
   return "This repo first. " + base;
@@ -1271,7 +1274,7 @@ function tierHtml(k, entries, o = {}) {
     wordsShown = true;
     inner = newPart + div + draw(part(true), false);
   } else inner = groups.map(([r, es], i) => `<section class="subgrp" role="group" aria-labelledby="sh-${esc(r)}">${subhead(r, es.reduce((s, e) => s + mem(e).length, 0), i === 0 ? tags.sub : i === 1 ? tags.sub2 : "")}${body(es, {}, { ...tags, stops: i === 0 ? tags.stops : "", seen: i === 0 ? tags.seen : "" })}</section>`).join("");
-  const line = `<p class="tsub"${lab("new", tags.line)}>${esc(lineFor(k, multi, o))}</p>`;
+  const line = `<p class="tsub"${lab("new", tags.line)}>${esc(lineFor(k, groups, o))}</p>`;
   return { html: `<section class="tier" id="${o.id || "tier-" + k}" aria-labelledby="th-${k}"${lab("today", tags.tier)}><header><h2 id="th-${k}">${G(k)}${T(k).name}<span class="ct">${total}</span></h2>${line}</header>${inner}</section>`, groups, multi };
 }
 function chip(it, st) {
@@ -1320,7 +1323,7 @@ const PAGE_TAGS = { tier: "", line: "the tier's order, said once", sub: "sub-gro
 function screen(s) {
   if (s === "page") return pageOf([["holds", BLOCKING, { tags: PAGE_TAGS }], ["due", [U1], { tags: { line: "one repo, this repo: no sub-head" } }], ["calm", [W1, W2, W3], { tags: { card: { 52: "no repo field: under this repo" } } }]],
     { answered: [A1, A2], railTag: "rail: each repo's chips start with its tile" });
-  if (s === "single-repo") return pageOf([["holds", [B1, B2, B3, B4, B5], { tags: { line: "one repo: the line, no sub-heads", stops: "the sort key", seen: "seen divider once, as today" } }], ["due", [U1]], ["calm", [W1, W2]]], { answered: [A1] });
+  if (s === "single-repo") return pageOf([["holds", [B1, B2, B3, B4, B5], { tags: { line: "one repo: the line, no sub-heads", stops: "the sort key", seen: "today:seen divider once" } }], ["due", [U1]], ["calm", [W1, W2]]], { answered: [A1] });
   if (s === "groups") return pageOf([["holds", [[GA, G1, G2], B2, [GB, G3, G4], S2, Q1], { tags: { bundle: "group: one place, its stops counted once", about: "member of another repo: names its repo", sub: "", sub2: "group sits under the repo of its member that stops the most" } }]], { answered: [] });
   if (s === "no-repo") return pageOf([["due", [U2], { tags: { sub: "only another repo here: its head stays" } }], ["calm", [W2, W3], { tags: { card: { 52: "no repo field: under this repo" }, sub: "this repo's head: the tier holds two repos" } }]], { answered: [] });
   if (s === "last-sent") return pageOf([["calm", [W1, W2], { forceHeads: true, tags: { sub: "heads frozen at load: stays after banchi's last card sank", line: "banchi's head left with its last card" } }]], { answered: [A3, A1], ansTag: "No. 54 sent on this visit: sank here" });
