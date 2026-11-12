@@ -71,13 +71,18 @@ def sentences(block):
     return [s for s in re.split(r"(?<=[.!?])\s+", flat) if s]
 
 
-def route_section(text):
-    """The "Route and close" section, up to the next heading, or "" when the heading is missing."""
-    start = text.find(ROUTE_HEADING)
+def section(text, heading):
+    """The section that starts with `heading`, up to the next heading, or "" when the heading is missing."""
+    start = text.find(heading)
     if start < 0:
         return ""
     end = text.find("\n## ", start + 1)
     return text[start:] if end < 0 else text[start:end]
+
+
+def route_section(text):
+    """The "Route and close" section, up to the next heading, or "" when the heading is missing."""
+    return section(text, ROUTE_HEADING)
 
 
 def park_branch(text):
