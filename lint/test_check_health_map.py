@@ -248,6 +248,12 @@ class HealthMapTests(unittest.TestCase):
         rc, out = self.check()
         self.assert_uncovered(rc, out, ["uncovered hook: hooks/zz_late.py"])
 
+    def test_18_root_with_no_parts_exits_2(self):
+        # A valid map over a root with no hooks, checks or skills. Zero parts is a wrong root, not a clear run.
+        self.write_map(rows_for(NARROW_COVERS))
+        rc, out = self.check()
+        self.assert_unknown(rc, out, "no parts")
+
 
 if __name__ == "__main__":
     unittest.main()
