@@ -145,7 +145,17 @@
                           batch that says `On: batch-NAME` on the new head. Before the push it asks the host to return a ready pull
                           request to draft; Host.to_draft sends nothing, so it says so and the push restarts CI. The batch then needs
                           `--batch-build NAME --ready` again. Runs no lane lint and no ready check, takes no lock.
-  merge --role TIER       cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`
+  merge --batch-split NAME --run URL
+                          split a red batch: drop the one lane the run names, and each lane that stacks on it, from batch-NAME, by the
+                          --batch-drop route with no stored blame. URL must be a completed, failed run on the batch pull request's current
+                          head, and batch-NAME's tip must be that head. Each failed job's failing lines map to a lane by its own `+` lines
+                          (a case, as a whole word) or, for a line with no case, its own changed paths; never by a file lanes share. A job
+                          that maps to no lane or to two or more, a job whose log is unread, a line that names no case or file, two or
+                          more lanes across the jobs, or a drop that would leave no lane exits 1 with nothing dropped, and names the
+                          route: --blame, then --batch-drop. Cost: one run read, one jobs read plus one log read per failed job, one
+                          fetch, one log read and one diff read per lane; no new process and no file. Takes no lock; accepts --base,
+                          --lint-unknown-ok and --config. A cloud run needs the batch-runner role.
+  merge --role TIER      cloud only: record this session's merge role (batch-runner only; the coordinator never merges). In a cloud session `--confirm`
                           runs only when that role is recorded for the session (read_merge_role).
 
 Git half: the merge lock, the temporary worktree, the claim, the push, the revert, resume, the
@@ -1006,12 +1016,18 @@ class Host:
         return self.pages(f"pulls/{n}/files")
 
     def failed_lines(self, run_id):
-        """-> the failing lines (see failing_line) of the log of each failed job of run RUN_ID: the jobs read (its pages), then one log read per
+        """-> the failing lines (see failing_line) of the log of each failed job of run RUN_ID, every job's in one list: failed_jobs, flattened.
+        A job not accounted for raises UnreadJobs, as failed_jobs does."""
+        return [line for lines in self.failed_jobs(run_id).values() for line in lines]
+
+    def failed_jobs(self, run_id):
+        """-> {job name: its failing lines (see failing_line)} for each failed job of run RUN_ID: the jobs read (its pages), then one log read per
         failed job. Each job is accounted for on its own. The rollup job (ROLLUP_JOB) is skipped, with no log read. A job with a fine conclusion
         (FINE_CONCLUSIONS) needs no log. A failed job must give at least one case or file from its own log lines; an empty log gives none. Any other
-        conclusion, a job still running included, is unread. A failed read is a Stop. A job not accounted for raises UnreadJobs once every job is
-        read, carrying the lines read, so the caller can still use them and say the rest is unknown."""
-        lines, unread = [], []
+        conclusion, a job still running included, is unread. A job name a second job repeats is kept as `name #<job id>`. A failed read is a Stop. A job
+        not accounted for raises UnreadJobs once every job is read, carrying the lines read (every job's, in one list), so the caller can still use
+        them and say the rest is unknown."""
+        jobs, unread = {}, []
         for job in self.pages(f"actions/runs/{run_id}/jobs", "jobs"):
             name, conclusion = job.get("name") or job.get("id"), job.get("conclusion")
             if job.get("name") == ROLLUP_JOB or conclusion in FINE_CONCLUSIONS:
@@ -1028,11 +1044,11 @@ class Host:
                 unread.append(f"{name} failure, its log gave no case or file")
             elif any(not (file or case) and not UNITTEST_SUMMARY.fullmatch(LOG_PREFIX.sub("", t, count=1).rstrip()) for t, (file, case) in found):
                 unread.append(f"{name} failure, a failing line in its log names no case or file")  # its own case may be the one the parsed lines hide
-            lines += [t for t, _p in found]
+            jobs[name if name not in jobs else f"{name} #{job['id']}"] = [t for t, _p in found]
         if unread:
             raise UnreadJobs(f"unknown: run {run_id} has a job whose log was not read or gave no case or file ({'; '.join(unread)}) "
-                             + UNKNOWN_CITE, lines)
-        return lines
+                             + UNKNOWN_CITE, [line for lines in jobs.values() for line in lines])
+        return jobs
 
     # The old GraphQL values the rest of the tool reads, from the REST fields.
     MERGEABLE = {True: "MERGEABLE", False: "CONFLICTING", None: "UNKNOWN"}  # mergeable is null while GitHub works it out
@@ -4264,6 +4280,11 @@ def failing_line(text):
         return None, GUARD_NOTE.sub("", rest.split("]", 1)[1].strip()).strip() or None
     return None, None
 
+def plus_lines(patch):
+    """-> the added lines of a patch, each without its `+`: never a `-` line, a context line or the `+++` file header. The one home of that read: --touches
+    reads a pull request's patches with it, --batch-split a lane's diff."""
+    return [t[1:] for t in patch.splitlines() if t.startswith("+") and not PATCH_FILE_HEADER.match(t)]
+
 def touches_lines(h, run, cases, files):
     """-> (lines, unknown): the lines of `merge --touches` and why it is unknown, or None. A line per open pull request that touches a named file or
     holds a named case in a `+` line of its patch (a case a run's failing lines name also matches a context line), ascending by number; the one no-match line when there is none and nothing is unknown. Paths are
@@ -4296,7 +4317,7 @@ def touches_lines(h, run, cases, files):
     out = []
     for d in sorted(h.pages("pulls", fields={"state": "open"}), key=lambda d: d["number"]):
         changed = h.pull_files(d["number"])
-        added = [t[1:] for f in changed for t in (f.get("patch") or "").splitlines() if t.startswith("+") and not PATCH_FILE_HEADER.match(t)]
+        added = [t for f in changed for t in plus_lines(f.get("patch") or "")]
         names = {posixpath.normpath(f.get("filename") or ""): f for f in changed}
         hits = [f"file {p}" for p in files if p in names]
         context = [t[1:] for f in changed for t in (f.get("patch") or "").splitlines() if t.startswith(" ")]
@@ -5013,36 +5034,49 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", co
     say(f"merge: batch {name} built: PR #{pr} {'draft' if info['draft'] else 'ready'}, lanes {lane_list(heads)}")
     return rc
 
-def batch_blame(root, h, name, number, url):
-    """merge --batch-build NAME --blame PR --run URL: store `Blamed: #PR` in batch-NAME's block, so a drop may take PR off. Only a completed run
-    that concluded failure, on the batch pull request's current head, counts. A refusal writes nothing. Runs no lint and no ready check, and pushes nothing."""
+def check_run(h, url, info, name, done):
+    """The run checks of --blame and --batch-split, one home: the run at `url` is completed, concluded failure, and ran on the batch pull request's
+    current head (info["head"]). Any other run is a Stop that says nothing was `done` (stored, dropped). -> the run's head sha. One run read."""
+    conclusion, sha = h.cited_run(url)
+    if conclusion is None:
+        raise Stop(f"the run {url} is still running, not completed, so it blames no lane yet. Nothing was {done}. {FREEZE_CITE}")
+    if conclusion != "failure":
+        raise Stop(f"the run {url} concluded {conclusion}, not failure: only a failed run blames a lane. Nothing was {done}. {FREEZE_CITE}")
+    if sha != info["head"]:
+        raise Stop(f"the run {url} ran on {(sha or 'no head')[:9]}, an older head: batch {name}'s current head is {info['head'][:9]}. "
+                   f"Only a run on the current head blames a lane. Nothing was {done}. {FREEZE_CITE}")
+    return sha
+
+def read_frozen_batch(h, name, nothing):
+    """The open pull request of batch-NAME and its frozen block, read fresh, for the routes that act on a red run (--blame, --batch-split). A pull request
+    that is missing, holds no block, or holds another batch's is a Stop that says nothing was `nothing` (blamed, dropped). -> (branch, PR, its info, block)."""
     branch = integration_branch(name)
     found = h.batch_pr(branch)
     if found is None:
-        raise Stop(f"no open pull request has the head {branch}, so nothing was blamed. {FREEZE_CITE}")
+        raise Stop(f"no open pull request has the head {branch}, so nothing was {nothing}. {FREEZE_CITE}")
     pr, info = found
     block = parse_freeze(info["body"])
     if block is None:
-        raise Stop(f"#{pr} is the open pull request of {branch} and holds no frozen block, so nothing was blamed. {FREEZE_CITE}")
+        raise Stop(f"#{pr} is the open pull request of {branch} and holds no frozen block, so nothing was {nothing}. {FREEZE_CITE}")
     if block["name"] != name:
         raise Stop(f"the frozen block of #{pr} names batch {block['name']}, not {name}. {FREEZE_CITE}")
+    return branch, pr, info, block
+
+def batch_blame(root, h, name, number, url):
+    """merge --batch-build NAME --blame PR --run URL: store `Blamed: #PR` in batch-NAME's block, so a drop may take PR off. Only a completed run
+    that concluded failure, on the batch pull request's current head, counts. A refusal writes nothing. Runs no lint and no ready check, and pushes nothing."""
+    branch, pr, info, block = read_frozen_batch(h, name, "blamed")
     if number not in block["lanes"]:
         raise Stop(f"#{number} is not in batch {name}'s frozen lane set, which is {lane_list(block['lanes'])}, so nothing was blamed. {FREEZE_CITE}")
-    conclusion, sha = h.cited_run(url)
-    if conclusion is None:
-        raise Stop(f"the run {url} is still running, not completed, so it blames no lane yet. Nothing was stored. {FREEZE_CITE}")
-    if conclusion != "failure":
-        raise Stop(f"the run {url} concluded {conclusion}, not failure: only a failed run blames a lane. Nothing was stored. {FREEZE_CITE}")
-    if sha != info["head"]:
-        raise Stop(f"the run {url} ran on {(sha or 'no head')[:9]}, an older head: batch {name}'s current head is {info['head'][:9]}. "
-                   f"Only a run on the current head blames a lane. Nothing was stored. {FREEZE_CITE}")
+    sha = check_run(h, url, info, name, "stored")
     record_in_block(h, branch, blamed=sorted({*block["blamed"], number}))
     say(f"merge: batch {name}: #{number} is blamed by the failed run {url} on {sha[:9]}. To take it off the batch, run:",
         f"  merge --batch-drop {name} {number}")
     return 0
 
-def batch_drop(root, h, name, number):
-    """merge --batch-drop NAME PR: PR and each frozen lane whose head contains PR's head come off batch-NAME. Returns 0, or 1 when a batch stacked on it could not be rebuilt."""
+def batch_drop(root, h, name, number, proven=False):
+    """merge --batch-drop NAME PR: PR and each frozen lane whose head contains PR's head come off batch-NAME. Returns 0, or 1 when a batch stacked on it could not be rebuilt.
+    `proven` skips only the stored-blame refusal: --batch-split has read the run's own log lines and named PR, so no Blamed line is needed."""
     branch = integration_branch(name)
     found = h.batch_pr(branch)
     if found is None:
@@ -5062,7 +5096,7 @@ def batch_drop(root, h, name, number):
         return rc
     if number not in lanes:
         raise Stop(f"#{number} is not in batch {name}'s frozen lane set, which is {lane_list(lanes)}. {FREEZE_CITE}")
-    if number not in block["blamed"]:
+    if number not in block["blamed"] and not proven:
         raise Stop(f"#{number} is frozen in batch {name}, and no red run of its head blamed it: the batch stores no blame for it"
                    + (f" (it stores a blame for {lane_list(block['blamed'])})" if block["blamed"] else "")
                    + ". After the build a drop takes off only a lane with a stored blame. A FAIL of `--ready` stores the lanes it names. "
@@ -5093,6 +5127,93 @@ def batch_drop(root, h, name, number):
         f"merge: batch {name} now holds lanes {lane_list(kept)}.")
     needs_ready(name, drafted)
     return 1 if restack(root, h, branch, new, {n: lanes[n] for n in dropping}) else 0
+
+def word_in(case, texts):
+    """True when `case` is a whole word of one of `texts`: test_it is in `def test_it(self):` and not in `def test_items(self):`."""
+    pattern = re.compile(rf"(?<!\w){re.escape(case)}(?!\w)")
+    return any(pattern.search(t) for t in texts)
+
+def lane_changes(root, branch, tip, start, lanes):
+    """-> {lane PR: (the `+` lines of its own change, the paths it changes)} for each frozen lane of `lanes` ({PR: head}): the diff of its no-ff merge
+    commit on `branch` against that merge's first parent, so a lane stacked on an earlier lane holds only its own commits. The merge commits are the
+    first-parent merges of `tip` down to `start`, each lane found by the second parent that is its head (as stray_heads reads them); a merge of the
+    base is no lane's. A lane with no merge there is a Stop: its change is unread. One log read, one diff read per lane."""
+    c, out = git(root, "log", "--first-parent", "--merges", "--format=%H %P", tip, "--not", start)
+    if c:
+        raise Stop(f"cannot read the merges on {branch}: {out} {FREEZE_CITE}")
+    by_head = {sha: n for n, sha in lanes.items()}
+    merges = {}
+    for row in out.splitlines():
+        parts = row.split()
+        if len(parts) == 3 and parts[2] in by_head:
+            merges.setdefault(by_head[parts[2]], parts[0])
+    missing = [n for n in lanes if n not in merges]
+    if missing:
+        raise Stop(f"unknown: {lane_list(missing)} has no merge commit on {branch}'s tip, so its own change is unread. Nothing was dropped. {UNKNOWN_CITE}")
+    changes = {}
+    for n in sorted(lanes):
+        c, diff = git(root, "-c", "core.quotepath=off", "diff", "-U0", "--no-renames", "--no-color", f"{merges[n]}^1", merges[n])
+        if c:
+            raise Stop(f"cannot read the change of #{n} on {branch}: {diff} {FREEZE_CITE}")
+        # `diff --git a/P b/P`: with no renames both sides name one path P, so a header's rest `P b/P` is 2 * len(P) + 3 long
+        heads = [l[len("diff --git a/"):] for l in diff.splitlines() if l.startswith("diff --git a/")]
+        changes[n] = (plus_lines(diff), {r[:(len(r) - 3) // 2] for r in heads})
+    return changes
+
+def job_lanes(lines, changes):
+    """-> (the lanes one failed job's failing `lines` name, why the job is unknown or None). A summary line (UNITTEST_SUMMARY) is skipped. A line with a
+    case names each lane whose own `+` lines hold that case as a whole word, whatever file the line also names; a line with only a file names each lane
+    that changes that path. A line with neither makes the job unknown, with no lane named."""
+    named = set()
+    for line in lines:
+        if UNITTEST_SUMMARY.fullmatch(LOG_PREFIX.sub("", line, count=1).rstrip()):
+            continue
+        file, case = failing_line(line) or (None, None)
+        if not (file or case):
+            return set(), f"unknown: its failing line {line.strip()!r} names no case or file"
+        named.update(n for n, (added, paths) in changes.items() if (word_in(case, added) if case else posixpath.normpath(file) in paths))
+    return named, None
+
+def batch_split(root, h, name, url):
+    """merge --batch-split NAME --run URL: drop the one lane a red run names, with its dependents, from batch-NAME (decision batch-freeze-lane-set).
+    Reads only, until the drop. The run must be completed, failed and on the batch pull request's current head, and batch-NAME's tip must be that head.
+    Each failed job (Host.failed_jobs) maps to the lanes whose own change holds its failing cases or files (job_lanes); a job that maps to no lane or to
+    two or more is unmapped, and a job with a line that names neither case nor file, or whose log was not read, is unknown. Any of those, or more than
+    one lane across all jobs, is a Stop that names the cause and writes nothing. Else batch_drop drops the one lane with its stored-blame refusal
+    skipped (`proven`): the run's own log lines name the lane, so no Blamed line is written. Cost: one run read, one jobs read and one log read per
+    failed job, one fetch, one log read and one diff read per lane; no new process and no file."""
+    branch, pr, info, block = read_frozen_batch(h, name, "dropped")
+    sha = check_run(h, url, info, name, "dropped")
+    try:
+        jobs = h.failed_jobs(run_id(url))
+    except UnreadJobs as e:
+        raise Stop(f"{e} Nothing was dropped. {FREEZE_CITE}") from e
+    if not jobs:
+        raise Stop(f"the run {url} names no lane: it has no failed job but the rollup, so its log names no case or file. Nothing was dropped. {FREEZE_CITE}")
+    tip = fetch_branch(root, branch, FREEZE_CITE)
+    if tip != sha:
+        raise Stop(f"{branch}'s tip on origin is {tip[:9]}, not {sha[:9]}, the head the run ran on, so the run's log is not of this tip. Nothing was dropped. {FREEZE_CITE}")
+    changes = lane_changes(root, branch, tip, batch_start(root, block, info["base"])[0], block["lanes"])
+    by_job, problems = {}, []
+    for job, lines in jobs.items():
+        named, unknown = job_lanes(lines, changes)
+        if unknown:
+            problems.append(f"job {job} is {unknown}")
+        elif len(named) != 1:
+            problems.append(f"job {job} is unmapped: " + (f"its failing lines name {lane_list(named)}, not one lane" if named
+                                                           else "no frozen lane's own change holds its failing case or file"))
+        else:
+            by_job[job] = named.pop()
+    route = f"store the blame of the lane the run is caused by with `merge --batch-build {name} --blame <PR> --run {url}`, then run its `merge --batch-drop {name} <PR>`"
+    if problems:
+        raise Stop("\n".join(problems) + f"\nNothing was dropped: a job that is unmapped or unknown names no lane, so {route}. {FREEZE_CITE}")
+    lanes = sorted(set(by_job.values()))
+    if len(lanes) > 1:
+        by = "; ".join(f"#{n} by job " + ", ".join(j for j, m in by_job.items() if m == n) for n in lanes)
+        raise Stop(f"the run {url} names {lane_list(lanes)} ({by}): one lane per run (decision batch-freeze-lane-set). Nothing was dropped: {route}. {FREEZE_CITE}")
+    number = lanes[0]
+    say(f"merge: the run {url} names #{number} by job {', '.join(by_job)}; dropping it, with each lane that stacks on it, from batch {name}. No blame is stored.")
+    return batch_drop(root, h, name, number, proven=True)
 
 MERGE_ROLES = {"batch-runner"}  # the one tier that may run `merge <pr> --confirm` in a cloud session; the coordinator never merges
 
@@ -5206,6 +5327,7 @@ def build_parser():
     p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")
     p.add_argument("--batch-build", nargs="+", metavar=("NAME", "PR"), help="build batch-NAME and its one draft pull request from these lane PRs, or allow the same set again; stands alone; takes no lock")
     p.add_argument("--batch-drop", nargs=2, metavar=("NAME", "PR"), help="take PR, and each frozen lane that stacks on it, off batch-NAME; stands alone; takes no lock")
+    p.add_argument("--batch-split", metavar="NAME", help="drop the one lane a failed CI run of batch-NAME names (by its failing cases and files), and each lane that stacks on it; needs --run; stands alone; takes no lock")
     p.add_argument("--on", metavar="BRANCH", help="with --batch-build: stack the batch on this running batch's head")
     p.add_argument("--ready", action="store_true", help="with --batch-build: lint the head of batch-NAME once and run the ready checks, then ask the host to mark its draft pull request ready; the PR list may be left out")
     p.add_argument("--blame", type=pr_arg, metavar="PR", help="with --batch-build NAME and --run: store that a failed CI run of the batch's current head blames lane PR, so a drop may take it off; nothing else")
@@ -5229,7 +5351,7 @@ def build_parser():
     p.add_argument("--grant", type=grant_arg, metavar="TEXT", help="with --review-record: the owner's grant of round 4, `#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT`, with PR the pull request's own number; the rounds must then reach round 4")
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after the final round (round 3, or 4 with --grant)")
     p.add_argument("--touches", action="store_true", help="list the open pull requests that touch a failing case or a named file; takes no lock, merges and posts nothing")
-    p.add_argument("--run", default=None, metavar="RUN", help="a workflow run, by its id or its Actions run URL. With --touches: the run whose failing log lines name the cases. With --batch-build NAME --blame PR: the failed run of the batch's current head that blames the lane")
+    p.add_argument("--run", default=None, metavar="RUN", help="a workflow run, by its id or its Actions run URL. With --touches: the run whose failing log lines name the cases. With --batch-build NAME --blame PR, or --batch-split NAME: the failed run of the batch's current head that blames the lane")
     p.add_argument("--case", action="append", default=[], metavar="TEXT", help="with --touches: a case to find in the `+` lines of an open pull request's patch; repeat it")
     p.add_argument("--file", action="append", default=[], metavar="PATH", help="with --touches: a file an open pull request changes; repeat it")
     return p
@@ -5243,8 +5365,10 @@ def main(argv, host=None, lock=None, hosts=None):
                 else "--head, --kind, --guard, --round, --fix-check and --net-value go with --review-record (--head also goes with --confirm)")
     if a.ready and not a.batch_build:
         p.error("--ready goes with --batch-build")
-    if a.run is not None and a.blame is None and not a.touches:
-        p.error("--run goes with --touches, or with --batch-build NAME --blame PR")
+    if a.run is not None and a.blame is None and not a.touches and a.batch_split is None:
+        p.error("--run goes with --touches, or with --batch-build NAME --blame PR, or --batch-split NAME")
+    if a.batch_split is not None and a.run is None:
+        p.error("--batch-split needs --run <Actions run URL>: the failed run of the batch's current head that names the lane")
     if a.blame is not None:
         if not a.batch_build:
             p.error("--blame goes with --batch-build NAME")
@@ -5279,35 +5403,35 @@ def main(argv, host=None, lock=None, hosts=None):
     if a.idle_lanes and (a.pr is not None or a.confirm or a.unlock is not None or a.role is not None or a.reviewed
                          or a.review_record or a.lane_lint):
         p.error("--idle-lanes stands alone")
-    batch = a.batch_build is not None or a.batch_drop is not None
+    batch = a.batch_build is not None or a.batch_drop is not None or a.batch_split is not None
     if a.on is not None and not a.batch_build:
         p.error("--on goes with --batch-build")
-    if not (a.lane_lint or a.batch_build):
+    if not (a.lane_lint or a.batch_build or a.batch_split is not None):
         if a.base:
-            p.error("--base goes with --lane-lint or --batch-build")
+            p.error("--base goes with --lane-lint, --batch-build or --batch-split")
     if a.touched_tests and not a.lane_lint:
         p.error("--touched-tests goes with --lane-lint")
     if a.with_prs is not None and not a.lane_lint:
         p.error("--with goes with --lane-lint")
-    if not (a.lane_lint or a.ready):
+    if not (a.lane_lint or a.ready or a.batch_split is not None):
         if a.lint_unknown_ok:
-            p.error("--lint-unknown-ok goes with --lane-lint or --batch-build --ready")
+            p.error("--lint-unknown-ok goes with --lane-lint, --batch-build --ready or --batch-split")
         if a.pr is not None and not a.pr.isdigit():
             p.error(f"argument pr: invalid int value: {a.pr!r}")
     # A batch route takes only these options; any other option set (a mode flag or a modifier) means it does not stand alone.
     if batch and (any(v != p.get_default(k) for k, v in vars(a).items()
-                      if k not in ("batch_build", "batch_drop", "ready", "on", "base", "lint_unknown_ok", "blame", "run",
+                      if k not in ("batch_build", "batch_drop", "batch_split", "ready", "on", "base", "lint_unknown_ok", "blame", "run",
                                  "config", "session", "undo_check_unknown_ok", "base_red_ok"))
-                  or (a.batch_build and a.batch_drop)):
-        p.error("--batch-build and --batch-drop each stand alone")
+                  or sum(x is not None for x in (a.batch_build, a.batch_drop, a.batch_split)) > 1):
+        p.error("--batch-build and --batch-drop each stand alone, and so does --batch-split")
     if a.idle_lanes or a.touches or a.release_check:
         pass  # stands alone: checked above
     elif batch:
-        name, *numbers = a.batch_build or a.batch_drop
-        flag = "--batch-build" if a.batch_build else "--batch-drop"
+        name, *numbers = a.batch_build or a.batch_drop or [a.batch_split]
+        flag = "--batch-build" if a.batch_build else "--batch-drop" if a.batch_drop else "--batch-split"
         if not BATCH_NAME.fullmatch(name):
             p.error(f"{flag} NAME {name!r} must be 1 to 32 characters from a-z, 0-9 and -")
-        if not numbers and not a.ready and a.blame is None:
+        if not numbers and not a.ready and a.blame is None and a.batch_split is None:
             p.error("--batch-build needs at least one pull request number (PR) after NAME")
         if not all(x.isdigit() for x in numbers):
             p.error(f"{flag}: each PR is a pull request number, and these are not: {' '.join(x for x in numbers if not x.isdigit())}")
@@ -5404,6 +5528,8 @@ def main(argv, host=None, lock=None, hosts=None):
             raise Stop("not in a git checkout")
         if batch:  # stands alone: no lock, no lint, no wait
             h = host or Host()
+            if a.batch_split is not None:
+                return batch_split(root, h, name, a.run)
             if a.batch_drop:
                 return batch_drop(root, h, name, int(numbers[0]))
             if a.blame is not None:

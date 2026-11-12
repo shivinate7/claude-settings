@@ -87,7 +87,11 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    stores the lanes it names (`Blamed:`). For a red CI run, `merge --batch-build NAME --blame PR --run <run URL>` stores the blame. It
    refuses a run that is still running, a run that did not fail, a run on an older head, and a lane outside the batch.
    `merge --batch-drop NAME PR` takes off only a stored-blamed lane and its dependents, rebuilds from the frozen set, runs no lane lint, and asks
-   to return a ready PR to draft. Any other lane waits for the next batch. `--on BRANCH` stacks a batch on a running batch.
+   to return a ready PR to draft. Any other lane waits for the next batch. `merge --batch-split NAME --run <run URL>` drops the one lane the
+   failed run names, and its dependents, with no stored blame: each failed job's failing cases map to the lane whose own `+` lines hold them,
+   a line with no case to the lane's own changed paths, never by a file lanes share. A run that is not a failed run of the batch's current
+   head, a batch tip that is not that head, a job that maps to no lane or to two, a job with an unread log, two or more lanes, or a drop that
+   leaves no lane exits 1 with nothing dropped: use `--blame`, then `--batch-drop`. `--on BRANCH` stacks a batch on a running batch.
    Never push to a ready PR while its CI run can still go green. A late lane joins the next batch.
    Once a job is red, push the lane drop or the lane fix at once. The push cancels the old run, and
    the new run is the re-run. A lone lane is its own integration PR. When the integration PR merges,
