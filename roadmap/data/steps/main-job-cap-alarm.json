@@ -9,7 +9,7 @@
  "note": "Missing guard under R16 (plan f8b11c2, 3.2). A job cancelled at its cap on main counts as red, never passed or skipped; the alarm names the job, its cap and the run. Red case first. Cost stated in its record. Owner item 549 a (11:59 CST Nov 12): every cap end on main alarms, cleared or not. Item 588 a (owner 12:58 CST): a cap end in an earlier attempt under a green re-run alarms too. Stands item 608: the alarm skips a run an earlier alarm already named. Plan R53 (owner 13:07 CST Nov 12, restart-plan 4c91998): \"i think any ci / merge relaterd thing should be just an alert for batch runner to either then address or bring to coordinator right\". A CI or merge alarm (red main, a job at its time cap, a dropped check run) wakes the batch runner and opens no GitHub issue. The runner fixes it or brings it to the coordinator. PR #2745 (lane fan-code-workflows, session_013NEJL11UY3p6jnSXrTspmu) uses the one main-run wake that step red-job-wakes-runner builds; its issue-vs-wake part waits on that lane naming the entry point. Owner page save 13:12 CST Nov 12: item 608 a (accepted pick).",
  "source": "owner 2026-11-11 11:53 CST, relayed by the retrospective session",
  "owner": "triage",
- "updatedAt": "2026-11-12T15:01:11-06:00",
+ "updatedAt": "2026-11-12T17:03:05-06:00",
  "blockedBy": [
   "main-push-wakes-runner"
  ]

@@ -5,8 +5,8 @@
  "order": 1037,
  "owner": "triage",
  "why": "Owner R17, 16:25 and 16:36 CST Nov 10 (relayed by the retrospective session): \"repos that have no CI need to get an easy exemption so that they can still call claude-settings but basically things that need CI don't pertain to them -- how can that become a thing?\"; \"this is approved and sounds better than allowing no ci\".",
- "note": "Keeps decision same-check-kinds (item 87). The starter CI checks that links resolve, scripts parse and JSON parses, inside the all-jobs-passed rollup. When the merge tool (required_names, \"no required checks are named\") or lane lint (bin/ci-job, no checks.yml) refuses for no CI, the refusal names that step as the fix. Folds in roadmap step c33. Home: decision same-check-kinds; skill project-ops. Plan stage 3.1, commit 4ac2c0351. Lane code-workflows started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium).",
- "updatedAt": "2026-11-12T07:29:00-06:00",
+ "note": "Keeps decision same-check-kinds (item 87). The starter CI checks that links resolve, scripts parse and JSON parses, inside the all-jobs-passed rollup. When the merge tool (required_names, \"no required checks are named\") or lane lint (bin/ci-job, no checks.yml) refuses for no CI, the refusal names that step as the fix. Folds in roadmap step c33. Home: decision same-check-kinds; skill project-ops. Plan stage 3.1, commit 4ac2c0351. Lane code-workflows started 07:29 CST Nov 12 (coordinator fan-out, Sonnet, medium). Coordinator 17:02 CST Nov 12 (lane fan-code-workflows final): #2770 handed to runner 10, head 63e51f3107; merge order #2733, #2770, #2875, #2920 (each holds the one before). Follow-up after #2770 merges: bump the two zero pins in skills/project-ops/templates/starter-ci/checks.yml.",
+ "updatedAt": "2026-11-12T17:03:05-06:00",
  "lane": "session_013NEJL11UY3p6jnSXrTspmu",
  "blockedBy": []
 }
