@@ -2180,3 +2180,4 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
+- bracket-stamp-open-limits: the bracket header stamp check passes a bracket with no closing `]`, double brackets and `[a 13:40 CST 12:00 CST]` (two stamps in one bracket); the comma form reads the `*` and `#` lead slowly (1.8 s on a 5,000-character run, on main too). Found in PR 2876 review rounds 1 to 3; none is a mistake Claude is likely to make. Decision: local-time-central.
