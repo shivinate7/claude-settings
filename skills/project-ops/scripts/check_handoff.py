@@ -6,9 +6,10 @@
 A save of the waiting page wakes only the page writer, the one session that watches the page. A successor page
 writer with no watch hears no answer on the items it inherits. Reason: measured incident, the owner's two test saves
 (rule building-guard-needs-incident). Every other role never watches the page: the page writer messages it of an
-answer. The check fails closed: a handoff is the page writer's unless its first heading line names the coordinator
-or the batch runner (`# Coordinator handoff, <date>`). A heading with no such word, or no heading, is the page
-writer's.
+answer. The check fails closed, and the first heading line decides. A handoff is not the page writer's only when
+that line names the coordinator or the batch runner (`# Coordinator handoff, <date>`). The page-writer words win: a
+line that also names triage or the page writer is the page writer's, as `# Batch runner and triage handoff`. A
+heading with no coordinator or batch runner, or no heading, is the page writer's.
 The check reads the `## Pages` section of the handoff
 (templates/role-handoff.md). It needs an `Open items:` line: `none`, or the URL of the page's items
 collection. A handoff never carries item ids, which go stale after a compaction. An id, a number or a
@@ -28,10 +29,12 @@ PAGES = re.compile(r"^## Pages[ \t]*\n(.*?)(?=^## |\Z)", re.M | re.S)
 # `0` is none only alone: `05` and `0, 4` are ids.
 NONE = re.compile(r"(?:none\b|0(?![\w,]))", re.I)
 WATCH_NONE = re.compile(r"none\b", re.I)
-# The first heading line of a handoff. Only the page writer watches the page, so a handoff is the page writer's
-# unless that line names the coordinator or the batch runner.
+# The first heading line of a handoff. Only the page writer watches the page. A handoff is not the page writer's
+# only when that line names the coordinator or the batch runner and names neither triage nor the page writer.
+# A session that holds the page writer's role beside another role still watches the page, so the page-writer words win.
 FIRST_HEADING = re.compile(r"^#{1,6}[ \t].*$", re.M)
 NON_WRITER_TITLE = re.compile(r"\b(?:coordinator|batch[ \t]+runner)\b", re.I)
+WRITER_TITLE = re.compile(r"\b(?:triage|page[ \t]+writer)\b", re.I)
 URL = re.compile(r"https?://\S+")
 # A standalone number, as `12` or `#12`, outside any URL: a copied item id.
 ID = re.compile(r"(?<!\w)#?\d+(?!\w)")
@@ -48,9 +51,13 @@ def _is_url(value):
 
 
 def _is_page_writer(text):
-    """True unless the first heading line names the coordinator or the batch runner (fails closed)."""
+    """True unless the first heading line names the coordinator or the batch runner and names neither triage nor
+    the page writer (fails closed)."""
     m = FIRST_HEADING.search(text)
-    return not (m and NON_WRITER_TITLE.search(m.group(0)))
+    if not m:
+        return True
+    title = m.group(0)
+    return bool(WRITER_TITLE.search(title)) or not NON_WRITER_TITLE.search(title)
 
 
 def handoff_problems(text):
