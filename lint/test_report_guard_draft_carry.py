@@ -14,7 +14,9 @@ the transcript the guard has already read. These cases pin what the draft holds:
 - a report with no compaction, or with an unsourced item, drafts nothing;
 - drafting starts no process and opens no file;
 - the Stop block the owner sees carries the draft;
-- a draft line in the Stop block ends before the next refusal reason, so a pasted line carries none of it.
+- a draft line in the Stop block ends before the next refusal reason, so a pasted line carries none of it;
+- the Stop block prints the drafts last, each on its own line after the other reasons, on an unlanded turn and on the
+  rewrite after a missing-report block.
 
 The fixture, the record builders and the run folder come from lint/test_report_guard.py, the one home, borrowed by name
 here. No model call is made. Run with:
@@ -42,6 +44,12 @@ REPORT = trg.REPORT_NO_LINE  # carries neither carry line
 SOURCES = ("git", "page", "digest")
 # The owner-line tail every refusal ends with. A draft is read up to it, so the tail is never part of the draft.
 OWNER_TAIL = re.compile(r"\s*\(%s\)" % re.escape(RG.REMEDY_CITE))
+# An answered-source refusal's trigger: a reply line that says "answered" and cites no source.
+ANSWERED_LINE = "Answered: no permission rule can lift it."
+# The rule suffix a joined Stop reason ends with, and the header it prints before the draft lines. The header is written
+# out here, not read from report_guard, so the pin states the text the owner reads.
+RULE_SUFFIX = " (rule reports-order-of-labels)"
+DRAFT_HEADER = "\nDraft of each missing line:\n"
 
 
 def setUpModule():
@@ -132,6 +140,23 @@ def drafted(refusal, label):
 def draft_sources(draft):
     """The source words the draft names, in SOURCES order."""
     return [word for word in SOURCES if re.search(r"\b%s\b" % word, draft)]
+
+
+def assert_drafts_last(case, reason, others, labels):
+    """The Stop reason prints the other reasons before the draft header, the rule suffix right before the header, then
+    each draft on its own line. `others` are texts the reasons before the header hold; `labels` name the draft lines in
+    order. Returns the draft lines."""
+    head, sep, tail = reason.partition(DRAFT_HEADER)
+    case.assertTrue(sep, "the Stop reason holds no draft header: %r" % reason)
+    for text in others:
+        case.assertIn(text, head, "the reason %r is not printed before the draft header: %r" % (text, reason))
+    case.assertTrue(head.endswith(RULE_SUFFIX), "the rule suffix is not right before the draft header: %r" % reason)
+    lines = tail.split("\n")
+    case.assertEqual([ln.partition(":")[0] for ln in lines], labels,
+                     "the lines after the draft header are not the draft lines %r: %r" % (labels, reason))
+    for ln in lines:
+        case.assertNotIn(RULE_SUFFIX, ln, "the rule suffix sits on a draft line: %r" % ln)
+    return lines
 
 
 class RecoveredDraftTests(unittest.TestCase):
@@ -384,6 +409,50 @@ class DraftStopTests(unittest.TestCase):
                                          % (name, label, out["reason"]))
                     self.assertNotIn("Cite-gloss", line, "the %s draft line for %s carries the next reason: %r"
                                      % (name, label, line))
+
+    def test_an_unlanded_stop_prints_the_drafts_last_on_their_own_lines(self):
+        # The pick join: a turn with no call (no commit, push or merge), holding an answered-source refusal and the
+        # Recovered refusal with both draft lines.
+        records = compacted(trg.assistant_text(ANSWERED_LINE + "\n\n" + REPORT))
+        # Scope first: the turn holds no call, so it is the unlanded path.
+        self.assertEqual(calls_in(records), [], "the turn holds a call, so it is not the unlanded path")
+        out = self.stop_block(records)
+        self.assertIsNotNone(out, "the Stop printed no block for an unlanded turn with two refusals")
+        self.assertEqual(out.get("decision"), "block")
+        lines = assert_drafts_last(self, out["reason"], ["Answered guard", "Recovered guard"],
+                                   ["Recovered", "Handoff gave"])
+        # Catches: a Recovered draft that names a source, though no source was read after the compaction.
+        self.assertEqual(lines[0], "Recovered: none", "the Recovered draft is %r, not Recovered: none" % lines[0])
+
+
+class DraftRewriteStopTests(unittest.TestCase):
+    """The rewrite after a missing-report block prints the drafts last too: the rewrite join."""
+
+    def setUp(self):
+        self.folder = tempfile.mkdtemp(dir=trg.RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, self.folder, True)
+        self.sid = "cc-" + uuid.uuid4().hex
+
+    def stop(self, records, active):
+        path = trg.write_transcript(records, self.folder)
+        hook = {"hook_event_name": "Stop", "transcript_path": path, "stop_hook_active": active,
+                "session_id": self.sid}
+        run = trg.run_guard(REPORT_GUARD, hook, env=dict(os.environ, CLAUDE_CODE_SUBAGENT_MODEL="sonnet"))
+        self.assertEqual(run.returncode, 0, run.stderr[-300:])
+        return json.loads(run.stdout) if run.stdout.strip() else None
+
+    def test_the_rewrite_after_a_missing_report_prints_the_drafts_last(self):
+        # The first Stop lands a commit with no report: it blocks for the report and leaves the marker the rewrite reads.
+        first = self.stop(compacted(*landed(), trg.assistant_text("All done.")), False)
+        self.assertIsNotNone(first, "no missing-report block on the first Stop")
+        self.assertIn("does not end with the report", first["reason"], "the first Stop is not the missing-report block")
+        out = self.stop(compacted(*landed(), trg.assistant_text(ANSWERED_LINE + "\n\n" + REPORT)), True)
+        self.assertIsNotNone(out, "the rewrite printed no block for a reply with two refusals")
+        self.assertEqual(out.get("decision"), "block")
+        lines = assert_drafts_last(self, out["reason"], ["Answered guard", "Recovered guard"],
+                                   ["Recovered", "Handoff gave"])
+        # The commit after the compaction is a git source, so the Recovered draft names git and no other source.
+        self.assertEqual(draft_sources(lines[0]), ["git"], "the Recovered draft is %r, not one naming git" % lines[0])
 
 
 if __name__ == "__main__":
