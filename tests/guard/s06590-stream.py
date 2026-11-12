@@ -362,12 +362,15 @@ add("check-tail: pytest with bin/ci-job as an argument piped to tail, background
 # count. A foreground run and the other merge flags are not this rule's. The lint is read through the wrappers,
 # `uv run` and a script run by python, as check_stage reads it.
 LANE_LINT_RULE = "lane-lint-timeout"
-# Three copies of the guard, each with its own merge/ beside it, or none: no merge/ at all; a merge/merge.py whose
-# two constants set a bound of their own; and one whose pushed-head wait is text. The bound of the middle copy is
-# not main's, so a reason that copies main's bound fails on it.
+# Five copies of the guard, each with its own merge/ beside it, or none: no merge/ at all; a merge/merge.py whose
+# two constants set a bound of their own; one whose pushed-head wait is text; one whose two waits are both text; and
+# one whose lint wait is a float. The bound of the middle copy is not main's, so a reason that copies main's bound
+# fails on it.
 LANE_LINT_NOMERGE_GUARD = os.path.join(ROOT, "lanelint-nomerge", "hooks", "guard.py")
 LANE_LINT_BOUND_GUARD = os.path.join(ROOT, "lanelint-bound", "hooks", "guard.py")
 LANE_LINT_TEXT_GUARD = os.path.join(ROOT, "lanelint-text", "hooks", "guard.py")
+LANE_LINT_BOTH_TEXT_GUARD = os.path.join(ROOT, "lanelint-bothtext", "hooks", "guard.py")
+LANE_LINT_FLOAT_GUARD = os.path.join(ROOT, "lanelint-float", "hooks", "guard.py")
 LANE_LINT_FIXTURE_SECONDS = 1234
 LANE_LINT_FIXTURE_WAIT_MINUTES = 2
 LANE_LINT_FIXTURE_BOUND_S = LANE_LINT_FIXTURE_SECONDS + LANE_LINT_FIXTURE_WAIT_MINUTES * 60
@@ -400,9 +403,19 @@ def build_lanelint_text():
                         'LINT_SECONDS = %d\nPUSHED_HEAD_WAIT_MINUTES = "5"\n' % LANE_LINT_FIXTURE_SECONDS)
 
 
+def build_lanelint_both_text():
+    build_lanelint_copy(LANE_LINT_BOTH_TEXT_GUARD, 'LINT_SECONDS = "1200"\nPUSHED_HEAD_WAIT_MINUTES = "5"\n')
+
+
+def build_lanelint_float():
+    build_lanelint_copy(LANE_LINT_FLOAT_GUARD, "LINT_SECONDS = 1234.5\nPUSHED_HEAD_WAIT_MINUTES = 2\n")
+
+
 lazy_fixture([LANE_LINT_NOMERGE_GUARD], build_lanelint_nomerge)
 lazy_fixture([LANE_LINT_BOUND_GUARD], build_lanelint_bound)
 lazy_fixture([LANE_LINT_TEXT_GUARD], build_lanelint_text)
+lazy_fixture([LANE_LINT_BOTH_TEXT_GUARD], build_lanelint_both_text)
+lazy_fixture([LANE_LINT_FLOAT_GUARD], build_lanelint_float)
 
 
 def lane_lint_bg(name, expected, command, timeout=None, rule=None, guard=None, carries=(), lacks=()):
@@ -501,6 +514,19 @@ add("lane-lint timeout: a copy whose own bound is cleared judges the dev server 
     timeout=LANE_LINT_FIXTURE_BOUND_MS + 1, guard=LANE_LINT_BOUND_GUARD, carries=("background-end", "until:"))
 lane_lint_bg("lane-lint timeout: a copy whose wait is text reads the bound as unknown, so the lint alone is allowed",
              "allow", "merge --lane-lint 1476", guard=LANE_LINT_TEXT_GUARD)
+# Both waits as text: the bound is a string, not a number, so it reads as unknown. Without the int check the string
+# bound reaches the comparison or the reason, which raises, and the guard fails open and allows a call that a later
+# rule refuses. The dev-server rows below are the ones that show it: the lint's own rows are allowed either way.
+lane_lint_bg("lane-lint timeout: a copy whose waits are both text allows a lint above any plausible limit", "allow",
+             "merge --lane-lint 1476", timeout=7200000, guard=LANE_LINT_BOTH_TEXT_GUARD)
+lane_lint_bg("lane-lint timeout: a copy whose waits are both text still refuses a lint piped to tail", "deny",
+             "merge --lane-lint 1476 | tail -8", rule="check-tail", guard=LANE_LINT_BOTH_TEXT_GUARD)
+add("lane-lint timeout: a copy whose waits are both text judges the dev server after a lint with a limit", "deny",
+    "background-end", cwd=NOGIT, run_in_background=True, command="merge --lane-lint 1476; npm run dev",
+    timeout=7200000, guard=LANE_LINT_BOTH_TEXT_GUARD, carries=("background-end", "until:"))
+add("lane-lint timeout: a copy whose waits are both text judges the dev server after a lint with no limit", "deny",
+    "background-end", cwd=NOGIT, run_in_background=True, command="merge --lane-lint 1476; npm run dev",
+    guard=LANE_LINT_BOTH_TEXT_GUARD, carries=("background-end", "until:"))
 # The limit's type. A float above the bound is allowed, and a float at the bound is refused. A bool or a string is no
 # limit, so it is refused as unset.
 lane_lint_bg("lane-lint timeout: a float limit above the bound is allowed", "allow",
@@ -511,6 +537,12 @@ lane_lint_bg("lane-lint timeout: a bool limit is refused as unset", "deny",
              "merge --lane-lint 1476", timeout=True, rule=LANE_LINT_RULE)
 lane_lint_bg("lane-lint timeout: a string limit is refused as unset", "deny",
              "merge --lane-lint 1476", timeout="7200000", rule=LANE_LINT_RULE)
+# A float wait is not an int, so the bound reads as unknown and nothing is refused on it. Without the int check the
+# float is a number bound, and a call with no limit is refused on it.
+lane_lint_bg("lane-lint timeout: a float wait reads the bound as unknown, so a lint with no limit is allowed",
+             "allow", "merge --lane-lint 1476", guard=LANE_LINT_FLOAT_GUARD)
+lane_lint_bg("lane-lint timeout: a copy whose wait is a float allows a lint above any plausible limit", "allow",
+             "merge --lane-lint 1476", timeout=7200000, guard=LANE_LINT_FLOAT_GUARD)
 
 # Wrapper forms in the foreground: each deny reads its check through the wrapper, each allow does not.
 sh("check-tail: uv run python runs the script piped to tail in the foreground is refused",
