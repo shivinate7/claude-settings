@@ -26,7 +26,7 @@ MARKED = ("import os, sys\n"
           "    f.write(os.path.basename(__file__) + ' ' + os.getcwd() + '\\n')\n"
           "sys.exit(%d)\n")
 # A fixture test that passes only once `fixed.flag` exists: the base commit adds the flag after the debts are born, so the test
-# fails on the birth commit and passes on the head, as a real Retire test does.
+# fails on the birth commit and passes in the head tree, as a real Retire test does.
 FIXABLE = MARKED.replace("sys.exit(%d)", "sys.exit(0 if os.path.exists('fixed.flag') else 1)")
 EXTRAS = {"kinds": {}, "rolled-out": True}  # a rolled-out repo keeps debts at docs/debts
 BASE = {
