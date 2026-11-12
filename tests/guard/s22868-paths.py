@@ -350,7 +350,7 @@ LOG_CHECKS_EXTRA.append(("designer-scope: an unread layout allows no path", dz_u
 
 
 # An .xctestplan diff: the plan is whole-file test config, so a builder's added codeCoverage line is refused
-# (builder-diff) at commit, push and stop. A test-author's plan edit logs nothing.
+# at commit, push and stop, and each refusal's log row names the plan. A test-author's plan edit logs nothing.
 XCTESTPLAN_BASE = '{\n  "configurations" : [ ],\n  "testTargets" : [ ]\n}\n'
 XCTESTPLAN_SKIP = ('{\n  "configurations" : [ ],\n  "testTargets" : [\n'
                    '    {\n      "skippedTests" : [ "LaunchTests" ]\n    }\n  ]\n}\n')
@@ -363,32 +363,37 @@ def _plan_repo(name, text):
 
 
 def xctestplan_logs_case():
-    """A builder's added codeCoverage line is refused at commit (builder-diff), since a .xctestplan is
-    whole-file test config. A test-author's plan edit logs no author-diff line. A builder's added skippedTests
-    line is refused too: see the builder-refuse section, which builds the same plan repo (`xctestplan-skip`) once."""
-    problems = []
+    """A builder's added codeCoverage line in a .xctestplan is refused at commit, at push and at the first stop,
+    and each refusal's log row names the plan as its first offending path. A test-author's plan edit logs no
+    author-diff line. A builder's added skippedTests line is refused too: see the builder-refuse section, which
+    builds the same plan repo (`xctestplan-skip`) once. The first failed check ends the case, so each failure
+    message names one cause."""
     skip = os.path.join(DIFFROOT, "xctestplan-skip")
     coverage = _plan_repo("xctestplan-coverage", XCTESTPLAN_COVERAGE)
     materialize(coverage)
     with open(os.path.join(coverage, XCTESTPLAN), encoding="utf-8") as f:
         if '"codeCoverage" : true' not in f.read():
-            problems.append("fixture: the coverage repo's plan lacks its codeCoverage line")
-    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-xctestplan-coverage"), coverage, "builder",
-                              "bld1")
-    refused = [r for r in rows if len(r) > 3 and r[2] == "deny" and r[3] == "builder-diff"]
-    if not refused:
-        problems.append("coverage: expected a builder-diff refusal, got %r %r" % (out[:60], rows))
-    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-xctestplan-author"), skip,
-                              "test-author", "auth1")
-    rows = [r for r in rows if len(r) > 3 and r[3] == "author-diff"]
-    if out or rows:
-        problems.append("author: a plan edit was judged: %r %r" % (out[:60], rows))
-    return (not problems), ("; ".join(problems) or
-                            "codeCoverage is refused builder-diff; a test-author's plan edit logs no author-diff line")
+            return False, "fixture: the coverage repo's plan lacks its codeCoverage line"
+    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-xctestplan-coverage"), coverage, "builder", "bld1")
+    plan = [r for r in rows if len(r) > 4 and XCTESTPLAN in r[4]]
+    if not plan:
+        return False, "coverage: no log row names the plan as its first offending path, rows %r" % rows
+    if [(r[2], r[3]) for r in plan] != [("deny", "builder-diff")] * 3:
+        return False, "coverage: the plan's log rows are not three builder-diff refusals: %r" % plan
+    answers = [decision for decision, _ in _guard_answers(out)]
+    if answers != ["deny"] * 3:
+        return False, "coverage: the commit, push and stop do not all refuse, decisions %r" % answers
+    out, rows = _diff_log_run(os.path.join(ROOT, "difflog-xctestplan-author"), skip, "test-author", "auth1")
+    judged = [r for r in rows if len(r) > 3 and r[3] == "author-diff"]
+    if out or judged:
+        return False, "author: a test-author's plan edit was judged: %r %r" % (out[:60], judged)
+    return True, ("codeCoverage is refused at commit, push and stop, each row naming the plan; "
+                  "a test-author's plan edit logs no author-diff line")
 
 
-LOG_CHECKS_EXTRA.append(("xctestplan-diff: a builder's codeCoverage line is refused builder-diff, and a "
-                         "test-author's plan edit logs no author-diff line", xctestplan_logs_case))
+LOG_CHECKS_EXTRA.append(("xctestplan-diff: a builder's codeCoverage line is refused at commit, push and stop, "
+                         "each row naming the plan, and a test-author's plan edit logs no author-diff line",
+                         xctestplan_logs_case))
 
 
 # =========================================================================== builder refusal

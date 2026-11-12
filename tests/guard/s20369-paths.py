@@ -777,6 +777,10 @@ add("builder-test: Edit of .xctestplan that adds skippedTests is refused", "deny
 add("builder-test: Edit of .xctestplan that adds codeCoverage is refused", "deny", rule=BT,
     tool="Edit", file_path=XCTESTPLAN, new_string='"codeCoverage" : true', **B)
 add("test-author: Edit of .xctestplan is allowed", "allow", tool="Edit", file_path=XCTESTPLAN, **A)
+# A Markdown document named like a plan is a document: the plan pattern matches only a basename that ends in
+# `.xctestplan`, and a document is not test config.
+add("builder-test: Edit of docs/App.xctestplan.md, a document named like a plan, is allowed", "allow",
+    tool="Edit", file_path="docs/App.xctestplan.md", new_string="Notes on the test plan.\n", **B)
 # A whole-file test config is refused by its path, whatever the content: the runner's own config files and
 # an Xcode test plan.
 for _path, _text in (
