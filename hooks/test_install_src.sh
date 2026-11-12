@@ -4956,11 +4956,12 @@ caseP3() {
   fi
 }
 
-# ---- caseP4 (characterization, for a reviewer's ruling on the fallback): with no origin/stable, a local install pins local main ----
+# ---- caseP4: with no origin/stable, a local install pins the clone's local main and says so in one WARN line naming stable ----
 # install.sh's pin_commit falls back to the clone's local main when origin holds no stable branch. Local main is made one
-# commit ahead of origin's main, so a pin at origin/main would differ from the pin at local main.
+# commit ahead of origin's main, so a pin at origin/main would differ from the pin at local main. The fallback is never
+# silent (coordinator ruling, act 2 round 1, 2026-11-12 CST).
 caseP4() {
-  name="caseP4 (characterization of the no-stable fallback): with no origin/stable, a local install pins the clone's local main, not origin/main"
+  name="caseP4: with no origin/stable, a local install pins the clone's local main and says so in one WARN line naming stable"
   fx="$work/p4-fx"; h="$work/p4-home"; co="$work/p4-co"; cfg="$work/p4-cfg"
   mkdir -p "$h"
   make_github_fixture "$fx"
@@ -4980,8 +4981,69 @@ caseP4() {
   out=$(cd "$co" && env -i PATH="$work/npm-stub:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" bash ./install.sh 2>&1)
   rc=$?
   pin_head=$(git -C "$co-live" rev-parse HEAD 2>/dev/null)
+  warns=$(printf '%s\n' "$out" | grep -c 'WARN.*stable')
   if [ "$pin_head" != "$local_main" ]; then
     bad "$name" "the pinned checkout is at ${pin_head:-nothing}, want local main $local_main, not origin/main $main_sha (install exit $rc: $(install_problems))"
+  elif [ "$warns" -ne 1 ]; then
+    bad "$name" "the fallback to local main is silent or repeated: want one WARN line naming stable, got $warns (install exit $rc: $(install_problems))"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseP5: a local install whose origin/stable was pruned pins local main and says so in one WARN line naming stable ----
+caseP5() {
+  name="caseP5: a local install whose origin/stable was pruned pins the clone's local main and says so in one WARN line naming stable"
+  fx="$work/p5-fx"; h="$work/p5-home"; co="$work/p5-co"; cfg="$work/p5-cfg"
+  mkdir -p "$h"
+  stable_fixture "$fx" p5
+  main_sha=$(fixture_sha "$fx")
+  write_redirect "$h" "$fx/bare.git"
+  local_stable_clone "$co" "$fx"
+  if ! git -C "$co" rev-parse -q --verify refs/remotes/origin/stable >/dev/null; then
+    bad "$name" "FIXTURE the clone holds no origin/stable before the prune"
+    return
+  fi
+  git -C "$fx/bare.git" update-ref -d refs/heads/stable
+  HOME="$h" git -C "$co" fetch -q --prune origin
+  if git -C "$co" rev-parse -q --verify refs/remotes/origin/stable >/dev/null; then
+    bad "$name" "FIXTURE the prune left origin/stable in the clone"
+    return
+  fi
+  out=$(cd "$co" && env -i PATH="$work/npm-stub:$PATH" HOME="$h" CLAUDE_CONFIG_DIR="$cfg" bash ./install.sh 2>&1)
+  rc=$?
+  pin_head=$(git -C "$co-live" rev-parse HEAD 2>/dev/null)
+  warns=$(printf '%s\n' "$out" | grep -c 'WARN.*stable')
+  if [ "$pin_head" != "$main_sha" ]; then
+    bad "$name" "the pinned checkout is at ${pin_head:-nothing}, want local main $main_sha after the prune (install exit $rc: $(install_problems))"
+  elif [ "$warns" -ne 1 ]; then
+    bad "$name" "the fallback after the prune is silent or repeated: want one WARN line naming stable, got $warns (install exit $rc: $(install_problems))"
+  else
+    ok "$name"
+  fi
+}
+
+# ---- caseK15: a cloud install with no stable branch on origin clones main and says so in one WARN line naming stable ----
+caseK15() {
+  name="caseK15: a cloud install with no stable branch on origin clones main and says so in one WARN line naming stable"
+  fx="$work/k15-fx"; h="$work/k15-home"; scratch="$work/k15-scratch"; bin="$work/k15-bin"
+  mkdir -p "$h" "$scratch"
+  make_github_fixture "$fx"; main_sha=$(fixture_sha "$fx")
+  if git -C "$fx/bare.git" rev-parse -q --verify refs/heads/stable >/dev/null; then
+    bad "$name" "FIXTURE origin has a stable branch, so the no-stable fallback is not what runs"
+    return
+  fi
+  write_redirect "$h" "$fx/bare.git"
+  make_curl_stub "$bin" fail-tarball
+  default_cloud_install "$h" "$scratch" "$bin"
+  co="$h/claude-settings"
+  warns=$(printf '%s\n' "$out" | grep -c 'WARN.*stable')
+  if [ ! -d "$co/.git" ]; then
+    bad "$name" "no clone at $co/.git (install exit $rc: $(install_problems))"
+  elif [ "$(git -C "$co" rev-parse HEAD)" != "$main_sha" ]; then
+    bad "$name" "clone HEAD is $(git -C "$co" rev-parse HEAD), want origin's main $main_sha: no fallback to main"
+  elif [ "$warns" -ne 1 ]; then
+    bad "$name" "the fallback to main is silent or repeated: want one WARN line naming stable, got $warns (install exit $rc: $(install_problems))"
   else
     ok "$name"
   fi
@@ -5992,10 +6054,12 @@ run caseK11
 run caseK12
 run caseK13
 run caseK14
+run caseK15
 run caseP1
 run caseP2
 run caseP3
 run caseP4
+run caseP5
 run caseL1
 run caseL2
 run caseL3
