@@ -2470,6 +2470,20 @@ class QuestionReachesPageTests(SameTurnWriter, unittest.TestCase):
                 out = self.stop([human("decide"), *write, assistant_text(self.reply(self.PICK))])
                 self.assert_blocked(out, "Pick guard")
 
+    def test_qm_green_mac_items_write_in_the_turn_passes(self):
+        # Catches: a Mac db_write of items (claude-artifacts, its own tool name) not read as the page writer's items
+        # write, so the question's send is missed. The write is mapped by lint/_transcript.py data_call first.
+        write = self.call("mcp__claude-artifacts__db_write",
+                          {"url": self.PAGE, "ops": [{"op": "set", "path": "items/q1", "data": {}}]})
+        out = self.stop([human("decide"), *write, assistant_text(self.reply(self.PICK))])
+        self.assertIsNone(out)
+
+    def test_qm_red_mac_items_read_does_not_count(self):
+        # Catches: a Mac db_get of items passed as the write. A read is no items write, mapped or not.
+        read = self.call("mcp__claude-artifacts__db_get", {"url": self.PAGE, "path": "items/q1"})
+        out = self.stop([human("decide"), *read, assistant_text(self.reply(self.PICK))])
+        self.assert_blocked(out, "Pick guard")
+
     def test_qm_red_act_in_an_earlier_turn_does_not_count(self):
         # Catches: a send, a box or an items write from an earlier turn passing for this turn's question.
         earlier = (("send", [*self.writer_read(self.WRITER), *self.send(session_id=self.WRITER)]),

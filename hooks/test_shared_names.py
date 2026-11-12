@@ -701,7 +701,6 @@ MALFORMED_CALLS = [
     (MAC + "db_write", {"ops": {"op": "set", "path": "items/it-1"}}),
     (MAC + "db_write", {"ops": "set items/it-1"}),
     (MAC + "db_write", {"ops": ["set"]}),
-    (MAC + "db_write", {"ops": [{"op": "set", "path": "items/it-1", "data": {}}, "junk"]}),
     (MAC + "db_write", {"ops": [{"op": "set", "data": {}}]}),
     (MAC + "db_write", {"ops": [{"op": "set", "path": 7, "data": {}}]}),
     (MAC + "db_write", {"ops": [{"op": "set", "path": "items", "data": {}}]}),
@@ -716,6 +715,41 @@ MALFORMED_CALLS = [
     (MAC + "publish_files", {"url": PAGE_URL}),
     (MAC + "publish_files", None),
 ]
+
+
+def case_db_write_maps_the_readable_op_beside_a_bad_one():
+    # Each op stands alone: a bad op is left out, so the readable op beside it still maps.
+    name, got = _canon(MAC + "db_write", {"url": PAGE_URL, "ops": [
+        {"op": "set", "path": "items/it-1", "data": {}}, "junk"]})
+    return (name == "ArtifactData" and _writes_view(got) == [("set", "items", "it-1", {}, None)],
+            "set beside junk -> %r, writes %r" % (name, _writes_view(got)))
+
+
+def case_db_write_keeps_each_readable_op_of_a_mixed_batch():
+    # An unknown op and a junk entry are left out; the two sets either side of them both map, in order.
+    ops = [{"op": "set", "path": "items/it-1", "data": {"n": 1}}, {"op": "upsert", "path": "items/it-2", "data": {}},
+           "junk", {"op": "set", "path": "items/it-3", "data": {"n": 3}}]
+    want = [("set", "items", "it-1", {"n": 1}, None), ("set", "items", "it-3", {"n": 3}, None)]
+    name, got = _canon(MAC + "db_write", {"url": PAGE_URL, "ops": ops})
+    return (name == "ArtifactData" and _writes_view(got) == want,
+            "mixed batch -> %r, writes %r" % (name, _writes_view(got)))
+
+
+def case_db_write_odd_paths_map_to_the_items_collection():
+    # The collection is read the way the page reads it: a capital and a leading slash do not change the collection.
+    name, got = _canon(MAC + "db_write", {"url": PAGE_URL, "ops": [
+        {"op": "set", "path": "Items/am-1", "data": {"n": 1}}, {"op": "set", "path": "/items/am-1", "data": {"n": 1}}]})
+    want = [("set", "items", "am-1", {"n": 1}, None), ("set", "items", "am-1", {"n": 1}, None)]
+    return (name == "ArtifactData" and _writes_view(got) == want,
+            "Items/am-1 and /items/am-1 -> %r, writes %r" % (name, _writes_view(got)))
+
+
+def case_db_list_and_query_normalise_the_collection():
+    name, got = _canon(MAC + "db_list", {"url": PAGE_URL, "collection": "/Items"})
+    name2, got2 = _canon(MAC + "db_query", {"url": PAGE_URL, "collection": "Items", "query": "status"})
+    ok = (name == "ArtifactData" and _has(got, {"action": "list", "collection": "items"})
+          and name2 == "ArtifactData" and _has(got2, {"action": "query", "collection": "items", "query": "status"}))
+    return ok, "db_list /Items -> %r, db_query Items -> %r" % (got, got2)
 
 
 def case_malformed_input_comes_back_unchanged_and_never_raises():
@@ -786,6 +820,12 @@ CASES = [
     ("(r12) names outside the Mac write and read set come back unchanged", case_other_names_come_back_unchanged),
     ("(r13) malformed input comes back unchanged and never raises",
      case_malformed_input_comes_back_unchanged_and_never_raises),
+    ("(r14) a db_write keeps the readable op beside a bad one", case_db_write_maps_the_readable_op_beside_a_bad_one),
+    ("(r15) a db_write keeps each readable op of a mixed batch, in order",
+     case_db_write_keeps_each_readable_op_of_a_mixed_batch),
+    ("(r16) a db_write's odd paths Items/x and /items/x map to the items collection",
+     case_db_write_odd_paths_map_to_the_items_collection),
+    ("(r17) a db_list and a db_query normalise their collection", case_db_list_and_query_normalise_the_collection),
 ]
 
 

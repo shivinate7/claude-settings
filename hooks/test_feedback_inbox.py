@@ -1786,6 +1786,54 @@ def case_page_read_back_that_misses_n_does_not_prove_the_filing():
                         "fb-0958-7", "98")
 
 
+# --------------------------------------------------------------------------- Mac page tools (claude-artifacts)
+#
+# A Mac db call is the cloud call of the same write or read: lint/_transcript.py data_call maps it (the one mapping,
+# hooks/shared_names.py canonical_artifact_call). The page filing reads it as the cloud call, so a Mac write of item n
+# is the send, and a Mac read of the items collection is the read-back.
+
+MAC_WRITE = "mcp__claude-artifacts__db_write"
+MAC_QUERY = "mcp__claude-artifacts__db_query"
+
+
+def case_page_mac_write_proves_the_send():
+    """A Mac db_write of items/disk-cleanup, whose data holds n 98, sends the ruling as the ArtifactData write does. The
+    copy holds item 98, so the send is the only thing in question. The same write under notes proves no send."""
+    repo = record_repo("filed", copy_files(FILED))
+    write = {"url": PAGE_URL, "ops": [{"op": "set", "path": "items/disk-cleanup", "data": {"n": 98}}]}
+    p = page_run(new_cfg(), "page-mac-write", [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL), used_rec(MAC_WRITE, write)], cwd=repo)
+    expect_silent("page filing: n 98 sent by a Mac db_write of items/disk-cleanup, with its send", p)
+    other = {"url": PAGE_URL, "ops": [{"op": "set", "path": "notes/disk-cleanup", "data": {"n": 98}}]}
+    p = page_run(new_cfg(), "page-mac-notes", [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL), used_rec(MAC_WRITE, other)], cwd=repo)
+    expect_send_missing("page filing: a Mac db_write of notes/disk-cleanup, n 98, proves no send", p, "fb-0958-7", "98")
+
+
+def case_page_mac_read_back_proves_the_filing():
+    """A Mac read of the waiting page's items, after the owner's message and with the send, whose result returns item 98,
+    proves the filing as an ArtifactData read does: a db_get of items/disk-cleanup, a db_list of the collection named
+    Items, a db_query of /items. A Mac db_get of answers that returns item 98 proves nothing."""
+    repo = record_repo("unfiled", copy_files(UNFILED))
+    reads = (
+        ("db_get of items/disk-cleanup", MAC_GET, {"url": PAGE_URL, "path": "items/disk-cleanup"}, [ITEM_98], "string"),
+        ("db_list of Items, with n 97 and n 99 beside n 98", MAC_LIST, {"url": PAGE_URL, "collection": "Items"},
+         [("near-97", {"id": "near-97", "n": 97}), ITEM_98, ("sweep-notes", {"id": "sweep-notes", "n": 99})], "blocks"),
+        ("db_query of /items where n is 98", MAC_QUERY,
+         {"url": PAGE_URL, "collection": "/items", "query": {"where": [["n", "==", 98]]}}, [ITEM_98], "nested"),
+    )
+    for label, name, inp, docs, form in reads:
+        p = page_run(new_cfg(), "page-mac-readback", [(NEUTRAL, (PAGE_ITEM,))],
+                     [owner_rec(NEUTRAL), send_rec(SENT), used_rec(name, inp, tool_id="rb1"),
+                      result_rec("rb1", response_of(docs, form=form))], cwd=repo)
+        expect_silent("page filing: n 98 proved by a Mac %s, with its send" % label, p)
+    p = page_run(new_cfg(), "page-mac-answers", [(NEUTRAL, (PAGE_ITEM,))],
+                 [owner_rec(NEUTRAL), send_rec(SENT),
+                  used_rec(MAC_GET, {"url": PAGE_URL, "path": "answers/a-7k2"}, tool_id="rb1"),
+                  result_rec("rb1", response_of([ITEM_98]))], cwd=repo)
+    expect_unfiled("page filing: a Mac db_get of answers that returns n 98 does not prove it", p, "fb-0958-7", "98")
+
+
 def case_page_unfiled_remedy_offers_the_read_back():
     """The remedy for an unfiled number names both ways out: the page writer exports the copy into folder
     `waiting`, or the sender reads item 98 back from the page. The case checks that the remedy offers the read-back,
@@ -4395,6 +4443,8 @@ CASES = (
     case_page_read_back_proves_the_filing,
     case_page_read_back_that_misses_n_does_not_prove_the_filing,
     case_page_unfiled_remedy_offers_the_read_back,
+    case_page_mac_write_proves_the_send,
+    case_page_mac_read_back_proves_the_filing,
     case_repo_send_naming_the_repo_passes,
     case_repo_send_with_error_result_does_not_count,
     case_repo_slug_match_ignores_case,

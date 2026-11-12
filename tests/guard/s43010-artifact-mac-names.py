@@ -30,10 +30,10 @@ def am_set(name, expected, item, action="set", rule=None):
         tool="ArtifactData", cwd=PQ_REPO, **{"url": PQ_URL, **kw})
 
 
-def am_write(name, expected, ops, rule=None):
-    """One Mac db_write of the given ops, on this repo's waiting page."""
+def am_write(name, expected, ops, rule=None, cwd=PQ_REPO):
+    """One Mac db_write of the given ops, from `cwd` (the waiting-page repo by default), naming this repo's waiting page."""
     add("artifact mac names: " + name, expected, rule if expected == "deny" else None,
-        tool=AM_MAC_WRITE, cwd=PQ_REPO, url=PQ_URL, ops=ops)
+        tool=AM_MAC_WRITE, cwd=cwd, url=PQ_URL, ops=ops)
 
 
 am_set("ArtifactData set of an item with an option keyed none is denied (the twin)", "deny",
@@ -50,3 +50,19 @@ am_write("db_write set of a lettered item is allowed", "allow",
 am_write("db_write with no ops is allowed", "allow", [])
 add("artifact mac names: db_get of a waiting item is allowed", "allow",
     tool=AM_MAC_GET, cwd=PQ_REPO, url=PQ_URL, path="items/" + AM_DOC)
+
+# Odd paths. The page reads a collection with no capital and no leading slash, so `Items/am-1` and `/items/am-1` are
+# judged as `items/am-1`, from the waiting-page repo and from a folder that is no repo (NOGIT, s00442).
+for am_where, am_folder in (("the waiting-page repo", PQ_REPO), ("a folder that is no repo", NOGIT)):
+    for am_path in ("items/" + AM_DOC, "Items/" + AM_DOC, "/items/" + AM_DOC):
+        am_write("db_write set of a keyed-none item at %s, from %s, is denied" % (am_path, am_where), "deny",
+                 [{"op": "set", "path": am_path, "data": am_item(AM_KEYED_NONE)}], rule="option-letter-keys",
+                 cwd=am_folder)
+
+# A batch with an op the page cannot run: that op is left out, and the keyed-none set beside it is still judged.
+am_write("db_write batch of a keyed-none set and an upsert is denied", "deny",
+         [{"op": "set", "path": "items/" + AM_DOC, "data": am_item(AM_KEYED_NONE)},
+          {"op": "upsert", "path": "items/am-2", "data": am_item()}], rule="option-letter-keys")
+am_write("db_write batch of an upsert, then a keyed-none set, is denied", "deny",
+         [{"op": "upsert", "path": "items/am-2", "data": am_item()},
+          {"op": "set", "path": "items/" + AM_DOC, "data": am_item(AM_KEYED_NONE)}], rule="option-letter-keys")
