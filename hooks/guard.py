@@ -4,9 +4,11 @@
 Modes:
 - PreToolUse: Before each matched tool call, runs the owner's global rules in a fixed
   order and refuses or asks on the first match. Bad input allows the call.
-- SubagentStop: When a builder, test-author or record-writer stops, judges its whole diff
-  against its role, for example a builder that changed a test path. A builder's offence
-  is refused at its first stop; any other role's offence is logged for the reviewer.
+- SubagentStop: When a builder, test-author, record-writer or designer stops, judges its whole
+  diff against its role, for example a builder that changed a test path. A builder's offence
+  is refused at its first stop; any other role's offence is logged for the reviewer. Any agent
+  with an agent_id, of any role, has its last message refused once at its first stop when it
+  names a sha that is no commit in its checkout.
 
 Claude Code runs this script before each matched tool call. The script reads one
 JSON object on stdin and answers on stdout.
@@ -2884,8 +2886,10 @@ REPORT_QUOTED = re.compile(r'"[^"\n]*"')
 REPORT_QUOTE_LINE = re.compile(r"\s*>(\s|$)")
 REPORT_SHA_MAX = 100   # shas judged in one report: a bound on the one git call's input
 REPORT_SHA_FIX = (
-    "Your report names a commit this repo does not hold: %s. Check each sha with git before you write it, "
-    "and name only a commit that exists. If you made no commit, say so and give no sha. "
+    "Your report names a commit that does not resolve in this checkout: %s. Check each sha with git here "
+    "before you write it. A commit that exists on origin may not be fetched into this checkout yet: run "
+    "`git fetch origin`, then repeat the report, or cite the commit by branch name. "
+    "With no commit to report, say so and give no sha. "
 )
 REPORT_SHA_REASON = REPORT_SHA_FIX + "Then hand back again. (decision agent-report-shas-resolve)"
 REPORT_SHA_STOP_REASON = REPORT_SHA_FIX + "Fix the report, then stop again. (decision agent-report-shas-resolve)"
