@@ -35,7 +35,8 @@ d = find()
 try:
     if not origin(d): sys.exit(f"merge: {d} is not a checkout of shivinate7/claude-settings; stopped before any PR read")
     # nowindow: launch.py and merge.py print the merge report on the caller's terminal; the wrapper's no-window flag could hide that output
-    rc = subprocess.run([sys.executable, os.path.join(d, "merge", "launch.py"), d] + sys.argv[1:]).returncode
+    # CLAUDE_MERGE_SHIM_PID lets merge.py see a runner kill this process: a batch build checks it before it pushes
+    rc = subprocess.run([sys.executable, os.path.join(d, "merge", "launch.py"), d] + sys.argv[1:], env={**os.environ, "CLAUDE_MERGE_SHIM_PID": str(os.getpid())}).returncode
 finally:
     for m in made: rmtree_retry(m)  # only a clone this shim made
 sys.exit(rc)
