@@ -2430,7 +2430,9 @@ _OS_SHELLS = {"system", "popen"}
 
 def is_python_word(word: str) -> bool:
     """True when `word` names a python interpreter: py, python, python3, python3.11, with or
-    without `.exe`. The one reader of the name."""
+    without `.exe`. The one python command-name test for the push reader and the body reader.
+    guard_frozen's `_inline_script_at` keeps its own locator (`_PY_COMMAND`, `_PY_C_FLAG`,
+    `_PY_VALUE_FLAGS`) for now."""
     word = word.lower()
     word = word[:-4] if word.endswith(".exe") else word
     return word in ("py", "python") or (word.startswith("python") and word[6:].replace(".", "").isdigit())
