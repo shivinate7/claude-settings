@@ -719,9 +719,11 @@ def lease_fixture(name, rows, pid_starts, leases=None, queue=(), raw=None, as_di
     return folder + os.pathsep + PY_PATH, cfg
 
 
-def lease_launch(name, expected, fixture, device=None, udid=None, session=LEASE_OWN, rule=None, carries=None, raw=None):
+def lease_launch(name, expected, fixture, device=None, udid=None, session=LEASE_OWN, rule=None, carries=None, raw=None,
+                 env=None):
     """One MCP launch case against FIXTURE, naming the device by DEVICE or by UDID. SESSION rides on the payload,
-    and None sends no session key. A deny carries LEASE_CARRIES unless CARRIES says otherwise. Returns the case."""
+    and None sends no session key. A deny carries LEASE_CARRIES unless CARRIES says otherwise. ENV adds variables
+    to LEASE_ENV for this case. Returns the case."""
     env_path, config = fixture
     tool_input = {"action": "launch"}
     if device is not None:
@@ -731,7 +733,7 @@ def lease_launch(name, expected, fixture, device=None, udid=None, session=LEASE_
     if carries is None:
         carries = LEASE_CARRIES if expected == "deny" else ()
     add(name, expected, rule=rule, tool=SIM_MCP, env_path=env_path, config=config, session=session,
-        carries=carries, env=LEASE_ENV, raw=raw, **tool_input)
+        carries=carries, env=dict(LEASE_ENV, **(env or {})), raw=raw, **tool_input)
     return CASES[-1]
 
 
@@ -930,6 +932,27 @@ def register_simulator_lease_cases():
                                        records=[sim_boot_record(SIM_UT0, "Idle Pro", SIM_TYPE_PRO, SIM_RT,
                                                                 2 * 3600)]),
                  device=duo1, rule="simulator-boot-twin", carries=(SIM_UT0,))
+    # A reuse lease takes a device that is already booted, so the boot is not this session's. Its record carries the
+    # reuse marker, and the marker keeps the lease from allowing a boot. The own-boot lease beside it, the same slot
+    # and device without the marker, still allows one.
+    reused = dict(lease_entry("1"), reuse=LEASE_DUO1)
+    lease_launch("lease: a reuse lease of Duo 1 does not allow a launch of Duo 1 by name", "deny",
+                 lease_fixture("reuse_slot1", rows, live, [reused]), device=duo1, rule=LEASE_RULE)
+    lease_launch("lease: a reuse lease of Duo 1 does not allow a launch of Duo 1 by udid", "deny",
+                 lease_fixture("reuse_slot1_udid", rows, live, [reused]), udid=LEASE_DUO1, rule=LEASE_RULE)
+    lease_launch("control: an own-boot slot 1 lease of Duo 1 still allows a launch of Duo 1 by name", "allow",
+                 own1, device=duo1)
+
+    # A lease silent past SIM_LEASE_MAX is not live, so it allows nothing. The clock is SIM_LEASE_NOW, a fixed
+    # number, so the case reads no real time. The fresh lease beside it, silent for less, still allows.
+    clock = {"SIM_LEASE_NOW": "1790000000", "SIM_LEASE_MAX": "1800"}
+    silent = dict(lease_entry("1"), granted=1790000000 - 3600)
+    lease_launch("lease: a lease silent past SIM_LEASE_MAX does not allow a launch of Duo 1", "deny",
+                 lease_fixture("expired_slot1", rows, live, [silent]), device=duo1, rule=LEASE_RULE, env=clock)
+    fresh = dict(lease_entry("1"), granted=1790000000 - 60)
+    lease_launch("control: a lease silent for 60 s, under SIM_LEASE_MAX, still allows a launch of Duo 1", "allow",
+                 lease_fixture("fresh_slot1", rows, live, [fresh]), device=duo1, env=clock)
+
     ps_counts = [("simulator: a held-lease allow of two leases makes two lease reads, one ps per lease (ruling 7)",
                   lease_ps_count_check(shared_case, 2)),
                  ("simulator: a launch of a booted device makes no lease read (ruling 7)",

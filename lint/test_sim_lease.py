@@ -606,6 +606,26 @@ class ReuseTake(LeaseCase):
         self.assertIn(" slot other ", line, "status does not show the lease as slot other")
         self.assertIn("udid %s" % UNKNOWN_DUO_UDID, line, "status does not show the UDID of the slot other lease")
 
+    def lease_records(self):
+        """The lease records leases.json holds in this case's own config dir."""
+        with open(os.path.join(self.cfg, "state", "sim-lease", "leases.json")) as f:
+            return json.load(f)["leases"]
+
+    def test_a_reuse_lease_record_keeps_the_reuse_marker(self):
+        pid = self.spawn().pid
+        self.assertEqual(self.reuse(SLOT_UDID["1"], pid).returncode, 0, "take --reuse of slot 1's UDID is not granted")
+        records = self.lease_records()
+        self.assertEqual([e["pid"] for e in records], [pid], "leases.json does not hold the reuse's lease alone")
+        self.assertEqual(records[0].get("reuse"), SLOT_UDID["1"],
+                         "the reuse lease record has no reuse marker naming the reused UDID")
+
+    def test_an_own_boot_lease_record_has_no_reuse_marker(self):
+        pid = self.spawn().pid
+        self.assertEqual(grant(self.take("duo", pid)), (0, "1"), "the own-boot take is not granted slot 1")
+        records = self.lease_records()
+        self.assertEqual([e["pid"] for e in records], [pid], "leases.json does not hold the own-boot lease alone")
+        self.assertNotIn("reuse", records[0], "an own-boot lease record carries a reuse marker")
+
 
 class Usage(LeaseCase):
     def test_a_usage_error_exits_2(self):
