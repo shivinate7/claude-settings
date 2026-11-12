@@ -200,6 +200,45 @@ sh("two-worktrees: worktree add -f --detach, a forced detached add that takes no
    VCS + " worktree add -f --detach ../n2 x", "allow", cwd=TWACT)
 
 
+# BRANCH AND REF FORMS. `branch -f` and `branch --force` re-point a branch the way `checkout -B` does, and
+# `update-ref refs/heads/<name>` writes the branch ref with no check at all. Measured on git 2.43: git itself
+# refuses a forced `branch` of a branch another worktree holds ("cannot force update the branch ... used by
+# worktree"), and lets `update-ref` through. So the `branch` refused rows pin this rule's own refusal, which
+# runs first and names the remedy, and the `update-ref` rows pin the only refusal that form has.
+sh("two-worktrees: branch -f of a branch another worktree holds is refused",
+   VCS + " branch -f x HEAD", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: branch -f with a start point, the reset of a held branch, is refused",
+   VCS + " branch -f x origin/x", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: branch --force of a branch another worktree holds is refused",
+   VCS + " branch --force x HEAD", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: branch --force with a start point is refused",
+   VCS + " branch --force x origin/x", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: branch -qf, the force letter inside a cluster, is refused",
+   VCS + " branch -qf x HEAD", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: update-ref of a held branch's ref is refused",
+   VCS + " update-ref refs/heads/x HEAD", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: update-ref -m, a reason word before the held branch's ref, is refused",
+   VCS + " update-ref -m moved refs/heads/x HEAD", "deny", TWO_RULE, cwd=TWACT)
+sh("two-worktrees: update-ref of a quoted held branch's ref is refused",
+   VCS + ' update-ref "refs/heads/x" HEAD', "deny", TWO_RULE, cwd=TWACT)
+# THE BRANCH AND REF CONTROLS. A name no worktree holds passes, the holder's own tree passes its own branch, a
+# tag that shares a held name is not a branch, and a branch create without force is git's own refusal.
+sh("two-worktrees: branch -f of a branch no worktree holds is allowed",
+   VCS + " branch -f y HEAD", "allow", cwd=TWACT)
+sh("two-worktrees: update-ref of a branch no worktree holds is allowed",
+   VCS + " update-ref refs/heads/y HEAD", "allow", cwd=TWACT)
+sh("two-worktrees: branch -f of the holder's own branch, run in the holder's own tree, is allowed",
+   VCS + " branch -f x HEAD", "allow", cwd=TWHOLD)
+sh("two-worktrees: update-ref of the holder's own branch, run in the holder's own tree, is allowed",
+   VCS + " update-ref refs/heads/x HEAD", "allow", cwd=TWHOLD)
+sh("two-worktrees: update-ref of a tag named like a held branch is allowed",
+   VCS + " update-ref refs/tags/x HEAD", "allow", cwd=TWACT)
+sh("two-worktrees: branch of a held name with no force is git's own refusal, not this rule's",
+   VCS + " branch x HEAD", "allow", cwd=TWACT)
+sh("two-worktrees: the branch -f form inside an echo's quotes is text, not a move",
+   "echo 'git branch -f x HEAD'", "allow", cwd=TWACT)
+
+
 def _two_worktrees_calls(command, cwd):
     """Run `command` through the guard with the logging stand-in on PATH. Returns (decision, reason, the
     argv lines the stand-in logged for this one run)."""
