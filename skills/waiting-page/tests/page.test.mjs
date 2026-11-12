@@ -197,6 +197,21 @@ test("a rule question starts blank, my pick is starred in its card, and a tap on
   assert.deepEqual([a.item, a.n, a.choice, a.note], [DECISION.id, 27, "a", ""]);
 });
 
+// The saved answer names the option picked by its id as well as by its letter (ruling R60): a stored pick records the id,
+// so a later move of the letters cannot change which option the owner meant.
+test("a pick saves the id of the option picked, beside its letter", async (t) => {
+  const WITH_IDS = mk("ids-decision", 40, { pick: "a", options: [
+    { key: "a", id: "red", label: "Red", how: "h", gain: "g", lose: "l" },
+    { key: "b", id: "blue", label: "Blue", how: "h", gain: "g", lose: "l" },
+  ] });
+  const page = await open(t, { items: [WITH_IDS] }); if (!page) return;
+  await takePick(page, WITH_IDS);
+  await send(page);
+  await page.waitForFunction((id) => !!window.__answers()[id], WITH_IDS.id);
+  const a = (await answers(page))[WITH_IDS.id];
+  assert.equal(a.optionId, "red", "the saved answer does not carry the id of the option picked");
+});
+
 test("the list has three tiers read from holds and by, then Pick stands last", async (t) => {
   const items = [
     mk("calm-dec", 1), { ...TASK, id: "calm-task", n: 2 },
