@@ -1,14 +1,14 @@
 {
  "id": "override-docstring-later-line",
  "title": "hooks/override.py's docstring drops the wrong later-line sentence that PR #2612 fixed in decision owner-override",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "session_013NEJL3CReswfrnssPb2YxY",
+ "lane": "",
  "owner": "triage",
  "blockedBy": [],
  "why": "The module docstring at hooks/override.py lines 17-18 still states the later-line rule that #2612 corrected in docs/decisions/owner-override.md line 30, so a reader of the code gets the old rule.",
  "source": "coordinator 23:01 CST Nov 11, from lane owner-override-later-line-text (PR #2612)",
- "note": "Code: rewrite the docstring to match the decision as #2612 leaves it. Unblocked: the guard test split merged (39e378f15, 07:16 CST Nov 12). Lane started 07:20 CST Nov 12 (coordinator, Sonnet, medium).",
- "updatedAt": "2026-11-12T07:22:00-06:00"
+ "note": "Code: rewrite the docstring to match the decision as #2612 leaves it. Unblocked: the guard test split merged (39e378f15, 07:16 CST Nov 12). Lane started 07:20 CST Nov 12 (coordinator, Sonnet, medium). Done check green on main: #2814 (batch 104, merge bcbeaa26a, 14:43 CST Nov 12), lane PR #2656.",
+ "updatedAt": "2026-11-12T14:46:46-06:00"
 }
