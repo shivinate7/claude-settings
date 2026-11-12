@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""The nightly gate: decides whether the 03:17 scheduled run of checks.yml can skip (R61, decision test-strategy-reset).
+"""The nightly skip decision: it decides whether the 03:17 scheduled run of checks.yml can skip (R61, decision test-strategy-reset).
 
-Writes one line to $GITHUB_OUTPUT (stdout when unset): skip=true or skip=false. It exits 0 on every path, so the gate job
+Writes one line to $GITHUB_OUTPUT (stdout when unset): skip=true or skip=false. It exits 0 on every path, so the skip job
 is a visible success and scope reads its output.
 
 skip=true only when BOTH hold:
@@ -11,7 +11,7 @@ skip=true only when BOTH hold:
 Any read failure writes skip=false and says "unknown": an unknown state runs everything, never skips.
 
 Input (env): REPO (owner/name), HEAD_SHA, GH_TOKEN. RUNS_JSON is a stand-in for the read: a JSON list of run records in the
-shape of the Actions runs API (lint/test_nightly_gate.py). Cost: two runs reads per nightly, no file, no process kept.
+shape of the Actions runs API (lint/test_nightly_skip.py). Cost: two runs reads per nightly, no file, no process kept.
 """
 import json
 import os
@@ -25,7 +25,7 @@ API = "https://api.github.com"
 
 
 class Unknown(Exception):
-    """The runs read could not be judged: the gate says skip=false."""
+    """The runs read could not be judged: the script says skip=false."""
 
 
 def api_get(url, token):
@@ -89,10 +89,10 @@ def main(env=None):
     env = os.environ if env is None else env
     try:
         skip = decide(read_runs(env), env.get("HEAD_SHA"))
-        print("nightly-gate: skip=%s" % str(skip).lower())
+        print("nightly-skip: skip=%s" % str(skip).lower())
     except Unknown as ex:
         skip = False
-        print("nightly-gate: unknown (%s), so the nightly runs everything" % ex)
+        print("nightly-skip: unknown (%s), so the nightly runs everything" % ex)
     line = "skip=%s\n" % str(skip).lower()
     out = env.get("GITHUB_OUTPUT")
     if out:
