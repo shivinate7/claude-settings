@@ -895,9 +895,10 @@ class ItemCiteTests(unittest.TestCase):
 
     An item cite is `item <n>`, `items <n> and <m>` or `items <n>, <m>`, with an optional `page` or
     `waiting-page` before it. The first time a number appears in a reply, it needs its short name beside
-    it. A later cite of that number needs none. On a reply, a bare `item <n>` is read only when the reply
-    also names `page`, `waiting page` or `triage` outside code (the scope ruling); `page item <n>` and
-    `waiting-page item <n>` are always read. The text matrix lives here, on bare_cite. The Stop cases
+    it. A later cite of that number needs none. On a reply, a bare `item <n>` is read only when its clause
+    also names `waiting page`, `waiting-page` or `triage` outside code (the scope ruling); a bare `page` elsewhere
+    in the sentence does not count. `page item <n>` and `waiting-page item <n>` are always read. The text matrix
+    lives here, on bare_cite. The Stop cases
     prove only the wiring.
     """
 
@@ -954,14 +955,14 @@ class ItemCiteTests(unittest.TestCase):
         long_reply = "\n".join("Line %d of the report, no cite here." % n for n in range(2000))
         self.assert_refused("Triage left the report open.\n" + long_reply + "\nThen item 46 waits.", "46")
 
-    # the scope ruling: a bare item cite on a reply is read only when the reply names page or triage outside code
+    # the scope ruling: a bare item cite is read only when its clause names waiting page, waiting-page or triage
     def test_icite_red_bare_item_in_a_cart_sentence_passes(self):
         self.assert_passes("Fixed the cart so item 2 no longer renders twice.",
-                           "no page or triage word on the reply, so a bare item is not read")
+                           "no waiting page or triage in its clause, so a bare item is not read")
 
     def test_icite_red_bare_item_in_a_list_sentence_passes(self):
         self.assert_passes("Reordered the list so item 1 comes first.",
-                           "no page or triage word on the reply, so a bare item is not read")
+                           "no waiting page or triage in its clause, so a bare item is not read")
 
     def test_icite_red_scope_word_in_a_code_span_does_not_turn_scope_on(self):
         self.assert_passes("Run `triage` first; item 46 waits.",
@@ -1057,7 +1058,7 @@ class ItemCiteTests(unittest.TestCase):
         self.assertEqual(got, "D12", "the D-id reader must refuse a bare D12 in a table cell: a bar is no gloss "
                                      "for a record id, so it gave %r" % got)
 
-    # the scope read keeps a markdown link's text: `see [the waiting page](url)` holds the word page
+    # the scope read keeps a markdown link's text: `see [the waiting page](url)` holds the name waiting page
     def test_icite_red_scope_word_in_link_text_turns_the_scope_on(self):
         got = rg.bare_item_cite("Item 46 is open; see [the waiting page](https://x.test/w).", scoped=True)
         self.assertEqual(got, "46", "the scope read must keep a link's text, so the page word in it turns the "
@@ -1073,6 +1074,60 @@ class ItemCiteTests(unittest.TestCase):
     def test_icite_green_item_number_with_a_table_bar_and_a_name_passes(self):
         got = rg.bare_item_cite("Triage left item 46 | waiting on owner |", scoped=True)
         self.assertEqual(got, "", "an item cite with a table bar and a name after it must pass: it gave %r" % got)
+
+    # a list bullet's lead is its own line: a heading or a bullet above an item is no dash gloss before it
+    def test_icite_red_bullet_under_a_heading_is_not_a_dash_gloss(self):
+        got = rg.bare_item_cite("## Next steps\n\n- item 46 waits for the owner.")
+        self.assertEqual(got, "46", "a heading above a bullet is no gloss for the bullet's item: it gave %r" % got)
+
+    def test_icite_red_bullet_under_a_plain_line_is_not_a_dash_gloss(self):
+        got = rg.bare_item_cite("Where things stand\n\n- Item 46 is red")
+        self.assertEqual(got, "46", "a plain line above a bullet is no gloss for the bullet's item: it gave %r" % got)
+
+    def test_icite_red_bullet_under_a_bullet_is_not_a_dash_gloss(self):
+        got = rg.bare_item_cite("- Recheck the build\n- item 47 blocks the merge")
+        self.assertEqual(got, "47", "a bullet above a bullet is no gloss for the item: it gave %r" % got)
+
+    def test_icite_green_dash_gloss_on_the_item_line_still_names_the_item(self):
+        got = rg.bare_item_cite("- Search pill — item 46 waits.")
+        self.assertEqual(got, "", "a two-word gloss and a dash on the item's own line still name it: it gave %r" % got)
+
+    # a digit-led token is no record slug, so a date before an item number does not name it
+    def test_icite_red_date_before_a_bare_item_is_not_a_slug(self):
+        got = rg.bare_item_cite("Owner ruling 2026-11-06, item 183")
+        self.assertEqual(got, "183", "a date is no record slug, so it names no item: it gave %r" % got)
+
+    def test_icite_red_short_date_before_a_bare_item_is_not_a_slug(self):
+        got = rg.bare_item_cite("On 11-08 item 46 closed")
+        self.assertEqual(got, "46", "a short date is no record slug, so it names no item: it gave %r" % got)
+
+    # markers around a cite are not its text: a bold or italic name after the closing marks still names the item
+    def test_icite_red_bold_or_italic_cite_with_its_name_after_passes(self):
+        for text in ("**Item 46** (search pill clear)", "**Item 46:** search pill clear",
+                     "**item 46** — search pill clear", "*item 46* (search pill clear)"):
+            with self.subTest(text=text):
+                got = rg.bare_item_cite(text)
+                self.assertEqual(got, "", "markers around a cite must not hide the name after them: %r gave %r"
+                                 % (text, got))
+
+    def test_icite_green_bold_bare_item_is_still_refused(self):
+        got = rg.bare_item_cite("**Item 46** is open.")
+        self.assertEqual(got, "46", "a bold cite with no name after its marks is still refused: it gave %r" % got)
+
+    # the scope reads a bare item cite only in a clause that names waiting page, waiting-page or triage
+    def test_icite_red_bare_page_word_in_another_clause_does_not_turn_scope_on(self):
+        self.assert_passes("Fixed the page so item 2 no longer renders twice.",
+                           "the word page names no waiting page or triage, so a bare item 2 is not read")
+
+    def test_icite_red_page_word_before_a_bare_item_does_not_turn_scope_on(self):
+        self.assert_passes("The page now shows item 3 of the brief in red.",
+                           "the word page names no waiting page or triage, so a bare item 3 is not read")
+
+    def test_icite_green_page_item_form_is_refused_without_a_waiting_word(self):
+        self.assert_refused("Open: page item 9.", "9")
+
+    def test_icite_green_waiting_page_clause_refuses_a_bare_item(self):
+        self.assert_refused("Waiting page: item 12 is open.", "12")
 
     # the Stop hook, through main: the wiring of the same check
     def test_icite_red_bare_item_in_a_report_blocks_through_main(self):
