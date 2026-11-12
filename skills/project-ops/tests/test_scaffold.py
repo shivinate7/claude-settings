@@ -597,7 +597,7 @@ class HandoffCheck(TempDest):
 
 
 REPO_RULESETS = "repos/acme/widgets/rulesets"  # the rulesets route of the fake repo
-ADMIN_ROLE = 5  # GitHub's id of the Admin repository role: the one bypass actor ruling r names
+ADMIN_ROLE = 5  # 5 is the id the ruling's form assumes and is unconfirmed against a live ruleset
 
 
 def ruled_ruleset(ruleset_id, branch="main"):
