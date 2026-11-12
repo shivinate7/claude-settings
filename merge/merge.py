@@ -32,9 +32,10 @@
   merge --reviewed        one line per open PR, with its review state (bad when the newest record does not parse; no record when it has none),
                           its one next act, owner and age (`; next: ACT, owner OWNER, age Nh[, RED]`; ACT is batch, lane round N, fix check,
                           fresh full review, waits on debt:SLUG|page:ID, batch run, blocked on #N, lane lint or none; RED when the act is over its limit
-                          in PR_STATE_AGE_HOURS, or none; lane lint, owner lane, is a done record with no lane-lint PASS at its head; blocked on #N
+                          in PR_STATE_AGE_HOURS, or none; a held, parked or replaced label with no valid Waits line reads none, even on a draft;
+                          lane lint, owner lane, is a done record with no lane-lint PASS at its head; blocked on #N
                           is a PR whose base branch is the head branch of open PR #N) and its live CI (not read for a ready PR with no record); then the PRs with no
-                          record; then two numbers, each target 0: `longest wait from a done record: Nh` and `open PRs with no next act: N`
+                          record; then two numbers, each target 0: `longest wait from a done record: Nh` (acts batch and lane lint) and `open PRs with no next act: N`
                           (decision pr-ledger). Label events (`batch`, or `held`/`parked`/`replaced` with a `Waits on: debt:SLUG|page:ID`
                           comment line) are read only for the PRs that reach those rules. Reads per run, on demand: no file, timer or process.
   merge --reviewed --root DIR [--root DIR ...]
@@ -4066,7 +4067,7 @@ REVIEW_BATCH_BUILD = "build next batch on the running head: "  # ... and when on
 REVIEW_BATCH_UNKNOWN = "batch line unknown "  # ... and when a read for the batch line stopped: the reason follows, in brackets
 
 # The PR ledger (decision pr-ledger, part 1): each open pull request gets one next act, read from GitHub alone.
-PR_STATE_AGE_HOURS = {"batch": 24, "lane round 1": 72, "lane round 2": 72, "lane round 3": 72, "lane round 4": 72, "fix check": 72, "fresh full review": 72, "batch run": 24}  # hours a next act may wait before it reads RED, by act. All unmeasured first guesses (coordinator pick A, 12:33 CST Nov 7; picks B, 12:01 CST Nov 12: 72 h for fix check, fresh full review and lane round 2 and up): the coordinator measures the real ages after the label rollout. An act with no key has no limit: waits on, blocked on, lane lint. Lane round 4 is the granted round past REVIEW_LAST_ROUND (pr_next_round)
+PR_STATE_AGE_HOURS = {"batch": 24, "lane round 1": 72, "lane round 2": 72, "lane round 3": 72, "lane round 4": 72, "fix check": 72, "fresh full review": 72, "batch run": 24, "lane lint": 72}  # hours a next act may wait before it reads RED, by act. All unmeasured first guesses (coordinator pick A, 12:33 CST Nov 7; picks B, 12:01 CST Nov 12: 72 h for fix check, fresh full review and lane round 2 and up; lane pick 12:13 CST Nov 12: 72 h for lane lint): the coordinator measures the real ages after the label rollout. An act with no key has no limit: waits on, blocked on. Lane round 4 is the granted round past REVIEW_LAST_ROUND (pr_next_round)
 PR_HOLD_LABELS = ("held", "parked", "replaced")  # a label that holds a pull request when a `Waits on:` line names what it waits for
 PR_BATCH_LABEL = "batch"  # an integration pull request in a batch run
 PR_RECORD_STATES = ("done", "open", "stale")  # the review states that give a record act; held and bad give none, so they fall to the label, blocked and draft rules
@@ -4113,7 +4114,8 @@ def pr_next_act(row, now):
     this one's base ref, or None), draft, touched (epoch of the last update).
     The first match wins, in decision pr-ledger's order: a done record (act batch, owner batch runner; with no lane-lint PASS at the live head, act lane
     lint, owner lane: the join refuses it until the lane runs `merge --lane-lint`), an open record, a stale record, the hold label, the batch label, a
-    stacked pull request, a draft with no record, none. Blocked on #N is never red here: it is red while #N is red, which the caller resolves."""
+    stacked pull request, a hold label with no valid `Waits on:` line (act none, red, even on a draft: no hold rule holds it), a draft with no record,
+    none. Blocked on #N is never red here: it is red while #N is red, which the caller resolves."""
     state, hours = row["state"], lambda since: max(0.0, (now - since) / 3600)
     if state in PR_RECORD_STATES:
         since = row["record_at"] or row["touched"]
@@ -4132,6 +4134,8 @@ def pr_next_act(row, now):
             act, owner = f"waits on {row['waits']}", ("owner" if row["waits"].startswith("page:") else "coordinator")
         elif row["based_on"]:
             act, owner, since = f"blocked on #{row['based_on']}", "lane", row["touched"]
+        elif any(x in row["labels"] for x in PR_HOLD_LABELS):  # label without a valid Waits line, else pr_event_label had named it
+            return "none", "triage", hours(row["touched"]), True
         elif row["draft"]:
             act, owner, since = "lane round 1", "lane", row["touched"]
         else:
@@ -4150,7 +4154,7 @@ def reviewed_read(h):
     timer or process of its own. The comment list pages every comment of the repo since the oldest open pull request.
     The same list holds the lane-lint comments: a done record counts as done only with a lane-lint PASS at the live head (lint_state), else its line
     names `merge --lane-lint <n>`; no extra call. The ledger's act reads that lint too: a done record with no lint PASS reads act `lane lint`, owner
-    lane (the lane runs it); with a PASS it reads `batch`, owner batch runner. A pull request is stacked, and reads `blocked on #N`, when its base ref
+    lane (the lane runs it); with a PASS it reads `batch`, owner batch runner. The longest wait from a done record counts both acts. A pull request is stacked, and reads `blocked on #N`, when its base ref
     names the head branch of open pull request #N; a `Based on #N` body line stacks nothing. Each record's clean-merge walk judges against the host's
     base at entry, the repo's default branch, never the pull request's own base."""
     main, now = h.base, h.now()
@@ -4195,7 +4199,7 @@ def reviewed_read(h):
             row["label_at"] = max((t for t in stamps if t is not None), default=None)
         act, owner, age, red = pr_next_act(row, now)
         acts[n] = [act, owner, age, red, based]
-        if act == "batch":
+        if act in ("batch", "lane lint"):  # both wait from a done record
             longest = max(longest, age)
         lines.append((n, f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}", ci))
     for n, got in acts.items():  # blocked on #N is red while #N is red; a loop of blocks has no one to move it
