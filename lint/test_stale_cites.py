@@ -76,6 +76,7 @@ REPORT, OTHER, MERGE_PY, PUSH = "tools/report.py", "tools/other.py", "merge/merg
 COMMON = "tools/common_args.py"  # a shared parent parser that a script can take its flags from
 PAGES = "tools/stale_pages.py"  # the script that the bare basename `stale_pages.py` names
 SAME_NAME = "hooks/report.py"  # a second report.py, in another folder than REPORT
+SCRIPT_A, SCRIPT_B = "lint/a.py", "lint/b.py"  # two scripts that one code span can cite, in order
 LIB = "export const refusals = [\n  'a',\n  'b',\n  'c',\n  'd',\n];\n"  # long enough that git pairs a move as a rename
 GUARD = "def _process_start_ms(path):\n    return 0\n\n\ndef keep():\n    return 1\n"
 CODE = {
@@ -983,6 +984,42 @@ class FlagTests(StaleCase):
             write(repo, REPORT, head_src)
             commit(repo)
         self.assert_passes(self.make_range(base_files(notes, extra={REPORT: base_src, OTHER: other_src}), change))
+
+    def range_drops_json_from_a(self, notes, others=None):
+        """A range that removes --json from SCRIPT_A and keeps --check there. `notes` and `others` ({path: text}) are
+        committed at base, and only SCRIPT_A changes at head."""
+        base_src, head_src = parser_script(["--check", "--json"]), parser_script(["--check"])
+        self.assertEqual(argument_flags(base_src), {"--check", "--json"})  # scope: base declares --json in a.py
+        self.assertEqual(argument_flags(head_src), {"--check"})  # scope: head removes only --json from a.py
+
+        def change(repo):
+            write(repo, SCRIPT_A, head_src)
+            commit(repo)
+        return self.make_range(base_files(notes, extra={SCRIPT_A: base_src, **(others or {})}), change)
+
+    def test_a_flag_after_a_later_script_in_one_span_is_not_read_for_the_earlier_script(self):
+        b_src = parser_script(["--json"])
+        self.assertEqual(argument_flags(b_src), {"--json"})  # scope: b.py keeps --json, and the range leaves b.py alone
+        notes = "# Notes\n\n- check: `python3 lint/a.py --check && python3 lint/b.py --json`\n"
+        self.assert_passes(self.range_drops_json_from_a(notes, others={SCRIPT_B: b_src}))
+
+    def test_a_flag_before_its_script_in_one_span_is_not_read_for_that_script(self):
+        notes = "# Notes\n\n- verdict: `bin/verdict --json python3 lint/a.py`\n"
+        self.assert_passes(self.range_drops_json_from_a(notes))
+
+    def test_a_flag_after_a_pipe_is_not_read_for_the_script_before_the_pipe(self):
+        notes = "# Notes\n\n- check: `lint/a.py --check | jq --json`\n"
+        self.assert_passes(self.range_drops_json_from_a(notes))
+
+    def test_a_flag_right_after_its_own_script_is_still_flagged(self):
+        notes = "# Notes\n\n- json: `lint/a.py --json`\n"
+        found = self.assert_flags(self.range_drops_json_from_a(notes), [(NOTES, 3, "STALE007")])
+        self.assertIn("--json", found[0][3])
+
+    def test_the_same_script_after_a_separator_is_still_flagged_for_its_own_flag(self):
+        notes = "# Notes\n\n- check: `python3 lint/a.py --check && python3 lint/a.py --json`\n"
+        found = self.assert_flags(self.range_drops_json_from_a(notes), [(NOTES, 3, "STALE007")])
+        self.assertIn("--json", found[0][3])
 
     def test_a_shim_path_is_not_flagged_for_a_flag_its_target_removes(self):
         shim = ('#!/usr/bin/env python3\n# Shim for the merge tool. Starts merge/merge.py; no merge logic lives here.\n'
