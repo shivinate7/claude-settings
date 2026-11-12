@@ -1866,9 +1866,10 @@ def parked_data_answer(item_id, at):
     return {"id": item_id, "data": {"parked": True, "item": item_id, "n": 27, "at": at, "note": "Later."}}
 
 
-# The sessions an item wakes: its `wakes` field (a list of session ids), and the owner that asked. The names are fixtures:
-# the mode reads them as text and never checks them as sessions. named_sessions finds each name as a whole word.
-OWNER_SESSION, TRIAGE_SESSION, COORD_SESSION, LANE_SESSION = "sess-asker", "sess-triage", "sess-coord", "sess-lane-7"
+# The sessions an item wakes: its `wakes` field (a list of session ids), and the owner that asked. The names are in the
+# repo's session id shape (session_ and word characters, hooks/own_session.py), the only shape the mode reads as a session.
+# named_sessions finds each name as a whole word.
+OWNER_SESSION, TRIAGE_SESSION, COORD_SESSION, LANE_SESSION = "session_asker", "session_triage", "session_coord", "session_lane_7"
 SESSION_NAMES = (OWNER_SESSION, TRIAGE_SESSION, COORD_SESSION, LANE_SESSION)
 # The full-size store's items take each of these by item number: no wakes (so the owner alone), one name, two names,
 # and three names with the owner among them.
