@@ -69,9 +69,9 @@ Trap: gathering into `roadmap/outbox/triage.md` clears nothing. It already holds
    goes by mail; the outbox keeps own-repo items only. Blocker: Mac `ls-remote` auth. Until measured, a Mac
    sender writes its own outbox and act 5's per-repo read stays on. Gate: a sender session needs
    session-mailbox attached (session-messages.md:190).
-7. **Tests for `build.py`.** A `file://` bare repository as the mailbox store (as hooks/test_mail.py:246 does);
-   red on a named old commit; each failure message names one cause; no real clock; fixtures with an empty
-   outbox, a README-only outbox and a full one; the check tested on its rule's own cases.
+7. **Tests for `build.py`.** Use a `file://` bare repository as the mailbox store, as hooks/test_mail.py:246
+   does. Each test goes red on a named old commit. Each failure message names one cause. No test reads the real
+   clock. Fixtures: an empty outbox, a README-only outbox and a full one. The check is tested on its rule's own cases.
 
 ## Risks and unknowns
 
@@ -84,11 +84,13 @@ Trap: gathering into `roadmap/outbox/triage.md` clears nothing. It already holds
 
 ## Owner acts
 
-- a. A read grant for every repo beyond the 5 that pick 493 a names, by name or "all shivinate7 repos"; in the cloud also attach them to the session, or run act 1 from the Mac.
+- a. Access to the 11 unswept repos. In the cloud, attach them to the session. Or run act 1 from the Mac.
 - b. Pick the clearing route: each child's triage clears (recommended), or a one-time override push per repo (item 490 route).
 - c. Measure Mac `ls-remote` auth (session-messages.md step 2) before the mailbox is the only route.
 
 ## Refuter verdict: revise (refuter opus, 2026-11-12 15:10 CST)
+
+Refuter: refuter opus, 2026-11-12, revise
 
 The refuter held only the step text and this plan. Findings, with this lane's change to the plan (checked: commit
 833b0c472 exists; the step page-feedback-to-template note names no repos):
