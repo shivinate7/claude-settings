@@ -161,9 +161,11 @@ class Isolated(Case):
                   "sys.exit(0 if os.path.isdir(os.path.join('node_modules', 'marker')) else 1)\n")
 
     def deps_repo(self, nested=False):
-        self.repo(debts={"d-deps": "Delete the helper. Check: `tests/test_deps.py`."})
+        retire = "Delete the helper. Check: `tests/test_deps.py`" + (" and `tests/test_deps_sub.py`." if nested else ".")
+        self.repo(debts={"d-deps": retire})
         self.change(write={"tests/test_deps.py": self.NEEDS_DEPS, "package.json": "{}\n", ".gitignore": "node_modules/\n",
-                           **({"sub/package.json": "{}\n"} if nested else {})})
+                           **({"sub/package.json": "{}\n", "tests/test_deps_sub.py": self.NEEDS_DEPS.replace("'node_modules'", "'sub', 'node_modules'")}
+                              if nested else {})})
         self.base = self.head
         self.change(rm=["docs/debts/d-deps.md"])
         for pre in ("", "sub") if nested else ("",):
@@ -179,6 +181,11 @@ class Isolated(Case):
     def test_i2_a_nested_package_folder_gets_its_packages_too(self):
         self.deps_repo(nested=True)
         self.assertEqual(pairs(self.isolated()), [], "a nested node_modules did not reach the scratch worktree")
+
+    def test_i2b_a_nested_package_folder_without_packages_is_red(self):
+        self.deps_repo(nested=True)
+        shutil.rmtree(os.path.join(self.dir, "sub", "node_modules"))
+        self.assertEqual(pairs(self.isolated()), [("d-deps", "red")], "the nested test passed without sub/node_modules")
 
     def test_i3_a_checkout_with_no_packages_still_runs_the_test_and_it_is_red(self):
         self.deps_repo()
