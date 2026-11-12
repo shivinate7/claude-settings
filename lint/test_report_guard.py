@@ -5058,11 +5058,9 @@ class AnsweredNeedsSourceTests(StopVerdictMixin, unittest.TestCase):
 
 class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
     """The pre-existing verdict, in report_guard.py's Stop hook (rule pre-existing-needs-main-run). A reply line
-    that calls a failure pre-existing, calls it already red on main, or says it fails on a commit "too" must name
-    a run on the base branch on the same line: "on main at <sha>", "on origin/<branch> at <sha>", or a CI run URL
-    on main. A bare "on origin/main" names no run (coordinator ruling 2026-11-08 03:52 CST). Incident
-    2026-11-07: a lane report said a failure "fails on 32b5f8b8e too, pre-existing"; 32b5f8b8e was the PR's own
-    head, not main, so the failure came from the PR."""
+    that calls a failure pre-existing, or says it also fails on a commit, must name a run on the base branch on
+    the same line: "on main at <sha>", "on origin/<branch> at <sha>", or a CI run URL on main. A bare
+    "on origin/main" names no run. A sha on the PR's own head names no run on main, so the failure it shows is the PR's."""
 
     # Red: each case below fails until the verdict exists. One test per case, so the red count is the case count.
 
@@ -5077,7 +5075,7 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
         self.assert_blocked(line, line)
 
     def test_pe_red_already_red_on_main_with_no_run_is_refused(self):
-        # Catches: "already red on main" with no run named passes.
+        # Catches: a claim that the failure is on the base branch, with no run named, passes.
         line = "The lint check was already red on main."
         self.assert_blocked(line, line)
 
@@ -5128,13 +5126,13 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
     def test_pe_red_failure_claims_with_no_run_are_refused(self):
         # A failure claim names a run on the base branch's tip on the same line.
         rows = [
-            # Catches: "already fails on main" with no run passes.
+            # Catches: a claim that the base branch has the failure, with no run named, passes.
             "The lint check already fails on main.",
             # Catches: "as well" in place of "too" or "also" passes.
             "Lint fails on 32b5f8b8e as well, so it is not from this step.",
             # Catches: a negator before "so" exempts a claim in the next clause.
             "Nothing in this PR touches lint so the failure is pre-existing.",
-            # Catches: "fails on main too" with no sha passes.
+            # Catches: a claim that the failure also occurs on the base branch, with no sha, passes.
             "Lint fails on main too.",
             # Catches: an all-digit sha is not read as a sha, so "fails on <sha> too" passes.
             "Lint fails on 1234567 too.",
