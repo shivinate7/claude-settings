@@ -1002,6 +1002,15 @@ for _name in ("confirm-solo", "confirm-runner", "confirm-solo-then-other-tags"):
 for _form in (MERGE_SHIM, "python3 merge/merge.py"):
     role_refuse("a subagent of a solo session is refused the hat, " + _form, _form + " --role batch-runner",
                 role_path("solo"), agent_id=SUBAGENT_ID, agent_type="builder")
+# A subagent shares its session's id, so the parent's solo hat must not carry to its `merge --confirm`. The subagent of a
+# batch runner is the green control: its session holds the batch-runner tag, so it confirms as on main.
+for _form in (MERGE_SHIM, "python3 merge/merge.py"):
+    sh("merge-role-proof: a subagent of a solo session cannot confirm, " + _form, _form + " 5 --confirm --head " + CONFIRM_HEAD,
+       "deny", rule=ROLE_RULE, cwd=ROLE_REPO_A, env=CONFIRM_ENV, transcript=role_path("confirm-solo"),
+       agent_id=SUBAGENT_ID, agent_type="builder")
+    sh("merge-role-proof: a subagent of a batch runner still confirms, " + _form, _form + " 5 --confirm --head " + CONFIRM_HEAD,
+       "allow", cwd=ROLE_REPO_A, env=CONFIRM_ENV, transcript=role_path("confirm-runner"),
+       agent_id=SUBAGENT_ID, agent_type="builder")
 # Nothing the guard cannot read as an own record allows.
 role_refuse("no get_session record in the transcript is refused", MERGE_SHIM + " --role batch-runner",
           role_path("no-record"))
