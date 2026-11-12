@@ -11,6 +11,6 @@
  ],
  "why": "Owner ruling R28 (one store for page data, git first) and owner 12:10 CST: \"Custom connectors are not allowed -- so we can do route B\".",
  "source": "coordinator 12:28 CST Nov 12, from lane page-data-one-store (decision waiting-page-one-store rewritten to route B on #2829, owner 12:10 CST)",
- "note": "Only if the owner picks b on page item 593 (route B) (coordinator 12:50 CST Nov 12). Parked 12:42 CST Nov 12: fallback only if same-account lag is measured (owner item 593 a, coordinator 12:52 CST).",
- "updatedAt": "2026-11-12T12:43:41-06:00"
+ "note": "Only if the owner picks b on page item 593 (route B) (coordinator 12:50 CST Nov 12). Parked 12:42 CST Nov 12: fallback only if same-account lag is measured (owner item 593 a, coordinator 12:52 CST). Measured by lane waiting-site-probe (coordinator 14:31 CST Nov 12): a claude.ai artifact page reaches no outside host (GET api.github.com, PUT with dummy auth, credentialed fetch to httpbin.org all failed; CSP default-src 'none'; frame-ancestors 'none'; sandbox; origin frame.claudeusercontent.com). A page cannot call GitHub or a webhook itself. Server routes read from docs only, unmeasured: Cloudflare (100k req/day, no sleep), Render (sleeps after 15 min idle, about 1 min to wake). Probe artifact deleted; no token used.",
+ "updatedAt": "2026-11-12T14:35:44-06:00"
 }

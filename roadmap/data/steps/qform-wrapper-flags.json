@@ -1,11 +1,11 @@
 {
   "title": "The question-form step-span check skips a wrapper's flags and values before a backslash cmdlet path",
   "why": "`sudo -u bob C:\\tools\\Get-Thing`, `nice -n 5 …`, `time -p …` and `timeout 5 …` passed the step-span check while their `/` forms were refused; a stated limit in #2293, found by its round 2 review.",
-  "note": "Filed by triage at 03:57 CST Nov 9: #2311 (draft, head d45104769, stacked on #2293) already named this step, and decision act-in-place on #2024 and #2293 cites it, but no record existed (lane notes-fix-page asked). Lane notes-fix-page, [ended:lane:-notes-fix-page]. Round 3 (reviewer sonnet) PASS at 9a024f566, net value positive; its fix check waits for closed #2296. Done when #2311 merges. Wait on closed #2296 is void 13:18 CST Nov 10 (step dead-pr-waits): its work landed on main in badc9f457 (#2342); the step still waits on open #2311. Dead-wait re-point 11:58 CST Nov 12 (step dead-pr-waits part a; triage Explore Sonnet audit, PR states read via GitHub): #2296 is void (landed in #2342); #2311 and its base #2293 were closed unmerged by the 10:10 CST stale-draft close (branches kept); no carry found; reopen or carry when a lane takes this step. Lane 14:29 CST Nov 12: base not on main. #1785 and #2293 closed unmerged; #2024 open draft, dirty (last update Nov 10). The step edits _cmdlet_prefix, which exists only in #2293. Needs a carry of #2293 onto today's main before it can start; no branch or PR made.",
+  "note": "Filed by triage at 03:57 CST Nov 9: #2311 (draft, head d45104769, stacked on #2293) already named this step, and decision act-in-place on #2024 and #2293 cites it, but no record existed (lane notes-fix-page asked). Lane notes-fix-page, [ended:lane:-notes-fix-page]. Round 3 (reviewer sonnet) PASS at 9a024f566, net value positive; its fix check waits for closed #2296. Done when #2311 merges. Wait on closed #2296 is void 13:18 CST Nov 10 (step dead-pr-waits): its work landed on main in badc9f457 (#2342); the step still waits on open #2311. Dead-wait re-point 11:58 CST Nov 12 (step dead-pr-waits part a; triage Explore Sonnet audit, PR states read via GitHub): #2296 is void (landed in #2342); #2311 and its base #2293 were closed unmerged by the 10:10 CST stale-draft close (branches kept); no carry found; reopen or carry when a lane takes this step. Lane 14:29 CST Nov 12: base not on main. #1785 and #2293 closed unmerged; #2024 open draft, dirty (last update Nov 10). The step edits _cmdlet_prefix, which exists only in #2293. Needs a carry of #2293 onto today's main before it can start; no branch or PR made. Coordinator pick b 14:34 CST Nov 12: this lane carries #2293 onto main, then builds the step.",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "session_013NEJL2usVdzwPksu1Xbp3i",
-  "status": "blocked",
+  "status": "doing",
   "order": 890,
-  "updatedAt": "2026-11-12T14:32:38-06:00"
+  "updatedAt": "2026-11-12T14:35:44-06:00"
 }

@@ -1,0 +1,31 @@
+{
+  "added": "2026-11-12T20:34:00Z",
+  "context": "Goal: a ruling of yours governs every session and every guard from the moment you make it, not hours later when main takes it in (your question, 14:28 CST).\nProblem (rule): a ruling lives off main until a lane rewrites the rule and its batch merges; running sessions loaded the rules file at start and the guards run main's code, so both keep enforcing the old rule.\nBased on (measured): main has not moved since 09:09 CST, and batch 104 sat green from 14:04 CST.\nBased on (read): the timer miss at 14:15 CST and the round-3 miss at 14:24 CST both cited main's old text over the restart plan.\nDeparts from: main \u2014 guards obey only main's code \u2014 one ruling store can lift a named guard rule before its code lands.",
+  "home": "step ruled-store-one-home (one store for rulings not yet on main)",
+  "id": "ruling-governs-guards-now",
+  "kind": "decision",
+  "n": 646,
+  "options": [
+    {
+      "gain": "A ruling holds everywhere within one turn, guards included, with no override typing.",
+      "how": "Only triage writes the store, from your quoted words with their time; each lift names one guard rule; the entry closes when main takes the change in.",
+      "key": "a",
+      "label": "Your ruling governs the guard now (Recommended)",
+      "lose": "The store becomes a strong lever: a wrong entry lifts a guard until someone notices."
+    },
+    {
+      "gain": "Guards stay code-only; a ruling never loosens a guard before its code is reviewed.",
+      "how": "Rulings govern prose and the past-ruling checks only; a guard keeps refusing until its code merges.",
+      "key": "b",
+      "label": "Rulings govern text only",
+      "lose": "You keep typing override, or waiting, on every ruled change to a hook."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "ref": "owner question 14:28 CST Nov 12, via retrospective 14:31 CST",
+  "repo": "shivinate7/claude-settings",
+  "short": "Rulings off main: guards too, or text only",
+  "status": "open",
+  "title": "Does a ruling not yet on main also govern the guards?",
+  "why": "Today a ruling waits for main before guards and running sessions obey it."
+}

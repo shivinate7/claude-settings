@@ -1,14 +1,14 @@
 {
  "id": "lane-lint-batch-pr-conflicts",
  "title": "On a batch integration PR, merge --lane-lint reports conflicts with later open PRs to those lanes instead of refusing",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
- "lane": "",
+ "lane": "session_013NEJL3X9nLPmg93fTowhHx",
  "owner": "triage",
  "blockedBy": [],
  "why": "merge --lane-lint FAILed batch #2814 at c63629c18 on merge-tree conflicts with later open PRs #2839, #2884, #2906, not with main, and \"No override lifts this refusal\": a green batch cannot merge until later lanes close. It holds main.",
  "source": "coordinator 14:30 CST Nov 12",
- "note": "Fix: on an integration PR, report other-PR conflicts to those later lanes and do not refuse. Red first on #2814 at c63629c18. Bandaid now (coordinator): runner 10 closes #2839, #2884, #2906, merges #2814, then reopens them. Rank with the stability fixes.",
- "updatedAt": "2026-11-12T14:32:38-06:00"
+ "note": "Fix: on an integration PR, report other-PR conflicts to those later lanes and do not refuse. Red first on #2814 at c63629c18. Bandaid now (coordinator): runner 10 closes #2839, #2884, #2906, merges #2814, then reopens them. Rank with the stability fixes. Lane started 14:34 CST Nov 12.",
+ "updatedAt": "2026-11-12T14:35:44-06:00"
 }

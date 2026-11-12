@@ -1,14 +1,14 @@
 {
  "id": "rollup-needs-all-shards",
  "title": "The all-jobs-passed rollup waits on every Windows shard",
- "status": "doing",
+ "status": "blocked",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
- "lane": "session_013NEJKyrPZUnwo7FivBJ7Dp",
+ "lane": "",
  "owner": "triage",
  "blockedBy": [],
  "why": "A red or hung Windows shard does not hold the required all-jobs-passed check, so a batch can merge past it.",
  "source": "coordinator 12:22 CST Nov 12, from the Plan agent of lane time-limits-end-hangs-only",
- "note": "checks.yml rollup `needs` lacks windows-guard-2, windows-guard-3 and windows-merge-2 to -5. Also: all-jobs-passed and ci-done run only on pull_request, so they get no sample on main. Fix: a check that the rollup needs every job in the file (red first on today's file), then add the missing shards. R55 express (owner 14:05 CST Nov 12, via retrospective, plan fbc11be: \"CI fixes need to be right up there in the express lane with the merging fixes\"; home decision no-merge-during-batch-ci).",
- "updatedAt": "2026-11-12T14:09:06-06:00"
+ "note": "checks.yml rollup `needs` lacks windows-guard-2, windows-guard-3 and windows-merge-2 to -5. Also: all-jobs-passed and ci-done run only on pull_request, so they get no sample on main. Fix: a check that the rollup needs every job in the file (red first on today's file), then add the missing shards. R55 express (owner 14:05 CST Nov 12, via retrospective, plan fbc11be: \"CI fixes need to be right up there in the express lane with the merging fixes\"; home decision no-merge-during-batch-ci). Lane dropped 14:30 CST Nov 12, no code (coordinator 14:29: gate by step). Hand-off list: add to the rollup needs, each gated by step not job-level if, after its owning lane lands: checks-windows-guard-2, -3 (lane guard-pr-runs-windows-shards); checks-windows-merge-2, -3, -4, -5 (branches lane/merge-pr-windows-shards, docs/merge-pr-windows-shards). Today each has if: github.event_name != 'pull_request' (checks.yml about lines 1488-1645). lint/test_all_jobs_passed.py (needs_problems, all_jobs_passed_rules.py 173-176) goes red once a shard is gated by step and missing from needs: no new check. Stale: decision main-branch-protection lines 18-19 say five shards stay off the rollup; it is six; the owning lanes rewrite it. Open: all-jobs-passed and ci-done run only on pull_request, so main gets no rollup sample.",
+ "updatedAt": "2026-11-12T14:35:44-06:00"
 }

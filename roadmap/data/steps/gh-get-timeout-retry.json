@@ -1,14 +1,14 @@
 {
  "id": "gh-get-timeout-retry",
  "title": "The merge tool retries a GitHub read that timed out, once",
- "status": "doing",
+ "status": "blocked",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
- "lane": "session_013NEJL2UayGumX3LbxC3R4h",
+ "lane": "",
  "owner": "triage",
  "blockedBy": [],
  "why": "Lane merge-claim-survives-timeout 13:37 CST Nov 12: a timed-out gh GET is never retried.",
  "source": "lane merge-claim-survives-timeout 13:37 CST Nov 12",
- "note": "An unreviewed fix exists at archive/merge-claim-survives-timeout (b642e49ce). Its one full test_merge run ended FAILED (1 of 1608); which test, and whether main fails it too, is unknown. Treat it as unproven: a new lane reruns the suite on main and on b642e49ce first. Lane merge-net-small-fixes started 13:49 CST Nov 12 with lock-listed-stdout-only. Lane merge-net-small-fixes 14:23 CST Nov 12: proven red then green on branch merge-net-small-fixes; to the batch runner after review and the full suite.",
- "updatedAt": "2026-11-12T14:24:57-06:00"
+ "note": "An unreviewed fix exists at archive/merge-claim-survives-timeout (b642e49ce). Its one full test_merge run ended FAILED (1 of 1608); which test, and whether main fails it too, is unknown. Treat it as unproven: a new lane reruns the suite on main and on b642e49ce first. Lane merge-net-small-fixes started 13:49 CST Nov 12 with lock-listed-stdout-only. Lane merge-net-small-fixes 14:23 CST Nov 12: proven red then green on branch merge-net-small-fixes; to the batch runner after review and the full suite. Lane merge-net-small-fixes 14:33 CST Nov 12: review round 1 FAIL, dead path. SH_TIMEOUT is None in the CLI (merge.py:257); the guard sets 25 s (guard_merge.py:183) but every guarded gh read runs inside shared_deadline, where the new branch re-raises (merge.py:940); only sh-patched tests reach it. Also: only the first -X is read (latent POST retry); two mutants pass. Archived at archive/merge-net-small-fixes (4fa6c264e), no PR. Triage pick 14:36 CST: parked, no fix round; reopens when a real timed-out gh read outside shared_deadline shows.",
+ "updatedAt": "2026-11-12T14:35:44-06:00"
 }
