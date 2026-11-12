@@ -224,6 +224,53 @@ class Cli(unittest.TestCase):
         self.assertEqual(r.returncode, 1)
         self.assertTrue(r.stderr.startswith("refused: "), r.stderr)
 
+    def test_spec_with_no_id_is_refused(self):
+        """A chat question names its item by id, so a spec with no id is refused, not rendered as `Page item: None`."""
+        r = self.run_cli({"shown": [], "options": [{"label": "Blue"}, {"label": "Red"}]})
+        self.assertEqual(r.returncode, 1, "a spec with no id was rendered: %r" % r.stdout[:120])
+        self.assertTrue(r.stderr.startswith("refused: "), r.stderr)
+
+    def refusal_of(self, r):
+        """The refusal's text after `refused: `, or "" when the CLI did not refuse."""
+        return r.stderr.strip()[len("refused: "):] if r.stderr.startswith("refused: ") else ""
+
+    def assert_names_id(self, r):
+        """The refusal names the id the shown entry lacks. A bare KeyError reads `'id'`, which names no cause."""
+        msg = self.refusal_of(r)
+        self.assertNotEqual(msg, "'id'", "the refusal is a bare KeyError, not a message: %r" % r.stderr)
+        self.assertRegex(msg, r"\bid\b", "the refusal does not name the id the shown entry lacks: %r" % msg)
+
+    def test_shown_entry_with_no_id_is_refused_with_a_message_naming_the_id(self):
+        """A shown entry with no id can match no option. With `changes` naming that option, render reads its id."""
+        no_id = [{k: v for k, v in entry.items() if k != "id"} for entry in EARLIER]
+        r = self.run_cli({"id": ID, "shown": no_id, "changes": {"a": NOTE},
+                          "options": [{"label": "Keep it as is", "gain": "g", "lose": "l"},
+                                      {"label": "Allow merge --role", "gain": "g", "lose": "l"}]})
+        self.assertEqual(r.returncode, 1, "a shown entry with no id was rendered: %r" % r.stdout[:120])
+        self.assert_names_id(r)
+
+    def test_shown_entry_with_no_id_is_refused_without_changes_naming_the_id(self):
+        """The same shown entry with no `changes`: the option differs from its shown entry, and the refusal names the id."""
+        no_id = [{k: v for k, v in entry.items() if k != "id"} for entry in EARLIER]
+        r = self.run_cli({"id": ID, "shown": no_id,
+                          "options": [{"label": "Keep it as is", "gain": "g", "lose": "l"},
+                                      {"label": "Allow merge --role", "gain": "g", "lose": "l"}]})
+        self.assertEqual(r.returncode, 1, "a shown entry with no id was rendered: %r" % r.stdout[:120])
+        self.assert_names_id(r)
+
+    def test_existing_item_with_an_empty_shown_is_refused(self):
+        """A spec that names an existing item carries that item's shown list: `shown: []` would skip the freeze."""
+        r = self.run_cli({"id": ID, "existing": True, "shown": [], "options": [{"label": "Blue"}]})
+        self.assertEqual(r.returncode, 1, "an existing item was rendered with an empty shown list")
+        self.assertTrue(r.stderr.startswith("refused: "), r.stderr)
+
+    def test_existing_item_with_its_shown_list_is_rendered(self):
+        """Control, green on the current head: an existing item that carries its shown list renders."""
+        r = self.run_cli({"id": ID, "existing": True, "shown": EARLIER,
+                          "options": [{"label": "Keep it as is", "gain": "g", "lose": "l"},
+                                      {"label": "Allow merge --role", "gain": "g", "lose": "l"}]})
+        self.assertEqual(r.returncode, 0, r.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
