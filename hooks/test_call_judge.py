@@ -1792,7 +1792,7 @@ def case_pick_fixture_is_a_coordinator_record():
     check("pick fixture: the own record reads as cs-build:coordinator", tags == [PICK_TAG], tags)
 
 
-def case_pick_gate_passes_untouched():
+def case_pick_check_passes_untouched():
     # The cry-wolf guard: a sender that is no coordinator, or a text with no whole word pick or hold, passes with no model call.
     cases = (
         ("a session that is no coordinator", PICK_PASS_MESSAGE, {"coordinator": False}),
@@ -1883,7 +1883,7 @@ def main():
                  case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
                  case_page_relative_file_path_reaches_the_review, case_page_relative_file_path_passing_item_passes,
                  case_page_absolute_file_path_is_judged,
-                 case_pick_fixture_is_a_coordinator_record, case_pick_gate_passes_untouched,
+                 case_pick_fixture_is_a_coordinator_record, case_pick_check_passes_untouched,
                  case_pick_without_a_cite_is_refused, case_pick_no_ruling_statement_is_not_refused,
                  case_pick_matching_ruling_passes, case_pick_incidents_are_refused_on_the_text,
                  case_pick_model_failure_fails_open, case_pick_full_ruling_set):
