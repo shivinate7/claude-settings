@@ -3541,29 +3541,45 @@ def brief_destructive_hit(tool: str, tool_input) -> str:
 # it to write a file makes it write by a shell redirect or stall. The rule judges the spawns this file's brief rules judge
 # (_brief_spawns, so a Workflow agent() call counts) and only a read-only role: a writing role, the default role and a
 # spawn with no role pass. Two readings, both pure text:
-#   - command-shaped parts (_brief_commands): a `tee` with an operand, or a redirect into a path, once quoted text is cut
-#     out. A target of /dev/null or under any session scratchpad is no repo write and passes.
-#   - prose lines outside a fence: an imperative write verb (write, save, store, dump, append, create, make) whose clause
-#     holds only lead-in words before it, then a path (an extension or a slash) after to, into, in, as, at, named or
-#     called; "create a file"; and "use the Write tool". A verb in another form (saves, wrote) is no order.
-# Passes: a negator in the verb's clause (_brief_prohibits, the same window as brief-destructive-git), a "Must deny:" or
-# "Add a case:" line, and a negating heading's cover. Accepted limits: a path with no extension and no slash ("Write it
-# to notes") is no order here; an order in a language this scan has no verb for passes. The override lifts it. Cost:
-# pure text work inside the one guard call. No process, no file.
-BRIEF_WRITE_VERBS = r"(?:write|save|store|dump|append|create|make)"
-BRIEF_WRITE_PATH = r"`?(?:[\w~./-][\w~./#-]*\.[A-Za-z]\w{0,7}|[\w.~-]*/[\w./#-]+)"
-BRIEF_WRITE_PROSE = re.compile(
-    r"\b" + BRIEF_WRITE_VERBS + r"\b(?:[^\n.;]|\.(?=\S))*?\b(?:to|into|in|as|at|named|called)\s+" + BRIEF_WRITE_PATH,
-    re.IGNORECASE)
+#   - command-shaped parts (_brief_commands): a `tee` with an operand, or a redirect into a path. A quoted `>` is text, but a
+#     quoted target ("> 'a.md'") is read. A target of /dev/null or under any session scratchpad is no repo write and passes,
+#     and so does a number ("count > 0").
+#   - prose lines outside a fence, with emphasis marks and quote marks around words gone: a write verb (write, save, store,
+#     dump, append, create, make, put, place, redirect) whose clause holds only lead-in words before it. The clause ends at
+#     a sentence mark, a comma, "then" or "but". After the verb it needs a destination word (to, into, onto, in, inside, as,
+#     at, under, named, called) that leads to a path (an extension, or a slash that is no word pair such as PASS/FAIL) or to
+#     "a file". "in", "inside", "at" and "under" count only when no other preposition sits between the verb and them
+#     ("Make a table of the rules in hooks/guard.py" is no order). A negator between the verb and the destination ("Write
+#     nothing to a.md"), "write-up", and another verb form (saves, wrote) are no order. Also "create a file", a
+#     `tee <path>` in prose, and a call or use of the Write tool.
+# Passes: a negator in the verb's clause before it (_brief_prohibits, the same window as brief-destructive-git), a "Must
+# deny:" or "Add a case:" line, and a negating heading's cover. Accepted limits: a destination with no extension and no
+# slash ("Write it to notes") is no order here; a comma inside the object ("Save the notes, logs to a.md") ends the clause;
+# an order in a language this scan has no verb for passes. The override lifts it. Cost: pure text work inside the one
+# guard call. No process, no file.
+BRIEF_WRITE_VERB = re.compile(r"(?<![\w-])(?:write|save|store|dump|append|create|make|put|place|redirect)\b(?!-)", re.IGNORECASE)
+BRIEF_WRITE_DEST = re.compile(
+    r"(?<![\w-])(to|into|onto|in|inside|as|at|under|named|called)\s+(?:(?:the|a|an|your|this|new)\s+)*"
+    r"(?:(?P<noun>(?:\w+\s+){0,2}?file(?![\w'-]))\s*)?(?P<token>`?[\w~./#-]*)", re.IGNORECASE)
+BRIEF_WRITE_REST_END = re.compile(r"[.!?;:](?=\s|$)|,(?=\s|$)|\bthen\b|\bbut\b", re.IGNORECASE)
 BRIEF_WRITE_FILE = re.compile(r"\b(?:create|write|make|touch)\s+(?:a|an|the|new)\s+(?:new\s+)?file\b", re.IGNORECASE)
-BRIEF_WRITE_TOOL = re.compile(r"\buse\s+(?:the\s+)?write\s+tool\b", re.IGNORECASE)
+BRIEF_WRITE_TOOL = re.compile(r"(?<![\w-])(?:use|call|invoke|run)\s+(?:the\s+)?write\s+tool\b", re.IGNORECASE)
+BRIEF_WRITE_PROSE_TEE = re.compile(r"(?<![\w-])tee\s+(?:-\w+\s+)*(`?[\w~./#-]+)", re.IGNORECASE)
 BRIEF_WRITE_LEAD = frozenset((
     "please", "now", "you", "must", "should", "will", "can", "to", "just", "always", "finally", "also", "then", "are",
-    "need", "needs", "have", "has", "may", "do", "first", "next", "and", "-", "*", "+"))
-BRIEF_WRITE_BOUNDARY = re.compile(r"[.!?:;,]\s|\band\b|\bthen\b|\balso\b|\bfirst\b|\bnext\b|`", re.IGNORECASE)
+    "need", "needs", "have", "has", "may", "do", "first", "next", "and", "-", "*", "+", "so", "when", "whenever", "once",
+    "done", "after", "afterwards", "finished", "ready", "if", "needed", "later", "otherwise", "instead"))
+BRIEF_WRITE_BOUNDARY = re.compile(r"[.!?:;,]\s|\band\b|\bthen\b|\balso\b|\bfirst\b|\bnext\b|\bbut\b|`", re.IGNORECASE)
+BRIEF_WRITE_NEGATORS = frozenset(BRIEF_DESTRUCTIVE_NEGATORS + ("not", "nothing", "none", "neither", "nor", "nowhere", "without"))
+BRIEF_WRITE_PREPS = frozenset((
+    "of", "in", "for", "from", "about", "with", "on", "at", "to", "per", "across", "over", "between", "by", "into",
+    "regarding", "covering", "under", "inside"))
+BRIEF_WRITE_WORD_PAIRS = frozenset((
+    "and/or", "yes/no", "pass/fail", "true/false", "read/write", "input/output", "in/out", "on/off", "either/or", "y/n"))
 BRIEF_WRITE_TEE = re.compile(r"(?<![\w-])tee\s+(?:-\w+\s+)*([^\s|;&<>-][^\s|;&<>]*)")
-BRIEF_WRITE_REDIRECT = re.compile(r"(?<![\w&>=-])\d?>>?\s*(?!&)([^\s&|;>]+)")
+BRIEF_WRITE_REDIRECT = re.compile(r"(?<![\w&>=-])\d?>>?\s*(?![&=])([^\s&|;>]+)")
 BRIEF_WRITE_QUOTED = re.compile(r"\"[^\"]*\"|'[^']*'")
+BRIEF_WRITE_MARKS = re.compile(r"\*+|(?<!\w)[\"']|[\"'](?!\w)")
 BRIEF_WRITE_REASON = (
     "The brief tells a read-only agent to write a file. That role has no write tool, so it writes by a shell redirect "
     "or stalls. Name a writer role (record-writer, builder or test-author) for the write, or have the agent report "
@@ -3573,20 +3589,80 @@ BRIEF_WRITE_REASON = (
 
 
 def _brief_write_target_ok(target: str) -> bool:
-    """True for a redirect or tee target that is no repo write: /dev/null, or under any session scratchpad."""
+    """True for a redirect or tee target that is no repo write: /dev/null, under any session scratchpad, or a number."""
     target = target.strip("`\"'")
-    return target == "/dev/null" or (target.startswith("/") and in_any_session_scratchpad(target))
+    return target == "/dev/null" or bool(re.fullmatch(r"[\d.]+", target)) \
+        or (target.startswith("/") and in_any_session_scratchpad(target))
+
+
+def _brief_write_path(token: str) -> bool:
+    """True when a prose word names a file path: it ends in an extension, or holds a slash that is no word pair."""
+    token = token.strip("`").rstrip(".,)")
+    if re.search(r"\.[A-Za-z]\w{0,7}(?:#|$)", token):
+        return True
+    parts = [part for part in token.split("/") if part]
+    return "/" in token and bool(parts) and not all(part.isupper() for part in parts) \
+        and token.lower() not in BRIEF_WRITE_WORD_PAIRS
 
 
 def _brief_write_command(command: str) -> str:
-    """The write a command-shaped part makes into a path: its tee or redirect text, or "". Quoted text is cut first, so a
-    `>` inside quotes is text."""
-    bare = BRIEF_WRITE_QUOTED.sub(" ", command)
+    """The write a command-shaped part makes into a path: its tee or redirect text, or "". Quoted text is masked, so a
+    `>` inside quotes is text, and a quoted target is read back."""
+    quoted = []
+
+    def mask(match):
+        quoted.append(match.group(0)[1:-1])
+        return "\x01%d\x01" % (len(quoted) - 1)
+
+    bare = BRIEF_WRITE_QUOTED.sub(mask, command.replace("\x01", " "))
     for pattern in (BRIEF_WRITE_TEE, BRIEF_WRITE_REDIRECT):
         for match in pattern.finditer(bare):
-            if not _brief_write_target_ok(match.group(1)):
+            target = re.sub(r"\x01(\d+)\x01", lambda m: quoted[int(m.group(1))], match.group(1))
+            if not _brief_write_target_ok(target):
                 return command
     return ""
+
+
+def _brief_write_leads(before: str) -> bool:
+    """True when only lead-in words sit between the start of the clause and the verb that ends `before`."""
+    bounds = list(BRIEF_WRITE_BOUNDARY.finditer(before))
+    return all(word in BRIEF_WRITE_LEAD for word in _brief_words(before[bounds[-1].end():] if bounds else before))
+
+
+def _brief_write_object(rest: str) -> bool:
+    """True when the clause after a write verb sends its object to a file: a destination word that leads to a path or to
+    "a file", with no negator before it, and for "in", "inside", "at" and "under" no other preposition before it."""
+    for match in BRIEF_WRITE_DEST.finditer(rest):
+        between = _brief_words(rest[:match.start()])
+        if any(word in BRIEF_WRITE_NEGATORS for word in between):
+            return False
+        if match.group(1).lower() in ("in", "inside", "at", "under") and any(word in BRIEF_WRITE_PREPS for word in between):
+            continue
+        if match.group("noun") or _brief_write_path(match.group("token")):
+            return True
+    return False
+
+
+def _brief_write_orders(text: str) -> bool:
+    """True when one prose line, marks removed, orders a file write: a write verb with a file destination, "create a file",
+    a `tee <path>`, or the Write tool."""
+    for verb in BRIEF_WRITE_VERB.finditer(text):
+        before = text[:verb.start()]
+        if _brief_write_leads(before) and not _brief_prohibits(before) \
+                and _brief_write_object(BRIEF_WRITE_REST_END.split(text[verb.end():], 1)[0]):
+            return True
+    for pattern in (BRIEF_WRITE_FILE, BRIEF_WRITE_TOOL, BRIEF_WRITE_PROSE_TEE):
+        for match in pattern.finditer(text):
+            before = text[:match.start()]
+            if pattern is BRIEF_WRITE_PROSE_TEE:
+                ordered = _brief_write_path(match.group(1)) and not _brief_prohibits(before)
+            elif pattern is BRIEF_WRITE_FILE:
+                ordered = _brief_write_leads(before) and not _brief_prohibits(before)
+            else:
+                ordered = not _brief_prohibits(before)
+            if ordered:
+                return True
+    return False
 
 
 def _brief_write_prose(prompt: str) -> str:
@@ -3609,16 +3685,8 @@ def _brief_write_prose(prompt: str) -> str:
             covered = False
         if covered or stripped.startswith("$ ") or BRIEF_DESTRUCTIVE_CASE_DATA.search(line):
             continue
-        hits = [m for m in BRIEF_WRITE_PROSE.finditer(line)] + list(BRIEF_WRITE_FILE.finditer(line))
-        for match in hits:
-            before = line[:match.start()]
-            bounds = list(BRIEF_WRITE_BOUNDARY.finditer(before))
-            lead = _brief_words(before[bounds[-1].end():] if bounds else before)
-            if all(word in BRIEF_WRITE_LEAD for word in lead) and not _brief_prohibits(before):
-                return line.strip()
-        for match in BRIEF_WRITE_TOOL.finditer(line):
-            if not _brief_prohibits(line[:match.start()]):
-                return line.strip()
+        if _brief_write_orders(BRIEF_WRITE_MARKS.sub("", line)):
+            return stripped
     return ""
 
 
