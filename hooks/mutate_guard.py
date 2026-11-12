@@ -1541,14 +1541,14 @@ MUTATIONS = [
      '        if deadline < local_time.clock():\n            return ""',
      '        if deadline > local_time.clock():\n            return ""', "guard",
      "a Write that sets only the cap-lift end asks"),
-    ("guard: the end drops its zone, so it reads as a bare HH:MM with no CST or CDT",
-     '        return local_time.central_hhmm(deadline)\n    except (ValueError, OverflowError, TypeError):',
-     '        return local_time.central_hhmm(deadline).split(" ")[0]\n'
+    ("guard: the end drops its zone, so it reads as a date and time with no CST or CDT",
+     '        return local_time.central_full(deadline)\n    except (ValueError, OverflowError, TypeError):',
+     '        return local_time.central_full(deadline).rsplit(" ", 1)[0]\n'
      '    except (ValueError, OverflowError, TypeError):', "guard",
      "names the end in CST"),
     ("guard: the end prints in UTC, not US Central, so the approver reads the wrong hour",
-     '        return local_time.central_hhmm(deadline)\n    except (ValueError, OverflowError, TypeError):',
-     '        return deadline.strftime("%H:%M UTC")\n    except (ValueError, OverflowError, TypeError):',
+     '        return local_time.central_full(deadline)\n    except (ValueError, OverflowError, TypeError):',
+     '        return deadline.strftime("%Y-%m-%d %H:%M UTC")\n    except (ValueError, OverflowError, TypeError):',
      "guard", "names the end in CST"),
     ("guard: a Write that sets the cap-lift end is not asked about, so its end is never shown",
      '            change = cap_with_deadline(cap_change_parts(write_content_parts(tool_input)),\n'
@@ -1568,7 +1568,7 @@ MUTATIONS = [
      '    disk = None', "guard",
      "an Edit that changes only the end's value, with no field name in its strings"),
     ("guard: an Edit that leaves the cap-lift end alone asks with the end on disk anyway",
-     '    if cap_deadline_text([arrived]) == cap_deadline_text([disk]):\n        return strings\n    return [arrived]',
+     '    if cap_deadline_text([arrived]) == cap_deadline_text([disk]):\n        return []\n    return [arrived]',
      '    return [arrived]', "guard",
      "an Edit that leaves a settings file's cap-lift end alone adds no ask"),
     ("guard: a sed reads no substitution, so a sed's end is read from the command text alone",
