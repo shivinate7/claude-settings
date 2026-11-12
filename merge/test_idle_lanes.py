@@ -29,8 +29,8 @@ import _test_temp  # noqa: E402  test-temp-standard: one run folder per test run
 import test_build as roadmap  # noqa: E402  the roadmap fixture: make_repo, session_row, iso_ago (one home)
 
 REPO = "cs-repo:owner/fixture"
-SUMMARY_ONE = "merge: 1 lanes to archive. Run get_session on each alone, then archive it."
-SUMMARY_ZERO = "merge: 0 lanes to archive. Run get_session on each alone, then archive it."
+SUMMARY_ONE = "merge: 1 lanes to archive. Run get_session on each lane in one message, then archive them in the next message."
+SUMMARY_ZERO = "merge: 0 lanes to archive. Run get_session on each lane in one message, then archive them in the next message."
 SUMMARY_LINE = re.compile(r"^merge: \d+ lanes to archive\b", re.M)
 ZERO_LINE = re.compile(r"^merge: 0 lanes to archive\.", re.M)
 
