@@ -444,6 +444,105 @@ await test('turn.complete no transcript: the first turn shows one UNKNOWN notice
   same(h.toasts.length, 1, 'notices shown after the second turn of the same session')
 })
 
+// ---- the transcript fallback (decision decision-watch-finds-transcript). When the mod's own derived path misses, the mod
+// still hands the turn to the script, and the script finds the transcript by session id. The script also owns the
+// once-per-session UNKNOWN, so the mod keeps no seen state of its own.
+
+const FLAG_MODEL = () => ({ isAnswered: true, text: FLAG_REPLY, usage: {} })
+// A cwd whose project folder the app shortens: the mod derives the long name, and the file sits under a stand-in name.
+const LONG_CWD = '/work/' + 'r'.repeat(260)
+const SHORT_FOLDER = 'app-folder-after-truncation'
+// A cwd with one character outside the Basic Multilingual Plane (U+1F600). The mod folds each UTF-16 unit to "-", so the
+// emoji becomes two dashes; the script folds each code point, so it becomes one. The repo does not record the app's rule,
+// so the non-BMP case accepts either fold.
+const NON_BMP_CWD = '/x/\u{1F600}y'
+
+// The script when it looks for the transcript (decision_watch.py): it finds a transcript filed under the session id in any
+// project folder. With none found it prints one UNKNOWN per session. Its mark lives in h.noTranscriptSeen, which the host
+// keeps across a mod reload. A session with no id is never marked, so it is told on every turn.
+function scriptNoTranscript(h) {
+  return (argv, o) => {
+    const stdin = JSON.parse(o.stdin || '{}')
+    if (!argv.includes('--emit-prompt')) return { exitCode: 2, stdout: '', stderr: 'fake python: unknown argv' }
+    if ([...h.files.keys()].some(p => p.endsWith('/' + stdin.session_id + '.jsonl'))) return defaultPython(h, argv, o)
+    h.noTranscriptSeen ??= new Set()
+    const key = `${o.env.CLAUDE_CONFIG_DIR}|${stdin.session_id}`
+    if (stdin.session_id && h.noTranscriptSeen.has(key)) return { exitCode: 0, stdout: '', stderr: '' }
+    if (stdin.session_id) h.noTranscriptSeen.add(key)
+    return out({ systemMessage: UNKNOWN + `transcript_path is missing or does not exist (tried: ${stdin.transcript_path}), and no transcript was found under session id ${stdin.session_id || '(none given)'}.` })
+  }
+}
+
+// One turn, done once its STOP seen line is written. The judge after it is promise steps only, so one flush drains it.
+const turnDone = async (h, turnId) => {
+  const stopSeen = waitLog(h, /STOP seen/)
+  await fire(h, 'turn.complete', turnEvent({ turnId }), {})
+  await stopSeen
+  await flush()
+}
+
+await test('turn.complete fallback: a transcript the mod path misses is judged by the script, and its FLAG shows', async () => {
+  const h = await load(host({ cwd: LONG_CWD, model: FLAG_MODEL }))
+  missingLookup(h)
+  h.py1 = scriptNoTranscript(h)
+  h.files.set(`${REAL_CFG}/projects/${SHORT_FOLDER}/${SID}.jsonl`, '{}\n')
+  await turnDone(h, 't1')
+  same(emits(h).length, 1, 'script calls asking for a prompt, when the mod path misses')
+  assert.ok(!h.toasts.some(t => t.includes('No transcript found')), `the mod said the turn was not judged: ${JSON.stringify(h.toasts)}`)
+  assert.ok(h.toasts.includes(FLAG), `the script's FLAG did not show: ${JSON.stringify(h.toasts)}`)
+})
+
+await test('/dw fallback: a transcript the mod path misses is judged by the script, and its FLAG shows', async () => {
+  const h = await load(host({ cwd: LONG_CWD, model: FLAG_MODEL }))
+  missingLookup(h)
+  h.py1 = scriptNoTranscript(h)
+  h.files.set(`${REAL_CFG}/projects/${SHORT_FOLDER}/${SID}.jsonl`, '{}\n')
+  const r = await dwRun(h)
+  same(emits(h).length, 1, 'script calls asking for a prompt, when the mod path misses')
+  assert.ok(shown(h, r).includes(FLAG), `the /dw result did not show the FLAG: ${tail(shown(h, r))}`)
+})
+
+await test('turn.complete no transcript anywhere: one UNKNOWN on the first turn, none after it, and none after a mod reload', async () => {
+  const h = host()
+  missingLookup(h)
+  h.py1 = scriptNoTranscript(h)
+  await load(h)
+  await turnDone(h, 't1')
+  same(h.toasts.length, 1, 'notices after the first turn')
+  assert.ok(h.toasts[0].startsWith(UNKNOWN), `the notice is not an UNKNOWN: ${JSON.stringify(h.toasts[0])}`)
+  await turnDone(h, 't2')
+  same(h.toasts.length, 1, 'notices after the second turn of the same session')
+  h.hooks.length = 0 // a mod reload: a new module instance, with the host and the session unchanged
+  await load(h)
+  await turnDone(h, 't3')
+  same(h.toasts.length, 1, 'notices after a mod reload of the same session (the seen mark must live outside the mod)')
+})
+
+await test('turn.complete no session id: the UNKNOWN shows on every turn, the mod keeps no mark for an empty id', async () => {
+  const h = host({ sid: '' })
+  await load(h)
+  missingLookup(h)
+  h.py1 = scriptNoTranscript(h)
+  await turnDone(h, 't1')
+  same(h.toasts.length, 1, 'notices after the first turn with no session id')
+  await turnDone(h, 't2')
+  same(h.toasts.length, 2, 'notices after the second turn with no session id')
+})
+
+await test('turn.complete non-BMP cwd: a transcript filed under the other fold of the folder name is judged', async () => {
+  const h = await load(host({ cwd: NON_BMP_CWD, model: FLAG_MODEL }))
+  const modFold = NON_BMP_CWD.replace(/[^A-Za-z0-9]/g, '-')
+  const scriptFold = NON_BMP_CWD.replace(/[^A-Za-z0-9]/gu, '-')
+  assert.notEqual(scriptFold, modFold, 'the two folds are the same, so the case tests nothing')
+  missingLookup(h)
+  h.py1 = scriptNoTranscript(h)
+  h.files.set(`${REAL_CFG}/projects/${scriptFold}/${SID}.jsonl`, '{}\n')
+  await turnDone(h, 't1')
+  same(emits(h).length, 1, 'script calls asking for a prompt, when the mod fold misses')
+  assert.ok(!h.toasts.some(t => t.includes('No transcript found')), `the mod said the turn was not judged: ${JSON.stringify(h.toasts)}`)
+  assert.ok(h.toasts.includes(FLAG), `the script's FLAG did not show: ${JSON.stringify(h.toasts)}`)
+})
+
 // /clear gives the process a new session id with no session.start (SessionEndInput and the session.start note in the
 // host types). A kept id is then the OLD session's, whose transcript is still on disk, so a fallback to it would judge
 // the wrong session.
