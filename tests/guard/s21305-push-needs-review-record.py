@@ -278,7 +278,7 @@ PFR_LINES = {
                    blocks=True)
         + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL, "FAIL")],
                                           fix=(PFR_HEAD_A, "reviewer", PFR_MODEL, "PASS"), head=PFR_HEAD_B)),
-    # A round report is cleared by a Round line only; a Fix check line does not clear it.
+    # A Fix check line clears no round report, and it denies a push to its PR's head branch before the round ask.
     "round-fail-fix-record": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL)
                              + pfr_post("toolu_c1", pfr_record(fix=(PFR_FIX_SHA, "reviewer", PFR_MODEL, "FAIL"))),
     "fail-then-comment": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL)
@@ -547,8 +547,6 @@ pfr_ask("a design-reviewer FAIL cleared only by a reviewer record line, then the
            pfr_path("design-fail-reviewer-record"))
 pfr_ask("a reviewer PASS cleared only by a FAIL record line, then the push", PFR_PUSH,
            pfr_path("pass-fail-record"))
-pfr_ask("a FAIL round 1 cleared only by a Fix check record line, then the push", PFR_PUSH,
-           pfr_path("round-fail-fix-record"))
 # Every report needs its own clearing record: an older unrecorded FAIL is not cleared by a newer recorded PASS.
 pfr_ask("an unrecorded reviewer FAIL, then a design-reviewer PASS whose record holds only its own line, then the push",
            PFR_PUSH, pfr_path("mixed-unrecorded-reviewer"))
@@ -732,10 +730,11 @@ def pfr_held_cost_case():
     return True, "no git read with no report held, and the held transcript's count saw %d" % len(held_reads)
 
 
-def pfr_fix_refuse(name, command, transcript):
+def pfr_fix_refuse(name, command, transcript, lacks=PFR_FIX_BRANCH):
     """A push onto a PR's head branch after its fix check is recorded. The refusal tells the lane to open a new
-    branch and a new PR for the next fix, and names neither branch."""
-    sh("push-needs-review-record: " + name, command, "deny", rule=PFR_RULE, lacks=PFR_FIX_BRANCH,
+    branch and a new PR for the next fix, and names neither branch. `lacks` is the branch the push writes, which
+    the refusal must not name."""
+    sh("push-needs-review-record: " + name, command, "deny", rule=PFR_RULE, lacks=lacks,
        carries=("new branch", "PR"), cwd=PUSHFEAT, transcript=transcript)
 
 
@@ -746,6 +745,11 @@ pfr_fix_refuse("a fix check FAIL for PR 1464 posted, then a push to its head bra
 # A round 2 report with no record, after the fix check, does not turn the fix-branch refusal into an ask.
 pfr_fix_refuse("a fix check PASS for PR 1464 posted, a round 2 FAIL unrecorded, then a push to its head branch",
                PFR_FIX_PUSH, pfr_path("fix-pass-then-round2-fail"))
+# A Fix check line on PR 1467 denies a push to its head branch, and the round 1 FAIL beside it stays uncleared. The
+# deny comes before that FAIL's ask, so the push is denied, not asked (decision push-needs-review-record).
+pfr_fix_refuse("a FAIL round 1 with a Fix check record line for PR 1467, then a push to its head branch: deny, "
+               "the fix-branch rule comes before the pending ask", PFR_PUSH, pfr_path("round-fail-fix-record"),
+               lacks=PFR_BRANCH)
 # A documented miss, pinned: a fix check whose PR head is unknown is allowed, so the next PR is never deadlocked.
 pfr_allow("a fix check PASS for a PR the transcript never opens, then a push to its branch", PFR_FIX_PUSH,
           pfr_path("fix-pass-unknown-head"))
