@@ -17,9 +17,9 @@ A repo lists paths that no session may write, in `.claude/layout-extras.json`. T
 - Incident class: named incident (rule `building-guard-needs-incident`). Probe in a banchi project thread, 2026-11-03 10:35 CST: banchi's own `.claude/settings.json` does not load there, so its `fixtures/` refusal rule let a write through. The claude-settings guard did load. Mistake stopped: Claude edits or regenerates a fixture file while fixing a failing test. Harm: banchi's `fixtures/` holds real TCGplayer exports, the ground truth for the round-trip test; an edited fixture turns a real defect green.
 - Scope: a refusal rule a repo keeps in its own settings does not run in a project's cloud thread. This rule moves that kind of refusal into the guard, which does.
 - Cost:
-  - Write family: one read of the target checkout's extras file per guard call, cached for the call. No process, no file written.
-  - Bash: the extras file is read only when the command looks like a write (`PROTECTED_WRITE_HINT`). A read-only command opens nothing. Check: the cost test in `hooks/test_guard_protected.py`.
-  - No log line, except one `noted` line on a malformed key.
+  - Write family: at most one read of the target checkout's extras file per guard call, kept for the call. The Write path is not pinned by a test. It starts no process and writes no file (unmeasured).
+  - Bash: the extras file is read only when the command looks like a write (`PROTECTED_WRITE_HINT`). A read-only command opens it never. Check: `test_a_read_only_bash_call_does_not_open_the_extras_file` and `test_a_repo_with_no_key_opens_its_extras_file_at_most_once`.
+  - A malformed key writes at most one `noted` line to the log. Check: `test_a_malformed_protected_key_logs_one_noted_line`.
 - Known limits: a write the scanner cannot see passes. That covers a path built at run time, such as `"$(git rev-parse --show-toplevel)/fixtures/a"` or `'fix' + 'tures/a'`, and a binary that writes a path it computes. On a case-insensitive file system (macOS), `FIXTURES/a` does not match `fixtures/`. The rule stops Claude's mistakes, not an attacker (decision `guard-guards-mistakes-only`).
 
 Kind: build
