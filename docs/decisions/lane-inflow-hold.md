@@ -9,6 +9,9 @@ The coordinator starts no new lane while the hold stands, except the lanes that 
 - Gap fixes: owner, 2026-11-08 06:11 CST, saved on the waiting page (its save comment in page thread 39498742-caad-4394-b043-13ab1619051c), page item 410 (hold-which-fixes-start, which fixes start a lane), pick a, whose option text reads: "Every fix for a found gap may start a lane".
 - Waits: every other ready-not-started step. Rule `parallelism-keep-going` (start each queued item the owner asked for when a lane ends) yields to this ruling while it holds.
 - Ends: the ruling names no end.
+- On main, checked 2026-11-12 07:36 CST: no record or plan cites this hold, its item 384, or any ruling that lifts it.
+- Main's freeze: the restart plan (`restart-plan`), stage 1, says "The freeze holds (owner 09:18 CST Nov 10): no new lanes except fixes of items landing on main." Its R42 records the owner's 13:51 CST Nov 11 pick "a", which narrows the freeze: "until the fan-out, only fixes that main's stability needs start."
+- Status on main: unclear. Main does not say the freeze is this hold, so this record keeps the owner's words above.
 
 Kind: process
 Home: rule:parallelism-keep-going
