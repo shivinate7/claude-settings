@@ -906,7 +906,7 @@ jobs:
   shell-macos:
     runs-on: macos-latest
     needs: scope
-    # 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). Newest 29 push runs on main, latest attempt of each (run 42466009585 to run 43184587111):
+    # 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). Newest 29 completed push runs on main, latest attempt of each (run 42466009585 to run 43184587111):
     # 29 green, median 23.0, slowest 31.3 min (run 43184587111). The stopgap ends with roadmap step time-pinned-tests-go.
     timeout-minutes: 75
     steps:
