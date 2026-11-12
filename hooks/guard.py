@@ -3588,23 +3588,41 @@ BRIEF_BLIND_LABELS = re.compile(BRIEF_BLIND_OPEN + r"(%s)[*_]*[ \t]*(?::|$)" % "
 # An item may follow a one-label report's `Done:`, as in `Done: BUILT <id> ...`.
 BRIEF_BLIND_DONE = r"(?:%s[*_]*[ \t]*:[*_]*[ \t]*)?" % BRIEF_DONE_LABEL
 BRIEF_BLIND_ITEM = re.compile(BRIEF_BLIND_OPEN + BRIEF_BLIND_DONE + r"(?:BUILT|RECORDED)(?![\w-])", re.M)
-# A verdict line is one of two. A line with `verdict`, or a round label with or without `result`, before its colon, and the
-# verdict word right after the colon. Or a report's leading verdict, `FAIL, round <n> of 3, ...`. A line that opens with a
-# verdict word and a colon (`FAIL: test_x`) is a quote.
+# A verdict line is one of two. A line with `verdict`, or a round label (with or without a leading word such as `Prior`, a
+# number, or `result`), before its separator, and a verdict word right after the separator: a colon, bold marks around it, or
+# a dash. A choice list (`Verdict: PASS or FAIL`) is a request, not a verdict. Or a report's leading verdict, `FAIL, round <n>
+# of 3, ...`, bare or after `Done:`. A line that opens with a verdict word and a colon (`FAIL: test_x`) is a quote.
+BRIEF_BLIND_ROUND = r"(?:\w+[ \t]+){0,2}[Rr]ound\b(?:[ \t]+\d+(?:[ \t]+of[ \t]+\d+)?)?(?:[^\n:]*?\b[Rr]esult\b[^\n:]*?)?"
 BRIEF_BLIND_VERDICT = re.compile(
-    BRIEF_BLIND_OPEN + r"(?:(?:[^\n:]*?\b[Vv]erdict\b[^\n:]*?|[Rr]ound[ \t]+\d+(?:[ \t]+of[ \t]+\d+)?(?:[^\n:]*?\b[Rr]esult\b[^\n:]*?)?)"
-    r"[*_]*[ \t]*:[ \t]*[*_`\"'(]*(?:%s)\b|(?:%s)[*_]*[ \t]*,[ \t]*[Rr]ound[ \t]+\d+)" % (BRIEF_BLIND_VERDICT_WORDS, BRIEF_BLIND_VERDICT_WORDS),
+    BRIEF_BLIND_OPEN + r"(?:(?:[^\n:]*?\b[Vv]erdict\b[^\n:]*?|" + BRIEF_BLIND_ROUND + r")"
+    r"[*_]*[ \t]*(?::[*_]*|[\u2014\u2013-]+)[ \t]*[*_`\"'(]*(?:%s)\b(?![ \t]+or[ \t]+(?:%s)\b)"
+    r"|" % (BRIEF_BLIND_VERDICT_WORDS, BRIEF_BLIND_VERDICT_WORDS) + BRIEF_BLIND_DONE
+    + r"(?:%s)[*_]*[ \t]*,[ \t]*[Rr]ound[ \t]+\d+)" % BRIEF_BLIND_VERDICT_WORDS,
     re.M)
 BRIEF_BLIND_REASON = ("A reviewer's brief holds a builder's report or a prior verdict, so the reviewer anchors on it. "
                       "Send the task, the diff or a pointer to it, and the governing rulings. For a later round, send the "
                       "prior findings as a list of file, line and claim, with no verdict (decision reviewer-brief-blind).")
 
 
+def brief_blind_bodied_labels(brief: str) -> set:
+    """The report labels that carry a body: text after the label on its line, or a non-label line right under it. A bare
+    label list (`Report with:` then `- Done`, `- Deviations`) asks for a report's shape and holds none."""
+    lines, bodied = brief.split("\n"), set()
+    for i, line in enumerate(lines):
+        m = BRIEF_BLIND_LABELS.match(line)
+        if not m:
+            continue
+        under = lines[i + 1] if i + 1 < len(lines) else ""
+        if line[m.end():].strip() or (under.strip() and not BRIEF_BLIND_LABELS.match(under)):
+            bodied.add(m.group(1))
+    return bodied
+
+
 def brief_blind_shape(brief) -> str:
     """The shape of a brief that a reviewer must not read: "report", "item" or "verdict", else ""."""
     if not isinstance(brief, str):
         return ""
-    if len(set(BRIEF_BLIND_LABELS.findall(brief))) >= 2:
+    if len(brief_blind_bodied_labels(brief)) >= 2:
         return "report"
     if BRIEF_BLIND_ITEM.search(brief):
         return "item"
