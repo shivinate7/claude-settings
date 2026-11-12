@@ -25,6 +25,7 @@ import shallow_clone  # noqa: E402  the one shallow-clone fixture (testing/shall
 import test_rule_audit as audit  # noqa: E402  the cite pattern and the exempt list, one home (lint/test_rule_audit.py)
 from workflow_steps import job_block  # noqa: E402  the one workflow reader (lint/workflow_steps.py)
 import stale_cites  # noqa: E402  the guard's rule dirs, one home (lint/stale_cites.py)
+import rule_audit  # noqa: E402  the rule file list, one home (lint/rule_audit.py RULE_FILES)
 sys.path.append(os.path.join(os.path.dirname(HERE), "hooks"))  # append: no hook module shadows one this suite imports
 import guard as hook_guard  # noqa: E402  is_test_rel, the one home of what a test path is (hooks/guard.py)
 CITE_HOMES = audit.cite_homes()  # read live from the repo when this run starts
@@ -1175,6 +1176,21 @@ class ClaudeMdFlag(Env):
         self.pr_writes({".Claude/claude.md": "rules\n", "Output-Styles/A.md": "a\n", "notes/Output-Styles/b.md": "b\n"})
         rc, out = self.run_merge("7", "--confirm")
         self.assert_flagged(rc, out, ".Claude/claude.md", "Output-Styles/A.md")
+
+    def test_every_skill_and_rules_file_in_the_rule_file_list_is_flagged(self):  # the list is rule_audit.RULE_FILES, read here
+        listed = [p.replace(os.sep, "/") for p in rule_audit.RULE_FILES]
+        paths = [p for p in listed if p.startswith(("skills/", ".claude/rules/"))]
+        self.assertTrue(paths, "rule_audit.RULE_FILES lists no skill or rules file, so the case would pass with nothing to check")
+        self.pr_writes({p: "rules\n" for p in paths})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_flagged(rc, out, *paths)
+
+    def test_a_skill_outside_the_rule_file_list_is_not_flagged(self):
+        listed = {p.replace(os.sep, "/") for p in rule_audit.RULE_FILES}
+        self.assertNotIn("skills/other/SKILL.md", listed, "the list names this skill, so the case would expect the wrong result")
+        self.pr_writes({"skills/other/SKILL.md": "a skill\n", "CLAUDE.md": "rules\n"})  # the control: CLAUDE.md is still flagged
+        rc, out = self.run_merge("7", "--confirm")
+        self.assert_flagged(rc, out, "CLAUDE.md")
 
 class Race(Env):
     def test_two_runs_one_lock(self):
