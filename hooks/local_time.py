@@ -294,8 +294,10 @@ def page_note(raw):
     """PostToolUse on ArtifactData: saves the note of each new answer a `get` of `answers` returned.
     Saves nothing for any other call. Prints a PostToolUse additionalContext JSON when a save fails."""
     hook = json.loads(raw.decode("utf-8"))
-    inp = hook.get("tool_input")
-    if (hook.get("tool_name") != "ArtifactData" or not isinstance(inp, dict)
+    from shared_names import DATA_TOOL, canonical_artifact_call  # only this mode needs the names
+    # A Mac db_get is read as the ArtifactData get of the same document.
+    name, inp = canonical_artifact_call(hook.get("tool_name"), hook.get("tool_input"))
+    if (name != DATA_TOOL or not isinstance(inp, dict)
             or inp.get("action") != "get" or inp.get("collection") != "answers"):
         return
     paths = inbox_paths(hook.get("session_id"))
