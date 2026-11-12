@@ -69,6 +69,7 @@ Interface the hook must match:
   stake outside the set, or none. A message over report_guard.ASK_TEXT_MAX keeps its Based on lines and its text from
   its first form line. Any other send makes no model call and starts no subprocess. A refusal is rule `past-ruling`
   with the Stop hook's facts-only owner line (decision guard-remedy-not-to-owner). A check that could not run refuses
+  with the Unvetted remedy instead, which keeps its `Unvetted:` marker text (that decision covers Stop refusals only),
   unless every question in the message carries its own `Unvetted:` line.
 - Page item writes (ruled 14:38 CST): a judged item write gets the dedicated past-ruling call first (item 8 alone, Sonnet).
   A refusal denies with rule past-ruling and makes no form-judge call. Otherwise the form judge (Opus) runs, and its
@@ -2255,8 +2256,10 @@ PICK_PROBLEM = "Problem (rule): the owner already picked it on 2026-11-09, so th
 
 def case_send_check_that_cannot_run_refuses_unvetted():
     # report_guard cannot be imported, so the past-ruling check cannot run. The question is one a listed ruling settles,
-    # so an allowed send is the defect. Each claim is its own check. The control is a send that carries its own
-    # Unvetted line: it is not refused, as the check it names is the one that can run.
+    # so an allowed send is the defect. The refusal is the Unvetted outcome of a PreToolUse refusal, so it keeps the
+    # `Unvetted:` marker text that call_judge.UNVETTED_REMEDY names. Each claim is its own check. The control is a send
+    # that carries its own Unvetted line: it is not refused, as the check it names is the one that can run.
+    marker = unvetted_marker(guard_constant(HOOK, "UNVETTED_REMEDY"))
     marked = INCIDENT_357 + "\n" + UNVETTED_LINE
     for tool in SEND_TOOLS:
         name = "send, check cannot run (report_guard blocked), via %s" % tool
@@ -2264,8 +2267,7 @@ def case_send_check_that_cannot_run_refuses_unvetted():
         check(name + ": refused, not allowed", (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
         check(name + ": the refusal is rule past-ruling", r.reason().startswith("past-ruling: "), r.reason()[:160])
         check(name + ": the refusal names the check that could not run", "could not run" in r.reason(), r.reason()[:160])
-        check(name + ": the refusal holds no Remedy or Unvetted text",
-              "Remedy:" not in r.reason() and "Unvetted:" not in r.reason(), r.reason()[:160])
+        check(name + ": the refusal names the Unvetted marker", bool(marker) and marker in r.reason(), r.reason()[:200])
         check(name + ": no fail-open line on stderr", "call judge failed open" not in r.err, r.err[-200:])
         r = run_hook(send_input(tool, marked), answer=ruled(WORKTREE_SLUG), block="report_guard")
         check(name + " with an Unvetted line: not refused", r.code == 0 and r.deny() is None, detail(r))
@@ -2273,13 +2275,19 @@ def case_send_check_that_cannot_run_refuses_unvetted():
 
 def case_page_check_that_cannot_run_refuses_unvetted():
     # The same defect on a page write: the dedicated past-ruling call cannot run, so the item write is refused as
-    # Unvetted, rule past-ruling, and no form-judge call follows. The control carries its own Unvetted line.
+    # Unvetted, rule past-ruling, and no form-judge call follows. The refusal keeps the marker text, which says the line
+    # goes to `context` for a page item. The control carries its own Unvetted line.
+    marker = unvetted_marker(guard_constant(HOOK, "UNVETTED_REMEDY"))
     page_item_passes_the_form("cannot run")
     r = run_hook(page_input("set", WORKTREE_PAGE_ITEM, cwd=INCIDENT_REPO), answer=ALLOW, block="report_guard")
     check("page, check cannot run (report_guard blocked): refused, not allowed",
           (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
     check("page, check cannot run: the refusal is rule past-ruling", r.reason().startswith("past-ruling: "),
           r.reason()[:160])
+    check("page, check cannot run: the refusal names the Unvetted marker", bool(marker) and marker in r.reason(),
+          r.reason()[:200])
+    check("page, check cannot run: the refusal says the line goes to `context`", "`context`" in r.reason(),
+          r.reason()[:200])
     check("page, check cannot run: no form-judge call follows", len(form_calls(r)) == 0, detail(r))
     check("page, check cannot run: no fail-open line on stderr", "call judge failed open" not in r.err, r.err[-200:])
     marked = dict(WORKTREE_PAGE_ITEM, context=WORKTREE_PAGE_ITEM["context"] + "\n" + UNVETTED_LINE)
@@ -2511,17 +2519,19 @@ def case_capped_questions_starts_each_cut_unit_on_its_own_line():
           0 < len(cut) <= cap, len(cut))
 
 
-def case_unrun_reason_copies_the_report_guard_unvetted_text():
-    # The hook's UNRUN_REASON copies report_guard.UNVETTED_REASON without the record cite, because that module may be what
-    # failed to import. The copy plus report_guard's own cite must read as report_guard's text, word for word.
-    unrun = guard_constant(HOOK, "UNRUN_REASON")
-    report = guard_constant(REPORT_GUARD, "UNVETTED_REASON")
-    cite = guard_constant(REPORT_GUARD, "REMEDY_CITE")
-    check("UNRUN_REASON: call_judge holds the copy, and report_guard holds UNVETTED_REASON and REMEDY_CITE",
-          bool(unrun) and bool(report) and bool(cite), (bool(unrun), bool(report), bool(cite)))
-    check("UNRUN_REASON + report_guard's cite reads as report_guard.UNVETTED_REASON",
-          bool(unrun) and bool(report) and bool(cite) and unrun + " (" + cite + ")." == report,
-          (unrun[:120], report[:120]))
+def case_unrun_fallback_prints_the_marker_remedy():
+    # The fallback, refuse_unrun, runs for a check whose module did not import. It prints the Unvetted remedy, the same
+    # text as the other Unvetted outcomes: call_judge.UNVETTED_REMEDY, the one home (the fallback cannot import
+    # report_guard). Its reason is that remedy with the cause filled in, marker included.
+    remedy = guard_constant(HOOK, "UNVETTED_REMEDY")
+    check("unrun remedy: call_judge holds UNVETTED_REMEDY with one reason slot and the Unvetted marker",
+          remedy.count("%s") == 1 and bool(unvetted_marker(remedy)), remedy[:120])
+    if remedy.count("%s") != 1:
+        return
+    r = run_hook(send_input("SendMessage", INCIDENT_357), answer=ruled(WORKTREE_SLUG), block="report_guard")
+    reason = r.reason().split(": ", 1)[-1]  # the rule label is not part of the text
+    check("unrun remedy: the fallback's reason is UNVETTED_REMEDY with its cause filled in",
+          unvetted_template(reason, remedy).startswith(remedy.replace("%s", "<why>")), reason[:200])
 
 
 def case_past_ruling_rule_name_is_question_forms_rule():
@@ -2582,7 +2592,7 @@ def main():
                  case_send_tool_names_come_from_shared_names,
                  case_dedicated_and_form_failures_print_one_text,
                  case_capped_questions_starts_each_cut_unit_on_its_own_line,
-                 case_unrun_reason_copies_the_report_guard_unvetted_text,
+                 case_unrun_fallback_prints_the_marker_remedy,
                  case_past_ruling_rule_name_is_question_forms_rule):
         try:
             case()
