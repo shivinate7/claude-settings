@@ -4081,7 +4081,7 @@ class SourceProseLintTests(unittest.TestCase):
         lines = {f.line for f in self.check("sample.py", text) if f.code == "STE013"}
         self.assertEqual(lines, {3}, "the double negative is not reported on its own source line")
 
-    def test_76_a_long_comment_sentence_gives_no_ste001(self):
+    def test_77_a_long_comment_sentence_gives_no_ste001(self):
         text = "\n".join("# " + w for w in ["word"] * 31) + "\n# This step is not unsafe.\n"
         codes = [f.code for f in self.check("sample.py", text)]
         self.assertIn("STE013", codes, "the control comment was not linted")
