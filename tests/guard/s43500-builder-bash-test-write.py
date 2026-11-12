@@ -71,6 +71,37 @@ def _bbtw_product(w):
 BBTW_PRODUCT = diff_repo("bbtw-product", _bbtw_product)
 BBTW_CLEAN = diff_repo("bbtw-clean", lambda w: None)   # the empty state: nothing changed
 
+# A test in a new untracked folder. Plain `git status` lists that folder alone, not its files.
+BBTW_NEWDIR = diff_repo("bbtw-newdir", _put("src/newdir/test_n.py", "def test_n():\n    assert 1\n"))
+# A test whose name holds a space, and one whose name holds a non-ASCII letter. Plain `git status` quotes both.
+BBTW_SPACE = diff_repo("bbtw-space", _put("tests/my test.py", "def test_space():\n    assert 1\n"))
+BBTW_UNICODE = diff_repo("bbtw-unicode", _put("tests/test_café.py", "def test_caf():\n    assert 1\n"))
+# The undo route's fallback: a builder that cannot undo the change stops and reports it.
+BBTW_STOP = ("cannot undo it yourself", "stop and report")
+BBTW_MERGE_ABORT = "git merge --abort"
+
+
+def _bbtw_merge_conflict(w):
+    """A real merge that stops on a conflict in tests/test_a.py, so git leaves MERGE_HEAD in the worktree's git dir.
+    Branch `other` and the worktree's branch `work` each rewrite the test; the merge of `other` into `work` conflicts."""
+    def git(*args):
+        done = run_vcs(w, *args)
+        if done.returncode != 0:
+            sys.exit("fixture setup failed: git %s in %r: %s" % (" ".join(args), w, done.stderr.strip()))
+    git("checkout", "-q", "-b", "other")
+    write(os.path.join(w, "tests/test_a.py"), "def test_a():\n    assert 2\n")
+    git("add", "-A")
+    git(*IDENT, "commit", "-q", "-m", "other side")
+    git("checkout", "-q", "work")
+    write(os.path.join(w, "tests/test_a.py"), "def test_a():\n    assert 3\n")
+    git("add", "-A")
+    git(*IDENT, "commit", "-q", "-m", "work side")
+    if run_vcs(w, *IDENT, "merge", "-q", "--no-edit", "other").returncode == 0:
+        sys.exit("fixture setup failed: the merge in %r did not conflict" % w)
+
+
+BBTW_MERGE = diff_repo("bbtw-merge", _bbtw_merge_conflict)
+
 # A git stand-in that answers every call but a status read. It is POSIX only, so its cases skip on Windows.
 BBTW_NO_ANSWER_BIN = os.path.join(ROOT, "bbtw-no-answer")
 BBTW_NO_ANSWER_PATH = BBTW_NO_ANSWER_BIN + os.pathsep + os.environ.get("PATH", "")
@@ -127,6 +158,14 @@ if os.name != "nt":
              "allow", BBTW_UNTRACKED, env_path=BBTW_NO_ANSWER_PATH, silent=True)
 else:
     skip_case("builder-bash-test-write: a builder's call whose git status fails is allowed silently", NO_STAND_IN)
+
+# Each case names one shape. The folder and merge shapes get their own checks below, which read the fixture first.
+bbtw_add("builder-bash-test-write: a builder's call that leaves a space-named test, tests/my test.py, is blocked at PostToolUse",
+         "deny", BBTW_SPACE, rule=BBTW_RULE, carries=BBTW_UNDO, lacks=("my test.py",))
+bbtw_add("builder-bash-test-write: a builder's call that leaves a non-ASCII-named test is blocked at PostToolUse",
+         "deny", BBTW_UNICODE, rule=BBTW_RULE, carries=BBTW_UNDO, lacks=("test_caf",))
+bbtw_add("builder-bash-test-write: a builder's block says to stop and report when it cannot undo the test change",
+         "deny", BBTW_UNTRACKED, rule=BBTW_RULE, carries=BBTW_STOP, lacks=("tests/foo.py",))
 
 
 # ---------------------------------------------------------------- checks the log and the git spy (LOG_CHECKS)
@@ -362,6 +401,57 @@ def bbtw_gate_stops_case():
     return True, "the gate starts no guard for the main session or a test-author"
 
 
+def _bbtw_folder_scope(where, folder):
+    """P7: the fixture holds `folder` as one new untracked entry, the default status shape the no-flag mutant reads.
+    '' when it does, else the one failure note."""
+    done = run_vcs(where, "status", "--porcelain")
+    if done.returncode != 0:
+        return "the fixture is not a repository: git status fails"
+    if ("?? %s/" % folder) not in done.stdout:
+        return "the fixture does not hold %s/ as a new untracked folder: git status reads %r" % (
+            folder, done.stdout.strip()[:120])
+    return ""
+
+
+def bbtw_new_folder_case():
+    """A builder's call that creates a test in a new untracked folder is blocked, and the reason names no path."""
+    materialize(BBTW_NEWDIR)
+    note = _bbtw_folder_scope(BBTW_NEWDIR, "src/newdir")
+    if note:
+        return False, note
+    got, reason, _folder, _names = _bbtw_judge("new-folder", _bbtw_raw(BBTW_NEWDIR))
+    if got != "deny":
+        return False, "a builder's test in a new untracked folder is %s, want a block" % got
+    if "src/newdir" in reason:
+        return False, "the block names the folder"
+    return True, "a test in a new untracked folder is blocked, and the reason names no path"
+
+
+def _bbtw_merge_scope(where):
+    """P7: a merge is in progress (MERGE_HEAD in the worktree's git dir) and the test path is unmerged.
+    '' when both hold, else the one failure note."""
+    git_dir = run_vcs(where, "rev-parse", "--git-dir")
+    if git_dir.returncode != 0:
+        return "the fixture is not a repository: git rev-parse fails"
+    if not os.path.exists(os.path.join(where, git_dir.stdout.strip(), "MERGE_HEAD")):
+        return "the fixture holds no merge in progress: no MERGE_HEAD in its git dir"
+    return _bbtw_scope(where, "tests/test_a.py")
+
+
+def bbtw_merge_abort_case():
+    """A builder's call in a merge that conflicts in a test path is blocked, and the block names the merge-abort step."""
+    materialize(BBTW_MERGE)
+    note = _bbtw_merge_scope(BBTW_MERGE)
+    if note:
+        return False, note
+    got, reason, _folder, _names = _bbtw_judge("merge-abort", _bbtw_raw(BBTW_MERGE))
+    if got != "deny":
+        return False, "a builder's call in a merge with a test conflict is %s, want a block" % got
+    if BBTW_MERGE_ABORT not in reason:
+        return False, "the block does not name the merge-abort step %r" % BBTW_MERGE_ABORT
+    return True, "a block in a merge with a test conflict names the merge-abort step"
+
+
 BBTW_CHECKS = (
     ("builder-bash-test-write: a block writes one deny line for the rule to guard.log", bbtw_deny_line_case),
     ("builder-bash-test-write: a call git cannot read because it is no repository logs builder-bash-test-write-unread, noted",
@@ -380,6 +470,10 @@ BBTW_CHECKS = (
      bbtw_gate_passes_case),
     ("builder-bash-test-write: the settings entry's gate starts no guard for the main session or a test-author",
      bbtw_gate_stops_case),
+    ("builder-bash-test-write: a builder's test in a new untracked folder is blocked, and the reason names no path",
+     bbtw_new_folder_case),
+    ("builder-bash-test-write: a builder's call in a merge with a test conflict names the merge-abort step",
+     bbtw_merge_abort_case),
 )
 # A git stand-in is POSIX only. A gate runs the settings line under sh, which Windows cannot run here.
 BBTW_STAND_IN_CHECKS = (bbtw_unread_git_fails_case, bbtw_status_once_test_case, bbtw_status_once_product_case,
