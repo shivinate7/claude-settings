@@ -5,13 +5,19 @@ A cloud session copies hooks at start, so a hook merged later stays stale for th
 hook reads the install record that install.sh --cloud writes (<config dir>/.claude-settings-install.json: ref,
 sha, source, installer). It asks origin for the recorded ref's tip and acts on the answer:
 - tip equals the recorded sha: prints nothing.
-- tip differs: runs the recorded installer once (`install.sh --cloud`) and prints one line naming both 7-character
-  shas. A second line follows when a changed path needs a new session to read it again: CLAUDE.md, output-styles/,
+- tip differs: runs the recorded installer once (`install.sh --cloud`), then reads the record again. A record now at
+  the tip prints one line naming both 7-character shas. A record still at another sha (the installer exited 0 but
+  its fetch missed the tip) prints "reinstall did not reach <tip> (record at <sha>)", never "reinstalled". A second
+  line follows when a changed path needs a new session to read it again: CLAUDE.md, output-styles/,
   and the settings.json keys model and effortLevel (the line names each key). An installer that exits non-zero
-  prints "reinstall failed (exit N)" and is not retried that turn.
+  prints "reinstall failed (exit N)" and is not retried that turn. An installer past its timeout gets SIGTERM, so
+  install.sh's EXIT trap releases its lock, then SIGKILL after a short wait; it prints "reinstall failed (timed out
+  after N s)".
 - the record, the origin URL or the read fails: prints one "install freshness unknown (reason)" line and installs
   nothing. Unknown is never reported as current.
-The ref comes only from the record. The hook names no branch of its own.
+The ref comes only from the record: the installer gets it as CLAUDE_SETTINGS_REF, replacing any value in the
+hook's environment. The hook names no branch of its own. The installer also gets a CS_HOOK_INPUT whose source no
+SessionStart entry fires on, so install.sh runs no startup entry for a reinstall in a running session.
 
 Cost: one python process start per turn. At most one `git ls-remote` per turn (a network read, bounded by
 CLAUDE_SETTINGS_FETCH_TIMEOUT seconds, default 10), none outside a cloud session. The origin URL is read from the
@@ -22,6 +28,7 @@ writes the record).
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 
@@ -29,8 +36,15 @@ RECORD_NAME = ".claude-settings-install.json"
 SHORT = 7
 # Seconds for the one network read. CLAUDE_SETTINGS_FETCH_TIMEOUT replaces it.
 FETCH_TIMEOUT = 10
-# Seconds for one installer run. The hook's own limit in settings.json is 120.
-INSTALL_TIMEOUT = 100
+# Seconds for one installer run. CLAUDE_SETTINGS_REINSTALL_TIMEOUT replaces it. The hook's own limit in settings.json
+# is 120. One turn can also spend 10 on the origin read, up to 30 on the restart reads, and TERM_GRACE on a stop.
+# The default leaves room for all of them.
+INSTALL_TIMEOUT = 60
+# Seconds the installer gets to run its EXIT trap after SIGTERM, before SIGKILL.
+TERM_GRACE = 5
+# The hook input a reinstall passes. install.sh reads the session source from it, and no SessionStart entry
+# fires on this one (the startup entries ran at session start).
+INSTALL_HOOK_INPUT = '{"source":"stale-install"}'
 # A running session reads these once. A new session must start to see a change.
 RESTART_PATHS = ("CLAUDE.md", "output-styles/")
 RESTART_SETTINGS_KEYS = ("model", "effortLevel")
@@ -94,6 +108,14 @@ def fetch_timeout():
     return value if value > 0 else FETCH_TIMEOUT
 
 
+def install_timeout():
+    try:
+        value = float(os.environ.get("CLAUDE_SETTINGS_REINSTALL_TIMEOUT", ""))
+    except ValueError:
+        return INSTALL_TIMEOUT
+    return value if value > 0 else INSTALL_TIMEOUT
+
+
 def remote_tip(url, ref):
     """(sha, None), or (None, reason). One git ls-remote of the recorded ref."""
     env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
@@ -147,16 +169,38 @@ def restart_line(source, old, new):
     return PREFIX + "restart needed for: " + ", ".join(needed) if needed else ""
 
 
-def reinstall(record):
-    """Runs the recorded installer once. Returns None on success, else the failure text."""
+def stop_group(proc):
+    """SIGTERM to the installer's group, so install.sh's EXIT trap releases the install lock. SIGKILL to the group
+    after TERM_GRACE, or at once after the leader's exit, for any member still running."""
     try:
-        done = subprocess.run(["bash", record["installer"], "--cloud"], capture_output=True, text=True,
-                              timeout=INSTALL_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        return "reinstall failed (timed out after %d s)" % INSTALL_TIMEOUT
+        os.killpg(proc.pid, signal.SIGTERM)
+        proc.wait(timeout=TERM_GRACE)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except OSError:
+        pass
+    proc.wait()
+
+
+def reinstall(record):
+    """Runs the recorded installer once. Returns None on success, else the failure text. The installer runs in its
+    own session so a stop reaches its children. Its output goes nowhere: the hook prints its own lines."""
+    limit = install_timeout()
+    env = dict(os.environ, CLAUDE_SETTINGS_REF=record["ref"], CS_HOOK_INPUT=INSTALL_HOOK_INPUT)
+    try:
+        proc = subprocess.Popen(["bash", record["installer"], "--cloud"], stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env,
+                                start_new_session=True)
     except OSError as err:
         return "reinstall failed (%s)" % err
-    return None if done.returncode == 0 else "reinstall failed (exit %d)" % done.returncode
+    try:
+        code = proc.wait(timeout=limit)
+    except subprocess.TimeoutExpired:
+        stop_group(proc)
+        return "reinstall failed (timed out after %g s)" % limit
+    return None if code == 0 else "reinstall failed (exit %d)" % code
 
 
 def check():
@@ -177,6 +221,10 @@ def check():
     failure = reinstall(record)
     if failure:
         return [PREFIX + failure]
+    now, _ = load_record()
+    if now is None or now["sha"] != tip:
+        return [PREFIX + "reinstall did not reach %s (record at %s)"
+                % (tip[:SHORT], now["sha"][:SHORT] if now else "none")]
     lines = [PREFIX + "reinstalled hooks at %s (was %s)" % (tip[:SHORT], record["sha"][:SHORT])]
     restart = restart_line(record["source"], record["sha"], tip)
     if restart:
