@@ -1065,8 +1065,9 @@ def strip_heredoc_bodies(cmd: str, shells_only: bool = False, per_body: bool = F
     headers = [_without_message_values(header) for _, _, header in bodies]
     keep = []
     # The per-body reading starts from main's whole-command test, which both its callers read before.
-    if (SHELL_HEREDOC if shells_only and not per_body else INTERPRETER_HEREDOC)(text) or _runs_written_file(
-            text, headers):
+    whole = shells_only and not per_body   # a bare python, perl, ruby or node run of a written file is no shell
+    if (SHELL_HEREDOC if whole else INTERPRETER_HEREDOC)(text) or _runs_written_file(
+            text, headers, _SHELL_RUNNER if whole else _RUNNER):
         # The body may be executed, so keep it under inspection. With the two walks reading these headers
         # differently, no body can be told apart from another; a heredoc that eval or source runs may open
         # on a line before its header.

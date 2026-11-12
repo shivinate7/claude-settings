@@ -4622,9 +4622,10 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         refuse(tool, "deny", "roadmap-one-writer", RECORD_REASON, matched)
 
     # 6b. A pull request opened without --draft.
-    for text, _in_message in _substitutions(stripped)[0]:
-        if any(undrafted_pr_create(seg) for seg in split_segments(text) if seg.strip()):
-            refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "gh pr create")
+    for run_text in shell_run_texts(raw):
+        for text, _in_message in _substitutions(run_text)[0]:
+            if any(undrafted_pr_create(seg) for seg in split_segments(text) if seg.strip()):
+                refuse(tool, "deny", "draft-pr", DRAFT_PR_REASON, "gh pr create")
 
     # 6c. A lane commit of the generated records page (decision records-index-at-merge).
     matched = records_page_hit(stripped, cwd)
@@ -5024,11 +5025,11 @@ def impeccable_shell_hit(segment: str) -> str:
 _HERE_STRING = re.compile(r"@(['\"])[ \t]*\r?\n(.*?)\r?\n\1@", re.S)
 
 
-def impeccable_command_hit(raw: str) -> str:
-    """Judge a whole command for impeccable. Only a body a shell reads is judged as shell lines,
-    and an unquoted heredoc body or an expandable here-string is judged by the `$(...)` and
-    backticks it runs. The limits: a Python, Node, Perl or Ruby
-    body is not read, and a here-string body is allowed."""
+def shell_run_texts(raw: str) -> list:
+    """The texts a shell reads from a whole command, for a rule that judges shell lines. A body a shell
+    reads stays whole; an unquoted heredoc body or an expandable here-string joins as the `$(...)` and
+    backticks it runs. The limits: a body that python, node, perl or ruby reads is not read as shell lines,
+    and a here-string body is allowed."""
     texts = []
     if POWERSHELL_CALL[0] and "@" in raw:
         def cut(found):
@@ -5042,7 +5043,12 @@ def impeccable_command_hit(raw: str) -> str:
         for quote, body, _ in _split_heredocs(raw)[1]:
             if not quote:
                 texts.extend(t for t, _ in _substitutions(body, heredoc=True)[0][:-1])
-    for text in texts:
+    return texts
+
+
+def impeccable_command_hit(raw: str) -> str:
+    """Judge a whole command for impeccable, by the texts a shell reads."""
+    for text in shell_run_texts(raw):
         for segment in split_segments(text):
             matched = impeccable_shell_hit(segment)
             if matched:
