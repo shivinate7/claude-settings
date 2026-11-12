@@ -54,7 +54,7 @@ The row "lanes to archive" (idle_lanes) lists each completed or review-ready lan
 that no open pull (on lane_head_refs) or open page item holds; `merge --idle-lanes` prints the same list. An idle lane
 not to archive now reads `hold (<reason>; lane <session id>)` and is left out of the row's count. The reason is no
 cs-step tag, a step unproven on main, or a step whose `lane` is the session and that is still doing or active and not
-landed; the last clears when the step moves or closes.
+landed; the last clears when the step's status is set to todo or done.
 A lane that waits (step not done, open pull, open item) prints no line.
 
 This script goes red (step roadmap-pr-without-step) when a todo step is named by an open pull: it prints
@@ -1542,12 +1542,20 @@ def done_without_check(steps):
     return out
 
 
+def running_under(step, sid):
+    """True when the step's `lane` (stripped) is the session `sid` and its status (stripped, casefolded) is in
+    RUNNING_STATUS. A padded lane id or a cased status still holds the lane."""
+    lane, status = step.get("lane"), step.get("status")
+    return (isinstance(lane, str) and lane.strip() == sid
+            and isinstance(status, str) and status.strip().casefold() in RUNNING_STATUS)
+
+
 def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=None, trailer_ids=None):
     """Entries for each idle lane of this repo, sorted: `<session id> (<steps>; topic <topic or ->)` to archive, or
     `hold (<reason>; lane <session id>)` for a lane not to archive now: no cs-step tag, a step that is neither on the
     record branch nor named by a Step trailer on main (that reason ends `; also tagged <tags>` when the lane carries
     another repo's cs-repo tag), or a record-branch step whose `lane` is this session and that is still doing or active
-    and not landed (this hold clears when the step moves or closes). A lane that waits (step not done, open pull, open
+    and not landed (this hold clears when the step's status is set to todo or done). A lane that waits (step not done, open pull, open
     item) has no line. `unknown (<why>)` is only for a whole read that could not run.
 
     A session is listed only when it carries cs-build:lane and this repo's cs-repo tag, is not archived, has status
@@ -1616,9 +1624,10 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
         if any(r.get("lane") in mine or r.get("owner") == sid for r in open_items):
             continue
         doing = sorted(k for k, d in steps.items()
-                       if d.get("lane") == sid and d.get("status") in RUNNING_STATUS and k not in marks)
+                       if running_under(d, sid) and k not in marks)
         if doing:
-            out.append("hold (step %s still doing under this lane; lane %s)" % (" ".join(doing), sid))
+            out.append("hold (step %s still doing under this lane; set the step's status to todo or done; lane %s)"
+                       % (" ".join(doing), sid))
             continue
         topic = next((t[len(TOPIC_TAG):].strip() for t in tags if t.startswith(TOPIC_TAG) and t[len(TOPIC_TAG):].strip()), "-")
         out.append("%s (%s; topic %s)" % (sid, " ".join(mine), topic))
