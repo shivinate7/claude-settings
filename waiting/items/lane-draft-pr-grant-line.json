@@ -1,0 +1,40 @@
+{
+  "added": "2026-11-12T23:12:00Z",
+  "checked_with": "session_013NEJL1gw6EdrSyvHkTUEx6",
+  "context": "Goal: a lane never stops to ask you before opening its draft pull request.\nProblem (rule): at 17:10 you had to tell a lane \"yes open the draft PR\"; this repo's instructions carry no grant line, so lanes ask.\nBased on (ruling): step lane-draft-pr-grant, under decision draft-until-reviewed (yours, Oct 10 and 13): lane pull requests open as drafts; the grant lands as a Standing grants line.\nDeparts from: main has no Standing grants line for draft pull requests \u2014 adds one: any lane a coordinator or lane started may open its own draft pull request and never marks it ready.\nWhy yours: auto mode refused the coordinator's session start as a change to its own instructions (17:13 CST); only your typed yes lets a session edit CLAUDE.md (measured 2026-11-12, coordinator create_session refused by auto mode as Self-Modification at 17:13 CST).",
+  "home": "step lane-draft-pr-grant",
+  "id": "lane-draft-pr-grant-line",
+  "kind": "task",
+  "n": 668,
+  "options": [
+    {
+      "gain": "Lanes hand in their work without stopping to ask you.",
+      "how": "In the coordinator chat, type: go lane-draft-pr-grant",
+      "id": "type-go",
+      "key": "a",
+      "label": "Type the go",
+      "links": [
+        {
+          "label": "coordinator session",
+          "url": "https://claude.ai/code/session_013NEJL1gw6EdrSyvHkTUEx6"
+        }
+      ],
+      "lose": "One typed line."
+    },
+    {
+      "gain": "Nothing to type.",
+      "how": "Nothing is typed; the step waits.",
+      "id": "leave-it",
+      "key": "b",
+      "label": "Leave it",
+      "lose": "Lanes keep stopping to ask you before each draft, as at 17:10."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "ref": "coordinator 17:13 CST; your chat 17:10 CST",
+  "repo": "shivinate7/claude-settings",
+  "short": "Type go lane-draft-pr-grant",
+  "status": "open",
+  "title": "Type go lane-draft-pr-grant in the coordinator chat so a lane can add the draft pull request grant",
+  "why": "Auto mode refuses any session that edits this repo's CLAUDE.md without your typed yes."
+}

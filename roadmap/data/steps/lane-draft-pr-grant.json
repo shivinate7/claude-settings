@@ -1,7 +1,7 @@
 {
  "id": "lane-draft-pr-grant",
  "title": "Standing grant: a lane opens its own draft PR",
- "status": "ready",
+ "status": "blocked",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
  "lane": "",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Owner 17:10 CST Nov 12, after lane cloud-hooks-stale-copy stopped to ask before opening its draft PR: \"yes open the draft PR ... but kinda a problem no\". The cloud default says no PR unless the user asks, and claude-settings .claude/CLAUDE.md has no grant line, so a lane that reads it literally stalls.",
  "source": "retrospective 17:11 CST Nov 12 (owner chat 17:10 CST)",
- "note": "Settled, no owner item: decision draft-until-reviewed (owner 2026-10-10 and 2026-10-13) already rules that every PR opens as a draft and lane PRs stay drafts; only the integration PR goes ready. Land it as a Standing grants line in .claude/CLAUDE.md citing that decision: any lane that a coordinator or lane started may open its own draft PR and never marks it ready. Degen carries the same grant (its item 161 a). Owner 17:10 CST yes covers cloud-hooks-stale-copy's PR now.",
- "updatedAt": "2026-11-12T17:11:56-06:00"
+ "note": "Settled, no owner item: decision draft-until-reviewed (owner 2026-10-10 and 2026-10-13) already rules that every PR opens as a draft and lane PRs stay drafts; only the integration PR goes ready. Land it as a Standing grants line in .claude/CLAUDE.md citing that decision: any lane that a coordinator or lane started may open its own draft PR and never marks it ready. Degen carries the same grant (its item 161 a). Owner 17:10 CST yes covers cloud-hooks-stale-copy's PR now. Coordinator 17:13 CST Nov 12: not started; auto mode refused its create_session as Self-Modification (brief edits .claude/CLAUDE.md). Owner task item 668 asks for the typed `go lane-draft-pr-grant` in the coordinator chat; the coordinator starts the lane on it.",
+ "updatedAt": "2026-11-12T17:14:11-06:00"
 }
