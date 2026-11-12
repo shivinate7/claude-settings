@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Lanes fan-prose-debts and fan-prose-handoffs both carried #1479: 10 identical commits, in PR #2712 and on branch carry-1479-agent-shells. The coordinator assigned the second carry at 07:37 CST Nov 12 without checking.",
  "source": "coordinator 09:20 CST Nov 12, from its own mistakes that day",
- "note": "Guard. Related: plans/open-pr-owners-2026-11-12.md (the open-PR owner list) and the coordinator pick 5 in plans/fanout-lanes-2026-11-12.md (look up that list first). Ready, no lane; joins the guard wave after guard-tables-per-section.",
- "updatedAt": "2026-11-12T09:19:00-06:00"
+ "note": "Guard. Related: plans/open-pr-owners-2026-11-12.md (the open-PR owner list) and the coordinator pick 5 in plans/fanout-lanes-2026-11-12.md (look up that list first). Ready, no lane; joins the guard wave after guard-tables-per-section. Second hit, #1516 (lane fan-code-guard-3, 10:26 CST Nov 12): #2735 and #2794 both carry it.",
+ "updatedAt": "2026-11-12T10:27:00-06:00"
 }
