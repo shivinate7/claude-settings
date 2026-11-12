@@ -1,14 +1,14 @@
 {
  "id": "usage-hook-read-measure",
  "title": "Measure whether a hook can read the usage percentages on each surface",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "session_013NEJL2kVC8YJi3BaQYqf3W",
+ "lane": "",
  "owner": "triage",
  "blockedBy": [],
  "why": "The usage brake (step usage-brake) waits on this: main reads rateLimits only in the desktop status line mod, desktop surface only; cloud and terminal hooks are unmeasured (docs/decisions/usage-brake.md, Before any build).",
  "source": "coordinator 07:57 CST Nov 12, from lane fan-prose-unmapped-6",
- "note": "Code measure. Put on lane fan-code-check-cost-pins by triage 07:58 CST Nov 12. Lane 07:59 CST Nov 12: measures the cloud surface only; the desktop and terminal surfaces need a session on the owner's computer (needs-owner-computer for that part). Reads docs/decisions/usage-brake.md from PR #2663.",
- "updatedAt": "$T"
+ "note": "Code measure. Put on lane fan-code-check-cost-pins by triage 07:58 CST Nov 12. Lane 07:59 CST Nov 12: measures the cloud surface only; the desktop and terminal surfaces need a session on the owner's computer (needs-owner-computer for that part). Reads docs/decisions/usage-brake.md from PR #2663. Closed by coordinator 09:33 CST Nov 12 (lane fan-code-check-cost-pins): measured 09:32 CST, one run, cloud only. No usage percentages reach a cloud hook: the input of SessionStart, UserPromptSubmit and Stop and the environment names hold no rate-limit or percent field. Not measured: the status line, PreToolUse, an interactive cloud session, terminal and desktop, and whether the account has limits. No change on main; the answer is in page item 540 (usage-brake) and goes into the record by step usage-brake-measure-record.",
+ "updatedAt": "2026-11-12T09:33:00-06:00"
 }

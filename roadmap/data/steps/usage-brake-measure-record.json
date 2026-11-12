@@ -1,0 +1,14 @@
+{
+ "id": "usage-brake-measure-record",
+ "title": "The usage-brake record says what a hook can read, under \"Before any build\"",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJL2kVC8YJi3BaQYqf3W",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "The 09:32 CST Nov 12 measure found no usage percentages reach a cloud hook, so either brake option needs a usage source first; the record must say so.",
+ "source": "coordinator 09:33 CST Nov 12, to lane fan-code-check-cost-pins (\"Write it into usage-brake.md \\\"Before any build\\\" yourself as a small prose PR once #2663 merges\")",
+ "note": "Prose, docs/decisions/usage-brake.md. Waits for PR #2663 (records the usage brake ruling) to merge; then the lane opens a small prose PR.",
+ "updatedAt": "2026-11-12T09:33:00-06:00"
+}
