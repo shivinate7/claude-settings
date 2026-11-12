@@ -13,9 +13,12 @@ import fnmatch
 import json
 import os
 import re
-import subprocess
 import sys
 import urllib.parse
+
+# Anchored on this file, not the cwd: the action runs in the caller's checkout. GitHub fetches the whole repo at the pinned sha.
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "hooks"))
+import _nowindow  # noqa: E402  the one home of a child start with no console window (hooks/_nowindow.py)
 
 MODES = ("links", "scripts", "json")
 # The start of `[text](target)` and `![alt](target)`; link_targets reads the target after it.
@@ -33,7 +36,7 @@ EXTERNAL = re.compile(r"^(?:[a-zA-Z][a-zA-Z0-9+.-]*:|//|#)")  # a scheme, a prot
 
 def tracked_files():
     """The repo's files: what git tracks, else every file under the folder (a checkout with no .git, never `.git` itself)."""
-    r = subprocess.run(["git", "ls-files", "-z"], capture_output=True)
+    r = _nowindow.run(["git", "ls-files", "-z"], capture_output=True)
     if r.returncode == 0:
         return sorted(p for p in r.stdout.decode("utf-8", "replace").split("\0") if p and os.path.isfile(p))
     out = []
@@ -106,7 +109,7 @@ def check_scripts(path, data):
         except (SyntaxError, ValueError) as e:  # ValueError: a null byte
             return ["python does not parse: %s" % e]
         return []
-    r = subprocess.run(["bash", "-n", path], capture_output=True, text=True)
+    r = _nowindow.run(["bash", "-n", path], capture_output=True, text=True)
     return [] if r.returncode == 0 else ["bash -n fails: %s" % " ".join(r.stderr.split())]
 
 
