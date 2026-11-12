@@ -4413,6 +4413,68 @@ def case_act_after_a_later_sentence_still_bars_the_handoff_object():
     expect_once_home_barred(LATER_SENTENCE_TEXTS, "act in a later sentence")
 
 
+MERGE_SYNONYM_ACT_TEXTS = (  # merge and push have synonyms that are acts too: each bars the noun's once: home
+    "Approved. Hand in any PR to triage, then squash it.",
+    "Approved. Hand in any PR to triage, then bring it into main.",
+    "Approved. Hand in any PR to triage, then integrate it.",
+    "Approved. Hand in any PR to triage, then accept it.",
+    "Approved. Hand in any PR to triage, then roll it back.",
+    "Approved. Hand in any PR to triage, then commit it.",
+)
+GLUED_MARK_TEXTS = (  # a colon or a full stop glued to the verb is no clause boundary: the act before it stays in the clause
+    "Approved:hand in any PR to triage.",
+    "Approved. merge:hand in any PR to triage.",
+)
+RUNNER_TEXTS = (  # green control: "runner" is no act. A bare "run" stem would refuse it, and the measured brief with it
+    "approved. Hand in any PR to the batch runner.",
+)
+# A hang guard, not a speed test. A linear scan of the 5,000-sentence message takes well under a second; the bound only
+# catches a scan that grows with the square of the message, which would stall the Stop hook.
+HANG_BOUND_S = 10
+HANG_CHILD = (
+    "import importlib.util, sys\n"
+    "spec = importlib.util.spec_from_file_location('feedback_guard_hang', sys.argv[1])\n"
+    "mod = importlib.util.module_from_spec(spec)\n"
+    "spec.loader.exec_module(mod)\n"
+    "out = mod.problems(mod.parse(sys.stdin.buffer.read().decode('utf-8')), '')\n"
+    "print(('REFUSED: ' + ' | '.join(out)) if out else 'accepted')\n"
+)
+
+
+def case_merge_synonym_acts_after_the_handoff_object_bar_its_once_home():
+    """An act synonym after the handoff object bars its once: home, as merge and push do: squash, bring into main,
+    integrate, accept, roll back and commit. Each text passes today, so each is red."""
+    expect_once_home_barred(MERGE_SYNONYM_ACT_TEXTS, "merge synonym act")
+
+
+def case_glued_colon_or_full_stop_is_no_boundary_before_the_handoff_verb():
+    """A colon or a full stop glued to the handoff verb is no clause boundary, so an act before it stays in the noun's
+    clause and bars the once: home. Each text passes today, so each is red."""
+    expect_once_home_barred(GLUED_MARK_TEXTS, "glued mark before the handoff verb")
+
+
+def case_batch_runner_is_no_act_control():
+    """Green control: the batch runner is a destination, and "runner" is no act. The measured brief and this sentence
+    keep their once: home."""
+    expect_once_home_passes(RUNNER_TEXTS, "batch runner")
+
+
+def case_five_thousand_handoff_sentences_get_a_verdict_inside_the_hang_bound():
+    """A message of 5,000 handoff sentences with a once: home gets its verdict within the hang bound, and the verdict is
+    accepted: no act follows any noun. The hang is the red. The verdict is checked only once the child finishes."""
+    block = render_block("Approved. " + " ".join(["Hand in any PR to triage."] * 5000), items=(REPRO_ITEM,))
+    try:
+        cp = subprocess.run([sys.executable, "-c", HANG_CHILD, GUARD_PATH], input=block.encode("utf-8"),
+                            capture_output=True, timeout=HANG_BOUND_S)
+    except subprocess.TimeoutExpired:
+        check("hang bound: 5,000 handoff sentences get a verdict within %d s" % HANG_BOUND_S, False,
+              "no verdict within %d s: the guard is still scanning the message" % HANG_BOUND_S)
+        return
+    out = cp.stdout.decode("utf-8", "replace").strip()
+    check("hang bound: 5,000 handoff sentences with a once: home are accepted", out == "accepted",
+          out or cp.stderr.decode("utf-8", "replace")[-300:])
+
+
 # --------------------------------------------------------------------------- page-form-to-template cases
 # A waiting-page comment is answered by rewriting its item, never by a thread reply (ruling c164). So each
 # comment's item routes to the shared template, skills/waiting-page: a task homed to a step file that names it,
@@ -4903,6 +4965,10 @@ CASES = (
     case_tag_verb_in_the_handoff_clause_bars_the_handoff_object,
     case_tag_labels_and_earlier_sentences_do_not_bar_the_handoff_object,
     case_act_after_a_later_sentence_still_bars_the_handoff_object,
+    case_merge_synonym_acts_after_the_handoff_object_bar_its_once_home,
+    case_glued_colon_or_full_stop_is_no_boundary_before_the_handoff_verb,
+    case_batch_runner_is_no_act_control,
+    case_five_thousand_handoff_sentences_get_a_verdict_inside_the_hang_bound,
     case_page_form_asked_comment_with_a_note_blocks,
     case_page_form_step_without_the_template_blocks,
     case_page_form_step_naming_the_template_passes,
