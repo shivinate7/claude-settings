@@ -455,6 +455,39 @@ def dead_pid_missing_log_returns_fast():
 
 
 @case
+def stall_cases_pass_on_slow_runner():
+    """9b. stall_cases_pass_on_slow_runner: the quiet-stall and dead-pid cases pass when each clock read jumps 100 s"""
+    if os.name != "posix":
+        raise Skip("posix only: the hook is silent on os.name %r" % os.name)
+    global time
+    real_time = time
+    clock = [0.0]
+
+    class SlowClock:
+        """Stands in for the time module here: each monotonic() read jumps 100 s, and other names are the real module's."""
+
+        def monotonic(self):
+            clock[0] += 100.0
+            return clock[0]
+
+        def __getattr__(self, name):
+            return getattr(real_time, name)
+
+    time = SlowClock()
+    try:
+        # Scope before subject: the stub must be live before the bodies read it.
+        first = time.monotonic()
+        gap = time.monotonic() - first
+        if gap != 100.0:
+            return [f"clock stub is not live: two reads differ by {gap}, want 100.0"]
+        problems = [f"quiet_sleep_stalls_and_exits_3: {p}" for p in quiet_sleep_stalls_and_exits_3()]
+        problems += [f"dead_pid_missing_log_returns_fast: {p}" for p in dead_pid_missing_log_returns_fast()]
+    finally:
+        time = real_time
+    return problems
+
+
+@case
 def stall_report_lists_lock_path():
     """4. a child holding a file under a *lock* path: the report lists it after the STALL: line"""
     if shutil.which("lsof") is None:
