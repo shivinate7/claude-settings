@@ -671,6 +671,10 @@ for _command in ("gh run watch 123", "gh pr checks 1 --watch"):
     monitor("ci-wait: Monitor runs %s, refused as its Bash twin is" % _command, _command, "deny", "waiter")
     sh("ci-wait: Bash twin of the Monitor run of %s, in the foreground, stays refused" % _command, _command,
        "deny", "waiter", cwd=NOGIT)
+# The Bash background twin of the Monitor case above. A background `gh pr checks --watch` is allowed
+# (decision agents-wait-with-monitor), so this case pins the Bash side of that split.
+add("waiter: gh pr checks 1 --watch under run_in_background is allowed", "allow", cwd=NOGIT,
+    command="gh pr checks 1 --watch", run_in_background=True)
 
 # Every remedy the stream family prints, reached by its own trigger. The two checks are apart, so
 # each goes red alone: the refused call or bin/merge is named, and the CI-wake notice is not named.
