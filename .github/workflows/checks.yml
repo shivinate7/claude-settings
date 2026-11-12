@@ -96,12 +96,12 @@ jobs:
         run: bin/ci-job checks --lint --base "origin/$BASE_REF"
 
   # Posts the red comment first, then cancels the run: a cancelled run skips ci-done, so nothing else wakes a waiting session. The cancel
-  # ends this job, so the comment must come before it. Only this job holds the write permission for runs. Its job-level if is always(): without it GitHub skips the job when lint
+  # ends this job, so the comment must come before it. Only this job holds the write permission for runs. Its job-level if is always() and not a draft (a draft run skips every job): without it GitHub skips the job when lint
   # fails (actions/all-jobs-passed/action.yml). Each step reads the red lint itself, and a green lint skips them all. A failed post skips the cancel.
   cancel-on-red-lint:
     runs-on: ubuntu-latest
     needs: lint
-    if: ${{ always() }}
+    if: ${{ always() && !github.event.pull_request.draft }}
     timeout-minutes: 5
     permissions:
       actions: write
