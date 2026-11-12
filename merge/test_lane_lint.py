@@ -2245,7 +2245,8 @@ ALL_PASS = ("Round 1: reviewer, sonnet, PASS", "Round 2: reviewer, sonnet, PASS"
 
 class ReviewHost(tm.FakeHost):
     """A FakeHost whose review log is scripted: `records` holds the review log comment bodies of pull request 7, oldest first.
-    review_comments is the one read lane lint makes of the comments, so it is the only read this fake answers."""
+    review_comments is the read the lint makes now. review_records is the read of the code before it (the red run's old sha makes it),
+    answered with the same bodies in its (body, created_at, updated_at) shape, so the old code reads the same log."""
 
     def __init__(self, root, other):
         super().__init__(root, other)
@@ -2253,6 +2254,9 @@ class ReviewHost(tm.FakeHost):
 
     def review_comments(self, since):
         return {7: list(self.records)}
+
+    def review_records(self, since):  # glossary-ok: the read name the old sha calls, so the red run reads the same log
+        return {7: [(body, None, None) for body in self.records]}
 
 
 class PostReviewCommit(LaneFixture):
@@ -2263,6 +2267,7 @@ class PostReviewCommit(LaneFixture):
     A refusal posts no lane-lint PASS. The ci-job stub passes in every case, so only the new check can refuse."""
 
     commit_on = CrossMeasure.commit_on  # one home: the second clone's commit and push
+    contains = CrossMeasure.contains  # one home: the ancestor read, LaneLint's
 
     def setUp(self):
         super().setUp()
@@ -2345,6 +2350,30 @@ class PostReviewCommit(LaneFixture):
         self.assertIn(missing[:9], out, "the stop does not name the review record's head the clone lacks:\n" + out)
         self.assertIn("unknown", out, "the stop for a review head the clone lacks does not read unknown:\n" + out)
         self.assertEqual(self.host.posted, [], "a lane lint unknown posted a lane-lint PASS:\n" + out)
+
+    def test_a_guard_commit_after_the_last_review_log_is_refused_on_a_release_based_pr_and_named_by_its_sha(self):
+        self.push_release_branch()
+        self.host.base = "release"  # the lint and the guard walk run against release, not main
+        self.record(self.head("feat"), "no", tm.REVIEW_PASS, "not owed")
+        guard = self.commit_on("feat", {GUARD_PATH: "a guard path on a release-based lane, after the review\n"}, "origin/feat")
+        rc, out = self.lint_pr()
+        self.assertEqual(rc, 1, "lane lint passed a guard commit after the last review log on a PR based on release:\n" + out)
+        self.assertIn(guard[:7], out, "the refusal does not name the guard commit %s it refuses:\n%s" % (guard[:7], out))
+        self.assertIn(GUARD_PATH, out, "the refusal does not name the guard path it refuses:\n" + out)
+        self.assertEqual(self.host.posted, [], "the refused head posted a lane-lint PASS:\n" + out)
+
+    def test_a_guard_commit_release_holds_and_a_merge_commit_brings_in_is_not_counted_on_a_release_based_pr(self):  # control: green on the old code
+        self.push_release_branch()
+        self.host.base = "release"
+        self.record(self.head("feat"), "no", tm.REVIEW_PASS, "not owed")
+        release_guard = self.commit_on("release", {GUARD_PATH: "a guard path on release, after the review\n"}, "origin/release")
+        head = self.merge_into_feat("origin/release")
+        parents = tm.sh(self.other, "git", "rev-list", "--parents", "-n", "1", head).split()
+        self.assertEqual(len(parents), 3, "fixture: %s is no merge commit" % head)
+        self.assertTrue(self.contains(head, release_guard), "precondition: the merge did not bring release's guard commit into the lane")
+        rc, out = self.lint_pr()
+        self.assertEqual(rc, 0, "lane lint counted release's own guard commit, which the lane only merged in:\n" + out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
 
 
 if __name__ == "__main__":
