@@ -11,7 +11,7 @@
 # Head line must be that head too. A fix check is cleared by its own sha, not by the Head line. One record that
 # holds all the lines clears every report before it. A push asks until each report has its record. A deny is
 # left for a push to a PR's head branch once its fix check is recorded.
-# before it. A report reads from the Agent result, from a later task-notification, from a queued_command
+# A report reads from the Agent result, from a later task-notification, from a queued_command
 # attachment, or from a hand-back (a user message that opens with the frame, names the agent in its tag, and
 # indents the report). Its verdict is the Done line, never a finding line, and the Done line still matches when
 # indented. A line inside a code fence is never a verdict. A PASS needs its own record as much as a FAIL does: a
@@ -24,9 +24,12 @@ PFR_BRANCH = "notes-delete-pass"   # the lane's branch: a refusal never names it
 PFR_PUSH = VCS + " push origin HEAD:" + PFR_BRANCH
 PFR_MODEL = "claude-sonnet-5-5"
 PFR_FIX_SHA = "fedcba9876543210fedcba9876543210fedcba98"   # the reviewed head of a fix check, never the Head
-PFR_HEAD_A = "08462577333eefc425e50c60f85514b699c8bdf0"    # PR #2871: its round 1 record's Head
-PFR_HEAD_B = "5b77f144394703c567bd335f63d6d887e3e71cf1"    # PR #2871: a later lane-lint head
-PFR_HEAD_C = "ad369e36499cf561188457e07ca5ded263d5557c"    # PR #2871: the head of its fix-check record
+PFR_HEAD_A = "08462577333eefc425e50c60f85514b699c8bdf0"    # PR #2871: the Head of its round 1 record (haiku's FAIL)
+PFR_HEAD_B = "5b77f144394703c567bd335f63d6d887e3e71cf1"    # PR #2871: the later lane-lint head a round 2 report names
+PFR_MODEL_2871 = "claude-haiku-5-5"                        # PR #2871: the model that ran its round 1 reviewer
+PFR_GH_ROOT = "gh -R shivinate7/claude-settings"           # a repo flag before the verb, as gh reads it
+PFR_GH_LONG = "gh --repo shivinate7/claude-settings"       # the long form of the same repo flag
+PFR_GH_GROUP = "gh pr -R shivinate7/claude-settings"       # the same flag after the group word `pr`
 PFR_AGENT_ID = "a1b2c3d4e5f607182"                          # 17 characters, the agent_id an agent's call carries
 PFR_AGENT_TOOL = "Agent"
 PFR_CREATE_PR = "mcp__github__create_pull_request"
@@ -154,16 +157,18 @@ def pfr_bash(tool_id, command, output):
     return [role_use(tool_id, "Bash", {"command": command}), role_result(tool_id, output)]
 
 
-def pfr_gh_pr(tool_id, number=1467, head=PFR_BRANCH):
-    """A successful `gh pr create`: its result is the URL of the new pull request."""
-    return pfr_bash(tool_id, 'gh pr create --base main --head %s --title "notes delete pass"' % head,
+def pfr_gh_pr(tool_id, number=1467, head=PFR_BRANCH, words="gh pr create"):
+    """A successful `gh pr create`, spelled as `words` says (a repo flag may sit before or after `pr`): its result is
+    the URL of the new pull request."""
+    return pfr_bash(tool_id, '%s --base main --head %s --title "notes delete pass"' % (words, head),
                     "https://github.com/shivinate7/claude-settings/pull/%d\n" % number)
 
 
-def pfr_gh_post(tool_id, body, form="comment", n=1467):
-    """A record posted by `gh pr comment` or by `gh api .../comments`. The whole body sits in the command text."""
+def pfr_gh_post(tool_id, body, form="comment", n=1467, words="gh pr comment"):
+    """A record posted by `gh pr comment` (spelled as `words` says) or by `gh api .../comments`. The whole body sits
+    in the command text."""
     if form == "comment":
-        return pfr_bash(tool_id, "gh pr comment %d --body-file - <<'EOF'\n%s\nEOF" % (n, body),
+        return pfr_bash(tool_id, "%s %d --body-file - <<'EOF'\n%s\nEOF" % (words, n, body),
                         "https://github.com/shivinate7/claude-settings/pull/%d#issuecomment-9001" % n)
     return pfr_bash(tool_id, "gh api repos/shivinate7/claude-settings/issues/%d/comments -F body=@- <<'EOF'\n%s\nEOF"
                     % (n, body), '{"id": 9001}')
@@ -258,13 +263,21 @@ PFR_LINES = {
     # A round report and no record at all: PR #2921 has no comments.
     "round-no-record-2921": pfr_pr() + pfr_call("toolu_rev1", pfr_report(
         pfr_verdict("FAIL", 1), "Reviewed at head %s" % PFR_HEAD_A, PFR_FINDING)),
-    # PR #2871's shape: a round 1 record at head C, and a fix check PASS whose own sha is head A, not C.
-    "round-head-c-fix-head-a": pfr_pr() + pfr_call("toolu_rev1", pfr_report(
-        pfr_verdict("FAIL", 1), "Reviewed at head %s" % PFR_HEAD_C, PFR_FINDING))
+    # PR #2871's real history: its round 1 record is posted at head A (haiku's FAIL), and a round 2 report names the
+    # later lane-lint head B. Round 2 has no record, so the push asks.
+    "2871-round2-unrecorded": pfr_pr() + pfr_call("toolu_rev1", pfr_report(
+        pfr_verdict("FAIL", 1, PFR_MODEL_2871), "Reviewed at head %s" % PFR_HEAD_A, PFR_FINDING))
+        + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL_2871, "FAIL")], head=PFR_HEAD_A))
+        + pfr_call("toolu_rev2", pfr_report(pfr_verdict("FAIL", 2, PFR_MODEL_2871),
+                                            "Reviewed at head %s" % PFR_HEAD_B, PFR_FINDING)),
+    # A fix check is cleared by its own reviewed sha, not by the record's Head line: the round 1 record at head B
+    # holds both lines, and the fix check reviewed head A.
+    "round-head-b-fix-head-a": pfr_pr() + pfr_call("toolu_rev1", pfr_report(
+        pfr_verdict("FAIL", 1), "Reviewed at head %s" % PFR_HEAD_B, PFR_FINDING))
         + pfr_call("toolu_rev2", pfr_report(pfr_fix_verdict("PASS"), "Reviewed at head %s" % PFR_HEAD_A, PFR_FINDING),
                    blocks=True)
         + pfr_post("toolu_c1", pfr_record([(1, "reviewer", PFR_MODEL, "FAIL")],
-                                          fix=(PFR_HEAD_A, "reviewer", PFR_MODEL, "PASS"), head=PFR_HEAD_C)),
+                                          fix=(PFR_HEAD_A, "reviewer", PFR_MODEL, "PASS"), head=PFR_HEAD_B)),
     # A round report is cleared by a Round line only; a Fix check line does not clear it.
     "round-fail-fix-record": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL)
                              + pfr_post("toolu_c1", pfr_record(fix=(PFR_FIX_SHA, "reviewer", PFR_MODEL, "FAIL"))),
@@ -361,6 +374,22 @@ PFR_LINES = {
                           + pfr_post("toolu_c1", PFR_FAIL_RECORD),
     # A Done label line with no verdict word, then the ruled form on the next line.
     "see-below-ruled": pfr_pr() + pfr_call("toolu_rev1", "Done: see below\n" + pfr_verdict("FAIL", 1) + "\n" + PFR_FINDING),
+    # A PR opened with a repo flag in one of gh's three spellings. gh reads the same verb for each, so the PR is known.
+    "gh-root-flag-pr-create-fail": pfr_gh_pr("toolu_pr1", words=PFR_GH_ROOT + " pr create")
+                                   + pfr_call("toolu_rev1", PFR_FAIL),
+    "gh-long-flag-pr-create-fail": pfr_gh_pr("toolu_pr1", words=PFR_GH_LONG + " pr create")
+                                   + pfr_call("toolu_rev1", PFR_FAIL),
+    "gh-group-flag-pr-create-fail": pfr_gh_pr("toolu_pr1", words=PFR_GH_GROUP + " create")
+                                    + pfr_call("toolu_rev1", PFR_FAIL),
+    # A FAIL recorded by a comment that carries the same repo flag. gh reads the flag in front of the verb as valid.
+    "fail-gh-root-flag-pr-comment": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL)
+                                    + pfr_gh_post("toolu_c1", PFR_FAIL_RECORD, words=PFR_GH_ROOT + " pr comment"),
+    "fail-gh-long-flag-pr-comment": pfr_pr() + pfr_call("toolu_rev1", PFR_FAIL)
+                                    + pfr_gh_post("toolu_c1", PFR_FAIL_RECORD, words=PFR_GH_LONG + " pr comment"),
+    # A fix check PASS for PR 1464 is posted, then a round 2 FAIL with no record. The fix-branch refusal still denies.
+    "fix-pass-then-round2-fail": pfr_pr_open("toolu_pr1", PFR_FIX_PR, PFR_FIX_BRANCH)
+                                 + pfr_post("toolu_c1", PFR_FIX_PASS_RECORD, n=PFR_FIX_PR)
+                                 + pfr_call("toolu_rev2", pfr_report(pfr_verdict("FAIL", 2), PFR_FINDING)),
     "empty": [],
 }
 # An agent's own file, `<session>/subagents/agent-<id>.jsonl`, keyed by the session name it sits under.
@@ -396,7 +425,7 @@ lazy_fixture([pfr_path(name) for name in PFR_LINES] + [PFR_UNREADABLE], write_pf
 # transcripts after the commits.
 PFR_HIST = os.path.join(ROOT, "pfrhist")
 PFR_OTHER_BRANCH = "notes-other"
-PFR_HELD = ("held-ancestor", "held-head-record", "held-off-history", "held-no-sha", "held-agent-trailer",
+PFR_HELD = ("held-ancestor", "held-record-other-head", "held-off-history", "held-no-sha", "held-agent-trailer",
             "held-path-then-off-history", "held-base-then-head", "held-head-then-two-prs",
             "held-label-round", "held-label-head")
 
@@ -441,7 +470,9 @@ def _build_pfr_history():
     held = {
         # A is on main, so it never counts for PR head B: a report that names only it is dropped.
         "held-ancestor": pfr_call("toolu_rev1", report_a) + pfr_pr(),
-        "held-head-record": pfr_call("toolu_rev1", report_b) + pfr_pr() + pfr_post("toolu_c1", PFR_FAIL_RECORD),
+        # A held report carries no head, so a record at another head still clears it: a known miss, pinned.
+        "held-record-other-head": pfr_call("toolu_rev1", report_b) + pfr_pr()
+                                  + pfr_post("toolu_c1", PFR_FAIL_RECORD),
         "held-off-history": pfr_call("toolu_rev1", report_c) + pfr_pr(),
         "held-no-sha": pfr_call("toolu_rev1", pfr_report(pfr_verdict("FAIL", 1), "Reviewed the lane's latest push.",
                                                          PFR_FINDING)) + pfr_pr(),
@@ -526,6 +557,13 @@ pfr_ask("a reviewer FAIL handed back with no record, then the push", PFR_PUSH, p
 pfr_ask("a reviewer PASS handed back with no record, then the push", PFR_PUSH, pfr_path("handback-pass"))
 pfr_ask("a PR opened by a Bash gh pr create, a reviewer FAIL with no record, then the push", PFR_PUSH,
            pfr_path("gh-pr-create-fail"))
+# The same open, spelled with the repo flag before the verb, after --repo, or after the group word. Each opens a PR.
+pfr_ask("a PR opened by gh -R o/r pr create, a reviewer FAIL with no record, then the push", PFR_PUSH,
+           pfr_path("gh-root-flag-pr-create-fail"))
+pfr_ask("a PR opened by gh --repo o/r pr create, a reviewer FAIL with no record, then the push", PFR_PUSH,
+           pfr_path("gh-long-flag-pr-create-fail"))
+pfr_ask("a PR opened by gh pr -R o/r create, a reviewer FAIL with no record, then the push", PFR_PUSH,
+           pfr_path("gh-group-flag-pr-create-fail"))
 pfr_ask("a FAIL round 1, then a record whose only FAIL line is round 2, then the push", PFR_PUSH,
            pfr_path("round-scoped-deny"))
 # Each record clears only the reports it holds, so a later FAIL with no record of its own stays refused.
@@ -553,6 +591,10 @@ pfr_allow("a FAIL round 1, then its record posted by a Bash gh pr comment, then 
           pfr_path("fail-gh-pr-comment"))
 pfr_allow("a FAIL round 1, then its record posted by a Bash gh api comments call, then the push", PFR_PUSH,
           pfr_path("fail-gh-api-comment"))
+pfr_allow("a FAIL round 1, then its record posted by gh -R o/r pr comment, then the push", PFR_PUSH,
+          pfr_path("fail-gh-root-flag-pr-comment"))
+pfr_allow("a FAIL round 1, then its record posted by gh --repo o/r pr comment, then the push", PFR_PUSH,
+          pfr_path("fail-gh-long-flag-pr-comment"))
 pfr_allow("a PR open with no review yet, then the push", PFR_PUSH, pfr_path("no-review"))
 # A known miss, pinned: a FAIL with no PR known to the session is allowed, so the first push is never blocked.
 pfr_allow("a FAIL with no PR known to the session, then the push", PFR_PUSH, pfr_path("no-pr-fail"))
@@ -621,8 +663,8 @@ pfr_allow("a FAIL naming only diff base A, on main and the parent of PR head B, 
           PFR_PUSH, pfr_path("held-ancestor"), cwd=PFR_HIST)
 pfr_ask("a FAIL naming diff base A then head B, then the PR, no record, then the push", PFR_PUSH,
            pfr_path("held-base-then-head"), cwd=PFR_HIST)
-pfr_allow("a FAIL naming head B, then the PR, then its FAIL record posted, then the push", PFR_PUSH,
-          pfr_path("held-head-record"), cwd=PFR_HIST)
+pfr_allow("a FAIL naming head B, then the PR, then a FAIL record at another head posted (a known miss), then the push",
+          PFR_PUSH, pfr_path("held-record-other-head"), cwd=PFR_HIST)
 pfr_allow("a FAIL naming a path word, then a commit off main, then the PR, no record, then the push", PFR_PUSH,
           pfr_path("held-path-then-off-history"), cwd=PFR_HIST)
 pfr_allow("a FAIL naming no sha but an agentId trailer, then the PR, no record, then the push", PFR_PUSH,
@@ -701,6 +743,9 @@ pfr_fix_refuse("a fix check PASS for PR 1464 posted, then a push to its head bra
                pfr_path("fix-pass-same"))
 pfr_fix_refuse("a fix check FAIL for PR 1464 posted, then a push to its head branch", PFR_FIX_PUSH,
                pfr_path("fix-fail-same"))
+# A round 2 report with no record, after the fix check, does not turn the fix-branch refusal into an ask.
+pfr_fix_refuse("a fix check PASS for PR 1464 posted, a round 2 FAIL unrecorded, then a push to its head branch",
+               PFR_FIX_PUSH, pfr_path("fix-pass-then-round2-fail"))
 # A documented miss, pinned: a fix check whose PR head is unknown is allowed, so the next PR is never deadlocked.
 pfr_allow("a fix check PASS for a PR the transcript never opens, then a push to its branch", PFR_FIX_PUSH,
           pfr_path("fix-pass-unknown-head"))
@@ -716,9 +761,12 @@ pfr_allow("a round 1 FAIL reviewed at head A, then a FAIL record for head A post
           pfr_path("round-head-a-record-head-a"))
 pfr_ask("the #2921 shape: a round 1 FAIL report and no record at all, then the push", PFR_PUSH,
         pfr_path("round-no-record-2921"))
-# A fix check is cleared by its own reviewed sha: the record's Head line (head C) does not decide it.
-pfr_allow("the #2871 shape: a round 1 FAIL at head C and a fix check PASS at head A, the record at head C holds both, "
-          "then a push to another branch", PFR_NEXT_PUSH, pfr_path("round-head-c-fix-head-a"))
+# PR #2871's real history: the round 1 record is at head A, and a round 2 report names the later head B with no record.
+pfr_ask("the #2871 shape: a round 1 record at head A, then a round 2 FAIL at head B with no record, then the push",
+        PFR_PUSH, pfr_path("2871-round2-unrecorded"))
+# A fix check is cleared by its own reviewed sha: the round 1 record's Head line (head B) does not decide it.
+pfr_allow("a round 1 FAIL at head B and a fix check PASS at head A, the record at head B holds both, "
+          "then a push to another branch", PFR_NEXT_PUSH, pfr_path("round-head-b-fix-head-a"))
 
 pfr_ask("a fix check FAIL unrecorded, then a fix check PASS with its record posted, then the push", PFR_NEXT_PUSH,
            pfr_path("fix-fail-then-fix-pass"))
