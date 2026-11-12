@@ -9,8 +9,8 @@ import os
 import re
 
 from guard_core import (
-    _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, cd_walk, command_root, dir_before_segment,
-    GIT_WORK_TREE_RE, git_calls, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
+    _absolute, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, cd_walk, command_root,
+    GIT_WORK_TREE_RE, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
     strip_heredoc_bodies, walk_quotes,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too

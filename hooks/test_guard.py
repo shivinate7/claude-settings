@@ -140,7 +140,7 @@ FAMILIES = {
     "mask-script": "mask_script lexemes",
     "simulator": "the simulator boot and hold rules",
     "rm-var": "every case named rm-var, wherever it sits",
-    "git-after-cd": "a git write after a cd: a ;, a newline or a || reopens the path a failed cd takes, so the write is refused; a && chain, -C with an absolute path, and reads pass",
+    "git-after-cd": "a git write after a cd: a ;, a newline or a || reopens the path a failed cd takes, so the write is refused; a git push after a check joined by ; or a newline is refused unless a || exit protects the check; a && chain, -C with an absolute path, a push that comes first, and reads pass",
     "session-log": "the session id column of guard.log",
     "fail-closed": "a missing sibling module refuses the call, and never allows it",
     "reload-stamp": "a hook file broken, missing or mis-stamped: the guard waits and reloads, then refuses, never allows",
@@ -5801,6 +5801,11 @@ sh("git-after-cd: the 2026-11-07 incident, a cd joined by && then ; git writes, 
    % ((VCS,) * 4), "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
 sh("git-after-cd: a cd then ; then a git push is refused",
    "cd /tmp/w; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+# In Bash a Set-Location is no cd, so the push after ; is refused by the push-after-check path, under
+# the git-after-cd rule. That refusal wins over the push-main ask for a push to main.
+sh("git-after-cd: a Set-Location then ; then a git push to main is refused",
+   "Set-Location /tmp ; %s push origin main" % VCS, "deny", "git-after-cd", cwd=PUSHMAIN,
+   carries=("&&",))
 sh("git-after-cd: a cd then a newline then a git merge is refused",
    "cd /tmp/w\n%s merge claude/lane-a" % VCS, "deny", "git-after-cd", cwd=NOGIT,
    carries=("&&", "-C"))
@@ -6101,6 +6106,18 @@ sh("git-after-cd: a cd that lands, then && true || a test that may be skipped, t
    "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
 
 
+# A REAL CHECK IS NO DIR TEST. _dir_test_before_its_cd excuses a step only when it is a dir test that heads a cd to
+# that folder. A check in the chain keeps its failure in view, with or without a dir test ahead of it: the push after
+# ; runs whatever the check did. The folder exists, so each cd lands and the cd walk looks through it. The check walk
+# is what must refuse these pushes.
+sh("git-after-cd: a real check, then && a cd that lands, then ; a git push -u is refused",
+   "make check && cd %s; %s push -u origin b" % (slash(NOGIT), VCS),
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: a dir test, then && a real check, then && a cd to the same folder that lands, then ; a git push -u is refused",
+   "[ -d %s ] && make check && cd %s; %s push -u origin b" % (slash(NOGIT), slash(NOGIT), VCS),
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+
+
 # THE REFUSAL BRANCHES. _never_runs and _dir_test_word refuse three forms that a skipped cd could pass for. Each form
 # is refused only because one branch holds: drop that branch and the form is allowed. Each is checked under bash with
 # a stub git. A regular file for M makes -e pass and the cd fail. The push then runs in the start folder.
@@ -6157,6 +6174,105 @@ sh("git-after-cd: echo set -e, then a failed cd, then ; a git push is refused",
 # A set -e inside a subshell ends with the subshell, so the shell's own errexit stays off.
 sh("git-after-cd: a set -e in a subshell, then a failed cd, then ; a git push is refused",
    "(set -e); cd /tmp/w; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&", "-C"))
+
+
+# A PUSH AFTER A CHECK JOINED BY ; OR A NEWLINE. A git push that follows a check joined by `;` or a newline is
+# refused, and the remedy names `&&`: the push runs whatever the check did. A cd between them is looked through
+# only when it lands or a `|| exit` protects it. A check protected by `|| exit` is exempt, since that exit stops
+# the shell before the push. `|| return` and `|| (exit)` do not stop the shell, so the push after them is refused.
+# The forms git-after-cd already passes stay allowed: the same chain joined by `&&`, a push alone, a fetch then a
+# status, a push that comes first, and a dry run.
+sh("git-after-cd: a landed cd, a check, then ; echo, then ; a git push is refused",
+   'cd %s && %s commit -q -am "msg" && python3 lint/check_silent_undo.py --upstream origin/b --head HEAD '
+   '--strict; echo "undo $?"; %s push origin HEAD:refs/heads/b 2>&1 | tail -1' % (slash(ROOT), VCS, VCS),
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: a check, then ; echo, then ; a git push, with no cd, is refused",
+   'python3 lint/check_silent_undo.py --upstream origin/b --head HEAD --strict; echo "undo $?"; '
+   '%s push origin HEAD:refs/heads/b 2>&1 | tail -1' % VCS,
+   "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: the same check and push joined by && throughout, after a landed cd, passes",
+   'cd %s && %s commit -q -am "msg" && python3 lint/check_silent_undo.py --upstream origin/b --head HEAD '
+   '--strict && echo "undo $?" && %s push origin HEAD:refs/heads/b 2>&1 | tail -1' % (slash(ROOT), VCS, VCS),
+   "allow", cwd=NOGIT)
+sh("git-after-cd: a git push alone, with an explicit refspec, passes",
+   "%s push origin HEAD:refs/heads/b" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a git fetch, then ; a git status, with no push, passes",
+   "%s fetch origin; %s status" % (VCS, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: a git push that comes first, then ; echo, passes",
+   '%s push origin HEAD:refs/heads/b; echo "undo $?"' % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a check, then ; a git push --dry-run, a read, passes",
+   "python3 lint/check_silent_undo.py --upstream origin/b --head HEAD --strict; "
+   "%s push --dry-run origin HEAD:refs/heads/b" % VCS, "allow", cwd=NOGIT)
+# A CHECK THE PUSH CANNOT SEE. The `;` or the newline after a check lets the push run whatever the check did. A cd
+# that lands is looked through, so it does not end the check's reach. ROOT is a real folder, so every cd here lands.
+sh("git-after-cd: a check, then ; a landed cd, then && a git push, is refused",
+   "pytest -q; cd %s && %s push" % (slash(ROOT), VCS), "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: a check, then ; git add, commit and push joined by &&, is refused",
+   "pytest -q; %s add -A && %s commit -m m && %s push" % (VCS, VCS, VCS), "deny", "git-after-cd",
+   cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: a check, then ; a landed cd, then ; a git push, is refused",
+   "pytest -q; cd %s; %s push" % (slash(ROOT), VCS), "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: a check, then && a landed cd, then ; a git push, is refused",
+   "pytest -q && cd %s; %s push" % (slash(ROOT), VCS), "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: a landed cd, then ; a subshell holding a check, then ; a git push, is refused",
+   "cd %s; (pytest -q); %s push" % (slash(ROOT), VCS), "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+sh("git-after-cd: a check, then a newline and a git push, is refused",
+   "pytest -q\n%s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+# A CHECK THAT EXIT GUARDS. `|| exit` stops the shell when the check fails, so the push after `;` runs only when the
+# check passed. `|| return` and `|| (exit)` leave the shell running, so the push after them still runs on a failure.
+sh("git-after-cd: a check protected by || exit 1, then ; a git push, passes",
+   "pytest -q || exit 1; %s push" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a check protected by || return 1, then ; a git push, is refused",
+   "pytest -q || return 1; %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: a check protected by || (exit 1), then ; a git push, is refused",
+   "pytest -q || (exit 1); %s push" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+# Green controls: a landed cd with no check before it, and a check joined to the push by && alone. Only a `;` or a
+# newline makes a push run whatever the check did.
+sh("git-after-cd: a landed cd, then ; a git push, with no check before it, passes",
+   "cd %s; %s push" % (slash(ROOT), VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: a check, then && a landed cd, then && a git push, passes",
+   "pytest -q && cd %s && %s push" % (slash(ROOT), VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: a check, then && a git push, passes",
+   "pytest -q && %s push" % VCS, "allow", cwd=NOGIT)
+# A CHECK JOINED BY || OR |. A `||` or a `|` before the push's chain is no `;` join, so the push passes.
+sh("git-after-cd: a check joined to a push by ||, then a git push -u, passes",
+   "pytest || %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a pipe into tee, then && a git push -u, passes",
+   "make check | tee l && %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+# A CHAIN OVER NEWLINES, AND COMPOUNDS. A `&&` at a line's end joins the next line, so the lines are one chain.
+# An if, a while, a set -e line and an exit guard run the push only when the check passed. A check and a push
+# inside `{ }` or `( )`, joined by `;`, run the push whatever the check did, so both forms are refused.
+sh("git-after-cd: a check, then && and a newline, then a git push -u, is one chain and passes",
+   "pytest -q &&\n%s push -u origin b" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a git add, commit and push joined by && over newlines is one chain and passes",
+   "%s add -A &&\n%s commit -m x &&\n%s push -u origin b" % (VCS, VCS, VCS), "allow", cwd=NOGIT)
+sh("git-after-cd: a push in the then branch of an if on a check, over newlines, passes",
+   "if pytest -q; then\n  %s push -u origin b\nfi" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a push in the body of a while on a check, over newlines, passes",
+   "while pytest; do\n  %s push -u origin b\ndone" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: set -e, then a check, then ; a git push -u, passes",
+   "set -e; pytest -q; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a check protected by || a braced exit 1, then ; a git push -u, passes",
+   "pytest || { echo bad; exit 1; }; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a check in an if that exits on failure, then ; a git push -u, passes",
+   "if ! pytest; then exit 1; fi; %s push -u origin b" % VCS, "allow", cwd=NOGIT)
+sh("git-after-cd: a check and a push inside braces, joined by ;, is refused",
+   "{ pytest -q; %s push -u origin b; }" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: a check and a push inside a subshell, joined by ;, is refused",
+   "( pytest -q; %s push -u origin b )" % VCS, "deny", "git-after-cd", cwd=NOGIT, carries=("&&",))
+sh("git-after-cd: a cd into a missing folder, then && braces holding a check and a push joined by ;, is refused",
+   "cd x && { pytest -q; %s push -u origin b; }" % VCS, "deny", "git-after-cd", cwd=NOGIT,
+   carries=("&&",))
+# A DATA HEREDOC BEFORE THE CHECK. The quoted body is data and ends at its closer, so the check and the push after it
+# are shell lines. The `;` lets the push run whatever the check did, so git-after-cd refuses it, and that refusal wins
+# over the push-main ask the same push to main would raise.
+sh("git-after-cd: a data heredoc, then a check joined by ; to a git push to main, is refused",
+   "cat <<'EOF'\nn\nEOF\npytest -q; %s push origin main" % VCS, "deny", "git-after-cd", cwd=PUSHMAIN,
+   carries=("&&",))
 
 
 # A CRASH IN THE CD WALK. The walk runs inside cd_walk's try, and a raise there must read as stranded: the
@@ -17999,6 +18115,10 @@ sh("ask-alone: a one-command python heredoc holding a hard reset in a worktree a
    "python3 - <<'PY'\n" + VCS + " reset --hard\nPY", "ask", "shared-tree", cwd=GITWT)
 sh("ask-alone: a one-command python heredoc holding a cap write asks, not denies",
    "python3 - <<'PY'\n" + CAP_PLAIN + "\nPY", "ask", "agent-model-cap", cwd=PROJ)
+# A CHECK LINE IN AN INTERPRETER BODY IS NO SHELL LINE. The body runs as Python, so the check and the push are one
+# interpreter command. The push to main asks once, as push-main, and git-after-cd must not read the body as a shell chain.
+sh("ask-alone: a python heredoc with a check line then a push to main asks once, push-main",
+   "python3 <<EOF\npytest -q\n" + VCS + " push origin main\nEOF", "ask", PUSH_MAIN_RULE, cwd=PUSHMAIN)
 
 # Scanner cases (building-scanner-respects-strings): a comment opener, a lone apostrophe and a
 # multi-line template literal inside the body. None of them hides the prune or adds a command.
