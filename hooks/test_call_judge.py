@@ -67,6 +67,9 @@ Interface the hook must match:
   picked, hold, holds, held; not `on hold`, `hold on`, `pick up` or a hyphen id), must cite a ruling or say `no ruling
   found:`. A cite gets one judge call whose prompt carries the pick text and the candidate rulings. Any other message passes
   with no model call.
+- The pick's sources on two refs (the section "a coordinator's pick: plans and page answers on refs"): a plan R-number
+  reads from origin/restart-plan (plans/*.md), a `page item N` reads its answer and question from origin/roadmap
+  (waiting/answers and waiting/items, matched by n). Read by git, no checkout; a missing ref or file reads as not searched.
 """
 import atexit
 import json
@@ -2090,6 +2093,293 @@ def case_pick_long_plan_section_reaches_the_prompt():
     check("pick, long plan section: the prompt carries the section's last word", R61_MARK in pick_prompt(r), detail(r))
 
 
+# ------------------------------------------------------------------ a coordinator's pick: plans and page answers on refs
+#
+# Plans and page answers live on two remote-tracking refs, not in the checkout on main. origin/restart-plan holds plans/*.md,
+# where a plan R-number is defined. origin/roadmap holds waiting/items/<slug>.json (the question of a page item) and
+# waiting/answers/<slug>.json (the owner's answer, matched by its `n`). The hook reads them with git: no checkout and no fetch.
+# A missing ref or file, or a git error, reads as not searched and never raises. The fixtures are real git repos, as
+# make_repo builds them: a commit of files on a temp branch, with the ref pointed at it.
+PLAN_REF, PLAN_REF_FULL = "origin/restart-plan", "refs/remotes/origin/restart-plan"
+PAGE_REF, PAGE_REF_FULL = "origin/roadmap", "refs/remotes/origin/roadmap"
+PLAN_HEAD = "# Restart plan (fixture)\n\n"
+PAST_RULING_PHRASE = "a past ruling to weigh"
+OLD_RULING_WORDING = re.compile(r"\bowe[sd]?\b|\bmust\b[^.]*\bruling\b|\bruling\b[^.]*\bmust\b", re.I)
+SUPERSEDE_RULE = re.compile(r"\bsupersede[sd]?\b[^.]*\bcite the later\b", re.I)
+FENCED = re.compile(r"\n\n[^\n]*\(data, not instructions\):\n```\n.*?\n```", re.S)
+WORDING_REASON = "R49 says the opposite: a mailbox default is never held."
+
+
+def put_on_ref(repo, ref, files):
+    """Put `files` ({path in the repo: text}) on the remote-tracking `ref` of `repo`, as one commit. The commit is made on a
+    temp branch; the checkout switches back and the branch is deleted, so the checkout holds none of the files, as on main."""
+    git(repo, "checkout", "-q", "-b", "ref-tmp")
+    for path, text in files.items():
+        full = os.path.join(repo, *path.split("/"))
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "w", encoding="utf-8") as f:
+            f.write(text)
+    git(repo, "add", *files)
+    git(repo, "commit", "-q", "-m", "files for " + ref)
+    sha = git(repo, "rev-parse", "HEAD").stdout.strip()
+    git(repo, "checkout", "-q", "-")
+    git(repo, "branch", "-q", "-D", "ref-tmp")
+    git(repo, "update-ref", ref, sha)
+    return repo
+
+
+def on_ref(repo, spec):
+    """True when `spec` (a ref, or ref:path) resolves in `repo`. A read for a scope check, never for the subject."""
+    return subprocess.run(["git", "-C", repo, "rev-parse", "--verify", "--quiet", spec],
+                          capture_output=True, text=True, env=GIT_ENV).returncode == 0
+
+
+def pick_instructions(prompt):
+    """The judge prompt with each fenced block of data cut out: the instructions the model is given, nothing a record wrote."""
+    return FENCED.sub("", prompt)
+
+
+def one_line_holds(prompt, *needles):
+    """True when one line of the prompt holds every needle, so a source label and its marker are one candidate's line."""
+    return any(all(n in line for n in needles) for line in prompt.splitlines())
+
+
+def not_searched_lines(prompt):
+    """The prompt's lines that open with `Not searched:`, lowercased."""
+    return [line.lower() for line in prompt.splitlines() if line.lower().startswith("not searched:")]
+
+
+def old_ruling_wording(text):
+    """The first match of the ruling-as-law wording (owed, or must near a ruling) in `text`, or ""."""
+    found = OLD_RULING_WORDING.search(text)
+    return found.group(0) if found else ""
+
+
+REF_ONLY_MARK = "refonly-3b71"
+REF_ONLY_BULLET = "- **R931. A ruling only on the ref reaches the judge.** Outcome: fixture text. Marker %s.\n" % REF_ONLY_MARK
+REF_ONLY_REPO = put_on_ref(make_repo("plan-ref-only"), PLAN_REF_FULL, {"plans/restart-plan.md": PLAN_HEAD + REF_ONLY_BULLET})
+NO_REF_REPO = make_repo("plan-no-ref")
+COST_CONTROL_SLUG = "cost-control-2026-11"
+COST_MARK = "lastfile-5a90"
+COST_FILES = {"plans/p%02d-filler.md" % n: "# Filler %d (fixture)\n\n- **R%d. Filler ruling %d.** Outcome: fixture text.\n"
+              % (n, 900 + n, n) for n in range(1, 7)}
+COST_FILES["plans/z-late.md"] = PLAN_HEAD + ("- **R933. A ruling in the last plan file reaches the judge.** Outcome: "
+                                             "fixture text. Marker %s.\n" % COST_MARK)
+COST_REPO = put_on_ref(make_repo("plan-ref-cost", decisions={COST_CONTROL_SLUG: "Owner, 2026-11-01: fixture decision for the "
+                                                                              "cost control."}),
+                       PLAN_REF_FULL, COST_FILES)
+LONG_MARK = "long-7c40"
+LONG_BULLET = ("- **R934. A long ruling on the ref keeps its whole text.** Outcome: fixture text.\n  %s Marker %s.\n"
+               % (" ".join("clause %03d keeps the whole ruling text." % n for n in range(1, 141)), LONG_MARK))
+LONG_REPO = put_on_ref(make_repo("plan-ref-long"), PLAN_REF_FULL, {"plans/long.md": PLAN_HEAD + LONG_BULLET})
+SUP_SLUG, SUP_OLD_MARK, SUP_NEW_MARK = "scope-hold-2026-10", "oldhold-4e8a", "newship-b5d2"
+SUP_OLD = "Owner, 2026-10-02: the scope change waits until the plan lands. Marker %s." % SUP_OLD_MARK
+SUP_REPO = put_on_ref(make_repo("plan-supersede", decisions={SUP_SLUG: SUP_OLD}), PLAN_REF_FULL, {
+    "plans/restart-plan.md": PLAN_HEAD + ("- **R935. The scope change ships now.** Owner, 2026-11-10: this supersedes the "
+                                          "2026-10-02 hold. Marker %s.\n" % SUP_NEW_MARK)})
+
+# Page items: the question on origin/roadmap waiting/items, the owner's answer on waiting/answers (matched by n = 556).
+PAGE_RULING_SLUG, PAGE_OLD_MARK = "mailbox-stored-copy", "mbxold-3c5e"
+PAGE_RULING = ("Owner, 2026-11-10, on page item 556: sessions hold their mail until the owner names a start. Marker %s."
+               % PAGE_OLD_MARK)
+PAGE_ANS_AT, PAGE_ANS_MARK, PAGE_Q_MARK, PAGE_DECOY_MARK = "2026-11-12T17:59:44.968Z", "pageans-6d19", "pageq-2c7e", "decoy557-9b0a"
+PAGE_ANSWER_LABEL = "page item 556 answer (origin/roadmap, %s)" % PAGE_ANS_AT
+PAGE_ANS_FILE = "waiting/answers/mailbox-sessions.json"
+PAGE_ITEM_FILE = "waiting/items/mailbox-sessions.json"
+PAGE_DECOY_ANS_FILE = "waiting/answers/other-item.json"
+PAGE_DECOY_ITEM_FILE = "waiting/items/other-item.json"
+
+
+def page_json(obj):
+    return json.dumps(obj, indent=2) + "\n"
+
+
+PAGE_ANS_JSON = page_json({"at": PAGE_ANS_AT, "choice": ["a"], "item": "mailbox-sessions", "n": 556,
+                           "note": "start on the git mailbox at once, each message stored. Marker %s." % PAGE_ANS_MARK})
+PAGE_ITEM_JSON = page_json({"id": "mailbox-sessions", "kind": "decision", "n": 556, "status": "closed", "pick": "a",
+                            "title": "How should sessions start using the git mailbox? Marker %s." % PAGE_Q_MARK})
+PAGE_DECOY_ANS_JSON = page_json({"at": "2026-11-09T10:00:00.000Z", "choice": "none", "item": "other-item", "n": 557,
+                                 "note": "a decoy row, not item 556. Marker %s." % PAGE_DECOY_MARK})
+PAGE_DECOY_ITEM_JSON = page_json({"id": "other-item", "kind": "decision", "n": 557, "status": "open",
+                                  "title": "A decoy question."})
+PAGE_PLAN_MARK = "r936-8a41"
+PAGE_ANS_REPO = put_on_ref(
+    put_on_ref(make_repo("page-answer", decisions={PAGE_RULING_SLUG: PAGE_RULING}), PAGE_REF_FULL, {
+        PAGE_ANS_FILE: PAGE_ANS_JSON, PAGE_ITEM_FILE: PAGE_ITEM_JSON,
+        PAGE_DECOY_ANS_FILE: PAGE_DECOY_ANS_JSON, PAGE_DECOY_ITEM_FILE: PAGE_DECOY_ITEM_JSON}),
+    PLAN_REF_FULL, {"plans/restart-plan.md": PLAN_HEAD + ("- **R936. Sessions start on the git mailbox.** Outcome: fixture "
+                                                           "text. Marker %s.\n" % PAGE_PLAN_MARK)})
+PAGE_MISS_REPO = put_on_ref(make_repo("page-answer-miss"), PAGE_REF_FULL,
+                            {PAGE_DECOY_ANS_FILE: PAGE_DECOY_ANS_JSON, PAGE_DECOY_ITEM_FILE: PAGE_DECOY_ITEM_JSON})
+
+
+def case_pick_ref_only_ruling_reaches_the_judge():
+    # The scope first: the ref holds the plan, and the checkout holds no plan file.
+    check("pick ref fixture: origin/restart-plan holds R931 and the checkout holds no plan file",
+          on_ref(REF_ONLY_REPO, PLAN_REF + ":plans/restart-plan.md")
+          and not os.path.exists(os.path.join(REF_ONLY_REPO, "plans", "restart-plan.md")), REF_ONLY_REPO)
+    r = pick_run("coordinator pick: ship the ref-only ruling, per plan R931.", cwd=REF_ONLY_REPO)
+    prompt = pick_prompt(r)
+    check("pick, plan R931 only on the ref: one judge call", len(r.calls) == 1, detail(r))
+    check("pick, plan R931 only on the ref: its text reaches the prompt", REF_ONLY_MARK in prompt, detail(r))
+    check("pick, plan R931 only on the ref: its line names origin/restart-plan",
+          one_line_holds(prompt, PLAN_REF, REF_ONLY_MARK), detail(r))
+    check("pick, plan R931 only on the ref: no plan file is checked out",
+          not os.path.exists(os.path.join(REF_ONLY_REPO, "plans", "restart-plan.md")), detail(r))
+
+
+def case_pick_missing_ref_is_not_searched():
+    check("pick no-ref fixture: origin/restart-plan does not exist", not on_ref(NO_REF_REPO, PLAN_REF), NO_REF_REPO)
+    r = pick_run("coordinator pick: hold the scope change, per plan R932.", cwd=NO_REF_REPO)
+    check("pick, plan R932 on no ref: one judge call, no refusal in code", len(r.calls) == 1 and r.out == "", detail(r))
+    check("pick, plan R932 on no ref: no failed-open line, the read never raises", "failed open" not in r.err, detail(r))
+    check("pick, plan R932 on no ref: the Not searched line names R932 and origin/restart-plan",
+          any(PLAN_REF in line and "r932" in line for line in not_searched_lines(pick_prompt(r))), detail(r))
+
+
+def case_pick_plan_read_costs_at_most_two_git_processes():
+    names = git(COST_REPO, "ls-tree", "--name-only", PLAN_REF, "plans/").stdout.split()
+    check("pick cost fixture: origin/restart-plan holds six filler plan files and the late one, last",
+          len(names) == 7 and names[-1] == "plans/z-late.md", names)
+    control = pick_run("coordinator pick: hold the scope change, per decision %s." % COST_CONTROL_SLUG, cwd=COST_REPO)
+    r = pick_run("coordinator pick: hold the scope change, per plan R933.", cwd=COST_REPO)
+    check("pick cost: the decision control is one judge call", len(control.calls) == 1, detail(control))
+    check("pick cost: plan R933, in the last file of the ref, reaches the prompt", COST_MARK in pick_prompt(r), detail(r))
+    check("pick cost: the plan read adds at most two git processes over a decision cite",
+          0 <= r.git - control.git <= 2, "plan run %d git, decision control %d git" % (r.git, control.git))
+
+
+def case_pick_long_ref_section_reaches_the_prompt_whole():
+    section = " ".join(LONG_BULLET.split())
+    check("pick long ref fixture: the R934 section is over 3000 and within 6000 characters once white space is collapsed",
+          3000 < len(section) <= 6000, len(section))
+    r = pick_run("coordinator pick: hold the scope change, per plan R934.", cwd=LONG_REPO)
+    check("pick, long plan section on the ref: one judge call", len(r.calls) == 1, detail(r))
+    check("pick, long plan section on the ref: the section's last word reaches the prompt", LONG_MARK in pick_prompt(r),
+          detail(r))
+
+
+def case_pick_later_ruling_wins_and_is_labelled():
+    # The scope first: the plan is on the ref and the decision is in the repo, and the pick cites the plan only.
+    check("pick supersede fixture: the ref holds R935 and the repo holds the older decision",
+          on_ref(SUP_REPO, PLAN_REF + ":plans/restart-plan.md")
+          and os.path.exists(os.path.join(SUP_REPO, "docs", "decisions", SUP_SLUG + ".md")), SUP_REPO)
+    r = pick_run("coordinator pick: ship the scope change, per plan R935.", cwd=SUP_REPO)
+    prompt = pick_prompt(r)
+    check("pick, R935 and an older decision: one judge call", len(r.calls) == 1, detail(r))
+    check("pick, R935 and an older decision: the instructions say a later ruling supersedes an older one and to cite the later",
+          SUPERSEDE_RULE.search(pick_instructions(prompt)) is not None, detail(r))
+    check("pick, R935 and an older decision: the decision line names docs/decisions/<slug>.md and its marker",
+          one_line_holds(prompt, "docs/decisions/%s.md" % SUP_SLUG, SUP_OLD_MARK), detail(r))
+    check("pick, R935 and an older decision: the plan line names origin/restart-plan and its marker",
+          one_line_holds(prompt, PLAN_REF, SUP_NEW_MARK), detail(r))
+    check("pick, R935 and an older decision: the Not searched line says page items and later page answers are not searched",
+          any("not searched: page items and later page answers" in line for line in not_searched_lines(prompt)), detail(r))
+
+
+def case_pick_judge_refusal_says_a_past_ruling_to_weigh():
+    r = pick_run(PICK_PASS_MESSAGE, answer=pick_refusal(WORDING_REASON))
+    check("pick wording, judge refusal: denied with the judge's reason",
+          (r.deny() or {}).get("permissionDecision") == "deny" and WORDING_REASON in r.reason(), detail(r))
+    check("pick wording, judge refusal: the printed reason says a past ruling to weigh",
+          PAST_RULING_PHRASE in r.reason().lower(), r.reason()[-160:])
+    empty = pick_run(PICK_PASS_MESSAGE, answer='{"ok": false, "reason": ""}')
+    check("pick wording, judge refusal with no reason: denied", (empty.deny() or {}).get("permissionDecision") == "deny",
+          detail(empty))
+    check("pick wording, judge refusal with no reason: the printed reason says a past ruling to weigh",
+          PAST_RULING_PHRASE in empty.reason().lower(), empty.reason()[-160:])
+
+
+def case_pick_judge_prompt_says_how_to_word_the_reason():
+    r = pick_run(PICK_PASS_MESSAGE)
+    check("pick wording, judge prompt: one call", len(r.calls) == 1, detail(r))
+    check("pick wording, judge prompt: the instructions say to word the reason as a past ruling to weigh",
+          PAST_RULING_PHRASE in pick_instructions(pick_prompt(r)).lower(), detail(r))
+
+
+def case_pick_old_ruling_wording_is_absent():
+    no_cite = pick_run(PICK_UNCITED)
+    check("pick wording, no cite: denied in code, with no model call",
+          (no_cite.deny() or {}).get("permissionDecision") == "deny" and no_cite.calls == [], detail(no_cite))
+    check("pick wording, no cite: the printed remedy has no owed or must-about-a-ruling wording",
+          old_ruling_wording(no_cite.reason()) == "", old_ruling_wording(no_cite.reason()))
+    refused = pick_run(PICK_PASS_MESSAGE, answer=pick_refusal(WORDING_REASON))
+    check("pick wording, judge refusal: the printed reason has no owed or must-about-a-ruling wording",
+          old_ruling_wording(refused.reason()) == "", old_ruling_wording(refused.reason()))
+    check("pick wording, judge prompt: the instructions have no owed or must-about-a-ruling wording",
+          old_ruling_wording(pick_instructions(pick_prompt(refused))) == "",
+          old_ruling_wording(pick_instructions(pick_prompt(refused))))
+
+
+def case_pick_page_answer_reaches_the_judge():
+    # The scope first: the roadmap ref holds the answer and the item, and the checkout holds neither.
+    check("pick page fixture: origin/roadmap holds the answer n=556 and its item, and the checkout holds neither",
+          on_ref(PAGE_ANS_REPO, PAGE_REF + ":" + PAGE_ANS_FILE) and on_ref(PAGE_ANS_REPO, PAGE_REF + ":" + PAGE_ITEM_FILE)
+          and not os.path.exists(os.path.join(PAGE_ANS_REPO, *PAGE_ANS_FILE.split("/"))), PAGE_ANS_REPO)
+    r = pick_run("coordinator pick: start on the git mailbox, per page item 556 a.", cwd=PAGE_ANS_REPO)
+    prompt = pick_prompt(r)
+    check("pick, page item 556 answered on the ref: one judge call", len(r.calls) == 1, detail(r))
+    check("pick, page item 556 answered on the ref: the answer line carries its label and its text",
+          one_line_holds(prompt, PAGE_ANSWER_LABEL, PAGE_ANS_MARK), detail(r))
+    check("pick, page item 556 answered on the ref: the question reaches the prompt", PAGE_Q_MARK in prompt, detail(r))
+    check("pick, page item 556 answered on the ref: the Not searched line does not name page item 556",
+          not any("page item 556" in line for line in not_searched_lines(prompt)), detail(r))
+    check("pick, page item 556 answered on the ref: a row of another item is not read as the answer",
+          PAGE_DECOY_MARK not in prompt, detail(r))
+    check("pick, page item 556 answered on the ref: no answer file is checked out",
+          not os.path.exists(os.path.join(PAGE_ANS_REPO, *PAGE_ANS_FILE.split("/"))), detail(r))
+
+
+def case_pick_later_page_answer_supersedes_the_ruling():
+    r = pick_run("coordinator pick: start on the git mailbox, per page item 556 a.", cwd=PAGE_ANS_REPO)
+    prompt = pick_prompt(r)
+    check("pick, page answer and an older ruling of item 556: one judge call", len(r.calls) == 1, detail(r))
+    check("pick, page answer and an older ruling of item 556: the instructions say the later one supersedes and is cited",
+          SUPERSEDE_RULE.search(pick_instructions(prompt)) is not None, detail(r))
+    check("pick, page answer and an older ruling of item 556: the older ruling's line reaches the prompt",
+          one_line_holds(prompt, PAGE_OLD_MARK), detail(r))
+    check("pick, page answer and an older ruling of item 556: the answer's line reaches the prompt",
+          one_line_holds(prompt, PAGE_ANSWER_LABEL, PAGE_ANS_MARK), detail(r))
+
+
+def case_pick_page_and_plan_reads_cost_at_most_three_git_processes():
+    control = pick_run("coordinator pick: start on the git mailbox, per decision %s." % PAGE_RULING_SLUG, cwd=PAGE_ANS_REPO)
+    page = pick_run("coordinator pick: start on the git mailbox, per page item 556 a.", cwd=PAGE_ANS_REPO)
+    both = pick_run("coordinator pick: start on the git mailbox, per plan R936 and page item 556 a.", cwd=PAGE_ANS_REPO)
+    check("pick git bound: the decision control is one judge call", len(control.calls) == 1, detail(control))
+    check("pick git bound: the page answer read adds at most three git processes over a decision cite",
+          0 <= page.git - control.git <= 3, "page run %d git, decision control %d git" % (page.git, control.git))
+    check("pick git bound: the plan and page answer reads together add at most three git processes over a decision cite",
+          0 <= both.git - control.git <= 3, "both run %d git, decision control %d git" % (both.git, control.git))
+    check("pick git bound: the plan R936 and the page answer both reach the prompt of one pick",
+          PAGE_PLAN_MARK in pick_prompt(both) and one_line_holds(pick_prompt(both), PAGE_ANSWER_LABEL, PAGE_ANS_MARK),
+          detail(both))
+
+
+def case_pick_page_answer_missing_ref_is_not_searched():
+    r = pick_run("coordinator pick: start on the git mailbox, per page item 556 a.", cwd=NO_REF_REPO)
+    check("pick, page item 556 with no roadmap ref: one judge call, no refusal in code", len(r.calls) == 1 and r.out == "",
+          detail(r))
+    check("pick, page item 556 with no roadmap ref: no failed-open line, the read never raises",
+          "failed open" not in r.err, detail(r))
+    check("pick, page item 556 with no roadmap ref: the Not searched line names page item 556 and origin/roadmap",
+          any("page item 556" in line and PAGE_REF in line for line in not_searched_lines(pick_prompt(r))), detail(r))
+
+
+def case_pick_page_answer_missing_file_is_not_searched():
+    check("pick page miss fixture: origin/roadmap holds the n=557 row and no answer for n=556",
+          on_ref(PAGE_MISS_REPO, PAGE_REF + ":" + PAGE_DECOY_ANS_FILE) and not on_ref(PAGE_MISS_REPO, PAGE_REF + ":" + PAGE_ANS_FILE),
+          PAGE_MISS_REPO)
+    r = pick_run("coordinator pick: start on the git mailbox, per page item 556 a.", cwd=PAGE_MISS_REPO)
+    prompt = pick_prompt(r)
+    check("pick, page item 556 with no answer file: one judge call, no failed-open line",
+          len(r.calls) == 1 and "failed open" not in r.err, detail(r))
+    check("pick, page item 556 with no answer file: the Not searched line names page item 556 and origin/roadmap",
+          any("page item 556" in line and PAGE_REF in line for line in not_searched_lines(prompt)), detail(r))
+    check("pick, page item 556 with no answer file: the n=557 row is not read as the answer", PAGE_DECOY_MARK not in prompt,
+          detail(r))
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -2127,7 +2417,14 @@ def main():
                  case_pick_statement_words_are_checked,
                  case_pick_held_cited_reaches_the_judge, case_pick_chatter_passes_untouched,
                  case_pick_markdown_no_ruling_is_not_refused, case_pick_bare_item_is_no_cite,
-                 case_pick_long_plan_section_reaches_the_prompt):
+                 case_pick_long_plan_section_reaches_the_prompt,
+                 case_pick_ref_only_ruling_reaches_the_judge, case_pick_missing_ref_is_not_searched,
+                 case_pick_plan_read_costs_at_most_two_git_processes, case_pick_long_ref_section_reaches_the_prompt_whole,
+                 case_pick_later_ruling_wins_and_is_labelled, case_pick_judge_refusal_says_a_past_ruling_to_weigh,
+                 case_pick_judge_prompt_says_how_to_word_the_reason, case_pick_old_ruling_wording_is_absent,
+                 case_pick_page_answer_reaches_the_judge, case_pick_later_page_answer_supersedes_the_ruling,
+                 case_pick_page_and_plan_reads_cost_at_most_three_git_processes,
+                 case_pick_page_answer_missing_ref_is_not_searched, case_pick_page_answer_missing_file_is_not_searched):
         try:
             case()
         except Exception as exc:
