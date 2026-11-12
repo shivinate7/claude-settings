@@ -1929,16 +1929,15 @@ MUTATION_TEST_NAMES = {name.rsplit("/", 1)[-1] for name in AUTHOR_MUTATION_TESTS
 # Test config is two kinds. A whole-file config holds only test settings, so a builder may not change it
 # at all. A partly-owned file also holds product settings, so a builder may not change its owned parts
 # (`owned_config_changed`). The test-author owns both kinds whole, so `TEST_CONFIG` is their union. A test
-# plan (`*.xctestplan`) is in `TEST_CONFIG` only: a builder's added `skippedTests` is refused as on main, and
-# the whole-file refusal ships as step `builder-xctestplan-config`.
+# plan (`*.xctestplan`) is whole-file: it lists the tests to run and which to skip.
 WHOLE_FILE_TEST_CONFIG_PATTERN = (
     r"pytest\.ini|(?:jest|vitest|playwright|karma)\.conf(?:ig)?\.\w+|vitest\.workspace\.\w+"
-    r"|\.mocharc(?:\.\w+)?")
+    r"|\.mocharc(?:\.\w+)?|[^/]+\.xctestplan")
 PARTLY_OWNED_TEST_CONFIG_PATTERN = r"package\.json|pyproject\.toml|setup\.cfg|tox\.ini"
 WHOLE_FILE_TEST_CONFIG = re.compile(r"^(?:%s)$" % WHOLE_FILE_TEST_CONFIG_PATTERN)
 PARTLY_OWNED_TEST_CONFIG = re.compile(r"^(?:%s)$" % PARTLY_OWNED_TEST_CONFIG_PATTERN)
 TEST_CONFIG = re.compile(
-    r"^(?:%s|%s|[^/]+\.xctestplan)$" % (WHOLE_FILE_TEST_CONFIG_PATTERN, PARTLY_OWNED_TEST_CONFIG_PATTERN))
+    r"^(?:%s|%s)$" % (WHOLE_FILE_TEST_CONFIG_PATTERN, PARTLY_OWNED_TEST_CONFIG_PATTERN))
 # What disables tests. NAMES are test-runner settings that no lint tool shares, so they count in any
 # test config. FLAGS (`--ignore` is also ruff's and flake8's) count only in a test-runner context:
 # pytest `addopts`, a `[tool.pytest*]` section, or a line that calls a test runner.
