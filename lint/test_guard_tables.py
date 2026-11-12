@@ -7,7 +7,8 @@ placement case for the central tables. Standard library only.
     python3 lint/test_guard_tables.py --compare BASE.json [DIR] DIR's tables against BASE.json. Content differences
                                                                 (a row missing, extra or changed) and order
                                                                 differences (a row kept, at another place) print
-                                                                apart. Exit 1 on a content difference, else 0.
+                                                                apart. The case count is content too. Exit 1 on a
+                                                                content difference, else 0.
 
 The move keeps content: a builder runs `--dump` on main into the scratchpad, then `--compare` against that file.
 That is a command, not a case in CI: after the move a later lane that adds a family differs from main by design.
@@ -159,6 +160,8 @@ def compare(base, got):
         content.append("LOG_CHECKS: row %s extra" % (row,))
     order += moved("LOG_CHECKS", [row for row in was_rows if row in now_count],
                    [row for row in now_rows if row in was_count], show=lambda row: row[0])
+    if got.get("case_count") != base.get("case_count"):
+        content.append("case count: %s, was %s" % (got.get("case_count"), base.get("case_count")))
     return {"content": content, "order": order}
 
 
@@ -335,6 +338,11 @@ class CompareRules(unittest.TestCase):
         result = compare(self.BASE, self.varied(families=[["b", "B2"], ["a", "A"], ["c", "C"]]))
         self.assertTrue(result["content"], "the changed text was not reported as content")
         self.assertTrue(result["order"], "the moved row was not reported as order")
+
+    def test_changed_case_count_is_content(self):
+        result = compare(self.BASE, dict(self.varied(), case_count=4))
+        self.assertEqual(result["content"], ["case count: 4, was 3"],
+                         "a changed case count was not reported as content")
 
     def test_empty_tables_compare_clean(self):
         empty = {"families": [], "reason_may_name": [], "log_checks": [], "case_count": 0}
