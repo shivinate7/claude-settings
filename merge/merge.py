@@ -1251,9 +1251,30 @@ class Host:
         """-> the parent shas of the commit `sha`, in order (first parent first): one read of commits/<sha> (commit_read). Any failed read raises Stop."""
         return self.commit_read(sha)[0]
 
+    def ruleset_names(self):
+        """-> the check names that the base's ruleset requires: every context of every required_status_checks rule that applies to the base,
+        in order, once each. None when no rule requires a check, which hands the names to the classic protection. One read of rules/branches/<base>,
+        which answers [] when no ruleset applies. An HTTP 404 that is not a network error reads as no ruleset, like the classic read's 404 (a host with no
+        rules route has no ruleset). Any other failed read raises Stop: the classic list is no stand-in for an unread ruleset."""
+        c, out = self.api(f"rules/branches/{self.base}")
+        if c and not is_net(c, out) and re.search(r"\bHTTP 404\b", out):
+            return None
+        try:
+            rules = json.loads(out) if not c else None
+            if not isinstance(rules, list):
+                raise ValueError(out)
+            names = [s["context"] for r in rules if isinstance(r, dict) and r.get("type") == "required_status_checks" for s in r["parameters"]["required_status_checks"]]
+        except (ValueError, KeyError, TypeError):
+            raise Stop(f"cannot read the rules of {self.base} {PIN_CITE}. Set merge.requiredChecks to a list of check names.\n{out}")
+        return list(dict.fromkeys(names)) or None
+
     def protection_names(self):
-        """-> the required check names of the base's branch protection, or None when the base has none (an HTTP 404 that is not a
-        network error). Through api, so the guard's -R repo and its cwd name the repo. Any other failed read raises Stop."""
+        """-> the required check names of the base: its ruleset's first (ruleset_names), else its classic branch protection's. None when neither names any
+        (the classic read is an HTTP 404 that is not a network error). Through api, so the guard's -R repo and its cwd name the repo. Any other failed read
+        raises Stop."""
+        names = self.ruleset_names()
+        if names:
+            return names
         c, out = self.api(f"branches/{self.base}/protection/required_status_checks", "--jq", ".contexts")
         if c and not is_net(c, out) and re.search(r"\bHTTP 404\b", out):
             return None
