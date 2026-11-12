@@ -1,0 +1,14 @@
+{
+ "id": "glossary-keep-and-round",
+ "title": "GLOSSARY.md names the brief's Keep line, and \"round\" matches its use in briefs",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "now",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A brief line with no glossary row, and a term used two ways, make sessions guess.",
+ "source": "coordinator 11:35 CST Nov 12, from lane fan-prose-unmapped-3 (#2812, #2821)",
+ "note": "Two gaps: (1) `Keep:` (the brief line naming earlier commits to keep) has no GLOSSARY.md row. (2) The glossary defines \"round\" as a review plus its fix, while the new roles-brief-contents sentence says \"A round 2 or 3 brief\" (a builder brief). Fix: add the Keep row; reword either the glossary row or the sentence so \"round\" has one meaning. Wording only, reversible: no page item (triage, 11:47 CST). Ready, no lane.",
+ "updatedAt": "2026-11-12T11:45:46-06:00"
+}
