@@ -72,7 +72,7 @@ def spans(text, tracked):
 
 @contextlib.contextmanager
 def scratch(wt, head):
-    """A detached worktree of `head` under the temp dir, removed after: what a Retire test writes stays there and never reaches `wt`, except through a linked `node_modules` (see link_packages).
+    """A detached worktree of `head` under the temp dir, removed after: what a Retire test writes stays there and never reaches `wt`, except through a linked `node_modules`, which is the install itself (see link_packages).
     A tree that cannot be made yields None, and the test is unknown."""
     tmp = tempfile.mkdtemp(prefix="debt-retire-")
     tree = os.path.join(tmp, "tree")
@@ -230,7 +230,7 @@ def judge_close(wt, base_ref, head, mb, tracked, debt, old, new, cited, run_stat
 def check(wt, base_ref, head="HEAD", timeout=TIMEOUT, pr_body="", run_state=None, isolate=False):
     """[Finding] for each debt that `head` closes against `base_ref` and whose Retire step does not hold. Raises Unknown.
     run_state(url) -> (conclusion, head sha) of a workflow run, or raises.
-    isolate: run each test in its own scratch worktree of `head` (the merge tool and the CLI do), so nothing it writes reaches `wt` but through a linked `node_modules`;
+    isolate: run each test in its own scratch worktree of `head` (the merge tool and the CLI do), so nothing it writes reaches `wt` or its main checkout but through a linked `node_modules` (link_packages);
     off, a test runs in `wt` itself."""
     got = closes(wt, base_ref, head)
     if not got:
