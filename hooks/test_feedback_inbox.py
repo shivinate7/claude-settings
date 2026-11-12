@@ -1693,8 +1693,9 @@ def git_starts_naming_copy(lines):
 def case_page_filing_never_reads_the_copy():
     """The cost of the filing check, which a test proves (the rule that every reader states its cost): a page item
     with a proved send starts no git that names the waiting copy folder, whatever the subcommand (grep, show,
-    cat-file, ls-tree), at 2 items or at 40. The git starts are the same count for both sizes. Red on main, where
-    each page item greps the copy. Every subcommand counts, so a read by show is caught as a grep is."""
+    cat-file, ls-tree), at 2 items or at 40. The git starts are the same count for both sizes. A git read of the
+    copy would make the stated cost false, so the case holds it at both sizes. Every subcommand counts, so a read
+    by show is caught as a grep is."""
     counts = {}
     for label, repo in (("a copy of 2 items", record_repo("filed", copy_files(FILED))),
                         ("a copy of 40 items", record_repo("filed-forty", copy_files(FORTY)))):
