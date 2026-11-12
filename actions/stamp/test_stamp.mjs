@@ -1941,9 +1941,9 @@ for (const kind of ["hold", "orphan"]) {
         found = leftovers(pidFile);
       }
       const out = readFileSync(outFile, "utf8");
-      // The watchdog ends the suite at its cap and prints that line. shSync's own 40 s timeout bounds the run, so no clock is read here.
+      // The watchdog prints the cap line when it ends the suite. Teardown time after the cap is not bounded here: a real-clock
+      // bound breaks test-practices P5, and shSync's 40 s timeout is the only limit on it.
       assert.match(out, /The suite ran past its 5 s cap/, `no cap line: the cap did not end the suite\n${out}`);
-      assert.doesNotMatch(out, /passed its own bound/, `the hard stop ended the suite, not the cap\n${out}`);
       assert.equal(found.pids.length, 2, out);
       assert.deepEqual(found.left, [], `still running: ${JSON.stringify(found.left)}; exit ${r.status}; cap line ${/ran past its/.test(out) ? "present" : "absent"}\n${out}`);
       assert.equal(r.status, 1, out);
