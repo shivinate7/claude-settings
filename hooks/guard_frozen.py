@@ -236,6 +236,10 @@ def _mutates_as_command(command: str, words) -> bool:
         return True
     if command == "git":
         rest = [word for word in words if not word.startswith("-")]
+        # `git rm --cached` drops the index entry and leaves the file on disk, so it writes no file.
+        flags = words[:words.index("--")] if "--" in words else words
+        if rest[:1] == ["rm"] and "--cached" in flags:
+            return False
         return any(word in ("mv", "rm") for word in rest[:2])
     return bool(re.fullmatch(MUTATING_COMMAND, command))
 
@@ -1055,7 +1059,7 @@ def _holds_frozen(path: str, cwd: str) -> bool:
 
 
 def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
-                     command_position=False, predicate_command=False, script_data=False) -> str:
+                     command_position=False, predicate_command=False, script_data=False, read_forms=False) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
     `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
     `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
@@ -1071,7 +1075,7 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     # The same words with a quoted newline kept, for a `sh -c` script read at its command positions only:
     # the text the write patterns read keeps newlines as spaces, so a quoted newline never ends a command.
     scripts = ([[_typed(word, segment) for word in _quoted_words(segment, True)] for segment in segments]
-               if command_position else parsed)
+               if command_position or read_forms else parsed)
     closed = any(unsafe or _runs_stored_text(segment, words, plain)
                  for segment, words, (unsafe, plain) in zip(segments, parsed, scans))
     kinds = ["" if closed else _kind(words, plain) for words, (_u, plain) in zip(parsed, scans)]
@@ -1123,17 +1127,24 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
         text = " ".join(shown)
         at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
         verb = _segment_command(words)[0] if predicate_command else ""
+        # `read_forms` (the frozen callers) reads a plain command's arguments by command position and leaves a
+        # printer's or PowerShell's quoted text alone: it may be a program another command runs
+        # (`echo '...' | python -`, a scriptblock).
+        by_position = command_position or (
+            read_forms and kinds[number] not in ("printer", "message") and not is_powershell(cmd))
         for nested in _powershell_scripts_of(segments[number]):
             # a script pwsh, `cmd /c` or iex runs is PowerShell text: judge it by PowerShell's rules too
             hit = _shell_write_hit(nested, at, predicate, holds, follow_cd, command_position, predicate_command)
             if hit:
                 return hit
-        for word in words:
+        for word, previous in zip(words, [""] + words):
             if word.startswith("-") or REDIRECT.fullmatch(word):
                 continue
+            if re.fullmatch(r"\d*<", previous):
+                continue   # the file `< FILE` names is read as input and never written
             if not word or word in (">", ">>"):
                 continue
-            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(script) if command_position else ())):
+            if (predicate(word, at, verb) if predicate_command else predicate(word, at)) and writes_to(word, text, *(_segment_command(script) if by_position else ())):
                 return word
     for text in inner:
         hit = _shell_write_hit(text, cwd, predicate, holds, follow_cd, command_position)
@@ -1175,7 +1186,7 @@ def frozen_shell_hit(cmd: str, cwd: str) -> str:
     return _shell_write_hit(cmd, cwd, is_frozen, _holds_frozen)
 
 
-def shell_write_hit(raw: str, cwd: str, predicate, holds=None) -> str:
+def shell_write_hit(raw: str, cwd: str, predicate, holds=None, read_forms=False) -> str:
     """Return the path a whole shell command writes to that `predicate(path, cwd)` accepts, else ''.
     A shell reads the command with its heredoc bodies dropped, except a body a shell runs
     (`strip_heredoc_bodies`). The text a python, node, perl or ruby script holds is data: its heredoc body,
@@ -1184,7 +1195,7 @@ def shell_write_hit(raw: str, cwd: str, predicate, holds=None) -> str:
     falls back to reading every body, which refuses more and never less."""
     try:
         hit = _shell_write_hit(strip_heredoc_bodies(raw, shells_only=True, per_body=True), cwd, predicate, holds,
-                           script_data=True)
+                           read_forms=read_forms, script_data=True)
         texts = []
         resolved = _resolve_vars(raw)   # each body and `-c` script reads `$F` as the command's own assignment
         for lang, body, quote in interpreter_bodies(resolved):
@@ -1198,7 +1209,7 @@ def shell_write_hit(raw: str, cwd: str, predicate, holds=None) -> str:
             hit = hit or _shell_write_hit(text, cwd, predicate, holds)
         return hit
     except Exception:
-        return _shell_write_hit(strip_heredoc_bodies(raw), cwd, predicate, holds)
+        return _shell_write_hit(strip_heredoc_bodies(raw), cwd, predicate, holds, read_forms=read_forms)
 
 
 def project_config_shell_hit(cmd: str, cwd: str) -> str:
