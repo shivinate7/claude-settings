@@ -12,13 +12,17 @@
   "options": [
     {
       "gain": "Batch macOS jobs run on your MacBook as soon as PR #2970 merges.",
-      "how": "1. On your MacBook, open the new-runner page below, pick macOS and ARM64, and run its commands; when config.sh asks for labels, add claude-settings-mac. Run ./svc.sh install then ./svc.sh start so it survives a restart. 2. Make a fine-grained token for shivinate7/claude-settings with Administration: Read only (the token page below). 3. Paste the command below in Terminal and paste the token when asked.",
+      "how": "1. On your MacBook, open the new-runner page below, pick macOS and ARM64, and run its commands; when config.sh asks for labels, add claude-settings-mac. Run ./svc.sh install then ./svc.sh start so it survives a restart. 2. You asked whether the degen repo's token can serve: yes, if its repo access includes shivinate7/claude-settings with Administration: Read (widen it on its token page if not); GitHub never shows a secret again, so paste its value from where you keep it. Otherwise make a new fine-grained token with Administration: Read on this repo (the token page below). 3. Paste the command below in Terminal and paste the token when asked.",
       "key": "a",
       "label": "Register the runner and add the secret",
       "links": [
         {
           "label": "New self-hosted runner",
           "url": "https://github.com/shivinate7/claude-settings/settings/actions/runners/new?arch=arm64&os=osx"
+        },
+        {
+          "label": "Your fine-grained tokens",
+          "url": "https://github.com/settings/personal-access-tokens"
         },
         {
           "label": "New fine-grained token",
