@@ -70,7 +70,7 @@ Each act that cannot be undone or costs money needs one owner yes, asked by the 
 ## Known gaps
 
 - Unmeasured, decided by the probe:
-  - Whether a Worker can wake the writer on a save. The candidate is a POST from the Worker to a webhook URL that the writer made with its `watch_url` tool, which arrives in the writer's conversation. Decision `session-messages` (line 37) says a webhook to `watch_url` is likely blocked, because its signing secret is sealed to the artifact service, so a Worker may not be able to sign it. The fallback is the turn-start read of `answers/`.
+  - Whether a Worker can wake the writer on a save. The candidate is a POST from the Worker to a webhook URL that the writer made with its `watch_url` tool, which arrives in the writer's conversation. Decision `session-messages` (line 37) says a webhook to `watch_url` is likely blocked. Its signing secret is sealed to the artifact service, so a Worker may not be able to sign it. The fallback is the turn-start read of `answers/`.
   - The delay from a click to a commit on the record branch, and the cost of a poll in GitHub API calls.
   - Whether the free Cloudflare plan and its Access gate cover one owner on a phone.
   - Whether one commit can carry several files, and whether the token can be kept off main by the ruleset alone.
