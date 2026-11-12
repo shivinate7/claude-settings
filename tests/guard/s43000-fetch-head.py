@@ -68,6 +68,10 @@ fetch_head_refused("fetch-head read, a lone apostrophe in unquoted text does not
 fetch_head_refused("fetch-head read, a newline inside a quoted string does not hide a read on the next line, denies",
                    "echo \"first line\nsecond line\"\n" + VCS + " log FETCH_HEAD", cwd=GITWT)
 
+# A shell that runs a script given as its argument runs that script's reads too: the inner script is walked.
+fetch_head_refused("fetch-head read in a bash -c script, the inner script is walked, denies",
+                   'bash -c "' + VCS + ' show FETCH_HEAD"', cwd=GITWT)
+
 # Allowed: a read of origin/<b>, which is the remedy's own read. A fetch alone, and a fetch earlier in the same
 # command, with the read after it of FETCH_HEAD or of origin/<b>. A long chain with its fetch first is the
 # full-size form.
@@ -95,6 +99,8 @@ for _name, _cmd in (
     ("a long chain whose fetch comes before the read",
      " && ".join([VCS + " fetch -q origin feat:refs/remotes/origin/feat", VCS + " status", VCS + " log -1",
                   VCS + " diff --stat", VCS + " show FETCH_HEAD:p.txt"])),
+    ("a fetch, then a read of FETCH_HEAD in a $( ) text of the same command",
+     VCS + " fetch x && SHA=$(" + VCS + " rev-parse FETCH_HEAD)"),
 ):
     sh("fetch-head allowed, %s" % _name, _cmd, "allow", cwd=GITWT)
 
@@ -111,6 +117,8 @@ for _name, _cmd, _dir in (
     ("a quoted two-line echo that names a read", "echo \"first line\ngit log FETCH_HEAD\"", NOGIT),
     ("a quoted apostrophe that names the name", "echo \"Don't read FETCH_HEAD\"", NOGIT),
     ("a commit message that names the name", VCS + ' commit -m "fix: FETCH_HEAD race"', NOGIT),
+    ("a commit message of the bare name, as the value of -m", VCS + " commit -m FETCH_HEAD", NOGIT),
+    ("a log grep for the bare name, as the value of --grep", VCS + " log --grep FETCH_HEAD", GITWT),
     ("a log grep for the name, over origin", VCS + " log origin/feat --grep=FETCH_HEAD --oneline", GITWT),
     ("a read of origin piped to grep for the name",
      VCS + " show origin/feat:hooks/guard.py | grep FETCH_HEAD", GITWT),
