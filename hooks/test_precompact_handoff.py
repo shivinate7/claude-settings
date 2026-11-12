@@ -165,14 +165,16 @@ class Case(object):
         return subprocess.run([sys.executable, MODULE] + args, input=json.dumps(payload),
                                capture_output=True, text=True, env=self.env(), cwd=self.repo)
 
-    def run_precompact(self, transcript_path, cwd=None):
+    def run_precompact(self, transcript_path, cwd=None, extra=None):
         payload = {"session_id": self.session_id, "transcript_path": transcript_path,
                    "cwd": cwd or self.repo, "hook_event_name": "PreCompact"}
+        payload.update(extra or {})
         return self.run([], payload)
 
-    def run_reorient(self, cwd=None):
+    def run_reorient(self, cwd=None, extra=None):
         payload = {"session_id": self.session_id, "hook_event_name": "SessionStart",
                    "source": "compact", "cwd": cwd or self.repo}
+        payload.update(extra or {})
         return self.run(["--reorient"], payload)
 
     def digest_path(self):
@@ -373,10 +375,48 @@ def worktree_at(c, rel):
     return path
 
 
+AGENT_FOLDER = re.compile(r"^agent-[0-9a-fA-F]{16,}$")   # an agent's worktree folder: `agent-` and 16 or more hex characters
+AGENT_ID_SHAPE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")     # a valid agent_id: the guard's reader, AGENT_ID in hooks/guard.py
+
+
 def is_agent_worktree(path):
-    """The shape the hooks test: the last two parents are .claude and worktrees, and the folder is agent-*."""
+    """True when the folder is an agent's worktree itself: `.claude/worktrees/agent-<16 or more hex>`."""
     parts = os.path.normpath(path).split(os.sep)
-    return len(parts) >= 3 and parts[-3:-1] == [".claude", "worktrees"] and parts[-1].startswith("agent-")
+    return len(parts) >= 3 and parts[-3:-1] == [".claude", "worktrees"] and AGENT_FOLDER.match(parts[-1]) is not None
+
+
+def under_agent_worktree(path):
+    """True when the folder is an agent's worktree or lies inside one."""
+    parts = os.path.normpath(path).split(os.sep)
+    return any(parts[i:i + 2] == [".claude", "worktrees"] and i + 2 < len(parts)
+               and AGENT_FOLDER.match(parts[i + 2]) is not None for i in range(len(parts)))
+
+
+# The cwd shapes the hooks judge, as (label, folder under the repo, skipped). Skipped: an agent's worktree, or a folder
+# inside one. Not skipped: a lane whose name begins `agent-`, a short or empty suffix, and an agent-shaped folder that
+# is not under .claude/worktrees. The wave2 file runs the same rows against the post-compact flag.
+CWD_SHAPES = (
+    ("an agent's worktree", os.path.join(".claude", "worktrees", "agent-a1634141822b8dc54"), True),
+    ("a folder inside an agent's worktree", os.path.join(".claude", "worktrees", "agent-a1634141822b8dc54", "src"), True),
+    ("an agent suffix of 16 hex characters", os.path.join(".claude", "worktrees", "agent-a1634141822b8dc5"), True),
+    ("a lane named agent-handoff-lock-report", os.path.join(".claude", "worktrees", "agent-handoff-lock-report"), False),
+    ("a folder named agent-x", os.path.join(".claude", "worktrees", "agent-x"), False),
+    ("an agent suffix of 15 hex characters", os.path.join(".claude", "worktrees", "agent-a1634141822b8dc"), False),
+    ("an empty agent suffix", os.path.join(".claude", "worktrees", "agent-"), False),
+    ("an agent-shaped folder outside .claude/worktrees", os.path.join("tools", "agent-a1634141822b8dc54"), False),
+    ("a worktree that is not an agent's", LANE_WORKTREE, False),
+)
+
+# The agent_id values a payload may carry, as (label, value, skipped). A valid id skips the hooks even in the primary
+# checkout, since an agent with no worktree (an Explore agent) shares that checkout. Any other value is no agent's id.
+AGENT_IDS = (
+    ("a valid agent_id", "a1634141822b8dc54", True),
+    ("an agent_id of 64 characters", "a" * 64, True),
+    ("an agent_id of 65 characters", "a" * 65, False),
+    ("a malformed agent_id, with a space and a slash", "not an id/x", False),
+    ("an empty agent_id", "", False),
+    ("a non-string agent_id", 42, False),
+)
 
 
 def handoff_state_files(c):
@@ -534,6 +574,86 @@ def case_lane_worktree_reorient_still_prints():
               and c.handoff_path() in out, "rc=%r stdout: %r" % (proc.returncode, out[-300:]))
     finally:
         c.cleanup()
+
+
+def case_agent_folder_shape_decides_the_skip():
+    """Each row of CWD_SHAPES. An agent's worktree, or a folder inside one, is skipped by PreCompact and by --reorient:
+    no digest, no state, no reorient text. Every other folder runs. The primary's own PreCompact, last in each row, is
+    the live control: the hooks run in this case, so an empty result in the row is the skip and not a broken hook."""
+    for label, rel, skipped in CWD_SHAPES:
+        c = Case("shape")
+        try:
+            wt = worktree_at(c, rel)
+            check("cwd shape, %s: scope, the folder is %s" % (label, "an agent's worktree or inside one" if skipped
+                                                              else "not an agent's worktree"),
+                  under_agent_worktree(wt) == skipped, wt)
+            tpath = os.path.join(c.root, "shape.jsonl")
+            write_transcript(tpath, [transcript_line("user", [{"type": "text", "text": "SHAPETEXT"}])])
+            proc = c.run_precompact(tpath, cwd=wt)
+            written = handoff_state_files(c)
+            if skipped:
+                ok = written == {}
+            else:
+                ok = c.read_digest() is not None and c.read_state() is not None
+            check("cwd shape, %s: PreCompact %s" % (label, "writes nothing" if skipped
+                                                    else "writes digest and state"),
+                  ok, "rc=%r written: %s stderr=%r" % (proc.returncode, changed_names({}, written),
+                                                       proc.stderr[-300:]))
+            rd = c.run_reorient(cwd=wt)
+            if skipped:
+                ok = (rd.stdout or "").strip() == ""
+            else:
+                ok = c.prompt_path() in (rd.stdout or "")
+            check("cwd shape, %s: --reorient %s" % (label, "prints nothing" if skipped
+                                                    else "prints the reorient text"),
+                  ok, "stdout: %r" % (rd.stdout or "")[-300:])
+            live = c.run_precompact(tpath)
+            check("cwd shape, %s: live control, the primary's PreCompact writes digest and state" % label,
+                  live.returncode == 0 and c.read_digest() is not None and c.read_state() is not None,
+                  "rc=%r stderr=%r" % (live.returncode, live.stderr[-300:]))
+        finally:
+            c.cleanup()
+
+
+def case_agent_id_payload_decides_the_skip():
+    """Each row of AGENT_IDS, on a payload whose cwd is the primary checkout. A valid agent_id skips PreCompact and
+    --reorient there, since an agent with no worktree shares the checkout. A malformed, empty or non-string id runs.
+    The payload with no agent_id, last in each row, is the live control."""
+    for label, value, skipped in AGENT_IDS:
+        c = Case("agent_id")
+        try:
+            valid_shape = isinstance(value, str) and AGENT_ID_SHAPE.match(value) is not None
+            check("agent_id, %s: scope, the value is %s" % (label, "a valid id" if skipped else "not a valid id"),
+                  valid_shape == skipped, repr(value)[:80])
+            tpath = os.path.join(c.root, "id.jsonl")
+            write_transcript(tpath, [transcript_line("user", [{"type": "text", "text": "IDTEXT"}])])
+            proc = c.run_precompact(tpath, extra={"agent_id": value})
+            written = handoff_state_files(c)
+            if skipped:
+                ok = written == {}
+            else:
+                ok = c.read_digest() is not None and c.read_state() is not None
+            check("agent_id, %s: PreCompact %s" % (label, "writes nothing" if skipped else "writes digest and state"),
+                  ok, "rc=%r written: %s stderr=%r" % (proc.returncode, changed_names({}, written),
+                                                       proc.stderr[-300:]))
+            rd = c.run_reorient(extra={"agent_id": value})
+            if skipped:
+                ok = (rd.stdout or "").strip() == ""
+            else:
+                ok = c.prompt_path() in (rd.stdout or "")
+            check("agent_id, %s: --reorient %s" % (label, "prints nothing" if skipped
+                                                   else "prints the reorient text"),
+                  ok, "stdout: %r" % (rd.stdout or "")[-300:])
+            c2 = Case("agent_id_live")
+            try:
+                live = c2.run_precompact(tpath)
+                check("agent_id, %s: live control, the same payload without agent_id writes digest and state" % label,
+                      live.returncode == 0 and c2.read_digest() is not None and c2.read_state() is not None,
+                      "rc=%r stderr=%r" % (live.returncode, live.stderr[-300:]))
+            finally:
+                c2.cleanup()
+        finally:
+            c.cleanup()
 
 
 # --------------------------------------------------------------------------- settings.json
@@ -2549,6 +2669,8 @@ def main() -> int:
     case_lane_worktree_reorient_still_prints()
     case_agent_precompact_fresh_session_writes_nothing()
     case_agent_reorient_fresh_session_prints_nothing()
+    case_agent_folder_shape_decides_the_skip()
+    case_agent_id_payload_decides_the_skip()
 
     if FAILED:
         print()

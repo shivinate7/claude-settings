@@ -14,10 +14,12 @@ AW_EDIT_OLD = "Nothing in flight.\n"
 AW_EDIT_NEW = "Nothing in flight; the red run is recorded.\n"
 AW_MULTI = [{"old_string": "Branch hsk-tests at", "new_string": "Branch hsk-tests2 at"},
             {"old_string": "The builder adds the check.", "new_string": "The builder adds the check, then the red run."}]
-# The refusal tells the agent that it is an agent, that the handoff is its parent's, and that it must not retry.
-# Each fragment is any-of, and the wording is not pinned.
-AW_CARRIES = (("agent", "Agent"), ("parent", "Parent", "orchestrator", "coordinator"),
+# The refusal tells the agent that it is an agent, that the handoff is the one of the session that spawned it, and that
+# it must not retry. Each fragment is any-of, and the wording is not pinned, except for the spawner: the refusal says
+# "the session that spawned you" (glossary term `spawner`), and never "parent" (AW_LACKS).
+AW_CARRIES = (("agent", "Agent"), "the session that spawned you",
               ("retry", "Retry", "repeat", "Repeat", "again"))
+AW_LACKS = ("parent", "Parent")
 
 
 def aw_scope():
@@ -44,23 +46,50 @@ LOG_CHECKS_EXTRA.append(("handoff-agent-write: scope: the parent's handoff on di
 # handoff-sections, so a refusal that would tell the agent how to pass the section check is never the one it reads.
 add("handoff-agent-write: an agent's Write of the parent's handoff is refused, naming the rule and the parent",
     "deny", AW_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, agent_id=AW_AGENT,
-    carries=AW_CARRIES, file_path=hs_handoff(HS_CFG), content=AW_WRITE)
+    carries=AW_CARRIES, lacks=AW_LACKS, file_path=hs_handoff(HS_CFG), content=AW_WRITE)
 add("handoff-agent-write: an agent's Edit of the parent's handoff is refused, naming the rule and the parent",
     "deny", AW_RULE, tool="Edit", cwd=NOGIT, session=HS_SID, config=HS_CFG, agent_id=AW_AGENT,
-    carries=AW_CARRIES, file_path=hs_handoff(HS_CFG), old_string=AW_EDIT_OLD, new_string=AW_EDIT_NEW)
+    carries=AW_CARRIES, lacks=AW_LACKS, file_path=hs_handoff(HS_CFG), old_string=AW_EDIT_OLD, new_string=AW_EDIT_NEW)
 add("handoff-agent-write: an agent's MultiEdit of the parent's handoff is refused, naming the rule and the parent",
     "deny", AW_RULE, tool="MultiEdit", cwd=NOGIT, session=HS_SID, config=HS_CFG, agent_id=AW_AGENT,
-    carries=AW_CARRIES, file_path=hs_handoff(HS_CFG), edits=AW_MULTI)
+    carries=AW_CARRIES, lacks=AW_LACKS, file_path=hs_handoff(HS_CFG), edits=AW_MULTI)
 # P8: the states the handoff reaches. Full-size, empty, and no handoff on disk yet.
 add("handoff-agent-write: an agent's full-size Write of the parent's handoff is refused, naming the rule",
     "deny", AW_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, agent_id=AW_AGENT,
-    carries=AW_CARRIES, file_path=hs_handoff(HS_CFG), content=AW_FULL_SIZE)
+    carries=AW_CARRIES, lacks=AW_LACKS, file_path=hs_handoff(HS_CFG), content=AW_FULL_SIZE)
 add("handoff-agent-write: an agent's empty Write of the parent's handoff is refused, naming the rule",
     "deny", AW_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, agent_id=AW_AGENT,
-    carries=AW_CARRIES, file_path=hs_handoff(HS_CFG), content="")
+    carries=AW_CARRIES, lacks=AW_LACKS, file_path=hs_handoff(HS_CFG), content="")
 add("handoff-agent-write: an agent's first Write of the parent's handoff, with no handoff on disk, is refused",
     "deny", AW_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=AW_EMPTY_CFG, agent_id=AW_AGENT,
-    carries=AW_CARRIES, file_path=hs_handoff(AW_EMPTY_CFG), content=AW_WRITE)
+    carries=AW_CARRIES, lacks=AW_LACKS, file_path=hs_handoff(AW_EMPTY_CFG), content=AW_WRITE)
+
+# The realistic case: the agent runs in its own worktree, a real linked worktree at <checkout>/.claude/worktrees/agent-<id>,
+# not a folder outside every checkout (NOGIT). The payload is the one the agent's own call carries.
+AW_HOME = os.path.join(ROOT, "aw-home")                                     # the checkout that worktree is linked to
+AW_WT = os.path.join(AW_HOME, ".claude", "worktrees", "agent-" + AW_AGENT)  # the agent's own worktree
+
+
+def _build_aw_home():
+    """AW_HOME: a real checkout with one commit, and AW_WT, a real linked worktree at the agent's own path."""
+    os.makedirs(AW_HOME, exist_ok=True)
+    write(os.path.join(AW_HOME, "README.md"), "base\n")
+    for args in (("init", "-q", "-b", "main", "."), ("add", "-A"),
+                 (*IDENT, "commit", "-q", "-m", "base"),
+                 ("worktree", "add", "-q", AW_WT, "-b", "worktree-agent-" + AW_AGENT)):
+        done = run_vcs(AW_HOME, *args)
+        if done.returncode != 0:
+            sys.exit("fixture setup failed: git %s: %s" % (" ".join(args), done.stderr.strip()))
+
+
+lazy_fixture([AW_HOME, AW_WT], _build_aw_home)
+add("handoff-agent-write: an agent in its own worktree, Write of the parent's handoff, is refused by handoff-agent-write",
+    "deny", AW_RULE, tool="Write", cwd=AW_WT, session=HS_SID, config=HS_CFG, agent_id=AW_AGENT,
+    carries=AW_CARRIES, lacks=AW_LACKS, file_path=hs_handoff(HS_CFG), content=AW_WRITE)
+# The word alone, so a refusal that still says "parent" fails here by name, not behind the spawner phrase above.
+add("handoff-agent-write: the refusal never calls the spawner the parent",
+    "deny", AW_RULE, tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, agent_id=AW_AGENT,
+    lacks=AW_LACKS, file_path=hs_handoff(HS_CFG), content=AW_WRITE)
 
 # The controls. The same Write with no agent_id passes, so the refusals above are the agent's and not the content's.
 add("handoff-agent-write: control: the same Write with no agent_id passes, silently",
@@ -78,4 +107,8 @@ add("handoff-agent-write: control: a malformed agent_id (a space and a slash) do
     file_path=hs_handoff(HS_CFG), content=AW_WRITE)
 add("handoff-agent-write: control: a non-string agent_id does not trigger the rule, silently",
     "allow", tool="Write", cwd=NOGIT, session=HS_SID, config=HS_CFG, agent_id=42, silent=True,
+    file_path=hs_handoff(HS_CFG), content=AW_WRITE)
+# The same Write from the agent's own worktree with no agent_id: the session's own call, which the rule does not judge.
+add("handoff-agent-write: control: the same Write from the agent's own worktree with no agent_id passes, silently",
+    "allow", tool="Write", cwd=AW_WT, session=HS_SID, config=HS_CFG, silent=True,
     file_path=hs_handoff(HS_CFG), content=AW_WRITE)

@@ -71,7 +71,8 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from test_precompact_handoff import (  # noqa: E402
-    HANDOFF_WITH_PREMISES, RUN_FOLDER, ids_in, put, transcript_line, write_transcript)
+    AGENT_ID_SHAPE, AGENT_IDS, CWD_SHAPES, HANDOFF_WITH_PREMISES, RUN_FOLDER, under_agent_worktree, ids_in, put,
+    transcript_line, write_transcript)
 
 PRECOMPACT = os.environ.get("PRECOMPACT_HANDOFF_UNDER_TEST") or os.path.join(
     HERE, "precompact_handoff.py")
@@ -311,10 +312,11 @@ class Case(object):
         t = time.time() - age
         os.utime(path, (t, t))
 
-    def post_compact(self, sid, cwd=None):
-        return self.run(READ_CHECK, "--post-compact", {
-            "session_id": sid, "hook_event_name": "PostCompact", "trigger": "auto",
-            "cwd": cwd or self.proj})
+    def post_compact(self, sid, cwd=None, extra=None):
+        payload = {"session_id": sid, "hook_event_name": "PostCompact", "trigger": "auto",
+                   "cwd": cwd or self.proj}
+        payload.update(extra or {})
+        return self.run(READ_CHECK, "--post-compact", payload)
 
     def read(self, sid, file_path, extra=None):
         payload = {
@@ -759,6 +761,51 @@ def case_agent_post_compact_sets_no_flag():
         c.cleanup()
 
 
+def case_agent_folder_shape_decides_the_flag():
+    """Each row of CWD_SHAPES, the rows the PreCompact file judges. An agent's worktree, or a folder inside one, sets no
+    re-read flag; every other folder sets it. The primary's own PostCompact, last in each row, is the live control."""
+    for label, rel, skipped in CWD_SHAPES:
+        c = Case("shape_post")
+        try:
+            wt = os.path.join(c.proj, rel)
+            os.makedirs(wt, exist_ok=True)
+            check("post-compact cwd shape, %s: scope, the folder is %s" % (
+                label, "an agent's worktree or inside one" if skipped else "not an agent's worktree"),
+                under_agent_worktree(wt) == skipped, wt)
+            c.post_compact("shape-1", cwd=wt)
+            flagged = os.path.isfile(c.state("shape-1.reread"))
+            check("post-compact cwd shape, %s: the re-read flag is %s" % (label, "not set" if skipped else "set"),
+                  flagged == (not skipped), "flag at %s" % c.state("shape-1.reread"))
+            live = c.post_compact("shape-live")
+            check("post-compact cwd shape, %s: live control, the primary's PostCompact sets its flag" % label,
+                  live.returncode == 0 and os.path.isfile(c.state("shape-live.reread")),
+                  "rc=%r err=%r" % (live.returncode, tail(live.stderr)))
+        finally:
+            c.cleanup()
+
+
+def case_agent_id_payload_sets_no_flag():
+    """Each row of AGENT_IDS, on a payload whose cwd is the primary checkout. A valid agent_id sets no re-read flag: an
+    agent with no worktree shares the session's id, so its PostCompact must not refuse the parent. A malformed, empty or
+    non-string id is no agent's and sets the flag. The payload with no agent_id is the live control."""
+    for label, value, skipped in AGENT_IDS:
+        c = Case("id_post")
+        try:
+            valid_shape = isinstance(value, str) and AGENT_ID_SHAPE.match(value) is not None
+            check("post-compact agent_id, %s: scope, the value is %s" % (
+                label, "a valid id" if skipped else "not a valid id"), valid_shape == skipped, repr(value)[:80])
+            proc = c.post_compact("id-1", extra={"agent_id": value})
+            flagged = os.path.isfile(c.state("id-1.reread"))
+            check("post-compact agent_id, %s: the re-read flag is %s" % (label, "not set" if skipped else "set"),
+                  flagged == (not skipped), "rc=%r flag at %s" % (proc.returncode, c.state("id-1.reread")))
+            live = c.post_compact("id-live")
+            check("post-compact agent_id, %s: live control, a payload with no agent_id sets its flag" % label,
+                  live.returncode == 0 and os.path.isfile(c.state("id-live.reread")),
+                  "rc=%r err=%r" % (live.returncode, tail(live.stderr)))
+        finally:
+            c.cleanup()
+
+
 def case_stop_hook_active_passes():
     """stop_hook_active true passes, so a block cannot loop. Its twin, the same flagged
     state without the flag, must block."""
@@ -1107,6 +1154,8 @@ def main() -> int:
     case_read_of_other_file_keeps_flag()
     case_agent_read_keeps_flag()
     case_agent_post_compact_sets_no_flag()
+    case_agent_folder_shape_decides_the_flag()
+    case_agent_id_payload_sets_no_flag()
     case_stop_hook_active_passes()
     case_stop_no_flag_passes()
     case_sibling_import_failure_exits_zero()
