@@ -16628,6 +16628,12 @@ class ReviewQuotesFlag(ReviewGuardEnv):
     also changes a non-doc path is refused on Kind, or on Guard or check for a guard path. Without the flag the refusal stays
     (test_a_decision_record_refuses_the_docs_only_record)."""
 
+    def error_line(self, err):
+        """-> the `merge: error:` line(s) of a usage error. argparse's usage block names every flag, so a check on all of stderr passes on the usage alone."""
+        lines = [l for l in err.splitlines() if l.startswith("merge: error:")]
+        self.assertTrue(lines, "no `merge: error:` line in the usage error:\n" + err)
+        return " ".join(lines)
+
     def stamped_run(self, changed):
         """-> (rc, out, err) of the docs-only record with the flag, for the changed paths `changed`. Fails by name when the parser does not know the flag."""
         self.host.changed = changed
@@ -16660,8 +16666,18 @@ class ReviewQuotesFlag(ReviewGuardEnv):
         for kind in ("normal", "delete-only"):
             with self.subTest(kind=kind):
                 _out, err = self.assert_usage_error(*self.review_argv(kind, quotes=True))
-                self.assertIn("--quotes-matched", err, f"the usage error for --kind {kind} does not name the flag")
-                self.assertIn("docs-only", err, f"the usage error for --kind {kind} does not name the kind it needs")
+                self.assertIn("--quotes-matched", self.error_line(err), f"the usage error for --kind {kind} does not name the flag")
+                self.assertIn("docs-only", self.error_line(err), f"the usage error for --kind {kind} does not name the kind it needs")
+
+    def test_a_round_or_a_grant_under_the_flag_names_the_flag_in_its_refusal(self):
+        # Sibling first: the stamp with no round and no grant prints, so the refusals below are the round's or the grant's, read under the flag.
+        rc, out, err = self.stamped_run([("docs/a.md", "modified", 1)])
+        self.assertEqual(rc, 0, out + err)
+        grant = "#7, item 4 x, owner, 2026-11-12 14:13 CST"
+        for label, extra in (("a round", ("--round", "1:reviewer:sonnet:PASS")), ("a grant", ("--grant", grant))):
+            with self.subTest(extra=label):
+                _out, err = self.assert_usage_error(*self.review_argv("docs-only", quotes=True), *extra)
+                self.assertIn("--quotes-matched", self.error_line(err), f"the refusal of the stamp beside {label} does not name --quotes-matched")
 
 class ReviewGuardFiles(ReviewGuardEnv):
     """The guard and the kind read the files through the real Host.pr_files, so a rename counts by both its names and every page of the list is
