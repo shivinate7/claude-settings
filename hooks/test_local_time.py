@@ -150,6 +150,18 @@ def case_pointer_constant():
           "NOW_CENTRAL_POINTER is %r (module %s)" % (POINTER, LOAD_ERROR or "loaded"))
 
 
+def case_page_note_doc_names_the_feedback_log():
+    # The module docstring is the hook's own description, and the generated hook catalog reads it. Its --page-note line says the
+    # note is saved to the session's feedback log, the word the owner's feedback log has.
+    if LT is None:
+        check("local_time docstring: the --page-note line names the feedback log", False, missing_note())
+        return
+    line = next((l for l in (LT.__doc__ or "").splitlines() if l.startswith("- --page-note:")), "")
+    check("local_time docstring: the --page-note line saves the note to the session's feedback log",
+          "to the session's feedback log" in line,
+          "the --page-note line is %r" % line)
+
+
 def case_real_clock():
     if LT is None:
         check("real clock: one Central line", False, missing_note())
@@ -2583,6 +2595,7 @@ def main():
     try:
         case_table_in_process()
         case_pointer_constant()
+        case_page_note_doc_names_the_feedback_log()
         case_real_clock()
         case_no_tz_database()
         case_machine_zone_is_not_used()
