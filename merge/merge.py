@@ -306,8 +306,8 @@ def sh(args, cwd=None, input=None, env=None, timeout=None, live_stderr=False, st
         return 0, r.stdout.strip()
     return r.returncode, (r.stdout + r.stderr).strip()
 
-def git(cwd, *a, input=None):
-    return sh(["git", "-C", cwd, *a], input=input)
+def git(cwd, *a, input=None, stdout_only=False):
+    return sh(["git", "-C", cwd, *a], input=input, **({"stdout_only": True} if stdout_only else {}))
 
 def ancestor(cwd, tip, base):
     """True when `tip` is reachable from `base`, False when it is not, None when git could not tell. A shallow clone
@@ -716,7 +716,7 @@ class GitLock(Lock):
 
     def read(self, b, ref=None):
         ref = ref or lock_ref(b)
-        c, out, _ = retry_net(lambda: sh(["git", "-C", self.root, "ls-remote", "origin", ref], stdout_only=True), self.pause, what=f"the lock read {ref}")
+        c, out, _ = retry_net(lambda: git(self.root, "ls-remote", "origin", ref, stdout_only=True), self.pause, what=f"the lock read {ref}")
         if c:
             raise (NetStop if is_net(c, out) else Stop)("cannot read the merge lock " + LOCK_CITE + ": " + out)
         if not out:
@@ -2314,7 +2314,7 @@ def push_branch(wt, branch, lease=None, cite=""):
         raise Stop(f"the push of {branch} was refused. Nothing is on origin from this run. Run again.{' ' + cite if cite else ''}\n{out}")
 
 def origin_head(root, branch):
-    return git(root, "ls-remote", "origin", f"refs/heads/{branch}")[1].split("\t")[0]
+    return git(root, "ls-remote", "origin", f"refs/heads/{branch}", stdout_only=True)[1].split("\t")[0]
 
 def revert_claim(root, wt, branch, claim_sha):
     """Revert only while the origin head is the claim commit. Else the claim commit can be gone."""

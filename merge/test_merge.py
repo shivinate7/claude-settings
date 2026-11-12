@@ -1103,11 +1103,11 @@ class ClaudeMdFlag(Env):
     def unreadable(self, fail):
         """Patch merge.sh so the PR-paths read fails: `fail(args)` returns (rc, text) or raises. -> the list of args it saw."""
         real_sh, seen = merge.sh, []
-        def stub(args, cwd=None, input=None, env=None):
+        def stub(args, cwd=None, input=None, env=None, **k):
             if "diff" in args and any("..." in a for a in args):
                 seen.append(args)
                 return fail(args)
-            return real_sh(args, cwd=cwd, input=input, env=env)
+            return real_sh(args, cwd=cwd, input=input, env=env, **k)
         patch = unittest.mock.patch.object(merge, "sh", stub)
         patch.start(); self.addCleanup(patch.stop)
         return seen
@@ -1195,6 +1195,16 @@ class GitLockReadsStdoutOnly(Env):
         self.listing("not-a-sha\trefs/heads/merge-lock/main\n")
         with self.assertRaises(merge.Stop):
             self.lock.read("main")
+
+    def test_a_41_hex_or_a_64_hex_first_token_stops(self):
+        for tok in ("a" * 41, "a" * 64):
+            self.listing(f"{tok}\trefs/heads/merge-lock/main\n")
+            with self.assertRaises(merge.Stop, msg=tok):
+                self.lock.read("main")
+
+    def test_origin_head_ignores_a_stderr_line_on_an_empty_listing(self):
+        self.listing("", "warning: redirecting\n")
+        self.assertEqual(merge.origin_head(self.co, "feat"), "")
 
     def test_a_stderr_line_beside_a_real_listing_leaves_the_sha_alone(self):
         sha = "a" * 40
@@ -5042,10 +5052,10 @@ class GhHalf(Env):
         def push(wt, branch):
             pushed.append(branch)
             return real_push(wt, branch)
-        def git_fails(cwd, *a, input=None):
+        def git_fails(cwd, *a, input=None, **k):
             if pushed and a[:2] == ("fetch", "-q") and a[-1] == "+refs/heads/main:refs/remotes/origin/main":
                 return 1, msg
-            return real_git(cwd, *a, input=input)
+            return real_git(cwd, *a, input=input, **k)
         with unittest.mock.patch.object(merge, "push_branch", push), unittest.mock.patch.object(merge, "git", git_fails):
             return self.go()
 
@@ -5180,9 +5190,9 @@ class GhHalf(Env):
         def sh_answer(args, *a, **k):
             reply = gh(args) if gh and claimed and args[0] == "gh" else None
             return reply if reply is not None else real_sh(args, *a, **k)
-        def git_answer(cwd, *a, input=None):
+        def git_answer(cwd, *a, input=None, **k):
             reply = git_call(a) if git_call and claimed else None
-            return reply if reply is not None else real_git(cwd, *a, input=input)
+            return reply if reply is not None else real_git(cwd, *a, input=input, **k)
         with unittest.mock.patch.object(merge, "push_branch", push), unittest.mock.patch.object(merge, "sh", sh_answer), \
                 unittest.mock.patch.object(merge, "git", git_answer):
             rc, out = self.go(**gh_kw)
@@ -5419,11 +5429,11 @@ class GhHalf(Env):
         # Windows credential manager: ls-remote of the lock ref fails once, then works
         real_git = merge.git
         hits = []
-        def flaky(cwd, *a, input=None):
+        def flaky(cwd, *a, input=None, **k):
             if a[:1] == ("ls-remote",) and a[-1] == "refs/heads/merge-lock/main" and not hits:
                 hits.append(1)
                 return 1, "unexpected end of JSON input"
-            return real_git(cwd, *a, input=input)
+            return real_git(cwd, *a, input=input, **k)
         with unittest.mock.patch.object(merge, "git", flaky):
             rc, out = self.go()
         self.assertEqual(hits, [1])  # the first read failed
@@ -8494,7 +8504,7 @@ class GitLockReadExhaustion(unittest.TestCase):
     def read_fails(self, reply):
         """-> (the Stop the read raised, its ls-remote calls, its retry pauses)."""
         calls, pauses = [], []
-        def fake_git(cwd, *a, input=None):
+        def fake_git(cwd, *a, input=None, **k):
             calls.append(a)
             return reply
         with unittest.mock.patch.object(merge, "git", fake_git):
@@ -11211,14 +11221,14 @@ class GitLockExtendsForRateWaits(Env):
         self.token = self.glock.acquire("main", ttl)
         self.gh_calls, self.gh, self.cmds, self.lose_push = 0, [(0, "[]")], [], False  # cmds: every non-gh command after the take
         real = merge.sh
-        def fake_sh(args, cwd=None, input=None, env=None):
+        def fake_sh(args, cwd=None, input=None, env=None, **k):
             if args[0] != "gh":
                 self.cmds.append(list(args))
                 if self.lose_push and "push" in args and not args[-1].startswith(":"):  # the next ref update lands on origin, and its reply is lost
                     self.lose_push = False
-                    real(args, cwd=cwd, input=input, env=env)
+                    real(args, cwd=cwd, input=input, env=env, **k)
                     return 128, NET_HOST
-                return real(args, cwd=cwd, input=input, env=env)
+                return real(args, cwd=cwd, input=input, env=env, **k)
             self.gh_calls += 1
             return self.gh[min(self.gh_calls, len(self.gh)) - 1]
         p = unittest.mock.patch.object(merge, "sh", fake_sh)
