@@ -3090,7 +3090,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
         drop_worktree(root, tmp, wt)
     short = head[:9]
     report_lines = ["merge: clashes with other PRs that this lint does not count (report only):", *reports] if reports else []
-    if state == "unknown" and any(NO_CI_WHY in l for l in lines):  # ci-job found no workflow with a `checks` job: a repo with no CI, which no flag lifts
+    if state == "unknown" and any(NO_CI_WHY in l for l in lines):  # ci-job found no workflow folder or no workflow file: a repo with no CI, which no flag lifts. A workflow with no `checks` job stays a liftable unknown
         raise Stop("\n".join([f"the lint of {short} against {base} has no CI to run:", *lines, STARTER_CI_FIX + " Push, then run `merge --lane-lint` again. " + LANE_LINT_CITE]))
     if state == "pass":
         named = f" ({len(lines)} CI step{'s' if len(lines) != 1 else ''} skipped: {', '.join(lines)})" if lines else ""

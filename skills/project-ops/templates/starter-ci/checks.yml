@@ -2,11 +2,13 @@
 # The `checks` job runs three quick checks: each relative markdown link resolves, each Python and shell script parses, each JSON
 # file parses. The all-jobs-passed job is the one check branch protection requires (decision same-check-kinds); add each job
 # you add later to its `needs`. Replace both claude-settings pins (the 40-hex words after `@`) with the current head of
-# shivinate7/claude-settings main before you commit: a tag or a branch can move under the check.
+# shivinate7/claude-settings main before you commit: a tag or a branch can move under the check. Keep ready_for_review in the
+# pull_request types: GitHub's default types omit it, and a red draft marked ready would rerun nothing.
 name: checks
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
 

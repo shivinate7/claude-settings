@@ -4,10 +4,12 @@
     python3 quick_checks.py links|scripts|json
 
 Run in the checkout root. `links`: each relative link in a tracked markdown file resolves to a file or folder. `scripts`: each tracked
-Python file compiles and each shell file passes `bash -n`. `json`: each tracked JSON file parses. Exit 0 when every file of its kind
+Python file compiles and each shell file passes `bash -n`. `json`: each tracked JSON file parses; a file with a name that tools read as
+JSON with comments (JSONC_NAMES) may hold `//` and `/* */` comments. Exit 0 when every file of its kind
 passes (none is a pass), 1 when one fails, 2 on a usage error. Each failing file is named on its own `FAIL <path>: <why>` line.
 """
 import ast
+import fnmatch
 import json
 import os
 import re
@@ -16,11 +18,14 @@ import sys
 import urllib.parse
 
 MODES = ("links", "scripts", "json")
-# `[text](target)` and `![alt](target)`; the target ends at the first space (a title follows) or the closing paren.
-INLINE_LINK = re.compile(r"!?\[[^\]\n]*\]\(\s*(<[^>\n]*>|[^)\s]*)[^)\n]*\)")
-REFERENCE_LINK = re.compile(r"^ {0,3}\[[^\]\n]+\]:\s*(<[^>\n]*>|\S+)", re.M)
+# The start of `[text](target)` and `![alt](target)`; link_targets reads the target after it.
+INLINE_LINK_START = re.compile(r"!?\[[^\]\n]*\]\(\s*")
+# A reference definition; a footnote definition `[^1]: text` is no link.
+REFERENCE_LINK = re.compile(r"^ {0,3}\[(?!\^)[^\]\n]+\]:\s*(<[^>\n]*>|\S+)", re.M)
 CODE_SPAN = re.compile(r"(`+)(?:(?!\1).)+?\1")
-FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+FENCE = re.compile(r"^[ \t]*(`{3,}|~{3,})")  # at any indent: a fence in a list item sits deeper than 3 spaces
+# The names tools read as JSON with comments: TypeScript and JavaScript configs, ESLint's, and the dev container's.
+JSONC_NAMES = ("tsconfig*.json", "jsconfig.json", ".eslintrc.json", "devcontainer.json")
 EXTERNAL = re.compile(r"^(?:[a-zA-Z][a-zA-Z0-9+.-]*:|//|#)")  # a scheme, a protocol-relative URL, or a same-page anchor
 
 
@@ -58,7 +63,7 @@ def link_problem(path, target):
     target = target.strip("<>")
     if not target or EXTERNAL.match(target):
         return None
-    target = urllib.parse.unquote(re.split(r"[#?]", target, 1)[0])
+    target = urllib.parse.unquote(re.split(r"[#?]", target, maxsplit=1)[0])
     if not target:
         return None
     base = "." if target.startswith("/") else os.path.dirname(path) or "."
@@ -67,9 +72,28 @@ def link_problem(path, target):
     return None
 
 
+def inline_target(text, start):
+    """The target of an inline link whose `(` and spaces end at `start`: `<...>`, or the run up to a space or the `)` that
+    closes the link, with balanced parentheses inside (`foo_(bar).md`)."""
+    if text[start:start + 1] == "<":
+        end = text.find(">", start)
+        newline = text.find("\n", start)
+        return text[start:end + 1] if end != -1 and (newline == -1 or end < newline) else ""
+    depth, i = 0, start
+    while i < len(text) and not text[i].isspace():
+        if text[i] == "(":
+            depth += 1
+        elif text[i] == ")":
+            if depth == 0:
+                break
+            depth -= 1
+        i += 1
+    return text[start:i]
+
+
 def check_links(path, data):
-    text = outside_code(data.decode("utf-8", "replace"))
-    targets = [m.group(1) for m in INLINE_LINK.finditer(text)] + [m.group(1) for m in REFERENCE_LINK.finditer(text)]
+    text = outside_code(data.decode("utf-8-sig", "replace"))
+    targets = [inline_target(text, m.end()) for m in INLINE_LINK_START.finditer(text)] + [m.group(1) for m in REFERENCE_LINK.finditer(text)]
     return [p for p in (link_problem(path, t) for t in targets) if p]
 
 
@@ -84,9 +108,36 @@ def check_scripts(path, data):
     return [] if r.returncode == 0 else ["bash -n fails: %s" % " ".join(r.stderr.split())]
 
 
+def strip_comments(text):
+    """The text without `//` and `/* */` comments. A string is read as JSON reads it, so `//` or `/*` inside one stays. An unterminated
+    block comment is left in the text, where the JSON parser rejects it."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == '"':
+            j = i + 1
+            while j < n and text[j] not in '"\n':
+                j += 2 if text[j] == "\\" else 1
+            out.append(text[i:j + 1])
+            i = j + 1
+        elif text.startswith("//", i):
+            while i < n and text[i] != "\n":
+                i += 1
+        elif text.startswith("/*", i) and "*/" in text[i + 2:]:
+            i = text.index("*/", i + 2) + 2
+            out.append(" ")
+        else:
+            out.append(c)
+            i += 1
+    return "".join(out)
+
+
 def check_json(path, data):
     try:
-        json.loads(data.decode("utf-8"))
+        text = data.decode("utf-8-sig")  # a byte order mark is no part of the JSON
+        if any(fnmatch.fnmatchcase(os.path.basename(path).lower(), pattern) for pattern in JSONC_NAMES):
+            text = strip_comments(text)
+        json.loads(text)
     except (ValueError, UnicodeDecodeError) as e:
         return ["json does not parse: %s" % e]
     return []

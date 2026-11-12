@@ -1429,7 +1429,6 @@
 - repo-dir-var-unexpanded: `-C "$HOME/x"` is not expanded (only `~` is), so the merge is denied. Decision: merge-confirm-repo
 - merge-dev-flag-stripped: merge/launch.py strips `--dev`, so `merge --dev N --confirm` is refused in the cloud. Decision: merge-confirm-repo
 - launch-checkout-read-as-pr: `python3 merge/launch.py <checkout> N --confirm` parses the checkout as the PR number (merge/launch.py). Decision: merge-confirm-repo
-- job-workflow-unreadable-skipped: `job_workflow` (lint/workflow_steps.py) skips an unreadable workflow file with no log. Decision: merge-confirm-repo
 - ci-job-discovery-no-case: lint/test_ci_job.py has no case for default workflow discovery with 0 or 2 files. Decision: merge-confirm-repo
 - merge-env-c-allowed: `env -C <dir> merge N --confirm` is allowed in a cloud session, because `dir_before_segment` never applies env's `-C` (hooks/guard_core.py), so the merge is judged in the shell's directory. Decision: merge-confirm-repo
 - merge-python-w-script: `python3 -W ignore merge/merge.py ...` reads `ignore` as the script, so `merge_tool_args` does not see a merge tool call and the call is not judged (hooks/guard_merge.py `merge_tool_args`). Decision: merge-confirm-repo
