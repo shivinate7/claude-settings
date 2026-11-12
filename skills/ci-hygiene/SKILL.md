@@ -131,7 +131,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    conflict)` names a PR that conflicts with the new main. A line that says `unknown` does not say there is a conflict. Route a PR only when the
    conflict is the line's only reason. A line that also says the log was edited or is not done needs the full review.
    The runner names each conflicting PR to its lane and picks nothing per PR, so no coordinator pick is
-   needed. Each named lane does these acts in its own checkout:
+   needed. The record already holds the route (record `pr-review-record`, The review a changed head owes):
+   a conflicted merge of main takes one fix verifier. Each named lane does these acts in its own checkout:
    1. Merge main into the lane branch once: `git fetch origin main`, then `git merge origin/main`.
       Resolve the conflicted paths only. Never rebase, never force-push, never edit a path git merged
       without conflict. Push the merge. A review log can only name a head that is live.
@@ -150,8 +151,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    round 3 and its net-value test. A PR that merges clean needs no fix verifier and no new log: the log
    stays valid (record `pr-review-record`, clean merge survival). It still needs item 4 of this list, because the
    lint verdict names an exact head. A refused chain means that the lane gets the full review of its
-   new head. Two examples: a second fix verifier on a head whose first fix verifier is open, and a
-   merge whose second parent is not on main. The lane never works around the refusal. A FAIL starts a
+   new head. Two examples: a second fix verifier on a head whose first fix verifier is open, and, after a
+   PASS fix verifier, a merge whose second parent is not on main. The first fix verifier on a log with
+   no Fix check line meets no merge-shape test, so the verifier's read is the check there. The lane never works around the refusal. A FAIL starts a
    new lane at round 1.
    Batch across sessions too (`git-integration-branch-merge`).
 9. **Wait without loops.** Wait for the CI-wake notice that follows `gh pr ready`. A push starts no
