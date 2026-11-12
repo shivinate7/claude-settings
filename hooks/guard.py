@@ -63,8 +63,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        and a read that fails refuses. An override lifts it.
   branch-slug-no-git   deny. A call that creates a branch whose name holds the word git: `checkout -b|-B|--orphan`,
                        `switch -c|-C|--create|--force-create|--orphan`, `branch <name>`, `worktree add -b|-B`, and a
-                       `push` to a destination the clone holds no remote-tracking ref for. A name that already
-                       exists, a name without the word, a read that fails and quoted text pass.
+                       `push` to a destination the clone holds neither as a local branch nor as a remote-tracking ref. A name
+                       that already exists, a new local branch made from `<remote>/<same name>`, a name without the word, a read that fails and quoted text pass.
   pointer-edit        deny. A Write, Edit, MultiEdit or NotebookEdit whose target is one of the
                        pointer checkout's own files. The pointer's `.git`, a linked worktree under
                        `.claude/worktrees/` or elsewhere, a target outside it, an unreadable or
@@ -555,7 +555,7 @@ while True:
             worktree_remove_forced,
         )
         from guard_branch_worktree import (
-            BRANCH_SLUG_REFUSE_REASON, TWO_WORKTREES_REFUSE_REASON, branch_slug_hit, two_worktrees_hit,
+            TWO_WORKTREES_REFUSE_REASON, branch_slug_hit, two_worktrees_hit,
         )
         _loading = "guard_shared_tree"
         from guard_shared_tree import (
@@ -4363,9 +4363,9 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
         matched = two_worktrees_hit(segment, head_root(segment, here))
         if matched:
             refuse(tool, "deny", "two-worktrees-one-branch", TWO_WORKTREES_REFUSE_REASON, matched)
-        matched = branch_slug_hit(segment, head_root(segment, here))
+        matched, slug_reason = branch_slug_hit(segment, head_root(segment, here))
         if matched:
-            refuse(tool, "deny", "branch-slug-no-git", BRANCH_SLUG_REFUSE_REASON, matched)
+            refuse(tool, "deny", "branch-slug-no-git", slug_reason, matched)
 
     # 1c. A git write whose own trace is silenced, by a redirect of either stream to a null
     # device, or, on the measured subcommands, by git's own quiet flag alone. Placed after the

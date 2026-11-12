@@ -260,10 +260,12 @@ def two_worktrees_hit(segment: str, root: str) -> str:
 #   `checkout -b|-B|--orphan <name>`, `switch -c|-C|--create|--force-create|--orphan <name>`,
 #   `branch <name>` (flags that only tune the create are skipped; any other flag is not read),
 #   `worktree add -b|-B <name>`, and `push <remote> <spec>` whose spec and destination hold the word
-#   and whose destination the clone holds no remote-tracking ref for.
-# A name that already exists keeps its name: a local branch for the first four forms, a remote-tracking
-# ref for the push. The word is the lowercase substring `git`, as the owner's check reads it. A read that
-# fails passes, since nothing then shows a creation. The remedy names no command of the refused form
+#   and whose destination the clone holds neither as a local branch nor as a remote-tracking ref.
+# A name that already exists keeps its name: a local branch, or a new local branch made from
+# `<remote>/<same name>` (a remote branch brought local), for the first four forms; a local branch or a
+# remote-tracking ref for the push. The word is the lowercase substring `git`, as the owner's rule reads it.
+# A read that fails passes, since nothing then shows a creation. A push refusal has its own reason: the
+# branch may sit on origin, never fetched. Neither remedy names a command of the refused form
 # (rule git-remedy-never-names-target).
 BRANCH_SLUG_REFUSE_REASON = (
     "Rule (branch-slug-no-git): this call creates a branch whose name holds the word git. Claude Code's "
@@ -274,6 +276,15 @@ BRANCH_SLUG_REFUSE_REASON = (
     "(decision branch-slug-no-git, a new branch name never holds the word git)"
 )
 BRANCH_SLUG_WORD = "git"
+BRANCH_SLUG_PUSH_REFUSE_REASON = (
+    "Rule (branch-slug-no-git): this push would create a branch whose name holds the word git, and this "
+    "clone holds that name neither as a local branch nor as a remote-tracking ref. Claude Code's own "
+    "worktree check refuses any later command of yours that names such a branch. "
+    "Remedy: the branch may already exist on origin and never have been fetched, so fetch origin and "
+    "retry the push. If it is still missing, the name is new: pick a slug without that word and push "
+    "under that name. "
+    "(decision branch-slug-no-git, a new branch name never holds the word git)"
+)
 # `git branch` flags that tune a create and take no value. Any other flag makes the call one this rule
 # does not read: a delete, a rename, a copy, a list or an upstream edit.
 _BRANCH_CREATE_FLAGS = {"-f", "--force", "-t", "--track", "--no-track", "-q", "--quiet", "--create-reflog"}
@@ -359,9 +370,22 @@ def _remote_ref_exists(root: str, remote: str, name: str):
     return any(ref.split("/", 3)[-1] == name for ref in answer.stdout.splitlines())
 
 
+def _made_from_remote_branch(root: str, name: str, args):
+    """True when a word of ARGS is `<remote>/<name>` and that remote-tracking ref exists: the new local
+    branch NAME is then a remote branch brought local, which is no new name. None when git cannot say."""
+    for arg in args:
+        if arg.endswith("/" + name) and not arg.startswith("-"):
+            answer = _git(root, "show-ref", "--verify", "-q", "refs/remotes/" + arg)
+            if answer is None or answer.returncode not in (0, 1):
+                return None
+            if answer.returncode == 0:
+                return True
+    return False
+
+
 def _new_push_names(args, root: str):
     """The destinations of a push whose spec and destination both hold the word, for each of which the
-    clone holds no remote-tracking ref. A push that names no refspec, a deletion, `--all`, `--mirror` and a
+    clone holds neither a local branch nor a remote-tracking ref. A push that names no refspec, a deletion, `--all`, `--mirror` and a
     tags-only push return []: push_refspecs reads none of them, and none names a branch to create."""
     named = push_refspecs(args)
     if named is None or not named[1]:
@@ -373,24 +397,28 @@ def _new_push_names(args, root: str):
         # holds the word as a command, not as a name) is no branch name this can read
         if not dest or dest.startswith("refs/") or any(char in spec + dest for char in "*$`("):
             continue
-        if BRANCH_SLUG_WORD in spec and BRANCH_SLUG_WORD in dest and _remote_ref_exists(root, remote, dest) is False:
+        if (BRANCH_SLUG_WORD in spec and BRANCH_SLUG_WORD in dest
+                and _remote_ref_exists(root, remote, dest) is False
+                and _local_branch_exists(root, dest) is False):
             found.append(dest)
     return found
 
 
-def branch_slug_hit(segment: str, root: str) -> str:
-    """Return the matched text when one segment creates a branch whose name holds the word git (see
-    BRANCH_SLUG_REFUSE_REASON), else ''. ROOT is the tree the call runs in. Git is asked only for a call
-    that names the word, once per name."""
+def branch_slug_hit(segment: str, root: str):
+    """Return (matched text, reason) when one segment creates a branch whose name holds the word git, else
+    ('', ''). ROOT is the tree the call runs in. Git is asked only for a call that names the word, once per
+    name. A push gets BRANCH_SLUG_PUSH_REFUSE_REASON, every other form BRANCH_SLUG_REFUSE_REASON."""
     for subcommand, args in git_calls(segment):
         if subcommand == "push":
-            names = _new_push_names(args, root)
+            names, reason = _new_push_names(args, root), BRANCH_SLUG_PUSH_REFUSE_REASON
         else:
             names = [name for name in new_branch_names(subcommand, args)
-                     if BRANCH_SLUG_WORD in name and _local_branch_exists(root, name) is False]
+                     if BRANCH_SLUG_WORD in name and _local_branch_exists(root, name) is False
+                     and _made_from_remote_branch(root, name, args) is False]
+            reason = BRANCH_SLUG_REFUSE_REASON
         if names:
-            return " ".join(["git", subcommand] + list(args)).strip()
-    return ""
+            return " ".join(["git", subcommand] + list(args)).strip(), reason
+    return "", ""
 
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
