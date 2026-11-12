@@ -180,15 +180,92 @@ class LiftGuardsTests(RepoCase):
         }))
         return ruled_store.open_entries(ruled_store.ruled_entries(repo), repo)
 
-    def test_the_switch_is_off_and_lifts_no_guard(self):
-        self.assertIs(ruled_store.ENTRIES_LIFT_GUARDS, False, "ENTRIES_LIFT_GUARDS is not False")
-        self.assertEqual(ruled_store.lifted_guards(self.open_guarded_entries()), [],
-                         "the switch is off, yet a guard was lifted")
+    def test_the_switch_defaults_on_so_an_open_entry_lifts_its_guard(self):
+        self.assertIs(ruled_store.ENTRIES_LIFT_GUARDS, True, "ENTRIES_LIFT_GUARDS is not True")
+        self.assertEqual(ruled_store.lifted_guards(self.open_guarded_entries()), ["guard-apps"],
+                         "the switch is on by default, yet an open entry's guard was not lifted")
+
+    def test_switch_off_lifts_no_guard(self):
+        with mock.patch.object(ruled_store, "ENTRIES_LIFT_GUARDS", False):
+            got = ruled_store.lifted_guards(self.open_guarded_entries())
+        self.assertEqual(got, [], "the switch is off, yet %r was lifted" % got)
 
     def test_switch_on_lifts_the_guard_refs_of_open_entries_only(self):
         with mock.patch.object(ruled_store, "ENTRIES_LIFT_GUARDS", True):
             got = ruled_store.lifted_guards(self.open_guarded_entries())
         self.assertEqual(got, ["guard-apps"], "switch on lifted %r, want only the open entry's guard-rule ref" % got)
+
+
+def guard_entry(rid, at=fixture.AT, guard_ref="guard-apps", status="open"):
+    """A store entry whose supersedes names one guard rule: the shape ruling_for_guard reads."""
+    return fixture.entry(rid, at=at, status=status, supersedes=[{"kind": "guard-rule", "ref": guard_ref}])
+
+
+class RulingForGuardTests(unittest.TestCase):
+    def test_the_newest_open_entry_that_names_the_guard_is_returned(self):
+        entries = [guard_entry("older", at="2026-11-10T09:00:00-06:00"),
+                   guard_entry("newest", at="2026-11-12T09:00:00-06:00"),
+                   guard_entry("middle", at="2026-11-11T09:00:00-06:00")]
+        with mock.patch.object(ruled_store, "ENTRIES_LIFT_GUARDS", True):
+            got = ruled_store.ruling_for_guard("guard-apps", entries)
+        self.assertIsNotNone(got, "no entry returned, though three open entries name the guard")
+        self.assertEqual(got["id"], "newest", "returned %r, want the newest open entry" % got["id"])
+
+    def test_the_one_open_entry_that_names_the_guard_is_returned(self):
+        with mock.patch.object(ruled_store, "ENTRIES_LIFT_GUARDS", True):
+            got = ruled_store.ruling_for_guard("guard-apps", [guard_entry("only")])
+        self.assertIsNotNone(got, "no entry returned for the one open entry that names the guard")
+        self.assertEqual(got["id"], "only", "returned %r, want the one open entry" % got["id"])
+
+    def test_switch_off_gives_none_though_an_open_entry_names_the_guard(self):
+        entries = [guard_entry("only")]
+        with mock.patch.object(ruled_store, "ENTRIES_LIFT_GUARDS", True):
+            on = ruled_store.ruling_for_guard("guard-apps", entries)
+        self.assertIsNotNone(on, "control: the switch on finds the entry")
+        with mock.patch.object(ruled_store, "ENTRIES_LIFT_GUARDS", False):
+            off = ruled_store.ruling_for_guard("guard-apps", entries)
+        self.assertIsNone(off, "the switch is off, yet an entry was returned: %r" % off)
+
+    def test_a_closed_entry_is_ignored(self):
+        entries = [guard_entry("shut-newest", at="2026-11-12T09:00:00-06:00", status="closed"),
+                   guard_entry("open-older", at="2026-11-10T09:00:00-06:00")]
+        with mock.patch.object(ruled_store, "ENTRIES_LIFT_GUARDS", True):
+            got = ruled_store.ruling_for_guard("guard-apps", entries)
+            only_shut = ruled_store.ruling_for_guard("guard-apps", [guard_entry("shut", status="closed")])
+        self.assertIsNotNone(got, "no entry returned, though an open entry names the guard")
+        self.assertEqual(got["id"], "open-older", "returned %r, want the open entry, not the closed one" % got["id"])
+        self.assertIsNone(only_shut, "a closed entry alone was returned: %r" % only_shut)
+
+    def test_a_ref_with_trailing_text_matches_by_its_first_token(self):
+        trailing = fixture.entry("trailing", supersedes=[{"kind": "guard-rule",
+                                                          "ref": "guard-apps check the access rule"}])
+        with mock.patch.object(ruled_store, "ENTRIES_LIFT_GUARDS", True):
+            got = ruled_store.ruling_for_guard("guard-apps", [trailing])
+            longer = ruled_store.ruling_for_guard("guard-apps", [guard_entry("longer", guard_ref="guard-apps-extra")])
+        self.assertIsNotNone(got, "a ref with trailing text did not match by its first token")
+        self.assertEqual(got["id"], "trailing", "returned %r for the trailing-text ref" % got["id"])
+        self.assertIsNone(longer, "a ref whose first token is a longer name matched: %r" % longer)
+
+    def test_only_a_guard_rule_ref_counts_and_another_guard_gives_none(self):
+        test_kind = fixture.entry("test-kind", supersedes=[{"kind": "test", "ref": "guard-apps"}])
+        with mock.patch.object(ruled_store, "ENTRIES_LIFT_GUARDS", True):
+            got_test = ruled_store.ruling_for_guard("guard-apps", [test_kind])
+            got_other = ruled_store.ruling_for_guard("guard-other", [guard_entry("named")])
+        self.assertIsNone(got_test, "a test ref matched a guard name: %r" % got_test)
+        self.assertIsNone(got_other, "an entry naming another guard matched: %r" % got_other)
+
+
+class GuardRulingLineTests(unittest.TestCase):
+    def test_the_line_names_the_id_the_owner_time_and_the_ruling(self):
+        entry = fixture.entry("ruled-apps-keep", ruling="Owner: keep the apps' access as is.")
+        self.assertEqual(ruled_store.guard_ruling_line(entry),
+                         "ruled by ruled-apps-keep (owner %s): Owner: keep the apps' access as is." % fixture.AT)
+
+    def test_the_ruling_is_cut_to_one_hundred_characters(self):
+        ruling = "a" * 100 + "TAILMARK" + "b" * 40
+        got = ruled_store.guard_ruling_line(fixture.entry("long", ruling=ruling))
+        self.assertEqual(got, "ruled by long (owner %s): %s" % (fixture.AT, ruling[:100]),
+                         "the guard line is not the ruling cut to 100 characters: %r" % got)
 
 
 class CheckEntryTests(unittest.TestCase):
