@@ -33,6 +33,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
 sys.path.insert(0, HERE)
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import layout  # noqa: E402  the one home of where a repo keeps its decisions (lint/layout.py)
+import diff_moves  # noqa: E402  the one home of a moved line (lint/diff_moves.py)
 
 class DatedText:
     """A date pattern that skips a date a rule or a limit runs on: the word effective, valid, until or expires,
@@ -220,22 +221,31 @@ def language_of(path, std):
 
 
 def added_lines(base, std):
-    """Map each changed path in a scanned language to (language, the set of line numbers the diff adds)."""
+    """Map each changed path in a scanned language to (language, the set of line numbers the diff adds).
+
+    A line the same diff deletes, with the same text, is a move and not added (diff_moves). A move into an
+    untracked file has no diff, so it is no move: that file is not in the diff and stays unchecked here."""
     git("rev-parse", "--verify", "--quiet", base + "^{commit}")
     fork = git("merge-base", base, "HEAD").strip()
     diff = git("diff", "-U0", "-M", "--no-color", "--no-ext-diff", fork)
-    added, path = {}, None
+    left = diff_moves.deleted_texts(diff)
+    added, path, header, line = {}, None, False, 0
     for row in diff.split("\n"):
-        if row.startswith("+++ "):
+        if row.startswith("diff --git "):
+            path, header = None, True
+        elif header and row.startswith("+++ "):
             path = None if row == "+++ /dev/null" else row[6:].split("\t")[0]
             lang = language_of(path, std) if path else None
             if lang is None:
                 path = None
             else:
                 added.setdefault(path, (lang, set()))
-        elif path and (m := HUNK.match(row)):
-            start, count = int(m.group(1)), int(m.group(2) or 1)
-            added[path][1].update(range(start, start + count))
+        elif (m := HUNK.match(row)):
+            header, line = False, int(m.group(1))
+        elif not header and row.startswith("+"):
+            if path and not diff_moves.take_move(left, row[1:]):
+                added[path][1].add(line)
+            line += 1
     return added
 
 
