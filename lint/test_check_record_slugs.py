@@ -151,10 +151,11 @@ class RecordSlugsTests(unittest.TestCase):
                              capture_output=True, text=True, check=True).stdout.strip()
         return os.path.join(self.tree, ".git", "objects", sha[:2], sha[2:])
 
-    def roadmap(self, *slugs):
-        """Point refs/remotes/origin/roadmap at a commit that holds one step file for each slug. The commit is built
-        in a temp index, so HEAD and the working tree do not move."""
-        env = dict(os.environ, GIT_INDEX_FILE=os.path.join(self.tree, ".git", "roadmap-index"),
+    def commit_files(self, files, parent=None):
+        """The sha of a commit of `files` (path -> text), built in a temp index so HEAD and the working tree do not
+        move. With `parent`, the commit starts from that commit's tree and keeps its other files; without, it holds
+        only `files`."""
+        env = dict(os.environ, GIT_INDEX_FILE=os.path.join(self.tree, ".git", "temp-index"),
                    GIT_AUTHOR_NAME="test", GIT_AUTHOR_EMAIL="test@example.com",
                    GIT_COMMITTER_NAME="test", GIT_COMMITTER_EMAIL="test@example.com")
 
@@ -163,11 +164,21 @@ class RecordSlugsTests(unittest.TestCase):
                                  env=env, input=stdin)
             return out.stdout.strip()
 
-        run("read-tree", "--empty")
-        for slug in slugs:
-            blob = run("hash-object", "-w", "--stdin", stdin=STEP_JSON)
-            run("update-index", "--add", "--cacheinfo", "100644,%s,roadmap/data/steps/%s.json" % (blob, slug))
-        run("update-ref", "refs/remotes/origin/roadmap", run("commit-tree", run("write-tree"), "-m", "roadmap"))
+        run("read-tree", parent or "--empty")
+        for rel, text in files.items():
+            blob = run("hash-object", "-w", "--stdin", stdin=text)
+            run("update-index", "--add", "--cacheinfo", "100644,%s,%s" % (blob, rel))
+        return run("commit-tree", run("write-tree"), *(["-p", parent] if parent else []), "-m", "test commit")
+
+    def roadmap(self, *slugs):
+        """Point refs/remotes/origin/roadmap at a commit that holds one step file for each slug."""
+        files = {"roadmap/data/steps/%s.json" % slug: STEP_JSON for slug in slugs}
+        self.git("update-ref", "refs/remotes/origin/roadmap", self.commit_files(files))
+
+    def main_moves_to(self, rel, text):
+        """Move origin/main one commit on, with `rel` set to `text`. Its other files stay as they were, and a branch's
+        merge base stays where it was."""
+        self.git("update-ref", "refs/remotes/origin/main", self.commit_files({rel: text}, parent=self.base_sha()))
 
     def printed_total(self, out, total):
         """True when the output prints `total` as a number of its own."""
@@ -715,6 +726,39 @@ class RecordSlugsTests(unittest.TestCase):
         sha = self.base_sha()[:7]  # a real commit on origin/main, so the new line's Fix is valid
         self.put(DEBT_NOTES, NOTES_HEAD + old + "- new-note: a gap. Fix: already fixed on main %s\n" % sha)
         self.commit_change()
+        self.assert_passes()
+
+    def test_none_note_with_a_date_that_is_not_real_is_red(self):
+        self.add_note("- new-note: a gap. Fix: none — owner decides. Until: 2026-02-30\n")
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.failed_about(out, "new-note", DEBT_NOTES), out)
+
+    def test_ratchet_at_full_size_edit_that_removes_a_fix_is_red(self):
+        # Full size: 1,500 bullets, every third with no Fix, so 500 count at the base. One edit drops a Fix: 501.
+        lines = [NOTES_HEAD] + [
+            "- full-%04d: a gap, no fix named.\n" % n if n % 3 == 0
+            else "- full-%04d: a gap. Fix: already fixed on main 1a2b3c4\n" % n for n in range(1500)]
+        self.put(DEBT_NOTES, "".join(lines))
+        self.commit_base()
+        lines[2] = "- full-0001: a gap, its Fix removed.\n"  # lines[1] is full-0000, so lines[2] is full-0001
+        self.put(DEBT_NOTES, "".join(lines))
+        self.commit_change()
+        rc, out = self.lint()
+        self.assertEqual(rc, 1, out)
+        self.assertTrue(self.printed_total(out, 501), out)
+
+    def test_ratchet_branch_forked_before_main_lowered_its_count_is_not_blamed(self):
+        # The merge base holds two bullets with no Fix. The branch rewords one and keeps two. Then origin/main moves on
+        # and fixes the other, so main holds one. The branch is judged against its merge base: two, not one.
+        self.put(DEBT_NOTES, NOTES_HEAD + OLD_NOTE + "- second-note: a gap, no fix named.\n")
+        self.commit_base()
+        merge_base = self.base_sha()[:7]
+        self.put(DEBT_NOTES, NOTES_HEAD + "- old-note: an old gap, reworded. Fix: pin the base.\n"
+                 + "- second-note: a gap, no fix named.\n")
+        self.commit_change()
+        self.main_moves_to(DEBT_NOTES, NOTES_HEAD + OLD_NOTE
+                           + "- second-note: a gap. Fix: already fixed on main %s\n" % merge_base)
         self.assert_passes()
 
 
