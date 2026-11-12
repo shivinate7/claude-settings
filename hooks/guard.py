@@ -368,6 +368,11 @@ Other tools, in `judge` order:
                        `model` or no `source_url`; a value that is not text, or is empty or only whitespace once
                        stripped, counts as missing. A call with no lane tag passes. The deny reason names both
                        fields. Runs after lane-repo-tag. An override lifts it. (agent-model-cap)
+  lane-title-slug      deny. A `create_session` call with a lane tag (as for lane-effort-pin) whose `title` does
+                       not open, after leading blanks, with LANE_TITLE_OPENING (shared_names), cut from the
+                       form LANE_TITLE_FORM the deny reason prints: `Lane <branch slug>:`. A missing, empty or
+                       non-text title is refused. A call with no lane tag passes. Runs after lane-start-settings.
+                       An override lifts it. (agent-model-cap)
   load-brake           deny. On a local session, a lane-start call, an agent's shell or file write, or a lane
                        session's own shell or file write, when the machine is busy (lane starts only) or full. A
                        lane session is one whose own newest get_session record carries `cs-build:lane` and no other
@@ -6181,7 +6186,7 @@ def judge(payload) -> None:
     if lane_missing:
         refuse(tool, "deny", "lane-start-settings", LANE_START_SETTINGS_REASON, lane_missing)
 
-    # 9b2d. The lane title: a lane session's title opens with `Lane <branch slug>:`. After the start settings, so a call
+    # 9b2d. The lane title: a lane's title opens with `Lane <branch slug>:`. After the start settings, so a call
     # that breaks both reads the settings first. An override lifts it.
     lane_title = lane_title_hit(tool, tool_input)
     if lane_title:

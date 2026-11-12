@@ -147,14 +147,16 @@ the roadmap page, because the live check matches the full tag.
 whose input has no `model` or no `source_url`; an empty or whitespace-only value counts as missing. A lane with no
 repo has nothing to work in. A lane with no model starts on the coordinator's model, not the lane row's. The coordinator
 passes both on every lane start. The rule runs after `lane-repo-tag`. An owner override lifts it.
-Known gaps: a lane tag set after the start is not judged, and a lane tag sent to `start_session` is not
-judged (both inherited from the lane effort pin and the lane repo tag). The rule checks that a model is
-present, not which model.
+Known gaps: a lane tag set after the start is not judged, and `start_session` is not judged (both inherited from the
+lane effort pin and the lane repo tag): only `create_session` tagged `cs-build:lane` is a lane start to the guard,
+because `start_session` carries no tags field. Mac lanes start by `start_session` (decision `lanes-start-as-agents`),
+so they pass this rule unjudged; the owner decides whether to judge them. The rule checks that a model is present, not
+which model.
 
 **The lane title.** Guard rule `lane-title-slug` refuses a `create_session` call tagged `cs-build:lane` whose `title`
-does not open with `Lane <branch slug>:` (`LANE_TITLE_OPENING` in `hooks/shared_names.py`): the word `Lane`, a slug of
+does not open with `Lane <branch slug>:` (`LANE_TITLE_FORM` in `hooks/shared_names.py`): the word `Lane`, a slug of
 lower-case letters and digits joined by single hyphens, a colon. A missing, empty or placeholder title (`Lane <branch
-slug>: <task>`) is refused. The deny reason prints the form from `LANE_TITLE_FORM`, the same constant the check reads.
+slug>: <task>`) is refused. The deny reason prints `LANE_TITLE_FORM`; `LANE_TITLE_OPENING` is cut from that same string, so one source feeds the remedy and the check.
 The rule runs after `lane-start-settings`. An owner override lifts it. Outcome: the owner reads a lane's branch in his
 session list (rule `git-slug-then-claim-number`, name a lane by its branch slug). Lane start text: `templates/brief.md`
 and `templates/operating-model.md` in skill `project-ops`. Known gaps: the rule reads the form, not that the slug is the
