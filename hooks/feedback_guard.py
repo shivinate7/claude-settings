@@ -149,6 +149,7 @@ import json
 import os
 import re
 import sys
+from bisect import bisect_left, bisect_right
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -198,12 +199,15 @@ _STANDING_SCOPE = (r"whenever|going forward|from here on|in (?:the )?future|by d
 _SCOPE_NOUN = r"(?:all|any|every)\s+(?:repos?|prs?|branch(?:es)?|open|green|new|future)"
 STANDING = re.compile(_WORD % (r"always|standing|from now on|" + _STANDING_SCOPE), re.IGNORECASE)  # counts anywhere
 STANDING_NOUN = re.compile(_WORD % _SCOPE_NOUN, re.IGNORECASE)
-HANDOFF_VERB = re.compile(r"(?<![A-Za-z0-9_])(?:hand[ \t]+in|hand|send|post|report)[ \t]+$", re.IGNORECASE)  # right before the noun
+HANDOFF_VERB = re.compile(r"(?<![A-Za-z0-9_])(?:hand[ \t]+in|hand|send|post|report)[ \t]+", re.IGNORECASE)  # a noun counts only when one ends right where it starts
 # The act stems a handoff object must not meet, in any form ("merging", "landed"). Wider than ACT, which decides only
 # whether a message grants; these decide whether a handoff object is an act's object too. Each is a regex fragment that
 # starts a word. "tag" counts only as a verb with an object ("tag it"): a label such as "(tag cs-build:triage)" has a
 # colon in its token and is none.
 ACT_STEMS = ("merg", "push", "delet", "deploy", "releas", "publish", "ship", "land", "clos", "approv", "revert", "rebas",
+             "squash", "integrat", "accept", "rollback", "commit", r"run(?![A-Za-z0-9_])",
+             r"roll(?:s|ed|ing)?[ \t]+(?:[A-Za-z]+[ \t]+){0,2}back(?![A-Za-z0-9_])",
+             r"(?:bring(?:s|ing)?|brought)(?=[^.\n]{0,40}?[ \t]into[ \t]+(?:the[ \t]+)?main(?![A-Za-z0-9_]))",
              r"tag(?:s|ged|ging)?(?=[ \t]+[^\s:]+(?:\s|$))")
 ACT_STEM = re.compile(r"(?<![A-Za-z0-9_])(?:%s)" % "|".join(ACT_STEMS), re.IGNORECASE)
 # Where the clause before a handoff verb starts: a comma, semicolon, colon, dash, full stop or newline. A colon or a
@@ -905,31 +909,35 @@ def is_grant(text):
     return GRANT.search(plain) is not None and ACT.search(plain) is not None
 
 
-def handoff_object(text, noun):
-    """True when a handoff verb stands right before the scope noun match, with only spaces between, and no act stem
-    (ACT_STEMS) appears in either window: after the noun to the end of the message, or before the verb back to the
-    nearest comma, semicolon, colon, dash, full stop or newline."""
-    verb = HANDOFF_VERB.search(text, 0, noun.start())
-    if verb is None:
-        return False
-    if ACT_STEM.search(text, noun.end()) is not None:
-        return False
-    start = 0
-    for mark in CLAUSE_START.finditer(text, 0, verb.start()):
-        start = mark.end()
-    return ACT_STEM.search(text, start, verb.start()) is None
-
-
 def standing_word(text):
     """True when the message, fenced text left out, holds a standing word. A scope noun ("any PR", "every open") counts
     wherever it sits, except as a handoff verb's object: "Hand in any PR to the batch runner" only says where the lane
-    hands its work. Limits: only the base verbs count, so "sends any PR" bars; the clause before the verb starts at the
-    nearest comma, semicolon, colon, dash, full stop or newline, so "Approved send any PR" bars on "Approved"; an act
-    stem anywhere after the noun bars, however far; "tag" bars only before a word with no colon."""
+    hands its work. The object holds only when no act stem (ACT_STEMS) appears in either window: after the noun to the
+    end of the message, or before the verb back to the nearest clause mark. A clause mark is a comma, semicolon, dash,
+    newline, or a colon or full stop followed by whitespace or the end of the message; a colon or full stop glued to
+    the next word is none, so "Approved:hand in any PR" bars on "Approved". Limits: only the base verbs count, so
+    "sends any PR" bars; an act stem anywhere after the noun bars, however far; "tag" bars only before a word with no
+    colon. One pass over the message: the stems, the verbs and the clause marks are each found once, and each noun
+    checks them by bisection."""
     plain = unfenced(text)
     if STANDING.search(plain):
         return True
-    return any(not handoff_object(plain, noun) for noun in STANDING_NOUN.finditer(plain))
+    nouns = list(STANDING_NOUN.finditer(plain))
+    if not nouns:
+        return False
+    verb_at = {m.end(): m.start() for m in HANDOFF_VERB.finditer(plain)}  # where the noun starts -> where its verb starts
+    acts = [m.start() for m in ACT_STEM.finditer(plain)]
+    mark_ends = [m.end() for m in CLAUSE_START.finditer(plain)]
+    for noun in nouns:
+        verb = verb_at.get(noun.start())
+        if verb is None or (acts and acts[-1] >= noun.end()):
+            return True
+        k = bisect_right(mark_ends, verb)  # marks ending at or before the verb: the last one starts the clause
+        start = mark_ends[k - 1] if k else 0
+        i = bisect_left(acts, start)
+        if i < len(acts) and acts[i] < verb:
+            return True
+    return False
 
 
 def once_home(it, text):

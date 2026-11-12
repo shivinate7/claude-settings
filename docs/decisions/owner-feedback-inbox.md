@@ -63,12 +63,17 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   noun right after a handoff verb (hand in, hand, send, post or report), with only spaces or tabs between, is that
   verb's object, not a standing scope ("Hand in any PR to the batch runner."). The exception holds only when no act
   stem appears in either window. Window one runs after the noun to the end of the message, across commas, semicolons,
-  colons, dashes, full stops and newlines. Window two runs before the verb, back to the nearest comma, semicolon,
-  colon, dash, full stop or newline. The stems are the guard's ACT_STEMS, in any form: merg, push, delet, deploy,
-  releas, publish, ship, land, clos, approv, revert, rebas. "Tag" is a stem only as a verb ("tag it"), never as a label
-  ("(tag cs-build:triage)"). Limits: "Please hand in any PR." passes, as the verb stands right before the noun. "sends
-  any PR" bars, as only the base verbs count. "Approved send any PR" bars, as no mark ends the clause before the verb.
-  An act stem anywhere after the noun bars, however far. "Tag" before any word with no colon bars, even as a noun.
+  colons, dashes, full stops and newlines. Window two runs before the verb, back to the nearest clause mark: a comma,
+  semicolon, dash or newline, or a colon or full stop followed by whitespace or the end of the message. A colon or full
+  stop glued to the next word is no mark, so "Approved:hand in any PR" and "Approved. merge:hand in any PR" bar. The
+  stems are the guard's ACT_STEMS, in any form: merg, push, delet, deploy, releas, publish, ship, land, clos, approv,
+  revert, rebas, squash, integrat, accept, rollback, commit, "roll back" (also "roll it back", "rolled back"), "bring
+  ... into main" and the whole word "run" ("batch runner" is none). "Tag" is a stem only as a verb ("tag it"), never as
+  a label ("(tag cs-build:triage)"). The scan is one pass over the message, so a long message gets a verdict at once.
+  Limits: "Please hand in any PR." passes, as the verb stands right before the noun. "sends any PR" bars, as only the
+  base verbs count. "Approved send any PR" bars, as no mark ends the clause before the verb. An act stem anywhere after
+  the noun bars, however far. "Tag" before any word with no colon bars, even as a noun. A stem inside a longer word
+  bars ("acceptance", "integration"), as the stems are prefixes.
   A grant's ruling home may also be `settings.json` or `.claude/CLAUDE.md` at the repo root, if some
   branch tracks it. A plain ruling there still blocks. A lone short message counts. Risk kind: named
   incident. F47 (an all-repos grant left in chat) and F31 (a grant homed to the handoff), in the
