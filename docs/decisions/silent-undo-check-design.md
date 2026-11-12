@@ -94,5 +94,13 @@ way out that does not depend on the check is the reason flag
 ruling, Cockpit item 178 a, 2026-11-03 22:31 CST). Each lift is printed and written to the merge
 commit message as `Reason flag: --undo-check-unknown-ok: <reason>`. It never excuses a finding.
 
+## Keep line
+
+A brief marked `Round 2 of 3` or `Round 3 of 3` names each earlier lane commit to keep, by short sha and subject, on its `Keep:` line.
+
+The reader is the batch reviewer. The reviewer reads each lane undo finding and the brief (section "Required or advisory"). No code reads `Keep:`.
+
+Source: owner ruling fb-1041-1 (Nov 2 10:41 CST: builders never undo earlier lane work). Owner ruling in chat, 10:52 CST (page item 165, pick a): reuse the existing `Drops-lines:` excuse line, one excuse line.
+
 Kind: process
 Home: lint/check_silent_undo.py
