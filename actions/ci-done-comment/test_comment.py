@@ -18,9 +18,9 @@ SCRIPT = os.path.join(HERE, "comment.sh")
 CHECKS = os.path.join(HERE, "..", "..", ".github", "workflows", "checks.yml")
 
 
-def body(needs):
+def body(needs, job="", announced=""):
     env = dict(os.environ, NEEDS=json.dumps(needs), CI_DONE_DRY="1", PR="1", REPO="o/r",
-               SHA="0123456789abcdef", RUN_URL="https://example/run")
+               SHA="0123456789abcdef", RUN_URL="https://example/run", JOB=job, ANNOUNCED=announced)
     out = subprocess.run(["bash", SCRIPT], env=env, capture_output=True, text=True, check=True)
     return out.stdout
 
@@ -42,6 +42,74 @@ class Body(unittest.TestCase):
         got = body({"checks": {"result": "success"}, "checks-macos": {"result": "skipped"}})
         self.assertNotIn("ci-done", got)
         self.assertEqual(got.strip(), "No red job: no comment.")
+
+
+class PerJob(unittest.TestCase):
+    """A failing job wakes the runner at once; the run-end comment names only jobs not yet announced."""
+
+    def test_job_mode_names_the_job_with_a_marker(self):
+        got = body({}, job="checks")
+        self.assertIn("<!-- ci-done -->", got)
+        self.assertIn("<!-- ci-job:checks -->", got)
+        self.assertIn("CI job checks failed on 0123456", got)
+        self.assertIn("Run: https://example/run", got)
+
+    def test_run_end_skips_announced_jobs(self):
+        needs = {"checks": {"result": "failure"}, "checks-macos": {"result": "failure"}}
+        got = body(needs, announced="checks")
+        self.assertIn("checks-macos (failure)", got)
+        self.assertNotIn("checks (failure)", got)
+
+    def test_run_end_posts_nothing_when_all_announced(self):
+        got = body({"checks": {"result": "failure"}}, announced="checks")
+        self.assertEqual(got.strip(), "No red job: no comment.")
+
+    def test_run_end_still_names_unannounced_cancelled_job(self):
+        # A timeout cancels a job before any step can post, so only the run-end comment can name it.
+        got = body({"checks": {"result": "cancelled"}}, announced="")
+        self.assertIn("checks (cancelled)", got)
+
+
+NO_STEP_JOBS = {"all-jobs-passed", "ci-done"}
+
+
+def per_job_problems(text):
+    """Each job that fails without a step that wakes the runner as it fails."""
+    out = []
+    for name, job in checks_jobs(text).items():
+        if name in NO_STEP_JOBS:
+            continue
+        job = re.sub(r"^\s*#.*\n", "", job, flags=re.M)
+        if not re.search(r"^    permissions:\s*\n(?:      [\w-]+: \w+\s*\n)*      pull-requests:\s*write\s*$", job, re.M):
+            out.append(name + " lacks pull-requests: write")
+        step = re.search(r"- name: [^\n]*\n\s+if:\s*(.*)\n\s+uses:\s*\$/actions/ci-done-comment\s*\n\s*with:\s*\n\s*job:\s*(\S+)\s*$", job)
+        if not step:
+            out.append(name + " has no ci-done-comment job step")
+            continue
+        for part in ("failure()", "github.event_name == 'pull_request'", "!github.event.pull_request.draft"):
+            if part not in step.group(1):
+                out.append(name + " step if lacks " + part)
+        if step.group(2) != name:
+            out.append(name + " step names job " + step.group(2))
+    return out
+
+
+class JobSteps(unittest.TestCase):
+    def test_every_job_has_the_step(self):
+        with open(CHECKS, encoding="utf-8") as fh:
+            self.assertEqual(per_job_problems(fh.read()), [])
+
+    def test_detector_goes_red(self):
+        good = ("jobs:\n  a:\n    permissions:\n      contents: read\n      pull-requests: write\n    steps:\n"
+                "      - run: x\n      - name: Wake\n        if: ${{ failure() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}\n"
+                "        uses: $/actions/ci-done-comment\n        with:\n          job: a\n")
+        self.assertEqual(per_job_problems(good), [])
+        for name, bad in {"no step": good.split("      - name: Wake")[0],
+                          "wrong name": good.replace("job: a", "job: b"),
+                          "no failure": good.replace("failure() && ", ""),
+                          "no write": good.replace("pull-requests: write", "pull-requests: read")}.items():
+            with self.subTest(name):
+                self.assertNotEqual(per_job_problems(bad), [], name)
 
 
 def checks_jobs(text):
