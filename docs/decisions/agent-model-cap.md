@@ -112,7 +112,7 @@ after it set none). Guard rule `lane-effort-pin` (likely risk, first landed 2026
 call tagged `cs-build:lane` unless its `effort` is `medium` and its prompt's first non-blank line is a Grant line
 with owner words after it. Owner words hold a letter or digit and no `<`, so a placeholder Grant such as
 `<owner words>` is refused. Rule `lane-one-topic` also reads a lane `create_session` prompt. When the prompt's
-`Lane brief:` line follows the Grant line, its Topic must match the call's `cs-topic` tag. A `send_message`
+`Lane brief:` line follows the Grant line, its Topic must match the call's `cs-topic` tag, and the start is role-checked too: its text must name Coordinator, Triage and Batch runner. A `send_message`
 brief follows the same rule (owner chat, 2026-11-10 13:19 CST, "B is good", page item 495 a). A lane
 started with no `cs-build:lane` tag is unseen; the
 tag is the coordinator's rule in `session-tiers`. An owner override lifts it; it is not one of the role and model guards

@@ -1767,8 +1767,8 @@ BRIEF_GRANT_REASON = (
 )
 BRIEF_ROLE_REASON = (
     "this brief does not name {missing} by role, so the lane cannot tell whom to ask. Name "
-    + ", ".join(ROLE_LABELS) + " once each, as a whole word in any case (for example `Ask: Coordinator, Triage, Batch runner.`). "
-    "Name the role only; none is required beyond its label. The roster on the record branch holds the ids, and the wake path reads them there. (decision session-tiers, a lane holds one topic)"  # glossary-ok: session-tiers is the decision's file name
+    + ", ".join(ROLE_LABELS) + ", each as a whole word in any case (for example `Ask: Coordinator, Triage, Batch runner.`). "
+    "Name the role only; none is required beyond its label. The roster on the record branch holds each role's id. (decision session-tiers, a lane holds one topic)"  # glossary-ok: session-tiers is the decision's file name
 )
 
 
