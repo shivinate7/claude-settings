@@ -148,6 +148,7 @@ FAMILIES = {
     "mask-script": "mask_script lexemes",
     "simulator": "the simulator boot and hold rules",
     "rm-var": "every case named rm-var, wherever it sits",
+    "git-after-cd": "a git write after a cd: a ;, a newline or a || reopens the path a failed cd takes, so the write is refused; a && chain, -C with an absolute path, and reads pass",
     "session-log": "the session id column of guard.log",
     "fail-closed": "a missing sibling module refuses the call, and never allows it",
     "reload-stamp": "a hook file broken, missing or mis-stamped: the guard waits and reloads, then refuses, never allows",
