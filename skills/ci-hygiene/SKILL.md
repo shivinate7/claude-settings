@@ -173,8 +173,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     scope flag, or a non-PR event (step 19).
 17. **Run each suite once per batch.** The batch PR run is the proof for its tree. Rulings: R61, macOS
     once per batch; R62, Linux and Windows once per batch; R63, install.sh tests on Linux and macOS.
-    The push to main starts no suite on a tree that a green batch PR run tested. The nightly run
-    skips when main's head already has a green run, and the no-merge-onto-red-main gate reads that
+    The push to main starts no suite on a tree that a green batch PR run tested. If main's head
+    already has a green run, the nightly run skips. The no-merge-onto-red-main gate reads that
     PR run. On a slow platform, a macOS job runs only the tests whose subject is macOS, and a Windows
     job runs a Windows-tagged slice. Windows keeps its full guard and merge shards, once, in the
     batch PR run. A lane's touched-tests macOS leg runs only for files whose subject is macOS. The
