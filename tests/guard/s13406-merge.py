@@ -742,6 +742,9 @@ ROLE_LINES = {
                               + own_tag_call("t1", "cs-build:lane") + role_call("g2", LANE_A_TAGS, parent=None),
     "confirm-solo-then-triage": role_call("g1", SOLO_A_TAGS, parent=None) + HAT_CALL
                                 + own_tag_call("t1", "cs-build:triage") + role_call("g2", TRIAGE_A_TAGS, parent=None),
+    # No re-read after the self-tag: the solo read still shows no cs-build tag, so only the set_session_tags call marks it stale.
+    "confirm-solo-tagged-no-reread": role_call("g1", SOLO_A_TAGS, parent=None) + HAT_CALL
+                                     + own_tag_call("t1", "cs-build:lane"),
     # roadmap-one-writer reads these too: a triage record, its tag set after, a title, another session, and
     # the newest own record in either order.
     "triage": role_call("g1", TRIAGE_TAGS),
@@ -997,6 +1000,10 @@ for _tier, _name in (("coordinator", "confirm-solo-then-coordinator"), ("lane", 
 for _name in ("confirm-solo", "confirm-runner", "confirm-solo-then-other-tags"):
     sh("merge-role-proof: confirm allowed for " + _name, MERGE_SHIM + " 5 --confirm --head " + CONFIRM_HEAD, "allow",
        cwd=ROLE_REPO_A, env=CONFIRM_ENV, transcript=role_path(_name))
+# A self-tag after the hat grant, with no re-read, makes the solo read stale: the grant does not carry to the confirm.
+sh("merge-role-proof: a solo session that tagged itself after the hat, with no re-read, cannot confirm",
+   MERGE_SHIM + " 5 --confirm --head " + CONFIRM_HEAD, "deny", rule=ROLE_RULE, cwd=ROLE_REPO_A, env=CONFIRM_ENV,
+   transcript=role_path("confirm-solo-tagged-no-reread"))
 # One role per agent (decision session-tiers): a subagent of a solo session, a builder or a reviewer, records no hat. The session's
 # own record allows it, so only the agent id on the payload refuses it.
 for _form in (MERGE_SHIM, "python3 merge/merge.py"):
