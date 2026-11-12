@@ -1296,14 +1296,26 @@ def _own_tier_proved(transcript: str, tier: str) -> bool:
 
 
 def _open_substitutions(text: str) -> int:
-    """How many `$(` spans in `text` are still open at its end. Inside a span, a `(` opens and a `)` closes."""
+    """How many `$(` spans in `text` are still open at its end. Inside a span, a `(` opens and a `)` closes, except in quotes or after a
+    backslash, where either is text. A quote is read only inside a span: outside one, the words are already unquoted tokens."""
     depth = index = 0
+    quote = ""
     while index < len(text):
-        if text.startswith("$(", index):
-            depth, index = depth + 1, index + 2
-            continue
-        if depth and text[index] in "()":
-            depth += 1 if text[index] == "(" else -1
+        char = text[index]
+        if quote:
+            if char == "\\" and quote == '"':
+                index += 1
+            elif char == quote:
+                quote = ""
+        elif char == "\\":
+            index += 1
+        elif text.startswith("$(", index):
+            depth += 1
+            index += 1
+        elif depth and char in "'\"":
+            quote = char
+        elif depth and char in "()":
+            depth += 1 if char == "(" else -1
         index += 1
     return depth
 
