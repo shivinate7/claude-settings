@@ -129,6 +129,7 @@ FAMILIES = {
     "paths": "path rules, builders and the test-author",
     "diff": "the diff judged at commit, push and stop",
     "builder-refuse": "a builder's diff refused at commit and push and blocked at the first stop, the deny names no path, and a test-author's diff still allowed",
+    "report-sha-missing": "an agent's SubagentHandback and its SubagentStop: a sha-like token that does not resolve as a commit in the cwd's repo is refused; a shallow clone and a stop_hook_active stop are allowed and noted; the quoted, quote-line, URL, colour, UUID and upper-case forms are not judged; one git cat-file call per judged hand-back",
     "impeccable": "impeccable is review-only",
     "port-question": "the page writer: a port question carries a Departs from line and holds nothing",
     "page-stale": "the waiting page: a publish of a page behind main's page.html is refused, a republish of main's page with empty designData and roadmap blocks is refused, a page with its own title and empty blocks is allowed, and an allowed publish of a page with live data writes the stamp",

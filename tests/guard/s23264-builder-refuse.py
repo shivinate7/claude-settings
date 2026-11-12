@@ -1729,4 +1729,389 @@ sh("builder-refuse: the same tracked src/pytest.ini edit, committed from the top
    COMMIT, "deny", rule=BDIFF, cwd=_bd_src_ini_t, agent_id="bld1", agent_type="builder")
 
 
+# =========================================================================== report-sha-missing
+# An agent's report (SubagentHandback) and its stop: each sha-like token in the message must resolve as a
+# commit in the repo of the payload's cwd. The incident of 2026-11-08 had four such shas, and no guard refused
+# them. Decision: report-sha-missing. A token is 7-40 lowercase hex with a digit and an a-f letter. It is not
+# judged inside a double-quoted span, on a `> ` line, or when it touches - _ / # . or @.
+FAMILY = "report-sha-missing"
+RSHA_RULE = "report-sha-missing"
+RSHA_SHALLOW_RULE = "report-sha-shallow"
+RSHA_UNRESOLVED_RULE = "report-sha-unresolved"
+HANDBACK = "SubagentHandback"
+# The four shas of the 2026-11-08 incident. They are made up: no repo the suite builds holds them.
+RSHA_INCIDENT = ("8c1f0e2a7", "5b7d10a42", "e7c35b1d0", "3d2a91f4c")
+# A made-up 40-character sha. It is hashed, so it is hex with digits and letters, and no repo here holds it.
+RSHA_MADE_UP_40 = hashlib.sha1(b"report-sha-missing: a made-up commit").hexdigest()
+RSHA_DATE = "2026-01-02T03:04:05Z"      # a fixed commit date, so each sha is the same on every run
+RSHA_DATE_TWO = "2026-01-03T03:04:05Z"
+RSHA_MAIN = os.path.join(ROOT, "rsha-main")        # a main checkout: a base commit, then one more on main
+RSHA_LANE = os.path.join(ROOT, "rsha-lane")        # a worktree on branch work, cut from the base commit
+RSHA_SHALLOW = os.path.join(ROOT, "rsha-shallow")  # a shallow clone of main: its last commit only
+RSHA_OTHER = os.path.join(ROOT, "rsha-other")      # another repo, with a commit no repo above holds
+RSHA_SHA = {}                                      # the shas rsha_build records: base, main, tree, other
+
+
+def _rsha_git(where, *args, date=None):
+    """One git call for a sha fixture. A fixed date makes each commit's sha the same on every run."""
+    env = dict(os.environ)
+    if date:
+        env["GIT_AUTHOR_DATE"] = env["GIT_COMMITTER_DATE"] = date
+    done = subprocess.run([VCS, *args], cwd=where, capture_output=True, text=True, env=env)
+    if done.returncode != 0:
+        sys.exit("fixture setup failed in rsha_build: git %s in %r: %s"
+                 % (" ".join(args), where, done.stderr.strip()))
+    return done.stdout.strip()
+
+
+def _rsha_commit(where, text, message, date):
+    write(os.path.join(where, "src", "app.py"), text)
+    _rsha_git(where, "add", "-A")
+    _rsha_git(where, *IDENT, "commit", "-q", "-m", message, date=date)
+    return _rsha_git(where, "rev-parse", "HEAD")
+
+
+def rsha_build():
+    """The sha fixtures, built on first use. Each assert reads the scope a case relies on, before the case
+    reads it (P7): the clone is shallow and has lost the base commit, and the commit on main is not an
+    ancestor of the lane's HEAD."""
+    os.makedirs(RSHA_MAIN, exist_ok=True)
+    _rsha_git(RSHA_MAIN, "init", "-q", "-b", "main", ".")
+    RSHA_SHA["base"] = _rsha_commit(RSHA_MAIN, "x = 1\n", "base", RSHA_DATE)
+    _rsha_git(RSHA_MAIN, "worktree", "add", "-q", "-b", "work", RSHA_LANE)
+    RSHA_SHA["main"] = _rsha_commit(RSHA_MAIN, "x = 2\n", "main moves on", RSHA_DATE_TWO)
+    RSHA_SHA["tree"] = _rsha_git(RSHA_LANE, "rev-parse", "HEAD^{tree}")
+    _rsha_git(ROOT, "clone", "-q", "--depth", "1", "file://" + slash(RSHA_MAIN), RSHA_SHALLOW)
+    os.makedirs(RSHA_OTHER, exist_ok=True)
+    _rsha_git(RSHA_OTHER, "init", "-q", "-b", "main", ".")
+    RSHA_SHA["other"] = _rsha_commit(RSHA_OTHER, "y = 1\n", "elsewhere", RSHA_DATE)
+    if _rsha_git(RSHA_SHALLOW, "rev-parse", "--is-shallow-repository") != "true":
+        sys.exit("fixture setup failed in rsha_build: the clone is not shallow")
+    gone = subprocess.run([VCS, "cat-file", "-e", RSHA_SHA["base"] + "^{commit}"],
+                          cwd=RSHA_SHALLOW, capture_output=True)
+    if gone.returncode == 0:
+        sys.exit("fixture setup failed in rsha_build: the base commit resolves in the shallow clone")
+    ancestor = subprocess.run([VCS, "merge-base", "--is-ancestor", RSHA_SHA["main"], "HEAD"],
+                              cwd=RSHA_LANE, capture_output=True)
+    if ancestor.returncode != 1:
+        sys.exit("fixture setup failed in rsha_build: the commit on main is an ancestor of the lane's HEAD")
+
+
+lazy_fixture([RSHA_MAIN, RSHA_LANE, RSHA_SHALLOW, RSHA_OTHER], rsha_build)
+RSHA_BUILDER = diff_repo("rsha-builder", _put("tests/test_a.py", "pass\n"))
+
+
+def rsha_ready():
+    """Build the sha fixtures now, if no case has yet: a log check reads their shas."""
+    materialize(RSHA_LANE)
+
+
+def rsha_judge(cwd, message=None, raw=None, tool=HANDBACK, config=None, env_path=None,
+               agent_id="rev1", agent_type="reviewer"):
+    """(decision, reason) for one call: an agent's hand-back carrying `message`, or the `raw` payload."""
+    return decide({
+        "raw": raw, "tool": tool, "cwd": cwd, "session": None, "env_path": env_path,
+        "config": config, "agent_id": agent_id, "agent_type": agent_type,
+        "tool_input": {} if message is None else {"message": message},
+        "transcript": None, "event": None, "stop_active": False, "env": None, "no_root": False,
+        "guard": None, "temp": None, "max_seconds": None,
+    })
+
+
+def rsha_stop(cwd, message, agent_id="rev2", agent_type="reviewer", active=False):
+    """The raw payload of an agent's SubagentStop, carrying its last message."""
+    body = {"hook_event_name": "SubagentStop", "cwd": cwd, "agent_id": agent_id,
+            "agent_type": agent_type, "last_assistant_message": message}
+    if active:
+        body["stop_hook_active"] = True
+    return json.dumps(body)
+
+
+def rsha_sha_like(token):
+    """The token rule, for a control's own check: 7-40 lowercase hex, with a digit and an a-f letter."""
+    return (bool(re.fullmatch(r"[0-9a-f]{7,40}", token)) and bool(re.search(r"[0-9]", token))
+            and bool(re.search(r"[a-f]", token)))
+
+
+def rsha_refused(got, reason, named):
+    """'' when the call is refused under report-sha-missing and the reason names each sha in `named`; else one cause."""
+    if got != "deny":
+        return "want deny, got %s (%s)" % (got, reason[:90])
+    if RSHA_RULE not in reason:
+        return "the reason does not name %s: %s" % (RSHA_RULE, reason[:90])
+    for sha in named:
+        if sha not in reason:
+            return "the reason does not name %s: %s" % (sha, reason[:90])
+    return ""
+
+
+def rsha_allowed(got, reason, what):
+    """(ok, note) for a control that must be allowed."""
+    if got != "allow":
+        return False, "%s: want allow, got %s (%s)" % (what, got, reason[:90])
+    return True, "%s is allowed" % what
+
+
+def rsha_fresh(name):
+    """An empty config folder for one note case, so its guard.log holds that case's lines alone."""
+    folder = os.path.join(ROOT, name)
+    os.makedirs(folder, exist_ok=True)
+    if os.path.exists(os.path.join(folder, "guard.log")):
+        os.remove(os.path.join(folder, "guard.log"))
+    return folder
+
+
+def rsha_noted(folder, rule):
+    """True when guard.log in `folder` holds a noted line for `rule`: six fields, the decision in 2, the rule in 3."""
+    for line in _guard_log_lines(folder):
+        fields = line.split("\t")
+        if len(fields) == 6 and fields[2] == "noted" and fields[3] == rule:
+            return True
+    return False
+
+
+def rsha_stand_in_sees(log, path):
+    """True when the stand-in logs a git call made on its PATH, so a count of zero means no call was made."""
+    if os.path.exists(log):
+        os.remove(log)
+    subprocess.run([VCS, "rev-parse", "--is-inside-work-tree"], cwd=RSHA_LANE,
+                   env=dict(os.environ, PATH=path), capture_output=True)
+    return os.path.exists(log)
+
+
+def rsha_stand_in_ready():
+    """(log, PATH, '') for a stand-in git that counts; (None, None, reason) when it cannot count here."""
+    rsha_ready()
+    log, path = _stand_in_git("rsha_cost")
+    if not path:
+        return None, None, "no git on PATH, so no stand-in can count the spawns"
+    if not rsha_stand_in_sees(log, path):
+        return None, None, "the stand-in git saw no spawn, so the counts below prove nothing"
+    return log, path, ""
+
+
+def rsha_cat_file_spawns(log, path, message):
+    """The git calls with `cat-file` that one hand-back makes in RSHA_LANE, through the stand-in on `path`.
+    Other rules' git calls are not counted, so a zero means this rule made none."""
+    if os.path.exists(log):
+        os.remove(log)
+    rsha_judge(RSHA_LANE, message, env_path=path)
+    if not os.path.exists(log):
+        return []
+    with open(log, encoding="utf-8") as handle:
+        return [line for line in handle.read().splitlines() if "cat-file" in line]
+
+
+# --- the cases a hand-back or a stop decides by its message alone: no real sha is needed, so they are add() cases.
+add("report-sha-missing: an Explore hand-back naming a made-up sha is refused, and the reason names it",
+    "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="exp1", agent_type="Explore",
+    message="Done. The fix is in 9a0f3c6e21b, the commit on the lane.", carries=("9a0f3c6e21b",))
+add("report-sha-missing: the four made-up shas of the 2026-11-08 incident are each named in the refusal",
+    "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="tau1", agent_type="test-author",
+    message="Report: " + ", ".join(RSHA_INCIDENT) + " stay open", carries=RSHA_INCIDENT)
+add("report-sha-missing: a reviewer's hand-back naming a made-up sha is refused",
+    "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Verdict: pass. Evidence in 4e2c9b1a0f8, see the lane.", carries=("4e2c9b1a0f8",))
+add("report-sha-missing: a made-up 7-character sha is refused",
+    "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Fixed in 6b3e9d1 on the lane.", carries=("6b3e9d1",))
+add("report-sha-missing: a made-up 40-character sha is refused",
+    "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Fixed in %s, the lane commit." % RSHA_MADE_UP_40, carries=(RSHA_MADE_UP_40,))
+add("report-sha-missing: a lone double quote does not hide a made-up sha after it",
+    "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message='He wrote "see the lane. Commit 6e0b3f9a2d1 has the fix', carries=("6e0b3f9a2d1",))
+add("report-sha-missing: a backticked made-up sha is refused",
+    "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Commit `7a1d5c0e9b2` holds the fix.", carries=("7a1d5c0e9b2",))
+add("report-sha-missing: a made-up sha after an arrow on a Red-run line is refused",
+    "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Red-run: pytest -> 1 failed on 3f8e0a5d2c7 at the lane.", carries=("3f8e0a5d2c7",))
+add("report-sha-missing: a reviewer's first stop naming a made-up sha is blocked, and the block names the sha",
+    "deny", RSHA_RULE, tool="SubagentStop", event="SubagentStop", cwd=RSHA_LANE,
+    agent_id="rev2", agent_type="reviewer",
+    raw=rsha_stop(RSHA_LANE, "Done. The fix is at 8c1f0e2a7 on the lane."), carries=("8c1f0e2a7",))
+add("report-sha-missing: a builder's stop with a test change and a made-up sha is one block naming both rules",
+    "deny", BDIFF, tool="SubagentStop", event="SubagentStop", cwd=RSHA_BUILDER,
+    agent_id="bld2", agent_type="builder",
+    raw=rsha_stop(RSHA_BUILDER, "Done. Fixed in 5b7d10a42 and the test is in place.",
+                  agent_id="bld2", agent_type="builder"),
+    carries=(RSHA_RULE, "5b7d10a42"))
+
+add("report-sha-missing: a hand-back with no sha-like token is allowed",
+    "allow", tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Verdict: pass. Nothing to name here.")
+add("report-sha-missing: a made-up sha in double quotes is not judged",
+    "allow", tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message='The log shows "8c1f0e2a7" failed once.')
+add("report-sha-missing: a made-up sha on a `> ` quoted line is not judged",
+    "allow", tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Summary:\n> 5b7d10a42 failed earlier\nFix pending.")
+add("report-sha-missing: a made-up 40-character sha in a github.com URL is not judged",
+    "allow", tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="See https://github.com/acme/other-repo/commit/%s, the upstream fix." % RSHA_MADE_UP_40)
+add("report-sha-missing: the colours #ff00aa and #a1b2c3d4 are not shas",
+    "allow", tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Use #ff00aa for the badge and #a1b2c3d4 for the border.")
+add("report-sha-missing: an agent name with a hex run is not a sha",
+    "allow", tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Finished as agent-a7f3c9e10b2d4e581, with no commit.")
+add("report-sha-missing: a UUID is not a sha",
+    "allow", tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Session 3c6e1f2a-0000-4000-8000-00000000b0b0 is closed.")
+add("report-sha-missing: a run of digits and a run of letters are not shas",
+    "allow", tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Counts 1234567 and deadbeef are plain words.")
+add("report-sha-missing: an upper-case hex run is not a sha, because the token is lowercase",
+    "allow", tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
+    message="Fixed in 8C1F0E2A7 on the lane.")
+add("report-sha-missing: a stop_hook_active stop naming a made-up sha is allowed, not blocked again",
+    "allow", tool="SubagentStop", event="SubagentStop", cwd=RSHA_LANE,
+    agent_id="rev2", agent_type="reviewer",
+    raw=rsha_stop(RSHA_LANE, "Done, fixed in 5b7d10a42 on the lane.", active=True))
+add("report-sha-missing: a main session's hand-back is not judged",
+    "allow", tool=HANDBACK, cwd=RSHA_LANE, message="Fixed in 8c1f0e2a7 on the lane.")
+add("report-sha-missing: a hand-back in a folder with no git repo is allowed",
+    "allow", tool=HANDBACK, cwd=NOGIT, agent_id="rev1", agent_type="reviewer",
+    message="Done at 8c1f0e2a7 here.")
+
+
+# --- the cases that need a real sha, read at run time: log checks, so the fixtures are built by the check.
+def rsha_mixed_case():
+    """One real sha and one made-up sha: the made-up one is named, and the real commit is not."""
+    rsha_ready()
+    real = RSHA_SHA["base"]
+    got, reason = rsha_judge(RSHA_LANE, "Fixed in %s and 3d2a91f4c stays open." % real)
+    problem = rsha_refused(got, reason, ["3d2a91f4c"])
+    if problem:
+        return False, problem
+    if real in reason or real[:7] in reason:
+        return False, "the reason names the real commit, which resolves: %s" % reason[:90]
+    return True, "the made-up sha is named, and the real commit is not"
+
+
+def rsha_tree_case():
+    """A tree sha is not a commit: it does not resolve as one, so the hand-back is refused."""
+    rsha_ready()
+    tree = RSHA_SHA["tree"]
+    got, reason = rsha_judge(RSHA_LANE, "Fixed in %s, the tree of the lane." % tree)
+    problem = rsha_refused(got, reason, [tree])
+    return (False, problem) if problem else (True, "a tree sha is refused, because it is not a commit")
+
+
+def rsha_other_repo_case():
+    """A sha of a commit that the cwd's repo does not hold is refused, though another repo holds it."""
+    rsha_ready()
+    other = RSHA_SHA["other"]
+    got, reason = rsha_judge(RSHA_LANE, "Fixed in %s, a commit of another repo." % other)
+    problem = rsha_refused(got, reason, [other])
+    return (False, problem) if problem else (True, "a sha of another repo is refused and named")
+
+
+def rsha_cost_multi_case():
+    """A hand-back that names four shas makes one git cat-file --batch-check call, not one per sha."""
+    if os.name == "nt":
+        return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
+    log, path, problem = rsha_stand_in_ready()
+    if problem:
+        return False, problem
+    spawns = rsha_cat_file_spawns(log, path, "Report: " + ", ".join(RSHA_INCIDENT) + " stay open")
+    if len(spawns) != 1 or "--batch-check" not in spawns[0]:
+        return False, "%d cat-file git call(s) for four shas, want one with --batch-check: %r" % (
+            len(spawns), spawns[:2])
+    return True, "four shas make one cat-file --batch-check call"
+
+
+def rsha_cost_none_case():
+    """A hand-back with no sha-like token makes no cat-file call."""
+    if os.name == "nt":
+        return SKIP, "skipped: a stand-in git is not reached through CreateProcess"
+    log, path, problem = rsha_stand_in_ready()
+    if problem:
+        return False, problem
+    spawns = rsha_cat_file_spawns(log, path, "Verdict: pass, nothing to name.")
+    if spawns:
+        return False, "a hand-back with no sha-like token made %d cat-file call(s), want none: %r" % (
+            len(spawns), spawns[0])
+    return True, "a hand-back with no sha-like token makes no cat-file call"
+
+
+def rsha_note_shallow_case():
+    """A sha a shallow clone cannot resolve is allowed, and the guard notes it report-sha-shallow."""
+    rsha_ready()
+    folder = rsha_fresh("rsha-note-shallow")
+    rsha_judge(RSHA_SHALLOW, "Fixed in %s, cut off by the clone." % RSHA_SHA["base"], config=folder)
+    if not rsha_noted(folder, RSHA_SHALLOW_RULE):
+        return False, "no noted %s line in guard.log" % RSHA_SHALLOW_RULE
+    return True, "the clone's unresolved sha is noted %s" % RSHA_SHALLOW_RULE
+
+
+def rsha_note_unresolved_case():
+    """A stop with stop_hook_active that names a made-up sha is allowed, and the guard notes it report-sha-unresolved."""
+    rsha_ready()
+    folder = rsha_fresh("rsha-note-unresolved")
+    rsha_judge(RSHA_LANE, raw=rsha_stop(RSHA_LANE, "Done, fixed in 5b7d10a42 on the lane.", active=True),
+               tool="SubagentStop", config=folder)
+    if not rsha_noted(folder, RSHA_UNRESOLVED_RULE):
+        return False, "no noted %s line in guard.log" % RSHA_UNRESOLVED_RULE
+    return True, "the second stop's unresolved sha is noted %s" % RSHA_UNRESOLVED_RULE
+
+
+def rsha_short_real_case():
+    """A 7-character sha that resolves is allowed."""
+    rsha_ready()
+    short = RSHA_SHA["base"][:7]
+    if not rsha_sha_like(short):
+        return False, "the 7-character prefix %r is not sha-like, so the control proves nothing" % short
+    got, reason = rsha_judge(RSHA_LANE, "Fixed in %s, the first commit." % short)
+    return rsha_allowed(got, reason, "a 7-character sha that resolves")
+
+
+def rsha_full_real_case():
+    """A full 40-character sha that resolves is allowed."""
+    rsha_ready()
+    got, reason = rsha_judge(RSHA_LANE, "Fixed in %s, the first commit." % RSHA_SHA["base"])
+    return rsha_allowed(got, reason, "a full 40-character sha that resolves")
+
+
+def rsha_main_only_case():
+    """A sha of a commit on main that the lane's HEAD does not reach is allowed: the rule reads the repo, not HEAD."""
+    rsha_ready()
+    got, reason = rsha_judge(RSHA_LANE, "Fixed in %s, the commit on main." % RSHA_SHA["main"])
+    return rsha_allowed(got, reason, "a sha of a commit on main, outside the lane's HEAD")
+
+
+def rsha_shallow_decision_case():
+    """A sha that a shallow clone cannot resolve is allowed."""
+    rsha_ready()
+    got, reason = rsha_judge(RSHA_SHALLOW, "Fixed in %s, cut off by the clone." % RSHA_SHA["base"])
+    return rsha_allowed(got, reason, "a sha a shallow clone cannot resolve")
+
+
+LOG_CHECKS_EXTRA.append(("report-sha-missing: one real sha and one made-up sha: only the made-up one is named",
+                         rsha_mixed_case))
+LOG_CHECKS_EXTRA.append(("report-sha-missing: a tree sha is not a commit, so it is refused", rsha_tree_case))
+LOG_CHECKS_EXTRA.append(("report-sha-missing: a sha of another repo is refused, the cwd's repo holds no such commit",
+                         rsha_other_repo_case))
+LOG_CHECKS_EXTRA.append(("report-sha-missing: four shas make one git cat-file --batch-check call, not one per sha",
+                         rsha_cost_multi_case))
+LOG_CHECKS_EXTRA.append(("report-sha-missing: a hand-back with no sha-like token makes no cat-file call",
+                         rsha_cost_none_case))
+LOG_CHECKS_EXTRA.append(("report-sha-missing: a shallow clone's unresolved sha is allowed and noted report-sha-shallow",
+                         rsha_note_shallow_case))
+LOG_CHECKS_EXTRA.append(("report-sha-missing: a stop_hook_active stop's unresolved sha is noted report-sha-unresolved",
+                         rsha_note_unresolved_case))
+LOG_CHECKS_EXTRA.append(("report-sha-missing: a 7-character sha that resolves is allowed", rsha_short_real_case))
+LOG_CHECKS_EXTRA.append(("report-sha-missing: a full 40-character sha that resolves is allowed", rsha_full_real_case))
+LOG_CHECKS_EXTRA.append(("report-sha-missing: a sha of a commit on main, outside the lane's HEAD, is allowed",
+                         rsha_main_only_case))
+LOG_CHECKS_EXTRA.append(("report-sha-missing: a sha a shallow clone cannot resolve is allowed",
+                         rsha_shallow_decision_case))
+# Each check builds only its own sha fixtures (rsha_ready), never the whole fixture set, so a family run stays quick.
+FIXTURELESS_CHECKS.update((rsha_mixed_case, rsha_tree_case, rsha_other_repo_case, rsha_cost_multi_case,
+                           rsha_cost_none_case, rsha_note_shallow_case, rsha_note_unresolved_case,
+                           rsha_short_real_case, rsha_full_real_case, rsha_main_only_case,
+                           rsha_shallow_decision_case))
+
+
 # =========================================================================== failing open
