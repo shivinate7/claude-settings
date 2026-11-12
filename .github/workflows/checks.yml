@@ -1532,7 +1532,7 @@ jobs:
   # The guard fixture suite on Windows, split off checks-windows by cut F. Every run, a ready pull_request included (R62, owner
   # 15:55 CST Nov 12: the batch PR run carries the full guard so the push to main can skip it), runs the full suite in shards:
   # shard 1 here, the rest in checks-windows-guard-<i>. A ready pull_request also runs the cases tagged windows (the slice step
-  # below), a subset of the full suite, kept because the old checks pin it (the shard switch in hooks/test_guard.py;
+  # below), which the full suite already holds, so those cases run twice there (the shard switch in hooks/test_guard.py;
   # lint/test_windows_split.py proves each case runs once).
   checks-windows-guard:
     runs-on: windows-latest
@@ -1615,7 +1615,7 @@ jobs:
         run: python hooks/test_guard.py
 
   # The merge suites on Windows. The full git-half suite runs in shards, a ready pull_request included (R62), shard 1 here and the
-  # rest in checks-windows-merge-<i> (the shard switch in merge/test_merge.py). The slice also runs here on pull_request.
+  # rest in checks-windows-merge-<i> (the shard switch in merge/test_merge.py). The slice, a subset of the full suite, also runs here on pull_request.
   checks-windows-merge:
     runs-on: windows-latest
     needs: scope
