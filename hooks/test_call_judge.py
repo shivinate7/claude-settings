@@ -61,10 +61,11 @@ Interface the hook must match:
   line, `past-ruling search unknown:`, and never says clear.
 - A relative file_path on an items set or update with no `data`: the file is read against the payload's `cwd`, as
   question_form._write_data reads it, so that write is judged like inline data (the section "a relative file_path").
-- A coordinator's pick (send_message, the section "a coordinator's pick"): a send_message whose sender's own get_session
-  record carries cs-build:coordinator, and whose text has the whole word `pick` or `hold`, must cite a ruling or say
-  `no ruling found:`. A cite gets one judge call whose prompt carries the pick text and the candidate rulings. Any other
-  message passes with no model call.
+- A coordinator's pick (send_message, the section "a coordinator's pick"): a send_message whose sender's own record carries
+  cs-build:coordinator (a set_session_tags call after that record counts), and whose text states a pick or hold (pick, picks,
+  picked, hold, holds, held; not `on hold`, `hold on`, `pick up` or a hyphen id), must cite a ruling or say `no ruling
+  found:`. A cite gets one judge call whose prompt carries the pick text and the candidate rulings. Any other message passes
+  with no model call.
 """
 import atexit
 import json
@@ -1693,10 +1694,12 @@ def case_mid_reason_unlisted_id_is_a_plain_refusal():
 
 # ------------------------------------------------------------------ a coordinator's pick (send_message)
 #
-# A send_message from a coordinator (its own get_session record carries cs-build:coordinator) whose text has the whole word
-# `pick` or `hold` must cite a ruling, or say `no ruling found:` with what it searched. A cite gets one judge call, whose
-# prompt carries the pick text and the candidate rulings. Any other sender or text passes with no model call. The cases run
-# the hook as a child, as the cases above do: the stub answers `claude -p`, and each call is read from its record.
+# A send_message from a coordinator (its own record carries cs-build:coordinator, read as hooks/own_session.py reads it) whose
+# text states a pick or a hold must cite a ruling, or say `no ruling found:` with what it searched. The statement words are
+# pick, picks, picked, hold, holds and held, and a word is no statement inside `on hold`, `hold on`, `pick up` or a hyphen id.
+# A cite gets one judge call, whose prompt carries the pick text and the candidate rulings. Any other sender or text passes
+# with no model call. The cases run the hook as a child, as the cases above do: the stub answers `claude -p`, and each call
+# is read from its record.
 PICK_TOOL = "mcp__claude-code-remote__send_message"
 PICK_OWN = "session_coord01"  # the coordinator's own record id
 PICK_LANE_ENV = "cse_coord01"  # the same id as the cloud sets it in the env (override.LANE_ENV, prefix cse_)
@@ -1708,6 +1711,13 @@ PTC_STEP, PTC_MARK = "prose-tending-contract", "ptc-6a3f"
 PTC_SENTENCE = ("Ruling (owner, Nov 11): prose tending is a contract, so no lane routes around a check to tend prose. "
                 "Marker %s." % PTC_MARK)
 R22_3_MARK, R49_MARK = "r22-3-5e0a", "r49-9c1e"
+# A ruling of about 5900 characters with its marker last. The cap on a cited plan section must reach it whole, so a cap
+# under that length drops the marker. Written last in the plan file, so no other section's text ends on it.
+R61_MARK = "r61-7f03"
+R61_SECTION = (
+    "- **R61. A long ruling keeps its whole text.** Outcome: fixture text.\n"
+    "  %s Marker %s.\n"
+) % (" ".join("clause %03d keeps the whole ruling text." % n for n in range(1, 147)), R61_MARK)
 # The plan file of the pick repo. Plan R-numbers are not candidate sources today (question_form.past_rulings reads decision
 # and debt records and step notes), so the cases below hold the builder to the text reaching the judge's prompt.
 PLAN_TEXT = (
@@ -1716,7 +1726,7 @@ PLAN_TEXT = (
     "  3. A page item, brief or handoff names a lane slug or role, never a session id. A guard refuses a page write "
     "that stores a session id. Marker %s.\n"
     "- **R49. A mailbox default is never held.** The owner names each mailbox. Marker %s.\n"
-) % (R22_3_MARK, R49_MARK)
+) % (R22_3_MARK, R49_MARK) + R61_SECTION
 PICK_REPO = make_repo("pick", decisions={MBX_SLUG: MBX_RULING}, steps={PTC_STEP: PTC_SENTENCE})
 PICK_FULL_REPO = make_repo("pick-full", decisions=dict(
     [(MBX_SLUG, MBX_RULING)] + [("filler-%02d" % n, "Owner, 2026-10-10: filler ruling %d on build timing." % n)
@@ -1739,9 +1749,13 @@ PICK_INCIDENTS = (
 )
 
 
-def coordinator_transcript(tags):
-    """A transcript whose newest get_session result is the own record (ccr.id PICK_OWN) with `tags`: what own_session reads."""
-    name = "pick-transcript-%s.jsonl" % (re.sub(r"[^A-Za-z0-9]+", "-", "-".join(tags)) or "untagged")
+def coordinator_transcript(tags, set_after=None):
+    """A transcript whose newest get_session result is the own record (ccr.id PICK_OWN) with `tags`: what own_session reads.
+    With `set_after`, a set_session_tags call on the own session follows that result (the self-tag a coordinator makes)."""
+    name = "pick-transcript-%s" % (re.sub(r"[^A-Za-z0-9]+", "-", "-".join(tags)) or "untagged")
+    if set_after is not None:
+        name += "-then-set-%s" % (re.sub(r"[^A-Za-z0-9]+", "-", "-".join(set_after)) or "none")
+    name += ".jsonl"
     use = "toolu_own_record"
     ccr = {"id": PICK_OWN, "tags": list(tags)}
     records = [
@@ -1750,6 +1764,15 @@ def coordinator_transcript(tags):
         {"type": "user", "message": {"role": "user", "content": [
             {"type": "tool_result", "tool_use_id": use, "content": json.dumps({"ccr": ccr})}]}},
     ]
+    if set_after is not None:
+        set_use = "toolu_set_own_tags"
+        records += [
+            {"type": "assistant", "message": {"role": "assistant", "content": [
+                {"type": "tool_use", "id": set_use, "name": "mcp__claude-code-remote__set_session_tags",
+                 "input": {"session_ids": [PICK_OWN], "tags": list(set_after)}}]}},
+            {"type": "user", "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": set_use, "content": "ok"}]}},
+        ]
     path = os.path.join(ROOT, name)
     with open(path, "w", encoding="utf-8") as f:
         for record in records:
@@ -1762,9 +1785,10 @@ def pick_input(message, transcript, cwd):
                        "tool_input": {"session_id": PICK_TARGET, "message": message}})
 
 
-def pick_run(message, tags=(PICK_TAG,), coordinator=True, cwd=PICK_REPO, answer=ALLOW, model_fail=False):
-    """One run of the hook on a send_message. `coordinator` False leaves the session's own record id unset."""
-    transcript = coordinator_transcript(tags)
+def pick_run(message, tags=(PICK_TAG,), coordinator=True, cwd=PICK_REPO, answer=ALLOW, model_fail=False, set_after=None):
+    """One run of the hook on a send_message. `coordinator` False leaves the session's own record id unset. `set_after`
+    names the tags of a set_session_tags call that follows the own record (coordinator_transcript)."""
+    transcript = coordinator_transcript(tags, set_after)
     saved = os.environ.pop(override.LANE_ENV, None)
     try:
         if coordinator:
@@ -1857,6 +1881,98 @@ def case_pick_full_ruling_set():
           len(r.calls) == 1 and MBX_MARK in pick_prompt(r), detail(r))
 
 
+PICK_UNCITED = "coordinator pick: go with the second option, no more detail needed."
+
+
+def case_pick_self_tag_after_get_session_is_checked():
+    # A coordinator records with get_session, then tags itself with set_session_tags. The tag is read from the record
+    # after that call, so the sender is a coordinator and an uncited pick is refused in code.
+    import own_session  # the one reader of the own record (hooks/own_session.py)
+    tags, tagged_after = own_session.own_session_read(coordinator_transcript((), (PICK_TAG,)), PICK_OWN)[:2]
+    check("pick scope: the own record reads untagged, with a set_session_tags call after it",
+          tags == [] and tagged_after is True, (tags, tagged_after))
+    r = pick_run(PICK_UNCITED, tags=(), set_after=(PICK_TAG,))
+    check("pick, self-tagged after get_session: an uncited pick is denied in code",
+          (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+    check("pick, self-tagged after get_session: no model call", r.calls == [], detail(r))
+
+
+def case_pick_statement_words_are_checked():
+    # held, picked, picks and holds state a pick too: an uncited one is denied in code, with no model call.
+    for label, message in (
+        ("held", "The mailbox default was held."),
+        ("picked", "The owner picked the second option."),
+        ("picks", "The coordinator picks route B."),
+        ("holds", "The lane holds the mailbox default."),
+    ):
+        r = pick_run(message)
+        check("pick words, uncited %s: denied in code" % label,
+              (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+        check("pick words, uncited %s: no model call" % label, r.calls == [], detail(r))
+
+
+def case_pick_held_cited_reaches_the_judge():
+    # "was held" states a pick, so a cited one gets the one judge call, and the judge's refusal denies it with its reason.
+    reason = "R49 says the opposite: a mailbox default is never held."
+    r = pick_run("A mailbox default was held, per plan R49.", answer=pick_refusal(reason))
+    check("pick, was held + plan R49: one judge call", len(r.calls) == 1, detail(r))
+    check("pick, was held + plan R49: the prompt carries the cited plan text", R49_MARK in pick_prompt(r), detail(r))
+    check("pick, was held + plan R49: the judge's refusal denies the pick with its reason",
+          (r.deny() or {}).get("permissionDecision") == "deny" and reason in r.reason(), detail(r))
+
+
+def case_pick_chatter_passes_untouched():
+    # The control first: a coordinator's uncited hold is denied, so the sender gate is live for these texts.
+    control = pick_run("coordinator hold: keep the lane parked until the run ends.")
+    check("pick chatter control: a coordinator's uncited hold is denied",
+          (control.deny() or {}).get("permissionDecision") == "deny", detail(control))
+    for label, message in (
+        ("Hold on", "Hold on, lane 3 is still building."),
+        ("Pick up", "Pick up the thread when CI ends."),
+        ("on hold", "the PR is on hold until CI ends"),
+        ("hyphen ids", "Still open: hold-unsafe-after-round-3 and pick-cites-ruling-before-send."),
+    ):
+        r = pick_run(message)
+        check("pick chatter, %s: passes untouched, with no model call and no refusal" % label,
+              r.code == 0 and r.out == "" and r.calls == [], detail(r))
+
+
+def case_pick_markdown_no_ruling_is_not_refused():
+    # A "no ruling found:" line with markdown around it states the search, so the cite check passes it. With no ruling
+    # listed, the judge still runs once, and an ok verdict gives no output.
+    for label, message in (
+        ("bold label", "Hold: **No ruling found:** searched decisions and plan."),
+        ("backticked path", "Pick: X. no ruling found: `decisions/`"),
+    ):
+        r = pick_run(message, cwd=BARE_REPO)
+        check("pick, markdown no ruling found (%s): not refused for no cite" % label, r.code == 0 and r.out == "", detail(r))
+        check("pick, markdown no ruling found (%s): one judge call" % label, len(r.calls) == 1, detail(r))
+
+
+def case_pick_bare_item_is_no_cite():
+    # The control: a page item cite ("page item 556 a") gets the one judge call. A bare "item N" is no page item cite.
+    control = pick_run("coordinator pick: hold the mailbox default, per page item 556 a.")
+    check("pick, page item 556 a: a page item cite gets one judge call", len(control.calls) == 1 and control.out == "",
+          detail(control))
+    for label, message in (
+        ("items 1 and 2", "Hold items 1 and 2 until CI ends."),
+        ("item 2", "Pick: go with option 2, per item 2."),
+    ):
+        r = pick_run(message)
+        check("pick, bare %s: denied in code" % label, (r.deny() or {}).get("permissionDecision") == "deny", detail(r))
+        check("pick, bare %s: no model call" % label, r.calls == [], detail(r))
+
+
+def case_pick_long_plan_section_reaches_the_prompt():
+    # A cited plan section longer than the old 3000-character cap reaches the judge whole: its marker is its last word.
+    section = " ".join(R61_SECTION.split())
+    check("pick plan fixture: the R61 section is over 3000 and within 6000 characters once white space is collapsed",
+          3000 < len(section) <= 6000, len(section))
+    r = pick_run("coordinator pick: hold the mailbox default, per plan R61.")
+    check("pick, long plan section: one judge call", len(r.calls) == 1, detail(r))
+    check("pick, long plan section: the prompt carries the section's last word", R61_MARK in pick_prompt(r), detail(r))
+
+
 def main():
     for case in (case_agent_refusal, case_spawn_prompt_bars_a_lane_waiting_page_write, case_agent_override, case_explore_row_is_vetoed,
                  case_explore_remedy_names_marker, case_agent_fallback_names_marker, case_question,
@@ -1886,7 +2002,11 @@ def main():
                  case_pick_fixture_is_a_coordinator_record, case_pick_check_passes_untouched,
                  case_pick_without_a_cite_is_refused, case_pick_no_ruling_statement_is_not_refused,
                  case_pick_matching_ruling_passes, case_pick_incidents_are_refused_on_the_text,
-                 case_pick_model_failure_fails_open, case_pick_full_ruling_set):
+                 case_pick_model_failure_fails_open, case_pick_full_ruling_set,
+                 case_pick_self_tag_after_get_session_is_checked, case_pick_statement_words_are_checked,
+                 case_pick_held_cited_reaches_the_judge, case_pick_chatter_passes_untouched,
+                 case_pick_markdown_no_ruling_is_not_refused, case_pick_bare_item_is_no_cite,
+                 case_pick_long_plan_section_reaches_the_prompt):
         try:
             case()
         except Exception as exc:
