@@ -17,10 +17,14 @@ was written has no zone: `when` is its naked time and `at` is None, never assume
 --between START END (aware ISO 8601 times) prints the rows whose `at` falls in [START, END], and the
 count of old lines that could fall in it under some zone, for the batch pace read (window()).
 --rule narrows --between to one rule id (the pace read uses load-brake).
---rule past-ruling-run, without --between, reads the line report_guard writes once per past-ruling model call
-(a Stop that asks the owner): decision measured, matched `ms= chars= candidates= outcome=`. It prints the
-window's count, median ms, max ms, max chars and timeouts, one `label: value` line each, over --days.
-This is the reader of that line. Cost: one line per Stop that asks the owner, one append, no new process.
+--rule past-ruling-run or --rule judge-run, without --between, reads the line one model call writes
+(hooks/call_judge.py record_judge_run: the past-ruling review of a Stop that asks the owner, or the judge hook's
+own call): decision measured, matched `ms= chars= [candidates= ]outcome=`. It prints the window's count, median ms,
+max ms, max chars and timeouts, one `label: value` line each, over --days. An even count's median is the mean of
+the middle two; a window with no run prints n/a for median ms and max ms. The default read counts neither rule
+and does not list their lines under other: these two reads are their readers.
+Cost: one append per model call, no new process. The append can wait on the log lock up to 2 s
+(hooks/guard_core.py LOG_LOCK_WAIT), and writes the line unlocked after that.
 In a cloud session (CLAUDE_CODE_REMOTE=true) that read prints `n/a (cloud)` and no count.
 The brake guards the owner's own machine."""
 import argparse
@@ -34,6 +38,7 @@ from datetime import datetime, timedelta, timezone
 # repo and under ~/.claude, so the hop holds in both places (lint/report_guard.py does the same).
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 from guard_core import LOG_CUT_MARK, SESSION_LOG_PLACEHOLDER, is_cloud  # noqa: E402
+from call_judge import JUDGE_RUN_RULE, PAST_RULING_RUN_RULE  # noqa: E402  the rule ids record_judge_run writes
 
 COUNTED = ("deny", "ask", "noted")
 OVERRIDE = "override"  # a refusal an owner override lifted: counted, and a key only when present
@@ -41,8 +46,8 @@ FIRST = "first line"  # the --all-rules column: YYYY-MM-DD of the rule's first l
 COMBINED = re.compile(r"STE\d+(,STE\d+)+")  # one id the removed STE guard wrote for several codes found at once
 UNKNOWN = "unknown session"
 BRAKE_RULE = "load-brake"
-PAST_RULING_RULE = "past-ruling-run"
-PAST_RULING_FIELD = re.compile(r"(ms|chars|outcome)=(\S+)")
+RUN_RULES = (PAST_RULING_RUN_RULE, JUDGE_RUN_RULE)  # read by --rule only, never counted or listed by the default read
+RUN_FIELD = re.compile(r"(ms|chars|outcome)=(\S+)")
 BY_SESSION_ROWS = 200
 Row = namedtuple("Row", "line when tool decision rule matched session at", defaults=(None,))
 MAX_ZONE_HOURS = 14  # the widest UTC offset in use is +14:00, the narrowest -12:00
@@ -138,7 +143,8 @@ def summarize(lines, days, now, session=None):
         if decision == "fixed":
             decision = "noted"  # an old STE guard rewrite line: counted as a note, its STE codes are its rule
         if decision not in COUNTED + (OVERRIDE,):
-            out["other"].append(row.line)
+            if rule not in RUN_RULES:
+                out["other"].append(row.line)
             continue
         row = out["by_rule"].setdefault(rule, dict.fromkeys(COUNTED, 0))
         row[decision] = row.get(decision, 0) + 1
@@ -192,22 +198,24 @@ def render(s, by_session=False, ids=None):
     return "\n".join(out)
 
 
-def past_ruling_summary(lines, days, now):
-    """The summary of the past-ruling-run lines whose date is in the last `days` calendar dates (all when None)."""
+def run_summary(lines, days, now, rule):
+    """The summary of the `rule` lines (one of RUN_RULES) whose date is in the last `days` calendar dates (all when None)."""
     first = None if days is None else (now.date() - timedelta(days=days - 1)).isoformat()
     ms, chars, timeouts = [], [], 0
     for raw in lines:
         row = parse_line(raw)
-        if row is None or row.rule != PAST_RULING_RULE or (first and row.when.date().isoformat() < first):
+        if row is None or row.rule != rule or (first and row.when.date().isoformat() < first):
             continue
-        fields = dict(PAST_RULING_FIELD.findall(row.matched))
+        fields = dict(RUN_FIELD.findall(row.matched))
         if fields.get("ms", "").isdigit() and fields.get("chars", "").isdigit():
             ms.append(int(fields["ms"]))
             chars.append(int(fields["chars"]))
             timeouts += fields.get("outcome") == "timeout"
     ms.sort()
-    return "\n".join(["count: %d" % len(ms), "median ms: %d" % (ms[(len(ms) - 1) // 2] if ms else 0),
-                      "max ms: %d" % (ms[-1] if ms else 0), "max chars: %d" % max(chars, default=0),
+    middle = (ms[(len(ms) - 1) // 2] + ms[len(ms) // 2]) / 2 if ms else None
+    return "\n".join(["count: %d" % len(ms), "median ms: %s" % (("%d" % middle if middle == int(middle) else "%.1f" % middle)
+                                                                if ms else "n/a"),
+                      "max ms: %s" % (ms[-1] if ms else "n/a"), "max chars: %d" % max(chars, default=0),
                       "timeouts: %d" % timeouts])
 
 
@@ -235,7 +243,7 @@ def main(argv):
     ap.add_argument("--by-session", action="store_true", help="add counts per session")
     ap.add_argument("--between", nargs=2, metavar=("START", "END"), type=datetime.fromisoformat,
                     help="print the rows inside this window (aware ISO 8601 times) and the old-line unknown count")
-    ap.add_argument("--rule", help="with --between: keep one rule id; past-ruling-run alone prints that rule's summary")
+    ap.add_argument("--rule", help="with --between: keep one rule id; past-ruling-run or judge-run alone prints that rule's summary")
     args = ap.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):  # absent when stdout is redirected to StringIO
         sys.stdout.reconfigure(errors="replace")
@@ -256,8 +264,8 @@ def main(argv):
                 print("\n".join(row.line for row in rows))
                 print("unknown (old lines with no zone that could fall inside): %d" % unknown)
                 return 0
-            if args.rule == PAST_RULING_RULE:
-                print(past_ruling_summary(handle, args.days, datetime.now()))
+            if args.rule in RUN_RULES:
+                print(run_summary(handle, args.days, datetime.now(), args.rule))
                 return 0
             print(render(summarize(handle, args.days, datetime.now(), args.session), args.by_session, ids))
     except FileNotFoundError:

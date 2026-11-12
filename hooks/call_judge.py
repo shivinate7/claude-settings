@@ -55,6 +55,7 @@ Cost: one more haiku call (low effort, OPUS_SCOPE_TIMEOUT s) for such an ask, no
 import json
 import os
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
@@ -140,6 +141,8 @@ PAST_RULING_ITEM = (
 )
 # The question-judge call of lint/report_guard.py (a Stop whose reply asks the owner something): Sonnet, 60 s.
 PAST_RULING_MODEL, PAST_RULING_TIMEOUT = SPAWN_MODEL, 60
+# The two guard.log rules record_judge_run writes, one line per model call; lint/guard_log_report.py reads them.
+JUDGE_RUN_RULE, PAST_RULING_RUN_RULE = "judge-run", "past-ruling-run"
 # The seven items, then the eighth, a question to the owner is judged on: one text, for the chat box and the page.
 JUDGE_ITEMS = (
     "1. The Goal is in the owner's terms.\n"
@@ -262,6 +265,24 @@ def invoke_model(*args, **kwargs):
     """The model call. A module-level name, so a test can replace it."""
     from decision_watch import invoke_model as home
     return home(*args, **kwargs)
+
+
+def record_judge_run(rule, started, prompt_chars, error=None, refused=False, extra="", tool="PreToolUse"):
+    """The one writer of a model call's guard.log line (`rule` is JUDGE_RUN_RULE or PAST_RULING_RUN_RULE): decision
+    measured, matched `ms= chars= [extra ]outcome=`. `started` is time.monotonic() before the call, `error` and
+    `refused` are what it returned. Never the prompt's text. No line when no model process started, and a failed
+    write never changes the verdict. Cost: one append, which can wait on the log lock up to 2 s, no new process."""
+    try:
+        import decision_watch
+        if error == decision_watch.MODEL_TOKEN_ERROR or str(error or "").startswith(decision_watch.MODEL_START_ERROR):
+            return
+        import guard_core
+        outcome = ("timeout" if error == decision_watch.MODEL_TIMEOUT_ERROR else "error") if error else (
+            "refused" if refused else "ok")
+        fields = ["ms=%d" % ((time.monotonic() - started) * 1000), "chars=%d" % prompt_chars]
+        guard_core.record(tool, "measured", rule, " ".join(fields + ([extra] if extra else []) + ["outcome=" + outcome]))
+    except Exception:
+        pass
 
 
 def _ask_judge(head, text, what):
@@ -421,7 +442,15 @@ def main():
             full += "\n" + NONE_DIRECTION_RULE  # after `%`, so the rule's text never meets the formatter
         if widening:
             full += "\n" + widening_rule()
+        started = time.monotonic()
         verdict, error = invoke_model(full + tail, model=model, timeout=timeout, shape=OK_SHAPE, effort=None)
+        try:
+            import guard_core
+            guard_core.set_log_session(payload.get("session_id"))  # the line's last column
+        except Exception:
+            pass
+        record_judge_run(JUDGE_RUN_RULE, started, len(full) + len(tail), error,
+                         bool(verdict) and verdict.get("ok") is False)
     except Exception as exc:
         print("call judge failed open: %s" % " ".join(("%s: %s" % (type(exc).__name__, exc)).split()),
               file=sys.stderr)

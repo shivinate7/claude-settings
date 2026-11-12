@@ -661,6 +661,8 @@ def _judge_isolation():
 
 
 VERDICT_SHAPE = {"verdict": ("ALLOW", "FLAG")}
+MODEL_TOKEN_ERROR = "token file could not be read"  # the two errors that mean no model process started: call_judge.record_judge_run writes no line for them
+MODEL_START_ERROR = "model subprocess failed to start"
 MODEL_TIMEOUT_ERROR = "model subprocess timed out"  # the error text of a timeout: callers that tell a timeout from another failure compare to this
 REPLY_OUTPUT_ERROR = "model output"  # the start of each error for a reply that is not the claude envelope
 REPLY_RESULT_ERROR = "model result"  # the start of each error for a result text that is not the verdict asked for
@@ -690,7 +692,7 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
     try:
         root, env = _judge_isolation()
     except TokenUnreadable:
-        return None, "token file could not be read"
+        return None, MODEL_TOKEN_ERROR
     token = env.get(TOKEN_ENV, "")
     scrub = lambda text: text.replace(token, "[token]") if token else text
     try:
@@ -710,7 +712,7 @@ def invoke_model(prompt, model=MODEL, timeout=MODEL_TIMEOUT, shape=VERDICT_SHAPE
     except subprocess.TimeoutExpired:
         return None, MODEL_TIMEOUT_ERROR  # fixed text: never put str(exc) in the report
     except Exception as exc:
-        return None, scrub("model subprocess failed to start: %s" % exc)
+        return None, scrub("%s: %s" % (MODEL_START_ERROR, exc))
     finally:
         try:
             shutil.rmtree(root, ignore_errors=True)
