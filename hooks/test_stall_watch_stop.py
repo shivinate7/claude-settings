@@ -43,9 +43,10 @@ Seams: STALL_WATCH_NOW (epoch seconds, the clock), STALL_WATCH_OUTPUT_BASE (a fo
 replaces the folder of each transcript output path and keeps its file name), STALL_WATCH_QUIET
 (the age in seconds). STALL_WATCH_MODULE picks the module under test, as in test_stall_watch.py.
 
-No posix check: this mode must run on Windows. These cases use no sh, ps or lsof. Every case that
-expects silence also runs a control that must list a stale job, so a mode that is absent or
-silent everywhere cannot pass it.
+No posix check: this mode must run on Windows. These cases use no sh, ps or lsof, except S21a: it
+starts a shell job and skips off posix, so Windows runs the rest. Every case that expects silence
+also runs a control that must list a stale job, so a mode that is absent or silent everywhere
+cannot pass it.
 """
 
 import atexit
@@ -57,6 +58,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -1729,6 +1731,76 @@ def A10_full_size_each_quiet_agent_is_listed_once():
     msg = system_message(out, problems)
     for aid in ids:
         problems += listed_once(msg, aid, by_line=True)
+    return problems
+
+
+def start_job(command, path):
+    """Start `command` in the background, as the harness does: its stdout is the job's output file. The job
+    has its own process group, so a case can end every process under it. The command may use `{sync}`, the
+    fd it writes one byte to once it is busy. Return (process, read end of the sync pipe)."""
+    r, w = os.pipe()
+    with open(path, "ab") as out:
+        proc = subprocess.Popen(["sh", "-c", command.format(sync=w)], stdin=subprocess.DEVNULL, stdout=out,
+                                stderr=subprocess.STDOUT, start_new_session=True, pass_fds=(w,))
+    os.close(w)
+    return proc, r
+
+
+def end_job(proc, r):
+    """Kill the job's process group, and close the read end of its sync pipe."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except OSError:
+        pass
+    proc.wait()
+    os.close(r)
+
+
+@case
+def busy_job_with_no_output_is_not_listed():
+    """S21a. a background `| tail -1` job whose child spins a CPU, with no output and its output file quiet 600 s:
+    not listed, since its CPU time is life. A job that only sleeps, quiet 600 s, is listed (control)"""
+    if os.name != "posix" or not shutil.which("sh"):
+        raise Skip("needs sh and process groups, which this host lacks")
+    base = new_dir()
+    busy_path = output_file(base, "bmcpu600", 600)
+    sleep_path = output_file(base, "bmsleep600", 600)
+    busy_cmd = "while :; do :; done | tail -1"
+    sleep_cmd = "sleep 60 | tail -1"
+    busy, busy_r = start_job("echo x >&{sync}; " + busy_cmd, busy_path)
+    sleeper, sleep_r = start_job(sleep_cmd, sleep_path)
+    try:
+        if os.read(busy_r, 1) != b"x":  # the child is spinning now, so the Stop check runs while it is busy
+            return ["the busy job did not start its spin"]
+        recs = log_job("bmcpu600", busy_cmd) + log_job("bmsleep600", sleep_cmd)
+        rc, out, err = run_stop(transcript(recs), base)
+        problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+        msg = system_message(out, problems)
+        problems += expect("bmcpu600" not in msg, f"a job whose child spins a CPU is listed as quiet: {msg!r}")
+        problems += listed_once(msg, "bmsleep600")
+        return problems
+    finally:
+        end_job(busy, busy_r)
+        end_job(sleeper, sleep_r)
+
+
+@case
+def unresolved_log_is_named_as_not_watched():
+    """S21b. `cd "$REPO" && make > build.log`, with build.log grown 10 s ago: its directory is unknown, so the Stop
+    check does not watch the log, as the watcher does (27e in test_stall_watch.py). The job is still listed, and
+    its row says the log is not watched. A plain quiet job is listed (control)"""
+    base, d = new_dir(), new_dir()
+    output_file(base, "bmenv600", 600)
+    output_file(base, "bmplain600", 600)
+    log_at(os.path.join(d, "build.log"), 10)
+    recs = log_job("bmenv600", 'cd "$REPO" && make > build.log', cwd=d) + moved("bmplain600")
+    rc, out, err = run_stop(transcript(recs), base)
+    problems = expect(rc == 0, f"exit {rc}, want 0: {err.strip()[:200]}")
+    msg = system_message(out, problems)
+    problems += listed_once(msg, "bmplain600")
+    problems += listed_once(msg, "bmenv600")
+    problems += expect(any("not watched" in line and "build.log" in line for line in msg.splitlines()),
+                       f"the job's log build.log is not named as not watched: {msg!r}")
     return problems
 
 

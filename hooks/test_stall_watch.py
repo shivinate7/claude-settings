@@ -1176,6 +1176,30 @@ def trailing_comment_on_a_cd_line_keeps_the_newline():
 
 
 @case
+def cd_before_a_pipe_or_or_never_moves_the_log_into_its_dir():
+    """27h. `cd sub |` and `cd sub ||` at a line end, and `cd sub || make` on one line: the cd does not move the shell
+    that runs make, so the log is never sub/log. It reads as the start dir's log or as unknown, never dropped"""
+    sw = load_module()
+    problems = []
+    for command in ("cd sub |\nmake > log", "cd sub ||\nmake > log", "cd sub || make > log"):
+        paths, unresolved = read_with(sw, command)
+        if "sub/log" in paths:
+            problems.append(f"{command!r}: reads sub/log, though the cd does not move the shell that runs make")
+        elif "log" not in paths and "log" not in unresolved:
+            problems.append(f"{command!r}: the log is dropped: reads paths {paths}, unresolved {unresolved}")
+    return problems
+
+
+@case
+def cd_joined_by_and_or_a_newline_still_moves_the_log():
+    """27i. control: `cd sub &&` at a line end, and `cd sub` then a newline, are sure cds, so the log is sub/log"""
+    return read_rows_problems([
+        ("cd sub &&\nmake > log", ["sub/log"], []),
+        ("cd sub\nmake > log", ["sub/log"], []),
+    ])
+
+
+@case
 def heredoc_cd_is_text():
     """27c. a cd in a heredoc body is text: the log stays as written and no path is unresolved"""
     return read_rows_problems([("cat <<'EOF'\ncd /y\nEOF\nmake > log", ["log"], [])])
