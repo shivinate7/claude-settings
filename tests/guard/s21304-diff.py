@@ -103,14 +103,19 @@ BUILDER_GREEN = [
                                        write(os.path.join(w, "latest_results.md"), "better\n"))),
     ("product-rename", _mv("src/app.py", "src/main.py")),
     ("product-delete", _rm("src/contest.py")),
-    ("dependency-added", _put("pyproject.toml", "[project]\nname = 'x'\ndependencies = ['requests']\n")),
-    ("script-added", _put("package.json", '{"name": "x", "scripts": {"build": "tsc"}}\n')),
+    # Each row keeps the base's owned parts (the test scripts and the `[tool.pytest*]` section), so it
+    # changes no owned part. The `ruff` row keeps its `test` line more than three lines above the flag,
+    # the window disables_tests reads.
+    ("dependency-added", _put("pyproject.toml", "[project]\nname = 'x'\ndependencies = ['requests']\n"
+                              "[tool.pytest.ini_options]\nminversion = '7'\n")),
+    ("script-added", _put("package.json", '{"name": "x", "scripts": {"build": "tsc", "test": "jest"}}\n')),
     ("symlink-to-product", _link("../src/app.py", "src/alias.py")),
-    ("ruff-ignore-script", _put("package.json", '{"name": "x", "scripts": {"lint": '
-                                '"ruff check --ignore E501"}}\n')),
+    ("ruff-ignore-script", _put("package.json", '{\n  "name": "x",\n  "scripts": {\n    "test": "jest",\n'
+                                '    "build": "tsc",\n    "clean": "rm -rf dist",\n'
+                                '    "typecheck": "tsc --noEmit",\n    "lint": "ruff check --ignore E501"\n  }\n}\n')),
     ("flake8-ignore-flag", _put("tox.ini", "[testenv:lint]\ncommands = flake8 --ignore=E203\n")),
-    ("ignore-scripts-flag", _put("package.json",
-                                 '{"name": "x", "scripts": {"ci": "npm ci --ignore-scripts && jest"}}\n')),
+    ("ignore-scripts-flag", _put("package.json", '{"name": "x", "scripts": {"ci": '
+                                 '"npm ci --ignore-scripts && jest", "test": "jest"}}\n')),
     ("dev-requirements", _put("requirements-dev.txt", "pytest\nruff\n")),
     ("pyproject-non-pytest", _put("pyproject.toml",
                                   "[project]\nname = 'x'\ndependencies = ['y']\n"
@@ -172,6 +177,195 @@ add("builder-diff: stop after COMMITTING a test change is blocked", "deny", rule
     event="SubagentStop", cwd=_repo, agent_id="bld1", agent_type="builder")
 sh("builder-diff: push after COMMITTING a test change is denied", PUSH, "deny", rule=BDIFF,
    cwd=_repo, agent_id="bld1", agent_type="builder")
+
+# ---- test config a builder may not change: a whole file, and the owned parts of a partly-owned file
+# (package.json: the jest key and the test scripts; pyproject.toml: the [tool.pytest*] sections). The
+# Edit cases run in a checkout that holds those files, so each old_string is the file's own text.
+OWNED_PKG = '''{
+  "name": "x",
+  "scripts": {
+    "test": "jest"
+  },
+  "jest": {
+    "testEnvironment": "node"
+  },
+  "dependencies": {
+    "a": "1"
+  },
+  "devDependencies": {
+    "b": "1"
+  }
+}
+'''
+# The `[tool.pytest.ini_options]` line inside the `notes` string is text, not a section. The string's
+# value differs from the real section's, so each old_string below is unique in the file.
+OWNED_PYPROJECT = '''[project]
+name = 'x'
+description = "use # here, don't"
+notes = """
+[tool.pytest.ini_options]
+minversion = '6'
+"""
+
+[tool.pytest.ini_options]
+minversion = '7'
+'''
+OWNED_FILES = {"pytest.ini": "[pytest]\nminversion = 7.0\n", "setup.cfg": "[flake8]\nmax-line-length = 88\n",
+               "package.json": OWNED_PKG, "pyproject.toml": OWNED_PYPROJECT}
+_owned = diff_repo("b-owned-edit", lambda w: None, files={**BASE_FILES, **OWNED_FILES})
+OWN = dict(B, cwd=_owned)
+PKG_ADDS = (OWNED_PKG.replace('"test": "jest"', '"build": "tsc",\n    "test": "jest"')
+            .replace('"a": "1"', '"a": "1",\n    "left-pad": "1.3.0"')
+            .replace('"b": "1"', '"b": "1",\n    "eslint": "9.0.0"'))
+add("builder-test: Edit of pytest.ini that adds no disabling line is refused", "deny", rule=BT,
+    tool="Edit", file_path="pytest.ini", old_string="[pytest]\nminversion = 7.0",
+    new_string="[pytest]\nminversion = 8.0", **OWN)
+add("builder-test: Edit of package.json that changes the jest key is refused", "deny", rule=BT,
+    tool="Edit", file_path="package.json", old_string='  "jest": {\n    "testEnvironment": "node"\n  },',
+    new_string='  "jest": {\n    "testEnvironment": "jsdom"\n  },', **OWN)
+add("builder-test: Edit of pyproject.toml that changes a [tool.pytest] section is refused", "deny",
+    rule=BT, tool="Edit", file_path="pyproject.toml", old_string="[tool.pytest.ini_options]\nminversion = '7'",
+    new_string="[tool.pytest.ini_options]\nminversion = '8'", **OWN)
+add("builder-test: Edit of package.json that adds a dependency, a devDependency and a build script is allowed",
+    "allow", tool="Edit", file_path="package.json", old_string=OWNED_PKG, new_string=PKG_ADDS, **OWN)
+add("builder-test: Edit of pyproject.toml that adds a [project] line is allowed", "allow", tool="Edit",
+    file_path="pyproject.toml", old_string="name = 'x'", new_string="name = 'x'\nrequires-python = '>=3.11'",
+    **OWN)
+add("builder-test: Edit of setup.cfg that changes [flake8] is allowed", "allow", tool="Edit",
+    file_path="setup.cfg", old_string="max-line-length = 88", new_string="max-line-length = 100", **OWN)
+add("builder-test: Edit of a pyproject.toml string that holds a [tool.pytest] line is allowed", "allow",
+    tool="Edit", file_path="pyproject.toml", old_string="minversion = '6'", new_string="minversion = '5'",
+    **OWN)
+add("builder-test: Edit of a pyproject.toml string with # and a lone quote is allowed", "allow",
+    tool="Edit", file_path="pyproject.toml", old_string='description = "use # here, don\'t"',
+    new_string='description = "use # there, don\'t"', **OWN)
+add("test-author: Write of pytest.ini is allowed", "allow", tool="Write", file_path="pytest.ini", **A)
+# A builder commit holding a jest config change that disables no test is refused (builder-diff). The
+# base holds the file, so the commit changes it.
+_repo = diff_repo("b-jest-config-plain", _put("jest.config.js", "module.exports = {verbose: true}\n"),
+                  commit=True, files={**BASE_FILES, "jest.config.js": "module.exports = {verbose: false}\n"})
+sh("builder-diff: commit with a jest.config.js change that disables no test is denied", COMMIT, "deny",
+   rule=BDIFF, cwd=_repo, agent_id="bld1", agent_type="builder")
+
+# ---- owned sections of setup.cfg and tox.ini: [tool:pytest], and a [testenv] or [testenv:*] whose body names
+# a test runner. [tox] and a [testenv:lint] that runs flake8 are not owned.
+_owned_tox = diff_repo("b-owned-tox", lambda w: None, files={
+    **BASE_FILES, "setup.cfg": "[tool:pytest]\nminversion = 7.0\n",
+    "tox.ini": "[tox]\nenvlist = py\n\n[testenv]\ncommands = pytest -q\n\n[testenv:lint]\ncommands = flake8 --ignore=E203\n"})
+TOX = dict(B, cwd=_owned_tox)
+add("builder-test: Edit of setup.cfg [tool:pytest] is refused", "deny", rule=BT, tool="Edit",
+    file_path="setup.cfg", old_string="[tool:pytest]\nminversion = 7.0",
+    new_string="[tool:pytest]\nminversion = 8.0", **TOX)
+add("builder-test: Edit of a tox.ini [testenv] that runs pytest is refused", "deny", rule=BT, tool="Edit",
+    file_path="tox.ini", old_string="[testenv]\ncommands = pytest -q",
+    new_string="[testenv]\ncommands = pytest -q -x", **TOX)
+add("builder-test: Edit of a tox.ini [testenv:lint] that runs flake8 is allowed", "allow", tool="Edit",
+    file_path="tox.ini", old_string="commands = flake8 --ignore=E203",
+    new_string="commands = flake8 --ignore=E203 --max-line-length=100", **TOX)
+add("builder-test: Edit of tox.ini [tox] envlist is allowed", "allow", tool="Edit", file_path="tox.ini",
+    old_string="envlist = py", new_string="envlist = py, lint", **TOX)
+# An empty manifest (test-practices P8): the owned jest key is refused; dependencies, not owned, are allowed.
+_empty = diff_repo("b-empty-manifest", lambda w: None, files={**BASE_FILES, "package.json": ""})
+EMPTY = dict(B, cwd=_empty)
+add("builder-test: Edit of an empty package.json that adds a jest key is refused", "deny", rule=BT,
+    tool="Edit", file_path="package.json", old_string="",
+    new_string='{\n  "jest": {\n    "testEnvironment": "node"\n  }\n}\n', **EMPTY)
+add("builder-test: Edit of an empty package.json that adds dependencies is allowed", "allow", tool="Edit",
+    file_path="package.json", old_string="",
+    new_string='{\n  "dependencies": {\n    "a": "1"\n  }\n}\n', **EMPTY)
+# A disabling flag in a partly-owned manifest's own part (the `ci` script is no test script) is refused by the
+# write tool's read of the content. The owned-part check does not judge this script, so only the content read refuses it.
+_disable = diff_repo("b-disable-manifest", lambda w: None, files={
+    **BASE_FILES, "package.json": '{\n  "name": "x",\n  "scripts": {\n    "ci": "npm run build",\n    "test": "jest"\n  }\n}\n'})
+add("builder-test: Edit of a package.json script that adds a disabling flag is refused", "deny", rule=BT,
+    tool="Edit", file_path="package.json", old_string='"ci": "npm run build"',
+    new_string='"ci": "npm run build && jest --testPathIgnorePatterns=e2e"', **dict(B, cwd=_disable))
+
+# ---- owned parts of a manifest and an ini file. The guard reads a file with universal newlines, so a
+# CRLF body-only fragment is found on disk and judged as the LF edit it is. A header with a trailing
+# comment still names its section. A BOM is no content of a manifest; a malformed manifest stays refused.
+def _crlf_on_disk(w):
+    """A scope check, before the guard decides: the base files hold CRLF bytes on disk. Were the bytes
+    folded to LF, the fragment would be found and the case would test an LF edit, not the CRLF one."""
+    for rel in ("pyproject.toml", "setup.cfg"):
+        with open(os.path.join(w, rel), "rb") as handle:
+            if b"\r\n" not in handle.read():
+                sys.exit("fixture setup failed in build_fixtures: %r holds no CRLF on disk in %r" % (rel, w))
+
+
+_bypass = diff_repo("b-crlf-body", _crlf_on_disk, files={
+    **BASE_FILES,
+    "pyproject.toml": "[project]\r\nname = 'x'\r\n[tool.pytest.ini_options]\r\nminversion = '7'\r\naddopts = '-q'\r\n",
+    "setup.cfg": "[tool:pytest]\r\nminversion = 7.0\r\naddopts = -q\r\n"})
+BYPASS = dict(B, cwd=_bypass)
+add("builder-test: Edit of two [tool.pytest] body lines in a CRLF pyproject.toml is refused", "deny", rule=BT,
+    tool="Edit", file_path="pyproject.toml", old_string="minversion = '7'\naddopts = '-q'",
+    new_string="minversion = '8'\naddopts = '-q'", **BYPASS)
+add("builder-test: Edit of two [tool:pytest] body lines in a CRLF setup.cfg is refused", "deny", rule=BT,
+    tool="Edit", file_path="setup.cfg", old_string="minversion = 7.0\naddopts = -q",
+    new_string="minversion = 8.0\naddopts = -q", **BYPASS)
+_ini_header = diff_repo("b-ini-header-comment", lambda w: None, files={
+    **BASE_FILES, "setup.cfg": "[tool:pytest]  # x\nminversion = 7.0\n"})
+add("builder-test: Edit of minversion under a [tool:pytest]  # x header is refused", "deny", rule=BT,
+    tool="Edit", file_path="setup.cfg", old_string="minversion = 7.0", new_string="minversion = 8.0",
+    **dict(B, cwd=_ini_header))
+_bom = diff_repo("b-bom-manifest", lambda w: None, files={**BASE_FILES, "package.json": "﻿" + OWNED_PKG})
+add("builder-test: Edit that adds a devDependency to a package.json with a UTF-8 BOM is allowed", "allow",
+    tool="Edit", file_path="package.json", old_string='  "devDependencies": {\n    "b": "1"\n  }',
+    new_string='  "devDependencies": {\n    "b": "1",\n    "eslint": "9.0.0"\n  }', **dict(B, cwd=_bom))
+_bad_json = diff_repo("b-malformed-manifest", lambda w: None, files={
+    **BASE_FILES, "package.json": '{\n  "name": "x",\n  "devDependencies": {\n    "b": "1"\n  }\n'})
+add("builder-test: Edit that adds a devDependency to a malformed package.json is refused", "deny", rule=BT,
+    tool="Edit", file_path="package.json", old_string='"b": "1"', new_string='"b": "1",\n    "eslint": "9.0.0"',
+    **dict(B, cwd=_bad_json))
+# A .md under docs is a document. jest.config.ts is still whole-file test config and is refused.
+add("builder-test: Edit of docs/jest.config.md is allowed", "allow", tool="Edit",
+    file_path="docs/jest.config.md", new_string="Run jest with its config.\n", **B)
+add("builder-test: Edit of jest.config.ts is refused", "deny", rule=BT, tool="Edit",
+    file_path="jest.config.ts", new_string="export default {}\n", **B)
+
+# ---- a merge conflict in package.json, built with git (see _conflict_repo). A conflict in `version` alone is
+# not owned, so a builder may resolve it, write the resolved file and commit the merge. A conflict in the
+# `jest` key is owned, so the same resolutions are refused. The STAGED repos are linked worktrees, so the
+# setup commits are not the builder's and only the resolution is judged.
+def _manifest(version="1.0.0", env="node"):
+    return ('{\n  "name": "x",\n  "version": "%s",\n  "scripts": {\n    "test": "jest"\n  },\n'
+            '  "jest": {\n    "testEnvironment": "%s"\n  }\n}\n' % (version, env))
+
+
+MCONF_VER = os.path.join(ROOT, "mconflict-version")  # package.json conflicts in `version` only
+MCONF_VER_STAGED = os.path.join(ROOT, "mconflict-version-staged")  # the same, resolved and staged
+MCONF_JEST = os.path.join(ROOT, "mconflict-jest")  # package.json conflicts in the `jest` key
+MCONF_JEST_STAGED = os.path.join(ROOT, "mconflict-jest-staged")  # the same, resolved and staged
+lazy_fixture([MCONF_VER], lambda: _conflict_repo(
+    MCONF_VER, "package.json", _manifest(), _manifest("1.1.0"), _manifest("1.0.1")))
+lazy_fixture([MCONF_VER_STAGED], lambda: _conflict_repo(
+    MCONF_VER_STAGED, "package.json", _manifest(), _manifest("1.1.0"), _manifest("1.0.1"),
+    resolved=_manifest("1.2.0"), linked=True))
+lazy_fixture([MCONF_JEST], lambda: _conflict_repo(
+    MCONF_JEST, "package.json", _manifest(), _manifest(env="jsdom"), _manifest(env="happy-dom")))
+lazy_fixture([MCONF_JEST_STAGED], lambda: _conflict_repo(
+    MCONF_JEST_STAGED, "package.json", _manifest(), _manifest(env="jsdom"), _manifest(env="happy-dom"),
+    resolved=_manifest(env="jsdom"), linked=True))
+add("builder-test: Edit that resolves a version-only merge conflict in package.json is allowed", "allow",
+    tool="Edit", file_path="package.json",
+    old_string='<<<<<<< HEAD\n  "version": "1.0.1",\n=======\n  "version": "1.1.0",\n>>>>>>> feature',
+    new_string='  "version": "1.2.0",', **dict(B, cwd=MCONF_VER))
+add("builder-test: Write of a version-only merge resolution to package.json is allowed", "allow",
+    tool="Write", file_path="package.json", content=_manifest("1.2.0"), **dict(B, cwd=MCONF_VER))
+add("builder-test: Write of a malformed merge resolution to package.json is refused", "deny", rule=BT,
+    tool="Write", file_path="package.json", content=_manifest("1.2.0").rstrip()[:-1], **dict(B, cwd=MCONF_VER))
+sh("builder-test: git commit of a merge that resolves only the package.json version is allowed",
+   "git commit -q -m merge", "allow", **dict(B, cwd=MCONF_VER_STAGED))
+add("builder-test: Edit that resolves a conflict in the package.json jest key is refused", "deny", rule=BT,
+    tool="Edit", file_path="package.json",
+    old_string='<<<<<<< HEAD\n    "testEnvironment": "happy-dom"\n=======\n    "testEnvironment": "jsdom"\n>>>>>>> feature',
+    new_string='    "testEnvironment": "jsdom"', **dict(B, cwd=MCONF_JEST))
+sh("builder-test: git commit of a merge that resolves the package.json jest key is refused",
+   "git commit -q -m merge", "deny", rule=BDIFF, **dict(B, cwd=MCONF_JEST_STAGED))
+add("builder-test: Write of docs/jest.config.md that names testPathIgnorePatterns is allowed", "allow",
+    tool="Write", file_path="docs/jest.config.md",
+    content="Set testPathIgnorePatterns in the jest key of package.json.\n", **B)
 _repo = diff_repo("b-reverted", lambda w: (write(os.path.join(w, "tests/test_a.py"), "pass\n"),
                                            write(os.path.join(w, "tests/test_a.py"),
                                                  BASE_FILES["tests/test_a.py"])))

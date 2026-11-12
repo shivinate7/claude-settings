@@ -1619,33 +1619,53 @@ def _build_pointer():
 
     make_blind_git(GITBLIND)
 
-def _build_conflict():
-    """CONFLICT: a real checkout with one unresolved merge conflict."""
+def _conflict_repo(where, path, base, feature, main, resolved=None, linked=False):
+    """A real checkout with one unresolved merge conflict in `path`. `feature` and `main` each change the
+    file from `base`, and `feature` is merged into `main`. `resolved`, when given, replaces the conflicted
+    file and is staged, so a case reads a resolution that is ready to commit.
+
+    `linked` builds the same conflict as a linked worktree, as a builder runs in (see diff_repo). The three
+    commits sit in a main checkout at `where` + "-main", and the merge runs in `where`, a worktree on a new
+    branch cut from main. own_changes reads the HEAD reflog of the checkout it judges, and a linked
+    worktree's reflog holds none of the setup commits, so only the resolution is the builder's change."""
     # A real checkout with a real, unresolved merge conflict, built with git itself rather than
     # mocked. Two branches each change the same file, and merging one into the other leaves
     # MERGE_HEAD set and the file in the conflicted "AA" state, which git will not let a commit
     # leave silently.
-    os.makedirs(CONFLICT, exist_ok=True)
-    run_vcs(CONFLICT, "init", "-q", "-b", "main", ".")
+    home = where + "-main" if linked else where
+    os.makedirs(home, exist_ok=True)
+    run_vcs(home, "init", "-q", "-b", "main", ".")
     ident = ["-c", "user.email=cases@example.invalid", "-c", "user.name=cases"]
-    write(os.path.join(CONFLICT, "docs", "DEBTS.md"), "base\n")
-    run_vcs(CONFLICT, "add", "docs/DEBTS.md")
-    run_vcs(CONFLICT, *ident, "commit", "-q", "-m", "base")
-    run_vcs(CONFLICT, "checkout", "-q", "-b", "feature")
-    write(os.path.join(CONFLICT, "docs", "DEBTS.md"), "feature change\n")
-    run_vcs(CONFLICT, "add", "docs/DEBTS.md")
-    run_vcs(CONFLICT, *ident, "commit", "-q", "-m", "feature change")
-    run_vcs(CONFLICT, "checkout", "-q", "main")
-    write(os.path.join(CONFLICT, "docs", "DEBTS.md"), "main change\n")
-    run_vcs(CONFLICT, "add", "docs/DEBTS.md")
-    run_vcs(CONFLICT, *ident, "commit", "-q", "-m", "main change")
+    write(os.path.join(home, path), base)
+    run_vcs(home, "add", path)
+    run_vcs(home, *ident, "commit", "-q", "-m", "base")
+    run_vcs(home, "checkout", "-q", "-b", "feature")
+    write(os.path.join(home, path), feature)
+    run_vcs(home, "add", path)
+    run_vcs(home, *ident, "commit", "-q", "-m", "feature change")
+    run_vcs(home, "checkout", "-q", "main")
+    write(os.path.join(home, path), main)
+    run_vcs(home, "add", path)
+    run_vcs(home, *ident, "commit", "-q", "-m", "main change")
+    if linked:
+        made = run_vcs(home, "worktree", "add", "-q", "-b", "work", where, "main")
+        if made.returncode != 0:
+            sys.exit("fixture setup failed: worktree in %r: %s" % (where, made.stderr.strip()))
     # MEASURED on CI (run 35182973995): this call ran with no `ident`, so on a runner with no
     # global git identity the merge refused before it ever touched the tree ("Committer identity
     # unknown", exit 128), MERGE_HEAD was never set, and the conflict-resolve fixtures below were
     # silently testing a CLEAN tree. It passed here only because this machine's own ~/.gitconfig
     # supplied an identity the fixture never asked for.
-    run_vcs(CONFLICT, *ident, "merge", "feature")  # conflicts and leaves MERGE_HEAD set
-    _require_conflict(CONFLICT, "docs/DEBTS.md")
+    run_vcs(where, *ident, "merge", "feature")  # conflicts and leaves MERGE_HEAD set
+    _require_conflict(where, path)
+    if resolved is not None:
+        write(os.path.join(where, path), resolved)
+        run_vcs(where, "add", path)
+
+
+def _build_conflict():
+    """CONFLICT: a real checkout with one unresolved merge conflict in docs/DEBTS.md."""
+    _conflict_repo(CONFLICT, "docs/DEBTS.md", "base\n", "feature change\n", "main change\n")
 
 def _build_branch():
     """The branch-delete repos: a bare remote, the base fallbacks and the unmerged branches."""

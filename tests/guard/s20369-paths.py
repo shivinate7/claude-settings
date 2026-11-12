@@ -767,18 +767,26 @@ add("swift-test: Edit of non-test App/LoginTest.swift is allowed", "allow", tool
 add("swift-test: Edit of non-test native/abTests/x.swift is allowed", "allow", tool="Edit",
     file_path="native/abTests/x.swift", **B)
 
-# ---- an Xcode test plan is test config (Degen, 2026-10-11; decisions/builders-cannot-edit-tests.md,
-# "Test path"). `native/Degen.xctestplan` is test config. A builder change that ADDS a skip
-# (`skippedTests`) disables tests, so it is a test change. A new unrelated key (`codeCoverage`) stays
-# allowed. A test-author may edit the plan. The write tool judges the new text. The diff check
-# refuses the builder's skip at commit and push (the builder-refuse section), and logs the author's
-# plan edit (`xctestplan_logs_case`).
+# ---- an Xcode test plan is test config. A `.xctestplan` is whole-file test config (decision
+# builders-cannot-edit-tests, "Test paths and test config"): a builder's Edit of it is refused by path,
+# whatever the content. A test-author may edit the plan. The diff check refuses a builder's commit
+# that changes it (the builder-refuse section), and logs the author's plan edit (`xctestplan_logs_case`).
 XCTESTPLAN = "native/Degen.xctestplan"
 add("builder-test: Edit of .xctestplan that adds skippedTests is refused", "deny", rule=BT,
     tool="Edit", file_path=XCTESTPLAN, new_string='"skippedTests" : [ "LaunchTests" ]', **B)
-add("builder-test: Edit of .xctestplan that adds codeCoverage is allowed", "allow", tool="Edit",
-    file_path=XCTESTPLAN, new_string='"codeCoverage" : true', **B)
+add("builder-test: Edit of .xctestplan that adds codeCoverage is refused", "deny", rule=BT,
+    tool="Edit", file_path=XCTESTPLAN, new_string='"codeCoverage" : true', **B)
 add("test-author: Edit of .xctestplan is allowed", "allow", tool="Edit", file_path=XCTESTPLAN, **A)
+# A whole-file test config is refused by its path, whatever the content: the runner's own config files.
+for _path, _text in (
+    (".mocharc.yml", "reporter: dot\n"),
+    ("vitest.workspace.ts", "export default []\n"),
+    ("playwright.config.ts", "export default { reporter: 'dot' }\n"),
+    ("karma.conf.js", "module.exports = {}\n"),
+    ("App.xctestplan", '"testExecutionOrdering" : "random"'),
+):
+    add("builder-test: Edit of %s, a whole-file test config, is refused" % _path, "deny", rule=BT,
+        tool="Edit", file_path=_path, new_string=_text, **B)
 
 # ---- a builder's shell write to a test file: a redirect, tee, sed -i, or a python or node script that
 # opens it for write. A read, a write to product code and a recovery are allowed. BR is a builder in a checkout.
@@ -873,6 +881,26 @@ sh("builder-test: main session shell write of a test is allowed", RULE_AUDIT_EDI
    cwd=GITMAIN)
 sh("builder-test: --agent builder with no agent_id shell write of a test is allowed",
    RULE_AUDIT_EDIT, "allow", agent_type="builder", cwd=GITMAIN)
+# A whole-file test config is refused to a builder's shell write, as a test file is. A partly-owned
+# manifest passes the shell step: its owned parts are judged at commit, push and stop.
+sh("builder-test: shell write of pytest.ini, echo redirect, is refused", 'echo "[pytest]" > pytest.ini',
+   "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: test-author shell write of pytest.ini, echo redirect, is allowed",
+   'echo "[pytest]" > pytest.ini', "allow", **A)
+sh("builder-test: shell append to package.json passes the shell step", "echo x >> package.json",
+   "allow", **BR)
+sh("builder-test: shell recovery by git restore of pytest.ini is allowed", "git restore pytest.ini",
+   "allow", **BR)
+# Three more shell forms that write a whole-file test config: tee, sed -i, and a python heredoc open-write.
+sh("builder-test: shell write of pytest.ini, tee, is refused", "printf '[pytest]\\n' | tee pytest.ini",
+   "deny", rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell write of pytest.ini, sed -i, is refused", "sed -i s/a/b/ pytest.ini", "deny",
+   rule=BT, carries=("test-author",), **BR)
+sh("builder-test: shell write of pytest.ini, python heredoc open-write, is refused",
+   "python3 - <<'EOF'\nopen('pytest.ini', 'w').write('[pytest]')\nEOF", "deny", rule=BT,
+   carries=("test-author",), **BR)
+# A .md under docs is a document, not test config, though its name reads as one.
+sh("builder-test: shell write of docs/jest.config.md is allowed", "echo x > docs/jest.config.md", "allow", **BR)
 
 # Review false alarms: a read whose argument is a mutating word stays allowed, and a name that a
 # heredoc rebinds is read at its new value, so a write to product code after the rebind is allowed.
