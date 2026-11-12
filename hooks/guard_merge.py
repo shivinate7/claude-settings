@@ -1842,7 +1842,9 @@ _STAMP_HEADER = re.compile(
 # no separator needed after it, the same stamp inside square brackets (the 2026-11-12 coordinator incident form).
 # A list bullet (`- ` or `+ `) may lead. It shares the group names above.
 _STAMP_BRACKET = re.compile(
-    _MARKDOWN_LEAD + r"(?:[-+]\s+" + _MARKDOWN_LEAD + r")?\[\s*[^\s\[\]]+(?:\s+[^\s\[\]]+){0,3}\s+"
+    _MARKDOWN_LEAD + r"(?:[-+]\s+[#*_>]*)?\[\s*"
+    # A date is never a label word, or the `date` group below would never capture after a label.
+    r"(?!\d{4}-\d{2}-\d{2}\s)[^\s\[\]]+(?:\s+(?!\d{4}-\d{2}-\d{2}\s)[^\s\[\]]+){0,3}\s+"
     r"(?:(?P<date>\d{4}-\d{2}-\d{2})\s+)?"
     r"(?P<hour>\d{1,2}):(?P<minute>\d{2})(?::\d{2})?\s+(?P<zone>CST|CDT)\s*\]", re.IGNORECASE)
 _STAMP_OFFSET_HOURS = {"CST": -6, "CDT": -5}
