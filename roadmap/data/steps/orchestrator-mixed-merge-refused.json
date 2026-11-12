@@ -1,12 +1,12 @@
 {
   "title": "A lane session's merge commit that resolves both test and product files is refused",
   "why": "Coordinator 12:02 CST Nov 8: refuse a merge commit made by a lane session (not a test-author) whose resolution touches both test and product files. Builds on #1521's role reader, so it starts once #1521 merges. Sightings: 1a444eb96 on #1932, and #2194's #1479 merge (11:59 CST). Owner item 437 (builder-test-edit-scope) is open on the same guard.",
-  "note": "#1521 is on main (batch 69, 624dcc188), so this step may start. Sighting 3, folded from the coordinator's orchestrator-resolves-merge (15:52 CST Nov 9): lane record-tool-posts-itself (#2413, merge 6e127172a, 15:31 CST) resolved three conflict hunks itself, in a decision doc, merge.py and test_merge.py, with no role agent and no refusal. The coordinator's proposed check: refuse a lane or coordinator session's own Edit or Write to a product or test file while MERGE_HEAD is set, as well as the merge commit. Lane [ended:lane:-orchestrator-mixed-merge-refused] started 15:55 CST Nov 9 (coordinator). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJL4KAVGBcxoZzRnGNpj.md on archive/session-handoffs-2026-11-10). Takes in step worktree-role-pins (fold, coordinator 13:36 CST Nov 12).",
+  "note": "#1521 is on main (batch 69, 624dcc188), so this step may start. Sighting 3, folded from the coordinator's orchestrator-resolves-merge (15:52 CST Nov 9): lane record-tool-posts-itself (#2413, merge 6e127172a, 15:31 CST) resolved three conflict hunks itself, in a decision doc, merge.py and test_merge.py, with no role agent and no refusal. The coordinator's proposed check: refuse a lane or coordinator session's own Edit or Write to a product or test file while MERGE_HEAD is set, as well as the merge commit. Lane [ended:lane:-orchestrator-mixed-merge-refused] started 15:55 CST Nov 9 (coordinator). Back to ready 07:22 CST Nov 12 (coordinator yes 07:21 CST): no live lane (was archived, handoff at handoffs/session_013NEJL4KAVGBcxoZzRnGNpj.md on archive/session-handoffs-2026-11-10). Takes in step worktree-role-pins (fold, coordinator 13:36 CST Nov 12). Coordinator 16:13 CST Nov 12: fold in two red pin cases (a builder in another agent's worktree) left by lane worktree-role-pins; take them from archive/worktree-role-pins-2 (8454aded4).",
   "phase": "now",
   "owner": "claude-settings",
   "lane": "session_013NEJL1oCt2U9LgL9z8VZHs",
   "status": "doing",
   "order": 774,
-  "updatedAt": "2026-11-12T13:39:34-06:00",
+  "updatedAt": "2026-11-12T16:12:16-06:00",
   "paused": false
 }
