@@ -14,15 +14,18 @@
                           Cost per draft-step ready: one ci-job run and one worktree; the run time is unmeasured for a step subset
                           (the 3600 s lint bound applies). No new file but ci-job's own log.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
-                          The draft step, a ready --confirm (before the lock) and the preview run the handed-lane check. A body with a `Lanes:`
-                          line must name every handed lane PR (open, newest review record done): on that line, or on a `Dropped`, `Held` or
-                          `Next batch` line with a reason; one not named refuses, nothing pushed, locked or marked ready. A body with no `Lanes:`
-                          line makes no gh read: a head that merges lanes (local git, in the worktree the path already opens) refuses.
-                          --undo-check-unknown-ok "REASON" also lifts a failed lane read of the no-Lanes check (one line names it).
-                          Cost: with a `Lanes:` line, reviewed_read's reads (two list reads, and three gh calls per ready PR with a record), then
-                          one gh api compare per open PR on the base that reads done (against the base), one per handed PR against the integration
-                          head, and one per Lanes-named open PR not in the batch. Without a `Lanes:` line, no gh call: one `git log` in the worktree,
-                          then one `git merge-base --is-ancestor` per merged-in parent (plus a shallow-repo probe on exit 1); on a base that is not the
+                          The draft step, a ready --confirm and the preview run the handed-lane check in two halves. The gh half (handed_check)
+                          runs on every path: the body must name every handed lane PR (open, newest review record done) on its `Lanes:` line, or
+                          on a `Dropped`, `Held` or `Next batch` line with a reason; one not named refuses, nothing pushed or marked ready. A body
+                          with no `Lanes:` line reads as an empty one. The lines of the frozen block are no body lines. The git half (handed_local)
+                          runs when no `Lanes:` line names a PR: a head that merges lanes (local git, in the worktree the path already opens) refuses.
+                          On a ready --confirm the gh half runs before the lock and the git half under it, so a git-half refusal takes and frees
+                          the lock; the draft step and the preview take no lock (a PR that turns draft under the lock runs both under it).
+                          --undo-check-unknown-ok "REASON" lifts a failed lane read of the git half (one line names it).
+                          Cost, gh half: reviewed_read's reads (two list reads, and three gh calls per ready PR with a record), then one gh api
+                          compare per open PR on the base that reads done (against the base), one per handed PR against the integration head, and
+                          one per Lanes-named open PR not in the batch. Git half, no gh call: one `git log` in the worktree, then one
+                          `git merge-base --is-ancestor` per merged-in parent (plus a shallow-repo probe on exit 1); on a base that is not the
                           default branch, when it finds a lane tip, add one `git fetch` of the default branch and one ancestry read per lane tip.
                           No long-lived process, file or timer.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
@@ -4257,9 +4260,21 @@ def body_lanes(body):
     The Lanes line may start with a list marker (`- ` or `* `) or bold (`**Lanes:**`), in any case. left_out: {number: [has a reason, ...]},
     one entry per time the number is on a line that starts with a BATCH_LEFT_OUT prefix, after any indent, list marker or bold. Only the numbers
     after the label's colon (label_colon) count. A reason is a `(...)` right after the number, or a `(...)` in the label before the colon,
-    and it must say something (real_reason)."""
+    and it must say something (real_reason). The lines of a batch's frozen block, markers included, are skipped: --batch-drop writes its
+    `Dropped: #N` lines there (freeze_lines), and they carry no reason, so they neither name a lane nor read as a left-out line with no reason.
+    Only a begin marker paired with the next end marker (freeze_markers) skips: a lone marker skips nothing, so no reasonless line can hide
+    behind it; parse_freeze refuses that body elsewhere."""
     lanes, left = None, {}
-    for line in body.splitlines():
+    lines = body.splitlines()
+    begins, ends = freeze_markers(lines)
+    block = set()
+    for b in begins:
+        e = next((e for e in ends if e > b), None)
+        if e is not None:
+            block.update(range(b, e + 1))
+    for i, line in enumerate(lines):
+        if i in block:
+            continue
         text = line.lstrip(" \t-*>")
         if text[:len(BATCH_LANES)].lower() == BATCH_LANES.lower():
             lanes = (lanes or []) + [int(m.group(1)) for m in _PR_REF.finditer(text[len(BATCH_LANES):])]
@@ -4312,7 +4327,7 @@ def handed_check(host, n, info):
 
 def handed_local(wt, base_ref, n, info, unknown_ok="", default=""):
     """The handed-lane check for a body with no `Lanes:` line, or an empty one, in the worktree `wt` of the head: local git, no gh read. A head that merges
-    lane tips (read_lanes, less the dropped ones) is an integration head, so the missing Lanes line refuses. A read that fails raises Stop: unknown is never a pass,
+    lane tips (read_lanes, less the dropped ones) is an integration head, so the missing Lanes line refuses. A read that fails raises Liftable: unknown is never a pass,
     unless the run has the reason flag --undo-check-unknown-ok "<reason>", which lifts the same read for refuse_dropped_lane: one line says so
     and the reason is returned, for record_lift. On a base that is not `default` (the default branch), a tip that origin/<default> holds is the
     default branch merged into the head, not a lane. origin/<default> is fetched first: open_worktree and load_config fetch only the base
@@ -4337,8 +4352,9 @@ def handed_local(wt, base_ref, n, info, unknown_ok="", default=""):
         if unknown_ok.strip():
             say(f"merge: handed-lane check UNKNOWN ({type(e).__name__}: {e}). {UNDO_FLAG}, reason: {unknown_ok.strip()}")
             return unknown_ok.strip()
-        raise Stop(f"the handed-lane check could not read the merge commits of #{n} ({type(e).__name__}: {e}). Unknown is not a pass. "
-                   f"Nothing was pushed, marked ready, locked, claimed or merged. {HANDED_CITE}")
+        raise Liftable(f"the handed-lane check could not read the merge commits of #{n} ({type(e).__name__}: {e}). Unknown is not a pass. "
+                       f"Nothing was pushed, marked ready, locked, claimed or merged.\n"
+                       f"If the cause is known, run again with the reason flag {UNDO_FLAG} \"<reason>\". {HANDED_CITE}")
     if tips:
         raise Unnamed(f"the head of #{n} merges lanes (tip {', '.join(sorted(t[:9] for t in tips))}) but the body has no {BATCH_LANES} line.\n"
                       f"Name each lane on a {BATCH_LANES} line, and each handed lane left out on a {'/'.join(BATCH_LEFT_OUT)} line with a reason. "
