@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Cases for two wrong refusals of lint/report_guard.py that the guard cull names (roadmap step
-guard-false-alarm-cull; decision cull-guard-wrong-refusals).
+"""Cases for the guard cull's readings of lint/report_guard.py (roadmap step guard-false-alarm-cull; decision
+cull-guard-wrong-refusals).
 
 - The Recovered check goes (owner-delegate DELETE ruling, coordinator 11:22 CST, 2026-11-12). After a compaction,
   a report with no Recovered or Handoff gave line passes, and so does a Recovered item that names no source.
   The handoff-unread guard is a different guard (hooks/guard.py) and is not touched here.
 - A review PASS inside a statistic is not a review claim (retrospective session, 15:39 CST, 2026-11-10). A claim
   with no pull request still refuses on a lane, and that control stays.
+- A review PASS that names a round, a reviewer or a pull request is a claim, even with a count word beside it. The
+  statistic check must not read it as a count.
 
 Each case runs lint/report_guard.py as a Stop hook, the way Claude Code runs it, and reads only its output.
 Run from the repository root:
@@ -30,6 +32,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
 import override  # noqa: E402  LANE_ENV, the env name that marks a lane session (hooks/override.py, one home)
 import test_report_guard as trg  # noqa: E402  the Stop runner, transcript records and run folder (one home)
 import test_report_guard_review as trr  # noqa: E402  the lane fixture: the lane's id, its parent and the env value
+import report_guard as rg  # noqa: E402  review_claims, the review check's claim reader (one home, lint/report_guard.py)
 
 RUN_FOLDER = trg.RUN_FOLDER
 CALLS = trg.SameTurnWriter()  # builds tool-call records; holds no state
@@ -52,6 +55,21 @@ STAT_LINES = (
     "Round 1 reviewers this batch: PASS 9, FAIL 1, so the PASS count is 9.",
 )
 NO_PR_CLAIM = "Round 2 reviewer PASS on the lane's head."
+# Claims that name pull request 12. Each has a count word that the statistic check strips today.
+PR_CLAIMS = (
+    "round 2 of 3 reviewers got PASS on #12.",
+    "round 2 reviewer: 2 lanes got PASS on #12.",
+    "3 reviewers got PASS on #12.",
+    "round 2 reviewer on #12: PASS 2.",
+    "round 2 reviewer: PR 12 PASS 2, FAIL 1.",
+)
+# Claims that name no pull request. The no-PR refusal needs no gh read, so these run the Stop hook end to end.
+NO_PR_CLAIMS = ("round 2 reviewer PASS 12.", "(reviewer PASS 12)")
+# Statistics that must stay no claim. The first three carry no round or reviewer word, so the trigger alone keeps them
+# out; the last three carry one, so they test the statistic check itself.
+STAT_CONTROLS = ("PASS rate 90%", "9 of 10 lanes got PASS", "the PASS count was 9",
+                 "Round 2 stats: PASS rate 90%.", "Round 2 stats: 9 of 10 lanes got PASS.",
+                 "Round 2 stats: the PASS count was 9.")
 
 
 def tearDownModule():
@@ -91,6 +109,18 @@ def lane_own_record():
 def compacted(reply):
     """A compaction, then the report as the first reply after it."""
     return [trg.human("do the task"), trg.compact_boundary(), trg.compact_summary(), trg.assistant_text(reply)]
+
+
+def done_report(text):
+    """A report whose Done item is `text`. The other items hold nothing a check reads."""
+    return "> **Done** OTHER " + text + "\n> **Deviations** none\n> **Next** wait"
+
+
+def claim_prs(text):
+    """The PR numbers of each review claim that review_claims reads in `text`, one list per claim line. It runs in
+    process: a claim that names a PR is refused only after a gh read, and this file has no stand-in for gh
+    (CLAIM_FORMS in test_report_guard_review.py cover that refusal)."""
+    return [nums for _line, nums in rg.review_claims(done_report(text))]
 
 
 class CullRecoveredCheckTests(unittest.TestCase):
@@ -147,6 +177,38 @@ class CullReviewStatisticTests(unittest.TestCase):
         reason = block_reason(run_stop(self.lane_turn(COUNTED + "\n\n" + NO_PR_CLAIM), lane=True))
         self.assertIn(REVIEW_REASON, reason, "control: a review PASS claim with no PR was not refused")
         self.assertIn(NO_PR_TEXT, reason, "control: the refusal does not name the missing PR")
+
+
+class CullReviewClaimTests(unittest.TestCase):
+    """A review PASS that names a round, a reviewer or a pull request is a claim, even beside a count word. The
+    statistic check must not read such a claim as a count."""
+
+    def test_cull_red_pass_claim_naming_pr_12_is_read_as_a_claim(self):
+        # Scope first (P7): a plain claim on #12 is read as one claim naming 12, so the lines below judge the statistic
+        # check.
+        self.assertEqual(claim_prs("round 2 PASS on #12."), [[12]],
+                         "scope: review_claims does not read a plain claim on #12")
+        for text in PR_CLAIMS:
+            with self.subTest(line=text):
+                self.assertEqual(claim_prs(text), [[12]],
+                                 "review_claims does not read this line as one review claim naming PR 12")
+
+    def test_cull_red_pass_claim_with_no_pr_is_refused_on_a_lane(self):
+        # Scope first (P7): a plain claim with no PR is refused by the no-PR reason on a lane, so the lines below judge
+        # the statistic check.
+        out = run_stop(CullReviewStatisticTests.lane_turn(done_report(NO_PR_CLAIM)), lane=True)
+        self.assertIn(NO_PR_TEXT, block_reason(out), "scope: the lane fixture does not refuse a plain claim with no PR")
+        for text in NO_PR_CLAIMS:
+            with self.subTest(line=text):
+                out = run_stop(CullReviewStatisticTests.lane_turn(done_report(text)), lane=True)
+                self.assertIn(NO_PR_TEXT, block_reason(out),
+                              "the review-record guard passed a review PASS claim that names no PR")
+
+    def test_cull_green_statistic_lines_are_not_claims(self):
+        # Control: a count of PASS is no review claim, with or without a round or reviewer word beside it.
+        for text in STAT_CONTROLS:
+            with self.subTest(line=text):
+                self.assertEqual(claim_prs(text), [], "review_claims reads a statistic line as a review claim")
 
 
 if __name__ == "__main__":
