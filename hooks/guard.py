@@ -214,6 +214,15 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        deny. A SendMessage whose `to` is a string starting `session_`: that is no agent name, and the
                        hand-off could go missing. A missing or non-string `to`, an agent name, @parent and the
                        mcp__claude-code-remote__send_message tool pass. An override lifts it.
+  review-record-after-round
+                       deny. A call from any session with no `agent_id`: an Agent or Task spawn of a `builder` or
+                       `test-author`, or a send_message, when the transcript's last Agent or Task spawn of a `reviewer`
+                       or `design-reviewer` has no later call that posted a review record (an add_issue_comment
+                       whose body, or a Bash command, holds the merge tool's REVIEW_MARKER, read through
+                       `merge_module`). No reviewer spawn, and a missing or unreadable transcript, allow. A merge tool
+                       that cannot load allows and is noted as `review-record-unread`. The reason names the
+                       merge tool's `--review-record --head` remedy and the comment tool. One transcript read per judged
+                       call, no subprocess, no network. An override lifts it. (pr-review-record)
   draft-pr             deny. A `gh pr create` without `--draft`. (draft-until-reviewed)
   gh-write-cloud       deny. In a cloud session, a gh write: `gh pr` create, merge, comment, edit, close, review or
                        ready; `gh issue` create, comment, edit or close; `gh api` with a write method, or with a field
@@ -575,7 +584,7 @@ while True:
             DRAFT_PR_REASON, GH_WRITE_CLOUD_REASON, MERGE_TOOLS, OCTOPUS_PUSH_REASON, RECORDS_PAGE_REASON, REPO_REASON, ROLE_REASON,
             HOOK_BYPASS_REASON, conflict_markers_hit, hook_bypass_hit, octopus_push_hit, _push_calls, gh_call_of, gh_write_of, git_call_of, merge_call_of, merge_check, merge_check_reason, record_writer_hit,
             records_page_hit, repo_proof_hit, role_proof_hit,
-            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, stamp_hit, trust_card_hit, written_time_hit,
+            DEFAULT_RECORD_BRANCH, RECORD_REASON, settings_roots, TRUST_REASON, archive_hit, brief_hit, review_record_hit, stamp_hit, trust_card_hit, written_time_hit,
             undrafted_pr_create, uses_merge_tool, ready_page_hit,
         )
         _loading = "guard_frozen"
@@ -6236,6 +6245,14 @@ def judge(payload) -> None:
     written = written_time_hit(tool, tool_input, cwd)
     if written:
         refuse(tool, "deny", "message-time-matches-clock", written[1], written[0])
+
+    # A builder, test-author or handoff while the last reviewer spawn has no review record (rule review-record-after-round).
+    record_reason, record_matched, record_unknown = review_record_hit(
+        tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", bool(payload.get("agent_id")))
+    if record_unknown:
+        record(tool, "noted", "review-record-unread", tool)
+    if record_reason:
+        refuse(tool, "deny", "review-record-after-round", record_reason, record_matched)
 
     if tool == "Skill":
         matched = impeccable_skill_hit(tool_input)
