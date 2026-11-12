@@ -4866,7 +4866,7 @@ class GhHalf(Env):
     def other_pr(self, runs, rows=(), ignore=None):
         """Pull request 8 on main, ready, with its own check rows and workflow runs: the other half of the batch brake. -> the Host for run_merge."""
         other = "c" * 40
-        self.set(open_prs=[["feat2", other, "main", 8]], other_rows={other: list(rows)}, other_runs={other: list(runs)})
+        self.set(open_prs=[["feat2", other, "main", 8]], other_rows={other: list(rows)}, other_runs={other: list(runs)}, issue_comments=[])
         return self.gh_host(ignore=ignore)
 
     def test_confirm_refuses_while_a_workflow_runs_before_its_required_check_reports(self):
