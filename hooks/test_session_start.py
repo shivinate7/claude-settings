@@ -1312,6 +1312,23 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
         _, starts = self.run_traced()
         self.assert_one_origin_main_fetch(starts, branch="trunk")
 
+    def test_a_remote_with_no_main_refreshes_its_default_branch_and_reads_its_grants(self):
+        # origin's default branch is master and origin has no main: the refresh must ask only for master.
+        fresh = self.tip_with(GRANT_FRESH, GRANT_STALE_DOT)
+        vcs(self.primary, "push", "-q", "origin", "%s:refs/heads/master" % fresh)
+        vcs(self.origin_repo, "symbolic-ref", "HEAD", "refs/heads/master")
+        vcs(self.origin_repo, "branch", "-q", "-D", "main")
+        vcs(self.primary, "update-ref", "-d", "refs/remotes/origin/main")
+        vcs(self.primary, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/master")
+        self.assertEqual(self.resolve("origin/master"), fresh, "scope: origin/master is not the fresh tip")
+        self.assertIsNone(self.resolve("origin/main"), "scope: origin/main still resolves")
+        self.assertNotEqual(self.blob("HEAD", "CLAUDE.md"), self.blob("origin/master", "CLAUDE.md"),
+                            "scope: the checkout's CLAUDE.md does not differ from origin/master")
+        lines = self.run_checked()
+        self.assertEqual([line for line in lines if "did not run" in line], [],
+                         "the refresh failed on a remote with no main, so it asked for main: %r" % lines)
+        self.assert_one_differ_line(lines, "CLAUDE.md", "origin/master", fresh)
+
     def test_no_origin_remote_starts_no_fetch_and_prints_no_refresh_line(self):
         vcs(self.primary, "remote", "remove", "origin")
         self.assertEqual(vcs(self.primary, "remote").stdout.strip(), "", "scope: a remote is still configured")
