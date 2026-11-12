@@ -579,6 +579,26 @@ class CostPinTests(unittest.TestCase):
                            "- **Cost:** one read per call, in `lint/test_y.py`, for `far`.\n")
         self.assert_found([count_row("test-span.md", text, "in `lint/test_x.py`")], counts=True)
 
+    def test_function_name_span_pins_the_count_its_test_file_holds(self):
+        # `test_one_thing` is the nearest span that is no pin candidate, and the file holds that name. The file token
+        # `hooks/test_refusal_note.py` is a pin candidate, so it is never the nearest span and pins nothing here.
+        self.put("hooks/test_refusal_note.py", "# refusal note cases\n\ndef test_one_thing():\n    pass\n")
+        self.assert_exists("hooks/test_refusal_note.py")
+        self.decide("fn-span.md",
+                    "- **Cost:** one file per refusal is pinned by `hooks/test_refusal_note.py`, "
+                    "and `test_one_thing` proves one file per refusal.\n")
+        self.assert_clean()
+
+    def test_function_name_the_test_file_lacks_still_flags_the_count(self):
+        # The same sentence, and a file that holds another name. The count stays flagged, so a fix must not pass every
+        # count that names a test function.
+        self.put("hooks/test_refusal_note.py", "# refusal note cases\n\ndef test_other_thing():\n    pass\n")
+        self.assert_exists("hooks/test_refusal_note.py")
+        text = self.decide("fn-lacks.md",
+                           "- **Cost:** one file per refusal is pinned by `hooks/test_refusal_note.py`, "
+                           "and `test_one_thing` proves one file per refusal.\n")
+        self.assert_found([count_row("fn-lacks.md", text, "- **Cost:**")], counts=True)
+
     def test_word_gap_is_three_words_not_four(self):
         # Three words sit between the count and `read`, so the count is read. Four words sit between, so it is not.
         text = self.decide("gap.md",
