@@ -193,8 +193,8 @@ def case_fn_empty_and_full_size():
 def case_fn_passes():
     passes("fn: a set whose options match its shown passes",
            frozen("set", decision(OPTIONS, shown=shown_of(OPTIONS))))
-    passes("fn: an update that appends an option passes",
-           frozen("update", decision(OPTIONS + [GREEN], shown=shown_of(OPTIONS))))
+    passes("fn: an update that appends an option, shown on the same write, passes",
+           frozen("update", decision(OPTIONS + [GREEN], shown=shown_of(OPTIONS + [GREEN]))))
     passes("fn: a note added to an option, key, id and label unchanged, passes",
            frozen("update", decision(NOTED, shown=shown_of(OPTIONS))))
     passes("fn: a task with reordered options and no shown passes", frozen("update", decision(SWAPPED, kind="task")))
