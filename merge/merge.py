@@ -4677,15 +4677,15 @@ def stray_heads(root, tip, block, stops, kept):
 
 def stacked_remedy(name, branch, onto, base, named, blamed):
     """The route the stacked-check refusal names for the lanes it lists. A drop is named only for a lane with a stored blame, the only lane a drop takes off.
-    Any other lane gets the two routes the tool accepts from this state: the route that stores a blame, which needs a completed, failed run of the batch's
-    current head, and a wait until the open pull request each line names is merged into `base`, after which the check no longer names it. No route here
+    Any other lane gets the two routes the tool accepts from this state: the route that stores a blame, which needs a failed run of the batch's current head (or one still going with a job already finished red),
+    and a wait until the open pull request each line names is merged into `base`, after which the check no longer names it. No route here
     leaves the lane as it is: the next --ready stops at this same refusal."""
     drops = [n for n in named if n in blamed]
     waits = [n for n in named if n not in blamed]
     text = "".join(f"Run `merge --batch-drop {name} {n}`, then run this --batch-build again: it rebuilds {branch} on the head of {onto} now. " for n in drops)
     if waits:
         one = len(waits) == 1
-        text += (f"{lane_list(waits)} {'has' if one else 'have'} no stored blame, so a drop is refused. If a completed, failed run of the batch's current head is caused by "
+        text += (f"{lane_list(waits)} {'has' if one else 'have'} no stored blame, so a drop is refused. If a failed run of the batch's current head, or one still going with a red job, is caused by "
                  f"{'it' if one else 'one of them'}, store the blame with "
                  + " or ".join(f"`merge --batch-build {name} --blame {n} --run <Actions run URL>`" for n in waits)
                  + f", then run its drop. Otherwise wait until the pull request each line above names is merged into {base}, then run this --batch-build again.")
@@ -4778,7 +4778,7 @@ def blame_lines(name, blamed, base, stored=True):
     if stored:
         return [line for n in sorted(blamed) for line in (touches(n) + " To take it off the batch, run:", f"  merge --batch-drop {name} {n}")]
     return [line for n in sorted(blamed) for line in (touches(n) + " Its blame is not stored, so a drop is refused. "
-                                                        f"If a completed, failed run of batch {name}'s current head is caused by it, store the blame by running:",
+                                                        f"If a failed run of batch {name}'s current head, or one still going with a red job, is caused by it, store the blame by running:",
                                                         f"  merge --batch-build {name} --blame {n} --run <Actions run URL>")]
 
 def record_in_block(h, branch, **fields):
@@ -5128,7 +5128,7 @@ def build_parser():
     p.add_argument("--grant", type=grant_arg, metavar="TEXT", help="with --review-record: the owner's grant of round 4, `#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT`, with PR the pull request's own number; the rounds must then reach round 4")
     p.add_argument("--net-value", choices=REVIEW_NETS, default="not owed", help="with --review-record: the net value of a guard or check change after the final round (round 3, or 4 with --grant)")
     p.add_argument("--touches", action="store_true", help="list the open pull requests that touch a failing case or a named file; takes no lock, merges and posts nothing")
-    p.add_argument("--run", default=None, metavar="RUN", help="a workflow run, by its id or its Actions run URL. With --touches: the run whose failing log lines name the cases. With --batch-build NAME --blame PR: the failed run of the batch's current head that blames the lane")
+    p.add_argument("--run", default=None, metavar="RUN", help="a workflow run, by its id or its Actions run URL. With --touches: the run whose failing log lines name the cases. With --batch-build NAME --blame PR: the failed run of the batch's current head (or one still going with a job already finished red) that blames the lane")
     p.add_argument("--case", action="append", default=[], metavar="TEXT", help="with --touches: a case to find in the `+` lines of an open pull request's patch; repeat it")
     p.add_argument("--file", action="append", default=[], metavar="PATH", help="with --touches: a file an open pull request changes; repeat it")
     return p
@@ -5148,7 +5148,7 @@ def main(argv, host=None, lock=None, hosts=None):
         if not a.batch_build:
             p.error("--blame goes with --batch-build NAME")
         if a.run is None:
-            p.error("--blame needs --run <Actions run URL>: the failed run of the batch's current head that blames the lane")
+            p.error("--blame needs --run <Actions run URL>: the failed run of the batch's current head (or one still going with a job already finished red) that blames the lane")
         if len(a.batch_build) > 1 or a.ready or a.on is not None or a.base or a.lint_unknown_ok:
             p.error("--batch-build NAME --blame PR --run URL takes no PR list, --ready, --on, --base or --lint-unknown-ok")
     if any(not v.strip() for v in [*a.case, *a.file, *([a.run] if a.run is not None else [])]):
