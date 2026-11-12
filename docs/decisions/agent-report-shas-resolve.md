@@ -39,7 +39,7 @@ The payload must carry a valid `agent_id`. Every agent type is judged, reviewers
 
 ## Cost
 
-A hand-back is judged before any other guard rule reads git, so a hand-back with no sha-like token starts no git process. One that holds one starts one `git cat-file --batch-check`, and one `rev-parse --is-shallow-repository` when a sha is missing. A stop adds the same to the stop's existing diff reads. A guard.log line only for a refusal or a note. No file, timer or long-lived process.
+A hand-back is judged before any other guard rule reads git, so a hand-back with no sha-like token starts no git process. A hand-back that holds a sha-like token starts a `git cat-file --batch-check` call for all its shas, and a `rev-parse --is-shallow-repository` call when a sha is missing. A stop adds the same to the stop's existing diff reads. A guard.log line only for a refusal or a note. No file, timer or long-lived process.
 
 ## Known gaps
 
