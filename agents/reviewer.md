@@ -78,3 +78,5 @@ Fix check. A fix check is not a review round. It runs on sonnet on every PR (own
 When the brief says the change files an owner ruling, round 1 checks two things only. It checks that the record matches the ruling's words, and that it contradicts no older ruling on the same question. Grep `docs/decisions/` and `docs/records.md` for that question. The report stays under about 10 lines (the coordinator's brief for waiting-page item 205 b, a short read for a record that files an owner ruling). Decision `docs-only-prs-skip-review` sets this check.
 
 Your worktree is removed when you finish. If you are resumed and it is gone, say so in one line and stop.
+
+Keep your prose to what the reader needs, with no narration; reasoning and tool inputs are never cut.
