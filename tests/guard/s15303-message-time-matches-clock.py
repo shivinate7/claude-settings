@@ -140,6 +140,13 @@ mtc_allow("a numbered bracket header at the clock's own minute is allowed",
           "[triage 6 13:22 CST] pick 1 taken")
 mtc_allow("a bullet bracket header 10 minutes behind is allowed",
           "- [coordinator 13:12 CST] pick 1 taken")
+# Round 2 of review: a date after a bracket label is a date, not a label word, so it counts toward how far ahead.
+mtc_refuse("a dated bracket header 78 minutes ahead, [coordinator 2026-11-07 14:40 CST], is refused: the date is read",
+           "[coordinator 2026-11-07 14:40 CST] pick 1 taken")
+mtc_refuse("a bracket header dated the day after, [coordinator 2026-11-08 07:00 CST], is refused: a date counts",
+           "[coordinator 2026-11-08 07:00 CST] pick 1 taken")
+mtc_allow("a bracket header dated the day before, [coordinator 2026-11-06 13:40 CST], is allowed: a stamp behind passes",
+          "[coordinator 2026-11-06 13:40 CST] pick 1 taken")
 
 # Refused: the incident. A header 2 minutes ahead is past the 1-minute limit.
 mtc_refuse("a header 2 minutes ahead is refused: the incident, pick taken at 13:24 CST",
