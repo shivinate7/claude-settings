@@ -7,7 +7,8 @@ watch finds the transcript by session id. The script `hooks/decision_watch.py` j
 given. The silent no-transcript case belongs to the mod `mods/decision-watch`
 (`mods/decision-watch/hooks/register.mjs:82`).
 
-- The UNKNOWN for a failed path names the path it tried. It shows once per session.
+- The UNKNOWN for a failed path names the path it tried. It shows once per session for the
+  background judge.
 - The mod's silent no-transcript case (`mods/decision-watch/hooks/register.mjs:82`) shows once per
   session too.
 
@@ -30,8 +31,8 @@ Red cases first. Each case below gets a test:
 
 This narrows one sentence in the Stop guardrail record, decision `stop-guardrail-became-a-command-hook`.
 That sentence says the cap never applies to an UNKNOWN read. For this one UNKNOWN, the failed-path
-UNKNOWN, the cap applies: it shows once per session. Other UNKNOWN reads keep the older rule. The
-older sentence stays true of the code until this build lands.
+UNKNOWN, the cap applies: it shows once per session for the background judge. Other UNKNOWN
+reads keep the older rule. The older sentence stays true of the code until this build lands.
 
 ## Not built
 
