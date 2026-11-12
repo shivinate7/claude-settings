@@ -119,7 +119,7 @@
         "kind": "guard",
         "ref": "resume-finished-reviewer"
       },
-      "test": "hooks/test_guard.py::resume-finished-reviewer: a finished background reviewer, named by its agent id, is refused"
+      "test": "tests/guard/s15900-resume-finished-reviewer.py::resume-finished-reviewer: a finished background reviewer, named by its agent id, is refused"
     },
     "parallelism-each-own-checkout": {
       "mechanism": {

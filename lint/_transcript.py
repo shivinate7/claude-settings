@@ -510,7 +510,7 @@ def stopped_ids(content):
     return [m.group(1)] if m else []
 
 
-def _notice_text(rec):
+def notice_text(rec):
     """The text a record can carry a notice in: a queued_command attachment's prompt, a queue-operation's
     content, or a user message's content."""
     kind = rec.get("type")
@@ -553,7 +553,7 @@ def agent_state(records, tool_use_id, tag):
         return UNKNOWN
     stops, unclear = set(), False
     for later in records[at + 1:]:
-        for tid, uid, st in notice_blocks(_notice_text(later), tag):
+        for tid, uid, st in notice_blocks(notice_text(later), tag):
             if tid == agent or uid == tool_use_id:
                 if st in TERMINAL:
                     return FINISHED

@@ -2430,7 +2430,7 @@ RESUME_MAIN = "main"
 RESUME_ISOLATIONS = ("worktree", "remote")
 # One reason for every role: it names the role, so the remedy names a fresh agent of that same role.
 RESUME_REASON = (
-    "this %(role)s has finished, so it has no worktree any more and a resume runs with no "
+    "this %(role)s has finished, and the worktree of a finished agent is gone or reaped with its finish, so a resume runs with no "
     "tree%(model)s. Spawn a fresh %(role)s and pass it the prior report. "
     "(rule roles-resume-by-name: when a finished agent's worktree is gone, send a fresh agent of the same role the prior report)"
 )
@@ -2533,18 +2533,23 @@ def resume_finished_hit(tool: str, tool_input, transcript: str, isolation_pin=No
         spawns = [use for rec in records for use in reader.tool_uses(rec)
                   if use.get("name") in RECORD_SPAWN_TOOLS and isinstance(use.get("input"), dict)
                   and use.get("id") not in failed]
-        named = [use for use in spawns if use["input"].get("name") == target or agents.get(use.get("id")) == target]
+        # A launch result that is a bare string holds no agent id; the finish notice names the spawn by its id and its tool use id.
+        noticed = {uid: tid for rec in records for tid, uid, _st in reader.notice_blocks(reader.notice_text(rec), TASK_NOTIFICATION_TAG)
+                   if tid and uid}
+        named = [use for use in spawns if use["input"].get("name") == target
+                 or target in (agents.get(use.get("id")), noticed.get(use.get("id")))]
         if not named:
             return _workflow_resume_hit(reader, tool, transcript, target, isolation_pin)
         spawn = named[-1]["input"]
         role = spawn.get("subagent_type") if isinstance(spawn.get("subagent_type"), str) else "agent"
-        if role not in RECORD_REVIEWER_ROLES and not _resume_worktree(spawn, role, isolation_pin):
+        reviewer = role_key(role) in RECORD_REVIEWER_ROLES  # `Reviewer` is the reviewer role, as in review_log_hit
+        if not reviewer and not _resume_worktree(spawn, role, isolation_pin):
             return "", "", "", ""
         state = reader.agent_state(records, named[-1].get("id"), TASK_NOTIFICATION_TAG)
     except Exception:
         return "ask", RESUME_UNPARSED_REASON, "%s with a transcript record the read cannot parse" % tool, RESUME_UNPARSED_NOTE
     if state == reader.FINISHED:
-        model = RESUME_MODEL_CLAUSE if role in RECORD_REVIEWER_ROLES else ""
+        model = RESUME_MODEL_CLAUSE if reviewer else ""
         reason = RESUME_REASON % {"role": role, "model": model}
         return "deny", reason, "%s to a finished %s" % (tool, role), ""
     if state == reader.UNKNOWN:
