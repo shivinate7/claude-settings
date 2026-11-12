@@ -3835,6 +3835,50 @@ def write_inbox(cfg, sid, rows):
     write_file(inbox_of(cfg, sid), "".join(render_block(text, header=h, items=items) for h, text, items in rows))
 
 
+LATE_REF = "inbox:%s@%s" % (NEW_SID[:8], LATE_HEADER[:16])  # the candidate ref of the 10:09 message
+SAME_MINUTE_REF = EARLY_REF + "#2"  # the second of two messages stamped 10:04: inbox_refs takes `#2`
+AGAIN_ID = "fb-1004-1"
+AGAIN_LINE = "- fb-1004-1 [note] -> noted"
+
+
+def judged_again_with_mark(name, second_header, second_ref, mark):
+    """The shared step of the second-judging marks. The item sits on the first message, with `mark` already on
+    its line. The second message is a plain one stamped `second_header`. The Stop judges the item again, and the
+    model names `second_ref` as its repeat. Returns (cfg, Proc, calls)."""
+    root = repeat_repo(name, step=True)
+    cfg = new_cfg()
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [AGAIN_LINE + mark]), (second_header, MSG_TWO, [])])
+    answer = json.dumps({"repeats": [{"id": AGAIN_ID, "ref": second_ref}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    return cfg, p, calls
+
+
+def case_repeat_same_minute_mark_is_recognised_on_a_second_judging():
+    """A ref of a message stamped in a minute shared with another ends `#<block number>` (inbox_refs). A line
+    already marked with that ref is marked: a Stop that judges the item again must leave the line with its one
+    mark. Red on ca3f3cd: MARKED ends at the time, so the `#2` mark is no mark, and mark_items appends the same
+    ref again. The Stop's flag line names the ref, so the hit is known accepted, not a vacuous pass."""
+    mark = " repeats " + SAME_MINUTE_REF
+    cfg, p, calls = judged_again_with_mark("repeat-same-minute-mark", EARLY_HEADER, SAME_MINUTE_REF, mark)
+    check("same minute mark: the Stop judges the item once", len(calls) == 1, p.desc())
+    check("same minute mark: the Stop flags the item at its ref", "%s may repeat %s" % (AGAIN_ID, SAME_MINUTE_REF) in p.out,
+          p.desc())
+    check("same minute mark: the line keeps its one mark",
+          inbox_line(cfg, NEW_SID, AGAIN_ID) == AGAIN_LINE + mark, inbox_line(cfg, NEW_SID, AGAIN_ID))
+
+
+def case_repeat_unsuffixed_mark_stays_one_mark_on_a_second_judging():
+    """Control for the case above: the same shape with the second message in its own minute, so its ref has no
+    `#`. It passes on ca3f3cd: MARKED matches the time-only ref, and mark_items adds no second mark."""
+    mark = " repeats " + LATE_REF
+    cfg, p, calls = judged_again_with_mark("repeat-unsuffixed-mark", LATE_HEADER, LATE_REF, mark)
+    check("unsuffixed mark control: the Stop judges the item once", len(calls) == 1, p.desc())
+    check("unsuffixed mark control: the Stop flags the item at its ref", "%s may repeat %s" % (AGAIN_ID, LATE_REF) in p.out,
+          p.desc())
+    check("unsuffixed mark control: the line keeps its one mark",
+          inbox_line(cfg, NEW_SID, AGAIN_ID) == AGAIN_LINE + mark, inbox_line(cfg, NEW_SID, AGAIN_ID))
+
+
 def case_repeat_own_home_is_never_a_candidate_for_its_item():
     """R38 (owner 13:03 CST Nov 11): a session's follow-up items match the work it filed from its own earlier
     items. The step an item names as its home is that item's own home, so the judge drops it for that item:
@@ -4666,6 +4710,8 @@ CASES = (
     case_repeat_cap_keeps_the_open_roadmap_steps,
     case_repeat_list_ids_and_refs_do_not_cost_the_valid_hit,
     case_repeat_spaced_inbox_mark_is_recognised_on_a_second_judging,
+    case_repeat_same_minute_mark_is_recognised_on_a_second_judging,
+    case_repeat_unsuffixed_mark_stays_one_mark_on_a_second_judging,
     case_repeat_repo_item_is_never_judged_as_a_repeat,
     case_repeat_own_home_is_never_a_candidate_for_its_item,
     case_repeat_each_item_is_judged_against_the_other_messages,
