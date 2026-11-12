@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fails when a merge or branch silently drops or reverts earlier work. Stdlib and git only.
 
-    python3 lint/check_silent_undo.py [--upstream origin/main] [--head HEAD] [--strict]
+    python3 lint/check_silent_undo.py [--upstream BASE] [--head HEAD] [--strict]   # no BASE: the branch's tracked upstream; its own pushed copy, a gone upstream or none: origin/main
     python3 lint/check_silent_undo.py --history [REV] [--window 60]   # audit, always exit 0
 
 Three reads, one verdict. Design: docs/decisions/silent-undo-check-design.md.
@@ -684,6 +684,45 @@ def resolve_upstream(cwd, upstream):
     raise Unknown("no %s here, nothing to compare against" % upstream)
 
 
+DEFAULT_BASE = "origin/main"
+
+
+def default_base(cwd, head):
+    """(base, why) for a run with no --upstream: the branch's tracked upstream, so a branch stacked on another is judged
+    against the branch it stacks on. The branch's own pushed copy is no base, and gives origin/main. The one rule: the
+    upstream is the branch's own copy when branch.<name>.merge names the branch itself (refs/heads/<name>), or when the
+    upstream's tip is the branch's tip (a branch pushed under another name, which keeps the old name in that key).
+    A gone upstream (the key stays, the remote ref is pruned) and no tracking at all give origin/main too. A branch
+    that is ahead of a copy pushed under another name reads as stacked: only the PR's base tells them apart.
+    The branch is read by its full name (refs/heads/<name>), so a tag named like it cannot make the name ambiguous;
+    `<name>@{upstream}` looks up the branch only, and the upstream comes back as a full ref for the same reason."""
+    if head == "HEAD":
+        ref = git(cwd, "symbolic-ref", "-q", "HEAD", ok=(0, 1))[1].strip()
+    else:
+        ref = next((r for r in (head, "refs/heads/" + head) if r.startswith("refs/heads/")
+                    and git(cwd, "rev-parse", "--verify", "-q", r + "^{commit}", ok=(0, 1))[0] == 0), "")
+    if not ref:
+        return DEFAULT_BASE, "no tracked upstream: %s is no branch" % head
+    name = ref[len("refs/heads/"):]
+    merge = git(cwd, "config", "--get", "branch.%s.merge" % name, ok=(0, 1))[1].strip()
+    if not merge:
+        return DEFAULT_BASE, "no tracked upstream"
+    rc, up = git(cwd, "rev-parse", "--symbolic-full-name", name + "@{upstream}", ok=(0, 128))
+    up = up.strip()
+    if rc != 0 or not up:
+        remote = git(cwd, "config", "--get", "branch.%s.remote" % name, ok=(0, 1))[1].strip()
+        kept = merge[len("refs/heads/"):] if merge.startswith("refs/heads/") else merge
+        stored = merge if remote == "." else "refs/remotes/%s/%s" % (remote, kept)
+        if remote and git(cwd, "rev-parse", "--verify", "-q", stored, ok=(0, 1))[0] != 0:
+            return DEFAULT_BASE, "the upstream of %s, %s on %s, is gone" % (name, merge, remote)
+        return DEFAULT_BASE, "the upstream of %s cannot be read" % name
+    if merge == ref:
+        return DEFAULT_BASE, "%s tracks its own pushed copy" % name
+    if git(cwd, "rev-parse", ref + "^{commit}")[1] == git(cwd, "rev-parse", up + "^{commit}", ok=(0, 128))[1]:
+        return DEFAULT_BASE, "the upstream tip equals the branch tip"
+    return up, "the branch's tracked upstream"
+
+
 def generated_page(cwd, head, paths, upstream="origin/main", tool=None):
     """(page path, True when head's copy equals what the generator writes for head's tree).
     The generator is the upstream's own lint/hook_catalog.py, never the head's: a head that edits the generator and
@@ -813,7 +852,7 @@ def say(line):
 
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("--upstream", default="origin/main")
+    ap.add_argument("--upstream", help="the base to compare against; default: the branch's tracked upstream, else origin/main")
     ap.add_argument("--head", default="HEAD")
     ap.add_argument("--window", type=int, default=60, help="history mode only")
     ap.add_argument("--strict", action="store_true", help="unknown exits 1 (also when env CI is set)")
@@ -821,6 +860,10 @@ def main(argv):
     ap.add_argument("--repo", default=os.getcwd())
     a = ap.parse_args(argv)
     try:
+        if a.upstream is None and not a.history:
+            a.upstream, why = default_base(a.repo, a.head)
+            used = resolve_upstream(a.repo, a.upstream)  # the ref check() will read: local main when there is no origin
+            say("silent-undo: base: %s (%s)" % (re.sub("^refs/(heads|remotes)/", "", used), why))
         if a.history:
             n, hits = history(a.repo, a.history, a.window)
             say("\n".join(hits))
