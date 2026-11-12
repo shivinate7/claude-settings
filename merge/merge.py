@@ -84,7 +84,7 @@
                           Cost: one `pulls/N` read per PR and one read of the repo's comments since the oldest PR (every page), one fetch per
                           distinct base, one merge-tree per PR (tree objects, no ref), and a fetch of a PR head the clone lacks; no new
                           process kept, file or timer.
-  merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"] [--with PR,PR,...]
+  merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"] [--with PR,PR,...] [--integration]
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
                           commit or ref is linted against --base (default main). A PR on a base other than main also FAILs when its head lacks that base's head (never lifted). A FAIL step refuses. An unknown refuses unless
@@ -93,6 +93,8 @@
                           and pushes nothing, except that a PASS on a PR number posts one comment on it, as the account that runs it
                           (the join and --reviewed count only an owner's); any session may run it, cloud included. Cost per call: one
                           ci-job run (about 550 s, measured once on one PR head), one worktree, and on a PASS one comment post.
+                          --integration (a PR number only) also adds the `batch` label to the PR on a PASS, one more REST call; a failed
+                          add prints how to label it by hand and the PASS still exits 0.
                           Every head, a ref or commit too, is first merged into origin/<base> with `git merge-tree --write-tree`. A conflict FAILs,
                           naming the base (never lifted).
                           A PR number is also checked against each other open PR of its lane (a draft counts; a PR whose body holds a
@@ -1147,6 +1149,12 @@ class Host:
         c, out = self.api(f"issues/{n}/comments", method="POST", body={"body": body})
         if c:
             raise Stop(f"posting the comment on #{n} failed {LANE_LINT_CITE}: {out}")
+
+    def add_label(self, n, label):
+        """Add `label` to pull request n (REST POST issues/n/labels, through gh; GitHub makes a missing label). The one home of a label write. A failed add is a Stop."""
+        c, out = self.api(f"issues/{n}/labels", method="POST", body={"labels": [label]})
+        if c:
+            raise Stop(f"adding the `{label}` label to #{n} failed {LANE_LINT_CITE}: {out}")
 
     def review_comments(self, since):
         """-> {PR number: [review record bodies, oldest first]}: review_records without the timestamps."""
@@ -3052,7 +3060,7 @@ def ci_job_run(wt, *args, notes=None):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
-def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
+def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), integration=False):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
     A target of digits is a PR number: its head and base come from the PR, and a stacked PR (base other than main) whose head lacks its base's head stops first.
@@ -3063,7 +3071,9 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
     A FAIL above, and exit 1 of ci-job (a FAIL), refuse always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
     A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names.
     A PASS on a pull request number posts the lane-lint comment (lint_body) naming the head it read, which `--reviewed` and the join require; a failed post
-    prints a reason line and still exits 0. A FAIL, an unknown and a ref or commit target post nothing."""
+    prints a reason line and still exits 0. A FAIL, an unknown and a ref or commit target post nothing.
+    `integration` (a PR number only; main checks it) also adds the PR_BATCH_LABEL label to the PR on a PASS, so the ledger reads it as a batch run (decision
+    pr-ledger); a failed add prints a reason that names the hand fix and still exits 0."""
     if target.isdigit():
         host = host or Host(cwd=root)
         n = int(target)
@@ -3108,6 +3118,12 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
             except Stop as e:  # the lint stands; only the proof on the PR is missing, so say how to get it
                 say(f"merge: the lane-lint comment was not posted on #{n}: {' '.join(str(e).split())} The join and `merge --reviewed` read no PASS for {short} until it is. "
                     f"Run `merge --lane-lint {n}` again, or post this comment on #{n} as the repo's owner:", *lint_body(n, head).splitlines())
+            if integration:
+                try:
+                    host.add_label(n, PR_BATCH_LABEL)
+                except Stop as e:  # the lint stands; only the label is missing, so say how to add it
+                    say(f"merge: the `{PR_BATCH_LABEL}` label was not added to #{n}: {' '.join(str(e).split())} The ledger reads #{n} as `none`, red, until it is. "
+                        f"Run `merge --lane-lint {n} --integration` again, or add the `{PR_BATCH_LABEL}` label by the session's route (cloud: MCP issue_write labels).")
         return 0
     if state == "fail":
         raise LintFail("\n".join([f"the lint of {short} against {base} FAILs:", *lines, *log, LANE_LINT_REMEDY]), lines, log)
@@ -5212,6 +5228,7 @@ def build_parser():
     p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
     p.add_argument("--with", dest="with_prs", default=None, metavar="PR,PR,...", help="with --lane-lint on a PR number: also check the head against each named open PR (a comma list), even one of another session")
+    p.add_argument("--integration", action="store_true", help="with --lane-lint on a PR number: the PR is a batch's integration PR; a PASS also adds its `batch` label")
     p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")
     p.add_argument("--batch-build", nargs="+", metavar=("NAME", "PR"), help="build batch-NAME and its one draft pull request from these lane PRs, or allow the same set again; stands alone; takes no lock")
     p.add_argument("--batch-drop", nargs=2, metavar=("NAME", "PR"), help="take PR, and each frozen lane that stacks on it, off batch-NAME; stands alone; takes no lock")
@@ -5296,6 +5313,8 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--base goes with --lane-lint or --batch-build")
     if a.with_prs is not None and not a.lane_lint:
         p.error("--with goes with --lane-lint")
+    if a.integration and not (a.lane_lint and a.pr is not None and a.pr.isdigit()):
+        p.error("--integration goes with --lane-lint on a pull request number: only a PR carries a label")
     if not (a.lane_lint or a.ready):
         if a.lint_unknown_ok:
             p.error("--lint-unknown-ok goes with --lane-lint or --batch-build --ready")
@@ -5384,7 +5403,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 raise Stop("not in a git checkout " + LANE_LINT_CITE)
             with release_on_signals():  # a signal ends the run through lane_lint's `finally`, which removes the worktree
                 with_prs = parse_with(a.with_prs, int(a.pr)) if a.with_prs is not None else ()  # a bad list stops before any read
-                return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok, with_prs)  # before the role check and any lock: it merges and pushes nothing
+                return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok, with_prs, a.integration)  # before the role check and any lock: it merges and pushes nothing
         if a.release_check:
             try:
                 c, root = sh(["git", "rev-parse", "--show-toplevel"], cwd=a.repo_dir)  # -C names the checkout; None is the process directory's
