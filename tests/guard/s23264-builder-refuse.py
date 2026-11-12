@@ -1731,15 +1731,16 @@ sh("builder-refuse: the same tracked src/pytest.ini edit, committed from the top
 
 # =========================================================================== report-sha-missing
 # An agent's report (SubagentHandback) and its stop: each sha-like token in the message must resolve as a
-# commit in the repo of the payload's cwd. The incident of 2026-11-08 had four such shas, and no guard refused
-# them. Decision: report-sha-missing. A token is 7-40 lowercase hex with a digit and an a-f letter. It is not
-# judged inside a double-quoted span, on a `> ` line, or when it touches - _ / # . or @.
+# commit in the repo of the payload's cwd. A made-up sha in a report reads as finished work, so the report is
+# refused. Decision: report-sha-missing. A token is 7 to 12, or exactly 40, lowercase hex characters with a digit
+# and an a-f letter. It is not judged inside a double-quoted span, on a `> ` line, or when it touches - _ / # @ or
+# =. A sentence mark that ends the token, followed by a space or the end of the text, does not count as touching.
 FAMILY = "report-sha-missing"
 RSHA_RULE = "report-sha-missing"
 RSHA_SHALLOW_RULE = "report-sha-shallow"
 RSHA_UNRESOLVED_RULE = "report-sha-unresolved"
 HANDBACK = "SubagentHandback"
-# The four shas of the 2026-11-08 incident. They are made up: no repo the suite builds holds them.
+# Four made-up shas, the kind a report may name. No repo the suite builds holds them.
 RSHA_INCIDENT = ("8c1f0e2a7", "5b7d10a42", "e7c35b1d0", "3d2a91f4c")
 # A made-up 40-character sha. It is hashed, so it is hex with digits and letters, and no repo here holds it.
 RSHA_MADE_UP_40 = hashlib.sha1(b"report-sha-missing: a made-up commit").hexdigest()
@@ -1908,7 +1909,7 @@ def rsha_cat_file_spawns(log, path, message):
 add("report-sha-missing: an Explore hand-back naming a made-up sha is refused, and the reason names it",
     "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="exp1", agent_type="Explore",
     message="Done. The fix is in 9a0f3c6e21b, the commit on the lane.", carries=("9a0f3c6e21b",))
-add("report-sha-missing: the four made-up shas of the 2026-11-08 incident are each named in the refusal",
+add("report-sha-missing: four made-up shas are each named in the refusal",
     "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="tau1", agent_type="test-author",
     message="Report: " + ", ".join(RSHA_INCIDENT) + " stay open", carries=RSHA_INCIDENT)
 add("report-sha-missing: a reviewer's hand-back naming a made-up sha is refused",
@@ -1994,7 +1995,7 @@ add("report-sha-missing: a double-quoted span ends at the line end, so a made-up
     message='He wrote "see the lane.\nFixed in 3f8e0a5d2c7 on the lane.', carries=("3f8e0a5d2c7",))
 
 
-# Round 2 (decision agent-report-shas-resolve, What counts as a sha): a range judges each side, a sentence mark
+# Decision agent-report-shas-resolve, What counts as a sha: a range judges each side, a sentence mark
 # around a bold or bracketed token does not hide it, and a hex run is not a sha by its length or a touching mark.
 add("report-sha-missing: the two sides of a made-up a..b range are each named",
     "deny", RSHA_RULE, tool=HANDBACK, cwd=RSHA_LANE, agent_id="rev1", agent_type="reviewer",
