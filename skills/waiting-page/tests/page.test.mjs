@@ -9826,9 +9826,11 @@ for (const width of [800, 1280]) {
   });
 }
 
-// The tab bar at a phone width: one row, no sideways scroll, each tab 44 px tall. Designs shown is the four tabs; hidden is three.
+// The tab bar at a phone width: no sideways scroll, each tab 44 px tall. Designs shown is the four tabs; hidden is three.
+// Designs shown at 320 is re-pointed: its slack is 5 px with one-digit counts, so the bar may wrap, with Designs above (as main does).
 for (const width of [320, 360, 375, 414, 430, 500]) for (const designs of [true, false]) {
-  test(`Health tab: at ${width} wide with Designs ${designs ? "shown" : "hidden"}, the tabs stay on one row with no sideways scroll, each 44 px tall`, async (t) => {
+  const relaxed = designs && width === 320;
+  test(`Health tab: at ${width} wide with Designs ${designs ? "shown" : "hidden"}, the tabs ${relaxed ? "stay on one row or wrap with Designs above" : "stay on one row"} with no sideways scroll, each 44 px tall`, async (t) => {
     const extra = designs ? { items: [mk("tb-design", 1, { designs: [{ slug: "s1", label: "Option a" }] })], designData: { s1: "<p>one</p>" } } : {};
     const page = await open(t, { ...extra, pageHtml: withBuild({ healthMap: healthMap() }), viewport: { width, height: 800 } });
     if (!page) return;
@@ -9837,10 +9839,33 @@ for (const width of [320, 360, 375, 414, 430, 500]) for (const designs of [true,
     const ids = designs ? ["tabQ", "tabStatus", "healthTab", "tabD"] : ["tabQ", "tabStatus", "healthTab"];
     const boxes = await page.evaluate((ids) => ids.map((id) => { const r = document.getElementById(id).getBoundingClientRect(); return { top: Math.round(r.top), h: Math.round(r.height) }; }), ids);
     const rows = new Set(boxes.map((b) => b.top)).size;
-    assert.equal(rows, 1, `the tabs wrap onto ${rows} rows at ${width} wide`);
+    if (relaxed && rows === 2) {
+      assert.ok(boxes[3].top < Math.min(...boxes.slice(0, 3).map((b) => b.top)), "the wrapped bar does not put Designs above the other tabs");
+    } else {
+      assert.equal(rows, 1, `the tabs wrap onto ${rows} rows at ${width} wide`);
+    }
     const scroll = await page.evaluate(() => document.documentElement.scrollWidth);
     assert.ok(scroll <= width, `the page scrolls sideways at ${width} wide: scrollWidth ${scroll}`);
     assert.ok(boxes.every((b) => b.h >= 44), `a tab is under 44 px tall at ${width} wide: ${boxes.map((b) => b.h).join(", ")}`);
+  });
+}
+
+// Two-digit counts (12 questions, 12 designs) under the page font and a forced DejaVu Sans: the bar never scrolls sideways,
+// and every tab's right edge stays on the screen. When the tabs do not fit, the bar wraps with Designs above.
+for (const width of [320, 360, 375, 390, 414, 430]) for (const font of ["page", "dejavu"]) {
+  test(`Health tab: at ${width} wide with Designs shown and counts 12 and 12, under the ${font === "page" ? "page" : "DejaVu Sans"} font, no sideways scroll and every tab on the screen`, async (t) => {
+    const items = Array.from({ length: 12 }, (_, i) => mk("tc" + i, i + 1, { designs: [{ slug: "s" + i, label: "Option " + i }] }));
+    const designData = Object.fromEntries(Array.from({ length: 12 }, (_, i) => ["s" + i, "<p>one</p>"]));
+    const page = await open(t, { items, designData, pageHtml: withBuild({ healthMap: healthMap() }), viewport: { width, height: 800 } });
+    if (!page) return;
+    if (font === "dejavu") await page.addStyleTag({ content: ':root { --body: "DejaVu Sans", sans-serif !important; font-family: "DejaVu Sans", sans-serif !important; }' });
+    assert.equal(await page.locator("#qCount").textContent(), "12", "the fixture does not show 12 questions");
+    assert.equal(await page.locator("#dCount").textContent(), "12", "the fixture does not show 12 designs");
+    if (font === "dejavu") assert.match(await page.evaluate(() => getComputedStyle(document.getElementById("tabQ")).fontFamily), /DejaVu/, "the forced font did not reach the tabs");
+    const ids = ["tabQ", "tabStatus", "healthTab", "tabD"];
+    const r = await page.evaluate((ids) => ({ scroll: document.documentElement.scrollWidth, rights: ids.map((id) => Math.round(document.getElementById(id).getBoundingClientRect().right)) }), ids);
+    assert.ok(r.scroll <= width, `the page scrolls sideways at ${width} wide: scrollWidth ${r.scroll}`);
+    assert.ok(r.rights.every((x) => x <= width), `a tab runs off the screen at ${width} wide: right edges ${r.rights.join(", ")}`);
   });
 }
 
