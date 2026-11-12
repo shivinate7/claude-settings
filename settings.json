@@ -10,6 +10,7 @@
     "allow": [
       "Bash(gh pr merge:*)",
       "mcp__Claude_Browser",
+      "ArtifactData",
       "mcp__claude-artifacts__db_get",
       "mcp__claude-artifacts__db_list",
       "mcp__claude-artifacts__db_query",
