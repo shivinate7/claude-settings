@@ -671,18 +671,74 @@ for _name, _prompt in PHRASING_CONTROLS:
         "allow", tool="Agent", prompt=_prompt, subagent_type="Explore")
     add("brief-write-needs-writer: brief-write-phrasing-misses control: Workflow Explore agent with %s is allowed" % _name,
         "allow", tool="Workflow", script=_step_flow(json.dumps(_prompt), "agentType: 'Explore'"))
-# brief-write-long-line-cost: one 36 KB line of whole sentences, so the order ends a sentence. The limit is 1.0 s, a
-# generous bound: the reader's cost grows with each write verb in the line, and today the line takes seconds. The bound
-# times the whole guard run, so it is not read on Windows, where the full suite runs only on pushes (as s13406-merge does).
-# The verdict is the short brief's: deny with the order, allow without it.
-LONG_LINE_LIMIT_S = 1.0 if os.name != "nt" else None
+# brief-write-long-line-cost: one 36 KB line of whole sentences, so the order ends a sentence. The verdicts are the short
+# brief's: deny with the order, allow without it. No clock judges the cost. The count checks after these cases take the
+# reader's work from the characters it slices out of the line, and find that count bounded (decision brief-write-needs-writer).
 LONG_FILLER = "Write, add, make, log and record each note; put it in the list and save the rest. "
 LONG_LINE = LONG_FILLER * (36000 // len(LONG_FILLER))
-add("brief-write-needs-writer: brief-write-long-line-cost: a 36 KB one-line Explore brief that orders a write is denied "
-    "within 1.0 s", "deny", WRITE_BRIEF, tool="Agent", prompt=LONG_LINE + WRITE_CANONICAL, subagent_type="Explore",
-    max_seconds=LONG_LINE_LIMIT_S)
-add("brief-write-needs-writer: brief-write-long-line-cost: a 36 KB one-line Explore brief with no order is allowed "
-    "within 1.0 s", "allow", tool="Agent", prompt=LONG_LINE, subagent_type="Explore", max_seconds=LONG_LINE_LIMIT_S)
+add("brief-write-needs-writer: brief-write-long-line-cost: a 36 KB one-line Explore brief that orders a write is denied",
+    "deny", WRITE_BRIEF, tool="Agent", prompt=LONG_LINE + WRITE_CANONICAL, subagent_type="Explore")
+add("brief-write-needs-writer: brief-write-long-line-cost: a 36 KB one-line Explore brief with no order is allowed",
+    "allow", tool="Agent", prompt=LONG_LINE, subagent_type="Explore")
+# The count checks. The line is a str that counts the characters of each slice taken from it. A reader that slices the
+# whole prefix and suffix at each verb grows with the square of the line (about 4x when the line doubles). A reader that
+# slices a 400-char window before each verb grows with the line (about 2x), and stays within four windows a verb. The
+# filler holds seven write verbs (write, add, make, log, record, put, save) in each repeat.
+LONG_LINE_VERBS = ("write", "add", "make", "log", "record", "put", "save")
+LONG_LINE_PER_VERB = 4 * 400
+
+
+class _SlicedText(str):
+    """A line that counts the characters each slice of it returns."""
+
+    sliced = 0
+
+    def __getitem__(self, key):
+        part = str.__getitem__(self, key)
+        self.sliced += len(part)
+        return part
+
+
+def _chars_sliced(guard, line):
+    """The characters _brief_write_orders slices out of `line` while it reads the line."""
+    text = _SlicedText(line)
+    guard._brief_write_orders(text)
+    return text.sliced
+
+
+def long_line_growth_check():
+    """Doubling the line less than triples the characters the reader slices out of it."""
+    guard = _load_guard_module()
+    half = _chars_sliced(guard, LONG_FILLER * (18000 // len(LONG_FILLER)))
+    full = _chars_sliced(guard, LONG_LINE)
+    if not half:
+        return False, "the reader sliced no characters from an 18 KB one-line brief, so there is no count to bound"
+    if full > 2.5 * half:
+        return False, ("the reader sliced %d characters from a 36 KB line and %d from half of it: its reads grow faster "
+                       "than the line" % (full, half))
+    return True, ("the reader sliced %d characters from a 36 KB line and %d from half of it: its reads grow with the line"
+                  % (full, half))
+
+
+def long_line_bound_check():
+    """The reader slices no more than four 400-char windows for each write verb in a 36 KB line."""
+    guard = _load_guard_module()
+    verbs = (36000 // len(LONG_FILLER)) * len(LONG_LINE_VERBS)
+    full = _chars_sliced(guard, LONG_LINE)
+    if full > LONG_LINE_PER_VERB * verbs:
+        return False, ("the reader sliced %d characters for %d write verbs: more than %d a verb"
+                       % (full, verbs, LONG_LINE_PER_VERB))
+    return True, ("the reader sliced %d characters for %d write verbs: within %d a verb"
+                  % (full, verbs, LONG_LINE_PER_VERB))
+
+
+for _label, _check in (
+        ("brief-write-needs-writer: brief-write-long-line-cost: the reader's slices of a 36 KB line grow with the line",
+         long_line_growth_check),
+        ("brief-write-needs-writer: brief-write-long-line-cost: the reader's slices stay within four windows a write verb",
+         long_line_bound_check)):
+    LOG_CHECKS_EXTRA.append((_label, _check))
+    FIXTURELESS_CHECKS.add(_check)  # it loads the guard and builds no fixture
 # brief-write-tool-negator: a negator before "the Write tool" passes, and a test named for the tool passes. A use of the
 # tool to save a file still refuses.
 add("brief-write-needs-writer: brief-write-tool-negator: Explore brief that says you may not use the Write tool is allowed",
