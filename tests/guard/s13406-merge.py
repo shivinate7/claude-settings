@@ -65,8 +65,8 @@ add("draft-pr: MCP create with draft false is refused", "deny", rule="draft-pr",
 add("draft-pr: MCP create with draft true is allowed", "allow",
     tool="mcp__github__create_pull_request", cwd=NOGIT, title="x", head="h", base="main",
     repo="x", owner="y", draft=True)
-# Limits of the draft-pr rule (decision `draft-until-reviewed`), no case: `gh api -X POST .../pulls`,
-# `hub pull-request`, and short-flag clusters such as `-dt x` (refused, a rare false alarm).
+# Limits of the draft-pr rule (decision `draft-until-reviewed`), no case: `hub pull-request`, and short-flag
+# clusters such as `-dt x` (refused, a rare false alarm). A `gh api` create has its cases in section 45072.
 
 
 # =========================================================================== 5a2. gh writes in a cloud session
