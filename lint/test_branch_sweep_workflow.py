@@ -128,6 +128,16 @@ class Workflow(unittest.TestCase):
         found = [line for line in lines if line.startswith(rule + ": ")]
         self.assertTrue(found, "%s: want a %s finding, got %r" % (msg, rule, lines))
 
+    def assertTipFindingOn(self, text, line_no, msg):
+        """A tip finding on line_no. Scope first: any other rule's finding would make the fixture trip more than the
+        rule under test, so that fails before the subject does."""
+        lines = self.lint(text)
+        findings = [line for line in lines if line != "clean"]
+        self.assertEqual([line for line in findings if not line.startswith("tip: ")], [],
+                         "%s: scope: the fixture trips another rule" % msg)
+        found = [line for line in findings if line.startswith("tip: line %d: " % line_no)]
+        self.assertTrue(found, "%s: no tip finding on line %d, got %r" % (msg, line_no, lines))
+
     def test_contents_write_only_is_clean(self):
         self.assertClean(GOOD, "a workflow that requests only contents is not clean")
 
@@ -256,6 +266,26 @@ class Workflow(unittest.TestCase):
         text = variant(TIP_LINE + DELETE_LINE,
                        '              msg="a # opens a quote\n' + DELETE_LINE + '              end"\n')
         self.assertFinding(text, "tip", "a quote left open on one line does not skip the DELETE on the next")
+
+    def test_read_of_one_branch_then_delete_of_another_is_flagged(self):
+        # The loop reads the tip of $head, then deletes $name: the read checks a branch the DELETE does not remove.
+        text = variant(TIP_LINE, TIP_LINE.replace("$name", "$head"))
+        delete_at = text.splitlines().index(DELETE_LINE.rstrip("\n")) + 1
+        self.assertTipFindingOn(text, delete_at, "the loop reads the tip of $head, then deletes $name")
+
+    def test_one_line_loop_after_a_block_level_read_is_flagged(self):
+        # The block-level read and the DELETE both name $name, so only the one-line loop lacks its own read.
+        block_read = '          tip=$(gh api "repos/$REPO/git/ref/heads/$name" --jq .object.sha)\n'
+        one_line = '          for name in a b; do gh api -X DELETE "repos/$REPO/git/refs/heads/$name"; done\n'
+        text = variant(LOOP_LINE, block_read + one_line + LOOP_LINE)
+        at = text.splitlines().index(one_line.rstrip("\n")) + 1
+        self.assertTipFindingOn(text, at, "a one-line loop after a block-level read: its DELETE inherits the read")
+
+    def test_one_line_loop_with_its_own_read_is_clean(self):
+        one_line = ('          for name in a b; do tip=$(gh api "repos/$REPO/git/ref/heads/$name" --jq .object.sha); '
+                    'gh api -X DELETE "repos/$REPO/git/refs/heads/$name"; done\n')
+        self.assertClean(variant(LOOP_LINE, one_line + LOOP_LINE),
+                         "a one-line loop that reads its own tip before its DELETE is no finding")
 
     def test_commented_out_delete_is_clean(self):
         text = variant(TIP_LINE + DELETE_LINE,
