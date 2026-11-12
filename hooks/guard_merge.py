@@ -23,7 +23,7 @@ from guard_pointer import (
     pointer_checkout,
 )
 from guard_push_delete import (
-    DEFAULT_BRANCH_FALLBACK, push_calls, push_destinations, push_refspecs, push_target,
+    DEFAULT_BRANCH_FALLBACK, push_calls, push_destinations, push_refspecs, push_target, push_verdict,
 )
 
 
@@ -1281,18 +1281,26 @@ RECORD_REASON = (
 )
 
 
-def _own_tier_proved(transcript: str, tier: str) -> bool:
-    """True when the own newest get_session record lists cs-build:<tier> and no set_session_tags call
-    follows it. Fails closed: no env id, no transcript or any read error is False."""
+def _own_proved_tags(transcript: str):
+    """The tags of the own newest get_session record when no set_session_tags call follows it, else None.
+    Fails closed: no env id, no transcript or any read error is None."""
     try:
         from override import remote_session_id
         own_id = remote_session_id()
         if own_id and transcript:
             tags, tagged_after = _own_session_read(transcript, own_id)
-            return tags is not None and not tagged_after and ROLE_TAG_PREFIX + tier in tags
+            if tags is not None and not tagged_after:
+                return tags
     except Exception:
         pass
-    return False
+    return None
+
+
+def _own_tier_proved(transcript: str, tier: str) -> bool:
+    """True when the own newest get_session record lists cs-build:<tier> and no set_session_tags call
+    follows it. Fails closed: no env id, no transcript or any read error is False."""
+    tags = _own_proved_tags(transcript)
+    return tags is not None and ROLE_TAG_PREFIX + tier in tags
 
 
 def _open_substitutions(text: str) -> int:
@@ -1358,12 +1366,53 @@ def _push_calls(segment: str, script: str, cwd: str):
                     yield from _push_calls(part, each, inner_cwd)
 
 
+HANDOFF_SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")  # no `/` and no `.`, so a slug is one plain file-name part
+HANDOFF_PATH = re.compile(r"roadmap/outbox/(" + HANDOFF_SLUG.pattern + r")-handoff\.md")
+
+
+def _lane_handoff_holds(args, where: str, overrides, root: str, destination, tags) -> bool:
+    """True when a lane's push of `args` to the record branch changes exactly one path against the record
+    branch's origin tip, that path is roadmap/outbox/<slug>-handoff.md, the file is added or modified, and the
+    slug is the lane's own: a slug of one of its cs-step tags, else its checkout's branch with a leading `lane/`
+    cut. Fails closed: a force, a delete, a mirror, an unnamed remote or source, no origin tip, an unreadable
+    diff, a rename, a delete or an empty diff is False. One `git diff --name-status` runs at most once
+    per call (a `symbolic-ref` follows only when no cs-step tag names the slug)."""
+    if push_verdict(args, where, overrides) != "":  # a force, a lease, a `+` refspec or a delete is no handoff
+        return False
+    named = push_refspecs(args)
+    if named is None or not named[0] or destination is None:
+        return False
+    remote, specs = named
+    if len(specs) > 1:
+        return False
+    source = specs[0].partition(":")[0] if specs else "HEAD"
+    if not source or source.startswith("-"):
+        return False
+    done = _git(root, "diff", "--name-status", "refs/remotes/" + remote + "/" + destination, source, "--")
+    if done is None or done.returncode != 0:
+        return False
+    changes = [line.split("\t") for line in done.stdout.splitlines() if line.strip()]
+    if len(changes) != 1 or len(changes[0]) != 2 or changes[0][0] not in ("A", "M"):
+        return False
+    found = HANDOFF_PATH.fullmatch(changes[0][1])
+    if not found:
+        return False
+    slug = found.group(1)
+    if slug in [str(t)[len(ARCHIVE_STEP_PREFIX):].strip() for t in tags if str(t).startswith(ARCHIVE_STEP_PREFIX)]:
+        return True
+    branch = _git(root, "symbolic-ref", "-q", "--short", "HEAD")
+    if branch is None or branch.returncode != 0:
+        return False
+    return branch.stdout.strip().removeprefix("lane/") == slug
+
+
 def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of, read_verb) -> str:
     """Return the matched push when a segment pushes to the checkout's record branch, or to the default
-    name `roadmap`, and the own record does not prove the triage tier, else ''. `record_branch_of(root)`
-    reads the checkout's branch (lint/layout.py); a read error means the default. `read_verb(subcommand,
-    args)` is guard.py's own test for a dry run, which moves nothing. The proof is read only after a push
-    reaches the branch."""
+    name `roadmap`, and the own record proves neither the triage tier nor a lane's own handoff push, else ''.
+    `record_branch_of(root)` reads the checkout's branch (lint/layout.py); a read error means the default.
+    `read_verb(subcommand, args)` is guard.py's own test for a dry run, which moves nothing. The proof is
+    read only after a push reaches the branch. Triage is allowed with no diff read. A lane is allowed only
+    for its own handoff file (`_lane_handoff_holds`), which costs one changed-path read."""
     for segment in split_segments(stripped):
         for args, where, overrides in _push_calls(segment, stripped, cwd):
             if read_verb("push", args):
@@ -1374,9 +1423,16 @@ def record_writer_hit(stripped: str, cwd: str, transcript: str, record_branch_of
                 record = record_branch_of(root)
             except Exception:
                 record = DEFAULT_RECORD_BRANCH
-            if {record, DEFAULT_RECORD_BRANCH} & set(push_destinations(args, where, overrides)) and (
-                    not _own_tier_proved(transcript, RECORD_WRITER_TIER)):
-                return "git push to the record branch"
+            destinations = push_destinations(args, where, overrides)
+            if not {record, DEFAULT_RECORD_BRANCH} & set(destinations):
+                continue
+            tags = _own_proved_tags(transcript)
+            if tags is not None and ROLE_TAG_PREFIX + RECORD_WRITER_TIER in tags:
+                continue
+            if (tags is not None and LANE_TAG in tags and len(destinations) == 1 and root
+                    and _lane_handoff_holds(args, where, overrides, root, destinations[0], tags)):
+                continue
+            return "git push to the record branch"
     return ""
 
 
