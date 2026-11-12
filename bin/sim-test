@@ -42,7 +42,7 @@
 # Cost per run: child processes xcrun, sed, grep, head, mkdir, cat, rm and rmdir; after its own boot only, python3
 # (hooks/sim_boot_record.py --record: one simctl list and two ps, one line appended to sim-boots.jsonl); mv and find on a
 # takeover; one sleep per poll; one grep per new SpringBoard report; and xcodebuild. An own boot adds two sim-lease
-# processes (take, give) and one more simctl list; a waiting take costs one sysctl and one ps per poll there, and writes
+# processes (take, give) and one more simctl list; a waiting take costs one in-process brake read and one ps per poll there, and writes
 # leases.json (see the header of sim-lease). One folder listing per poll while the child runs (a waiting run also reads
 # the lock every poll). A hold adds no process: its polls cost the same, for at most 900 s, with the lock held. It writes
 # no file beyond the lock folder's pid file and, during an own-boot take, take.out (the take's output); no log.
