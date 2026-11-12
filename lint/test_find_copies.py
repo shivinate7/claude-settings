@@ -50,6 +50,10 @@ PR_TEMPLATE = (
 )
 OWN_TEMPLATE = ".github/pull_request_template.md"  # a child's own copy of the parent's PR template
 CONTROL = "vendor/whatever.mjs"  # a child copy of another parent file, reported in every run
+# A parent file of 20 significant lines, none of them in PR_TEMPLATE. A child template that holds the
+# template and this file whole scores 1.0 for both, and the ranking picks the template.
+Z_TEXT = "".join(f"export function zed{i}(value) {{ return value + {i}; }}\n" for i in range(20))
+Z_EDITED = Z_TEXT.replace("return value + 3;", "return value + 33;", 1)  # a near copy: 19 of 20 lines
 
 
 def module_under_test():
@@ -272,14 +276,16 @@ class FindCopiesTest(unittest.TestCase):
             with self.subTest(mode=mode):
                 self.assert_own_template_not_reported(PR_TEMPLATE, mode)
 
-    def test_own_pr_template_near_copy_is_not_reported(self):
+    def near_variants(self):
         edited = PR_TEMPLATE.replace("Check 0: name", "Check 0: this repo names", 1)
         self.assertNotEqual(edited, PR_TEMPLATE, "fixture: the one-line edit did not change the template")
-        variants = {
+        return {
             "header added": "<!-- added in this repo -->\n" + PR_TEMPLATE,
             "one line edited": edited,
         }
-        for label, text in variants.items():
+
+    def test_own_pr_template_near_copy_is_not_reported(self):
+        for label, text in self.near_variants().items():
             for mode in ("json", "text"):
                 with self.subTest(variant=label, mode=mode):
                     self.assert_own_template_not_reported(text, mode)
@@ -309,6 +315,58 @@ class FindCopiesTest(unittest.TestCase):
         write(self.child, OWN_TEMPLATE, "")
         code, out = self.findings()
         self.assertEqual((code, out["files"]), (0, []), "an empty child PR template is reported")
+
+    def assert_template_holds_parent_file(self, text):
+        # Scope first (P7): the fixtures clear the floors and sit inside the growth bound, so a miss is the subject's.
+        mod = module_under_test()
+        tlines, zlines = mod.significant_lines(PR_TEMPLATE.encode()), mod.significant_lines(Z_TEXT.encode())
+        clines = mod.significant_lines(text.encode())
+        self.assertGreaterEqual(len(Z_TEXT.encode()), mod.MIN_BYTES, "fixture: the parent file is under MIN_BYTES")
+        self.assertGreaterEqual(len(zlines), mod.MIN_LINES, "fixture: the parent file is under MIN_LINES")
+        self.assertFalse(tlines & zlines, "fixture: the parent file shares a line with the template")
+        self.assertTrue(tlines <= clines, "fixture: the child does not hold the whole template")
+        self.assertGreaterEqual(len(zlines & clines) / len(zlines), 0.8,
+                                "fixture: the child holds too little of the parent file")
+        self.assertLessEqual(len(clines), mod.CHILD_GROWTH * min(len(tlines), len(zlines)),
+                             "fixture: the child is over the growth bound for one of the two")
+        write(self.parent, "testing/z.mjs", Z_TEXT)
+        write(self.child, OWN_TEMPLATE, text)
+        write(self.child, CONTROL, TEST)
+        with self.subTest(mode="json"):
+            proc = run(self.parent, self.child, "--json")
+            self.assertIn(proc.returncode, (0, 1), proc.stderr)
+            pairs = [(f["child"], f["parent"], f["kind"]) for f in json.loads(proc.stdout)["files"]]
+            self.assertIn((CONTROL, "testing/skip-locally-fail-in-ci.test.mjs", "byte-equal"), pairs,
+                          "control: the run did not report the other copy")
+            self.assertIn((OWN_TEMPLATE, "testing/z.mjs", "near-equal"), pairs,
+                          "the child's PR template holding a copy of testing/z.mjs is not reported as that copy")
+        with self.subTest(mode="text"):
+            proc = run(self.parent, self.child)
+            self.assertIn(proc.returncode, (0, 1), proc.stderr)
+            self.assertTrue(text_reports(proc.stdout, CONTROL), "control: the run did not report the other copy")
+            lines = proc.stdout.splitlines()
+            self.assertTrue(any(line.startswith(f"file {OWN_TEMPLATE} copies testing/z.mjs (near-equal, ")
+                                for line in lines),
+                            "the child's PR template holding a copy of testing/z.mjs is not reported as that copy")
+
+    def test_own_pr_template_holding_a_parent_file_is_reported(self):
+        # The template and the parent file tie at 1.0, and the ranking picks the template, so the old code excuses the file.
+        self.assert_template_holds_parent_file(PR_TEMPLATE + Z_TEXT)
+
+    def test_own_pr_template_holding_a_near_copy_of_a_parent_file_is_reported(self):
+        self.assertNotEqual(Z_EDITED, Z_TEXT, "fixture: the one-line edit did not change the parent file")
+        self.assert_template_holds_parent_file(PR_TEMPLATE + Z_EDITED)
+
+    def test_own_pr_template_twin_in_parent_is_not_reported(self):
+        # The parent keeps the same template at a second path. The child's own copy matches its own path.
+        write(self.parent, ".claude/pull_request_template.md", PR_TEMPLATE)
+        self.assertTrue(os.path.isfile(os.path.join(self.parent, ".claude", "pull_request_template.md")),
+                        "fixture: the parent has no twin template")
+        variants = {"copy": PR_TEMPLATE, **self.near_variants()}
+        for label, text in variants.items():
+            for mode in ("json", "text"):
+                with self.subTest(variant=label, mode=mode):
+                    self.assert_own_template_not_reported(text, mode)
 
     def test_reads_only(self):
         write(self.child, "harness/tests/copy.test.mjs", TEST)
