@@ -18,10 +18,11 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
    `wait:` line per open item with `waits` (`ended`, `waiting` or `unknown`), and one `waiting` lane line per open item with
    `lane` and `lastAnswer` and no `waits`. Last, one `kept-answer:` line per closed item whose `answers/<id>` is still kept
    (never an open item, an arbiter ruling or a park answer). A closed item with `waits` gets a line that says it is closed with waits. The exit code stays the page's.
+   Save the asks first with `ArtifactData list asks` (`query.limit` 1000, follow `next_cursor` until it is empty; "Keep a copy in the repo" step 2 saves the same list).
    Run the end check last, as its own run, apart from the plain run and never with `--write`:
-   `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --asks <asks>` (`<asks>` is what `ArtifactData list asks`
-   saved). It prints one `open-ask:` line per ask with no reply, then a `FAIL:` line. On a current page, exit 1 means an ask is open,
-   and exit 2 means the asks list could not be read. Answer each open ask before the wake ends.
+   `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --asks <asks>` (`<asks>` is that saved list). It prints one
+   `open-ask:` line per ask with no `reply`, a routed ask included, and a `FAIL:` line only when an ask is listed. On a current page, exit 1 means an ask is open,
+   and exit 2 means the asks list could not be read. The session that holds an ask answers it ("Route an ask"); the writer routes it or names the holder.
 3. Keep a copy of the page in the repo, from the same file ("Keep a copy in the repo"). Do it before any
    republish, so the copy holds the page as it was.
 4. Before any republish, check the pictures of the open items, against the file about to be published (`<out>`, the `--write` output of
