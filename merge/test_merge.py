@@ -967,6 +967,35 @@ class ConfirmHead(Env):
         self.assertEqual(len(raced), 1, "the racing fetch did not run between the branch fetch and the head read")  # scope: the race happened
         self.assertTrue(holds, "a racing fetch of another ref changed the relayed-yes verdict: the head was read through FETCH_HEAD")
 
+    def test_a_failed_branch_fetch_is_a_moved_head_even_when_the_tracking_ref_holds_the_live_head(self):
+        relayed = self.head()
+        live = self.competitor_push(self.CLAIM)  # the tool's own claim on the relayed head: it holds whenever the head is read
+        sh(self.co, "git", "fetch", "-q", "origin", "refs/heads/feat")  # this clone holds the claim's objects
+        sh(self.co, "git", "update-ref", "refs/remotes/origin/feat", live)  # the tracking ref already names the live head
+        real, fetches = merge.git, []
+        def failing(cwd, *a, input=None):
+            if a[:1] == ("fetch",) and any("refs/heads/feat" in x for x in a):
+                fetches.append(a)
+                return 1, "fatal: the fetch of the branch failed"
+            return real(cwd, *a, input=input)
+        with unittest.mock.patch.object(merge, "git", failing):
+            holds = merge.relayed_head_holds(self.co, "feat", relayed, live)
+        self.assertEqual(len(fetches), 1, "the branch fetch did not run")  # scope: the fetch that failed is the one the check made
+        self.assertEqual(sh(self.co, "git", "rev-parse", "refs/remotes/origin/feat"), live, "the tracking ref no longer names the live head")  # scope
+        self.assertFalse(holds, "a failed fetch read the tracking ref's head as the live head: the relayed yes held without a fetch that read it")
+
+    def test_a_head_that_moved_past_the_live_head_the_relay_read_holds_no_relayed_yes(self):
+        relayed = self.head()
+        live = self.competitor_push(self.CLAIM)  # the head the relay's live read named: the claim on the relayed head
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        put(os.path.join(self.other, "later.txt"), "a commit after the claim\n")
+        sh(self.other, "git", "add", "-A"); sh(self.other, "git", "commit", "-q", "-m", "later"); sh(self.other, "git", "push", "-q", "origin", "feat")
+        later = sh(self.other, "git", "rev-parse", "HEAD")
+        holds = merge.relayed_head_holds(self.co, "feat", relayed, live)
+        self.assertEqual(sh(self.co, "git", "rev-parse", "refs/remotes/origin/feat"), later, "the branch fetch did not read the moved head")  # scope: the head moved on past the live one
+        self.assertFalse(holds, "a head that moved on past the live head still held the relayed yes: the check did not compare the head the fetch read")
+
 class ShallowMain(unittest.TestCase):
     """ff_main in a shallow clone of origin. The commit it moves to is on origin/main, but the clone cuts the history
     between that commit and main. The folders come from this run's run folder (test-temp-standard), not the system temp dir."""
@@ -1496,6 +1525,25 @@ class LockTextByFetchedSha(Env):
         self.assertIsNotNone(cur, "the lock read found no lock on origin")  # scope: a lock is there to read
         named = [c.args for c in calls.call_args_list if any("FETCH_HEAD" in a for a in c.args)]
         self.assertEqual(named, [], "the lock read passed FETCH_HEAD to git: %r" % (named,))
+
+    def test_a_lock_that_moves_after_its_ls_remote_read_reads_as_live_not_expired(self):
+        self.rival_lock()
+        lock = merge.lock_ref("main")
+        old = sh(self.co, "git", "ls-remote", "origin", lock).split()[0]  # the sha the ls-remote read will name
+        self.assertNotEqual(merge.git(self.co, "cat-file", "-e", old)[0], 0, "the old lock's commit is already in this clone")  # scope: its log must fail
+        real, raced = merge.git, []
+        def moving(cwd, *a, input=None):
+            out = real(cwd, *a, input=input)
+            if a[:2] == ("ls-remote", "origin") and a[-1:] == (lock,) and not raced:
+                raced.append(a)
+                sha = sh(self.other, "git", "commit-tree", self.EMPTY_TREE, "-m", merge.lock_message(900, self.now))
+                sh(self.other, "git", "push", "-q", "-f", "origin", f"{sha}:{lock}")  # the lock moves after the ls-remote named the old one
+            return out
+        with unittest.mock.patch.object(merge, "git", moving):
+            cur = self.lock.read("main")
+        self.assertEqual(len(raced), 1, "the lock did not move between the ls-remote and the fetch")  # scope: the race ran
+        self.assertIsNotNone(cur, "the lock read found no lock on origin")  # scope: a lock is there to read
+        self.assertEqual(cur[1], float("inf"), "a lock whose commit this clone lacks read as expiring at %r, not as live" % (cur[1],))
 
 class Guards(Env):
     def test_moved_head_is_refused_and_nothing_is_claimed(self):
