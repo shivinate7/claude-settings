@@ -4643,6 +4643,7 @@ def refuse_ready_page(tool: str, tool_input: dict, command: str, where: str) -> 
 def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str = "",
                 transcript: str = "", agent: bool = False,
                 background: bool = False, description: str = "", payload=None) -> None:
+    # The agent's own transcript (the brief) is named from `payload` only at a commit or push, never per call.
     POWERSHELL_CALL[0] = tool == "PowerShell"
     PENDING_ASK.clear()
     stripped = strip_heredoc_bodies(raw)
