@@ -9,23 +9,33 @@ Reads prose only and runs none of the skill's code. Each claim has one case:
   2. The same step has a sentence that says exit 1 means an ask is open on a current page.
   2b. The same step has a sentence that says exit 2 means the asks list could not be read.
   3. SKILL.md's "## Read the answers" section (the wake text) names the same run, in a sentence that says end or last.
-  4. The end check runs after the step that saves the asks, or step 2 saves them first.
+  4. The asks save in step 2 comes after a routing act and a reply, both in sentences that name an ask, and right
+     before the end check: no routing act sits between the save and the run. The save is a code span that lists the
+     asks (`ArtifactData list asks`). A "Keep a copy in the repo" pointer is never the save.
   5. A FAIL sentence in step 2 says FAIL prints when an ask is listed, and a FAIL sentence says it prints when the
      asks list cannot be read (stale_pages.py prints FAIL on both).
   6. The session that holds an ask answers it, and the writer routes or names it; the writer does not answer each ask.
   7. The comment-wake save list in "## Read the answers" names asks.
   8. The "in full" list in "## Read the answers" names asks, so a cut asks list is not read as clear.
-  9. A sentence in "Keep the page on main's code" names the end check and says routing comes first: it has route, and
-     after, once, following or first.
+  9. The sentence that saves the asks names, before the save, an after word, a routing act and a reply, for example
+     "After the writer routes each ask and the holder replies, save the asks ...".
  10. SKILL.md's end-check sentence and republish.md agree on where the check runs: the step the sentence names, and
      whether it says the check ends the wake (republish.md runs it in its step 2 of 5, so the two cannot both say last).
  11. A sentence in "Keep the page on main's code" says `<asks>` is the list saved in the same step.
  12. A sentence in that section that saves the asks says the save touches the `.complete` marker.
  13. The one Cost: paragraph of that section names the second run, the end check's python process.
  14. The one Cost: paragraph names the asks list read.
-The controls pass on the text as it stands. They show that each read finds its section, that the copy step saves
-the asks, that the Cost: paragraph is found once, and that the span reader takes a lone apostrophe, comment-like
-characters and a line break as plain text.
+ 15a. The end-check paragraph of SKILL.md's "## Read the answers" orders its asks save after routing and a reply, and
+      right before the run (the same order check as case 4).
+ 15b. The asks save sentence in that paragraph names the `.complete` marker.
+ 15c. A sentence in that paragraph says the `<asks>` the run reads is the folder saved.
+ 16. The Cost: sentence that names the `ArtifactData list asks` read names it as the end check's one read.
+ 17. SKILL.md's end-check sentence says when the check runs: at turn start, or at each wake and before each republish.
+     When it names turn start, republish.md's section names turn start too.
+ c1-c11. Controls. They pass on the text as it stands, and they show that each read finds its section, that the copy
+     step saves the asks, that the Cost: paragraph is found once, that the span reader takes a lone apostrophe,
+     comment-like characters and a line break as plain text, and that the order check passes a compliant step and
+     names the cause in a save-first step.
 """
 import re
 import unittest
@@ -38,6 +48,7 @@ COPY_HEADING = "## Keep a copy in the repo"
 READ_HEADING = "## Read the answers"
 COPY_NAME = "Keep a copy in the repo"
 CODE = re.compile(r"`([^`]*)`")
+QUOTED = re.compile(r'"[^"\n]*"')  # a quoted title such as ("Route an ask"): a pointer to a section, never a routing act
 END = re.compile(r"\b(?:end|last)\b", re.I)
 EXIT_ONE = re.compile(r"\bexit\s+(?:code\s+)?1\b", re.I)
 EXIT_TWO = re.compile(r"\bexit\s+(?:code\s+)?2\b", re.I)
@@ -57,10 +68,16 @@ SAVE = re.compile(r"\b(?:save|saves|saved|fetch|fetches)\b", re.I)
 IN_FULL = re.compile(r"\bin full\b", re.I)
 # Case 5: the FAIL line also prints when the asks list cannot be read (stale_pages.py open_asks_mode, unknown path).
 UNREADABLE_CLAUSE = re.compile(r"\bcannot be read\b|\bcould not be read\b|\bunreadable\b|\bcut[- ]short\b|\bunknown\b", re.I)
-# Case 9: the check is ordered after routing when its sentence says so.
+# Cases 4, 9, 15a, 15b: the save is ordered after a routing act and a reply, both in ask sentences, and right before the run.
 END_REF = re.compile(r"\bend check\b", re.I)
-ROUTING = re.compile(r"\broute[sd]?\b|\brouting\b", re.I)
-AFTER = re.compile(r"\bafter\b|\bonce\b|\bfollowing\b|\bfirst\b", re.I)
+ROUTE_ACT = re.compile(r"\brout(?:e|es|ed|ing)\b", re.I)
+REPLY_ACT = re.compile(r"\brepl(?:y|ies|ied|ying)\b|\banswer(?:s|ed|ing)?\b", re.I)
+AFTER_ACT = re.compile(r"\bafter\b|\bonce\b|\bfollowing\b", re.I)
+# Cases 15c, 17: the save word, the timing words, and the republish word.
+SAVE_VERB = re.compile(r"\bsav(?:e|es|ed|ing)\b", re.I)
+TURN = re.compile(r"\bturn\b", re.I)
+WAKE_WORD = re.compile(r"\bwake\b", re.I)
+REPUBLISH = re.compile(r"\brepublish", re.I)
 # Case 10: a claim that the check comes last, either at the wake's end or as the section's last step.
 STEP_NUMBER = re.compile(r"\bstep (\d+)\b", re.I)
 LAST_CLAIM = re.compile(r"\bends? (?:each|every|the) wake\b|\bend of (?:each|every|the) wake\b|\blast (?:in|of) (?:each|every|the) wake\b"
@@ -69,10 +86,11 @@ LAST_CLAIM = re.compile(r"\bends? (?:each|every|the) wake\b|\bend of (?:each|eve
 SAME_STEP = re.compile(r"\b(?:same|this) step\b", re.I)
 SAVED = re.compile(r"\bsav\w*", re.I)
 ASKS_WORD = re.compile(r"\basks?\b", re.I)
-COMPLETE = ".complete"  # Case 12: the marker's text, in prose or in a code span
+COMPLETE = ".complete"  # Cases 12, 15b: the marker's text, in prose or in a code span
 # Case 13: the Cost: paragraph names the end check's own python process, a second run beside the plain one.
 SECOND_RUN = re.compile(r"\bend check\b|\bsecond (?:python|run|process)\b|\btwo (?:python )?(?:processes|runs)\b|\bper run\b"
                         r"|\banother (?:python )?(?:process|run)\b|\bone more (?:python )?(?:process|run)\b", re.I)
+SCOPE = "SKILL.md's '## Read the answers' section has no one paragraph with the end check's run (`stale_pages.py --page <file> --asks <asks>`)"
 
 
 def spans(text):
@@ -83,6 +101,26 @@ def spans(text):
 def prose(text):
     """The text with its code spans taken out, so a word inside a command does not count as prose."""
     return CODE.sub(" ", text)
+
+
+def masked(text):
+    """The text with its code spans and quoted titles blanked to spaces of the same length, so an offset reads the same in both."""
+    text = CODE.sub(lambda m: " " * len(m.group(0)), text)
+    return QUOTED.sub(lambda m: " " * len(m.group(0)), text)
+
+
+def one_line(text):
+    return " ".join(text.split())
+
+
+def sentence_bounds(flat):
+    """(start, end) of each sentence of a one-line text, cut where sentences() cuts it."""
+    bounds, start = [], 0
+    for m in re.finditer(r"(?<=[.!?])\s+", flat):
+        bounds.append((start, m.start()))
+        start = m.end()
+    bounds.append((start, len(flat)))
+    return bounds
 
 
 def asks_run(code):
@@ -101,14 +139,67 @@ def names_asks(code):
     return code == "asks" or code.startswith("ArtifactData list asks")
 
 
+def asks_calls(flat):
+    """Offsets of the code spans that list the asks. A pointer such as "Keep a copy in the repo" is no span, so it is no call."""
+    return [m.start() for m in CODE.finditer(flat) if names_asks(m.group(1))]
+
+
+def run_calls(flat):
+    """Offsets of the code spans that run the end check."""
+    return [m.start() for m in CODE.finditer(flat) if own_run(m.group(1))]
+
+
+def order_fault(flat):
+    """The one cause the asks save is not right before the end check, or "" when it is. The save is the last asks call
+    before the run. Before it there must be a routing act and a reply, each in a sentence that names an ask. No routing
+    act may sit between the save and the run."""
+    runs = run_calls(flat)
+    if not runs:
+        return "no end check run (`stale_pages.py --page <file> --asks <asks>`) in the text"
+    run = runs[0]
+    saves = [p for p in asks_calls(flat) if p < run]
+    if not saves:
+        return "no asks save before the end check"
+    save = saves[-1]
+    body = masked(flat)
+    route, reply = [], []
+    for a, b in sentence_bounds(flat):
+        sentence = body[a:b]
+        if not ASK.search(sentence):
+            continue
+        route += [a + m.start() for m in ROUTE_ACT.finditer(sentence)]
+        reply += [a + m.start() for m in REPLY_ACT.finditer(sentence)]
+    if not any(p < save for p in route):
+        return "the asks save comes before any routing"
+    if not any(p < save for p in reply):
+        return "the asks save comes before any reply"
+    if any(save < p < run for p in route):
+        return "routing sits between the asks save and the end check"
+    return ""
+
+
+def ordered_save_sentences(flat):
+    """Each sentence that holds an asks save and, before that save, an after word, a routing act and a reply."""
+    body = masked(flat)
+    found = []
+    for a, b in sentence_bounds(flat):
+        calls = asks_calls(flat[a:b])
+        if not calls:
+            continue
+        before = body[a:a + calls[0]]
+        if AFTER_ACT.search(before) and ROUTE_ACT.search(before) and REPLY_ACT.search(before):
+            found.append(flat[a:b])
+    return found
+
+
 def step_two():
     """Step 2 of "Keep the page on main's code", on one line, read from the skill file that holds it."""
-    return " ".join(skill_step(STEP_HEADING, 2).split())
+    return one_line(skill_step(STEP_HEADING, 2))
 
 
 def copy_step_two():
     """Step 2 of "Keep a copy in the repo", the fetch of the five collections, on one line."""
-    return " ".join(skill_step(COPY_HEADING, 2).split())
+    return one_line(skill_step(COPY_HEADING, 2))
 
 
 def read_answers():
@@ -116,9 +207,20 @@ def read_answers():
     return section(read(SKILL), READ_HEADING)
 
 
+def end_check_paragraph():
+    """The one "## Read the answers" paragraph that holds the end check's run, on one line, or "" when there is not exactly one."""
+    found = [one_line(b) for b in blocks(read_answers()) if any(own_run(c) for c in spans(b))]
+    return found[0] if len(found) == 1 else ""
+
+
 def step_section():
     """The whole "Keep the page on main's code" section of republish.md, from its heading to the next section."""
     return skill_file_with(STEP_HEADING).split(STEP_HEADING, 1)[1].split("\n## ", 1)[0]
+
+
+def republish_flat():
+    """The whole "Keep the page on main's code" section on one line."""
+    return one_line(step_section())
 
 
 def section_sentences():
@@ -142,22 +244,14 @@ def numbered_steps():
     return found
 
 
-def save_and_run_positions():
-    """Where the section saves the asks, and where its own end-check run sits: (step, offset) pairs, in text order.
-    A save is a copy step ("Keep a copy in the repo") or a sentence with a save verb and an asks span. The run's own
-    sentence is never a save, so a line that says what the run reads does not count."""
-    saves, runs = [], []
+def run_positions():
+    """(step, offset) for each own end-check run in "Keep the page on main's code", in text order."""
+    found = []
     for n, text in numbered_steps():
         for m in CODE.finditer(text):
             if own_run(m.group(1)):
-                runs.append((n, m.start()))
-        if COPY_NAME in text:
-            saves.append((n, text.index(COPY_NAME)))
-        for s in sentences(text):
-            codes = spans(s)
-            if not any(own_run(c) for c in codes) and SAVE.search(prose(s)) and any(names_asks(c) for c in codes):
-                saves.append((n, text.index(s)))
-    return saves, runs
+                found.append((n, m.start()))
+    return found
 
 
 class EndCheckInRepublishStep(unittest.TestCase):
@@ -185,16 +279,11 @@ class EndCheckInRepublishStep(unittest.TestCase):
         self.assertTrue(says, "republish.md step 2 has no sentence that says exit 2 means the asks list could not be read. "
                         "Step 2:\n" + step)
 
-    def test_4_the_end_check_runs_after_the_step_that_saves_the_asks(self):
-        saves, runs = save_and_run_positions()
-        self.assertTrue(runs, "republish.md's \"Keep the page on main's code\" section has no own `stale_pages.py --page <file> "
-                        "--asks <asks>` run")
-        self.assertTrue(saves, "no step of \"Keep the page on main's code\" saves the asks, so the end check reads no saved list")
-        first_save, first_run = min(saves), min(runs)
-        self.assertLess(first_save, first_run,
-                        "republish.md's end check (step %d) runs before the step that saves the asks (step %d, "
-                        "\"Keep a copy in the repo\"), so the check reads an asks list not yet saved"
-                        % (first_run[0], first_save[0]))
+    def test_4_the_asks_save_follows_routing_and_a_reply_and_comes_right_before_the_end_check(self):
+        step = step_two()
+        fault = order_fault(step)
+        self.assertEqual(fault, "", "republish.md step 2 orders the asks save wrongly (%s), so the end check reads an asks "
+                         "list that the routing and the replies have not yet changed. Step 2:\n%s" % (fault, step))
 
     def test_5_the_fail_line_names_both_the_listed_ask_and_the_unreadable_list(self):
         step = step_two()
@@ -216,14 +305,14 @@ class EndCheckInRepublishStep(unittest.TestCase):
                         "republish.md step 2 must say the session that holds an ask answers it, with the writer routing or "
                         "naming it, and must not have the writer answer each ask. Step 2:\n" + step)
 
-    def test_9_a_sentence_says_the_end_check_runs_after_routing(self):
-        self.assertTrue(numbered_steps(), "republish.md's \"Keep the page on main's code\" section has no numbered steps")
-        ordered = [s for s in section_sentences()
-                   if (END_REF.search(prose(s)) or any(own_run(c) for c in spans(s)))
-                   and ROUTING.search(prose(s)) and AFTER.search(prose(s))]
-        self.assertTrue(ordered, "republish.md's \"Keep the page on main's code\" section has no sentence that puts the end "
-                        "check after the writer routes the asks it takes (end check or its run, with route, and after, "
-                        "once, following or first)")
+    def test_9_the_sentence_that_saves_the_asks_names_routing_and_a_reply_before_the_save(self):
+        step = step_two()
+        self.assertTrue(asks_calls(step), "republish.md step 2 has no `ArtifactData list asks` save, so there is no save to order. "
+                        "Step 2:\n" + step)
+        ordered = ordered_save_sentences(step)
+        self.assertTrue(ordered, "republish.md step 2's sentence that saves the asks does not name, before the save, an after "
+                        "word, a routing act and a reply (for example: After the writer routes each ask and the holder replies, "
+                        "save the asks ...). Step 2:\n" + step)
 
     def test_10_skill_md_and_republish_agree_on_where_the_end_check_runs(self):
         self.assertTrue(numbered_steps(), "republish.md's \"Keep the page on main's code\" section has no numbered steps")
@@ -231,9 +320,10 @@ class EndCheckInRepublishStep(unittest.TestCase):
                 if any(own_run(c) for c in spans(s)) and END.search(prose(s))]
         self.assertTrue(ends, "SKILL.md's '## Read the answers' section has no sentence that names the end check run")
         skill = ends[0]
-        saves_runs = save_and_run_positions()
-        self.assertTrue(saves_runs[1], "republish.md's \"Keep the page on main's code\" section has no own run")
-        run_step = min(saves_runs[1])[0]
+        runs = run_positions()
+        self.assertTrue(runs, "republish.md's \"Keep the page on main's code\" section has no own `stale_pages.py --page <file> "
+                        "--asks <asks>` run")
+        run_step = min(runs)[0]
         last_step = max(n for n, _ in numbered_steps())
         named = STEP_NUMBER.search(prose(skill))
         claims_last = LAST_CLAIM.search(prose(skill))
@@ -258,6 +348,42 @@ class WakeTextNamesTheCheck(unittest.TestCase):
         self.assertTrue(ended, "SKILL.md's '## Read the answers' section names the `--asks` run but does not say it is the "
                         "wake's end check")
 
+    def test_15a_the_skill_end_check_paragraph_saves_the_asks_after_routing_and_a_reply(self):
+        para = end_check_paragraph()
+        self.assertTrue(para, SCOPE)
+        fault = order_fault(para)
+        self.assertEqual(fault, "", "SKILL.md's end-check paragraph orders the asks save wrongly (%s), so the wake's end check "
+                         "can read an asks list from before the routing. Paragraph:\n%s" % (fault, para))
+
+    def test_15b_the_skill_asks_save_sentence_names_the_complete_marker(self):
+        para = end_check_paragraph()
+        self.assertTrue(para, SCOPE)
+        marked = [s for s in sentences(para) if asks_calls(s) and COMPLETE in s]
+        self.assertTrue(marked, "SKILL.md's end-check paragraph has no asks save sentence that names the `.complete` marker, "
+                        "so a partial asks list can read as the whole. Paragraph:\n" + para)
+
+    def test_15c_the_skill_run_reads_the_folder_the_paragraph_saved(self):
+        para = end_check_paragraph()
+        self.assertTrue(para, SCOPE)
+        named = [s for s in sentences(para) if any("<asks>" in c for c in spans(s)) and SAVE_VERB.search(prose(s))]
+        self.assertTrue(named, "SKILL.md's end-check paragraph does not say the `<asks>` the run reads is the folder saved "
+                        "(no sentence has `<asks>` and a save word). Paragraph:\n" + para)
+
+    def test_17_the_skill_end_check_sentence_says_when_the_check_runs(self):
+        para = end_check_paragraph()
+        self.assertTrue(para, SCOPE)
+        runs = [s for s in sentences(para) if any(own_run(c) for c in spans(s))]
+        self.assertTrue(runs, "SKILL.md's end-check paragraph has no sentence with the end check's run")
+        sentence = runs[0]
+        words = prose(sentence)
+        turn = TURN.search(words)
+        self.assertTrue(turn or (WAKE_WORD.search(words) and REPUBLISH.search(words)),
+                        "SKILL.md's end-check sentence names no timing: say the turn-start case, or each wake and before each "
+                        "republish (as republish.md does). Sentence:\n" + sentence)
+        if turn:
+            self.assertTrue(TURN.search(republish_flat()), "SKILL.md's end-check sentence says the check runs at turn start, but "
+                            "republish.md's \"Keep the page on main's code\" section does not say so. Sentence:\n" + sentence)
+
 
 class WakeSaveListNamesAsks(unittest.TestCase):
     def test_7_the_comment_wake_save_list_names_the_asks(self):
@@ -265,8 +391,8 @@ class WakeSaveListNamesAsks(unittest.TestCase):
         save = [s for b in blocks(wake) for s in sentences(b) if any(c.startswith("ArtifactData list receipts") for c in spans(s))]
         self.assertTrue(save, "SKILL.md's '## Read the answers' section has no comment-wake save of `ArtifactData list receipts`")
         named = [s for s in save if any(names_asks(c) for c in spans(s))]
-        self.assertTrue(named, "the comment-wake save list names no asks, so a wake saves no asks list for the end check. "
-                        "Save sentence:\n" + "\n".join(save))
+        self.assertTrue(named, "the comment-wake save list names no asks, so the wake's saved copy holds no asks list (the writer "
+                        "routes asks from its own read at each wake). Save sentence:\n" + "\n".join(save))
 
     def test_8_the_in_full_list_names_the_asks_so_a_cut_list_is_not_read_as_clear(self):
         wake = read_answers()
@@ -310,6 +436,15 @@ class AsksListAndCost(unittest.TestCase):
         self.assertTrue(read_asks, "the Cost: paragraph does not name the asks list read (`ArtifactData list asks`). Cost:\n"
                         + cost)
 
+    def test_16_the_cost_names_the_asks_read_as_the_end_checks_one_read(self):
+        cost = cost_text()
+        self.assertTrue(cost, "republish.md's \"Keep the page on main's code\" section has no single Cost: paragraph")
+        reads = [s for s in sentences(cost) if any(c.startswith("ArtifactData list asks") for c in spans(s))]
+        self.assertTrue(reads, "the Cost: paragraph names no `ArtifactData list asks` read")
+        named = [s for s in reads if END_REF.search(prose(s)) or any(own_run(c) for c in spans(s))]
+        self.assertTrue(named, "the Cost: sentence for the `ArtifactData list asks` read does not name it as the end check's one "
+                        "read, so a second asks read can hide in the cost. Sentence:\n" + "\n".join(reads))
+
 
 class Controls(unittest.TestCase):
     def test_c1_step_2_still_names_the_plain_run(self):
@@ -344,7 +479,36 @@ class Controls(unittest.TestCase):
 
     def test_c7_the_cost_paragraph_is_found_once(self):
         self.assertTrue(cost_text(), "republish.md's \"Keep the page on main's code\" section has no single Cost: paragraph, "
-                        "so tests 13 and 14 read nothing")
+                        "so tests 13, 14 and 16 read nothing")
+
+    def test_c8_a_keep_a_copy_pointer_is_not_an_asks_save(self):
+        text = 'Keep the copy from the same file ("Keep a copy in the repo" step 2 saves the same list of asks).'
+        self.assertEqual(asks_calls(text), [], "a 'Keep a copy in the repo' pointer that names the asks counts as an asks save")
+        self.assertEqual(ordered_save_sentences(text), [], "a 'Keep a copy in the repo' pointer passes the save-sentence check")
+
+    def test_c9_a_compliant_step_passes_both_order_checks(self):
+        text = one_line('After the writer routes each ask with no `owner` ("Route an ask") and the holder replies, save the asks '
+                        'into one new folder with `ArtifactData list asks`, then touch `.complete`. Run the end check as its own '
+                        'run: `python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --asks <asks>` (`<asks>` is the '
+                        'folder saved in this step).')
+        self.assertEqual(order_fault(text), "", "the order check fails a compliant step")
+        self.assertTrue(ordered_save_sentences(text), "the save-sentence check fails a compliant step")
+
+    def test_c10_a_save_first_step_is_named_as_saved_before_routing(self):
+        text = one_line('Save the asks first with `ArtifactData list asks`, then touch `.complete` in that folder. After the writer '
+                        'takes or routes each ask with no `owner`, run the end check: '
+                        '`python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file> --asks <asks>`.')
+        self.assertEqual(order_fault(text), "the asks save comes before any routing",
+                         "the order check names another cause for a save-first step")
+
+    def test_c11_a_lone_apostrophe_and_comment_openers_in_a_span_read_as_plain_text(self):
+        text = ("Don't rerun it. After the writer routes each ask and the holder replies, save the asks with "
+                "`ArtifactData list asks # not a comment // or /* one */`,\n  then touch `.complete`. Then run the end check: "
+                "`python3 ~/.claude/skills/waiting-page/stale_pages.py --page <file>\n  --asks <asks>` last.")
+        flat = one_line(text)
+        self.assertEqual(len(asks_calls(flat)), 1, "the span reader cut the asks span at a comment opener or a lone apostrophe")
+        self.assertEqual(order_fault(flat), "", "the order check fails a step with a lone apostrophe, comment openers and a "
+                         "line-broken run span")
 
 
 if __name__ == "__main__":
