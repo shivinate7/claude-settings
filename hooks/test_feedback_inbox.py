@@ -60,8 +60,9 @@ Inbox: <CLAUDE_CONFIG_DIR>/handoffs/<session_id>.inbox.md, outside git. Format:
 
 Repeat flag (decision owner-feedback-inbox, "Repeats"): the Stop guard judges each new item with one
   model call per Stop, `decision_watch.invoke_model` (model claude-haiku-5-5, timeout 45 s, effort
-  None). A match appends ` repeats <ref>` to the item's line in the inbox. The block reason names it,
-  or systemMessage does when stop_hook_active. Judged ids are kept in the turn state file under
+  None). A match appends ` repeats <ref>` to the item's line in the inbox. systemMessage names it, one
+  line per mark, and a mark never blocks (owner ruling 13:03 CST Nov 11). A candidate on the item's own
+  home is dropped for that item. Judged ids are kept in the turn state file under
   `judged`. Candidates come from the repo of the payload cwd: the step at refs/remotes/origin/roadmap,
   the layout's backlog files in the working tree, and older inboxes whose sidecar `<sid>.inbox.repo`
   names the repo. Capture writes that sidecar once, in a repo. The repeat cases stub the model call
@@ -3310,9 +3311,10 @@ def in_a_repo(path):
     return cp.returncode == 0
 
 
-def case_repeat_roadmap_step_marks_the_item_and_blocks():
+def case_repeat_roadmap_step_marks_the_item_and_tells_the_owner():
     """The owner says `carousel`; the step says `wheel`. The model names the step for the item. The
-    item line gains the mark, and the block names it. The mark keeps the line well formed."""
+    item line gains the mark, systemMessage names it, and the mark blocks nothing (owner ruling 13:03 CST
+    Nov 11). The mark keeps the line well formed."""
     root = repeat_repo("repeat-roadmap", step=True)
     cfg, sid = new_cfg(), "repeat-roadmap"
     check("roadmap: the message is saved", ran_central(capture(cfg, sid, MSG_ONE, cwd=root)))
@@ -3326,10 +3328,12 @@ def case_repeat_roadmap_step_marks_the_item_and_blocks():
           MSG_ONE.split("\n")[0] in prompt and ITEM_ID in prompt, prompt[-300:])
     check("roadmap: the item line gains the mark", inbox_line(cfg, sid, ITEM_ID) == ITEM_LINE + MARKED,
           inbox_line(cfg, sid, ITEM_ID))
+    out = guard_json(p) or {}
+    check("roadmap: the mark blocks nothing", not is_block(out), p.desc())
+    check("roadmap: systemMessage names the item and the ref",
+          "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in str(out.get("systemMessage", "")), p.desc())
     reason = block_reason(p) or ""
-    check("roadmap: the block reason names the item and the ref",
-          "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in reason, p.desc())
-    check("roadmap: no reason calls the item malformed", "malformed" not in reason, reason)
+    check("roadmap: no block reason calls the item malformed", "malformed" not in reason, reason)
 
 
 def case_repeat_stop_hook_active_marks_and_tells_the_owner():
@@ -3580,27 +3584,35 @@ def case_repeat_cap_keeps_each_source_within_its_share():
         check("cap %d: at most 100 inbox blocks" % steps, counts["inbox"] <= 100, counts)
 
 
-def case_repeat_repeat_only_reason_has_no_page_suffix_and_no_double_period():
-    """A block whose only reason is a repeat flag carries neither the page and standing suffix, nor a
-    double period. A flag beside another reason has no double period either."""
+def case_repeat_mark_never_blocks_and_prints_one_system_line():
+    """A mark never blocks (owner ruling 13:03 CST Nov 11). A Stop whose only reason is a mark passes:
+    systemMessage holds the one flag line, and the line still gains the mark. A mark beside a burst message
+    that needs items keeps the block for that reason alone: the flag stays out of the block reason, and
+    systemMessage holds it, with no double period in the reason."""
     root = repeat_repo("repeat-reason", step=True)
     cfg, sid = new_cfg(), "repeat-reason"
     capture(cfg, sid, MSG_ONE, cwd=root)
     add_item(cfg, sid)
     p, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID))
-    reason = block_reason(p) or ""
-    check("reason: the repeat-only Stop blocks", block_reason(p) is not None, p.desc())
-    check("reason: no page and standing suffix on a repeat-only block",
-          "Send each page ruling" not in reason, reason)
-    check("reason: no double period in a repeat-only block", ".." not in reason, reason)
+    out = guard_json(p) or {}
+    check("never blocks: a Stop whose only reason is a mark does not block", not is_block(out), p.desc())
+    msg = str(out.get("systemMessage", ""))
+    check("never blocks: systemMessage holds the flag as one line",
+          "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in msg and "\n" not in msg, p.desc())
+    check("never blocks: the mark still lands on the item line", inbox_line(cfg, sid, ITEM_ID) == ITEM_LINE + MARKED,
+          inbox_line(cfg, sid, ITEM_ID))
     cfg2, sid2 = new_cfg(), "repeat-mixed"
     capture(cfg2, sid2, MSG_ONE, cwd=root)
     add_item(cfg2, sid2)
     capture(cfg2, sid2, MSG_TWO, cwd=root)  # a burst message with no item: a reason of its own
     p2, calls2 = stop(cfg2, sid2, root, answer=repeat_answer(ITEM_ID))
     reason2 = block_reason(p2) or ""
-    check("reason: a repeat flag beside another reason is in the block with no double period",
-          "may repeat" in reason2 and ".." not in reason2, reason2)
+    check("never blocks: a burst reason still blocks beside a mark", block_reason(p2) is not None, p2.desc())
+    check("never blocks: the flag stays out of the block reason", "may repeat" not in reason2, reason2)
+    check("never blocks: systemMessage holds the flag beside the block",
+          "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in str((guard_json(p2) or {}).get("systemMessage", "")),
+          p2.desc())
+    check("never blocks: no double period in the block reason", ".." not in reason2, reason2)
 
 
 def case_repeat_second_judging_adds_no_second_mark():
@@ -3621,8 +3633,8 @@ def case_repeat_second_judging_adds_no_second_mark():
 
 
 def case_repeat_unplaced_mark_is_reported_as_not_marked():
-    """The item's line is gone by the time the mark goes on: the block reason names the flag and says
-    it is not marked, and never says it is marked on the item."""
+    """The item's line is gone by the time the mark goes on: systemMessage names the flag and says
+    it is not marked, and never says it is marked on the item. The mark blocks nothing."""
     root = repeat_repo("repeat-unplaced", step=True)
     cfg, sid = new_cfg(), "repeat-unplaced"
     capture(cfg, sid, MSG_ONE, cwd=root)
@@ -3630,11 +3642,12 @@ def case_repeat_unplaced_mark_is_reported_as_not_marked():
     p, calls = stop(cfg, sid, root, answer=repeat_answer(ITEM_ID),
                     drop=(inbox_of(cfg, sid), "- " + ITEM_ID + " "))
     check("unplaced: one model call", len(calls) == 1, p.desc())
-    reason = block_reason(p) or ""
-    check("unplaced: the reason names the flag", "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in reason, p.desc())
-    check("unplaced: the reason says not marked", "not marked" in reason, reason)
-    check("unplaced: the reason never says marked on the item",
-          re.search(r"(?<!not )marked on the item", reason) is None, reason)
+    msg = str((guard_json(p) or {}).get("systemMessage", ""))
+    check("unplaced: systemMessage names the flag", "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in msg, p.desc())
+    check("unplaced: systemMessage says not marked", "not marked" in msg, msg)
+    check("unplaced: systemMessage never says marked on the item",
+          re.search(r"(?<!not )marked on the item", msg) is None, msg)
+    check("unplaced: the mark blocks nothing", not is_block(guard_json(p)), p.desc())
 
 
 def case_repeat_word_repeats_in_an_item_still_gets_the_mark():
@@ -3653,10 +3666,10 @@ def case_repeat_word_repeats_in_an_item_still_gets_the_mark():
           inbox_line(cfg, sid, "fb-1-4") == line4 + MARKED, inbox_line(cfg, sid, "fb-1-4"))
     check("word: a ref-like run mid-line is not a mark, so the line gains one",
           inbox_line(cfg, sid, "fb-1-5") == line5 + MARKED, inbox_line(cfg, sid, "fb-1-5"))
-    reason = block_reason(p) or ""
-    check("word: the reason names both items and says marked",
-          "fb-1-4 may repeat %s" % REPEAT_REF in reason and "fb-1-5 may repeat %s" % REPEAT_REF in reason
-          and "marked on the item" in reason and "not marked" not in reason, reason)
+    msg = str((guard_json(p) or {}).get("systemMessage", ""))
+    check("word: systemMessage names both items and says marked",
+          "fb-1-4 may repeat %s" % REPEAT_REF in msg and "fb-1-5 may repeat %s" % REPEAT_REF in msg
+          and "marked on the item" in msg and "not marked" not in msg, msg)
 
 
 def case_repeat_cap_keeps_the_newest_notes_lines():
@@ -3694,7 +3707,7 @@ def case_repeat_cap_keeps_the_open_roadmap_steps():
 
 def case_repeat_list_ids_and_refs_do_not_cost_the_valid_hit():
     """An answer entry whose id or ref is a list is not a hit. It must not stop the valid hit of the same
-    answer, which still gets its mark and its reason."""
+    answer, which still gets its mark and its systemMessage line."""
     root = repeat_repo("repeat-list", step=True)
     cfg, sid = new_cfg(), "repeat-list"
     capture(cfg, sid, MSG_ONE, cwd=root)
@@ -3707,8 +3720,8 @@ def case_repeat_list_ids_and_refs_do_not_cost_the_valid_hit():
     check("list: one model call", len(calls) == 1, p.desc())
     check("list: the valid hit still marks the line", inbox_line(cfg, sid, ITEM_ID) == ITEM_LINE + MARKED,
           inbox_line(cfg, sid, ITEM_ID))
-    reason = block_reason(p) or ""
-    check("list: the block names the valid hit", "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in reason,
+    msg = str((guard_json(p) or {}).get("systemMessage", ""))
+    check("list: systemMessage names the valid hit", "%s may repeat %s" % (ITEM_ID, REPEAT_REF) in msg,
           p.desc())
     check("list: no repeats-not-checked note", "repeats not checked" not in str(guard_json(p) or {}),
           p.desc())
@@ -3774,6 +3787,57 @@ def case_repeat_repo_item_is_never_judged_as_a_repeat():
     check("repo item: the note beside it is in the prompt", "[%s]" % ITEM_ID_2 in prompt, prompt[-300:])
     check("repo item: its line gets no mark", " repeats " not in inbox_line(cfg, sid, REPO_ID),
           inbox_line(cfg, sid, REPO_ID))
+
+
+# The own-home and per-item cases write the inbox with fixed headers, not with capture(): a capture stamps
+# the real clock, and two captures in one minute share an inbox ref, so the refs would not name a message.
+NEW_SID = "c3d4e5f6-0a1b-4c2d"
+EARLY_HEADER = "2026-10-13 10:04 CDT (UTC-05:00)"
+LATE_HEADER = "2026-10-13 10:09 CDT (UTC-05:00)"
+EARLY_REF = "inbox:%s@%s" % (NEW_SID[:8], EARLY_HEADER[:16])  # the candidate ref of the 10:04 message
+MARK_EARLY = " repeats " + EARLY_REF
+
+
+def write_inbox(cfg, sid, rows):
+    """Writes the inbox from (header, text, items) rows, in the format, each header as given."""
+    write_file(inbox_of(cfg, sid), "".join(render_block(text, header=h, items=items) for h, text, items in rows))
+
+
+def case_repeat_own_home_is_never_a_candidate_for_its_item():
+    """R38 (owner 13:03 CST Nov 11): a session's follow-up items match the work it filed from its own earlier
+    items. The step an item names as its home is that item's own home, so the judge drops it for that item:
+    the model's naming of the step marks nothing on it. The other item of the same message has no such home,
+    so it keeps the step as a candidate and gets the mark for a repeat in other words (carousel and wheel)."""
+    root = repeat_repo("repeat-own-home", step=True)
+    cfg = new_cfg()
+    homed_line, other_line = "- fb-1004-1 [task] -> step:wheel-speed", "- fb-1004-2 [note] -> noted"
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [homed_line, other_line])])
+    answer = json.dumps({"repeats": [{"id": "fb-1004-1", "ref": REPEAT_REF},
+                                     {"id": "fb-1004-2", "ref": REPEAT_REF}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    check("own home: one model call, for the item that keeps the step", len(calls) == 1, p.desc())
+    check("own home: the item whose home is the step gets no mark",
+          inbox_line(cfg, NEW_SID, "fb-1004-1") == homed_line, inbox_line(cfg, NEW_SID, "fb-1004-1"))
+    check("own home: the other item of the same message gets the mark",
+          inbox_line(cfg, NEW_SID, "fb-1004-2") == other_line + MARKED, inbox_line(cfg, NEW_SID, "fb-1004-2"))
+
+
+def case_repeat_each_item_is_judged_against_the_other_messages():
+    """R38 (owner 13:03 CST Nov 11): one candidate list was given to every item in a Stop, so each message of the
+    Stop hid the others. The item on the later message repeats the earlier one: the earlier message is its
+    candidate, and it is marked. The item on the earlier message is never marked against its own message. One
+    model call covers both items."""
+    root = repeat_repo("repeat-per-item", step=True)
+    cfg = new_cfg()
+    early_line, late_line = "- fb-1004-1 [note] -> noted", "- fb-1009-1 [note] -> noted"
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [early_line]), (LATE_HEADER, MSG_TWO, [late_line])])
+    answer = json.dumps({"repeats": [{"id": "fb-1009-1", "ref": EARLY_REF}, {"id": "fb-1004-1", "ref": EARLY_REF}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    check("per item: one model call covers both messages", len(calls) == 1, p.desc())
+    check("per item: the later item is marked against the earlier message",
+          inbox_line(cfg, NEW_SID, "fb-1009-1") == late_line + MARK_EARLY, inbox_line(cfg, NEW_SID, "fb-1009-1"))
+    check("per item: the earlier item is not marked against its own message",
+          inbox_line(cfg, NEW_SID, "fb-1004-1") == early_line, inbox_line(cfg, NEW_SID, "fb-1004-1"))
 
 
 def case_one_shot_grant_passes_with_its_home_and_blocks_without_one():
@@ -4433,7 +4497,7 @@ CASES = (
     case_page_note_u2028_in_note_saves_verbatim,
     case_page_note_u0085_in_note_saves_verbatim,
     case_page_note_u2028_in_at_saves_once,
-    case_repeat_roadmap_step_marks_the_item_and_blocks,
+    case_repeat_roadmap_step_marks_the_item_and_tells_the_owner,
     case_repeat_stop_hook_active_marks_and_tells_the_owner,
     case_repeat_judged_items_are_not_judged_again,
     case_repeat_removed_mark_is_not_flagged_again,
@@ -4443,7 +4507,7 @@ CASES = (
     case_repeat_backlog_debt_text_is_in_the_prompt,
     case_repeat_cost_one_call_one_grep_and_two_files,
     case_repeat_cap_keeps_each_source_within_its_share,
-    case_repeat_repeat_only_reason_has_no_page_suffix_and_no_double_period,
+    case_repeat_mark_never_blocks_and_prints_one_system_line,
     case_repeat_second_judging_adds_no_second_mark,
     case_repeat_unplaced_mark_is_reported_as_not_marked,
     case_repeat_word_repeats_in_an_item_still_gets_the_mark,
@@ -4452,6 +4516,8 @@ CASES = (
     case_repeat_list_ids_and_refs_do_not_cost_the_valid_hit,
     case_repeat_spaced_inbox_mark_is_recognised_on_a_second_judging,
     case_repeat_repo_item_is_never_judged_as_a_repeat,
+    case_repeat_own_home_is_never_a_candidate_for_its_item,
+    case_repeat_each_item_is_judged_against_the_other_messages,
     case_one_shot_grant_passes_with_its_home_and_blocks_without_one,
     case_guard_ruling_home_is_judged_in_the_repo_the_session_worked_in,
     case_step_path_is_derived_from_override_step_dir,
