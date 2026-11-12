@@ -148,7 +148,9 @@ store: cloud sessions share no `~/.claude`, so a file under it would not reach t
   restart plan R38). It also drops every other block of the item's own inbox stamped within 30
   minutes of the item's block, either direction, stamp to stamp, each stamp read with its UTC offset:
   a message that close is a follow-up on the same thread, not a repeat. A block 31 minutes away, and
-  any block of another session's inbox, stay candidates. The prompt adds one sentence: a follow-up or
+  any block of another session's inbox, stay candidates. The 30-minute window comes from step
+  repeat-mark-skips-followups (owner gripe 14:24 CST Nov 12, relayed 14:25 CST; the window is the
+  step's, in the coordinator's lane grant 14:27 CST Nov 12). A recorded rule is an argument, not law. The prompt says a follow-up or
   detail on the same topic is not a repeat. A candidate is named only when the new item asks again
   for a change it already asked for and got an answer. An item with no candidate left is not asked. A hit appends ` repeats <ref>`
   to the item line (one inbox rewrite through a temp file) and prints one systemMessage line. A mark
