@@ -3727,16 +3727,37 @@ def role_agent_keys(pointer_root):
         yield frontmatter_keys(lines[1:end])
 
 
+def role_pin(pointer_root, role, key):
+    """The raw frontmatter value of `key` in the agent file that names this role in the pointer checkout's agents
+    folder: "" when the file lacks the key or no file names the role, None when the folder cannot be read. The one
+    reader of a role's pin: role_has_model_pin and role_isolation_pin call it."""
+    try:
+        for keys in role_agent_keys(pointer_root):
+            if keys.get("name", "").lower() == role.lower():
+                return keys.get(key, "")
+    except OSError:
+        return None
+    return ""
+
+
 def role_has_model_pin(pointer_root, role):
     """True when an agent file in the pointer checkout's agents folder names this role and pins a `model:` in its
     frontmatter, False when none does, None when the folder cannot be read."""
-    try:
-        for keys in role_agent_keys(pointer_root):
-            if keys.get("name", "").lower() == role.lower() and keys.get("model"):
-                return True
-    except OSError:
-        return None
-    return False
+    pin = role_pin(pointer_root, role, "model")
+    return None if pin is None else bool(pin)
+
+
+def role_isolation_pin(pointer_root, role):
+    """The `isolation:` a role's agent file pins, without quotes or a trailing comment, or "" when it pins none or
+    the folder cannot be read or there is no pointer checkout (a rule that reads it then stands down, as the pointer
+    rules do)."""
+    if not pointer_root:
+        return ""
+    raw = (role_pin(pointer_root, role, "isolation") or "").strip()
+    if raw[:1] in ("'", '"'):
+        close = raw.find(raw[0], 1)
+        return raw[1:close] if close > 0 else raw[1:]
+    return re.split(r"\s#", raw, maxsplit=1)[0].strip()
 
 
 # General-purpose and claude have no agents/ file, so they are listed here to count as real roles. Plan and Explore
@@ -6265,7 +6286,8 @@ def judge(payload) -> None:
 
     # A SendMessage to a spawn that has finished and ran in a worktree, or to a finished reviewer (rule resume-finished-reviewer).
     resume_decision, resume_reason, resume_matched, resume_note = resume_finished_hit(
-        tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", bool(payload.get("agent_id")))
+        tool, tool_input, trust_transcript if isinstance(trust_transcript, str) else "", bool(payload.get("agent_id")),
+        lambda role: role_isolation_pin(pointer_checkout(), role))
     if resume_note:
         record(tool, "noted", resume_note, tool)
     if resume_decision == "deny":
