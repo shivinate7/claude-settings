@@ -892,8 +892,8 @@ def _clear_prompted():
 def auth_check(model_call=invoke_model):
     """Return one owner line when model calls cannot authenticate, else ''.
 
-    The fix is shown once per missing token (owner ruling, 2026-11-06 11:43 CST: prompt once). A token
-    file that is present clears the mark, so a token that goes missing again is a new fix."""
+    The fix is shown once per missing token, so a login that is lost shows its fix at once and does not nag.
+    A token file that is present clears the mark and returns '', so a token that goes missing again is a new fix."""
     try:
         token = _hook_token()
     except TokenUnreadable:
@@ -980,7 +980,7 @@ def streak_line(session_id):
     if not path:
         return ""
     count, last, kind = _read_streak(path)
-    if count < (1 if kind == "AUTH" else STREAK_MIN):  # a lost login speaks at the first failure (owner, 11:43 CST Nov 6)
+    if count < (1 if kind == "AUTH" else STREAK_MIN):  # a lost login never heals by retry, so the first failure speaks
         return ""
     line = "Model calls: %d failed in a row this session (last: %s). Hook judges are not running." % (count, last)
     if kind == "RUN":

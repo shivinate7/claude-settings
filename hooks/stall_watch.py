@@ -5,7 +5,7 @@ Modes:
 - --hook: Before a background Bash command, wraps it so a watcher reports a stall after
   300 seconds with no new output. The job keeps running.
 - --stop: At Stop, lists each open background job whose output file did not change for
-  the quiet age.
+  the quiet age, and adds the "Model calls: N failed" line when this session's model calls keep failing.
 
 Hook: stall_watch.py --hook
   PreToolUse hook. For a Bash call with run_in_background true, it returns updatedInput only
