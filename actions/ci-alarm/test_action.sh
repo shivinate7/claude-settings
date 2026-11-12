@@ -87,8 +87,27 @@ contents_api() {
   if printf '%s\n' "$@" | grep -q 'vnd.github.raw'; then cat "$file"; else printf '{"encoding":"base64","content":"%s"}\n' "$(base64 -w0 < "$file")"; fi
   exit 0
 }
+# issue_list "$@": `gh issue list`. With $ISSUES (a JSON array of issues, in the shape --json gives, comments included) the list
+# is filtered by --state (open when not given; all is both states), keeps the --json fields asked for, then runs --jq. Search is
+# not filtered, so a lookup must find what it needs in the text itself. Without $ISSUES, open serves $OPEN, the number issue.sh
+# comments on, and any other state serves an empty list.
+issue_list() {
+  local st=open want="" jqf="" prev="" a
+  for a in "$@"; do
+    case "$prev" in --state|-s) st="$a" ;; --json) want="$a" ;; --jq|-q) jqf="$a" ;; esac
+    case "$a" in --state=*) st="${a#--state=}" ;; esac
+    prev="$a"
+  done
+  if [ -n "${ISSUES:-}" ] && [ -f "$ISSUES" ]; then
+    jq --arg st "$st" --arg want "$want" '[.[] | select($st == "all" or .state == ($st | ascii_upcase))
+      | if $want == "" then . else with_entries(select(.key as $k | $want | split(",") | any(. == $k))) end]' "$ISSUES" \
+      | jq -r "${jqf:-.}"
+  elif [ "$st" = open ]; then echo "${OPEN:-}"
+  else echo '[]' | jq -r "${jqf:-.}"; fi
+}
 if [ "$1" = api ]; then classify "$@" >> "${DROP_READS:-/dev/null}"; fi
 if [ "$1" = api ]; then echo "$2" >> "${READS:-/dev/null}"; fi
+if [ "$1 $2" = "issue list" ]; then echo "issue-list" >> "${READS:-/dev/null}"; fi
 if [ -n "${FAIL:-}" ] && [[ "$1 $2" == $FAIL ]]; then echo "gh: HTTP 500 (fake)" >&2; exit 1; fi
 if [ -n "${EMPTY:-}" ] && [[ "$1 $2" == $EMPTY ]]; then exit 0; fi
 case "$1 $2" in
@@ -108,7 +127,7 @@ case "$1 $2" in
       */contents/*) contents_api "$@" ;;
       *) cat "$WORKFLOWS" ;;
     esac ;;
-  "issue list") echo "${OPEN:-}" ;;
+  "issue list") issue_list "$@" ;;
   "issue create") echo "ISSUE $*" >> "$LOG" ;;
   "issue comment") echo "COMMENT $*" >> "$LOG" ;;
 esac
@@ -128,7 +147,7 @@ gh_run() {
     "$1" "$id" "$6" "$concl" "$3" "$4" "$5" "${7:-completed}" "$6" "${8:-1}"
 }
 # A case starts with its runs: runs_are clears the jobs of the case before the jobs_of lines that follow it.
-runs_are() { printf '%s\n' "$@" | jq -s . > "$tmp/runs"; rm -rf "$tmp/jobs"; mkdir -p "$tmp/jobs"; }
+runs_are() { printf '%s\n' "$@" | jq -s . > "$tmp/runs"; rm -rf "$tmp/jobs"; mkdir -p "$tmp/jobs"; rm -f "$tmp/issues.json"; }
 # jobs_of <run id> [job:conclusion[:minutes|never]]...: the jobs of one run as `gh api .../actions/runs/<id>/jobs` lists them.
 # minutes: the job ran that long from 2026-01-02T10:00:00Z. never: started_at is null. No third field: no times.
 jobs_of() {
@@ -173,10 +192,10 @@ job_cap() {
     f && /^    timeout-minutes:/ { sub(/^    timeout-minutes:[ \t]*/, ""); sub(/[ \t]*#.*$/, ""); print; exit }' "$root/.github/workflows/checks.yml"
 }
 # cost <label> <jobs reads> <contents reads> <python3 starts>: what the last t case did. The one other api read is the
-# workflows list. No file is left in its TMPDIR, so a cache it made is gone.
+# workflows list. No file is left in its TMPDIR, so a cache it made is gone. Issue-list reads are left out: count_is pins them.
 cost() {
   local total j c p other left
-  total="$(wc -l < "$tmp/reads")"
+  total="$(grep -vc '^issue-list' "$tmp/reads")"
   j="$(grep -c 'actions/runs/[0-9]*/jobs' "$tmp/reads")"
   c="$(grep -c '/contents/' "$tmp/reads")"
   other=$((total - j - c))
@@ -222,7 +241,7 @@ bad=0
 # Sets out (stdout), code (exit status); stderr is in $tmp/err. The one home of the run step (t and named call it).
 run_alarm() {
   : > "$tmp/log"; : > "$tmp/reads"; : > "$tmp/pylog"; rm -rf "$tmp/scratch"; mkdir -p "$tmp/scratch"
-  out="$(PATH="$tmp/bin:$PATH" RUNS="$tmp/runs" WORKFLOWS="$tmp/workflows" JOBS="$tmp/jobs" READS="$tmp/reads" LOG="$tmp/log" \
+  out="$(PATH="$tmp/bin:$PATH" RUNS="$tmp/runs" WORKFLOWS="$tmp/workflows" JOBS="$tmp/jobs" READS="$tmp/reads" LOG="$tmp/log" ISSUES="$tmp/issues.json" \
     FAIL="${1:-}" EMPTY="${2:-}" PYLOG="$tmp/pylog" TMPDIR="$tmp/scratch" CONTENTS="$tmp/contents" CONTENTS_DEFAULT="$tmp/no-if.yml" GITHUB_REPOSITORY=o/r SELF=alarm bash "$here/alarm.sh" 2>"$tmp/err")"
   code=$?
 }
@@ -810,6 +829,95 @@ runs_are "$(gh_run checks success 2026-11-03T14:12:08Z https://runs/skipped-push
 jobs_of 62 checks-windows-merge-3:failure all-jobs-passed:skipped
 jobs_of 63 checks-windows-merge-3:skipped all-jobs-passed:skipped
 t red red-job-skipped-in-the-newer-run-is-red-when-the-workflow-read-fails "api *contents/*" "" https://runs/skipped-schedule-62
+
+# --- an earlier alarm already named a cap end: a repeat of it posts nothing ---
+# Each run of alarm.sh reads the alarm issues once: `gh issue list --state all`, open and closed, with each issue's comments.
+# A cap end whose run id an earlier alarm named, in an issue body or in a comment on it, is not alarmed again. The fixture
+# (issues_are) holds the earlier alarms as issue_of gives them, each body and comment written in the shapes cap_body gives.
+# issue_of <number> <OPEN|CLOSED> <title> <body> [comment body]...: one issue as `gh issue list --json` gives it.
+issue_of() {
+  local n="$1" st="$2" ttl="$3" body="$4"
+  shift 4
+  jq -cn --argjson n "$n" --arg st "$st" --arg t "$ttl" --arg b "$body" --args \
+    '{number: $n, state: $st, title: $t, body: $b, comments: ($ARGS.positional | map({body: .}))}' "$@"
+}
+# issues_are <issue>...: the alarm issues the lookup list holds, one per argument. None is an empty list.
+issues_are() { printf '%s\n' "$@" | jq -s . > "$tmp/issues.json"; }
+# cap_body <run id> <job> <cap> <minutes> <run url>: an alarm body that names one cap end, in the shapes alarm.sh writes.
+cap_body() { printf 'CI alarm on main:\n\n- ci (cancelled): %s\n  cap end: job %s ran %s min, cap %s min, run %s\n' "$5" "$2" "$4" "$3" "$1"; }
+# posted <label> <verdict> [text the post must name]...: one run of alarm.sh. It exits 0, prints the verdict, and posts one issue or
+# one comment naming each text. The destination is open (a comment on an open issue or a new issue), so either is the post.
+posted() {
+  local label="$1" want="$2" shown text miss=""
+  shift 2
+  run_alarm "" ""
+  shown="$(grep -v '^::\(warning\|notice\)::' <<<"$out")"
+  if [ "$code" != 0 ] || [ "$shown" != "$want" ] || ! grep -q '^\(ISSUE\|COMMENT\) ' "$tmp/log"; then
+    echo "FAIL $label (exit $code, verdict '$shown', want $want; posted: $(tr '\n' ' ' < "$tmp/log"))"; bad=1; return 0
+  fi
+  for text in "$@"; do grep -qF -- "$text" "$tmp/log" || miss="${miss:-$text}"; done
+  if [ -n "$miss" ]; then echo "FAIL $label (the post lacks '$miss')"; bad=1; else echo "ok   $label"; fi
+}
+# quiet <label>: one run of alarm.sh. The lookup read comes first, so a run that never looked cannot pass as quiet. Then the run
+# exits 0 with an alarm or green verdict and no warning, and posts nothing.
+quiet() {
+  local label="$1" shown
+  run_alarm "" ""
+  count_is "$label: reads the alarm issues once" issue-list 1
+  shown="$(grep -v '^::\(warning\|notice\)::' <<<"$out")"
+  if [ "$code" = 0 ] && { [ "$shown" = green ] || [ "$shown" = alarm ]; } && ! grep -q '::warning::' <<<"$out"; then echo "ok   $label: exits 0 with verdict $shown"
+  else echo "FAIL $label: exit $code, verdict '$shown', or a warning"; bad=1; fi
+  if [ -s "$tmp/log" ]; then echo "FAIL $label: posts $(tr '\n' ' ' < "$tmp/log")"; bad=1; else echo "ok   $label: posts nothing"; fi
+}
+# lacks <label> <text>: the last post does not name <text>.
+lacks() { if grep -qF -- "$2" "$tmp/log"; then echo "FAIL $1: the post names '$2'"; bad=1; else echo "ok   $1"; fi; }
+# An open issue names the cap end of run 5500: a second alarm over that run posts nothing.
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-5500 push 5500)"
+jobs_of 5500 scope-guard:cancelled:40
+workflow_at 5500 scope-guard:37
+issues_are "$(issue_of 9 OPEN 'CI job hit its time cap on main: scope-guard' "$(cap_body 5500 scope-guard 37 40 https://runs/cap-5500)")"
+quiet open-issue-names-the-cap-run-posts-nothing
+# A closed issue names the cap end of run 5510: an owner who closed the alarm does not get it opened again.
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-5510 push 5510)"
+jobs_of 5510 scope-guard:cancelled:40
+workflow_at 5510 scope-guard:37
+issues_are "$(issue_of 9 CLOSED 'CI job hit its time cap on main: scope-guard' "$(cap_body 5510 scope-guard 37 40 https://runs/cap-5510)")"
+quiet closed-issue-names-the-cap-run-posts-nothing
+# An open issue whose body names run 5590 holds a comment that names run 5600: the cap end of run 5600 posts nothing.
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-5600 push 5600)"
+jobs_of 5600 scope-guard:cancelled:40
+workflow_at 5600 scope-guard:37
+issues_are "$(issue_of 9 OPEN 'CI job hit its time cap on main: scope-guard' "$(cap_body 5590 scope-guard 37 40 https://runs/cap-5590)" "$(cap_body 5600 scope-guard 37 40 https://runs/cap-5600)")"
+quiet cap-run-named-only-in-a-comment-on-the-open-issue-posts-nothing
+# Control: an open issue names run 52401, a longer id that holds 5240. The cap end of run 5240 still alarms, so the lookup must
+# match the whole run id, not a substring of it.
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-5240 push 5240)"
+jobs_of 5240 scope-guard:cancelled:40
+workflow_at 5240 scope-guard:37
+issues_are "$(issue_of 9 OPEN 'CI job hit its time cap on main: scope-guard' "$(cap_body 52401 scope-guard 37 40 https://runs/cap-52401)")"
+posted cap-end-of-a-run-whose-id-is-a-prefix-of-a-named-run-still-alarms alarm "job scope-guard ran 40 min, cap 37 min, run 5240"
+# Control: a failure run with a red job, under an old issue that names its run id in a cap line, still opens its red alarm.
+runs_are "$(gh_run ci failure 2026-01-02 https://runs/red-6100 push 6100)"
+jobs_of 6100 checks:failure
+issues_are "$(issue_of 9 OPEN 'CI job hit its time cap on main: scope-guard' "$(cap_body 6100 scope-guard 37 40 https://runs/cap-6100)")"
+t red red-run-under-an-old-issue-naming-its-run-id-still-opens-the-red-alarm "" "" "- ci (failure): https://runs/red-6100"
+# Two cap runs in the window, the older already named by an open issue: only the newer one is alarmed, and the post names only it.
+runs_are "$(gh_run ci cancelled 2026-01-02 https://runs/cap-5401 push 5401)" "$(gh_run ci cancelled 2026-01-01 https://runs/cap-5400 push 5400)"
+jobs_of 5401 scope-guard:cancelled:40
+jobs_of 5400 build-guard:cancelled:40
+workflow_at 5401 scope-guard:37
+workflow_at 5400 build-guard:37
+issues_are "$(issue_of 9 OPEN 'CI job hit its time cap on main: build-guard' "$(cap_body 5400 build-guard 37 40 https://runs/cap-5400)")"
+posted only-the-unnamed-cap-run-is-alarmed-when-the-other-is-already-named alarm "--title CI job hit its time cap on main: scope-guard" "job scope-guard ran 40 min, cap 37 min, run 5401"
+lacks already-named-cap-run-5400-is-not-in-the-new-post "run 5400"
+count_is only-the-unnamed-cap-run-reads-the-alarm-issues-for-the-lookup-and-for-its-post issue-list 2
+# A full run window of 100 runs: the oldest is a cap end that a closed issue names, and the 99 newer runs succeeded. Nothing posts.
+window=(); for i in $(seq 1 99); do window+=("$(gh_run ci success 2026-01-02 "https://runs/window-named-$i" push $((5800 + i)))"); done
+runs_are "$(gh_run ci cancelled 2026-01-01 https://runs/cap-5700 push 5700)" "${window[@]}"
+jobs_of 5700 scope-guard:cancelled:40
+workflow_at 5700 scope-guard:37
+issues_are "$(issue_of 9 CLOSED 'CI job hit its time cap on main: scope-guard' "$(cap_body 5700 scope-guard 37 40 https://runs/cap-5700)")"
+quiet full-run-window-cap-end-named-by-a-closed-issue-posts-nothing
 
 # --- dropped-start: dropped.sh alarms on a pull request whose all-jobs-passed run never started ---
 # A case builds its fixtures under $dd, then drun runs dropped.sh once: CHECK unset, NOW given, fake gh.
