@@ -138,7 +138,9 @@ PAST_RULING_ITEM = (
     "it was set so). A question whose `Based on (ruling): ...` line names that ruling (its id or slug) passes: "
     "a re-ask the ruling allows is fine. A challenge that names the record passes on a new fact alone (rule "
     "outcomes-stale-decision-protocol). A new fact is a measure or an observed harm that the ruling left "
-    "unweighed. \"Unmeasured\" alone is not a new fact. A restatement of the ruling's own claim is not a new fact. "
+    "unweighed. A challenge that names the record and says the ruling's claim is unmeasured passes too (rule "
+    "outcomes-stale-decision-protocol: measure the claim, or say unmeasured). "
+    "A restatement of the ruling's own claim is not a new fact. "
     "The outcome the ruling protected, what protects it now and a proposed fix are optional, never "
     "required. Refuse a re-ask that brings no new fact. "
     "A challenge only asks; it never grants anything. "
@@ -151,7 +153,8 @@ PAST_RULING_ITEM = (
 CHALLENGE_HOW = (
     "To challenge the ruling, send the question again as a challenge that names the record and brings a new fact: "
     "a measure, or an observed harm the ruling left unweighed. The outcome it protected, what protects it now and a "
-    "proposed fix are optional. A challenge with the record and a new fact passes this check."
+    "proposed fix are optional. A challenge with the record and a new fact passes this check. A restatement of the "
+    "ruling's own claim is not a new fact. A re-ask that does not name the record is not a challenge."
 )
 # The question-judge call of lint/report_guard.py (a Stop whose reply asks the owner something): Sonnet, 60 s.
 PAST_RULING_MODEL, PAST_RULING_TIMEOUT = SPAWN_MODEL, 60
