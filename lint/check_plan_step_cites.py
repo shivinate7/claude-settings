@@ -14,22 +14,24 @@ It ends at a blank line, a line at the marker's indent or less, the next part, a
 
 Each part needs one valid cite `step:<slug>` in its part text, outside a code fence. A cite counts when no letter or
 hyphen sits before `step:`, so a tag such as `cs-step:<slug>` is no cite. A part passes when any one cite is valid.
-A valid cite names a step file roadmap/data/steps/<slug>.json on the roadmap branch. The branch is read with git
-(refs/remotes/origin/roadmap first, then refs/heads/roadmap), never from the working tree, so the steps are the live
-ones and no list is copied here. An opaque slug (one letter then digits, such as c55) says nothing alone, so it is
+A valid cite names a step file roadmap/data/steps/<slug>.json on the record branch, which layout.record_branch(root)
+names (lint/layout.py: the extras key "record-branch", else roadmap). The branch is read with git (origin's ref first,
+then the local one), never from the working tree, so the steps are the live ones and no list is copied here. An opaque slug (one letter then digits, such as c55) says nothing alone, so it is
 valid only with a gloss in parentheses right after it: `step:c55 (short gloss)`.
 
 A fence is a line of 3 or more backticks or tildes at any indent, closed by a fence of the same mark that is at least
 as long. A fenced block holds no ruling, no part and no cite. The fence pattern takes any indent because a part's
-content sits 5 spaces in, past the 0 to 3 that a bare CommonMark fence allows.
+content sits 5 spaces in, past the 0 to 3 that a bare CommonMark fence allows. A fence that never closes runs to the
+end of the file and would hide every part below it, so its opening line is flagged. The hidden parts are not flagged.
 
-Output, one line per flagged part: `<file>:<line>: <ruling> part <N>: <reason>`.
+Output, one line per flagged part: `<file>:<line>: <ruling> part <N>: <reason>`. One line per unclosed fence:
+`<file>:<line>: unclosed code fence hides the parts below it`.
 
-Cost: one git process to find the roadmap branch (two when origin/roadmap is absent), one to list its steps, and one
+Cost: one git process to find the record branch (two when origin's ref is absent), one to list its steps, and one
 read per plan file. No file, timer or log is written.
 
-Exit 0: clean. Exit 1: a part has no valid cite. Exit 2: UNKNOWN, because the roadmap branch, the repo or the plans
-home could not be read. Unknown is never 0 here: a green exit on an unread branch would hide a gap. A repo whose plans
+Exit 0: clean. Exit 1: a part has no valid cite. Exit 2: UNKNOWN, because the record branch (or its name), the repo or the
+plans home could not be read. Unknown is never 0 here: a green exit on an unread branch would hide a gap. A repo whose plans
 home does not exist holds no plans, so it is clean.
 """
 import os
@@ -41,8 +43,7 @@ import layout  # noqa: E402  the one home of the plans kind (lint/layout.py)
 sys.path.append(os.path.join(HERE, "..", "hooks"))  # appended, so no hooks module shadows a lint one
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 
-STEPS_DIR = "roadmap/data/steps/"  # the folder of step files on the roadmap branch
-ROADMAP_REFS = ("refs/remotes/origin/roadmap", "refs/heads/roadmap")  # tried in order
+STEPS_DIR = "roadmap/data/steps/"  # the folder of step files on the record branch
 NO_RULING = "(no ruling id)"
 
 PART = re.compile(r"^( {2,})(\d+)\.(?:\s|$)")
@@ -56,7 +57,7 @@ GLOSS = re.compile(r"\s*\(\s*\S[^)]*\)")
 
 
 class Unknown(Exception):
-    """A read failed, so the roadmap branch or the plans home is not known."""
+    """A read failed, so the record branch or the plans home is not known."""
 
 
 def git(root, *args, check=True):
@@ -70,12 +71,16 @@ def git(root, *args, check=True):
 
 
 def live_steps(root):
-    """The slugs of the step files on the roadmap branch."""
-    for ref in ROADMAP_REFS:
+    """The slugs of the step files on the record branch."""
+    try:
+        branch = layout.record_branch(root)
+    except layout.LayoutError as err:  # an invalid name must not fall back to roadmap
+        raise Unknown("record branch unreadable: %s" % err) from err
+    for ref in ("refs/remotes/origin/" + branch, "refs/heads/" + branch):
         if git(root, "rev-parse", "--verify", "-q", ref + "^{commit}", check=False).returncode == 0:
             break
     else:
-        raise Unknown("no roadmap branch: neither origin/roadmap nor roadmap exists in %s" % root)
+        raise Unknown("no record branch: neither origin/%s nor %s exists in %s" % (branch, branch, root))
     out = git(root, "ls-tree", "--name-only", "-z", ref, STEPS_DIR).stdout
     return {name[len(STEPS_DIR):-len(".json")] for name in out.split("\0")
             if name.startswith(STEPS_DIR) and name.endswith(".json")}
@@ -99,19 +104,21 @@ def plan_files(root):
 
 
 def fenced_lines(lines):
-    """One flag per line: True for a fence line and each line inside a fenced block."""
-    flags, fence = [], None
-    for line in lines:
+    """(flags, unclosed): one flag per line, True for a fence line and each line inside a fenced block; and the
+    index of the opening line of a fence that never closes, else None."""
+    flags, fence, opened = [], None, None
+    for at, line in enumerate(lines):
         mark = FENCE.match(line)
         if fence is None:
             fence = mark.group(1) if mark else None
+            opened = at if fence else None
             flags.append(fence is not None)
         else:
             flags.append(True)
             if mark and mark.group(1)[0] == fence[0] and len(mark.group(1)) >= len(fence) \
                     and not line.strip().strip(fence[0]):
                 fence = None
-    return flags
+    return flags, (opened if fence else None)
 
 
 def indent_of(line):
@@ -157,9 +164,11 @@ def gaps(root):
                 lines = handle.read().replace("\r\n", "\n").split("\n")
         except OSError as err:
             raise Unknown("plan unreadable: %s: %s" % (rel, err)) from err
-        fenced = fenced_lines(lines)
+        fenced, unclosed = fenced_lines(lines)
         ruling = NO_RULING
         for at, line in enumerate(lines):
+            if at == unclosed:
+                found.append("%s:%d: unclosed code fence hides the parts below it" % (rel, at + 1))
             if fenced[at]:
                 continue
             bullet = RULING.match(line)
@@ -194,7 +203,8 @@ def main(args):
         print(line)
     if bad:
         print("check_plan_step_cites: file a roadmap step for each part above, then cite it in the part as "
-              "`step:<slug>`, outside any code block. An id such as c55 needs a gloss: `step:c55 (short gloss)`.")
+              "`step:<slug>`, outside any code block. An id such as c55 needs a gloss: `step:c55 (short gloss)`. "
+              "Close each code fence you open.")
     return 1 if bad else 0
 
 
