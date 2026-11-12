@@ -685,6 +685,11 @@ ROLE_LINES = {
     "tags-then-untagged": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1") + role_call("g2", ["cs-repo:o/r"]),
     "tags-then-coordinator": role_call("g1", ["cs-repo:o/r"]) + role_tag_call("t1") + role_call("g2", COORD_TAGS),
     "untagged-then-lane": role_call("g1", ["cs-repo:o/r"]) + role_call("g2", LANE_TAGS),
+    # orchestrator-merge-write: a lane record that a set_session_tags call on this session makes stale, one that
+    # such a call on another session leaves current, and one that a newer untagged read supersedes.
+    "lane-then-tags": role_call("g1", LANE_TAGS) + role_tag_call("t1"),
+    "lane-then-other-tags": role_call("g1", LANE_TAGS) + role_tag_call("t1", session=ROLE_OTHER),
+    "lane-then-untagged": role_call("g1", LANE_TAGS) + role_call("g2", ["cs-repo:o/r"]),
     # roadmap-one-writer reads these too: a triage record, its tag set after, a title, another session, and
     # the newest own record in either order.
     "triage": role_call("g1", TRIAGE_TAGS),

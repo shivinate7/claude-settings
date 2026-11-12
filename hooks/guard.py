@@ -48,6 +48,18 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        role-diff-unread. An unread diff of any role, builder included, is logged
                        and allowed.
                        (builders-cannot-edit-tests)
+  orchestrator-merge-write
+                       deny. A `git commit` or `git merge --continue` from a lane or coordinator session (its own
+                       newest get_session record, read from the transcript, carries `cs-build:lane` or
+                       `cs-build:coordinator` and no other `cs-build:` tag, with no set_session_tags call after it)
+                       and no agent_id, while git's own merge of HEAD and MERGE_HEAD conflicts a non-.md path. The
+                       write form, under the write tools below, is its Edit or Write of a non-.md path while MERGE_HEAD
+                       is set. The reason says to abort the merge and send the whole merge to a role agent. A call
+                       from an agent, and a merge that conflicts only Markdown, pass. An env with no session id
+                       passes silently. An unread record and a failed git read allow and log
+                       `orchestrator-merge-write-unread`. A call
+                       with no merge runs one MERGE_HEAD probe and reads no transcript. An override lifts it.
+                       (builders-cannot-edit-tests, the merge route)
   git-env-set          deny. A command that sets GIT_DIR, GIT_WORK_TREE or GIT_INDEX_FILE.
                        Reading, unsetting, or a mention in quoted text passes. (git-env-set-refused)
   shared-tree          deny or ask. A command that throws away work, judged against the state of
@@ -404,6 +416,9 @@ Other tools, in `judge` order:
                        (sim-test-is-the-one-boot-path)
   builder-test-edit, test-author-scope, record-writer-scope, designer-scope
                        deny. A role's write outside its scope. (builders-cannot-edit-tests)
+  orchestrator-merge-write
+                       deny. The write-tool form of the rule above: an Edit or Write of a non-.md path from a lane or
+                       coordinator session with no agent_id, while MERGE_HEAD is set in its checkout.
   handoff-sections     deny. A Write, Edit or MultiEdit to a session handoff (a `.md` file in
                        `<config dir>/handoffs/`) whose resulting text lacks a section that step 4 of the
                        installed `precompact_handoff_prompt.md` lists on its `handoff-sections` marker
@@ -2569,16 +2584,87 @@ def merge_route_paths(conflicts):
     return [path for path in conflicts if not (is_workflow_rel(path) or author_path_ok(path))]
 
 
-def merge_conflicts(root: str):
-    """The paths git's own merge of HEAD and MERGE_HEAD left conflicted, for the merge in progress at
-    `root`; [] when no merge is in progress; None when git failed."""
+def merge_head(root: str):
+    """MERGE_HEAD's commit id when a merge is in progress at `root`; "" when none is; None when git failed.
+    The one probe for "a merge is in progress"."""
     merging = guard_core._git(root, "rev-parse", "-q", "--verify", "MERGE_HEAD")
     if merging is None or merging.returncode not in (0, 1):
         return None
-    if merging.returncode:
-        return []
-    merged = merge_tree(root, "HEAD", merging.stdout.strip())
+    return "" if merging.returncode else merging.stdout.strip()
+
+
+def merge_conflicts(root: str):
+    """The paths git's own merge of HEAD and MERGE_HEAD left conflicted, for the merge in progress at
+    `root`; [] when no merge is in progress; None when git failed."""
+    merging = merge_head(root)
+    if not merging:
+        return None if merging is None else []
+    merged = merge_tree(root, "HEAD", merging)
     return None if merged is None else merged[1]
+
+
+# Rule orchestrator-merge-write (decision builders-cannot-edit-tests, the merge route). A session with no agent_id
+# whose own newest get_session record carries cs-build:lane or cs-build:coordinator, with no set_session_tags
+# call after it, does not write a non-.md file or commit a merge that conflicts one while a merge is in progress: the
+# whole merge goes to a role agent. A non-.md write or a commit with no agent_id and no merge pays one MERGE_HEAD probe and reads no
+# transcript. A session id the env does not give (a local session) allows with no log. An unreadable record and a git
+# failure allow, and log one `orchestrator-merge-write-unread` line. The owner's typed override lifts the refusal.
+ORCH_MERGE_REASON = (
+    "A lane or coordinator session does not resolve or finish a merge that holds a product, test or config file: "
+    "choosing each side is a build and a test choice, which the role agents own. Abort the merge, then send the "
+    "whole merge to one role agent: a test-author when any conflict is in a test file, a builder when the "
+    "conflicts are product files only, a record-writer when they are Markdown only. "
+    "(decision builders-cannot-edit-tests, the merge route)"
+)
+ORCH_MERGE_UNREAD = "orchestrator-merge-write-unread"
+
+
+def orchestrator_session(payload):
+    """True when this session's own newest get_session record carries cs-build:lane or cs-build:coordinator
+    and no other cs-build tag, with no set_session_tags call after it; False when the record or a later tag call
+    shows another tier, or when the env gives no session id (a local session, which the rule does not cover);
+    None when the record could not be read (no transcript, no record, a read error)."""
+    try:
+        import override
+        import own_session
+        own_id = override.remote_session_id()
+        if own_id is None:
+            return False
+        transcript = payload.get("transcript_path") if isinstance(payload, dict) else None
+        if not isinstance(transcript, str) or not transcript:
+            return None
+        build, tagged_after = own_session.own_build_tags(transcript, own_id)
+    except Exception:
+        return None
+    if build is None:
+        return None
+    if tagged_after:
+        return False
+    return bool(build) and all(n in (LANE_TAG, COORDINATOR_TAG) for n in build)
+
+
+def orchestrator_merge_write_hit(tool: str, payload, root: str, writes: bool) -> str:
+    """`root` when a lane or coordinator session's own call is refused by rule orchestrator-merge-write, else "".
+    `writes` is True for an Edit or Write of a non-.md path (a merge in progress is enough) and False for a commit or
+    `merge --continue` (the merge must conflict a non-.md path). An agent's call is judged by its role, not here."""
+    if not isinstance(payload, dict) or payload.get("agent_id") or payload.get("agent_type"):
+        return ""
+    if writes:
+        found = merge_head(root)  # the one probe a call with no merge pays
+    else:
+        found = merge_conflicts(root)
+    if found is None:
+        # A folder that is no git tree holds no merge: nothing to read. git that gives no answer is an unread merge.
+        if guard_core._inside_work_tree(root) is not False:
+            record(tool, "noted", ORCH_MERGE_UNREAD, root)
+        return ""
+    if not (found if writes else [p for p in found if not p.lower().endswith(".md")]):
+        return ""
+    kind = orchestrator_session(payload)
+    if kind is None:
+        record(tool, "noted", ORCH_MERGE_UNREAD, root)
+        return ""
+    return root if kind else ""
 
 
 def upstream_kept(root: str, orig: str, onto: str):
@@ -2878,7 +2964,7 @@ AGENT_NO_REMOTE_REASON = (
     "that. Finish your own work and put the request in your report so that session can act on it. "
     "(decision lanes-start-as-agents, an agent is not a lane)"
 )
-from shared_names import LANE_TAG, grant_line_holds_words  # noqa: E402  the one home of the lane tag and the Grant reader, shared with guard_merge
+from shared_names import COORDINATOR_TAG, LANE_TAG, grant_line_holds_words  # noqa: E402  the one home of the tier tags and the Grant reader, shared with lint/report_guard.py and guard_merge
 LANE_EFFORT_REASON = (
     "A lane starts with the effort field set to `%s` and the whole brief as its prompt. The prompt's "
     "first non-blank line is `Grant: <the grant>, <time>`, the owner's grant that starts this lane. Set the "
@@ -4039,9 +4125,8 @@ def lane_session_hit(payload, tool: str) -> tuple:
         if not full or not isinstance(transcript, str) or not transcript:
             return "", ""
         import own_session
-        tags, tagged_after, _parent = own_session.own_session_read(transcript, own_id)
-        names = [t.strip().casefold() for t in tags if isinstance(t, str)] if isinstance(tags, list) else []
-        if tagged_after or LANE_TAG not in names or any(n.startswith("cs-build:") and n != LANE_TAG for n in names):
+        build, tagged_after = own_session.own_build_tags(transcript, own_id)
+        if tagged_after or not build or any(n != LANE_TAG for n in build):
             return "", ""
     except Exception:
         return "", ""
@@ -4252,6 +4337,16 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
             for subcommand, _ in git_calls(segment):
                 if subcommand in ("commit", "push"):
                     diff_refusal(tool, role, command_root(stripped, cwd))
+
+    # 0b2. A lane or coordinator session's own `git commit` or `git merge --continue` of a merge that conflicts a non-.md
+    # path (rule orchestrator-merge-write). A call from an agent is judged by its role above. An override lifts it.
+    if not role and not agent:
+        for segment in split_segments(stripped):
+            for subcommand, args in git_calls(segment):
+                if subcommand == "commit" or (subcommand == "merge" and "--continue" in args):
+                    matched = orchestrator_merge_write_hit(tool, payload, command_root(stripped, cwd), False)
+                    if matched:
+                        refuse(tool, "deny", "orchestrator-merge-write", ORCH_MERGE_REASON, matched)
 
     # 0c. A command that sets a git location variable (q_max incident, 2026-10-14). Placed before
     # rule 1 on purpose: the deny wins where the shared-tree guard would only ask (arbiter ruling).
@@ -6354,6 +6449,9 @@ def judge(payload) -> None:
     # runs over all fields, then the 7b notes, then the 8 asks (docs/decisions/builders-cannot-edit-tests.md,
     # "Judge the result").
     targets = write_targets(tool_input)
+    merge_write = ""
+    if any(not t.lower().endswith(".md") for t in targets):
+        merge_write = orchestrator_merge_write_hit(tool, payload, cwd, True)
     for target in targets:
         # 0b. The early warning for a builder, test-author, record-writer or designer write (see BUILDER_ROLE). A read is allowed.
         role = agent_role(payload)
@@ -6365,6 +6463,11 @@ def judge(payload) -> None:
                              DESIGNER_ROLE: ("designer-scope", DESIGNER_SCOPE_REASON)}.get(
                     role, ("builder-test-edit", BUILDER_TEST_REASON))
                 refuse(tool, "deny", code, why, matched)
+
+        # 0b2. A lane or coordinator session's own write of a non-.md file while a merge is in progress (rule
+        # orchestrator-merge-write). An override lifts it.
+        if merge_write and not target.lower().endswith(".md"):
+            refuse(tool, "deny", "orchestrator-merge-write", ORCH_MERGE_REASON, merge_write)
 
         # 5. The environment file. Every writing tool is refused. A read is not judged here: no hook
         # runs for Read, so settings.json denies Read and Edit of `.env*` at any depth, with `!`

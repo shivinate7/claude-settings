@@ -3370,6 +3370,32 @@ MUTATIONS = [
      '    return clause\n\n\ndef _claim_clause',
      '    return None\n\n\ndef _claim_clause',
      "guard", 'brief-claim: test-author brief where main refuses all three today'),
+    # Added: the orchestrator's merge write (rule orchestrator-merge-write, section 5j of test_guard.py). Each one
+    # removes one check of the rule, so a later edit that drops that check goes red here.
+    ("orchestrator-merge-write: the agent test is gone, so an agent's own Edit is judged by this rule",
+     '    if not isinstance(payload, dict) or payload.get("agent_id") or payload.get("agent_type"):',
+     '    if not isinstance(payload, dict):',
+     "guard", "orchestrator-merge-write: a builder's Edit of a product file its merge conflicts is allowed"),
+    ("orchestrator-merge-write: a checkout with no merge reads as merging, so the MERGE_HEAD probe is void",
+     '        found = merge_head(root)  # the one probe a call with no merge pays',
+     '        found = merge_head(root) or "0"  # the one probe a call with no merge pays',
+     "guard", "orchestrator-merge-write: a lane's Edit of a product file in a checkout with no merge is allowed"),
+    ("orchestrator-merge-write: any cs-build tier counts, not only lane or coordinator",
+     '    return bool(build) and all(n in (LANE_TAG, COORDINATOR_TAG) for n in build)',
+     '    return bool(build)',
+     "guard", "orchestrator-merge-write: a triage session's Edit is allowed in a merge"),
+    ("orchestrator-merge-write: the .md exemption is gone, so a doc Edit in a merge is refused",
+     '        if merge_write and not target.lower().endswith(".md"):',
+     '        if (merge_write := merge_write or orchestrator_merge_write_hit(tool, payload, cwd, True)):',
+     "guard", "orchestrator-merge-write: a lane's Edit of a doc its merge conflicts is allowed"),
+    ("orchestrator-merge-write: a commit needs no conflicted path, so a conflicted commit is allowed",
+     '    if not (found if writes else [p for p in found if not p.lower().endswith(".md")]):',
+     '    if not (found if writes else []):',
+     "guard", "orchestrator-merge-write: a lane's git commit of a merge that conflicts a product file is refused"),
+    ("orchestrator-merge-write: a doc conflict counts for a commit, so a doc-only commit is refused",
+     '    if not (found if writes else [p for p in found if not p.lower().endswith(".md")]):',
+     '    if not (found if writes else found):',
+     "guard", "orchestrator-merge-write: a lane's git commit of a merge that conflicts only a doc is allowed"),
 ]
 
 

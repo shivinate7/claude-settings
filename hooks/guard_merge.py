@@ -1288,7 +1288,7 @@ def _own_tier_proved(transcript: str, tier: str) -> bool:
         from override import remote_session_id
         own_id = remote_session_id()
         if own_id and transcript:
-            tags, tagged_after = _own_session_read(transcript, own_id)
+            tags, tagged_after = own_session.own_build_tags(transcript, own_id, fold=False)
             return tags is not None and not tagged_after and ROLE_TAG_PREFIX + tier in tags
     except Exception:
         pass

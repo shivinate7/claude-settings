@@ -88,10 +88,11 @@ TEMPLATE_DIR = "skills/waiting-page"
 REPO_TAG = "cs-repo:"
 STEP_TAG = "cs-step:"
 # A topic lane carries TOPIC_TAG; a tier session (batch-runner, triage) carries BUILD_TAG plus its tier; a lane
-# session carries LANE_TAG.
+# session carries LANE_TAG; a coordinator session carries COORDINATOR_TAG.
 TOPIC_TAG = "cs-topic:"
 BUILD_TAG = "cs-build:"
 LANE_TAG = BUILD_TAG + "lane"
+COORDINATOR_TAG = BUILD_TAG + "coordinator"
 # A lane start prompt opens with `Grant: <owner words>, <time>`; the guard reads the line by this marker (rules
 # lane-effort-pin and lane-one-topic).
 LANE_GRANT_MARKER = "Grant:"
