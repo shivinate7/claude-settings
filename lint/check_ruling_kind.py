@@ -116,6 +116,12 @@ def field(lines, name):
     return [m.group(1).strip() for m in (re.match(name + r":(.*)$", x) for x in lines) if m]
 
 
+def footer(lines):
+    """The lines after the Kind line. A body paragraph that starts "Home:" sits above it and is
+    prose, not the record's Home field."""
+    return lines[next(n for n, x in enumerate(lines) if x.startswith("Kind:")) + 1:]
+
+
 def problems(rel):
     text = read(rel)
     if text is None:
@@ -131,7 +137,7 @@ def problems(rel):
             return ["Kind: build needs a Plan line: Plan: <path>#<slug> (<platform>)"]
         return [p for p in map(plan_problem, plans) if p]
     if kind == "process":
-        homes = field(lines, "Home")
+        homes = field(footer(lines), "Home")
         if not homes:
             return ["Kind: process needs a Home line: Home: rule:<id> or Home: <path>"]
         ids = rule_ids()
