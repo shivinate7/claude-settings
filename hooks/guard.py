@@ -3540,7 +3540,7 @@ def brief_destructive_hit(tool: str, tool_input) -> str:
 def step_up_hit(tool: str, tool_input) -> str:
     """The step-up reason for a spawn whose marker and model disagree, or "". Only a line
     that starts with the marker, or the brief's first line, counts. A missing model runs the env default, which is Sonnet for a builder; a reviewer's
-    frontmatter model is haiku, so a reviewer on a later-round brief must name sonnet. A later-round reviewer that names Opus
+    frontmatter model is haiku, so a reviewer on a later-round or fix-check brief must name sonnet. A reviewer on either that names Opus
     passes here and is refused by the Opus ceiling (opus_spawn_hit), so the remedy names Sonnet only (decision agent-model-cap)."""
     if tool in SPAWN_TOOLS and isinstance(tool_input.get("prompt"), str):
         return step_up_reason(tool_input["prompt"], tool_input.get("subagent_type"), tool_input.get("model"))
@@ -3567,6 +3567,8 @@ def step_up_reason(prompt: str, role, model) -> str:
             return "Reviewer round 2 runs on Sonnet. Spawn it with model sonnet."
         if role == "reviewer" and kind == "round" and n == "3" and "sonnet" not in model and "opus" not in model:
             return "Reviewer round 3 runs on Sonnet. Spawn it with model sonnet."
+    if role == "reviewer" and ("fixcheck", None) in marker_hits(prompt) and (not model or "haiku" in model):
+        return "Reviewer fix check runs on Sonnet. Spawn it with model sonnet."
     if role == "builder" and builder_third_round(prompt) and "opus" not in model:
         return "Builder round 3 runs on Opus. Spawn it with model opus."
     return ""
