@@ -332,10 +332,10 @@ def log_marks(paths, base=None):
     return marks
 
 
-def _run(args):
+def _run(args, timeout=TOOL_TIMEOUT):
     try:
         return _nowindow.run(args, capture_output=True, text=True, errors="replace",
-                              timeout=TOOL_TIMEOUT).stdout
+                              timeout=timeout).stdout
     except Exception as exc:
         return "(%s did not answer: %s)\n" % (args[0], type(exc).__name__)
 
@@ -361,10 +361,10 @@ def cpu_seconds(text):
 PS_DOWN = "(ps did not answer"
 
 
-def proc_table():
+def proc_table(timeout=TOOL_TIMEOUT):
     """(rows, kids, note) from one ps call: rows is {pid: [pid, ppid, stat, time]}, kids {ppid: [pid]}.
     note is the text of a ps that gave no answer, else ''."""
-    out = _run(["ps", "-axo", "pid=,ppid=,stat=,time="])
+    out = _run(["ps", "-axo", "pid=,ppid=,stat=,time="], timeout)
     if out.startswith(PS_DOWN):
         return {}, {}, out.strip()
     rows, kids = {}, {}
@@ -378,7 +378,9 @@ def proc_table():
 
 def tree_cpu(table, pid):
     """{pid: CPU seconds} for every process under pid in a proc_table. pid's own time is left out: a
-    builtin loop in the job shell, with no child, is no sign of work."""
+    builtin loop in the job shell, with no child, is no sign of work. At Stop the roots are the job's
+    subshell under a hook-wrapped job (its own time is left out too), so a builtin spin there is not seen
+    as busy and the job is listed; the watcher reports it."""
     rows, kids, _ = table
     cpu, stack = {}, list(kids.get(str(pid), []))
     while stack:
@@ -409,18 +411,27 @@ def job_state(pid):
 
 
 CPU_SAMPLE = 1.5  # seconds between the two ps reads at Stop: whole-second CPU time must tick in between
+BUSY_BUDGET = 6.0  # seconds for the whole busy check at Stop; the Stop hook is killed at 10 s (settings.json)
 
 
 def busy_outputs(paths):
     """The output files in paths whose job has CPU time advancing in a process under it, the Stop-side
     form of the watcher's CPU-time-as-life rule. posix with lsof only: else none. A job's processes are
     found by the output file they hold as stdout or stderr (the job has no pid at Stop); the files are
-    the ones about to be listed. Two ps reads CPU_SAMPLE apart, and only when some process holds a file."""
+    the ones about to be listed. Two ps reads CPU_SAMPLE apart, and only when some process holds a file.
+    One deadline, BUSY_BUDGET, bounds lsof, both ps reads and the wait: each call's timeout is the time
+    left, and a check that runs out of time returns none, so every job is listed as before."""
     if os.name != "posix" or not paths or not shutil.which("lsof"):
         return set()
+    deadline = time.monotonic() + BUSY_BUDGET
+
+    def left():
+        return min(TOOL_TIMEOUT, deadline - time.monotonic())
     names = {os.path.realpath(p): p for p in paths}
     holders, pid, fd = {}, None, None
-    for line in _run(["lsof", "-nP", "-F", "pfn", "--"] + list(names)).splitlines():
+    if left() <= 0:
+        return set()
+    for line in _run(["lsof", "-nP", "-F", "pfn", "--"] + list(names), left()).splitlines():
         if line.startswith("p"):
             pid, fd = line[1:], None
         elif line.startswith("f"):
@@ -429,9 +440,15 @@ def busy_outputs(paths):
             holders.setdefault(line[1:], set()).add(pid)
     if not holders:
         return set()
-    before = proc_table()
+    if left() <= CPU_SAMPLE:  # no time for a sample and a second read
+        return set()
+    before = proc_table(left())
+    if left() <= CPU_SAMPLE:
+        return set()
     time.sleep(CPU_SAMPLE)
-    after = proc_table()
+    if left() <= 0:
+        return set()
+    after = proc_table(left())
     if before[2] or after[2]:
         return set()
     busy = set()

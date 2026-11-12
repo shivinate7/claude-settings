@@ -129,9 +129,16 @@ watcher's rule (posix with lsof only; `busy_outputs`). The job has no pid at Sto
 those that hold its output file as stdout or stderr. Two `ps` reads 1.5 s apart tell whether CPU time advanced.
 Stop-side unresolved-log rule: a listed job whose named log has an unknown directory says that log is
 not watched, as the watcher's report does. The job is still listed when quiet. Limit: a spinning child is
-never reported (the watcher counts CPU as life); a builtin spin in the job's shell is. Cost: no process
+never reported (the watcher counts CPU as life). A builtin spin in the job's shell is reported by the
+watcher only: in a hook-wrapped job `tree_cpu` counts the job subshell, so Stop does not list it. Limit: a job
+dropped as busy at its crossing Stop has used up its one listing, so a job busy and then hung is never listed by
+Stop (the watcher still catches a hook-wrapped one). Limit (partial fix): one 1.5 s sample at whole-second `ps` resolution
+reliably spares only CPU-bound jobs; a job at about 25% CPU can still be listed as quiet. Time bound: one
+deadline of 6 s (`BUSY_BUDGET`) covers `lsof`, both `ps` reads and the wait. Each call's timeout is the time left.
+Past the deadline the check returns none, and every job is listed as before. The Stop hook is killed at 10 s, so the check
+stays well under it. Cost: no process
 that lives on, no file, no timer. A quiet shell job whose output file a process holds costs one `lsof`,
-two `ps` reads and a 1.5 s wait at that Stop (the `ps` reads only when a process holds the file); none for a Stop that lists no shell job.
+two `ps` reads and a 1.5 s wait at that Stop. The `ps` reads run only when a process holds the file. A Stop that lists no shell job costs none.
 
 Cost: one more JSON parse per `stop_hook_summary` line (one a Stop run), in the one pass that `scan_jobs`
 already makes, at each Stop (unmeasured).
