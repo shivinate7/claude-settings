@@ -9,7 +9,9 @@ Next step: the Mac round trip (the owner's check card). A Windows round trip pas
 7292c549f4ee, both taken, 11:52 CST Nov 12; record: branch roadmap, commit b21c5d3dc). Cloud works for the owner's account; ssemwal-cdc is unmeasured.
 `MAILBOX_REPO` has a settings.json `env` default, set by the owner's ruling (page item 556 a, 2026-11-12 12:04 CST), not by
 measurement. A session with an address reads mail at turn start. A failed read prints "mail unknown: <reason>". A session
-with no address, or a store with no mail ref, prints nothing. The 20-message trial (step 5) is still open.
+with no address, or a store with no mail ref, prints nothing. A Mac prints nothing at turn start until its round trip passes
+(coordinator pick 12:33 CST Nov 12, per page item 556 a: `HELD_PLATFORMS` in `hooks/mail.py`); the `mail` command still runs there.
+The 20-message trial (step 5) is still open.
 
 ## Ruling
 

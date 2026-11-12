@@ -1073,6 +1073,29 @@ class SshBatchDefault(MailCase):
                          % command)
 
 
+class MacHold(MailCase):
+    """Step session-mailbox-followups: the Mac keeps the settings.json default but prints no turn-start mail line until its
+    own round-trip check passes. The `mail` command itself is not held, so the owner's check card still runs."""
+
+    def seeded_reader(self):
+        store = self.store()
+        mid = "0a1b2c3d4eaa"
+        store.seed("cloud/sess-b", mid, "request", "cloud/sess-a", "Body marker: mac-hold\n")
+        return mid, self.machine("b", store, session="sess-b")
+
+    def test_linux_turn_start_lists_the_message(self):
+        mid, reader = self.seeded_reader()
+        with mock.patch.object(MAIL_MODULE.sys, "platform", "linux"):
+            lines = turn(reader)
+        self.assertEqual(len(listed_with(lines, mid)), 1, "control: a Linux turn does not list the message: %r" % lines)
+
+    def test_mac_turn_start_prints_nothing_for_an_open_message(self):
+        mid, reader = self.seeded_reader()
+        with mock.patch.object(MAIL_MODULE.sys, "platform", "darwin"):
+            lines = turn(reader)
+        self.assertEqual(lines, [], "a Mac turn start read the mailbox before its check passed: %r" % lines)
+
+
 class AgeUnknown(MailCase):
     def healthy_line(self, store, mid):
         """The turn-start line of a machine whose git log works, so each failing case has a line to compare."""
