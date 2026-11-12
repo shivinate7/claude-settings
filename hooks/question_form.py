@@ -967,7 +967,7 @@ def form_str_replace_hit(entry):
     return PASS
 
 
-def item_hit(op, entry, cwd="", session_id=None):
+def item_hit(op, entry, cwd="", session_id=None, root=None):
     """(rule, matched) for one write of a waiting item that a rule refuses, else ("", ""). `session_id` is the
     writer's, for the cross-repo check."""
     data = _write_data(entry, cwd)
@@ -1001,7 +1001,7 @@ def item_hit(op, entry, cwd="", session_id=None):
     hit = port_item_hit(op, data)
     if hit:
         return "port-question", hit
-    page_repo = _page_repo(cwd)
+    page_repo = _layout().repo_name(root) if root else _page_repo(cwd)  # the page's own checkout, whatever the cwd
     hit = cross_repo_hit(op, data, page_repo, session_id) if page_repo else None
     if hit:
         return CROSS_REPO_RULE, hit
@@ -1062,10 +1062,28 @@ def _layout():
 
 def waiting_page_root(tool_input, cwd):
     """The git root of cwd's repo when the call's url is that repo's waiting page (lint/layout.py, the one
-    home), else None. A repo with no page reads as unknown; only the none-key check judges its calls."""
+    home), else the pointer checkout's, else the hooks' own checkout's, when the url is that page, else None. A
+    url that is none of these pages reads as unknown; only the none-key check judges its calls."""
     layout = _layout()
     root = _git_root_of(cwd)
-    return root if root and layout.is_waiting_page_url(root, tool_input.get("url")) else None
+    if root and layout.is_waiting_page_url(root, tool_input.get("url")):
+        return root
+    # The one page writer (triage) writes from a worktree or a home folder whose repo holds no page key. The hooks'
+    # own checkout is the page's home too, so its page is judged whatever the cwd.
+    # The installed hooks are a copy with no git folder beside them, so the pointer checkout is read first.
+    for home in (_pointer_checkout(), _git_root_of(os.path.join(HERE, ".."))):
+        if home and layout.is_waiting_page_url(home, tool_input.get("url")):
+            return home
+    return None
+
+
+def _pointer_checkout():
+    """The checkout the global rules file points at, else "" (hooks/guard_pointer.py, the one home)."""
+    try:
+        import guard_pointer
+        return guard_pointer.pointer_checkout()
+    except Exception:
+        return ""
 
 
 def design_file_problems(writes, root):
@@ -1103,12 +1121,13 @@ def page_item_hit(tool_input, cwd="", session_id=None):
     writes = [(op, e) for op, e in entries if op in ITEM_OPS and e.get("collection") == WAITING_ITEMS]
     if not writes:  # a read or another collection loads nothing more
         return PASS, []
-    if not is_waiting_page(tool_input, cwd):
+    page_root = waiting_page_root(tool_input, cwd)
+    if page_root is None:
         # The cwd's page is unknown, or the url is another's: only the option-key check still reads the
         # write, and refuses only a key none. No writes return, so no other check or model review follows.
         return keyed_options_hit(writes, cwd), []
     for op, entry in writes:
-        hit = item_hit(op, entry, cwd, session_id)
+        hit = item_hit(op, entry, cwd, session_id, page_root)
         if hit[0]:
             return hit, writes
     return PASS, writes

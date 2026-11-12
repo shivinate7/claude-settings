@@ -2002,6 +2002,78 @@ def case_item_stray_field_refused_from_a_record_branch_checkout():
     verdict("control: the same stray field at the page's own checkout is refused", control[0], ("item-field-rendered", "focus"))
 
 
+def case_item_stray_field_refused_from_a_cwd_with_no_page():
+    """Triage writes the page from a worktree or home folder whose repo holds no page key. The checks must still run:
+    the page is the claude-settings checkout's (the one the hooks load from), so a stray top-level field is refused
+    there too, as at the page's own checkout. Control: the same write to another url keeps only the none-key check."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint"))
+    import layout
+    checkout = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+    url = layout.waiting_page(checkout)
+    check("scope: the hooks' own checkout names a waiting page", url != "unknown", "no page key to read")
+    if url == "unknown":
+        return
+    bare = tcj.make_repo("no-page-cwd", page=None)
+    tool_input = {"action": "set", "url": url, "collection": tcj.PAGE_ITEMS, "doc_id": DOC, "data": page_item(focus="#fill")}
+    got = call("page_item_hit", tool_input, bare)
+    verdict("page_item_hit from a cwd with no page key: a stray field is refused", got[0], ("item-field-rendered", "focus"))
+    other = dict(tool_input, url="https://claude.ai/artifact/someotherpage")
+    control = call("page_item_hit", other, bare)
+    check("control: another page's url from the same cwd is not judged by the item checks", control[0] == ("", ""),
+          "got %r" % (control[0],))
+
+
+def case_cross_repo_page_repo_is_the_pages_checkout_from_any_cwd():
+    """The page's repo comes from the checkout that holds the page, not from the cwd. Judged from a cwd with no page
+    key, a foreign repo with no checked_with is refused, a cwd with another origin does not change that, and the
+    page's own repo passes. Scope: the hooks' own checkout needs a page and a GitHub origin."""
+    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+    sys.path.insert(0, os.path.join(here, "lint"))
+    import layout
+    url, own = layout.waiting_page(here), layout.repo_name(here)
+    check("scope: the hooks' checkout has a page and a GitHub origin", url != "unknown" and bool(own), "page %r origin %r" % (url, own))
+    if url == "unknown" or not own:
+        return
+    bare = tcj.make_repo("no-page-cwd", page=None)
+    other = tcj.make_repo("other-origin-cwd", page=None)
+    tcj.git(other, "remote", "add", "origin", "https://github.com/shivinate7/other-repo")
+    for label, cwd in (("a cwd with no origin", bare), ("a cwd with another origin", other)):
+        foreign = call("page_item_hit", dict(ma144_write(), url=url, action="set"), cwd)
+        check("foreign repo, no checked_with, from " + label + ": refused by the cross-repo rule",
+              foreign[0][0] == CROSS_REPO_RULE, "got %r" % (foreign[0],))
+        mine = call("page_item_hit", dict(ma144_write(repo=own), url=url, action="set"), cwd)
+        check("the page's own repo from " + label + ": passes", mine[0] == ("", ""), "got %r" % (mine[0],))
+
+
+def case_page_root_found_through_the_pointer_from_gitless_hooks():
+    """Installed hooks are a copy with no folder of version history beside them, so the hooks' own checkout reads as
+    none. The pointer checkout must still name the page. The pointer and the hooks' folder are patched: the pointer to
+    this checkout, the hooks' folder to a folder with no checkout above it. Without the pointer path a stray field passes."""
+    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+    sys.path.insert(0, os.path.join(here, "lint"))
+    import layout
+    url = layout.waiting_page(here)
+    check("scope: the hooks' checkout names a waiting page", url != "unknown", "no page key to read")
+    if url == "unknown":
+        return
+    gitless = os.path.join(tcj.ROOT, "gitless-hooks", "hooks")
+    os.makedirs(gitless, exist_ok=True)
+    tool_input = {"action": "set", "url": url, "collection": tcj.PAGE_ITEMS, "doc_id": DOC, "data": page_item(focus="#fill")}
+    bare = tcj.make_repo("no-page-cwd", page=None)
+    old_here, old_pointer = question_form.HERE, question_form._pointer_checkout
+    try:
+        question_form.HERE = gitless
+        question_form._pointer_checkout = lambda: os.path.realpath(here)
+        got = call("page_item_hit", tool_input, bare)
+        verdict("gitless hooks, the pointer names the page: a stray field is refused", got[0], ("item-field-rendered", "focus"))
+        question_form._pointer_checkout = lambda: ""
+        control = call("page_item_hit", tool_input, bare)
+        check("control: gitless hooks and no pointer: the page is unknown, the write is not judged",
+              control[0] == ("", ""), "got %r" % (control[0],))
+    finally:
+        question_form.HERE, question_form._pointer_checkout = old_here, old_pointer
+
+
 # ------------------------------------------------------------------ a decision on another repo is checked with that repo
 #
 # Rule question-checked-with-repo (CROSS_REPO_RULE). An open decision or task set that names a `repo` other than the
@@ -2535,7 +2607,9 @@ def main():
                  case_cross_repo_writer_guard_path, case_cross_repo_writer_page_item_hit,
                  case_cross_repo_writer_call_judge, case_cross_repo_update_checked_with_needs_repo,
                  case_judged_relative_file_path_read_at_cwd, case_judged_absolute_and_empty_are_unchanged,
-                 case_judged_mixed_writes_all_returned):
+                 case_judged_mixed_writes_all_returned, case_item_stray_field_refused_from_a_cwd_with_no_page,
+                 case_cross_repo_page_repo_is_the_pages_checkout_from_any_cwd,
+                 case_page_root_found_through_the_pointer_from_gitless_hooks):
         try:
             case()
         except Exception as exc:
