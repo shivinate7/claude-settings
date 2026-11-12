@@ -3171,8 +3171,8 @@ READY_CHECKS_CITE = "(decision lanes-run-no-full-ci-job, the ready checks: a dra
 def run_ready_checks(wt, n, base, checks, remedy="Fix it on the branch, push, and run --confirm again."):
     """The ready checks of the draft step: run the repo's `merge.readyChecks` through ci-job in the tree `wt`, which holds what the step
     would push. One ci-job run. Returns on a pass; a FAIL or an unknown raises Stop, and no flag lifts it. `checks` is a non-empty list.
-    `remedy` is the route the refusal names: the draft step's by default, the batch's own for `--batch-build --ready`.
-    A FAIL is a LintFail, so `--batch-build --ready` can blame the lanes it names; an unknown is a plain Stop."""
+    `remedy` is the route the refusal names: the draft step's by default.
+    A FAIL is a LintFail, with the step lines and the log; an unknown is a plain Stop."""
     args = ["checks", "--pinned", *[a for name in checks for a in ("--step", name)], "--base", f"origin/{base}"]
     state, lines, log, _ = ci_job_run(wt, *args)
     short = git(wt, "rev-parse", "--short=9", "HEAD")[1]
