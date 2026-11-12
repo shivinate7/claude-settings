@@ -1,9 +1,9 @@
 # Carry source words are too few
 
-**What.** `SOURCE_RE` accepts only the words git, page and digest as the source of a Recovered item. The guard refuses an item that names its source another way, such as "commit abc1234", "GitHub PR" or a github.com URL. Claude is likely to write those forms. Each one costs one refusal per compaction.
+**What.** No check reads a source word now. `SOURCE_RE` is removed with the Recovered guard (decision cull-guard-wrong-refusals, the guard cull). This debt has no code left to fix.
 
-**Where.** `lint/report_guard.py`: `SOURCE_RE`, used by `unsourced_recovered_item`.
+**Where.** None. `lint/report_guard.py` has no `SOURCE_RE` and no `unsourced_recovered_item` after the guard cull.
 
-**Decision.** precompact-handoff (checkpoints keep the handoff current). Its item 'Recovered line after compaction' names git, page and digest as the only sources.
+**Decision.** precompact-handoff (checkpoints keep the handoff current). Its item 'Recovered line after compaction' is removed with the guard (decision cull-guard-wrong-refusals).
 
-**Retire.** Closed when a case in `lint/test_report_guard.py` passes a Recovered item that names a commit, a GitHub PR or a github.com URL. A second case still refuses an item with no source.
+**Retire.** Closed by the guard cull. `lint/test_report_guard_cull.py` shows that a Recovered item with no source passes.

@@ -20,3 +20,4 @@ Tasks a session caught and did not do. One line each.
 - The lane-undo check reads two shapes of undo (owner, 2026-11-02 14:19 CST; it grants the 11:26 CST narrowing).
 - Build the child-repo lanes from the term recheck and the merge-line pointers. A coordinator may run them in any child repo with no per-repo grant. An exception a child wants needs the owner's grant (owner, 2026-11-02 15:43 CST).
 - Let a solo session merge. The merge tool's cloud confirm needs the batch-runner role today (owner, 2026-11-02 14:02 CST).
+- Step idea scratch-owner-bash-writes: a Bash write into another agent's scratchpad folder passes the scratchpad-owner guard. Found in the guard cull (decision cull-guard-wrong-refusals). Not yet a roadmap step.
