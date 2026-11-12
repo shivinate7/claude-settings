@@ -72,12 +72,14 @@ GitHub, so the publisher reads them just before the build and passes one file:
 
     python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --live live.json --block --out FILE
 
-    {"readAt": "<ISO time of the reads>",
-     "threads"?: [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
-     "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "head"?, "url"?, "checks"?}],
-     "branches": [{"name", "updatedAt"?}],
-     "sessions": [{"id", "session_status", "tags", "status_bucket"?}],
-     "items": [{"n", "status", "home", "lane"?}]}
+```
+{"readAt": "<ISO time of the reads>",
+ "threads"?: [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
+ "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "head"?, "url"?, "checks"?}],
+ "branches": [{"name", "updatedAt"?}],
+ "sessions": [{"id", "session_status", "tags", "status_bucket"?, "updated_at"?}],
+ "items": [{"n", "status", "home", "lane"?}]}
+```
 
 - `threads`: `list_threads`, every page. Leave out resolved threads. `state` is the thread state as
   listed. Add `step` only when the thread's brief names it.
@@ -88,9 +90,12 @@ GitHub, so the publisher reads them just before the build and passes one file:
 - `landedPulls` (optional, beside the keys above): `[{"number", "branch", "head"?, "merged"?}]`, the repo's pull
   requests closed in the last 14 days whose base is the default branch, each with its head ref (`branch`), head sha
   (`head`) and GitHub's `merged` flag. Triage's live-file brief must fill it; see "A merge marks a step".
-- `sessions`: `list_sessions`, every page, each row copied as it comes with only these fields.
+- `sessions`: `list_sessions`, every page, each row copied as it comes with only these fields: `id`, `session_status`,
+  `tags`, `status_bucket` and `updated_at` (the timestamp list_sessions gives for the session's last activity; ISO time
+  with a zone). The flagged sessions row reads `updated_at`. A working row with no zoned `updated_at` makes the flagged
+  sessions row unknown. A producer that cannot send it must say so.
   `status_bucket` is the bucket list_sessions returns (`SESSION_STATUS_BUCKET_WORKING`, `_BLOCKED`, `_REVIEW_READY`, `_COMPLETED`, `_FAILED`);
-  it is optional, and a row without it reads as not completed. The upkeep list reads the rows for steps
+  it is optional, and a row without it reads as not completed. `updated_at` is optional for a row that is not working. The upkeep list reads the rows for steps
   in progress and for lanes to archive. A live file with no `sessions` list still renders
   Live work.
 - `items`: `ArtifactData list items` of the repo's waiting page, every page, each row copied with only
@@ -301,6 +306,13 @@ After each build the roadmap build script prints the upkeep list for the triage 
 
   `merge --idle-lanes --live FILE` prints the same list for the batch runner: lane lines and hold lines, then
   a summary line that gives the held count when there are holds. It exits 1, with no summary line, when every entry is unknown;
+- `flagged sessions` (plan R54, step coordinator-session-board): each non-archived session of this repo with a
+  `cs-build:` tag other than `cs-build:coordinator` that needs an act. Its `status_bucket` sets the flag: blocked reads
+  `waiting for action`, completed or review ready read `done`, failed reads `failed`, and working reads `silent` when
+  its `updated_at` is more than 60 minutes old (`SILENT_MINUTES`). A recent working session is not listed. Each entry
+  reads `<session id> (<flag>; <cs-step ids or ->; PR #N or no PR)`, the PR being the lowest open pull on a step's head
+  ref. The row is one `unknown (<why>)` entry when the live read is unknown, no candidate row has a bucket name, or a
+  working row has no `updated_at` with a time zone. Cost: reads the same live file, adds no process, file or timer;
 - `Step:` trailers that name no step;
 - `open step waits on a closed unmerged PR`: an open step whose title, why or note waits on PR #N. A wait is a phrase in `WAIT_ON_PULL_PHRASES` in `build.py`. The word `PR` may sit before `#N`. A `#N` followed by `closed` or `merged` is history, not a wait. The row lists the step when `landedPulls` has a row for #N with `merged` false. It skips #N when `landedPulls` has a `merged` true row for #N, or when #N is an open pull. It also skips #N when the head of its `merged` false row is on main (`head_on_main`, as for the landed rows). A PR closed before the 14-day `landedPulls` window is not seen. Each entry is `<step id> (#N)`. The row reads `unknown (the live file has no landedPulls list)` when the live file has no `landedPulls` key. A live read that is unknown, such as no `--live` file, makes the row unknown too. An empty `landedPulls` list reads none. The fix is to name the step slug it waits on in the step's `blockedBy` list (owner, 2026-11-10 13:10 CST);
 - `done without check`: a `done` step updated on or after the cutoff (`DONE_CHECK_SINCE`, in the build script) that names no Done check. It is also listed when its note, why and ask hold no `Done check green on main:` (any case) with a `#N`, `PR N`, URL or commit hash right after it. Triage's close writes that line, such as `Done check green on main: #1312.` The instruction is in the Triage bullet of the operating model (skill `project-ops`). A `done` step updated before the cutoff is not judged, because the Done check line had not shipped then.
@@ -310,7 +322,8 @@ After each build the roadmap build script prints the upkeep list for the triage 
 About six git processes, plus up to four when a step cites a mockup, and one file written per build. With `--live`, the publisher's reads add
 one `list_threads` walk and one or two GitHub list calls, and one file it writes and the roadmap build script
 reads. The stale-step row adds one more `list_sessions` walk inside that publish, and three more
-fields per session in the file. The page-ruling row adds one `ArtifactData list items` read (every
+fields (id, session_status, tags) per session in the file. The flagged sessions row adds `updated_at` per session to that file and
+no other read. The page-ruling row adds one `ArtifactData list items` read (every
 page) to the same publish. The roadmap build script adds no git process, file, timer or log for either row. The
 dated-claim row reads the notes already loaded and adds nothing.
 The red line, the stalled lines, the ready lines and the two stale-ready rows read the live file and steps build.py

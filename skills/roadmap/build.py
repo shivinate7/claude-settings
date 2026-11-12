@@ -110,7 +110,8 @@ SCANNED, and writes no page.
 Cost per build: about six git processes, one read of each scanned file, one page written. No
 watcher, no timer, no log. The stale-step row adds no git process, file, timer or log to the build. It
 adds to triage's publish, already running: one more list_sessions walk (every page) and three more
-fields (id, session_status, tags) per session in the live file it already writes. The page-ruling row adds
+fields (id, session_status, tags) per session in the live file it already writes. The flagged-sessions row adds
+one more per session (updated_at) and no other read. The page-ruling row adds
 one read of the waiting page's items (n, status, home) to that same publish. This script adds no git
 process, file, timer or log for it. The dated-claim row adds no git process, file, timer or log: it reads
 the notes already loaded.
@@ -184,6 +185,9 @@ ITEM_DONE_STATUSES = ("closed",)
 ITEMS_MISSING_WHY = "unknown (the live file has no items list)"
 THREADS_MISSING_WHY = "unknown (the live file has no threads list)"
 IDLE_LANES_LINE = "lanes to archive"
+SESSION_BOARD_LINE = "flagged sessions"
+# A working session whose updated_at is older than this is silent (plan R54, step coordinator-session-board).
+SILENT_MINUTES = 60
 # A readAt this far past the build time is clock skew; further than that is a bad stamp.
 FUTURE_MINUTES = 5
 # `ready` reads as todo.
@@ -654,7 +658,7 @@ def live_work(path, steps, slug=None):
 
     Shape: {"readAt": ISO, "threads"?: [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
     "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "url"?, "checks"?}], "branches"?: [{"name", "updatedAt"?}],
-    "sessions"?: [{"id", "session_status", "tags"?}]} (triage copies the list_sessions rows, every page;
+    "sessions"?: [{"id", "session_status", "tags"?, "status_bucket"?, "updated_at"?}]} (triage copies the list_sessions rows, every page;
     list_sessions omits the tags key on a tagless session, so a missing or null tags reads as no tags).
     A file with no pulls list reads unknown, so a dropped key never shows as "none". A file with no threads list stays
     valid: `threads` is None and `threadsWhy` says why, so only the thread count reads unknown (never zero) and `strays`
@@ -671,8 +675,9 @@ def live_work(path, steps, slug=None):
     reads the answer; a row keeps each only when the file has the key.
     `laneTags` holds the cs-topic: and cs-build: tags of the live sessions, for lane_live.
     Two more optional keys feed the lanes-to-archive row (idle_lanes): a sessions row's `status_bucket` (list_sessions'
-    enum name; missing reads as not completed) and a pulls row's `head` (the head commit sha). `laneSessions` holds the
-    kept session rows, or None. Old files without them read as before.
+    enum name; missing reads as not completed) and a pulls row's `head` (the head commit sha). `sessionRows` holds the
+    kept session rows, or None. Old files without them read as before. A sessions row's `updated_at` (ISO time, text)
+    is copied the same way for session_board.
     One more optional key, `landedPulls`: [{"number": int, "branch": str, "head"?: sha, "merged"?: bool}], the closed
     pull requests of the last 14 days (head ref, head sha, GitHub's merged flag). The publisher (triage) fills it from
     GitHub: a merged lane branch is gone from the open pulls and may leave no Step trailer on main. `landedPulls` holds
@@ -734,7 +739,7 @@ def live_work(path, steps, slug=None):
         if sid and (sid not in steps or steps[sid].get("status") == "done"):
             strays.append("%s (%s)" % (sid, row["title"]))
     threads.sort(key=lambda r: (STATES.index(r["state"]), r.get("title")))
-    why, session_steps, live_steps, lane_sessions = [], [], [], None  # the first reason wins
+    why, session_steps, live_steps, session_rows = [], [], [], None  # the first reason wins
     lane_tags = []  # the cs-topic: and cs-build: tags of the same live sessions, for lane_live
     if read.startswith("unknown"):
         why.append(read)
@@ -768,8 +773,9 @@ def live_work(path, steps, slug=None):
         live_steps = sorted(step_tag_ids(t for r in rows if r.get("status_bucket") not in ENDED_BUCKETS
                                          for t in r.get("tags") or []))
         lane_tags = sorted({t for t in tags if t.startswith((TOPIC_TAG, BUILD_TAG))})
-        lane_sessions = [{"id": r["id"], "session_status": r["session_status"], "tags": r.get("tags") or [],
-                          "status_bucket": r.get("status_bucket") if isinstance(r.get("status_bucket"), str) else None}
+        session_rows = [{"id": r["id"], "session_status": r["session_status"], "tags": r.get("tags") or [],
+                          "status_bucket": r.get("status_bucket") if isinstance(r.get("status_bucket"), str) else None,
+                          "updated_at": r.get("updated_at") if isinstance(r.get("updated_at"), str) else None}
                          for r in sessions]
         if len(skipped) > before:
             why.append("unknown (%d session rows skipped)" % (len(skipped) - before))
@@ -799,7 +805,7 @@ def live_work(path, steps, slug=None):
             "threadsWhy": None if has_threads else THREADS_MISSING_WHY, "pulls": sorted(pulls, key=lambda r: r["number"]),
             "branches": branches, "skipped": skipped, "strays": strays,
             "sessionSteps": session_steps, "liveSteps": live_steps, "laneTags": lane_tags, "staleWhy": stale_why, "pullWhy": pull_why,
-            "pageItems": page_items, "itemsWhy": items_why, "laneSessions": lane_sessions,
+            "pageItems": page_items, "itemsWhy": items_why, "sessionRows": session_rows,
             "landedPulls": landed_pulls}
 
 
@@ -1587,7 +1593,7 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
 
     open_items = [r for r in work["pageItems"] if r["status"] not in ITEM_DONE_STATUSES]
     # repo_tag_names takes the tag as the guard reads it, unstripped; the other tags are read stripped.
-    ours = [row for row in work.get("laneSessions") or []
+    ours = [row for row in work.get("sessionRows") or []
             if LANE_TAG in [t.strip() for t in row["tags"] if isinstance(t, str)]
             and any(repo_tag_names(t, slug) for t in row["tags"])]
     live = [row for row in ours if row["session_status"] != ARCHIVED_SESSION]
@@ -1631,6 +1637,60 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
             continue
         topic = next((t[len(TOPIC_TAG):].strip() for t in tags if t.startswith(TOPIC_TAG) and t[len(TOPIC_TAG):].strip()), "-")
         out.append("%s (%s; topic %s)" % (sid, " ".join(mine), topic))
+    return sorted(out)
+
+
+BOARD_FLAGS = {SESSION_BUCKETS[1]: "waiting for action", SESSION_BUCKETS[2]: "done", SESSION_BUCKETS[3]: "done",
+               SESSION_BUCKETS[4]: "failed"}
+
+
+def session_board(work, steps, slug, repo):
+    """Entries of the flagged sessions row: each session of this repo that the coordinator started and that needs an act, or one
+    `unknown (<why>)` entry, never an empty list when a read could not run. Each entry reads
+    `<session id> (<flag>; <steps or ->; <PR #n or no PR>)`, sorted.
+
+    A session is listed when it carries a cs-build: tag other than cs-build:coordinator and this repo's cs-repo tag
+    and is not archived. Its flag comes from its status bucket: blocked reads `waiting for action`, completed and
+    review ready read `done`, failed reads `failed`, and working reads `silent` once updated_at is more than
+    SILENT_MINUTES old; a recent working session is not listed. The PR is the lowest-numbered open pull on a head
+    ref of one of its steps (lane_head_refs). The row reads only `work`, which the build already holds, so it adds
+    no process, file read or session walk. A row with a missing or wrong-form bucket is skipped as idle_lanes skips
+    it; when no candidate row has a bucket name, or a working row has no zoned updated_at, the whole row reads one
+    unknown entry, since a silent session could hide behind the gap."""
+    why = live_why(work)
+    if why:
+        return [why]
+    if not slug:
+        return ["unknown (the repo's GitHub name could not be read)"]
+    now = datetime.datetime.now(datetime.timezone.utc)
+    ours = [row for row in work.get("sessionRows") or []
+            if any(repo_tag_names(t, slug) for t in row["tags"]) and row["session_status"] != ARCHIVED_SESSION]
+    cands = []
+    for row in ours:
+        tags = [t.strip() for t in row["tags"] if isinstance(t, str)]
+        if any(t.startswith(BUILD_TAG) for t in tags) and BUILD_TAG + "coordinator" not in tags:
+            cands.append((row, tags))
+    if cands and not any(row.get("status_bucket") in SESSION_BUCKETS for row, _ in cands):
+        return ["unknown (no live session row carries a status_bucket enum name)"]
+    out = []
+    for row, tags in cands:
+        bucket = row.get("status_bucket")
+        if not isinstance(bucket, str):
+            continue  # a list or other unhashable bucket would raise in the dict lookup below
+        flag = BOARD_FLAGS.get(bucket)
+        if bucket == SESSION_BUCKETS[0]:
+            at = zoned_time(row.get("updated_at"))
+            if at is None:
+                return ["unknown (working session %s has no updated_at with a time zone)" % row["id"]]
+            if (now - at).total_seconds() > SILENT_MINUTES * 60:
+                flag = "silent"
+        if flag is None:
+            continue
+        mine = sorted(step_tag_ids(tags))
+        heads = {name for k in mine for name in lane_head_refs(k)}
+        pulls = [p["number"] for p in work["pulls"] if p.get("branch") in heads]
+        out.append("%s (%s; %s; %s)" % (row["id"], flag, " ".join(mine) or "-",
+                                         "PR #%d" % min(pulls) if pulls else "no PR"))
     return sorted(out)
 
 
@@ -1699,6 +1759,8 @@ def upkeep(steps, added, marks, strays, work=None, slug=None, repo=None, main_br
             ("live threads naming no open step", (work or {}).get("strays", [])),
             ("live file entries skipped", (work or {}).get("skipped", [])),
             ("open step waits on a closed unmerged PR", waits_on_closed_pulls(open_, work, repo, ref)),
+            (SESSION_BOARD_LINE, session_board(work or {"read": "unknown (no --live file)"}, steps, slug, repo)
+             if repo is not None else ["unknown (the checkout was not named)"]),
             ("done without check", done_without_check(steps))]
     # A hold line is shown, never counted as a lane to archive.
     print("upkeep: " + "; ".join(
