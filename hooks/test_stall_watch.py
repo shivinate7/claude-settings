@@ -191,9 +191,45 @@ def module_or_fail():
         raise Fail(f"{MODULE} is missing")
 
 
-def hook(command, os_name=None, quiet="2", tmpdir=None):
+# Counts only the listings of the one folder named, so the module's other reads of the disk do not count.
+LISTING_PATCH = """\
+_folder = %r
+_listings = [0]
+
+
+def _counted(real):
+    def listing(path=".", *args, **kwargs):
+        if isinstance(path, str) and os.path.realpath(path) == _folder:
+            _listings[0] += 1
+        return real(path, *args, **kwargs)
+    return listing
+
+
+os.scandir = _counted(os.scandir)
+os.listdir = _counted(os.listdir)
+"""
+
+
+def listing_driver(os_name, count_to, folder):
+    """Source for `python -c`, which runs the hook module. It patches os.name when os_name is given, and counts the
+    os.scandir and os.listdir calls on folder into the file count_to. The count is written in a finally, so it lands
+    when the hook exits through SystemExit."""
+    # The stdlib is imported first, so only the module's own os.name checks see the patch.
+    src = "import json, os, runpy, shlex, shutil, signal, subprocess, sys, tempfile, time\n"
+    if os_name is not None:
+        src += "os.name = %r\n" % os_name
+    src += "sys.argv = [sys.argv[1], '--hook']\n"
+    if count_to is None:
+        return src + "runpy.run_path(sys.argv[0], run_name='__main__')\n"
+    tail = ("try:\n    runpy.run_path(sys.argv[0], run_name='__main__')\n"
+            "finally:\n    with open(%r, 'w') as _f:\n        _f.write(str(_listings[0]))\n") % count_to
+    return src + (LISTING_PATCH % folder) + tail
+
+
+def hook(command, os_name=None, quiet="2", tmpdir=None, count_to=None):
     """Run the hook on one background Bash call, with STALL_WATCH_QUIET set to quiet. Return (rc, stdout, stderr).
-    tmpdir is the folder the hook sees as TMPDIR, and the folder it prunes (default SCRATCH)."""
+    tmpdir is the folder the hook sees as TMPDIR, and the folder it prunes (default SCRATCH). count_to, when given,
+    is a file that receives the number of listings of tmpdir the hook made (see listing_driver)."""
     module_or_fail()
     payload = {
         "session_id": "test-stall-watch",
@@ -204,14 +240,10 @@ def hook(command, os_name=None, quiet="2", tmpdir=None):
     # TMPDIR makes the hook name its log under SCRATCH (case 7b): a stalled job's log is never
     # removed by the wrapper, so the run's cleanup must remove it. Every caller goes through here.
     env = dict(os.environ, STALL_WATCH_QUIET=quiet, TMPDIR=tmpdir or SCRATCH)
-    if os_name is None:
+    if os_name is None and count_to is None:
         argv = [PY, MODULE, "--hook"]
     else:
-        # Import the stdlib first, so only the module's own os.name checks see the patch.
-        driver = "import json, os, runpy, shlex, shutil, signal, subprocess, sys, tempfile, time\n" \
-                 "os.name = %r\nsys.argv = [sys.argv[1], '--hook']\n" \
-                 "runpy.run_path(sys.argv[0], run_name='__main__')\n" % os_name
-        argv = [PY, "-c", driver, MODULE]
+        argv = [PY, "-c", listing_driver(os_name, count_to, os.path.realpath(tmpdir or SCRATCH)), MODULE]
     proc = subprocess.run(argv, input=json.dumps(payload).encode("utf-8"),
                           capture_output=True, env=env, timeout=20)
     return proc.returncode, proc.stdout.decode("utf-8", "replace"), proc.stderr.decode("utf-8", "replace")
@@ -1230,31 +1262,24 @@ def job_that_never_stalls_removes_its_log_and_beat():
     return problems
 
 
-@posix_case
-def hook_prunes_kept_logs_older_than_seven_days():
-    """Prune. Before a background call, the hook removes a stalled job's kept log older than 7 days from its log
-    folder, with its marker (LOG + ".stalled"). A marked log 6 days old stays. So does an unmarked stall-watch log
-    aged 8 days, which may be a live job's log, and a file that is not a stall-watch log. Only the hook runs
-    here, so no job starts and no process is left to stop."""
-    folder = os.path.realpath(new_dir())  # the hook names its folder by the realpath of TMPDIR
-    now = time.time()  # fixture ages sit a day either side of the 7-day line, so clock drift cannot move one across it
-    fixtures = {
-        "old": ("stall-watch-%s.log" % ("8" * 32), 8, True),
-        "young": ("stall-watch-%s.log" % ("6" * 32), 6, True),
-        "unmarked": ("stall-watch-%s.log" % ("4" * 32), 8, False),
-        "other": ("other-job.log", 8, False),
-    }
-    paths, markers, written = {}, {}, []
-    for key, (name, days, marked) in fixtures.items():
-        path = os.path.join(folder, name)
-        names = [path, path + ".stalled"] if marked else [path]
-        for p in names:
-            with open(p, "w", encoding="utf-8") as f:
+def plant_and_prune(folder, fixtures):
+    """Plant each fixture in folder, then run the hook on folder. A fixture is (name, log_days, marker_days): a
+    stall-watch log aged log_days, and its marker (LOG + ".stalled") aged marker_days, or no marker when that is None.
+    Each file has its own age. Return (problems, paths), where paths maps each fixture key to (log, marker or None).
+    The problems cover the fixtures and the hook's command, so a removal the caller checks has a prune behind it."""
+    now = time.time()  # ages sit a day or more either side of the 7-day line, so clock drift cannot move one across it
+    paths, written = {}, []
+    for key, (name, log_days, marker_days) in fixtures.items():
+        log = os.path.join(folder, name)
+        marker = log + ".stalled" if marker_days is not None else None
+        for path, days in ((log, log_days), (marker, marker_days)):
+            if path is None:
+                continue
+            with open(path, "w", encoding="utf-8") as f:
                 f.write("kept\n")
-            os.utime(p, (now - days * 86400, now - days * 86400))
-            written.append(p)
-        paths[key] = path
-        markers[key] = path + ".stalled" if marked else None
+            os.utime(path, (now - days * 86400, now - days * 86400))
+            written.append(path)
+        paths[key] = (log, marker)
     # Scope: every fixture exists before the hook runs, so a removal below proves something.
     problems = expect(all(os.path.exists(p) for p in written), "a fixture is missing before the hook runs")
     rc, out, err = hook("echo hi", tmpdir=folder)
@@ -1264,12 +1289,82 @@ def hook_prunes_kept_logs_older_than_seven_days():
     except (ValueError, KeyError, TypeError):
         command = None
     problems += expect(isinstance(command, str), "the hook printed no updatedInput command")
-    problems += expect(not os.path.exists(paths["old"]), "a marked log aged 8 days is still there after the hook ran")
-    problems += expect(not os.path.exists(markers["old"]), "the marker of a log aged 8 days is still there after the hook ran")
-    problems += expect(os.path.exists(paths["young"]), "a marked log aged 6 days was removed; only older than 7 days go")
-    problems += expect(os.path.exists(markers["young"]), "the marker of a kept log aged 6 days was removed")
-    problems += expect(os.path.exists(paths["unmarked"]), "an unmarked stall-watch log aged 8 days was removed")
-    problems += expect(os.path.exists(paths["other"]), "a file that is not a stall-watch log, aged 8 days, was removed")
+    return problems, paths
+
+
+@posix_case
+def hook_prunes_kept_logs_older_than_seven_days():
+    """Prune, by the log's own age. Before a background call, the hook removes a stalled job's kept log only when
+    the log was last written more than 7 days ago, and then its marker (LOG + ".stalled"). Here the marker is 8 days
+    old and the log 1 day old, so both stay. A marked log 6 days old stays. So does an unmarked stall-watch log aged
+    8 days, which may be a live job's log, and a file that is not a stall-watch log. Only the hook runs here, so no
+    job starts and no process is left to stop."""
+    folder = os.path.realpath(new_dir())  # the hook names its folder by the realpath of TMPDIR
+    fixtures = {
+        "marker_old": ("stall-watch-%s.log" % ("8" * 32), 1, 8),
+        "young": ("stall-watch-%s.log" % ("6" * 32), 6, 6),
+        "unmarked": ("stall-watch-%s.log" % ("4" * 32), 8, None),
+        "other": ("other-job.log", 8, None),
+    }
+    problems, paths = plant_and_prune(folder, fixtures)
+    log, marker = paths["marker_old"]
+    problems += expect(os.path.exists(log), "a log aged 1 day was removed, though its marker is aged 8 days")
+    problems += expect(os.path.exists(marker), "the marker of a log aged 1 day was removed")
+    log, marker = paths["young"]
+    problems += expect(os.path.exists(log), "a marked log aged 6 days was removed; only older than 7 days go")
+    problems += expect(os.path.exists(marker), "the marker of a kept log aged 6 days was removed")
+    log, _ = paths["unmarked"]
+    problems += expect(os.path.exists(log), "an unmarked stall-watch log aged 8 days was removed")
+    log, _ = paths["other"]
+    problems += expect(os.path.exists(log), "a file that is not a stall-watch log, aged 8 days, was removed")
+    return problems
+
+
+@posix_case
+def hook_prunes_kept_log_by_its_own_age_not_its_marker():
+    """Prune, the other way round. A stalled job's kept log aged 8 days goes with its marker even when the marker is
+    1 day old, because the age that counts is the log's. A log and its marker both aged 8 days go too."""
+    folder = os.path.realpath(new_dir())
+    fixtures = {
+        "log_old": ("stall-watch-%s.log" % ("7" * 32), 8, 1),
+        "both_old": ("stall-watch-%s.log" % ("8" * 32), 8, 8),
+    }
+    problems, paths = plant_and_prune(folder, fixtures)
+    log, marker = paths["log_old"]
+    problems += expect(not os.path.exists(log), "a log aged 8 days stayed, though its marker is aged 1 day")
+    problems += expect(not os.path.exists(marker), "the marker of a log aged 8 days stayed after the hook ran")
+    log, marker = paths["both_old"]
+    problems += expect(not os.path.exists(log), "a log and its marker both aged 8 days: the log stayed")
+    problems += expect(not os.path.exists(marker), "a log and its marker both aged 8 days: the marker stayed")
+    return problems
+
+
+@posix_case
+def prune_lists_the_log_folder_once():
+    """Cost. One prune call lists its folder once: one os.scandir or os.listdir on that folder, in the hook process
+    already running. It runs over an empty folder and a full one, since a listing per entry shows only in the full one."""
+    problems = []
+    for state, count in (("empty", 0), ("full", 200)):
+        folder = os.path.realpath(new_dir())
+        for i in range(count):
+            with open(os.path.join(folder, "stall-watch-%032x.log" % i), "w", encoding="utf-8") as f:
+                f.write("kept\n")
+        listed = os.path.join(new_dir(), "listings")
+        rc, out, err = hook("echo hi", tmpdir=folder, count_to=listed)
+        # Scope: the hook ran past its prune to print its command, and the driver wrote a count.
+        try:
+            command = json.loads(out)["hookSpecificOutput"]["updatedInput"]["command"]
+        except (ValueError, KeyError, TypeError):
+            command = None
+        scope = expect(rc == 0, f"{state} folder: hook exit {rc}: {err.strip()[:200]}")
+        scope += expect(isinstance(command, str), f"{state} folder: the hook printed no updatedInput command")
+        scope += expect(os.path.exists(listed), f"{state} folder: the driver wrote no listing count")
+        if scope:
+            problems += scope
+            continue
+        with open(listed, encoding="utf-8") as f:
+            listings = int(f.read())
+        problems += expect(listings == 1, f"{state} folder: {listings} listings, want exactly 1")
     return problems
 
 
