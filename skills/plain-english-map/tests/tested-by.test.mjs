@@ -24,12 +24,18 @@
 //   T5   scanner traps. A path only in a TS comment (T5a) or a Python docstring (T5b) fails. `//` (T5c) and `#` (T5d) inside a string,
 //        before a real import on the same line, pass. A lone quote in a comment, TS (T5e) and Python (T5f), passes. A multi-line template
 //        literal that holds the import as text fails (T5g). The same template before a real import passes (T5h).
-//   T6   a shell test fails as an unknown read (T6a). With no python3 on PATH, a Python test fails as an unknown read, and with python3 it passes (T6b).
+//   T6   a shell test is read through its quoted string literals. A literal path passes (T6a, T6g, T6h). A `#` inside a string (T6c), a lone
+//        quote in a comment (T6e) and a string that spans two lines (T6f) hide no path. A path only in a comment does not load the file (T6d).
+//        With no python3 on PATH, a Python test fails as an unknown read, and with python3 it passes (T6b).
 //   T7   placement and form. A tested-by line under a table line (T7a), a screen line (T7b) or a home (T7c) fails. Unindented (T7d), with no
 //        backticks (T7e), or with a `;` separator (T7f), it fails. Under a map line after a decisions line (T7g), it passes.
 //        Under a backtick line in a Notes section it is an orphan and fails (T7h): a tested-by line is valid only under a Code files map line.
 //   T8   one hop. Through `src/pkg/index.ts`, the test passes (T8a). Without the re-export, it fails (T8b). Two hops fail (T8c).
 //        Through `src/pkgpy/__init__.py`, the test passes (T8d). Without the re-export, it fails (T8e).
+//   T10  an import by a tsconfig path alias. An alias that a `paths` entry maps passes (T10a). An alias no entry maps does not load the
+//        file (T10b), and a type-only import by an alias does not count (T10c).
+//   T11  a path built by `path.join` or `os.path.join` from literal pieces. A join that names the file passes (T11a, T11b), and a lone quote
+//        in a comment before it hides nothing (T11e). A join of another file (T11c) and a join in a comment (T11d) do not load the file.
 //   C0   control, green on the old code: the import reader MAP11 uses reads the fixture's imports the way these cases assume.
 
 import { test } from 'node:test';
@@ -274,15 +280,72 @@ test('T5h. control: the same multi-line template literal, then a real import aft
   mustPass(check(dir));
 });
 
-test('T6a. a shell test fails MAP11 as an unknown read, and names the test', () => {
-  needFile(REL);
-  const dir = scratchRepo();
-  writeAt(dir, 'src/retry_check.sh', '#!/bin/sh\npython3 src/retry.py\n');
+// A shell test is read through its string literals: `blankShell` keeps each string's text and blanks every comment.
+const shellTest = (dir, body) => {
+  writeAt(dir, 'src/retry_check.sh', body);
   gitIn(dir, 'add', '-N', 'src/retry_check.sh');
   setTestedBy(dir, 'src/retry.py', tested('src/retry_check.sh'));
+};
+
+test('T6a. a shell test that runs the file by its double-quoted literal path passes MAP11', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  shellTest(dir, '#!/bin/sh\npython3 "src/retry.py"\n');
+  // The scope first: the test names the file in a quoted string, from the repository root.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /python3 "src\/retry\.py"/, 'the shell test must run src/retry.py by a quoted path');
+  mustPass(check(dir));
+});
+
+test('T6c. a # inside a string, before the quoted path on the same line, is no comment: the test passes', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  shellTest(dir, '#!/bin/sh\necho "#" && python3 "src/retry.py"\n');
+  assert.match(readAt(dir, 'src/retry_check.sh'), /echo "#" && python3 "src\/retry\.py"/, 'the shell test must hold a # inside a string before the path');
+  mustPass(check(dir));
+});
+
+test('T6d. a path that appears only in a shell comment does not load the file: MAP11 fails as a read that does not load, and names the test and the file', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  shellTest(dir, '#!/bin/sh\n# python3 "src/retry.py"\necho done\n');
+  // The scope first: the path sits in the comment alone, and no line outside a comment names it.
+  assert.doesNotMatch(readAt(dir, 'src/retry_check.sh').replace(/^#.*$/gm, ''), /src\/retry\.py/, 'the path must sit only in the comment');
   const r = check(dir);
-  mustFail(r, 'src/retry_check.sh');
-  assert.match(map11(r), /unknown|could not read/i, `the shell test must fail as an unknown read\n${map11(r)}`);
+  mustFail(r, 'src/retry_check.sh', 'src/retry.py');
+  assert.doesNotMatch(map11(r), /unknown/, `the comment-only test must fail as a read that does not load, not as an unknown read\n${map11(r)}`);
+});
+
+test("T6e. a lone quote in a shell comment does not open a string that hides the path on the next line: the test passes", () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  shellTest(dir, "#!/bin/sh\n# one ' here: the path is on the next line\npython3 \"src/retry.py\"\n");
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^# one ' here/m, 'the comment must hold a lone quote');
+  mustPass(check(dir));
+});
+
+test('T6f. a double-quoted string over two lines, whose second line starts with #, is text: the call after the string loads the file, and the test passes', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  shellTest(dir, '#!/bin/sh\nmsg="one\n# two"; python3 "src/retry.py"\n');
+  assert.match(readAt(dir, 'src/retry_check.sh'), /^# two"; python3 "src\/retry\.py"$/m, 'the second line must open with # inside the string');
+  mustPass(check(dir));
+});
+
+test('T6g. a shell test in src/ that runs `python3 "retry.py"` loads the file: the quoted path is read from the test folder', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  shellTest(dir, '#!/bin/sh\npython3 "retry.py"\n');
+  // The scope first: the quoted word is the file's name alone, so only the folder of the test can resolve it.
+  assert.match(readAt(dir, 'src/retry_check.sh'), /python3 "retry\.py"/, 'the shell test must name the file from its own folder');
+  mustPass(check(dir));
+});
+
+test("T6h. a shell test that runs `python3 'src/retry.py'` passes: a single-quoted literal is a string literal too", () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  shellTest(dir, "#!/bin/sh\npython3 'src/retry.py'\n");
+  assert.match(readAt(dir, 'src/retry_check.sh'), /python3 'src\/retry\.py'/, 'the shell test must run src/retry.py by a single-quoted path');
+  mustPass(check(dir));
 });
 
 test('T6b. with no python3 on PATH, a Python test fails MAP11 as an unknown read that names it; with python3 on PATH it passes', POSIX_ONLY, () => {
@@ -415,6 +478,98 @@ test('T8e. one hop, Python, without the re-export: the __init__.py no longer re-
   assert.doesNotMatch(readAt(dir, 'src/pkgpy/__init__.py'), /retry/, 'the __init__.py must not name retry');
   setTestedBy(dir, 'src/retry.py', tested('src/pkgpy_check.py'));
   mustFail(check(dir), CORE, 'src/pkgpy_check.py');
+});
+
+// A host with a tsconfig.json that maps `@/*` to the root. The file is tracked, so the check reads it as a host file would be read.
+const aliasRepo = () => {
+  const dir = scratchRepo();
+  writeAt(dir, 'tsconfig.json', `${JSON.stringify({ compilerOptions: { paths: { '@/*': ['./*'] } } })}\n`);
+  gitIn(dir, 'add', '-N', 'tsconfig.json');
+  return dir;
+};
+
+test("T10a. a test that imports the file by a tsconfig path alias passes MAP11: '@/src/home' maps to src/home.ts through `paths`", () => {
+  needFile(REL);
+  const dir = aliasRepo();
+  writeAt(dir, 'src/home.spec.ts', "import { homeTitle } from '@/src/home';\n");
+  // The scope first: the test imports home.ts by the alias alone, and the tsconfig maps the alias.
+  assert.match(readAt(dir, 'src/home.spec.ts'), /from '@\/src\/home'/, 'the test must import by the alias');
+  assert.match(readAt(dir, 'tsconfig.json'), /"@\/\*"/, 'tsconfig.json must map @/*');
+  setTestedBy(dir, 'src/home.ts', tested('src/home.spec.ts'));
+  mustPass(check(dir));
+});
+
+test("T10b. control: an alias that no `paths` entry maps does not load the file, so the test fails MAP11 and is named", () => {
+  needFile(REL);
+  const dir = aliasRepo();
+  writeAt(dir, 'src/home.spec.ts', "import { homeTitle } from '@lib/src/home';\n");
+  assert.doesNotMatch(readAt(dir, 'tsconfig.json'), /@lib/, 'tsconfig.json must not map @lib');
+  setTestedBy(dir, 'src/home.ts', tested('src/home.spec.ts'));
+  mustFail(check(dir), CORE, 'src/home.spec.ts', 'src/home.ts');
+});
+
+test("T10c. control: a type-only import by an alias does not load the file, so the test fails MAP11 and is named", () => {
+  needFile(REL);
+  const dir = aliasRepo();
+  writeAt(dir, 'src/home.spec.ts', "import type { homeTitle } from '@/src/home';\n");
+  // The scope first: the test's only import is the type import, through the alias the tsconfig maps.
+  assert.match(readAt(dir, 'src/home.spec.ts'), /^import type \{ homeTitle \} from '@\/src\/home';$/m, 'the test must hold the type-only alias import');
+  setTestedBy(dir, 'src/home.ts', tested('src/home.spec.ts'));
+  mustFail(check(dir), CORE, 'src/home.spec.ts');
+});
+
+test('T11a. a Python test that builds the file path by os.path.join("src", "retry.py") loads the file: MAP11 passes', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  writeAt(dir, 'tests/retry_join.py', 'import os\nimport subprocess\nimport sys\n\n\ndef test_runs_retry():\n    subprocess.run([sys.executable, os.path.join("src", "retry.py")], check=True)\n');
+  gitIn(dir, 'add', '-N', 'tests/retry_join.py');
+  // The scope first: the test imports no retry module, and no piece of the join names a file beside the test, so only the joined path can link retry.py.
+  assert.doesNotMatch(readAt(dir, 'tests/retry_join.py'), /^(import|from) retry\b/m, 'the test must not import retry');
+  assert.equal(existsSync(join(dir, 'tests', 'retry.py')), false, 'no file beside the test may be named retry.py');
+  setTestedBy(dir, 'src/retry.py', tested('tests/retry_join.py'));
+  mustPass(check(dir));
+});
+
+test("T11b. a TypeScript test that builds the file path by path.join('src', 'home.ts') loads the file: MAP11 passes", () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  writeAt(dir, 'tests/join.spec.ts', "import path from 'node:path';\n\nexport const homeFile = path.join('src', 'home.ts');\n");
+  gitIn(dir, 'add', '-N', 'tests/join.spec.ts');
+  // The scope first: the test imports no home module, and no piece of the join names a file beside the test, so only the joined path can link home.ts.
+  assert.doesNotMatch(readAt(dir, 'tests/join.spec.ts'), /from '\.\/home'/, 'the test must not import home');
+  assert.equal(existsSync(join(dir, 'tests', 'home.ts')), false, 'no file beside the test may be named home.ts');
+  setTestedBy(dir, 'src/home.ts', tested('tests/join.spec.ts'));
+  mustPass(check(dir));
+});
+
+test('T11c. control: a Python join that names another file, os.path.join("src", "retry_check.py"), does not load retry.py: MAP11 fails and names the test', () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  writeAt(dir, 'tests/retry_join.py', 'import os\n\n\ndef test_other():\n    assert os.path.join("src", "retry_check.py")\n');
+  gitIn(dir, 'add', '-N', 'tests/retry_join.py');
+  assert.match(readAt(dir, 'tests/retry_join.py'), /os\.path\.join\("src", "retry_check\.py"\)/, 'the test must join the other file');
+  setTestedBy(dir, 'src/retry.py', tested('tests/retry_join.py'));
+  mustFail(check(dir), CORE, 'tests/retry_join.py', 'src/retry.py');
+});
+
+test("T11d. control: a join in a TypeScript comment, // path.join('src', 'home.ts'), does not load the file: MAP11 fails and names the test", () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  writeAt(dir, 'tests/join.spec.ts', "// path.join('src', 'home.ts') is only a comment here\nexport {};\n");
+  gitIn(dir, 'add', '-N', 'tests/join.spec.ts');
+  assert.doesNotMatch(readAt(dir, 'tests/join.spec.ts').replace(/^\/\/.*$/gm, ''), /home\.ts/, 'the join must sit only in the comment');
+  setTestedBy(dir, 'src/home.ts', tested('tests/join.spec.ts'));
+  mustFail(check(dir), CORE, 'tests/join.spec.ts', 'src/home.ts');
+});
+
+test("T11e. a lone quote in a TypeScript comment does not hide the join on the next line: the test passes", () => {
+  needFile(REL);
+  const dir = scratchRepo();
+  writeAt(dir, 'tests/join.spec.ts', "// one ' here: the join is on the next line\nimport path from 'node:path';\nexport const homeFile = path.join('src', 'home.ts');\n");
+  gitIn(dir, 'add', '-N', 'tests/join.spec.ts');
+  assert.match(readAt(dir, 'tests/join.spec.ts'), /^\/\/ one ' here/m, 'the comment must hold a lone quote');
+  setTestedBy(dir, 'src/home.ts', tested('tests/join.spec.ts'));
+  mustPass(check(dir));
 });
 
 test('C0. control, green on the old code: the import reader MAP11 uses reads the fixture imports the way these cases assume', async () => {
