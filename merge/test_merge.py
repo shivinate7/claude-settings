@@ -19258,6 +19258,46 @@ class BatchFreeze(CloudSession):
         rc, out = self.run_batch("--batch-build", "two", "102")
         self.assertEqual(rc, 0, "a lane dropped from one batch was refused by the next build: %s" % out)
 
+    def mark(self, n, *names):
+        for name in names:
+            self.host.post_comment(n, "<!-- batch-dropped: %s -->\nDropped from batch %s." % (name, name))
+
+    def test_ready_refuses_a_frozen_lane_that_was_dropped_from_two_batches(self):
+        for n in (101, 102):
+            self.lane(n)
+        self.frozen_batch("x", [101, 102], draft=True)
+        self.mark(102, "y", "z")
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "x", "--ready")
+        self.assertNotEqual(rc, 0, "--ready readied a batch that holds lane #102, dropped from two batches: %s" % out)
+        self.assertIn("fix lane", out)
+        self.assertEqual(self.host.readies, [], "the refused --ready still marked a pull request ready")
+
+    def test_a_dependent_dropped_with_a_blamed_lane_gets_no_marker(self):
+        self.lane(101)
+        self.lane(102, on=101)
+        self.lane(103)
+        self.frozen_batch("one", [101, 102, 103], blamed=(101,))
+        rc, out = self.run_batch("--batch-drop", "one", "101")
+        self.assertEqual(rc, 0, "setup: the drop exited %s: %s" % (rc, out))
+        self.assertIn("#102 dropped too", out, "setup: #102 did not come off as a dependent: %s" % out)
+        self.assertEqual([n for n, _ in self.host.posted], [101], "a marker was posted for a lane other than the blamed one")
+
+    def test_a_marker_post_refused_after_the_drop_is_posted_by_the_rerun(self):
+        for n in (101, 102):
+            self.lane(n)
+        self.frozen_batch("one", [101, 102], blamed=(102,))
+        real = self.host.post_comment
+        def refuse(n, body):
+            raise merge.Stop("posting refused")
+        self.host.post_comment = refuse
+        rc, out = self.run_batch("--batch-drop", "one", "102")
+        self.assertNotEqual(rc, 0, "a refused marker post exited 0: %s" % out)
+        self.host.post_comment = real
+        rc, out = self.run_batch("--batch-drop", "one", "102")
+        self.assertEqual(rc, 0, "the rerun exited %s: %s" % (rc, out))
+        self.assertEqual(self.host.comment_bodies(102).__len__(), 1, "the rerun did not post the missing marker once")
+
     # After the build, a drop takes off only a lane that a red run blamed (decision batch-freeze-lane-set). The control is
     # test_a_blamed_lane_dropped_leaves_a_draft_that_needs_ready_again_and_the_next_ready_lints_once, which drops a blamed lane.
 

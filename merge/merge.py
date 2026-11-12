@@ -4523,6 +4523,14 @@ def dropped_batches(h, n):
     """-> the batch names that dropped lane PR n, read from its marker comments (`batch_drop` posts one per drop)."""
     return {m.group(1) for body in h.comment_bodies(n) for m in DROPPED_MARK.finditer(body)}
 
+def mark_dropped(h, n, name):
+    """Post lane PR n's `batch-dropped` marker for batch `name` once. -> the batch names that dropped n, this one included.
+    Only the lane a red run blamed is marked: a dependent comes off with it and is not at fault."""
+    names = dropped_batches(h, n)
+    if name not in names:
+        h.post_comment(n, f"<!-- batch-dropped: {name} -->\nDropped from batch {name}.")
+    return names | {name}
+
 def fix_lane_line(n, names):
     return (f"#{n} was dropped from {len(names)} batches ({', '.join(sorted(names))}): it leaves the batch queue for a fix lane. "
             f"Open a fix lane for it as a new pull request; the new pull request joins a batch with a clean count.")
@@ -4843,10 +4851,9 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", co
             raise Stop(f"#{n} is {infos[n]['state']}, not open, so it cannot join batch {name}. {FREEZE_CITE}")
         if infos[n]["base"] != base:
             raise Stop(f"#{n} targets {infos[n]['base']}, and batch {name} targets {base}. Nothing was pushed. Retarget #{n}, or give --base {infos[n]['base']}. {FREEZE_CITE}")
-    if not ready:
-        out = [fix_lane_line(n, names) for n in numbers if len(names := dropped_batches(h, n)) >= DROP_LIMIT]
-        if out:
-            raise Stop("\n".join(out) + f"\nNothing was pushed. {FREEZE_CITE}")
+    out = [fix_lane_line(n, names) for n in numbers if len(names := dropped_batches(h, n)) >= DROP_LIMIT]  # a build and --ready alike: a frozen lane that left the queue is not readied
+    if out:
+        raise Stop("\n".join(out) + f"\nNothing was pushed. {FREEZE_CITE}")
     heads ={n: infos[n]["head"] for n in numbers}  # read once, now: this is the freeze
     merged_on = False
     if on:
@@ -4964,6 +4971,9 @@ def batch_drop(root, h, name, number):
     if number not in lanes and number in block["dropped"]:
         # a rerun: a kill after the body write leaves the branch holding the lane the body already drops
         say(f"merge: #{number} was dropped from batch {name} already; {branch} is checked against its frozen set.")
+        names = mark_dropped(h, number, name)  # a kill between the body write and the marker leaves none: the rerun posts it
+        if len(names) >= DROP_LIMIT:
+            say(fix_lane_line(number, names))
         rc = sync_batch(root, h, pr, info, block, block["on"][0] if block["on"] else None, info["base"])
         say(f"merge: batch {name} holds lanes {lane_list(lanes)}.")
         return rc
@@ -4993,17 +5003,14 @@ def batch_drop(root, h, name, number):
             on = (on[0], start)
         except Stop as e:
             say(f"merge: {on[0]} could not be read ({e}); batch {name} is rebuilt on the On sha it recorded, {on[1][:9]}.")
-    counts = {}
-    for n in dropping:  # before any push: a refused post leaves the batch as it was, and a rerun posts again (one name counts once)
-        names = dropped_batches(h, n) | {name}
-        counts[n] = names
-        if name not in dropped_batches(h, n):
-            h.post_comment(n, f"<!-- batch-dropped: {name} -->\nDropped from batch {name}.")
     text = freeze_rewrite(info["body"], block, freeze_lines(name, kept, [*block["dropped"], *dropping], on, recorded, [b for b in block["blamed"] if b in kept]))
     drafted = return_to_draft(h, pr, info)
     new = build_integration_branch(root, name, start, sorted(kept.items()), lease=tip, body=(h, pr, info["body"], text))
     say(f"merge: #{number} dropped from batch {name}.", *(f"merge: #{n} dropped too: its head contains #{number}'s head." for n in dependents),
-        f"merge: batch {name} now holds lanes {lane_list(kept)}.", *(fix_lane_line(n, names) for n, names in sorted(counts.items()) if len(names) >= DROP_LIMIT))
+        f"merge: batch {name} now holds lanes {lane_list(kept)}.")
+    names = mark_dropped(h, number, name)  # after the body write: a refused post leaves a drop the rerun path above marks
+    if len(names) >= DROP_LIMIT:
+        say(fix_lane_line(number, names))
     needs_ready(name, drafted)
     return 1 if restack(root, h, branch, new, {n: lanes[n] for n in dropping}) else 0
 

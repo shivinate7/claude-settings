@@ -23,6 +23,7 @@ The owner may use any word for a thing (`speak-one-name-per-thing`); the glossar
 | Term | Meaning | Home | Not |
 |---|---|---|---|
 | lane | The unit of work, and the session role that runs it. One isolated piece of work, with its own branch, worktree and lane PR. Its branch slug is its name. A lane runs it, local and cloud alike, under a coordinator or on its own. An agent is never a lane. | `rule:parallelism-own-lane-orchestrator`, `docs/decisions/lane-by-slug.md`, `docs/decisions/session-tiers.md` | `workstream`, `lane session`, `solo session`, `one-lane session` |
+| fix lane | A new lane, with a new PR, that takes over a lane dropped from two batches, so the old lane stops holding later batches. | `docs/decisions/batch-freeze-lane-set.md` | `repair lane` |
 | batch | The lane PRs that join one integration branch and merge to main together. | `rule:git-integration-branch-merge` | — |
 | integration branch | The branch that holds the commit of each lane in a batch. | `rule:git-integration-branch-merge` | `batch branch` |
 | integration PR | The one PR of a batch that goes ready. Its CI run is the only CI run for the batch. A lone lane is its own integration PR. | `rule:git-integration-branch-merge`, `skills/ci-hygiene/SKILL.md` | — |
