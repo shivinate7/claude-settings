@@ -20387,6 +20387,76 @@ class BatchFreeze(CloudSession):
         self.assertTrue(self.files_holding(self.QUICK_TEXT, [state]),
                         "the quick step's output is gone after the temp-folder step: ci-job wrote it into the session's temp folder, which the step removes: %s" % swept)
 
+    def log_lines(self, name="nightly"):
+        """The lines of batch `name`'s log. No log, or an empty one, reads as no lines."""
+        return (self.read_text(self.batch_log(name)) or "").splitlines()
+
+    def test_a_clean_build_ends_its_log_with_end_ok(self):
+        for n in (101, 102):
+            self.lane(n)
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+        lines = self.log_lines()
+        self.assertTrue(lines, "the batch log is empty after a clean build")
+        self.assertEqual(lines[-1], "end: ok", "a clean build's log does not end with `end: ok`: its last line is %r" % lines[-1])
+
+    def test_a_build_refused_for_a_lane_not_open_ends_its_log_with_the_refusal(self):
+        for n in (101, 102):
+            self.lane(n)
+        self.host.batch_pulls[102]["state"] = "MERGED"
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(rc, 1, "a merged lane PR was not refused with exit 1: %s" % out)
+        lines = self.log_lines()
+        self.assertIsNotNone(self.start_line(lines, "nightly", (101, 102)),
+                             "the log holds no start line naming batch nightly and lanes 101 and 102 before the refusal: %r" % lines)
+        self.assertTrue(lines[-1].startswith("end: refused: #102 is MERGED, not open"), "the log does not end with the refusal: %r" % lines[-1])
+
+    def test_a_build_refused_for_no_open_pull_request_with_the_head_names_the_batch_in_its_log(self):
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertEqual(rc, 1, "a --ready with no open pull request for batch-nightly exited %s: %s" % (rc, out))
+        lines = self.log_lines()
+        self.assertIsNotNone(self.start_line(lines, "nightly", ()),
+                             "the log holds no line naming batch nightly before the refusal: %r" % lines)
+        self.assertTrue(lines[-1].startswith("end: refused: no open pull request has the head batch-nightly"),
+                        "the log does not end with the refusal: %r" % lines[-1])
+
+    def test_a_build_that_fails_with_an_unexpected_error_ends_its_log_as_failed_and_raises_it(self):
+        for n in (101, 102):
+            self.lane(n)
+        real_pr = self.host.pr
+
+        def pr_breaks_for_102(n):
+            if n == 102:
+                raise RuntimeError("the host connection broke")
+            return real_pr(n)
+        self.host.pr = pr_breaks_for_102
+        with self.no_lint_or_ready_check(), self.assertRaises(RuntimeError):
+            self.run_batch("--batch-build", "nightly", "101", "102")
+        lines = self.log_lines()
+        self.assertIsNotNone(self.start_line(lines, "nightly", (101, 102)),
+                             "the log holds no start line naming batch nightly and lanes 101 and 102 before the error: %r" % lines)
+        self.assertEqual(lines[-1], "end: failed: the host connection broke", "the log does not end with the failure: %r" % lines[-1])
+
+    def test_a_refusal_ends_its_log_with_the_first_line_of_its_message_only(self):
+        for n in (101, 102):
+            self.lane(n)
+        real_pr = self.host.pr
+
+        def pr_refuses_102(n):
+            if n == 102:
+                raise merge.Stop("#102 cannot be read.\nThe second line is for the terminal, not for the log.")
+            return real_pr(n)
+        self.host.pr = pr_refuses_102
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102")
+        self.assertEqual(rc, 1, "the refused read exited %s: %s" % (rc, out))
+        lines = self.log_lines()
+        self.assertTrue(lines, "the batch log is empty after a refusal")
+        self.assertEqual(lines[-1], "end: refused: #102 cannot be read.", "the log's end line is not the first line of the refusal: %r" % lines[-1])
+
 # `merge --touches [--run RUN_ID] [--case TEXT]... [--file PATH]...`: the open pull requests that already touch a failing case or a named file.
 # The incident's fixtures: red main run 42559512356 failed two brief-destructive-git cases, and open pull 2390 already fixes them.
 # The run's record names no case. The two cases here are the ones the fix's patch edits the body of, so the names come from that patch.
