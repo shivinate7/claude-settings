@@ -3462,11 +3462,10 @@ def case_repeat_model_error_fails_open_and_is_not_retried():
 
 def case_repeat_old_inboxes_bind_by_sidecar_and_capture_writes_it_once():
     """An older inbox is a candidate only with a sidecar that names this repo. Capture writes this
-    session's sidecar once, inside a repo, and never outside one. The two captures are stamped 36 minutes apart
-    (LOCAL_TIME_NOW), so the earlier message stays a candidate of the later item."""
+    session's sidecar once, inside a repo, and never outside one."""
     root = repeat_repo("repeat-binding")
     cfg, sid = new_cfg(), "repeat-binding"
-    env = dict(git_counter(cfg), LOCAL_TIME_NOW=EARLY_NOW)
+    env = git_counter(cfg)
     write_old_inbox(cfg, OLD_A_SID, OLD_A_TEXT, sidecar=os.path.realpath(root))
     write_old_inbox(cfg, OLD_B_SID, OLD_B_TEXT)
     start = len(git_lines(env))
@@ -3476,7 +3475,7 @@ def case_repeat_old_inboxes_bind_by_sidecar_and_capture_writes_it_once():
     check("binding: capture starts at most one git process", len(git_lines(env)) - start <= 1,
           git_lines(env, start))
     mid = snapshot(cfg)
-    capture(cfg, sid, MSG_TWO, cwd=root, extra_env={"LOCAL_TIME_NOW": LATE_NOW})
+    capture(cfg, sid, MSG_TWO, cwd=root)
     check("binding: a second capture leaves the sidecar as it was",
           sidecar_rel(sid) not in written_between(mid, snapshot(cfg)), sorted(written_between(mid, snapshot(cfg))))
     add_item(cfg, sid)
@@ -3829,9 +3828,8 @@ def case_repeat_repo_item_is_never_judged_as_a_repeat():
 NEW_SID = "c3d4e5f6-0a1b-4c2d"
 EARLY_HEADER = "2026-10-13 10:04 CDT (UTC-05:00)"
 LATE_HEADER = "2026-10-13 10:40 CDT (UTC-05:00)"
-# The same two minutes as LOCAL_TIME_NOW. They are 36 minutes apart, outside the 30-minute window in which a same-inbox
+# The 10:04 and 10:40 messages are 36 minutes apart, outside the 30-minute window in which a same-inbox
 # candidate is dropped, so the earlier message stays a candidate of the later one.
-EARLY_NOW, LATE_NOW = "2026-10-13T10:04:00-05:00", "2026-10-13T10:40:00-05:00"
 EARLY_REF = "inbox:%s@%s" % (NEW_SID[:8], EARLY_HEADER[:16])  # the candidate ref of the 10:04 message
 MARK_EARLY = " repeats " + EARLY_REF
 
@@ -3981,6 +3979,14 @@ BEFORE_29 = "2026-10-13 09:35 CDT (UTC-05:00)"  # 29 minutes before EARLY_HEADER
 AFTER_29 = "2026-10-13 10:33 CDT (UTC-05:00)"  # 29 minutes after EARLY_HEADER
 BEFORE_31 = "2026-10-13 09:33 CDT (UTC-05:00)"  # 31 minutes before EARLY_HEADER
 AFTER_31 = "2026-10-13 10:35 CDT (UTC-05:00)"  # 31 minutes after EARLY_HEADER
+BEFORE_30 = "2026-10-13 09:34 CDT (UTC-05:00)"  # exactly 30 minutes before EARLY_HEADER
+AFTER_30 = "2026-10-13 10:34 CDT (UTC-05:00)"  # exactly 30 minutes after EARLY_HEADER
+NEAR_HEADER = "2026-10-13 10:20 CDT (UTC-05:00)"  # 16 minutes after EARLY_HEADER
+# Across the night the clocks went back (2026-11-01, CDT to CST). The window reads each stamp's own offset, so
+# real time decides it, and the clock faces, which these stamps also show, do not.
+MIXED_CDT_LATE = "2026-11-01 01:55 CDT (UTC-05:00)"  # 06:55 UTC: 25 real minutes before MIXED_CST, 35 on the faces
+MIXED_CST = "2026-11-01 01:20 CST (UTC-06:00)"  # 07:20 UTC
+MIXED_CDT_EARLY = "2026-11-01 01:10 CDT (UTC-05:00)"  # 06:10 UTC: 70 real minutes before MIXED_CST, 10 on the faces
 OTHER_1003 = "2026-10-13 10:03 CDT (UTC-05:00)"  # one minute before EARLY_HEADER, in another session's inbox
 TODAY_DRAFT_PRS = ("can we have it be that draft PRs first have to check with batch runner that it's not using mac os "
                    "runners at this time before opening the pr for CI to be ready? or is there anyway to expand the "
@@ -4039,6 +4045,77 @@ def case_repeat_candidate_thirty_one_minutes_away_stays_a_candidate():
     check("window keep: the item is marked against the block 31 minutes before",
           inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID) == WINDOW_ITEM_LINE + " repeats " + new_ref(BEFORE_31),
           inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID))
+
+
+def case_repeat_candidate_exactly_thirty_minutes_away_is_not_a_candidate():
+    """The window closes at 30 minutes: a block exactly 30 minutes before the item, and one exactly 30 minutes after it,
+    are within it, so neither is a candidate. The stub's naming of both is rejected."""
+    root = repeat_repo("repeat-window-edge", step=True)
+    cfg = new_cfg()
+    write_inbox(cfg, NEW_SID, [(BEFORE_30, MSG_ONE, []), (EARLY_HEADER, MSG_ONE, [WINDOW_ITEM_LINE]),
+                               (AFTER_30, MSG_ONE, [])])
+    answer = json.dumps({"repeats": [{"id": WINDOW_ITEM_ID, "ref": new_ref(BEFORE_30)},
+                                     {"id": WINDOW_ITEM_ID, "ref": new_ref(AFTER_30)}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    refs = candidate_refs(calls[0]["prompt"]) if len(calls) == 1 else []
+    check("window edge: one model call, and the roadmap step is its candidate",
+          len(calls) == 1 and REPEAT_REF in refs, p.desc() + " " + str(refs))
+    check("window edge: the block exactly 30 minutes before is not a candidate", new_ref(BEFORE_30) not in refs, refs)
+    check("window edge: the block exactly 30 minutes after is not a candidate", new_ref(AFTER_30) not in refs, refs)
+    check("window edge: the item gets no mark", inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID) == WINDOW_ITEM_LINE,
+          inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID))
+
+
+def case_repeat_mixed_offsets_inside_thirty_real_minutes_is_not_a_candidate():
+    """Across the night the clocks went back, a CDT block 25 real minutes before a CST block reads 35 minutes before it
+    on the clock faces. The window reads real time, so the CDT block is within it: it is not the item's candidate, and
+    the stub's naming of it is rejected. A window that compared clock faces would keep it."""
+    root = repeat_repo("repeat-mixed-near", step=True)
+    cfg = new_cfg()
+    write_inbox(cfg, NEW_SID, [(MIXED_CDT_LATE, MSG_ONE, []), (MIXED_CST, MSG_TWO, [WINDOW_ITEM_LINE])])
+    answer = json.dumps({"repeats": [{"id": WINDOW_ITEM_ID, "ref": new_ref(MIXED_CDT_LATE)}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    refs = candidate_refs(calls[0]["prompt"]) if len(calls) == 1 else []
+    check("mixed near: one model call, and the roadmap step is its candidate",
+          len(calls) == 1 and REPEAT_REF in refs, p.desc() + " " + str(refs))
+    check("mixed near: the CDT block 25 real minutes before is not a candidate",
+          new_ref(MIXED_CDT_LATE) not in refs, refs)
+    check("mixed near: the item gets no mark", inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID) == WINDOW_ITEM_LINE,
+          inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID))
+
+
+def case_repeat_mixed_offsets_beyond_thirty_real_minutes_stays_a_candidate():
+    """The reverse: a CDT block 70 real minutes before a CST block reads 10 minutes before it on the clock faces. The
+    window reads real time, so the CDT block stays the item's candidate, and the stub's naming of it marks the item."""
+    root = repeat_repo("repeat-mixed-far", step=True)
+    cfg = new_cfg()
+    write_inbox(cfg, NEW_SID, [(MIXED_CDT_EARLY, MSG_ONE, []), (MIXED_CST, MSG_TWO, [WINDOW_ITEM_LINE])])
+    cdt_ref = new_ref(MIXED_CDT_EARLY)
+    answer = json.dumps({"repeats": [{"id": WINDOW_ITEM_ID, "ref": cdt_ref}]})
+    p, calls = stop(cfg, NEW_SID, root, answer=answer)
+    refs = candidate_refs(calls[0]["prompt"]) if len(calls) == 1 else []
+    check("mixed far: one model call, and the roadmap step is its candidate",
+          len(calls) == 1 and REPEAT_REF in refs, p.desc() + " " + str(refs))
+    check("mixed far: the CDT block 70 real minutes before is a candidate", cdt_ref in refs, refs)
+    check("mixed far: the item is marked against the CDT block",
+          inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID) == WINDOW_ITEM_LINE + " repeats " + cdt_ref,
+          inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID))
+
+
+def case_repeat_only_near_blocks_left_makes_no_model_call():
+    """Every item's candidates are its own block or blocks within 30 minutes of it, so no candidate is left for any
+    item. The two items sit 16 minutes apart, each the other's near block, and the repo has no roadmap step or debt.
+    The Stop makes no model call, and neither item is marked."""
+    root = repeat_repo("repeat-only-near")
+    cfg = new_cfg()
+    near_line = "- fb-1020-1 [note] -> noted"
+    write_inbox(cfg, NEW_SID, [(EARLY_HEADER, MSG_ONE, [WINDOW_ITEM_LINE]), (NEAR_HEADER, MSG_TWO, [near_line])])
+    p, calls = stop(cfg, NEW_SID, root, answer=ANSWER_NONE)
+    check("only near: no model call", len(calls) == 0, p.desc() + " calls=%d" % len(calls))
+    check("only near: the first item gets no mark", inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID) == WINDOW_ITEM_LINE,
+          inbox_line(cfg, NEW_SID, WINDOW_ITEM_ID))
+    check("only near: the second item gets no mark", inbox_line(cfg, NEW_SID, "fb-1020-1") == near_line,
+          inbox_line(cfg, NEW_SID, "fb-1020-1"))
 
 
 def case_repeat_other_session_one_minute_away_stays_a_candidate():
@@ -4866,6 +4943,10 @@ CASES = (
     case_repeat_same_minute_blocks_keep_their_own_candidates,
     case_repeat_candidate_within_thirty_minutes_is_not_a_candidate,
     case_repeat_candidate_thirty_one_minutes_away_stays_a_candidate,
+    case_repeat_candidate_exactly_thirty_minutes_away_is_not_a_candidate,
+    case_repeat_mixed_offsets_inside_thirty_real_minutes_is_not_a_candidate,
+    case_repeat_mixed_offsets_beyond_thirty_real_minutes_stays_a_candidate,
+    case_repeat_only_near_blocks_left_makes_no_model_call,
     case_repeat_other_session_one_minute_away_stays_a_candidate,
     case_repeat_today_false_pairs_are_not_marked,
     case_repeat_prompt_says_a_follow_up_on_the_same_topic_is_not_a_repeat,
