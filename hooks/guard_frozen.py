@@ -1252,6 +1252,9 @@ def _py_run_folder_is_helper(tree) -> bool:
     a lambda, an assignment, a parameter, another import). A `run_folder` the script makes itself may name
     any folder, so a join on it is no temp head. Any scope counts: the check is the whole tree, not an order."""
     import ast
+    # The match-statement nodes exist from Python 3.10; the 3.9 floor has none, so a script there has no such binding.
+    match_name = tuple(getattr(ast, n) for n in ("MatchAs", "MatchStar") if hasattr(ast, n))
+    match_rest = tuple(getattr(ast, n) for n in ("MatchMapping",) if hasattr(ast, n))
     imported = False
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
@@ -1276,10 +1279,10 @@ def _py_run_folder_is_helper(tree) -> bool:
         elif isinstance(node, ast.ExceptHandler):
             if node.name == "run_folder":
                 return False
-        elif isinstance(node, (ast.MatchAs, ast.MatchStar)):
+        elif match_name and isinstance(node, match_name):
             if node.name == "run_folder":
                 return False
-        elif isinstance(node, ast.MatchMapping):
+        elif match_rest and isinstance(node, match_rest):
             if node.rest == "run_folder":
                 return False
     return imported
@@ -1404,7 +1407,10 @@ def _py_env_at(tree, script: str = ""):
     came from: `__file__` is that path, so `dirname(__file__)` is the script's own folder."""
     top = {id(statement) for statement in tree.body}
     events = _py_bindings(tree)
-    run_folder_is_helper = _py_run_folder_is_helper(tree)
+    try:
+        run_folder_is_helper = _py_run_folder_is_helper(tree)
+    except Exception:   # fail closed: a helper that cannot judge the name leaves `run_folder` no temp head, so the write is refused
+        run_folder_is_helper = False
 
     def env_at(call):
         env = {"__file__": [script]} if script else {}
