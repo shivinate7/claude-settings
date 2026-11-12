@@ -5604,8 +5604,8 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
     RUN_FORMS = ("it fails on %s at %s.", "it fails on %s at commit %s.", "it fails on %s (%s).", "it is red on %s@%s.")
 
     def test_pe_red_incident_pr_head_hash_on_main_is_refused(self):
-        # Catches: "on main at <sha>" passes for the PR's own head sha, so the PR's failure reads as pre-existing. This is
-        # the incident form (decision pre-existing-needs-main-run, incident 2026-11-07): the lane cited its head as main's run.
+        # Catches: "on main at <sha>" passes for the PR's own head sha, so the PR's failure reads as pre-existing.
+        # Decision pre-existing-needs-main-run names this form as the one to refuse: a lane cited its own head as main's run.
         self.assert_fixture_shape()
         self.assertFalse(self.ancestor(self.P, "origin/main"), "fixture: P is on pr only, not on main")
         line = "The failure is pre-existing; it fails on main at %s." % self.P
@@ -5660,7 +5660,7 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
         self.assertNotEqual(probe.returncode, 0, "fixture: git knows the hash")
         self.assert_allowed("The failure is pre-existing; it fails on main at %s." % unknown)
 
-    # Item 571, round 1: the rule's git cost, the shallow-clone limit, and the known debt of a PR's own branch as a base.
+    # Item 571: the rule's git cost, the shallow-clone limit, and the known debt of a PR's own branch as a base.
 
     # Runs the guard under a wrapper that logs each git process it starts. Every git read the guard makes goes through
     # subprocess.Popen, so the log holds the git calls of one run.
