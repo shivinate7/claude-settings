@@ -9749,6 +9749,45 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.refs(), refs_before, "pushed on a refusal")
         self.assertRegex(out, r"[Rr]evert that claim commit[\s\S]*draft", out)
 
+    def test_a_merge_of_the_base_over_a_claim_that_took_a_number_still_names_the_revert(self):
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 0, out)
+        self.on("main", {"docs/decisions/third.md": record("D-002", "third")}, "a record that takes the number")
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "merge", "-q", "--no-edit", "origin/main")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        self.host.draft = False
+        refs_before = self.refs()
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.refs(), refs_before, "pushed on a refusal")
+        self.assertRegex(out, r"[Rr]evert that claim commit[\s\S]*draft", out)
+
+    def test_the_remedy_of_a_claim_head_whose_base_moved_ends_in_a_merge(self):
+        self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 0, out)
+        self.on("main", {"docs/decisions/third.md": record("D-002", "third")}, "a record that takes the number")
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat")
+        sh(o, "git", "revert", "--no-edit", "HEAD")
+        sh(o, "git", "merge", "-q", "--no-edit", "origin/main")
+        sh(o, "git", "push", "-q", "origin", "feat")
+        rc, out = self.draft_confirm()
+        self.assertEqual(rc, 0, out)
+        self.assertIn(7, self.host.readies)
+        ready_head = self.rev("origin/feat")
+        self.assertNotEqual(self.log1("%(trailers:key=Record-claim,valueonly)", ready_head).strip(), "", "the draft step claimed no fresh number")
+        self.host.draft = False
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.rev("origin/main^2"), ready_head, "a commit was pushed after the ready run")
+        self.assertTrue(getattr(self.host, "merged", False), out)
+
     def test_prepare_draft_confirm_never_calls_merge_on_any_path(self):
         # One repo, four draft confirms in turn: a stale page, a current page, a refused push, and a head behind main.
         # On each, merge is never called and the pull request stays open.
