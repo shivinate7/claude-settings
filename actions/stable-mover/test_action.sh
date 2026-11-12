@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Red run: the stable mover moves stable to a green main head, and leaves stable alone on a failed
-# run, on a head that does not descend from stable, and on a head behind stable (exit 0). The contract the mover (actions/stable-mover/run.sh)
-# is built to: run in a checkout whose origin is the fixture, with HEAD_SHA (the green head) and
-# RUN_CONCLUSION (the run's conclusion). It pushes HEAD_SHA to refs/heads/stable, fast-forward only.
+# The stable mover (actions/stable-mover/run.sh) moves stable to a green main head, fast-forward only. It leaves
+# stable alone on a failed run, on a head that does not descend from stable, on a head that origin's main lacks,
+# and on a head behind stable (exit 0). It creates stable when origin has none, and exits 2 (UNKNOWN) when origin
+# cannot be read. Run in a checkout whose origin is the fixture, with HEAD_SHA and RUN_CONCLUSION set.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
@@ -40,13 +40,17 @@ origin_sha() { # origin_sha <origin dir> <branch>: the sha the fixture origin ho
 control() { # control <label> <got> <want>: the fixture is set up as the case says before the mover runs
   if [ "$2" = "$3" ]; then ok "control: $1"; else fail "control: $1 (fixture holds $2, wanted $3)"; fi
 }
-# scenario <name> <stable commit>: sets origin and ws. The origin's main is the green head and its stable is the
-# given commit. The checkout ws is a clone of that origin, so its origin is the fixture.
+# scenario <name> <stable commit | none> [<side commit>]: sets origin and ws. The origin's main is the green head; its
+# stable is the given commit, or absent for none. A side commit becomes a branch of its own, so a checkout can hold a
+# head that main lacks. The checkout ws is a clone of that origin, so its origin is the fixture.
 scenario() {
   origin="$work/$1.git"
   ws="$work/$1.ws"
   git init -q --bare -b main "$origin" || { echo "FAIL - fixture $1: init of the origin failed"; exit 1; }
-  git -C "$seed" push -q "$origin" "$green:refs/heads/main" "$2:refs/heads/stable" \
+  refs=("$green:refs/heads/main")
+  [ "$2" = none ] || refs+=("$2:refs/heads/stable")
+  [ -z "${3:-}" ] || refs+=("$3:refs/heads/side")
+  git -C "$seed" push -q "$origin" "${refs[@]}" \
     || { echo "FAIL - fixture $1: push to the origin failed"; exit 1; }
   git clone -q "$origin" "$ws" || { echo "FAIL - fixture $1: clone of the origin failed"; exit 1; }
 }
@@ -91,6 +95,34 @@ if [ "$got" = "$ahead" ]; then ok "a green run behind stable leaves stable where
 else fail "behind stable: stable moved backwards on a green run (stable at $got, wanted $ahead)"; fi
 if [ "$mover_rc" -eq 0 ]; then ok "a green run behind stable exits 0"
 else fail "behind stable: the mover exited $mover_rc, wanted 0"; fi
+
+# No stable yet (the first live run): the mover creates stable at the green head.
+scenario absent none
+control "a green run with no stable: the fixture has no stable" "$(origin_sha "$origin" stable)" none
+control "a green run with no stable: the fixture main is the green head" "$(origin_sha "$origin" main)" "$green"
+run_mover "$ws" "$green" success
+got=$(origin_sha "$origin" stable)
+if [ "$got" = "$green" ]; then ok "a green run with no stable creates stable at the green head"
+else fail "absent stable: stable was not created at the green head (stable at $got, wanted $green)"; fi
+
+# A green head that main lacks. It descends from stable, so only the main check refuses it.
+scenario offmain "$base" "$diverged"
+control "a head off main: the fixture stable is the old base" "$(origin_sha "$origin" stable)" "$base"
+control "a head off main: the fixture main is the green head" "$(origin_sha "$origin" main)" "$green"
+if git --git-dir="$origin" merge-base --is-ancestor "$diverged" refs/heads/main; then on_main=yes; else on_main=no; fi
+control "a head off main: origin's main does not hold the head" "$on_main" no
+run_mover "$ws" "$diverged" success
+got=$(origin_sha "$origin" stable)
+if [ "$got" = "$base" ]; then ok "a green run whose head main lacks leaves stable alone"
+else fail "head off main: stable moved to a head that origin's main does not hold (stable at $got, wanted $base)"; fi
+
+# An origin that cannot be read: the mover fails closed with exit 2, and does not read stable as absent.
+scenario unreadable "$base"
+git -C "$ws" remote set-url origin "$work/gone.git"
+control "an unreadable origin: the origin path is missing" "$(test -e "$work/gone.git" && echo present || echo missing)" missing
+run_mover "$ws" "$green" success
+if [ "$mover_rc" -eq 2 ]; then ok "an unreadable origin exits 2 (UNKNOWN)"
+else fail "unreadable origin: the mover exited $mover_rc, wanted 2 (UNKNOWN)"; fi
 
 if [ "$fails" -eq 0 ]; then echo "stable-mover: all cases pass"; exit 0; fi
 echo "stable-mover: $fails failed"
