@@ -12,6 +12,7 @@ MRF_BARE = os.path.join(MRF_DIR, "bare.git")          # the origin of MRF_REPO, 
 MRF_REPO = os.path.join(MRF_DIR, "repo")              # origin is MRF_ORIGIN, and refs/pull/7/head exists
 MRF_NOORIGIN = os.path.join(MRF_DIR, "noorigin")      # a repo with no origin at all
 MRF_BADREMOTE = os.path.join(MRF_DIR, "badremote")    # origin routed to a bare path that is not there
+MRF_NOREPO = os.path.join(MRF_DIR, "norepo")          # a plain folder, no git repo at all
 MRF_GH_BIN = os.path.join(MRF_DIR, "gh-bin")          # a folder that holds the fake gh
 MRF_GH_LOG = os.path.join(MRF_DIR, "gh-calls.log")    # one line per call the fake gh receives
 MRF_PATH = MRF_GH_BIN + os.pathsep + os.environ.get("PATH", "")
@@ -56,6 +57,7 @@ def mrf_build():
     """The message-ref fixtures, built on first use: a repo whose origin routes to a bare repo holding
     refs/pull/7/head, a repo with no origin, a repo whose origin routes to a missing path, and the fake gh."""
     os.makedirs(MRF_DIR, exist_ok=True)
+    os.makedirs(MRF_NOREPO, exist_ok=True)
     _rsha_git(MRF_DIR, "init", "-q", "--bare", MRF_BARE)
     for where in (MRF_REPO, MRF_NOORIGIN, MRF_BADREMOTE):
         os.makedirs(where, exist_ok=True)
@@ -96,6 +98,9 @@ def mrf_build():
     rc, remotes, _ = _mrf_probe(MRF_NOORIGIN, VCS, "remote")
     if rc != 0 or remotes:
         sys.exit("fixture setup failed in mrf_build: MRF_NOORIGIN has a remote")
+    rc, _, _ = _mrf_probe(MRF_NOREPO, VCS, "config", "--local", "--get", "remote.origin.url")
+    if rc != 128:
+        sys.exit("fixture setup failed in mrf_build: MRF_NOREPO is inside a git repo (git config exit %d)" % rc)
     gh_env = dict(os.environ, PATH=MRF_PATH)
     rc, _, _ = _mrf_probe(MRF_REPO, "gh", "api", "repos/o/r/issues/comments/111", env=gh_env)
     if rc != 0:
@@ -109,7 +114,7 @@ def mrf_build():
         sys.exit("fixture setup failed in mrf_build: the fake gh error mode is not a non-404 failure")
 
 
-lazy_fixture([MRF_REPO, MRF_NOORIGIN, MRF_BADREMOTE, MRF_GH_BIN, MRF_SHALLOW, MRF_DEEP_SRC], mrf_build)
+lazy_fixture([MRF_REPO, MRF_NOORIGIN, MRF_NOREPO, MRF_BADREMOTE, MRF_GH_BIN, MRF_SHALLOW, MRF_DEEP_SRC], mrf_build)
 
 
 def mrf_judge(cwd, message, agent=None, env_path=None, mode=None):
@@ -127,16 +132,17 @@ def mrf_judge(cwd, message, agent=None, env_path=None, mode=None):
     })
 
 
-def mrf_case(name, expected, message, cwd=MRF_REPO, carries=(), mode=None, context=False):
+def mrf_case(name, expected, message, cwd=MRF_REPO, carries=(), mode=None, context=False, lacks=()):
     """One send_message case from the main session. An agent's send never reaches this check: the agent-remote-tools
     rule (agent-no-remote-tools) refuses it first, so an agent variant could only ever read that refusal.
-    `context` asks for an allow whose output holds additionalContext and no permissionDecision key."""
+    `context` asks for an allow whose output holds additionalContext and no permissionDecision key. `lacks` names
+    fragments the printed reason must not hold."""
     env = {"FAKE_GH_LOG": MRF_GH_LOG}
     if mode:
         env["FAKE_GH_MODE"] = mode
     add("message-ref-missing: %s, main session" % name, expected, MRF_RULE if expected == "deny" else None,
-        tool=SEND_MESSAGE, cwd=cwd, env_path=MRF_PATH, env=env, carries=carries, no_permission_key=context,
-        message=message)
+        tool=SEND_MESSAGE, cwd=cwd, env_path=MRF_PATH, env=env, carries=carries, lacks=lacks,
+        no_permission_key=context, message=message)
 
 
 mrf_case("a made-up commit sha is refused", "deny", "Record link: commit 8c1f0e2a7 has the fix.",
@@ -155,6 +161,10 @@ mrf_case("a pull URL of another repo is not judged", "allow",
          "See https://github.com/x/y/pull/8 for the upstream change.")
 mrf_case("a sha on a line that names x/y@<sha> on main is not judged", "allow", "x/y@8c1f0e2a7 on main.")
 mrf_case("a PR in a repo with no origin is not judged", "allow", "PR #8 has the fix.", cwd=MRF_NOORIGIN)
+# A folder that is no git repo: its PR and comment links are neither judged nor named, and its sha is named unchecked.
+mrf_case("a PR, a comment link and a made-up sha in a folder that is no git repo: the sha is named, the PR and comment are not",
+         "allow", "See https://github.com/o/r/pull/7#issuecomment-222 and PR #8 for it, at 8c1f0e2a7.",
+         cwd=MRF_NOREPO, carries=("8c1f0e2a7",), lacks=("#8", "222"), context=True)
 mrf_case("a message with no ref is allowed", "allow", "Verdict: pass, nothing to name.")
 # Fail open: the call is allowed, and the output names each ref it could not check in additionalContext,
 # with no permissionDecision key, so the sender sees the note and no permission prompt is skipped.
@@ -182,6 +192,11 @@ mrf_case("PRs 7 and 8, with 8 missing, is refused and names 8", "deny",
          "PRs 7 and 8 are open.", carries=("#8",))
 mrf_case("a commit link of this repo for a made-up sha is refused", "deny",
          "See https://github.com/o/r/commit/8c1f0e2a7 for it.", carries=("8c1f0e2a7",))
+# The refusal of a missing sha names the route to it: `git fetch origin`, the route the report-sha refusal names.
+mrf_case("a made-up sha is refused, and the refusal names git fetch origin", "deny",
+         "Record link: commit 8c1f0e2a7 has the fix.", carries=("8c1f0e2a7", "git fetch origin"))
+mrf_case("a made-up commit link is refused, and the refusal names git fetch origin", "deny",
+         "See https://github.com/o/r/commit/8c1f0e2a7 for it.", carries=("8c1f0e2a7", "git fetch origin"))
 # Fail open: a gh 500 whose URL holds /404/ is not a 404, so the link is left unchecked and named.
 mrf_case("a gh 500 whose URL holds /404/ leaves comment 333 unchecked, and the output names it", "allow",
          "See https://github.com/o/r/pull/7#issuecomment-333 for the reply.", carries=("333",), mode="url404",
