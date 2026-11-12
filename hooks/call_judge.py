@@ -72,7 +72,7 @@ if HERE not in sys.path:
 # shared_names is standard library only and adds about 2 ms.
 from shared_names import EXPLORE_AUDIT_MARKER  # noqa: E402
 from shared_names import DATA_TOOL  # noqa: E402  stdlib only: the one home of the tool name
-from shared_names import BRIEF_LINE, BRIEF_MARKER_LINE, BRIEF_TOOL  # noqa: E402  the lane brief's names, stdlib only
+from shared_names import BRIEF_LINE, BRIEF_MARKER_LINE, BRIEF_TOOL, brief_lines, is_lane_create_session  # noqa: E402  the lane brief's names and readers, stdlib only
 
 OK_SHAPE = {"ok": (True, False)}
 SPAWN_RULE, QUESTION_RULE, REFUTER_RULE = "spawn-judge", "question-judge", "check-refuter"
@@ -386,12 +386,13 @@ def past_ruling_context(payload, units):
             question_form.unreadable_sources(unknown))
 
 
-def refute_brief(payload, args):
-    """The send_message site: judge a lane brief's Done check line. 0 for a message without the lane brief marker, before
-    any heavy import. Fails CLOSED for a brief: no check line, a gap, an unknown or a crash all refuse under
-    check-refuter, because a refuter that fails open would let any brief through by breaking it."""
-    message = args.get("message") if isinstance(args, dict) else None
-    first = next((line.strip() for line in message.splitlines() if line.strip()), "") if isinstance(message, str) else ""
+def refute_brief(payload, tool, args):
+    """The lane-brief site: a send_message's message, or a lane start's (create_session) prompt. Judges the brief's Done
+    check line. 0 for a text without the lane brief marker, before any heavy import. Fails CLOSED for a brief: no check
+    line, a gap, an unknown or a crash all refuse under check-refuter, because a refuter that fails open would let any
+    brief through by breaking it."""
+    message = args.get("message" if tool == BRIEF_TOOL else "prompt") if isinstance(args, dict) else None
+    first = next(iter(brief_lines(message)[1]), "")  # the first line after the Grant line, as the lane-topic guard reads it
     if not BRIEF_MARKER_LINE.match(first):
         return 0
     try:
@@ -408,7 +409,7 @@ def refute_brief(payload, args):
             import question_form
             root = question_form._git_root_of(payload.get("cwd") or "")
             if not root:
-                raise ValueError("no checkout holds the brief's record")
+                raise ValueError("no checkout holds the brief's record. " + check_refuter.fetch_hint())
             title, why = check_refuter.ask_for_step(root, found.group("step"))
             verdict, case = check_refuter.refute(title, why, check_line)
     except Exception as exc:
@@ -419,15 +420,15 @@ def refute_brief(payload, args):
         reason = "the Done check line could pass with the ask unmet: %s Rewrite the check so a pass proves the ask." % case
     else:
         reason = "the check refuter's verdict is unknown (%s), so the brief's Done check line is unchecked. Send again." % case
-    return refuse(payload, BRIEF_TOOL, args, REFUTER_RULE, reason)
+    return refuse(payload, tool, args, REFUTER_RULE, reason)
 
 
 def main():
     try:
         payload = json.loads(sys.stdin.buffer.read().decode("utf-8", "replace"))
         tool, args = payload.get("tool_name"), payload.get("tool_input")
-        if tool == BRIEF_TOOL:
-            return refute_brief(payload, args)
+        if tool == BRIEF_TOOL or (isinstance(args, dict) and is_lane_create_session(tool, args)):
+            return refute_brief(payload, tool, args)
         if tool not in JUDGES:
             return 0
         if not isinstance(args, dict):

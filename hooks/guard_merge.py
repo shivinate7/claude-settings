@@ -18,7 +18,7 @@ from guard_core import (
     is_cloud, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import BUILD_TAG, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import BUILD_TAG, DATA_TOOL, LANE_TAG, TOPIC_TAG, brief_lines, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -1797,10 +1797,7 @@ def brief_hit(tool: str, tool_input, transcript: str):
         text = tool_input.get("prompt")
     else:
         return None
-    lines = [line.strip() for line in text.splitlines() if line.strip()] if isinstance(text, str) else []
-    grant = None
-    if lines and lines[0].startswith(LANE_GRANT_MARKER):  # a lane brief opens with the owner's Grant line; the marker line follows it
-        grant, lines = lines[0], lines[1:]
+    grant, lines = brief_lines(text)  # a lane brief opens with the owner's Grant line; the marker line follows it
     first = lines[0] if lines else ""
     if not _BRIEF_MARKER_LINE.match(first):
         if tool != BRIEF_TOOL and any(_BRIEF_MARKER_LINE.match(line) for line in lines[1:]):  # a start's marker past its first line is read by no one

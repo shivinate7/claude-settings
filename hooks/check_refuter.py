@@ -80,9 +80,17 @@ def is_placeholder(check):
     return isinstance(check, str) and _PLACEHOLDER.fullmatch(check.strip()) is not None
 
 
+def fetch_hint(branch="<record branch>"):
+    """The fetch command an unreadable step names: the one remedy for a ref that is missing or stale. With no checkout
+    the record branch is unknown, so the placeholder stands for it."""
+    return ("If the record branch is not fetched or is stale, run: git fetch origin +refs/heads/%s:refs/remotes/origin/%s"
+            % (branch, branch))
+
+
 def ask_for_step(root, step):
     """(title, why) of roadmap step `step`, read from the local ref refs/remotes/origin/<record branch> of the repo at
-    `root`. Raises when the ref, the file or a field is missing, so a caller reads it as unknown."""
+    `root`. Raises when the ref, the file or a field is missing, so a caller reads it as unknown. Each of those reasons
+    names the fetch command, since a fetch of the record branch is the remedy for all of them."""
     import layout  # lint/layout.py, the one home of the record branch
     if not isinstance(step, str) or not _STEP_ID.fullmatch(step):
         raise ValueError("step %r is not a step id" % (step,))
@@ -91,13 +99,15 @@ def ask_for_step(root, step):
     run = _nowindow.run(["git", "show", "%s:%s" % (ref, STEP_PATH % step)], cwd=root, capture_output=True,
                         timeout=GIT_TIMEOUT)
     if run.returncode != 0:
-        raise ValueError("git show %s failed: %s. If the record branch is not fetched or is stale, run: git fetch origin "
-                         "+refs/heads/%s:refs/remotes/origin/%s" % (ref, run.stderr.decode("utf-8", "replace").strip()[:200],
-                                                                    branch, branch))
-    data = json.loads(run.stdout.decode("utf-8", "replace"))
-    title, why = data.get("title"), data.get("why")
+        raise ValueError("git show %s failed: %s. %s" % (ref, run.stderr.decode("utf-8", "replace").strip()[:200],
+                                                         fetch_hint(branch)))
+    try:
+        data = json.loads(run.stdout.decode("utf-8", "replace"))
+    except ValueError as exc:
+        raise ValueError("step %s on %s is not valid JSON (%s). %s" % (step, ref, exc, fetch_hint(branch)))
+    title, why = (data.get("title"), data.get("why")) if isinstance(data, dict) else (None, None)
     if not all(isinstance(v, str) and v.strip() for v in (title, why)):
-        raise ValueError("step %s on %s has no title or no why" % (step, ref))
+        raise ValueError("step %s on %s has no title or no why. %s" % (step, ref, fetch_hint(branch)))
     return title, why
 
 

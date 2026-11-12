@@ -121,6 +121,16 @@ def grant_line_holds_words(line: str) -> bool:
     return "<" not in words and any(c.isalnum() for c in words)
 
 
+def brief_lines(text: object) -> tuple[Optional[str], list[str]]:
+    """(grant, lines) of a lane brief's text: its non-blank lines, stripped, with a leading `Grant:` line split off as
+    `grant` (None when there is none). The one reading of where a brief's marker line sits, shared by the lane-topic
+    guard and the check refuter."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()] if isinstance(text, str) else []
+    if lines and lines[0].startswith(LANE_GRANT_MARKER):
+        return lines[0], lines[1:]
+    return None, lines
+
+
 def lane_head_refs(slug: str) -> tuple[str, str]:
     """The head refs a lane's pull request may carry for its step `slug`: the bare slug and `lane/<slug>`. The one
     home, read by the roadmap build (idle lanes, stalled steps) and by the archive guard, so the two forms cannot

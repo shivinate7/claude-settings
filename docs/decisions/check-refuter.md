@@ -2,7 +2,7 @@
 
 ## The ruling
 
-Ruling: owner, 2026-11-06, the owner's waiting-page item 284 c. The owner's waiting-page item 282 b, same day, fixes the word as "refuter". The owner's waiting-page item 289, 2026-11-06 13:59 CST, says "for now let's do sonnet for all": the refuter runs Sonnet.
+Ruling: owner, 2026-11-06, the owner's waiting-page item 284 c. The owner's waiting-page item 282 b, same day, fixes the word as "refuter". The owner's waiting-page item 289, 2026-11-06 13:59 CST, says to use Sonnet for all for now. The refuter runs Sonnet.
 
 - Each lane brief carries one `Done check:` line. It names the one check that proves the ask met.
 - Before the send goes through, the check refuter reads that line once, blind. It asks whether the check could pass while the ask stays unmet.
@@ -11,9 +11,9 @@ Ruling: owner, 2026-11-06, the owner's waiting-page item 284 c. The owner's wait
 
 ## The check
 
-Check: `hooks/check_refuter.py`, the one home of the check refuter. `hooks/call_judge.py` calls it at a `send_message`.
+Check: `hooks/check_refuter.py`, the one home of the check refuter. `hooks/call_judge.py` calls it at a `send_message` and at a lane start by `create_session`.
 
-- Trigger: a `send_message` whose first non-blank line starts `Lane brief: <step>. Topic: <topic>.` Other messages make no model call and do not load the module.
+- Trigger: a `send_message` message, or the prompt of a `create_session` that carries the lane tag, whose first non-blank line after its optional `Grant:` line starts `Lane brief: <step>. Topic: <topic>.` The line is read as the lane-topic guard reads it (`shared_names.brief_lines`). Other messages and starts make no model call and do not load the module.
 - Done check line: the brief's line that names the check. These forms count:
   - plain: `Done check: <check>`
   - bold: `**Done check:** <check>`
@@ -31,7 +31,7 @@ Check: `hooks/check_refuter.py`, the one home of the check refuter. `hooks/call_
 - Answers:
   - met: the send goes through.
   - gap: the send is refused. The reason is the model's case.
-  - unknown: the send is refused. Causes: a model error, an odd answer, or an unreadable step (a missing ref, file, title or why). The reason names the fetch command: `git fetch origin +refs/heads/<record branch>:refs/remotes/origin/<record branch>`.
+  - unknown: the send is refused. Causes: a model error, an odd answer, or an unreadable step (a missing checkout, ref, file, title or why, or a step file that is not JSON). Each of those reasons names the fetch command: `git fetch origin +refs/heads/<record branch>:refs/remotes/origin/<record branch>`.
 - No Done check line, or a placeholder only: the send is refused, with no model call.
 - Override: the owner override (`docs/decisions/owner-override.md`) lifts each refusal: a gap, an unknown, or a missing line.
 
@@ -41,7 +41,7 @@ Check: `hooks/check_refuter.py`, the one home of the check refuter. `hooks/call_
 - A met answer is one model's read. The lane's own check still proves the work.
 - Unknown refuses. An unreadable step blocks a brief. It never passes one.
 - The step-close site is not in this change. It follows once PR #1317 (step-done-needs-check, which makes a step's done state need its check) merges. Then triage runs one command at step close. The command writes a dated refuter line into the step note. The roadmap build only reads that line.
-- Opus for some refuters is open. Lane `debate-model-tiers` decides it. Owner item 289 keeps Sonnet for all until then.
+- Opus for some refuters is open. Lane `debate-model-tiers` decides it. Owner item 289 keeps Sonnet for all until then. <!-- glossary-ok: the lane's slug is its name -->
 
 ## Guard need
 
@@ -60,7 +60,7 @@ Risk kind: likely risk. Per rule `building-guard-needs-incident`, a guard names 
 
 - Per lane brief: one Sonnet call and one `git show` of the step file from the record-branch ref.
 - Per refusal: one `guard.log` line, written by `guard_core.refuse()`, as every refusal does.
-- Per other `send_message`: no model call and no module load. The `call_judge` matcher now includes `send_message`, so each one starts the hook process.
+- Per other `send_message`: no model call and no module load. The `call_judge` matcher includes `send_message` and `create_session`, so each one starts the hook process.
 - No other file, timer or log.
 
 ## Done check
@@ -69,10 +69,10 @@ The cases in `hooks/test_check_refuter.py` are the Done check. They must cover:
 
 - A gap refuses, with the model's case.
 - A met answer sends.
-- A model error, an odd answer and an unreadable step each refuse as unknown, never met. The unknown reason names the fetch command.
+- A model error, an odd answer and an unreadable step each refuse as unknown, never met. An unreadable step's reason names the fetch command. A model error's or an odd answer's reason does not, since a fetch does not mend it.
 - A brief with no `Done check:` line, or only a `<...>` placeholder, refuses, with no model call.
 - Each accepted form counts, and a line inside a fenced block does not.
-- Any other `send_message` makes no model call.
+- A Grant-led brief and a lane start (`create_session`) are read the same way. Any other `send_message` or `create_session` makes no model call.
 
 That file lands with lane `check-line-reader`.
 
