@@ -2414,7 +2414,7 @@ def cannot_problem(records, text, refused=()):
 
 
 # Review-record check: a lane's round PASS claim needs a review record for the PR's live head. See the module docstring.
-REVIEW_TRIGGER_RE = re.compile(r"(?i:\bround\s+\d+\b|\breviewer\b)")
+REVIEW_TRIGGER_RE = re.compile(r"(?i:\bround\s+\d+\b|\breviewers?\b)")
 REVIEW_PASS_RE = re.compile(r"\bPASS(?:ED)?\b")
 # A PASS that a negator governs: the negator, at most one word, then PASS.
 REVIEW_NEGATED_RE = re.compile(r"(?i:(?:\b(?:not|never|nor|cannot)|n't)\s+(?:\w+\s+)?)PASS(?:ED)?\b")
@@ -2423,17 +2423,20 @@ REVIEW_HISTORY_RE = re.compile(
     r"(?i:\b(?:stale|outdated|superseded|invalidated|previously|formerly|no longer)\b"
     r"|\b(?:was|were)\s+(?:\w+\s+){0,2}(?:before|prior|earlier)\b)")
 REVIEW_CLAUSE_SPLIT_RE = re.compile(r"[,;]|--")
-# A PASS inside a statistic, which counts reviews and claims none: "PASS rate", "PASS count", "PASS 9", "90%PASS",
-# "9 of 10 lanes got PASS". A number after "round", "PR", "PRs", "#" or "/" names a round or a pull request, so it
-# never makes a statistic ("PR 12 PASS", "round 2 reviewer got PASS" stay claims).
+# A PASS inside a statistic, which counts reviews and claims none: "PASS rate", "PASS count", "90%PASS",
+# "9 of 10 lanes got PASS". A bare number after PASS ("PASS 12") is no statistic: it reads as a pull request number.
+# Only a tally ("PASS 9, FAIL 1") on a line that names no pull request is one (REVIEW_TALLY_RE).
+# A line that names a round, a pull request or a "#" is no statistic either: "PR 12 PASS", "round 2 reviewer got PASS",
+# "3 reviewers got PASS on #12" stay claims.
+REVIEW_PR_PATTERN = r"(?<![\w&])#(\d+)\b|\bPRs?\s*#?(\d+)\b|/pull/(\d+)\b"
 REVIEW_NOT_REF = r"(?<!(?i:round) )(?<!(?i:pr) )(?<!(?i:prs) )(?<![#/\w])"
 REVIEW_STAT_RE = re.compile(
     r"PASS(?:ED)?(?=[ \t]+(?i:rate|count|total|ratio|tally|percentage)\b)"
-    r"|PASS(?:ED)?[ \t]*[:=]?[ \t]*\d+(?=[ \t]*(?:[.)]|$|FAIL\b))"
     r"|%[ \t]*PASS(?:ED)?\b"
     r"|" + REVIEW_NOT_REF + r"\d+[ \t]+(?:(?i:of)[ \t]+\d+[ \t]+(?:[A-Za-z]+[ \t]+){0,2}|(?:[A-Za-z]*s[ \t]+){1,2})"
-    r"(?i:got|had|received|earned)[ \t]+(?:a[ \t]+)?PASS(?:ED)?\b")
-REVIEW_PR_RE = re.compile(r"(?<![\w&])#(\d+)\b|\bPRs?\s*#?(\d+)\b|/pull/(\d+)\b", re.I)
+    r"(?i:got|had|received|earned)[ \t]+(?:a[ \t]+)?PASS(?:ED)?\b(?![^\n]*?(?i:" + REVIEW_PR_PATTERN + r"))")
+REVIEW_PR_RE = re.compile(REVIEW_PR_PATTERN, re.I)
+REVIEW_TALLY_RE = re.compile(r"PASS(?:ED)?[ \t]*[:=]?[ \t]*\d+(?=[ \t]*,[ \t]*FAIL(?:ED)?[ \t]*[:=]?[ \t]*\d)")
 REVIEW_READ_TIMEOUT = 30  # seconds for one gh read
 REVIEW_CHECK_BUDGET = 70  # seconds for the whole review check of one reply, under the Stop hook's 80 s timeout (settings.json); the question and relay checks run outside this budget
 REVIEW_NO_PR = (
@@ -2475,10 +2478,11 @@ def review_claims(text):
         plain = CODE_SPAN.sub(lambda m: m.group(2), body)
         if not REVIEW_TRIGGER_RE.search(plain):
             continue
-        if not any(REVIEW_PASS_RE.search(REVIEW_NEGATED_RE.sub(" ", REVIEW_STAT_RE.sub(" ", clause))) and not REVIEW_HISTORY_RE.search(clause)
-                   for clause in REVIEW_CLAUSE_SPLIT_RE.split(plain)):
-            continue
         numbers = [int(g) for m in REVIEW_PR_RE.finditer(plain) for g in m.groups() if g]
+        counted = plain if numbers else REVIEW_TALLY_RE.sub(" ", plain)  # the tally spans two clauses, so strip it before the split
+        if not any(REVIEW_PASS_RE.search(REVIEW_NEGATED_RE.sub(" ", REVIEW_STAT_RE.sub(" ", stripped))) and not REVIEW_HISTORY_RE.search(clause)
+                   for clause, stripped in zip(REVIEW_CLAUSE_SPLIT_RE.split(plain), REVIEW_CLAUSE_SPLIT_RE.split(counted))):
+            continue
         claims.append((body, list(dict.fromkeys(numbers))))
     return claims
 
