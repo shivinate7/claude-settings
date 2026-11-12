@@ -78,7 +78,8 @@ jobs:
     # Cap 75 min, a stopgap under the owner's 2026-11-01 18:44 CST ruling in decision ci-job-caps: slowest 22.8 min
     # is 30% of it (range 15.5-22.8, median 19.8, n 27 green runs, runs 42074654512 to 42263498384,
     # 2026-11-05 17:26 to 2026-11-06 17:38 UTC), after the merge and install suites moved to checks-merge-install.
-    # Now 75, above the 3600 s suite cap that the janitor sweep mutation test runs under (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go).
+    # Now 75 (interim, owner 12:11 CST Nov 10; stopgap per decision ci-job-caps; ends with step time-pinned-tests-go). The janitor sweep mutation test,
+    # whose 3600 s suite cap that 75 sat above, now runs in checks-rest, which carries the same cap.
     # The lint family: the hooks/ suites moved to checks-hooks and the rest to checks-rest, because this job took 35.1 min in run 43234925158 (batch 103).
     # Its remaining steps summed 1008 s in that run (16.8 min; about 17.4 min with setup, projected).
     timeout-minutes: 75
@@ -568,10 +569,12 @@ jobs:
   checks-rest:
     runs-on: ubuntu-latest
     needs: scope
-    # provisional 60 (decision ci-job-caps, rule 6) until 5 green runs, then re-cap from the measured slowest / 0.7.
-    # These steps summed 520 s (8.7 min) inside the old `checks` job in run 43234925158; about 9.3 min with setup. Unmeasured as a job of its own.
+    # 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps; ends with step time-pinned-tests-go), above the 3600 s suite cap
+    # that the janitor sweep mutation test runs under. That test runs here, as it did in `checks`.
+    # These steps summed 520 s (8.7 min) inside the old `checks` job in run 43234925158 (the mutation test took 54 s there);
+    # about 9.3 min with setup. Unmeasured as a job of its own.
     # The mod step is the last step, as in every job that runs it (lint/test_windows_split.py MOD_JOBS).
-    timeout-minutes: 60 # provisional
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
