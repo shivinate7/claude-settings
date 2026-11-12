@@ -1,4 +1,4 @@
-# An agent pushes only where its brief says
+# An agent pushes only to the branch its brief names
 
 ## The ruling
 
@@ -7,9 +7,9 @@ Rule `push-target-named` in `hooks/guard.py` refuses an agent's `git push` unles
 - The mistake: in lane `writer-lists-awaiting-threads` a builder pushed to the lane branch before the review records were posted.
 - The harm: the early push breaks the pull request review record (`pr-review-record`) and lands unreviewed work on origin.
 - What is read: the payload's valid `agent_id` (`scratchpad_agent`, the one `AGENT_ID` pattern), then the first user record of that agent's own transcript (`own_session.agent_brief_text`, through `agent_transcript_path`). A record held as a list of blocks reads as its text blocks, one per line.
-  - A line counts when it starts, after markdown lead characters `#*_>` and spaces, with `Push to:`. A line inside a fence, or in backticks (a backtick cannot lead the line), does not count. A `**Push to:**` line is no line.
-  - The value is read without code ticks, a trailing full stop, `refs/heads/` or `origin/`.
-  - A line with an empty or `<placeholder>` value is skipped, indented or not. The first line with a real value decides.
+  - A line counts when it starts, after markdown lead characters `#*_>` and spaces, with `Push to:`. A line inside a fence, or in backticks (a backtick cannot lead the line), does not count.
+  - The value is the first word after `Push to:`, with backticks, asterisks, underscores, full stops, commas, semicolons and parentheses stripped from both ends (`brief_push_target`). A word that strips to empty is read past, so `**Push to:** lane-x` names `lane-x`. The words after the value are a note: `Push to: none (report only)` is none. `refs/heads/` and `origin/` are dropped from the value.
+  - A line with no value, or whose value starts with `<` (a placeholder such as `<branch>`), is skipped, indented or not. The first line with a real value decides.
 - Verdicts, each a refusal:
   - `none`: every push.
   - a named branch: a push whose destinations (`push_destinations`) are not all that branch, a glob, or a destination that cannot be resolved (a detached HEAD).

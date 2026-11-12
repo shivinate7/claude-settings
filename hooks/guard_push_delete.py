@@ -616,8 +616,9 @@ def push_destinations(args, cwd: str, overrides=None):
     return _DESTINATIONS[key]
 
 
-PUSH_LINE = re.compile(r"^[#*_>\s]*Push to:(?![*_])(.*)$")   # `**Push to:**` is no line: its value would start with `*`
+PUSH_LINE = re.compile(r"^[#*_>\s]*Push to:(.*)$")
 PUSH_FENCE = re.compile(r"^\s*(```|~~~)")
+PUSH_VALUE_EDGES = "`*_.,;()"   # markup and punctuation stripped from both ends of a Push to: word
 PUSH_NONE = "none"   # the value of a Push to: line that lets the agent push nothing
 PUSH_NO_TARGET_REASON = (
     "Rule (Git): an agent pushes only where its brief's Push to: line says, and this brief holds no such line or "
@@ -638,16 +639,17 @@ PUSH_OTHER_REASON = (
 def brief_push_target(brief):
     """The branch the brief's first real `Push to:` line names, `none` for a none line, else '' (no usable line). A line
     counts when it starts, after markdown lead characters (`#*_>`) and spaces, with `Push to:`, outside a fence and
-    not in backticks, which cannot start such a line. A `**Push to:**` line is no line. The value is read without code
-    ticks, a trailing full stop, `refs/heads/` or `origin/`. A line with an empty or `<placeholder>` value is skipped:
-    the first line with a real value decides."""
+    not in backticks, which cannot start such a line. The value is the first word after `Push to:` that is not empty
+    once PUSH_VALUE_EDGES are stripped from both ends, so `**Push to:** x` names x and the words after the value are a
+    note. `refs/heads/` and `origin/` are dropped from it. A line with no such word, or whose word is a `<placeholder>`,
+    is skipped: the first line with a real value decides."""
     fenced = False
     for line in brief.split("\n") if isinstance(brief, str) else []:
         if PUSH_FENCE.match(line):
             fenced = not fenced
         elif not fenced and (found := PUSH_LINE.match(line)):
-            value = found.group(1).strip().strip("`").rstrip(".").strip()
-            if not value or (value.startswith("<") and value.endswith(">")):
+            value = next((word for word in (w.strip(PUSH_VALUE_EDGES) for w in found.group(1).split()) if word), "")
+            if not value or value.startswith("<"):
                 continue
             if value.lower() == PUSH_NONE:
                 return PUSH_NONE

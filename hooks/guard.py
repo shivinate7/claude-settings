@@ -116,7 +116,8 @@ Shell tools (Bash, PowerShell), in judge_shell order:
                        (stale-safe-force-push)
   push-target-named    deny. An agent's (valid agent_id) non-dry `git push` whose brief, the first user record of
                        its own transcript, has no `Push to:` line (outside fences and backticks, after markdown
-                       lead characters; the first line decides), a `<placeholder>` or empty one, or a none one,
+                       lead characters; the value is its first word, edge markup stripped; the first line with a
+                       real value decides), a `<placeholder>` or empty one, or a none one,
                        or whose destinations are not all the branch that line names. A forced push keeps
                        force-push. An unreadable brief is no line. The remedy never names the destination.
                        Cost: one file read per agent push, no file written. (push-target-named)
