@@ -47,6 +47,10 @@ ATTRIBUTION = ["Co-Authored-By: Claude <noreply@anthropic.com>",
                "Claude-Session: https://claude.ai/code/session_0000"]
 MARKER = "RULING_CITE_RE"  # the string a parent's check file holds once the ruling rule has landed
 MARKER_OFF = "RULING_CITE_OFF"  # the same file with the marker renamed out: a parent from before the rule
+RULE_DATE = "2026-11-05T10:00:00Z"  # the landing commit's author and committer date
+OLD_DATE = "2026-11-01T10:00:00Z"  # a commit written before the rule landed
+REWRITE_DATE = "2026-11-09T10:00:00Z"  # a rewrite made after the rule landed
+DECISION_REL = "docs/decisions/widget-cite-rule.md"  # a decision home: the file must sit in the commit's tree
 # The incident commit's message, verbatim: a claim with no home and no time, in the subject and in the trailer.
 INCIDENT_SUBJECT = "Drop the span-flag and two-level red cases per the owner ruling"
 INCIDENT_MESSAGE = "\n".join([
@@ -121,15 +125,20 @@ class Fixture(unittest.TestCase):
                               capture_output=True, env=GIT_ENV)
         return done.returncode == 0
 
+    def epoch(self, rev, field):
+        """A commit's author date (field "at") or committer date (field "ct"), in epoch seconds."""
+        return int(self.git("log", "-1", "--format=%" + field, rev))
+
     def new_test_path(self):
         """A new test file path per call, so no two commits of one case add the same lines."""
         self.serial += 1
         return "lint/test_widgets_%d.py" % self.serial
 
-    def commit(self, subject, files, red=None, message=None, author_date=None):
+    def commit(self, subject, files, red=None, message=None, author_date=None, committer_date=None, amend=False):
         """Write files (a None value deletes one), commit them, return the full sha. `red` is the Red-run line.
-        `message`, when given, is the whole commit message, written as it stands. `author_date`, when given, sets
-        the commit's author date, so a case can order commits in time."""
+        `message`, when given, is the whole commit message, written as it stands. `author_date` and
+        `committer_date`, when given, set the commit's dates, so a case can order commits in time. `amend` rewrites
+        HEAD with the message and keeps its author, as git commit --amend does."""
         for rel, text in files.items():
             path = os.path.join(self.tree, *rel.split("/"))
             if text is None:
@@ -143,8 +152,10 @@ class Fixture(unittest.TestCase):
         if message is None:
             body = ([red] if red else []) + ATTRIBUTION
             message = subject + "\n\n" + "\n".join(body) + "\n"
-        env = {"GIT_AUTHOR_DATE": author_date} if author_date else None
-        self.git("commit", "-q", "--allow-empty", "--cleanup=verbatim", "-F", "-", input=message, env=env)
+        dates = {"GIT_AUTHOR_DATE": author_date, "GIT_COMMITTER_DATE": committer_date}
+        env = {name: value for name, value in dates.items() if value} or None
+        verb = ["commit", "-q", "--allow-empty", "--cleanup=verbatim"] + (["--amend"] if amend else [])
+        self.git(*verb, "-F", "-", input=message, env=env)
         return self.git("rev-parse", "HEAD")
 
     def base(self, files=None, check=True, marker=True):
@@ -530,7 +541,8 @@ class RulingCiteCase(CheckCase):
         self.assertClean()
 
     def test_claim_inside_backticks_passes(self):
-        """Inline code is a name. The span holds the phrase in a subject, in a line, and across a line break."""
+        """A noun in inline code names a thing, so it owes no cite. The phrase sits in a subject, in a line, and across
+        a line break."""
         cases = (("Refuse `owner ruling` with no cite", None),
                  ("Refuse claims with no cite", "Refuse `owner ruling` with no cite."),
                  ("Refuse claims with no cite", "A claim such as `owner\nruling` is a name."))
@@ -580,23 +592,44 @@ class RulingCiteCase(CheckCase):
                     subject, body="Per the owner's ruling, %s, 2026-11-08 08:15 CST." % home))
                 self.assertClean()
 
-    def test_pre_marker_commit_rebuilt_onto_a_marker_parent_passes(self):
-        """A commit written before the commit that first adds the marker, cherry-picked onto a parent that holds the
-        marker. Its author date is before that commit's, so the rule does not judge it."""
+    def test_pre_rule_commit_rebuilt_onto_a_rule_parent_is_judged(self):
+        """A commit written before the rule, rebuilt by cherry-pick after the rule landed. The rebuild is a new commit
+        with a new committer date, so the gate judges its message."""
         self.base(marker=False)
         self.git("checkout", "-q", "-b", "side")
         early = self.commit(INCIDENT_SUBJECT, {self.new_test_path(): TEST_TEXT}, message=INCIDENT_MESSAGE,
-                            author_date="2026-11-01T10:00:00Z")
+                            author_date=OLD_DATE, committer_date=OLD_DATE)
         self.git("checkout", "-q", "main")
-        marker = self.commit("land the ruling rule", {CHECK_REL: check_text(True)})
-        self.git("cherry-pick", early)
+        marker = self.commit("land the ruling rule", {CHECK_REL: check_text(True)},
+                             author_date=RULE_DATE, committer_date=RULE_DATE)
+        self.git("cherry-pick", early, env={"GIT_COMMITTER_DATE": REWRITE_DATE})
         rebuilt = self.git("rev-parse", "HEAD")
-        # Scope before the subject: the parent holds the marker, and the rebuilt commit predates the marker commit.
+        # Scope before the subject: the parent holds the marker, the rebuild keeps the old author date, and its
+        # committer date is after the landing commit's author date.
         self.assertIn(MARKER, self.git("show", marker + ":" + CHECK_REL))
-        self.assertLess(int(self.git("log", "-1", "--format=%at", rebuilt)),
-                        int(self.git("log", "-1", "--format=%at", marker)))
+        self.assertLess(self.epoch(rebuilt, "at"), self.epoch(marker, "at"))
+        self.assertGreaterEqual(self.epoch(rebuilt, "ct"), self.epoch(marker, "at"))
         self.base_sha = marker
-        self.assertClean()
+        self.assertRulingFlagged(rebuilt, INCIDENT_SUBJECT, "a commit rebuilt after the rule is not flagged")
+
+    def test_reworded_commit_from_before_the_rule_is_judged(self):
+        """A commit written before the rule, then reworded after it. An amend keeps the author date and sets a new
+        committer date, so the gate judges the reworded message."""
+        self.base(marker=False)
+        marker = self.commit("land the ruling rule", {CHECK_REL: check_text(True)},
+                             author_date=RULE_DATE, committer_date=RULE_DATE)
+        subject = "Drop the widget tests"
+        message = ruling_message(subject, body="Per the owner's ruling, drop it.")
+        old = self.commit(subject, {self.new_test_path(): TEST_TEXT}, message=message,
+                          author_date=OLD_DATE, committer_date=OLD_DATE)
+        # Scope before the subject: the commit predates the rule, and its parent holds the marker.
+        self.assertLess(self.epoch(old, "at"), self.epoch(marker, "at"))
+        self.assertTrue(self.has_file(old + "^", CHECK_REL))
+        self.assertClean()  # written before the rule, so its claim is not judged
+        reworded = self.commit(subject, {}, message=message, amend=True, committer_date=REWRITE_DATE)
+        self.assertEqual(self.epoch(reworded, "at"), self.epoch(old, "at"))  # the amend kept the author date
+        self.assertGreaterEqual(self.epoch(reworded, "ct"), self.epoch(marker, "at"))
+        self.assertRulingFlagged(reworded, subject, "a reworded commit from before the rule is not flagged")
 
     def test_ruling_trailer_does_not_cover_a_body_claim(self):
         """A Ruling: trailer covers a claim in the subject or the trailer block, not a claim in a body paragraph."""
@@ -606,8 +639,46 @@ class RulingCiteCase(CheckCase):
             subject, body="Per the owner's ruling, drop it.", trailers=["Ruling: step:x 08:15 CST"]))
         self.assertRulingFlagged(sha, subject, "a body claim with only a Ruling: trailer cite is not flagged")
 
+    def test_subject_claim_cited_in_a_body_paragraph_passes(self):
+        """A subject claim takes its home and time from a body paragraph that holds both."""
+        self.base()
+        subject = "Drop the widget tests per the owner ruling"
+        self.ruling_commit(subject, ruling_message(subject, body="Item 359 b, 2026-11-08 08:15 CST."))
+        self.assertClean()
+
+    def test_subject_claim_with_a_body_that_lacks_a_time_is_flagged(self):
+        self.base()
+        subject = "Drop the widget tests per the owner ruling"
+        sha = self.ruling_commit(subject, ruling_message(subject, body="Item 359 b."))
+        self.assertRulingFlagged(sha, subject, "a subject claim with a home and no time in the body is not flagged")
+
+    def test_body_claim_is_not_covered_by_the_next_paragraph(self):
+        """A body claim names its own home and time. The paragraph after it does not cover it."""
+        self.base()
+        subject = "Drop the widget tests"
+        sha = self.ruling_commit(subject, ruling_message(
+            subject, body="Per the owner's ruling, drop it.\n\nItem 359 b, 2026-11-08 08:15 CST."))
+        self.assertRulingFlagged(sha, subject, "a body claim covered by the next paragraph is not flagged")
+
+    def test_per_owner_ruling_named_by_letter_or_number_passes(self):
+        """A ruling named by its letter or its number is a home, as a page item is."""
+        for body in ("Per owner ruling r, 2026-11-11 16:43 CST.", "Per owner ruling 178, 08:15 CST."):
+            with self.subTest(body=body):
+                self.base()
+                subject = "Drop the widget tests"
+                self.ruling_commit(subject, ruling_message(subject, body=body))
+                self.assertClean()
+
+    def test_per_owner_ruling_named_by_letter_or_number_with_no_time_is_flagged(self):
+        for body in ("Per owner ruling r.", "Per owner ruling 178."):
+            with self.subTest(body=body):
+                self.base()
+                subject = "Drop the widget tests"
+                sha = self.ruling_commit(subject, ruling_message(subject, body=body))
+                self.assertRulingFlagged(sha, subject, "a ruling named by letter or number with no time is not flagged")
+
     def test_listed_claim_forms_with_no_cite_are_flagged(self):
-        """Each claim form owes a cite. These are the forms the round-2 review lists as still claims."""
+        """Each claim form owes a cite, whatever its wording."""
         claims = ("Dropped per the owner ruling.", "Dropped per the owner's ruling.", "Dropped per ruling.",
                   "Dropped under the owner's ruling.", "Dropped following the owner's ruling.",
                   "Dropped because the owner ruled.", "Dropped because Shivam ruled.",
@@ -620,12 +691,48 @@ class RulingCiteCase(CheckCase):
                 sha = self.ruling_commit(subject, ruling_message(subject, body=claim))
                 self.assertRulingFlagged(sha, subject, "a claim form with no cite is not flagged: " + claim)
 
-    def test_claim_quoted_in_backticks_for_a_remedy_passes(self):
-        """Quoting the phrase is not claiming it. The remedy's escape stays a pass."""
+    def test_claim_with_its_noun_in_backticks_is_flagged(self):
+        """Backticks name a noun. A claim form with only part of it in backticks is still a claim."""
+        for claim in ("Dropped per `owner's ruling`.", "Dropped per the `owner's ruling`."):
+            with self.subTest(claim=claim):
+                self.base()
+                subject = "Drop the widget tests"
+                sha = self.ruling_commit(subject, ruling_message(subject, body=claim))
+                self.assertRulingFlagged(sha, subject, "a claim with a backticked noun is not flagged: " + claim)
+
+    def test_lone_backtick_does_not_hide_a_later_claim(self):
+        """An unclosed backtick is text. A later code span in the same paragraph must not pair with it."""
         self.base()
         subject = "Drop the widget tests"
-        self.ruling_commit(subject, ruling_message(subject, body="Dropped per `owner's ruling`."))
+        body = "Press the ` key. Dropped per the owner's ruling. Run `make` after."
+        self.assertEqual(body.count("`"), 3, "the paragraph holds a lone tick and one code span")
+        sha = self.ruling_commit(subject, ruling_message(subject, body=body))
+        self.assertRulingFlagged(sha, subject, "a claim after a lone backtick is hidden by a later code span")
+
+    def test_owner_ruling_label_with_no_cite_is_flagged(self):
+        """A label line makes a ruling claim, so it owes a home and a time."""
+        for subject, body in (("Owner ruling: drop the widget tests", None),
+                              ("Drop the widget tests", "Owner ruling: drop it."),
+                              ("Drop the widget tests", "Owner's ruling: drop it.")):
+            with self.subTest(subject=subject, body=body):
+                self.base()
+                sha = self.ruling_commit(subject, ruling_message(subject, body=body))
+                self.assertRulingFlagged(sha, subject, "a label-form claim with no cite is not flagged")
+
+    def test_label_form_with_a_full_cite_passes(self):
+        self.base()
+        subject = "Drop the widget tests"
+        self.ruling_commit(subject, ruling_message(subject, body="Owner ruling: item 359 b, 2026-11-08 08:15 CST."))
         self.assertClean()
+
+    def test_ruling_nouns_without_a_claim_pass(self):
+        """A bare noun about rulings names a thing. With no claim form, it owes no cite."""
+        for body in ("Update the ruling census.", "Sort the rulings table."):
+            with self.subTest(body=body):
+                self.base()
+                subject = "Drop the widget tests"
+                self.ruling_commit(subject, ruling_message(subject, body=body))
+                self.assertClean()
 
     def test_claim_inside_a_fence_passes(self):
         self.base()
@@ -663,6 +770,17 @@ class RulingCiteCase(CheckCase):
                 subject = "Drop the widget tests"
                 sha = self.ruling_commit(subject, ruling_message(subject, body="Per the owner's ruling, %s." % cite))
                 self.assertRulingFlagged(sha, subject, "a decision home with no docs/decisions file is not flagged")
+
+    def test_decision_slug_with_its_file_in_the_commit_passes(self):
+        """A bare slug is a home when the commit's tree holds its file under the decisions folder."""
+        for cite in ("decision widget-cite-rule", "decision `widget-cite-rule`"):
+            with self.subTest(cite=cite):
+                self.base({DECISION_REL: "# Widget cite rule\n"})
+                subject = "Drop the widget tests"
+                self.ruling_commit(subject, ruling_message(
+                    subject, body="Per the owner's ruling, %s, 2026-11-08 08:15 CST." % cite))
+                self.assertTrue(self.has_file("HEAD", DECISION_REL))  # scope: the file is in the judged commit's tree
+                self.assertClean()
 
     def test_fail_line_names_the_missing_part(self):
         """The FAIL line names no home, no time, or both, and never the vague 'and time' wording."""
