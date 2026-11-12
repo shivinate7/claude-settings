@@ -30,8 +30,7 @@ share one definition of "the machine is loaded".
   reading, awaiting owner confirmation, and no step-record entry holds it. Applying the "a check that cannot read its input fails" ruling (item 276 a, which on main is only
   the page-check ruling in decision `page-check-at-export`) to `sim-lease` is this lane's reading, awaiting owner confirmation. "Slot 2 needs a normal machine" is this lane's mapping too. The queue order
   and the 18 Pro's slot rules are not load rules.
-- **Changed by this step.** The shared definition reads memory and disk only, and `sim-lease` drops its load-average bars. This is
-  carried from PR #1369's text (source unverified; awaiting owner confirmation), not an owner ruling. So a Mac with a high load average but free
+- **Changed by this step.** The shared definition reads memory and disk only, and `sim-lease` drops its load-average bars (item 309 a, owner 2026-11-06 15:45 CST). So a Mac with a high load average but free
   memory and disk grants a boot. The guard's verdicts are unchanged.
 
 Why: one capability has one home (`building-one-home-per-capability`), so the two readers can never disagree.
