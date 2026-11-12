@@ -12650,6 +12650,36 @@ class RedMainBrake(Env):
             self.refused(rc, again, before)
             self.assertIn("#2790", again, "the first-attempt text promises a pull-request blame on a red re-run, and the red re-run names no pull request")
 
+    # The walk from the breaking run takes only runs of its own workflow file and event group (breaking_line's filter). A run of another group between
+    # two push runs is neither blamed nor a stop. Green on the head; each case is red under the mutant named in its commit's trailer.
+    def test_a_red_schedule_run_of_the_same_file_between_push_runs_neither_breaks_nor_extends_the_walk(self):
+        # mutants: the group filter `if False:`, and the path-only filter `r["path"] != key[0]`, which keeps a schedule run of the same file
+        runs = [self.merge_run(906, "failure", 2650, run_attempt=2), main_run(905, "failure", event="schedule", sha=self.sha_of(905)), self.merge_run(904, "success", 2649)]
+        rc, out, before = self.go(runs, self.page_jobs(runs))
+        self.refused(rc, out, before)
+        self.assertRegex(out, r"#2650\b", "the walk does not name the push breaking merge, pull request #2650, past a red schedule run between push runs")
+        self.assertNotIn("gh run rerun 905", out, "the walk takes a schedule run between push runs as the first red run")
+
+    def test_a_red_links_run_between_push_runs_neither_breaks_nor_extends_the_walk(self):
+        # mutant: the group filter `if False:`; a run of another workflow file is outside the walk
+        links = main_run(905, "failure", name="links", path=LINKS_PATH, sha=self.sha_of(905))
+        runs = [self.merge_run(906, "failure", 2650, run_attempt=2), links, self.merge_run(904, "success", 2649)]
+        rc, out, before = self.go(runs, {**self.page_jobs(runs), 905: [main_job("readme-links", "failure", 20)]})
+        self.refused(rc, out, before)
+        self.assertRegex(out, r"#2650\b", "the walk does not name the push breaking merge, pull request #2650, past a red links.yml run between push runs")
+        self.assertNotIn("gh run rerun 905", out, "the walk takes a links.yml run between push runs as the first red run")
+
+    def test_a_run_between_a_red_and_its_green_parent_is_stepped_over_whatever_its_conclusion(self):
+        # mutant: dropping "cancelled" from the stepped-over tuple (breaking_line) makes the cancelled run 902 the first red run
+        for conclusion in ("cancelled", "skipped", "neutral"):
+            with self.subTest(conclusion=conclusion):
+                runs = [self.merge_run(903, "failure", 2651, run_attempt=2), self.merge_run(902, conclusion, 2650), self.merge_run(901, "success", 2649)]
+                jobs = {**self.page_jobs(runs), 902: [main_job("scope", "success"), main_job("checks", "cancelled", 2)]}
+                rc, out, before = self.go(runs, jobs)
+                self.refused(rc, out, before)
+                self.assertRegex(out, r"#2651\b", "the walk does not name the push breaking merge, pull request #2651, past a run that is " + conclusion)
+                self.assertNotIn("gh run rerun 902 --failed", out, "the walk takes a " + conclusion + " run between a red run and its green parent as the first red run")
+
     def test_a_revert_run_still_going_over_the_breaking_run_refuses_and_says_so(self):
         # the revert's own run, 906, is pending on main: base_state skips a first-attempt run still going, so breaking run 905 stays the newest red
         runs = [main_run(906, None, status="in_progress", sha=self.sha_of(906), message="Merge pull request #2653 from o/lane-2653"),
@@ -12690,6 +12720,13 @@ class RedMainBrake(Env):
     def test_the_revert_route_names_git_revert_m_1_for_a_merge_commit(self):
         _, out, _ = self.revert_route_refusal()
         self.assertIn("git revert -m 1", out, "the refusal does not name `git revert -m 1`, the way to revert a merge commit")
+
+    def test_the_revert_route_names_the_drops_lines_trailer_in_its_way_text(self):
+        # the positive pin beside the negative ones above: the way text itself names the trailer a revert PR needs (red_base's revert route)
+        _, out, _ = self.revert_route_refusal()
+        parts = out.split("No batch merges onto a red", 1)
+        self.assertEqual(len(parts), 2, "the refusal has no way text after its detail")
+        self.assertIn("Drops-lines", parts[1], "the revert route's way text does not name the Drops-lines trailer")
 
     def pr_head_after(self, *steps, drops=""):
         """Push feat, the PR head, on top of its own head. Each step is a sha to revert, "HEAD" to revert the commit before it, or "fix" to add a file.
