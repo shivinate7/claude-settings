@@ -1581,7 +1581,7 @@ def _wrapper_chdir(tokens):
     folder joins onto the one before it, as `env -C a env -C b` does."""
     found = None
     for word, flags in _walk_wrappers(tuple(tokens))[1]:
-        for flag, value in flags:
+        for flag, value, _ in flags:
             if flag in WRAPPER_CHDIR_FLAGS.get(word, ()) and value:
                 found = _chain_chdir(found, value)
     return found
@@ -2367,7 +2367,7 @@ def wrapped_commands(tokens, at: int, strict: bool = False):
     index, flags = _wrapper_flags(word, rest, 0)
     if strict and word in ("docker", "podman"):
         known = WRAPPER_VALUE_FLAGS[word] | EXEC_BARE_FLAGS
-        if any(flag not in known for flag, _ in flags):
+        if any(flag not in known for flag, _, _ in flags):
             return []
     inner = rest[index + skip:]
     return [shlex.join(inner)] if inner else []
