@@ -1,0 +1,14 @@
+{
+ "id": "rollup-needs-all-shards",
+ "title": "The all-jobs-passed rollup waits on every Windows shard",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A red or hung Windows shard does not hold the required all-jobs-passed check, so a batch can merge past it.",
+ "source": "coordinator 12:22 CST Nov 12, from the Plan agent of lane time-limits-end-hangs-only",
+ "note": "checks.yml rollup `needs` lacks windows-guard-2, windows-guard-3 and windows-merge-2 to -5. Also: all-jobs-passed and ci-done run only on pull_request, so they get no sample on main. Fix: a check that the rollup needs every job in the file (red first on today's file), then add the missing shards.",
+ "updatedAt": "2026-11-12T12:23:05-06:00"
+}
