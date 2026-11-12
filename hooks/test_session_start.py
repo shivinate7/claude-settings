@@ -416,13 +416,42 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         """True when the sentence names the lane session: its cs-build:lane tag, or the words `lane session`."""
         return "cs-build:lane" in sentence or "lane session" in sentence
 
+    # the skip verb, the clause breaks and the other verbs that end a skip's reach, and the session kinds (for the helpers below)
+    SKIP_VERB = re.compile(r"\bskip\w*", re.IGNORECASE)
+    CLAUSE_BREAK = re.compile(r"[,;:.()]")
+    OTHER_VERB = re.compile(r"\b(?:archiv\w*|runs?|names?|naming|reports?)\b", re.IGNORECASE)
+    SESSION_KIND = re.compile(r"\b(?:sessions?|tiers?|coordinators?|solo|one-lanes?|lanes?)\b", re.IGNORECASE)
+
     @staticmethod
-    def tells_other_tier_to_run_idle_lanes(sentence):
-        """True when the sentence names the idle-lanes command and a tier other than the batch runner, and does not negate the run."""
-        names_command = "merge --idle-lanes" in sentence
-        other_tier = re.search(r"coordinator|cs-build:lane|lane session|other tier", sentence, re.IGNORECASE) is not None
-        negated = re.search(r"\b(?:never|not|no)\s+runs?\b", sentence, re.IGNORECASE) is not None
-        return names_command and other_tier and not negated
+    def skip_verb_governs(sentence, term):
+        """True when a skip verb comes before the term (a regex), with no clause break and no other verb between them."""
+        found = re.search(term, sentence)
+        if found is None:
+            return False
+        for skip in SessionStartMergeRoleTests.SKIP_VERB.finditer(sentence, 0, found.start()):
+            between = sentence[skip.end():found.start()]
+            if not SessionStartMergeRoleTests.CLAUSE_BREAK.search(between) and not SessionStartMergeRoleTests.OTHER_VERB.search(between):
+                return True
+        return False
+
+    @staticmethod
+    def archive_follows_get_session(sentence):
+        """True when the archive comes after the get_session call: get_session first, or the archive set `after` its get_session."""
+        get, archive = sentence.find("get_session"), sentence.find("archive")
+        if get < 0 or archive < 0:
+            return False
+        if get < archive:
+            return True
+        return re.search(r"archiv\w*[^,;.()]*\bafter\b[^,;.()]*get_session", sentence) is not None
+
+    @staticmethod
+    def runner_subject_only(sentence):
+        """True when the words before the verb `runs` name the batch runner tag and no other session kind."""
+        verb = re.search(r"\bruns?\b", sentence)
+        if verb is None:
+            return False
+        subject = sentence[:verb.start()]
+        return "cs-build:batch-runner" in subject and len(SessionStartMergeRoleTests.SESSION_KIND.findall(subject)) == 1
 
     @staticmethod
     def idle_lanes_sentences(line):
@@ -533,9 +562,13 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         found = self.idle_lanes_sentences(hook_tier_line())
         self.assertEqual(len(found), 1, "expected one sentence naming merge --idle-lanes, found %d: %r" % (len(found), found))
 
-    def test_the_idle_lanes_sentence_names_only_the_batch_runner_tag(self):
+    def test_the_idle_lanes_sentence_names_the_batch_runner_tag(self):
         sentence = self.idle_lanes_sentence()
         self.assertIn("cs-build:batch-runner", sentence, "the idle-lanes sentence names no cs-build:batch-runner tag: %r" % sentence)
+
+    def test_the_idle_lanes_sentence_has_the_batch_runner_tag_as_its_only_subject(self):
+        sentence = self.idle_lanes_sentence()
+        self.assertTrue(self.runner_subject_only(sentence), "the words before `runs` do not name only the batch runner tag: %r" % sentence)
 
     def test_the_idle_lanes_sentence_does_not_name_the_coordinator(self):
         sentence = self.idle_lanes_sentence()
@@ -545,11 +578,6 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         sentence = self.idle_lanes_sentence()
         self.assertFalse(self.names_a_lane(sentence),
                          "the idle-lanes sentence names a lane session or the cs-build:lane tag: %r" % sentence)
-
-    def test_no_sentence_tells_the_coordinator_a_lane_or_another_tier_to_run_idle_lanes(self):
-        self.idle_lanes_sentence()  # scope first: one sentence names the command
-        told = [s for s in sentences(hook_tier_line()) if self.tells_other_tier_to_run_idle_lanes(s)]
-        self.assertEqual(told, [], "a sentence tells another tier to run merge --idle-lanes: %r" % told)
 
     def test_the_idle_lanes_command_is_named_by_its_home_path(self):
         # Bare `merge` is not on a cloud session's PATH, so the sentence gives the shim's full path, as the merge role sentence does.
@@ -566,16 +594,15 @@ class SessionStartMergeRoleTests(unittest.TestCase):
         self.assertTrue(told, "no sentence says to run get_session on each listed lane alone")
 
     def test_the_idle_lanes_sentence_says_to_archive_each_lane_after_its_get_session(self):
-        told = [s for s in self.idle_lanes_sentences(hook_tier_line()) if 0 <= s.find("get_session") < s.find("archive")]
+        told = [s for s in self.idle_lanes_sentences(hook_tier_line()) if self.archive_follows_get_session(s)]
         self.assertTrue(told, "no sentence says to archive each lane after its get_session")
 
     def test_the_idle_lanes_sentence_says_to_skip_a_lane_with_a_hold_marker(self):
-        told = [s for s in self.idle_lanes_sentences(hook_tier_line()) if "HOLD" in s and re.search(r"\bskip", s, re.IGNORECASE)]
+        told = [s for s in self.idle_lanes_sentences(hook_tier_line()) if self.skip_verb_governs(s, r"\bHOLD\b")]
         self.assertTrue(told, "no sentence says to skip a lane that carries a HOLD marker")
 
     def test_the_idle_lanes_sentence_says_to_skip_a_lane_that_needs_judgment(self):
-        told = [s for s in self.idle_lanes_sentences(hook_tier_line())
-                if re.search(r"judgment", s, re.IGNORECASE) and re.search(r"\bskip", s, re.IGNORECASE)]
+        told = [s for s in self.idle_lanes_sentences(hook_tier_line()) if self.skip_verb_governs(s, r"\bjudgment\b")]
         self.assertTrue(told, "no sentence says to skip a lane that needs judgment")
 
     def test_the_idle_lanes_sentence_says_to_name_each_skipped_lane_in_its_report(self):
@@ -591,18 +618,34 @@ class SessionStartMergeRoleTests(unittest.TestCase):
                 if "roadmap/livework/README.md" in s and "record branch" in s.lower()]
         self.assertTrue(told, "no idle-lanes sentence says roadmap/livework/README.md is on the record branch")
 
-    # green controls (P2): the predicate passes on the current code, so a red above is the missing sentence, not a broken predicate
-    def test_the_idle_lanes_predicate_flags_a_coordinator_or_lane_run(self):
-        self.assertTrue(self.tells_other_tier_to_run_idle_lanes(
-            "The coordinator runs ~/.claude/bin/merge --idle-lanes --live FILE after each merge."))
-        self.assertTrue(self.tells_other_tier_to_run_idle_lanes(
-            "A lane session (tag cs-build:lane) runs ~/.claude/bin/merge --idle-lanes --live FILE."))
+    # green controls (P2): the helpers pass on the current code, so a red above is the sentence, not a broken helper
+    def test_the_skip_binding_helper_binds_the_verb_only_with_no_clause_break_or_verb_between(self):
+        self.assertTrue(self.skip_verb_governs("archives that lane, but skips any lane that shows a HOLD marker.", r"\bHOLD\b"),
+                        "a skip verb before HOLD in its clause is not read")
+        self.assertFalse(self.skip_verb_governs("archives any lane that shows a HOLD marker, skipping nothing.", r"\bHOLD\b"),
+                         "a skip verb after a comma is read as governing HOLD")
+        self.assertFalse(self.skip_verb_governs("archives any lane that shows a HOLD marker; skipped lanes are named in its report.",
+                                                r"\bHOLD\b"), "a skip verb after HOLD is read as governing it")
+        self.assertFalse(self.skip_verb_governs("skips any lane that shows a HOLD marker or archives any lane that needs judgment.",
+                                                r"\bjudgment\b"), "an archive verb between skip and judgment is not blocked")
 
-    def test_the_idle_lanes_predicate_passes_a_batch_runner_run_and_a_negated_one(self):
-        self.assertFalse(self.tells_other_tier_to_run_idle_lanes(
-            "A session tagged cs-build:batch-runner runs ~/.claude/bin/merge --idle-lanes --live FILE after each merge."))
-        self.assertFalse(self.tells_other_tier_to_run_idle_lanes(
-            "A lane, the coordinator or any other tier never runs ~/.claude/bin/merge --idle-lanes --live FILE."))
+    def test_the_archive_order_helper_takes_both_allowed_wordings_and_rejects_archive_first(self):
+        self.assertTrue(self.archive_follows_get_session("runs get_session on each listed lane alone and archives that lane."),
+                        "archive after get_session is not read")
+        self.assertTrue(self.archive_follows_get_session("archives each lane after its get_session."),
+                        "archive set after its get_session is not read")
+        self.assertFalse(self.archive_follows_get_session("archives that lane, then runs get_session on it."),
+                         "archive before get_session is read as in order")
+        self.assertFalse(self.archive_follows_get_session("archives each lane and runs get_session on it."),
+                         "archive before get_session with no after is read as in order")
+
+    def test_the_runner_subject_helper_passes_one_runner_subject_and_rejects_a_second_one(self):
+        self.assertTrue(self.runner_subject_only("A session tagged cs-build:batch-runner, and no other, runs `x`."),
+                        "the one batch runner subject is rejected")
+        self.assertFalse(self.runner_subject_only("A session tagged cs-build:batch-runner, and any session, runs `x`."),
+                         "a second session subject is accepted")
+        self.assertFalse(self.runner_subject_only("A session tagged cs-build:batch-runner, and a solo session does too, runs `x`."),
+                         "a solo session subject is accepted")
 
 
 class SessionStartLivePinNoticeTests(SessionStartAgentWorktreeNoticeTests):
