@@ -519,11 +519,39 @@ def role_opus_role_lift_check():
     return True, "the test-author grant lifted a test-author on opus, and not a builder on opus"
 
 
+def role_override_no_model_fix_check():
+    """A reviewer's fix check with no model is never-lifted: its refusal keeps ROLE_NO_MODEL_MATCH, which never_lifted
+    reads, so an override neither lifts it nor spends."""
+    fix_check = role_input("reviewer", None, FIX_MARKER + ". Re-run the cases.")
+    return role_override_never_lifted_story("ov-fix-no-model", fix_check, ROLE_OV_UNSET,
+                                            "a reviewer fix check with no model")
+
+
+def role_override_haiku_fix_check():
+    """A reviewer's fix check that names haiku is refused with ROLE_FIX_VERIFIER_MATCH, which the general override
+    lifts. One override lifts it once, then it refuses again."""
+    fix_check = role_input("reviewer", "haiku", FIX_MARKER + ". Re-run the cases.")
+    return role_override_lift_story("ov-fix-haiku", fix_check, "a reviewer fix check on haiku")
+
+
+def role_override_workflow_haiku_fix_check():
+    """A Workflow agent() call that names haiku on a fix check is lifted by one override, then refused again."""
+    script = _step_flow("'%s. Re-run the cases.'" % FIX_MARKER, "agentType: 'reviewer', model: 'haiku'")
+    return role_override_lift_story("ov-fix-workflow-haiku", {"script": script},
+                                    "a Workflow reviewer fix check on haiku", tool="Workflow")
+
+
 ROLE_OVERRIDE_CHECKS = (
     ("role-model: an owner override lifts a test-author on sonnet once, then refuses again",
      role_override_lift_check),
     ("role-model: the no-model refusal stays under an owner override, and spends none",
      role_override_no_model_check),
+    ("role-model: the no-model fix check reviewer stays refused under an owner override, and spends none",
+     role_override_no_model_fix_check),
+    ("role-model: a haiku-named fix check reviewer is lifted by an owner override once, then refused again",
+     role_override_haiku_fix_check),
+    ("role-model: a haiku-named fix check reviewer in a Workflow is lifted by an owner override once, then refused again",
+     role_override_workflow_haiku_fix_check),
     ("role-model: opus 2h lifts an Explore on opus with no Audit: marker (item 137)", role_opus_explore_lift_check),
     ("role-model: opus test-authors 2h lifts a test-author on opus, and no builder", role_opus_role_lift_check),
     ("role-model: the typed override lifts a Workflow builder on opus with a variable brief, once",
@@ -919,10 +947,10 @@ for _label, _check in _BRIEF_MARKER_CHECKS:
 
 # ---- B4: the fix check marker (owner item 444 a). A reviewer's fix check carries no round, so it
 # lifts to Sonnet on FIX_CHECK_MARKER. The marker counts only when the brief's first non-blank line starts with it, leading
-# spaces and tabs aside, and it is case-sensitive: text ahead of it on that line does not count. It lifts a reviewer on
-# Sonnet only: Haiku passes on its own row, Opus stays under the ceiling, and a builder, a test-author or an Explore gets no
-# lift. The constant is read from shared_names at module load, never copied. A missing constant reads as FIX_UNBUILT, so
-# each case fails on its assert, not on an import error.
+# spaces and tabs aside, and it is case-sensitive: text ahead of it on that line does not count. A reviewer's fix check runs
+# Sonnet, set per spawn, so a reviewer on Haiku is refused too (owner item 444 a; decision agent-model-cap). Opus stays under
+# the ceiling, and a builder, a test-author or an Explore gets no lift. The constant is read from shared_names at module
+# load, never copied. A missing constant reads as FIX_UNBUILT, so each case fails on its assert, not on an import error.
 FIX_UNBUILT = "FIX_CHECK_NOT_BUILT"
 try:
     FIX_MARKER = getattr(_shared_names_under_test(), "FIX_CHECK_MARKER", FIX_UNBUILT)
@@ -1006,8 +1034,6 @@ role_model_allow("role-model: fix check: the same reviewer spawn as a Task on so
                  FIX_MARKER + ". Re-run the cases.", tool="Task")
 workflow_allow("role-model: fix check: Workflow reviewer on sonnet with the marker on line one is allowed",
                _step_flow("'%s. Re-run the cases.'" % FIX_MARKER, "agentType: 'reviewer', model: 'sonnet'"))
-role_model_allow("role-model: fix check: reviewer on haiku with the marker is allowed, at its own row", "reviewer",
-                 "haiku", FIX_MARKER + ". Re-run the cases.")
 role_model_refuse("role-model: fix check: reviewer on sonnet with no marker is denied, and its remedy names the marker",
                   "reviewer", "sonnet", "Check the diff for typos.",
                   carries=(ROLE_REMEDY, ROUND_MARKER, FIX_MARKER) + FREE_ROUND_MARKERS)
@@ -1032,6 +1058,48 @@ role_model_refuse("role-model: fix check: test-author on sonnet with the marker 
 role_model_refuse("role-model: fix check: Explore on sonnet with the marker is denied, only the audit marker lifts an Explore",
                   "Explore", "sonnet", FIX_MARKER + ". Find where X is defined.", carries=(EXPLORE_MARKER,),
                   lacks=ROLE_LACKS + (FIX_MARKER,))
+
+# ---- served model on a fix check (decision agent-model-cap; owner item 444 a). A fix check runs Sonnet, set per spawn.
+# Its first line is the bare marker, not a round line, so step-up does not read it (step_up_reason reads rounds 2 and 3
+# only). With no model it is refused even when a default model is set, since the agent file's `haiku` pin beats the
+# default, and no owner override lifts that refusal. A fix check that names Haiku is refused too, and an owner override
+# lifts it. The tag "served-model:" selects these cases alone (MUTATE_ONLY).
+SERVED_REMEDY = (("model sonnet", "(sonnet)"),)
+role_model_refuse("role-model: served-model: fix check, reviewer with no model is denied when the default is sonnet",
+                  "reviewer", None, FIX_MARKER + ". Re-run the cases.", env=SONNET_DEFAULT, carries=SERVED_REMEDY)
+role_model_refuse("role-model: served-model: fix check, reviewer with no model is denied when the default is unset",
+                  "reviewer", None, FIX_MARKER + ". Re-run the cases.", env=UNSET_DEFAULT, carries=SERVED_REMEDY)
+role_model_refuse("role-model: served-model: fix check, Round 1 of 3 after the marker, reviewer with no model is denied "
+                  "when the default is sonnet", "reviewer", None, FIX_MARKER + ". Round 1 of 3 finding F1, head abc1234.",
+                  env=SONNET_DEFAULT, carries=SERVED_REMEDY)
+role_model_refuse("role-model: served-model: fix check, reviewer on haiku with the marker is denied under agent-role-model",
+                  "reviewer", "haiku", FIX_MARKER + ". Re-run the cases.", carries=SERVED_REMEDY)
+# The round form of the same ruling. Its first line is a round 2 marker, so the step-up holds a reviewer on it to Sonnet, and
+# Haiku is denied. Green on the base by design: the step-up already denies round 2 on Haiku. It guards the form: a build that
+# skips the step-up for a fix check would let Haiku through here.
+add("role-model: served-model: fix check, Round 2 of 3 (fix check) on haiku is denied under the step-up, as a round 2 brief",
+    "deny", STEP_UP, tool="Agent", prompt="Round 2 of 3 (fix check). Re-run the cases.", model="haiku",
+    subagent_type="reviewer")
+# The Workflow form of the fix check on Haiku. Each agent() call is judged as an Agent spawn is.
+workflow_refuse("role-model: served-model: fix check, Workflow reviewer on haiku with the marker is denied under "
+                "agent-role-model, and the denial names sonnet",
+                _step_flow("'%s. Re-run the cases.'" % FIX_MARKER, "agentType: 'reviewer', model: 'haiku'"),
+                rule=ROLE_RULE, carries=SERVED_REMEDY, lacks=ROLE_LACKS)
+# Controls, green on the base too. A reviewer's first round with no marker runs on its row, with no model or on Haiku, and a
+# record-writer with no model runs on its file's pin. A builder with no model and the marker passes the default, since the
+# refusals lift a reviewer only. A reviewer on Sonnet with the marker passes its lift, and the below-Sonnet test stops at Sonnet.
+role_model_allow("role-model: served-model: reviewer with no marker and no model is allowed when the default is sonnet",
+                 "reviewer", None, "Check the diff for typos.", env=SONNET_DEFAULT)
+role_model_allow("role-model: served-model: reviewer with no marker on haiku is allowed, at its own row",
+                 "reviewer", "haiku", "Check the diff for typos.")
+role_model_allow("role-model: served-model: record-writer with no model is allowed when the default is unset (its file "
+                 "pins haiku)", "record-writer", None, "Record the decision.", env=UNSET_DEFAULT)
+role_model_allow("role-model: served-model: record-writer with no model is allowed when the default is sonnet",
+                 "record-writer", None, "Record the decision.", env=SONNET_DEFAULT)
+role_model_allow("role-model: served-model: fix check, builder with no model and the marker is allowed when the default "
+                 "is sonnet", "builder", None, FIX_MARKER + ". Re-run the cases.", env=SONNET_DEFAULT)
+role_model_allow("role-model: served-model: fix check, reviewer on sonnet with the marker is allowed, the lift is to "
+                 "sonnet", "reviewer", "sonnet", FIX_MARKER + ". Re-run the cases.")
 
 # A reviewer's refusal names each brief form that lifts it above its row: rounds 2 and 3, and the fix check on line one.
 # It also says the first round and the test-author run on their role's model. A builder's refusal names none of these.
