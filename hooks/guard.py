@@ -3536,6 +3536,110 @@ def brief_destructive_hit(tool: str, tool_input) -> str:
     return ""
 
 
+# A READ-ONLY AGENT'S BRIEF MUST NOT ORDER A FILE WRITE (rule brief-write-needs-writer). A read-only role (READ_ONLY in
+# hooks/agent_brief.py, plugin prefix dropped, as brief_destructive_hit reads it) has no write tool, so a brief that tells
+# it to write a file makes it write by a shell redirect or stall. The rule judges the spawns this file's brief rules judge
+# (_brief_spawns, so a Workflow agent() call counts) and only a read-only role: a writing role, the default role and a
+# spawn with no role pass. Two readings, both pure text:
+#   - command-shaped parts (_brief_commands): a `tee` with an operand, or a redirect into a path, once quoted text is cut
+#     out. A target of /dev/null or under any session scratchpad is no repo write and passes.
+#   - prose lines outside a fence: an imperative write verb (write, save, store, dump, append, create, make) whose clause
+#     holds only lead-in words before it, then a path (an extension or a slash) after to, into, in, as, at, named or
+#     called; "create a file"; and "use the Write tool". A verb in another form (saves, wrote) is no order.
+# Passes: a negator in the verb's clause (_brief_prohibits, the same window as brief-destructive-git), a "Must deny:" or
+# "Add a case:" line, and a negating heading's cover. Accepted limits: a path with no extension and no slash ("Write it
+# to notes") is no order here; an order in a language this scan has no verb for passes. The override lifts it. Cost:
+# pure text work inside the one guard call. No process, no file.
+BRIEF_WRITE_VERBS = r"(?:write|save|store|dump|append|create|make)"
+BRIEF_WRITE_PATH = r"`?(?:[\w~./-][\w~./#-]*\.[A-Za-z]\w{0,7}|[\w.~-]*/[\w./#-]+)"
+BRIEF_WRITE_PROSE = re.compile(
+    r"\b" + BRIEF_WRITE_VERBS + r"\b(?:[^\n.;]|\.(?=\S))*?\b(?:to|into|in|as|at|named|called)\s+" + BRIEF_WRITE_PATH,
+    re.IGNORECASE)
+BRIEF_WRITE_FILE = re.compile(r"\b(?:create|write|make|touch)\s+(?:a|an|the|new)\s+(?:new\s+)?file\b", re.IGNORECASE)
+BRIEF_WRITE_TOOL = re.compile(r"\buse\s+(?:the\s+)?write\s+tool\b", re.IGNORECASE)
+BRIEF_WRITE_LEAD = frozenset((
+    "please", "now", "you", "must", "should", "will", "can", "to", "just", "always", "finally", "also", "then", "are",
+    "need", "needs", "have", "has", "may", "do", "first", "next", "and", "-", "*", "+"))
+BRIEF_WRITE_BOUNDARY = re.compile(r"[.!?:;,]\s|\band\b|\bthen\b|\balso\b|\bfirst\b|\bnext\b|`", re.IGNORECASE)
+BRIEF_WRITE_TEE = re.compile(r"(?<![\w-])tee\s+(?:-\w+\s+)*([^\s|;&<>-][^\s|;&<>]*)")
+BRIEF_WRITE_REDIRECT = re.compile(r"(?<![\w&>=-])\d?>>?\s*(?!&)([^\s&|;>]+)")
+BRIEF_WRITE_QUOTED = re.compile(r"\"[^\"]*\"|'[^']*'")
+BRIEF_WRITE_REASON = (
+    "The brief tells a read-only agent to write a file. That role has no write tool, so it writes by a shell redirect "
+    "or stalls. Name a writer role (record-writer, builder or test-author) for the write, or have the agent report "
+    "the text in its reply and let the session save it. "
+    "(decision brief-write-needs-writer, a read-only agent's brief orders no file write)"
+)
+
+
+def _brief_write_target_ok(target: str) -> bool:
+    """True for a redirect or tee target that is no repo write: /dev/null, or under any session scratchpad."""
+    target = target.strip("`\"'")
+    return target == "/dev/null" or (target.startswith("/") and in_any_session_scratchpad(target))
+
+
+def _brief_write_command(command: str) -> str:
+    """The write a command-shaped part makes into a path: its tee or redirect text, or "". Quoted text is cut first, so a
+    `>` inside quotes is text."""
+    bare = BRIEF_WRITE_QUOTED.sub(" ", command)
+    for pattern in (BRIEF_WRITE_TEE, BRIEF_WRITE_REDIRECT):
+        for match in pattern.finditer(bare):
+            if not _brief_write_target_ok(match.group(1)):
+                return command
+    return ""
+
+
+def _brief_write_prose(prompt: str) -> str:
+    """The first prose line that orders a file write, or "". Fenced lines and lines led by `$ ` are command text, read
+    by _brief_write_command; a part under a negating heading is covered."""
+    fenced, covered, cover_indent = False, False, -1
+    for line in prompt.replace("\x00", " ").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```") and not BRIEF_DESTRUCTIVE_INLINE.match(stripped):
+            fenced = not fenced
+            continue
+        if fenced or not stripped:
+            continue
+        bullet = bool(BRIEF_DESTRUCTIVE_BULLET.match(line))
+        indent = len(line) - len(line.lstrip())
+        if _brief_heading(line):
+            covered, cover_indent = True, (indent if bullet else -1)
+            continue
+        if not bullet or indent <= cover_indent:
+            covered = False
+        if covered or stripped.startswith("$ ") or BRIEF_DESTRUCTIVE_CASE_DATA.search(line):
+            continue
+        hits = [m for m in BRIEF_WRITE_PROSE.finditer(line)] + list(BRIEF_WRITE_FILE.finditer(line))
+        for match in hits:
+            before = line[:match.start()]
+            bounds = list(BRIEF_WRITE_BOUNDARY.finditer(before))
+            lead = _brief_words(before[bounds[-1].end():] if bounds else before)
+            if all(word in BRIEF_WRITE_LEAD for word in lead) and not _brief_prohibits(before):
+                return line.strip()
+        for match in BRIEF_WRITE_TOOL.finditer(line):
+            if not _brief_prohibits(line[:match.start()]):
+                return line.strip()
+    return ""
+
+
+def brief_write_hit(tool: str, tool_input) -> str:
+    """The first line of a read-only agent's brief that orders a file write, or ""."""
+    read_only = {role.lower() for role in READ_ONLY}
+    for spawn in _brief_spawns(tool, tool_input):
+        prompt = spawn.get("prompt")
+        role = role_key(spawn.get("subagent_type")).rsplit(":", 1)[-1]
+        if not isinstance(prompt, str) or role not in read_only:
+            continue
+        for command, before, covered in _brief_commands(prompt):
+            if not covered and not BRIEF_DESTRUCTIVE_CASE_DATA.search(before) and not _brief_prohibits(before):
+                if _brief_write_command(command):
+                    return command
+        found = _brief_write_prose(prompt)
+        if found:
+            return found
+    return ""
+
+
 # A Workflow agent() call is read statically; one whose prompt or model the scan cannot read passes.
 def step_up_hit(tool: str, tool_input) -> str:
     """The step-up reason for a spawn whose marker and model disagree, or "". Only a line
@@ -6203,6 +6307,11 @@ def judge(payload) -> None:
     ordered = brief_destructive_hit(tool, tool_input)
     if ordered:
         refuse(tool, "deny", "brief-destructive-git", BRIEF_DESTRUCTIVE_REASON, ordered[:120])
+
+    # 9e3. A read-only agent's brief that orders a file write (rule brief-write-needs-writer). An override lifts it.
+    ordered = brief_write_hit(tool, tool_input)
+    if ordered:
+        refuse(tool, "deny", "brief-write-needs-writer", BRIEF_WRITE_REASON, ordered[:120])
 
     # A merge through the MCP tool is judged by the same merge guard as `gh pr merge`.
     if tool in MERGE_TOOLS:
