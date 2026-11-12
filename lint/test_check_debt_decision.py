@@ -9,16 +9,22 @@ The value names the decision by its slug, or is `none`.
 
 The check reads the lines the change adds or edits (origin/main...HEAD) in docs/debts/. It judges each Decision line:
 
-- the first word of the value, with backticks, quote marks and trailing punctuation dropped, is `none`, or the
-  slug of a decision file in docs/decisions/ of the tree;
+- the value names a decision by its slug: the README's template form, with a prose word before the slug
+  (`The decision `slug`: ...`), counts. The value is `none`, or names a decision file in docs/decisions/ of the tree;
+- a value that names no decision file is red, and its FAIL line names that missing slug;
 - a first word with a `/` (a path cite), or ending `.md`, is red, whatever it names;
-- a debt the change adds with no Decision part is red.
+- a debt the change adds, or edits so that its Decision part is gone (deleted, or rewritten out of the marker),
+  is red with no Decision part. A rename inside the folder counts as an edit of the debt.
 
 Each FAIL line, `check_debt_decision: FAIL: ...`, names one cause. A debt with no Decision part has no line
 to name, so its FAIL line names the path alone.
 
 Each case builds a temp git repo. origin/main is the base, HEAD the change. The module runs from that tree.
-DEBT_DECISION_UNDER_TEST overrides the module path, for a mutant copy.
+DEBT_DECISION_UNDER_TEST overrides the module path, for a mutant copy. RECORD_DIFF_UNDER_TEST overrides the shared
+helper lint/_record_diff.py the same way.
+
+A run that cannot read its base prints UNKNOWN. Locally that exits 0; under CI it exits 1 (decision ci-unknown-is-red).
+assert_passes fails a run that printed UNKNOWN.
 """
 import os
 import shutil
@@ -35,9 +41,11 @@ sys.path.insert(0, os.path.join(HERE, "..", "testing"))
 import tracked_tree  # noqa: E402  copies what git lists, so no fixture lists files (testing/tracked_tree.py)
 
 MODULE = os.environ.get("DEBT_DECISION_UNDER_TEST") or os.path.join(HERE, "check_debt_decision.py")
+RECORD_DIFF = os.environ.get("RECORD_DIFF_UNDER_TEST")  # a mutant of lint/_record_diff.py, else the tree's own copy
 DECISION = "docs/decisions/merge-lock.md"  # the decision the cases link: its slug is merge-lock
 DECISION_NEW = "docs/decisions/lock-expires.md"  # a decision the same change adds
 DEBT = "docs/debts/lock-read-error.md"  # the debt the cases add or edit
+DEBT_MOVED = "docs/debts/lock-read-fail.md"  # the same debt renamed inside the folder
 NOTES = "docs/debts/notes.md"  # the folder's notes file: not a debt
 ROOT_FILE = "scratch-note.txt"  # a file outside the debts folder: a change that adds no debt line
 MERGE_LOCK = "# Merge lock\n\nOne lock per base, so two runs cannot race.\n"
@@ -74,6 +82,8 @@ class DebtDecisionTests(unittest.TestCase):
         self.tree = tempfile.mkdtemp(prefix="cdd_", dir=RUN_FOLDER)
         self.addCleanup(tracked_tree.rm_tree, self.tree)
         tracked_tree.copy_tracked(self.tree, "lint", "hooks")  # the layout and the check's imports
+        if RECORD_DIFF:
+            shutil.copyfile(RECORD_DIFF, os.path.join(self.tree, "lint", "_record_diff.py"))
         shutil.copyfile(MODULE, os.path.join(self.tree, "lint", "check_debt_decision.py"))
         self.git("init", "-q")
         self.base({DECISION: MERGE_LOCK})  # merge-lock is a decision from the start
@@ -96,10 +106,12 @@ class DebtDecisionTests(unittest.TestCase):
         self.git("commit", "-q", "-m", "base")
         self.git("update-ref", "refs/remotes/origin/main", "HEAD")
 
-    def change(self, files):
-        """Commit `files` on top of origin/main. The diff must name each path first (scope before subject)."""
+    def change(self, files, removed=()):
+        """Commit `files` on top of origin/main, and delete `removed`. The diff must name each path first (scope before subject)."""
         for rel, text in files.items():
             self.put(rel, text)
+        for rel in removed:
+            os.remove(os.path.join(self.tree, *rel.split("/")))
         self.git("add", "-A")
         self.git("commit", "-q", "-m", "change")
         named = subprocess.run(["git", "-C", self.tree, "diff", "--name-only", "origin/main...HEAD"],
@@ -107,17 +119,30 @@ class DebtDecisionTests(unittest.TestCase):
         for rel in files:
             self.assertIn(rel, named, "the change does not name %s" % rel)
 
-    def lint(self):
+    def lint(self, base=None, ci=False):
+        """Run the check. `base` names the ref to diff against (default origin/main). `ci` sets CI, as the workflow does."""
         env = dict(os.environ)
-        env.pop("CI", None)  # CI makes an unknown read red; these cases run locally
+        env.pop("CI", None)  # CI makes an unknown read red; the default run is local
+        if ci:
+            env["CI"] = "true"
         cmd = [sys.executable, os.path.join(self.tree, "lint", "check_debt_decision.py")]
+        if base:
+            cmd += ["--base", base]
         r = subprocess.run(cmd, cwd=self.tree, env=env, capture_output=True, text=True,
                            encoding="utf-8", errors="replace")
         return r.returncode, r.stdout + r.stderr
 
-    def assert_passes(self):
-        rc, out = self.lint()
+    def unreadable_base(self):
+        """A ref the tree does not hold. Scope before subject: the case reads UNKNOWN only if this ref is absent."""
+        probe = subprocess.run(["git", "-C", self.tree, "rev-parse", "--verify", "--quiet", "no-such-ref"],
+                               capture_output=True, text=True)
+        self.assertNotEqual(probe.returncode, 0, "no-such-ref must be absent for this case")
+        return "no-such-ref"
+
+    def assert_passes(self, base=None):
+        rc, out = self.lint(base=base)
         self.assertEqual(rc, 0, out)
+        self.assertNotIn("UNKNOWN", out, "a run that printed UNKNOWN is not a pass\n" + out)
         self.assertEqual(flagged(out), [], out)
 
     def assert_flags(self, *cases):
@@ -168,6 +193,16 @@ class DebtDecisionTests(unittest.TestCase):
         self.change({ROOT_FILE: "nothing in the debts folder\n"})
         self.assert_passes()
 
+    def test_default_passes_an_edit_that_keeps_the_decision_part(self):
+        self.base({DEBT: debt("`merge-lock` (one lock per base).")})
+        self.change({DEBT: debt("`merge-lock` (one lock per base).", what="- **What.** A read error holds the lock.\n")})
+        self.assert_passes()
+
+    def test_default_passes_a_rename_that_keeps_the_decision_part(self):
+        self.base({DEBT: debt("`merge-lock` (one lock per base).")})
+        self.change({DEBT_MOVED: debt("`merge-lock` (one lock per base).")}, removed=(DEBT,))
+        self.assert_passes()
+
     # Red: each case names the one Decision part it must flag.
 
     def test_default_flags_a_decision_slug_that_names_no_file(self):
@@ -191,6 +226,37 @@ class DebtDecisionTests(unittest.TestCase):
         self.change({DEBT: debt("`merge-lok` (typo).")})
         self.assert_flags((DEBT, DECISION_LINE, "merge-lok"))
 
+    def test_default_passes_a_prose_word_before_a_decision_slug(self):
+        # The README's template form, "The decision `slug`: ...": the slug names a decision file, so it passes.
+        self.change({DEBT: debt("The decision `merge-lock`: one lock per base.")})
+        self.assert_passes()
+
+    def test_default_flags_a_prose_word_before_a_slug_that_names_no_file(self):
+        self.change({DEBT: debt("The decision `merge-lok`: one lock per base.")})
+        self.assert_flags((DEBT, DECISION_LINE, "merge-lok"))
+
+    def test_default_flags_a_rule_anchor_that_names_no_decision_file(self):
+        # verdict-rewritten-xcode-output.md line 7: a rule anchor, and no decision file has its slug.
+        self.change({DEBT: debt("Rule `verification-report-unknown-reads` (a read that could not run is unknown, never clear).")})
+        self.assert_flags((DEBT, DECISION_LINE, "verification-report-unknown-reads"))
+
+    def test_default_flags_an_edit_that_deletes_the_decision_part(self):
+        self.base({DEBT: debt("`merge-lock` (one lock per base).")})
+        self.change({DEBT: "# Lock read error\n\n" + WHAT + WHERE + RETIRE})
+        self.assert_flags((DEBT, 0, "Decision part"))
+
+    def test_default_flags_an_edit_that_rewrites_the_decision_line_out_of_its_marker(self):
+        # The line is still there, but without the `**Decision.**` marker: the debt is left with no Decision part.
+        self.base({DEBT: debt("`merge-lock` (one lock per base).")})
+        self.change({DEBT: "# Lock read error\n\n" + WHAT + WHERE + "Decision: `merge-lock` (one lock per base).\n" + RETIRE})
+        self.assert_flags((DEBT, 0, "Decision part"))
+
+    def test_default_flags_a_rename_that_drops_the_decision_part(self):
+        # A rename inside the folder is not an add, so only its moved content can show the dropped part.
+        self.base({DEBT: debt("`merge-lock` (one lock per base).")})
+        self.change({DEBT_MOVED: "# Lock read error\n\n" + WHAT + WHERE + RETIRE}, removed=(DEBT,))
+        self.assert_flags((DEBT_MOVED, 0, "Decision part"))
+
     # Scope: only a Decision line the change adds or edits is judged.
 
     def test_default_ignores_a_bad_decision_line_on_an_unchanged_line(self):
@@ -201,6 +267,27 @@ class DebtDecisionTests(unittest.TestCase):
     def test_default_leaves_the_debt_notes_file_unchecked(self):
         self.change({NOTES: "# Notes\n\n- **Decision.** `merge-lok` (typo).\n"})
         self.assert_passes()
+
+    # An unread base is UNKNOWN: exit 0 locally, exit 1 under CI (decision ci-unknown-is-red).
+    # Each case has a bad Decision line, so a run that read the change would print a FAIL line.
+
+    def test_default_gives_unknown_on_an_unreadable_base(self):
+        self.change({DEBT: debt("`merge-lok` (typo).")})
+        rc, out = self.lint(base=self.unreadable_base())
+        self.assertIn("check_debt_decision: UNKNOWN", out, out)
+        self.assertEqual(rc, 0, out)
+
+    def test_ci_fails_an_unreadable_base(self):
+        self.change({DEBT: debt("`merge-lok` (typo).")})
+        rc, out = self.lint(base=self.unreadable_base(), ci=True)
+        self.assertIn("check_debt_decision: UNKNOWN", out, out)
+        self.assertEqual(rc, 1, out)
+
+    def test_assert_passes_fails_a_run_that_printed_unknown(self):
+        self.change({DEBT: debt("`merge-lock` (one lock per base).")})
+        with self.assertRaises(AssertionError) as caught:
+            self.assert_passes(base=self.unreadable_base())
+        self.assertIn("UNKNOWN", str(caught.exception))
 
 
 if __name__ == "__main__":
