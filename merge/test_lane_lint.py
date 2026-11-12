@@ -2209,19 +2209,20 @@ class BatchLintFlags(tm.Env):
         tm.sh(o, "git", "push", "-q", "origin", branch)
         return tm.sh(o, "git", "rev-parse", "HEAD")
 
-    def lane_lint(self, target, out, unknown_ok=""):
-        """merge.lane_lint of `target` against BASE, in the lane checkout, through the copy of ci-job. Its output goes to `out`. A refusal raises."""
+    def lane_lint(self, target, out, unknown_ok="", pre_join=False):
+        """merge.lane_lint of `target` against BASE, in the lane checkout, through the copy of ci-job. Its output goes to `out`. A refusal raises.
+        pre_join is the batch runner's pre-join call (main passes it for the batch-runner role)."""
         env = {"VERDICT_LOG": os.path.join(self.t, "verdict.log")}  # one log for the run: no ci-job log lands in the system temp dir
         with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER), unittest.mock.patch.object(merge, "CI_JOB", self.ci_job), \
                 unittest.mock.patch.dict(os.environ, env), contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
-            return merge.lane_lint(self.co, target, self.host, base=BASE, unknown_ok=unknown_ok)
+            return merge.lane_lint(self.co, target, self.host, base=BASE, unknown_ok=unknown_ok, pre_join=pre_join)
 
-    def lane_lint_outcome(self, target, unknown_ok=""):
+    def lane_lint_outcome(self, target, unknown_ok="", pre_join=False):
         """What the lint of `target` does: ("liftable", text) when merge.Liftable stops it, ("stop", text) for any other refusal,
         ("pass", text) when it returns 0. The text is the refusal, or the output printed."""
         out = io.StringIO()
         try:
-            self.lane_lint(target, out, unknown_ok)
+            self.lane_lint(target, out, unknown_ok, pre_join)
         except merge.Liftable as raised:
             return "liftable", str(raised) + out.getvalue()
         except merge.Stop as raised:
@@ -2310,22 +2311,47 @@ class BatchLintFlags(tm.Env):
         return head, tm.sh(o, "git", "ls-tree", "-r", "--name-only", head)
 
     def push_no_ci_head(self, files, has_yml):
-        """Push NO_CI: main plus `files`. Assert the scope first: the head holds a workflow .yml file or it does not."""
-        _, listed = self.push_head(NO_CI, files)
+        """Push NO_CI: main plus `files`. Assert the scope first: the head holds a workflow .yml file or it does not. -> the head sha."""
+        head, listed = self.push_head(NO_CI, files)
         found = any(p.startswith(".github/workflows/") and p.endswith((".yml", ".yaml")) for p in listed.splitlines())
         self.assertEqual(found, has_yml, "scope: the head's workflow .yml files are not the ones this case names:\n" + listed)
+        return head
 
-    def assert_no_ci_refusal(self, unknown_ok=""):
-        """The lint of NO_CI refuses: it names the starter CI step (decision same-check-kinds, plan R17), offers no --lint-unknown-ok lift
-        (the exemption the owner refused), and reads as no pass. unknown_ok is the lift reason the lint is given; no reason lifts it."""
+    def push_no_ci_mutate_head(self):
+        """Push NO_CI with no workflow file, and a diff that touches a mutation test file: the head the mutate check would be read on. -> the head sha."""
+        head = self.push_no_ci_head({"hooks/mutate_shared.py": "SHARED = 1\n", "notes.md": "# Notes\n"}, has_yml=False)
+        self.assert_mutate_in_diff(head)
+        return head
+
+    def assert_mutate_in_diff(self, head):
+        """Scope: the head's diff against main holds a mutation test file, so the lint reaches the mutate check."""
+        touched = tm.sh(self.other, "git", "diff", "--name-only", "origin/" + BASE, head).splitlines()
+        self.assertTrue(any(f.startswith("hooks/mutate_") for f in touched), "scope: the head's diff holds no mutation test file: %s" % touched)
+
+    def pr_of_no_ci(self, head, hand_off_pass):
+        """Pull request 7 is the NO_CI head. Its issue comments hold a hand-off lint PASS for `head` when hand_off_pass: the record the
+        pre-join call reads through host.issue_comments (merge.hand_off_pass). The fake host serves no comments, so this case sets them."""
+        self.host.branch = NO_CI
+        bodies = [lint_comment(501, head)["body"]] if hand_off_pass else []
+        self.assertEqual(merge.lint_state(bodies, head), "pass" if hand_off_pass else "none", "scope: the comments do not say what the case claims")
+        patch = unittest.mock.patch.object(self.host, "issue_comments", create=True, return_value=({}, {7: bodies}))
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def assert_no_ci_refusal(self, unknown_ok="", target=NO_CI, pre_join=False):
+        """The lint of the no-CI head refuses: it names the starter CI step (decision same-check-kinds, plan R17), offers no --lint-unknown-ok
+        lift (the exemption the owner refused), reads as no pass, and prints no mutation test skip line. target is NO_CI by ref, or the pull
+        request that holds it, with pre_join for the batch runner's pre-join call. unknown_ok is the lift reason the lint is given; no reason lifts it."""
         out = io.StringIO()
         with self.assertRaises(merge.Stop, msg="the lint of a head with no CI took a pass or a liftable path, not the no-CI refusal") as raised:
-            self.lane_lint(NO_CI, out, unknown_ok)
+            self.lane_lint(target, out, unknown_ok, pre_join)
         text = str(raised.exception) + out.getvalue()
+        self.assertNotIsInstance(raised.exception, merge.Liftable, "the no-CI refusal is a liftable unknown, so a lift reason passes it: " + text)
         self.assertEqual(pass_lines(out.getvalue()), [], "a head with no CI read as a pass: " + text)
-        self.assertIn("project-ops", text, "the no-CI refusal names no project-ops step")
         self.assertIn(STARTER_STEP, text, "the no-CI refusal does not name the starter CI step")
+        self.assertIn("project-ops", text, "the no-CI refusal names no project-ops step")
         self.assertNotIn("--lint-unknown-ok", text, "the no-CI refusal offers --lint-unknown-ok, the exemption the owner refused")
+        self.assertNotIn(MUTATE_SKIPPED, text, "the no-CI refusal printed the mutation test skip line, which says a hand-off ran the run: " + text)
 
     def test_a_head_with_no_workflow_folder_refuses_as_no_ci_and_names_the_starter_step(self):
         self.push_no_ci_head({"notes.md": "# Notes\n"}, has_yml=False)
@@ -2339,6 +2365,41 @@ class BatchLintFlags(tm.Env):
         # The lift reason is set and non-blank: a liftable unknown would pass here, so the refusal is the no-CI one only.
         self.push_no_ci_head({"notes.md": "# Notes\n"}, has_yml=False)
         self.assert_no_ci_refusal(unknown_ok="shellcheck is not on this box")
+
+    def test_a_no_ci_head_that_touches_a_mutation_test_file_refuses_as_no_ci_with_no_lift(self):  # the control: no lift reason, and the mutate check is never reached
+        self.push_no_ci_mutate_head()
+        self.assert_no_ci_refusal()
+
+    def test_a_no_ci_head_that_touches_a_mutation_test_file_is_not_lifted_by_a_lint_unknown_ok_reason(self):
+        # A lift reason reaches the mutate check on this head. Its refusal is the no-CI one, which names the starter step, not the mutate check's.
+        self.push_no_ci_mutate_head()
+        self.assert_no_ci_refusal(unknown_ok="shellcheck is not on this box")
+
+    def test_a_pre_join_lint_of_a_no_ci_head_with_a_hand_off_pass_refuses_as_no_ci_and_never_skips_or_passes(self):
+        head = self.push_no_ci_mutate_head()
+        self.pr_of_no_ci(head, hand_off_pass=True)  # the hand-off PASS skips the mutate run; the no-CI refusal must still stand
+        for unknown_ok in ("", "shellcheck is not on this box"):
+            with self.subTest(unknown_ok=unknown_ok):
+                self.assert_no_ci_refusal(unknown_ok, target="7", pre_join=True)
+
+    def test_a_pre_join_lint_of_a_no_ci_head_with_no_hand_off_pass_refuses_as_no_ci_with_or_without_a_lift(self):
+        head = self.push_no_ci_mutate_head()
+        self.pr_of_no_ci(head, hand_off_pass=False)  # no PASS names the head, so the mutate check is reached only on a lift
+        for unknown_ok in ("", "shellcheck is not on this box"):
+            with self.subTest(unknown_ok=unknown_ok):
+                self.assert_no_ci_refusal(unknown_ok, target="7", pre_join=True)
+
+    def test_a_head_whose_workflow_has_no_checks_job_and_touches_a_mutation_test_file_is_not_the_no_ci_refusal(self):  # the control: a workflow is not no CI
+        head, listed = self.push_head(NO_CHECKS, {".github/workflows/lint.yml": NO_CHECKS_WORKFLOW, "hooks/mutate_shared.py": "SHARED = 1\n"})
+        self.assertIn(".github/workflows/lint.yml", listed, "scope: the head has no workflow file for this case to read")
+        self.assertNotIn(WORKFLOW_REL, listed, "scope: the head has a checks.yml, so the mutate check would read that file, not a missing one")
+        self.assert_mutate_in_diff(head)
+        kind, text = self.lane_lint_outcome(NO_CHECKS)
+        self.assertEqual(kind, "liftable", "a workflow with no checks job that touches a mutation test file is not a liftable unknown: " + text)
+        self.assertNotIn(STARTER_STEP, text, "a workflow with no checks job names the starter step, which is the no-CI refusal: " + text)
+        kind, text = self.lane_lint_outcome(NO_CHECKS, unknown_ok="shellcheck is not on this box")
+        self.assertEqual(kind, "stop", "the mutate check did not refuse a lifted unknown whose checks.yml has no checks job, as before: " + text)
+        self.assertNotIn(STARTER_STEP, text, "a workflow with no checks job names the starter step, which is the no-CI refusal: " + text)
 
     def test_a_head_whose_workflow_has_no_checks_job_is_a_liftable_unknown(self):
         # A repo that has a workflow, but none with a checks job, is an unknown a flag lifts. Only a repo with no workflow is the no-CI refusal.
