@@ -847,14 +847,16 @@ def INTERPRETER_HEREDOC(text: str) -> bool:
 _HEAD_MARKS = re.compile(r"""['"(#<]""")
 
 
-def heredoc_heads(text: str, quote: str = "", closes_after: bool = False, legacy: bool = False):
+def heredoc_heads(text: str, quote: str = "", closes_after: bool = False, legacy: bool = False,
+                  dashes: bool = False):
     """Return ([(quote char, delimiter)], quote) for the heredoc headers in `text` that sit outside
     quotes and comments, in order, and what is still open at its end. `quote` is a stack of open
     quotes and parentheses. `echo "<<EOF"` and `<<<word` hold no header, but `-m "$(cat <<EOF` does:
     a `$(` inside double quotes is shell again. Quotes are read as bash reads them, with no escape:
     only a contraction bash never closes (is_contraction; `closes_after` says a `'` follows `text`)
     opens none. A mark read as text could show a header bash quotes, and drop a body bash runs.
-    `legacy` reads each header with _MAIN_HEADER, as main did (the bandaid there)."""
+    `legacy` reads each header with _MAIN_HEADER, as main did (the bandaid there). `dashes` makes each head
+    (quote, delimiter, dash), `dash` true for a `<<-` header: its body ends at a line of tabs and the delimiter."""
     if not quote and not _HEAD_MARKS.search(text):
         return [], ""   # no quote, paren, comment or `<` to read: nothing opens, nothing is open
     heads = []
@@ -888,7 +890,8 @@ def heredoc_heads(text: str, quote: str = "", closes_after: bool = False, legacy
         elif char == "<":
             header = (_MAIN_HEADER if legacy else HEREDOC_HEADER).match(text, index)
             if header:
-                heads.append(header.groups() if legacy else heredoc_delimiter(header.group(1)))
+                head = header.groups() if legacy else heredoc_delimiter(header.group(1))
+                heads.append(head + (header.group(0).startswith("<<-"),) if dashes else head)
                 index = header.end()
                 continue
         index += 1
@@ -949,13 +952,14 @@ def _walk_heredocs(cmd: str, contractions_are_text: bool = False, legacy: bool =
         if kept_at is not None:
             kept_at.append(index)
         header_line = lines[index]
-        heads, stack = heredoc_heads(header_line, stack, index < last, legacy)   # a later line holds a `'`
+        heads, stack = heredoc_heads(header_line, stack, index < last, legacy, dashes=True)   # a later line holds a `'`
         index += 1
         if own_heads is not None and heads:
             own_heads.extend(_own_headers(header_line, len(heads)))
-        for quote, delimiter in heads:
+        for quote, delimiter, dash in heads:
             start = index
-            while index < len(lines) and lines[index].strip() != delimiter:
+            # bash ends a body at a line that is exactly the delimiter, after leading tabs under `<<-` only
+            while index < len(lines) and (lines[index].lstrip("\t") if dash else lines[index]) != delimiter:
                 index += 1
             bodies.append((quote, "\n".join(lines[start:index]), header_line))
             if spans is not None:
