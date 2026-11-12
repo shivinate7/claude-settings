@@ -31,8 +31,8 @@ PREMISE_KINDS and an option with no gain or no loss refuse as `question-form`, a
 Based on line whose text is only an angle-bracket placeholder (the template copied; `<Button>` inside real
 text passes). A Problem line that is
 bare, or whose stake is outside OWNER_STAKES, refuses as `owner-judge`. When all of those pass, a missing
-or empty `Departs from:` line (a bullet or bold label is read), a line with no separator (" — ", an unspaced
-"—", " - " or " -- ") or an empty or placeholder side, and a change side whose first clause (before ";") says
+or empty `Departs from:` line (a bullet or bold label is read), a line with an empty or placeholder side (no
+separator is needed: the first word and the rest are the sides), and a change side whose first clause (before ";") says
 nothing changes (a restatement of main) refuse as `question-departs`: the rule building-port-keeps-behaviour,
 in decision port-keeps-behaviour. departs_hit is its one predicate; lint/report_guard.py calls it too.
 The page writer's last two rules run after the form: `option-letter-keys` (an option's key is its
@@ -175,7 +175,8 @@ DEPARTS_RULE = "question-departs"
 # The one pattern for a Departs from line: at a line start, with an optional bullet ("- ", "* ") and an
 # optional bold label ("**Departs from:**"). Group 1 is the rest of the line; a CR from CRLF is no part of it.
 DEPARTS_LINE = re.compile(r"^[ \t]*(?:[-*+][ \t]+)?(?:\*\*)?Departs from(?:\*\*)?:(?:\*\*)?([^\n]*)", re.I | re.M)
-# The separator: an em dash, spaced or not, or " - " or " -- ". The first one splits the line.
+# The separator: an em dash, spaced or not, or " - " or " -- ". The first one splits the line. A line with none
+# splits at its first space: the first word is the main side, the rest is the change side.
 DEPARTS_SEPARATOR = re.compile(r"\s*\u2014\s*|\s+--?\s+")
 # Whole words and phrases that say the change side restates main. "stay", "remain" and "kept" are not
 # here: "Suspense cards stay in Suspense" is a port change that names where a thing goes.
@@ -183,8 +184,10 @@ NO_CHANGE = re.compile(r"(?<![\w/-])(?:none|nothing|n/a|no changes?|no differenc
                        r"|as on main|as before|same as|identical to|already)(?![\w/-])", re.I)
 # The new-thing change side, "adds <X>": group 1 is X.
 PORT_NEW_THING = re.compile(r"adds\b\s*(.*\S)", re.I)
+# A line with no separator that is only placeholders, "<what on main> <what changes>": the template copied.
+DEPARTS_ONLY_PLACEHOLDERS = re.compile(r"(?:<[^<>\n]*>\s*)+")
 DEPARTS_REASON = ("A question to the owner says how the work departs from main, in a line that starts "
-                  "\"Departs from: <what on main> \u2014 <what changes>\", with both sides filled and a change that "
+                  "\"Departs from: <what on main> <what changes>\", with both sides filled and a change that "
                   "differs from main. If it is new, write \"Departs from: main \u2014 adds <X>\". If the change "
                   "only restates what main does, do not ask: act on main's behaviour.")
 PAGE_DEPARTS_REASON = DEPARTS_REASON + " On the waiting page the line goes in `context`."
@@ -194,17 +197,19 @@ PLACEHOLDER_HINT = ": write the real text"
 
 
 def departs_sides(rest):
-    """(main side, change side, whether a separator split it) of one Departs from line's text. The one parser."""
+    """(main side, change side, whether a separator split it) of one Departs from line's text. The one parser.
+    With no separator the first word is the main side and the rest the change side, so one word is an empty side."""
     parts = DEPARTS_SEPARATOR.split(rest, maxsplit=1)
     if len(parts) < 2:
-        return rest.strip(), "", False
+        words = rest.split(None, 1)
+        return (words[0] if words else ""), (words[1].strip() if len(words) > 1 else ""), False
     return parts[0].strip(), parts[1].strip(), True
 
 
 def departs_hit(text) -> str:
     """The miss reason when `text` lacks a valid Departs from line, else "". Every such line must hold a
-    non-empty side on each side of the first separator (see DEPARTS_SEPARATOR), neither side only a
-    placeholder, and no no-change word in the first clause of the change side: the part before its first
+    non-empty side on each side of the first separator (see DEPARTS_SEPARATOR; with none, the first word and
+    the rest), neither side only a placeholder, and no no-change word in the first clause of the change side: the part before its first
     ";", or the whole side with none. A word after the ";" says what the change does."""
     text = str(text or "")
     lines = DEPARTS_LINE.findall(text)
@@ -212,12 +217,11 @@ def departs_hit(text) -> str:
         return "no Departs from line"
     for rest in lines:
         main, change, split = departs_sides(rest)
-        if not split:
-            return "Departs from line with no \u2014, - or -- separator between what is on main and what changes"
         if not main or not change:
             return "Departs from line with an empty side"
         added = PORT_NEW_THING.fullmatch(change)
-        if is_placeholder(main) or is_placeholder(change) or (added and is_placeholder(added.group(1))):
+        if (is_placeholder(main) or is_placeholder(change) or (added and is_placeholder(added.group(1)))
+                or (not split and DEPARTS_ONLY_PLACEHOLDERS.fullmatch(rest.strip()))):
             return "Departs from line with a side that is only a placeholder" + PLACEHOLDER_HINT
         word = NO_CHANGE.search(change.split(";", 1)[0])
         if word:
@@ -474,17 +478,18 @@ OWNER_NAME = re.compile(r"\b(?:the\s+(?:owner|user)|shivam|he|him)\b", re.I)
 # between, so "Shivam will approve it" and "the user to just click Merge" act, and "the owner clicked
 # Approve" (the button's name, after a past act) does not.
 # "the owner's merge" and "the owner's approval" are presses not yet made, as "the owner's click" is, unless the
-# approval is already in ("the owner's approval is in"). "merge" is a press only as the last word of its phrase:
-# a noun after it ("the owner's merge commit", "merge queue", "merge button") names a thing, not his act.
-# "has to", "needs to" and "reviews and" stand before the act as a modal does. A bare "has" does not: "the owner
-# has merge rights" names no act, and "the owner has hit Merge" is a past one.
+# approval is already in ("the owner's approval is in"). Each is a press only as the last word of its phrase
+# (_NOUN_END): a noun or a hyphen after it ("the owner's merge commit", "merge-queue", "approval note") names a
+# thing, not his act. A punctuation mark or a joining word after it ends the phrase ("approval on GitHub", "merge,
+# then"). "has to", "needs to" and "reviews and" stand before the act as a modal does. A bare "has" does not: "the
+# owner has merge rights" names no act, and "the owner has hit Merge" is a past one.
+_NOUN_END = (r"(?=\s*(?:[^\w\s-]|-(?!\w)|$)|\s+(?:on|in|at|of|by|for|from|with|before|after|to|first|and|or|then|so"
+             r"|but|once|when)\b)")
 OWNER_ACT = re.compile(r"(?:(?:\s+(?:will|can|must|should|may|then|also|first|now|to|just|please"
                        r"|(?:has|have|needs?)\s+to|\w+ly|\w+s\s+and))*\s+"
                        r"(?:press(?:es|ing)?|click(?:s|ing)?|tap(?:s|ping)?|approv(?:e|es|ing)"
                        r"|merg(?:e|es|ing)|hit(?:s|ting)?|turn(?:s|ing)?\s+(?:it\s+)?on)"
-                       r"|['\u2019]s\s+(?:merge(?=\s*(?:[^\w\s]|$)|\s+(?:on|in|at|of|by|for|from|with|before|after"
-                       r"|first|and|or|then|so|but|once|when)\b)"
-                       r"|approval(?!\s+(?:is|was|has|are|came|comes|arrives?)\b)))\b" + _PAGE_BUTTON, re.I)
+                       r"|['\u2019]s\s+(?:merge" + _NOUN_END + r"|approval" + _NOUN_END + r"))\b" + _PAGE_BUTTON, re.I)
 _PRESS_LEAD = frozenset(("you", "and", "then", "or", "please"))
 
 
