@@ -112,8 +112,8 @@
                           .ps1 tests print `skip <test>: <reason>`. A failing test refuses, with its last output; a timeout, an
                           unloadable selector or an unreadable diff is an unknown, lifted by --lint-unknown-ok. The PASS line names
                           the run and skipped counts. Extra cost: the touched tests' own run time, bounded in all by LINT_SECONDS.
-                          Before any step: a lint tree that lacks lint/check_python_floor.py or .github/workflows/checks.yml, which the head's
-                          own tree holds, reads UNKNOWN (exit 2) and names the file; no step runs and --lint-unknown-ok never lifts it. Cost:
+                          Before any step: a lint worktree that lacks lint/check_python_floor.py or .github/workflows/checks.yml, which the head's
+                          own tree holds, reads UNKNOWN (exit 1, as every lane-lint refusal) and names the file; no step runs and --lint-unknown-ok never lifts it. Cost:
                           one `git ls-tree` of the head.
   merge --idle-lanes --live FILE
                           one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
@@ -186,7 +186,7 @@ class Liftable(Stop):
     """A refusal that a reason flag lifts. Its message names the flag, so main() does not add the no-override line."""
 
 class UnknownStop(Stop):
-    """A refusal that reads UNKNOWN: the run could not tell pass from fail. main() exits 2 on it (as bin/ci-job does), and no flag lifts it."""
+    """A refusal that reads UNKNOWN: the run could not tell pass from fail. no flag lifts it. It exits 1 like every refusal: exit 2 is argparse's usage code."""
 
 class LintFail(Stop):
     """The lint of a head FAILed. `lines` are ci-job's FAIL lines, `log` its `log=` line as a list of 0 or 1: the step output that names the paths is in that log."""
@@ -3053,12 +3053,12 @@ def ci_job_run(wt, *args, notes=None):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
-TOUCHED_SELECTOR = ".github/scripts/touched-tests.py"  # the lint tree's own selector, so the batch's tests are chosen by the batch's rules
+TOUCHED_SELECTOR = ".github/scripts/touched-tests.py"  # the lint worktree's own selector, so the batch's tests are chosen by the batch's rules
 TOUCHED_RUNNERS = {".py": sys.executable, ".sh": "bash", ".mjs": "node", ".js": "node"}  # bash, not sh: the suites use bashisms
 TOUCHED_TAIL_LINES = 15  # last output lines a failing test shows; the whole log would bury the assertion
 
 def run_touched_tests(wt, base, head):
-    """Run the test files the diff base...head touches, inside the lint tree `wt`, once the lint has passed. The batch's merged tree can fail a test
+    """Run the test files the diff base...head touches, inside the lint worktree `wt`, once the lint has passed. The batch's merged tree can fail a test
     that no lane failed alone, so this runs on the integration head. A test the selector keeps out (HEAVY, NEEDS_SETUP) or a .ps1 with no pwsh on the PATH is
     skipped with its reason, never run and never a pass. The whole stage shares one LINT_SECONDS bound.
     -> (run count, skip lines, fail texts, unknown lines). An unreadable diff, an unloadable selector and a timeout are unknowns, not passes."""
@@ -3067,14 +3067,14 @@ def run_touched_tests(wt, base, head):
         return 0, [], [], [f"the diff origin/{base}...{head[:9]} could not be read: {diff}"]
     c, listed = git(wt, "ls-files", "-z")
     if c:
-        return 0, [], [], [f"git ls-files failed in the lint tree: {listed}"]
+        return 0, [], [], [f"git ls-files failed in the lint worktree: {listed}"]
     try:  # the filename has a hyphen, so no import statement names it
         spec = importlib.util.spec_from_file_location("lint_tree_touched_tests", os.path.join(wt, *TOUCHED_SELECTOR.split("/")))
         selector = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(selector)
         candidates, heavy, needs_setup, reason = selector.candidates, selector.HEAVY, selector.NEEDS_SETUP, selector.reason
     except (Exception, SystemExit) as e:  # the lane's own file: any failure to load it says nothing about the tests
-        return 0, [], [], [f"the lint tree's {TOUCHED_SELECTOR} could not be loaded: {type(e).__name__}: {e}"]
+        return 0, [], [], [f"the lint worktree's {TOUCHED_SELECTOR} could not be loaded: {type(e).__name__}: {e}"]
     tracked = set(listed.split("\0")) - {""}
     try:
         # a path the diff deleted or renamed away is not in the tree, so it is no test to run; the selector's own main() drops it the same way
@@ -3121,18 +3121,18 @@ def run_touched_tests(wt, base, head):
 LINT_TREE_FILES = ("lint/check_python_floor.py", ".github/workflows/checks.yml")  # files the lint reads from its own tree: the floor check and the workflow that names the steps
 
 def refuse_incomplete_tree(wt, head, base):
-    """UNKNOWN, before any ci-job step runs, when the made lint tree `wt` lacks a file of LINT_TREE_FILES that the head's own git tree holds: a tree
-    cut incomplete (the incident's tree lacked both), not a head that never had the file. Without it the floor step only crashes on the file and its
-    FAIL blames the lane for a tree defect. Names each missing file; --lint-unknown-ok never lifts it (UnknownStop, not Liftable).
+    """UNKNOWN, before any ci-job step runs, when the lint worktree `wt` lacks a file of LINT_TREE_FILES that the head's own git tree holds: a worktree
+    cut incomplete (the incident's lacked both), not a head that never had the file. Without it the floor step only crashes on the file and its
+    FAIL blames the lane for a worktree defect. Names each missing file; --lint-unknown-ok never lifts it (UnknownStop, not Liftable).
     A head whose tree git cannot list is the same unknown."""
     c, listed = git(wt, "ls-tree", "-r", "--name-only", "-z", head, "--", *LINT_TREE_FILES)
     if c:
-        raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the head's tree could not be listed, so the lint tree was not checked: {listed}")
+        raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the head's tree could not be listed, so the lint worktree was not checked: {listed}")
     held = [p for p in listed.split("\0") if p]
     missing = [rel for rel in held if not os.path.isfile(os.path.join(wt, *rel.split("/")))]
     if missing:
-        raise UnknownStop("\n".join([f"the lint of {head[:9]} against {base} is unknown, not a pass: the lint tree lacks {', '.join(missing)}, so no step ran.",
-                                     "Run again. If it keeps happening, the tree made for this head is incomplete. --lint-unknown-ok does not lift this. " + LANE_LINT_REMEDY]))
+        raise UnknownStop("\n".join([f"the lint of {head[:9]} against {base} is unknown, not a pass: the lint worktree lacks {', '.join(missing)}, so no step ran.",
+                                     "Run again. If it keeps happening, the lint worktree made for this head is incomplete. --lint-unknown-ok does not lift this. " + LANE_LINT_REMEDY]))
 
 def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_tests=False):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
@@ -5200,7 +5200,7 @@ def build_parser():
     p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
     p.add_argument("--with", dest="with_prs", default=None, metavar="PR,PR,...", help="with --lane-lint on a PR number: also check the head against each named open PR (a comma list), even one of another session")
-    p.add_argument("--touched-tests", action="store_true", help="with --lane-lint: after the lint passes, run the test files the diff touches in the lint tree; a failing test refuses, a timeout is unknown (lifted by --lint-unknown-ok)")
+    p.add_argument("--touched-tests", action="store_true", help="with --lane-lint: after the lint passes, run the test files the diff touches in the lint worktree; a failing test refuses, a timeout is unknown (lifted by --lint-unknown-ok)")
     p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")
     p.add_argument("--batch-build", nargs="+", metavar=("NAME", "PR"), help="build batch-NAME and its one draft pull request from these lane PRs, or allow the same set again; stands alone; takes no lock")
     p.add_argument("--batch-drop", nargs=2, metavar=("NAME", "PR"), help="take PR, and each frozen lane that stacks on it, off batch-NAME; stands alone; takes no lock")
@@ -5492,7 +5492,7 @@ def main(argv, host=None, lock=None, hosts=None):
         return (preview(root, cfg, a.config, a.pr, h, lock, info, a.undo_check_unknown_ok)) or 0
     except Stop as e:
         print(f"merge: {e}" + ("" if isinstance(e, (Liftable, Unproven)) else " No override lifts this refusal, because this tool runs after the guard."), file=sys.stderr)
-        return 2 if isinstance(e, UnknownStop) else 1
+        return 1
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))
