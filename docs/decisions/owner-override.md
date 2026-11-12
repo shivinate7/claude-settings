@@ -2,7 +2,7 @@
 
 ## The ruling
 
-The owner starts a prompt with the word `override`. The guard then lets a refusal or an ask through, once or for a time. The words after `override` are the reason, written to `guard.log` as one line.
+The owner starts a prompt with the word `override`. The guard then lets a refusal or an ask through, once or for a time. A length right after `override` makes it timed. The reason words of a one-act override are written to `guard.log` as one line. A timed override logs no reason.
 
 Owner words, 2026-10-18 CDT:
 
@@ -21,28 +21,46 @@ Owner, 2026-10-26 (step c41, answer a): build an Opus-only override word. It lif
 
 Owner, 2026-10-19 00:07 CDT, process-only: after round 3, a test-only re-point of mutation anchors lands with CI's mutation run as its proof, with no 4th review.
 
+Owner R12 (the owner's override ruling), 16:10 CST Nov 10: one override route. `override` with any length form (`15`, `15m`, `90 minutes`, `2 hours`, `4h`), with trailing reason words allowed, is timed. It runs on the fast path, with no model call. A bare `override` is one act. Departs from main: `override 15m please` granted nothing.
+
+Owner Q1 (the relay question), `q1 -- yes`, 09:10 CST Nov 11: a relayed override counts only in the form of R18 point 5 (the relayed-grant check: exact words, time, the one session and act, checked against the sender's feedback log). The receiver prints the receipt line. Until that check is built, only typed words and a page save grant an override.
+
 Orchestrator's call, not an owner grant:
 
 - An override covers only the session where the owner typed it.
 - A one-act override that nothing uses ends after 10 minutes.
 - A bare number is minutes: `override 15` is 15 minutes. The units are `m` and `h`.
 - `override off` ends any override at once.
-- The keyword counts only as the first word of the owner prompt, after leading whitespace, in any case. `override` alone, or with a reason (`override: use opus for that one review agent`), is a one-act override. One punctuation mark may follow the word (`,` `.` `!` `;` `:` or a dash). It is dropped before the reason, so `override, yes` is `override yes`. All marks but `:` count only with whitespace or the end after them: `override.py is broken` and `override-15m` grant nothing. The reason keeps its case, folds newlines and tabs to spaces, and goes to `guard.log` through the guard's own locked log writer. `override <n>[m|h]` and `override off` keep their meaning only as the whole prompt after that mark: a word after a length or after `off` (`override 15m please`) grants nothing on this route, so an intended "off" never becomes a grant. A rest that holds a length goes to the plain override ask below. On this keyword route, a later line that starts with the keyword grants nothing. Neither does a word that only starts with it (`overrides`, `override15m`), a notice tag, tool output, or a file or text from an agent. The plain ask below grants nothing from a notice tag, tool output, a file, text from an agent, or a `<pasted_content>` block. The plain ask reads a later line with the whole word `override` outside code spans like any prompt. For example, `thanks`, then `override 15m` on the next line, grants 15m on a judge yes.
+- The keyword counts only as the first word of the owner prompt, after leading whitespace, in any case. `override` alone, or with a reason (`override: use opus for that one review agent`), is a one-act override. One punctuation mark may follow the word (`,` `.` `!` `;` `:` or a dash). It is dropped before the reason, so `override, yes` is `override yes`. All marks but `:` count only with whitespace or the end after them: `override.py is broken` and `override-15m` grant nothing.
+- The reason of a one-act override keeps its case, folds newlines and tabs to spaces, and goes to `guard.log` through the guard's own locked log writer, cut to 300 characters. A timed override logs no reason.
+- Fast path (R12): `override` followed by a length grants a timed override, with no model call. The length is `15`, `15m`, `90 minutes`, `2 hours` or `4h`. A bare number is minutes. Any words after the length are allowed. Two lengths, a decimal (`1.5h`) or a compound length (`1h30m`) grant nothing. A length after other words (`override that for 15 minutes`) goes to the plain ask below.
+- `override off` counts only as the whole prompt. A word after `off` grants nothing, so an intended "off" never becomes a grant.
+- The keyword route reads the payload `source` and the prompt's own transcript record. A `source` other than absent, null or `user` grants nothing, such as `system` or `loop_wakeup`. So does any record that fails the owner-turn test (`_owner_text`): a `system` or `isMeta` record, a command record, a fired-task block, or an origin that is not human, such as a peer or a task notification. With no transcript path, or no record that matches the prompt, the grant goes ahead: there is no evidence against it.
+- On this keyword route, a later line that starts with the keyword grants nothing. Neither does a word that only starts with it (`overrides`, `override15m`), a notice tag, tool output, or a file or text from an agent.
+- The plain ask below grants nothing from a notice tag, tool output, a file, text from an agent, or a `<pasted_content>` block. The plain ask reads a later line with the whole word `override` outside code spans like any prompt. For example, `thanks`, then `override 15m` on the next line, grants 15m on a judge yes.
 - An override file that is missing, unreadable or corrupt is no override.
 - `override` also lifts the Opus spawn refusal of `agent-model-cap`, and a refusal of a spawn above its role's row (`agent-role-model`; owner, 2026-11-01 17:25 CST, item 127, pick a, same for Sonnet and Opus). It never lifts that rule's settings-write ask, nor the no-model refusal of `agent-role-model`.
 - The override check sits at the top of `refuse()` in `hooks/guard_core.py`, the one place that prints a deny or an ask.
-- A valid override writes one guard log line, `override <rule>`, and prints nothing, so the normal permission flow runs.
+- A lift writes one guard log line, `override <rule>`, and prints nothing, so the normal permission flow runs. That guard.log line is its receipt.
+
+## The receipt
+
+- A grant prints one line, from `override_line` in `hooks/local_time.py`, for both the keyword and the plain ask. A one-act override prints `Override: one act, ends at HH:MM ZONE if unused.` A timed override prints `Override: until HH:MM ZONE`. The time is Central: CST or CDT.
+- `override off` prints `Override: ended.`
+- An Opus grant prints its own line, `Opus override: ...` (see The Opus override).
+- A lift prints nothing. Its receipt is its guard.log line.
+- A refusal that no override lifts ends with `No override lifts this refusal.` (`override.NO_OVERRIDE`).
 
 ## The plain override ask
 
 - Owner ask, 2026-11-07 12:44 CST (page ask `ask-mw6r5ldefg`): a plain typed override ask, such as `override that for 15 minutes please` or `yes override that`, lifts a refusal, as the plain Opus ask does. Departs from: main, keyword forms only for `override` — adds a judged plain-word route.
 - `hooks/local_time.py` calls `override.grant_override_ask` after `grant()` and `grant_opus_ask` granted nothing. It writes the same override file `grant()` writes: timed for a length in the words (`15m`, `15 minutes`, or a bare number right after a first word `override`, in minutes), else one-act with the 10-minute window.
-- `grant()` defers to it only for a first word `override` whose rest is no whole keyword form and holds a length. A judge no or error keeps main's result: a reason form stays one-act, and `override 15m please` grants nothing. A judge error never widens one-act to timed.
+- `grant()` defers to it only for a first word `override` whose rest starts with no length and holds one later on (`override that for 15 minutes please`). A judge no or error keeps main's result: a reason form stays one-act. A judge error never widens one-act to timed. A length at the start is the fast path, not the judge: `override 15m please` is timed, with no model call (R12).
 - It shares the Opus ask's gates (one helper): the `source` check, a notice start, cut pasted and notice blocks (a `<cross-session-message>` block too), a fired-task block, a `promptSource` `system` record, and the cloud seed check. Its judge is `call_judge.override_ask`, the same fail-closed call as `opus_ask` with its own prompt head.
 - The prompt hook saves the owner's prompt to the inbox before any judge call, so a hook timeout during the call loses no capture. A capture error never stops a grant.
 - A pasted refusal line from `override.offer` grants nothing: the word counts only outside backtick code spans.
-- These get no judge call and no grant: no whole word `override` outside code spans, and a `NEGATIONS` word or `off` within `NEGATION_SPAN` words of it. So do a `?`, two lengths, a decimal or compound length, and the whole word `opus`, which the Opus route owns.
-- Cost: at most one model call per owner prompt, only for a prompt that holds the whole word `override` and passes the gates. None for any other prompt.
+- On the plain ask, these get no judge call and no grant: no whole word `override` outside code spans, and a `NEGATIONS` word or `off` within `NEGATION_SPAN` words of it. So do a `?`, two lengths, a decimal or compound length, and the whole word `opus`, which the Opus route owns.
+- Cost: the keyword forms make no model call. The plain ask makes at most one per owner prompt, only for a prompt that holds the whole word `override` and passes the gates. None for any other prompt.
 
 ## The Opus override
 
