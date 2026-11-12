@@ -1987,7 +1987,7 @@ class LintPostsPassComment(CiJobStub, tm.CloudSession):
 
     def test_a_real_host_posts_the_pass_as_one_rest_comment_on_the_pull_request(self):
         tm.install_gh_shim(self)
-        tm.GhHalf.set(self)
+        tm.GhHalf.set(self, issue_comments=[])  # no comment on the pull request: the review read finds no record, and the 404 it would otherwise get is unknown
         head = self.head("feat")
         self.use_ci_job(PASSING, 0)
         rc, out = self.lane("--lane-lint", "7", host=merge.Host())
@@ -2021,7 +2021,7 @@ class LintPostsPassComment(CiJobStub, tm.CloudSession):
 
     def test_a_failed_post_after_a_pass_prints_the_pass_and_a_reason_and_exits_zero(self):
         tm.install_gh_shim(self)
-        tm.GhHalf.set(self, post_fail=tm.rest_err(502, "Bad Gateway"))
+        tm.GhHalf.set(self, post_fail=tm.rest_err(502, "Bad Gateway"), issue_comments=[])  # the review read finds no record; the 404 it would otherwise get is unknown
         head = self.head("feat")
         self.use_ci_job(PASSING, 0)
         rc, out = self.lane("--lane-lint", "7", host=merge.Host())
@@ -2343,6 +2343,16 @@ class PostReviewCommit(LaneFixture):
         rc, out = self.lint_pr()
         self.assertEqual(rc, 0, out)
         self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_a_review_head_missing_from_the_clone_is_unknown_not_a_pass(self):
+        self.commit_on("feat", {GUARD_PATH: "a guard path, after a review this clone cannot read\n"}, "origin/feat")
+        missing = "c" * 40  # no commit of this clone, and none on origin for one fetch to bring
+        self.record(missing, "no", tm.REVIEW_PASS, "not owed")
+        rc, out = self.lint_pr()
+        self.assertEqual(rc, 1, "lane lint passed a lane whose newest review record names a head this clone lacks:\n" + out)
+        self.assertIn(missing[:9], out, "the stop does not name the review record's head the clone lacks:\n" + out)
+        self.assertIn("unknown", out, "the stop for a review head the clone lacks does not read unknown:\n" + out)
+        self.assertEqual(self.host.posted, [], "a lane lint unknown posted a lane-lint PASS:\n" + out)
 
 
 if __name__ == "__main__":
