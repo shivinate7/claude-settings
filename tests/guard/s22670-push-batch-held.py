@@ -42,7 +42,7 @@ BH_COUNT = os.path.join(ROOT, "bhcountrepo")              # lane-count: two read
 BH_COUNT_GH = os.path.join(ROOT, "bhcountgh")
 BH_MERGED = os.path.join(ROOT, "bhmergedrepo")            # lane-merged: its tip is an ancestor of origin/main, and a ready pull request holds it
 BH_MERGED_GH = os.path.join(ROOT, "bhmergedgh")
-BH_AGENT = os.path.join(ROOT, "bhagentrepo")              # worktree-agent-5e6f7a8b: named like an agent worktree, its tip held
+BH_AGENT = os.path.join(ROOT, "bhagentrepo")              # the lane named in the agent-worktree form (see the literal below), its tip held
 BH_AGENT_GH = os.path.join(ROOT, "bhagentgh")
 
 
