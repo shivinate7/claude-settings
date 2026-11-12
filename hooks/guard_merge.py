@@ -19,7 +19,7 @@ from guard_core import (
     is_cloud, strip_heredoc_bodies, strip_redirections,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
-from shared_names import BUILD_TAG, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
+from shared_names import BUILD_TAG, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, TASK_NOTIFICATION_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
 from guard_pointer import (
     pointer_checkout,
 )
@@ -2401,6 +2401,59 @@ def review_record_hit(tool: str, tool_input, transcript: str, agent: bool = Fals
     if role_key(last["input"].get("subagent_type")) == "design-reviewer":
         return REVIEW_RECORD_DESIGN_REASON, matched, False
     return REVIEW_RECORD_REASON, matched, False
+
+
+# ---- a resume of a finished reviewer (rule resume-finished-reviewer, rule roles-resume-by-name)
+RESUME_TOOL = "SendMessage"  # the built-in send: it resumes a named spawn. The remote send_message names a session.
+RESUME_MAIN = "main"
+RESUME_REASON = (
+    "resume-finished-reviewer: a reviewer or design-reviewer that has finished has no worktree any more, so a resume "
+    "runs with no tree. Spawn a fresh reviewer and pass it the prior report. "
+    "(rule roles-resume-by-name: resume a dead agent by name, never fresh; a finished reviewer's worktree is gone)"
+)
+RESUME_ASK_REASON = (
+    "resume-finished-reviewer: the guard cannot tell whether this reviewer or design-reviewer has finished. A finished "
+    "one has no worktree, so a resume runs with no tree; then spawn a fresh reviewer and pass it the prior report. "
+    "Allow this send only if the reviewer is still running. (rule roles-resume-by-name)"
+)
+
+
+def resume_finished_hit(tool: str, tool_input, transcript: str, agent: bool = False):
+    """(decision, reason, matched, unread): "deny" when this built-in SendMessage from the main session names a
+    reviewer or design-reviewer spawn that has finished, "ask" when the spawn's state is unknown, else ("", "", "", ...).
+    `to` names the spawn by its launch result's toolUseResult.agentId or by its call's `name`; the latest spawn with
+    the name wins. A send to main, a name no spawn holds, a spawn of any other role, a running spawn and a call with an
+    agent_id pass. `unread` is true when a send that would be judged finds no transcript to read: it passes and
+    the caller notes it. The state read is _transcript.agent_state, the one reader of a spawn's finish. Cost: one
+    transcript read per judged send, no subprocess, no network."""
+    target = tool_input.get("to") if isinstance(tool_input, dict) else None
+    if agent or tool != RESUME_TOOL or not isinstance(target, str) or not target or target == RESUME_MAIN:
+        return "", "", "", False
+    if not transcript:
+        return "", "", "", True
+    try:
+        reader = _transcript_reader()
+        records = [rec for rec in reader.read_transcript(transcript) if not rec.get("isSidechain")]
+    except Exception:
+        return "", "", "", True
+    try:
+        agents = {res.get("tool_use_id"): rec["toolUseResult"].get("agentId")
+                  for rec in records if isinstance(rec.get("toolUseResult"), dict)
+                  for res in reader.tool_results(rec)}
+        spawns = [use for rec in records for use in reader.tool_uses(rec)
+                  if use.get("name") in RECORD_SPAWN_TOOLS and isinstance(use.get("input"), dict)]
+        named = [use for use in spawns if use["input"].get("name") == target or agents.get(use.get("id")) == target]
+        if not named or named[-1]["input"].get("subagent_type") not in RECORD_REVIEWER_ROLES:
+            return "", "", "", False
+        state = reader.agent_state(records, named[-1].get("id"), TASK_NOTIFICATION_TAG)
+    except Exception:
+        return "", "", "", False
+    role = named[-1]["input"]["subagent_type"]
+    if state == reader.FINISHED:
+        return "deny", RESUME_REASON, "%s to a finished %s" % (tool, role), False
+    if state == reader.UNKNOWN:
+        return "ask", RESUME_ASK_REASON, "%s to a %s of unknown state" % (tool, role), False
+    return "", "", "", False
 
 
 # The installer swaps the next line for `INSTALL_ID = "<id>"` at copy time; guard.py compares the
