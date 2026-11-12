@@ -13,7 +13,11 @@ judge's real entry function. The runner holds no prompt: each case drives the en
 calls decision_watch.invoke_model, the one model seam, looked up at call time. The adapter reads what the entry did:
 a refusal, a finding or a flag is deny, an answer with none of those is allow, and no model call or a model error is
 unknown. An entry that fails open prints no verdict, so the adapter reads the model's own answer to tell unknown from
-allow.
+allow. The opus_scope adapter reads {"ok": false} as deny and {"ok": true} with no roles as unknown. The feedback adapter
+reads any hit as deny, whichever older message the model names.
+
+A corpus that is missing, empty, not JSON or not a list of cases exits 1, and a detail line names the judge and its file.
+Only a judge that PENDING_STEPS names may have a missing or empty file.
 
 A case runs `runs` times (--runs N, default 1). It is PASS or MISS only when one answer holds a strict majority of the
 runs. Anything else is UNKNOWN, a failed call and a flip alike.
@@ -211,7 +215,13 @@ def opus_ask(case_input, calls):
 def opus_scope(case_input, calls):
     import call_judge
     roles = call_judge.opus_scope(case_input["text"], case_input["context"])
-    return "allow" if roles else "deny"
+    if roles:
+        return "allow"
+    # opus_scope returns None for a refusal and for a fail-open answer alike, so the model's own answer tells them apart
+    answer = calls[-1][0] if calls else None
+    if isinstance(roles, list) or (isinstance(answer, dict) and answer.get("ok") is False):
+        return "deny"
+    raise RuntimeError("call_judge.opus_scope: the answer failed open (ok with no usable roles)")
 
 
 def prose(case_input, calls):
@@ -253,8 +263,8 @@ def feedback(case_input, calls):
     hits, why = feedback_guard.judge(homes, FEEDBACK_INBOX, blocks, [(FEEDBACK_ID, len(older))])
     if why is not None:  # the check was not whole: an error, an off-shape answer or a bad entry
         raise RuntimeError("feedback_guard.judge: %s" % why)
-    wanted = feedback_ref(case_input.get("repeats", 0))
-    return "deny" if any(ref == wanted for _, ref, _ in hits) else "allow"
+    # Any hit is a repeat: the check flags the new item whichever older message the model names.
+    return "deny" if hits else "allow"
 
 
 def past_ruling(case_input, calls):
@@ -330,6 +340,9 @@ def watch(case_input, calls):
 
 CALL = "hooks/call_judge.py"
 QUESTION_FORM = "hooks/question_form.py"
+ROUTE_MATCH = "hooks/route_match.py"  # reply_judge's prompt carries the route rows it reads
+REPORT_GUARD = "lint/report_guard.py"  # reply_judge reads its hand-off lines and cite pattern for the route block
+TRANSCRIPT = "lint/_transcript.py"  # decision_watch's chat text starts after the record is_last_human picks
 OK = {"ok": True}
 NOT_OK = {"ok": False, "reason": "the case's judge item misses; fix the line it names."}
 # A refusal of a past-ruling check must cite a listed record, and a case's list is its own, so this answer cites none the
@@ -359,14 +372,14 @@ JUDGES = {
                                    ["hooks/override.py"]),
     "prose_judge": entry("prose_judge", prose, ["hooks/prose_judge.py"], verdict_pair(NOT_OK)),
     "reply_judge": entry("reply_judge", reply, ["hooks/reply_judge.py"], verdict_pair(NOT_OK),
-                         [QUESTION_FORM]),
+                         [QUESTION_FORM, ROUTE_MATCH, REPORT_GUARD]),
     "feedback_guard": entry("feedback_guard", feedback, ["hooks/feedback_guard.py"],
                             {"allow": {"repeats": []},
                              "deny": {"repeats": [{"id": FEEDBACK_ID, "ref": feedback_ref(0)}]}}),
-    "report_guard.past_ruling": entry("report_guard.past_ruling", past_ruling, ["lint/report_guard.py", CALL],
+    "report_guard.past_ruling": entry("report_guard.past_ruling", past_ruling, [REPORT_GUARD, CALL],
                                       verdict_pair(RULING_NOT_OK), [QUESTION_FORM]),
     "sendmessage_state": entry("sendmessage_state", sendmessage, ["hooks/sendmessage_state.py"], verdict_pair(NOT_OK)),
-    "decision_watch": entry("decision_watch", watch, ["hooks/decision_watch.py"],
+    "decision_watch": entry("decision_watch", watch, ["hooks/decision_watch.py", TRANSCRIPT],
                             {"allow": {"verdict": "ALLOW"},
                              "deny": {"verdict": "FLAG", "why": "a guard was removed and the chat holds no grant"}}),
 }
@@ -389,13 +402,35 @@ def touched(paths):
     return sorted(hit)
 
 
-def load_corpus(name):
-    """The cases of a judge's corpus file. A missing file is no cases; the runner exits 1 on that unless PENDING_STEPS names the judge."""
+def well_formed(cases):
+    """True for a list of cases that each hold a str id, an expect of allow or deny, and an input."""
+    return isinstance(cases, list) and all(
+        isinstance(c, dict) and isinstance(c.get("id"), str) and c.get("expect") in ("allow", "deny") and "input" in c
+        for c in cases)
+
+
+def read_corpus(name):
+    """(cases, gap) of a judge's corpus file. `gap` is None when the cases are readable, else why there are none: no file,
+    a file that is not a list of cases, or an empty list. The runner exits 1 on a gap unless PENDING_STEPS names the judge
+    and the file is absent or empty."""
+    path = JUDGES[name]["corpus"]
     try:
-        with open(os.path.join(REPO, *JUDGES[name]["corpus"].split("/")), encoding="utf-8") as f:
-            return json.load(f)
+        with open(os.path.join(REPO, *path.split("/")), encoding="utf-8") as f:
+            cases = json.load(f)
     except FileNotFoundError:
-        return []
+        return [], "no corpus file"
+    except (ValueError, OSError):
+        return [], "unreadable corpus (not JSON) in"
+    if not well_formed(cases):
+        return [], "malformed corpus (not a list of cases) in"
+    return cases, (None if cases else "no cases in")
+
+
+ABSENT = ("no corpus file", "no cases in")  # the gaps a pending judge may have; a corpus that does not parse is never one
+
+
+def load_corpus(name):
+    return read_corpus(name)[0]
 
 
 def one_run(row, case):
@@ -527,14 +562,13 @@ def main(argv):
     for name in names:
         rows = replay(name, runs)
         print("%s (%d cases, %d run%s each)" % (name, len(rows), runs, "" if runs == 1 else "s"))
-        if not rows and name in PENDING_STEPS:
+        gap = None if rows else read_corpus(name)[1]
+        if gap in ABSENT and name in PENDING_STEPS:
             print("  %s" % NO_CASES)
             print("  %s" % PENDING_STEPS[name])
         elif not rows:
             unreadable += 1
-            path = JUDGES[name]["corpus"]
-            gap = "no cases in" if os.path.exists(os.path.join(REPO, *path.split("/"))) else "no corpus file"
-            print("  %s: %s %s" % (name, gap, path))
+            print("  %s: %s %s" % (name, gap, JUDGES[name]["corpus"]))
         for r in rows:
             note = "  %s" % r["error"] if r.get("error") else ""
             print("  %-7s %s expect=%s got=%s agreement=%s%s" % (r["verdict"], r["id"], r["expect"], r["got"],
