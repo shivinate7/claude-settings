@@ -1826,8 +1826,43 @@ def _expanded(path: str, cwd: str) -> str:
     return target
 
 
+# A call of thousands of words resolves each word as a path, and a plain realpath lstat-s every
+# component each time, so a slow filesystem ran the guard past its hook time limit. Words share
+# their folder, so the folder resolves once per process and only the leaf is read for each word.
+_REAL_DIRS: dict = {}
+_REAL_CONFIG: dict = {}
+
+
+def clear_real_cache() -> None:
+    """Forget the resolved folders, for a process that makes a symlink and reads it again."""
+    _REAL_DIRS.clear()
+    _REAL_CONFIG.clear()
+
+
+def real_path(path: str) -> str:
+    """`os.path.realpath(path)`, with the folder part cached. A leaf that is a symlink, or is empty,
+    `.` or `..`, takes the full realpath, so the verdict is the same as an uncached read."""
+    head, leaf = os.path.split(path)
+    if not head or leaf in ("", ".", ".."):
+        return os.path.realpath(path)
+    real_head = _REAL_DIRS.get(head)
+    if real_head is None:
+        real_head = _REAL_DIRS[head] = os.path.realpath(head)
+    if os.path.islink(os.path.join(real_head, leaf)):
+        return os.path.realpath(path)
+    return os.path.join(real_head, leaf)
+
+
+def real_config_dir() -> str:
+    """`os.path.realpath(config_dir())`, read once for each spelling of the config folder."""
+    spelling = config_dir()
+    if spelling not in _REAL_CONFIG:
+        _REAL_CONFIG[spelling] = os.path.realpath(spelling)
+    return _REAL_CONFIG[spelling]
+
+
 def _resolved(path: str, cwd: str) -> str:
-    return os.path.normcase(os.path.realpath(_expanded(path, cwd)))
+    return os.path.normcase(real_path(_expanded(path, cwd)))
 
 # What the printed reason may carry. A reason is read by a person under time pressure, and it is the
 # one reason in this file built from tool-supplied text, so the text is bounded and cleaned first.
