@@ -4360,7 +4360,7 @@ def case_page_form_other_repo_route_to_settings_passes():
 
 
 def case_page_form_other_repo_route_without_send_blocks():
-    """Control, green on main. The route out still needs its send: the owner's record of the comment, then the route
+    """Control. The route out still needs its send: the owner's record of the comment, then the route
     with no send after it. The repo-item check blocks it and names the repo, so the rule must not pass it alone."""
     cfg, sid = new_cfg(), "page-form-acme-nosend"
     root = acme_repo()
