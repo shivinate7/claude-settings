@@ -1281,11 +1281,10 @@ def case_port_finding_is_a_note_with_its_rule():
 
 
 # --------------------------------------------------------------------------- c139
-# Owner ruling, item 278 (2026-11-06 12:41 CST): a repo should change to fit a shared tool, rather than the tool
-# change to fit a repo. Widening is judged by scope: a change that applies the same way to every repo is not
-# widening. An option that widens carries "Goes against your ruling: a repo should change to fit the shared tool,
-# rather than the tool change to fit a repo" and is never the recommended option. Rule `style-question-form` holds
-# that text (the one question form, hooks/question_form.py).
+# A repo should change to fit a shared tool, rather than the tool change to fit a repo. Widening is judged by scope:
+# a change that applies the same way to every repo is not widening. An option that widens carries the question form's
+# "Goes against your ruling" label and is never the recommended option. Rule `style-question-form` holds that text
+# (the one question form, hooks/question_form.py).
 
 WIDENS_RULE = "style-question-form"
 WIDENS_ASK = (
@@ -1341,8 +1340,8 @@ def case_prompt_flags_a_recommended_option_that_widens():
 
 
 def case_prompt_says_a_same_change_for_every_repo_is_not_widening():
-    # Item 278: a change made the same way for every repo, for every repo's sake, is not widening. Pinned whole in the
-    # prompt, so a sentence that drops the motive clause fails.
+    # A change made the same way for every repo, for every repo's sake, is not widening. Pinned whole in the prompt,
+    # so a sentence that drops the motive clause fails.
     run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
     check("prompt: a sentence says a change made the same way for every repo, for every repo's sake, is not widening",
           twords.in_text(twords.SAME_CHANGE_IS_NOT_WIDENING, run.prompt()),
@@ -1365,8 +1364,8 @@ def case_prompt_scopes_widening_to_one_repos_sake():
 
 
 def case_prompt_says_an_unmarked_allow_list_option_is_widening():
-    # Owner ruling: an unmarked option that adds to a shared allow-list or a second accepted form counts as widening,
-    # unless it says it applies to every repo. Pinned whole in the prompt, so dropping the exemption clause fails.
+    # An unmarked option that adds to a shared allow-list or a second accepted form is widening, unless it says it
+    # applies to every repo. Pinned whole in the prompt, so dropping the exemption clause fails.
     run = run_hook(WIDENS_ASK, answer=OK_ANSWER)
     check("prompt: a sentence says an unmarked allow-list or second-form option is widening unless it says it applies "
           "to every repo",

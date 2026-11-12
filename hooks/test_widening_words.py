@@ -4,9 +4,9 @@ Each sentence is held whole. A case passes only when the whole sentence is in th
 ignored, so a dropped clause fails it, and no keyword list can stand in for it. The tests import these; none copies them.
 """
 
-# Owner ruling on the widening scope: an option with no mark that adds to a shared allow-list or a second accepted
-# form is widening, unless it says it applies to every repo. The scope may not turn on a stated motive alone, since
-# an option that names no repo would then pass.
+# An option with no mark that adds to a shared allow-list or a second accepted form is widening, unless it says it
+# applies to every repo. The scope may not turn on a stated motive alone, since an option that names no repo would
+# then pass.
 UNMARKED_OPTION_IS_WIDENING = ("an unmarked option that adds to a shared allow-list or a second accepted form counts "
                                "as widening unless it says it applies to every repo")
 # Current wording of the exemption, pinned whole: its motive clause is part of the sentence.

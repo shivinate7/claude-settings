@@ -1365,8 +1365,8 @@ def rule_sentences(text):
 
 
 def case_widening_rule_says_a_same_change_for_every_repo_is_not_widening():
-    # Item 278 (owner ruling, 2026-11-06 12:41 CST): a change made the same way for every repo, for every repo's sake,
-    # is not widening. The sentence is pinned whole, so a sentence that drops the motive clause fails.
+    # A change made the same way for every repo, for every repo's sake, is not widening. The sentence is pinned whole,
+    # so a sentence that drops the motive clause fails.
     rule = widening_rule()
     check("widening scope: WIDENING_RULE holds the same-change sentence whole, with its motive clause",
           twords.in_text(twords.SAME_CHANGE_IS_NOT_WIDENING, rule),
@@ -1391,8 +1391,8 @@ def case_widening_rule_scopes_widening_to_one_repos_sake():
 
 
 def case_widening_rule_says_an_unmarked_option_is_widening():
-    # Owner ruling: an unmarked option that adds to a shared allow-list or a second accepted form counts as widening,
-    # unless it says it applies to every repo. Pinned whole, so dropping the exemption clause fails.
+    # An unmarked option that adds to a shared allow-list or a second accepted form is widening, unless it says it
+    # applies to every repo. Pinned whole, so dropping the exemption clause fails.
     rule = widening_rule()
     check("widening unmarked: WIDENING_RULE says an unmarked allow-list or second-form option is widening unless it "
           "says it applies to every repo",
