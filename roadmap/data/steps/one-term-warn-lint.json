@@ -1,0 +1,14 @@
+{
+ "id": "one-term-warn-lint",
+ "title": "A warn-only lint for one term per meaning",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner page item 533 pick a, 11:59 CST Nov 12.",
+ "source": "owner page save 11:59 CST Nov 12, item 533; lane notes-keep-reverify 12:04 CST",
+ "note": "A lint that warns, never refuses, when a text uses two terms for one thing (rule speak-one-name-per-thing, one term per meaning). Add its row to lint/rule_mechanisms.json. Decision plain-prose-lint allows a warn-only check. Then note one-term-per-meaning-unchecked reads Fix: step:one-term-warn-lint.",
+ "updatedAt": "2026-11-12T12:06:21-06:00"
+}

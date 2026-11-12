@@ -808,3 +808,4 @@ Checked Nov 2 12:58 CST: none of these is in docs/debts/notes.md on main. Triage
 - Step usage-brake: Owner page save 11:59 CST Nov 12: item 540 pick a: the brake applies only to an account with a 5-hour or weekly limit; the record in #2663 keeps that reading.
 - Step past-ruling-reads-newer-ruling: Owner page save 12:00 CST Nov 12: item 469 closed ("is this still needed"): the item holds the words (19:35 CST, outcome matters not route; 19:50 CST, cloud push 179 a). A lane writes them into decision ios-mac-install-first citing page item 469.
 - Step drain-sort-against-plan: Owner page save 12:00 CST Nov 12: item 501 none, "is this still a real open question?": R9 settles it; triage closed #1773, #1939 and #1994 at 12:05 CST with a note, branches kept; item closed.
+- Carry lanes started by the coordinator 12:04 CST Nov 12 for lint-config-guard-paths, qform-wrapper-flags, review-record-parse-warn, merge-route-author-paths, merge-subst-paren (ids to follow).
