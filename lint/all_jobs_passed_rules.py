@@ -16,9 +16,29 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from test_windows_split import (ALL_JOBS_PASSED_JOB, MACOS_JOBS, NIGHTLY_SKIP_JOB, all_jobs, draft_guard_only, eval_if, push_guard_only,  # noqa: E402  the one home of the scope condition and scalar parsers
+from test_windows_split import (ALL_JOBS_PASSED_JOB, MACOS_JOBS, NIGHTLY_SKIP_JOB, all_jobs, draft_guard_only, eval_if as _eval_if, push_guard_only,  # noqa: E402  the one home of the scope condition and scalar parsers
                                 schedule_only, shard_base, yaml_scalar)
 from workflow_steps import job_block, step_blocks, step_key  # noqa: E402  the one home of the step parser
+
+PUSH_SKIP_JOB = "push-skip"  # R62: the push-only job whose skip output scope reads, as it reads the nightly skip job's
+
+
+def eval_if(expr, event, flag_value, draft=False, nightly_skip=""):
+    """test_windows_split.eval_if, with the push skip job's output read as unset (a push that is not skipped). Bandaid: the reader
+    has one home, in a test file a builder may not edit, and it cannot read needs.push-skip.outputs.skip. The cure is a push_skip
+    argument on that reader, as nightly_skip has; this wrapper goes then."""
+    expr = re.sub(rf"needs\.{re.escape(PUSH_SKIP_JOB)}\.outputs\.skip\b", "''", expr)
+    return _eval_if(expr, event, flag_value, draft=draft, nightly_skip=nightly_skip)
+
+
+def push_only(expr):
+    """True when a job-level if runs on a push and on no other event (the push skip job)."""
+    try:
+        return all(eval_if(expr, event, "false") == want for event, want in
+                   (("push", True), ("pull_request", False), ("schedule", False), ("workflow_dispatch", False)))
+    except Exception:
+        return False
+
 
 ALL_JOBS_PASSED_USES = "$/actions/all-jobs-passed"
 ALL_JOBS_PASSED_IF = "${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.draft }}"
@@ -166,12 +186,14 @@ def steps_problems(text):
 
 
 def off_problems(text):
-    """Only the schedule-only nightly skip job may stay off all-jobs-passed. A needed job has
+    """Only the schedule-only nightly skip job may stay off all-jobs-passed (R62: the push-only push skip job too). A needed job has
     no job-level if, except scope (its draft rule), a macOS job (the push guard) and a Windows full shard (the draft guard)."""
     jobs = all_jobs(text)
     needed, off, problems = split_jobs(text)
     for name in off:
         if name == NIGHTLY_SKIP_JOB and schedule_only(jobs[name]["if"]):  # R61 part 3: the skip job runs on a schedule only
+            continue
+        if name == PUSH_SKIP_JOB and push_only(jobs[name]["if"]):  # R62: the push skip job runs on a push only
             continue
         if not shard_base(name):
             problems.append(f"{name} is off all-jobs-passed but is not a shard: its job-level if skips it on a PR")
