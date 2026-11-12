@@ -48,7 +48,7 @@ def ol(name, expected, item, action="set", **extra):
 
 
 def ol_write(data, op="set"):
-    return {"op": op, "collection": "items", "doc_id": OL_DOC, "data": data}
+    return {"op": op, "collection": "items", "doc_id": OL_DOC, "data": with_shown(data)}
 
 
 # Keys by position: the page's letter for index i, lowercased.
