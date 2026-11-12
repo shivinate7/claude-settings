@@ -110,19 +110,20 @@ Lag mode, run by the writer at a comment wake, after the folder of answers and r
 
     python3 ~/.claude/skills/waiting-page/stale_pages.py --lag <folder> [--max-age <min>] [--now <iso>]
 
-<folder> is the wake's folder, read as --unread reads it (load_saved): answers.json and receipts.json, each a list of {"id", "data"}
-entries the session saved from the store. No marker, and no per-doc answers/ folder. It measures how long each item answer took to be
+<folder> is the wake's folder, read as --unread reads it (load_saved): answers.json, receipts.json and items.json, each a list of
+{"id", "data"} entries the session saved from the store. No marker, and no per-doc answers/ folder. An answer whose item is not in
+items.json is skipped, with no line and no count, as --unread skips it. It measures how long each item answer took to be
 read back. Lines, then the total, which is always last:
 `read-delay <id> answered <at>, read <read>, delay <N>s` (a receipt whose `read` is at or after the answer's `at`; `filed` is never read),
 `unread-old <id> answered <at>, no read after it, age <N>s` (no such receipt, and the answer is more than --max-age old), and
 `lag total: A answers, R read, U unread older than M min, Y unread within M min`. An unread answer exactly max-age old or younger
 prints no line and is counted as within. A park answer (`park.<id>`, `parked: true`, act `park`) is skipped, as --unread does
 (--parked reads it). Times print in US Central (hooks/local_time.central_full). Exit 0 with no unread-old line, 1 with one.
-Exit 2 with `unknown:` lines and no total when answers.json or receipts.json is missing, not JSON or not a list (an old per-doc
-answers/ folder is a missing answers.json), an answer has no readable `at`, or its receipt has no readable `read`: an unread read is
-never a clean or an old line. --max-age is whole minutes and defaults to 60: an unmeasured pick, a default and not a ruling. --now
+Exit 2 with `unknown:` lines and no total when answers.json, receipts.json or items.json is missing, not JSON or not a list (an old
+per-doc answers/ folder is a missing answers.json), an answer has no readable `at`, its receipt has no readable `read`, or --now or
+--max-age is bad: an unread read is never a clean or an old line. --max-age is whole minutes and defaults to 60: an unmeasured pick, a default and not a ruling. --now
 defaults to the clock. The incident: an answer that sat unread 10.5 h (owner's report).
-Cost: one python process, reads 2 files the writer already saved, writes none, starts no git, no timer.
+Cost: one python process, reads 3 files the writer already saved, writes none, starts no git, no timer.
 
 Cost: one python process, at most one read-only git process (no fetch, no network, 30 s cap), no
 extra process for --answers (it reads one more file, a folder one per answer), no
@@ -838,7 +839,7 @@ def lag_mode(argv):
         print("unknown: --now is not an ISO time, or --max-age is below 0 (%s, %s)" % (args.now, args.max_age))
         return 2
     try:
-        loaded = load_saved(args.lag, ("answers", "receipts"))
+        loaded = load_saved(args.lag, ("answers", "receipts", "items"))
     except ValueError as err:
         print("unknown: %s" % err)
         return 2
@@ -853,11 +854,14 @@ def lag_mode(argv):
     for r in loaded["receipts"]:
         if isinstance(r, dict):
             reads.setdefault(r.get("id"), []).append(data(r).get("read"))
+    item_ids = {r.get("id") for r in loaded["items"] if isinstance(r, dict)}
     lines, unknown, read, old, young = [], [], 0, 0, 0
     for r in loaded["answers"]:
         key = r.get("id") if isinstance(r, dict) else None
         # A park answer is read by the --parked mode, never here: keyed park.<id>, parked: true, or act park.
         if not isinstance(key, str) or key.startswith("park.") or data(r).get("parked") is True or data(r).get("act") == "park":
+            continue
+        if key not in item_ids:  # an answer whose item is gone has no reader to wait on, as --unread skips it
             continue
         at = parse_utc(data(r).get("at"))
         if at is None:  # an unreadable time is never counted read or unread
