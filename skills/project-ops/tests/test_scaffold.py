@@ -615,6 +615,17 @@ def summary(ruleset_id):
     return {"id": ruleset_id, "name": "ruleset-%d" % ruleset_id, "target": "branch"}
 
 
+def list_page(args, items):
+    """The items a list read gives for `args`, as gh api gives them: page `page` (1 when not given) of `per_page` items (30 when not given,
+    100 at most), or every item under --paginate."""
+    if "--paginate" in args:
+        return list(items)
+    fields = dict(args[i + 1].split("=", 1) for i, a in enumerate(args[:-1]) if a == "-f")
+    size = max(1, min(int(fields.get("per_page", 30)), 100))
+    n = int(fields.get("page", 1))
+    return list(items)[(n - 1) * size:n * size]
+
+
 class Protect(unittest.TestCase):
     """Ruling r (owner, 2026-11-11 16:43 CST): adopting a repo sets a ruleset on its default branch that requires its one required check (the rollup),
     so no repo starts with none. A fake `gh` records each call."""
@@ -625,7 +636,7 @@ class Protect(unittest.TestCase):
     def run_protect(self, *argv, existing=None, other_rules=False, rulesets=(), details=None, write_error=None):
         """`existing` is the classic required checks (None: no classic protection), `other_rules` a classic protection with no check rule. `rulesets`
         are the repo's ruleset summaries, `details` each one's full object by id, and `write_error` the (code, output) every ruleset write answers.
-        A list read gives its first 30 items unless the call asks for every page."""
+        A list read gives the page it asks for (list_page)."""
         calls = []
         details = details or {}
 
@@ -640,8 +651,7 @@ class Protect(unittest.TestCase):
                 return (0, '{"required_pull_request_reviews": {"required_approving_review_count": 1},"enforce_admins": {"enabled": true}}') if other_rules else (1, "HTTP 404: Branch not protected")
             if route.split("?")[0] == REPO_RULESETS:
                 if method == "GET":
-                    every = "--paginate" in args or "per_page=100" in " ".join(args)
-                    return 0, json.dumps(list(rulesets) if every else list(rulesets)[:30])
+                    return 0, json.dumps(list_page(args, rulesets))
                 if method == "POST":
                     return write_error or (0, '{"id": 42}')
             m = re.fullmatch(r"repos/acme/widgets/rulesets/(\d+)", route)
@@ -754,14 +764,15 @@ class Protect(unittest.TestCase):
         self.assertEqual(self.classic_writes(calls), [], "the classic protection is not written: its removal is a later act")
 
     def test_the_ruleset_list_is_read_past_its_first_page(self):
-        stale = ruled_ruleset(31)
+        stale = ruled_ruleset(101)
         stale["rules"] = [r for r in stale["rules"] if r["type"] != "deletion"]
-        rulesets = [summary(i) for i in range(1, 32)]  # main's ruleset is the 31st: the first page of 30 does not hold it
-        details = {i: ruled_ruleset(i, branch="dev-%d" % i) for i in range(1, 31)}
-        details[31] = stale
+        # protect.py asks for 100 to a page: a full first page of 100, and main's ruleset is the 101st, on page 2
+        rulesets = [summary(i) for i in range(1, 102)]
+        details = {i: ruled_ruleset(i, branch="dev-%d" % i) for i in range(1, 101)}
+        details[101] = stale
         code, out, calls = self.confirm(rulesets=rulesets, details=details)
         self.assertEqual(code, 0, out)
-        self.assertEqual([(m, r) for m, r, _ in self.writes(calls)], [("PUT", REPO_RULESETS + "/31")],
+        self.assertEqual([(m, r) for m, r, _ in self.writes(calls)], [("PUT", REPO_RULESETS + "/101")],
                          "main's ruleset is on page 2: it is PUT, not POSTed as a second ruleset")
 
     def test_a_ruleset_write_the_api_refuses_exits_1(self):
