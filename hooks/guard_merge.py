@@ -354,7 +354,7 @@ def _gh_api_args(args):
         elif arg in GH_API_VALUE_FLAGS:
             index += 1
         elif arg in ("-h", "--help"):
-            return None
+            return None   # help sends no request
         elif arg in GH_API_FIELD_FLAGS:
             fields.append(args[index] if index < len(args) else "")
             index += 1
@@ -603,7 +603,9 @@ def auto_merge_hit(segment: str) -> str:
     """The matched call when the segment (or a `sh -c` script it holds) turns on GitHub's auto-merge: `gh pr merge --auto`
     or a `gh api graphql` enablePullRequestAutoMerge mutation, else "" (rule auto-merge). Disabling it matches nothing."""
     for rest in _gh_calls(segment):
-        if rest[:2] == ["pr", "merge"] and _merge_auto_flag(rest[2:]) and "-h" not in rest and "--help" not in rest:
+        if rest[:2] != ["pr", "merge"] or "-h" in rest or "--help" in rest:
+            continue
+        if _merge_auto_flag(rest[2:]):
             return "gh pr merge --auto"
     return "gh api graphql auto-merge" if gh_api_graphql_has(segment, "enablePullRequestAutoMerge") else ""
 
@@ -618,7 +620,7 @@ READY_LANE_REASON = (
 
 def ready_lane_hit(tool: str, tool_input: dict, command: str, segments, transcript: str) -> str:
     """The matched call when a session proved cs-build:lane by its own record marks a pull request ready, else "". The
-    marks are update_pull_request with draft false, the gh ready command, and a `gh api` PATCH with draft=false. `segments`
+    marks are update_pull_request with draft false, the gh ready command, and a `gh api` ready mark (api_ready_mark). `segments`
     are the shell segments of `command`, cut as the draft-pr scan cuts them. The transcript is read only for a call that
     marks something ready. A record that cannot be read proves nothing, so the call is judged as main judges it."""
     if tool == READY_PAGE_MCP_TOOL:
