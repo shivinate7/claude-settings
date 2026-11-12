@@ -256,6 +256,10 @@ else
   git worktree lock --reason "$REASON" "$pin" >/dev/null 2>&1   # lock an unlocked pin; fails harmlessly when locked
 fi
 
+# origin/$REF is gone, so the pin sits at local main. The installers compare the pin with origin/$REF as last fetched, and that
+# copy is stale, so they would refuse the pin. Hand them REF=main (the recovery, the ref the pin follows) in this case; both
+# install.sh and install.ps1 read CLAUDE_SETTINGS_REF.
+[ "$ref_gone" != 1 ] || export CLAUDE_SETTINGS_REF=main
 # The installer runs under this run's lock; the EXIT trap logs the end line with its exit code.
 case "$(uname)" in
   MINGW*|MSYS*|CYGWIN*)

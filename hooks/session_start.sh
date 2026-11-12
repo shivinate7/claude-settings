@@ -263,8 +263,9 @@ if [ -n "$d" ] && [ -e "$d/.git" ]; then
   if [ "$pointer_branch" = "main" ] && [ "$cloud_mirror" != "true" ]; then
     if bounded_fetch "$d"; then
       # The pin follows origin/stable (decision merge-reinstalls-from-main); a clone with no origin/stable is
-      # counted against origin/main as before.
-      if (cd "$d" 2>/dev/null && git rev-parse --verify -q refs/remotes/origin/stable >/dev/null 2>&1); then
+      # counted against origin/main as before. CLAUDE_SETTINGS_REF=main (the recovery) makes main the ref the pin
+      # follows, so the count is against origin/main even when origin/stable exists.
+      if [ "${CLAUDE_SETTINGS_REF:-stable}" != main ] && (cd "$d" 2>/dev/null && git rev-parse --verify -q refs/remotes/origin/stable >/dev/null 2>&1); then
         behind_ref=origin/stable
         behind=$(cd "$d" 2>/dev/null && git rev-list --count HEAD..origin/stable 2>/dev/null)
       else
