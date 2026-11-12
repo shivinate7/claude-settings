@@ -8,9 +8,11 @@ so they cannot differ.
     python3 skills/waiting-page/question_source.py < spec.json      prints {"chat": ..., "item": ...} as JSON
 
 The spec is the item's own fields, with `options`, and optionally:
+  id       required: the chat question cites the item by it.
   shown    required by the command line, a list; [] for a new item. The `shown` list of an earlier item: [{key, id, label}, ...]. The new options must extend it, position by
            position, in key, id and label, or render raises ValueError. That is the freeze (guard rule
            `option-letters-frozen`) read before the write, not after it.
+  existing true when the spec names an item already on the page: `shown` must then be that item's, never empty.
   changes  {key: note}. A shown option listed here keeps its shown key, id and label and carries the note as its `note`
            (the page shows it on the card). Use it when a rule changes what an option means: the letter does not move.
 
@@ -29,7 +31,7 @@ import sys
 
 CITE = "Page item: "
 SHOWN_FIELDS = ("key", "id", "label")
-NOT_ITEM_FIELDS = ("options", "shown", "changes")  # the spec's own controls: the item holds options and shown it built
+NOT_ITEM_FIELDS = ("options", "shown", "changes", "existing")  # the spec's own controls: the item holds options and shown it built
 
 
 def slug(label):
@@ -55,10 +57,17 @@ def triple(entry):
 
 
 def render(spec):
-    """{"chat": text, "item": dict} for one spec. ValueError when the options do not extend the spec's shown list."""
+    """{"chat": text, "item": dict} for one spec. ValueError when the spec has no id, a shown entry has no id, or the options do not extend the spec's shown list."""
     options = spec.get("options") or []
     shown = spec.get("shown") or []
     changes = spec.get("changes") or {}
+    if not isinstance(spec.get("id"), str) or not spec["id"].strip():
+        raise ValueError("the spec carries no `id`: the chat question cites the item by it")
+    if spec.get("existing") and not shown:
+        raise ValueError("the spec names an existing item but carries an empty `shown`: give the item's shown list")
+    for at, entry in enumerate(shown):
+        if not isinstance(entry, dict) or not isinstance(entry.get("id"), str) or not entry["id"].strip():
+            raise ValueError("shown entry %d has no `id`" % (at + 1))
     if len(options) > len(string.ascii_lowercase):
         raise ValueError("more than 26 options: the page repeats its letters after Z")
     if len(options) < len(shown):

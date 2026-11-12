@@ -1402,6 +1402,7 @@ function choose(it, key) {
   const cur = state.draft[it.id] || {};
   // A "none" note says what the owner wants instead. It does not carry over to an option.
   const patch = { choice: key, auto: false, act: null };
+  if (key !== null && key !== NONE) patch.picked = capturePick(it, key);
   if (key === null && stoodNow(it)) patch.unstood = true; // else my pick would stand again
   if (cur.choice === NONE && key !== NONE) patch.note = "";
   edited(); setDraft(it, patch); repaint(it);
@@ -1415,6 +1416,7 @@ function toggle(it, key) {
   const next = it.ranked === true ? (on ? [...cur, key] : cur.filter((k) => k !== key))
     : (it.options || []).map((o) => o.key).filter((k) => k === key ? on : cur.includes(k));
   const patch = { choice: next.length ? next : null, auto: false, act: null };
+  if (on) patch.picked = capturePick(it, key);
   if (!next.length && stoodNow(it)) patch.unstood = true;
   if ((eff(it) || {}).choice === NONE) patch.note = "";
   edited(); setDraft(it, patch); repaint(it);
@@ -1431,23 +1433,27 @@ function answerBody(it, d, at) {
   if (d.act === "park") return { item: it.id, n: it.n, at, act: "park", note: typed };
   const body = { item: it.id, n: it.n, at, note: typed || (d.auto ? "accepted pick" : "") };
   if (isRuling(it)) body.choice = OVERTURN; else if (it.kind === "decision") {
-    body.choice = d.choice || NONE; body.label = choiceLabel(it, body.choice);
-    const oid = choiceOptionId(it, body.choice);
+    body.choice = d.choice || NONE; body.label = choiceLabel(it, body.choice, d.picked);
+    const oid = choiceOptionId(it, body.choice, d.picked);
     if (oid != null) body.optionId = oid;
   } else if (d.done) body.done = true;
   return body;
 }
-// The id of the option picked (a list of ids for a multi item), saved beside the key so a later move of the letters cannot change which option the owner meant (ruling R60). Absent when an option has no id, and for none of these.
-function choiceOptionId(it, choice) {
+// What an option read when the owner picked it: its id (null when it has none) and its label as "A: Red". The draft keeps this per picked key, so a move of the letters between the pick and Send cannot change what the answer saves (ruling R60).
+const optionIdOf = (it, k) => { const o = (it.options || []).find((x) => x.key === k); return o && typeof o.id === "string" && o.id ? o.id : null; };
+const optionLabelOf = (it, k) => { const o = (it.options || []).find((x) => x.key === k), t = o && o.label != null ? String(o.label).trim() : ""; return letterOf(it, k) + (t ? ": " + t : ""); };
+const capturePick = (it, key) => Object.assign({}, (state.draft[it.id] || {}).picked, { [key]: { id: optionIdOf(it, key), label: optionLabelOf(it, key) } });
+// The id of the option picked (a list of ids for a multi item), saved beside the key so a later move of the letters cannot change which option the owner meant (ruling R60). `picked` is the draft's capture; a key it lacks reads the item as it is now. Absent when an option has no id, and for none of these.
+function choiceOptionId(it, choice, picked) {
   if (choice === NONE) return null;
-  const one = (k) => { const o = (it.options || []).find((x) => x.key === k); return o && typeof o.id === "string" && o.id ? o.id : null; };
+  const one = (k) => picked && picked[k] ? picked[k].id : optionIdOf(it, k);
   if (!Array.isArray(choice)) return one(choice);
   const ids = choice.map(one);
   return ids.every((x) => x !== null) ? ids : null;
 }
 // The saved answer's words, so a reader sees what the letter meant on the page: "A: Red" for a pick, a list of those for a multi item, "none of these" for none. `choice` stays the key and alone decides the answer.
-function choiceLabel(it, choice) {
-  const one = (k) => { const o = (it.options || []).find((x) => x.key === k), t = o && o.label != null ? String(o.label).trim() : ""; return letterOf(it, k) + (t ? ": " + t : ""); };
+function choiceLabel(it, choice, picked) {
+  const one = (k) => picked && picked[k] ? picked[k].label : optionLabelOf(it, k);
   return choice === NONE ? "none of these" : Array.isArray(choice) ? choice.map(one) : one(choice);
 }
 const edited = () => { state.barNote = ""; state.copyOffer = false; };

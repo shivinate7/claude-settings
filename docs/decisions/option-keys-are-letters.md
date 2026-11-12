@@ -41,11 +41,12 @@ An option also keeps its letter once shown (owner ruling R60, roadmap ruling r60
 
   - an option has no non-empty string `id`, has an id that is a lone letter, or shares an id with another option;
   - the write carries no `shown` list. `shown` is the options as first shown, in order, each as `{key, id, label}`;
-  - there are fewer options than shown; or
+  - there are fewer options than shown;
+  - `shown` is shorter than `options`; or
   - an option at a shown position differs from the shown entry in key, id or label (a reorder, a relabel, a changed id).
 
   - A note on an option (`note`), with key, id and label unchanged, passes. So does an option appended after the shown ones. A rule-driven change adds a `note` and reorders nothing; the page shows the note on the option's card.
-  - A first `set` must carry a `shown` equal to its own options. An update may append.
+  - On every write that carries `options`, `shown` is as long as `options`. An update that appends options extends `shown` by them on the same write. A first `set` carries a `shown` equal to its own options. The reason names `shown`.
   - A task, a note, a closed item and a write with no `options` pass. `shown` is in the page's `itemFields` block (rule `item-field-rendered`).
   - The reason says: keep each shown option's key, id and label and position, give each option a unique id, carry `shown`. It names no target.
   - Incident: 2026-11-12 14:39 CST, waiting item 646. Triage reordered the options after the chat question went out, so chat a became page b. The owner's "a" (15:03 CST) could have been filed as the opposite pick. `option_letter_hit` could not see it: after the swap each key was still its position's letter.
@@ -54,7 +55,11 @@ An option also keeps its letter once shown (owner ruling R60, roadmap ruling r60
   - Known limit: a write that rewrites `shown` itself is not detectable. The guard trusts `shown`, since the stored item is unseen.
   - Known limit: a write that carries no `options` is not judged, so an update that drops `shown` alone passes.
 
+The page keeps the id and the label of an option as they read when the owner picked it, in the draft. A move of the letters between the pick and Send then saves the option picked.
+
 The id is the stable name of an option; the letter is its place. The page saves `optionId` beside `choice` in the answer. `skills/waiting-page/page_grant.py` prints `held:` (exit 3) for an answer that names an option the item no longer holds. The answer's `optionId` is compared with the option at its choice key, or its `label` when it has no `optionId`. A choice key the item lacks is held too. The owner then confirms in words (R60, part 3). `skills/waiting-page/question_source.py` (`render`) builds the chat question and the item's `options` and `shown` from one spec, so the two copies share one source.
+
+A chat answer is not covered by the guard, since no guard can read the chat. Before acting on an owner's chat letter answer to an item that carries `shown`, the session compares the letters in the chat question it asked with the item's `shown`. If they differ, it holds the answer and asks the owner to confirm in words (`skills/waiting-page/SKILL.md`, "Route and close").
 
 A letter also names the same option in the chat and on the page. Guard rule `option-labels-match-chat` (`hooks/question_form.py`, functions `chat_page_label_hit` and `page_label_hit`, run by `hooks/guard.py` `data_tool_label_hit`) refuses a set or update of an open decision on this repo's waiting page. The refusal holds when an option label differs from the chat's text for the same letter.
 

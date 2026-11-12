@@ -145,8 +145,8 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
     visit on the open page moves no mark. A roadmap step is marked "Updated" the same way, when its `updatedAt` is later than the last visit; with no visit, no step is marked. An answered card with a new reply opens in place, and no card moves. Write no `replied` for any other change.
   - `lastAnswer` (`{choice, note, at}` on a decision, `{done, note, at}` on a task, `{act: "park", note, at}` on an item the owner parked and then unparked) is the owner's last answer to this item.
     The card shows it above the reply, as "Your last answer, <time>". The writer copies it from `answers/<id>` before it
-    deletes that record (steps 2 to 4 of "Route and close"), and from a chat answer. When the writer rewrites `options`,
-    it writes `lastAnswer` again without `choice`: the old key may now name another option.
+    deletes that record (steps 2 to 4 of "Route and close"), and from a chat answer. When the item carries `shown`,
+    each shown option keeps its key, so `lastAnswer` keeps its `choice`. An item with no `shown` may have moved its keys: write `lastAnswer` again without `choice`.
   - `lane` (the receiver's branch slug, or its tier, such as `batch-runner` from its `cs-build:` tag, when it has no branch) is set when an answer
     takes the busy-lane path. The card shows "waits on lane <slug>" in its top row. The item stays open until the receiver
     reports the act done, and then the owning session closes it and deletes `answers/<id>` (see "Route and close", the busy-lane path).
@@ -169,6 +169,7 @@ Read every ISO time you write (`added`, `replied`, `ruled`, `read`, `filed`, `an
   - The page draws only the top-level fields that its `itemFields` block lists (`page.html`). A write that names another
     top-level field is refused (guard rule `item-field-rendered`), and a stored item that carries one shows a warning on its card.
     To add a field, draw it on the page and add its name to that block. A key inside `options` or `steps` is not judged. `shown` is in the block; an option's `id` and `note` sit inside `options`, so they are not listed.
+    When the page is current, it saves `optionId` in an answer, and it draws an option's `note` and the item's `shown`. An older page does none of these. Run `stale_pages.py` before you write `shown`, an option `note` or `optionId`.
     An update removes a stored field with `{"__delete__": true}`.
 - `groups/<slug>`: `title` and `why`. `why` is one sentence on how the items of the group connect.
   Write the record in the same step that sets `group` on the second item.
@@ -277,6 +278,7 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
   start; it may not name another option. A question asked in the chat first and written to the page later cites
   the id the page item will get.
 - A chat answer: send the answer, with its time, to the writer. The owner's answer closes the item.
+  Before you act on the owner's chat letter answer to an item that carries `shown`, compare two lists. One is the letters in the chat question you asked. The other is the item's `shown`. If they differ, hold the answer and ask the owner to confirm it in words. No guard can read the chat, so this check is yours.
   Jot `- <id> [page] -> page:<n>` under the owner's message in the inbox; the feedback guard
   (`hooks/feedback_guard.py`) blocks until the transcript shows that send. The writer puts the item's
   `n` in every items write, set or update, so the guard can match it.
@@ -304,7 +306,10 @@ writer writes the item, and "Add an item" step 3 tells the owner where it is.
 2. Write it with `ArtifactData set items/<id>`. Make the key a slug of the question, 32 characters
    or fewer. Never reuse a key. If a slug is taken, add a suffix. After the `set`, read the item back (`ArtifactData get
    items/<id>`). Check `n`, `kind` and, on a decision, `options`: at least one, each keyed
-   `a`, `b`, `c` in order, and no key `none`. On a look question, check that each option has its own mockup
+   `a`, `b`, `c` in order, and no key `none`. Give each option a unique `id` that is never a lone letter. Write `shown`, the options as first shown, each as `{key, id, label}`. When the item is new, `shown` equals `options` in length and in content.
+   - When you append an option to a shown item, extend `shown` on the same write. A write whose `shown` is shorter than its `options` is refused.
+   - For an item already shown, add a `note` to the option that changed. Write a new option after the shown ones. Never reorder, relabel or drop a shown option.
+   - To build the chat question and the item from one spec, run `question_source.py`. The spec carries an `id`. An existing item carries its own non-empty `shown`, with `"existing": true`. On a look question, check that each option has its own mockup
    drawing that option's state, and that each `focus` names an element in its mockup. If a check
    fails, fix the item at once. The page refuses to send an answer to a broken item.
    - Set `repo`. When it is not this page's repo, ask that repo's triage, coordinator or owner's-computer session whether the owner has ruled, and write its session id as `checked_with` (rule `question-checked-with-repo`).

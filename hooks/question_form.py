@@ -1312,14 +1312,14 @@ def option_letter_hit(op: str, data) -> str:
 # went out, so chat a became page b, and the owner's "a" could have been filed as the opposite pick. option_letter_hit
 # cannot see that: after the swap each key is still its position's letter. The item therefore carries `shown`, the
 # options as first shown, in order, each as {key, id, label}. A later write keeps each shown position's key, id and
-# label, may add a `note` to an option, and may append options. Each option carries a unique `id` that a stored answer
+# label, may add a `note` to an option, and may append options when `shown` is extended by them. Each option carries a unique `id` that a stored answer
 # records, so a later move of the letters cannot change which option the owner meant (page_grant.py holds such an
 # answer for his word).
 FROZEN_RULE = "option-letters-frozen"
 FROZEN_REASON = ("An option keeps the letter it was first shown with. Carry `shown`, the options as first shown, in "
                  "order, each as {key, id, label}. Give each option a short unique `id` that is never a lone letter. "
                  "Keep each shown option's key, id and label and its position: never reorder, relabel or drop one. "
-                 "A rule-driven change adds a `note` to the option and moves nothing. A new option goes at the end. "
+                 "A rule-driven change adds a `note` to the option and moves nothing. A new option goes at the end, and `shown` gets it on the same write. "
                  "(decision option-keys-are-letters, ruling R60: an option keeps its letter and carries an id)")
 SHOWN_FIELDS = ("key", "id", "label")
 
@@ -1348,8 +1348,8 @@ def _shown_entry(entry):
 def frozen_letters_hit(op: str, data) -> str:
     """The matched text when this write of an open waiting-page decision that carries `options` breaks the freeze:
     an option with no unique id (or an id that is a lone letter), no `shown` list, an option at a shown position
-    that differs from the shown entry in key, id or label, or fewer options than shown. A `set` is a first write,
-    so its `shown` must equal its options. An update may append. A task, a note, a closed item and a write with no
+    that differs from the shown entry in key, id or label, fewer options than shown, or a `shown` shorter than the
+    options (an appended option is shown on the same write). A task, a note, a closed item and a write with no
     `options` pass. The stored item is unseen: a write that carries `shown` is trusted, as the record says."""
     if not _open_decision(data) or "options" not in data:
         return ""
@@ -1367,8 +1367,8 @@ def frozen_letters_hit(op: str, data) -> str:
     for i, entry in enumerate(shown):
         if _shown_entry(options[i]) != _shown_entry(entry):
             return "option %s differs from the option shown at its letter" % _letter_of(i)
-    if op == "set" and len(shown) != len(options):
-        return "shown holds fewer options than a first set carries"
+    if len(shown) != len(options):
+        return "shown holds fewer options than the write carries: extend shown with each appended option"
     return ""
 
 
@@ -1397,9 +1397,10 @@ CHAT_OPTION_LINE = re.compile(
 CHAT_BARE_LINE = re.compile(r"^[ \t>*-]*\**\(?([A-Za-z])[ \t]+(\S.*)$", re.M)
 CHAT_TAIL_BYTES = 1 << 20  # how far back from the transcript's end the cited chat question is looked for
 LABELS_REASON = ("A question sent to the chat and the page carries the same option text in the same order, so "
-                 "a letter means one option on both. Rewrite the page item's options to match the chat "
+                 "a letter means one option on both. On an item not yet shown, rewrite its options to match the chat "
                  "question (or ask the chat question again with the page's text), then write the item "
-                 "again. (decision option-keys-are-letters, a letter names the same option in the chat "
+                 "again. On an item already shown, add a `note` and write the new options after the shown ones. "
+                 "(decision option-keys-are-letters, a letter names the same option in the chat "
                  "and on the page)")
 
 
