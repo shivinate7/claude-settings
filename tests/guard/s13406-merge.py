@@ -355,7 +355,7 @@ ROUTE_UNREAD_DENIALS = (
 )
 for _label, _command in ROUTE_UNREAD_DENIALS:
     sh("merge-route: unread form: %s is refused" % _label, _command, "deny", "merge-checks",
-       cwd=NOGIT, env_path=ROUTE_ON, config=MERGECFG)
+       carries="name the pull request by its number", cwd=NOGIT, env_path=ROUTE_ON, config=MERGECFG)
 # With no busy pr on main the head is green, so a merge read as known would allow. An unread form is unknown: it denies.
 sh("merge-route: unread form: an absolute https URL, no busy pr on main is refused",
    "gh api -X PUT https://api.github.com/repos/y/x/pulls/1/merge", "deny", "merge-checks",
@@ -385,9 +385,9 @@ sh("merge-route: fixture: gh pr merge 1 is refused when the busy pr is on page t
 sh("merge-route: gh api -X PUT is refused when the busy pr is on page two of the open list", GH_API_MERGE, "deny", "merge-checks",
    carries=ROUTE_CARRIES, lacks=ROUTE_LACKS, cwd=NOGIT, env_path=GHBATCHPAGE2 + os.pathsep + PY_PATH)
 sh("merge-route: variable: gh api -X PUT, a pr number in a shell variable, is refused while a busy pr is pending",
-   "gh api -X PUT repos/y/x/pulls/$PR/merge", "deny", "merge-checks", cwd=NOGIT, env_path=ROUTE_ON, config=MERGECFG)
+   "gh api -X PUT repos/y/x/pulls/$PR/merge", "deny", "merge-checks", carries="have the head $PR:", cwd=NOGIT, env_path=ROUTE_ON, config=MERGECFG)
 sh("merge-route: variable: gh api -X PUT, a repo in a shell variable, is refused while a busy pr is pending",
-   "gh api -X PUT repos/$REPO/pulls/1/merge", "deny", "merge-checks", cwd=NOGIT, env_path=ROUTE_ON, config=MERGECFG)
+   "gh api -X PUT repos/$REPO/pulls/1/merge", "deny", "merge-checks", carries="reading the pull request failed", cwd=NOGIT, env_path=ROUTE_ON, config=MERGECFG)
 sh("merge-route: variable: gh api, a GET of a pr number in a shell variable, is allowed",
    "gh api repos/y/x/pulls/$PR/merge", "allow", silent=True, cwd=NOGIT, env_path=ROUTE_ON, config=MERGECFG)
 sh("merge-route: git push origin main with a busy pr that is a draft still asks", VCS + " push origin main", "ask", PUSH_MAIN_RULE,
