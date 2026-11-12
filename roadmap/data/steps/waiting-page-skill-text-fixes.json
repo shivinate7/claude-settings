@@ -1,0 +1,14 @@
+{
+ "id": "waiting-page-skill-text-fixes",
+ "title": "Five wording fixes in skills/waiting-page/SKILL.md",
+ "status": "queued",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane fan-prose-waiting-page found them; lane skill-text-once, which held this file, has closed.",
+ "source": "lane fan-prose-waiting-page 10:42 CST Nov 12, via coordinator 10:40 CST",
+ "note": "Prose. (1) fetch step 2; (2) the registry paragraph; (3) the line \"writer never writes receipts\"; (4) the receipts/<id> \"never by the page\" line; (5) the --asks wake text: exit 1 means an open ask, and the wake has its own end check. Ready, no lane.",
+ "updatedAt": "2026-11-12T10:41:00-06:00"
+}

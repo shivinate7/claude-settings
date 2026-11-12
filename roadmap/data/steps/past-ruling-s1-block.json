@@ -1,6 +1,6 @@
 {
  "id": "past-ruling-s1-block",
- "title": "The past-ruling judge carries the S1 to S4 block, the owner-marked step-pool filter and the item-8 test pins",
+ "title": "The past-ruling judge carries the S1 to S4 block and the item-8 test pins",
  "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "The #1554 carry (draft PR #2740) ships without S1 to S4: the block is not on main, so carrying it widens what counts as a ruling, which is its own guard change.",
  "source": "coordinator 08:35 CST Nov 12 (option a); ruling owner item 445 a, 15:04 CST Nov 8",
- "note": "Carry from origin/past-ruling-owner-only (rule S1 evidence clause, commit e0b623811, is one line of that block). Test-author first. Starts after #2740 hands in. Lane fan-prose-waiting-page.",
- "updatedAt": "2026-11-12T10:13:00-06:00"
+ "note": "Carry from origin/past-ruling-owner-only (rule S1 evidence clause, commit e0b623811, is one line of that block). Test-author first. Starts after #2740 hands in. Lane fan-prose-waiting-page. Title fixed (lane fan-prose-waiting-page 10:42 CST Nov 12): the owner-marked step-pool filter was dropped.",
+ "updatedAt": "2026-11-12T10:41:00-06:00"
 }
