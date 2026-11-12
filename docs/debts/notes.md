@@ -2180,3 +2180,7 @@
 - load-sections-skips-non-py-silently: `load_sections` in `hooks/test_guard.py` skips non-.py files with no message. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - tests-for-silent-empty: `tests_for_main` in `hooks/mutate_guard.py` prints nothing on a runner parse error or a non-static SECTION_DIR. Found in PR 2635. Decision: roles-findings-are-debts-or-notes.
 - scratchpad-rm-rf-unguarded: no guard refuses `rm -rf` on a scratchpad folder that another agent of the session wrote. A builder deleted one. Queued as a debt. Decision: scratchpad-owner (the pattern).
+- wake-step-no-timeout: the red-job wake steps in `checks.yml` set no timeout-minutes, so a hung PR-comment post holds a red job to its cap. Found in PR 2860. Decision: ci-wait-reads-run-status.
+- wake-step-windows-unexercised: the red-job wake step has not run on a windows-latest job; it is the first `$/` action there. Found in PR 2860. Decision: ci-wait-reads-run-status.
+- wake-step-drop-untested-shape: `lint/workflow_steps.py` and `lint/test_windows_split.py` drop the red-job wake step silently, so `bin/ci-job`'s failure()-only branch never fires on the real step, and no test pins the drop. Found in PR 2860. Decision: ci-wait-reads-run-status.
+- red-job-not-in-glossary: "red job" is not a GLOSSARY.md term, and "red run" there means a test-author proof. Found in PR 2860. Decision: roles-findings-are-debts-or-notes.
