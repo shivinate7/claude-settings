@@ -8,7 +8,11 @@ comment, a code span or a 4-space indented code block does not count, and neithe
 agent file's frontmatter. A code span stays inside one paragraph. A list item's 4-space continuation
 counts. A comment opener inside inline code opens nothing, even across a line break. A fence marker
 in the middle of a line opens nothing. A lone quote in prose hides nothing, and a lone backtick does
-not pair across a blank line. The line may wrap over a line break.
+not pair across a blank line. A comment opened mid-line ends at its paragraph break, and a comment opened at a
+line start hides the rest of the line it closes on. The line may wrap over a line break. A heading, a fence, a list
+item, a quote or a rule line ends a comment opened mid-line above it. A line-start comment ends the paragraph above
+it, and a rule line (`---`, `* * *`, `- - -`) is not a list item: it clears the list above it. The scan's cost grows
+no faster than linear, and a paragraph with one lone backtick and no close is not searched.
 A file that cannot be read is unknown (exit 2, named), never clear.
 
 The no-argument run reads the module's ROOT when it runs. These cases patch ROOT to a fixture tree.
@@ -231,6 +235,261 @@ class BodyCases:
         self.assertEqual(self.verdict("- Every lane keeps its prose short.\n\n    " + TERSE_LINE), (0, ""),
                          "a list item's four-space paragraph after a blank line was read as code, so the line did not count")
 
+    # The reader is CommonMark. An inline comment opened mid-line ends at its paragraph break, so it cannot
+    # hide a line below a blank line. A comment opened at a line start is a block: it hides the rest of the
+    # line it closes on, and it ends with its list item.
+    def test_an_unclosed_mid_line_comment_opener_hides_nothing_below_it_in_its_paragraph(self):
+        # Controls first: a comment closed on its line, or closed in its paragraph, hides nothing after it.
+        self.assertEqual(self.verdict("Work the brief. <!-- open --> stays.\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a mid-line comment closed on its line was hidden")
+        self.assertEqual(self.verdict("Work the brief. <!-- open\nclose --> stays.\n\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a mid-line comment closed in its paragraph was hidden")
+        self.assertEqual(self.verdict("Work the brief. <!-- open\n" + TERSE_LINE + "\n--> stays.")[0], 1,
+                         "control: a line inside a mid-line comment closed in its paragraph counted as holding the line")
+        self.assertEqual(self.verdict("Work the brief. <!-- open\n" + TERSE_LINE), (0, ""),
+                         "an unclosed mid-line comment opener hid the terse line below it in the same paragraph")
+
+    def test_an_unclosed_mid_line_comment_opener_hides_nothing_after_a_blank_line(self):
+        self.assertEqual(self.verdict("Write <!-- open --> to open a comment.\n\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a mid-line comment closed on its line and a blank line was hidden")
+        self.assertEqual(self.verdict("Write <!-- to open a comment.\n\n" + TERSE_LINE), (0, ""),
+                         "an unclosed mid-line comment opener hid the terse line after a blank line")
+
+    def test_an_unclosed_mid_line_comment_opener_hides_nothing_after_a_blank_line_in_a_full_size_file(self):
+        self.assertEqual(self.verdict(long_prose() + "\n\nWrite <!-- open --> to open a comment.\n\n" + TERSE_LINE),
+                         (0, ""), "control: a full-size file with a closed mid-line comment before the line was flagged")
+        self.assertEqual(self.verdict(long_prose() + "\n\nWrite <!-- to open a comment.\n\n" + TERSE_LINE), (0, ""),
+                         "an unclosed mid-line comment opener in a full-size file hid the terse line after a blank line")
+
+    def test_a_mid_line_comment_does_not_close_in_a_later_paragraph(self):
+        # Controls first: a comment closed inside its paragraph hides nothing after it, and a line it holds counts as hidden.
+        self.assertEqual(self.verdict("Work <!-- note\nspans a break --> stays.\n\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a comment closed inside its paragraph was hidden")
+        self.assertEqual(self.verdict("Work <!-- " + TERSE_LINE + "\nspans --> stays.")[0], 1,
+                         "control: a line inside a mid-line comment that spans a break in its paragraph counted")
+        self.assertEqual(self.verdict("Work the brief. <!-- open\n\n" + TERSE_LINE + "\n\n-->"), (0, ""),
+                         "a mid-line comment opener closed in a later paragraph hid the terse line between them")
+
+    def test_an_unclosed_mid_line_comment_opener_after_a_fence_hides_nothing_after_a_blank_line(self):
+        self.assertEqual(self.verdict("```\ncode\n```\nWork the brief. <!-- open --> stays.\n\n" + TERSE_LINE),
+                         (0, ""), "control: the line after a closed comment that follows a fence was hidden")
+        self.assertEqual(self.verdict("```\ncode\n```\nWork the brief. <!-- open\n\n" + TERSE_LINE), (0, ""),
+                         "an unclosed mid-line comment opener after a fence hid the terse line after a blank line")
+
+    def test_an_unclosed_mid_line_comment_opener_after_indented_code_hides_nothing_after_a_blank_line(self):
+        self.assertEqual(self.verdict("    code\nWork the brief. <!-- open --> stays.\n\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a closed comment that follows an indented code line was hidden")
+        self.assertEqual(self.verdict("    code\nWork the brief. <!-- open\n\n" + TERSE_LINE), (0, ""),
+                         "an unclosed mid-line comment opener after an indented code line hid the terse line after a blank line")
+
+    def test_an_unclosed_mid_line_comment_opener_in_a_list_item_hides_nothing_after_a_blank_line(self):
+        self.assertEqual(self.verdict("- Work the brief. <!-- open --> stays.\n\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a closed comment in a list item was hidden")
+        self.assertEqual(self.verdict("- Work the brief. <!-- open\n\n" + TERSE_LINE), (0, ""),
+                         "an unclosed mid-line comment opener in a list item hid the terse line after a blank line")
+
+    def test_an_unclosed_mid_line_comment_opener_in_a_list_item_continuation_hides_nothing(self):
+        self.assertEqual(self.verdict("- item\n\n  Work <!-- open --> stays.\n\n  " + TERSE_LINE), (0, ""),
+                         "control: a list item's continuation after a closed comment was hidden")
+        self.assertEqual(self.verdict("- item\n\n  Work <!-- open\n\n  " + TERSE_LINE), (0, ""),
+                         "an unclosed mid-line comment opener in a list item's paragraph hid the item's next paragraph")
+
+    def test_a_line_start_comment_in_a_list_item_ends_with_the_item(self):
+        self.assertEqual(self.verdict("- item\n  <!-- open -->\n\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a line-start comment closed on its line in a list item was hidden")
+        self.assertEqual(self.verdict("- item\n\n  <!-- open\n\n" + TERSE_LINE), (0, ""),
+                         "a line-start comment in a list item hid the terse line after the list item ended")
+
+    def test_a_line_start_comment_hides_the_text_after_its_close_on_the_same_line(self):
+        # Controls first: text after a mid-line comment's close counts, and a line inside a mid-line comment is hidden.
+        self.assertEqual(self.verdict("Work the brief. <!-- note --> " + TERSE_LINE), (0, ""),
+                         "control: the text after a mid-line comment's close on the same line was hidden")
+        self.assertEqual(self.verdict("Work the brief. <!-- " + TERSE_LINE + " -->")[0], 1,
+                         "control: a line inside a mid-line comment counted as holding the line")
+        self.assertEqual(self.verdict("<!-- note -->\n\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a line-start comment closed on its own line was hidden")
+        self.assertEqual(self.verdict("<!-- note --> " + TERSE_LINE)[0], 1,
+                         "the text after a line-start comment's close on the same line counted as holding the line")
+
+    def test_a_line_start_comment_closed_on_a_later_line_hides_the_text_after_its_close(self):
+        self.assertEqual(self.verdict("Work the brief. <!-- note\n--> " + TERSE_LINE), (0, ""),
+                         "control: the text after an inline comment's close on a later line was hidden")
+        self.assertEqual(self.verdict("<!-- note\n--> " + TERSE_LINE)[0], 1,
+                         "the text after a line-start comment's close on a later line counted as holding the line")
+
+    def test_a_line_start_comment_after_a_paragraph_line_hides_the_text_after_its_close(self):
+        # Controls first: a line-start comment closed on its own line hides nothing below it, and one never closed hides the rest.
+        self.assertEqual(self.verdict("Work the brief.\n<!-- note -->\n\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a line-start comment closed on its own line was hidden")
+        self.assertEqual(self.verdict("Work the brief.\n<!-- open\n\n" + TERSE_LINE)[0], 1,
+                         "control: an unclosed line-start comment after a paragraph line did not hide the rest of the file")
+        self.assertEqual(self.verdict("Work the brief.\n<!-- note --> " + TERSE_LINE)[0], 1,
+                         "the text after a line-start comment's close on the same line counted as holding the line")
+
+    def test_a_line_start_comment_indented_one_to_three_spaces_hides_the_text_after_its_close(self):
+        self.assertEqual(self.verdict("   <!-- note -->\n\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a 3-space line-start comment closed on its own line was hidden")
+        self.assertEqual(self.verdict("   <!-- note --> " + TERSE_LINE)[0], 1,
+                         "the text after a 3-space line-start comment's close on the same line counted as holding the line")
+
+    def test_a_four_space_comment_after_text_is_not_a_block(self):
+        # Control first: a three-space comment after text is a block that hides the rest of its line.
+        self.assertEqual(self.verdict("Work the brief.\n   <!-- open --> " + TERSE_LINE)[0], 1,
+                         "control: a three-space line-start comment after text did not hide the rest of its line")
+        self.assertEqual(self.verdict("Work the brief.\n    <!-- open --> " + TERSE_LINE), (0, ""),
+                         "a four-space comment that continues a paragraph was read as a block, so the text after its close was hidden")
+
+    def test_an_unclosed_line_start_comment_in_a_list_item_ends_with_the_item(self):
+        self.assertEqual(self.verdict("- item\n  <!-- open -->\n\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a line-start comment closed on its line in a list item was hidden")
+        self.assertEqual(self.verdict("- item\n  <!-- open\n\n" + TERSE_LINE), (0, ""),
+                         "an unclosed line-start comment in a list item hid the terse line after the list item ended")
+
+    # A heading, a fence, a list item, a quote or a rule line interrupts a paragraph, so a comment opened mid-line
+    # above one ends there. Each row has a control beside it: the same block after a comment closed on its line.
+    def assert_block_ends_an_unclosed_comment(self, block, name):
+        self.assertEqual(self.verdict("Write <!-- open --> to open.\n" + block + "\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a closed comment and a %s was hidden" % name)
+        self.assertEqual(self.verdict("Write <!-- open\n" + block + "\n" + TERSE_LINE + "\n-->")[0], 0,
+                         "a comment opened above a %s ran past it, so the line below it was hidden" % name)
+
+    def test_a_heading_ends_an_unclosed_mid_line_comment(self):
+        # Control first: the comment ends with its paragraph, so a heading and a blank line leave the line below counted.
+        self.assertEqual(self.verdict("Write <!-- open\n## Heading\n\n" + TERSE_LINE), (0, ""),
+                         "control: the line after an unclosed comment, a heading and a blank line was hidden")
+        self.assert_block_ends_an_unclosed_comment("## Heading", "heading")
+
+    def test_a_list_item_ends_an_unclosed_mid_line_comment(self):
+        self.assert_block_ends_an_unclosed_comment("- item", "list item")
+
+    def test_a_quote_ends_an_unclosed_mid_line_comment(self):
+        self.assert_block_ends_an_unclosed_comment("> quote", "quote")
+
+    def test_a_rule_ends_an_unclosed_mid_line_comment(self):
+        self.assert_block_ends_an_unclosed_comment("***", "rule line")
+
+    def test_a_nested_list_item_ends_an_unclosed_mid_line_comment(self):
+        self.assertEqual(self.verdict("- a\n  Write <!-- open -->\n  - b\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a closed comment in a nested item was hidden")
+        self.assertEqual(self.verdict("- a\n  Write <!-- open\n  - b\n" + TERSE_LINE + "\n-->")[0], 0,
+                         "a comment opened above a nested item ran into it, so the line below it was hidden")
+
+    def test_a_fence_ends_an_unclosed_mid_line_comment(self):
+        self.assertEqual(self.verdict("Write <!-- x -->\n```\n" + TERSE_LINE + "\n```")[0], 1,
+                         "control: a line in a fence after a closed comment counted as holding the line")
+        self.assertEqual(self.verdict("Write <!-- x\n```\n-->\n" + TERSE_LINE + "\n```")[0], 1,
+                         "a comment opened above a fence ran into it, so a line inside the fence counted")
+
+    def test_a_fence_after_an_unclosed_mid_line_comment_does_not_hide_the_text_after_it(self):
+        self.assertEqual(self.verdict("```\n-->\n```\n\n" + TERSE_LINE), (0, ""),
+                         "control: a fence holding --> hid the line after it")
+        self.assertEqual(self.verdict("Write <!-- x\n```\n-->\n```\n\n" + TERSE_LINE), (0, ""),
+                         "a comment opened above a fence ran past the fence's first line, so the text after the fence was hidden")
+
+    def test_an_ordered_item_ends_an_unclosed_mid_line_comment(self):
+        self.assert_block_ends_an_unclosed_comment("1. item", "ordered list item")
+
+    def test_a_plus_item_ends_an_unclosed_mid_line_comment(self):
+        self.assert_block_ends_an_unclosed_comment("+ item", "plus list item")
+
+    def test_a_star_item_ends_an_unclosed_mid_line_comment(self):
+        self.assert_block_ends_an_unclosed_comment("* item", "star list item")
+
+    def test_a_dash_rule_ends_an_unclosed_mid_line_comment(self):
+        self.assert_block_ends_an_unclosed_comment("---", "dash rule line")
+
+    def test_an_underscore_rule_ends_an_unclosed_mid_line_comment(self):
+        self.assert_block_ends_an_unclosed_comment("___", "underscore rule line")
+
+    def test_a_tilde_fence_ends_an_unclosed_mid_line_comment(self):
+        # Control first: a line in a ~~~ fence after a closed comment is fenced, so it does not count.
+        self.assertEqual(self.verdict("Write <!-- x -->\n~~~\n" + TERSE_LINE + "\n~~~")[0], 1,
+                         "control: a line in a ~~~ fence after a closed comment counted as holding the line")
+        self.assertEqual(self.verdict("Write <!-- x\n~~~\n-->\n~~~\n\n" + TERSE_LINE), (0, ""),
+                         "a comment opened above a ~~~ fence ran past the fence's first line, so the text after the fence was hidden")
+
+    def test_a_line_start_comment_ends_the_paragraph_above_it(self):
+        # Control first: a comment closed on its line leaves the line above a line-start comment counted.
+        self.assertEqual(self.verdict("Write <!-- open --> to open.\n" + TERSE_LINE + "\n<!-- c -->"), (0, ""),
+                         "control: the line above a line-start comment, after a closed comment, was hidden")
+        self.assertEqual(self.verdict("Write <!-- open\n" + TERSE_LINE + "\n<!-- c -->"), (0, ""),
+                         "a line-start comment did not end the paragraph above it, so an unclosed mid-line comment hid the line above it")
+
+    def assert_rule_clears_the_list(self, rule, name):
+        # Control first: a closed comment below the rule hides nothing. A rule is not an item, so the item's list ends.
+        self.assertEqual(self.verdict("- a\n" + rule + "\n  <!-- open -->\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a closed comment below a %s was hidden" % name)
+        self.assertEqual(self.verdict("- a\n" + rule + "\n  <!-- open\n" + TERSE_LINE)[0], 1,
+                         "a %s did not clear the list above it, so an unclosed comment below it ended with the item and the line after it counted" % name)
+
+    def test_a_dash_rule_clears_the_list(self):
+        self.assert_rule_clears_the_list("---", "dash rule line")
+
+    def test_a_spaced_star_rule_clears_the_list(self):
+        self.assert_rule_clears_the_list("* * *", "spaced star rule line")
+
+    def test_a_spaced_dash_rule_clears_the_list(self):
+        self.assert_rule_clears_the_list("- - -", "spaced dash rule line")
+
+    # The list ends at a column-0 heading or fence. An indented comment after one is top-level, not in the list.
+    def test_a_column_zero_heading_ends_the_list_before_an_indented_comment(self):
+        self.assertEqual(self.verdict("- item\n# Heading\n  <!-- open -->\n\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a closed comment below a heading was hidden")
+        self.assertEqual(self.verdict("- item\n# Heading\n  <!-- open\n\n" + TERSE_LINE)[0], 1,
+                         "a list still open after a column-0 heading ended an unclosed comment early, so the line after it counted")
+
+    def test_a_column_zero_fence_ends_the_list_before_an_indented_comment(self):
+        self.assertEqual(self.verdict("- item\n```\ncode\n```\n  <!-- open -->\n\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a closed comment below a fence was hidden")
+        self.assertEqual(self.verdict("- item\n```\ncode\n```\n  <!-- open\n\n" + TERSE_LINE)[0], 1,
+                         "a list still open after a column-0 fence ended an unclosed comment early, so the line after it counted")
+
+    def test_the_outer_item_width_returns_after_a_nested_item(self):
+        self.assertEqual(self.verdict("- a\n  - b\n\n  <!-- open -->\n\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a closed comment under the outer item was hidden")
+        self.assertEqual(self.verdict("- a\n  - b\n\n  <!-- open\n\n" + TERSE_LINE)[0], 0,
+                         "after a nested item the outer item's width was not restored, so an unclosed comment hid the line below the list")
+
+    def test_an_ordered_item_holds_its_unclosed_comment_in_its_item(self):
+        # Control first: a closed comment hides nothing. The content column of "1. " is 3, so the comment is indented 3.
+        self.assertEqual(self.verdict("1. item\n\n   <!-- open -->\n\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a closed comment under an ordered item was hidden")
+        self.assertEqual(self.verdict("1. item\n\n   <!-- open\n\n" + TERSE_LINE), (0, ""),
+                         "an ordered item did not hold its unclosed comment, so the line after the item was hidden")
+
+    def test_a_plus_item_holds_its_unclosed_comment_in_its_item(self):
+        self.assertEqual(self.verdict("+ item\n\n  <!-- open -->\n\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a closed comment under a plus item was hidden")
+        self.assertEqual(self.verdict("+ item\n\n  <!-- open\n\n" + TERSE_LINE), (0, ""),
+                         "a plus item did not hold its unclosed comment, so the line after the item was hidden")
+
+    def test_a_five_space_item_gap_puts_its_content_at_the_marker_plus_one(self):
+        # Controls first: a closed comment hides nothing, and a four-space gap sets the content column at 5, so a
+        # two-space comment is outside that item and hides the text below it.
+        self.assertEqual(self.verdict("-     item\n\n  <!-- open -->\n\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a closed comment under a five-space item was hidden")
+        self.assertEqual(self.verdict("-    item\n\n  <!-- open\n\n" + TERSE_LINE)[0], 1,
+                         "control: a four-space item gap did not put its content at column 5, so the comment was read as inside")
+        self.assertEqual(self.verdict("-     item\n\n  <!-- open\n\n" + TERSE_LINE), (0, ""),
+                         "a five-space item gap did not put its content at column 2, so the comment was read as outside the item and hid the line after it")
+
+    def test_a_line_at_the_item_column_stays_in_an_unclosed_comment_of_the_item(self):
+        # Control first: a line indented less than the item's column ends its comment, so the line below it counts.
+        self.assertEqual(self.verdict("- item\n  <!-- open\n " + TERSE_LINE + "\n  -->"), (0, ""),
+                         "control: a line indented less than the item's column did not end its unclosed comment")
+        self.assertEqual(self.verdict("- item\n  <!-- open\n  " + TERSE_LINE + "\n  -->")[0], 1,
+                         "a line at the item's column ended its unclosed comment, so the line counted")
+
+    def test_an_outer_indent_line_closes_the_nested_item(self):
+        # Controls first: a closed comment hides nothing below it, and a line at the outer indent inside an unclosed
+        # comment stays hidden. That comment sits in the outer item, after the nested item has ended.
+        self.assertEqual(self.verdict("- a\n  - b\n  <!-- open -->\n" + TERSE_LINE), (0, ""),
+                         "control: the line after a closed comment under a nested item was hidden")
+        self.assertEqual(self.verdict("- a\n  - b\n  <!-- open\n  " + TERSE_LINE + "\n  -->")[0], 1,
+                         "control: a line at the outer indent inside an unclosed comment counted as holding the line")
+        self.assertEqual(self.verdict("- a\n  - b\n  <!-- open\ntext " + TERSE_LINE), (0, ""),
+                         "a line at the outer indent did not close the nested item, so an unclosed comment hid the text after it")
+
     def test_a_file_that_cannot_be_read_is_unknown_not_clear(self):
         root = fixture_root()
         path = os.path.join(root, self.NAME)
@@ -281,6 +540,114 @@ class RoleFileBody(BodyCases, unittest.TestCase):
 
 class LaneTextBody(BodyCases, unittest.TestCase):
     NAME = LANE_TEXT
+
+
+class ScannerCases(unittest.TestCase):
+    """body_text on raw text. A file read turns CRLF into LF, so only the scanner itself sees a CRLF line end."""
+
+    def test_a_crlf_blank_line_ends_a_comment_opened_above_it(self):
+        self.assertIn(TERSE_LINE, C.body_text("Write <!-- open\n\n" + TERSE_LINE + "\n-->"),
+                      "control: the line after an LF blank line was hidden")
+        self.assertIn(TERSE_LINE, C.body_text("Write <!-- open\r\n\r\n" + TERSE_LINE + "\r\n-->"),
+                      "a CRLF blank line did not end a comment opened above it, so the line below it was hidden")
+
+
+class CountingText(str):
+    """A str that counts the characters its find and slice calls scan. A regex search is not counted,
+    since its work is inside the engine."""
+    scanned = 0
+
+    def find(self, sub, *bounds):
+        found = str.find(self, sub, *bounds)
+        start = bounds[0] if bounds else 0
+        stop = found if found >= 0 else (bounds[1] if len(bounds) > 1 else len(self))
+        self.scanned += max(0, min(stop, len(self)) - start)
+        return found
+
+    def __getitem__(self, key):
+        part = str.__getitem__(self, key)
+        self.scanned += len(part) if isinstance(key, slice) else 1
+        return part
+
+
+class CountingSearch:
+    """Stands in for SPAN_OR_COMMENT in body_text. Counts its search calls, then runs the real pattern."""
+
+    def __init__(self, pattern):
+        self.pattern = pattern
+        self.calls = 0
+
+    def search(self, text, pos=0):
+        self.calls += 1
+        return self.pattern.search(text, pos)
+
+
+class ScanCost(unittest.TestCase):
+    """The scan's cost grows no faster than its input, and an unclosed paragraph is not searched for comments.
+    Both are counted, not timed (test-strategy-reset, point 2): the list case counts the characters that body_text's
+    find and slice calls scan, and the paragraph case counts its searches."""
+    NAME = os.path.join("agents", "builder.md")
+    SMALL = 500  # the repeats of a shape in the paragraph case and the control
+    COUNT_SMALL = 250  # the counted list has this many repeats, then twice as many
+    COUNT_LIMIT = 2.5  # a linear scan doubles its count on a doubled input; a quadratic one nearly quadruples it
+
+    def work(self, body):
+        """The characters body_text's finds and slices scan on body."""
+        text = CountingText(body)
+        C.body_text(text)
+        return text.scanned
+
+    def searches(self, body):
+        """How many times body_text searches body for a comment or a code span."""
+        counting = CountingSearch(C.SPAN_OR_COMMENT)
+        with mock.patch.object(C, "SPAN_OR_COMMENT", counting):
+            C.body_text(body)
+        return counting.calls
+
+    def test_an_unclosed_paragraph_of_openers_is_never_searched(self):
+        # Control first: a closed comment is searched for, so a count of 0 below means the scan skipped the paragraph.
+        self.assertGreaterEqual(self.searches("x <!-- y --> z"), 1,
+                                "control: a closed comment was not searched for, so the counter sees nothing")
+        self.assertEqual(self.searches("x <!-- " * self.SMALL + "\n\n" + TERSE_LINE), 0,
+                         "a paragraph of unclosed openers with no --> was searched for comments")
+
+    def test_a_long_list_of_line_start_comments_scans_no_more_than_linear(self):
+        small_body = "- item\n" + "  <!-- x -->\n" * self.COUNT_SMALL + "\n" + TERSE_LINE
+        big_body = "- item\n" + "  <!-- x -->\n" * (2 * self.COUNT_SMALL) + "\n" + TERSE_LINE
+        small, big = self.work(small_body), self.work(big_body)
+        # Control first: the counter saw at least the characters of the input, so a count of 0 cannot pass.
+        self.assertGreaterEqual(small, len(small_body),
+                                "the counter saw fewer characters than the input holds, so the ratio proves nothing")
+        self.assertLessEqual(big, self.COUNT_LIMIT * small,
+                             "a list of line-start comments twice as long scanned %d characters against %d: "
+                             "the scan is worse than linear" % (big, small))
+
+    def test_a_paragraph_with_one_lone_backtick_is_never_searched(self):
+        # Control first: a paragraph with a closed code span is searched, so a count of 0 below means the scan skipped it.
+        self.assertGreaterEqual(self.searches("word <!-- x\n" * self.SMALL + "`a`\n\n" + TERSE_LINE), 1,
+                                "control: a paragraph with a closed code span was not searched, so the counter sees nothing")
+        self.assertEqual(self.searches("word <!-- x\n" * self.SMALL + "`\n\n" + TERSE_LINE), 0,
+                         "a paragraph of unclosed openers with one lone backtick was searched for comments and code spans")
+
+    def test_a_paragraph_with_one_lone_backtick_scans_no_more_than_linear(self):
+        # The regex search's own steps are not counted here; the search count above covers them.
+        small_body = "word <!-- x\n" * self.COUNT_SMALL + "`\n\n" + TERSE_LINE
+        big_body = "word <!-- x\n" * (2 * self.COUNT_SMALL) + "`\n\n" + TERSE_LINE
+        small, big = self.work(small_body), self.work(big_body)
+        # Control first: the counter saw at least the characters of the input, so a count of 0 cannot pass.
+        self.assertGreaterEqual(small, len(small_body),
+                                "the counter saw fewer characters than the input holds, so the ratio proves nothing")
+        self.assertLessEqual(big, self.COUNT_LIMIT * small,
+                             "a paragraph with one lone backtick twice as long scanned %d characters against %d: "
+                             "the scan is worse than linear" % (big, small))
+
+    def test_both_long_shapes_still_count_the_line_after_them(self):
+        paragraph = write(fixture_root(), self.NAME, doc("x <!-- " * self.SMALL + "\n\n" + TERSE_LINE))
+        self.assertEqual(check_files(paragraph), (0, ""),
+                         "a long paragraph of unclosed openers hid the line after it")
+        listed = write(fixture_root(), self.NAME, doc("- item\n" + "  <!-- x -->\n" * self.SMALL + "\n" + TERSE_LINE))
+        self.assertEqual(check_files(listed), (0, ""),
+                         "a long list of line-start comments hid the line after the list")
 
 
 def make_tree(root, missing=(), bare=(), lane_bare=False):
