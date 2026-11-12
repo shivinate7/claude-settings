@@ -2331,20 +2331,29 @@ class LintCheckJoin(tm.CloudSession):
         self.assertIn("green", skips[0], "the skip line does not say the rollup is green:\n" + out)
         self.assertIn(head[:9], skips[0], "the skip line does not name the head it skipped:\n" + out)
 
-    def test_a_join_with_all_jobs_passed_not_green_on_the_live_head_still_needs_the_lane_lint(self):
-        """Why: only a green rollup on the live head replaces the lane lint. A red, pending or skipped rollup (a draft run skips it), or no rollup
-        at all, keeps the refusal: the join names `merge --lane-lint 7` and merges and pushes nothing. Green on the old code: the refusal has
-        never depended on CI."""
-        states = {
-            "absent": [[("checks", "pass", "")]],
-            "red": [[("checks", "pass", ""), (REQUIRED_CHECK, "fail", "https://x/y")]],
-            "pending": [[("checks", "pass", ""), (REQUIRED_CHECK, "pending", "")]],
-            "skipped": [[("checks", "pass", ""), (REQUIRED_CHECK, "skipping", "")]],
-        }
-        for name, seq in states.items():
-            with self.subTest(rollup=name):
-                out = self.assert_refused([], f"all-jobs-passed {name} on the live head", checks_seq=seq)
-                self.assertEqual(rollup_skip_lines(out), [], f"all-jobs-passed {name} on the live head printed a line that says the lane lint was skipped:\n{out}")
+    def refused_with_rollup(self, name, seq):
+        """The join of an integration PR whose live head shows the rollup in `seq` (no lint PASS): refused, with no skip line."""
+        with self.integration_pr():
+            out = self.assert_refused([], f"all-jobs-passed {name} on the live head of an integration PR", checks_seq=seq, body=self.integration_body())
+        self.assertEqual(rollup_skip_lines(out), [], f"all-jobs-passed {name} on the live head printed a line that says the lane lint was skipped:\n{out}")
+
+    def test_an_integration_pr_with_no_all_jobs_passed_on_the_live_head_still_needs_the_lane_lint(self):
+        """Why: a rollup that is absent does not clear the lint on an integration PR. The join names `merge --lane-lint 7` and merges and pushes
+        nothing. Red under a mutant that reads every rollup as green: the join then skips the lint and merges."""
+        self.refused_with_rollup("absent", [[("checks", "pass", "")]])
+
+    def test_an_integration_pr_with_a_red_all_jobs_passed_on_the_live_head_still_needs_the_lane_lint(self):
+        """Why: a red rollup on the live head does not clear the lint on an integration PR. Red under a mutant that reads every rollup as green."""
+        self.refused_with_rollup("red", [[("checks", "pass", ""), (REQUIRED_CHECK, "fail", "https://x/y")]])
+
+    def test_an_integration_pr_with_a_pending_all_jobs_passed_on_the_live_head_still_needs_the_lane_lint(self):
+        """Why: a pending rollup on the live head does not clear the lint on an integration PR. Red under a mutant that reads every rollup as green."""
+        self.refused_with_rollup("pending", [[("checks", "pass", ""), (REQUIRED_CHECK, "pending", "")]])
+
+    def test_an_integration_pr_with_a_skipped_all_jobs_passed_on_the_live_head_still_needs_the_lane_lint(self):
+        """Why: a skipped rollup (a draft run skips it) does not clear the lint on an integration PR. Red under a mutant that reads every rollup
+        as green."""
+        self.refused_with_rollup("skipped", [[("checks", "pass", ""), (REQUIRED_CHECK, "skipping", "")]])
 
     def moved_after_green_skip(self):
         """A batch integration PR whose head moves after its green-rollup read: -> (rc, out) of its join. The first head read shows the linted head;
@@ -2455,12 +2464,15 @@ class LintCheckRollup(unittest.TestCase):
 
     def test_a_green_rollup_on_an_older_head_does_not_clear_the_live_head(self):
         """Why: when the head moved, the live head's lane lint is still owed. Green on the old head proves nothing about the new head, which has
-        its own run. Green on the old code too: lint_check refuses every head with no lane-lint PASS, and reads no rollup."""
+        its own run. The PR is a batch integration PR, the only kind whose green rollup can clear the lint, so the rollup read decides. Red under a
+        mutant that reads every rollup as green: the lint is skipped on the live head."""
         old, live = "1" * 40, "2" * 40
         host = tm.PullsHost([], {old: [tm.batch_run(REQUIRED_CHECK, status="completed", conclusion="success")], live: []})
         self.assertEqual(len(host.pages(f"commits/{old}/check-runs", "check_runs")), 1, "precondition: the older head has no green rollup row, so the case probes nothing")
         self.assertEqual(host.pages(f"commits/{live}/check-runs", "check_runs"), [], "precondition: the live head has a check run, so the case probes nothing")
-        info = {"head": live, "branch": "feat", "base": "main", "created": None, "body": ""}
+        info = {"head": live, "branch": merge.integration_branch(INTEGRATION_NAME), "base": "main", "created": None,
+                "body": "\n".join(merge.freeze_lines(INTEGRATION_NAME, {6: old})) + "\n"}
+        self.assertTrue(merge.is_integration_pr(info), "precondition: the info is a lane PR, so the case probes no rollup")
         root = tempfile.mkdtemp(prefix="lint-rollup-", dir=RUN_FOLDER)
         self.addCleanup(shutil.rmtree, root, True)
         with self.assertRaises(merge.Stop) as cm:
