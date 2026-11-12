@@ -60,8 +60,8 @@ Interface the hook must match:
   ruling is found in the prompt with the call's JSON cut out. A search that cannot read a source prints one stderr
   line, `past-ruling search unknown:`, and never says clear.
 - A challenge to a past ruling (decision `question-form`, rule outcomes-stale-decision-protocol): item 8 passes a
-  question that names the record and brings a new fact, or that names the record and says the claim is unmeasured.
-  The outcome protected, what protects it now and a proposed fix are optional. It refuses a re-ask that brings no new
+  question that names the record and brings a new fact, or that names the record, quotes the ruling's sentence that states
+  no measure, and says the claim is unmeasured. The outcome protected, what protects it now and a proposed fix are optional. It refuses a re-ask that brings no new
   fact. A denial tells the session how to challenge, never to
   withdraw. A challenge is a question, never a grant (see the section "a challenge to a past ruling").
 - A relative file_path on an items set or update with no `data`: the file is read against the payload's `cwd`, as
@@ -1734,27 +1734,38 @@ def refuses_a_bare_re_ask(text):
     return any("refuse" in s and "re-ask" in s and "no new fact" in s for s in sentences_of(text))
 
 
-def names_a_new_fact_alone_passes(text):
-    """True when a sentence of `text` says a challenge that names the record passes on a new fact alone. A sentence with a
-    negative word (not, never, no) says the opposite, so it does not count."""
-    return any("new fact alone" in s and "pass" in s and "record" in s and re.search(r"\b(not|never|no)\b", s) is None
-               for s in sentences_of(text))
+def says_new_fact_alone_passes(text):
+    """True when a sentence of `text` says a challenge passes on a new fact alone. That wording makes a new fact the only
+    ground of a pass, so it refuses the unmeasured route, which passes with no new fact. The item must not hold it."""
+    return any("new fact alone" in s and "pass" in s for s in sentences_of(text))
 
 
-# A negative word, then `new fact` within three words: "is not a new fact", "does not count as a new fact".
+# The negation sits right before the noun: "is not a new fact", "is no new fact", "is not a challenge". A negative word
+# elsewhere in the sentence does not count, so "is a new fact, not a measure" is no negation of the new fact.
+NEGATED_NEW_FACT_NOUN = re.compile(r"\b(?:not|no|never)\s+(?:a\s+)?new fact\b")
+# The negation sits right before `challenge`, after the record clause: "is not a challenge".
+NEGATED_CHALLENGE = re.compile(r"\b(?:not|no|never)\s+(?:a\s+)?challenge\b")
+# A negative word, then `record` within four words: "does not name the record", "names no record", "without the record".
+NEGATED_RECORD = re.compile(r"\b(?:not|no|without)\b(?:\s+[\w'-]+){0,4}\s+record\b")
+# A negative word, then `new fact` within three words: "is not a new fact", "does not count as a new fact". It is wide on
+# purpose here: says_unmeasured_is_no_new_fact must flag more blended wording, and the check refuses every flag.
 NEGATED_NEW_FACT = re.compile(r"\b(?:not|never|no)\b(?:\s+[\w'-]+){0,3}\s+new fact")
+# A negative word, or `no pass`, anywhere in a sentence that names the unmeasured route.
+NEGATED_ROUTE = re.compile(r"\b(?:not|never|without)\b|\bno\s+(?:a\s+)?pass")
 
 
 def restates_is_no_new_fact(text):
-    """True when a sentence of `text` says a restatement of the ruling's own claim is not a new fact."""
-    return any(("restat" in s or "own claim" in s) and "new fact" in s and re.search(r"\b(not|never|no)\b", s) is not None
+    """True when a sentence of `text` says a restatement of the ruling's own claim is not a new fact: the negation governs
+    `new fact`, so "is a new fact, not a measure" is no pass."""
+    return any(("restat" in s or "own claim" in s) and NEGATED_NEW_FACT_NOUN.search(s) is not None
                for s in sentences_of(text))
 
 
-def names_an_unmeasured_claim_passes(text):
-    """True when a sentence of `text` says a challenge that names the record and says the claim is unmeasured passes. A
-    sentence with a negative word (not, never, no) says the opposite, so it does not count."""
-    return any("unmeasured" in s and "record" in s and "pass" in s and re.search(r"\b(not|never|no)\b", s) is None
+def names_unmeasured_route(text):
+    """True when a sentence of `text` names the unmeasured route with the record and the quoted sentence of the ruling that
+    states no measure (rule outcomes-stale-decision-protocol: name the record and the sentence). One sentence holds
+    `unmeasured`, `record`, a quote and `sentence`, and no negation (not, never, without, or no pass)."""
+    return any("unmeasured" in s and "record" in s and "quot" in s and "sentence" in s and NEGATED_ROUTE.search(s) is None
                for s in sentences_of(text))
 
 
@@ -1764,10 +1775,14 @@ def says_unmeasured_is_no_new_fact(text):
 
 
 def excludes_a_re_ask_without_the_record(text):
-    """True when a sentence of `text` says a re-ask that does not name the record is not a challenge: a negative word
-    (not, no, without) governs the record, and the sentence says not a challenge."""
-    return any(re.search(r"\bre-?ask", s) is not None and re.search(r"\b(?:not|no|without)\b[^.]*\brecord\b", s) is not None
-               and "challenge" in s and re.search(r"\bnot\b", s) is not None for s in sentences_of(text))
+    """True when a sentence of `text` says a re-ask that does not name the record is not a challenge. The negation must
+    stand on the record clause, and `challenge` must follow it with a negation right before it, so "does not name the
+    record is a challenge" is no pass."""
+    for s in sentences_of(text):
+        record = NEGATED_RECORD.search(s)
+        if re.search(r"\bre-?ask", s) is not None and record is not None and NEGATED_CHALLENGE.search(s, record.end()):
+            return True
+    return False
 
 
 def new_shape_checks(text, subject):
@@ -1839,22 +1854,22 @@ def case_new_fact_alone_question_gets_item_8():
           len(r.calls) == 1 and r.code == 0 and r.out == "", detail(r))
     item8 = item8_of(r.calls[0]["prompt"] if r.calls else "")
     check("new fact alone question: the prompt holds item 8", item8 != "", detail(r))
-    check("new fact alone question: item 8 passes a new fact alone with the record named",
-          names_a_new_fact_alone_passes(item8), " ".join(item8.split())[:300])
     new_shape_checks(item8, "new fact alone question: item 8")
+    check("new fact alone question: item 8 names the unmeasured route with the record and the quoted sentence",
+          names_unmeasured_route(item8), " ".join(item8.split())[:300])
 
 
 def case_new_fact_is_one_the_ruling_left_unweighed():
     # A new fact is a measure or an observed harm the ruling left unweighed. A challenge that names the record and says the
-    # claim is unmeasured passes too: the owner's rule says measure the claim, or say unmeasured. A restatement of the
+    # claim is unmeasured is its own route, and quotes the ruling's sentence that states no measure. A restatement of the
     # ruling's own claim is not a new fact. The check reads the item's sentences; a failure prints the sentences with the word.
     item = load_file_module(HOOK, "call_judge_under_test").PAST_RULING_ITEM
     flat = " ".join(item.split())
     unmeasured = " | ".join(s.strip() for s in sentences_of(item) if "unmeasured" in s)
     check("unweighed: the item says a measure is a new fact only when the ruling left it unweighed",
           re.search(r"\bmeasure\b(?:(?!\bclaim)[^.])*\bunweighed\b", flat.lower()) is not None, flat[:300])
-    check("unweighed: the item says a challenge that names the record and says the claim is unmeasured passes",
-          names_an_unmeasured_claim_passes(item), unmeasured[:300])
+    check("unweighed: the item names the unmeasured route with the record and the quoted sentence that states no measure",
+          names_unmeasured_route(item), unmeasured[:300])
     check("unweighed: the item no longer says the word unmeasured is not a new fact",
           not says_unmeasured_is_no_new_fact(item), unmeasured[:300])
     check("unweighed: the item says a restatement of the ruling's own claim is not a new fact",
@@ -1869,6 +1884,82 @@ def case_past_ruling_item_refuses_a_bare_re_ask():
     check("bare re-ask: the item refuses a re-ask that brings no new fact", refuses_a_bare_re_ask(item), flat)
     check("bare re-ask: the item no longer refuses a re-ask as not such a challenge",
           "such a challenge" not in item.lower(), flat)
+
+
+def case_past_ruling_item_names_the_unmeasured_route():
+    # (a) Item 8 names the unmeasured route with the record and the quoted sentence of the ruling that states no measure
+    # (rule outcomes-stale-decision-protocol: "name the record and the sentence").
+    item = load_file_module(HOOK, "call_judge_under_test").PAST_RULING_ITEM
+    check("unmeasured route: item 8 names it with the record and the quoted sentence that states no measure",
+          names_unmeasured_route(item), " ".join(item.split())[:300])
+
+
+def case_negation_governs_the_claim_it_negates():
+    # Probes on literal sentences, never product text. Each inverted sentence must be refused and each true one accepted,
+    # one check per sentence, so a red names the sentence. The last true unmeasured sentence says "states no measure", so the
+    # unmeasured route's negation rule is shown not to refuse that phrase.
+    probes = (
+        ("re-ask", excludes_a_re_ask_without_the_record, "A re-ask that does not name the record is a challenge.", False),
+        ("re-ask", excludes_a_re_ask_without_the_record, "A re-ask that names no record is a challenge.", False),
+        ("re-ask", excludes_a_re_ask_without_the_record, "A re-ask that names the record is not a challenge.", False),
+        ("re-ask", excludes_a_re_ask_without_the_record, "A re-ask that does not name the record is not a challenge.", True),
+        ("re-ask", excludes_a_re_ask_without_the_record, "A re-ask that names no record is not a challenge.", True),
+        ("restatement", restates_is_no_new_fact,
+         "A restatement of the ruling's own claim is a new fact, not a measure.", False),
+        ("restatement", restates_is_no_new_fact, "A restatement of the ruling's own claim is a new fact.", False),
+        ("restatement", restates_is_no_new_fact, "A restatement of the ruling's own claim is not a new fact.", True),
+        ("unmeasured", names_unmeasured_route,
+         "A challenge that says the claim is unmeasured does not need the record or the quoted sentence.", False),
+        ("unmeasured", names_unmeasured_route,
+         "A challenge that says the claim is unmeasured passes without the record and the quoted sentence.", False),
+        ("unmeasured", names_unmeasured_route,
+         "A challenge that says the claim is unmeasured, with the record and the quoted sentence, is no pass.", False),
+        ("unmeasured", names_unmeasured_route,
+         "A challenge that names the record, says the claim is unmeasured, and quotes the ruling's sentence that states "
+         "no measure, passes.", True),
+    )
+    for kind, helper, sentence, want in probes:
+        got = helper(sentence)
+        check("probe %s: %r is %s" % (kind, sentence, "accepted" if want else "refused"), got == want,
+              "the helper returned %s" % got)
+
+
+def line_with(path, anchor):
+    """The first line of the file at `path` that holds `anchor`, or "" when no line does or the file cannot be read."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return next((line for line in handle if anchor in line), "")
+    except OSError:
+        return ""
+
+
+def stale_protocol_reason():
+    """The mechanism reason of rule outcomes-stale-decision-protocol (line 19 of lint/rule_mechanisms.json), or "" when the
+    entry or the file cannot be read."""
+    try:
+        with open(os.path.join(REPO, "lint", "rule_mechanisms.json"), encoding="utf-8") as handle:
+            return json.load(handle)["rules"]["outcomes-stale-decision-protocol"]["mechanism"]["reason"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return ""
+
+
+def case_records_name_the_unmeasured_route_with_the_quote():
+    # (d) The two decision records and the rule-mechanism entry that name the ways to challenge carry the unmeasured route,
+    # with the record and the quoted sentence, as the code does. Each text is found first, so a missing text fails by its
+    # name and is never read as an empty pass.
+    decisions = os.path.join(REPO, "docs", "decisions")
+    records = (
+        ("docs/decisions/question-form.md",
+         line_with(os.path.join(decisions, "question-form.md"), "`PAST_RULING_ITEM` in `hooks/call_judge.py`")),
+        ("docs/decisions/guard-remedy-not-to-owner.md",
+         line_with(os.path.join(decisions, "guard-remedy-not-to-owner.md"), "To challenge the ruling")),
+        ("lint/rule_mechanisms.json, outcomes-stale-decision-protocol", stale_protocol_reason()),
+    )
+    for label, text in records:
+        check("records: %s is found" % label, text.strip() != "", "no line or entry holds the anchor")
+        if text.strip():
+            check("records: %s names the unmeasured route with the record and the quoted sentence" % label,
+                  names_unmeasured_route(text), " ".join(text.split())[:300])
 
 
 def case_past_ruling_item_never_says_withdraw():
@@ -1893,6 +1984,14 @@ def case_past_ruling_tail_names_the_record_and_the_new_fact():
           tail[:300])
 
 
+def case_challenge_how_names_the_unmeasured_route():
+    # (c) The how-to-challenge tail names the unmeasured route on its own: the record, the quoted sentence of the ruling that
+    # states no measure, and the claim is unmeasured. The denial the session reads carries this tail (the next case).
+    tail = load_file_module(HOOK, "call_judge_under_test").CHALLENGE_HOW
+    check("challenge how: the tail names the unmeasured route with the record and the quoted sentence",
+          names_unmeasured_route(tail), " ".join(tail.split())[:300])
+
+
 def case_bare_re_ask_is_refused_beside_a_passing_challenge():
     # R39 item 4: the same question with no new fact is refused. Its denial tells the session how to challenge, and never
     # to withdraw. A challenge that brings a new fact, asked beside it, reaches the owner with no denial.
@@ -1909,6 +2008,8 @@ def case_bare_re_ask_is_refused_beside_a_passing_challenge():
           re.search(r"\b(optional|never required|not required)\b", reason) is not None, reason[:300])
     hits = [p for p in WITHDRAW_PHRASES if p in reason]
     check("re-ask with no new fact: the denial never tells the session to withdraw the question", not hits, hits)
+    check("re-ask with no new fact: the denial names the unmeasured route with the record and the quoted sentence",
+          names_unmeasured_route(reason), reason[:300])
     challenge = run_hook(question_input(box=good_box(goal=CHAL_GOAL, problem=CHAL_PROBLEM, based=CHAL_BASED,
                                                      options=CHAL_OPTIONS), cwd=DECISIONS_REPO), answer=ALLOW)
     check("challenge beside it: judged once, reaches the owner with no denial",
@@ -1948,14 +2049,16 @@ def case_challenge_text_never_lifts_a_refusal():
           not lifted_log(r, question_form.PAST_RULING_RULE) and "\toverride\t" not in r.log, r.log[-200:])
 
 
-def case_new_fact_alone_passes_with_the_record():
-    # Item 8 passes a challenge that names the record and brings a new fact alone. The four-part bar is gone, so the item
-    # must not still require four parts.
+def case_item_has_no_new_fact_alone_route():
+    # (b) The unmeasured route is its own route. The item must not say a challenge passes on a new fact alone, because
+    # "alone" makes a new fact the only ground of a pass, and the unmeasured route passes with none. Green controls beside
+    # it: the new-fact route still passes with the record named (new_shape_checks), and the item no longer requires four parts.
     item = load_file_module(HOOK, "call_judge_under_test").PAST_RULING_ITEM
     flat = " ".join(item.split())[:300]
-    check("new fact alone: the item says a challenge that names the record passes on a new fact alone",
-          names_a_new_fact_alone_passes(item), flat)
-    check("new fact alone: the item no longer requires a challenge with four parts",
+    check("no new-fact-alone route: the item does not say a challenge passes on a new fact alone",
+          not says_new_fact_alone_passes(item), flat)
+    new_shape_checks(item, "no new-fact-alone route: the item")
+    check("no new-fact-alone route: the item no longer requires a challenge with four parts",
           not any("only" in s and "four" in s for s in sentences_of(item)), flat)
 
 
@@ -2076,7 +2179,7 @@ def case_past_ruling_replay_item_532():
 
 def case_past_ruling_replay_item_532_challenge_passes():
     # Green control, beside the replay: the same question with the record named and a new fact, and no outcome and no fix.
-    # One model call and no refusal. The item 8 the model reads passes a new fact alone, which the new-fact checks read.
+    # One model call and no refusal. The item 8 the model reads passes a challenge with the record and a new fact.
     import question_form  # the one form check (hooks/question_form.py)
     challenge = good_page_item(title=REPLAY_TITLE, context=REPLAY_CHALLENGE_CONTEXT, options=REPLAY_OPTIONS)
     got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "c532c", "data": challenge})
@@ -2088,9 +2191,9 @@ def case_past_ruling_replay_item_532_challenge_passes():
     check("replay 532 challenge: the ruling reaches the candidate list",
           REPLAY_SLUG in without_call(prompt, challenge) and REPLAY_RULING in without_call(prompt, challenge), detail(r))
     item8 = item8_of(prompt)
-    check("replay 532 challenge: item 8 passes a new fact alone with the record named",
-          names_a_new_fact_alone_passes(item8), " ".join(item8.split())[:300])
     new_shape_checks(item8, "replay 532 challenge: item 8")
+    check("replay 532 challenge: item 8 names the unmeasured route with the record and the quoted sentence",
+          names_unmeasured_route(item8), " ".join(item8.split())[:300])
 
 
 # ------------------------------------------------------------------ the Item N opener of a refusal (R39)
@@ -2189,8 +2292,10 @@ def main():
                  case_past_ruling_challenge_page_item_gets_item_8, case_past_ruling_item_refuses_a_bare_re_ask,
                  case_past_ruling_item_never_says_withdraw, case_bare_re_ask_is_refused_beside_a_passing_challenge,
                  case_past_ruling_item_says_a_challenge_never_grants, case_challenge_question_writes_no_grant,
-                 case_challenge_text_never_lifts_a_refusal, case_new_fact_alone_passes_with_the_record,
-                 case_new_fact_is_one_the_ruling_left_unweighed,
+                 case_challenge_text_never_lifts_a_refusal, case_item_has_no_new_fact_alone_route,
+                 case_new_fact_is_one_the_ruling_left_unweighed, case_past_ruling_item_names_the_unmeasured_route,
+                 case_negation_governs_the_claim_it_negates, case_challenge_how_names_the_unmeasured_route,
+                 case_records_name_the_unmeasured_route_with_the_quote,
                  case_plain_words_explain_keeps_its_rule_id, case_judges_call_no_grant_reader,
                  case_past_ruling_denial_keeps_its_id_and_date, case_past_ruling_denial_plain_reason_keeps_its_id_and_date,
                  case_past_ruling_replay_item_532, case_past_ruling_replay_item_532_challenge_passes,
