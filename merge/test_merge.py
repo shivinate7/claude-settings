@@ -266,6 +266,9 @@ class FakeHost:
     def post_comment(self, n, body):  # the fake of Host.post_comment: a comment on pull request n, recorded for the case
         self.posted.append((n, body))
 
+    def issue_comments(self, since):  # the fake of Host.issue_comments: no record and no lint comment, so the lane lint's comment read finds none
+        return {}, {}
+
 MAILAUDIT_CHECK = "mailaudit-check"  # the required check a second checkout's stamp config names: a read of that config shows which checkout it came from
 
 class RepoHost(FakeHost):
@@ -14101,6 +14104,18 @@ class ReviewRecordForm(unittest.TestCase):
         self.assertEqual(record_state(self, no_note, head=head), "done", "the record without the note is not done at its head")
         self.assertEqual(parse_text(self, no_note).get("fix"), (fix_head, "reviewer", "sonnet", "PASS"), "the fix check did not parse")
 
+    def test_the_remedy_sentence_is_one_module_constant_in_merge_py(self):
+        # the one home of the `---` sentence (REVIEW_RULE_STEP): one module-level string, written nowhere else in merge.py. An ast read, not a text scan.
+        with open(merge.__file__, encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        homes = [node for node in tree.body if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "REVIEW_RULE_STEP" for t in node.targets)]
+        self.assertEqual(len(homes), 1, "merge.py does not assign REVIEW_RULE_STEP once at module level (found %d)" % len(homes))
+        self.assertIsInstance(homes[0].value, ast.Constant, "REVIEW_RULE_STEP is not a string literal")
+        sentence = homes[0].value.value
+        self.assertIn("---", sentence, "REVIEW_RULE_STEP does not name the --- line")
+        copies = [node for node in ast.walk(tree) if isinstance(node, ast.Constant) and node.value == sentence]
+        self.assertEqual(len(copies), 1, "the remedy sentence is written %d times in merge.py, want once, in REVIEW_RULE_STEP" % len(copies))
+
 class ReviewRecordRules(unittest.TestCase):
     """review_state over records the form gives (owner, page item 471 a). A change with Guard or check no is done by the review cap rule
     (roles-review-cap-three): the last round is PASS and the last design-reviewer line is PASS or absent, or the final round is recorded, whatever its
@@ -14763,6 +14778,22 @@ class ReviewRecordWrite(ReviewEnv):
                 out, _err = self.assert_usage_error("7", "--review-record", "--kind", "normal", "--guard", "no", "--head", self.head(), "--round", rnd)
                 self.assertNotIn(REVIEW_MARKER, out)
 
+    def test_the_printed_record_ends_with_a_footer_rule_line_after_its_ci_line(self):
+        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assertEqual(rc, 0, out + err)
+        lines = out.splitlines()
+        self.assertIn(REVIEW_CI_LINE, lines, "the printed record has no CI line:\n" + out)
+        after = lines[lines.index(REVIEW_CI_LINE) + 1:lines.index(REVIEW_CI_LINE) + 2]
+        self.assertEqual(after, ["---"], "the printed record has no --- footer line after its CI line, so a note has no rule to go below:\n" + out)
+
+    def test_the_stderr_note_names_the_rule_sentence_for_notes(self):
+        rc, out, err = self.run_args("7", "--review-record", *self.flags())
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn("---", err, "the --review-record note names no --- line:\n" + err)
+        rule = getattr(merge, "REVIEW_RULE_STEP", None)
+        self.assertIsNotNone(rule, "merge.py names no REVIEW_RULE_STEP, so the note has no one sentence")
+        self.assertIn(rule, err, "the --review-record note is not the REVIEW_RULE_STEP sentence:\n" + err)
+
 class ReviewFixFlag(ReviewEnv):
     """`--fix-check REVIEWED_HEAD:reviewer:MODEL:VERDICT` goes with --review-record and prints the fix check line after the rounds. A usage
     error prints no record. Each refusal sits beside the good value, which must exit 0, so a parser that never learned the flag fails here too."""
@@ -14836,6 +14867,29 @@ class ReviewFixFlag(ReviewEnv):
                                              host=self.earlier_host())
                 self.assertEqual(rc, 0, f"a fix check naming {model} was refused:\n" + out + err)
                 self.assertEqual(parse_text(self, posted_body(self, out)).get("fix"), (REVIEW_OLD_HEAD, "reviewer", model, "PASS"))
+
+    def test_a_fix_verifier_refusal_names_the_remedy_when_the_earlier_record_has_text_after_its_ci_line(self):
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS) + "Lane note.\n"
+        host = self.record_host(review_comment(1, 7, earlier), head=self.head())
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(), host=host)
+        self.assertEqual(rc, 2, "the fix check after a bad earlier record was not refused:\n" + out + err)
+        self.assertIn("---", err, "the --fix-check refusal names no --- line:\n" + err)
+        rule = getattr(merge, "REVIEW_RULE_STEP", None)
+        self.assertIsNotNone(rule, "merge.py names no REVIEW_RULE_STEP, so the refusal has no one sentence")
+        self.assertIn(rule, err, "the --fix-check refusal's remedy is not REVIEW_RULE_STEP:\n" + err)
+
+    def test_a_fix_verifier_refusal_names_the_comment_and_line_of_an_earlier_record_for_another_pr(self):
+        host = self.record_host(review_comment(1, 7, record_text(head=REVIEW_OLD_HEAD, n=9)), head=self.head())
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(), host=host)
+        self.assertEqual(rc, 2, "the fix check after an earlier record for PR #9 was not refused:\n" + out + err)
+        self.assertIn("comment 1, line 2: PR: #9", err, "the refusal does not name the comment and line of the record for another PR:\n" + err)
+
+    def test_a_fix_verifier_refusal_names_no_remedy_when_the_bad_line_is_elsewhere(self):  # control
+        earlier = record_text(head=REVIEW_OLD_HEAD, rounds=REVIEW_PASS, kind="bogus")
+        host = self.record_host(review_comment(1, 7, earlier), head=self.head())
+        rc, out, err = self.run_args("7", "--review-record", *self.flags(), "--fix-check", self.fix_value(), host=host)
+        self.assertEqual(rc, 2, "the fix check after a bad earlier record was not refused:\n" + out + err)
+        self.assertNotIn("---", err, "a bad earlier line that is not after the CI line names the --- remedy:\n" + err)
 
 class ReviewFixBase(ReviewEnv):
     """`--fix-check BASE:...` with --review-record refuses unless BASE is the head of the newest review record already on the pull request, and
@@ -15360,6 +15414,67 @@ class ReviewedList(ReviewEnv):
         host = PullsHost(pulls, check_rows or {}, comments=comments, **reads)
         rc, out, err = self.run_args("--reviewed", host=host)
         return host, rc, out, err
+
+    def test_the_bad_line_names_its_comment_and_line_with_the_rule_once_and_no_double_period(self):
+        bad = len(record_text(rounds=REVIEW_PASS).splitlines()) + 1  # the line after the CI line
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(3, 7, record_text(rounds=REVIEW_PASS) + "Lane note.\n")])
+        self.assertEqual(rc, 0, out + err)
+        line = list_line(self, out, 7)
+        rule = getattr(merge, "REVIEW_RULE_STEP", None)
+        self.assertIsNotNone(rule, "merge.py names no REVIEW_RULE_STEP, so the bad line has no remedy sentence")
+        self.assertIn(f"(comment 3, line {bad}: Lane note. {rule})", line, "the bad line is not `(comment 3, line N: text REVIEW_RULE_STEP)`:\n" + out)
+        self.assertNotIn("..", line, "the bad line has a double period:\n" + out)
+
+    def test_a_bad_newest_record_names_its_comment_id_and_first_failing_line_beside_bad(self):
+        bad = len(record_text(rounds=REVIEW_PASS).splitlines()) + 1  # the line after the CI line
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(3, 7, record_text(rounds=REVIEW_PASS) + "Lane note.\n")])
+        self.assertEqual(rc, 0, out + err)
+        line = list_line(self, out, 7)
+        self.assertIn(" bad: ", line, "the newest record does not read bad:\n" + out)
+        self.assertIn(f"line {bad}: Lane note.", line, "the bad line does not name its first failing line:\n" + out)
+        self.assertRegex(line, r"comment 3\b", "the bad line does not name its comment id:\n" + out)
+
+    def assert_remedy_beside_bad_line(self, tail):
+        """The bad line right after the CI line names the --- remedy, and the remedy is REVIEW_RULE_STEP."""
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, record_text(rounds=REVIEW_PASS) + tail)])
+        self.assertEqual(rc, 0, out + err)
+        line = list_line(self, out, 7)
+        self.assertIn("---", line, "the bad line after the CI line names no --- line:\n" + out)
+        rule = getattr(merge, "REVIEW_RULE_STEP", None)
+        self.assertIsNotNone(rule, "merge.py names no REVIEW_RULE_STEP, so the remedy has no one sentence")
+        self.assertIn(rule, line, "the remedy beside the bad line is not REVIEW_RULE_STEP:\n" + out)
+
+    def test_a_note_after_the_ci_line_names_the_review_log_remedy(self):
+        self.assert_remedy_beside_bad_line("Lane note.\n" + REVIEW_FOOTER)
+
+    def test_a_finding_paragraph_after_the_ci_line_names_the_review_log_remedy(self):
+        self.assert_remedy_beside_bad_line("Finding: the guard misses a case.\n")
+
+    def test_a_bad_line_elsewhere_names_no_remedy(self):  # control: the first failing line is the Kind line
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(1, 7, record_text(rounds=REVIEW_PASS, kind="bogus"))])
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotIn("---", list_line(self, out, 7), "a bad line that is not after the CI line names the --- remedy:\n" + out)
+
+    def test_a_body_with_record_fields_and_no_marker_is_flagged_by_comment_id_not_dropped(self):
+        body = record_text(rounds=REVIEW_PASS).split("\n", 1)[1]  # the marker line cut off: PR: #7 is line 1
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(4, 7, body)])
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotIn(7, no_record_numbers(out), "the marker-less record was dropped: #7 is on the no record line:\n" + out)
+        line = list_line(self, out, 7)
+        self.assertIn(" bad: ", line, "the marker-less record does not read bad:\n" + out)
+        self.assertIn("line 1: PR: #7", line, "the marker-less record does not name line 1:\n" + out)
+        self.assertRegex(line, r"comment 4\b", "the marker-less record does not name its comment id:\n" + out)
+
+    def test_a_marker_less_flag_makes_no_gh_call_beyond_the_two_list_reads(self):  # control: the flag reads the list --reviewed already reads
+        body = record_text(rounds=REVIEW_PASS).split("\n", 1)[1]
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(4, 7, body)], count_gh=True)
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(host.gh_calls, ["pulls", "issues/comments"], "the marker-less flag made a read the list did not need")
+
+    def test_prose_that_opens_with_pr_and_a_head_that_is_not_a_sha_is_not_flagged(self):  # control
+        host, rc, out, err = self.listing([batch_pull(7, REVIEW_HEAD)], [review_comment(9, 7, "PR: #12\nHead: main is green now\n")])
+        self.assertEqual(rc, 0, out + err)
+        self.assertNotIn("comment 9", out, "an ordinary comment was flagged as a marker-less record:\n" + out)
 
     def test_the_newest_record_decides_the_line(self):
         comments = [review_comment(1, 7, record_text(rounds=("Round 1: reviewer, sonnet, FAIL",))), review_comment(2, 7, record_text(rounds=REVIEW_PASS)),
