@@ -472,8 +472,23 @@ spo_register("scratchpad-owner: finish 3 agent B's Write over the oldest of fort
              "allowed", fin_case_3)
 spo_register("scratchpad-owner: finish 4 agent B's Write over the file of agent A, which is still running: refused",
              fin_running_case)
+def fin_resumed_case():
+    """Agent A writes msg.txt and finishes, then writes msg.txt again as a resumed agent; agent B writes over it: refused.
+    The resumed write clears A's finished marker, so A's file is work in progress again."""
+    fx = spo_fixture("f6")
+    msg = os.path.join(fx["scratch"], "msg.txt")
+    problems = [spo_scope(fx, "f6", msg)] + spo_wrote(fx, "f6", SPO_WRITER, msg, "from A\n")
+    problems += spo_finish(fx, "f6", SPO_WRITER)
+    problems += spo_wrote(fx, "f6", SPO_WRITER, msg, "from A, resumed\n")
+    got, reason = spo_call(fx, "Write", SPO_OTHER, file_path=msg, content="from B\n")
+    problems.append(spo_refused("f6", got, reason, (fx["scratch"], "msg.txt")))
+    return spo_result(problems, "agent B's Write over the file of resumed agent A is refused")
+
+
 spo_register("scratchpad-owner: finish 5 agent B's Write over agent A's file, while agent C finished and A did not: "
              "refused", fin_other_case)
+spo_register("scratchpad-owner: resume 1 agent B's Write over the file of agent A, which finished and wrote again: "
+             "refused", fin_resumed_case)
 
 
 # Rule scratchpad-owner, more cases. Each case's label says refused, allowed or passes,
