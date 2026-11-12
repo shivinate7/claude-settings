@@ -95,13 +95,13 @@ sh("git env set: a PowerShell here-string that only names the variable, allowed"
 for _cmd in (
     "echo $GIT_DIR",
     'echo "$GIT_WORK_TREE"',
-    "unset GIT_DIR; python -m pytest",
-    "unset GIT_WORK_TREE GIT_INDEX_FILE; python -m pytest",
-    "env -u GIT_DIR python -m pytest",
+    "unset GIT_DIR; verdict python -m pytest",
+    "unset GIT_WORK_TREE GIT_INDEX_FILE; verdict python -m pytest",
+    "env -u GIT_DIR verdict python -m pytest",
     "GIT_TRACE=1 " + VCS + " rev-parse --git-dir",
-    "GIT_DIRX=1 python -m pytest",
-    "MYGIT_DIR=1 python -m pytest",
-    "export FOO=bar; python -m pytest",
+    "GIT_DIRX=1 verdict python -m pytest",
+    "MYGIT_DIR=1 verdict python -m pytest",
+    "export FOO=bar; verdict python -m pytest",
 ):
     sh("git env set: Bash allowed, %s" % _cmd[:40], _cmd, "allow", cwd=NOGIT)
 for _cmd in (
@@ -109,9 +109,9 @@ for _cmd in (
     r"Write-Output $env:GIT_WORK_TREE",
     r"Remove-Item env:GIT_DIR",
     r"Remove-Item Env:GIT_INDEX_FILE",
-    r'$env:GIT_DIRX = "1"; python -m pytest',
-    r'$env:MYGIT_DIR = "1"; python -m pytest',
-    r'$env:GIT_TRACE = "1"; python -m pytest',
+    r'$env:GIT_DIRX = "1"; verdict python -m pytest',
+    r'$env:MYGIT_DIR = "1"; verdict python -m pytest',
+    r'$env:GIT_TRACE = "1"; verdict python -m pytest',
     r"Select-String '$env:GIT_DIR = ' f.ps1",
 ):
     sh("git env set: PowerShell allowed, %s" % _cmd[:40], _cmd, "allow", tool="PowerShell",

@@ -59,11 +59,12 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
 8. **Batch lanes.** Batch lanes into one integration branch and one integration PR. A batch runs one
    CI run (rule `git-integration-branch-merge`, one CI run per batch). Only the integration PR goes
    ready. Each lane PR stays a draft until the integration PR merges. A lane runs
-   `~/.claude/bin/merge --lane-lint <pr>` before it hands off, and the batch runner runs it again on
+   `verdict ~/.claude/bin/merge --lane-lint <pr>` before it hands off (decision
+   `background-check-through-verdict`, a check runs through verdict), and the batch runner runs it again on
    each lane head before the build starts, once per lane. A red lane does not join. Before it marks
-   the integration PR ready, the batch runner runs `~/.claude/bin/merge --lane-lint <integration PR number>`
+   the integration PR ready, the batch runner runs `verdict ~/.claude/bin/merge --lane-lint <integration PR number>`
    on the batch head, after the draft step's page push. The batch ready route (`merge --batch-build NAME --ready`) runs the lint, then the repo's ready checks (`merge.readyChecks`), and no touched tests.
-   A lane's `merge --lane-lint <pr> --touched-tests` runs each test file the diff touches, once, in the lint worktree, after the lint passes. That catches a test that fails only on that head before the CI run. A ref target posts no comment, so it cannot
+   A lane's `verdict ~/.claude/bin/merge --lane-lint <pr> --touched-tests` runs each test file the diff touches, once, in the lint worktree, after the lint passes. That catches a test that fails only on that head before the CI run. A ref target posts no comment, so it cannot
    satisfy the join. A FAIL keeps it a draft. The lint counts a clash between two heads only when both
    merge clean with their base (decision `lanes-run-no-full-ci-job`). A hand list of checks never stands in for that run: `bin/ci-job`
    reads its steps from the workflow, so it cannot miss one. A lane never runs a whole CI job

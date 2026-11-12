@@ -352,7 +352,7 @@ class Scaffold(TempDest):
         files = tree(SKILL)
         self.assertIn("templates/brief.md", files)  # the scope first: a missing brief fails here, once
         flat = " ".join(files["templates/brief.md"].split())
-        self.assertIn("Run `merge --lane-lint` from the main checkout, never from a session or agent "
+        self.assertIn("Run `verdict merge --lane-lint` from the main checkout, never from a session or agent "
                       "isolated in a worktree: Claude Code's worktree check can refuse it there.", flat,
                       "templates/brief.md does not say where lane lint runs")
 

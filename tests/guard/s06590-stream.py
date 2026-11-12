@@ -79,7 +79,7 @@ for _name, _command in (
 for _name, _command in (
     ("an echo that names the follow", "echo 'tail -f log'"),
     ("docker run around a bounded command", "docker run --rm alpine ls"),
-    ("uv run around a bounded command", "uv run pytest"),
+    ("uv run around a bounded command, through verdict", "verdict uv run pytest"),
     ("kubectl exec around a bounded command", "kubectl exec pod -- cat log"),
 ):
     sh("stream: " + _name + " is no follow", _command, "allow", cwd=NOGIT)
@@ -222,6 +222,10 @@ sh("ln: a hard link over a directory name is not symbolic", "ln /opt/tool/x real
 # Every backgrounded case names an until note, so background-end decides none of them. sh() takes no
 # run_in_background, so the backgrounded cases use add(), the form the background-end section uses.
 TAIL_BG_UNTIL = "Lane lint in the background. until: the lint prints its verdict"
+# The bare-check rule and its remedy. The check-tail rows above and the bare section below both name them, so they
+# are defined once, here, before the first row that uses them.
+BARE_CHECK = "bare-check"
+BARE_REMEDY = "verdict <cmd>"
 
 add("check-tail: the incident line, backgrounded, is refused", "deny",
     "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
@@ -268,13 +272,18 @@ add("check-tail: a python3 verdict wrapper with no pipe, backgrounded, is allowe
 add("check-tail: wait-pid piped to tail, backgrounded, is allowed", "allow",
     cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/wait-pid 1836 2>&1 | tail -3")
-add("check-tail: output kept in a file, then grep piped to tail, backgrounded, is allowed",
-    "allow", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+add("bare-check: output kept in a file, then grep piped to tail, backgrounded, is refused, not check-tail",
+    "deny", BARE_CHECK, cwd=NOGIT, lacks="check-tail", run_in_background=True, description=TAIL_BG_UNTIL,
+    carries=BARE_REMEDY,
     command="~/.claude/bin/merge --lane-lint 1476 > /tmp/x/lanelint.log 2>&1; echo \"rc=$?\"; "
             "grep -E '^(PASS|FAIL)' /tmp/x/lanelint.log | tail -15")
-add("check-tail: merge --lane-lint piped to tee, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="merge --lane-lint 1476 2>&1 | tee run.out")
+add("verdict: merge --lane-lint via verdict, output kept in a file, grep piped to tail, backgrounded, is allowed",
+    "allow", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="~/.claude/bin/verdict ~/.claude/bin/merge --lane-lint 1476 > /tmp/x/lanelint.log 2>&1; echo \"rc=$?\"; "
+            "grep -E '^(PASS|FAIL)' /tmp/x/lanelint.log | tail -15")
+add("bare-check: merge --lane-lint piped to tee, backgrounded, is refused, not check-tail", "deny",
+    BARE_CHECK, cwd=NOGIT, lacks="check-tail", run_in_background=True, description=TAIL_BG_UNTIL,
+    carries=BARE_REMEDY, command="merge --lane-lint 1476 2>&1 | tee run.out")
 add("check-tail: a tee between the check and grep and tail, backgrounded, is refused", "deny",
     "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="merge --lane-lint 1476 2>&1 | tee x | grep FAIL | tail -3")
@@ -284,9 +293,9 @@ add("check-tail: merge --lane-lint through tee and tail, backgrounded, is refuse
 add("check-tail: ci-job checks --lint through tee and head, backgrounded, is refused", "deny",
     "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tee lint.log | head -20")
-add("check-tail: merge --lane-lint through tee with nothing after it, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="merge --lane-lint 7 2>&1 | tee lint.log")
+add("bare-check: merge --lane-lint through tee with nothing after it, backgrounded, is refused, not check-tail",
+    "deny", BARE_CHECK, cwd=NOGIT, lacks="check-tail", run_in_background=True, description=TAIL_BG_UNTIL,
+    carries=BARE_REMEDY, command="merge --lane-lint 7 2>&1 | tee lint.log")
 add("check-tail: grep naming the script, piped to tail, backgrounded, is allowed", "allow",
     cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command='grep -n "--lane-lint" merge/merge.py | tail -20')
@@ -316,9 +325,9 @@ add("check-tail: python3 runs the ci-job script piped to tail, backgrounded, is 
 add("check-tail: python3 -W ignore runs the ci-job script piped to tail, backgrounded, is refused",
     "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="python3 -W ignore bin/ci-job checks --lint | tail -5")
-add("check-tail: uv run python -m pytest piped to tail, backgrounded, is allowed", "allow",
-    cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="uv run python -m pytest | tail -5")
+add("bare-check: uv run python -m pytest piped to tail, backgrounded, is refused, not check-tail", "deny",
+    BARE_CHECK, cwd=NOGIT, lacks="check-tail", run_in_background=True, description=TAIL_BG_UNTIL,
+    carries=BARE_REMEDY, command="uv run python -m pytest | tail -5")
 add("check-tail: uv run grep naming the script piped to tail, backgrounded, is allowed", "allow",
     cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command='uv run grep -n "--lane-lint" merge/merge.py | tail -20')
@@ -328,9 +337,9 @@ add("check-tail: uv run -w pytest then ci-job checks --lint piped to tail, backg
 add("check-tail: uv run --cache-dir then ci-job checks --lint piped to tail, backgrounded, is refused",
     "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="uv run --cache-dir /tmp/c ci-job checks --lint | tail -5")
-add("check-tail: pytest with bin/ci-job as an argument piped to tail, backgrounded, is allowed",
-    "allow", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="python3 -m pytest hooks/test_guard.py -k bin/ci-job | tail -5")
+add("bare-check: pytest with bin/ci-job as an argument piped to tail, backgrounded, is refused, not check-tail",
+    "deny", BARE_CHECK, cwd=NOGIT, lacks="check-tail", run_in_background=True, description=TAIL_BG_UNTIL,
+    carries=BARE_REMEDY, command="python3 -m pytest hooks/test_guard.py -k bin/ci-job | tail -5")
 
 # Wrapper forms in the foreground: each deny reads its check through the wrapper, each allow does not.
 sh("check-tail: uv run python runs the script piped to tail in the foreground is refused",
@@ -346,8 +355,8 @@ sh("check-tail: env VAR=x then python3 runs the script piped to head in the fore
    "| head -5", "deny", "check-tail", cwd=NOGIT)
 sh("check-tail: a VAR=x prefix on merge --lane-lint piped to tail in the foreground is refused",
    "FOO=1 merge --lane-lint 7 | tail -3", "deny", "check-tail", cwd=NOGIT)
-sh("check-tail: uv run python -m pytest piped to tail in the foreground is allowed",
-   "uv run python -m pytest | tail -5", "allow", cwd=NOGIT)
+sh("bare-check: uv run python -m pytest piped to tail in the foreground is refused, not check-tail",
+   "uv run python -m pytest | tail -5", "deny", BARE_CHECK, cwd=NOGIT, lacks="check-tail", carries=BARE_REMEDY)
 sh("check-tail: uv run --no-group dev then merge --lane-lint piped to tail in the foreground is refused",
    "uv run --no-group dev merge --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
 sh("check-tail: a uv global flag before run, then merge --lane-lint piped to tail is refused",
@@ -442,9 +451,9 @@ verdict_pipe("a pipe with no verdict in it is allowed", "cat x.log | tail -3 && 
 verdict_pipe("verdict inside single quotes is not a call",
              "echo 'verdict a | tail -1 && b'", "allow")
 
-# Foreground: merge --lane-lint and merge --review-record piped to tail or head are refused. ci-job is
-# not refused in the foreground. A verdict call piped to tail is refused by verdict-pipe; with no pipe
-# after it, a verdict call is allowed.
+# Foreground: merge --lane-lint and merge --review-record piped to tail or head are refused. A bare ci-job piped to
+# tail in the foreground is bare-check's refusal (coordinator ruling, 11:23 CST), not check-tail's. A verdict call
+# piped to tail is refused by verdict-pipe; with no pipe after it, a verdict call is allowed.
 sh("check-tail: the incident line in the foreground is refused",
    "~/.claude/bin/merge --lane-lint 1476 2>&1 | tail -8", "deny", "check-tail", cwd=NOGIT)
 sh("check-tail: merge --lane-lint piped to tail in the foreground is refused",
@@ -452,10 +461,11 @@ sh("check-tail: merge --lane-lint piped to tail in the foreground is refused",
 sh("check-tail: merge --review-record piped to head in the foreground is refused",
    "~/.claude/bin/merge 12 --review-record --head 0123456789abcdef0123456789abcdef01234567 | head -20",
    "deny", "check-tail", cwd=NOGIT)
-sh("check-tail: ci-job piped to tail in the foreground is allowed",
-   "~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tail -20", "allow", cwd=NOGIT)
-sh("check-tail: ci-job checks --lint piped to tail in the foreground is allowed",
-   "~/.claude/bin/ci-job checks --lint 2>&1 | tail -20", "allow", cwd=NOGIT)
+sh("bare-check: ci-job piped to tail in the foreground is refused",
+   "~/.claude/bin/ci-job checks --lint --base origin/main 2>&1 | tail -20", "deny", "bare-check", cwd=NOGIT,
+   carries="verdict <cmd>")
+sh("bare-check: ci-job checks --lint piped to tail in the foreground is refused",
+   "~/.claude/bin/ci-job checks --lint 2>&1 | tail -20", "deny", "bare-check", cwd=NOGIT, carries="verdict <cmd>")
 sh("verdict-pipe: a verdict call piped to tail in the foreground is refused",
    "verdict merge --lane-lint 1476 | tail -3", "deny", "verdict-pipe", cwd=NOGIT)
 sh("check-tail: a verdict call with no pipe in the foreground is allowed",
@@ -470,14 +480,15 @@ sh("check-tail: merge --release-check piped to head in the foreground is refused
    "merge --release-check 5 6 | head -1", "deny", "check-tail", cwd=NOGIT)
 sh("check-tail: the bin merge --release-check piped to tail in the foreground is refused",
    "~/.claude/bin/merge --release-check 5 6 | tail -3", "deny", "check-tail", cwd=NOGIT)
-sh("check-tail: merge --release-check with no pipe in the foreground is allowed (control)",
-   "merge --release-check 5 6", "allow", cwd=NOGIT)
+# The bare form is bare-check's refusal (its own row in the bare-check section). This control runs it under verdict.
+sh("check-tail: verdict merge --release-check with no pipe in the foreground is allowed (control)",
+   "verdict merge --release-check 5 6", "allow", cwd=NOGIT)
 add("check-tail: merge --release-check piped to tail, backgrounded, is refused", "deny",
     "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
     command="merge --release-check 5 6 2>&1 | tail -3")
-add("check-tail: merge --release-check with no pipe, backgrounded, is allowed (control)", "allow",
+add("check-tail: verdict merge --release-check with no pipe, backgrounded, is allowed (control)", "allow",
     cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
-    command="merge --release-check 5 6")
+    command="verdict merge --release-check 5 6")
 
 # =========================================================================== 2c. waiter loops
 #
@@ -1036,7 +1047,7 @@ add("background-end: a dev server with an until note is allowed", "allow", cwd=N
 add("background-end: a build under run_in_background needs no note, allowed", "allow",
     cwd=NOGIT, command="npm run build", run_in_background=True)
 add("background-end: the guard suite under run_in_background needs no note, allowed", "allow",
-    cwd=NOGIT, command="python3 hooks/test_guard.py", run_in_background=True)
+    cwd=NOGIT, command="verdict python3 hooks/test_guard.py", run_in_background=True)
 add("background-end: a note does not unlock gh run watch, the waiter rule still refuses it",
     "deny", "waiter", cwd=NOGIT, command="gh run watch 7", run_in_background=True,
     description="until: run 7 ends")
@@ -1165,8 +1176,8 @@ add("background-end: vitest --watch=false under run_in_background needs no note,
     cwd=NOGIT, command="vitest --watch=false", run_in_background=True)
 add("background-end: vitest --watch false under run_in_background needs no note, allowed", "allow",
     cwd=NOGIT, command="vitest --watch false", run_in_background=True)
-add("background-end: npm test -- --watch=false under run_in_background needs no note, allowed",
-    "allow", cwd=NOGIT, command="npm test -- --watch=false", run_in_background=True)
+add("background-end: npm test -- --watch=false through verdict under run_in_background needs no note, allowed",
+    "allow", cwd=NOGIT, command="verdict npm test -- --watch=false", run_in_background=True)
 add("background-end: npm run build-docs under run_in_background needs no note, allowed", "allow",
     cwd=NOGIT, command="npm run build-docs", run_in_background=True)
 
@@ -1180,6 +1191,196 @@ add("background-end: a bash pwsh -c with a backslash before ; hides npm run dev,
 add("background-end: a PowerShell cd with a quoted backslash path before ; still denies npm run dev",
     "deny", "background-end", cwd=NOGIT, carries=DEVSERVER_DENY, tool="PowerShell",
     command=r'cd "C:\x\"; npm run dev', run_in_background=True)
+
+
+# --- a roster command run bare, with no verdict wrapper (rule bare-check)
+#
+# The roster is the check-tail roster, run in the foreground or the background (coordinator ruling, 11:23 CST):
+# `merge --lane-lint`, `merge --release-check`, and `bin/ci-job`. A bare `merge --review-record` is allowed (rule 8): its
+# output is a record to post, and a verdict run would hide it. A bare run prints the
+# check's own output, so the agent reads whatever ends the line. The incident form read `echo $?` as "lane lint
+# passes". The remedy is `verdict <cmd>` inline. A roster command under verdict, a merge preview and a grep that names
+# the script are no bare run. A bare test run is one (see the test-run rows below). A background roster run piped into
+# tail or head stays check-tail's refusal: those rows assert check-tail and lack bare-check, so the reason is printed
+# once. A bare ci-job piped into tail in the foreground is bare-check's refusal.
+
+
+for _name, _command in (
+    ("merge --lane-lint", "merge --lane-lint 7"),
+    ("merge --release-check", "merge --release-check 5 6"),
+    ("the bin path, merge --lane-lint", "~/.claude/bin/merge --lane-lint 7"),
+    ("merge.cmd --lane-lint", "merge.cmd --lane-lint 7"),
+    ("the script run by python3", "python3 merge/merge.py --lane-lint 7"),
+    ("the launcher run by python3", "python3 merge/launch.py --lane-lint 7"),
+    ("the script run by uv run", "uv run merge/merge.py --lane-lint 7"),
+    ("the script run by uv run python", "uv run python merge/merge.py --lane-lint 7"),
+    ("merge --lane-lint behind env", "env FOO=1 merge --lane-lint 7"),
+    ("merge --lane-lint behind a VAR=x prefix", "FOO=1 merge --lane-lint 7"),
+    ("merge --lane-lint with 2>&1 and no pipe", "merge --lane-lint 7 2>&1"),
+    ("ci-job checks --lint, as bin/ci-job", "bin/ci-job checks --lint"),
+    ("ci-job checks --lint, by name", "ci-job checks --lint"),
+    ("ci-job run by python3", "python3 bin/ci-job checks --lint"),
+    ("the incident form, merge --lane-lint then echo $?", "merge --lane-lint 7; echo $?"),
+    ("merge --lane-lint then && echo ok", "merge --lane-lint 7 && echo ok"),
+    ("ci-job checks --lint then echo $?", "bin/ci-job checks --lint; echo $?"),
+):
+    sh("bare-check: " + _name + " with no verdict wrapper is refused", _command, "deny", BARE_CHECK,
+       cwd=NOGIT, carries=BARE_REMEDY)
+
+for _name, _command in (
+    ("verdict wraps merge --lane-lint", "verdict merge --lane-lint 7"),
+    ("verdict wraps merge --review-record", "verdict merge --review-record 7"),
+    ("verdict wraps ci-job checks --lint", "verdict bin/ci-job checks --lint"),
+    ("verdict wraps the script run by python3", "verdict python3 merge/merge.py --lane-lint 7"),
+    ("the bin verdict wraps merge --lane-lint", "~/.claude/bin/verdict merge --lane-lint 7"),
+    ("merge preview with no flag", "merge 1234"),
+    ("grep that names the script", "grep x merge/merge.py"),
+    ("python3 -m pytest that names the script, through verdict", "verdict python3 -m pytest -k merge/merge.py"),
+    ("a test run through verdict, pytest", "verdict pytest lint/test_x.py"),
+    ("a test run through verdict, python3 on a test file", "verdict python3 lint/test_report_guard.py"),
+    ("echo that names the roster command", "echo merge --lane-lint 7"),
+    # merge --review-record is no roster run: its output is a record to post, and a verdict run would hide it.
+    ("merge --review-record, its output is a record to post", "merge --review-record 7"),
+    ("the script run by python3.11, review-record", "python3.11 merge/merge.py --review-record 7"),
+):
+    sh("bare-check: " + _name + " is no bare run, so it is allowed", _command, "allow", cwd=NOGIT)
+
+# Scanner forms: a bare run after a lone apostrophe, a # inside quotes, or a multi-line quote is still bare. A roster
+# name inside quotes, or verdict around the run, is no bare run.
+for _name, _command in (
+    ("after a lone apostrophe", "echo don't; merge --lane-lint 7"),
+    ("after a # inside quotes", 'echo "a # b"; merge --lane-lint 7'),
+    ("after a multi-line quote", 'echo "first line\nsecond line"\nmerge --lane-lint 7'),
+    ("before a # comment that holds an apostrophe", "merge --lane-lint 7 # don't"),
+):
+    sh("bare-check: bare run " + _name + " is refused", _command, "deny", BARE_CHECK, cwd=NOGIT,
+       carries=BARE_REMEDY)
+for _name, _command in (
+    ("a roster name in echo's quotes after a lone apostrophe", "echo don't; echo merge --lane-lint 7"),
+    ("a verdict run with a # comment that holds an apostrophe", "verdict merge --lane-lint 7 # don't"),
+    ("a roster name after a quoted #", 'echo "a # b" merge --lane-lint 7'),
+):
+    sh("bare-check: " + _name + " is no bare run, so it is allowed", _command, "allow", cwd=NOGIT)
+
+# Background (coordinator ruling, 11:23 CST): a bare roster run is refused in the background too. TAIL_BG_UNTIL gives
+# the until note, so background-end decides nothing. A run under verdict stays allowed in the background.
+for _name, _command in (
+    ("merge --lane-lint", "merge --lane-lint 7"),
+    ("merge --release-check", "merge --release-check 5 6"),
+    ("ci-job checks --lint", "bin/ci-job checks --lint"),
+):
+    add("bare-check: " + _name + " with no verdict wrapper, backgrounded, is refused", "deny", BARE_CHECK,
+        cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL, command=_command, carries=BARE_REMEDY)
+for _name, _command in (
+    ("merge --lane-lint", "verdict merge --lane-lint 7"),
+    ("merge --review-record", "verdict merge --review-record 7"),
+    ("ci-job checks --lint", "verdict bin/ci-job checks --lint"),
+):
+    add("bare-check: " + _name + " under verdict, backgrounded, is allowed", "allow", cwd=NOGIT,
+        run_in_background=True, description=TAIL_BG_UNTIL, command=_command)
+
+add("bare-check: merge --review-record with no verdict wrapper, backgrounded, is allowed", "allow", cwd=NOGIT,
+    run_in_background=True, description=TAIL_BG_UNTIL, command="merge --review-record 7")
+
+# Test runs are roster runs too (coordinator reversal 12:55 CST, owner R20 part 2): a bare test command is bare-check's
+# refusal, in the foreground and in the background, and its remedy is `verdict <cmd>`. A test run under verdict, and
+# a read that names a test, is no bare run.
+TEST_RUNS = (
+    ("python3 runs a test_ script", "python3 hooks/test_guard.py"),
+    ("python runs a test_ script", "python lint/test_report_guard.py"),
+    ("python3.11 runs a test_ script", "python3.11 lint/test_report_guard.py"),
+    ("py runs a test_ script", "py lint/test_report_guard.py"),
+    ("GUARD_FAMILY= then python3 runs a test_ script", "GUARD_FAMILY=stream python3 hooks/test_guard.py"),
+    ("an env wrapper runs a test_ script", "env FOO=1 python3 hooks/test_guard.py"),
+    ("uv run runs a test_ script", "uv run python3 hooks/test_guard.py"),
+    ("bash runs a test_ script", "bash hooks/test_cloud_setup.sh"),
+    ("sh runs a test_ script", "sh hooks/test_cloud_setup.sh"),
+    ("node runs a _test_ module", "node mods/x/_test_git.mjs"),
+    ("node runs a .test.mjs module", "node mods/x/git.test.mjs"),
+    ("pwsh runs a .test.ps1 script", "pwsh tests/git.test.ps1"),
+    ("python3 runs a _test.py script", "python3 lint/git_test.py"),
+    ("pytest", "pytest lint/test_x.py"),
+    ("python3 -m pytest", "python3 -m pytest lint/test_x.py"),
+    ("python3 -m unittest", "python3 -m unittest discover -s lint"),
+    ("node --test", "node --test"),
+    ("npm test", "npm test"),
+    ("swift test", "swift test"),
+    ("xcodebuild test", "xcodebuild test -scheme App"),
+)
+for _name, _command in TEST_RUNS:
+    sh("bare-check: " + _name + " with no verdict wrapper is refused", _command, "deny", BARE_CHECK, cwd=NOGIT,
+       carries=BARE_REMEDY)
+    add("bare-check: " + _name + " with no verdict wrapper, backgrounded, is refused", "deny", BARE_CHECK,
+        cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL, command=_command, carries=BARE_REMEDY)
+sh("bare-check: a bare test piped to tail is refused, not check-tail", "python3 hooks/test_guard.py | tail -5",
+   "deny", BARE_CHECK, cwd=NOGIT, lacks="check-tail", carries=BARE_REMEDY)
+sh("bare-check: pytest piped to tail is refused, not check-tail", "pytest lint/test_x.py 2>&1 | tail -20",
+   "deny", BARE_CHECK, cwd=NOGIT, lacks="check-tail", carries=BARE_REMEDY)
+add("bare-check: a bare test piped to tail, backgrounded, is refused, not check-tail", "deny", BARE_CHECK,
+    cwd=NOGIT, lacks="check-tail", run_in_background=True, description=TAIL_BG_UNTIL,
+    command="python3 hooks/test_guard.py | tail -5", carries=BARE_REMEDY)
+for _name, _command in (
+    ("pytest", "verdict pytest lint/test_x.py"),
+    ("python3 hooks/test_guard.py", "verdict python3 hooks/test_guard.py"),
+    ("npm test", "verdict npm test"),
+    ("node --test", "verdict node --test"),
+    ("the family-named run", "GUARD_FAMILY=stream verdict python3 hooks/test_guard.py"),
+):
+    sh("bare-check: a test run through verdict, " + _name + ", is allowed", _command, "allow", cwd=NOGIT)
+for _command in ("verdict python3 hooks/test_guard.py", "verdict pytest lint/test_x.py"):
+    add("bare-check: a test run through verdict, backgrounded, is allowed: " + _command, "allow", cwd=NOGIT,
+        run_in_background=True, description=TAIL_BG_UNTIL, command=_command)
+for _name, _command in (
+    ("a lint script that is not a test", "python3 lint/ste_lint.py"),
+    ("a rule audit that is not a test", "python3 lint/rule_audit.py"),
+    ("python -c that prints", "python3 -c 'print(1)'"),
+    ("grep that names a test file", "grep -n x hooks/test_guard.py"),
+    ("cat that names a test file", "cat lint/test_report_guard.py"),
+    ("ls that globs test files", "ls hooks/test_*.py"),
+    ("git diff under tests", "git diff -- tests/"),
+    ("git add of a test file", "git add tests/guard/s06590-stream.py"),
+    ("py_compile of a test file", "python3 -m py_compile hooks/test_guard.py"),
+    ("ruff check of a test file", "ruff check hooks/test_guard.py"),
+    ("echo that quotes a test run", 'echo "python3 hooks/test_guard.py"'),
+    ("git commit whose message names a test run", 'git commit -m "run python3 hooks/test_guard.py"'),
+):
+    sh("bare-check: " + _name + " is no test run, so it is allowed", _command, "allow", cwd=NOGIT)
+
+# A syntax check, a version or a help screen runs no test, so it is no test run, in the foreground or the background.
+# A run that names a test file or a test directory to run stays bare: it is refused, and its remedy is verdict.
+for _name, _command in (
+    ("node --check of a test module", "node --check tests/foo.test.mjs"),
+    ("bash -n of a test script", "bash -n tests/test_x.sh"),
+    ("sh -n of a test script", "sh -n hooks/test_cloud_setup.sh"),
+    ("pytest --version", "pytest --version"),
+    ("pytest --help", "pytest --help"),
+):
+    sh("bare-check: " + _name + " is no test run, so it is allowed", _command, "allow", cwd=NOGIT)
+    add("bare-check: " + _name + ", backgrounded, is no test run, so it is allowed", "allow", cwd=NOGIT,
+        run_in_background=True, description=TAIL_BG_UNTIL, command=_command)
+for _name, _command in (
+    ("pytest on a directory", "pytest tests/"),
+    ("bash on a test script under tests/", "bash tests/test_x.sh"),
+    ("node on a test module", "node tests/foo.test.mjs"),
+):
+    sh("bare-check: " + _name + " with no verdict wrapper is refused", _command, "deny", BARE_CHECK, cwd=NOGIT,
+       carries=BARE_REMEDY)
+    add("bare-check: " + _name + " with no verdict wrapper, backgrounded, is refused", "deny", BARE_CHECK,
+        cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL, command=_command, carries=BARE_REMEDY)
+
+# A background roster run piped into tail stays check-tail's refusal, and bare-check does not add a second.
+add("bare-check: merge --lane-lint piped to tail, backgrounded, stays check-tail, not refused twice", "deny",
+    "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="merge --lane-lint 7 2>&1 | tail -8", lacks=BARE_CHECK)
+
+# The pipe forms stay check-tail's refusal, and the reason is printed once: bare-check does not add a second.
+sh("bare-check: merge --lane-lint piped to tail stays check-tail, not refused twice",
+   "merge --lane-lint 7 | tail -8", "deny", "check-tail", cwd=NOGIT, lacks=BARE_CHECK)
+sh("bare-check: merge --review-record piped to head stays check-tail, not refused twice",
+   "merge --review-record 7 | head -5", "deny", "check-tail", cwd=NOGIT, lacks=BARE_CHECK)
+add("bare-check: ci-job checks --lint piped to head, backgrounded, stays check-tail, not refused twice",
+    "deny", "check-tail", cwd=NOGIT, run_in_background=True, description=TAIL_BG_UNTIL,
+    command="bin/ci-job checks --lint | head -5", lacks=BARE_CHECK)
 
 
 # =========================================================================== 2c-bis. the WSL launch allow list

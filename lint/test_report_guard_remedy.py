@@ -50,7 +50,7 @@ FIXTURES = ("missing_report", "correction_tail", "done_format", "models", "unsta
             "recovered", "departs_unlanded", "departs_landed", "answered", "mistake", "hand_off", "refusal",
             "lane", "pick_known_writer", "rewrite_stamp", "triage_hold", "unvetted_unreadable",
             "unvetted_cited", "rewrite_model", "rewrite_unstarted", "rewrite_answered", "rewrite_recovered",
-            "recovered_no_source", "past_ruling_order", "refusal_two_tools")
+            "recovered_no_source", "past_ruling_order", "refusal_two_tools", "pass_claim")
 FACT_SENTENCES = ("Pick guard: the page writer is session session_writer1 (decision guard-remedy-not-to-owner).",
                   "Names of the checks sit in the record. Keys are one option set per question.",
                   "The check reads the transcript, and a Done line holds one kind.")
@@ -312,6 +312,9 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
             "rewrite_unstarted": lambda: self.rewrite("unstarted", builder_turn("sonnet", "All done."),
                                                       builder_turn("sonnet", rw_done + "\n> **Next** ship it"),
                                                       "unstarted", clean),
+            # A pass claim with no cite: the Done line says lint passed, and no verdict line of this transcript backs it.
+            "pass_claim": lambda: case([trg.human("run the check"), trg.assistant_text(
+                "> **Done**\n> - OTHER: lint passed.\n> **Next** none")], "pass-claim", clean),
             "rewrite_answered": lambda: self.rewrite("answered", builder_turn("sonnet", "All done."),
                                                      builder_turn("sonnet", rw_done + "\n> **Next** Unstarted: none\n"
                                                                   "The owner answered it."), "answered", clean),
@@ -535,6 +538,24 @@ class RemedyReasons(trg.SameTurnWriter, unittest.TestCase):
         self.assertEqual(record_problems(emptied, ["Recovered guard", "Pick guard"]),
                          ["no step line under 'Recovered guard'"])
         self.assertEqual(record_problems(emptied, ["Unvetted guard"]), ["no step heading for 'Unvetted guard'"])
+
+    def test_pass_claim_steps_sit_under_steps_per_check_and_name_verdict(self):
+        # The remedy for a pass claim with no cite is `verdict <cmd>`. The record holds it under its own heading inside
+        # `## Steps per check` (decision guard-remedy-not-to-owner). Red until that heading exists.
+        with open(RECORD, encoding="utf-8") as handle:
+            record = handle.read()
+        scope = re.search(r"(?m)^## Steps per check\n", record)
+        self.assertTrue(scope, "the record has no Steps per check section")
+        rest = record[scope.end():]
+        next_section = re.search(r"(?m)^## ", rest)
+        steps = rest[:next_section.start()] if next_section else rest
+        head = re.search(r"(?m)^### Pass-claim guard\b.*$", steps)
+        self.assertTrue(head, "the Steps per check section has no heading for the pass-claim guard")
+        body = steps[head.end():]
+        next_step = SECTION_END.search(body)
+        section = body[:next_step.start()] if next_step else body
+        self.assertIn("verdict", section.lower(), "the pass-claim steps do not name verdict")
+        self.assertTrue(STEP_LINE.search(section), "the pass-claim section holds no step line")
 
 
 def _case_1a(name):

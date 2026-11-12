@@ -13147,7 +13147,7 @@ class MergeRoleCheck(CloudSession):
 
     def test_the_confirm_refusal_names_the_lane_lint_step(self):
         err = self.assert_refused()
-        self.assertIn("merge --lane-lint", err, "the --confirm refusal does not name merge --lane-lint")
+        self.assertIn("verdict merge --lane-lint", err, "the --confirm refusal does not name verdict merge --lane-lint")
 
     # ---- the role check lets through
     # decision session-tiers: the coordinator never merges, so a recorded coordinator role is refused (was: merges)
@@ -13239,7 +13239,12 @@ class MergeRoleCheck(CloudSession):
 
     def test_the_role_refusal_names_the_lane_lint_step(self):
         err = self.assert_writer_refused("--role", "lane")
-        self.assertIn("merge --lane-lint", err, "the --role refusal does not name merge --lane-lint")
+        self.assertIn("verdict merge --lane-lint", err, "the --role refusal does not name verdict merge --lane-lint")
+
+    def test_the_lane_lint_remedy_names_the_verdict_form(self):
+        # A remedy that names a lint run names it through verdict (rule 10). LANE_LINT_REMEDY is the one home of the
+        # remedy that the lane-lint refusals end with.
+        self.assertIn("`verdict merge --lane-lint`", merge.LANE_LINT_REMEDY, merge.LANE_LINT_REMEDY)
 
     def test_a_refused_role_leaves_an_earlier_role_file_as_it_was(self):
         self.put_role("batch-runner")  # decision session-tiers: re-pointed from coordinator to batch-runner
