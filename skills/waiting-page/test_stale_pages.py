@@ -1866,6 +1866,25 @@ def parked_data_answer(item_id, at):
     return {"id": item_id, "data": {"parked": True, "item": item_id, "n": 27, "at": at, "note": "Later."}}
 
 
+# The sessions an item wakes: its `wakes` field (a list of session ids), and the owner that asked. The names are fixtures:
+# the mode reads them as text and never checks them as sessions. named_sessions finds each name as a whole word.
+OWNER_SESSION, TRIAGE_SESSION, COORD_SESSION, LANE_SESSION = "sess-asker", "sess-triage", "sess-coord", "sess-lane-7"
+SESSION_NAMES = (OWNER_SESSION, TRIAGE_SESSION, COORD_SESSION, LANE_SESSION)
+# The full-size store's items take each of these by item number: no wakes (so the owner alone), one name, two names,
+# and three names with the owner among them.
+FULL_WAKES = (None, [TRIAGE_SESSION], [TRIAGE_SESSION, COORD_SESSION], [OWNER_SESSION, COORD_SESSION, LANE_SESSION])
+
+
+def named_sessions(line):
+    """The names of SESSION_NAMES that `line` holds as whole words, sorted. A name inside a longer word is not named."""
+    return sorted(name for name in SESSION_NAMES if re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(name), line))
+
+
+def answer_lines(out):
+    """The answer-unread lines of an output, in order."""
+    return [line for line in output_lines(out) if line.startswith("answer-unread ")]
+
+
 class UnreadStale(FolderCase):
     """The --unread mode. Each case writes its own four files, then runs the script on them."""
     FOLDER = "unread"
@@ -2016,6 +2035,59 @@ class UnreadStale(FolderCase):
         rc, out = self.run_unread()
         expected = [unread_line("item-%03d" % i, i, "ops", EARLY) for i in range(count) if i % 3]
         self.assertEqual((rc, output_lines(out)), (1, expected), "a full store did not list each unread answer, in order: " + out[:300])
+
+    def one_answer_line(self, **item_fields):
+        """Stores one item (n 143, with `item_fields` set on it) and its unread answer, runs the mode, and returns the one
+        answer-unread line. Scope first: the answer must be the only line, so each name check reads a line that exists."""
+        self.store(items=[item_entry("colour-pick", "open", n=143, **item_fields)], answers=[pick_answer_entry("colour-pick", EARLY)])
+        rc, out = self.run_unread(codes=(1,))
+        lines = answer_lines(out)
+        self.assertEqual([line.split()[1] for line in lines], ["colour-pick"], "the unread answer did not get its one line: " + out)
+        return lines[0]
+
+    def test_the_answer_line_names_each_session_in_wakes(self):
+        line = self.one_answer_line(owner=OWNER_SESSION, wakes=[TRIAGE_SESSION, COORD_SESSION])
+        self.assertTrue({TRIAGE_SESSION, COORD_SESSION} <= set(named_sessions(line)),
+                        "the answer line does not name each session in wakes: " + line)
+
+    def test_the_answer_line_does_not_name_the_owner_when_the_owner_is_not_in_wakes(self):
+        line = self.one_answer_line(owner=OWNER_SESSION, wakes=[TRIAGE_SESSION, COORD_SESSION])
+        self.assertNotIn(OWNER_SESSION, named_sessions(line), "the answer line names the owner, which wakes does not hold: " + line)
+
+    def test_an_answer_line_for_an_item_with_no_wakes_names_its_owner_alone(self):
+        """Green on the old code too: with no wakes the owner is the one session the line names."""
+        line = self.one_answer_line(owner=OWNER_SESSION)
+        self.assertEqual(named_sessions(line), [OWNER_SESSION], "an item with no wakes does not name its owner alone: " + line)
+
+    def test_wakes_that_name_no_session_are_unknown_and_list_no_answer(self):
+        for label, wakes in (("a string", TRIAGE_SESSION), ("an empty list", []), ("a list with a non-string", [TRIAGE_SESSION, 7]),
+                             ("a list with an empty name", [""])):
+            with self.subTest(wakes=label):
+                self.clear_store()
+                self.store(items=[item_entry("colour-pick", "open", n=143, owner=OWNER_SESSION, wakes=wakes)],
+                           answers=[pick_answer_entry("colour-pick", EARLY)])
+                rc, out = self.run_unread(codes=(0, 1, 2))
+                self.assert_unknown(rc, out, "colour-pick")
+                self.assert_no_listed_line(out, "%s: an answer was listed against wakes that name no session" % label)
+
+    def test_a_full_store_names_each_unread_answers_own_wakes_and_no_other_items(self):
+        count = 120  # a full page of items, each kind of wakes in turn (FULL_WAKES), and every third answer read back
+        items, answers = [], []
+        for i in range(count):
+            item_id = "item-%03d" % i
+            extra = {} if FULL_WAKES[i % 4] is None else {"wakes": FULL_WAKES[i % 4]}
+            items.append(item_entry(item_id, "open", n=i, owner=OWNER_SESSION, **extra))
+            answers.append(pick_answer_entry(item_id, EARLY))
+        receipts = [receipt_entry("item-%03d" % i, read=EARLY) for i in range(0, count, 3)]
+        self.store(items=items, answers=answers, receipts=receipts)
+        rc, out = self.run_unread()
+        lines = answer_lines(out)
+        self.assertEqual([line.split()[1] for line in lines], ["item-%03d" % i for i in range(count) if i % 3],
+                         "the full store did not list each unread answer, in order: " + out[:300])
+        for line in lines:
+            i = int(line.split()[1][len("item-"):])
+            self.assertEqual(named_sessions(line), sorted(FULL_WAKES[i % 4] or [OWNER_SESSION]),
+                             "the answer line for %s does not name exactly its own wakes: %s" % (line.split()[1], line))
 
     def test_an_empty_store_is_clean(self):
         self.store()

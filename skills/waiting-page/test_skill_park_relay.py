@@ -12,6 +12,9 @@ Reads prose only and runs none of the skill's code. Each case pins one claim:
   6. The park tell names only the page URL, the item id and the act withdrawn, never the answer's note or text.
   7. The decision's option bullet (the one with the option shape `{key, label, how`) says a settings-change option's
      label names settings.json and the entry.
+  8. The items/<id> entry documents `wakes`, and the sentence that names it says the absent value is the owner.
+  9. "Read the answers" says the writer messages the sessions in `wakes` and nobody else, and no longer sends the
+     answer-unread message to the item's owner.
 """
 import os
 import re
@@ -231,6 +234,53 @@ class OptionLabelGuidance(unittest.TestCase):
         self.assertTrue(self.bullet, "SKILL.md has no decision option bullet with the option shape `{key, label, how`")
         self.assertRegex(self.bullet, SETTINGS_LABEL,
                          "the option guidance does not say a settings-change option's label names settings.json and the entry")
+
+
+# Cases 8 and 9: the `wakes` item field, and the writer's message to exactly the sessions it names.
+ITEMS_ENTRY = "- `items/<id>`"
+READ_HEADING = "## Read the answers"
+NOBODY_ELSE = re.compile(r"\bnobody else\b", re.I)
+OWNER_SEND = "sends the session in the item's `owner`"  # the old target of the answer-unread message
+WAKES_WINDOW = 240  # characters after `wakes` in which its sentence must name the owner as the absent value
+
+
+def items_entry(text):
+    """The `items/<id>` bullet of the database section: from its line to the next top-level bullet."""
+    start = text.find(ITEMS_ENTRY)
+    if start < 0:
+        return ""
+    end = text.find("\n- `", start + 1)
+    return text[start:end if end >= 0 else len(text)]
+
+
+def read_answers_section(text):
+    """The "## Read the answers" section: from its heading to the next heading."""
+    start = text.find("\n" + READ_HEADING + "\n")
+    if start < 0:
+        return ""
+    end = text.find("\n## ", start + 1)
+    return text[start:end if end >= 0 else len(text)]
+
+
+class WakesProse(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.skill = read(SKILL)
+
+    def test_8_the_items_entry_documents_wakes_and_says_absent_means_the_owner(self):
+        entry = items_entry(self.skill)
+        self.assertTrue(entry, "SKILL.md has no items/<id> entry in the database section")
+        at = entry.find("`wakes`")
+        self.assertGreaterEqual(at, 0, "the items/<id> entry does not document the wakes field")
+        self.assertIn("owner", entry[at:at + WAKES_WINDOW],
+                      "the wakes field does not say that its absent value is the owner")
+
+    def test_9_read_the_answers_messages_exactly_the_wakes_and_nobody_else(self):
+        section = read_answers_section(self.skill)
+        self.assertTrue(section, "SKILL.md has no 'Read the answers' section")
+        self.assertIn("`wakes`", section, "the Read the answers section does not say the message goes to the sessions in wakes")
+        self.assertRegex(section, NOBODY_ELSE, "the Read the answers section does not say the message goes to nobody else")
+        self.assertNotIn(OWNER_SEND, section, "the Read the answers section still sends the answer-unread message to the item's owner")
 
 
 if __name__ == "__main__":
