@@ -2172,7 +2172,7 @@ class LiveStatusPhase(UpkeepFixture):
         self.assertNotIn("waiting-queued", stale + empty, "waiting holds only a queued step, so it is not live")
 
     def test_a_legacy_active_step_still_makes_its_phase_live(self):
-        # Control, green on main: the legacy status keeps its phase live, as the existing cases rely on.
+        # A legacy active step still makes its phase live, which the upkeep rows in this file depend on.
         self.commit_step("legacy-active", status="active", phase="build", note="Working.", updatedAt=iso_ago(5), order=1)
         self.commit_step("build-ready", status="ready", phase="build", note="Parked for a lane.",
                          updatedAt=self.ten_days_ago(), order=2)
@@ -2189,10 +2189,12 @@ class LiveStatusPhase(UpkeepFixture):
         self.assertEqual(unknown, [], "each LIVE_STATUS entry is in KNOWN_STATUS")
 
     def test_upkeep_spells_no_status_literal_of_its_own(self):
+        # Any status word in upkeep's code is a second spelling, so the check reads each string constant against
+        # build.KNOWN_STATUS, the one home of the status words.
         tree = ast.parse(inspect.getsource(build.upkeep))
-        literal = sorted(n.lineno for n in ast.walk(tree) if isinstance(n, ast.Constant) and n.value == "active")
-        self.assertEqual(literal, [], "upkeep spells the status \"active\" itself, at these lines of its source; "
-                                      "it must read build.LIVE_STATUS")
+        literal = sorted(n.lineno for n in ast.walk(tree) if isinstance(n, ast.Constant) and n.value in build.KNOWN_STATUS)
+        self.assertEqual(literal, [], "upkeep spells a status word itself, at these lines of its source; "
+                                      "it must read the status constants in build")
 
     def test_thirty_stale_steps_in_a_live_phase_are_all_listed(self):
         self.commit_step("build-doing", status="doing", phase="build", note="Working.", updatedAt=iso_ago(5), order=1)
