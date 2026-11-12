@@ -2880,7 +2880,7 @@ def judge_stop(payload) -> None:
 
 def builder_shell_write_reason(merging: bool = False) -> str:
     """The block text for a test change a builder's shell call left in its worktree. It names no path.
-    `merging`: a merge is in progress and a test path is in conflict, so the merge-abort step is named."""
+    `merging`: a merge is in progress (MERGE_HEAD), so the merge-abort step is named."""
     return (
         BUILDER_TEST_REASON + " Your shell call left a test change in your worktree. " + BUILDER_UNDO_ROUTE
         + "If you cannot undo it yourself, stop and report, so the orchestrator hands the paths to a test-author. "
@@ -2893,48 +2893,49 @@ def builder_shell_write_reason(merging: bool = False) -> str:
 UNMERGED_CODES = ("DD", "AU", "UD", "UA", "DU", "AA", "UU")
 
 
-def merge_test_conflict(where: str, raw: str) -> bool:
-    """True when a merge is in progress and a test path is unmerged. The conflict is read from the status
-    answer already in hand. MERGE_HEAD is read from the git dir found by walking up from `where` to `.git`
-    (a folder, or a file `gitdir: <path>` in a linked worktree): no second git call."""
-    if not any(e[:2] in UNMERGED_CODES and is_builder_test_rel(e[3:]) for e in raw.split("\0") if len(e) >= 4):
-        return False
-    here = os.path.abspath(where)
-    while True:
-        dot = os.path.join(here, ".git")
-        if os.path.isdir(dot):
-            return os.path.exists(os.path.join(dot, "MERGE_HEAD"))
-        if os.path.isfile(dot):
-            try:
-                with open(dot, encoding="utf-8") as handle:
-                    line = handle.readline().strip()
-            except OSError:
-                return False
-            if not line.startswith("gitdir:"):
-                return False
-            return os.path.exists(os.path.join(here, line[len("gitdir:"):].strip(), "MERGE_HEAD"))
-        parent = os.path.dirname(here)
-        if parent == here:
-            return False
-        here = parent
+# The git-dir entries of a merge, rebase or cherry-pick that stopped on a conflict. Each brings the other
+# side's files into the worktree, so git status lists them as changed though the builder wrote none.
+# REVERT_HEAD, SQUASH_MSG and MERGE_MSG are left out: those stops are not judged as incoming here.
+BUILDER_CONFLICT_STATES = ("MERGE_HEAD", "rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD")
 
 
-def status_paths(raw: str):
-    """The paths a `git status --porcelain -z` answer names. A rename or copy names both ends: the old path
-    is a change too, so a test moved out of a test path counts."""
+def conflict_states(where: str) -> tuple:
+    """The BUILDER_CONFLICT_STATES present in the git dir of the checkout at or above `where`: file reads, no git
+    call. Empty on any read failure, so the caller judges the call as outside a stop."""
+    root = _checkout_root_by_stat(os.path.abspath(where))
+    gitdir = _git_dir_by_file(root) if root else ""
+    if not gitdir:
+        return ()
+    return tuple(name for name in BUILDER_CONFLICT_STATES if os.path.exists(os.path.join(gitdir, name)))
+
+
+def status_entries(raw: str):
+    """(code, path) for each path a `git status --porcelain -z` answer names. A rename or copy names both
+    ends, each with the entry's code: the old path is a change too, so a test moved out of a test path counts."""
     records = raw.split("\0")
-    paths, index = [], 0
+    entries, index = [], 0
     while index < len(records):
         entry = records[index]
         index += 1
         if len(entry) < 4:
             continue
-        paths.append(entry[3:])
+        entries.append((entry[:2], entry[3:]))
         if entry[0] in "RC" or entry[1] in "RC":
             if index < len(records) and records[index]:
-                paths.append(records[index])
+                entries.append((entry[:2], records[index]))
             index += 1
-    return paths
+    return entries
+
+
+def status_paths(raw: str):
+    """The paths a `git status --porcelain -z` answer names (see `status_entries`)."""
+    return [path for _code, path in status_entries(raw)]
+
+
+def unmerged_test_path(raw: str) -> str:
+    """The first test path a `git status --porcelain -z` answer lists as unmerged, else ''."""
+    return next((path for code, path in status_entries(raw)
+                 if code in UNMERGED_CODES and is_builder_test_rel(path)), "")
 
 
 def judge_shell_write(payload) -> None:
@@ -2942,7 +2943,9 @@ def judge_shell_write(payload) -> None:
     check reads command text, so a script that computes its paths passes it. This reads the result: one
     `git status --porcelain` in the call's cwd, each changed path tested with `is_builder_test_rel`. A hit blocks
     the call's result, with the undo route. A status git cannot answer logs `builder-bash-test-write-unread`
-    and allows. Any other session, and any other tool, returns before a git call."""
+    and allows. In a stopped merge, rebase or cherry-pick (`conflict_states`) with no unmerged test path, the hit
+    logs `builder-bash-test-write-merging`, noted, and allows. Any other session, and any other tool, returns
+    before a git call."""
     if agent_role(payload) != BUILDER_ROLE:
         return
     tool = payload.get("tool_name", "") or ""
@@ -2958,11 +2961,18 @@ def judge_shell_write(payload) -> None:
     found = next((rel for rel in status_paths(answer.stdout) if is_builder_test_rel(rel)), "")
     if not found:
         return
+    # Every read runs before the deny row, so no read failure can log a deny without its block.
+    states = conflict_states(where)
+    if states and not unmerged_test_path(answer.stdout):
+        # The test path came in with the other side of a stopped merge, rebase or cherry-pick. The merge-aware
+        # commit and stop check (own_changes) judges that change.
+        record(tool, "noted", "builder-bash-test-write-merging", states[0] + " " + found)
+        return
     # A role guard stays outside every override (decision owner-override): a block is final.
     guard_core.set_override_veto(lambda: True)
     record(tool, "deny", "builder-bash-test-write", found)
     print(json.dumps({"decision": "block", "reason": "builder-bash-test-write: "
-                      + builder_shell_write_reason(merge_test_conflict(where, answer.stdout))}))
+                      + builder_shell_write_reason("MERGE_HEAD" in states)}))
     sys.exit(0)
 
 
@@ -5439,19 +5449,34 @@ def _checkout_root_by_stat(folder: str) -> str:
     return ""
 
 
+def _git_dir_by_file(root: str) -> str:
+    """The per-worktree git directory of the checkout at ROOT, read from files alone, else ''. A `.git`
+    folder is its own; a `.git` file names `gitdir: <dir>`, relative to ROOT or absolute. No git is
+    spawned. An unreadable or undecodable `.git` file is ''."""
+    dot = os.path.join(root, ".git")
+    if os.path.isdir(dot):
+        return dot
+    try:
+        with open(dot, encoding="utf-8") as handle:
+            first = handle.readline(4096).strip()
+    except (OSError, ValueError):  # ValueError: UnicodeDecodeError, or a NUL in the path
+        return ""
+    if not first.startswith("gitdir:"):
+        return ""
+    return os.path.join(root, first[len("gitdir:"):].strip())
+
+
 def _git_common_dir(root: str) -> str:
     """The git common directory of the checkout at ROOT, read from files alone, else ''. A `.git`
-    folder is its own; a `.git` file names `gitdir: <dir>`, and `<dir>/commondir` names the common
-    one, relative to `<dir>`. No git is spawned."""
+    folder is its own; a `.git` file names `gitdir: <dir>` (`_git_dir_by_file`), and `<dir>/commondir`
+    names the common one, relative to `<dir>`. No git is spawned."""
     dot = os.path.join(root, ".git")
     try:
         if os.path.isdir(dot):
             return os.path.realpath(dot)
-        with open(dot, encoding="utf-8") as handle:
-            first = handle.readline(4096).strip()
-        if not first.startswith("gitdir:"):
+        git_dir = _git_dir_by_file(root)
+        if not git_dir:
             return ""
-        git_dir = os.path.join(root, first[len("gitdir:"):].strip())
         try:
             with open(os.path.join(git_dir, "commondir"), encoding="utf-8") as handle:
                 git_dir = os.path.join(git_dir, handle.readline(4096).strip())
