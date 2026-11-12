@@ -617,7 +617,8 @@ def f():
 
 
 class ExampleIds(Case):
-    """A comma list of ids after an example marker is clean. A long list of ids, comma or space separated, finishes."""
+    """A comma list of ids after an example marker is clean. A long list of ids, comma or space separated, finishes.
+    An id is still flagged when its clause cites a commit, even after a marker or in a list join."""
     # The bound is a hang guard on the run, not a timed assert. A run past it fails with the bound named.
     BOUND = 2  # seconds
 
@@ -658,6 +659,28 @@ class ExampleIds(Case):
         self.assertEqual(len(rows), 3999, "the first id is not skipped, or a later id is not flagged")
         flagged = [row.split("commit hash: ", 1)[1].split(" ", 1)[0] for row in rows]
         self.assertEqual(flagged, ids[1:], "the flagged ids are not the ids after the first")
+
+    def assertCommitHashFlagged(self, cases):
+        """Each (comment, id) pair is one comment on line 2 of its own file. The check must flag that id there."""
+        rc, out = self.scan({"h%d.py" % i: "x = 1\n# %s\ny = 2\n" % text for i, (text, _) in enumerate(cases)})
+        self.assertNotIn("Traceback", out)
+        rows = out.splitlines()
+        missed = [text for i, (text, ident) in enumerate(cases)
+                  if not any(row.startswith("h%d.py:2: commit hash: %s " % (i, ident)) for row in rows)]
+        self.assertEqual(missed, [], "a commit id that its clause cites is not flagged as commit hash:\n%s" % out)
+        self.assertEqual(rc, 1, out)
+
+    def test_history_cite_right_after_an_example_marker_is_flagged(self):
+        self.assertCommitHashFlagged([
+            ("i.e. 41ddef83 reverted the guard", "41ddef83"),
+            ("works like 41ddef83", "41ddef83"),
+        ])
+
+    def test_history_cite_second_id_of_an_example_list_is_flagged(self):
+        self.assertCommitHashFlagged([("e.g. 41ddef83 and 03d62e85 reverted the guard", "03d62e85")])
+
+    def test_history_cite_restated_after_i_e_is_flagged(self):
+        self.assertCommitHashFlagged([("reverted in main, i.e. 41ddef83", "41ddef83")])
 
 
 class Scanner(Case):
