@@ -4,11 +4,11 @@
  "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "now",
- "lane": "review-record-fix-check-reads",
+ "lane": "session_013NEJKzp9u8s25scRwbZ3Y6",
  "owner": "triage",
  "blockedBy": [],
  "why": "Retrospective 13:44 CST Nov 12: merge/merge.py line 26 (\"MODEL must be sonnet on every record\") reads as covering every round, but it covers only --fix-check; sessions choked on where to record a Haiku round 1.",
  "source": "retrospective 13:44 CST Nov 12",
  "note": "Home: decision agent-model-cap. Reword the usage line to name --fix-check; a test pins the line. R9 and the code already settle the question; the retrospective answered runner 10 directly. S, one file. Taken by lane review-record-fix-check-reads (coordinator 13:59 CST Nov 12).",
- "updatedAt": "2026-11-12T14:00:48-06:00"
+ "updatedAt": "2026-11-12T14:02:37-06:00"
 }
