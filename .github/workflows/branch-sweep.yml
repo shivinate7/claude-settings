@@ -59,6 +59,40 @@ jobs:
           failed=0
           while read -r verb name reason; do
             if [ "$verb" = delete ]; then
+              # About 60 lanes push in parallel, so a branch can gain a commit after the checkout. The verdict
+              # holds for the checkout's tip, so a branch whose tip moved is kept. The read narrows the race to one
+              # API call; the delete has no sha condition, so a push in that gap still loses.
+              if ! want=$(git rev-parse --verify --quiet "refs/remotes/origin/$name"); then
+                echo "::warning::could not read the checkout tip of $name; not deleted"
+                failed=1
+                continue
+              fi
+              if ! tip=$(gh api "repos/$REPO/git/ref/heads/$name" --jq .object.sha 2> "$RUNNER_TEMP/tip-err.txt" < /dev/null); then
+                err=$(cat "$RUNNER_TEMP/tip-err.txt")
+                case "$err" in
+                  # The ref is already gone, so there is nothing to delete.
+                  *"HTTP 404"* | *"HTTP 422"*)
+                    echo "already gone: $name"
+                    continue
+                    ;;
+                  # A refusal for rate or scope repeats on every later call, so stop. A red run on main trips
+                  # the red-main brake, so this one stays green; the next run deletes the rest.
+                  *"HTTP 403"* | *"HTTP 429"*)
+                    echo "$err" >&2
+                    echo "::warning::GitHub refused a tip read (HTTP 403 or 429); stopped at $name. The next run deletes the rest."
+                    break
+                    ;;
+                esac
+                # An unreadable tip is no proof the branch is unchanged, so it is never deleted.
+                echo "$err" >&2
+                echo "::warning::could not read the tip of $name; not deleted"
+                failed=1
+                continue
+              fi
+              if [ "$tip" != "$want" ]; then
+                echo "tip moved since the checkout: $name (checkout $want, now $tip); kept. The next run decides again."
+                continue
+              fi
               if ! err=$(gh api -X DELETE "repos/$REPO/git/refs/heads/$name" 2>&1 < /dev/null); then
                 case "$err" in
                   # The ref is already gone, so the delete is done.

@@ -16,6 +16,8 @@ Rules:
   concurrency  a concurrency block is set at the top level
   condition    each job has an if: that limits it to refs/heads/main
   argv         --open-head takes its value as --open-head=VALUE, so a value that starts with - is no option
+  tip          each DELETE call has a gh api read of its branch's tip earlier in the same loop; a comment or a
+               quoted string is no call
 
 The reader is line based, with no YAML library: CI installs none for lint. It needs only the block style this
 repo's workflows use. GitHub evaluates an expression in a quoted value, a plain value, or a run: block, even after a
@@ -231,6 +233,83 @@ def check_read(structure, evaluated, runs, found, last):
     found.append((1, "read", "no step reads the open pull requests with gh api"))
 
 
+def mask_shell(text):
+    """The line with each shell comment cut and each quoted span blanked, so only commands outside quotes remain.
+    Quote state resets per line, and a quote opens only where a word starts, so `don't` and a quote left open on
+    one line hide nothing on the next."""
+    out, quote = [], None
+    for i, ch in enumerate(text):
+        if quote:
+            out.append(" ")
+            if ch == quote:
+                quote = None
+        elif ch in "\"'" and (i == 0 or text[i - 1] in " \t=;&|(<>"):
+            quote = ch
+            out.append(" ")
+        elif ch == "#" and (i == 0 or text[i - 1] in " \t;&|("):
+            break
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def run_blocks(runs):
+    """Lists of (n, text) lines, one per run: value. A block scalar's lines are contiguous; a one-line run: opens its own."""
+    blocks, last = [], None
+    for n, text in runs:
+        starts = re.match(r"^(-\s+)?run:", text.strip())
+        if last is None or n != last + 1 or starts:
+            blocks.append([])
+        blocks[-1].append((n, text))
+        last = n
+    return blocks
+
+
+def logical_lines(block):
+    """(n, text) per shell command line, a line that ends in a backslash joined to the next."""
+    joined, pending = [], None
+    for n, text in block:
+        if pending:
+            n, text = pending[0], pending[1] + " " + text.strip()
+            pending = None
+        if text.rstrip().endswith("\\"):
+            pending = (n, text.rstrip()[:-1])
+        else:
+            joined.append((n, text))
+    if pending:
+        joined.append(pending)
+    return joined
+
+
+GH_API = re.compile(r"\bgh\s+api\b")
+DELETE_CALL = re.compile(r"(-X\s*|--method[\s=]+)DELETE\b", re.I)
+TIP_PATH = re.compile(r"git/ref/heads/")
+LOOP_OPEN = re.compile(r"^\s*(while|until|for)\b")
+LOOP_CLOSE = re.compile(r"^\s*done\b")
+
+
+def check_tip(runs, found):
+    """Each DELETE call has a read of its branch's tip earlier in the same loop. Between a read and the DELETE a
+    push moves the tip, and the verdict was computed on the old one. A call is a `gh api` outside quotes and
+    comments; a commented-out call or one named in a string is text."""
+    for block in run_blocks(runs):
+        loops = [False]  # one flag per open loop, the run block itself first: has this loop read a tip
+        for n, text in logical_lines(block):
+            masked = mask_shell(text)
+            if LOOP_CLOSE.match(masked) and len(loops) > 1:
+                loops.pop()
+            starts = [m.start() for m in GH_API.finditer(masked)]
+            for k, start in enumerate(starts):
+                end = starts[k + 1] if k + 1 < len(starts) else len(masked)
+                if DELETE_CALL.search(masked[start:end]):
+                    if not loops[-1]:
+                        found.append((n, "tip", text.strip()))
+                elif TIP_PATH.search(text[start:end]):
+                    loops[-1] = True
+            if LOOP_OPEN.match(masked):
+                loops.append(False)
+
+
 def check(text):
     structure, evaluated, runs = read_lines(text)
     last = len(text.splitlines())
@@ -304,6 +383,7 @@ def check(text):
         if SPLIT_ARG.search(line) and not line.strip().startswith("#"):
             found.append((n, "argv", line.strip()))
     check_read(structure, evaluated, runs, found, last)
+    check_tip(runs, found)
 
     return sorted(set(found))
 
