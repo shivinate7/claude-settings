@@ -5833,6 +5833,51 @@ class PassClaimCitesVerdictTests(unittest.TestCase):
     def test_control_claim_wholly_in_backticks_passes(self):
         self.assert_passes(self.report("`Lint passed.`"))
 
+    # A colon, slash or pipe ends a clause as a comma does, so a negation before it does not reach the claim after it.
+    # The `to` of "Merged to main" is no condition cue. An instruction, a path or a quoted mention is no claim.
+
+    def test_red_a_colon_slash_or_pipe_ends_a_negation_clause(self):
+        for item in ("No issues found: lint passed.", "No failures: lint passed.", "Nothing to fix: lint passed.",
+                     "No failures / lint passed.", "No failures | lint passed."):
+            with self.subTest(item=item):
+                self.assert_blocked(self.report(item))
+        self.assert_passes(self.report("Lint did not pass."))
+
+    def test_red_to_is_no_condition_cue_before_a_claim(self):
+        self.assert_blocked(self.report("Merged to main and lint passed."))
+
+    def test_control_an_instruction_is_no_claim(self):
+        for item in ("Ensure lint passes before you hand off.", "Confirm the tests pass.",
+                     "Verify the checks are green.", "Clean up the lint warnings in hooks/x.py.",
+                     "Run a second lint pass."):
+            with self.subTest(item=item):
+                self.assert_passes(self.report(item))
+
+    def test_control_a_claim_beside_an_instruction_stays_a_claim(self):
+        for item in ("Lint passed.", "Lint: PASS.", "All checks pass.", "Lint passes before you hand off.",
+                     "The tests pass.", "The checks are green."):
+            with self.subTest(item=item):
+                self.assert_blocked(self.report(item))
+
+    def test_control_a_path_token_is_no_claim_word(self):
+        with self.subTest(item="a path token"):
+            self.assert_passes(self.report("Files: tests/guard/s42900-pass-claim-send.py"))
+        with self.subTest(item="the same line with a claim"):
+            self.assert_blocked(self.report("Files: lint passed."))
+
+    def test_control_a_double_quoted_mention_is_no_claim(self):
+        with self.subTest(item="a double-quoted mention"):
+            self.assert_passes(self.report('the guard flags a "lint passed" claim.'))
+        with self.subTest(item="the same words unquoted"):
+            self.assert_blocked(self.report("the guard flags a lint passed claim."))
+
+    def test_control_a_lone_quote_does_not_hide_a_later_claim(self):
+        self.assert_blocked(self.report('Size 12" and lint passed.'))
+
+    def test_red_the_refusal_says_the_command_must_match_the_claim(self):
+        out = self.assert_blocked(self.report("lint passed."))
+        self.assertIn("must match the claim", out["reason"].lower())
+
     # Rule 4: a cite backs a claim only when its check matches. A lint or checks claim needs a roster command, a
     # tests claim needs a command that names a test, and `verdict true` backs nothing.
 
@@ -5858,7 +5903,7 @@ class PassClaimCitesVerdictTests(unittest.TestCase):
 
     # Rule 5: a cite in each shell form backs its claim. The PASS line names the command as the shell passed it on.
 
-    def test_red_a_cite_with_the_shell_expanded_path_backs_its_claim(self):
+    def test_control_a_cite_with_the_shell_expanded_path_backs_its_claim(self):
         # The PASS line holds `~` expanded as the hook expands it (os.path.expanduser), so the path is the home folder
         # of the platform: /root, /Users/<name> or a drive path.
         expanded = os.path.expanduser("~/.claude/bin/merge")
@@ -5918,7 +5963,7 @@ class PassClaimCitesVerdictTests(unittest.TestCase):
         for clean, with_noun in (("The merge is clean.", "The lint is clean."),
                                  ("Clean-merge read: ok.", "Clean-lint read: ok."),
                                  ("Working tree clean.", "Working tree and lint clean."),
-                                 ("Clean up the branch.", "Clean up the lint.")):
+                                 ("Clean up the branch.", "The lint came back clean.")):
             with self.subTest(clean=clean):
                 self.assert_passes(self.report(clean))
                 self.assert_blocked(self.report(with_noun))
