@@ -426,8 +426,21 @@ body.sheet-open { overflow: hidden; }
 .tabs .tl { display: flex; gap: 4px; }
 .tabs .cnt:empty { display: none; }
 .tabs .cnt { display: inline-block; min-width: 3.5ch; font-variant-numeric: tabular-nums; text-align: start; }
-/* Four tabs (Designs too) fit a 390 phone on one row: the label is 15px and each count box holds two digits. Three tabs with a count box each must fit a 320 phone: the page never scrolls sideways. The row wraps when a wide fallback font makes them too wide. It wraps in reverse so the tab list stays on the bottom row, on the border, and Designs moves above. */
+/* Three tabs fit a 320 phone on one row: the label is 15px and each count box holds two digits. The row wraps when a wide fallback font makes them too wide. It wraps in reverse so the tab list stays on the bottom row, on the border. */
 @media (max-width: 400px) { .tabs a { padding-inline: 5px; gap: 3px; font-size: 15px; } .tabs .cnt { min-width: 2.5ch; } .tabs, .tabs .tl { gap: 2px; } .tabs { flex-wrap: wrap-reverse; } }
+/* With Designs shown the bar is four tabs. They stay on one row at every width, never wrapped and never scrolled sideways: below 500px the padding, gaps and reserved count boxes shrink, and below 400px the label shrinks too. */
+@media (max-width: 500px) {
+  .tabs:has(#tabD:not([hidden])) { flex-wrap: nowrap; gap: 2px; }
+  .tabs:has(#tabD:not([hidden])) .tl { gap: 2px; }
+  .tabs:has(#tabD:not([hidden])) a { padding-inline: 6px; gap: 3px; font-size: 15px; }
+  .tabs:has(#tabD:not([hidden])) .cnt { min-width: 2.5ch; }
+  .tabs:has(#tabD:not([hidden])) .hcue { min-width: 3.5ch; gap: 2px; }
+}
+@media (max-width: 400px) {
+  .tabs:has(#tabD:not([hidden])) a { padding-inline: 3px; gap: 2px; font-size: 14px; }
+  .tabs:has(#tabD:not([hidden])) .cnt { min-width: 1.5ch; }
+  .tabs:has(#tabD:not([hidden])) .hcue { min-width: 3ch; }
+}
 .tabs #qCount:empty { display: inline-block; }
 .svwrap { container-type: inline-size; padding-block: 18px 40px; }
 .sv { display: grid; gap: 16px; min-width: 0; }
@@ -3946,15 +3959,16 @@ function table() {
   const head = '<thead role="rowgroup"><tr role="row"><th role="columnheader" scope="col" class="gch"><span class="sr">Grade</span></th><th role="columnheader" scope="col" class="whh">What you see</th><th role="columnheader" scope="col" class="whyh">Why this grade</th><th role="columnheader" scope="col" class="mkh">What makes it happen</th><th role="columnheader" scope="col">What good looks like</th></tr></thead>';
   return `<table class="ht" role="table" id="healthTable" aria-label="Health, one row per thing you see, worst first">${head}<tbody role="rowgroup">${rows.map(row).join("")}</tbody></table>`;
 }
+// The kind words, lowercased and joined as a sentence: the known and the unknown coverage line both name the kinds through this.
+const kindList = (ks) => { const w = ks.map((k) => KIND[k].toLowerCase()); return w.length > 1 ? w.slice(0, -1).join(", ") + " and " + w[w.length - 1] : w[0] || "parts"; };
 function coverage() {
   const c = H.coverage;
-  if (!c) return `<div class="cov" id="healthCover"><p class="ln u"><span class="rg unk" aria-hidden="true"></span>Coverage: unknown. The build could not read the list of hooks, checks and skills, so no one can tell if a part is missing here.</p>
+  if (!c) return `<div class="cov" id="healthCover"><p class="ln u"><span class="rg unk" aria-hidden="true"></span>Coverage: unknown. The build could not read the list of ${kindList(Object.keys(KIND))}, so no one can tell if a part is missing here.</p>
     <details><summary>What the build said</summary><pre>${esc(reason(H.coverageWhy || "no reason given"))}</pre></details></div>`;
   const left = Object.keys(KIND).map((k) => [k, (c.left && c.left[k]) || []]);
   const n = left.reduce((s, [, xs]) => s + xs.length, 0);
   // The build lists each kind that has a part; a build without the list names the kinds the left-over list carries.
-  const kinds = (Array.isArray(c.kinds) ? c.kinds : Object.keys(KIND).filter((k) => c.left && k in c.left)).map((k) => KIND[k].toLowerCase()).filter(Boolean);
-  const names = kinds.length > 1 ? kinds.slice(0, -1).join(", ") + " and " + kinds[kinds.length - 1] : kinds[0] || "parts";
+  const names = kindList((Array.isArray(c.kinds) ? c.kinds : Object.keys(KIND).filter((k) => c.left && k in c.left)).filter((k) => KIND[k]));
   return `<div class="cov" id="healthCover"><p class="ln">The rows name <b>${esc(c.named)}</b> of <b>${esc(c.total)}</b> ${esc(names)}.</p>`
     + (n ? `<details><summary>Named by no row: ${n}</summary><div class="left">${left.filter(([, xs]) => xs.length).map(([k, xs]) => `<div><span>${KIND[k]} ${xs.length}</span><span>${xs.map((x) => `<code>${esc(base(x))}</code>`).join(", ")}</span></div>`).join("")}</div></details>` : "")
     + "</div>";
@@ -3990,11 +4004,13 @@ function noMap() {
     <textarea id="hAskText" rows="4" readonly hidden aria-label="The ask to ${verb} the health map"></textarea></section>`;
 }
 // The ask names the repo as the page does (meta/page identity); with none, "this repo". It names the file once and gives the cause once:
-// the build's reason leads with the file name and ends with the path, so both are cut before the cause is added.
+// the build's reason leads with the file name and ends with the path, so both are cut before the cause is added. A file that is there
+// but is not json says so in the ask's own words, so "is not valid json" is the cause that stays.
 const askText = () => {
   const id = (typeof state !== "undefined" && state.meta && state.meta.identity) || {}, name = typeof id.name === "string" ? id.name.trim().slice(0, 40) : "";
+  const badJson = /^(?:docs\/)?health-map\.json is not valid json: /.test(reason(H.why || ""));
   const cause = reason(H.why || "no reason given").replace(/^(?:docs\/)?health-map\.json (?:does not read: |is not valid json: )?/, "").replace(/:\s*'[^']*health-map\.json'\s*$/, "").trim() || "no reason given";
-  return (missingMap ? "Build the health map for " : "Fix the health map for ") + (name || "this repo") + ": " + MAP_FILE + (missingMap ? " is not there" : " does not read") + " (" + cause + "). Then have the page writer put the rebuilt roadmap block on this repo's waiting page.";
+  return (missingMap ? "Build the health map for " : "Fix the health map for ") + (name || "this repo") + ": " + MAP_FILE + (missingMap ? " is not there" : badJson ? " is not valid json" : " does not read") + " (" + cause + "). Then have the page writer put the rebuilt roadmap block on this repo's waiting page.";
 };
 $("hView").innerHTML = rows ? `<div class="hv">${top()}${quiet()}${table()}</div>` : noMap();
 const ask = $("hAsk");
