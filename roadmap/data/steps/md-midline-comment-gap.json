@@ -1,0 +1,14 @@
+{
+ "id": "md-midline-comment-gap",
+ "title": "#2714's scanner misses a comment opener in the middle of a line",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane fan-code-agents found a mid-line-comment gap in #2714's check; its closing report asks for a builder fix.",
+ "source": "lane fan-code-agents 10:28 CST Nov 12, via coordinator 10:29 CST",
+ "note": "Code. Two rare false alarms in the same check stay notes (roadmap/outbox/triage.md): an inline triple-backtick at line start, a backslash hard break. Ready, no lane.",
+ "updatedAt": "2026-11-12T10:30:00-06:00"
+}

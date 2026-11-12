@@ -1,0 +1,14 @@
+{
+ "id": "pr-2693-debt-fixes",
+ "title": "Fix the five debts #2693 recorded (a 36 KB brief costs 9.8 s)",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Lane fan-code-agents recorded five debts on #2693; its closing report asks for their fixes.",
+ "source": "lane fan-code-agents 10:28 CST Nov 12, via coordinator 10:29 CST",
+ "note": "Code. The five debts are listed in #2693. Ready, no lane.",
+ "updatedAt": "2026-11-12T10:30:00-06:00"
+}
