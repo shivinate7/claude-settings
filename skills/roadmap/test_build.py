@@ -4478,8 +4478,7 @@ class SessionBoard(UpkeepFixture):
                                "a pull on lane/<step> or on <step> is not read as that session's PR")
 
     def test_session_with_two_open_pulls_on_its_step_shows_the_lowest_number(self):
-        # #40 is on `c1` and #41 on `lane/c1`. Both orders are published, so a line that takes the first or the last pull
-        # fails on one of them.
+        # #40 is on `c1` and #41 on `lane/c1`. Both orders are published, so a line that takes the last pull fails.
         by_number = {40: {"number": 40, "title": "c1 cleanup", "branch": "c1"},
                      41: {"number": 41, "title": "c1 lane", "branch": "lane/c1"}}
         for order in ((41, 40), (40, 41)):

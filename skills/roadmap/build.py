@@ -107,7 +107,7 @@ Cost per build: about six git processes, one read of each scanned file, one page
 watcher, no timer, no log. The stale-step row adds no git process, file, timer or log to the build. It
 adds to triage's publish, already running: one more list_sessions walk (every page) and three more
 fields (id, session_status, tags) per session in the live file it already writes. The flagged-sessions row adds
-two more per session (status_bucket, updated_at) and no other read. The page-ruling row adds
+one more per session (updated_at) and no other read. The page-ruling row adds
 one read of the waiting page's items (n, status, home) to that same publish. This script adds no git
 process, file, timer or log for it. The dated-claim row adds no git process, file, timer or log: it reads
 the notes already loaded.
