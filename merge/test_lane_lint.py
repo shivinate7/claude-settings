@@ -2279,11 +2279,14 @@ class LintCheckJoin(tm.CloudSession):
 
     def test_a_rival_claim_commit_on_a_non_record_file_that_lands_after_the_lint_read_is_refused_by_the_lane_lint_head_check(self):
         # relayed_head_holds reads only the Record-claim trailer, so the join's head check and confirm's relayed-yes check both pass this commit.
-        # Only confirm's linted_head check refuses it, so the refusal must be the lane-lint one, not HEAD_MOVED.
+        # Only confirm's linted_head check refuses it, so the refusal must be the linted-head one, not HEAD_MOVED.
         linted = self.head("feat")
-        self.feat_commit({"rival.py": "rival = 1\n"}, "Add a rival change", "Record-claim: D-907")
+        new = self.feat_commit({"rival.py": "rival = 1\n"}, "Add a rival change", "Record-claim: D-907")
         out = self.assert_refused([lint_comment(2, linted)], "a Record-claim commit on a non-record file that lands after the lint read", ran_on=linted, lag={"n": 1, "prior": linted})
-        self.assertIn("after its lane-lint was read", out, "the refusal is not the lane-lint head refusal:\n" + out)
+        moved = [line for line in out.splitlines() if "moved from" in line]
+        self.assertTrue(moved, "the refusal is not the linted-head refusal (no line says the head moved):\n" + out)
+        self.assertIn(linted[:9], moved[0], "the moved-head refusal does not name the linted head:\n" + out)
+        self.assertIn(new[:9], moved[0], "the moved-head refusal does not name the new head:\n" + out)
         self.assertNotIn("since the owner's yes was relayed", out, "the refusal is HEAD_MOVED, so the lane-lint head check did not refuse:\n" + out)
 
 
