@@ -227,29 +227,35 @@ PR_HEAD_BODY = _commit_body(None, "the head the pull request had")
 PR_HEAD = _commit_sha(PR_HEAD_BODY)                      # the head the PR had, now behind the local tip
 TIP_BODY = _commit_body(PR_HEAD, "the local tip, one commit past the pull request head")
 TIP = _commit_sha(TIP_BODY)                              # the tip of lane-tip in LANE_TIP
-OTHER_PR_HEAD = _commit_sha(_commit_body(None, "another pull request's head, not in this checkout"))
+OTHER_PR_BODY = _commit_body(None, "another pull request's head, not in this checkout")
+OTHER_PR_HEAD = _commit_sha(OTHER_PR_BODY)
+
+
+def _put_commits(where, pairs):
+    """Write each commit object of (body, sha) pairs into the checkout at `where`; git must write the sha the text names."""
+    for body, sha in pairs:
+        written = subprocess.run([VCS, "hash-object", "-t", "commit", "-w", "--stdin"], input=body, cwd=where,
+                                 capture_output=True, text=True)
+        if written.returncode != 0 or written.stdout.strip() != sha:
+            sys.exit("fixture setup failed in build_fixtures: git did not write the commit %s in %r. stderr: %s"
+                     % (sha, where, written.stderr.strip()))
 
 
 def _build_lane_tip():
     """LANE_TIP: a checkout with origin claude-settings, the two commits, and the branch lane-tip at the newer one."""
     make_repo(LANE_TIP, {"README.md": "# lane\n"})
     run_vcs(LANE_TIP, "remote", "add", "origin", "https://github.com/" + ARCH_REPO_SETTINGS)
-    for body, sha in ((PR_HEAD_BODY, PR_HEAD), (TIP_BODY, TIP)):
-        written = subprocess.run([VCS, "hash-object", "-t", "commit", "-w", "--stdin"], input=body, cwd=LANE_TIP,
-                                 capture_output=True, text=True)
-        if written.returncode != 0 or written.stdout.strip() != sha:
-            sys.exit("fixture setup failed in build_fixtures: git did not write the commit %s in %r. stderr: %s"
-                     % (sha, LANE_TIP, written.stderr.strip()))
+    _put_commits(LANE_TIP, ((PR_HEAD_BODY, PR_HEAD), (TIP_BODY, TIP)))
     run_vcs(LANE_TIP, "update-ref", "refs/heads/lane-tip", TIP)
 
 
 lazy_fixture([LANE_TIP], _build_lane_tip)
 
 
-def head_case(name, expected, head, transcript):
-    """One merge confirm in LANE_TIP that names `head` with --head. A deny must name REPO_RULE."""
+def head_case(name, expected, head, transcript, cwd=LANE_TIP):
+    """One merge confirm in `cwd` (LANE_TIP by default) that names `head` with --head. A deny must name REPO_RULE."""
     sh("merge-confirm-repo: " + name, f"{MERGE_SHIM} 5 --confirm --head {head}", expected,
-       rule=REPO_RULE if expected == "deny" else None, cwd=LANE_TIP, transcript=transcript, env=CLOUD_ENV)
+       rule=REPO_RULE if expected == "deny" else None, cwd=cwd, transcript=transcript, env=CLOUD_ENV)
 
 
 head_case("a lane the owner started whose confirm names its own branch tip is allowed", "allow", TIP, LONE_CS)
@@ -257,6 +263,89 @@ head_case("a lane the owner started whose confirm names another pull request's h
 head_case("a lane the owner started whose confirm names a head its branch has moved past is denied", "deny", PR_HEAD, LONE_CS)
 head_case("a batch runner whose confirm names a head outside this checkout is not judged and is allowed", "allow", OTHER_PR_HEAD,
           TX_RUNNER)
+# Fail closed: a lone lane whose branch tips cannot be read is denied. NO_TIPS is no git tree, so git answers no for-each-ref there, and its
+# repo is read from the layout extras file it holds, which names claude-settings. The one read that fails is the tips read, so the head is
+# no proved tip and the confirm is denied. The control above, with the same head in a readable checkout, is allowed.
+NO_TIPS = os.path.join(ROOT, "lanenotips")  # a folder that is no git tree; its .claude/layout-extras.json names claude-settings
+
+
+def _build_no_tips():
+    write(os.path.join(NO_TIPS, ".claude", "layout-extras.json"), json.dumps({"roadmap": {"github": ARCH_REPO_SETTINGS}}) + "\n")
+
+
+lazy_fixture([NO_TIPS], _build_no_tips)
+head_case("a lane the owner started whose branch tips cannot be read is denied, fail closed", "deny", TIP, LONE_CS, cwd=NO_TIPS)
+
+# branch_tips (hooks/git_reads.py) is the one read of a lone lane's head: the tips of the local branches of a checkout, or None when git
+# cannot read the folder. Three folders, one claim each: two branches, with a remote-tracking ref that must stay out; no branch at all (an
+# empty set, not None); and a folder that is no git tree (None).
+TIPS_REPO = os.path.join(ROOT, "tipsrepo")  # lane-tip at TIP, lane-prior at PR_HEAD, and refs/remotes/origin/other at OTHER_PR_HEAD
+EMPTY_TIPS = os.path.join(ROOT, "emptytips")  # a git init with no commit, so no branch at all
+
+
+def _build_tips_repos():
+    run_vcs(ROOT, "init", "-q", TIPS_REPO)
+    _put_commits(TIPS_REPO, ((PR_HEAD_BODY, PR_HEAD), (TIP_BODY, TIP), (OTHER_PR_BODY, OTHER_PR_HEAD)))
+    run_vcs(TIPS_REPO, "update-ref", "refs/heads/lane-tip", TIP)
+    run_vcs(TIPS_REPO, "update-ref", "refs/heads/lane-prior", PR_HEAD)
+    run_vcs(TIPS_REPO, "update-ref", "refs/remotes/origin/other", OTHER_PR_HEAD)
+    run_vcs(ROOT, "init", "-q", EMPTY_TIPS)
+
+
+lazy_fixture([TIPS_REPO, EMPTY_TIPS], _build_tips_repos)
+
+
+def _git_reads():
+    """The git_reads module the guard under test loads, read after its load: the same module the guard's merge check calls."""
+    _load_guard_module()
+    return sys.modules["git_reads"]
+
+
+def branch_tips_lists_each_branch_case():
+    """branch_tips answers the tip of each local branch and of no remote-tracking ref."""
+    got = _git_reads().branch_tips(TIPS_REPO)
+    want = {TIP, PR_HEAD}
+    if got != want:
+        return False, "branch_tips of a checkout with two local branches is %r, want %r" % (got, want)
+    return True, "branch_tips lists the tip of each local branch, and no remote-tracking ref"
+
+
+def branch_tips_empty_case():
+    """branch_tips of a checkout with no branch is an empty set, not None: None is the answer for a read that failed."""
+    got = _git_reads().branch_tips(EMPTY_TIPS)
+    if got != set():
+        return False, "branch_tips of a checkout with no branch is %r, want an empty set" % (got,)
+    return True, "branch_tips of a checkout with no branch is an empty set"
+
+
+def branch_tips_none_case():
+    """branch_tips of a folder that is no git tree is None, so the head check reads it as no tip."""
+    got = _git_reads().branch_tips(NOGIT)
+    if got is not None:
+        return False, "branch_tips of a folder that is no git tree is %r, want None" % (got,)
+    return True, "branch_tips of a folder git cannot read is None"
+
+
+LOG_CHECKS_EXTRA.append(("merge-confirm-repo: branch_tips lists the tip of each local branch and no remote-tracking ref",
+                         branch_tips_lists_each_branch_case))
+LOG_CHECKS_EXTRA.append(("merge-confirm-repo: branch_tips of a checkout with no branch is an empty set", branch_tips_empty_case))
+LOG_CHECKS_EXTRA.append(("merge-confirm-repo: branch_tips of a folder git cannot read is None", branch_tips_none_case))
+
+
+def head_own_tip_case():
+    """_head_is_own_tip (hooks/guard_merge.py) reads a head as this checkout's own tip only when the tips are read and hold it. The
+    fail-open form (tips is None or head in tips) answers yes for NO_TIPS, so this case is the direct pin of that arm; the end-to-end
+    case above is the same claim through the confirm."""
+    _load_guard_module()
+    head_is_own_tip = sys.modules["guard_merge"]._head_is_own_tip
+    if head_is_own_tip(TIP, NO_TIPS) is not False:
+        return False, "_head_is_own_tip reads a head as its own tip in a folder whose branch tips cannot be read"
+    if head_is_own_tip(TIP, LANE_TIP) is not True:
+        return False, "_head_is_own_tip does not read the tip of lane-tip in the checkout that holds it"
+    return True, "_head_is_own_tip is no where the tips cannot be read, and yes where they hold the head"
+
+
+LOG_CHECKS_EXTRA.append(("merge-confirm-repo: _head_is_own_tip is no where the branch tips cannot be read", head_own_tip_case))
 # Not judged: a merge named in quoted text, --lane-lint (no lock, no merge), and any session outside the cloud.
 repo_case("a merge named in a quoted echo is not judged", "allow", f"echo '{MERGE_SHIM} --repo-dir {REPO_B} 5 --confirm'", REPO_A, TX_A)
 repo_case("--lane-lint is not judged, whatever the record", "allow", f"{MERGE_SHIM} --lane-lint --repo-dir '{REPO_B}' 5", REPO_A, TX_NONE)
