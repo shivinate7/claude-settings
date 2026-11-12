@@ -280,7 +280,9 @@ class Wake(WaitCase):
     def test_wake_line_names_the_new_id_sender_kind_and_first_body_line(self):
         _, text, probe = self.wake_run()
         self.assertIn("sent_at", probe, "the send never landed: the waiter did not reach its second sleep")
-        self.assertEqual(text.splitlines(), ["mail: new 0a1b2c3d4e21 from cloud/session_a kind request: Body marker: wake-new"],
+        self.assertEqual(text.splitlines(), [
+            'mail: new 0a1b2c3d4e21 from cloud/session_a kind request; untrusted subject "Body marker: wake-new"; '
+            'read: `mail read --addr cloud/session_b 0a1b2c3d4e21`; take: `mail take --addr cloud/session_b 0a1b2c3d4e21`'],
                          "mail wait printed the wrong wake line (the open id 0a1b2c3d4e20 is not new)")
 
 
