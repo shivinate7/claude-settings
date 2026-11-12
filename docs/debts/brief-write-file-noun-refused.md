@@ -1,0 +1,6 @@
+# A read-only brief that says "the file" and a noun is denied
+
+- **What.** A read-only brief is refused when "the file" or "a file" comes before a noun. Examples: "Write the file:line of each finding in your reply.", "Write a file-by-file summary in your reply.", "Make the file names in the table match the code." A spawner hits it in normal work. In the review, six of 46 read-only briefs were refused. "Record each finding in your reply with file and line." is refused too, since the file-noun pattern allows two words before "file". No test row covers a determiner and a file noun. The rows in `tests/guard/s28508-rule9.py` near lines 603-605 use "each" or "in the file" only.
+- **Where.** `hooks/guard.py` `brief_write_hit`, the prose pass: `BRIEF_WRITE_FILE` and `BRIEF_WRITE_FILE_NOUN`. The decision allows "a file" as a destination only.
+- **Decision.** `brief-write-needs-writer` (a read-only agent's brief never orders a file write).
+- **Retire.** The reader counts "a file" or "the file" only as the destination after to, in, into or as. It never counts a determiner before a compound, such as "file names" or "file:line". "Create a file" stays an order. A case in the `brief-write-needs-writer` family in `tests/guard/s28508-rule9.py` checks it, with a row for each determiner and file noun.
