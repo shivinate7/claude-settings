@@ -5046,7 +5046,7 @@ IDLE_BUILD = pathlib.Path(__file__).resolve().parents[1] / "skills/roadmap/build
 
 def idle_lanes(live, repo_dir=None):
     """merge --idle-lanes: print one line per lane to archive (a lane whose handoff is not on the record branch ends with
-    HOLD, and the summary counts those), then the summary line. Exit 1 with no summary when the
+    HOLD and counts only in the summary's "M held", not in "N lanes to archive"), then the summary line. Exit 1 with no summary when the
     live file is not named or the roadmap build cannot be loaded or run, so an unread list never reads as an empty one.
     `repo_dir` is the -C checkout (None: the one the process stands in)."""
     if not live:
@@ -5074,7 +5074,7 @@ def idle_lanes(live, repo_dir=None):
     unread = bool(entries) and not lanes  # exit 1 then, so a caller never reads exit 0 as "no lanes"
     held = [x for x in lanes if build.IDLE_HOLD_MARK in x]  # lanes whose handoff is not on the record branch
     if not unread:
-        count = f"{len(lanes)} lanes to archive" + (f", {len(held)} held" if held else "")
+        count = f"{len(lanes) - len(held)} lanes to archive" + (f", {len(held)} held" if held else "")
         entries = [*entries, f"merge: {count}. Run get_session on each alone, then archive it."]
     say(*entries)
     return 1 if unread else 0

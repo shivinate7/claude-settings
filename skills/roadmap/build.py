@@ -54,7 +54,7 @@ The row "lanes to archive" (idle_lanes) lists each completed or review-ready lan
 that no open pull (on lane_head_refs) or open page item holds; `merge --idle-lanes` prints the same list. A lane tagged
 `cs-archive-ready:<slug>` whose `roadmap/outbox/<slug>-handoff.md` is not on the record branch carries a `HOLD: handoff
 <slug> is not on the record branch` flag (a bad slug, or a handoff read that fails, reads the lane unknown); the merge
-summary then reads `N lanes to archive, M held`. Cost: one batched `git cat-file --batch-check`, none with no tagged lane.
+summary then reads `N lanes to archive, M held`, N counting only the clear lanes. Cost: one batched `git cat-file --batch-check`, none with no tagged lane.
 
 This script goes red (step roadmap-pr-without-step) when a todo step is named by an open pull: it prints
 "todo step with an open PR: <id> (#N)" per pair, writes the page, then exits 1. Without a usable readAt and pulls read (sessions are not
@@ -1561,7 +1561,8 @@ def idle_lanes(work, steps, marks, slug, repo, main_branch="main", marks_why=Non
     A listed lane tagged cs-archive-ready:<slug> is held, `HOLD: handoff <slug> is not on the record branch` after its
     entry, when roadmap/outbox/<slug>-handoff.md is no file on `record_ref` (the record branch as a git ref). A slug that
     is empty, holds `/`, `..` or a line break, or whose file cannot be read (or with no `record_ref`) reads the lane
-    unknown, never clear. Cost: one batched `git cat-file --batch-check` for all tagged lanes, none with no tagged lane."""
+    unknown, never clear. The page row lists a held lane's flagged entry like any other and keeps no count of its own.
+    Cost: one batched `git cat-file --batch-check` for all tagged lanes, none with no tagged lane."""
     why = live_why(work)
     if why:
         return [why]
