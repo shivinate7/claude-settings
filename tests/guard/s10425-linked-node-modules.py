@@ -457,5 +457,25 @@ nm_case("linked-nm: workspace: npm ci --no-workspaces --workspaces in a member u
 nm_case("linked-nm: workspace: npm ci --no-workspaces -ws in a member under a linked workspace root is refused",
         "npm ci --no-workspaces -ws", "deny", NM_WS_PKG)
 
+# THE LINKED MEMBER UNDER A REAL ROOT. A member's own node_modules is a link to another install, and its root's is a real
+# folder. npm prefixes the root from the member (npm 10.9.9: `npm prefix` run in the member prints the root), so the install
+# reaches the member's link through the root. Measured with npm 10.9.9 on a scratch copy: an `npm install` run in the root
+# printed "removed 2 packages" and took a package the lock lacks out of the link's target. The guard reads only the root's
+# real folder, so it allows each of these forms. The allow rows are the same forms under a real root with no member link.
+nm_case("linked-nm: member link: npm install from a member whose node_modules is a link, under a real root, is refused",
+        "npm install", "deny", NM_WSLINK_MEMBER)
+nm_case("linked-nm: member link: npm ci from a member whose node_modules is a link, under a real root, is refused",
+        "npm ci", "deny", NM_WSLINK_MEMBER)
+nm_case("linked-nm: member link: npm install from the root, whose node_modules is real, is refused",
+        "npm install", "deny", NMWSLINK)
+nm_case("linked-nm: member link control: npm install from a member with no node_modules, under the same real root, is allowed",
+        "npm install", "allow", NM_WSLINK_PLAIN)
+nm_case("linked-nm: member link control: npm install from the member, under NMWSREAL, a real root, is allowed",
+        "npm install", "allow", os.path.join(NMWSREAL, "packages", "a"))
+nm_case("linked-nm: member link control: npm ci from the member, under NMWSREAL, a real root, is allowed",
+        "npm ci", "allow", os.path.join(NMWSREAL, "packages", "a"))
+nm_case("linked-nm: member link control: npm install from the root, under NMWSREAL, a real root, is allowed",
+        "npm install", "allow", NMWSREAL)
+
 
 # =========================================================================== 4. environment files
