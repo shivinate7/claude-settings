@@ -64,7 +64,7 @@ Text: `ANSWERED_REASON`, rule `answered-needs-source` (a claim of "answered" nee
 
 ### Recovered and Handoff gave (no check)
 
-The Recovered guard is removed (decision cull-guard-wrong-refusals, the guard cull). No check asks for a `Recovered:` or `Handoff gave:` line. `LABEL_RE` in `lint/report_guard.py` still reads a bold **Recovered:** or **Handoff gave:** label as no report label.
+The Recovered guard is removed (owner R5, relayed by the coordinator at 11:22 CST Nov 12; decision cull-guard-wrong-refusals gives the rule: fix or delete, whichever costs less). No check asks for a `Recovered:` or `Handoff gave:` line. `LABEL_RE` in `lint/report_guard.py` still reads a bold **Recovered:** or **Handoff gave:** label as no report label.
 
 ### Departs-from guard (any reply with a pick)
 
