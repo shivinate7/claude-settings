@@ -419,10 +419,11 @@ class Queue(LeaseCase):
 
 
     def test_a_timed_out_take_leaves_the_queue(self):
-        holder, head, later = self.spawn(), self.spawn(), self.spawn()
+        holder, pro_holder, head, later = self.spawn(), self.spawn(), self.spawn(), self.spawn()
         self.assertEqual(grant(self.take("duo", holder.pid)), (0, "1"), "the first duo take is not granted slot 1")
+        self.assertEqual(grant(self.take("pro", pro_holder.pid)), (0, "pro"), "the pro holder is not granted pro")
         r = self.take("pro", head.pid, wait=1)
-        self.assertEqual(r.returncode, 1, "a pro take with a duo held is not refused")
+        self.assertEqual(r.returncode, 1, "a pro take is granted while pro is held")
         self.assertFalse(mentions(self.status().stdout, head.pid), "the timed-out pro take is still on the queue")
         self.assertEqual(grant(self.take("duo", later.pid)), (0, "2"),
                          "a timed-out waiter still blocks the next duo take")
