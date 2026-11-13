@@ -9443,9 +9443,10 @@ class ReadyPageState(RecordsEnv):
 
 class MergeImport(unittest.TestCase):
     """merge.py imports the records generator when it loads. With that import blocked, the tool prints one clear line and
-    exits non-zero, with no traceback."""
-    def tool_root(self):
-        """A root with merge/merge.py copied in, and a gh shim that fails if the tool reaches it."""
+    exits non-zero, with no traceback. A lone copy of the tool, laid out as the guard's copy is, must also import."""
+    def tool_root(self, layout=False):
+        """A root with merge/merge.py copied in, and a gh shim that fails if the tool reaches it. layout=True adds the guard's copy
+        layout (hooks/mutate_guard.py lay_out_guard_reads): events.json beside the tool, and the hooks and lint folders."""
         root = os.path.realpath(tempfile.mkdtemp(prefix="test-merge-import-", dir=run_folder()))
         self.addCleanup(shutil.rmtree, root, True)
         tool = os.path.join(root, "merge", "merge.py")
@@ -9455,7 +9456,40 @@ class MergeImport(unittest.TestCase):
         old = os.environ.get("PATH", "")
         os.environ["PATH"] = os.path.join(root, "bin") + os.pathsep + old
         self.addCleanup(os.environ.__setitem__, "PATH", old)
+        if layout:
+            alarm = os.path.join(root, "actions", "ci-alarm")
+            os.makedirs(alarm)
+            shutil.copyfile(os.path.join(HERE, "..", "actions", "ci-alarm", "events.json"), os.path.join(alarm, "events.json"))
+            for folder in ("hooks", "lint"):
+                shutil.copytree(os.path.join(HERE, "..", folder), os.path.join(root, folder), ignore=shutil.ignore_patterns("__pycache__"))
         return root, tool
+
+    def import_tool(self, root, tool):
+        """Load the tool as hooks/guard_merge.py loads it (spec_from_file_location), in a child with cwd root. -> the run."""
+        probe = ("import importlib.util, sys; spec = importlib.util.spec_from_file_location('merge_tool', sys.argv[1]); "
+                 "module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)")
+        return subprocess.run([sys.executable, "-I", "-c", probe, tool], cwd=root, capture_output=True, text=True)
+
+    def test_a_lone_copy_with_no_revert_rule_beside_it_imports(self):
+        # Named failure: merge.py imports revert_rule at the top, so the import fails with ModuleNotFoundError and the guard
+        # cannot load the tool.
+        root, tool = self.tool_root(layout=True)
+        alarm = os.path.join(root, "actions", "ci-alarm")
+        self.assertTrue(os.path.isfile(os.path.join(alarm, "events.json")), "scope: the copy has no events.json beside it")
+        self.assertTrue(os.path.isdir(os.path.join(root, "hooks")) and os.path.isdir(os.path.join(root, "lint")),
+                        "scope: the copy has no hooks or lint folder")
+        self.assertFalse(os.path.exists(os.path.join(alarm, "revert_rule.py")), "scope: revert_rule.py is beside the copy")
+        r = self.import_tool(root, tool)
+        last = (r.stderr.strip().splitlines() or ["(no stderr)"])[-1]
+        self.assertEqual(r.returncode, 0, "a lone copy of merge.py does not import: " + last)
+
+    def test_the_same_copy_with_revert_rule_beside_it_imports(self):
+        # The control: the same layout with revert_rule.py beside events.json imports, so the case above fails on that file alone.
+        root, tool = self.tool_root(layout=True)
+        shutil.copyfile(os.path.join(HERE, "..", "actions", "ci-alarm", "revert_rule.py"), os.path.join(root, "actions", "ci-alarm", "revert_rule.py"))
+        r = self.import_tool(root, tool)
+        last = (r.stderr.strip().splitlines() or ["(no stderr)"])[-1]
+        self.assertEqual(r.returncode, 0, "the copy with revert_rule.py beside it does not import: " + last)
 
     def assert_one_clear_line(self, r, *names):
         out = r.stdout + r.stderr
@@ -11789,6 +11823,15 @@ class RedMainBrake(Env):
         self.assertIn("UNKNOWN", out, "a failed read of the reverts is not unknown")
         self.assertIn("the read failed", out, "the refusal does not say the read failed")
         self.assertIn("reading the reverts on origin/main failed", out, "the refusal does not name the failed read")
+
+    def test_a_failed_run_with_no_red_job_clears_when_its_revert_merges(self):
+        # a broken workflow file: startup_failure and no job, so no red job names it. Its revert on main clears it, as it clears a red job.
+        # Named failure: the run with no job is judged red without its revert being read, so the merge is refused.
+        rev = self.revert_of(self.RED_SHA)
+        rc, out, _ = self.go([main_run(self.RED_RUN, "startup_failure", sha=self.RED_SHA)], {self.RED_RUN: []})
+        self.merged(rc, out, self.NOT_CLEARED)
+        self.assertIn(rev[:7], out, "the clear does not name the revert's sha")
+        self.assertIn(f"run {self.RED_RUN}", out, "the clear does not name the red run it clears")
 
     # The breaking merge (decision no-merge-onto-red-main, the revert route): a red push run whose parent run is green is the run a merge broke.
     # The refusal names that run's commit and its pull request, read from the run's head commit message. A first red names its re-run first,
