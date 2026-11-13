@@ -134,15 +134,16 @@
                           set and leaves the pull request as it is, draft or ready; a late PR, a moved head or a lane left out is refused,
                           and nothing is pushed or edited. Runs no lane lint and no ready check, waits for no CI, takes no lock.
                           A new build, and --ready, first read each lane's draft run of lane-touched-tests at its frozen head: a failed
-                          Windows or macOS job refuses the build, naming the lane and the link, before any push. Cost: one check-runs read per lane
-                          per build; the batch's own head is never read.
+                          Windows or macOS job refuses the build, naming the lane and the link, before any push; a run still running or missing
+                          does not stop a new build (--ready refuses it, below). Cost: one check-runs read per lane per build; the batch's own head is never read.
+                          --lane-lint reads the draft run only for a lane PR, never for a batch integration PR.
                           A cloud run needs the batch-runner role.
   merge --batch-build NAME [PR ...] --ready [--lint-unknown-ok REASON]
                           lint the head of batch-NAME once (the lint of --lane-lint), run the repo's ready checks on it, and record the
                           head that passed (Linted:). Then it asks the host to mark the draft ready. Host.ready sends nothing, so on a
                           real host the run stops there and names the session's route to mark it ready. A FAIL of the lint or of a ready
                           check stores each lane it names (Blamed:) and prints its drop command. A FAIL, or an unknown with no reason,
-                          leaves the draft and exits 1. A lane's draft run still running, or missing, refuses here too, and --lint-unknown-ok lifts it. A PR list, if given, must be the frozen set. A ready pull request whose head is the
+                          leaves the draft and exits 1. A lane's draft run still running, missing, or skipped refuses here, naming --lint-unknown-ok, which a non-blank reason lifts; a failed one never lifts. A PR list, if given, must be the frozen set. A ready pull request whose head is the
                           Linted head is left as it is. Takes no lock. A cloud run needs the batch-runner role.
   merge --batch-build NAME --blame PR --run URL
                           store Blamed: #PR in batch-NAME's block, so --batch-drop may take PR off. URL is the Actions run that blames it:
@@ -1350,7 +1351,8 @@ class Host:
     def draft_run_state(self, sha):
         """-> (state, lines): the verdict of the draft's lane-touched-tests run on the head `sha`, from ONE read of its check runs (no statuses).
         "fail": the `touched` job or a Windows or macOS test job finished with a conclusion other than success, skipped or neutral; `lines` name each job and its link.
-        "wait": one of those jobs has not finished. "unknown": no `touched` job is on `sha`, so no run was judged for this head (a run of an older head is never read).
+        "wait": one of those jobs has not finished. "unknown": no `touched` job is on `sha`, so no run was judged for this head (a run of an older head is never read),
+        or `touched` was skipped, as a never-drafted or ready lane's is: no touched test ran, so there is no proof.
         "pass": `touched` succeeded and every test job that ran succeeded or was skipped. Of rows that share a name (a re-run), the newest id counts: a re-run that passed clears the old failure."""
         newest = {}
         for r in self.pages(f"commits/{sha}/check-runs", "check_runs"):
@@ -1367,6 +1369,8 @@ class Host:
             return "wait", waiting
         if self.DRAFT_TOUCHED not in newest:
             return "unknown", [f"no `{self.DRAFT_TOUCHED}` job (lane-touched-tests) has run on {sha[:9]}"]
+        if newest[self.DRAFT_TOUCHED].get("conclusion") == "skipped":
+            return "unknown", [f"the `{self.DRAFT_TOUCHED}` job (lane-touched-tests) was skipped on {sha[:9]}, so no touched test ran: {newest[self.DRAFT_TOUCHED].get('html_url') or newest[self.DRAFT_TOUCHED].get('details_url') or '(no link)'}"]
         return "pass", []
 
     def superseded(self, items, sha):
@@ -3218,7 +3222,9 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
         if target.isdigit():
             cross_fails, reports, stop = cross_measure(root, head, int(target), info["body"], host, with_prs, base, fetched, why is None, is_integration_pr(info))
             fails += cross_fails
-            draft, draft_lines = host.draft_run_state(head)  # one check-runs read: the draft's Windows and macOS runs, which this Linux lint never runs
+            # one check-runs read: the draft's Windows and macOS runs, which this Linux lint never runs. A batch integration PR has no draft run of its own
+            # (a lane's run is the proof), so it reads none.
+            draft, draft_lines = ("pass", []) if is_integration_pr(info) else host.draft_run_state(head)
             if draft == "fail":
                 fails.append(f"its draft run of lane-touched-tests failed on {head[:9]}: " + "; ".join(draft_lines))
             elif draft != "pass" and not (fails or stop):
@@ -5078,16 +5084,18 @@ def batch_ready_checks(root, cfg, pr, name, branch, base):
     finally:
         drop_worktree(root, tmp, wt)
 
-def refuse_draft_runs(h, heads, unknown_ok=""):
+def refuse_draft_runs(h, heads, unknown_ok="", ready=False):
     """Reads each lane's draft run of lane-touched-tests at its frozen head (Host.draft_run_state, one check-runs read per lane) and refuses before the build
-    pushes or readies anything. A failed Windows or macOS job (or touched job) refuses always, naming the lane and the link. A run unfinished or missing refuses
-    unless `unknown_ok` gives a reason, which is logged. The batch's own head is never read: a lane's run is the proof, and the batch's run is the CI the batch waits on."""
+    pushes or readies anything. A failed Windows or macOS job (or touched job) refuses always, naming the lane and the link; --lint-unknown-ok never lifts it.
+    A plain build (`ready` False) refuses only that: a run unfinished or missing does not stop it, since the lanes are still in draft. With `ready`, a run
+    unfinished or missing (or a skipped touched job) refuses, naming --lint-unknown-ok, unless `unknown_ok` gives a non-blank reason, which is logged.
+    The batch's own head is never read: a lane's run is the proof, and the batch's run is the CI the batch waits on."""
     fails, unknowns = [], []
     for n in sorted(heads):
         state, lines = h.draft_run_state(heads[n])
         if state == "fail":
             fails.append(f"#{n}: its draft run of lane-touched-tests failed on {heads[n][:9]}: " + "; ".join(lines))
-        elif state != "pass":
+        elif state != "pass" and ready:
             unknowns.append((f"#{n}: its draft run of lane-touched-tests on {heads[n][:9]} is {'not finished' if state == 'wait' else 'unknown'}, not a pass: " + "; ".join(lines)))
     if fails:
         raise Stop("\n".join([*fails, *unknowns, f"Nothing was pushed. Drop the lane from the batch, or fix it and push. {FREEZE_CITE}"]))
@@ -5134,7 +5142,7 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", co
             raise Stop(f"--on {on}: {on} has no open pull request that holds a frozen block, so it is not a running batch. {FREEZE_CITE}")
     found = found or h.batch_pr(branch)
     if found is None:
-        refuse_draft_runs(h, heads, unknown_ok)
+        refuse_draft_runs(h, heads, unknown_ok)  # a plain build: only a failed run refuses
         start = fetch_branch(root, on or base, FREEZE_CITE)
         for n in numbers:
             if fetch_branch(root, infos[n]["branch"], FREEZE_CITE) != heads[n]:
@@ -5173,7 +5181,7 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", co
         say(f"merge: batch {name} was on {on}, which has merged into {base}; it is checked against {base}.")
         on, block = None, {**block, "on": None, "base": fetch_branch(root, base, FREEZE_CITE)}
     if ready:
-        refuse_draft_runs(h, heads, unknown_ok)
+        refuse_draft_runs(h, heads, unknown_ok, ready=True)
     rc = sync_batch(root, h, pr, info, block, on, base)
     if ready:
         cfg = load_config(root, base, config, " " + FREEZE_CITE)  # before the lint: a config that cannot be read stops the run before the 14 minutes
