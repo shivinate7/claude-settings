@@ -683,6 +683,8 @@ R44_REF = ('docs/decisions/%s.md: "Pins stay current on demand: the session that
 R44_TEXT = ("- **R44. Child repos follow claude-settings, with cited exceptions only.** Free text: decision %s "
             "says pins move only when a session sees drift." % SLUG)
 R46_TEXT = "- **R46. Fixture ruling with a free-text mention only.** Free text: decision %s stands as written." % FREE
+R47_REF = "test-strategy-reset: Reset of the test strategy: the old test plan no longer applies."  # slug first
+R47_TEXT = "- **R47. Fixture ruling that replaces the test strategy.** Free text: a new strategy note, nothing more."
 CITE_FORMS = ("docs/decisions/%s.md", "`docs/decisions/%s`", "decision %s", "decisions `%s`", "decision `%s`")
 GIT_IDENT = {"GIT_AUTHOR_NAME": "fixture", "GIT_AUTHOR_EMAIL": "fixture@example.invalid",
              "GIT_COMMITTER_NAME": "fixture", "GIT_COMMITTER_EMAIL": "fixture@example.invalid"}
@@ -694,15 +696,17 @@ def settled_text(sentence, cite):
 
 
 def ruling_json(rid, ruling, refs=()):
+    """refs: a ref string (kind main-sentence, the docs-path shape) or a {"kind", "ref"} dict."""
+    supersedes = [r if isinstance(r, dict) else {"kind": "main-sentence", "ref": r} for r in refs]
     return json.dumps({"id": rid, "at": "2026-11-11T14:05:00-06:00", "ruling": ruling, "status": "open",
-                       "supersedes": [{"kind": "main-sentence", "ref": ref} for ref in refs],
-                       "title": "Fixture ruling %s." % rid}, indent=1) + "\n"
+                       "supersedes": supersedes, "title": "Fixture ruling %s." % rid}, indent=1) + "\n"
 
 
 def store_files():
-    """The rulings a real store holds: r44 supersedes SLUG, r46 names FREE in its free text, and the filler
-    brings the store to full size, about 150 rulings."""
-    files = {"r44.json": ruling_json("r44", R44_TEXT, (R44_REF,)), "r46.json": ruling_json("r46", R46_TEXT)}
+    """The rulings a real store holds: r44 supersedes SLUG in the docs-path shape, r47 supersedes a slug in the
+    slug-first shape, r46 names FREE in its free text, and the filler brings the store to full size."""
+    files = {"r44.json": ruling_json("r44", R44_TEXT, (R44_REF,)), "r46.json": ruling_json("r46", R46_TEXT),
+             "r47.json": ruling_json("r47", R47_TEXT, ({"kind": "decision", "ref": R47_REF},))}
     for n in range(1, 151):
         files.setdefault("r%d.json" % n, ruling_json("r%d" % n, "Filler ruling %d, supersedes nothing." % n))
     return files
@@ -723,11 +727,12 @@ def ref_resolves(repo, ref):
     return git_out(repo, "rev-parse", "--verify", "--quiet", ref, check=False).returncode == 0
 
 
-def make_repo(name, rulings=None, ref="roadmap"):
+def make_repo(name, rulings=None, ref="roadmap", origin_extra=None):
     """A repo under the run folder, with a main commit. `rulings` (file name -> JSON text) makes a store commit
     under roadmap/rulings/. `ref` names the store commit: "roadmap" (the local branch), "origin" (the
     remote-tracking ref refs/remotes/origin/roadmap) or None (no store ref). With no rulings, the store commit
-    is the main commit, so the ref holds no rulings."""
+    is the main commit, so the ref holds no rulings. `origin_extra` (file name -> JSON text) is committed on top
+    of the store as origin/roadmap, so the local ref can lack a ruling that origin has."""
     repo = os.path.join(ROOT, name)
     os.makedirs(repo)
     git_out(repo, "init", "-q")
@@ -750,6 +755,16 @@ def make_repo(name, rulings=None, ref="roadmap"):
         git_out(repo, "update-ref", "refs/heads/roadmap", store)
     elif ref == "origin":
         git_out(repo, "update-ref", "refs/remotes/origin/roadmap", store)
+    if origin_extra:
+        folder = os.path.join(repo, "roadmap", "rulings")
+        os.makedirs(folder, exist_ok=True)
+        for fname, text in origin_extra.items():
+            with open(os.path.join(folder, fname), "w", encoding="utf-8") as f:
+                f.write(text)
+        git_out(repo, "add", "roadmap")
+        tree = git_out(repo, "write-tree").stdout.strip()
+        origin = git_out(repo, "commit-tree", tree, "-p", store, "-m", "origin").stdout.strip()
+        git_out(repo, "update-ref", "refs/remotes/origin/roadmap", origin)
     return repo
 
 
@@ -772,6 +787,10 @@ def store(kind):
             STORES[kind] = make_repo("empty", None, ref="roadmap")
         elif kind == "absent":
             STORES[kind] = make_repo("absent", None, ref=None)
+        elif kind == "stale-local":  # the local roadmap ref lacks r44, and origin/roadmap has it
+            full = store_files()
+            STORES[kind] = make_repo("stale-local", {k: v for k, v in full.items() if k != "r44.json"},
+                                     ref="roadmap", origin_extra={"r44.json": full["r44.json"]})
         elif kind == "broken":
             STORES[kind] = make_repo("broken", store_files())
             drop_blob(STORES[kind], "roadmap", R44_PATH)
@@ -946,6 +965,86 @@ def case_prefix_slug_does_not_match():
     check("prefix slug %s: the store is read by one git start" % PREFIX, len(r.rulings_reads) == 1, detail(r))
 
 
+# ---- round 2 of the past-ruling check: a later slug in a list, the slug-first ref shape, more settling
+# phrases, negations, a payload with no cwd, a stale local ref, and the refusal's remedy text.
+
+
+def case_second_slug_in_a_list_is_caught():
+    check("fixture: test-practices is in no ref line, so only the later slug is superseded",
+          "test-practices" not in R44_REF + R47_REF)
+    for text in ("Settled, per decisions test-practices and %s." % SLUG,
+                 "Settled. Decision: %s." % SLUG,
+                 "Settled. decisions/%s.md." % SLUG):
+        r = past_run(text, "full")
+        reason = denied(r) or ""
+        check("second slug in a list (%r): deny naming %s and r44, not test-practices" % (text, SLUG),
+              reason.startswith("past-ruling: ") and SLUG in reason and "r44" in reason
+              and "test-practices" not in reason, detail(r))
+
+
+def case_slug_first_ref_shape_supersedes():
+    text = store_text(store("full"), "roadmap", "roadmap/rulings/r47.json")
+    check("fixture: r47's ref line is slug first: \"ref\": \"test-strategy-reset: ...\"",
+          '"ref": "test-strategy-reset: ' in text, " ".join(text.split())[:160])
+    r = past_run("Settled, per decision test-strategy-reset.", "full")
+    reason = denied(r) or ""
+    check("slug-first ref shape (r47): deny naming test-strategy-reset and r47",
+          reason.startswith("past-ruling: ") and "test-strategy-reset" in reason and "r47" in reason, detail(r))
+    r = past_run("Settled, per decision %s." % SLUG, "full")
+    reason = denied(r) or ""
+    check("the docs-path ref shape (r44) still denies, naming %s and r44" % SLUG,
+          reason.startswith("past-ruling: ") and SLUG in reason and "r44" in reason, detail(r))
+
+
+def case_already_decided_phrase_denies():
+    r = past_run("Already decided: see decision %s." % SLUG, "full")
+    reason = denied(r) or ""
+    check("'already decided' settles: deny naming %s and r44" % SLUG,
+          reason.startswith("past-ruling: ") and SLUG in reason and "r44" in reason, detail(r))
+
+
+def case_negated_settling_word_is_allowed():
+    for text in ("Not settled yet: decision %s may still apply." % SLUG,
+                 "This isn't settled: decision %s may still apply." % SLUG,
+                 "It is unsettled: decision %s may still apply." % SLUG):
+        r = past_run(text, "full")
+        check("negated settling word (%r): allow (exit 0, no output, no stderr), no git start, judge reached" % text,
+              r.code == 0 and r.out == "" and r.err == "" and not r.git_starts and len(r.wording_calls) == 1,
+              detail(r) + " git=%r" % r.git_starts)
+
+
+def case_no_cwd_allows_with_one_stderr_line():
+    r = run_hook(hook_input(message=settled_text(SETTLING[0][1], "`decision %s`" % SLUG)),
+                 reader_mode="idle", cwd=store("plain"))
+    lines = r.err.strip().splitlines()
+    check("no cwd in the payload: one stderr line saying the rulings store was not read",
+          len(lines) == 1 and "rulings store" in lines[0] and "not read" in lines[0], detail(r))
+    check("no cwd in the payload: allow (exit 0, no output), no git start",
+          r.code == 0 and r.out == "" and not r.git_starts, detail(r))
+
+
+def case_stale_local_ref_checks_origin():
+    repo = store("stale-local")
+    check("fixture: the local roadmap ref lacks r44, and origin/roadmap has it",
+          store_text(repo, "roadmap", R44_PATH) == ""
+          and '"ref": "docs/decisions/%s.md' % SLUG in store_text(repo, "origin/roadmap", R44_PATH))
+    r = past_run(settled_text(SETTLING[0][1], "`decision %s`" % SLUG), "stale-local")
+    reason = denied(r) or ""
+    check("local roadmap stale, origin/roadmap has the ruling: deny naming %s and r44" % SLUG,
+          reason.startswith("past-ruling: ") and SLUG in reason and "r44" in reason, detail(r))
+
+
+def case_refusal_remedy_is_generic():
+    r = past_run(settled_text(SETTLING[0][1], "`decision %s`" % SLUG), "full")
+    reason = denied(r) or ""
+    check("refusal names the decision and the ruling (r44)", SLUG in reason and "r44" in reason,
+          detail(r) + " reason=%r" % reason)
+    check("refusal has no 'reply without citing %s' sentence" % SLUG,
+          ("reply without citing %s" % SLUG) not in reason.lower(), detail(r) + " reason=%r" % reason)
+    check("refusal remedy is generic: re-check the later ruling, and an owner override lifts it",
+          "re-check" in reason.lower() and "override" in reason.lower(), detail(r) + " reason=%r" % reason)
+
+
 def case_hook_runs():
     for case in (case_model_row_names_the_call,
                  case_wording_call_carries_its_model_and_no_effort,
@@ -973,7 +1072,14 @@ def case_hook_runs():
                  case_absent_store_allows_silently,
                  case_broken_store_fails_open_with_one_stderr_line,
                  case_free_text_decision_is_not_superseded,
-                 case_prefix_slug_does_not_match):
+                 case_prefix_slug_does_not_match,
+                 case_second_slug_in_a_list_is_caught,
+                 case_slug_first_ref_shape_supersedes,
+                 case_already_decided_phrase_denies,
+                 case_negated_settling_word_is_allowed,
+                 case_no_cwd_allows_with_one_stderr_line,
+                 case_stale_local_ref_checks_origin,
+                 case_refusal_remedy_is_generic):
         try:
             case()
         except subprocess.TimeoutExpired as exc:  # run_hook's cap: one FAIL line naming the case, no traceback
