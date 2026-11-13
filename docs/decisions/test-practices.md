@@ -28,10 +28,12 @@ P4. Make each failure message name one cause.
 - claude-settings hooks/mutate_guard.py — a red on the wrong case reads WRONG CAUSE, not a kill.
 Applies to: every test; guards and checks.
 
-P5. Never use a fixed sleep or a wall-clock wait bound; wait on a marker file or a condition. Never put a real clock or machine load in an assert; use an injected clock or a same-process ratio.
+P5. A timed test is allowed, but first ask whether it is needed. A test whose verdict depends on elapsed time uses a synthetic clock, so machine load cannot change it. A hang guard, a wait cap that only stops a hung test, is a good use of a timed wait (owner, 2026-11-07 13:00 CST, for these three sentences). The rest is our reading, not the owner's words. A per-test or per-suite time limit is a hang guard too (coordinator pick, 2026-11-07 13:32 CST). A hang guard's cap sits well above the measured run. A test waits on a marker file or a condition, never a fixed sleep. A date, a time-zone offset or a DST switch is a real clock too. An assert never reads the real date or time-zone offset; inject the clock. A fixture stamped from the real clock, then judged by code that reads that clock again, uses one injected clock for both. A floor on a fixture's own delay is allowed: load only lengthens it.
 - claude-settings plan c95-step2-escapes (roadmap branch) — 24 of 34 red runs on main were timing or load asserts.
 - q_max b14be7a95 — a fixed wait went false-green under load.
 - mailaudit 99bc9df — cases that waited real seconds moved to a virtual clock, asserts unchanged.
+- joyous PR 68 — main went red on 2026-11-03 because a test read the real clock; the fix pins the tour test's clock.
+- degen branch `l4-row-wait` — a test counted rows before they rendered; wait on the rendered condition, then count.
 Applies to: every test.
 
 P6. Treat a flake as a defect report: find its cause and make it deterministic before you widen a bound.
@@ -70,9 +72,9 @@ Applies to: guards and checks.
 
 P2 (red on a named old commit) is held by lint/check_red_run.py (decision red-run-trailer-on-test-commits).
 
-### Checks that could hold these (not built)
+### Checks that could hold these (P7 not built)
 
-- P5 (no sleep or clock): a lint for wall-clock reads and fixed sleeps in test asserts (time.time, performance.now, Date.now, sleep).
+- P5 (a verdict that depends on elapsed time uses a synthetic clock): built in part as lint/find_time_pinned.py, which lists sleep, elapsed-assert, test-cap and wait-cap. It lists no date or time-zone read as its own kind.
 - P7 (scope first): a lint for an assert inside a conditional on the subject's presence, such as `if (await x.count())`.
 - P3 (named cause): the mutation report already counts a crash as no kill (hooks/mutate_shared.py).
 
