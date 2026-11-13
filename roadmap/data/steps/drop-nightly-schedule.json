@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "The nightly run found nothing in 45 nights that the push runs had not found (8 failures, each already red on its push run).",
  "source": "owner 22:19 CST Nov 12, item 683 a (store entry drop-nightly-schedule); restart-plan 352e35f1 R61 part 3",
- "note": "Remove the `cron: \"17 3 * * *\"` trigger from .github/workflows/checks.yml; keep workflow_dispatch. Rewrite skill ci-hygiene step 4 (\"Add a nightly full run\") and step 17's nightly line. Step red-nightly-cleared-by-push is done and goes moot with this.",
- "updatedAt": "2026-11-12T23:18:28-06:00"
+ "note": "Remove the `cron: \"17 3 * * *\"` trigger from .github/workflows/checks.yml; keep workflow_dispatch. Rewrite skill ci-hygiene step 4 (\"Add a nightly full run\") and step 17's nightly line. Step red-nightly-cleared-by-push is done and goes moot with this. TOP PRIORITY, tracked until it lands on main 15:58 CST Nov 13 (owner 15:56 CST via the consultant: \"this needs to be in the most explicit way possible one of your top most priorities ... what to be tracking till it lands on main\"). Placed ahead of the rest of the queue. Part of the CI-speed cuts: #3021 (in #3278), #3042, #3217, #3088. Triage checks each at every batch review and says where it stands until it is on main. Owner question on what the push skip covers: page item 769.",
+ "updatedAt": "2026-11-13T15:58:02-06:00"
 }
