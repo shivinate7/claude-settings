@@ -25,18 +25,39 @@ done < <([ -f .ste-lint-exclude ] && cat .ste-lint-exclude; echo; printf '%s\n' 
 RAW_FILES=()
 FILES=()
 NO_FROM=""  # why the start of the diff is missing, when it is
-UNKNOWN=""  # why no changed file was read; the step then exits 0 unless stale-cites fails
+UNKNOWN=""  # why no file was read; the step then exits non-zero, fail=false too (decision ci-unknown-is-red)
+DEEPENED=""
+
+# A shallow clone may hold the history after one full fetch; any other repo never fetches. Returns 0 only when it
+# fetched, so the caller reads again once. A failed fetch leaves the read unknown, which the caller reports.
+deepen_once() {
+  [ -z "$DEEPENED" ] || return 1
+  [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ] || return 1
+  DEEPENED=1
+  echo "ste-lint: this clone is shallow, so the step fetches the full history once (git fetch --unshallow origin)."
+  git fetch --unshallow origin || true
+}
+
 if [ "$SCOPE" = "all" ]; then
   # ':(glob)' turns on real double-star matching. Without it, git's default
   # pathspec needs a literal '/' for '**/', so a root file such as README.md
   # never matches '**/*.md' (measured).
   # -z on every list of names: git quotes a non-ASCII name ("caf\303\251.md") in a newline list.
-  while IFS= read -r -d '' f; do
-    RAW_FILES+=("$f")
-  done < <(git ls-files -z -- ":(glob)$PATHS_GLOB")
-  while IFS= read -r -d '' f; do
-    FILES+=("$f")
-  done < <(git ls-files -z -- ":(glob)$PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"})
+  # Each list goes to a file first, so git's exit status is checked: inside `< <(...)` it is dropped, and a refused
+  # pathspec would look like "no markdown changed". A failed read is unknown.
+  READ_DIR="$(mktemp -d)"
+  if git ls-files -z -- ":(glob)$PATHS_GLOB" > "$READ_DIR/raw" &&
+     git ls-files -z -- ":(glob)$PATHS_GLOB" ${EXCLUDE_PATHSPECS[@]+"${EXCLUDE_PATHSPECS[@]}"} > "$READ_DIR/files"; then
+    while IFS= read -r -d '' f; do
+      RAW_FILES+=("$f")
+    done < "$READ_DIR/raw"
+    while IFS= read -r -d '' f; do
+      FILES+=("$f")
+    done < "$READ_DIR/files"
+  else
+    UNKNOWN="git could not list the files for the paths input and the exclude pathspecs, so no file was read. Nothing was checked. Check them, then run again."
+  fi
+  rm -rf "$READ_DIR"
 else
   if [ -n "$BASE_REF" ]; then
     BASE="$BASE_REF"
@@ -51,19 +72,22 @@ else
     RANGE="HEAD~1..HEAD"
     FROM="HEAD~1"
     # A root commit, or a shallow clone, has no HEAD~1: the diff would read nothing. Unknown, not "no markdown changed".
-    if ! git rev-parse --verify -q "$FROM^{commit}" >/dev/null; then
+    if ! git rev-parse --verify -q "$FROM^{commit}" >/dev/null && { ! deepen_once || ! git rev-parse --verify -q "$FROM^{commit}" >/dev/null; }; then
       FROM=""
       NO_FROM="HEAD~1 does not exist (a root commit or a shallow clone), so no changed file was read. Nothing was checked. Check out with fetch-depth 0 (actions/checkout) so the history is there."
     fi
   else
     RANGE="origin/$BASE...HEAD"
     FROM="$(git merge-base "origin/$BASE" HEAD 2>/dev/null)" || FROM=""
+    if [ -z "$FROM" ] && deepen_once; then
+      FROM="$(git merge-base "origin/$BASE" HEAD 2>/dev/null)" || FROM=""
+    fi
   fi
   UNTRACKED=()
   STALE_RANGE="$RANGE"  # a clean tree, as in CI, passes RANGE to stale-cites unchanged, as main does
   if [ -z "$FROM" ]; then
-    # No merge base (an unrelated history, or a shallow clone): the base is unknown, not a finding (decision
-    # stale-cites-at-merge, rule verification-report-unknown-reads). stale-cites prints its own unknown line.
+    # No merge base (an unrelated history, or a shallow clone that one deepen did not fix): the base is unknown, and an
+    # unknown read is red (decisions stale-cites-at-merge and ci-unknown-is-red). stale-cites prints its own unknown line.
     UNKNOWN="${NO_FROM:-no merge base between origin/$BASE and HEAD, so no changed file was read. Nothing was checked. Check out with fetch-depth 0 (actions/checkout) so the history is there.}"
   # The one changed set, for both steps below: the diff from FROM to WORK, plus the files git does not track.
   # First git's content check says whether the tracked files differ from HEAD. It runs on a private copy of the
@@ -126,8 +150,8 @@ else
     fi
     rm -rf "$READ_DIR"
   fi
-  [ -z "$UNKNOWN" ] || echo "ste-lint: unknown, $UNKNOWN"
 fi
+[ -z "$UNKNOWN" ] || echo "ste-lint: unknown, $UNKNOWN"
 
 # In-script fallback: a caller that passes a plain glob (no ':(exclude)' magic
 # understanding needed) still gets it dropped here.
@@ -180,6 +204,15 @@ LOG_OUT="$(mktemp)"
 # "no markdown changed" exit, so a code-only PR is checked. Its findings never go through the split
 # script below: every stale line is untouched by the range, and the split makes an untouched line
 # report-only. FAIL=false prints them and keeps the exit 0, as it does for the STE findings.
+# stale_run_exit CODE OUTFILE: one run's exit. fail=false mutes findings only: a run that exits non-zero is zeroed when its
+# last line starts `stale-cites: FAIL`. An unknown read (exit 2, or last line `stale-cites: UNKNOWN`) or a crash stays red.
+stale_run_exit() {
+  if [ "$1" -ne 0 ] && [ "${FAIL:-true}" != "true" ] && [[ "$(tail -n 1 "$2")" == "stale-cites: FAIL"* ]]; then
+    echo 0
+  else
+    echo "$1"
+  fi
+}
 STALE_EXIT=0
 if [ -n "${STALE_RANGE:-}" ]; then
   STALE_OUT="$(mktemp)"
@@ -187,6 +220,7 @@ if [ -n "${STALE_RANGE:-}" ]; then
   python3 "$STALE_CITES" --range "$STALE_RANGE" > "$STALE_OUT"
   STALE_EXIT=$?
   set -e
+  STALE_EXIT="$(stale_run_exit "$STALE_EXIT" "$STALE_OUT")"
   # stale-cites reads committed trees, so it never reads an untracked Markdown file: no PASS while one exists.
   UNREAD=""
   for u in ${UNTRACKED[@]+"${UNTRACKED[@]}"}; do
@@ -213,13 +247,18 @@ if [ -n "${STALE_RANGE:-}" ]; then
 fi
 # --tree (the tree-cites input) names stale cites on lines the range never touched, so it runs in both scopes.
 if [ "${TREE_CITES:-false}" = "true" ]; then
+  TREE_OUT="$(mktemp)"
   set +e
-  python3 "$STALE_CITES" --tree
+  python3 "$STALE_CITES" --tree > "$TREE_OUT"
   TREE_EXIT=$?
   set -e
-  [ "$TREE_EXIT" -ne 0 ] && STALE_EXIT="$TREE_EXIT"
+  cat "$TREE_OUT"
+  TREE_EXIT="$(stale_run_exit "$TREE_EXIT" "$TREE_OUT")"
+  # Each run is judged alone, so one run's findings never hide the other's unknown read.
+  [ "$TREE_EXIT" -eq 0 ] || STALE_EXIT="$TREE_EXIT"
 fi
-[ "${FAIL:-true}" = "true" ] || STALE_EXIT=0
+# An unknown read is red whatever fail says (decision ci-unknown-is-red).
+[ -z "$UNKNOWN" ] || [ "$STALE_EXIT" -ne 0 ] || STALE_EXIT=1
 
 if [ ${#FILES[@]} -eq 0 ]; then
   # An unknown read already printed its own line, and "no markdown changed" would be false: none was read.

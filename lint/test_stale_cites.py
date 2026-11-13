@@ -831,10 +831,11 @@ class ReadAtHeadTests(StaleCase):
 
 
 class UnknownTests(StaleCase):
-    """A base a shallow clone cannot resolve is unknown, not a finding: the check exits 0 and says so. A base that
+    """A base a shallow clone cannot resolve is unknown, not a finding: the check run alone exits 0 and says so. A base that
     does not resolve in a full clone is a read that could not run (UnreadableReadTests), except a root commit's
     parent (HEAD~1, HEAD^1): a first push to the default branch reads that range by design (actions/ste-lint/run.sh),
-    so it exits 0 as on main. The root commit's cases sit here for that reason."""
+    so it exits 0 as on main. The root commit's cases sit here for that reason. The step reads the same base as
+    unknown and exits non-zero, with fail=false too (decision ci-unknown-is-red; test_action.py)."""
 
     def test_an_unresolvable_base_in_a_depth_one_clone_prints_unknown_and_exits_zero(self):
         def change(repo):
@@ -847,7 +848,7 @@ class UnknownTests(StaleCase):
         self.assertTrue(unknown_lines(out), out)
         self.assertIn("fetch-depth", out, "the shallow clone's unknown line does not name fetch-depth\n" + out)
 
-    def test_step_with_an_unresolvable_base_exits_zero(self):
+    def test_step_with_an_unresolvable_base_fails_closed(self):
         def change(repo):
             move(repo, "hooks/lib.mjs", MOVED)
             commit(repo)
@@ -855,11 +856,13 @@ class UnknownTests(StaleCase):
         # A base with no shared history: origin/main resolves, but the three-dot range has no merge base.
         orphan = git(rng.repo, "commit-tree", EMPTY_TREE, "-m", "unrelated")
         git(rng.repo, "update-ref", "refs/remotes/origin/main", orphan)
-        done = subprocess.run([sys.executable, STEP, "main"], cwd=rng.repo, env=direct_step_env(rng, "true"),
-                              capture_output=True, text=True, encoding="utf-8", errors="replace")
-        out = done.stdout + done.stderr
-        self.assertEqual(done.returncode, 0, out)
-        self.assertIn("stale-cites: unknown", out)
+        for fail in ("true", "false"):
+            with self.subTest(fail=fail):
+                done = subprocess.run([sys.executable, STEP, "main"], cwd=rng.repo, env=direct_step_env(rng, fail),
+                                      capture_output=True, text=True, encoding="utf-8", errors="replace")
+                out = done.stdout + done.stderr
+                self.assertNotEqual(done.returncode, 0, "an unreadable base must fail the step (fail=%s)\n%s" % (fail, out))
+                self.assertIn("ste-lint: unknown", out)
 
     def root_repo(self):
         """A full clone whose one commit is the root. Its base, HEAD~1, names nothing."""
