@@ -637,6 +637,9 @@ jobs:
         shell: bash
         run: bash actions/stamp/test_action.sh
 
+      - name: Stable workflow move job suite
+        run: python3 lint/test_stable_workflow.py
+
       - name: Opt-in CI template fixture suites
         if: ${{ needs.scope.outputs.code == 'true' }}
         shell: bash
@@ -648,6 +651,7 @@ jobs:
           bash actions/ruling-kind/test_action.sh
           bash actions/zizmor/test_action.sh
           bash actions/silent-undo/test_action.sh
+          bash actions/stable-mover/test_action.sh
           python3 actions/readme-links/test_readme_links.py
           bash githooks/main-ref/test_hook.sh
           bash githooks/test_pre_commit.sh
