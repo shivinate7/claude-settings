@@ -39,7 +39,7 @@ def lane_brief(marker=None):
 
 def lane_start(name, expected, rule, config, marker, effort, model="sonnet", carries=()):
     """One lane start under `config`: the kind marker in the prompt, the effort field and the model. Allowed when `rule` is None."""
-    add(name, expected, rule, tool=LANE_TOOL, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt=lane_brief(marker),
+    add(name, expected, rule, tool=LANE_TOOL, title=LANE_TITLE, cwd=LANE_REPO, tags=OWN_LANE_TAGS, prompt=lane_brief(marker),
         effort=effort, model=model, source_url=LANE_SOURCE_URL, config=config, carries=carries)
 
 
