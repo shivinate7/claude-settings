@@ -2035,37 +2035,8 @@ def raw_tab_strings(source):
             if tok.type in kinds and "\t" in tok.string]
 
 class LaneHost(FakeHost):
-    """FakeHost plus the open-PR read. style: how the merge lands, merge (a merge commit), squash or rebase.
-    unreadable: stop (raises Stop), none (returns None) or error (raises ValueError). on_merged runs once the merge is on origin.
-    open: {head name: (head sha, PR base)} of the open pull requests, the shape Host.open_heads returns.
-    prs: raw rows [(head name, head sha, PR base), ...], one per open PR, in the order GitHub lists them. When set, open_heads
-    runs the real Host.open_heads over these rows, so a case does not pin the shape that read returns."""
-    style, open, unreadable, on_merged, prs = "merge", {}, None, None, None
-
-    def __init__(self, *a, **k):
-        super().__init__(*a, **k)
-        self.open_calls = 0
-
-    def open_heads(self):
-        self.open_calls += 1
-        if self.unreadable == "stop":
-            raise merge.Stop("gh pr list failed: HTTP 502")
-        if self.unreadable == "none":
-            return None
-        if self.unreadable == "error":
-            raise ValueError("not json")
-        if self.prs is not None:
-            host = merge.Host()
-            items = [REST.list_item(100 + i, s, h, b) for i, (h, s, b) in enumerate(self.prs)]
-
-            def gh(args, cwd=None):
-                assert args[:1] == ["api"], f"unexpected gh call: {args}"
-                method, path, params, flags, jq = REST.parse(args[1:])
-                assert method == "GET" and re.fullmatch(r"repos/(?:\{owner\}/\{repo\}|[^/]+/[^/]+)/pulls", path), (method, path)
-                return 0, REST.listing(items, None, params, flags, jq, 100)
-            host.gh = gh
-            return host.open_heads()
-        return dict(self.open)
+    """FakeHost that lands the merge as `style` says: merge (a merge commit), squash or rebase. on_merged runs once the merge is on origin."""
+    style, on_merged = "merge", None
 
     def merge(self, n, method, sha):
         if self.style == "merge":
@@ -2283,18 +2254,6 @@ class CutLanes(Env):
         self.assertTrue(self.has_local(branch), "subject: the local lane branch must exist first")
         return tree
 
-    def test_a_local_lane_branch_is_untouched_when_the_open_pr_read_fails(self):
-        tips = lane_batch(self, "lane1", "lane2")
-        self.host.unreadable = "error"  # the open-PR read raises
-        tree = self.kept_local_lane("lane-a", tips["lane1"])
-        self.assertNotEqual(self.head("lane1"), "", "subject: origin/lane1 must exist, so the remote pass has a head to keep")
-        rc, out = self.go()
-        self.assertEqual(rc, 0, out)
-        self.assert_merged()
-        self.assertNotEqual(self.head("lane1"), "", f"origin/lane1 was deleted; out: {out!r}")
-        self.assertTrue(self.tree_listed(tree), f"the lane's clean worktree is no longer listed; out: {out!r}")
-        self.assertTrue(self.has_local("lane-a"), f"a local lane branch was deleted when the open-PR read failed; out: {out!r}")
-
     def test_a_local_lane_branch_is_untouched_when_the_origin_heads_read_fails(self):
         tips = lane_batch(self, "lane1", "lane2")
         tree = self.kept_local_lane("lane-a", tips["lane1"])
@@ -2313,20 +2272,18 @@ class CutLanes(Env):
         self.assertTrue(self.tree_listed(tree), f"the lane's clean worktree is no longer listed; out: {out!r}")
         self.assertTrue(self.has_local("lane-a"), f"a local lane branch was deleted when the origin heads read failed; out: {out!r}")
 
-    def test_deleteBranch_false_keeps_every_lane_and_reads_no_open_prs(self):
+    def test_deleteBranch_false_keeps_every_lane(self):
         put_base_config(self, json.dumps(dict(CONFIG, merge=dict(CONFIG["merge"], deleteBranch=False))))
         lane_batch(self, "lane1", "lane2")
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
-        self.assertEqual(self.host.open_calls, 0)
         self.assertNotIn("merge: lane", out)
         for b in ("lane1", "lane2", "feat"):
             self.assertNotEqual(self.head(b), "")
 
-    def test_a_batch_without_lanes_reads_no_open_prs_and_prints_no_lane_line(self):
+    def test_a_batch_without_lanes_prints_no_lane_line(self):
         rc, out = self.go()  # feat holds no merge commit
         self.assertEqual(rc, 0, out)
-        self.assertEqual(self.host.open_calls, 0)
         self.assertNotIn("merge: lane", out)
 
     def keepBranches_config(self, value):
@@ -2403,14 +2360,13 @@ class CutLanes(Env):
         self.assertLessEqual(HELD, set(kept))
 
 class CutLanesHome(unittest.TestCase):
-    """The names the merge's reads and config are built on. One home each: the open-PR read on Host, the keepBranches field,
-    the ls-remote tab split, and the rule that merge.py copies no guard function."""
+    """The names the merge's reads and config are built on. One home each: the keepBranches field, the ls-remote tab split,
+    and the rule that merge.py copies no guard function."""
     def tree(self):
         with open(merge.__file__, encoding="utf-8") as f:
             return ast.parse(f.read())
 
-    def test_the_open_pr_read_and_the_config_field_exist(self):
-        self.assertTrue(callable(getattr(merge.Host, "open_heads", None)), "merge.Host must define open_heads()")
+    def test_the_config_field_exists(self):
         self.assertIn("keepBranches", merge.MERGE_FIELDS)
 
     def test_the_cherry_test_is_not_copied_into_merge_py(self):
@@ -3337,8 +3293,8 @@ try:
         finish(one({"default_branch": S.get("default_branch", "main"), "full_name": "o/r"}, jq), 0, include)
 
     elif method == "GET" and rel == "pulls":
-        if S.get("open_heads_fail"):
-            raise Refused(S["open_heads_fail"])
+        if S.get("open_pulls_fail"):
+            raise Refused(S["open_pulls_fail"])
         if params.get("state", "open") != "open" or set(params) - {"state", "per_page", "page"}:
             raise Refused(api_error(422, "fake gh: the open pull requests are read with state=open and per_page only, then matched on head.ref"))
         items = [list_item(n, r[1], r[0], r[2]) for n, r in numbered.items()]
@@ -3886,11 +3842,11 @@ class GhHalf(Env):
         self.assertIn("commit_message", fields[0], "the lift of the merge run's read is written into the merge commit message")
         self.assertEqual(set(fields[0]["commit_message"].splitlines()), {f"Reason flag: --undo-check-unknown-ok: {reason}"})
 
-    def test_open_heads_lists_the_open_pr_heads_past_ghs_default_of_30(self):
+    def test_open_pulls_lists_the_open_pr_heads_past_ghs_default_of_30(self):
         # A list read stops at its first page (30 rows by default) unless it asks for 100 a page and every page. A head past row 30 would be missed.
-        # Each head comes with its sha and its PR's base, {name: (sha, base)}.
+        # Each head comes with its sha and its PR's base, {name: (sha, base)}, read from the rows open_pulls returns.
         self.set(open_prs=[["lane2", "a" * 40, "main"], ["agent/lane1", "b" * 40, "release/1.0"]])
-        got = self.gh_host().open_heads()
+        got = {d["head"]["ref"]: (d["head"]["sha"], d["base"]["ref"]) for d in self.gh_host().open_pulls()}
         self.assertEqual(got, {"lane2": ("a" * 40, "main"), "agent/lane1": ("b" * 40, "release/1.0")})
         calls = self.calls()
         for part in (LIST_CALL, "state=open", "per_page=100"):  # one page holds 100 at most, so the read asks for each page by number
@@ -3898,9 +3854,9 @@ class GhHalf(Env):
 
     def test_a_failed_open_pr_read_is_never_an_empty_set(self):
         # An empty set means no PR is open, and every lane would go. A failure stops (merge.Stop) or answers None.
-        self.set(open_heads_fail="HTTP 404: Not Found")
+        self.set(open_pulls_fail="HTTP 404: Not Found")
         try:
-            got = self.gh_host().open_heads()
+            got = self.gh_host().open_pulls()
         except merge.Stop:
             return
         self.assertIsNone(got)
@@ -5484,11 +5440,12 @@ class RestRoutes(Env):
     def test_two_pages_of_open_pull_requests_with_the_head_on_page_two_is_found(self):
         lane = "c" * 40
         self.set(page_cap=2, open_prs=[["one", "a" * 40, "main"], ["two", "b" * 40, "main"], ["lane", lane, "main"]])
-        self.assertEqual(self.gh_host().open_heads(), {"one": ("a" * 40, "main"), "two": ("b" * 40, "main"), "lane": (lane, "main")})
+        got = {d["head"]["ref"]: (d["head"]["sha"], d["base"]["ref"]) for d in self.gh_host().open_pulls()}
+        self.assertEqual(got, {"one": ("a" * 40, "main"), "two": ("b" * 40, "main"), "lane": (lane, "main")})
 
-    def test_open_heads_reads_every_page_of_more_than_a_hundred_open_pull_requests(self):
+    def test_open_pulls_reads_every_page_of_more_than_a_hundred_open_pull_requests(self):
         self.set(open_prs=[[f"b{i}", f"{i:040x}", "main"] for i in range(250)])
-        self.assertEqual(len(self.gh_host().open_heads()), 250)
+        self.assertEqual(len(self.gh_host().open_pulls()), 250)
 
     # ---- the proxy refuses the numeric page gh follows from a Link header, so a list read asks for each page by number
 
@@ -5862,7 +5819,7 @@ class RestRoutes(Env):
                 pathlib.Path(self.state, "repos.log").unlink(missing_ok=True)
                 host = merge.Host(["checks"], "main", minute=60, now=lambda: self.now, pause=lambda s: None, repo=repo)
                 host.pr(7)
-                host.open_heads()
+                host.open_pulls()
                 host.checks(7, warn=False)
                 host.head_read(7)
                 host.merge(7, "merge", head)
@@ -5873,7 +5830,7 @@ class RestRoutes(Env):
     # ---- retries hold on every REST route
 
     def read_calls(self):
-        return {"pr": lambda h: h.pr(7), "list": lambda h: h.open_heads(),
+        return {"pr": lambda h: h.pr(7), "list": lambda h: h.open_pulls(),
                 "check-runs": lambda h: h.checks(7, warn=False), "status": lambda h: h.checks(7, warn=False)}
 
     def test_a_502_on_any_rest_read_is_retried_and_the_read_goes_through(self):
@@ -11464,7 +11421,6 @@ class SignalReleasesLock(Env):
 
 # The batch brake (roadmap step c195): nothing merges to a base while another ready pull request on it has a required check pending.
 BATCH_LINK = "https://github.com/o/r/actions/runs/88"
-BATCH_BLOCKER = "#2 (feat2) required check `checks` is pending: " + BATCH_LINK  # the shape FakeHost.batch reports
 OWN_SHA, OTHER_SHA = "a" * 40, "b" * 40
 # Containment: a busy ready pull request whose head holds this one's head (compare status ahead or identical) does not block it.
 N63_SHA = "476f456c" + "0" * 32  # head of #63, the pull request that merges
