@@ -1,14 +1,14 @@
 {
  "id": "cloud-precompact-handoff-stale",
  "title": "In the cloud, the precompact handoff hook leaves the handoff stale",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL34URk7P9AdEH62S3i",
  "owner": "triage",
  "blockedBy": [],
  "why": "Measured by the retrospective: at 21:04 CST Nov 12 its handoff was about 2 hours behind on CI and merges, after a hook-prompted rewrite. Owner 21:11 CST: the pre-compact hooks \"rnt running well in the cloud\".",
  "source": "retrospective 21:12 CST Nov 12",
- "note": "Find the cause: whether the PreCompact hook fires in the cloud at all, whether the checkpoint fires before the cloud's 384k trigger (steps handoff-checkpoint-before-cloud-compact and handoff-checkpoint-before-compact are done, so this may be a regression), and whether the post-compaction rewrite draws on a stale digest. Red first on a cloud fixture. Triage sighting 21:16 CST: in this session after the 21:00 compaction, the state line was current but the push times it carried were written from memory (stamp-guard-bracket-form). Handoff-audit-after-compact is the backstop, not the fix.",
- "updatedAt": "2026-11-12T21:14:59-06:00"
+ "note": "Find the cause: whether the PreCompact hook fires in the cloud at all, whether the checkpoint fires before the cloud's 384k trigger (steps handoff-checkpoint-before-cloud-compact and handoff-checkpoint-before-compact are done, so this may be a regression), and whether the post-compaction rewrite draws on a stale digest. Red first on a cloud fixture. Triage sighting 21:16 CST: in this session after the 21:00 compaction, the state line was current but the push times it carried were written from memory (stamp-guard-bracket-form). Handoff-audit-after-compact is the backstop, not the fix. Started by coordinator 21:18 CST Nov 12: one lane for both steps, two PRs, the audit line first.",
+ "updatedAt": "2026-11-12T21:17:22-06:00"
 }
