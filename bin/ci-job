@@ -69,8 +69,9 @@
 # the local copy under --pinned, as does a run without it; --lint ignores --pinned. Cost: at most one fetch and one archive per
 # distinct sha per run, into a fresh temp dir that is deleted when the run ends. The pin's sha pattern: hooks/action_pin.py.
 # Symlink members are not extracted: the harness reads none, and a host that refuses os.symlink would fail the export.
-# Every step's CLAUDE_SETTINGS_DIR, first that holds: the step's own env:; under --pinned, the tree of the step's own pin, else the
-# job's pin when its steps pin exactly one sha (a tree that cannot be made is unknown); the caller's non-empty value; this checkout.
+# Every step's CLAUDE_SETTINGS_DIR, first that holds: the step's own env:; under --pinned, the tree of the step's own pin, else (a run:
+# step only, never a uses: step without a sha) the job's pin when its steps pin exactly one sha; the caller's non-empty value; this
+# checkout. A caller's value must not reach a pinned action at another sha. A pin tree a step needs and cannot get makes it unknown.
 # Limits: the uses: owner is not checked, since the fetch reads the clone's origin. An uppercase or quoted 40-hex pin does
 # not match the sha pattern, so it runs the local copy. A SIGKILL from merge's timeout skips the cleanup and leaves the
 # export in TMPDIR: one export per run, about 24 MB at worst.
@@ -495,10 +496,11 @@ def lint_workers():
 
 
 def settings_dir(step, pinned, job_pins):
-    """(dir, None) for the step's CLAUDE_SETTINGS_DIR when its env: sets none; (None, why) when the pin's tree cannot be made.
-    First that holds: under --pinned the tree of the step's own pin, else the job's one pin; the caller's non-empty value; this checkout."""
+    """(dir, None) for a step whose env: sets no CLAUDE_SETTINGS_DIR; (None, why) when a pin tree it needs cannot be made.
+    First that holds: under --pinned the tree of the step's own pin, else (a run: step) the job's one pin; the caller's non-empty
+    value; this checkout. The caller's value must not reach a pinned action at another sha."""
     m = SHA_PIN.fullmatch(uses(step))
-    sha = m.group(2) if m else next(iter(job_pins)) if len(job_pins) == 1 else None
+    sha = m.group(2) if m else next(iter(job_pins)) if len(job_pins) == 1 and step_key(step, "uses") is None else None
     if pinned and sha:
         tree, why = pin_tree(sha)
         return (None, "pin %s: %s" % (sha[:7], why)) if why else (tree, None)
@@ -510,7 +512,7 @@ def run_step(name, step, install, detail, shell, env, cwd, ctx, log, suite=False
     values, pinned, job_pins). A parallel step gets a log of its own, so the reads from its start offset see only its output.
     suite: a CI step picked for its suite line, run whole, with the preamble marker (preamble_marked)."""
     top, base, values, pinned, job_pins = ctx
-    settings, why = settings_dir(step, pinned, job_pins)
+    settings, why = (None, None) if "CLAUDE_SETTINGS_DIR" in env else settings_dir(step, pinned, job_pins)
     if why:
         return "unknown", why + "; move the pin in a lane of its own"
     err_line("start: %s\n" % name)
@@ -527,7 +529,7 @@ def run_step(name, step, install, detail, shell, env, cwd, ctx, log, suite=False
                              stderr=subprocess.STDOUT, text=True,
                              env={**{k: v for k, v in os.environ.items() if k not in RUNNER_UNSET | {"GITHUB_BASE_REF", PIN_NOTE_ENV}},
                                   **({"GITHUB_BASE_REF": values["github.base_ref"]} if base else {}),
-                                  "CLAUDE_SETTINGS_DIR": settings, **env, "VERDICT_LOG": log}) as proc:
+                                  **({} if settings is None else {"CLAUDE_SETTINGS_DIR": settings}), **env, "VERDICT_LOG": log}) as proc:
             for line in proc.stdout:  # relay each heartbeat at once: the stall watch reads this job's output
                 if line.startswith("verdict: still running"):
                     err_line(line)
