@@ -1,0 +1,16 @@
+{
+ "id": "mutation-tests-for-cost",
+ "title": "Measure what the wider --tests-for selector costs the mutation report against its 300 s limit",
+ "status": "blocked",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [
+  "#3104"
+ ],
+ "why": "Lane lane-lint-hook-suites (#3104) widened the mutation report's --tests-for selector: it now picks about 9 more suites per guard.py mutant. Nobody measured the added time against the 300 s deadline. Decisions mutation-ci-report-and-replay and mutation-report-scores-suites still say the selector picks suites that \"import or load\" the file.",
+ "source": "coordinator 00:44 CST Nov 13, relaying lane lane-lint-hook-suites (#3104, handed in)",
+ "note": "After #3104 merges. Measure: time the mutation report on guard.py with the old and new selector, three runs each, and report suites per mutant, wall time and margin to 300 s. If it fits, rewrite both decisions in place to state the new rule. If it does not fit, say which suites to drop or how to split the run, as a note here. Docs-only if the measure fits.",
+ "updatedAt": "2026-11-13T00:43:16-06:00"
+}
