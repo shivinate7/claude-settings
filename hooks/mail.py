@@ -40,6 +40,7 @@ NOT_FF = "[rejected]"  # local fast-forward refusal; a hook or ACL refusal says 
 WINDOWS = sys.platform == "win32"  # read at call time, so a case can drive the Windows branch on any runner
 WAIT_INTERVAL, WAIT_MAX_SECONDS = 30, 6600  # `mail wait`: poll gap, and a run that ends before the 2 h background cap
 BODY_LIMIT = 160  # characters of a message's first body line that the wake line shows
+WAKE_MAX_NAMED = 5  # new messages one poll names in full; the rest count in one "more new" line
 BASELINE_RETRY_SECONDS = 300  # how long a failed start read is retried before `mail wait` gives up with exit 2
 
 
@@ -495,7 +496,8 @@ def _wake_line(env, tip, message, run):
 
 def wait(env, addrs, *, clock, sleep, run_git=None, pid_alive=None, start_time=None, pid=None, ppid=None,
          interval=None, max_seconds=None):
-    """Block until `addrs` has an open message that was not open at the start, print one line, and return the exit code:
+    """Block until `addrs` has an open message that was not open at the start, print one line for each new message
+    (the first WAKE_MAX_NAMED, then one count line), and return the exit code:
     0 new mail. 2 not started: MAILBOX_REPO unset, no address, a live waiter holds the lock, the lock cannot be taken, or the
     baseline stayed unreadable for BASELINE_RETRY_SECONDS (bin/mail also exits 2 for a bad --interval or --max-seconds).
     3 ended at max_seconds with no mail, or the lock was deleted, or the parent died. One waiter per address, held by a
@@ -569,7 +571,11 @@ def wait(env, addrs, *, clock, sleep, run_git=None, pid_alive=None, start_time=N
                 fresh = [m for m in open_messages(env, now_tip, addrs, run_git) if m["id"] not in seen]
                 tip = now_tip
                 if fresh:
-                    print(_wake_line(env, now_tip, fresh[0], run_git))
+                    for message in fresh[:WAKE_MAX_NAMED]:
+                        print(_wake_line(env, now_tip, message, run_git))
+                    if len(fresh) > WAKE_MAX_NAMED:
+                        # Plain `mail read`: the extras may sit at either of the waiter's addresses.
+                        print("mail: %d more new; read: `mail read`" % (len(fresh) - WAKE_MAX_NAMED))
                     return 0
             except MailError:
                 continue  # a transient failure: the tip stays as it was, so the next poll tries the same move again
