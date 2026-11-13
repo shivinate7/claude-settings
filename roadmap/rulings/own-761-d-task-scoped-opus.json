@@ -1,0 +1,10 @@
+{
+ "id": "own-761-d-task-scoped-opus",
+ "at": "2026-11-13T14:21:00-06:00",
+ "title": "A plain Opus ask grants Opus to the task it names: the agents spawned for it, plus resumes and retries of those agents",
+ "ruling": "Owner 14:21 CST Nov 13, relayed by the retrospective, on page item 761 option d: \"agreed\". Before that, 14:18: \"oh my version is too generous and yours is too tight there's an optimal middle ground though if you thinka bout it\". Meaning (option d as posted): a plain Opus ask grants Opus to the agents spawned for that ask, in the turn he typed it, plus resumes or retries of those same agents by name; role-scoped if the ask names a role (\"opus reviewers\"); the grant ends when those agents end. `opus <time>` stays timed; `opus off` ends any grant. REWRITES in place the Opus-ask half of item 601 a (12:54 CST Nov 12, \"an Opus ask with no length lasts until the session ends or `opus off`\"); the override half of 601 a (a one-act override ends on use, `override off` or his next typed message) stands. Draft #2928 builds the old reading and needs re-pointing (coordinator).",
+ "quote": "agreed (on option d, 14:21 CST) | too generous ... too tight ... optimal middle ground (14:18 CST)",
+ "source": "Owner words 14:21 CST Nov 13 via the retrospective 14:21; page item 761 (pick-opus-ask-one-spawn); filed by triage 14:22 CST Nov 13.",
+ "status": "open",
+ "step": "opus-ask-grants-one-spawn"
+}
