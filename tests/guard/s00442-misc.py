@@ -181,6 +181,8 @@ ARCHINC_REPO500 = os.path.join(ROOT, "archinc-repo-500")       # q_max's own rea
 ARCHINC_TRUNK = os.path.join(ROOT, "archinc-trunk")            # q_max's default branch is trunk: the branch is ahead of trunk
 ARCHINC_DIVERGED = os.path.join(ROOT, "archinc-diverged")      # the branch diverged from main in q_max, on no pull request
 ARCHINC_REPO404 = os.path.join(ROOT, "archinc-repo-404")       # q_max is named only by a source; its own read answers 404
+ARCHINC_OPENLIST_QMAX = os.path.join(ROOT, "archinc-openlist-qmax")          # q_max's open pull request list is a server error; claude-settings' answers
+ARCHINC_OPENLIST_SETTINGS = os.path.join(ROOT, "archinc-openlist-settings")  # claude-settings' open pull request list is a server error; q_max's answers
 ARCHINC_SLOW = os.path.join(ROOT, "archinc-slow")              # two branches of q_max, behind main; each compare of q_max sleeps
 ARCHDRAFT_SLOW = os.path.join(ROOT, "archdraft-slow")          # an open draft of the slug in q_max, behind main, and a branch ahead there; each compare of q_max sleeps
 ARCHINC_CLOSEDALONE = os.path.join(ROOT, "archinc-closed-alone")  # the branch's pull request was closed, and no pull request replaced it
@@ -1329,6 +1331,9 @@ def build_fixtures():
     make_fake_gh(ARCHINC_DIVERGED, "main", repos=arch_pair(qmax={"compares": {"main..." + ARCH_BRANCH: "diverged"}}))
     # q_max's own read answers 404: the repo is named only through a source, and it is not on GitHub.
     make_fake_gh(ARCHINC_REPO404, "main", repos=arch_pair(qmax={"repo_error": "missing"}))
+    # The open pull request list of one repo fails and the other's answers, so the archive's first read that fails names its repo.
+    make_fake_gh(ARCHINC_OPENLIST_QMAX, "main", repos=arch_pair(qmax={"pulls_error": ["open", "server"]}))
+    make_fake_gh(ARCHINC_OPENLIST_SETTINGS, "main", repos=arch_pair(settings={"pulls_error": ["open", "server"]}))
     # Each compare of q_max sleeps 13s, under MERGE_READ_TIMEOUT (25s) alone. The two branches are behind main, so a
     # read that runs both sums past one budget. A delay on every call would stretch the run past a minute.
     make_fake_gh(ARCHINC_SLOW, "main", repos=arch_pair(qmax={

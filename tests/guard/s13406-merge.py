@@ -625,6 +625,8 @@ ARCH_TRIAGE_TAGS = ["cs-build:triage", "cs-repo:o/r"]
 # A target that is no lane, yet carries a step slug and a repo: a read of its open list would find a slug.
 ARCH_TRIAGE_SLUG_TAGS = ["cs-build:triage", "cs-step:" + ARCHIVE_SLUG, "cs-repo:o/r"]
 ARCH_UNTAGGED_TAGS = ["cs-repo:o/r"]
+# A lane with its step and no cs-repo tag: the guard has no repo to read, so its refusal has no repo to name.
+ARCH_LANE_NO_REPO_TAGS = ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG]
 # The branch read: a lane tagged for both repos of the incident, and the sources its session started on.
 ARCH_INC_TAGS = ["cs-build:lane", "cs-step:" + ARCHIVE_SLUG, "cs-repo:" + ARCH_REPO_SETTINGS, "cs-repo:" + ARCH_REPO_QMAX]
 ARCH_QMAX_SOURCE = {"git_repository": {"url": "https://github.com/" + ARCH_REPO_QMAX}}
@@ -709,6 +711,7 @@ ROLE_LINES = {
     "archive-triage-slug": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_TRIAGE_SLUG_TAGS),
     "archive-no-target": role_call("r0", RUNNER_TAGS),
     "archive-own-lane": role_call("r0", LANE_TAGS),
+    "archive-lane-no-repo": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_LANE_NO_REPO_TAGS),
     "archive-stale-then-lane": role_call("r0", RUNNER_TAGS) + role_target_call("t1", ARCH_UNTAGGED_TAGS)
                                + role_target_call("t2", ARCH_LANE_TAGS),
     # merge-confirm-repo shapes (section 5h): a lane that names o/a, a runner that names claude-settings, a runner whose

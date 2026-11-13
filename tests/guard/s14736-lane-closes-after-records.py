@@ -99,6 +99,40 @@ archive_refuse("a payload with no transcript_path is refused", None, fake_gh_pat
 # read-failure reason says "could not be read". A case pins its own reason and not the other's.
 ARCHIVE_OPEN_PIN = ("still open",)
 ARCHIVE_READ_PIN = ("could not be read",)
+
+
+def add_repo_pin(repo):
+    """The fragment an unreadable read of `repo` names: the act, then the retry. The reason keeps ARCHIVE_READ_PIN too."""
+    return "add_repo " + repo + " (read), then retry"
+
+
+# The unreadable arms name the act that fixes them: add_repo of the repo whose read failed, taken from its cs-repo tag.
+# The open-list arm: the lane's one repo cannot be read, so the refusal names it.
+archive_refuse("a lane whose open pull requests cannot be read names add_repo for its cs-repo",
+               role_path("archive-lane"), fake_gh_path(GHBROKEN), carries=(add_repo_pin("o/r"),) + ARCHIVE_READ_PIN)
+# The branch arm: q_max's pull request list for the branch fails, and claude-settings answers 404 on the branch, so q_max
+# is the repo whose read failed. The refusal names q_max, never claude-settings.
+archive_refuse("a lane whose branch pull request read fails in q_max names add_repo for q_max, not claude-settings",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_PULLS500),
+               carries=(add_repo_pin(ARCH_REPO_QMAX),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_SETTINGS,))
+archive_refuse("a lane whose q_max default-branch read fails names add_repo for q_max, not claude-settings",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_REPO500),
+               carries=(add_repo_pin(ARCH_REPO_QMAX),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_SETTINGS,))
+# Two cs-repo tags, claude-settings first and q_max second. Only one repo's open-list read fails in each case, and the
+# reason names that repo: the second here, the first in the mirror below, so a reason that always names the last tag fails.
+archive_refuse("a lane whose second cs-repo open pull request read fails names add_repo for the second repo",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_OPENLIST_QMAX),
+               carries=(add_repo_pin(ARCH_REPO_QMAX),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_SETTINGS,))
+archive_refuse("a lane whose first cs-repo open pull request read fails names add_repo for the first repo",
+               role_path("archive-inc"), fake_gh_path(ARCHINC_OPENLIST_SETTINGS),
+               carries=(add_repo_pin(ARCH_REPO_SETTINGS),) + ARCHIVE_READ_PIN, lacks=("add_repo " + ARCH_REPO_QMAX,))
+# The refusals that are not an unreadable read name no repo to add: an open pull request, no record, no cs-repo tag.
+archive_refuse("a lane with an open pull request names no add_repo", role_path("archive-lane"), fake_gh_path(ARCHOPEN),
+               carries=ARCHIVE_OPEN_PIN, lacks=("add_repo",))
+archive_refuse("a target with no record names no add_repo", role_path("archive-no-target"), fake_gh_path(ARCHCLOSED),
+               carries=ARCHIVE_STEER, lacks=("add_repo",))
+archive_refuse("a lane with no cs-repo tag names no add_repo: it has no repo to add", role_path("archive-lane-no-repo"),
+               fake_gh_path(ARCHOPEN), carries=("no cs-step tag or no cs-repo tag",), lacks=("add_repo",))
 archive_allow("an open draft lane pull request whose head is behind main is allowed: its commits have landed",
               role_path("archive-lane"), fake_gh_path(ARCHDRAFT_BEHIND))
 archive_allow("an open draft lane pull request whose head is identical to main is allowed: its commits have landed",
