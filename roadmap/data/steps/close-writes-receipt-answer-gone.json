@@ -1,0 +1,14 @@
+{
+ "id": "close-writes-receipt-answer-gone",
+ "title": "Closing a page item also writes its receipt and deletes its answer, so no answer shows \"filing pending\" after the item is filed",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Owner 13:26 CST Nov 13 (typed in this session): \"im seeing a fuck ton of answered with filing pending in the artifact\". Measured by triage at that time: 276 answers, 180 receipts; 250 answers had no receipt (33 on open items, 217 on closed items from Nov 6 to Nov 13).",
+ "source": "owner, 13:26 CST Nov 13; triage read of the page database",
+ "note": "Todo, a mistake with a missing guard (rule building-mistake-names-its-guard). Cause: skill waiting-page says Route and close writes receipts/<id> (read, filed), copies the answer into lastAnswer, closes the item and deletes answers/<id>. Triage (the writer) closed items with status closed and a reply only, so the page kept reading \"Filing pending\". 19 of the 33 open ones are triage's own; 14 belong to the coordinator and lanes, whose sessions never wrote receipts. Fixed now for the 10 answers of 13:20 to 13:22 CST. Not fixed: the other 240, which need a ledger, since a receipt says \"filed in <home>\" and each home must be read first (bulk-close-needs-ledger). Guard to build: a check or helper so one write closes an item, writes its receipt and deletes its answer together; a read that lists answers with no receipt at each wake (the `--unread` check reads only `read`).",
+ "updatedAt": "2026-11-13T13:26:44-06:00"
+}
