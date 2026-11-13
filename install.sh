@@ -20,7 +20,7 @@ set -u
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) echo "install.sh does not run on Windows. Use install.ps1: powershell -ExecutionPolicy Bypass -File ./install.ps1"; exit 0;; esac
 
 REPO="shivinate7/claude-settings"
-REF="${CLAUDE_SETTINGS_REF:-main}"
+REF="${CLAUDE_SETTINGS_REF:-stable}"   # stable: the branch sessions install from. CLAUDE_SETTINGS_REF=main is the recovery.
 RAW="https://raw.githubusercontent.com/${REPO}/${REF}"; REFRESH_CURL="curl -fsSL ${RAW}/install.sh"  # REFRESH_CURL: the part of the cloud refresh hook that every form of it shares
 # REFRESH_HEAD: REFRESH_CURL up to its ref. A refresh hook built at any ref holds REFRESH_HEAD, a ref, then /install.sh.
 REFRESH_HEAD=${REFRESH_CURL%"${REF}/install.sh"}
@@ -201,7 +201,7 @@ else
 fi
 
 # Cloud, a run of the pin's own install.sh (merge/install_from_main.sh runs it there): the pin stays the source,
-# at the local main the merge set. Only that script moves the pin, so both cloud blocks below skip this source,
+# at the commit the merge set. Only that script moves the pin, so both cloud blocks below skip this source,
 # and the pin_off_main refusal below still checks it.
 FROM_LIVE_PIN=0
 if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$SRC" = "$SCRIPT_DIR" ] && live_pin_clone "$SRC" >/dev/null; then
@@ -209,9 +209,26 @@ if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$SRC" = "$SCRIPT_DIR" ] && live_pin_c
   log "the source $SRC is the live pin; the cloud steps leave it as it is"
 fi
 
-# True when the pinned checkout $1 is not detached at the clone's local main commit.
+# The commit the pinned checkout of the clone $1 belongs at: origin's $REF (stable) as last fetched, which
+# merge/install_from_main.sh keeps current. A clone that holds no origin/$REF, and CLAUDE_SETTINGS_REF=main (the
+# recovery), pin the clone's local main as before. Prints nothing when there is no such commit.
+pin_commit() {
+  pc=""
+  [ "$REF" = main ] || pc=$(git -C "$1" rev-parse --verify -q "refs/remotes/origin/$REF^{commit}")
+  [ -n "$pc" ] || pc=$(git -C "$1" rev-parse --verify -q refs/heads/main)
+  printf '%s' "$pc"
+}
+# The words for pin_commit's answer in a message.
+pin_what() {
+  if [ "$REF" != main ] && git -C "$1" rev-parse --verify -q "refs/remotes/origin/$REF^{commit}" >/dev/null; then
+    printf 'origin/%s' "$REF"
+  else
+    printf 'local main'
+  fi
+}
+# True when the pinned checkout $1 is not detached at the commit pin_commit names.
 pin_off_main() {
-  main_commit=$(git -C "$1" rev-parse --verify -q refs/heads/main)
+  main_commit=$(pin_commit "$1")
   git -C "$1" symbolic-ref -q HEAD >/dev/null || [ -z "$main_commit" ] \
     || [ "$(git -C "$1" rev-parse HEAD)" != "$main_commit" ]
 }
@@ -219,7 +236,7 @@ pin_off_main() {
 # An install from a linked worktree would point the global config at a temp
 # checkout. Refuse before any write, whether the source came from the script or from the cwd.
 # Decision merge-reinstalls-from-main: the pinned checkout <clone>-live is the one linked
-# worktree allowed, and only on a detached HEAD at the clone's local main commit. <clone>-live
+# worktree allowed, and only on a detached HEAD at the commit pin_commit names (origin's stable). <clone>-live
 # may be a link to such a worktree (merge/install_from_main.sh moves it), so paths compare resolved.
 if [ -n "$SRC" ] && is_linked_worktree "$SRC"; then
   m=$(clone_of "$SRC")
@@ -228,7 +245,7 @@ if [ -n "$SRC" ] && is_linked_worktree "$SRC"; then
     exit 1
   fi
   if pin_off_main "$SRC"; then
-    log "ERROR: the pinned checkout $SRC is not detached at local main; run merge/install_from_main.sh from the clone $m to move it."
+    log "ERROR: the pinned checkout $SRC is not detached at $(pin_what "$SRC"); run merge/install_from_main.sh from the clone $m to move it."
     exit 1
   fi
 fi
@@ -314,16 +331,20 @@ take_install_lock() {
 take_install_lock
 
 # Local install from a clone that has a branch named main: the links point at the pinned
-# checkout <clone>-live, a worktree on a detached HEAD at main's commit, never at the clone,
-# whose branch changes. Made here when missing; only merge/install_from_main.sh moves it. Cloud
+# checkout <clone>-live, a worktree on a detached HEAD at origin's stable commit (local main when the clone
+# holds no origin/stable), never at the clone, whose branch changes. Made here when missing; only merge/install_from_main.sh moves it. Cloud
 # mode and a clone with no main branch stay unpinned.
 if [ "$CLOUD" != 1 ] && [ -n "$SRC" ] && [ -e "$SRC/.git" ] && ! is_linked_worktree "$SRC"; then
-  if main_commit=$(git -C "$SRC" rev-parse --verify -q refs/heads/main); then
+  if main_commit=$(pin_commit "$SRC") && [ -n "$main_commit" ]; then
+    # The one WARN for the fallback: pin_commit runs inside $(...) several times, so it cannot say this itself.
+    if [ "$(pin_what "$SRC")" = "local main" ] && [ "$REF" != main ]; then
+      log "WARN: $SRC holds no origin/$REF, so the pinned checkout follows local main"
+    fi
     PIN="$SRC-live"
     if [ ! -e "$PIN" ]; then
       err=$(git -C "$SRC" worktree add -q --detach --lock --reason "claude-settings live pin" "$PIN" "$main_commit" 2>&1) \
         || { log "ERROR: cannot make the pinned checkout $PIN: $err; fix that and run the installer again."; exit 1; }
-      log "made the pinned checkout $PIN at main"
+      log "made the pinned checkout $PIN at $(pin_what "$SRC")"
     else
       pin_common=$(canon "$(common_dir "$PIN")")
       if [ -z "$pin_common" ] || [ "$pin_common" != "$(canon "$(common_dir "$SRC")")" ]; then
@@ -331,7 +352,7 @@ if [ "$CLOUD" != 1 ] && [ -n "$SRC" ] && [ -e "$SRC/.git" ] && ! is_linked_workt
         exit 1
       fi
       if pin_off_main "$PIN"; then
-        log "ERROR: the pinned checkout $PIN is not detached at local main; run merge/install_from_main.sh from the clone $SRC to move it."
+        log "ERROR: the pinned checkout $PIN is not detached at $(pin_what "$SRC"); run merge/install_from_main.sh from the clone $SRC to move it."
         exit 1
       fi
       # Lock an unlocked pin, so the janitor sweep never removes it; a locked one stays as it is.
@@ -417,6 +438,15 @@ if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ "$(git -C
   mirror_refresh "$SRC"
 fi
 
+# Origin has no $REF branch (stable): the rest of the run installs from main, with one WARN line naming $REF.
+# CLAUDE_SETTINGS_REF=main never reaches this, so the recovery path stays silent.
+fall_back_to_main() {
+  log "WARN: origin has no $REF branch, so this install takes main"
+  REF=main
+  RAW="https://raw.githubusercontent.com/${REPO}/main"
+  TARBALL="https://github.com/${REPO}/archive/refs/heads/main.tar.gz"
+}
+
 # clone_mirror DEST: clone $REF depth 1 into a sibling folder, then swap it in at DEST, so a failed clone leaves the old
 # copy. Marks DEST as a mirror this script made. Returns 1 and leaves DEST as it was on any failure, with the reason in
 # CLONE_MIRROR_WHY. The temp name is the same for every DEST, so one find sweeps a killed run's leftovers.
@@ -427,7 +457,11 @@ clone_mirror() {
   # no run still owns it; a newer one may belong to a run in parallel.
   find "$HOME" -maxdepth 1 -name 'claude-settings.clone.*' -mmin +5 -exec rm -rf {} + 2>/dev/null
   rm -rf "$clone_tmp"
-  if cloud_git clone -q --depth 1 --branch "$REF" "https://github.com/$REPO.git" "$clone_tmp" \
+  # An origin with no stable branch is cloned at main, and the rest of the run follows main (fall_back_to_main).
+  if { cloud_git clone -q --depth 1 --branch "$REF" "https://github.com/$REPO.git" "$clone_tmp" \
+       || { [ "$REF" != main ] && rm -rf "$clone_tmp" \
+            && cloud_git clone -q --depth 1 --branch main "https://github.com/$REPO.git" "$clone_tmp" \
+            && fall_back_to_main; }; } \
      && git -C "$clone_tmp" checkout -q -B main \
      && git -C "$clone_tmp" config claude-settings.cloudMirror true \
      && clone_sha=$(git -C "$clone_tmp" rev-parse main) \
@@ -491,6 +525,13 @@ if [ "$CLOUD" = 1 ] && [ -n "$SRC" ] && [ "$FROM_LIVE_PIN" != 1 ] && [ -e "$SRC/
     own_how=
     own_head=$(git -C "$SRC" rev-parse -q --verify HEAD 2>/dev/null)
     own_ref=$(git -C "$SRC" rev-parse -q --verify "refs/remotes/origin/$REF" 2>/dev/null)
+    # The checkout holds no origin/$REF and origin cannot give one (no stable branch, or no origin): the run follows main
+    # from here, as it did before stable existed, so a clean checkout at origin/main stays the source.
+    if [ -z "$own_ref" ] && [ "$REF" != main ] \
+       && ! cloud_git -C "$SRC" fetch -q origin "+refs/heads/$REF:refs/remotes/origin/$REF" 2>/dev/null; then
+      fall_back_to_main
+    fi
+    own_ref=$(git -C "$SRC" rev-parse -q --verify "refs/remotes/origin/$REF" 2>/dev/null)
     if [ -z "$(git -C "$SRC" status --porcelain 2>/dev/null)" ] && [ -n "$own_ref" ] \
        && git -C "$SRC" merge-base --is-ancestor "$own_ref" "$own_head" 2>/dev/null; then
       if [ -z "$(git -C "$SRC" config --get remote.origin.url 2>/dev/null)" ]; then
@@ -542,7 +583,9 @@ if [ -z "$SRC" ]; then
   SRC="$HOME/claude-settings"
   mkdir -p "$SRC"
   tmp="$SRC/.tarball.tmp.tar.gz"
-  if curl -fsSL "$TARBALL" -o "$tmp" && tar -xzf "$tmp" --strip-components=1 -C "$SRC"; then
+  if { curl -fsSL "$TARBALL" -o "$tmp" \
+       || { [ "$REF" != main ] && fall_back_to_main && curl -fsSL "$TARBALL" -o "$tmp"; }; } \
+     && tar -xzf "$tmp" --strip-components=1 -C "$SRC"; then
     rm -f "$tmp"
   else
     rm -f "$tmp"
@@ -1051,7 +1094,7 @@ if [ "$CLOUD" = 1 ]; then
       if [ "${n:-0}" -gt 0 ] 2>/dev/null; then
         log "wrote $TARGET_JSON (repo settings + cloud refresh hook + $n merge allow rules from $SRC at $SRC_SHA)"
       else
-        log "WARNING: wrote $TARGET_JSON with no merge allow rules: $SRC at $SRC_SHA has no rules in merge/cloud_allow.json, so the auto-mode classifier judges each merge --confirm. Move $SRC to origin/main, then resume the session."
+        log "WARNING: wrote $TARGET_JSON with no merge allow rules: $SRC at $SRC_SHA has no rules in merge/cloud_allow.json, so the auto-mode classifier judges each merge --confirm. Move $SRC to origin/$REF, then resume the session."
       fi
     else
       rm -f "$TARGET_JSON.tmp"
