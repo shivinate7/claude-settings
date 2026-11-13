@@ -750,7 +750,7 @@ PROMISE_HANDOFF_RE = re.compile(r"(?<![\w-])handoffs?(?![\w-])", re.I)
 PROMISE_LABEL_RE = re.compile(r"\bhandoff\s+gave\s*:", re.I)  # the compaction-carry label names no home
 PROMISE_REASON = (
     "Promise guard (rule building-mistake-names-its-guard): each line below promises \"from now on\" and names "
-    "only a handoff as its home. A handoff line is no mechanism (owner, 2026-11-06 19:02 CST). Build the check "
+    "only a handoff as its home. A handoff line is no mechanism (rule building-mistake-names-its-guard). Build the check "
     "or hook now and cite its PR or commit on the line, queue it as step:<slug>, or drop the promise. Lines: ")
 
 
