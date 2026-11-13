@@ -219,7 +219,9 @@ class ReviewGrantFlag(tm.ReviewEnv):
     and its PR must be the positional PR. Every refusal sits beside the good value, which must exit 0, so a parser that never learned the
     flag fails there too. A usage error prints no record."""
 
-    THREE = ("--round", "1:reviewer:sonnet:FAIL", "--round", "2:reviewer:sonnet:FAIL", "--round", "3:reviewer:opus:FAIL")
+    # Round 3 runs Sonnet high, and no round 3 names Opus (owner ruling own-r3-reviewer-sonnet-high, 2026-11-13 14:05 CST).
+    # Only a granted round 4 may run Opus, so FOUR's last round is the one Opus round.
+    THREE = ("--round", "1:reviewer:sonnet:FAIL", "--round", "2:reviewer:sonnet:FAIL", "--round", "3:reviewer:sonnet:FAIL")
     FOUR = (*THREE, "--round", "4:reviewer:opus:PASS")
 
     def granted(self, *tail, rounds=FOUR, pr="7"):
