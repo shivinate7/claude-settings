@@ -297,12 +297,13 @@ def past_ruling_hit(payload, message):
     return None
 
 
-def refuse(payload, to, reason, rule=RULE, cite=RULE_CITE):
+def refuse(payload, to, reason, rule=RULE):
     """Refuse through guard_core.refuse(), which lets an owner override lift it. refuse() exits."""
     reason = reason.strip()
     if reason.startswith(rule):
         reason = reason[len(rule):].lstrip(" :-")
     reason = reason or "the receiver must hear only what changes its work."
+    cite = PAST_RULE_CITE if rule == PAST_RULE else RULE_CITE
     text = reason + " " + cite  # the one text both the refuse() path and the fallback print carry
     try:
         import guard_core
@@ -335,7 +336,7 @@ def main():
         slug, rid = hit
         return refuse(payload, to if isinstance(to, str) else "",
                       "decision %s is superseded by ruling %s. Re-check the later ruling before you settle this; "
-                      "an owner override lifts this refusal." % (slug, rid), PAST_RULE, PAST_RULE_CITE)
+                      "an owner override lifts this refusal." % (slug, rid), PAST_RULE)
     answers = {}
     wording = threading.Thread(target=ask, daemon=True, args=(answers, "wording", build_wording_prompt(tool_input, message)),
                                kwargs={"model": WORDING_MODEL, "timeout": WORDING_TIMEOUT, "effort": None})
