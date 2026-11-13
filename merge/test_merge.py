@@ -1462,6 +1462,14 @@ class LockRetake(Env):
         self.assertEqual(self.head("merge-lock/main"), held)
 
 class Guards(Env):
+    def main_conflicts(self):
+        """A person pushes a commit to main that adds the path feat adds, with other text: the merge of the head and main conflicts there.
+        Under rule M3 a clean base move stands, so the base-tip refusals need this one."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        put(os.path.join(o, "docs/decisions/second.md"), record("pending", "rival"))
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-q", "-m", "main adds the same decision"); sh(o, "git", "push", "-q", "origin", "main")
+
     def test_moved_head_is_refused_and_nothing_is_claimed(self):
         old = self.head()
         self.competitor_push()
@@ -1485,24 +1493,6 @@ class Guards(Env):
         self.assertEqual(self.head(), sh(self.other, "git", "rev-parse", "HEAD"))  # the rival commit survives
         self.assertFalse(self.lock_ref())
         self.assertEqual(self.worktrees(), 1)
-
-    def test_red_check_reverts_the_claim(self):
-        self.host.seq = [(True, ""), (False, "required check `build` is red")]  # the head is green, the claim run is red
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 1)
-        self.assertIn("`build` is red", out)
-        self.assertIn("id: pending", self.show("feat", "docs/decisions/second.md"))
-        self.assertEqual(self.claims("feat"), 1)  # the claim commit stays in history, reverted
-        self.assertFalse(self.lock_ref())
-
-    def test_red_check_after_a_push_in_the_wait_reverts_nothing(self):
-        self.host.seq = [(True, ""), (False, "red")]
-        self.host.on_wait = self.competitor_push
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 1)
-        self.assertIn("Nothing reverted", out)
-        self.assertEqual(self.head(), sh(self.other, "git", "rev-parse", "HEAD"))
-        self.assertIn("id: D-002", self.show("feat", "docs/decisions/second.md"))
 
     def test_protection_refusal_reverts_the_claim(self):
         self.host.refuse = "protected branch: 1 approving review required"
@@ -1533,7 +1523,7 @@ class Guards(Env):
         self.assertFalse(self.host.merged)
 
     def test_a_head_without_the_base_tip_is_refused_before_any_claim(self):  # merge-needs-current-base
-        self.main_moves()
+        self.main_conflicts()  # a conflicting base: a clean one merges under M3 (PerLaneMerge clean-behind case)
         self.host.merged = False
         before = self.refs()
         rc, out = self.run_merge("7", "--confirm")
@@ -1546,10 +1536,10 @@ class Guards(Env):
 
     def test_a_base_that_moves_during_the_wait_reverts_the_claim_and_merges_nothing(self):
         self.host.merged = False
-        self.host.on_claim = self.main_moves
+        self.host.on_claim = self.main_conflicts  # after the claim: the post-claim proof refuses the conflict, and the claim is reverted
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 1, out)
-        self.assertIn("does not hold origin/main", out)
+        self.assertIn("does not merge cleanly with origin/main", out)  # records_proof's words: it reads the merge before holds_base does
         self.assertFalse(self.host.merged)
         self.assertIn("id: pending", self.show("feat", "docs/decisions/second.md"))
 
@@ -1562,11 +1552,11 @@ class Guards(Env):
         self.assertTrue(self.host.merged)
 
     def test_the_preview_names_a_head_without_the_base_tip(self):
-        self.main_moves()
+        self.main_conflicts()
         rc, out = self.run_merge("7")
         self.assertIn("base:   BEHIND:", out)
         self.assertIn("--confirm refuses it", out)
-        sh(self.other, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(self.other, "git", "merge", "-q", "--no-edit", "main"); sh(self.other, "git", "push", "-q", "origin", "feat")
+        sh(self.other, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(self.other, "git", "merge", "-q", "--no-edit", "-X", "theirs", "main"); sh(self.other, "git", "push", "-q", "origin", "feat")
         rc, out = self.run_merge("7")
         self.assertIn("base:   holds main's tip", out)
 
@@ -8968,20 +8958,26 @@ class RecordsEnv(Env):
             put_lf(os.path.join(o, rel), text)
         sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", msg); sh(o, "git", "push", "-q", "origin", branch)
 
-    def in_wait(self, action, at=1):
-        """Run action as the at-th check wait starts: main moves while the run waits, after the head was read current.
+    def in_wait(self, action):
+        """Run action once, right after the run's first head read (merge.holds_base, before the claim): main moves after the head was read
+        current, and before the run's own reads of the base. The per-lane run waits on no check, so the window is the head read, not a wait.
         A move before the run is refused at the start (merge-needs-current-base), so a case that needs main ahead of the head moves it here."""
-        actions = getattr(self, "_wait_actions", None)
-        if actions is None:
-            actions = self._wait_actions = {}
-            real = self.host.wait_checks
-            def wait(n, sha, d, prior=None):
-                act = actions.pop(len(self.host.waits) + 1, None)
-                if act:
-                    act()
-                return real(n, sha, d, prior)
-            self.host.wait_checks = wait
-        actions[at] = action
+        real = merge.holds_base
+        moved = []
+        def read_then_move(*a, **k):
+            out = real(*a, **k)
+            if not moved:
+                moved.append(True)
+                action()
+            return out
+        patch = unittest.mock.patch.object(merge, "holds_base", read_then_move)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def main_debt_conflicts(self):
+        """main adds the debt the head adds, with other text: the merge of the head and main conflicts on it. Under rule M3 a clean base
+        move stands, so a case that needs a refused head moves main this way."""
+        self.on("main", {"debts/gap-one.md": DEBT_TEXT.replace("Gap one", "Main gap")}, "untooled push")
 
     def drop(self, branch, rel, msg):
         """Push one commit to origin/<branch> from the second clone that removes rel, as a person would."""
@@ -9093,9 +9089,8 @@ class RecordsRebuild(RecordsEnv):
       the draft step refuses a claim head, so it is never named first. The preview's records line gives the same remedy.
     - The claim and the rebuild share one commit. With a claim: "Claim record numbers", with its Record-claim trailer, and
       the page in the same commit. A resumed claim with a stale page: the subject "Rebuild the records page", and no
-      Record-claim trailer. The order is the claim's: wait on the head first, then commit, push, wait on the new sha. A red
-      check on it reverts that commit, as for a claim.
-    - Nothing changed in the worktree: no commit, and one wait.
+      Record-claim trailer. The head is read green once, before the page commit is pushed; nothing waits on the new sha.
+    - Nothing changed in the worktree: no commit, and no wait.
     - Proof before the merge call: after the last fetch of the base, merge origin/<base> into the worktree without a
       commit and run the generator. When it would change the page, the page on the head is stale for the merge result
       (the base moved with a record): refuse with a line that says "records page" and "stale", revert the rebuild
@@ -9173,7 +9168,7 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.log1("%(trailers:key=Record-claim,valueonly)", after).strip(), "")
         self.assertIn(merge.RECORDS_PAGE, self.log1("%(trailers:key=Drops-lines,valueonly)", after))
         self.assertEqual(self.show("main", merge.RECORDS_PAGE), page("gap-one").strip())
-        self.assertEqual(self.host.waits, [(before, None), (after, before)])  # the head first, then the page commit on top of it
+        self.assertEqual(self.host.waits, [], "confirm waited on a check")  # no wait: the head was read green, and nothing waits on the page commit
         self.assertTrue(getattr(self.host, "merged", False), out)
 
     def test_a_stale_page_on_a_draft_heals_even_when_the_pr_touches_no_record(self):
@@ -9189,14 +9184,14 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.head("main"), main_before, "the draft step moved main")
         self.assertFalse(getattr(self.host, "merged", False), out)
 
-    def test_a_current_page_adds_no_commit_and_waits_once(self):
+    def test_a_current_page_adds_no_commit_and_no_wait(self):
         self.kinds_off()
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT, "docs/records.md": page("gap-one")})
         before = self.head()
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.rev("origin/main^2"), before)
-        self.assertEqual(len(self.host.waits), 1)
+        self.assertEqual(self.host.waits, [], "confirm waited on a check")
         self.assertTrue(os.path.exists(self.calls), "the generator did not run on a page that was already current")
 
     def test_a_base_that_is_not_the_default_is_left_alone(self):
@@ -9304,19 +9299,6 @@ class RecordsRebuild(RecordsEnv):
         self.assertFalse(self.lock_ref())
         self.assertEqual(self.worktrees(), 1)
 
-    def test_a_red_check_on_the_rebuild_commit_reverts_it(self):
-        self.claim_head({"debts/gap-one.md": DEBT_TEXT})  # resumed: the page commit on top of the claim is the one pushed
-        before = self.head()
-        self.host.seq = [(True, ""), (False, "a check is red: checks: fail")]  # the head is green, the rebuild commit is red
-        rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 1, out)
-        self.assertIn("reverted", out)
-        self.assertEqual(sh(self.co, "git", "diff", "--stat", before, "origin/feat"), "")  # the branch tree is as it was
-        self.assertNotIn("docs/records.md", self.tree_names("origin/main"))
-        self.assertFalse(getattr(self.host, "merged", False))
-        self.assertFalse(self.lock_ref())
-        self.assertEqual(self.worktrees(), 1)
-
     def test_main_gaining_a_record_during_the_wait_refuses_and_reverts(self):
         # A push that did not use the tool: a debt lands on main and the page is not rebuilt. The merge result
         # would hold a stale page, so the merge must not happen.
@@ -9333,17 +9315,15 @@ class RecordsRebuild(RecordsEnv):
         self.assertFalse(self.lock_ref())
         self.assertEqual(self.worktrees(), 1)
 
-    def test_main_gaining_an_unrelated_change_during_the_wait_refuses_and_reverts(self):
-        # The page is fresh, but no run tested the head with main's new commit (merge-needs-current-base).
-        self.claim_head({"debts/gap-one.md": DEBT_TEXT})  # resumed, so the page commit is pushed and the proof runs after its wait
-        before = self.head()
+    def test_main_gaining_an_unrelated_change_after_the_claim_merges_on_the_clean_merge(self):
+        # Rule M3: main's new commit touches no path the head changes, so the merge of the two is clean and the green run stands.
+        self.claim_head({"debts/gap-one.md": DEBT_TEXT})  # resumed, so the page commit is pushed and the proof runs after it
         self.host.on_claim = lambda: self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")
         rc, out = self.run_merge("7", "--confirm")
-        self.assertEqual(rc, 1, out)
-        self.assertIn("does not hold origin/main", out)
-        self.assertIn("reverted", out)
-        self.assertFalse(getattr(self.host, "merged", False), out)
-        self.assertEqual(sh(self.co, "git", "diff", "--stat", before, "origin/feat"), "")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("The green run stands", out)
+        self.assertNotIn("reverted", out)
+        self.assertTrue(getattr(self.host, "merged", False), out)
 
     def test_the_preview_on_a_non_default_base_says_nothing_about_the_page(self):
         # The records line sits inside the default-branch block of preview(), so a pull request
@@ -9374,7 +9354,7 @@ class RecordsRebuild(RecordsEnv):
 
     def test_prepare_refuses_a_head_that_does_not_hold_the_base_tip(self):
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
-        self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")  # main moves on; the head does not hold its tip
+        self.main_debt_conflicts()  # main moves on with a conflicting debt: the head does not hold its tip, and the merge conflicts
         before = (self.head(), self.head("main"))
         rc, out = self.draft_confirm()
         self.assertNotEqual(rc, 0, out)
@@ -9440,9 +9420,9 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.host.readies, [7], "the ready confirm marked it ready again")
         # deleteBranch removes `feat` after the merge, so read the merge commit instead. Its second parent is the sha
-        # the draft step pushed, and the one wait is on that sha: the ready confirm pushed no commit after it.
+        # the draft step pushed. The ready confirm pushed no commit after it, and waited on none.
         self.assertEqual(self.rev("origin/main^2"), prepared, "the ready confirm pushed a commit after the draft step")
-        self.assertEqual([sha for sha, _ in self.host.waits], [prepared])
+        self.assertEqual(self.host.waits, [], "the ready confirm waited on a check")
         self.assertEqual(self.show("main", merge.RECORDS_PAGE), page("gap-one").strip())
 
     def test_prepare_draft_confirm_never_calls_merge_on_any_path(self):
@@ -9468,7 +9448,7 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.head(), before, "refused push: the head moved")
         self.assertEqual(len(self.host.readies), 2, "refused push: the pull request was marked ready")
         self.assertEqual(asked, [], "refused push: merge was called")
-        self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")  # main moves on: the head is behind it
+        self.main_debt_conflicts()  # main moves on with a conflicting debt: the head is behind it
         rc, out = self.draft_confirm()
         self.assertNotEqual(rc, 0, "BEHIND: " + out)
         self.assertIn("BEHIND", out)
@@ -9490,14 +9470,12 @@ class RecordsRebuild(RecordsEnv):
         self.assertTrue(self.host.draft, "the refused ready cleared the draft flag")
         self.assertFalse(getattr(self.host, "merged", False), out)
 
-    def test_prepare_goes_on_when_the_green_run_stands_on_a_small_base_move(self):
+    def test_prepare_goes_on_when_the_base_moved_by_a_clean_merge(self):
         self.kinds_off()
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
-        self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")  # the head lacks the base tip, but its green run stands
+        self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")  # the head lacks the base tip; the merge of the two is clean, so the green run stands (M3)
         before = self.head()
-        stands = (True, "main moved by 1 commit touching only paths no job of this batch reads; the lints pass on the merge")
-        with unittest.mock.patch.object(merge, "small_base_move", return_value=stands):
-            rc, out = self.draft_confirm()
+        rc, out = self.draft_confirm()
         self.assertEqual(rc, 0, out)
         self.assertIn("The green run stands", out)
         self.assertNotIn("BEHIND", out)
@@ -9520,7 +9498,7 @@ class RecordsRebuild(RecordsEnv):
 
     def test_prepare_behind_names_the_remedy_once(self):
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
-        self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")
+        self.main_debt_conflicts()
         rc, out = self.draft_confirm()
         self.assertNotEqual(rc, 0, out)
         self.assertIn("BEHIND: ", out)
@@ -9540,25 +9518,25 @@ class RecordsRebuild(RecordsEnv):
         self.assertEqual(self.host.readies, [], "marked ready on a refusal")
 
     def test_prepare_under_the_lock_extends_it_and_releases_it(self):
-        # A PR that turns draft once the lock is held: the draft step runs under confirm's lock, so its proof hands holds_base
-        # the lock's own extend_for, as the ready path does. Without it a rate wait there could outlive the lock.
+        # A PR that turns draft once the lock is held: the draft step runs under confirm's lock, and its ready call runs with the
+        # lock's own extend_for as before_wait, so a rate wait there extends the lock. Without it a rate wait could outlive the lock.
         self.kinds_off()
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
         lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)
-        real_acquire, real_holds, seen = lock.acquire, merge.holds_base, []
+        real_acquire, real_ready, seen = lock.acquire, self.host.ready, []
         def acquire(*a, **k):
             token = real_acquire(*a, **k)
             self.host.draft = True  # main's read saw a ready PR; the read under the lock sees a draft
             return token
-        def holds(wt, base_ref, sha, before_run=None):
-            seen.append(before_run)
-            return real_holds(wt, base_ref, sha, before_run)
+        def ready(n):
+            seen.append(self.host.before_wait)
+            return real_ready(n)
         lock.acquire = acquire
-        with unittest.mock.patch.object(merge, "holds_base", holds):
-            rc, out = self.run_merge("7", "--confirm", lock=lock)
+        self.host.ready = ready
+        rc, out = self.run_merge("7", "--confirm", lock=lock)
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.host.readies, [7], out)
-        self.assertEqual(seen, [lock.extend_for], "the draft step under the lock did not pass the lock's extend_for to holds_base")
+        self.assertEqual(seen, [lock.extend_for], "the draft step's ready call did not run under the lock's extend_for")
         self.assertFalse(self.lock_ref(), "the lock was not released")
         self.assertFalse(getattr(self.host, "merged", False), out)
 
@@ -9578,10 +9556,10 @@ class RecordsRebuild(RecordsEnv):
         self.assertNotIn("--confirm on the draft", self.preview_line(out, "records"), f"hints a push that --confirm refuses\n{out}")
 
     def test_the_draft_preview_hints_no_push_when_the_head_is_behind(self):
-        # The draft step refuses a head that does not hold the base tip, so there is no push to promise.
+        # The draft step refuses a head that does not hold the base tip and conflicts with it, so there is no push to promise.
         self.kinds_off()
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
-        self.on("main", {"notes.txt": "unrelated\n"}, "untooled push")
+        self.main_debt_conflicts()
         self.assert_refused_draft_preview_hints_no_push(self.draft_preview(), "BEHIND")
 
     def test_the_draft_preview_hints_no_push_when_the_base_cannot_be_read(self):
@@ -9821,9 +9799,9 @@ class RecordsScope(RecordsEnv):
         self.assertNotIn("docs/catalog.md", changed, changed)
 
 class RecordsHeal(RecordsEnv):
-    """The keep paths of the heal wait in confirm(): the third wait of a run, on the merge commit that heals the page. The
-    fake generator writes the page, so the heal is a real conflict on docs/records.md. Each push or red check fires on the
-    third wait only (len(host.waits) == 3). These pin the keep paths."""
+    """The heal of a page that conflicts with main: the merge commit that heals the page is pushed and merged in one run, with no
+    wait on its checks. The fake generator writes the page, so the heal is a real conflict on docs/records.md. The keep-path cases
+    that pinned the old third wait are retired (see the commit message); the heal's own records and drops-lines contract stays here."""
     def setUp(self):
         super().setUp()
         self.calls, self.prog = os.path.join(self.t, "records-calls.log"), os.path.join(self.t, "records.py")
@@ -9838,85 +9816,6 @@ class RecordsHeal(RecordsEnv):
         self.claim_head({"debts/gap-one.md": DEBT_TEXT})
         self.in_wait(lambda: self.on("main", {"debts/main-gap.md": DEBT_TEXT.replace("Gap one", "Main gap"), "docs/records.md": "records\n- main-gap\n"},
                                      "a debt and a hand-written page on main"))
-
-    def on_heal_wait(self, action):
-        """Run action when the heal wait starts: the third wait, on the merge commit."""
-        self.host.on_wait = lambda: action() if len(self.host.waits) == 3 else None
-
-    def assert_kept(self, rc, out):
-        """The merge commit that heals the page stays on feat: no revert, no merge, lock free."""
-        self.assertEqual(rc, 1, out)
-        self.assertEqual(len(self.host.waits), 3, self.host.waits)
-        self.assertIn("stays on feat", out)
-        self.assertNotIn("reverted", out)
-        self.assertFalse(getattr(self.host, "merged", False), out)
-        self.assertEqual(self.rev("origin/feat"), self.host.waits[-1][0])
-        self.assertFalse(self.lock_ref())
-        self.assertEqual(self.worktrees(), 1)
-
-    def assert_unknown_kept(self, rc, out):
-        """The heal wait could not get an answer: the stop says the result is unknown and to rerun, the merge commit stays on feat, nothing is merged."""
-        self.assertEqual(rc, 1, out)
-        self.assertEqual(len(self.host.waits), 3, self.host.waits)
-        self.assertRegex(out.lower(), r"unknown", "the stop does not say the result is unknown")
-        self.assertRegex(out.lower(), r"re-?run|run again", "the stop does not say to rerun merge")
-        self.assertNotIn("are not green", out, "the heal wait read an unanswered wait as a red check")
-        self.assertNotIn("reverted", out)
-        self.assertFalse(getattr(self.host, "merged", False), out)
-        self.assertEqual(self.rev("origin/feat"), self.host.waits[-1][0], "feat moved off the merge commit the heal pushed")
-        self.assertFalse(self.lock_ref())
-        self.assertEqual(self.worktrees(), 1)
-
-    def test_red_checks_on_the_heal_commit_keep_it_and_merge_nothing(self):
-        self.heal_setup()
-        self.host.seq = [(True, ""), (True, ""), (False, "a check is red: checks: fail")]
-        rc, out = self.run_merge("7", "--confirm")
-        self.assert_kept(rc, out)
-        self.assertIn("are not green", out)
-        self.assertIn("checks: fail", out)
-
-    def test_a_deadline_with_a_required_check_pending_on_the_heal_commit_stops_unknown_and_keeps_it(self):
-        self.heal_setup()
-        self.host.seq = [(True, ""), (True, ""), (None, "the checks wait ended at its deadline with a required check pending")]
-        rc, out = self.run_merge("7", "--confirm")
-        self.assert_unknown_kept(rc, out)
-
-    def test_a_failed_read_in_the_heal_wait_stops_unknown_and_keeps_the_merge_commit(self):
-        self.heal_setup()
-        def read_fails():
-            raise merge.Stop("reading the checks of #7 failed: boom")
-        self.on_heal_wait(read_fails)
-        rc, out = self.run_merge("7", "--confirm")
-        self.assert_unknown_kept(rc, out)
-
-    def test_an_error_in_the_heal_wait_stops_unknown_and_keeps_the_merge_commit(self):
-        self.heal_setup()
-        def boom():
-            raise RuntimeError("boom")
-        self.on_heal_wait(boom)
-        rc, out = self.run_merge("7", "--confirm")
-        self.assert_unknown_kept(rc, out)
-
-    def test_a_debt_landing_on_main_during_the_heal_wait_makes_the_page_stale(self):
-        self.heal_setup()
-        self.on_heal_wait(lambda: self.on("main", {"debts/rival-gap.md": DEBT_TEXT.replace("Gap one", "Rival gap")}, "untooled push"))
-        rc, out = self.run_merge("7", "--confirm")
-        self.assert_kept(rc, out)
-        self.assertIn("records page is stale", out)
-
-    def test_a_page_edit_landing_on_main_during_the_heal_wait_stops_the_second_heal(self):
-        self.heal_setup()
-        self.on_heal_wait(lambda: self.on("main", {"docs/records.md": "records\n- rival\n"}, "untooled page edit"))
-        rc, out = self.run_merge("7", "--confirm")
-        self.assert_kept(rc, out)
-        self.assertIn("conflicts again", out)
-
-    def test_a_non_page_conflict_landing_on_main_during_the_heal_wait_refuses(self):
-        self.heal_setup()
-        self.on_heal_wait(lambda: self.on("main", {"debts/gap-one.md": DEBT_TEXT.replace("Gap one", "Rival gap one")}, "untooled debt"))
-        rc, out = self.run_merge("7", "--confirm")
-        self.assert_kept(rc, out)
-        self.assertIn("does not merge cleanly", out)
 
     def test_the_heal_commit_names_only_the_page_in_drops_lines(self):
         self.heal_setup()
