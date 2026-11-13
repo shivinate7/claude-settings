@@ -57,7 +57,7 @@ malformed `waits`; also an item past the WAIT_CAP-th call, which is not asked). 
 --answers, with --items, names the answers the session saved with `ArtifactData list answers`, in the same two shapes, read by the same
 loader (a list entry names its item in `item`, or is {"id", "data"}; a folder doc by its file name). After the wait and lane lines, one line per closed item,
 in item order, whose answer is still kept: `kept-answer: item <n> (<id>) is closed and answers/<id> is kept`, then the remedy (delete
-the answer, or reopen the item with `lane` and `lastAnswer`). A closed item with `waits` prints `kept-answer: item <n> (<id>) is closed with waits and
+the answer; a routed item stays closed). A closed item with `waits` prints `kept-answer: item <n> (<id>) is closed with waits and
 answers/<id> is kept`, then the remedy: when its wait has ended, drop `waits` and delete the answer; no gh call. Never named: an open item or one with no status,
 a closed item with a `lane` and a `lastAnswer` (routed: its answer stays until the done report), an item with `arbiter` true, a park answer (`park.<id>`, `parked: true` or `act: "park"`), an answer with no item. An unreadable file, a folder without the marker,
 unreadable items, an items folder without the marker, or --answers without --items print one `kept-answer: unknown (...)` line, with no other kept-answer line.
@@ -549,7 +549,7 @@ def wait_lines(items, complete=True):
 
 
 def kept_answer_lines(items, answers, complete=True, answers_complete=True):
-    """One line per closed item, in item order, whose answer is still kept: the writer re-reads answers/<id>, then deletes it or reopens the item
+    """One line per closed item, in item order, whose answer is still kept: the writer re-reads answers/<id>, then deletes it
     (SKILL.md, "Route and close"). `items` and `answers` are (doc id, data) pairs from load_docs. A closed item with `waits` and a kept answer (a chat
     answer can close an item during a wait) gets its own line, "is closed with waits", whose remedy waits for the wait to end; no gh call. Never an open
     item, an arbiter ruling (its overturn answer is read by its own route), a park answer, an answer with no item, or a routed closed item (a
@@ -579,8 +579,8 @@ def kept_answer_lines(items, answers, complete=True, answers_complete=True):
             lines.append('kept-answer: item %s (%s) is closed with waits and answers/%s is kept; when its wait has ended, drop waits and delete '
                          'answers/%s (SKILL.md, "Route and close")' % (item.get("n", item_id), item_id, item_id, item_id))
         else:
-            lines.append('kept-answer: item %s (%s) is closed and answers/%s is kept; re-read answers/%s, then delete it, or reopen the item with '
-                         'lane and lastAnswer (SKILL.md, "Route and close")' % (item.get("n", item_id), item_id, item_id, item_id))
+            lines.append('kept-answer: item %s (%s) is closed and answers/%s is kept; re-read answers/%s, then delete it '
+                         '(SKILL.md, "Route and close")' % (item.get("n", item_id), item_id, item_id, item_id))
     return lines
 
 

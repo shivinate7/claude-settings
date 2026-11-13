@@ -2273,3 +2273,6 @@
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
 - routed-answer-no-grant-route: a routed answer (item closed at routing, `lane` and answer kept) has no counted grant route in `page_grant.py` until restart-plan stage 4 (the `covers` check); the receiver needs the grant typed in its own session.
 - idle-lanes-reads-closed-lane-item: `idle_lanes` in `skills/roadmap/build.py` may read a lane whose only item is closed (routed) as idle; unpinned.
+- routed-no-done-report-silent: a receiver that ends with no done report no longer trips `stalled_items` in `skills/roadmap/build.py` or `wait_lines` in `skills/waiting-page/stale_pages.py`, since both skip closed rows; SKILL.md names the `--items` lane line as the page-side sign.
+- routed-waits-skipped: a routed closed item with `waits` is skipped by `kept_answer_lines` before its waits branch.
+- routed-kept-answer-at-unchecked: `kept_answer_lines` skips a routed closed item without comparing the kept answer's `at` to `lastAnswer.at`, so a changed answer on it is silent.
