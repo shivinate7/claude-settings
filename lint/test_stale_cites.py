@@ -14,6 +14,11 @@ files under hooks/, lint/, bin/, actions/ and .github/ (no touched or untouched 
 with the decisions whose Home names it and the rows that name it.
 STALE005 (range mode only) reports an added governed line that states a capability by route with no backing. It is
 report only: the exit code does not change (RouteClaimTests).
+STALE009 (range mode only) reports an added decision-record line that states what code does, with no cite of a bound
+name. It is report only too (CodeClaimTests).
+STALE010 (range mode) is a finding: an added line that cites a Python name the head does not bind, or a file absent at
+head in a tracked top folder, in a STALE002 form or a node id. A cite into an untracked top folder is no cite here
+(NameCiteTests). A cite is judged on added lines only.
 
 
 `--tree [REV]` reads every tracked Markdown file at REV instead of a range: STALE003 for a path cite that names
@@ -75,7 +80,7 @@ CODE = {
     "lint/x.py": "def check():\n    return 3\n",
 }
 Range = collections.namedtuple("Range", "case repo base head")
-FINDING = re.compile(r"^(?P<path>.+?):(?P<line>[0-9]+): (?P<code>STALE00[1-48]) (?P<text>.*)$")  # not STALE005: a report line
+FINDING = re.compile(r"^(?P<path>.+?):(?P<line>[0-9]+): (?P<code>STALE00[1-48]|STALE010) (?P<text>.*)$")  # not STALE005 or STALE009: report lines
 
 
 def base_files(notes="# Notes\n", extra=None):
@@ -258,15 +263,20 @@ def unknown_lines(out):
 
 
 class StaleCase(unittest.TestCase):
-    def make_range(self, base, change):
-        """Commit `base` on main, then run `change(repo)` on topic. `change` makes its own commit, so a case
-        can leave a file untracked after it."""
+    def make_range(self, base, change, history=()):
+        """Commit each `history` step on main, one commit per step, then `base`, then run `change(repo)` on topic. A
+        step runs before the base, so the range does not touch the paths it made. `change` makes its own commit, so a
+        case can leave a file untracked after it."""
         case = tempfile.mkdtemp(dir=RUN_FOLDER)
         self.addCleanup(tracked_tree.rm_tree, case)
         repo = os.path.join(case, "repo")
         os.makedirs(repo)
         git(repo, "init", "-q")
         git(repo, "symbolic-ref", "HEAD", "refs/heads/main")
+        for step in history:
+            step(repo)
+            git(repo, "add", "-A")
+            git(repo, "commit", "-qm", "history")
         for path, text in base.items():
             write(repo, path, text)
         git(repo, "add", "-A")
@@ -275,6 +285,31 @@ class StaleCase(unittest.TestCase):
         git(repo, "checkout", "-q", "-b", "topic")
         change(repo)
         return Range(case, repo, base_sha, git(repo, "rev-parse", "HEAD"))
+
+    def route_range(self, rows, extra=None, base_notes="# Notes\n", head_extra=None, history=()):
+        """A range that rewrites NOTES as `rows`, given as (line, flagged) pairs. `extra` is committed at base and
+        `head_extra` ({path: text}) at head. `history` steps are committed before the base (see make_range). Returns
+        (range, flagged lines)."""
+        text, flagged = rows_text(rows)
+
+        def change(repo):
+            write(repo, NOTES, text)
+            for path, body in (head_extra or {}).items():
+                write(repo, path, body)
+            commit(repo)
+        return self.make_range(base_files(base_notes, extra=extra), change, history=history), flagged
+
+    def rows_range(self, rows, head_extra=None):
+        """A range that rewrites the decision record DECISION as `rows` ((text, flagged) pairs) over a base of a heading
+        and the merge/merge.py fixture. `head_extra` ({path: text}) is written at head too. Returns (range, flagged)."""
+        text, flagged = rows_text(rows)
+
+        def change(repo):
+            write(repo, DECISION, text)
+            for path, body in (head_extra or {}).items():
+                write(repo, path, body)
+            commit(repo)
+        return self.make_range(base_files(extra={DECISION: "# Heading\n", MERGE_PY: LANE_LINT}), change), flagged
 
     def run_check(self, rng, base=None, extra_env=None, spec=None):
         """(exit code, output) of `--range`. `spec` gives the range text when a case needs another shape."""
@@ -1076,7 +1111,8 @@ class PinTests(unittest.TestCase):
 class CostTests(StaleCase):
     """The check's cost is a contract. A range that removes or renames no path, and changes only Markdown outside
     the rule files, starts three git processes and reads no blob, or one more when it adds a governed line: STALE005
-    reads the added lines once. A removed or renamed path makes the check read the
+    reads the added lines once. A decision line that states what code does (STALE009) reads its blob the same way, and
+    so does a folder .py name cite (STALE010, pinned at four starts in NameCiteTests). A removed or renamed path makes the check read the
     tracked Markdown files. So does a name that a touched .py no longer defines. A changed file that is not Markdown
     also reads the repo's decision records for its Home line, even when nothing was removed. No run writes a file."""
 
@@ -1245,6 +1281,25 @@ class CostTests(StaleCase):
         # The removed path makes the check read the Markdown at head (one ls-tree, one cat-file). The candidate line
         # reads its backing from that same cat-file, so the count is five and no more.
         self.assertEqual(len(subs), 5, subs)
+
+    def test_a_decision_line_stating_what_code_does_starts_one_cat_file_and_the_same_line_elsewhere_starts_none(self):
+        """STALE009 reads an added decision line that states what code does, so its head blob is read: four starts, not
+        three. The same line on a page outside the decisions folder reads no blob, which pins the extra start to the
+        decision reader. The line has no STALE005 verb or route word, so only STALE009 can read it."""
+        line = "- The check runs weekly."
+        module = load_module_under_test()
+        self.assertIsNone(module.VERB.search(line))  # scope: no STALE005 verb in the line
+        self.assertIsNone(module.ROUTE_WORD.search(line))  # scope: no route word in the line
+        rng, _ = self.rows_range([(line, False)])
+        self.assertIn(DECISION, touched(rng))  # scope: the added line is in a decision record
+        rc, out, subs = self.run_traced(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(subs), 4, subs)  # the three starts of a Markdown range, and one cat-file that reads the line
+        elsewhere, _ = self.route_range([(line, False)])
+        rc, out, subs = self.run_traced(elsewhere)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(subs), 3, subs)
+        self.assertNotIn("cat-file", subs, subs)
 
     def test_a_run_writes_no_file_in_the_repo_or_next_to_the_script(self):
         def change(repo):
@@ -2289,15 +2344,6 @@ class RouteClaimTests(StaleCase):
     """STALE005, range mode only, report only. An ADDED line of governed prose states a capability by route when it
     holds a capability verb and a route word. It is backed by a premise kind from PREMISE_KINDS with its source, or by a
     route id that is a row of hooks/route_rows.json. The exit code never changes."""
-
-    def route_range(self, rows, extra=None, base_notes="# Notes\n"):
-        """A range that rewrites NOTES as `rows`, given as (line, flagged) pairs. Returns (range, flagged lines)."""
-        text, flagged = rows_text(rows)
-
-        def change(repo):
-            write(repo, NOTES, text)
-            commit(repo)
-        return self.make_range(base_files(base_notes, extra=extra), change), flagged
 
     def assert_route_claims(self, rng, expected, path=NOTES):
         """Scope first: the range touched `path`. Then the exit is 0, the verdict is PASS, and the STALE005 lines that
@@ -3396,6 +3442,340 @@ class ValueCiteTests(StaleCase):
         self.assertEqual([(p, n, c) for p, n, c, _ in found], [(NOTES, 3, "STALE008")], out)
         self.assertIn("no JSON literal", found[0][3], "a set cite that is no JSON literal must print that reason: %s" % found[0][3])
         self.assertEqual(rc, 1, out)
+
+
+DECISION = "docs/decisions/pr-ledger.md"  # a decision record: STALE009 reads its added lines
+GUIDE = "docs/guide.md"  # a page outside the decisions folder: STALE009 never reads it
+MERGE_PY = "merge/merge.py"
+LANE_LINT = "def lane_lint(lane):\n    return lane\n"  # the one name merge/merge.py binds
+LEDGER = "The ledger reads no CI state; a batch line is a done record for the live head."
+CITED_PAREN = LEDGER.replace("reads no CI state;", "reads no CI state (merge/merge.py lane_lint);")
+CITED_TICK = LEDGER.replace("reads no CI state;", "reads no CI state, as `merge/merge.py` `lane_lint` shows;")
+DEAD_PAREN = LEDGER.replace("reads no CI state;", "reads no CI state (merge/merge.py no_such_name);")
+UNCITED = "The guard refuses a push to main."  # a code claim with no cite: STALE009 reports it
+CLAIM = re.compile(r"^stale-cites: report, (?P<path>[^\s:]+):(?P<line>\d+): STALE009 (?P<text>.*)$", re.M)
+
+
+def code_claims(out):
+    """(path, line, text) of each report line the check printed for STALE009, in output order."""
+    return [(m.group("path"), int(m.group("line")), m.group("text")) for m in CLAIM.finditer(out)]
+
+
+def top_folders(rng, rev=None):
+    """The first folder of each tracked path at `rev` (head by default): the folders a cite's first segment is tested
+    against. A symlink at the root has no folder part, so it is in none."""
+    listed = git(rng.repo, "ls-tree", "-r", "--name-only", rev or rng.head).split()
+    return {p.split("/", 1)[0] for p in listed if "/" in p}
+
+
+def tracked_history(rng):
+    """The paths the commits before the base add or delete, renames not followed: the history a folder is read from."""
+    return set(git(rng.repo, "log", "--no-renames", "--name-only", "--format=", rng.base).split())
+
+
+def track_debts_guard(repo):
+    write(repo, "debts/guard.py", GUARD)
+
+
+def move_debts_guard(repo):
+    move(repo, "debts/guard.py", "docs/debts/guard.py")
+
+
+DEBTS_MOVED_HISTORY = (track_debts_guard, move_debts_guard)  # `debts/` tracked, then moved out, before the base
+
+
+def track_root_link(repo):
+    os.symlink("lint", os.path.join(repo, "link"))  # a root symlink to a tracked folder: an entry of mode 120000
+
+
+def git_failing_log(case):
+    """A folder holding a `git` that fails every `log` and runs each other command as the real git does. A case puts
+    it first on PATH for the check's run only, so the history read fails and nothing else changes."""
+    real = shutil.which("git")
+    folder = os.path.join(case, "shim")
+    os.makedirs(folder)
+    script = os.path.join(folder, "git")
+    with open(script, "w", encoding="utf-8", newline="\n") as f:
+        f.write("#!/bin/sh\n"
+                "for arg in \"$@\"; do\n"
+                "  if [ \"$arg\" = log ]; then\n"
+                "    echo 'git log refused by the test shim' >&2\n"
+                "    exit 1\n"
+                "  fi\n"
+                "done\n"
+                "exec %s \"$@\"\n" % shlex.quote(real))
+    os.chmod(script, 0o755)
+    return folder
+
+
+class CodeClaimTests(StaleCase):
+    """STALE009, range mode, report only. An ADDED line of a decision record that states what code does (a code
+    subject and a behaviour verb) must carry a cite of a bound name, in a STALE002 form or a node id. A line that does
+    not is a report line. The exit code never changes, and a line the range does not add is never reported. A dead
+    cite is STALE010, not a report (NameCiteTests)."""
+
+    def assert_code_claims(self, rng, expected):
+        """The exit is 0, the verdict is PASS and no finding prints. The STALE009 report lines are exactly `expected`,
+        as (path, line) pairs. Returns the output."""
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("stale-cites: PASS", out)
+        self.assertEqual(parse(out), [], out)
+        self.assertEqual(sorted((p, n) for p, n, _ in code_claims(out)), sorted(expected), out)
+        return out
+
+    def test_an_added_decision_line_stating_what_code_does_with_no_cite_is_reported_and_the_exit_stays_zero(self):
+        rng, flagged = self.rows_range([("- " + LEDGER, True)])
+        self.assertIn(DECISION, touched(rng))  # scope: the range adds a decision line
+        self.assert_code_claims(rng, [(DECISION, n) for n in flagged])
+
+    def test_a_bound_name_cited_in_either_form_silences_its_sentence_and_the_uncited_twin_still_fires(self):
+        rows = [("- " + LEDGER, True), ("- " + CITED_TICK, False), ("- " + CITED_PAREN, False)]
+        rng, _ = self.rows_range(rows)
+        self.assertEqual(binding_kind(LANE_LINT, "lane_lint"), "def")  # scope: the cited name is bound at head
+        self.assertIn(DECISION, touched(rng))
+        self.assert_code_claims(rng, [(DECISION, 1)])
+
+    def test_a_node_id_of_a_name_bound_at_head_is_a_cite_and_the_uncited_twin_still_fires(self):
+        rows = [("- The check refuses a push to main, as `lint/x.py::check` shows.", False), ("- " + UNCITED, True)]
+        rng, _ = self.rows_range(rows)
+        self.assertEqual(binding_kind(CODE["lint/x.py"], "check"), "def")  # scope: the cited name is bound at head
+        self.assertIn(DECISION, touched(rng))
+        self.assert_code_claims(rng, [(DECISION, 2)])
+
+    def test_a_claim_outside_the_decisions_folder_is_not_reported_and_the_same_claim_in_a_decision_is(self):
+        guide_text, _ = rows_text([("- " + UNCITED, False)])
+        decision_text, flagged = rows_text([("- " + UNCITED, True)])
+
+        def change(repo):
+            write(repo, GUIDE, guide_text)
+            write(repo, DECISION, decision_text)
+            commit(repo)
+        rng = self.make_range(base_files(extra={GUIDE: "# Guide\n", DECISION: "# Heading\n", MERGE_PY: LANE_LINT}), change)
+        self.assertIn(GUIDE, touched(rng))  # scope: the same claim is added on a page outside decisions
+        self.assertIn(DECISION, touched(rng))
+        self.assert_code_claims(rng, [(DECISION, n) for n in flagged])
+
+    def test_a_mark_for_stale009_leaves_its_line_out_and_a_mark_for_another_code_does_not(self):
+        rows = [
+            ("- " + UNCITED + " <!-- ste-disable-line STALE009 -->", False),
+            ("- " + UNCITED + " <!-- ste-disable-line STALE005 -->", True),
+            ("- " + UNCITED, True),
+        ]
+        rng, flagged = self.rows_range(rows)
+        self.assertIn(DECISION, touched(rng))
+        self.assert_code_claims(rng, [(DECISION, n) for n in flagged])
+
+    def test_a_claim_inside_a_fenced_block_is_not_reported_and_the_same_claim_after_the_fence_is(self):
+        rows = [
+            ("```", False),
+            ("- " + UNCITED, False),  # an example inside a fence: a mention, as STALE005 reads it
+            ("```", False),
+            ("", False),
+            ("- " + UNCITED, True),
+        ]
+        rng, flagged = self.rows_range(rows)
+        self.assertIn(DECISION, touched(rng))
+        self.assert_code_claims(rng, [(DECISION, n) for n in flagged])
+
+    def test_a_comment_opener_in_a_code_span_a_lone_apostrophe_and_a_span_closed_on_the_next_row_do_not_hide_a_claim(self):
+        rows = [
+            ("- Open a comment with `<!--`.", False),
+            ("- Open a comment with `//`, `/*` and `#`, then the guard refuses a push to main.", True),
+            ("- Don't count on it: the ledger reads no CI state.", True),
+            ("- Keep `x", False),
+            ("  y`. The guard refuses a push to main.", True),  # the span closes here; the claim sentence starts here
+        ]
+        rng, flagged = self.rows_range(rows)
+        self.assertIn(DECISION, touched(rng))
+        self.assert_code_claims(rng, [(DECISION, n) for n in flagged])
+
+    def test_a_sentence_on_a_line_the_range_does_not_add_is_not_reported_even_in_the_same_paragraph(self):
+        base = LEDGER + "\n"  # no bullet: the old line and the added line are one paragraph
+        head = base + "The hook refuses a push to main.\n"
+
+        def change(repo):
+            write(repo, DECISION, head)
+            commit(repo)
+        rng = self.make_range(base_files(extra={DECISION: base, MERGE_PY: LANE_LINT}), change)
+        self.assertEqual(git(rng.repo, "show", "%s:%s" % (rng.base, DECISION)).split("\n")[0], LEDGER)  # scope: line 1 at base
+        self.assertIn(DECISION, touched(rng))
+        self.assert_code_claims(rng, [(DECISION, 2)])
+
+    def test_a_dead_cite_is_stale010_and_no_stale009_report_while_the_uncited_claim_beside_it_still_reports(self):
+        rows = [("- " + DEAD_PAREN, False), ("- " + UNCITED, True)]
+        rng, _ = self.rows_range(rows)
+        self.assertIsNone(binding_kind(LANE_LINT, "no_such_name"))  # scope: the head file never binds the name
+        self.assertIn(DECISION, touched(rng))
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 1, out)  # the dead cite is a finding, so the exit is 1
+        self.assertEqual([(p, n, c) for p, n, c, _ in parse(out)], [(DECISION, 1, "STALE010")], out)
+        self.assertEqual(sorted((p, n) for p, n, _ in code_claims(out)), [(DECISION, 2)], out)  # the uncited claim only
+
+
+class NameCiteTests(StaleCase):
+    """STALE010, range mode, a finding. An ADDED line that cites a Python name in a STALE002 form or a node id is
+    flagged when its file is absent at head or the name is not bound there. A cite into a top folder is judged only
+    when head tracks that folder, or history tracked it and head does not: one git log per range, started only when an
+    added cite names an absent folder. A folder never tracked is no cite. A failed log prints one unknown line and
+    flags nothing. Only added lines are judged, so the check is never red on work the range did not do."""
+
+    def test_a_cite_to_an_unbound_name_is_flagged_and_the_bound_name_beside_it_is_silent(self):
+        rows = [("- (lint/x.py CODE_CLAIM)", True), ("- (lint/x.py check)", False)]
+        rng, _ = self.route_range(rows)
+        self.assertIsNone(binding_kind(CODE["lint/x.py"], "CODE_CLAIM"))  # scope: lint/x.py binds no such name
+        self.assertEqual(binding_kind(CODE["lint/x.py"], "check"), "def")  # scope: the name it does bind
+        self.assertIn(NOTES, touched(rng))
+        self.assert_flags(rng, [(NOTES, 1, "STALE010")])
+
+    def test_a_dead_cite_on_an_added_line_is_flagged_and_the_same_cite_already_at_base_is_not(self):
+        old = "- old `lint/x.py` `gone_one`"
+        rng, _ = self.route_range([(old, False), ("- new `lint/x.py` `gone_two`", True)], base_notes=old + "\n")
+        self.assertEqual(git(rng.repo, "show", "%s:%s" % (rng.base, NOTES)).split("\n")[0], old)  # scope: line 1 at base
+        self.assertIn(NOTES, touched(rng))
+        self.assert_flags(rng, [(NOTES, 2, "STALE010")])
+
+    def test_each_cite_form_into_an_absent_file_is_flagged_and_a_bound_name_beside_them_is_silent(self):
+        rows = [
+            ("- (lint/gone.py lane_lint)", True),
+            ("- `lint/gone.py` `lane_lint`", True),
+            ("- `lint/gone.py::lane_lint`", True),
+            ("- (lint/x.py check)", False),
+            ("- Open a comment with `<!--` and cite `lint/gone.py` `lane_lint`.", True),
+            ("- Open a comment with `//`, `/*` and `#`, as `lint/gone.py` `lane_lint` shows.", True),
+            ("- Don't count on `lint/gone.py` `lane_lint`.", True),
+        ]
+        rng, flagged = self.route_range(rows)
+        self.assertNotIn("lint/gone.py", git(rng.repo, "ls-tree", "-r", "--name-only", rng.head).split())  # scope
+        self.assertEqual(binding_kind(CODE["lint/x.py"], "check"), "def")  # scope: the present file binds the name
+        self.assert_flags(rng, [(NOTES, n, "STALE010") for n in flagged])
+
+    def test_a_name_bound_only_in_a_comment_or_a_string_is_flagged_and_a_def_the_range_adds_is_bound(self):
+        head = ('# CODE_CLAIM is named in this comment\n'
+                'NOTE = "# CODE_CLAIM"\n'
+                'DOC = """\nCODE_CLAIM\n"""\n\n\n'
+                'def check():\n    return 3\n\n\n'
+                'def new_one():\n    return 5\n')
+        rows = [
+            ("- `lint/x.py` `CODE_CLAIM`", True),
+            ("- `lint/x.py` `check`", False),
+            ("- `lint/x.py` `new_one`", False),
+        ]
+        rng, _ = self.route_range(rows, head_extra={"lint/x.py": head})
+        self.assertIsNone(binding_kind(head, "CODE_CLAIM"))  # scope: a comment and strings name it, nothing binds it
+        self.assertEqual(binding_kind(head, "new_one"), "def")  # scope: a def the range adds
+        self.assertIn("lint/x.py", touched(rng))
+        self.assert_flags(rng, [(NOTES, 1, "STALE010")])
+
+    def test_src_layout_and_django_cites_are_silent_and_a_cite_into_a_tracked_folder_beside_them_is_flagged(self):
+        foo_src = "def foo():\n    return 1\n"
+        rows = [("- (mypkg/x.py foo)", False), ("- (django/db/models.py Model)", False), ("- (lint/x.py missing)", True)]
+        rng, flagged = self.route_range(rows, extra={"src/mypkg/x.py": foo_src})
+        self.assertEqual(binding_kind(foo_src, "foo"), "def")  # scope: the file under src binds the cited name
+        self.assertIn("src", top_folders(rng))  # scope: src is a tracked top folder
+        self.assertNotIn("mypkg", top_folders(rng))  # scope: mypkg is no tracked top folder
+        self.assertNotIn("django", top_folders(rng))  # scope: django is no tracked top folder
+        self.assertFalse(any(p.startswith(("mypkg/", "django/")) for p in tracked_history(rng)),
+                         "scope: a folder the cites name was tracked in the history")
+        self.assertIn("lint", top_folders(rng))  # scope: lint is a tracked top folder
+        self.assertIsNone(binding_kind(CODE["lint/x.py"], "missing"))  # scope: lint/x.py binds no such name
+        self.assert_flags(rng, [(NOTES, n, "STALE010") for n in flagged])
+
+    def test_a_top_folder_tracked_only_in_history_is_judged_and_its_cite_is_flagged(self):
+        rng, flagged = self.route_range([("- (debts/guard.py main)", True)], history=DEBTS_MOVED_HISTORY)
+        self.assertNotIn("debts", top_folders(rng))  # scope: debts/ is absent at head
+        self.assertIn("debts/guard.py", tracked_history(rng))  # scope: the history tracked debts/guard.py
+        self.assert_flags(rng, [(NOTES, n, "STALE010") for n in flagged])
+
+    def test_a_folder_never_tracked_beside_a_history_of_another_folder_is_silent_and_the_history_cite_is_flagged(self):
+        rows = [("- (django/db/models.py Model)", False), ("- (debts/guard.py main)", True)]
+        rng, flagged = self.route_range(rows, history=DEBTS_MOVED_HISTORY)
+        self.assertNotIn("django", top_folders(rng))  # scope: django is absent at head
+        self.assertTrue(any(p.startswith("debts/") for p in tracked_history(rng)), "scope: the history tracks debts/")
+        self.assertFalse(any(p.startswith("django/") for p in tracked_history(rng)),
+                         "scope: a folder the cite names was tracked in the history")
+        self.assert_flags(rng, [(NOTES, n, "STALE010") for n in flagged])
+
+    @unittest.skipUnless(os.name == "posix", "the shim is a POSIX shell script")
+    def test_a_failed_history_log_prints_one_unknown_line_exits_zero_and_flags_nothing(self):
+        rows = [("- (debts/guard.py main)", True), ("- (debts/guard.py keep)", True)]
+        rng, _ = self.route_range(rows, history=DEBTS_MOVED_HISTORY)
+        self.assertNotIn("debts", top_folders(rng))  # scope: debts/ is absent at head
+        self.assertIn("debts/guard.py", tracked_history(rng))  # scope: the history tracks it, so the log is needed
+        shim = git_failing_log(rng.case)
+        refused = subprocess.run([os.path.join(shim, "git"), "log", "--format=", rng.base], cwd=rng.repo,
+                                 capture_output=True, text=True)
+        self.assertNotEqual(refused.returncode, 0, "scope: the shim does not fail git log")
+        served = subprocess.run([os.path.join(shim, "git"), "rev-parse", "--verify", "HEAD"], cwd=rng.repo,
+                                capture_output=True, text=True)
+        self.assertEqual(served.returncode, 0, "scope: the shim does not pass git rev-parse through")
+        rc, out = self.run_check(rng, extra_env={"PATH": shim + os.pathsep + os.environ["PATH"]})
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn("stale-cites: UNKNOWN", out, out)  # a failed log is unknown, not a read that stops the run
+        self.assertEqual(parse(out), [], out)
+        self.assertEqual(len(unknown_lines(out)), 1, "one unknown line for the range, not one per cite\n" + out)
+
+    @unittest.skipUnless(os.name == "posix", "a symlink entry needs a POSIX checkout")
+    def test_a_root_symlink_top_folder_is_silent_and_a_tracked_folder_cite_beside_it_is_flagged(self):
+        rows = [("- (link/x.py foo)", False), ("- (lint/x.py missing)", True)]
+        rng, flagged = self.route_range(rows, history=(track_root_link,))
+        self.assertTrue(git(rng.repo, "ls-tree", rng.head, "--", "link").startswith("120000 "), "scope: link is a symlink")
+        self.assertNotIn("link", top_folders(rng))  # scope: a symlink is no tracked top folder
+        self.assertIn("lint", top_folders(rng))  # scope: lint is a tracked top folder
+        self.assert_flags(rng, [(NOTES, n, "STALE010") for n in flagged])
+
+    def test_a_name_cited_in_an_empty_py_file_or_a_full_size_one_is_judged_by_what_the_file_binds(self):
+        big = "".join("def f%d():\n    return %d\n\n\n" % (i, i) for i in range(300))
+        rows = [
+            ("- (lint/empty.py gone_eight)", True),
+            ("- (lint/big.py f299)", False),
+            ("- (lint/big.py f300)", True),
+        ]
+        rng, _ = self.route_range(rows, extra={"lint/empty.py": "", "lint/big.py": big})
+        self.assertGreater(len(big), 8192)  # scope: the full-size file
+        self.assertEqual(binding_kind(big, "f299"), "def")  # scope: the last def the file binds
+        self.assertIsNone(binding_kind(big, "f300"))
+        self.assertIsNone(binding_kind("", "gone_eight"))  # scope: the empty file binds nothing
+        self.assert_flags(rng, [(NOTES, 1, "STALE010"), (NOTES, 3, "STALE010")])
+
+    def test_a_markdown_range_that_adds_one_folder_py_cite_starts_exactly_four_git_processes_with_one_cat_file(self):
+        rng, _ = self.route_range([("- (lint/x.py check)", False)])
+        self.assertEqual(git(rng.repo, "diff", "--name-only", rng.base, rng.head), NOTES)  # scope: Markdown only
+        self.assertEqual(binding_kind(CODE["lint/x.py"], "check"), "def")  # scope: the cited name is bound at head
+        rc, out, commands = self.run_traced_commands(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("stale-cites: PASS", out)
+        subs = [command.split()[0] for command in commands]
+        # The three starts of a Markdown-only range, and one cat-file that reads lint/x.py for the cite: four in all.
+        self.assertEqual(sorted(subs), ["cat-file", "diff", "merge-base", "rev-parse"], subs)
+        self.assertEqual(whole_tree_listings(commands), [], commands)
+
+    def test_a_cite_into_a_folder_never_tracked_starts_one_git_log_for_the_range(self):
+        """`mypkg` is no tracked top folder: its package lives under `src/`. `django` is no folder of the repo. Both
+        cited files are absent at head and neither folder is in the history, so neither cite is judged. Both folders
+        are absent at head, so one git log reads the history for the whole range."""
+        foo_src = "def foo():\n    return 1\n"
+        rows = [("- (mypkg/x.py foo)", False), ("- (django/db/models.py Model)", False)]
+        rng, _ = self.route_range(rows, extra={"src/mypkg/x.py": foo_src})
+        self.assertEqual(binding_kind(foo_src, "foo"), "def")  # scope: the file under src binds the cited name
+        self.assertNotIn("mypkg", top_folders(rng))  # scope: mypkg is no tracked top folder
+        self.assertNotIn("django", top_folders(rng))  # scope: django is no tracked top folder
+        rc, out, commands = self.run_traced_commands(rng)
+        self.assertEqual(rc, 0, out)
+        self.assertIn("stale-cites: PASS", out)
+        subs = [command.split()[0] for command in commands]
+        # The four starts of a Markdown range, and one git log for the two absent folders: five, with one log.
+        self.assertEqual(sorted(subs), ["cat-file", "diff", "log", "merge-base", "rev-parse"], subs)
+        self.assertEqual(subs.count("log"), 1, subs)
+
+    def test_a_cite_into_a_folder_tracked_in_history_starts_one_git_log_beyond_the_four(self):
+        rng, _ = self.route_range([("- (debts/guard.py main)", True)], history=DEBTS_MOVED_HISTORY)
+        self.assertNotIn("debts", top_folders(rng))  # scope: debts/ is absent at head
+        rc, out, commands = self.run_traced_commands(rng)
+        self.assertEqual(rc, 1, out)  # the history cite is judged and flagged, so the run exits 1
+        subs = [command.split()[0] for command in commands]
+        self.assertEqual(sorted(subs), ["cat-file", "diff", "log", "merge-base", "rev-parse"], subs)
+        self.assertEqual(subs.count("log"), 1, subs)
 
 
 if __name__ == "__main__":
