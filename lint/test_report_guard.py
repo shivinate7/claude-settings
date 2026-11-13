@@ -5072,15 +5072,16 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
       own", "already on main", "pre-existing on main", "matches main", "regression from main" or "regressions from
       main", "worse than main". "The" may stand before main ("worse than the main"), and "branch" may follow it ("the
       main branch"). A hyphen joins no words, so "not-worse-than-main" and "bug-same as main" are no form.
-    - Only a branch-like use of `main` counts: `main` is a claim word only when a branch-like word follows it, a
-      punctuation mark follows it even after spaces ("main — see", "main (see"), or the line end follows it. A
-      branch-like word is `branch`, or a word that continues the comparison: in, on, at, for, with, and, or, but, so,
-      because, since, while, which, that, is, was, did, does, had, as, by, from, to, per, too, now, today, yet,
-      already, after, before, until, when, if, where, overall, again, still, also, anyway, either, this, one. A noun
-      after `main` ("window", "menu", "points", "page", "screen", "thread", "loop") makes it no claim, with or without
-      "the" before `main`.
+    - Only a branch-like use of `main` counts. With "the" right before `main` ("the main"), `main` is a claim word only
+      when a branch-like word follows it, a punctuation mark follows it even after spaces ("the main — see", "the main
+      (see"), or the line end follows it. A branch-like word is `branch`, or a word that continues the comparison: in,
+      on, at, for, with, and, or, but, so, because, since, while, which, that, is, was, did, does, had, as, by, from,
+      to, per, too, now, today, yet, already, after, before, until, when, if, where, overall, again, still, also,
+      anyway, either, this, one. Any other word after "the main" is a noun ("window", "menu", "points", "page",
+      "screen", "thread", "loop") and makes it no claim. With no "the" before `main`, any word after `main` leaves a
+      claim, a noun included: "Same as main window" is a claim, as are "Same as main." and "Same as main — see".
     - The word `main` is read only when no `.` plus a letter and no `(` follows it: "matches main.py" and "same as
-      main()" are no claim.
+      main()" are no claim, with or without "the" before `main`.
     - "main's own" is a claim only when a copula (is, are, was, were, be) comes right before it, or a clause mark (`.`,
       `,`, `;`, `:`), a closing paren `)` or bracket `]`, a closing quote, a dash (—, –), a spaced hyphen (`-` or
       `--`, with spaces) or the line end follows it. So "main's own CI is green" is no claim. "The layout is main's
@@ -5092,10 +5093,10 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
       screenshot" with a path or URL. A hash is six to forty hex characters with at least one letter a-f and one
       digit, so "20261112" and "deadbeef" are no hash. A source inside an inline code span counts. The list is closed:
       a bare "main", a path or file name with no line, a time, an item number and a `#<n>` PR ref are no cite.
-    - Code spans: a span that holds only `main` is read as the word, so "not worse than `main`" is a claim. Any other
-      span counts as one word, so a claim inside one is exempt: "The check refuses `not worse than main`" is a mention.
-      After `main`, such a span is a noun: "The layout is the same as main `window`" is no claim, while "The layout
-      is the same as main." is.
+    - Code spans: a span that holds only `main` is read as the word, so "not worse than `main`" is a claim, and "the
+      `main`" is "the main". Any other span counts as one word, so a claim inside one is exempt: "The check refuses
+      `not worse than main`" is a mention. After "the main", such a span is a noun: "The layout is the same as the
+      main `window`" is no claim. With no "the", a span after `main` is a word and leaves a claim.
     - Exempt: a question line, a line inside a ``` or ~~~ fence, and the noun "regression test(s)", "regression
       suite(s)" or "regression testing" (a test count, not a claim). "No regression in the layout." and "No
       regressions in the layout." stay refused.
@@ -5149,33 +5150,61 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
         ("The workflow matches main.yml.", "The workflow matches main."),
         ("The entry point is the same as main() in cli.py.", "The entry point is the same as main."),
     )
-    NOUN_PAIRS = (  # (no claim, its refused twin): a noun after main is no claim, with or without "the" before main
+    BARE_MAIN_PAIRS = (  # (refused, its passing twin): with no "the" before main, any word after main leaves a claim
+        ("The output matches main exactly.", "The output matches the main window."),
+        ("Same as main otherwise.", "Same as the main window."),
+        ("Same as main except the header.", "Same as the main window."),
+        ("Same as main without my change.", "Same as the main window."),
+        ("Worse than main though.", "Worse than the main window."),
+        ("Same as main yesterday.", "Same as the main window."),
+        ("Same as main 2 days ago.", "Same as the main window."),
+        ("Worse than main would be.", "Worse than the main window."),
+        ("Same as main `window`", "Same as the main `window`."),
+        ("The notes are same as main page.", "The notes are same as the main window."),
+    )
+    NOUN_PAIRS = (  # (no claim, its refused twin): a noun after "the main" is no claim
         ("The layout is the same as the main window.", "The layout is the same as the main."),
         ("The toolbar is worse than the main menu.", "The toolbar is worse than the main."),
-        ("The notes are same as main page.", "The notes are same as main."),
+        ("The notes are same as the main page.", "The notes are same as the main."),
         ("This is a regression from the main loop.", "This is a regression from the main."),
         ("The header matches the main points.", "The header matches the main."),
     )
-    FUNCTION_PAIRS = (  # (still refused, its passing twin): a function word after main that continues the comparison
+    FUNCTION_PAIRS = (  # (still refused, its passing twin): a function word after "the main" continues the comparison
         ("The filter is worse than the main branch.", "The filter is worse than the main window."),
-        ("The filter is the same as main in the layout.", "The filter is the same as main window in the layout."),
-        ("The filter matches main, so no change.", "The filter matches main window, so no change."),
-        ("Same as main and the rest.", "Same as main window and the rest."),
+        ("The filter is the same as the main in the layout.",
+         "The filter is the same as the main window in the layout."),
+        ("The filter matches the main, so no change.", "The filter matches the main window, so no change."),
+        ("Same as the main and the rest.", "Same as the main window and the rest."),
     )
     PUNCT_PAIRS = (  # (refused, its passing twin): a punctuation mark counts even after spaces
-        ("The change is worse than main — see the diff.", "The change is worse than main window — see the diff."),
-        ("The change is same as main (see notes).", "The change is same as main window (see notes)."),
-        ("The change is same as `main` (see notes).", "The change is same as `main` window (see notes)."),
+        ("The change is worse than the main — see the diff.",
+         "The change is worse than the main window — see the diff."),
+        ("The change is same as the main (see notes).",
+         "The change is same as the main window (see notes)."),
+        ("The change is same as the `main` (see notes).",
+         "The change is same as the `main` window (see notes)."),
     )
-    FOLLOW_PAIRS = (  # (refused, its passing twin): each follow word after main counts
-        ("The change is same as main already.", "The change is same as main window already."),
-        ("The change is same as main after the rebase.", "The change is same as main window after the rebase."),
-        ("The change is worse than main overall.", "The change is worse than main window overall."),
-        ("The change is same as main this time.", "The change is same as main window this time."),
+    FOLLOW_PAIRS = (  # (refused, its passing twin): each follow word after "the main" counts
+        ("The change is same as the main already.", "The change is same as the main window already."),
+        ("The change is same as the main after the rebase.",
+         "The change is same as the main window after the rebase."),
+        ("The change is worse than the main overall.", "The change is worse than the main window overall."),
+        ("The change is same as the main this time.", "The change is same as the main window this time."),
         ("The change is same as the main one.", "The change is same as the main window one."),
+        # The ten follow words below no pair above reaches. A mutant that drops one of them passes its line.
+        ("Same as the main before.", "Same as the main window."),
+        ("Same as the main again.", "Same as the main window."),
+        ("Same as the main still.", "Same as the main window."),
+        ("Same as the main also.", "Same as the main window."),
+        ("Same as the main anyway.", "Same as the main window."),
+        ("Same as the main either.", "Same as the main window."),
+        ("Same as the main when it ran.", "Same as the main window."),
+        ("Same as the main if you look.", "Same as the main window."),
+        ("Same as the main until now.", "Same as the main window."),
+        ("Same as the main where it was.", "Same as the main window."),
     )
-    SPAN_PAIR = (  # (refused, its passing twin): a code span that is not `main` after main is a noun, not the line end
-        "The layout is the same as main.", "The layout is the same as main `window`",
+    SPAN_PAIR = (  # (refused, its passing twin): a code span after "the main" is a noun, not the line end
+        "The layout is the same as the main.", "The layout is the same as the main `window`",
     )
     OWN_TWINS = (  # refused; "main's own CI is green." passes
         "The layout is main's own.", "The layout: main's own.",
@@ -5470,45 +5499,64 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
         self.assert_blocked("same as main at deadbeef", "same as main at deadbeef")
         self.assert_allowed("same as main at 3f9a1c2")
 
-    def test_mc_red_a_noun_after_main_is_no_claim(self):
-        # Catches: a noun after main ("the main window", "the main menu") is read as the branch, a false alarm. Each
-        # refused twin is the same line with main alone, so the noun is the only difference.
+    def test_mc_red_a_noun_after_the_main_is_no_claim(self):
+        # Catches: a noun after "the main" ("the main window", "the main menu") is read as the branch, a false alarm.
+        # Each refused twin is the same line with the noun left out, so the noun is the only difference.
         for line, twin in self.NOUN_PAIRS:
             with self.subTest(line=line):
                 self.assert_blocked(twin, twin)
                 self.assert_allowed(line)
 
     def test_mc_red_a_branch_or_function_word_after_main_still_counts(self):
-        # Catches: a function word that continues a comparison ("main in the layout", "main, so") or a branch-like word
-        # ("the main branch") is read as no claim. The refusal is asserted first; the twin swaps the word after main for
-        # a noun, so the word is the only difference.
+        # Catches: a function word that continues a comparison ("the main in the layout", "the main, so") or a
+        # branch-like word ("the main branch") is read as no claim. The refusal is asserted first; the twin swaps the
+        # word after "the main" for a noun, so the word is the only difference.
         for line, twin in self.FUNCTION_PAIRS:
             with self.subTest(line=line):
                 self.assert_blocked(line, line)
                 self.assert_allowed(twin)
 
     def test_mc_red_a_punctuation_mark_after_spaces_is_a_claim(self):
-        # Catches: a punctuation mark after a space ("main — see", "main (see") is read as a noun after main, so the
-        # claim passes. Each refusal's twin puts the noun "window" directly after main, the only difference.
+        # Catches: a punctuation mark after a space ("the main — see", "the main (see") is read as a noun after main,
+        # so the claim passes. Each refusal's twin puts the noun "window" directly after "the main", the only difference.
         for line, twin in self.PUNCT_PAIRS:
             with self.subTest(line=line):
                 self.assert_blocked(line, line)
                 self.assert_allowed(twin)
 
-    def test_mc_red_a_follow_word_after_main_is_a_claim(self):
-        # Catches: a follow word such as "already", "after", "overall", "this" or "one" after main is read as a noun,
-        # so the claim passes. Each refusal's twin puts the noun "window" directly after main, the only difference.
+    def test_mc_red_a_follow_word_after_the_main_is_a_claim(self):
+        # Catches: a follow word such as "already", "after", "overall", "this", "one", "before" or "when" after "the
+        # main" is read as a noun, so the claim passes. Each refusal's twin puts the noun "window" directly after
+        # "the main", in place of the follow word, so the word is the only difference.
         for line, twin in self.FOLLOW_PAIRS:
             with self.subTest(line=line):
                 self.assert_blocked(line, line)
                 self.assert_allowed(twin)
 
-    def test_mc_red_a_code_span_after_main_is_a_noun(self):
-        # Catches: a code span that is not `main` is blanked, so "main" looks like the line end and a noun after it
-        # ("main `window`") is read as a claim. The refused twin is the same claim with the span left out.
+    def test_mc_red_a_code_span_after_the_main_is_a_noun(self):
+        # Catches: a code span after "the main" that is not `main` is read as the line end, so the claim passes. The
+        # refused twin is the same claim with the span left out, so the span is the only difference.
         refused, passing = self.SPAN_PAIR
         self.assert_blocked(refused, refused)
         self.assert_allowed(passing)
+
+    def test_mc_red_a_word_after_bare_main_is_a_claim(self):
+        # Catches: with no "the" before main, a word after main (a noun, a count, a time, a code span) is read as a
+        # noun, so the claim passes. Each refusal is asserted first; the twin adds "the" before main and puts a noun
+        # after it, so the word after main is the only difference.
+        for line, twin in self.BARE_MAIN_PAIRS:
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
+                self.assert_allowed(twin)
+
+    def test_mc_pin_the_main_with_a_branch_or_follow_word_stays_refused(self):
+        # Catches: a change that reads "the main" as a noun before any word, which passes "the main branch", "the main
+        # one" and "the main already". The claim forms without "the" are pinned by
+        # test_mc_red_each_claim_form_is_refused.
+        for line in ("The filter is worse than the main branch.", "The change is same as the main one.",
+                     "The change is same as the main already."):
+            with self.subTest(line=line):
+                self.assert_blocked(line, line)
 
     # Cost: the claim check reads the reply and nothing else. The guard opens only the transcript and its own file.
 
