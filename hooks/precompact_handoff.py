@@ -56,6 +56,17 @@ the desktop app has none.
   prompt file's step 4. A lower bucket (after compaction) is stored silently. Nothing
   prints when stop_hook_active is true or on any error. Cost: one extra small JSON file read
   (~/.claude.json) at each Stop; no process start, no file written.
+  The same Stop also checks the handoff's sections: when the session's handoff exists and
+  missing_sections() finds a required section absent, it blocks once per handoff mtime, naming the
+  missing ones, and keeps that mtime as "sections_mtime" in the same <session_id>.nudge.json (no new
+  file). Silent when the handoff is absent or complete. Cost: one small read of the prompt file and of
+  the handoff at each Stop; no new log, hook, file or process start. Spec: docs/decisions/precompact-handoff.md,
+  item 14.
+
+  The required sections are the names on the marker line `<!-- handoff-sections: A | B | ... -->` in
+  step 4 of the installed prompt file, read at run time by missing_sections(); no code holds the list.
+  A prompt or marker that cannot be read gives none, so the check fails open. hooks/guard.py calls
+  missing_sections() to refuse a write to a handoff that drops one (rule handoff-sections).
 
   SessionEnd --session-end (stdin: session_id, reason, cwd) -- reason `clear` writes
   one pointer file, ~/.claude/state/handoff/pointers/<session_id>.json, holding the old
@@ -88,6 +99,14 @@ import shutil
 import sys
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from shared_names import config_dir  # noqa: E402  the one home of the config dir
+except ImportError:  # a copy by need: the hook lands before its sibling in an install, and must still build its digest
+    def _config_dir_fallback():
+        return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    config_dir = _config_dir_fallback
+
 DIGEST_CAP = 60_000
 # With a handoff, the digest runs from its last rewrite, so it needs room for all of that span.
 DIGEST_SINCE_CAP = 200_000
@@ -110,13 +129,18 @@ DEFAULT_WINDOW = 500_000
 # The source kinds of a handoff premise, strongest first. docs/decisions/premise-format.md says what
 # each means and lists the same names; case_premise_kinds_one_home keeps the two equal.
 PREMISE_KINDS = ("ruling", "measured", "read", "notes", "assumed")
-_PREMISES_HEAD = re.compile(r"^##[ \t]+Working premises[ \t]*$", re.I | re.M)
+# The required sections are named once, in the prompt file's step 4 marker line (SECTIONS_MARKER). No code
+# copies that list: the premises section is the marker name that holds the word "premises".
+SECTIONS_MARKER = re.compile(r"<!--[ \t]*handoff-sections:[ \t]*(.*?)[ \t]*-->")
+
+
+def section_heading(name_rx):
+    """The one heading matcher: a `#` or `##` heading line that starts with the name, which may carry the
+    prompt's step number first (`## 2. `) and may be followed by text. `N)` is no step number."""
+    return re.compile(r"^#{1,2}[ \t]+(?:\d+\.[ \t]+)?(?:%s)(?!\w)" % name_rx, re.I | re.M)
+
+
 _PREMISE_LINE = re.compile(r"^[ \t]*[-*][ \t]+(P\d+)\b(?:[ \t]*\[([^\]\n]*)\])?", re.M)
-
-
-def config_dir():
-    return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(
-        os.path.expanduser("~"), ".claude")
 
 
 def digest_path(session_id):
@@ -150,6 +174,57 @@ def prompt_path():
     repo's own copy -- the reorient message must name the path the session actually
     reads, under CLAUDE_CONFIG_DIR, the way `claude-settings` installs hooks."""
     return os.path.join(config_dir(), "hooks", "precompact_handoff_prompt.md")
+
+
+def _marker_names(path):
+    """The section names on the marker line of the prompt file at `path`, in order. [] when the file
+    cannot be read, is not UTF-8, or has no marker. Never raises."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            m = SECTIONS_MARKER.search(f.read())
+    except Exception:  # OSError (missing, a directory), ValueError (not UTF-8)
+        return []
+    return [n.strip() for n in m.group(1).split("|") if n.strip()] if m else []
+
+
+def required_sections():
+    """The sections a handoff must hold, from the marker: the installed prompt's, or, when no installed
+    prompt file exists, the copy beside this module (the installed one in an install, the repo's own in a
+    checkout). The one reader of the marker: the section check and the premises name both call it. []
+    when the prompt cannot be read: the check then fails open."""
+    path = prompt_path()
+    if not os.path.exists(path):
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "precompact_handoff_prompt.md")
+    return _marker_names(path)
+
+
+def premises_section(names=None):
+    """The marker's name for the premises section (the one that holds the word "premises"), or None. `names` is
+    required_sections()'s value, passed by a caller that has read the prompt already."""
+    for name in required_sections() if names is None else names:
+        if "premises" in name.lower():
+            return name
+    return None
+
+
+def _premises_head(name=None):
+    name = premises_section() if name is None else name
+    return section_heading(re.escape(name) if name else r"(?:[A-Za-z]+[ \t]+)?premises")
+
+
+def missing_sections(text, names=None):
+    """The required sections that `text` lacks, in the marker's order. A section is present when a
+    `#` or `##` heading line starts with its name (any case, text may follow). `names` is the list
+    from `required_sections()`, passed by a caller that judges two texts so the prompt is read once.
+    [] when the marker cannot be read. Never raises."""
+    try:
+        names = required_sections() if names is None else names
+        if not names:
+            return []
+        text = text if isinstance(text, str) else ""
+        return [n for n in names if not section_heading(re.escape(n)).search(text)]
+    except Exception:
+        return []
 
 
 def _entry_time(entry):
@@ -510,8 +585,26 @@ def inbox_note(session_id):
             " repo's todo or debt store." % ", ".join(ids))
 
 
+def _premise_lines(text, name=None):
+    """[(id, kind, line)] of the premise lines in the premises section of `text`, in order, one entry per id (the
+    first wins). `line` is the whole line. [] when the section is missing or holds no line. `name` is the
+    marker's premises name, when the caller has it; else the prompt is read for it."""
+    head = _premises_head(name).search(text)
+    if not head:
+        return []
+    body = text[head.end():]
+    end = re.search(r"^#{1,2}[ \t]", body, re.M)
+    if end:
+        body = body[:end.start()]
+    found = {}
+    for m in _PREMISE_LINE.finditer(body):
+        stop = body.find("\n", m.end())
+        found.setdefault(m.group(1), ((m.group(2) or "").strip().lower(), body[m.start():stop if stop >= 0 else len(body)]))
+    return [(pid, kind, line) for pid, (kind, line) in found.items()]
+
+
 def handoff_premises(path):
-    """[(id, kind)] of the premise lines in the handoff's Working premises section, in order,
+    """[(id, kind)] of the premise lines in the handoff's premises section, in order,
     one entry per id. [] when the file is unreadable or the section is missing or has no line.
     Reads text only. A kind outside PREMISE_KINDS is kept as written, so the caller lists it."""
     try:
@@ -519,15 +612,178 @@ def handoff_premises(path):
             text = f.read()
     except (OSError, ValueError):  # ValueError: a byte that is not UTF-8
         return []
-    head = _PREMISES_HEAD.search(text)
-    if not head:
-        return []
-    body = text[head.end():]
-    end = re.search(r"^#{1,2}[ \t]", body, re.M)
-    found = {}
-    for m in _PREMISE_LINE.finditer(body[:end.start()] if end else body):
-        found.setdefault(m.group(1), (m.group(2) or "").strip().lower())
-    return list(found.items())
+    return [(pid, kind) for pid, kind, _line in _premise_lines(text)]
+
+
+# The parts of a premise line that the checked-stamp rule reads (decision precompact-handoff, item 15). The stamp is
+# the line's text from its last `Checked` (or `Re-checked`) word to its end, so a spelling such as `Checked: x` counts.
+_STAMP_WORD = re.compile(r"\b(?:Re-?c|C)hecked\b")
+_STAMP_LEAD = re.compile(r"^(?:re-?)?checked\b[ \t:]*")
+_LINE_SOURCE = re.compile(r"\bSource:[ \t]*(.*)")
+# A Source token: a URL, a path (with a slash, or a file name with an extension), a 7+ hex hash with a digit, a
+# backticked command, or the slug or number after a record word. Text outside these is no token.
+_TOKEN_PATH = re.compile(r"https?://[^\s)`\]>]+|(?<![\w./~-])((?:[\w.~-]+(?:/[\w.~-]+)+)|(?:[\w-]+(?:\.[\w-]+)*\.[A-Za-z][A-Za-z0-9]{1,4}))(?::\d+(?:-\d+)?)?(?![\w/])")
+_TOKEN_HASH = re.compile(r"(?<![\w./-])[0-9a-f]{7,40}(?![\w-])")
+_TOKEN_TICKS = re.compile(r"`([^`\n]+)`")
+_TOKEN_RECORD = re.compile(r"\b(?:decision|debt|record|step|rule|lane|roadmap step|item)[ \t]+`?([a-z][a-z0-9]*(?:-[a-z0-9]+)+)\b"
+                           r"|\b(?:PR|pull request|issue)[ \t]+#?(\d+)\b", re.I)
+# A shell call that reads backs a premise; one that writes does not.
+SHELL_TOOLS = ("Bash", "PowerShell")
+READ_TOOLS = ("Read", "Grep", "Glob", "WebFetch", "WebSearch") + SHELL_TOOLS
+READ_MCP_WORDS = ("get", "list", "read", "query", "search", "view")
+# A whole name segment that makes an MCP tool a writer or a sender, whatever else its name says.
+WRITE_MCP_WORDS = ("write", "create", "update", "delete", "send", "set", "post", "add", "remove", "merge", "push",
+                   "resolve", "submit", "edit", "put", "patch", "run", "trigger", "reply", "comment", "fork")
+GIT_WRITES = ("commit", "push", "add", "tag", "merge", "rebase", "reset", "restore", "checkout", "switch", "stash",
+              "cherry-pick", "apply", "am", "rm", "mv", "clean", "pull", "revert", "init", "clone", "config")
+SHELL_WRITES = ("rm", "mv", "cp", "touch", "mkdir", "tee", "chmod", "ln", "install", "truncate", "dd")
+
+
+def source_tokens(source):
+    """The tokens of a premise's Source text, in order, each once. [] when it holds none: then any one read backs it."""
+    found = [m.group(1).strip() for m in _TOKEN_TICKS.finditer(source)]
+    for m in _TOKEN_PATH.finditer(source):
+        token = (m.group(1) or m.group(0)).rstrip(".,;")
+        for lead in ("./", "~/"):
+            token = token[len(lead):] if token.startswith(lead) else token
+        found.append(token)
+    found += [m.group(0) for m in _TOKEN_HASH.finditer(source) if any(c.isdigit() for c in m.group(0))]
+    found += [m.group(1) or m.group(2) for m in _TOKEN_RECORD.finditer(source)]
+    return [t for t in dict.fromkeys(found) if t]
+
+
+def premise_stamps(text, name=None):
+    """{id: (kind, source, stamp)} of the premise lines in `text`. `stamp` is the line's text from its last `Checked`
+    or `Re-checked` word to its end, lowercased, spaces folded, a closing period dropped, or None when the line has
+    none. `source` is the text after `Source:` up to the stamp, minus a closing period, or "" when the line has none.
+    `name` as in _premise_lines."""
+    stamps = {}
+    for pid, kind, line in _premise_lines(text if isinstance(text, str) else "", name):
+        words = list(_STAMP_WORD.finditer(line))
+        at = words[-1].start() if words else len(line)
+        stamp = " ".join(line[at:].lower().split()).rstrip(" .") if words else None
+        source = _LINE_SOURCE.search(line[:at])
+        stamps[pid] = (kind, source.group(1).strip().rstrip(".").strip() if source else "", stamp)
+    return stamps
+
+
+def _stamp_value(stamp):
+    """What a stamp says after its `Checked` word, or "" when it says nothing (or `stamp` is None)."""
+    return _STAMP_LEAD.sub("", stamp, count=1) if stamp else ""
+
+
+def stamp_changes(before, after, name=None):
+    """[(id, tokens)] of the premises of `after` whose stamp, spelling included, is new or differs from `before`'s, and
+    that need evidence. A stamp with no value counts as absent. A stamp present before and absent after is a change.
+    A premise whose kind in `before` is a `ruling` needs none, whatever the write relabels it to; a line new in `after`
+    is judged by its own kind. `Checked never` needs none. `name` is the marker's premises name, when the caller has it."""
+    old = premise_stamps(before, name)
+    need = []
+    for pid, (kind, source, stamp) in premise_stamps(after, name).items():
+        was = old[pid][2] if pid in old else None
+        if not _stamp_value(stamp):
+            stamp = None
+        if not _stamp_value(was):
+            was = None
+        if (old[pid][0] if pid in old else kind) == PREMISE_KINDS[0] or stamp == was or _stamp_value(stamp) == "never":
+            continue
+        need.append((pid, source_tokens(source)))
+    return need
+
+
+def _strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _strings(item)
+
+
+def _is_read(name):
+    """True for a tool that reads: a read tool, a shell, or an MCP tool with a whole name segment of get, list, read,
+    query, search or view and none of a write or send (`pull_request_review_write`, `send_message`, `resolve_review_thread`)."""
+    if not isinstance(name, str):
+        return False
+    if not name.startswith("mcp__"):
+        return name in READ_TOOLS
+    parts = set(re.split(r"[^a-z0-9]+", name.rsplit("__", 1)[-1].lower()))
+    return bool(parts & set(READ_MCP_WORDS)) and not parts & set(WRITE_MCP_WORDS)
+
+
+def _shell_reads(command):
+    """False when a shell command line changes something: a git call that writes, a write command, `sed -i`, or a
+    redirect onto a file. A bandaid, not a parser: it reads segments and tokens with guard_core's splitters, and an
+    unparsable segment counts as a read, the same stance as that module."""
+    import guard_core
+    if not isinstance(command, str):
+        return True
+    for segment in guard_core.split_segments(command):
+        if any(sub in GIT_WRITES for sub, _rest in guard_core.git_calls(segment)):
+            return False
+        tokens = guard_core.segment_tokens(segment) or []
+        at = guard_core.resolve_command(tokens) if tokens else None
+        if at is not None:
+            word = guard_core.basename(tokens[at])
+            if word in SHELL_WRITES or (word == "sed" and any(re.match(r"-[a-z]*i\b|--in-place", t) for t in tokens[at + 1:])):
+                return False
+        for i, token in enumerate(tokens):
+            m = re.match(r"^\d?>>?(.*)$", token)
+            target = (m.group(1) or (tokens[i + 1] if i + 1 < len(tokens) else "")) if m else "&"
+            if m and not target.startswith("&") and target != "/dev/null":
+                return False
+    return True
+
+
+def _same_path(a, b):
+    norm = lambda p: os.path.normcase(os.path.normpath(os.path.expanduser(p)))
+    return norm(a) == norm(b)
+
+
+def backed_premises(transcript, need, handoff):
+    """The ids of `need` ([(id, tokens)] from stamp_changes) that the session's own transcript backs, or None when the
+    transcript cannot be read or `need` is not a list of (id, tokens) pairs (the caller fails open). Evidence is a
+    read-type tool_use (`_is_read`; a shell call must not write) of the main session after the newest `compact_boundary` record (none: the whole transcript) whose input
+    holds a token of the premise's Source; a premise with no token is backed by any one such call. Not evidence: a
+    record of an agent (isSidechain, or an agent_id), a Write or Edit, a send (`_transcript.SEND_TOOLS`), a Read of
+    `handoff` itself, and a call whose result failed (`_transcript.failed_tool_use_ids`, over the whole transcript).
+    One open of the transcript."""
+    if not isinstance(need, (list, tuple)) or not all(
+            isinstance(pair, (list, tuple)) and len(pair) == 2 and isinstance(pair[0], str)
+            and isinstance(pair[1], (list, tuple)) for pair in need):
+        return None
+    lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint")
+    if lint not in sys.path:
+        sys.path.insert(0, lint)
+    try:
+        import _transcript
+        records = _transcript.read_transcript(transcript)
+    except (OSError, ValueError):
+        return None
+    failed = _transcript.failed_tool_use_ids(records)
+    backed = set()
+    for rec in records:
+        if rec.get("isSidechain") or rec.get("agent_id"):
+            continue
+        if rec.get("type") == "system" and rec.get("subtype") == "compact_boundary":
+            backed.clear()
+            continue
+        for use in _transcript.tool_uses(rec):
+            name, given = use.get("name"), use.get("input")
+            if not isinstance(given, dict) or use.get("id") in failed or name in _transcript.SEND_TOOLS \
+                    or not _is_read(name):
+                continue
+            if name in SHELL_TOOLS and not _shell_reads(given.get("command")):
+                continue
+            if name == "Read" and isinstance(given.get("file_path"), str) and _same_path(given["file_path"], handoff):
+                continue
+            text = "\n".join(_strings(given))
+            for pid, tokens in need:
+                if pid not in backed and (not tokens or any(t in text for t in tokens)):
+                    backed.add(pid)
+    return {pid for pid, _tokens in need if pid in backed}
 
 
 def premise_note(path, everyone):
@@ -539,7 +795,7 @@ def premise_note(path, everyone):
         return ""
     prem = handoff_premises(path)
     if not prem:
-        note = " The handoff has no Working premises section. Add it per step 4."
+        note = " The handoff has no %s section. Add it per step 4." % (premises_section() or "premises")
     else:
         weak = ["%s (%s)" % (i, k or "no kind") for i, k in prem if everyone or k != PREMISE_KINDS[0]]
         note = (" Premises are statements. Check each before you act on it, then rewrite its "
@@ -735,6 +991,63 @@ def window_limit(model=None):
     return parse(settings.get("autoCompactWindow")) or DEFAULT_WINDOW
 
 
+def _checkpoint_facts(payload, state):
+    """(size, messages) when the context size passed a new checkpoint, else None. Sets state["bucket"]
+    when the transcript gave a size."""
+    size = overhead = model = None
+    with open(payload.get("transcript_path", ""), "r", encoding="utf-8") as f:
+        for line in f:
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if entry.get("type") != "assistant" or entry.get("isSidechain") is True:
+                continue
+            msg = entry.get("message") or {}
+            u = msg.get("usage")
+            if msg.get("model") == "<synthetic>" or not isinstance(u, dict):
+                continue
+            n = sum(u.get(k) or 0 for k in (
+                "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
+            if n > 0:
+                if overhead is None:
+                    overhead = n
+                size = n
+                model = msg.get("model") or model
+    if size is None:
+        return None
+    # Proxy (record hook-inputs-carry-token-counts): the first turn is mostly overhead.
+    messages = max(size - overhead, 0)
+    if messages == 0:
+        bucket = -1  # nothing to hand off, even when the room left is zero or negative
+    else:
+        bucket = sum(1 for c in checkpoints(compact_threshold(window_limit(model)) - overhead)
+                     if messages >= c) - 1
+    try:
+        stored = int(state["bucket"])
+    except Exception:
+        stored = -1
+    state["bucket"] = bucket
+    return (size, messages) if bucket > stored else None
+
+
+def _unflagged_missing(session_id, state):
+    """The required sections the session's handoff lacks, when it exists and this mtime was not flagged
+    yet (state["sections_mtime"], set here), else []."""
+    path = handoff_path(session_id)
+    try:
+        mtime = os.stat(path).st_mtime_ns
+        with open(path, "r", encoding="utf-8") as f:
+            text = f.read()
+    except (OSError, ValueError):  # no handoff, or a byte that is not UTF-8
+        return []
+    missing = missing_sections(text)
+    if not missing or state.get("sections_mtime") == mtime:
+        return []
+    state["sections_mtime"] = mtime
+    return missing
+
+
 def run_nudge(payload):
     try:
         record_dir(payload.get("session_id", ""), payload.get("cwd"))
@@ -742,53 +1055,47 @@ def run_nudge(payload):
         sys.stderr.write("precompact_handoff: could not record the dir: %s\n" % e)
     if payload.get("stop_hook_active"):
         return 0
+    session_id = payload.get("session_id", "")
+    path = os.path.join(config_dir(), "state", "handoff", "%s.nudge.json" % session_id)
+    state = {}
     try:
-        session_id = payload.get("session_id", "")
-        size = overhead = model = None
-        with open(payload.get("transcript_path", ""), "r", encoding="utf-8") as f:
-            for line in f:
-                try:
-                    entry = json.loads(line)
-                except ValueError:
-                    continue
-                if entry.get("type") != "assistant" or entry.get("isSidechain") is True:
-                    continue
-                msg = entry.get("message") or {}
-                u = msg.get("usage")
-                if msg.get("model") == "<synthetic>" or not isinstance(u, dict):
-                    continue
-                n = sum(u.get(k) or 0 for k in (
-                    "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"))
-                if n > 0:
-                    if overhead is None:
-                        overhead = n
-                    size = n
-                    model = msg.get("model") or model
-        if size is None:
-            return 0
-        # Proxy (record hook-inputs-carry-token-counts): the first turn is mostly overhead.
-        messages = max(size - overhead, 0)
-        if messages == 0:
-            bucket = -1  # nothing to hand off, even when the room left is zero or negative
-        else:
-            bucket = sum(1 for c in checkpoints(compact_threshold(window_limit(model)) - overhead)
-                         if messages >= c) - 1
-        path = os.path.join(config_dir(), "state", "handoff", "%s.nudge.json" % session_id)
+        with open(path, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if isinstance(loaded, dict):
+            state = loaded
+    except Exception:
+        pass
+    before = dict(state)
+    facts, missing = None, []
+    try:
+        facts = _checkpoint_facts(payload, state)
+    except Exception as e:
+        sys.stderr.write("precompact_handoff: nudge error: %s\n" % e)
+    if not facts:  # a checkpoint block already says to rewrite the handoff; the sections wait for the next Stop
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                stored = int(json.load(f)["bucket"])
-        except Exception:
-            stored = -1
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump({"bucket": bucket}, f)
-        if bucket > stored:
+            missing = _unflagged_missing(session_id, state)
+        except Exception as e:
+            sys.stderr.write("precompact_handoff: nudge error: %s\n" % e)
+    try:
+        if state != before:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(state, f)
+        if facts:
+            size, messages = facts
             ensure_handoff_dir(session_id)
-            print(json.dumps({"decision": "block", "reason": (
-                "Context is about %dk tokens, messages about %dk. Rewrite your handoff at %s now, the whole "
-                "file; never append. Follow step 4 of %s for its sections and their order. "
-                "Then continue. (decision precompact-handoff)"
-                % (size // 1000, messages // 1000, handoff_path(session_id), prompt_path()))}))
+            reason = ("Context is about %dk tokens, messages about %dk. Rewrite your handoff at %s now, the "
+                      "whole file; never append. Follow step 4 of %s for its sections and their order. "
+                      "Then continue. (decision precompact-handoff)"
+                      % (size // 1000, messages // 1000, handoff_path(session_id), prompt_path()))
+        elif missing:
+            reason = ("Your handoff at %s lacks these sections: %s. Rewrite the whole file with each under "
+                      "its own ## heading, per step 4 of %s. (decision precompact-handoff)"
+                      % (handoff_path(session_id), ", ".join(missing), prompt_path()))
+        else:
+            reason = ""
+        if reason:
+            print(json.dumps({"decision": "block", "reason": reason}))
     except Exception as e:
         sys.stderr.write("precompact_handoff: nudge error: %s\n" % e)
     return 0

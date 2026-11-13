@@ -528,6 +528,71 @@ need "build ran" not built
 need "refusal text: $(tail -1 "$out")" grep -q 'TESTFLIGHT FAIL: the tree is not clean' "$out"
 end_case "tf: --export-only still refuses a dirty tree"
 
+# --method sets the export plist's method: the accept cases check the plist carries it.
+# The guard cases pin the default (app-store-connect).
+mk_tf "$(apps "$(app A)" "$(app B)")"; tf --export-only --method debugging
+need "rc=$rc: $(tail -1 "$out")" test "$rc" -eq 0
+n=$(grep -c '<key>method</key><string>debugging</string>' "$calls.plist")
+need "debugging on $n of 2 export plists" test "$n" -eq 2
+need "app-store-connect still in the export plist" not grep -q 'app-store-connect' "$calls.plist"
+need "destination is not export" grep -q '<key>destination</key><string>export</string>' "$calls.plist"
+need "success line: $(tail -1 "$out")" grep -qE '^TESTFLIGHT OK: build [0-9]+ exported to .* \(not uploaded: A, B\)$' "$out"
+end_case "tf: --export-only --method debugging: each app's export plist says debugging, destination export, success line unchanged"
+one_app; tf --method release-testing --export-only
+need "rc=$rc: $(tail -1 "$out")" test "$rc" -eq 0
+n=$(grep -c '<key>method</key><string>release-testing</string>' "$calls.plist")
+need "release-testing on $n of 1 export plist" test "$n" -eq 1
+need "app-store-connect still in the export plist" not grep -q 'app-store-connect' "$calls.plist"
+need "destination is not export" grep -q '<key>destination</key><string>export</string>' "$calls.plist"
+need "success line: $(tail -1 "$out")" grep -qE '^TESTFLIGHT OK: build [0-9]+ exported to .* \(not uploaded: A\)$' "$out"
+end_case "tf: --method release-testing --export-only: the export plist says release-testing, destination export"
+one_app; tf --export-only --method app-store
+need "rc=$rc, want 2" test "$rc" -eq 2
+need "build ran" not built
+need "refusal text: $(tail -1 "$out")" grep -q '^usage: ios-ship testflight' "$out"
+end_case "tf: --method with an unknown value refused with the usage line, no build"
+one_app; tf --export-only --method app-store-connect
+need "rc=$rc, want 2" test "$rc" -eq 2
+need "build ran" not built
+need "refusal text: $(tail -1 "$out")" grep -q '^usage: ios-ship testflight' "$out"
+end_case "tf: --method app-store-connect (the default, not a value --method takes) refused with the usage line, no build"
+# Near-misses that only the ^ and $ anchors refuse. A regex with one anchor dropped takes one of the two, so both run.
+one_app; tf --export-only --method debugging-x
+need "debugging-x: rc=$rc, want 2" test "$rc" -eq 2
+need "debugging-x: build ran" not built
+need "debugging-x: refusal text: $(tail -1 "$out")" grep -q '^usage: ios-ship testflight' "$out"
+one_app; tf --export-only --method xdebugging
+need "xdebugging: rc=$rc, want 2" test "$rc" -eq 2
+need "xdebugging: build ran" not built
+need "xdebugging: refusal text: $(tail -1 "$out")" grep -q '^usage: ios-ship testflight' "$out"
+end_case "tf: --method near-misses debugging-x and xdebugging refused with the usage line, no build"
+one_app; tf --export-only --method
+need "rc=$rc, want 2" test "$rc" -eq 2
+need "build ran" not built
+need "refusal text: $(tail -1 "$out")" grep -q '^usage: ios-ship testflight' "$out"
+end_case "tf: --method with no value refused with the usage line, no build"
+one_app; tf --method debugging
+need "rc=$rc, want 2" test "$rc" -eq 2
+need "build ran" not built
+need "refusal text: $(tail -1 "$out")" grep -q '^usage: ios-ship testflight' "$out"
+end_case "tf: --method debugging without --export-only refused with the usage line, no build"
+one_app; tf --no-install
+need "rc=$rc, want 2" test "$rc" -eq 2
+need "no testflight usage line: $(tail -1 "$out")" grep -q '^usage: ios-ship testflight' "$out"
+need "usage line does not name --method" grep -q '^usage: ios-ship testflight.*--method' "$out"
+end_case "tf: the usage line names --method"
+# guard: the default stays app-store-connect, on both the export and the upload.
+one_app; tf --export-only
+need "rc=$rc, want 0" test "$rc" -eq 0
+need "export plist lacks method app-store-connect" grep -q '<key>method</key><string>app-store-connect</string>' "$calls.plist"
+need "destination is not export" grep -q '<key>destination</key><string>export</string>' "$calls.plist"
+end_case "tf: guard: --export-only with no --method still writes method app-store-connect"
+one_app; tf
+need "rc=$rc, want 0" test "$rc" -eq 0
+need "upload plist lacks method app-store-connect" grep -q '<key>method</key><string>app-store-connect</string>' "$calls.plist"
+need "destination is not upload" grep -q '<key>destination</key><string>upload</string>' "$calls.plist"
+end_case "tf: guard: a plain upload still writes method app-store-connect"
+
 # ===================== install =====================
 
 # A real origin that the tool clones: ios/, an executable tools/build-rules that logs its call, and a .gitignore for the secrets.
@@ -818,6 +883,13 @@ home=$work/ci6home; COPY_PROBE="$(repo_of "$home" AdBlock)/ios/Secret.xcconfig" 
 need "exit $rc" test "$rc" -eq 0
 need "tilde not expanded to HOME" grep -qx 'build present' "$calls.probe"
 end_case "install: ~/ in copy_in.from expands to HOME"
+# --method belongs to testflight only: install refuses it with the usage line, before any build.
+icfg "$(apps "$(app AdBlock)")"
+home=$work/m1; install_run "$home" --method debugging
+need "rc=$rc, want 2" test "$rc" -eq 2
+need "build ran" not built
+need "refusal text: $(tail -1 "$out")" grep -q '^usage: ios-ship testflight' "$out"
+end_case "install: --method refused with the usage line, no build"
 
 # ===================== account file and an optional CONFIG =====================
 # The account values come from env first, then the repo config, then $HOME/.config/ios-ship/account.json.

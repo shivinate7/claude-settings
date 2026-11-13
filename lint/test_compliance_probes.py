@@ -33,6 +33,14 @@ RUN_FOLDER = _test_temp.run_folder()  # test-temp-standard (one run folder per t
 EXTRAS = layout.layout()["extras"]
 
 
+def load_probes():
+    """The probes module under test, loaded here so a case can patch check_glossary in this process."""
+    spec = importlib.util.spec_from_file_location("probes_under_test", PROBES)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def kind_path(name):
     return layout.layout()["kinds"][name]["path"]
 
@@ -161,26 +169,46 @@ class Layout(unittest.TestCase):
             return
         self.assertEqual((done.returncode, out), (0, "layout: in shape"))
 
-    def test_this_repos_extras_name_real_folders_and_no_wildcard(self):
+    def this_extras(self):
+        """This checkout's extras file, as text."""
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         with open(os.path.join(root, *EXTRAS.split("/")), encoding="utf-8") as handle:
-            text = handle.read()
+            return handle.read()
+
+    def this_repo(self, text):
+        """A rolled-out fixture that holds `text` as its extras file, every core kind, and the waiting copy on its
+        record branch, so the probe reads the folders that extras file names."""
+        repo = Repo(self).core().write(EXTRAS, text)
+        # The waiting copy lives on the record branch, so the fixture holds it there (decision waiting-data-in-repo).
+        repo.commit("base").branch(layout.record_branch(repo.root)).write("waiting/items/a.json", '{"id": "a"}\n')
+        return repo.commit("waiting copy").git("checkout", "-q", "-")
+
+    def test_this_repos_extras_name_real_folders_and_no_wildcard(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        text = self.this_extras()
         kinds = json.loads(text)["kinds"]
         files = subprocess.run(["git", "-C", root, "ls-files"], capture_output=True, text=True, check=True).stdout.split("\n")
         for name, kind in kinds.items():
             where = kind["path"].strip("/")
             self.assertNotIn("*", where, name)
             self.assertTrue(any(f.startswith(where + "/") for f in files), "%s: no tracked file under %s" % (name, where))
-        repo = Repo(self).core().write(EXTRAS, text)
-        # The waiting copy lives on the record branch, so the fixture holds it there (decision waiting-data-in-repo).
-        repo.commit("base").branch(layout.record_branch(repo.root)).write("waiting/items/a.json", '{"id": "a"}\n')
-        repo.commit("waiting copy").git("checkout", "-q", "-")
+        repo = self.this_repo(text)
         for kind in kinds.values():
             repo.write(kind["path"].strip("/") + "/a.x")
         self.assertEqual(repo.run("layout")[1].strip(), "layout: in shape")
         code, out = repo.write("undeclared/a.x").run("layout")
         self.assertEqual(code, 1, out)
         self.assertIn("folder undeclared/: neither", out)
+
+    def test_tests_guard_folder_is_accepted_as_an_extra_of_this_repo(self):
+        code, out = self.this_repo(self.this_extras()).write("tests/guard/a.py").run("layout")
+        self.assertEqual((code, out.strip()), (0, "layout: in shape"),
+                         "tests/guard is not an extra of this repo\n" + out)
+
+    def test_other_tests_folder_is_still_flagged(self):
+        code, out = self.this_repo(self.this_extras()).write("tests/other/a.py").run("layout")
+        self.assertEqual(code, 1, out)
+        self.assertIn("folder tests/", out)
 
     def test_not_a_git_repo_is_unknown(self):
         root = tempfile.mkdtemp(prefix="probes-", dir=RUN_FOLDER)
@@ -377,6 +405,10 @@ class Ios(unittest.TestCase):
         body = "".join("\t%s\n" % line for line in recipe.split("\n"))
         return self.edit(self.gold(), "Makefile", "phone:\n", "ui-run:\n" + body + "\nphone:\n")
 
+    def flagged(self, definitions, recipe="xcodebuild test -scheme X $(FLAGS)"):
+        """The gold with `recipe` as the ui-run recipe, and `definitions` (Makefile lines) above the phone target."""
+        return self.edit(self.make_run(recipe), "Makefile", "phone:\n", definitions + "\nphone:\n")
+
     def diag_pass(self, repo):
         code, out = repo.run("ios")
         self.assertEqual(code, 0, out)
@@ -397,6 +429,183 @@ class Ios(unittest.TestCase):
     def test_floating_ci_runner_is_red(self):
         repo = self.edit(self.gold(), ".github/workflows/ios.yml", "runs-on: macos-26", "runs-on: macos-latest")
         self.red(repo, "ci runner: gap - .github/workflows/ios.yml: macos-latest")
+
+    # The CI exemption form (skills/ios-apps): one JSON object at tools/ios-ci-exemption.json, with non-empty string `sdk` and
+    # `reason`. A valid form waives the app compile only: `ci checks` passes as `exempt: <sdk>` on a tree whose macOS job cannot
+    # compile the app. It never waives the macOS runner. A broken form grades both gap, and names the problem. A floating macOS
+    # image stays a gap.
+    EXEMPT_FORM = load_probes().IOS_CI_EXEMPTION  # the probe's one home of the path
+    VALID_FORM = {"sdk": "iOS 27.1", "reason": "Degen builds with the iOS 27 SDK"}
+    BROKEN_FORMS = (  # (the form's text, the keys its detail must name)
+        ('{"sdk": "iOS 27.1"}', ("reason",)),
+        ('{"reason": "Degen builds with the iOS 27 SDK"}', ("sdk",)),
+        ('{"sdk": "", "reason": "Degen builds with the iOS 27 SDK"}', ("sdk",)),
+        ('{"sdk": "iOS 27.1", "reason": ""}', ("reason",)),
+        ('{"sdk": 27.1, "reason": "Degen builds with the iOS 27 SDK"}', ("sdk",)),
+        ("{}", ("sdk", "reason")),
+        ('{"sdk": "iOS 27.1", "reason": "Degen builds with the iOS 27 SDK"', ()),  # cut short: invalid JSON
+        ('["iOS 27.1"]', ()),  # JSON, but no object
+        ("", ()),  # a 0-byte file
+    )
+
+    def put_form(self, repo, data, staged=True):
+        """`data` (bytes) at the form path. Staged: the author added it. Not staged: on disk only, so the form is untracked."""
+        full = os.path.join(repo.root, *self.EXEMPT_FORM.split("/"))
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "wb") as handle:
+            handle.write(data)
+        return repo.git("add", "-f", self.EXEMPT_FORM) if staged else repo
+
+    def with_form(self, repo, text, staged=True):
+        return self.put_form(repo, text.encode("utf-8"), staged)
+
+    def cannot_build(self, runner="ubuntu-latest"):
+        """The starter with its macOS job on `runner` and no compile step: a tree that cannot build the app on macos-26."""
+        repo = self.edit(self.gold(), self.FLOW, "runs-on: macos-26", "runs-on: " + runner)
+        return self.edit(repo, self.FLOW, "run: make app-build", "run: echo no compile")
+
+    def line(self, repo, item):
+        """The whole line of one item of the ios group, `<item>: <grade> - <detail>`. Scope first: the run must judge an iOS app."""
+        code, out = repo.run("ios")
+        self.assertFalse(out.startswith("ios: n/a"), out)
+        found = [raw.strip() for raw in out.splitlines() if raw.startswith("  %s:" % item)]
+        self.assertEqual(len(found), 1, "no single '%s' line in:\n%s" % (item, out))
+        return found[0]
+
+    def test_a_valid_exemption_form_waives_only_the_app_compile_on_a_tree_that_cannot_build(self):
+        bare = self.cannot_build()  # green control: without the form, both items are gaps
+        for item in ("ci runner", "ci checks"):
+            line = self.line(bare, item)
+            self.assertTrue(line.startswith(item + ": gap - "), line)
+        for sdk, reason in (("iOS 27.1", "Degen builds with the iOS 27 SDK"),
+                            ("iOS 27.0", "Needs the SDK, see https://example.com/issue #12"),  # `#` after a space, inside a JSON string
+                            ("iOS 27.1", "Degen builds with the iOS 27 SDK. " * 40)):  # a full-size reason
+            with self.subTest(sdk=sdk, reason_chars=len(reason)):
+                repo = self.with_form(self.cannot_build(), json.dumps({"sdk": sdk, "reason": reason}))
+                # The form waives the app compile: ci checks passes as exempt, its package tests and pull_request workflow still counted.
+                line = self.line(repo, "ci checks")
+                self.assertTrue(line.startswith("ci checks: pass - exempt: %s" % sdk), line)
+                # The form does not waive the macOS runner: this tree has no macOS workflow, so ci runner stays a gap.
+                line = self.line(repo, "ci runner")
+                self.assertTrue(line.startswith("ci runner: gap - no workflow runs on macOS"), line)
+
+    def test_a_valid_form_does_not_pass_a_tree_with_no_macos_workflow(self):
+        # The form waives the app compile, not the macOS runner. A macOS job on ubuntu-latest, or no workflow at all, is a gap.
+        removed = self.gold()
+        removed.git("rm", "-q", "-f", self.FLOW)
+        self.assertFalse(os.path.exists(os.path.join(removed.root, *self.FLOW.split("/"))))  # scope: no workflow file is left
+        for label, repo in (("the macOS job on ubuntu-latest", self.cannot_build()), ("no workflow file", removed)):
+            with self.subTest(tree=label):
+                line = self.line(self.with_form(repo, json.dumps(self.VALID_FORM)), "ci runner")
+                self.assertTrue(line.startswith("ci runner: gap - no workflow runs on macOS"), line)
+
+    def test_a_valid_form_does_not_waive_the_package_tests(self):
+        # The form waives the app compile and nothing else: a Kit package with no package-test step stays a gap.
+        repo = self.edit(self.gold(), self.FLOW, "run: make kit-test", "run: echo skipped")
+        line = self.line(self.with_form(repo, json.dumps(self.VALID_FORM)), "ci checks")
+        self.assertTrue(line.startswith("ci checks: gap - "), line)
+        self.assertIn("no workflow runs the package tests", line, line)
+
+    def test_a_valid_form_does_not_waive_the_pull_request_workflow(self):
+        # The form waives the app compile and nothing else: a tree with no pull_request workflow stays a gap.
+        repo = self.edit(self.gold(), self.FLOW, "  pull_request:\n    types: [opened, synchronize, reopened, ready_for_review]\n", "")
+        self.assertNotIn("  pull_request:", self.text(repo, self.FLOW))  # scope: the workflow no longer runs on pull requests
+        line = self.line(self.with_form(repo, json.dumps(self.VALID_FORM)), "ci checks")
+        self.assertTrue(line.startswith("ci checks: gap - "), line)
+        self.assertIn("no pull_request workflow", line, line)
+
+    def test_a_valid_form_waives_the_compile_on_a_pinned_tree_with_package_tests(self):
+        # Green control: a pinned macOS job that runs the package tests and skips the compile. The form passes ci checks as
+        # exempt, and ci runner stays on its pin.
+        repo = self.with_form(self.cannot_build("macos-26"), json.dumps(self.VALID_FORM))
+        self.assertEqual(self.grade(repo, "ci runner"), "pass", self.line(repo, "ci runner"))
+        line = self.line(repo, "ci checks")
+        self.assertTrue(line.startswith("ci checks: pass - exempt: iOS 27.1"), line)
+
+    def test_a_broken_exemption_form_grades_both_items_gap_and_names_the_problem(self):
+        for text, keys in self.BROKEN_FORMS:
+            repo = self.with_form(self.cannot_build(), text)
+            for item in ("ci runner", "ci checks"):
+                with self.subTest(form=text, item=item):
+                    line = self.line(repo, item)
+                    self.assertTrue(line.startswith(item + ": gap - "), line)
+                    detail = line.split(" - ", 1)[1]
+                    self.assertIn(self.EXEMPT_FORM, detail, line)
+                    for key in keys:
+                        self.assertIn(key, detail, line)
+
+    def test_a_broken_exemption_form_is_a_gap_on_a_tree_that_builds(self):
+        # A broken form grades both items gap with no condition on the tree: the plain reading of the form rule, which a builder may narrow.
+        repo = self.with_form(self.gold(), '{"sdk": "iOS 27.1"}')
+        for item in ("ci runner", "ci checks"):
+            with self.subTest(item=item):
+                line = self.line(repo, item)
+                self.assertTrue(line.startswith(item + ": gap - "), line)
+                self.assertIn(self.EXEMPT_FORM, line, line)
+
+    def test_a_valid_form_does_not_excuse_a_floating_macos_runner(self):
+        # Green control: a floating image is a gap on main too. A builder that returns `exempt` before this check turns it red.
+        repo = self.with_form(self.cannot_build("macos-latest"), json.dumps(self.VALID_FORM))
+        line = self.line(repo, "ci runner")
+        self.assertTrue(line.startswith("ci runner: gap - .github/workflows/ios.yml: macos-latest"), line)
+        self.assertNotIn("exempt", line, line)
+
+    def test_a_valid_form_on_a_tree_that_builds_leaves_it_in_shape(self):
+        # Green control: the form changes nothing on a tree that passes, so the starter tree still exits 0.
+        repo = self.with_form(self.gold(), json.dumps(self.VALID_FORM))
+        code, out = repo.run("ios")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.grade(repo, "ci runner"), "pass", out)
+
+    def test_an_untracked_exemption_form_is_no_form(self):
+        repo = self.with_form(self.cannot_build(), json.dumps(self.VALID_FORM), staged=False)
+        # Scope first: the form is on disk, and the index does not hold it.
+        self.assertTrue(os.path.isfile(os.path.join(repo.root, *self.EXEMPT_FORM.split("/"))))
+        indexed = subprocess.run(["git", "-C", repo.root, "ls-files"], capture_output=True, text=True, check=True).stdout.split("\n")
+        self.assertNotIn(self.EXEMPT_FORM, indexed)
+        for item in ("ci runner", "ci checks"):
+            with self.subTest(item=item):
+                line = self.line(repo, item)
+                self.assertTrue(line.startswith(item + ": gap - "), line)
+                self.assertIn(self.EXEMPT_FORM, line, "the gap does not name the form: " + line)
+                self.assertIn("untracked", line, "the gap does not say the form is untracked: " + line)
+
+    def test_a_form_path_that_is_a_directory_or_not_utf8_is_a_gap_naming_it(self):
+        directory = self.gold().write(self.EXEMPT_FORM + "/README.md", "not a form\n")
+        utf16 = self.put_form(self.gold(), json.dumps(self.VALID_FORM).encode("utf-16"))
+        # Scope first: the path is a directory, and the UTF-16 bytes do not decode as UTF-8.
+        self.assertTrue(os.path.isdir(os.path.join(directory.root, *self.EXEMPT_FORM.split("/"))))
+        with open(os.path.join(utf16.root, *self.EXEMPT_FORM.split("/")), "rb") as handle:
+            raw = handle.read()
+        with self.assertRaises(UnicodeDecodeError):
+            raw.decode("utf-8")
+        for label, repo in (("a directory", directory), ("UTF-16 text", utf16)):
+            for item in ("ci runner", "ci checks"):
+                with self.subTest(form=label, item=item):
+                    line = self.line(repo, item)
+                    self.assertTrue(line.startswith(item + ": gap - "), line)
+                    self.assertIn(self.EXEMPT_FORM, line, "the gap does not name the form: " + line)
+
+    def test_a_utf8_bom_before_a_valid_form_is_accepted(self):
+        bom = b"\xef\xbb\xbf"
+        forms = (json.dumps(self.VALID_FORM), json.dumps({"sdk": "iOS 27.1", "reason": "Degen builds with the iOS 27 SDK. " * 40}))
+        for form in forms:
+            with self.subTest(form_chars=len(form)):
+                repo = self.put_form(self.cannot_build("macos-26"), bom + form.encode("utf-8"))
+                # Scope first: the file opens with the BOM, and the rest is a JSON object.
+                with open(os.path.join(repo.root, *self.EXEMPT_FORM.split("/")), "rb") as handle:
+                    raw = handle.read()
+                self.assertTrue(raw.startswith(bom), "the fixture has no BOM")
+                self.assertIsInstance(json.loads(raw[len(bom):].decode("utf-8")), dict)
+                line = self.line(repo, "ci checks")
+                self.assertTrue(line.startswith("ci checks: pass - exempt: iOS 27.1"), line)
+
+    def test_ios_apps_skill_names_the_exemption_form_and_the_ios_26_5_sdk(self):
+        with open(os.path.join(os.path.dirname(HERE), "skills", "ios-apps", "SKILL.md"), encoding="utf-8") as handle:
+            rows = [row for row in handle.read().splitlines() if row.startswith("|") and self.EXEMPT_FORM in row]
+        self.assertTrue(rows, "no SKILL.md table row names the one CI exemption form")
+        for row in rows:
+            self.assertIn("26.5", row, "the SKILL.md row that names the form does not say the iOS 26.5 SDK")
 
     def test_swift_5_mode_is_red(self):
         repo = self.edit(self.gold(), "native/project.yml", 'SWIFT_VERSION: "6.0"', "SWIFT_VERSION: 5.0")
@@ -464,6 +673,14 @@ class Ios(unittest.TestCase):
             with self.subTest(run=run):
                 self.red(self.make_run(run), self.diag_gap("Makefile"))
 
+    def test_a_recipe_prefix_does_not_hide_an_xcodebuild_test_run(self):
+        # `@` silences a recipe line and `-` ignores its exit code. Neither hides the run from the probe.
+        self.assertEqual(self.grade(self.make_run("xcodebuild test -scheme X"), "test diagnostics"), "gap", "scope: the run is read")
+        for run in ("@xcodebuild test -scheme X", "-xcodebuild test -scheme X"):
+            with self.subTest(run=run):
+                self.assertEqual(self.grade(self.make_run(run), "test diagnostics"), "gap",
+                                 "a recipe prefix hides the run, so its missing flag is not read")
+
     def test_a_hash_inside_quotes_does_not_cut_the_flag(self):
         for run in ('xcodebuild test -scheme "a #b" -collect-test-diagnostics never',
                     "xcodebuild test -scheme 'a #b' -collect-test-diagnostics never",
@@ -479,6 +696,113 @@ class Ios(unittest.TestCase):
         self.red(repo, self.diag_gap("Makefile", script))  # one line, the files in tracked order
         self.diag_pass(self.gold().write("docs/testing.md", "Run `xcodebuild test -scheme Tally` by hand.\n"))  # prose is no run
 
+    def test_a_flag_in_a_make_variable_is_no_gap(self):
+        # The recipe passes the flag through `$(FLAGS)`, and the Makefile sets FLAGS to it: the run does carry the flag.
+        self.diag_pass(self.flagged("FLAGS = -collect-test-diagnostics never\n"))
+
+    # Each case below reads the run's grade. The first line is the scope: with the variable unset, the run is read and
+    # carries no flag, so the grade is gap. Without it, a run that is not read would grade pass and the case would pass for nothing.
+    def test_a_later_equals_replaces_the_make_variable(self):
+        first = "FLAGS = -collect-test-diagnostics never\n"
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged(first), "test diagnostics"), "pass", "control: the first value holds the flag")
+        self.assertEqual(self.grade(self.flagged(first + "FLAGS = -quiet\n"), "test diagnostics"), "gap",
+                         "a later = replaces the value, so the run gets -quiet and no diagnostics flag")
+
+    def test_a_question_equals_applies_only_when_the_variable_is_unset(self):
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS ?= -collect-test-diagnostics never\n"), "test diagnostics"), "pass",
+                         "control: FLAGS is unset, so ?= sets it")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -quiet\nFLAGS ?= -collect-test-diagnostics never\n"), "test diagnostics"),
+                         "gap", "?= does nothing once FLAGS is set to -quiet")
+
+    def test_a_plus_equals_appends_to_the_make_variable(self):
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -quiet\nFLAGS += -collect-test-diagnostics never\n"), "test diagnostics"),
+                         "pass", "+= appends the flag after -quiet")
+
+    def test_a_backslash_continued_make_value_is_read_whole(self):
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -quiet \\\n\t-collect-test-diagnostics never\n"), "test diagnostics"),
+                         "pass", "the continuation line is part of FLAGS, so the run carries the flag")
+
+    def test_a_three_level_make_chain_resolves(self):
+        recipe = "xcodebuild test -scheme X $(DIAG_A)"
+        self.assertEqual(self.grade(self.flagged("", recipe), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("DIAG_A = -collect-test-diagnostics never\n", recipe), "test diagnostics"),
+                         "pass", "control: one level")
+        self.assertEqual(self.grade(self.flagged("DIAG_A = $(DIAG_B)\nDIAG_B = $(DIAG_C)\nDIAG_C = -collect-test-diagnostics never\n",
+                                                 recipe), "test diagnostics"), "pass",
+                         "A = $(B), B = $(C), C = the flag: the run carries the flag through three levels")
+
+    def test_an_export_make_assignment_is_read(self):
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("export FLAGS = -collect-test-diagnostics never\n"), "test diagnostics"), "pass",
+                         "export FLAGS = is an assignment, so the run carries the flag")
+
+    def test_an_override_make_assignment_is_read(self):
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("override FLAGS = -collect-test-diagnostics never\n"), "test diagnostics"), "pass",
+                         "override FLAGS = is an assignment, so the run carries the flag")
+
+    def test_a_double_colon_make_assignment_is_read(self):
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS ::= -collect-test-diagnostics never\n"), "test diagnostics"), "pass",
+                         "FLAGS ::= is an assignment, so the run carries the flag")
+
+    def test_a_colon_equals_expands_the_make_variable_at_assignment(self):
+        # `:=` expands $(FLAGS) when it is read, so FLAGS keeps the flag and -quiet joins it. The run carries the flag.
+        recipe = "xcodebuild test $(FLAGS)"
+        self.assertEqual(self.grade(self.flagged("", recipe), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -collect-test-diagnostics never\n", recipe), "test diagnostics"), "pass",
+                         "control: one level")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -collect-test-diagnostics never\nFLAGS := $(FLAGS) -quiet\n", recipe),
+                                    "test diagnostics"), "pass",
+                         "the := value holds the flag, so the -quiet append keeps it")
+
+    def test_a_lone_quote_in_a_make_comment_is_no_gap(self):
+        # The apostrophe is text in a comment: it opens no string, so the flag before the comment still counts.
+        self.assertEqual(self.grade(self.flagged(""), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -collect-test-diagnostics never # the team's flag\n"), "test diagnostics"),
+                         "pass", "the flag before a comment that holds a lone quote still counts")
+
+    def test_a_make_comment_is_cut_from_a_variable_value(self):
+        # Make cuts `# x` from F's value, so F is `-quiet` and the run's own flag after $(F) is not in the comment.
+        recipe = "xcodebuild test $(F) -collect-test-diagnostics never"
+        self.assertEqual(self.grade(self.flagged("F = -quiet # x\n", "xcodebuild test $(F)"), "test diagnostics"), "gap",
+                         "scope: the run is read, and no diagnostics flag is in it")
+        self.assertEqual(self.grade(self.flagged("F = -quiet\n", recipe), "test diagnostics"), "pass",
+                         "control: no comment, so $(F) expands and the run keeps its flag")
+        self.assertEqual(self.grade(self.flagged("F = -quiet # x\n", recipe), "test diagnostics"), "pass",
+                         "the comment ends at F's value, so the run keeps its own diagnostics flag")
+
+    def test_a_quoted_hash_in_a_recipe_beside_a_make_variable_is_no_gap(self):
+        recipe = 'xcodebuild test -scheme "a #b" $(FLAGS)'
+        self.assertEqual(self.grade(self.flagged("", recipe), "test diagnostics"), "gap", "scope: the run is read")
+        self.assertEqual(self.grade(self.flagged("FLAGS = -collect-test-diagnostics never\n", recipe), "test diagnostics"), "pass",
+                         "a # inside quotes in the recipe is text, so the variable's flag still counts")
+
+    def test_a_quoted_never_is_no_gap(self):
+        # The shell reads `"never"` and `'never'` as `never`, so the run does carry the flag.
+        for run in ('xcodebuild test -scheme X -collect-test-diagnostics "never"',
+                    "xcodebuild test -scheme X -collect-test-diagnostics 'never'"):
+            with self.subTest(run=run):
+                self.diag_pass(self.make_run(run))
+
+    def test_a_step_name_naming_xcodebuild_test_is_no_test_run(self):
+        # A step's name is text: no xcodebuild test runs in this step, so neither item may read it as one.
+        repo = self.edit(self.gold(), self.FLOW, "run: make app-build",
+                         "run: make app-build\n      - name: xcodebuild test (slow tests)\n        run: echo done")
+        self.diag_pass(repo)
+        self.assertEqual(self.grade(repo, "slow tests"), "pass")
+
+    def test_an_echo_naming_xcodebuild_test_is_no_test_run(self):
+        # An echo prints text: `xcodebuild test` inside its quotes runs nothing, so neither item may read it as a run.
+        repo = self.edit(self.gold(), self.FLOW, "run: make app-build",
+                         'run: make app-build\n      - run: echo "xcodebuild test -scheme Tally"')
+        self.diag_pass(repo)
+        self.assertEqual(self.grade(repo, "slow tests"), "pass")
+
     def test_workflow_runs_are_read(self):
         flow = ".github/workflows/ios.yml"
         run = "xcodebuild test -project native/Tally.xcodeproj -scheme Tally"
@@ -490,6 +814,106 @@ class Ios(unittest.TestCase):
                 _, out = self.edit(self.gold(), flow, "run: make app-build", step).run("ios")  # slow tests is a gap here, by design
                 self.assertIn(self.DIAG_PASS, out)
                 self.assertNotIn("test diagnostics: gap", out)
+
+    # A command substitution in a quoted argument, `$(...)` or a backtick, is a command the shell runs in place. The shell
+    # reads the argument on past it, so the flag after it is in the run. Each scope line reads the same run with no flag.
+    SUBSTITUTIONS = ("$(cat id)", "`cat id`")
+
+    def substituted(self, sub, flag=" -collect-test-diagnostics never"):
+        return 'xcodebuild test -destination "id=%s"%s' % (sub, flag)
+
+    def test_a_substitution_in_a_makefile_recipe_keeps_the_flag(self):
+        self.diag_pass(self.make_run('xcodebuild test -destination "id=abc" -collect-test-diagnostics never'))  # control: no substitution
+        for sub in self.SUBSTITUTIONS:
+            with self.subTest(sub=sub):
+                self.assertEqual(self.grade(self.make_run(self.substituted(sub, "")), "test diagnostics"), "gap",
+                                 "scope: with no flag the run is read, and it gaps")
+                self.assertEqual(self.grade(self.make_run(self.substituted(sub)), "test diagnostics"), "pass",
+                                 "the flag after the substitution is in the run")
+
+    def test_an_unset_make_variable_in_a_recipe_keeps_the_flag(self):
+        # Make expands an unset `$(NAME)` to nothing, so the shell never sees a `$(`: the flag after it is in the run.
+        self.assertEqual(self.grade(self.flagged("", "xcodebuild test $(XCX_EXTRA)"), "test diagnostics"), "gap",
+                         "scope: with no flag the run is read, and it gaps")
+        self.assertEqual(self.grade(self.flagged("XCX_EXTRA = -collect-test-diagnostics never\n", "xcodebuild test $(XCX_EXTRA)"),
+                                    "test diagnostics"), "pass", "control: a variable that holds the flag passes")
+        self.assertEqual(self.grade(self.flagged("", "xcodebuild test $(XCX_EXTRA) -collect-test-diagnostics never"), "test diagnostics"),
+                         "pass", "the flag after an unset variable is in the run")
+
+    def test_a_substitution_in_a_shell_script_keeps_the_flag(self):
+        script = "tools/run-tests.sh"
+        self.diag_pass(self.gold().write(script, "#!/bin/sh\n%s\n" % self.substituted("abc")))  # control: no substitution
+        for sub in self.SUBSTITUTIONS:
+            with self.subTest(sub=sub):
+                repo = self.gold().write(script, "#!/bin/sh\n%s\n" % self.substituted(sub, ""))
+                self.assertEqual(self.grade(repo, "test diagnostics"), "gap", "scope: with no flag the run is read, and it gaps")
+                repo = self.gold().write(script, "#!/bin/sh\n%s\n" % self.substituted(sub))
+                self.assertEqual(self.grade(repo, "test diagnostics"), "pass", "the flag after the substitution is in the run")
+
+    def test_a_substitution_in_a_workflow_step_keeps_the_flag(self):
+        # control: no substitution. The step's UI-test run gaps its own item, so only this item is read.
+        self.assertEqual(self.grade(self.step(self.gold(), self.substituted("abc")), "test diagnostics"), "pass", "control: no substitution")
+        for sub in self.SUBSTITUTIONS:
+            with self.subTest(sub=sub):
+                self.assertEqual(self.grade(self.step(self.gold(), self.substituted(sub, "")), "test diagnostics"), "gap",
+                                 "scope: with no flag the run is read, and it gaps")
+                self.assertEqual(self.grade(self.step(self.gold(), self.substituted(sub)), "test diagnostics"), "pass",
+                                 "the flag after the substitution is in the run")
+
+    def test_a_lone_apostrophe_before_a_substitution_run_keeps_the_flag(self):
+        # `echo it's` opens no string, so the run after it is read whole.
+        for sub in self.SUBSTITUTIONS:
+            with self.subTest(sub=sub):
+                self.assertEqual(self.grade(self.step(self.gold(), "echo it's; " + self.substituted(sub, "")), "test diagnostics"), "gap",
+                                 "scope: with no flag the run is read, and it gaps")
+                self.assertEqual(self.grade(self.step(self.gold(), "echo it's; " + self.substituted(sub)), "test diagnostics"), "pass",
+                                 "the flag after the substitution is in the run")
+
+    def test_a_comment_opener_and_a_continuation_keep_the_flag_in_a_workflow_step(self):
+        # A `#` inside the quotes is text. A `\` continuation joins the flag's line to the run, so the flag still counts.
+        pairs = (
+            ('xcodebuild test -destination "name=iPhone #1,id=$(cat id)" -scheme X',
+             'xcodebuild test -destination "name=iPhone #1,id=$(cat id)" -collect-test-diagnostics never'),
+            ('|\n          xcodebuild test -destination "id=$(cat id)" \\\n            -scheme X',
+             '|\n          xcodebuild test -destination "id=$(cat id)" \\\n            -collect-test-diagnostics never'))
+        for scope, subject in pairs:
+            with self.subTest(command=subject):
+                self.assertEqual(self.grade(self.step(self.gold(), scope), "test diagnostics"), "gap",
+                                 "scope: with no flag the run is read, and it gaps")
+                self.assertEqual(self.grade(self.step(self.gold(), subject), "test diagnostics"), "pass",
+                                 "the flag after the substitution is in the run")
+
+    # `${XCB:-xcodebuild}` is xcodebuild when XCB is unset, so `test` is its action and the run needs the flag.
+    def test_a_parameter_default_naming_xcodebuild_gaps_in_a_shell_script(self):
+        script = "tools/run-tests.sh"
+        self.assertEqual(self.grade(self.gold().write(script, "#!/bin/sh\nxcodebuild test -scheme X\n"), "test diagnostics"), "gap",
+                         "scope: a plain xcodebuild test gaps, so the run is read")
+        self.assertEqual(self.grade(self.gold().write(script, "#!/bin/sh\n${XCB:-xcodebuild} test -scheme X\n"), "test diagnostics"), "gap",
+                         "the default names xcodebuild, so its test run with no flag gaps")
+
+    def test_a_parameter_default_naming_xcodebuild_gaps_in_a_workflow_step(self):
+        self.assertEqual(self.grade(self.step(self.gold(), "xcodebuild test -scheme X"), "test diagnostics"), "gap",
+                         "scope: a plain xcodebuild test gaps, so the run is read")
+        self.assertEqual(self.grade(self.step(self.gold(), "${XCB:-xcodebuild} test -scheme X"), "test diagnostics"), "gap",
+                         "the default names xcodebuild, so its test run with no flag gaps")
+        self.assertEqual(self.grade(self.step(self.gold(), "${XCB:-xcodebuild} test -scheme X -collect-test-diagnostics never"),
+                                    "test diagnostics"), "pass", "with the flag, the same run passes")
+
+    def test_a_parameter_default_naming_xcodebuild_gaps_in_a_makefile_recipe(self):
+        # Make reads `${...}` itself, so a recipe writes `$${...}` to hand the shell `${XCB:-xcodebuild}`.
+        self.assertEqual(self.grade(self.make_run("xcodebuild test -scheme X"), "test diagnostics"), "gap",
+                         "scope: a plain xcodebuild test gaps, so the run is read")
+        self.assertEqual(self.grade(self.make_run("$${XCB:-xcodebuild} test -scheme X"), "test diagnostics"), "gap",
+                         "the default names xcodebuild, so its test run with no flag gaps")
+
+    def test_a_recipe_prefix_on_a_parameter_default_naming_xcodebuild_gaps_in_a_makefile_recipe(self):
+        # Make strips a recipe line's `@`, `-` or `+` before the shell reads it, so a prefix is no part of the command's name.
+        for prefix in ("@", "-", "+"):
+            with self.subTest(prefix=prefix):
+                self.assertEqual(self.grade(self.make_run(prefix + "xcodebuild test -scheme X"), "test diagnostics"), "gap",
+                                 "scope: a prefixed plain xcodebuild test gaps, so the run is read")
+                self.assertEqual(self.grade(self.make_run(prefix + "$${XCB:-xcodebuild} test -scheme X"), "test diagnostics"), "gap",
+                                 "the default names xcodebuild behind the prefix, so its test run with no flag gaps")
 
     def test_account_ids_in_the_repo_are_red(self):
         repo = self.edit(self.gold(), "tools/ios-ship.json", '"repo_url"', '"team_id": "FAKE000000",\n  "repo_url"')
@@ -533,11 +957,7 @@ class Ios(unittest.TestCase):
 
     def grade(self, repo, item):
         """The grade of one item line of the ios group: pass, gap or partial."""
-        code, out = repo.run("ios")
-        for line in out.splitlines():
-            if line.strip().startswith(item + ":"):
-                return line.strip().split(": ", 1)[1].split(" - ", 1)[0]
-        self.fail("no '%s' line in:\n%s" % (item, out))
+        return self.line(repo, item).split(": ", 1)[1].split(" - ", 1)[0]
 
     def step(self, repo, command):
         """`repo` with `command` as one more step of the macOS job."""
@@ -783,6 +1203,7 @@ class LaneCap(unittest.TestCase):
 
 
 PROBES_MD = os.path.join(os.path.dirname(HERE), "skills", "compliance-check", "probes.md")
+SKILL_MD = os.path.join(os.path.dirname(HERE), "skills", "compliance-check", "SKILL.md")
 
 
 class Playwright(unittest.TestCase):
@@ -824,14 +1245,6 @@ class Playwright(unittest.TestCase):
     def test_no_playwright_is_na(self):
         code, out = Repo(self).write(self.WORKFLOW, "      - run: npm test\n").run("playwright")
         self.assertEqual((code, out.strip()), (0, "playwright: n/a - no Playwright install"))
-
-
-def load_probes():
-    """The probes module under test, loaded here so a case can patch check_glossary in this process."""
-    spec = importlib.util.spec_from_file_location("probes_under_test", PROBES)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def in_process(root, group="words", probes=None):
@@ -1091,6 +1504,123 @@ class Words(unittest.TestCase):
         self.assertIn("words", probes.GROUPS)
         self.assertIs(probes.GROUPS["words"], probes.probe_words)
 
+    # A change is read on what it adds, against the merge base with origin/main: the paths and the lines that its
+    # commits, its work tree and its untracked files add. A file already on origin/main is not read again.
+
+    @staticmethod
+    def anchored(word):
+        """A Python file whose line 2 names `word` in a rule anchor."""
+        return "VALUE = 1\n# Keep to rule:%s-cap.\n" % word.replace(" ", "-")
+
+    def based(self, *files):
+        """A child repo whose origin/main holds `files`, (path, text) pairs: the base that a change is read against."""
+        repo = Repo(self, origin=True)
+        for rel, text in files:
+            repo.write(rel, text)
+        return repo.publish()
+
+    def changed(self, repo, *files):
+        """`repo` with one commit that adds or edits `files`, so HEAD is ahead of origin/main."""
+        for rel, text in files:
+            repo.write(rel, text)
+        return repo.commit("change")
+
+    def test_a_retired_word_on_origin_main_and_untouched_is_not_read(self):
+        word = planted()
+        repo = self.based(("docs/%s_old.md" % word.replace(" ", "_"), "x\n"), ("src/cap.py", self.anchored(word)))
+        code, out = repo.run("words")
+        self.assertEqual((code, head(out), hits(out)), (0, "words: in shape", []), out)
+
+    def test_a_retired_word_added_after_the_base_is_read_on_its_path_and_line_only(self):
+        word = planted()
+        under = word.replace(" ", "_")
+        repo = self.based(("docs/%s_old.md" % under, "x\n"), ("src/app.py", "VALUE = 1\n"))
+        self.changed(repo, ("docs/%s_notes.md" % under, "x\n"), ("src/app.py", self.anchored(word)))
+        code, out = repo.run("words")
+        self.assertEqual(code, 1, out)
+        self.assertEqual(sorted(hits(out)), sorted([(word, "docs/%s_notes.md" % under, "-"), (word, "src/app.py", "2")]),
+                         out)
+
+    def test_an_old_line_with_a_retired_word_is_not_read_when_its_file_gets_a_clean_line(self):
+        word = planted()
+        repo = self.based(("src/cap.py", self.anchored(word)))
+        self.changed(repo, ("src/cap.py", self.anchored(word) + "NEW = 2\n"))
+        code, out = repo.run("words")
+        self.assertEqual((code, head(out), hits(out)), (0, "words: in shape", []), out)
+
+    def test_an_added_line_that_carries_glossary_ok_is_not_reported(self):
+        word = planted()
+        under = word.replace(" ", "_")
+        repo = self.based(("src/app.py", "VALUE = 1\n"))
+        self.changed(repo, ("src/app.py", "VALUE = 1\n%s_total = 2  # glossary-ok: the platform spells it so\n"
+                                          "%s_count = 3\n" % (under, under)))
+        code, out = repo.run("words")
+        self.assertEqual((code, head(out), hits(out)), (1, "words: out", [(word, "src/app.py", "3")]), out)
+
+    def test_without_origin_main_or_a_merge_base_the_whole_tree_is_read(self):
+        word = planted()
+        path = "docs/%s_notes.md" % word.replace(" ", "_")
+        for origin in (False, True):  # no origin at all, and an origin that holds no main
+            with self.subTest(origin=origin):
+                code, out = Repo(self, origin=origin).write(path).run("words")
+                self.assertEqual((code, hits(out)), (1, [(word, path, "-")]), out)
+        repo = self.based(("src/app.py", "VALUE = 1\n"))
+        repo.git("checkout", "-q", "--orphan", "lone")  # HEAD now shares no history with origin/main
+        code, out = repo.write(path).commit("lone").run("words")
+        self.assertEqual((code, hits(out)), (1, [(word, path, "-")]), out)
+
+    def test_a_subfolder_root_reads_the_change_from_the_repo_top(self):
+        word = planted()
+        under = word.replace(" ", "_")
+        repo = self.based(("sub/keep.md", "x\n"), ("docs/%s_old.md" % under, "x\n"), ("src/app.py", "VALUE = 1\n"))
+        self.changed(repo, ("docs/%s_new.md" % under, "x\n"))
+        with open(os.path.join(repo.root, "src", "app.py"), "w", encoding="utf-8") as handle:  # uncommitted, outside sub/
+            handle.write(self.anchored(word))
+        code, out = in_process(os.path.join(repo.root, "sub"))
+        self.assertNotIn("unread", out)
+        self.assertEqual((code, sorted(hits(out))),
+                         (1, sorted([(word, "docs/%s_new.md" % under, "-"), (word, "src/app.py", "2")])), out)
+
+    def test_untracked_non_utf8_text_is_unknown(self):
+        repo = self.based(("docs/a.md", "x\n"))
+        with open(os.path.join(repo.root, "docs", "latin.txt"), "wb") as handle:  # untracked, no NUL: text it cannot read
+            handle.write(b"caf\xe9\n")
+        code, out = repo.run("words")
+        self.assertEqual((code, head(out).startswith("words: unknown")), (2, True), out)
+
+    def test_untracked_binary_is_an_unread_note_not_unknown(self):
+        repo = self.based(("docs/a.md", "x\n"))
+        with open(os.path.join(repo.root, "docs", "pic.bin"), "wb") as handle:  # untracked, a NUL in its first bytes
+            handle.write(b"\x00\x01\xff")
+        code, out = repo.run("words")
+        self.assertEqual((code, head(out)), (0, "words: in shape"), out)
+        self.assertIn("unread: 1 files, docs/pic.bin", out)
+
+    def test_committed_non_utf8_text_is_not_unknown(self):
+        repo = self.based(("docs/a.md", "x\n"))
+        with open(os.path.join(repo.root, "docs", "latin.txt"), "wb") as handle:
+            handle.write(b"caf\xe9\n")
+        repo.git("add", "docs/latin.txt").commit("latin")
+        code, out = repo.run("words")
+        self.assertEqual((code, head(out)), (0, "words: in shape"), out)
+        self.assertIn("unread: 1 files, docs/latin.txt", out)
+
+    def test_the_deadline_counts_the_files_of_the_whole_tree(self):
+        probes = load_probes()
+        repo = Repo(self).write("a.md").write("b.md").write("c.md")
+        with mock.patch.object(probes, "WORDS_DEADLINE", -1):
+            code, out = in_process(repo.root, probes=probes)
+        self.assertEqual((code, "stopped at a.md, 0 of 3 read" in out), (2, True), out)
+
+    def test_the_deadline_counts_a_changed_file_once_though_it_has_a_path_unit_and_a_code_unit(self):
+        probes = load_probes()
+        under = planted().replace(" ", "_")
+        repo = self.based(("docs/a.md", "x\n"))
+        self.changed(repo, ("docs/%s_n.py" % under, "x = 1\n"))
+        with mock.patch.object(probes, "WORDS_DEADLINE", -1):
+            code, out = in_process(repo.root, probes=probes)
+        self.assertEqual((code, "stopped at docs/%s_n.py, 0 of 1 read" % under in out), (2, True), out)
+
 
 def minified_bundle(word, entries=6000, blobs=160, blob_size=125000):
     """One line of JSON, the shape of a minified data bundle: many small entries, a few long hex blobs, and `word` as
@@ -1271,6 +1801,424 @@ class Slugs(unittest.TestCase):
 
     def test_registered_in_groups(self):
         self.assertIn("slugs", load_probes().GROUPS)
+
+
+class LiveHooks(unittest.TestCase):
+    """The hooks group: the clone's settings.json `.hooks` against the live $HOME/.claude/settings.json `.hooks`.
+    hooks.SessionStart is ignored on both sides, since a cloud install rewrites it (install.sh). The fixtures read this
+    checkout's settings.json at test time, so the hooks are the real full-size set and no case pastes them."""
+
+    SOURCE = os.path.join(os.path.dirname(HERE), "settings.json")
+    NEW_COMMAND = "python3 hooks/changed.py"
+    # The SessionStart entry a cloud install writes, shortened. Its command text is unique to this class.
+    REFRESH = {"matcher": "startup|resume",
+               "hooks": [{"type": "command", "command": "i=$(cat); bash -s -- --cloud", "timeout": 60}]}
+
+    def source(self):
+        """This checkout's settings.json as a new dict, so a case edits its own copy."""
+        with open(self.SOURCE, encoding="utf-8") as handle:
+            return json.load(handle)
+
+    @staticmethod
+    def text(doc):
+        return json.dumps(doc, indent=2)
+
+    @staticmethod
+    def other_event(doc):
+        """The first event other than SessionStart."""
+        return next(event for event in doc["hooks"] if event != "SessionStart")
+
+    @staticmethod
+    def escaped(text):
+        """`text` as the pretty-printed JSON writes it, so a command with quotes still finds its line."""
+        return json.dumps(text)[1:-1]
+
+    @staticmethod
+    def changed(out):
+        """The item lines that add or remove text, without their indent. The `---` and `+++` headers are not changes."""
+        return [line[2:] for line in out.splitlines()[1:]
+                if line[2:3] in ("+", "-") and not line.startswith(("  ---", "  +++"))]
+
+    def dangling_link(self, path):
+        """A symlink at `path` whose target does not exist. A case skips where this platform makes no symlinks."""
+        try:
+            os.symlink("missing.json", path)
+        except (OSError, NotImplementedError):
+            self.skipTest("no symlinks here")
+
+    def clone(self, text, dangling=False):
+        """A claude-settings clone whose settings.json holds `text`; with no settings.json when `text` is None.
+        `dangling`: the settings.json is a symlink to a file that is not there, and git tracks it."""
+        repo = Repo(self)
+        if dangling:
+            self.dangling_link(os.path.join(repo.root, "settings.json"))
+            return repo.git("add", "-f", "settings.json")
+        return repo.write("settings.json", text) if text is not None else repo.write("README.md")
+
+    def live(self, text, dangling=False):
+        """A HOME folder whose ~/.claude/settings.json holds `text`; with no file when `text` is None.
+        `dangling`: that file is a symlink to a file that is not there."""
+        home = tempfile.mkdtemp(prefix="home-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, home, True)
+        if text is not None or dangling:
+            os.makedirs(os.path.join(home, ".claude"))
+        self.settings_file(os.path.join(home, ".claude", "settings.json"), text, dangling)
+        return home
+
+    def config_dir(self, text):
+        """A CLAUDE_CONFIG_DIR folder whose settings.json holds `text`, as `live()` makes ~/.claude; no file when `text` is None."""
+        folder = tempfile.mkdtemp(prefix="cfg-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, folder, True)
+        self.settings_file(os.path.join(folder, "settings.json"), text)
+        return folder
+
+    def settings_file(self, path, text, dangling=False):
+        """Write `text` to `path`; leave no file when `text` is None. `dangling`: make `path` a link to a file that is not there."""
+        if dangling:
+            self.dangling_link(path)
+        elif text is not None:
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(text)
+
+    def probe(self, repo, home, config=None, cwd=None):
+        """(exit code, stdout, stderr) of the hooks group on `repo` with HOME at `home`. `config`: the CLAUDE_CONFIG_DIR the run
+        gets, `""` included. None strips the variable, so this process's own value cannot leak into a case that does not set it.
+        `cwd`: the folder the run starts in."""
+        env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
+        if config is not None:
+            env["CLAUDE_CONFIG_DIR"] = config
+        env["HOME"] = env["USERPROFILE"] = home  # USERPROFILE is the home that expanduser reads on Windows
+        done = subprocess.run([sys.executable, PROBES, "hooks", repo.root], capture_output=True, text=True, env=env, cwd=cwd)
+        return done.returncode, done.stdout, done.stderr
+
+    def check(self, clone_text, live_text):
+        return self.probe(self.clone(clone_text), self.live(live_text))
+
+    def test_identical_hooks_are_in_shape(self):
+        clone, live = self.source(), self.source()
+        live.setdefault("permissions", {}).setdefault("allow", []).append("Bash(cloud-only:*)")  # outside .hooks: not read
+        reversed_keys = json.loads(self.text(live), object_pairs_hook=lambda pairs: dict(reversed(pairs)))
+        for name, doc in (("the same hooks", live), ("the same hooks, keys in reverse order", reversed_keys)):
+            with self.subTest(name):
+                code, out, err = self.check(self.text(clone), self.text(doc))
+                self.assertEqual(code, 0, err or out)
+                self.assertTrue(head(out).startswith("hooks: in shape"), err or out)
+
+    def test_a_session_start_only_difference_is_in_shape(self):
+        def without_session_start(doc):
+            doc["hooks"].pop("SessionStart")
+            return doc
+
+        rewritten = self.source()
+        rewritten["hooks"]["SessionStart"] = [entry for entry in rewritten["hooks"]["SessionStart"]
+                                              if "startup" not in entry.get("matcher", "")] + [self.REFRESH]
+        cases = (("live rewritten as a cloud install writes it", self.source(), rewritten),
+                 ("live without SessionStart", self.source(), without_session_start(self.source())),
+                 ("clone without SessionStart", without_session_start(self.source()), self.source()))
+        for name, clone, live in cases:
+            with self.subTest(name):
+                code, out, err = self.check(self.text(clone), self.text(live))
+                self.assertEqual(code, 0, err or out)
+                self.assertTrue(head(out).startswith("hooks: in shape"), err or out)
+
+    def test_a_changed_command_in_another_event_is_out(self):
+        clone, live = self.source(), self.source()
+        event = self.other_event(live)
+        old = live["hooks"][event][0]["hooks"][0]["command"]
+        live["hooks"][event][0]["hooks"][0]["command"] = self.NEW_COMMAND
+        code, out, err = self.check(self.text(clone), self.text(live))
+        self.assertEqual(code, 1, err or out)  # scope first: the verdict, then the lines it names
+        self.assertTrue(head(out).startswith("hooks: out"), err or out)
+        self.assertTrue(all(line.startswith("  ") for line in out.splitlines()[1:]), out)
+        changed = self.changed(out)
+        self.assertTrue(any(self.escaped(self.NEW_COMMAND) in line for line in changed), out)  # the live command
+        self.assertTrue(any(self.escaped(old) in line for line in changed), out)  # the clone's command
+        self.assertFalse(any('"SessionStart"' in line for line in out.splitlines()[1:]), out)
+
+    def test_a_hook_event_missing_live_is_out(self):
+        clone, live = self.source(), self.source()
+        event = self.other_event(live)
+        command = live["hooks"].pop(event)[0]["hooks"][0]["command"]
+        code, out, err = self.check(self.text(clone), self.text(live))
+        self.assertEqual(code, 1, err or out)
+        self.assertTrue(head(out).startswith("hooks: out"), err or out)
+        changed = self.changed(out)
+        self.assertTrue(any(('"%s"' % event) in line for line in changed), out)
+        self.assertTrue(any(self.escaped(command) in line for line in changed), out)
+
+    def test_an_extra_live_event_is_out(self):
+        clone, live = self.source(), self.source()
+        live["hooks"]["Notification"] = [{"hooks": [{"type": "command", "command": self.NEW_COMMAND}]}]
+        code, out, err = self.check(self.text(clone), self.text(live))
+        self.assertEqual(code, 1, err or out)
+        self.assertTrue(head(out).startswith("hooks: out"), err or out)
+        changed = self.changed(out)
+        self.assertTrue(any('"Notification"' in line for line in changed), out)
+        self.assertTrue(any(self.NEW_COMMAND in line for line in changed), out)
+
+    def test_a_session_start_difference_beside_a_real_change_is_out(self):
+        clone, live = self.source(), self.source()
+        live["hooks"]["SessionStart"] = [self.REFRESH]
+        live["hooks"][self.other_event(live)][0]["hooks"][0]["command"] = self.NEW_COMMAND
+        code, out, err = self.check(self.text(clone), self.text(live))
+        self.assertEqual(code, 1, err or out)
+        self.assertTrue(head(out).startswith("hooks: out"), err or out)
+        items = out.splitlines()[1:]
+        self.assertFalse(any('"SessionStart"' in line or self.REFRESH["hooks"][0]["command"] in line for line in items), out)
+        self.assertTrue(any(self.NEW_COMMAND in line for line in self.changed(out)), out)
+
+    def test_a_live_file_that_is_missing_is_unknown(self):
+        code, out, err = self.check(self.text(self.source()), None)
+        self.assertEqual(code, 2, err or out)
+        self.assertTrue(head(out).startswith("hooks: unknown - "), err or out)
+
+    def test_invalid_json_on_either_side_is_unknown(self):
+        good = self.text(self.source())
+        for side, clone, live in (("live", good, "{ not json"), ("clone", "{ not json", good)):
+            with self.subTest(side):
+                code, out, err = self.check(clone, live)
+                self.assertEqual(code, 2, err or out)
+                self.assertTrue(head(out).startswith("hooks: unknown - "), err or out)
+
+    def test_a_clone_settings_json_that_is_not_utf8_is_unknown(self):
+        text = self.text(self.source())
+        at = text.index('"command": "') + len('"command": "')
+        raw = text[:at].encode("utf-8") + b"\xff" + text[at:].encode("utf-8")  # inside a string: only the decode refuses it
+        repo = Repo(self)
+        with open(os.path.join(repo.root, "settings.json"), "wb") as handle:
+            handle.write(raw)
+        code, out, err = self.probe(repo, self.live(text))
+        self.assertEqual(code, 2, err or out)
+        self.assertTrue(head(out).startswith("hooks: unknown - "), err or out)
+        self.assertIn("UTF-8", head(out), err or out)  # the reason is the encoding, not a diff or a parse error
+        self.assertNotIn("trusts:", out, err or out)
+
+    def test_a_hooks_value_that_is_not_an_object_is_unknown(self):
+        for side in ("clone", "live"):
+            for value in ([], "none", None):
+                with self.subTest(side=side, value=value):
+                    doc = self.source()
+                    doc["hooks"] = value
+                    bad, good = self.text(doc), self.text(self.source())
+                    clone_text, live_text = (bad, good) if side == "clone" else (good, bad)
+                    code, out, err = self.check(clone_text, live_text)
+                    self.assertEqual(code, 2, err or out)
+                    self.assertTrue(head(out).startswith("hooks: unknown - "), err or out)
+                    self.assertIn("%s settings.json has no `hooks` object" % side, head(out), err or out)
+
+    def test_a_clone_without_settings_json_is_na(self):
+        code, out, err = self.probe(self.clone(None), self.live(self.text(self.source())))
+        self.assertEqual(code, 0, err or out)
+        self.assertTrue(head(out).startswith("hooks: n/a"), err or out)
+
+    def test_a_dangling_settings_json_link_is_unknown_not_na(self):
+        """A settings.json link to a file that is gone is a file the probe cannot read: unknown. Only a file that is not there is n/a."""
+        text = self.text(self.source())
+        for side in ("clone", "live"):
+            with self.subTest(side=side):
+                if side == "clone":
+                    repo, home = self.clone(None, dangling=True), self.live(text)
+                    path = os.path.join(repo.root, "settings.json")
+                else:
+                    repo, home = self.clone(text), self.live(None, dangling=True)
+                    path = os.path.join(home, ".claude", "settings.json")
+                self.assertTrue(os.path.islink(path) and not os.path.exists(path), path)  # scope first: a link to nothing
+                code, out, err = self.probe(repo, home)
+                self.assertEqual(code, 2, err or out)
+                self.assertTrue(head(out).startswith("hooks: unknown - "), err or out)
+                self.assertNotIn("trusts:", out, err or out)
+
+    def test_no_hooks_on_either_side_is_in_shape(self):
+        empty = self.text({"hooks": {}})
+        code, out, err = self.check(empty, empty)
+        self.assertEqual(code, 0, err or out)
+        self.assertTrue(head(out).startswith("hooks: in shape"), err or out)
+
+    def test_a_config_dir_settings_file_is_the_live_file_when_set(self):
+        """With CLAUDE_CONFIG_DIR set, the live file is <dir>/settings.json. The ~/.claude copy, equal to the clone, is not read."""
+        edited = self.source()
+        edited["hooks"][self.other_event(edited)][0]["hooks"][0]["command"] = self.NEW_COMMAND
+        home = self.live(self.text(self.source()))
+        cfg = self.config_dir(self.text(edited))
+        repo = self.clone(self.text(self.source()))
+        self.assertTrue(os.path.isfile(os.path.join(home, ".claude", "settings.json")))  # scope first: the home copy is there
+        code, out, err = self.probe(repo, home, config=cfg)
+        self.assertEqual(code, 1, err or out)
+        self.assertTrue(head(out).startswith("hooks: out"), err or out)
+        self.assertTrue(any(self.NEW_COMMAND in line for line in self.changed(out)), out)  # the <dir> copy is the one read
+        self.assertEqual(out.splitlines()[1], self.trusts(repo, os.path.join(cfg, "settings.json")), out)
+
+    def test_a_config_dir_settings_file_alone_decides_when_set(self):
+        """With CLAUDE_CONFIG_DIR set, a missing ~/.claude/settings.json is not read: <dir>/settings.json decides."""
+        text = self.text(self.source())
+        home = self.live(None)
+        cfg = self.config_dir(text)
+        repo = self.clone(text)
+        self.assertFalse(os.path.exists(os.path.join(home, ".claude", "settings.json")))  # scope first: no home copy
+        self.assertTrue(os.path.isfile(os.path.join(cfg, "settings.json")))
+        code, out, err = self.probe(repo, home, config=cfg)
+        self.assertEqual(code, 0, err or out)
+        self.assertTrue(head(out).startswith("hooks: in shape"), err or out)
+
+    def test_a_config_dir_without_settings_file_is_unknown_and_home_is_not_read(self):
+        """With CLAUDE_CONFIG_DIR set to a folder with no settings.json, the probe is unknown. It does not fall back to a good ~/.claude copy."""
+        text = self.text(self.source())
+        home = self.live(text)
+        cfg = self.config_dir(None)
+        repo = self.clone(text)
+        self.assertFalse(os.path.exists(os.path.join(cfg, "settings.json")))  # scope first: the folder is there, its file is not
+        self.assertTrue(os.path.isfile(os.path.join(home, ".claude", "settings.json")))
+        code, out, err = self.probe(repo, home, config=cfg)
+        self.assertEqual(code, 2, err or out)
+        self.assertTrue(head(out).startswith("hooks: unknown - "), err or out)
+        self.assertIn(repr(os.path.join(cfg, "settings.json")), head(out), err or out)  # the reason names the file it read
+        self.assertNotIn("trusts:", out, err or out)
+
+    def test_an_empty_config_dir_falls_back_to_home(self):
+        """CLAUDE_CONFIG_DIR set to an empty string is unset: the live file is ~/.claude/settings.json. The run starts in an
+        empty folder, so a relative read of `settings.json` finds no file and cannot pass for the fallback."""
+        edited = self.source()
+        edited["hooks"][self.other_event(edited)][0]["hooks"][0]["command"] = self.NEW_COMMAND
+        home = self.live(self.text(edited))  # the home copy holds the change, so a fallback to it shows in the diff
+        repo = self.clone(self.text(self.source()))
+        empty = tempfile.mkdtemp(prefix="cwd-", dir=RUN_FOLDER)
+        self.addCleanup(shutil.rmtree, empty, True)
+        self.assertEqual(os.listdir(empty), [])  # scope first: nothing relative to find
+        self.assertTrue(os.path.isfile(os.path.join(home, ".claude", "settings.json")))
+        code, out, err = self.probe(repo, home, config="", cwd=empty)
+        self.assertEqual(code, 1, err or out)
+        self.assertTrue(head(out).startswith("hooks: out"), err or out)
+        self.assertTrue(any(self.NEW_COMMAND in line for line in self.changed(out)), out)  # the home copy is the one read
+        self.assertEqual(out.splitlines()[1], self.trusts(repo), out)
+
+    def test_in_shape_trusts_line_names_the_live_file_read(self):
+        """The trusts line names the file the probe read: ~/.claude/settings.json when the variable is unset or empty,
+        and <dir>/settings.json when it is set."""
+        text = self.text(self.source())
+        cfg = self.config_dir(text)
+        for name, config, live in (("unset", None, "~/.claude/settings.json"),
+                                   ("empty", "", "~/.claude/settings.json"),
+                                   ("set", cfg, os.path.join(cfg, "settings.json"))):
+            with self.subTest(name):
+                repo = self.clone(text)
+                code, out, err = self.probe(repo, self.live(text), config=config)
+                self.assertEqual(code, 0, err or out)
+                self.assertEqual(out.splitlines(), ["hooks: in shape", self.trusts(repo, live)], out)
+
+    def trusts(self, repo, live="~/.claude/settings.json"):
+        """The line `hooks` prints right after the verdict for in shape and out: the clone is the side it trusts, and `live` is the file read."""
+        return "  trusts: clone (%s); live (%s) is the copy checked" % (os.path.join(repo.root, "settings.json"), live)
+
+    def test_in_shape_prints_the_trusts_line_right_after_the_verdict(self):
+        for name, doc in (("the same hooks", self.source()), ("no hooks on either side", {"hooks": {}})):
+            with self.subTest(name):
+                repo = self.clone(self.text(doc))
+                code, out, err = self.probe(repo, self.live(self.text(doc)))
+                self.assertEqual(code, 0, err or out)
+                self.assertEqual(head(out), "hooks: in shape", err or out)
+                self.assertEqual(out.splitlines(), ["hooks: in shape", self.trusts(repo)], out)
+
+    def test_out_prints_the_trusts_line_right_after_the_verdict_and_before_the_diff(self):
+        live = self.source()
+        event = self.other_event(live)
+        live["hooks"].pop(event)
+        repo = self.clone(self.text(self.source()))
+        code, out, err = self.probe(repo, self.live(self.text(live)))
+        self.assertEqual(code, 1, err or out)
+        self.assertEqual(head(out), "hooks: out", err or out)
+        lines = out.splitlines()
+        self.assertEqual(lines[1], self.trusts(repo), out)
+        self.assertTrue(lines[2:] and all(line.startswith("  ") for line in lines[2:]), out)
+        self.assertNotIn(self.trusts(repo), lines[2:], out)
+        self.assertTrue(any('"%s"' % event in line for line in self.changed(out)), out)
+
+    def test_unknown_and_na_print_no_trusts_line(self):
+        text = self.text(self.source())
+        cases = (("no clone settings.json", None, text, 0, "hooks: n/a"),
+                 ("live file missing", text, None, 2, "hooks: unknown - "),
+                 ("live file not JSON", text, "{ not json", 2, "hooks: unknown - "),
+                 ("clone file not JSON", "{ not json", text, 2, "hooks: unknown - "))
+        for name, clone_text, live_text, want_code, verdict in cases:
+            with self.subTest(name):
+                code, out, err = self.probe(self.clone(clone_text), self.live(live_text))
+                self.assertEqual(code, want_code, err or out)
+                self.assertTrue(head(out).startswith(verdict), err or out)
+                self.assertNotIn("trusts:", out, err or out)
+
+    def test_registered_in_groups(self):
+        self.assertIn("hooks", load_probes().GROUPS)
+
+    def test_probes_md_has_a_row_that_runs_the_hooks_group(self):
+        with open(PROBES_MD, encoding="utf-8") as handle:
+            rows = [line for line in handle.read().splitlines()
+                    if line.startswith("|") and "compliance_probes.py hooks" in line]
+        self.assertTrue(rows, "probes.md has no table row that runs `compliance_probes.py hooks`")
+
+    def hooks_arguments(self):
+        """The argument after `compliance_probes.py hooks` on each line of probes.md that runs the hooks group."""
+        with open(PROBES_MD, encoding="utf-8") as handle:
+            return re.findall(r"compliance_probes\.py hooks +([^\s`|]+)", handle.read())
+
+    def test_probes_md_runs_the_hooks_group_on_the_parent_clone(self):
+        """The probe reads the settings.json of the root it is given, so that root is the parent clone `$P`. A child root
+        has no clone settings.json: `.` is n/a, and n/a passes."""
+        args = self.hooks_arguments()
+        self.assertTrue(args, "probes.md has no command that runs `compliance_probes.py hooks`")  # scope first
+        for arg in args:
+            with self.subTest(arg=arg):
+                self.assertIn(arg, ("$P", '"$P"'), "probes.md runs the hooks probe on `%s`, not the parent clone `$P`" % arg)
+
+    def skill_text(self):
+        """SKILL.md as one run of words, so a line break cannot split a phrase."""
+        with open(SKILL_MD, encoding="utf-8") as handle:
+            return " ".join(handle.read().split())
+
+    def test_skill_parent_covered_check_names_the_hooks_probe(self):
+        text = self.skill_text()  # a boolean, not assertIn: a failure must not print the whole file
+        self.assertTrue("compliance_probes.py hooks" in text, "SKILL.md's parent-covered check does not name the hooks probe")
+
+    def test_skill_parent_covered_check_drops_the_same_hooks_block_comparison(self):
+        text = self.skill_text()
+        self.assertFalse("same `hooks` block" in text, "SKILL.md still compares the live hooks block with the parent's by hand")
+
+    # A claim that the probe never reads CLAUDE_CONFIG_DIR: the variable named after `never`, or `not read` right after it.
+    NEVER_READS = re.compile(r"\bnever\b[^.;]{0,40}CLAUDE_CONFIG_DIR|CLAUDE_CONFIG_DIR\W{0,3}(?:is )?not read\b")
+
+    def probes_md_hooks(self):
+        """The Hooks section of probes.md as one run of words."""
+        with open(PROBES_MD, encoding="utf-8") as handle:
+            text = handle.read()
+        start = text.find("\n## Hooks\n")
+        self.assertGreaterEqual(start, 0, "probes.md has no `## Hooks` section")  # scope first
+        end = text.find("\n## ", start + 1)
+        return " ".join(text[start:end if end > 0 else len(text)].split())
+
+    def test_probe_docstring_hooks_paragraph_does_not_say_config_dir_is_never_read(self):
+        doc = load_probes().__doc__ or ""
+        start, end = doc.find("\nhooks:"), doc.find("\nscorecard:")
+        self.assertTrue(start >= 0 and end > start, "the probe docstring has no `hooks:` paragraph before `scorecard:`")  # scope first
+        paragraph = " ".join(doc[start:end].split())
+        found = self.NEVER_READS.search(paragraph)
+        self.assertIsNone(found, "the docstring's hooks paragraph still says: %s" % (found and found.group(0)))
+        self.assertNotIn("always under the home folder", paragraph, "the hooks paragraph still says the live file is always under the home")
+
+    def test_probes_md_hooks_section_does_not_say_config_dir_is_never_read(self):
+        section = self.probes_md_hooks()
+        self.assertIn("compliance_probes.py hooks", section, "probes.md's Hooks section does not name the hooks probe")  # scope first
+        found = self.NEVER_READS.search(section)
+        self.assertIsNone(found, "probes.md's Hooks section still says: %s" % (found and found.group(0)))
+
+    def test_skill_names_the_hooks_probe_by_the_parent_placeholder(self):
+        text = self.skill_text()
+        self.assertTrue("<parent>/lint/compliance_probes.py hooks" in text,
+                        "SKILL.md does not name the hooks probe as `<parent>/lint/compliance_probes.py hooks`, as the rest of SKILL.md does")
+        self.assertFalse("$P/lint/compliance_probes.py" in text or "$PY" in text,
+                         "SKILL.md still names the hooks probe with $PY or $P, not <parent>")
+
+    def test_skill_does_not_say_config_dir_is_never_read(self):
+        text = self.skill_text()
+        found = self.NEVER_READS.search(text)
+        self.assertIsNone(found, "SKILL.md's parent-covered check still says: %s" % (found and found.group(0)))
 
 
 def live_anchors():
@@ -1583,7 +2531,7 @@ class Supersede(unittest.TestCase):
         self.assertRegex(items[0], r"^  departs, no exemption: (CLAUDE|AGENTS)\.md:1: " + re.escape(self.DEPARTS) + "$")
 
     def test_skill_md_names_supersede_among_the_groups_that_list_items(self):
-        with open(os.path.join(os.path.dirname(HERE), "skills", "compliance-check", "SKILL.md"), encoding="utf-8") as handle:
+        with open(SKILL_MD, encoding="utf-8") as handle:
             text = handle.read()
         found = re.search(r"([^.]*?)\blist each item under the\s+group line", text)
         self.assertIsNotNone(found, "SKILL.md no longer says which groups list each item")
@@ -2208,7 +3156,7 @@ class Restates(unittest.TestCase):
 
 
 class RestatesFixtures(unittest.TestCase):
-    """Green controls: the record text the restates cases read is there, in the shape they need. They pass on main."""
+    """Controls: the record text the restates cases read is there, in the shape they need."""
 
     def test_the_records_are_the_checkouts_decisions_folder(self):
         self.assertTrue(os.path.isdir(RECORDS), RECORDS)

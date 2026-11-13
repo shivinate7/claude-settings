@@ -7,7 +7,7 @@ question-form holds the ruling; rule `style-question-form` holds the text.
     item_hit(op, entry, cwd) -> (rule, matched)   one waiting-page write: set, update or str_replace
 
 ("", "") is a pass. hooks/call_judge.py calls chat_hit and page_item_hit; hooks/guard.py data_tool_hit calls
-page_item_hit, which filters the ArtifactData writes by collection and url and then calls item_hit; a write to another page gets only the check for an option keyed none. Nothing here writes a file. The only process it starts is the one git read of past_rulings, for a caller that makes a model call anyway.
+page_item_hit, which filters the ArtifactData writes by collection and url and then calls item_hit; a write to another page gets only the check for an option keyed none. Nothing here writes a file. The only processes it starts are the git reads of past_rulings (the roadmap step notes, and the ruled store: one ls-tree, one cat-file, and one more when an entry names `lands_in`), for a caller that makes a model call anyway.
 
     past_rulings(text, repo_root) -> (candidates, unknown)   the decision, debt and step rulings the judge reads
     key_overlap(reply, earlier)   -> clashing option keys     lint/report_guard.py rule question-keys
@@ -25,7 +25,7 @@ chat `Gain:` and `Lose:` in the option's description. Only a line at a line star
 
 THE OLDER RULES keep their ids and run first, in this order, then the form:
 `item-field-rendered` (a field the page draws), `port-question`, `uniform-pick`, `press-link`, `command-in-item`,
-`gh-login-switch`, `task-names-check` (page items), then the form. A missing Goal, Problem or Based on line, a
+`gh-login-switch`, `task-names-check`, `task-why-cited` (page items), then the form. A missing Goal, Problem or Based on line, a
 Based on count outside 1-3, a kind outside
 PREMISE_KINDS and an option with no gain or no loss refuse as `question-form`, and so does a Goal, Problem or
 Based on line whose text is only an angle-bracket placeholder (the template copied; `<Button>` inside real
@@ -35,8 +35,12 @@ or empty `Departs from:` line (a bullet or bold label is read), a line with no s
 "—", " - " or " -- ") or an empty or placeholder side, and a change side whose first clause (before ";") says
 nothing changes (a restatement of main) refuse as `question-departs`: the rule building-port-keeps-behaviour,
 in decision port-keeps-behaviour. departs_hit is its one predicate; lint/report_guard.py calls it too.
-The page writer's last two rules run after the form: `option-letter-keys` (an option's key is its
-position's letter, and a label that opens with a letter tag names that letter) and `rework-off-page` (an open item never says it is being reworked).
+The page writer's last three rules run after the form: `option-letter-keys` (an option's key is its
+position's letter, and a label that opens with a letter tag names that letter), `option-letters-frozen` (an option keeps the
+key, id and label it was shown with, and each option has a unique id) and `rework-off-page` (an open item never says it is being reworked).
+`option-labels-match-chat` runs in hooks/guard.py after all of those, because it reads the session's transcript, which item_hit never sees:
+page_label_hit(writes, transcript_path) -> (rule, matched). A chat question cites its item ("Page item: <id>") and writes "a) <text>" per
+option; a write of that item whose label for a letter differs from the chat's text for it is refused (chat_page_label_hit).
 
 An update is judged only for the fields it carries. A closed item passes the form: it asks the owner
 nothing, and the chat-answer flow writes one. A str_replace on `context` that removes a form line is
@@ -52,10 +56,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 from precompact_handoff import PREMISE_KINDS  # noqa: E402  the one home of the premise kinds
+from own_session import _CREATED_ID as SESSION_ID  # noqa: E402  the one home of the session id shape
 from shared_names import GH_DEFAULT_LOGIN, GH_FALLBACK_LOGIN  # noqa: E402  the one home of the gh logins
 
 PASS = ("", "")
 FORM_RULE, STAKE_RULE = "question-form", "owner-judge"
+LABELS_RULE = "option-labels-match-chat"
 
 # docs/decisions/owner-judge-test.md, rule `owner-judge`, built against a named incident (incident in
 # the record): a decision about CI internals reached the owner, who had no stake in it. The Problem
@@ -187,6 +193,9 @@ DEPARTS_REASON = ("A question to the owner says how the work departs from main, 
                   "differs from main. If it is new, write \"Departs from: main \u2014 adds <X>\". If the change "
                   "only restates what main does, do not ask: act on main's behaviour.")
 PAGE_DEPARTS_REASON = DEPARTS_REASON + " On the waiting page the line goes in `context`."
+# The hint that departs_hit adds to the placeholder miss. A Stop refusal (lint/report_guard.py) shows the miss
+# without it, since the owner reads that refusal (decision guard-remedy-not-to-owner).
+PLACEHOLDER_HINT = ": write the real text"
 
 
 def departs_sides(rest):
@@ -214,7 +223,7 @@ def departs_hit(text) -> str:
             return "Departs from line with an empty side"
         added = PORT_NEW_THING.fullmatch(change)
         if is_placeholder(main) or is_placeholder(change) or (added and is_placeholder(added.group(1))):
-            return "Departs from line with a side that is only a placeholder: write the real text"
+            return "Departs from line with a side that is only a placeholder" + PLACEHOLDER_HINT
         word = NO_CHANGE.search(change.split(";", 1)[0])
         if word:
             return "Departs from line whose change side says no change (%r): it restates main" % word.group(0)
@@ -304,13 +313,14 @@ def _write_data(entry, cwd=""):
 #
 # docs/decisions/uniform-over-variants.md, rule `uniform-pick`, built against a named incident
 # (incident in the record): a repo that differs from a shared format changes to match, so an
-# option marked `widens: true` is never the item's `pick`, a str or any key in a list `pick`. In the
+# option marked `widens: true` is never the item's `recommended` (old name `pick`), a str or any key in a list. In the
 # chat box the mark is the words below in an option's label or description, and such an option's label
 # never carries (Recommended). Read at the same ArtifactData call.
 WIDENS_TEXT = "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo"
 WIDENS_REASON = ("A pick never names an option that widens what a shared tool accepts: the owner ruled that "
-                 "a repo changes to fit a shared tool, never the tool to fit a repo. Make the pick an option "
-                 "where the repo changes to match the shared format, or leave pick out.")
+                 "a repo changes to fit a shared tool, never the tool to fit a repo. Make `recommended` (or `pick`, "
+                 "its old name, where the item still uses it) an option where the repo changes to match the "
+                 "shared format, or leave recommended out.")
 CHAT_WIDENS_REASON = ("A recommended option never widens what a shared tool accepts: the owner ruled that a "
                       "repo changes to fit a shared tool, never the tool to fit a repo. Recommend an option "
                       "where the repo changes to match the shared format, and give the widening option no "
@@ -329,20 +339,26 @@ WIDENS_MARK = re.compile("|".join(_words_pattern(t) for t in (WIDENS_TEXT, LEGAC
 RECOMMENDED = re.compile(r"\(Recommended\)", re.I)
 
 
+RECOMMENDED_FIELDS = ("recommended", "pick")  # the item field that holds the recommended option's key, then its old name
 WIDENS_KEY = "widens"  # the Python home of the mark's key; call_judge.WIDENING_RULE names it too, and skills/waiting-page/page.html reads the literal in JS
 
 
 def widens_pick_hit(data) -> str:
-    """The matched text when this write's `pick` (a str, or a list of keys) names an option it marks
-    `widens: true`. An update that carries `pick` without `options` cannot see the stored options and passes."""
+    """The matched text when this write's `recommended`, or its old name `pick` (each a str, or a list of keys),
+    names an option it marks `widens: true`. An update that carries either without `options` cannot see the stored
+    options and passes."""
     if not isinstance(data, dict) or data.get("kind", "decision") != "decision":
         return ""
-    options, pick = data.get("options"), data.get("pick")
-    if isinstance(pick, str):
-        pick = [pick]
-    if not isinstance(pick, list) or not isinstance(options, list):
-        return ""  # an absent or null pick picks nothing, so it never matches a keyless option
-    keys = {p for p in pick if isinstance(p, str)}
+    options = data.get("options")
+    if not isinstance(options, list):
+        return ""
+    keys = set()
+    for field in RECOMMENDED_FIELDS:
+        named = data.get(field)
+        if isinstance(named, str):
+            named = [named]
+        if isinstance(named, list):  # an absent or null field names nothing, so it never matches a keyless option
+            keys.update(p for p in named if isinstance(p, str))
     if any(isinstance(o, dict) and isinstance(o.get("key"), str) and o["key"] in keys
            and o.get(WIDENS_KEY) is True for o in options):
         return "pick names a widening option"
@@ -817,29 +833,81 @@ TASK_REASON = ("A task is yours to hand over only when no session can do it. If 
                "<the check that showed no session could do it>\".")
 
 
-def task_check_hit(op: str, data) -> str:
-    """The matched text when this write of a waiting-page task has no Why yours line. An update that
-    carries no `context` cannot change the line and passes, as does one with no `kind`."""
-    if not isinstance(data, dict) or data.get("kind") != "task":
+WHY_RULE = "task-why-cited"
+WHY_CITED_REASON = ("A Why yours line that says a session cannot do the act must cite what shows it. End the line with "
+                    "\"(route <id>)\", an id from the route rows file whose row on this surface says refused or asks, or "
+                    "with \"(measured <YYYY-MM-DD>, <the check and its result>)\". A row that says the act works, an "
+                    "id no row holds, and a measurement with no date do not count. The page reads no refusals file, so "
+                    "a tool name in backticks is no cite. (decision claims-carry-backing, part (v), rule task-why-cited)")
+# lint/report_guard.py why_yours_verdict kinds that refuse on the page, with the cause the refusal's `matched` carries.
+# "unknown" (a file or row that did not read) and "unread" never refuse: a read that could not run is not a finding.
+WHY_CAUSES = {"none": "no cite", "undated": "undated measured", "works": "works row", "dead": "unknown id"}
+
+
+def _report_guard():
+    """lint/report_guard.py, loaded here and not at import, as hooks/reply_judge.py loads it."""
+    lint = os.path.join(HERE, "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    import report_guard
+    return report_guard
+
+
+def why_cited_hit(text: str, fragments: bool = False) -> str:
+    """The cause when a Why yours line of `text` gives a capability reason its cite does not back, else "". The page
+    accepts a route cite and a dated measured cite, and reads no refusals file. A line with no route cite never reads
+    the rows file. With `fragments`, each other line of `text` has its cite tokens judged on their own: a str_replace
+    that swaps only a cite carries no Why yours line, and `new_str` must still hold a cite that backs."""
+    lines = text.splitlines()
+    labelled = [line for line in lines if WHY_YOURS_LINE.match(line)]
+    # A plain substring gate, so report_guard (which holds the cite regexes) loads only for a line that may hold a cite.
+    # A Based on line is the form's own premise line: "Based on (measured): ..." names a kind, not a dated cite.
+    loose = [line for line in lines if fragments and not WHY_YOURS_LINE.match(line) and not BASED_LABEL.match(line)
+             and ("(route" in line.casefold() or "(measured" in line.casefold())]
+    if not (labelled or loose):
         return ""
-    if (op == "set" or "context" in data) and not WHY_YOURS_LINE.search(str(data.get("context") or "")):
-        return "task with no Why yours line"
+    guard = _report_guard()
+    for line in labelled:
+        cause = WHY_CAUSES.get(guard.why_yours_verdict(None, line.strip())[0])
+        if cause:
+            return cause
+    for line in loose:
+        cause = WHY_CAUSES.get(guard.cite_tokens_verdict(line.strip())[0])
+        if cause:
+            return cause
     return ""
 
 
-def task_str_replace_hit(entry) -> str:
-    """The matched text when a str_replace on `context` removes the Why yours line or its label. It carries
-    no `data`, so it is read from old_str and new_str; the guard cannot see the stored kind, so it judges a
-    context edit that touches the line, whatever the item's kind. An edit that removes only the reason
-    after the label passes: the stored line is unseen, so old_str is no different from any prose."""
+def task_check_hit(op: str, data):
+    """(rule, matched) when this write of a waiting-page task has no Why yours line, or a line whose capability reason
+    its cite does not back. An update that carries no `context` cannot change the line and passes, as does one with
+    no `kind`."""
+    if not isinstance(data, dict) or data.get("kind") != "task":
+        return PASS
+    if not (op == "set" or "context" in data):
+        return PASS
+    context = str(data.get("context") or "")
+    if not WHY_YOURS_LINE.search(context):
+        return "task-names-check", "task with no Why yours line"
+    cause = why_cited_hit(context)
+    return (WHY_RULE, cause) if cause else PASS
+
+
+def task_str_replace_hit(entry):
+    """(rule, matched) when a str_replace on `context` removes the Why yours line or its label, or adds one whose
+    capability reason its cite does not back. It carries no `data`, so it is read from old_str and new_str; the
+    guard cannot see the stored kind, so it judges a context edit that touches the line, whatever the item's kind.
+    An edit that removes only the reason after the label passes: the stored line is unseen, so old_str is no
+    different from any prose."""
     if entry.get("field") != "context":
-        return ""
+        return PASS
     old, new = str(entry.get("old_str") or ""), str(entry.get("new_str") or "")
     if WHY_YOURS_LINE.search(old) and not WHY_YOURS_LINE.search(new):
-        return "context edit that removes the Why yours line"
+        return "task-names-check", "context edit that removes the Why yours line"
     if len(WHY_YOURS_LABEL.findall(old)) > len(WHY_YOURS_LABEL.findall(new)):
-        return "context edit that removes the Why yours label"
-    return ""
+        return "task-names-check", "context edit that removes the Why yours label"
+    cause = why_cited_hit(new, fragments=True)
+    return (WHY_RULE, cause) if cause else PASS
 
 
 # ------------------------------------------------------------------ a page decision states the form
@@ -911,16 +979,19 @@ def form_str_replace_hit(entry):
     return PASS
 
 
-def item_hit(op, entry, cwd=""):
-    """(rule, matched) for one write of a waiting item that a rule refuses, else ("", "")."""
+def item_hit(op, entry, cwd="", session_id=None):
+    """(rule, matched) for one write of a waiting item that a rule refuses, else ("", ""). `session_id` is the
+    writer's, for the cross-repo check."""
     data = _write_data(entry, cwd)
     hit = item_field_hit(op, entry, data)
     if hit:
         return "item-field-rendered", hit
     if op == "str_replace":
+        if entry.get("field") in CROSS_REPO_FIELDS:
+            return CROSS_REPO_RULE, CROSS_REPO_EDIT_REASON
         hit = task_str_replace_hit(entry)
-        if hit:
-            return "task-names-check", hit
+        if hit[0]:
+            return hit
         if entry.get("field") == "command":
             # The stored command is unseen: gh_edit_hit judges new_str, less an edit that only changes
             # a gh command old_str held.
@@ -942,6 +1013,10 @@ def item_hit(op, entry, cwd=""):
     hit = port_item_hit(op, data)
     if hit:
         return "port-question", hit
+    page_repo = _page_repo(cwd)
+    hit = cross_repo_hit(op, data, page_repo, session_id) if page_repo else None
+    if hit:
+        return CROSS_REPO_RULE, hit
     hit = widens_pick_hit(data)
     if hit:
         return "uniform-pick", hit
@@ -955,14 +1030,17 @@ def item_hit(op, entry, cwd=""):
     if hit:
         return "gh-login-switch", hit
     hit = task_check_hit(op, data)
-    if hit:
-        return "task-names-check", hit
+    if hit[0]:
+        return hit
     hit = decision_form_hit(op, data)
     if hit[0]:
         return hit
     hit = option_letter_hit(op, data)
     if hit:
         return "option-letter-keys", hit
+    hit = frozen_letters_hit(op, data)
+    if hit:
+        return FROZEN_RULE, hit
     hit = rework_off_page_hit(data)
     if hit:
         return "rework-off-page", hit
@@ -1005,6 +1083,17 @@ def waiting_page_root(tool_input, cwd):
     return root if root and layout.is_waiting_page_url(root, tool_input.get("url")) else None
 
 
+def names_no_artifact(url):
+    """True when `url` names no artifact (no string, empty, or a bare .../artifact/ link), by lint/layout.py artifact_id."""
+    return not _layout().artifact_id(url)
+
+
+def has_waiting_page(cwd):
+    """True when cwd's repo has a waiting page (lint/layout.py, the one home); a repo with no page reads as unknown."""
+    root = _git_root_of(cwd)
+    return bool(root) and _layout().waiting_page(root) != "unknown"
+
+
 def design_file_problems(writes, root):
     """[(doc_id, slug, sentence)] for each `designs` entry in `writes` (design_writes' picture writes) that has no
     `file`, or whose `file` lint/layout.py mockup_home_problem refuses against this machine's home. The sentence names
@@ -1027,7 +1116,7 @@ def is_waiting_page(tool_input, cwd) -> bool:
     return waiting_page_root(tool_input, cwd) is not None
 
 
-def page_item_hit(tool_input, cwd=""):
+def page_item_hit(tool_input, cwd="", session_id=None):
     """((rule, matched), writes) for one ArtifactData call. `writes` are the (op, entry) item writes of
     this repo's waiting page, empty for a read, another collection or another page (such a write still gets the check for an option keyed none). The hit is the first
     write that a rule refuses, else ("", "")."""
@@ -1045,7 +1134,7 @@ def page_item_hit(tool_input, cwd=""):
         # write, and refuses only a key none. No writes return, so no other check or model review follows.
         return keyed_options_hit(writes, cwd), []
     for op, entry in writes:
-        hit = item_hit(op, entry, cwd)
+        hit = item_hit(op, entry, cwd, session_id)
         if hit[0]:
             return hit, writes
     return PASS, writes
@@ -1089,14 +1178,15 @@ def _judged_fragment(field):
     return field in ("context", "options") or str(field).startswith("options.")
 
 
-def judged_item_writes(writes):
+def judged_item_writes(writes, cwd=""):
     """The writes of a page item that the model review reads. A set or update is read as
     {"op", "doc_id", "data"} when it is not closed and either writes a decision (an update with no kind is
     read, as decision_form_hit cannot see the stored kind) that carries `options` or `context`, or writes a
     task that carries `context`, `steps` or `options`. A task is kind task, or any write that carries
     `steps`, since steps are task-only. A str_replace on `context` or `options` (a subfield too) is
     read as {"op", "doc_id", "field", "new_str"}: its new_str alone, never old_str, because the rest of the
-    item is unseen."""
+    item is unseen. A write that names a `file_path` is read from it, a relative path against `cwd` (the
+    payload's cwd, as page_item_hit reads it), so the review sees the data the guard judged."""
     judged = []
     for op, entry in writes:
         if op == "str_replace":
@@ -1104,7 +1194,7 @@ def judged_item_writes(writes):
                 judged.append({"op": op, "doc_id": entry.get("doc_id"), "field": entry.get("field"),
                                "new_str": entry["new_str"]})
             continue
-        data = _write_data(entry)
+        data = _write_data(entry, cwd)
         if op not in ("set", "update") or not isinstance(data, dict) or data.get("status") == "closed":
             continue
         if data.get("kind") == "task" or data.get("steps"):
@@ -1176,10 +1266,11 @@ def key_named_hit(texts) -> str:
 NONE_KEY_HIT = "option keyed none"
 
 
-def _open_decision(data) -> bool:
-    """True for the data of an open decision. A task, a note and a closed item are not judged. The one filter
-    of option_letter_hit and keyed_options_hit."""
-    return isinstance(data, dict) and data.get("kind", "decision") == "decision" and data.get("status") != "closed"
+def _open_decision(data, kinds=("decision",)) -> bool:
+    """True for the data of an open item of one of `kinds` (a decision by default). A missing kind is a decision.
+    Any status but closed is open. A task, a note and a closed item are not judged by default. The one filter
+    of option_letter_hit, keyed_options_hit and cross_repo_hit (kinds decision and task)."""
+    return isinstance(data, dict) and data.get("kind", "decision") in kinds and data.get("status") != "closed"
 
 
 def _keyed_none(option) -> bool:
@@ -1212,6 +1303,293 @@ def option_letter_hit(op: str, data) -> str:
             if m and next(v for v in m.groupdict().values() if v).lower() != key:
                 return "option label that opens with a letter tag other than its key: " + m.group(0).strip()
     return key_named_hit(_item_text_fields(data))
+
+
+# ------------------------------------------------------------------ an option keeps the letter it was shown with
+#
+# docs/decisions/option-keys-are-letters.md, rule `option-letters-frozen`, ruling R60 (roadmap r60, owner 15:07 CST
+# Nov 12), built against a named incident (incident in the record): triage reordered item 646 after the chat question
+# went out, so chat a became page b, and the owner's "a" could have been filed as the opposite pick. option_letter_hit
+# cannot see that: after the swap each key is still its position's letter. The item therefore carries `shown`, the
+# options as first shown, in order, each as {key, id, label}. A later write keeps each shown position's key, id and
+# label, may add a `note` to an option, and may append options when `shown` is extended by them. Each option carries a unique `id` that a stored answer
+# records, so a later move of the letters cannot change which option the owner meant (page_grant.py holds such an
+# answer for his word).
+FROZEN_RULE = "option-letters-frozen"
+FROZEN_REASON = ("An option keeps the letter it was first shown with. Carry `shown`, the options as first shown, in "
+                 "order, each as {key, id, label}. Give each option a short unique `id` that is never a lone letter. "
+                 "Keep each shown option's key, id and label and its position: never reorder, relabel or drop one. "
+                 "A rule-driven change adds a `note` to the option and moves nothing. A new option goes at the end, and `shown` gets it on the same write. "
+                 "(decision option-keys-are-letters, ruling R60: an option keeps its letter and carries an id)")
+SHOWN_FIELDS = ("key", "id", "label")
+
+
+def _option_id_hit(options) -> str:
+    """The matched text when an option has no non-empty string id, an id that is a lone letter, or an id another option
+    already has, else "". A lone letter would read as a key."""
+    seen = set()
+    for i, option in enumerate(options):
+        found = option.get("id") if isinstance(option, dict) else None
+        if not isinstance(found, str) or not found.strip():
+            return "option %s has no id" % _letter_of(i)
+        if re.fullmatch(r"[A-Za-z]", found):
+            return "option %s has an id that is a lone letter" % _letter_of(i)
+        if found in seen:
+            return "option %s has an id that repeats" % _letter_of(i)
+        seen.add(found)
+    return ""
+
+
+def _shown_entry(entry):
+    """(key, id, label) of one shown entry or option, else None when it is no mapping."""
+    return tuple(entry.get(f) for f in SHOWN_FIELDS) if isinstance(entry, dict) else None
+
+
+def frozen_letters_hit(op: str, data) -> str:
+    """The matched text when this write of an open waiting-page decision that carries `options` breaks the freeze:
+    an option with no unique id (or an id that is a lone letter), no `shown` list, an option at a shown position
+    that differs from the shown entry in key, id or label, fewer options than shown, or a `shown` shorter than the
+    options (an appended option is shown on the same write). A task, a note, a closed item and a write with no
+    `options` pass. The stored item is unseen: a write that carries `shown` is trusted, as the record says."""
+    if not _open_decision(data) or "options" not in data:
+        return ""
+    options = data["options"]
+    if not isinstance(options, list):
+        return "options is not a list: the write would drop every option unjudged"
+    hit = _option_id_hit(options)
+    if hit:
+        return hit
+    shown = data.get("shown")
+    if not isinstance(shown, list) or any(not isinstance(entry, dict) for entry in shown):
+        return "the options carry no shown list"
+    if len(options) < len(shown):
+        return "option %s is missing: fewer options than shown" % _letter_of(len(options))
+    for i, entry in enumerate(shown):
+        if _shown_entry(options[i]) != _shown_entry(entry):
+            return "option %s differs from the option shown at its letter" % _letter_of(i)
+    if len(shown) != len(options):
+        return "shown holds fewer options than the write carries: extend shown with each appended option"
+    return ""
+
+
+# ------------------------------------------------------------------ the page's option letters mean the chat's
+#
+# docs/decisions/option-keys-are-letters.md, rule `option-labels-match-chat`, built against a named incident
+# (incident in the record): a question sent to the chat and the page is two static copies of one option list,
+# so a letter on one can name another option than the same letter on the other. A chat question cites its item
+# in a line "Page item: <id>" and writes each option as "a) <text>". A write of that item whose option label for
+# a letter differs from the chat's text for that letter is refused. Letters are positions, as in
+# option_letter_hit.
+# A cite is anywhere in a line (it may end a sentence). Without the colon it counts as a cite when the id has a digit
+# or a hyphen, so prose such as "this page item has" is no cite. A colon-less cite of the written item's own id counts
+# too, whatever the id (CHAT_LOOSE_CITE, read by `_cites`).
+PAGE_ITEM_CITE = re.compile(r"Page item(?:[ \t]*:|[ \t]+(?=[^\s*_`]*[-\d]))[ \t*_`]*([^\s*_`]+)", re.I)
+CHAT_LOOSE_CITE = re.compile(r"Page item[ \t]+[ \t*_`]*([^\s*_`]+)", re.I)
+# An option line opens with its letter as "a)", "a.", "a:", "**A**", "**A** <dash> ", "**a**)", "A <dash> " or
+# "Option A:", then the text. After `)` the space may be left out ("a)Blue"). A spaced dash after a bold letter is the
+# separator, not text, so "**A** \u2014 Blue" reads as "Blue".
+CHAT_OPTION_LINE = re.compile(
+    r"^[ \t>*-]*\**(?:[Oo]ption[ \t]+)?\(?([A-Za-z])"
+    r"(?:\*\*[).:][ \t]+|\)\**[ \t]*|[.:]\**[ \t]+|\*\*[ \t]+(?:[\u2014\u2013-][ \t]+)?|[ \t]+[\u2014\u2013-][ \t]+)"
+    r"(\S.*)$", re.M)
+# A line of one letter, a space and text ("A Blue"). It is no option line: reading it as one would read prose as
+# options. A page option's letter that opens such a line, with no option line of its own, is noted.
+CHAT_BARE_LINE = re.compile(r"^[ \t>*-]*\**\(?([A-Za-z])[ \t]+(\S.*)$", re.M)
+CHAT_TAIL_BYTES = 1 << 20  # how far back from the transcript's end the cited chat question is looked for
+LABELS_REASON = ("A question sent to the chat and the page carries the same option text in the same order, so "
+                 "a letter means one option on both. On an item not yet shown, rewrite its options to match the chat "
+                 "question (or ask the chat question again with the page's text), then write the item "
+                 "again. On an item already shown, add a `note` and write the new options after the shown ones. "
+                 "(decision option-keys-are-letters, a letter names the same option in the chat "
+                 "and on the page)")
+
+
+FOLD_MARKS = str.maketrans({"\u2019": "'", "\u2018": "'", "\u2014": "-", "\u2013": "-"})
+
+
+def _fold(text) -> str:
+    """Lowercase, markdown marks dropped, whitespace folded, curly apostrophes and em or en dashes made plain, a
+    closing sentence mark cut: the form two option texts are compared in."""
+    plain = re.sub(r"[*_`]", "", str(text)).translate(FOLD_MARKS).lower()
+    return " ".join(plain.split()).rstrip(".,;:!")
+
+
+def _chat_short_form(chat, page) -> bool:
+    """True when the folded chat text equals the folded page label, or is the label's start up to a word boundary.
+    The chat may be the shorter one (owner, 12:35 CST Nov 8: "A and B mean the same"); the page never is."""
+    if not page.startswith(chat):
+        return False
+    return len(page) == len(chat) or not page[len(chat)].isalnum()
+
+
+def _cited_ids(text) -> set:
+    """The page item ids a text cites with "Page item: <id>"."""
+    return {m.group(1).rstrip(".,;:)") for m in PAGE_ITEM_CITE.finditer(text)}
+
+
+def _cites(text, item_id) -> list:
+    """The cites in `text`, in order: each PAGE_ITEM_CITE match, plus each colon-less "Page item <id>" whose id is
+    `item_id` itself (a one-word id has no digit or hyphen to tell it from prose, but the written item's own id does)."""
+    found = {m.start(): m for m in PAGE_ITEM_CITE.finditer(text)}
+    for m in CHAT_LOOSE_CITE.finditer(text):
+        if m.group(1).rstrip(".,;:)") == item_id:
+            found.setdefault(m.start(), m)
+    return [found[k] for k in sorted(found)]
+
+
+def _owned(text, item_id, pattern) -> list:
+    """The matches of `pattern` (a line pattern) that belong to page item `item_id` in `text`. A reply writes its
+    cites on one side of their options. When an option line comes before the first cite and none comes after the last
+    cite, each cite sits under its options: it owns the lines between the cite before it (or the text's start) and
+    itself. Else each cite owns the lines after its own line, up to the next cite. Either way two questions in one
+    reply read apart. The side is read per reply, not per cite, from the option lines CHAT_OPTION_LINE reads: the
+    text between two cites reads the same in both shapes, and only the reply's ends tell them apart."""
+    cites = _cites(text, item_id)
+    options = list(CHAT_OPTION_LINE.finditer(text))
+    if not cites:
+        return []
+    under = bool(options) and options[0].start() < cites[0].start() and options[-1].start() < cites[-1].start()
+    owned = []
+    for i, cite in enumerate(cites):
+        if cite.group(1).rstrip(".,;:)") != item_id:
+            continue
+        if under:
+            start, end = (cites[i - 1].end() if i else 0), cite.start()
+        else:
+            # A line starts at a line start, so one that starts before the cite's end is on the cite's own
+            # line, or above it, and is not this cite's.
+            start, end = cite.end(), (cites[i + 1].start() if i + 1 < len(cites) else len(text))
+        owned.extend(m for m in pattern.finditer(text) if start <= m.start() < end)
+    return owned
+
+
+def _own_option_lines(text, item_id) -> dict:
+    """{letter: text} of the option lines that belong to page item `item_id` in `text` (see `_owned`)."""
+    lines = {}
+    for m in _owned(text, item_id, CHAT_OPTION_LINE):
+        lines.setdefault(m.group(1).lower(), m.group(2))
+    return lines
+
+
+def _own_bare_letters(text, item_id) -> dict:
+    """{letter: line} of the lines owned by `item_id` that open with one letter, a space and text ("A Blue") and
+    are no option line CHAT_OPTION_LINE reads."""
+    read = {m.start() for m in CHAT_OPTION_LINE.finditer(text)}
+    lines = {}
+    for m in _owned(text, item_id, CHAT_BARE_LINE):
+        if m.start() not in read:
+            lines.setdefault(m.group(1).lower(), m.group(0).strip())
+    return lines
+
+
+class UnreadChat(ValueError):
+    """The chat cites the item and writes a line the check cannot read as an option. The guard allows the write and
+    logs one `noted` line (hooks/guard.py data_tool_label_hit)."""
+
+
+def unread_chat_line(item_id, options, chat_text) -> str:
+    """The first chat line for `item_id` that opens with the letter of a page option the chat writes no option line
+    for, in the form "A Blue" (CHAT_BARE_LINE), else "". It reads the page's letters only, so prose that opens with
+    another single letter, such as "I recommend b.", is no hit."""
+    if not isinstance(chat_text, str) or not isinstance(options, list) or not isinstance(item_id, str):
+        return ""
+    have = _own_option_lines(chat_text, item_id)
+    letters = {_letter_of(i) for i in range(len(options))}
+    for letter, line in _own_bare_letters(chat_text, item_id).items():
+        if letter in letters and letter not in have:
+            return line
+    return ""
+
+
+def chat_page_label_hit(item_id, options, chat_text) -> str:
+    """The refusal text when `chat_text` cites page item `item_id` ("Page item: <id>") and writes an option line
+    ("a) <text>") whose text differs from the label of the option at that letter's position in `options`, else "".
+    Texts are compared folded, and equal when the chat text is the label or its start up to a word boundary (only
+    the chat may shorten a label). When the chat writes two or more letters, a page option at a letter it does not
+    write is refused too. A chat that cites no item or another one, a chat that writes one letter only, and a label
+    or line with no text pass."""
+    if not isinstance(chat_text, str) or not isinstance(options, list) or not isinstance(item_id, str):
+        return ""
+    lines = _own_option_lines(chat_text, item_id)
+    for i, option in enumerate(options):
+        letter = _letter_of(i)
+        label = option.get("label") if isinstance(option, dict) else None
+        if not isinstance(label, str):
+            continue
+        if letter not in lines:
+            if len(lines) >= 2 and _fold(label):
+                return "option %s: the page has it, the chat question writes no option %s" % (letter, letter)
+            continue
+        tag = LABEL_TAG.match(label)
+        page = _fold(label[tag.end():] if tag else label)
+        chat = _fold(lines[letter])
+        if page and chat and not _chat_short_form(chat, page):
+            return "option %s: the page says %r, the chat says %r" % (letter, label.strip(), lines[letter].strip())
+    return ""
+
+
+def chat_text_citing(transcript_path, item_id, options=None) -> str:
+    """The newest assistant text in the transcript's last CHAT_TAIL_BYTES that cites page item `item_id` and writes
+    option lines for it, else "". A later text that only mentions the item is no question and is passed over. When no
+    text writes option lines and `options` is given, the newest text whose line for the item is a bare "A Blue" form
+    for one of the page's letters (unread_chat_line) stands in, so the caller can note it. Raises OSError when the
+    file cannot be read."""
+    lint = os.path.join(HERE, "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    import _transcript
+    bare = ""
+    for rec in _transcript.tail_records(transcript_path, CHAT_TAIL_BYTES):
+        if rec.get("type") != "assistant" or rec.get("isSidechain"):
+            continue
+        blocks = (rec.get("message") or {}).get("content")
+        for b in blocks if isinstance(blocks, list) else []:
+            text = b.get("text") if isinstance(b, dict) and b.get("type") == "text" else None
+            if not isinstance(text, str):
+                continue
+            if _own_option_lines(text, item_id):
+                return text
+            if not bare and options is not None and unread_chat_line(item_id, options, text):
+                bare = text
+    return bare
+
+
+LABELS_UNKNOWN = "unknown"  # the rule slot of a verdict that could not be read: the caller allows and notes it
+
+
+def page_label_hit(writes, transcript_path, cwd=""):
+    """(rule, matched) for the first set or update in `writes` whose open-decision options carry a label that
+    differs from the chat's text for its letter (chat_page_label_hit), else ("", ""). The transcript is read
+    only for a write that carries options, and only as far back as CHAT_TAIL_BYTES. It never raises: a write that
+    carries options when the payload names no transcript, a transcript that cannot be read, and a chat line for an
+    item that reads as no option line (unread_chat_line, checked after every write is judged) each give
+    (LABELS_UNKNOWN, the reason), which the caller allows and notes."""
+    try:
+        return _page_label_hit(writes, transcript_path, cwd)
+    except Exception as err:  # an unreadable transcript, no path, or UnreadChat (a ValueError): unknown, not a raise
+        return LABELS_UNKNOWN, type(err).__name__ + ": " + str(err)
+
+
+def _page_label_hit(writes, transcript_path, cwd=""):
+    unread = ""
+    for op, entry in writes:
+        if op not in ("set", "update"):
+            continue
+        data = _write_data(entry, cwd)
+        options = data.get("options") if _open_decision(data) else None
+        item_id = entry.get("doc_id")
+        if not isinstance(options, list) or not isinstance(item_id, str):
+            continue
+        if not isinstance(transcript_path, str) or not transcript_path:
+            raise ValueError("no transcript_path in the payload")
+        chat = chat_text_citing(transcript_path, item_id, options)
+        hit = chat_page_label_hit(item_id, options, chat)
+        if hit:
+            return LABELS_RULE, hit
+        unread = unread_chat_line(item_id, options, chat) if not unread else unread
+    if unread:
+        raise UnreadChat("a chat line for the item that is no option line the check reads: %r" % unread[:60])
+    return PASS
 
 
 # ------------------------------------------------------------------ a reworked item is not answered on the page
@@ -1286,18 +1664,32 @@ def _item_fields(path):
     return fields if isinstance(fields, list) and fields and all(isinstance(x, str) for x in fields) else None
 
 
+# A field the page lists and draws, but only the page writes: the owner's Mark read sets `dismissed` with update (step ask-phase-out).
+# A session's write that names it is refused, so no session hides an item the owner has not read. The page draws the field
+# already, so the refusal gives its own reason, not the generic one that says to draw it.
+PAGE_ONLY_ITEM_FIELDS = ("dismissed",)
+PAGE_ONLY_MARK = " (the page's Mark read writes it)"
+PAGE_ONLY_REASON = ("Only the page's Mark read writes dismissed. The owner's press sets it, and Mark unread clears it. "
+                    "A session write never names it, on any route: leave it out of the write. "
+                    "(decision item-field-rendered, a waiting item names only fields the page draws)")
+
+
 def item_field_hit(op, entry, data) -> str:
     """The matched text when this write of a waiting item names a top-level field outside the page's
     itemFields block. An update may remove a field with {"__delete__": true}. A str_replace names its
     field in `field`. A page with no readable block, or an empty one, reads as unknown, and the write passes."""
     fields = _item_fields(os.environ.get(ITEM_FIELDS_SEAM) or ITEM_FIELDS_PAGE)
-    if fields is None:
-        return ""
     if op == "str_replace":
         field = entry.get("field")
         top = field.split(".", 1)[0] if isinstance(field, str) else ""
-        return "str_replace on " + top if top and top not in fields else ""
-    if not isinstance(data, dict):
+        if top in PAGE_ONLY_ITEM_FIELDS:
+            return "str_replace on " + top + PAGE_ONLY_MARK
+        return "str_replace on " + top if fields is not None and top and top not in fields else ""
+    if isinstance(data, dict):
+        for key in data:
+            if key in PAGE_ONLY_ITEM_FIELDS:
+                return "field " + str(key) + PAGE_ONLY_MARK
+    if fields is None or not isinstance(data, dict):
         return ""
     for key, value in data.items():
         if key in fields or (op == "update" and isinstance(value, dict) and value.get("__delete__") is True):
@@ -1353,14 +1745,79 @@ def _chat_question_hit(question, options):
     return (DEPARTS_RULE, miss) if miss else PASS
 
 
+# ------------------------------------------------------------------ a decision on another repo is checked with that repo
+#
+# docs/decisions/cross-repo-question-checked.md, rule `question-checked-with-repo`, built against a named incident
+# (incident in the record): triage filed another repo's design questions on this repo's page, ones the owner had
+# already ruled on. An open decision or task names its `repo` (owner/name). A repo other than the page's needs
+# `checked_with`, the session id of that repo's session that said the owner has not ruled, never the item's own owner.
+# The check keys on fields, never on words (decision predicate-is-the-act).
+CROSS_REPO_RULE = "question-checked-with-repo"
+CROSS_REPO_REASON = ("An open decision or task on the waiting page names its `repo` (owner/name). A repo other than "
+                     "the page's own needs `checked_with`: the session id of that repo's triage, coordinator or "
+                     "owner's-computer session that said the owner has not ruled. "
+                     "(decision cross-repo-question-checked, a question on another repo is checked with that repo)")
+_WAITING_PAGE_DIR = os.path.join(HERE, "..", "skills", "waiting-page")
+
+
+def _page_repo(cwd):
+    """`owner/name` of the origin of the checkout at cwd, lowercased, else None (no cwd, no checkout, no origin).
+    One read of git's config file, no process."""
+    root = _git_root_of(cwd) if cwd else None
+    return _layout().repo_name(root) if root else None
+
+
+CROSS_REPO_FIELDS = ("repo", "checked_with")
+CROSS_REPO_EDIT_REASON = ("A str_replace on `repo` or `checked_with` changes the cross-repo check, which a "
+                          "str_replace cannot show. Send an update that carries both `repo` and `checked_with`.")
+CROSS_REPO_UPDATE_REASON = ("An update that carries `checked_with` and no `repo` cannot be judged: the stored `repo` "
+                            "is unseen. Send an update that carries both `repo` and `checked_with`.")
+
+
+def cross_repo_hit(op, data, page_repo, session_id=None):
+    """The reason when this write of an open decision or task names no repo, a repo that is not owner/name, a repo
+    off the page's own without a session-shaped `checked_with`, or a `checked_with` that is the session in its
+    `owner` or the writer's own `session_id`; else None. `repo` is required whether or not the page's repo is
+    known; with it unknown only the compare is skipped. An update is judged only when it carries `repo`, and one
+    that carries `checked_with` without `repo` is refused; a str_replace (item_hit judges its field) and a closed
+    item pass. `session_id` is the writer's session record id (session_<x>), None for a local session."""
+    if op not in ("set", "update") or not _open_decision(data, ("decision", "task")):
+        return None
+    if op == "update" and "repo" not in data:
+        return CROSS_REPO_UPDATE_REASON if "checked_with" in data else None
+    if _WAITING_PAGE_DIR not in sys.path:
+        sys.path.append(_WAITING_PAGE_DIR)
+    from stale_pages import REPO_NAME
+    repo = data.get("repo")
+    own = "Add `repo`: \"%s\" for a question on this page's own repo, or the repo the question is about." % page_repo \
+        if page_repo else "Add `repo` (owner/name): the repo the question is about."
+    if not repo:
+        return "`repo` is missing. " + own
+    if not (isinstance(repo, str) and REPO_NAME.fullmatch(repo) and not repo.lower().endswith(".git")):
+        return "`repo` is not owner/name. " + own
+    if not page_repo or repo.lower() == page_repo.lower():
+        return None
+    checked = data.get("checked_with")
+    if not (isinstance(checked, str) and SESSION_ID.fullmatch(checked)):
+        return ("`repo` %s is not this page's repo, and `checked_with` is missing or not a session id. Ask that "
+                "repo's triage, coordinator or owner's-computer session whether the owner has ruled, then write its "
+                "session id in `checked_with`." % repo)
+    if checked in str(data.get("owner") or "") or (session_id and checked == session_id):
+        return ("`checked_with` is the session that files this item. Write the session id of the %s session that "
+                "checked, not the one that files the item." % repo)
+    return None
+
+
 # ------------------------------------------------------------------ the reasons, one table per surface
 
 PAGE_REASONS = {"port-question": PORT_REASON, "uniform-pick": WIDENS_REASON, "press-link": PRESS_LINK_REASON,
                 "command-in-item": COMMAND_REASON, "gh-login-switch": GH_LOGIN_REASON,
-                "task-names-check": TASK_REASON,
+                "task-names-check": TASK_REASON, WHY_RULE: WHY_CITED_REASON, CROSS_REPO_RULE: CROSS_REPO_REASON,
                 FORM_RULE: PAGE_FORM_REASON, STAKE_RULE: STAKE_REASON, "item-field-rendered": ITEM_FIELD_REASON,
+                "item-field-page-only": PAGE_ONLY_REASON,
                 DEPARTS_RULE: PAGE_DEPARTS_REASON,
-                "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON}
+                "option-letter-keys": LETTER_KEYS_REASON, "rework-off-page": REWORK_REASON,
+                LABELS_RULE: LABELS_REASON, FROZEN_RULE: FROZEN_REASON}
 CHAT_STAKE_REASON = ("A question is the owner's only when he can judge it. Write the Problem line as "
                      "\"Problem (<stake>): <the problem, and why it needs his word>\", where stake is one of %s. "
                      "(decision owner-judge-test, a decision reaches the owner only when he can judge it)"
@@ -1381,7 +1838,7 @@ PAST_RULING_RULE = "past-ruling"
 UNVETTED_LINE = re.compile(r"^[ \t>*+-]*Unvetted:[ \t]*\S", re.I | re.M)
 UNREADABLE = "unreadable"
 CLOSED_ITEMS = "closed page items"
-INDEX_CAP, STEP_TOP, STEP_GIT_TIMEOUT = 800, 30, 10
+INDEX_CAP, STEP_TOP, STEP_GIT_TIMEOUT, RULED_TOP = 800, 30, 10, 8
 RULING_HEADING = re.compile(r"^##[ \t]+The ruling[ \t]*$", re.I | re.M)
 RULING_WORDS = re.compile(r"ruling|owner|shiv", re.I)
 SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
@@ -1544,8 +2001,47 @@ def _step_rulings(steps, words):
     return [line for _, _, line in sorted(scored)[:STEP_TOP]]
 
 
+def _ruled_candidates(roots, unknown, words):
+    """The open entries of the ruled store (lint/ruled_store.py, the one reader) whose ruling shares a word with the
+    question (`words`, the step rulings' word test), as
+    `ruled:<id>: <ruling> (owner <at>; open, not on main; supersedes <refs>)`, the most shared words first and the
+    newest first among equal counts, at most RULED_TOP. An unchecked entry (supersedes_none starts with "unread") ends
+    with " (unchecked, not law)". The store is read from the first root that has one: the repo, else the
+    claude-settings checkout. No store anywhere adds "ruled store (absent)"; a store git failed to read adds
+    "ruled store (unreadable: git)"."""
+    lint = os.path.join(HERE, "..", "lint")
+    if lint not in sys.path:
+        sys.path.append(lint)
+    try:
+        import ruled_store
+    except Exception as exc:
+        unknown.append("ruled store (%s: %s)" % (UNREADABLE, type(exc).__name__))
+        return []
+    state = "absent"
+    for root in roots:
+        entries, state = ruled_store.read_store(root)
+        if state == "ok":
+            opened = ruled_store.open_entries(entries, root)
+            lines = []
+            scored = [(len(_words(str(e.get("ruling", ""))) & words), e) for e in opened]
+            newest = sorted((pair for pair in scored if pair[0]), key=lambda pair: ruled_store.entry_instant(pair[1]),
+                            reverse=True)
+            # The sort is stable: most shared words first, and the newest first among equal counts.
+            for _count, entry in sorted(newest, key=lambda pair: -pair[0])[:RULED_TOP]:
+                ruling = " ".join(str(entry.get("ruling", "")).split())[:INDEX_CAP]
+                mark = " (unchecked, not law)" if ruled_store.is_unchecked(entry) else ""
+                lines.append("ruled:%s: %s (owner %s; open, not on main; supersedes %s)%s"
+                             % (entry.get("id", "?"), ruling, entry.get("at", "?"),
+                                ruled_store.supersedes_text(entry), mark))
+            return lines
+        if state == "unreadable":
+            break
+    unknown.append("ruled store (%s)" % ("absent" if state == "absent" else "%s: git" % UNREADABLE))
+    return []
+
+
 def past_rulings(question_text, repo_root):
-    """(candidates, unknown). `candidates` are lines `<id>: <text>`: every decision and debt record, then the step
+    """(candidates, unknown). `candidates` are lines `<id>: <text>`: the (up to eight) open ruled-store entries that share words with the question, as `ruled:<id>`, every decision and debt record, then the step
     rulings that share words with the question. `unknown` lists each source not searched: "<source> (absent)"
     for a source the repo does not have, "<source> (unreadable: ...)" for one that exists and failed, and always
     "closed page items". Absent sources never refuse; unreadable ones do (see unreadable_sources)."""
@@ -1560,6 +2056,7 @@ def past_rulings(question_text, repo_root):
         unknown.append("claude-settings decision records (absent)")
     elif os.path.realpath(other) != os.path.realpath(repo_root):
         roots.append(other)
+    candidates += _ruled_candidates(roots, unknown, _words(question_text))
     for folder, label in (("decisions", "decision records"), ("debts", "debt records")):
         found = False
         for root in roots if folder == "decisions" else roots[:1]:

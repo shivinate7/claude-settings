@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""code-check: one type check and one bug lint per language, read from standard.json (the one home of the table).
+"""code-check: one type check and one bug lint per language, read from lint/code_check_standard.json (the one home of the table).
     python3 code_check.py [--root DIR] [--base REF] [--main REF]
 Fails when a tracked file has a language with no row, when a row is malformed, when a tool finds a bug, or when the
 repo's mypy list (.code-check.json, "mypy_modules") lost a module since --base or since --main, the current default
@@ -7,12 +7,12 @@ branch (the exclude list likewise only shrinks). A module renamed since that ref
 Against main, only entries the branch's merge-base with main also holds count, so a branch merely behind main passes.
 Known limit: a move whose edits fall below git's 50% rename similarity reads as a plain delete and may leave the list.
 Rare false alarm: a deleted module paired by git with an unrelated, similar new file reads as a rename.
-Tools are pinned in standard.json and run through pipx or npx. Astro projects are checked by astro-check, the
+Tools are pinned in lint/code_check_standard.json and run through pipx or npx. Astro projects are checked by astro-check, the
 @astrojs/check CLI that `astro check` calls. CODE_CHECK_TOOLS=path runs the tools already on PATH instead (tests,
 a dev machine). The javascript typecheck layer runs tsc over the tracked .mjs files and keeps only broken imports of
 a relative specifier, extensionless relative imports, TypeScript-only syntax and syntax errors ("mjs-imports"); checkJs is on for
 import diagnostics only, and type errors are dropped. Formatter layers are skipped until o2 (one layout) lands; their rows say so.
-It also runs lint/check_comment_narration.py (rule building-comments-say-why) on the Python, JS/TS, Astro and Swift lines the change adds
+It also runs lint/check_comment_narration.py (rule building-comments-say-why) on the Python, JS/TS, Astro, Swift and shell lines the change adds
 since --base, minus the exclude folders. It reads the lint/ and hooks/ folders of the repo the action is pinned to,
 which GitHub fetches whole at the pinned sha."""
 import argparse, json, os, re, subprocess, sys
@@ -58,7 +58,7 @@ def comment_check(root, base, exclude):
 
 
 def load_standard():
-    with open(os.path.join(HERE, "standard.json"), encoding="utf-8") as f:
+    with open(os.path.join(HERE, "..", "..", "lint", "code_check_standard.json"), encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -341,7 +341,7 @@ def main(argv):
     files = tracked(root, [e for e in cfg.get("exclude", []) if e.strip().strip("/")])
     found, missing = classify(root, files, std)
     for n in missing:
-        failures.append("%s: language has no row in actions/code-check/standard.json; add a row or list the path in %s exclude" % (n, CONFIG))
+        failures.append("%s: language has no row in lint/code_check_standard.json; add a row or list the path in %s exclude" % (n, CONFIG))
     refs = [(args.base, "base")]
     main_commit = commit(root, args.main)
     if main_commit is None or main_commit != commit(root, args.base):

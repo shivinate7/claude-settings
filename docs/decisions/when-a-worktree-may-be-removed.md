@@ -62,7 +62,7 @@ A worktree is removed only when all of these hold. A read that cannot tell keeps
 - It is pushed and unlocked.
 - No live session uses it (read 2 of the reaper, `agent-end-reap-stops-what-a-finished-agent-left`), and no process has a cwd inside it.
 
-Session start warns when more than 50 agent worktrees exist. An agent leaves its worktree clean and pushed, and a later agent end removes it. The builder agent definition says so. The test-author commits and pushes its own branch, and cleans and removes its red-run checkout itself.
+Session start warns when more than 50 agent worktrees exist. An agent leaves its worktree clean, and a later agent end removes it once its commits are pushed. The builder agent definition says so. The test-author commits and pushes to the branch its brief names, and cleans and removes its red-run checkout itself.
 
 ### Session-end sweep, agent rule
 

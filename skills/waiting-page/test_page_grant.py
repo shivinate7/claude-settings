@@ -10,8 +10,8 @@ The checker reads only what a session fetched with ArtifactData (DIR/answers/<ID
 repo's extras file (its "artifacts" registry, read by lint/layout.py). Relay text is never an input. Each case builds
 its own fixture under this run's folder, so no fixture file is checked in.
 
-Verdict, one line on stdout:
-  counted item=<ID> n=<n> choice=<choice> at=<at> [note=<json string>]   exit 0
+Verdict, one line on stdout. A counted line is page_grant.COUNTED_LINE with its fields filled in, plus
+note=<json string> when the answer has a note (exit 0).
   not counted: <reason>                                                  exit 1
   unknown: <reason>                                                      exit 2 (no readable registry, a fetched file not one JSON object)
 The rules are SKILL.md "Read the answers" ("A decision answer is clear only when") and "Route and close".
@@ -76,9 +76,19 @@ def answer(**fields):
     return merged({"at": AT, "choice": "a", "item": ITEM_ID, "n": ITEM_N, "note": ""}, fields)
 
 
+def label_of(choice):
+    """The label the counted line prints for a choice: the option's label, a list of them for several, null for overturn.
+    options() names each label, so the key fixes it."""
+    if choice == "overturn":
+        return None
+    if "+" in choice:
+        return ["Option " + key.upper() for key in choice.split("+")]
+    return "Option " + choice.upper()
+
+
 def verdict(choice, note=None):
-    """The counted line for item 231. `choice` is a key, or `a+c` for a list."""
-    line = "counted item=%s n=%d choice=%s at=%s" % (ITEM_ID, ITEM_N, choice, AT)
+    """The counted line for item 231. `choice` is a key, or `a+c` for a list. The label goes after `at`, before `note`."""
+    line = "counted item=%s n=%d choice=%s at=%s label=%s" % (ITEM_ID, ITEM_N, choice, AT, json.dumps(label_of(choice)))
     return line if note is None else line + " note=" + json.dumps(note)
 
 
@@ -167,6 +177,13 @@ class Base(unittest.TestCase):
                          % (r.returncode, r.stdout, r.stderr))
         self.assertEqual(r.stdout.splitlines(), [line], "the counted line differs from the answer")
 
+    def assertLabelled(self, r, line):
+        """The counted line with its label. A line with no label, or a label not quoted as JSON, fails on that alone."""
+        self.assertEqual(r.returncode, 0, "a clear answer is not counted: exit %d, stdout %r, stderr %r"
+                         % (r.returncode, r.stdout, r.stderr))
+        self.assertEqual(r.stdout.splitlines(), [line],
+                         "the counted line does not print the picked option's label as label=<json>")
+
     def assertNotCounted(self, r, case, reason=None):
         """`reason`, a lower-case word, must appear in the verdict's reason, so the case fails for its own rule."""
         self.assertEqual(r.returncode, 1, "%s: expected exit 1, got %d, stdout %r, stderr %r"
@@ -189,7 +206,7 @@ class Base(unittest.TestCase):
 class Counted(Base):
     def test_replay_item_231_counted(self):
         r = self.check(self.repo(), self.pair(), pick="a")
-        self.assertCounted(r, "counted item=review-fix-check-go n=231 choice=a at=2026-11-04T13:56:29.078Z")
+        self.assertCounted(r, 'counted item=review-fix-check-go n=231 choice=a at=2026-11-04T13:56:29.078Z label="Option A"')
 
     def test_code_artifact_form_of_the_page_counted(self):
         r = self.check(self.repo(), self.pair(), page=PAGE_CODE_URL, pick="a")
@@ -214,30 +231,44 @@ class Counted(Base):
         self.assertCounted(r, verdict("overturn"))
 
     def test_open_item_with_lane_set_counted(self):
-        """The relay case: a lane took the answer, so the item is still open with its lane set. Green on the old code too."""
+        """The relay case: a lane took the answer, so the item is still open with its `lane` set. The checker counts it."""
         r = self.check(self.repo(), self.pair(item_fields={"lane": "owner-word-relay"}), pick="a")
         self.assertCounted(r, verdict("a"))
 
     def test_open_item_with_lane_and_last_answer_and_answer_kept_counted(self):
         """The answer is kept until the receiver reports done: the item is open with `lane` and `lastAnswer` set, and
-        answers/<id> is still there. Counted on the relayed pick. Green on the old code too: the checker never reads those two fields."""
+        answers/<id> is still there. Counted on the relayed pick: the checker never reads `lane` or `lastAnswer`."""
         last = {"choice": "a", "note": "", "at": AT}
         r = self.check(self.repo(), self.pair(item_fields={"lane": "owner-word-relay", "lastAnswer": last}), pick="a")
         self.assertCounted(r, verdict("a"))
 
     def test_item_with_no_status_field_counted(self):
-        """An item with no `status` field at all is open, as the page reads it. Red on a checker whose default status is closed."""
+        """An item with no `status` field at all is open, as the page reads it. A checker that read a missing status
+        as closed would refuse this answer."""
         r = self.check(self.repo(), self.pair(item_fields={"status": ABSENT}), pick="a")
         self.assertCounted(r, verdict("a"))
 
+    # The doc key is the item id (roadmap step page-item-id-check).
+    def test_item_with_no_id_field_counted_under_its_key(self):
+        """The key of items/<key> is the item's id, so an item with no `id` field is counted under its key. Red on the old
+        checker, which refuses it: `answer is for item ..., not ...`, because it reads item.id."""
+        r = self.check(self.repo(), self.pair(item_fields={"id": ABSENT}), pick="a")
+        self.assertCounted(r, verdict("a"))
+
+    def test_item_whose_id_field_differs_from_its_key_counted(self):
+        """An `id` field that differs from the key is ignored: the key is the id. Red on the old checker, which refuses it
+        with `answer is for item ..., not ...`, because it reads item.id."""
+        r = self.check(self.repo(), self.pair(item_fields={"id": "other-id"}), pick="a")
+        self.assertCounted(r, verdict("a"))
+
     def test_closed_arbiter_ruling_overturn_counted(self):
-        """An arbiter ruling is written closed; its overturn still counts. Green on the old code too."""
+        """An arbiter ruling is written closed; its overturn still counts."""
         r = self.check(self.repo(), self.pair(item_fields={"status": "closed", "arbiter": True},
                                               answer_fields={"choice": "overturn"}), pick="overturn")
         self.assertCounted(r, verdict("overturn"))
 
     def test_added_with_explicit_offset_counted(self):
-        """06:00 at -06:00 is 12:00Z, so the answer at 13:56Z is still later. Green on the old code too."""
+        """06:00 at -06:00 is 12:00Z, so the answer at 13:56Z is still later."""
         r = self.check(self.repo(), self.pair(item_fields={"added": "2026-11-04T06:00:00-06:00"}), pick="a")
         self.assertCounted(r, verdict("a"))
 
@@ -267,6 +298,31 @@ class Counted(Base):
         self.assertEqual((snapshot(root), snapshot(fetched)), before, "the checker changed a file under root or fetched")
         self.assertFalse(os.path.exists(fetched + ".stamp"), "the checker left its stamp unused")
         self.assertTrue(os.path.isfile(fetched + ".stamp.used"), "the checker did not keep its used stamp")
+
+
+class CountedLabel(Base):
+    """The counted line prints the picked option's label as `label=<JSON>`, after `at` and before `note`, on one line."""
+
+    def test_counted_line_prints_the_picked_option_label(self):
+        r = self.check(self.repo(), self.pair(), pick="a")
+        self.assertLabelled(r, 'counted item=review-fix-check-go n=231 choice=a at=%s label="Option A"' % AT)
+
+    def test_label_with_quotes_a_fake_token_and_a_newline_prints_one_json_string(self):
+        label = 'Set "relayed" choice=b at=X\nin settings.json'
+        opts = [{"key": "a", "label": label}, {"key": "b", "label": "Option B"}]
+        r = self.check(self.repo(), self.pair(item_fields={"options": opts}), pick="a")
+        self.assertLabelled(r, 'counted item=review-fix-check-go n=231 choice=a at=%s '
+                               'label="Set \\"relayed\\" choice=b at=X\\nin settings.json"' % AT)
+
+    def test_multi_item_prints_its_labels_as_a_json_list(self):
+        r = self.check(self.repo(), self.pair(item_fields={"multi": True, "options": options("abc")},
+                                              answer_fields={"choice": ["a", "c"]}), pick="a+c")
+        self.assertLabelled(r, 'counted item=review-fix-check-go n=231 choice=a+c at=%s label=["Option A", "Option C"]' % AT)
+
+    def test_overturn_prints_label_null(self):
+        r = self.check(self.repo(), self.pair(item_fields={"arbiter": True}, answer_fields={"choice": "overturn"}),
+                       pick="overturn")
+        self.assertLabelled(r, "counted item=review-fix-check-go n=231 choice=overturn at=%s label=null" % AT)
 
 
 class NotCounted(Base):
@@ -380,7 +436,7 @@ class NotCounted(Base):
         self.assertNotCounted(r, "decision run with no --pick", reason="pick")
 
     def test_task_with_done_not_counted(self):
-        """Re-pointed from the task-done case that counted: a task answer grants no act, done or not."""
+        """A task answer grants no act, even with done set true."""
         r = self.check(self.repo(), self.pair(item_fields={"kind": "task", "options": []},
                                               answer_fields={"choice": ABSENT, "done": True}), pick="done")
         self.assertNotCounted(r, "task answer with done true", reason="task")

@@ -9,7 +9,11 @@ stays with the design reviewer. Standard library only.
 
 Faults, one of each code at most per page:
 - system-font: no CSS font-family or font shorthand whose first family is -apple-system or system-ui
-  (or a WebKit Dynamic Type keyword such as -apple-system-body). One level of var() is resolved.
+  (or a WebKit Dynamic Type keyword such as -apple-system-body), or one such declaration whose first family
+  is another font (Georgia on an h1 beside a system body). Besides the system families only inherit and
+  unset pass (skill ios-apps, Type): initial, revert, revert-layer and the ui-* names (ui-monospace,
+  ui-rounded) fault. A stack whose last family is the generic monospace is code text and passes. One level
+  of var() is resolved.
 - safe-area: no CSS env(safe-area-inset-...) call.
 - duo-frames: no element with data-device="iphone-duo-folded" and one with data-device="iphone-duo-unfolded",
   folded first in document order.
@@ -109,6 +113,20 @@ def _is_system(family):
     return family in SYSTEM_FONTS or family.startswith("-apple-system-")
 
 
+def _last_family(value, shorthand):
+    """The last family of a stack: the last comma part, and for a comma-less `font:` shorthand its last word."""
+    last = value.split(",")[-1].strip()
+    if shorthand and "," not in value:
+        last = last.split()[-1] if last.split() else ""
+    return last.strip("'\"").strip().lower()
+
+
+def _is_other_font(family, last):
+    """True when a declaration names a non-system font: not empty, not a pass key (the system families, inherit,
+    unset; skill ios-apps, Type), and no stack that ends in the generic monospace, which is code text."""
+    return bool(family) and not _is_system(family) and family not in ("inherit", "unset") and last != "monospace"
+
+
 def _resolve(value, custom):
     """`value` with each var(--name, fallback) replaced by the custom property's value, one level deep, and
     with any `!important` removed."""
@@ -123,10 +141,14 @@ def faults(text):
     css = strip_css_comments("\n".join(page.css))
     found = []
     custom = {name: value.strip() for name, value in CUSTOM.findall(css)}
-    families = [_first_family(_resolve(v, custom)) for v in FONT_FAMILY.findall(css)]
-    families += [_shorthand_family(_resolve(v, custom)) for v in FONT_SHORTHAND.findall(css)]
-    if not any(_is_system(f) for f in families):
+    families = [(_first_family(r), _last_family(r, False)) for r in (_resolve(v, custom) for v in FONT_FAMILY.findall(css))]
+    families += [(_shorthand_family(r), _last_family(r, True)) for r in (_resolve(v, custom) for v in FONT_SHORTHAND.findall(css))]
+    if not any(_is_system(f) for f, _ in families):
         found.append(("system-font", "no font-family starts with -apple-system or system-ui"))
+    else:
+        other = [f for f, last in families if _is_other_font(f, last)]
+        if other:
+            found.append(("system-font", "a font declaration starts with %s, not -apple-system or system-ui" % other[0]))
     if not SAFE_AREA.search(css):
         found.append(("safe-area", "no env(safe-area-inset-...) in the CSS"))
     frames = page.frames

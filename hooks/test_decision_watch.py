@@ -308,7 +308,7 @@ def case_last_human_reader_skips_a_peer_record():
           (idx, stamp) == (0, T0), repr((idx, stamp)))
     check("peer reply: last_human_stamp (shared reader) returns the owner's stamp",
           dw.last_human_stamp(records) == T0, repr(dw.last_human_stamp(records)))
-    # Pin (green before the fix): a later owner line still wins over an earlier peer reply.
+    # Pin: a later owner line still wins over an earlier peer reply.
     later = records + [human_record("thanks, now the next one", t2)]
     check("peer reply: a later owner line is still the last human",
           dw.last_human_index_and_stamp(later) == (4, t2), repr(dw.last_human_index_and_stamp(later)))

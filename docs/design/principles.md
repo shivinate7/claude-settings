@@ -178,8 +178,9 @@ impeccable `harden` and `overdrive` give it as advice with no check.
 When the GPU drops a 3D scene, the person sees words that say so, and the scene comes back when the GPU
 returns.
 Check: on the page, call `loseContext()` and then `restoreContext()` on the `WEBGL_lose_context`
-extension. For a WebGPU scene, call `device.destroy()` and check for the same words. Pass when the
-canvas is never blank without words, and the scene returns after restore.
+extension. Pass when the canvas is never blank without words, and the scene returns after restore.
+For a WebGPU scene, call `device.destroy()`, which is final. Pass when the canvas shows the words;
+the scene does not return, so check the words only.
 Source: [MDN, WebGL best practices](https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/WebGL_best_practices)
 ("Budget VRAM conservatively": handle `webglcontextlost`).
 
@@ -187,8 +188,9 @@ Source: [MDN, WebGL best practices](https://developer.mozilla.org/en-US/docs/Web
 
 A 3D scene that does not move draws no frames, so it does not spend the person's battery.
 Check: before load, add an init script that wraps every method whose name starts with `draw` or
-`multiDraw` on both `WebGLRenderingContext` and `WebGL2RenderingContext`, and counts each call. Let the
-scene draw its first frame, then reset the counter and let the scene rest for five seconds. Pass when
+`multiDraw` on both `WebGLRenderingContext` and `WebGL2RenderingContext`, and counts each call. Also
+wrap `getExtension`, so the object it returns for `WEBGL_multi_draw` gets the same wrap: the
+`multiDraw*` methods live there. Let the scene draw its first frame, then reset the counter and let the scene rest for five seconds. Pass when
 the count stays 0 after the reset, and a camera move or a resize draws again. For a WebGPU scene, count
 `GPUQueue.submit` calls the same way. A DevTools trace is the human view.
 Source: [three.js manual, rendering on demand](https://threejs.org/manual/en/rendering-on-demand).
@@ -226,8 +228,9 @@ Source: [MDN, forced-colors](https://developer.mozilla.org/en-US/docs/Web/CSS/@m
 ## ux-full-height-fits
 
 A full-height region fits the visible phone screen, with the browser bars shown or hidden, so its bottom content and actions are never under the bars.
-Check: grep the changed CSS for a `vh` value (`[0-9]vh`). Pass when each hit has an `svh` or `dvh`
-declaration on the same property, declared after the `vh` line, which overrides it.
+Check: find each `vh` or `lvh` value in the changed CSS with `grep -E '[0-9]l?vh'`. Pass when each hit has an `svh`
+or `dvh` declaration on the same property, declared after the hit, which overrides it. An `svh` or
+`dvh` value needs no check: it is the fix.
 Source: [web.dev, the large, small and dynamic viewport units](https://web.dev/blog/viewport-units).
 
 ## ux-vitals-measured

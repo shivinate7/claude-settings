@@ -59,6 +59,8 @@ Interface the hook must match:
   question a standing ruling already decides. Each case builds its own real git repo (make_repo), and a fixture
   ruling is found in the prompt with the call's JSON cut out. A search that cannot read a source prints one stderr
   line, `past-ruling search unknown:`, and never says clear.
+- A relative file_path on an items set or update with no `data`: the file is read against the payload's `cwd`, as
+  question_form._write_data reads it, so that write is judged like inline data (the section "a relative file_path").
 """
 import atexit
 import json
@@ -159,6 +161,51 @@ def make_repo(name, decisions=None, steps=None, debts=None, page=PAGE_URL):
         git(repo, "commit", "-q", "-m", "step notes")
         git(repo, "checkout", "-q", "-")
     REPOS[name] = repo
+    return repo
+
+
+# The waiting page's repo with a GitHub origin. PAGE_REPO above has no origin, so lint/layout.py repo_name reads it
+# as unknown. The cross-repo rule (question-checked-with-repo) judges a decision's repo against this origin's repo,
+# so its cases judge the write with cwd set here.
+PAGE_ORIGIN_URL = "https://github.com/shivinate7/claude-settings.git"
+
+
+def origin_page_repo():
+    """The waiting-page repo whose origin is PAGE_ORIGIN_URL. make_repo caches it by name, so one repo per run."""
+    repo = make_repo("page-origin", page=PAGE_URL)
+    if not git(repo, "remote").stdout.strip():
+        git(repo, "remote", "add", "origin", PAGE_ORIGIN_URL)
+    return repo
+
+
+# The record-branch checkout: a checkout on the record branch `roadmap` with no extras file, while origin/main holds
+# the page's extras file. lint/layout.py reads the page from origin/main when the checkout has none, so the page checks
+# run from here too. Built from plumbing and one branch switch. origin/main is a ref only (no local main stays), as a
+# fetch leaves it. The one home of this fixture.
+RECORD_CHECKOUT = os.path.join(ROOT, "record-branch-checkout")
+
+
+def record_branch_checkout():
+    """The checkout on `roadmap` whose origin/main holds the extras file of PAGE_URL, in the registry form main holds."""
+    repo = RECORD_CHECKOUT
+    if os.path.isdir(repo):
+        return repo
+    os.makedirs(repo)
+    git(repo, "init", "-q")
+    git(repo, "symbolic-ref", "HEAD", "refs/heads/roadmap")
+    with open(os.path.join(repo, "README.md"), "w", encoding="utf-8") as f:
+        f.write("# Record branch\n")
+    git(repo, "add", "README.md")
+    git(repo, "commit", "-q", "-m", "record")
+    git(repo, "checkout", "-q", "-b", "main")
+    os.makedirs(os.path.join(repo, ".claude"))
+    with open(os.path.join(repo, ".claude", "layout-extras.json"), "w", encoding="utf-8") as f:
+        json.dump({"kinds": {}, "artifacts": [{"id": "queue", "url": PAGE_URL, "role": "waiting-page", "account": "current"}]}, f)
+    git(repo, "add", ".claude/layout-extras.json")
+    git(repo, "commit", "-q", "-m", "extras")
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git(repo, "checkout", "-q", "roadmap")
+    git(repo, "branch", "-q", "-D", "main")
     return repo
 
 
@@ -342,9 +389,36 @@ PAGE_MARK, PAGE_MARK_B = "PAGEMARK-3f9c", "PAGEMARK-8d21"
 PAGE_OLD, PAGE_NEW = "PAGEOLD-5a0e", "PAGENEW-7c3d"
 
 
+def shown_of(options):
+    """The `shown` list a page write carries: each option's key, id and label, in order. A non-dict entry is skipped."""
+    return [{"key": o.get("key"), "id": o.get("id"), "label": o.get("label")} for o in options if isinstance(o, dict)]
+
+
+def with_frozen_fields(data, ids=True):
+    """A copy of a page write's data with the fields a session's write carries when it writes options: `shown`, the
+    options as first shown, and with `ids` an id on each option that has none (opt-<n>, n its 1-based position, never
+    a lone letter). An id the option already has, even "" or a repeat, is kept, so a case can write a bad id. Data with
+    no options list is copied unchanged. question_form.frozen_letters_hit (rule option-letters-frozen) reads both."""
+    found = dict(data)
+    options = data.get("options")
+    if not isinstance(options, list):
+        return found
+    filled = []
+    for i, option in enumerate(options):
+        if isinstance(option, dict):
+            option = dict(option)
+            if ids:
+                option.setdefault("id", "opt-%d" % (i + 1))
+        filled.append(option)
+    found["options"] = filled
+    found["shown"] = shown_of(filled)
+    return found
+
+
 def good_page_item(mark=PAGE_MARK, **over):
     """A waiting-page decision that passes the form. `mark` rides in option a's gain, so a case finds the item
-    in the prompt. `over` replaces fields, for a case that changes one."""
+    in the prompt. `over` replaces fields, for a case that changes one. Its options carry ids and `shown` (see
+    with_frozen_fields), so a case that replaces `options` gets a matching `shown` too."""
     context = "\n".join((GOAL_LINE, PROBLEM_LINE, *BASED_LINES, DEPARTS_LINE))
     item = {"kind": "decision", "title": "Ship the change today?", "status": "open", "context": context,
             "options": [{"key": "a", "label": "Ship it", "gain": "The change lands today. " + mark,
@@ -352,7 +426,7 @@ def good_page_item(mark=PAGE_MARK, **over):
                         {"key": "b", "label": "Hold it", "gain": "A reviewer reads it first.",
                          "lose": "The change lands a day later."}]}
     item.update(over)
-    return item
+    return with_frozen_fields(item)
 
 
 # A task item (kind task) is judged like a decision (coordinator follow-up after the Nov 1 11:51 CST ruling). Its
@@ -673,7 +747,7 @@ def case_page_batch_one_call():
     second = good_page_item(PAGE_MARK_B)
     writes = [{"op": "set", "collection": PAGE_ITEMS, "doc_id": "p1", "data": good_page_item()},
               {"op": "update", "collection": PAGE_ITEMS, "doc_id": "p2",
-               "data": {"kind": "decision", "context": second["context"], "options": second["options"]}}]
+               "data": with_frozen_fields({"kind": "decision", "context": second["context"], "options": second["options"]})}]
     r = run_hook(page_batch_input(writes), answer=ALLOW)
     prompt = r.calls[0]["prompt"] if r.calls else ""
     check("page batch: two qualifying item writes make exactly one model call, claude-opus-5-5",
@@ -862,6 +936,96 @@ def case_page_reads_and_other_collections_skip_question_form():
           "question_form" in r.imports, detail(r))
 
 
+# ------------------------------------------------------------------ a relative file_path (ArtifactData)
+#
+# An items write can name its data by a file_path, with no data. question_form._write_data reads that file against the
+# payload's cwd, and item_hit does. judged_item_writes must read it the same way, or the write never reaches the model
+# review, so item 8 (the past-ruling check) never sees it. Each file name below is unique and absent from the cwd the
+# hook runs in (run_hook inherits this test run's cwd), so a read that finds the file can only come from the join to the
+# payload's cwd. The item's text shares words with the APPS ruling, so the past-ruling search lists that record.
+def apps_refusal():
+    """The model's refusal, which cites the APPS record: a listed candidate, so the past-ruling refusal runs."""
+    return json.dumps({"ok": False, "reason": "decisions/%s: already decided by the keep-the-apps ruling." % APPS_SLUG})
+
+
+def relative_item_repo():
+    """The repo whose one decision record is the APPS ruling. Its waiting page is PAGE_URL."""
+    return make_repo("relative-file", decisions={APPS_SLUG: APPS_RULING})
+
+
+def apps_item():
+    """A waiting-page decision on the apps question: it passes item_hit, and its text lists the APPS record."""
+    context = "\n".join((APPS_GOAL, APPS_PROBLEM, APPS_BASED[0], DEPARTS_LINE))
+    options = [
+        {"key": "a", "label": "Keep the apps", "gain": "Calls into the repo stay straightforward. " + PAGE_MARK,
+         "lose": "An unused app keeps its access."},
+        {"key": "b", "label": "Remove the apps", "gain": "Fewer apps can write to the repo.",
+         "lose": "Each call into the repo needs a manual step."}]
+    return good_page_item(title="Keep the GitHub apps' access?", context=context, options=options)
+
+
+def write_item_file(path, item):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(item, f)
+
+
+def relative_name_precondition(repo, name):
+    """Scope before subject: the file is at the payload cwd, and no file of that name is at the hook's cwd."""
+    check("relative item %s: the file is at the payload cwd" % name, os.path.isfile(os.path.join(repo, name)), repo)
+    check("relative item %s: no file of that name at the hook's cwd, so only a join to the payload cwd finds it" % name,
+          not os.path.exists(name), os.getcwd())
+
+
+def case_page_relative_file_path_reaches_the_review():
+    # A relative file_path must be read against the payload cwd. Read without it, the file is not found and the
+    # write is dropped: the hook exits 0 with no model call, so the APPS ruling is never checked.
+    import question_form  # the one form check (hooks/question_form.py)
+    repo, name = relative_item_repo(), "relative-item-deny.json"
+    write_item_file(os.path.join(repo, name), apps_item())
+    relative_name_precondition(repo, name)
+    got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "p1", "file_path": name}, repo)
+    check("relative item: the form check reads the file at the payload cwd and passes it", got == ("", ""), got)
+    r = run_hook(page_input("set", None, doc_id="p1", cwd=repo, file_path=name), answer=apps_refusal())
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("relative item: the write reaches one model review", len(r.calls) == 1, detail(r))
+    check("relative item: the model sees the item read from the file", PAGE_MARK in prompt, prompt[:160])
+    check("relative item: the APPS record and its ruling reach the prompt",
+          APPS_SLUG in prompt and APPS_RULING in prompt, prompt[:160])
+    rule = question_form.PAST_RULING_RULE
+    check("relative item: the past-ruling refusal is denied under rule %s, with one deny line" % rule,
+          r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith(rule + ": ")
+          and r.log.count("\tdeny\t%s\t" % rule) == 1, detail(r))
+
+
+def case_page_relative_file_path_passing_item_passes():
+    # The negative: the same shape, and the model says ok. Only the one-call check tells a pass from a skip,
+    # because a skipped write also exits 0 with no output.
+    repo, name = relative_item_repo(), "relative-item-pass.json"
+    write_item_file(os.path.join(repo, name), apps_item())
+    relative_name_precondition(repo, name)
+    r = run_hook(page_input("set", None, doc_id="p1", cwd=repo, file_path=name), answer=ALLOW)
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    check("relative item, ok: the write reaches one model review", len(r.calls) == 1 and PAGE_MARK in prompt, detail(r))
+    check("relative item, ok: exit 0, no output, no deny",
+          r.code == 0 and r.out == "" and "\tdeny\t" not in r.log, detail(r))
+
+
+def case_page_absolute_file_path_is_judged():
+    # The control: an absolute file_path is read on main too, so this case is green before and after the fix.
+    import question_form  # the one form check (hooks/question_form.py)
+    repo = relative_item_repo()
+    path = os.path.join(repo, "absolute-item-deny.json")
+    write_item_file(path, apps_item())
+    check("absolute item: the file is at its absolute path", os.path.isabs(path) and os.path.isfile(path), path)
+    r = run_hook(page_input("set", None, doc_id="p1", cwd=repo, file_path=path), answer=apps_refusal())
+    prompt = r.calls[0]["prompt"] if r.calls else ""
+    rule = question_form.PAST_RULING_RULE
+    check("absolute item: the write reaches one model review", len(r.calls) == 1 and PAGE_MARK in prompt, detail(r))
+    check("absolute item: the past-ruling refusal is denied under rule %s" % rule,
+          r.code == 0 and (r.deny() or {}).get("permissionDecision") == "deny" and r.reason().startswith(rule + ": "),
+          detail(r))
+
+
 # ------------------------------------------------------------------ a re-ask of an answered item (ruled Nov 1 17:44 CST)
 #
 # An owner's "none of these" note that gives a direction closes the item and becomes a step, so a write that asks
@@ -892,7 +1056,7 @@ def last_answer(note, choice="none", done=None):
 
 def reask_item(mark, note=REASK_NOTE, choice="none", done=None):
     """Data for an update of an answered decision: its options and the owner's note, no context."""
-    return {"options": good_page_item(mark)["options"], "lastAnswer": last_answer(note, choice, done)}
+    return with_frozen_fields({"options": good_page_item(mark)["options"], "lastAnswer": last_answer(note, choice, done)})
 
 
 def rule_detail(rule, r):
@@ -932,7 +1096,7 @@ def case_options_without_note_lacks_rule():
     # Case 3: options with no lastAnswer is not a re-ask. The call still makes its one model call, so an early exit
     # cannot pass this check.
     rule = none_direction_rule()
-    r = run_hook(page_input("update", {"options": good_page_item()["options"]}), answer=ALLOW)
+    r = run_hook(page_input("update", with_frozen_fields({"options": good_page_item()["options"]})), answer=ALLOW)
     prompt = r.calls[0]["prompt"] if r.calls else ""
     check("no re-ask, options only: one model call, and no deny", len(r.calls) == 1 and r.code == 0 and r.out == ""
           and "\tdeny\t" not in r.log, detail(r))
@@ -943,7 +1107,7 @@ def case_options_without_note_lacks_rule():
 def case_blank_note_lacks_rule():
     # Case 4: a note that is blank after strip is not a direction, so the write is not a re-ask.
     rule = none_direction_rule()
-    data = {"options": good_page_item()["options"], "lastAnswer": last_answer("  ")}
+    data = with_frozen_fields({"options": good_page_item()["options"], "lastAnswer": last_answer("  ")})
     r = run_hook(page_input("update", data), answer=ALLOW)
     prompt = r.calls[0]["prompt"] if r.calls else ""
     check("no re-ask, blank note: one model call, and no deny", len(r.calls) == 1 and r.code == 0 and r.out == ""
@@ -983,7 +1147,7 @@ def case_reask_batch_one_call_rule_once():
 
 def case_reask_refusal_denies():
     # Case 7: case 1's write, and the fake refuses it. The deny is question-judge, and the prompt holds the rule
-    # once, so this case is red on main for the rule and not for the deny.
+    # once, so this case pins the rule's count in the prompt, apart from the deny.
     rule = none_direction_rule()
     r = run_hook(page_input("update", reask_item(PAGE_MARK)), answer=REASK_FLAG)
     d = r.deny() or {}
@@ -1122,7 +1286,7 @@ def case_widening_batch_holds_rule_once():
     rule = widening_rule()
     writes = [{"op": "set", "collection": PAGE_ITEMS, "doc_id": "p1", "data": good_page_item(PAGE_MARK)},
               {"op": "update", "collection": PAGE_ITEMS, "doc_id": "p2",
-               "data": {"options": good_page_item(PAGE_MARK_B)["options"]}}]
+               "data": with_frozen_fields({"options": good_page_item(PAGE_MARK_B)["options"]})}]
     r = run_hook(page_batch_input(writes), answer=ALLOW)
     check("widening batch: two option writes make one model call, and no deny", len(r.calls) == 1 and r.code == 0
           and r.out == "" and "\tdeny\t" not in r.log, detail(r))
@@ -1139,7 +1303,7 @@ def case_widening_absent_without_options():
     context = good_page_item()["context"]
     for label, inp, template in (
         ("a context-only update", page_input("update", {"context": context}), "PAGE_PROMPT"),
-        ("an update with context and empty options", page_input("update", {"context": context, "options": []}),
+        ("an update with context and empty options", page_input("update", with_frozen_fields({"context": context, "options": []})),
          "PAGE_PROMPT"),
         ("an AskUserQuestion box with options", question_input(), "QUESTION_PROMPT"),
         ("an Agent spawn", spawn_input("builder", model="sonnet"), "SPAWN_PROMPT"),
@@ -1159,6 +1323,7 @@ def case_widening_refusal_names_the_option():
     rule = widening_rule()
     item = good_page_item(PAGE_MARK)
     item["options"][1]["label"] = "Accept a second accepted form"
+    item = with_frozen_fields(item)  # the relabelled option is the item's first write, so its shown is the new label
     got = question_form.item_hit("set", {"collection": PAGE_ITEMS, "doc_id": "p1", "data": item})
     check("widening refusal fixture: the item passes question_form.item_hit, so a refusal below is the judge's",
           got == ("", ""), got)
@@ -1405,15 +1570,16 @@ def case_past_ruling_cost():
     box = good_box(goal=CI_GOAL, problem=CI_PROBLEM, based=CI_BASED, options=CI_CHAT_OPTIONS)
     check("past ruling cost fixture: the box passes chat_hit", question_form.chat_hit(box) == ("", ""),
           question_form.chat_hit(box))
+    # Two git starts: the roadmap read, then the ruled store's ls-tree (one start when the store is absent).
     r = run_hook(question_input(box=box, cwd=CI_REPO), answer=ALLOW)
-    check("past ruling cost: a judged question runs one git process, the roadmap read",
-          len(r.calls) == 1 and r.git == 1, detail(r))
+    check("past ruling cost: a judged question runs two git processes, the roadmap read and the store's ls-tree",
+          len(r.calls) == 1 and r.git == 2, detail(r))
     item = good_page_item(title="Raise the CI milestone job cap?", context=CI_PAGE_CONTEXT, options=CI_PAGE_OPTIONS)
     p = run_hook(page_input("set", item, doc_id="c133", cwd=CI_REPO), answer=ALLOW)
-    check("past ruling cost: a judged page write runs one git process", len(p.calls) == 1 and p.git == 1, detail(p))
+    check("past ruling cost: a judged page write runs two git processes", len(p.calls) == 1 and p.git == 2, detail(p))
     q = run_hook(question_input(box=good_box(), cwd=BARE_REPO), answer=ALLOW)
-    check("past ruling cost: a judged question with no roadmap ref runs at most one git process",
-          len(q.calls) == 1 and q.git <= 1, detail(q))
+    check("past ruling cost: a judged question with no roadmap ref runs at most two git processes",
+          len(q.calls) == 1 and q.git <= 2, detail(q))
     f = run_hook(question_input(box=good_box(problem=None), cwd=CI_REPO), answer=ALLOW)
     check("past ruling cost: a box refused by the form makes no model call and no git process",
           f.calls == [] and f.git == 0 and (f.deny() or {}).get("permissionDecision") == "deny", detail(f))
@@ -1573,7 +1739,9 @@ def main():
                  case_unvetted_not_for_closed_items, case_past_ruling_debt_candidates,
                  case_unshown_id_takes_the_unvetted_path, case_marker_does_not_skip_the_check,
                  case_unknown_names_the_claude_settings_records, case_cite_of_a_shown_record_is_not_bogus,
-                 case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal):
+                 case_page_task_gets_item_8_and_is_refused, case_mid_reason_unlisted_id_is_a_plain_refusal,
+                 case_page_relative_file_path_reaches_the_review, case_page_relative_file_path_passing_item_passes,
+                 case_page_absolute_file_path_is_judged):
         try:
             case()
         except Exception as exc:

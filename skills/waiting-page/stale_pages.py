@@ -13,7 +13,7 @@ reports as not found, and that this account's Artifact list (scope all) holds no
 
 Verdict, one line per page, then a total line:
   current  the fetched page holds page.html (white space, the designData mockups, the roadmap block and the document <title> text ignored)
-  behind   the fetched page differs: republish it (SKILL.md, "Update a repo's pages")
+  behind   the fetched page differs: republish it (skill waiting-page, "Update a repo's pages")
   unknown  the page was not read: another account, a missing file, an empty file, an .unreadable marker
   not-found  the page has a .notfound marker: not found from this account (deleted, or another account's).
            The line says to re-file the repo's items on the claude-settings waiting page: the URL recorded in the
@@ -32,7 +32,7 @@ beside this script, and needs no hooks/ folder.
 
 Single-page mode (the writer, at each wake and before each republish):
 
-    python3 ~/.claude/skills/waiting-page/stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>] [--items <file|folder>]
+    python3 ~/.claude/skills/waiting-page/stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>] [--items <file|folder>] [--answers <file|folder>]
 
 One verdict line names the template source: `origin/main <short sha>` or the --main path. Exit 0
 current, 1 behind, 2 unknown. Unknown: the file is missing or empty, it holds no designData block
@@ -41,7 +41,7 @@ saves main's page with the live designData and roadmap blocks kept (splice.carry
 --main; else page.html at origin/main of the checkout that holds this script, else of the checkout
 the `@<path>` line in ~/.claude/CLAUDE.md names. With neither, or with no hooks/_nowindow.py to
 start git, the verdict is unknown: the installed copy never stands in for main.
---items names the items the session saved with `ArtifactData list items`: a JSON list file, or the folder of
+--items names the items the session saved with `ArtifactData list items`: a JSON list file (bare data objects, or {id, data} entries), or the folder of
 <id>.json files that call saves. A folder without the .complete marker reads every wait `unknown`, with no gh call.
 --items needs hooks/_nowindow.py to start gh; without it every wait reads `unknown`. A `run` or `pr` is a whole
 number above zero, or a string of digits with no leading zero; anything else reads `unknown`. For each open item (status not `closed`) with a `waits` field, `{repo, run}`
@@ -54,6 +54,13 @@ An item with `waits` keeps its one line. The word is
 `ended` (the run completed with any conclusion; the PR merged; the PR closed unmerged, which its line says),
 `waiting` (the run or PR is still going), or `unknown` (gh missing, non-zero, timed out, not JSON, or a
 malformed `waits`; also an item past the WAIT_CAP-th call, which is not asked). The exit code stays the page verdict's.
+--answers, with --items, names the answers the session saved with `ArtifactData list answers`, in the same two shapes, read by the same
+loader (a list entry names its item in `item`, or is {"id", "data"}; a folder doc by its file name). After the wait and lane lines, one line per closed item,
+in item order, whose answer is still kept: `kept-answer: item <n> (<id>) is closed and answers/<id> is kept`, then the remedy (delete
+the answer, or reopen the item with `lane` and `lastAnswer`). A closed item with `waits` prints `kept-answer: item <n> (<id>) is closed with waits and
+answers/<id> is kept`, then the remedy: when its wait has ended, drop `waits` and delete the answer; no gh call. Never named: an open item or one with no status,
+an item with `arbiter` true, a park answer (`park.<id>`, `parked: true` or `act: "park"`), an answer with no item. An unreadable file, a folder without the marker,
+unreadable items, an items folder without the marker, or --answers without --items print one `kept-answer: unknown (...)` line, with no other kept-answer line.
 The folder loader is export_page.docs_in, the one home of reading that folder.
 Session-start mode, run by hooks/session_start.sh in a repo whose extras name a waiting page:
 
@@ -76,7 +83,31 @@ file, a file of the wrong shape (meta not an object, items or answers not a list
 `at` prints an `unknown:` line and exits 2.
 Cost: one python process, reads 3 files, writes none, starts no git, no timer.
 
+Unread mode, run by the writer at a comment wake, never at turn start (SKILL.md, "Read the answers").
+At the end of that wake the writer writes `woke`: `ArtifactData update meta/page` with only `woke`, ISO UTC with a
+trailing Z, and never on exit 2.
+
+    python3 ~/.claude/skills/waiting-page/stale_pages.py --unread <dir>
+
+<dir> holds four files the session saved from the store: meta.json (the data of meta/page, an object), items.json,
+answers.json and receipts.json (a list of {"id", "data"} entries each). One line per item answer the writer has not
+read back, in answers.json order, then exit 1:
+`answer-unread <id> (item <n>, owner <owner>, answered <at>, before wake <woke>)`
+(`?` for a missing n or owner). An answer is listed when it is an item answer (not `park.<id>`, `parked: true` or
+act `park`), its item exists (open, or closed with the answer kept), its `at` is earlier than meta `woke` (the
+writer's previous wake) and no receipt with the answer's id has a `read` at or after `at`. A receipt with only `filed`
+does not clear it (the check reads `read` only, never `filed`). With no `woke` (absent or null) every answer with
+no such receipt is listed, and the last field reads `before wake: none recorded`. With none listed,
+`unread: clean` and exit 0. A missing or unreadable file, a file of the wrong shape (meta not an object, the others
+not a list), an unreadable `woke`, an answer with no readable `at`
+or a compared receipt with no readable `read` prints an `unknown:` line and exits 2.
+The mode reads no clock and has no time bound: what it lists depends on the saved files alone. `woke` is the writer's
+own optional field in meta/page. The incident: an answer that sat unread 10.5 h (owner's report).
+Write `read` and `filed` as ISO UTC with a trailing Z: a time with no zone is read in the host's zone.
+Cost: one python process, reads 4 files, writes none, starts no git, no timer.
+
 Cost: one python process, at most one read-only git process (no fetch, no network, 30 s cap), no
+extra process for --answers (it reads one more file, a folder one per answer), no
 file written without --write, no timer, thread or child left running. Single-page mode never imports `layout`; batch and session-line modes do.
 Without --items: 0 gh processes. With it: one gh process per open item with a `waits` field, at most WAIT_CAP, each
 run to its end or its 30 s cap before the next (a lane line starts none); no file written, no timer, no process left running.
@@ -404,18 +435,31 @@ def session_line(root, main_checkout=None):
             "(skill waiting-page, \"Keep the page on main's code\")." % url)
 
 
-def load_items(path):
-    """(items, complete): the saved items as a list from a JSON list file, or the folder `ArtifactData list` saves. `complete` is False
-    for a folder without the marker the session leaves after the last list page, since a stopped fetch may lack items. Raises ValueError with the cause."""
-    from export_page import MARKER, Stop, docs_in, load_json  # lazy: only --items reads a folder
+def load_docs(path, what="items", keyed=False):
+    """(docs, complete): the saved `what` ("items" or "answers") as a list from a JSON list file, or the folder `ArtifactData list` saves. `complete` is False
+    for a folder without the marker the session leaves after the last list page, since a stopped fetch may lack docs. With `keyed`, each doc is
+    (doc id, data): the file name of a folder doc, None for a bare list entry, whose data alone says which item it answers. A list entry shaped
+    {"id": str, "data": dict} (what `ArtifactData list` returns) unwraps to (id, data), as a folder doc does, with or without `keyed`; so `--items`
+    reads that shape's data, where it once read the wrapper. Raises ValueError with the cause."""
+    from export_page import MARKER, Stop, docs_in, load_json  # lazy: only --items and --answers read a folder
     try:
-        data = list(docs_in(path, path).values()) if os.path.isdir(path) else load_json(path, path)
+        if os.path.isdir(path):
+            found = docs_in(path, path)
+            data = list(found.items()) if keyed else list(found.values())
+        else:
+            data = load_json(path, path)
+            if isinstance(data, list):
+                wrapped = [isinstance(doc, dict) and isinstance(doc.get("id"), str) and isinstance(doc.get("data"), dict) for doc in data]
+                if keyed:
+                    data = [(doc["id"], doc["data"]) if w else (None, doc) for doc, w in zip(data, wrapped)]
+                else:
+                    data = [doc["data"] if w else doc for doc, w in zip(data, wrapped)]
     except Stop as err:
         raise ValueError(str(err))
     except OSError as err:
         raise ValueError(err.strerror or str(err))
     if not isinstance(data, list):
-        raise ValueError("%s is not a JSON list of items" % path)
+        raise ValueError("%s is not a JSON list of %s" % (path, what))
     return data, not os.path.isdir(path) or os.path.isfile(os.path.join(path, MARKER))
 
 
@@ -504,24 +548,70 @@ def wait_lines(items, complete=True):
     return lines
 
 
+def kept_answer_lines(items, answers, complete=True, answers_complete=True):
+    """One line per closed item, in item order, whose answer is still kept: the writer re-reads answers/<id>, then deletes it or reopens the item
+    (SKILL.md, "Route and close"). `items` and `answers` are (doc id, data) pairs from load_docs. A closed item with `waits` and a kept answer (a chat
+    answer can close an item during a wait) gets its own line, "is closed with waits", whose remedy waits for the wait to end; no gh call. Never an open
+    item, an arbiter ruling (its overturn answer is read by its own route), a park answer or an answer with no item.
+    With `complete` or `answers_complete` False (that folder may be cut short), one unknown line naming it."""
+    if not (complete and answers_complete):
+        return ["kept-answer: unknown (the %s folder has no .complete marker, so its list may be cut short)"
+                % ("items" if not complete else "answers")]
+    kept = {}
+    for doc_id, data in answers:
+        if not isinstance(data, dict):
+            continue
+        doc_id = doc_id if doc_id is not None else data.get("item")  # a list entry has no file name
+        if (isinstance(doc_id, str) and not doc_id.startswith("park.") and data.get("parked") is not True
+                and data.get("act") != "park"):
+            kept[doc_id] = data
+    lines = []
+    for doc_id, item in items:
+        if not isinstance(item, dict):
+            continue
+        item_id = doc_id if doc_id is not None else item.get("id")  # the file name is the doc id, as for the answers
+        if item.get("status") != "closed" or item.get("arbiter") is True or item_id not in kept:
+            continue
+        if "waits" in item:
+            lines.append('kept-answer: item %s (%s) is closed with waits and answers/%s is kept; when its wait has ended, drop waits and delete '
+                         'answers/%s (SKILL.md, "Route and close")' % (item.get("n", item_id), item_id, item_id, item_id))
+        else:
+            lines.append('kept-answer: item %s (%s) is closed and answers/%s is kept; re-read answers/%s, then delete it, or reopen the item with '
+                         'lane and lastAnswer (SKILL.md, "Route and close")' % (item.get("n", item_id), item_id, item_id, item_id))
+    return lines
+
+
 def single_page(argv):
     """Exit 0 current, 1 behind, 2 unknown for one fetched page. Writes a file only with --write, never on unknown.
     With --items, prints after the verdict line one wait line per open item with a `waits` field, and one lane line per open
-    item with a `lane` and a `lastAnswer` and no `waits`; the exit code stays the verdict's."""
+    item with a `lane` and a `lastAnswer` and no `waits`. With --answers too, one kept-answer line per closed item whose answer is kept.
+    The exit code stays the verdict's."""
     ap = argparse.ArgumentParser(prog="stale_pages.py", allow_abbrev=False)
     ap.add_argument("--page", required=True)
     ap.add_argument("--write")
     ap.add_argument("--main")
     ap.add_argument("--items")
+    ap.add_argument("--answers")
     args = ap.parse_args(argv)
     code = page_verdict(args)
     if args.items is not None:
         try:
-            lines = wait_lines(*load_items(args.items))
+            items, complete = load_docs(args.items, keyed=True)
+            lines = wait_lines([dict(d, id=k) if k and isinstance(d, dict) else d for k, d in items], complete)
         except ValueError as err:
-            lines = ["wait: the items cannot be read: unknown (%s)" % err]
+            items, lines = None, ["wait: the items cannot be read: unknown (%s)" % err]
+        if args.answers is not None:
+            try:
+                if items is None:
+                    raise ValueError("the items cannot be read")
+                answers, answers_complete = load_docs(args.answers, "answers", keyed=True)
+                lines += kept_answer_lines(items, answers, complete, answers_complete)
+            except ValueError as err:
+                lines.append("kept-answer: unknown (%s)" % err)
         for line in lines:
             print(line)
+    elif args.answers is not None:
+        print("kept-answer: unknown (--answers needs --items)")
     return code
 
 
@@ -644,7 +734,70 @@ def parked_mode(argv):
     return 2 if unknown else 1 if lines else 0
 
 
+def unread_mode(argv):
+    """`--unread <dir>`: name each item answer the writer has not read back, from four saved files and no clock."""
+    ap = argparse.ArgumentParser(prog="stale_pages.py", allow_abbrev=False)
+    ap.add_argument("--unread", required=True)
+    args = ap.parse_args(argv)
+    try:
+        loaded = {}
+        for name in ("meta", "items", "answers", "receipts"):
+            with open(os.path.join(args.unread, name + ".json"), encoding="utf-8") as f:
+                loaded[name] = json.load(f)
+    except (OSError, ValueError) as err:
+        print("unknown: cannot read %s.json in %s (%s)" % (name, args.unread, err))
+        return 2
+    meta, items, answers, receipts = loaded["meta"], loaded["items"], loaded["answers"], loaded["receipts"]
+    for name, ok in (("meta", isinstance(meta, dict)), ("items", isinstance(items, list)),
+                     ("answers", isinstance(answers, list)), ("receipts", isinstance(receipts, list))):
+        if not ok:  # a file of the wrong shape is never read as clean or listed
+            print("unknown: %s.json is not %s" % (name, "an object" if name == "meta" else "a list"))
+            return 2
+    entries = lambda rows: [r for r in rows if isinstance(r, dict)]
+    data = lambda r: r.get("data") if isinstance(r.get("data"), dict) else {}
+    woke_text = meta.get("woke")
+    woke = parse_utc(woke_text) if woke_text is not None else None
+    if woke_text is not None and woke is None:  # an unreadable wake is never read as "no wake"
+        print("unknown: meta woke is not an ISO time (%s)" % woke_text)
+        return 2
+    item_data = {}
+    for r in entries(items):
+        item_data.setdefault(r.get("id"), data(r))
+    reads = {}
+    for r in entries(receipts):
+        reads.setdefault(r.get("id"), []).append(data(r).get("read"))
+    lines, unknown = [], []
+    for r in entries(answers):
+        key = r.get("id")
+        # A park answer is read by the --parked mode, never here: keyed park.<id>, parked: true, or act park.
+        if not isinstance(key, str) or key.startswith("park.") or data(r).get("parked") is True or data(r).get("act") == "park":
+            continue
+        if key not in item_data:
+            continue
+        at = parse_utc(data(r).get("at"))
+        if at is None:  # an unreadable time is never counted read or unread
+            unknown.append("unknown: the answer %s has no readable at" % key)
+            continue
+        if woke is not None and at >= woke:
+            continue
+        times = [parse_utc(read) for read in reads.get(key, []) if read is not None]
+        if any(t is not None and t >= at for t in times):
+            continue
+        if any(t is None for t in times):
+            unknown.append("unknown: the receipt of answer %s has no readable read" % key)
+            continue
+        item = item_data[key]
+        lines.append("answer-unread %s (item %s, owner %s, answered %s, %s)" % (
+            key, item.get("n", "?"), item.get("owner", "?"), data(r)["at"],
+            "before wake %s" % woke_text if woke is not None else "before wake: none recorded"))
+    out = lines + unknown
+    print("\n".join(out) if out else "unread: clean")
+    return 2 if unknown else 1 if lines else 0
+
+
 def main(argv):
+    if "--unread" in argv:
+        return unread_mode(argv)
     if "--parked" in argv:
         return parked_mode(argv)
     if "--session-line" in argv:
@@ -654,7 +807,8 @@ def main(argv):
     if not argv:
         sys.exit("usage: stale_pages.py <fetched-dir> [<repo root> ...]\n"
                  "       stale_pages.py --page <fetched.html> [--write <out.html>] [--main <page.html>]\n"
-                 "       stale_pages.py --parked <dir> [--now <iso>]")
+                 "       stale_pages.py --parked <dir> [--now <iso>]\n"
+                 "       stale_pages.py --unread <dir>")
     import layout  # batch mode only
     fetched, roots = argv[0], argv[1:] or default_roots()
     with open(TEMPLATE, encoding="utf-8") as f:

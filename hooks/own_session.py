@@ -1,11 +1,13 @@
-"""The one reader of a session's own get_session record in its transcript.
+"""The one reader of a session's own get_session and create_session records in its transcript.
 
 hooks/guard_merge.py (merge role, trust card, archive proofs) and lint/report_guard.py (lane or
 owner-facing pick guard) both read it. It is its own small module so the Stop hook can import it
 without loading the whole guard.
-Cost: one transcript read per call, no file written.
+Cost: one transcript read per call, no file written. An agent's own record is a second file read, by the
+caller, through agent_transcript_path.
 """
 import json
+import os
 import re
 
 # A get_session result for another session arrives as its untrusted text: an opening tag with a nonce, a preamble,
@@ -46,13 +48,48 @@ def _record_json(body):
     return record
 
 
+def agent_transcript_dir(transcript):
+    """The folder the harness writes a session's agents' transcripts to: `<transcript minus .jsonl>/subagents`.
+    The one home of that layout: the guards, the stall watch, the report guard and the ruling census all name
+    it through here. Cost: a string join, no read, no file written."""
+    root = transcript[:-len(".jsonl")] if transcript.endswith(".jsonl") else transcript
+    return os.path.join(root, "subagents")
+
+
+def agent_transcript_path(transcript, agent_id):
+    """The agent's own transcript: `agent-<agent_id>.jsonl` in agent_transcript_dir. The caller passes an agent_id
+    already checked against guard.AGENT_ID."""
+    return os.path.join(agent_transcript_dir(transcript), "agent-" + agent_id + ".jsonl")
+
+
 def own_session_read(transcript, own_id, created=False):
     """(tags, tagged_after, parent): the tags and parent_session_id of the newest get_session result
     whose ccr.id is own_id, else None for each, and whether a set_session_tags call follows that
     result. With `created`, a create_session call whose result names own_id is a record too: its tags
     are the call's input.tags, its parent is None unless the input names parent_session_id. The newest
     record of either kind decides. Without it, only get_session counts."""
-    uses, newest, parent, tagged_after = set(), None, None, False
+    return _scan(transcript, own_id, created)[:3]
+
+
+def own_session_ccr(transcript, own_id):
+    """The whole `ccr` dict of the newest get_session result whose ccr.id is own_id, else None. The
+    branch and source fields of the record are read from it (lane-closes-after-records).
+
+    Never raises, because the guard's checks must not crash on any input. A transcript it cannot read
+    (no path, a missing file, a folder, bad text) is None, the same as "no record"; a caller that needs
+    the record treats None as no record. The type check comes first because open() reads an int as a file
+    descriptor and would open, then close, a descriptor the caller owns."""
+    if not isinstance(transcript, (str, os.PathLike)):
+        return None
+    try:
+        return _scan(transcript, own_id, False)[3]
+    except (OSError, TypeError, ValueError, RecursionError):
+        return None
+
+
+def _scan(transcript, own_id, created):
+    """(tags, tagged_after, parent, ccr): the one pass over the transcript behind both readers."""
+    uses, newest, parent, tagged_after, newest_ccr = set(), None, None, False, None
     creates = {}  # tool_use id -> (tags, parent) a create_session call set
     with open(transcript, encoding="utf-8") as handle:
         for line in handle:
@@ -84,16 +121,16 @@ def own_session_read(transcript, own_id, created=False):
                         body = "".join(b.get("text", "") for b in body if isinstance(b, dict))
                     if block.get("tool_use_id") in creates:
                         if _created_session_id(body) == own_id:
-                            (newest, parent), tagged_after = creates[block.get("tool_use_id")], False
+                            (newest, parent), tagged_after, newest_ccr = creates[block.get("tool_use_id")], False, None
                         continue
                     if not isinstance(body, str):
                         continue
                     try:
                         ccr = _record_json(body)["ccr"]
                         if ccr["id"] == own_id and isinstance(ccr["tags"], list):
-                            newest, tagged_after = ccr["tags"], False
+                            newest, tagged_after, newest_ccr = ccr["tags"], False, ccr
                             found = ccr.get("parent_session_id")
                             parent = found if isinstance(found, str) and found else None
                     except (ValueError, KeyError, TypeError):
                         continue
-    return newest, tagged_after, parent
+    return newest, tagged_after, parent, newest_ccr

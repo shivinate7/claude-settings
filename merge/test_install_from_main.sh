@@ -330,6 +330,11 @@ case8() {
   if [ "$LINKS_OK" != yes ]; then skip "$name" "no symlink rights here, so the link check cannot run"; return; fi
   d="$work/case8"; h="$d/home"; mkdir -p "$h"; SHIM="$d/shim"; make_shim "$SHIM"
   live_clone "$d/clone" payload
+  # The origin stays GitHub's URL, which install.sh checks, but every fetch goes to a path with no repository.
+  # This case pins the fail-open on a fetch failure only: the fetch fails here at once, with no network, and the
+  # helper installs local main with its WARN line. A reachable origin is not this case: a local-only commit is
+  # refused (case43), and an origin whose main is unrelated to local main is refused (case45).
+  git -C "$d/clone" config "url.$d/no-origin.git.insteadOf" https://github.com/shivinate7/claude-settings.git
   c0=$(git -C "$d/clone" rev-parse main)
   git -C "$d/clone" worktree add -q --detach "$d/clone-live" "$c0"
   git -C "$d/clone" worktree add -q -b feature "$d/linked"
@@ -1205,8 +1210,9 @@ case30() {
 }
 
 # ---- Case 31: local main diverged from origin, clean tree on main -> the tree stays; one log line with git's reason ----
+# Per the ruling of 11 Nov, 14:19 CST: the installer fetches and uses origin's main.
 case31() {
-  name="case31: SessionStart hook with local main diverged from origin leaves the clean tree on main unchanged and logs one line with git's reason"
+  name="case31: SessionStart hook with local main diverged from origin leaves the clean tree on main unchanged; the log gets git's reason, then the pin install's refusal"
   d="$work/case31"; hook_fixture "$d" main
   git -C "$d/clone" commit -q --allow-empty -m local
   cl=$(git -C "$d/clone" rev-parse HEAD)
@@ -1217,10 +1223,14 @@ case31() {
     || why="$why; the clone's checkout moved to $(git -C "$d/clone" rev-parse HEAD), want $cl"
   skip=$(hook_log_lines "$d/home/.claude-cfg/claude-settings-install.log")
   n=$(printf '%s\n' "$skip" | grep -c .)
-  if [ "$n" -ne 1 ]; then
-    why="$why; want one log line for the refused fast-forward, got $n: [$skip]"
-  elif ! printf '%s\n' "$skip" | grep -q "fatal:"; then
-    why="$why; the log line has no git reason: [$skip]"
+  if [ "$n" -ne 2 ]; then
+    why="$why; want two log lines (the fast-forward's git reason, then the pin install's refusal), got $n: [$skip]"
+  else
+    first=$(printf '%s\n' "$skip" | sed -n 1p)
+    second=$(printf '%s\n' "$skip" | sed -n 2p)
+    printf '%s\n' "$first" | grep -q "fatal:" || why="$why; line 1 has no git reason: [$first]"
+    printf '%s\n' "$second" | grep -q "the pin install failed" || why="$why; line 2 does not name the pin install's failure: [$second]"
+    printf '%s\n' "$second" | grep -q "install not run" || why="$why; line 2 has no refusal from the helper: [$second]"
   fi
   if [ -z "$why" ]; then ok "$name"; else bad "$name" "${why#; }"; fi
 }
@@ -1452,7 +1462,95 @@ case41() {
   if [ -z "$why" ]; then ok "$name"; else bad "$name" "$why"; fi
 }
 
-ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31 case32 case33 case34 case35 case36 case37 case38 case39 case40 case41"
+# ---- Case 42: a stale local main (origin/main one commit ahead, local main an ancestor) -> the helper fast-forwards local
+# main and installs origin's main. A fetch never moves local main, so the helper must fetch first. hook_fixture: origin ahead.
+case42() {
+  name="case42: a stale local main behind origin/main: the helper fast-forwards local main and installs origin's main"
+  d="$work/case42"; hook_fixture "$d" trunk ahead
+  h="$d/home"; SHIM="$d/shim"
+  run_live "$d/clone"
+  if [ "$rc" -ne 0 ]; then bad "$name" "helper exited $rc: $out"
+  elif [ "$(git -C "$d/clone" rev-parse main)" != "$c1" ]; then
+    bad "$name" "local main is $(git -C "$d/clone" rev-parse main), want origin's main $c1"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$c1" ]; then
+    bad "$name" "the pinned checkout is at $(git -C "$d/clone-live" rev-parse HEAD), want $c1"
+  elif [ "$(tail -n 1 "$h/ran-install.txt" 2>/dev/null)" != "$c1" ]; then
+    bad "$name" "the installer did not run from the pin at $c1: [$(tail -n 1 "$h/ran-install.txt" 2>/dev/null)]"
+  else ok "$name"; fi
+}
+
+# ---- Case 43: a local main holding a commit origin lacks is refused: the helper exits non-zero, runs no install, and moves
+# neither local main nor the pin. The clone's checkout is main (hook_fixture main), so the local commit lands on main itself.
+# Refusal is the outcome asserted here.
+case43() {
+  name="case43: a local main holding a commit origin lacks is refused: the helper exits non-zero, runs no install, and moves neither main nor the pin"
+  d="$work/case43"; hook_fixture "$d" main same
+  h="$d/home"; SHIM="$d/shim"
+  git -C "$d/clone" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m "local only"
+  local_main=$(git -C "$d/clone" rev-parse main)
+  run_live "$d/clone"
+  if [ "$rc" -eq 0 ]; then bad "$name" "helper exited 0 and installed local main $local_main, which origin lacks"
+  elif [ -e "$h/ran-install.txt" ]; then bad "$name" "an install ran from the unpushed local main"
+  elif [ "$(git -C "$d/clone" rev-parse main)" != "$local_main" ]; then bad "$name" "local main moved from its local commit"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$c0" ]; then
+    bad "$name" "the pinned checkout moved to $(git -C "$d/clone-live" rev-parse HEAD), want $c0"
+  else ok "$name"; fi
+}
+
+# ---- Case 44: the helper's output or install log names the commit it installed. Local main is moved to origin's main
+# first, so the pin is behind and the helper moves and installs it.
+case44() {
+  name="case44: the helper's output or install log names the commit it installed"
+  d="$work/case44"; hook_fixture "$d" trunk ahead
+  h="$d/home"; SHIM="$d/shim"
+  git -C "$d/clone" fetch -q origin main
+  if ! git -C "$d/clone" cat-file -e "$c1" 2>/dev/null || ! git -C "$d/clone" update-ref refs/heads/main "$c1"; then
+    bad "$name" "FIXTURE the clone cannot move local main to origin's main $c1"; return
+  fi
+  run_live "$d/clone"
+  short=$(printf '%s' "$c1" | cut -c1-7)
+  if [ "$rc" -ne 0 ]; then bad "$name" "helper exited $rc: $out"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$c1" ]; then bad "$name" "FIXTURE the pinned checkout is not at $c1"
+  elif ! { printf '%s\n' "$out"; cat "$h/.claude-cfg/claude-settings-install.log" 2>/dev/null; } | grep -q "$short"; then
+    bad "$name" "neither the output nor the install log names the installed commit $short"
+  else ok "$name"; fi
+}
+
+# ---- Case 45: origin's main shares no history with local main, and origin is reachable -> the helper refuses: exit 1,
+# one 'install not run' line, no install, and neither local main nor the pin moves. The local-only commit puts local main
+# ahead of the pin, so a helper that installs local main anyway would move the pin and install that commit.
+case45() {
+  name="case45: origin's main unrelated to local main (no merge-base, origin reachable): the helper refuses with exit 1 and one 'install not run' line, runs no install, moves neither main nor the pin"
+  d="$work/case45"; hook_fixture "$d" main same
+  h="$d/home"; SHIM="$d/shim"
+  git clone -q "$d/origin.git" "$d/unrelated"
+  git -C "$d/unrelated" config user.email t@example.com
+  git -C "$d/unrelated" config user.name t
+  git -C "$d/unrelated" checkout -q --orphan other
+  git -C "$d/unrelated" commit -q --allow-empty -m "unrelated root"
+  git -C "$d/unrelated" push -q -f origin other:main
+  unrelated=$(git -C "$d/unrelated" rev-parse HEAD)
+  if git -C "$d/origin.git" merge-base --is-ancestor "$c0" "$unrelated" 2>/dev/null; then
+    bad "$name" "FIXTURE origin's main [$unrelated] descends from the clone's root [$c0], so the histories share a commit"; return
+  fi
+  git -C "$d/clone" -c user.email=t@example.com -c user.name=t commit -q --allow-empty -m "local only"
+  local_main=$(git -C "$d/clone" rev-parse main)
+  run_live "$d/clone"
+
+  if [ "$rc" -eq 0 ]; then
+    bad "$name" "helper exited 0 and installed local main $local_main, which shares no history with origin's main $unrelated"
+  elif ! printf '%s\n' "$errs" | grep -q '^install not run: '; then
+    bad "$name" "stderr has no 'install not run' line: $errs"
+  elif [ -e "$h/ran-install.txt" ]; then
+    bad "$name" "an install ran from local main $local_main"
+  elif [ "$(git -C "$d/clone" rev-parse main)" != "$local_main" ]; then
+    bad "$name" "local main moved from $local_main to $(git -C "$d/clone" rev-parse main)"
+  elif [ "$(git -C "$d/clone-live" rev-parse HEAD)" != "$c0" ]; then
+    bad "$name" "the pinned checkout moved to $(git -C "$d/clone-live" rev-parse HEAD), want $c0"
+  else ok "$name"; fi
+}
+
+ALL="case1 case2 case3 case4 case5 case6 case7 case8 case9 case10 case11 case12 case13 case14 case15 case16 case17 case18 case19 case20 case21 case22 case23 case24 case25 case26 case27 case28 case29 case30 case31 case32 case33 case34 case35 case36 case37 case38 case39 case40 case41 case42 case43 case44 case45"
 if [ $# -gt 0 ]; then WANT="$*"; else WANT="$ALL"; fi
 for c in $WANT; do "$c"; done
 

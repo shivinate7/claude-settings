@@ -5,7 +5,8 @@
 1. The links in `~/.claude` point at one pinned checkout. It is a worktree of the clone that holds main's commit on a detached HEAD,
    and no branch. No lane, review or merge work runs in it. The frozen-path guard refuses a file write or a shell write (redirect,
    `tee`, `sed -i`, `cp`, `mv`, `rm`) into the pin and into the stamped worktree the pin link points at. It does not read git
-   commands, so `git -C <pin> reset --hard origin/main` is allowed.
+   commands. The other-checkout guard does: an agent's `git -C <pin> <file-changing verb>`, such as `reset --hard`, is refused.
+   `merge/install_from_main.sh` runs inside the merge tool, not as an agent tool call, so that refusal does not touch it.
 2. This repo's `merge.afterMerge` runs `merge/install_from_main.sh` after each merge. The script moves the pinned checkout to the
    new local `main`, then runs the install from it. It never installs from the checkout that ran the merge, because that is often
    a temporary worktree.
@@ -14,8 +15,10 @@
 5. The install makes the pinned checkout when it is missing. Where the OS refuses symlinks, the install copies instead.
 6. When the step cannot move or install, it fails loudly. It prints one line that says the install did not run and names what to
    do. It exits non-zero, so the merge tool reports FAILED. The merge stays. A merge run from a worktree made before this
-   change cannot find the script, so the tool reports FAILED. When the local main does not move, the install runs from the old
-   main and the tool reports the failed move and exits non-zero (owner ruling, undated).
+   change cannot find the script, so the tool reports FAILED. The installer fetches origin's main and fast-forwards local main to
+   it (owner ruling 2026-11-11 14:19 CST: 'the installer fetches and uses origin's main'). A local main that holds commits origin
+   lacks, including unrelated history, is refused: one 'install not run' stderr line, exit 1, nothing installs, the pin does not
+   move. Only a failed or impossible fetch (offline, no origin remote) warns and installs local main, as before.
 
 Open: the SessionStart refresh lock has no test. A refresh child that outlives 10 minutes can remove a
 newer start's lock (debt `refresh-lock-untested`).

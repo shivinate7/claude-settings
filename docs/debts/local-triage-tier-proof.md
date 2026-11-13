@@ -4,7 +4,7 @@
 
 **Where.** `hooks/guard.py` rule `roadmap-one-writer` (one writer for the roadmap branch). Roadmap step `local-triage-tier-proof` (local triage tier proof).
 
-**Decision.** `session-tiers` (the session shapes).
+**Decision.** `session-tiers` (session roles).
 
 **Retire.** A local triage session on a Mac and on a Windows PC proves its tier, and its roadmap push passes. A guard test shows the push refused before the fix and passed after it, on both platforms. Any other session's roadmap push stays refused.
 

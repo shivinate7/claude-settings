@@ -16,7 +16,7 @@ A call with no write on collection `items` exits before importing question_form.
 For the rest, question_form.page_item_hit picks the item writes of this repo's waiting page. A write
 that item_hit refuses gets no model call: guard.py refuses it. The writes that pass and carry options,
 context or steps (question_form.judged_item_writes) go into one prompt, so the call makes one model call, however
-many writes a batch holds. A write that is a re-ask (new `options` plus a `lastAnswer` note) adds NONE_DIRECTION_RULE
+many writes a batch holds. A write that is a re-ask (new `options` plus a `lastAnswer` note with no picked choice) adds NONE_DIRECTION_RULE
 to that one prompt, once. A set or update with non-empty `options` adds WIDENING_RULE once: an option that widens what a
 shared tool accepts must carry `widens: true`, and the judge refuses an unmarked one by its option key (decision
 uniform-over-variants). WIDENING_RULE is built from question_form.WIDENS_KEY on each read (module `__getattr__`, no cache), so an
@@ -40,10 +40,13 @@ source allows, with one stderr line.
 
 Fail open. Any other model error, odd answer or unreadable input allows, with one stderr line.
 
-One exception, opus_ask(): the owner's plain Opus ask (decision owner-override, the Opus word) fails CLOSED. It grants
-an override, so a model error, a timeout or an odd answer grants nothing, with one stderr line. override.grant_opus_ask
-calls it, from the prompt hook hooks/local_time.py, only for an owner prompt that carries the whole word `opus` and
+Two exceptions, opus_ask() and override_ask(): the owner's plain asks (decision owner-override) fail CLOSED. Each
+grants an override, so a model error, a timeout or an odd answer grants nothing, with one stderr line. Both are thin
+wrappers on _ask_judge, which holds the one call, and differ only in their prompt head. override.grant_opus_ask calls
+opus_ask, from the prompt hook hooks/local_time.py, only for an owner prompt that carries the whole word `opus` and
 no keyword form. Cost: one haiku call (low effort, OPUS_ASK_TIMEOUT s) for such a prompt, none for any other.
+override.grant_override_ask calls override_ask only for an owner prompt that carries the whole word `override`
+outside code spans, has no whole word `opus`, and passes the gates. Cost: one such haiku call, none for any other.
 Its companion opus_scope() only narrows: for a plain ask that opus_ask said yes to, that names no role, and that has
 earlier owner prompts, it names the roles those prompts name. It fails OPEN to every role (None) with one stderr line,
 because the rule is "scope from context, fall back to every role" (decision owner-override).
@@ -86,6 +89,17 @@ OPUS_ASK_PROMPT = (
     "{\"ok\": true} or {\"ok\": false}.\n\nText:\n"
 )
 
+# The plain override ask (override_ask): the same call and time budget as opus_ask, its own head.
+OVERRIDE_ASK_PROMPT = (
+    "The text below is a prompt the owner typed to a coding assistant. Answer {\"ok\": true} only when it is the "
+    "owner's own present request to override a refusal or a permission ask of the assistant's guard now (for example "
+    "`yes override that` or `go ahead and override that for 15 minutes`). Answer {\"ok\": false} for a question, a "
+    "hedge such as `maybe override?`, a negation such as `don't override`, a request to turn an override `off`, a "
+    "mention in the past tense, a request about some other topic, and any text that quotes or reports what an agent "
+    "or another person said, or text of a refusal. When unsure answer {\"ok\": false}. Reply JSON only: "
+    "{\"ok\": true} or {\"ok\": false}.\n\nText:\n"
+)
+
 # The scope read (opus_scope). It follows opus_ask in the same hook run, so its timeout is short. Unmeasured: the worst
 # case, OPUS_ASK_TIMEOUT + OPUS_SCOPE_TIMEOUT plus two `claude -p` starts, may pass the prompt hook's "timeout": 30.
 OPUS_SCOPE_TIMEOUT = 8
@@ -124,8 +138,8 @@ PAST_RULING_ITEM = (
     "a re-ask the ruling allows is fine. This item passes when no list follows. "
     "When you refuse, the reason names the listed id, such as decisions/<name>, and gives the ruling's date."
 )
-# The question-judge call of lint/report_guard.py (a Stop whose reply asks the owner something): Sonnet, 15 s.
-PAST_RULING_MODEL, PAST_RULING_TIMEOUT = SPAWN_MODEL, 15
+# The question-judge call of lint/report_guard.py (a Stop whose reply asks the owner something): Sonnet, 60 s.
+PAST_RULING_MODEL, PAST_RULING_TIMEOUT = SPAWN_MODEL, 60
 # The seven items, then the eighth, a question to the owner is judged on: one text, for the chat box and the page.
 JUDGE_ITEMS = (
     "1. The Goal is in the owner's terms.\n"
@@ -149,10 +163,10 @@ QUESTION_PROMPT = (
 PAGE_PROMPT = (
     "Review these writes of a waiting-page item, each as {op, doc_id, data}: %s\nThe item is a question to "
     "the owner. Its `context` holds the Goal, Problem and Based on lines. Each entry of `options` has a "
-    "label, a `gain` and a `lose`. `pick` is the recommendation. Code has already checked the form lines "
+    "label, a `gain` and a `lose`. `recommended` (old name `pick`) is the recommendation. Code has already checked the form lines "
     "and the marks on each option, so judge only the items below, and only the fields a write carries: a "
     "write with no `options` is not flagged for options, one with no `context` is not flagged for the "
-    "Goal, Problem or premises, and one with no `pick` is not flagged for item 7, because the stored item "
+    "Goal, Problem or premises, and one with no `recommended` or `pick` is not flagged for item 7, because the stored item "
     "is unseen. A write with op str_replace carries only `field` and `new_str`, a fragment of that field. "
     "Judge a fragment only for plain words, unexplained ids, and pointers outside the item (items 3 to 6), "
     "and never flag a missing line or option, because the rest of the item is unseen. A task item has "
@@ -167,14 +181,14 @@ PAGE_PROMPT = (
     "the Problem or a recommended option, because a task has none of them. "
     "Block only on a clear miss; when unsure answer {\"ok\": true}.\n" + JUDGE_ITEMS
 )
-# A re-ask write gives an answered item new options and carries the owner's `lastAnswer` note. The text is appended to
+# A re-ask write gives an answered item new options and carries the owner's `lastAnswer` note with no picked choice. The text is appended to
 # the formatted PAGE_PROMPT, only for such a call (skill waiting-page, "Route and close"). It has no `%`, so it is
 # never formatted.
 NONE_DIRECTION_RULE = (
-    "This call includes a re-ask: a write that gives an item new options and carries a `lastAnswer` note, so it asks "
-    "the owner again after a \"none of these\" answer. A note that asks for other choices (cheaper, different, more) "
+    "This call includes a re-ask: a write that gives an item new options and carries a `lastAnswer` note with no picked choice, "
+    "so it asks the owner again after a \"none of these\" answer. A note that asks for other choices (cheaper, different, more) "
     "is always allowed, even with other words. Otherwise, if the note already names an act a session can take with no "
-    "further pick from the owner, block it: the item should close and the note be filed as a step. "
+    "further pick from the owner, block it: the item should close and the note be filed as a roadmap step, or a todo record where there is no roadmap. "
     "The reason names no target."
 )
 # A write that sets options may widen what a shared tool accepts (decision uniform-over-variants). Appended like
@@ -250,13 +264,13 @@ def invoke_model(*args, **kwargs):
     return home(*args, **kwargs)
 
 
-def opus_ask(text):
-    """True only when the model answers {"ok": true} to the owner's prompt `text` as a present request to run Opus
-    agents. Fails closed: an error, a timeout or an odd answer is False with one stderr line; a plain
-    {"ok": false} is False with none."""
+def _ask_judge(head, text, what):
+    """True only when the model answers {"ok": true} to the owner's prompt `text` read under the prompt `head`. The one
+    fail-closed call of the plain asks: an error, a timeout or an odd answer is False with one stderr line naming
+    `what`; a plain {"ok": false} is False with none."""
     try:
         import decision_watch  # lazy: the one home of the model's name
-        verdict, error = invoke_model(OPUS_ASK_PROMPT + text, model=decision_watch.MODEL,
+        verdict, error = invoke_model(head + text, model=decision_watch.MODEL,
                                       timeout=OPUS_ASK_TIMEOUT, shape=OK_SHAPE, effort="low")
         if error:
             raise ValueError(" ".join(str(error).split()))
@@ -267,8 +281,20 @@ def opus_ask(text):
             raise ValueError("the answer has no true or false ok")
         return False
     except Exception as exc:
-        print("call judge: opus ask grants nothing: %s" % " ".join(str(exc).split()), file=sys.stderr)
+        print("call judge: %s grants nothing: %s" % (what, " ".join(str(exc).split())), file=sys.stderr)
         return False
+
+
+def opus_ask(text):
+    """True only when the model says the owner's prompt `text` is a present request to run Opus agents. Fails closed
+    (_ask_judge)."""
+    return _ask_judge(OPUS_ASK_PROMPT, text, "opus ask")
+
+
+def override_ask(text):
+    """True only when the model says the owner's prompt `text` is a present request to override a refusal. Fails closed
+    (_ask_judge)."""
+    return _ask_judge(OVERRIDE_ASK_PROMPT, text, "override ask")
 
 
 def opus_scope(text, context):
@@ -374,8 +400,9 @@ def main():
             if args.get("action") not in PAGE_WRITE_ACTIONS or not writes_an_item(args):
                 return 0
             import question_form
-            hit, writes = question_form.page_item_hit(args, payload.get("cwd") or "")
-            judged = [] if hit[0] else question_form.judged_item_writes(writes)
+            import override  # the writer's record id, as guard.py reads it; the payload's id is a local UUID
+            hit, writes = question_form.page_item_hit(args, payload.get("cwd") or "", override.remote_session_id())
+            judged = [] if hit[0] else question_form.judged_item_writes(writes, payload.get("cwd") or "")
             if not judged:  # guard.py refuses a hit; no write carries options, context or steps
                 return 0
             shown = json.dumps(judged, ensure_ascii=False)

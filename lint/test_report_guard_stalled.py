@@ -9,8 +9,8 @@ so a triage session cannot end a wake that leaves a stall unread. The rules the 
 - The newest build output decides. A build output is the result of a Bash call that runs build.py. A clean
   build prints no stalled line, so a newer clean build releases an older entry.
 - An entry line is `stalled step: <id> (...)` or `stalled step: item <n> (...)`. An unknown line is not an entry.
-- The refusal names the ids of the newest output's entries, says to dispose each (resume, pause or done) and
-  to rebuild.
+- The refusal names the ids of the newest output's entries, and cites the record that holds the steps to dispose
+  each.
 - A second Stop (stop_hook_active) is refused again, unless the report's Input Needed section names every
   entry id and item n. One missing id keeps the refusal. The escape is an escalation to the coordinator.
 - An owner `override` typed for the session lifts the hold, as guard_core's refuse() honours override.grant.
@@ -146,6 +146,7 @@ class StalledFixture(trg.SameTurnWriter):
     not copy it, so a change to the shared fixture reaches both files."""
 
     PAGE = trg.QuestionReachesPageTests.PAGE  # named here, not aliased at module level: an alias loads its cases too
+    NO_KEY = trg.QuestionReachesPageTests.NO_KEY  # make_repo's writer default; the same object, so the identity test holds
     setUp = trg.QuestionReachesPageTests.setUp
     make_repo = trg.QuestionReachesPageTests.make_repo
     stop = trg.QuestionReachesPageTests.stop
@@ -155,13 +156,14 @@ class StalledFixture(trg.SameTurnWriter):
         return self.stop(records, env_id=env_id, stop_active=stop_active, session_id=OWNER_SESSION)
 
     def held(self, out, *named):
-        """The Stop was refused as a block, and the refusal names each of `named`, the disposition words and a rebuild."""
+        """The Stop was refused as a block, and the refusal names each of `named`, the triage check and its record."""
         self.assertIsNotNone(out, "the Stop was not refused: a triage wake ended while a stalled step line printed")
         self.assertEqual(out.get("decision"), "block", "the Stop was not refused as a block: %r" % (out,))
         for word in named:
             self.assertIn(word, out["reason"], "the refusal does not name %r" % word)
-        self.assertIn("resume, pause or done", out["reason"], "the refusal does not say resume, pause or done")
-        self.assertIn("rebuild", out["reason"].lower(), "the refusal does not say to rebuild")
+        self.assertIn("Triage hold", out["reason"], "the refusal is not the triage hold")
+        self.assertIn("decision guard-remedy-not-to-owner", out["reason"],
+                      "the refusal does not cite the record of its steps")
 
     def released(self, out):
         """The Stop was not refused."""

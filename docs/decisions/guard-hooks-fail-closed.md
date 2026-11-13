@@ -14,7 +14,7 @@ Owner, 2026-10-12: a guard whose script or python is missing refuses the call. A
 
 Why: wrappers that ended `; exit 0` let the call through on a missing script, so the guard's refusals vanished exactly when the guard was broken.
 
-Cost: a machine with `settings.json` but no hooks refuses Bash, PowerShell, Edit, Write, MultiEdit, NotebookEdit, Agent, Task, Workflow, Skill and two MCP tools. This lasts until the hooks are installed. The refusal names the remedy.
+Cost: a machine with `settings.json` but no hooks refuses the guarded calls, and `hooks/test_wrappers.py` expects exit 2 from the guard wrapper in `settings.json` with its script missing. The guarded calls are Bash, PowerShell, Edit, Write, MultiEdit, NotebookEdit, Agent, Task, Workflow, Skill and two MCP tools; no test pins that list. This lasts until the hooks are installed. The refusal names the remedy.
 
 Protected by `lint/check_hook_stubs.py` (fixtures in `lint/test_check_hook_stubs.py`) and `hooks/test_wrappers.py`: each guard wrapper exits 2 with the remedy line on a missing script and a missing python. With a script present it execs it, passes stdin through, and returns its exit code. Advisory entries exit 0. The suite is red on a `settings.json` where a guard carries `onFailure`.
 

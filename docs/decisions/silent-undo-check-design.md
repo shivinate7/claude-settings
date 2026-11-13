@@ -3,7 +3,7 @@
 ## The ruling
 
 `lint/check_silent_undo.py` is the one home. CI runs it on each pull request with `--strict`.
-`merge/merge.py` calls it through `undo_check` before it pushes or merges. It reads two things.
+`merge/merge.py` calls it through `undo_check` before it pushes or merges. It reads three things.
 
 - **Reversal.** Landing the branch on upstream puts a file back as an earlier first-parent commit of
   upstream had it: the exact blob, a `-U0` hunk reversed on all but one line, or lines main only added
@@ -12,7 +12,13 @@
   later. The branch check has no time bound and no commit-count floor.
 - **Lost line.** A merge commit in the branch loses a line one parent added since the merge base. It
   catches a conflict taken "ours" and a hand edit of a merge. A line main only gained is main's. A line a
-  commit added on the branch alone is the branch's.
+  commit added on the branch alone is the branch's. A merge of three or more parents is not read, and the
+  check reports it as UNKNOWN only after the other reads finish. The merge tool refuses an UNKNOWN that
+  carries a finding, and the reason flag cannot lift it (step notes-union-batch-revival).
+- **Revived note.** A note the branch deleted is back at head, because a union merge of main put it back
+  (decision `notes-merge-union`). The check replays the branch's own commits and counts copies per note.
+  A note is its slug, or its whole line when it has no slug form. A rebase leaves no merge, so it is not read
+  (debt `silent-undo-rebase-no-merge`).
 
 The escape is the line `Drops-lines: <path> -- <reason>`, one path per line. `bin/merge` reads it from the
 commit trailers of the branch and from the PR body. A bare path excuses nothing, and no reason excuses
@@ -71,7 +77,7 @@ changed lines are a new edit, so the reversal dial stays at one line until a mea
   Numbers may differ only when both sides changed the base line (a third value).
 
 **Unknown is red in CI.** No upstream, a shallow clone, a merge of three or more parents, an old git, or a
-failed git read prints UNKNOWN. Locally it exits 0. With env `CI` or `--strict` it exits 1
+failed git read prints UNKNOWN. Locally it exits 0 unless the UNKNOWN carries a finding. With env `CI` or `--strict` it exits 1
 (ci-unknown-is-red). `merge.py` refuses on unknown, because its merge cannot be taken back. The
 way out that does not depend on the check is the reason flag
 `merge <pr> --confirm --undo-check-unknown-ok "<reason>"`. Claude may type it, with a reason (owner

@@ -27,6 +27,14 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.append(os.path.join(HERE, "..", "lint"))  # appended: a lint module never shadows a hook module
+import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+RUN = _test_temp.run_folder()  # removed when the suite ends
+# settings.json env sets MAILBOX_REPO for every session; local_time would read the live mailbox and print a second
+# line. These cases compare its one Central line, so no child sees a store.
+for _name in ("MAILBOX_REPO", "MAILBOX_CACHE"):
+    os.environ.pop(_name, None)
+HOOKS_UNDER_TEST = os.environ.get("HOOKS_UNDER_TEST") or HERE  # a fixture copy of hooks/ may be scanned instead
 
 # Today's values, pinned from hooks/guard_frozen.py and hooks/guard_core.py.
 FROZEN_FILES = ("/.claude/settings.json", "/.claude/settings.local.json")
@@ -76,6 +84,15 @@ print(json.dumps(sorted(m for m in set(sys.modules) - before
 
 def _shared():
     return importlib.import_module("shared_names")
+
+
+def _printed_line():
+    """The line local_time prints: the time line, then NOW_CENTRAL_POINTER on that same line. The
+    constant is read from local_time, never copied (building-allow-list-is-the-constant)."""
+    pointer = getattr(importlib.import_module("local_time"), "NOW_CENTRAL_POINTER", None)
+    if not isinstance(pointer, str):
+        raise AssertionError("local_time has no NOW_CENTRAL_POINTER string, so the printed line is not pinned")
+    return TIME_LINE.rstrip("\n") + pointer + "\n"
 
 
 def case_module_exists():
@@ -239,16 +256,18 @@ def case_local_time_output_unchanged():
         s1 = os.path.exists(os.path.join(cfg, "handoffs", "s1.inbox.md"))
         override = _run_local_time(cfg, "override", "s3").stdout
     want_inbox = "### 2026-07-04 10:30 CDT (UTC-05:00)\n```\nfb real note\n```\n"
-    want_override = TIME_LINE + ("Override: the next refused act goes through, once. "
-                                 "It ends at 10:40 CDT if unused.\n")
-    ok = (outs == [TIME_LINE] * 4 and saved == want_inbox and not s1 and override == want_override)
+    printed = _printed_line()
+    want_override = printed + ("Override: the next refused act goes through, once. "
+                               "It ends at 10:40 CDT if unused.\n")
+    ok = (outs == [printed] * 4 and saved == want_inbox and not s1 and override == want_override)
     return ok, "stdouts ok=%s, s2 inbox ok=%s, tagged prompts saved nothing=%s, override ok=%s" % (
-        outs == [TIME_LINE] * 4, saved == want_inbox, not s1, override == want_override)
+        outs == [printed] * 4, saved == want_inbox, not s1, override == want_override)
 
 
 def case_local_time_fails_open_on_bad_shared_names():
     """A missing or stale shared_names.py (no MACHINE_TAGS) must not stop the time line or an
     override grant: the install can land local_time.py before its sibling."""
+    printed = _printed_line()
     bad = []
     for label in ("absent", "stale"):
         with tempfile.TemporaryDirectory() as scratch:
@@ -266,7 +285,7 @@ def case_local_time_fails_open_on_bad_shared_names():
             done = subprocess.run([sys.executable, os.path.join(hooks, "local_time.py")],
                                   input=json.dumps({"session_id": "s1", "prompt": "override"}),
                                   capture_output=True, text=True, env=env)
-            if not (done.returncode == 0 and done.stdout.startswith(TIME_LINE)
+            if not (done.returncode == 0 and done.stdout.startswith(printed)
                     and "Override:" in done.stdout):
                 bad.append("%s: rc=%s stdout=%r" % (label, done.returncode, done.stdout[:60]))
     return not bad, "bad states: %s" % (bad or "none")
@@ -306,6 +325,195 @@ def case_one_home_for_lane_heads():
         if literal:
             problems.append("%s holds the literal 'lane/' at line %d" % (rel, literal[0]))
     return not problems, "; ".join(problems) or "both read the one home"
+
+
+def _hooks_without_shared_names(scratch):
+    """A copy of hooks/ under `scratch` with shared_names.py removed: the install that lands a hook before its sibling."""
+    hooks = os.path.join(scratch, "hooks")
+    shutil.copytree(HERE, hooks, ignore=shutil.ignore_patterns("__pycache__"))
+    os.remove(os.path.join(hooks, "shared_names.py"))
+    return hooks
+
+
+def case_sim_boot_record_exits_zero_without_shared_names():
+    """sim_boot_record.py exits 0 in every case (its docstring). With shared_names.py absent, a Bash call that
+    names no simulator tool still exits 0 and writes nothing to stdout."""
+    scratch = os.path.join(RUN, "sim-boot-no-shared")
+    hooks = _hooks_without_shared_names(scratch)
+    cfg = os.path.join(scratch, "cfg")
+    os.makedirs(cfg)
+    payload = {"hook_event_name": "PreToolUse", "tool_name": "Bash", "session_id": "s-nosh", "cwd": scratch,
+               "tool_input": {"command": "export FOO=1"}}
+    done = subprocess.run([sys.executable, os.path.join(hooks, "sim_boot_record.py")], input=json.dumps(payload),
+                          capture_output=True, text=True, env=dict(os.environ, CLAUDE_CONFIG_DIR=cfg), cwd=scratch)
+    return (done.returncode == 0 and done.stdout.strip() == ""), "rc=%s stdout=%r stderr=%r" % (
+        done.returncode, done.stdout[:80], done.stderr[-160:])
+
+
+def case_precompact_builds_its_digest_without_shared_names():
+    """A hook that lands before its shared_names.py still does its job: the PreCompact run writes the digest."""
+    scratch = os.path.join(RUN, "precompact-no-shared")
+    hooks = _hooks_without_shared_names(scratch)
+    cfg, repo = os.path.join(scratch, "cfg"), os.path.join(scratch, "repo")
+    os.makedirs(cfg)
+    os.makedirs(repo)
+    transcript = os.path.join(scratch, "transcript.jsonl")
+    with open(transcript, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps({"type": "user", "message": {"role": "user", "content": "hello"}}) + "\n")
+    payload = {"session_id": "s-nosh", "transcript_path": transcript, "cwd": repo, "hook_event_name": "PreCompact"}
+    done = subprocess.run([sys.executable, os.path.join(hooks, "precompact_handoff.py")], input=json.dumps(payload),
+                          capture_output=True, text=True, env=dict(os.environ, CLAUDE_CONFIG_DIR=cfg), cwd=repo)
+    digest = os.path.join(cfg, "state", "handoff", "s-nosh.digest.md")
+    return (done.returncode == 0 and os.path.isfile(digest)), "rc=%s digest written=%s stderr=%r" % (
+        done.returncode, os.path.isfile(digest), done.stderr[-160:])
+
+
+# The four hook modules that may hold a config dir copy (debt config-dir-copies). HOOKS_UNDER_TEST, when set,
+# names a fixture copy of hooks/, so the scan can be shown red on a copy outside the fallback.
+CONFIG_DIR_MODULES = ("daily_note.py", "override.py", "precompact_handoff.py", "sim_boot_record.py")
+CONFIG_DIR_ENV = "CLAUDE_CONFIG_DIR"
+HOME_DIRS = (".claude", "~/.claude")  # the default folder that shared_names.config_dir falls back to
+
+
+def _parents(tree):
+    """Each node of `tree` mapped to its parent."""
+    return {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+
+
+def _scope(node, parents):
+    """The innermost function, or the module, that holds `node`."""
+    while not isinstance(node, (ast.FunctionDef, ast.Module)):
+        node = parents[node]
+    return node
+
+
+def _imports_shared_names(stmt):
+    return any((isinstance(node, ast.ImportFrom) and node.module == "shared_names")
+               or (isinstance(node, ast.Import) and any(alias.name == "shared_names" for alias in node.names))
+               for node in ast.walk(stmt))
+
+
+def _in_import_fallback(node, parents):
+    """True when `node` sits in the `except ImportError` branch of a try whose body imports shared_names."""
+    cur = node
+    while cur in parents:
+        cur = parents[cur]
+        if isinstance(cur, ast.ExceptHandler) and isinstance(cur.type, ast.Name) and cur.type.id == "ImportError":
+            trying = parents.get(cur)
+            if isinstance(trying, ast.Try) and any(_imports_shared_names(stmt) for stmt in trying.body):
+                return True
+    return False
+
+
+def _names_home(scope, functions):
+    """True when `scope` names the .claude default, or calls a function of the module that names it, directly or
+    through another call: the default may sit in a helper the copy calls."""
+    todo, seen = [scope], set()
+    while todo:
+        cur = todo.pop()
+        if any(isinstance(inner, ast.Constant) and inner.value in HOME_DIRS for inner in ast.walk(cur)):
+            return True
+        for inner in ast.walk(cur):
+            callee = inner.func.id if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name) else None
+            if callee in functions and callee not in seen:
+                seen.add(callee)
+                todo.append(functions[callee])
+    return False
+
+
+def _unguarded_copies(path):
+    """The lines of `path` where a config dir copy sits outside the import fallback. A copy reads CLAUDE_CONFIG_DIR
+    in a scope that names the .claude default, or calls a function that does, whatever the function is called."""
+    with open(path, encoding="utf-8") as handle:
+        tree = ast.parse(handle.read())
+    parents = _parents(tree)
+    functions = {node.name: node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
+    lines = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and node.value == CONFIG_DIR_ENV:
+            if _names_home(_scope(node, parents), functions) and not _in_import_fallback(node, parents):
+                lines.append(node.lineno)
+    return sorted(lines)
+
+
+def case_config_dir_copies_sit_only_in_the_import_fallback():
+    """A config dir copy in these four modules sits only in the `except ImportError` branch of a shared_names import:
+    the install may land a hook before shared_names.py, and the fallback keeps it running. Any other copy is a second
+    home (debt config-dir-copies). A source scan with the ast parser; the function's name does not matter."""
+    problems = []
+    for module in CONFIG_DIR_MODULES:
+        for line in _unguarded_copies(os.path.join(HOOKS_UNDER_TEST, module)):
+            problems.append("%s line %d copies the config dir outside the import fallback" % (module, line))
+    return not problems, "; ".join(problems) or "every copy sits in the import fallback"
+
+
+# Fixture modules for the scan, written under this run's folder. In each, the copy's own function names no home:
+# the `.claude` default sits in a helper that the copy calls.
+HELPER_DEFAULT_COPY = '''import os
+
+
+def _default_dir():
+    return os.path.join(os.path.expanduser("~"), ".claude")
+
+
+def config_dir():
+    return os.environ.get("CLAUDE_CONFIG_DIR") or _default_dir()
+'''
+HELPER_DEFAULT_COPY_LINE = 9  # the CLAUDE_CONFIG_DIR read in config_dir
+HELPER_DEFAULT_IN_FALLBACK = '''import os
+
+try:
+    from shared_names import config_dir
+except ImportError:
+    def _default_dir():
+        return os.path.join(os.path.expanduser("~"), ".claude")
+
+    def config_dir():
+        return os.environ.get("CLAUDE_CONFIG_DIR") or _default_dir()
+'''
+
+
+def _fixture_module(name, text):
+    """Writes a fixture module under this run's folder and returns its path."""
+    path = os.path.join(RUN, "copy-fixtures", name)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+    return path
+
+
+def case_scan_flags_a_copy_whose_default_sits_in_a_helper():
+    """A copy outside the import fallback that reads its `.claude` default through a helper it calls is a second home.
+    The scan reads only the copy's own function, so it must follow the call and flag the CLAUDE_CONFIG_DIR read."""
+    lines = _unguarded_copies(_fixture_module("helper_default.py", HELPER_DEFAULT_COPY))
+    return lines == [HELPER_DEFAULT_COPY_LINE], "lines flagged %s, want [%d]" % (lines, HELPER_DEFAULT_COPY_LINE)
+
+
+def case_scan_passes_a_fallback_copy_whose_default_sits_in_a_helper():
+    """Control: the same copy inside the `except ImportError` branch is the fallback, so it is never flagged. Following
+    helpers must not flag the fallback."""
+    lines = _unguarded_copies(_fixture_module("helper_default_fallback.py", HELPER_DEFAULT_IN_FALLBACK))
+    return lines == [], "lines flagged %s, want none" % (lines,)
+
+
+def case_guard_lane_tag_is_the_shared_object():
+    """hooks/guard.py holds LANE_TAG as shared_names.LANE_TAG, the one object. A literal copy of the same string
+    reads equal to it, so the case asks for identity."""
+    shared = _shared()
+    guard = importlib.import_module("guard")
+    got = getattr(guard, "LANE_TAG", None)
+    return got is shared.LANE_TAG, "guard.LANE_TAG=%r is shared_names.LANE_TAG: %s" % (
+        got, got is shared.LANE_TAG)
+
+
+def case_report_guard_lane_tag_is_the_shared_object():
+    """lint/report_guard.py holds LANE_TAG as shared_names.LANE_TAG, the one object. A literal copy of the same
+    string reads equal to it, so the case asks for identity."""
+    shared = _shared()
+    report_guard = importlib.import_module("report_guard")
+    got = getattr(report_guard, "LANE_TAG", None)
+    return got is shared.LANE_TAG, "report_guard.LANE_TAG=%r is shared_names.LANE_TAG: %s" % (
+        got, got is shared.LANE_TAG)
 
 
 def case_guard_merge_binds_tag_prefixes_to_shared_names():
@@ -350,8 +558,20 @@ CASES = [
     ("(k) shared_names holds lane_head_refs: the bare step slug and lane/<slug>", case_lane_head_refs_pinned),
     ("(k2) build.py and the archive guard import lane_head_refs, with no copy of it or the lane/ prefix",
      case_one_home_for_lane_heads),
-    ("(l) guard_merge binds ROLE_TAG_PREFIX and TOPIC_TAG_PREFIX to shared_names' tags, not literals",
+    ("(l) guard.py holds LANE_TAG as shared_names' own object", case_guard_lane_tag_is_the_shared_object),
+    ("(l2) lint/report_guard.py holds LANE_TAG as shared_names' own object",
+     case_report_guard_lane_tag_is_the_shared_object),
+    ("(l3) guard_merge binds ROLE_TAG_PREFIX and TOPIC_TAG_PREFIX to shared_names' tags, not literals",
      case_guard_merge_binds_tag_prefixes_to_shared_names),
+    ("(m) every config dir copy in the four hook modules sits only in an ImportError fallback of shared_names",
+     case_config_dir_copies_sit_only_in_the_import_fallback),
+    ("(n) sim_boot_record exits 0 with shared_names.py absent", case_sim_boot_record_exits_zero_without_shared_names),
+    ("(o) precompact_handoff still writes its digest with shared_names.py absent",
+     case_precompact_builds_its_digest_without_shared_names),
+    ("(p) a copy whose .claude default sits in a helper, outside the import fallback, is flagged",
+     case_scan_flags_a_copy_whose_default_sits_in_a_helper),
+    ("(q) a fallback copy whose .claude default sits in a helper is not flagged",
+     case_scan_passes_a_fallback_copy_whose_default_sits_in_a_helper),
 ]
 
 
@@ -374,4 +594,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    finally:
+        shutil.rmtree(RUN, ignore_errors=True)

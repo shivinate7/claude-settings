@@ -6,7 +6,7 @@ A pull request that changes only prose or docs, and touches no rule, guard, chec
 
 Sources: owner, 2026-09-26 (no reviewer for a docs-only PR); owner, 2026-11-04 07:56 CST (waiting-page item 205 b, a short read for a record that files an owner ruling). The second ruling's source is the coordinator's brief. The waiting page is not in this repo.
 
-Why: a full review of a change that simple is wasted. A record that files an owner ruling can still misquote the ruling. `roles-solo-reviews-logic-diffs-only` says the same for solo mode. This record extends it to every other session shape.
+Why: a full review of a change that simple is wasted. A record that files an owner ruling can still misquote the ruling. `roles-solo-reviews-logic-diffs-only` says the same for a run with one lane. This record extends it to every other session role.
 
 ## The round
 
