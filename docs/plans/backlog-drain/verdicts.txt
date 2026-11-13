@@ -1,0 +1,452 @@
+PR	verdict	kind	step	head	reason
+1034	keep	prose	craft-book	456296f55d43	shivpedia full plan (2 docs files), merges clean; PARKED until the 2026-11-20 count in decision merge-practices decides; before merge drop handoffs/craft-book.md, add Q0 to section 9, refresh section 7 (test-practices on main); counts stale
+1147	close	prose+code	timing-tests	39cfa19a477e	into #3167 (rebuilt P5 ruling), not 2081; close-now (owner pick 13:12 CST, step close-replaced-at-open, relayed by Coordinator 13:21 CST Nov 13): replacer #3167 is open (read on GitHub); close it, keep the branch; reopen if the replacer is dropped
+1314	close	code	mcp-merge-unguarded	7a46a0b94ecb	main already has matcher entries (settings.json:253) and scan test (lint/test_settings_matcher.py)
+1315	close	code	ste-lint-diff-fail-closed	0f0060684bb3	close-now: rebuilt as #3181 (draft, not on main); runner 10 closes with a pointer once #3181 merges (Coordinator 12:04 and 12:06 CST Nov 13); old reason: ste-lint must fail (not exit 0) on unreadable diff (ruling item 276); put unshallow retry + non-zero exit on main's READ; close-now (owner pick 13:12 CST, step close-replaced-at-open, relayed by Coordinator 13:21 CST Nov 13): replacer #3181 is open (read on GitHub); close it, keep the branch; reopen if the replacer is dropped
+1349	rebuild	code	watcher-builtin-hook-survey	cfa2e589b04a	cost_probe.py + CostTests + named-exception text; 8 conflicted files, 5246 commits behind; reword hooks.md exceptions to fit CLAUDE.md timer-allowed-when-cheaper; redo plan edits; re-verify every cost row on current main
+1377	close	code	challenger-page-against	8acf4c399891	older design (against field + refute_item.py); owner may want its auto-refuter script instead of "spawn one Sonnet agent" in SKILL
+1386	close	code	export-after-page-write	db0b51cec69d	promise-guard half already in keep #2677; held (coordinator 11:44 CST Nov 13)
+1417	close	code	ready-checks-use-pinned-tools	71b0be6a71c0	ancestor of 1938 (lane-lint-runs-local-tools rebuild, itself pending owner pick on design vs main's --pinned)
+1432	fresh	-	one-home-check	8005e3943ee1	fresh: runner 10 (under 48 h, not reviewed)
+1461	close	code	lane-lint-runs-local-tools	0d0c650b5778	inside 1938; fold into 1938 rebuild
+1509	close	code	notes-fix-large-3	8de06735b541	script-file test-write reader on main (8705f9a93)
+1517	close	code	notes-fix-guard-2	145b081dd0e6	subset of 1826
+1520	close	code	notes-fix-large-3	42f0a5a0e522	inside 1618
+1533	fresh	-	page-checks-reach-triage	ddb8659b56e2	fresh: runner 10 (under 48 h, not reviewed)
+1536	keep	code	notes-fix-page	c904ea4d0f2b	SOURCE_RE/artifact_id fixes; 1 conflict hunk; rerun guard suites at rebase
+1552	close	code	review-rounds-rework	5cb4cfe59cc5	on main already (review_guard_marked etc); close after 1789 rebuilt without its "lands with PR #1552" line
+1555	close	code	notes-fix-large-3	4e868978469a	inside 1618
+1561	rebuild	code	pr-state-is-on-the-pr	7e81df0bdda6	small rebuild only: "held by main red <age>" on batch lines, file Nov 10 01:07 CST ruling (--lane-lint read-only; label write moves to part 4) in pr-ledger.md, README --reviewed text + skills pointers; core superseded by 2845 line
+1585	close	code	notes-fix-large-3	a66bc002e32b	superseded by 2167
+1598	close	code	notes-fix-large-3	b98415e070c1	reader on main
+1616	close	prose+code	fix-check-after-notes-commit	c3d7fd5d588a	contradicts main (one fix verifier per record; no WIDE/chain); only slice wanted: fix check whose head differs from record Head by record/notes files only (compare_files) - coordinator pick whether wanted, may be in 2365/1789 rebuilds
+1618	rebuild	code	notes-fix-large-3	0286c61657ad	Kind check (debt ruling-pr-kind-unchecked open); 19-file conflict; rebuild as two lanes (Kind check; layout.py/waiting export mark handling)
+1619	rebuild	code	notes-sightings-expiry	721ccc144f86	notes sightings/expiry reader (expire-notes, debt-flow, notes_fix_problem); item 358 lands first; 5 of 16 files conflict; re-apply CLAUDE.md edits on main text; untested on main
+1631	rebuild	code	notes-fix-large-3	bd000f55d36c	pr-ready guard (debt pr-ready-unguarded); rebuild after 2115
+1632	rebuild	code	notes-fix-large-3	e10ac1e68e22	workspace-root walk + npm_deref; main reads --prefix; debt text stale
+1636	rebuild	code	guard-path-expand-forms	1ddd703f4fe0	default-word expand (${D:-x}), _py_paths additions, test-author _own_red_run branch; 4 of 7 files conflict, 4739 commits behind; redo in main's _resolve_into tokenizer; re-home test cases
+1647	close	code	notes-fix-large-3	96ca17a84dad	main has python/node reader; extra forms (bash, source, ./f, uv run, python -m, pwsh -File) re-file as debt if wanted
+1687	rebuild	code	mcp-tools-in-guard-matcher	f4fc22ad912b	3 missing matcher names (add_issue_comment, update_issue_comment, enable_pr_auto_merge) + push-main ask for file-write tools; PR is union of 3 branches, split; 10-file conflicts; OVERLAPS 2115 rebuild (notes-fix-large-3): do once
+1692	close	code	sim-lease-gaps	25a3ca4f3d94	contained in 2061
+1706	close	code	notes-fix-large-3	85de59e5423d	subset of 2115
+1707	close	code	notes-fix-large-3	ffc9149ff9cf	subset of 1722/2115; adds false debt review-record-mcp-edit-unjudged
+1708	close	code	merge-lock-expired-delete-race	3ccb79d428fc	ancestor of 1729 and 2148
+1714	keep	code	handoff-per-agent	b032ff03946d	agent-handoff-write guard; text conflicts only; renumber decision item 14 -> 17; re-point cases into tests/guard/
+1715	close	code	mutate-sweep-control	b456e502dde5	close-now: rebuilt as #3226 by lane mutate-sweep-control (named in the lane hand-in; Coordinator 13:20 CST Nov 13); runner 10 closes with a pointer once #3226 is on main; old reason: sweep half only: clean-layout control in janitor/mutate_sweep.py main(); guard half on main already; drop PR edits to mu; close-now (owner pick 13:12 CST, step close-replaced-at-open, relayed by Coordinator 13:21 CST Nov 13): replacer #3226 is open (read on GitHub); close it, keep the branch; reopen if the replacer is dropped
+1722	close	code	notes-fix-large-3	437866a47bf3	superseded by 2115
+1729	close	code	merge-lock-expired-delete-race	dc72a6b0577d	ancestor of 2148
+1732	keep	code	handoff-per-agent	6273a1a08bef	git_source_test_hit (checkout/restore --source of a test refused for builders); adjacent churn only; re-point cases into tests/guard/
+1733	rebuild	code	notes-fix-page	1f350467bc51	runs layer + low paused cell (nfp-narrow-paused-cell); 31 hunks vs main's paused cell; redo on main page.html/index.html, re-pin
+1743	close	prose	silent-undo-reads-retire-run	4ab3b1ae5710	ancestor of 1753
+1748	close	code	lane-finds-triage	d6422147c96a	opposite of owner ruling R22 point 3 (brief names a role, never a session id); superseded by 2709
+1751	close	code	review-record-provenance	c9a225c29781	patch-equivalent inside 2440 except 2 commits; closes if 2440 rebuild goes ahead
+1753	keep	code	silent-undo-reads-retire-run	b71ede7ca0a4	CI body wiring + deferred retire cite + key-line copy; 9-file conflicts; drop SESSION_LINK slice (main has SESSION_URL); needs test run after rebase; land first
+1758	close	code	notes-fix-large-3	26711383338c	subset of 2115
+1760	rebuild	code	record-post-runs-lane-lint	4c97367d58b3	review-record never runs lint; 9 of 11 files conflict; main's lane_lint posts owner lane-lint comment: decide whether review-record lint pass posts it; update stale cost/timeouts (LINT_SECONDS 3600); keep HOOK_CATALOG_ROOT drop; owner intent for step unknown; item 714 b (owner 11:53 CST Nov 13): lane lint follows the pinned trees, so proceed
+1771	rebuild	code	coordinator-pick-needs-record	954f087a37c3	handoff "Rulings with NO HOME YET" Home: check; clean textual merge would NameError (main removed _PREMISES_HEAD, added section_heading/_premises_head/_premise_lines); rebuild on those; rerun test_ruling_home.py, test_precompact_handoff.py
+1779	rebuild	code	roadmap-blank-pages	a0a5f510802a	record_source fetch in main() only + stale_pages flags empty roadmap block (exit 1); step still todo on origin/roadmap; conflicts test_idle_lanes.py, waiting-page SKILL.md; re-run 4 test files; HELD: child-repo pages need the owner word, on the page (coordinator 11:44 CST)
+1784	rebuild	code	export-after-page-write	e6e9f6458ff2	writer label as whole token (writer_ids, writer_names_id, record_id); 7 conflict regions in question_problem; keep label design; supersedes 1386 label half and overlaps 2865 (waiting-export-miss-cloud, keep): coordinator to check; lane fan-code-handoffs assigned by coordinator 11:35 CST; UPDATE Coordinator 12:28 CST Nov 13: replaced by #3197 (close clears only once #3197 is on main)
+1789	rebuild	code	review-rounds-rework	f174a536172e	10-file conflicts, contradicts main (counted FAIL/WIDE, round-3 hold, haiku fix check); fold only the unknown REVIEW_MODEL refusal + findings labels into R9 rewrite (step rounds-rules-one-record); drop rest; lane rounds-rules-one-record session_013NEJL1WaFntJRa9xwoqMHZ
+1805	keep	code	resume-msg-role-check	baecdac7739d	message-role-scope receiver-name lookup + verbs; re-home cases to tests/guard; recount rule_audit 61; drop dup matcher test; may owe round-3 net-value test
+1811	keep	code	runner-repos-in-parallel	3b46a73e067a	per-root gh cost tests; rebase (5 doc-text conflicts); drop brief.md lines
+1813	rebuild	code	merge-passes-settings-dir	f6f1ca00c434	per-step CLAUDE_SETTINGS_DIR; drop worktree pin machinery, reuse main's pin_tree; keep ste-lint local; port settings_pins reader if wanted; competing design on main (--pinned); pick with 1938/2001 lane-lint pinning decision; item 714 b (owner 11:53 CST Nov 13): lane lint follows the pinned trees, so proceed
+1826	close	code	notes-fix-guard-2	daa81094bac3	close-now (owner pick 13:12 CST, step close-replaced-at-open; runner 10 asked 13:38 CST Nov 13): replacer #3179 is open (read on GitHub, head 12027d0df); lane notes-fix-guard-2 commented "Replaced by #3179"; close it, keep the branch; reopen if the replacer is dropped; old reason: session_start.sh TMPDIR block; product merges clean; thread 4 params through main's hook_launch in hooks/test_session_start.py, drop PREPEND
+1829	close	code	same group	f812874cde31	superseded by 1951
+1831	close	code	lane-lint-unshallow	936092ed5402	carried by 1916 rebuild (1916 contains 1831 head via merge commit 86a899f60); closes only because 1916 carries it - main lacks unshallow_for_lint
+1835	close	code	stall-watch-quiet-lint	593a9c5e6745	same change rebuilt in 2800 (keep, fan-prose-small-homes)
+1836	close	code	lane-lint-runs-local-tools	67af2d5fc137	inside 1938; fold into 1938 rebuild
+1839	close	code	same group	4ecbf40cd094	superseded by 1951
+1844	close	code	lane-lint-hook-suites	5a846d7588e6	on main already with later fixes
+1848	close	code	runner-repos-in-parallel	0654324c7d75	superseded by 2071 rebuild
+1849	keep	code	resume-msg-role-check	c744278156cb	msg-role false-alarm fixes (follow-up to 1805 core); mutate_guard add-add keep both; land either first
+1861	rebuild	code	idle-lane-steps-unknown	e497e48a32c5	most on main; missing: two-repo hold (off-record step with another repo's cs-repo tag) + read-once trailers (NOT_READ, trailer_ids); all 5 files conflict; alternative: close and file the residual as a small new step (delta small)
+1863	rebuild	code	draft-pr-guard-heredoc	fae8e4f7b0b6	heredoc-keep fix (debt heredoc-written-run-false-alarm); rebuild on main after 2824 merges (same functions in guard_core.py)
+1869	rebuild	code	silent-undo-checks-pr-base	cf96725102af	keep only cite-reason notes ("cite for <slug> not accepted"; check_debt_retire judged/cited_deletes/reason split; closes debt retire-excuse-silent-refusal); drop 10 base-resolution commits (main reads tracked upstream); stack on whichever of 1753/1935 merges first; reconcile with their "cite for <slug> not read" line
+1871	close	code	process-held-end-to-end	1d2054259519	inside 2067
+1873	close	code	same group	8a826f9ef4b3	1839 plus one provenance-label commit; re-apply label in 1951 rebuild only if guard/kind freeze survives
+1881	close	code	same group	5cf0a0fc8912	superseded by 1951
+1892	close	code	same group	11c2103e3dbf	superseded by 1951
+1897	rebuild	code	draft-pr-guard-heredoc	9cc1859271d3	rebuild only its extra: mutant-anchor check (precheck_errors, lint/check_mutant_anchors.py, CI step); heredoc chain comes from 1863
+1900	close	code	runner-repos-in-parallel	3eac910e1c20	superseded by 2071 rebuild
+1916	rebuild	code	lane-lint-hook-suites	702d262ebb90	other-job suite runs for lane lint (other_job_runs, fetch-retry, GIT_TRACE strip, unshallow, NOT_RUN_JOB); 54 conflict hunks; rebuild only own commits from 86a899f60; would undo main's 1844 fixes if merged as is; coordinator/owner: is other-job suite in lane lint still wanted?; item 714 b (owner 11:53 CST Nov 13): lane lint follows the pinned trees, so proceed
+1935	keep	code	silent-undo-reads-retire-run	e6aff647e548	pre-existing-needs-main-run guard; 3-file mechanical conflicts; drop commits shared with 1753; becomes rebuild if owner wants shared clause parser first
+1938	rebuild	code	lane-lint-runs-local-tools	53dfd0e9c945	top of 1461<1836<1938 chain; contradicts main design (--pinned git archive; decisions lanes-run-no-full-ci-job, action-pins-follow-sessions: lane lint stays local); coordinator/owner pick needed: should lane lint follow pinned trees? If no, close 1938 and keep only what main lacks (yaml_scalar reader, settings_pins scan, SIGTERM cleanup + dead-run sweep); item 714 b (owner 11:53 CST Nov 13): lane lint follows the pinned trees, so proceed
+1951	close	code	fail-record-ancestor-head	79c49dfb8636	OVERRIDES earlier 1951 rebuild row: contained in 2365; the 2365 rebuild lane carries the core
+1958	close	prose+code	timing-tests	b870acbd04e8	into #3167 (rebuilt P5 ruling), not 2081; close-now (owner pick 13:12 CST, step close-replaced-at-open, relayed by Coordinator 13:21 CST Nov 13): replacer #3167 is open (read on GitHub); close it, keep the branch; reopen if the replacer is dropped
+1964	rebuild	code	notes-fix-page	04c7d3ab18c7	keep layout.py set-waiting-page fix + build_parser; redo records-page redirect half on main's strip_redirections
+1971	close	code	pr-backlog-clear	d37a95d84ebb	inside 2123
+1975	close	code	bg-tail-loses-verdict	76daeb155dab	ancestor of 2015
+1987	close	code	notes-fix-guard-2	9f8799a97d2c	close-now (owner pick 13:12 CST, step close-replaced-at-open; runner 10 asked 13:38 CST Nov 13): replacer #3179 is open (read on GitHub, head 12027d0df); lane notes-fix-guard-2 commented "Replaced by #3179"; close it, keep the branch; reopen if the replacer is dropped; old reason: ENTRY_WRITES/ENTRY_AMEND amend guard; re-point 178 test lines into tests/guard section file red then green; redo Cost/Measure lines; must re
+1995	close	code	runner-repos-in-parallel	7ae031d80470	superseded by 2071 rebuild
+2001	close	code	lane-lint-guard-suite-install	b1b4d7dd0479	earlier layers on main in other form; new guard-suite-in-lane-lint layer contradicts main (job scope is linted job only; GUARD_SHARD jobs; touched-tests HEAVY); closing loses debts lane-lint-guard-browser-skip + notes: re-file against main design if wanted
+2002	close	prose+code	timing-tests	fd0d55ad11fd	into #3167 (rebuilt P5 ruling), not 2081; close-now (owner pick 13:12 CST, step close-replaced-at-open, relayed by Coordinator 13:21 CST Nov 13): replacer #3167 is open (read on GitHub); close it, keep the branch; reopen if the replacer is dropped
+2015	rebuild	code	bg-tail-loses-verdict	5d44cbeed150	85 commits not on main, 9-file conflicts; add --release-check to MERGE_OPTIONS; split fail-closed imports (reread_check, precompact_handoff, proc_env) into own PR
+2017	close	code	lane-lint-cloud-time-limit	de1c0e755181	close-now: rebuilt as #3200 by lane fan-code-check-cost-pins (named in the lane hand-in; Coordinator 13:20 CST Nov 13); runner 10 closes with a pointer once #3200 is on main; old reason: core on main (1d8c70b1a); unique: other_job_runs/OTHER_JOB_SECONDS/NOT_RUN_JOB/MISSING_INSTALL, ci-job unknown reads, gu; close-now (owner pick 13:12 CST, step close-replaced-at-open, relayed by Coordinator 13:21 CST Nov 13): replacer #3200 is open (read on GitHub); close it, keep the branch; reopen if the replacer is dropped
+2024	keep	code	notes-fix-page	2ae838393d39	question-form stack; 2 test-file conflict hunks; land before 2300
+2026	rebuild	code	notes-fix-report	fe431c70808e	feedback-guard fixes (unread_note, STANDING_HOMES/GRANT_HOMES shared parts); conflicts _closed_reason; drop dup note once-home-standing-word-list
+2030	keep	code	notes-fix-report	d1e3aeadec76	split shared_names import in override.py so NOTICE_TAGS survives; test conflicts only (keep both); drop notes.md hunks main holds; "line 442" -> hooks/guard.py:644
+2033	close	code	sim-lease-gaps	090c4c93ec7f	contained in 2061
+2052	close	code	notes-fix-large-1	964981245f5c	subset of 2171
+2055	rebuild	code	export-check-writer-page	5b14714fa5e9	3 parts still wanted: writer from meta/page get of repo's waiting page only; close of read-back item counts as send; block text names [closed]; drop dup failed-sends part (on main); re-cut after 1784/2865 land; debts page-write-without-n, page-block-no-closed-hint open
+2061	rebuild	code	sim-lease-gaps	3ffe6bcb131a	sim lease renew/run limit/drive lease; 8-file conflicts, 4415 commits behind; ruling numbers 10-12 collide with main's; narrows ruling 1; Cost lines fail cost-line-pinned; rebuild on main; owner may need to confirm drive-lease ruling still wanted; lane says sim-lease-gaps is #2787 at runner 10: check if 2787 replaces this; HOLD: 2787 carries only about half (about 40 of 80 commits); the simulator-drive-lease guard series is not in 2787; rebuild that guard on main after 2787 merges, then close 2061
+2063	rebuild	code	record-claim-cites-code	788ad60caf98	STALE009/STALE010 CodeClaimReader, dead_name_cites; 2 prose conflicts (reviewer.md, stale-cites-at-merge.md); rerun test_stale_cites.py; re-pin counts
+2067	rebuild	code	process-held-end-to-end	84d390d078cc	10-file conflicts; main holds round-3 ruling 402a only (PR writes item 359 pick b, contradicts); marker work on main; carry only merge confirm refusing lane tip with no done record (refuse_owed_round, owed_round, unreviewed_lane); drop item 359 text; re-point tests to tests/guard; owner item 382 pick a not on main; lane process-held-end-to-end has a prose-only grant: needs a code lane; reusable prose on branch process-held-wording 8281b0ee1 (copy, do not merge)
+2071	rebuild	code	runner-repos-in-parallel	04089d720e45	merge-roots-cover guard, stale (21 hunks / 11 files); rebuild guard-only on top of 1811; no incident behind guard seen (step deferral only) - coordinator may decide keep/drop; guard held for owner pick on item 715 (replay past runner commands; keep only if clean and small)
+2081	close	code	timing-tests	0ad45a9672d0	superseded by #3167 (rebuilt P5 ruling, draft lane/time-pinned-p5-ruling, head 3a97b6e430; coordinator relay 11:5x CST); close-now (owner pick 13:12 CST, step close-replaced-at-open, relayed by Coordinator 13:21 CST Nov 13): replacer #3167 is open (read on GitHub); close it, keep the branch; reopen if the replacer is dropped
+2083	rebuild	code	commit-refuses-conflict-markers	be1347cc86f0	unread git read must not be "no hit" (CONFLICT_MARKERS_UNREAD_KIND, read_default_base_state, push_branch_unread); 5-file conflicts; re-place ~400 test lines into tests/guard/s13406-merge.py, s33355-misc.py; redo decision cost lines
+2097	close	code	guard-relative-write-escape	5b7144657241	core on main; rest contradicts main; debts other-git-option-unread, other-python-dynamic-unread may need re-filing
+2099	close	code	git-write-after-failed-cd	c16ae94ca135	2144 (rebuild, notes-fix-large-3) carries all 2099 commits except 2 redundant ones; restate c16ae94ca Drops-lines trailers on 2144 rebuild if needed; close-now (owner pick 13:12 CST, step close-replaced-at-open, relayed by Coordinator 13:21 CST Nov 13): replacer #2144 is open (read on GitHub); close it, keep the branch; reopen if the replacer is dropped; hold-stacked (runner 10, 13:25 CST Nov 13): open replacer #2144 has base after-cd-errexit, which is #2099's head; closes after its dependents merge
+2115	rebuild	code	notes-fix-large-3	013da95c86f0	review-record form + head guard, MCP auto-merge/push-main asks; 21 hunks in 13 files; rebuild once; add add_issue_comment etc to matcher
+2123	rebuild	code	pr-backlog-clear	403afbc0ecb5	coordinator-scope guard (COORDINATOR_MCP_WRITE_TOOLS, read_recorded_role, merge-role-skips-raw-merge gap open); 13 conflicting files; re-home 1834 test lines into tests/guard; only enable_pr_auto_merge new in matcher; lane pr-backlog-clear declined: fresh builder lane needed
+2129	close	code	notes-fix-large-3	5a93c5193e95	subset of 2167
+2144	rebuild	code	notes-fix-large-3	9bc869753e57	git-after-cd rule (incident 2026-11-07 16:15 CST); 15 hunks in 9 files
+2146	keep	prose	pr-review-range-check	45d2ce4f8963	2 appended notes (pointer-mkdir-let-through, two-briefs-one-branch); merges clean; note 2 cites step one-worktree-per-branch (not on main, unknown)
+2148	close	code	merge-lock-expired-delete-race	19510dea11f0	rebuilt as draft #2689 (head 4bd0f5412, lane lint PASS, round 3 PASS, with runner 10); its two rulings go to triage first (coordinator 11:46 CST Nov 13); close-now (owner pick 13:12 CST, step close-replaced-at-open, relayed by Coordinator 13:21 CST Nov 13): replacer #2689 is open (read on GitHub); close it, keep the branch; reopen if the replacer is dropped
+2156	rebuild	code	bg-tail-loses-verdict	4f479c0f75b2	glued-& reader, any-filter, lone writers; rebuild on top of rebuilt 2015; any-filter may cry wolf (owner/coordinator call: keep or drop widenings)
+2164	close	code	bg-tail-loses-verdict	af053ccf2231	ancestor of 2015
+2167	keep	code	notes-fix-large-3	a474d4bcd9d2	push-CI report check, debt push-report-before-checks; rebase 4 additive hunks; fix cite "owner 2026-11-07 13:20 CST cull-rules" (it is a coordinator ruling, pr-ledger.md:23)
+2171	keep	code	notes-fix-large-1	3845efe4d38e	env-file folder walk; rebase: guard.py:4737 add cwd=cwd, guard_env.py import union, re-home 469 test lines into tests/guard/s08198-env.py / s10739-env.py
+2173	close	code	option-tradeoff-pushback	9309aa81d8f3	step skip stands: measured 6.1% false alarm (10 of 163 answered items), caught 1 of 33; coordinator affirmed 09:31 CST Nov 12; lane fan-prose-guard-2 11:44 CST
+2195	close	code	past-ruling-on-send	4422fad7e739	close-now (owner pick 13:12 CST, step close-replaced-at-open; lane past-ruling-on-send told the Coordinator and runner 10 13:53 CST Nov 13): replacer #3206 is open (read on GitHub, head b54f0e36a, body "Replaces #2195"); close it, keep the branch; reopen if the replacer is dropped; old reason: judge_send/send_question/past_ruling_check; 7 files conflict; PAST_RULING_TIMEOUT now 60 s (budget 15+60 and settings ti
+2196	rebuild	code	cite-range-symbol-match	936dff70c8b2	STALE011 (+STALE009/010 stack of ~50 commits) not on main; 3 prose conflicts (stale-cites-at-merge.md, claims-carry-backing.md, reviewer.md); confirm earlier PRs #1539/STALE010 ride with it or are superseded; rerun STALE011 in tree mode after rebase
+2197	rebuild	code	guard-relative-write-escape	e7f7ab9c3621	relative_write_escape in worktree-home (incident 2026-11-08 mkdir ../tmp live); 13 hunks; thread anchor through main's dir_before_segment; keep design + 306 test lines; rebuild first (2234 on top). Note 2691 (agent-asks-become-refusals, keep) covers the same relative-write refusal: coordinator to check overlap
+2200	close	code	review-record-past-head	d72675b1a74b	subset of 2365
+2226	rebuild	code	draft-pr-guard-text-false-alarm	03192fb130bc	actual content: Monitor-allow change to waiter guard (WAITER_MONITOR_REASON, timeout_ms, debt monitor-ci-poll-loop) + heredoc \' reading; step name mismatches; re-apply Monitor part on main (small); re-check premise that Monitor reaches guard as Bash with timeout_ms; heredoc part after 2824 merges or split; needs fresh review
+2230	close	code	report-guard-spawn-model	57fc2e3f8344	close-now: rebuilt as #3160 (draft, not on main); runner 10 closes with a pointer once #3160 merges (Coordinator 12:04 and 12:06 CST Nov 13); old reason: only ROLE_MODEL_RE design-reviewer lookbehind fix (?<![\w-])(?<!design ) + 2 tests wanted; other two fixes on main; close-now (owner pick 13:12 CST, step close-replaced-at-open, relayed by Coordinator 13:21 CST Nov 13): replacer #3160 is open (read on GitHub); close it, keep the branch; reopen if the replacer is dropped
+2234	rebuild	code	guard-relative-write-escape	cc3637412007	quoted script args, heredoc kept-body reading, perl -i; 20 hunks; rebuild after 2197
+2262	close	code	ste-lint-run-exit-codes	ed4a70d7a50e	close-now: rebuilt as #3181 (draft, not on main); runner 10 closes with a pointer once #3181 merges (Coordinator 12:04 and 12:06 CST Nov 13); old reason: keep stale_run_exit (only last line "stale-cites: FAIL" zeroes exit under FAIL=false), TREE_OUT capture, action.yml fail; close-now (owner pick 13:12 CST, step close-replaced-at-open, relayed by Coordinator 13:21 CST Nov 13): replacer #3181 is open (read on GitHub); close it, keep the branch; reopen if the replacer is dropped
+2276	close	code	bg-tail-loses-verdict	4cbf017f10aa	ancestor of 2015
+2277	close	code	review-record-past-head	11192dff9ba5	subset of 2365
+2297	rebuild	code	live-stream-monitor-allowed	c20c85383c5e	Monitor tool as allowed live-stream wait (MONITOR_TOOL, SHELL_COMMAND_TOOLS, stream_family); 6-file conflicts; decide Monitor at newer gates (scratchpad-owner guard.py:6463, guard_merge.py:2014, config_watch.py:520/561); same area as 2226 Monitor part: do once
+2300	rebuild	code	notes-fix-page	76228dee40c8	core: PR body read through event file in ci-job/action.yml/merge.py; drop 2024 rider and session-link skip main has; 23 hunks
+2301	close	code	bg-tail-loses-verdict	c02058d87e6b	ancestor of 2015
+2321	close	code	bg-tail-loses-verdict	87503213fb02	ancestor of 2015
+2322	close	code	builder-diff-auto-merge-reflog	b7a2e2912792	close-now: rebuilt as #3209 by lane builder-diff-auto-merge-reflog (named in the lane hand-in; Coordinator 13:20 CST Nov 13); runner 10 closes with a pointer once #3209 is on main; old reason: take only top 8 commits 7ac111a39..b7a2e2912 (6 files), not the 1943-commit batch-66d stack; rewrite own_changes for mer; close-now (owner pick 13:12 CST, step close-replaced-at-open, relayed by Coordinator 13:21 CST Nov 13): replacer #3209 is open (read on GitHub); close it, keep the branch; reopen if the replacer is dropped
+2326	rebuild	code	review-record-stack	9efd6bbc4776	replay of old 1440/1575/1828/1957; keep WIDE verdict, round-3 holds, fix FAIL counts as next round (owner items 347a 356a 362b 363b); drop round floor and hard-coded fix model; do not close
+2347	close	code	notes-fix-page	cd80faefeea3	ancestor of 2982 (outside group, rebuild: re-shard 5-leg shoot job vs main's checks-waiting-page split); 2982 carries it
+2365	rebuild	code	review-record-past-head	e195c38be405	cumulative stack incl 1951 lineage; rebuild core only on main: open_fail_on_ancestor, one decision paragraph, tests; drop counted-FAIL/WIDE, fix-check chain, REVIEW_FIX_GUARD_MODEL, ~25 debt notes
+2440	rebuild	code	review-record-provenance	c028c1926176	64 conflict hunks/25 files; main has own live_review_state/REVIEW_CHECK_BUDGET 70 vs PR's shared 28 budget; MCP merge + draft guard already on main; rebuild core provenance (REVIEW_STAMP_SALT, cutover read, edit-route/GraphQL review-record guard, comment-post guard); maybe carry 1751's 2 extra commits (hit->bypass rename, comment reword)
+2463	close	code	lane-push-frozen-in-batch	8e1b00b61317	superseded by 3019; its debt docs/debts/push-batch-mutant-merge-dir.md not in 3019 (unknown if still real)
+2491	close	code	merge-route-author-paths	d65524fce177	already on main (e2aec35ac; guard.py merge_route_paths, mutant, tests/guard s23264)
+2500	close	code	close-replaced-at-open	6209713a48f2	stale earlier copy of 2667; overlaps fully
+2527	rebuild	prose	item-cite-carries-name	c3a1f8cb5735	report-guard half superseded by 2997; carry only prompt line in hooks/precompact_handoff_prompt.md + its test + StalledLineReplyTests case re-pointed at bare_item_cite
+2549	close	code	artifact-guard-matcher-names	e034db8de485	older rival of 2927; 2927 covers 15 tools vs 6, conflicts in 8 files; its two gaps go to 2927 rebase
+2654	keep	prose	test-guard-split-per-rule	e1b49d545e34	WAVE (reopened): 2 commits, notes only; clean; lane lint PASS, docs-only record
+2661	keep	prose	roster-on-record-branch	a23aa8dce6fb	WAVE (reopened): 4 commits; clean; round 2 PASS
+2663	keep	prose	usage-brake	3390b431eeee	WAVE (reopened): 3 commits; clean; review PASS; owner scope correction open (page item 540)
+2664	keep	code	builder-report-in-head	697d55472eaf	WAVE (reopened): 16 commits; clean; round 3 PASS net positive; carries closed 1978; cost-pin risk unrun
+2665	keep	code	input-needed-reads-page-status	27567de1b3fa	WAVE (reopened): 13 commits; clean; round 3 PASS net positive; replaces closed 2530
+2666	keep	code	override-strips-status-block	050f8007b6c7	WAVE (reopened): 16 commits; one docstring conflict; round 3 PASS net zero; open owner call in decision text | needs-home: owner words land only via this PR
+2667	rebuild	code	close-replaced-at-open	eb214c9c69a3	close-replaced lines; feature not on main; re-point reopen_lines/replaced_closes to main's (n, base, kind) done triples, red then green
+2672	keep	prose	decision-watch-finds-transcript	05324543d8b4	WAVE (reopened): 5 commits; clean; record twin of 2769: merge both in one batch; round 3 PASS
+2673	rebuild	prose	outbox-ruling-home-check	f0e260e9fc57	WAVE (reopened): small rebuild: carry R6 quote and Not-built lines; rewrite "outbox stays the place is open" to cite ruled-store-one-home.md:5; pairs with 2767; if owner wants as built: keep plus one line
+2674	keep	prose	coordinator-pick-needs-record	f6c02d8dc0df	WAVE (reopened): 16 commits squash to 1 new file; clean; round 2 PASS; carries old 1768 (closes citing this); whether the hold still stands is unknown | needs-home: all three (lands with this PR)
+2675	keep	code	fan-prose-handoffs	8ee3cb28d733	in batch 135 (coordinator 11:45 CST Nov 13): merges, not close
+2676	keep	code	check-line-reader	cf94390b469f	WAVE (reopened): 19 commits; one conflict hunk ci-scope.sh:104; owed: refuter row in agent-model-cap.md; conflict fix wants a fix check | needs-home: 284 c only in this PR
+2677	keep	code	fan-code-handoffs	f3161bcdbfaa	promise guard; merges clean; trim 16 of 21 notes already on main
+2678	keep	code	fan-prose-unmapped-1	25a3c5b6b8dc	shared branch-sweep workflow (cloud branch delete, restart-plan scope k); merges clean
+2680	keep	code	stall-watch-live-run	122f50ecf404	WAVE (reopened): 16 commits; conflict docs/catalog.md only (regenerate); stack base for 2862: merge before 2862; round 2 PASS
+2681	keep	code	question-form-task-context	27ab34a988fb	needs main merged (question-form.md 15-21); guard change
+2683	keep	code	ci-unknown-is-red	c610abe13bba	needs main merged (checks.yml:312 keep both); check change needs fix verifier
+2684	keep	code	fan-prose-handoffs	a1ebb982b450	artifact-cite refusal in triage push; rebase: ci-scope.sh shoot list
+2685	keep	code	handoff-keeps-owner-waits	e2ba07d38759	WAVE (reopened): 22 commits; conflict in test_precompact_handoff.py:2315 (keep both); item number collision: main has item 16, PR adds 16: renumber to 17; round 3 PASS | needs-home: both only in this PR
+2687	keep	code	stale009-sweep	980b5eb3b728	WAVE (reopened): one conflict hunk; lane lint PASS, round 3 PASS net positive
+2688	fresh	-	fan-prose-find-copies	70dcfe0af79d	fresh: runner 10 (under 48 h, not reviewed)
+2689	keep	code	merge-lock-expired-delete-race	4bd0f5412bbb	WAVE (reopened): carry of 1657 (17 cherry-picks + 2); 4 conflict hunks; round 3 PASS; needs fresh lint on new head; replaces 2148
+2691	keep	code	agent-asks-become-refusals	0ad3b6b0c151	relative shell write escape guard; rebase: guard.py keep both blocks (readonly-shell-write); merges clean with 2692/2693/2886
+2692	keep	code	agent-asks-become-refusals	e28b83cbdc8b	commit-trailer-model deny rule; merges clean
+2693	keep	code	agent-asks-become-refusals	b5579108d978	KEEP: owner item 712 a (page, 12:11 CST Nov 13), ruling keep-2886-spawn-check: main readonly-shell-write misses cp, sed -i and python -c; close both pair is off. Old reason: ancestor of 2886 (stands only if 2886 stays keep; 2886 may be partly stale: main has readonly-shell-
+2695	keep	code	page-answer-session-field	f20e790fc28f	WAVE (reopened): 3 one-hunk conflicts; lane lint PASS, round 2 PASS; same SKILL.md as skill-text-once lane | needs-home: item 367 a ruling
+2696	keep	code	fan-prose-handoffs	db1785021be1	superset of 2675; fixes UNKNOWN on failed install; merges clean
+2697	keep	code	stall-watch-open-call-cap	851abe4684ed	WAVE (reopened): one conflict hunk; round 3 PASS net positive; lane-lint PASS only in body
+2699	keep	code	open-asks-listed-at-wake	8525aec736cf	WAVE (reopened): clean merge; lane lint PASS, round 3 PASS; SKILL.md --asks wording left to skill-text-once lane | needs-home: Nov 10 11:26 owner chat ruling
+2700	keep	code	lane-lint-timeout	8e1810d1e2c4	needs main merged (guard.py:611 import list, keep both names)
+2701	keep	code	merge-role-raw-paths	35df574ffd55	WAVE (reopened): one conflict hunk in session_start.sh; round 3 PASS net zero; mutation test not run locally
+2702	keep	code	skill-text-once	6a398b0479af	WAVE (reopened): 1 conflict hunk SKILL.md; add field_table.json row for shown; round 3 PASS; conflicts with 2705 in SKILL.md
+2704	keep	code	why-cite-matches-act	bf458ff8a869	WAVE (reopened): 1 conflict hunk checks.yml; round 3 PASS net positive
+2705	rebuild	code	widening-rule-guideline	5e3c8b298b27	WAVE (reopened): main renamed pick to recommended: redo every pick wording; carry item 278 record, WIDENS_GUIDELINE, card text, tests; fresh review owed | needs-home: item 278 (lands via this PR)
+2708	keep	code	template-copies-byte-equal	e7673f6f4e88	needs main merged (take 2708 deletion; check prose check does not flag the line)
+2709	keep	code	lane-finds-triage	56fc4ded2980	brief names roles (Coordinator, Triage, Batch runner), no session id (R22 point 3); only conflict session-tiers.md Cost lines; check cost-mark lint
+2711	rebuild	code	stale-flags-test-gaps	be68f895e901	WAVE (reopened): carry only the 9 STALE007 commits on top of open 3182 (rebuilds STALE009/010); if 3182 closed, keep. Pick which STALE010 carry survives: 2687/2711 or 3182; 2687 closes either way | needs-home: item 386 if 2687 half dropped
+2712	keep	code	fan-prose-handoffs	7ede2542073b	agent-end reap by process marker; regenerate docs/catalog.md after rebase
+2714	close	code	agent-asks-become-refusals	7ed66f06a1e0	ancestor of 2885 (stands only if 2885 stays keep)
+2715	keep	code	shoot-touch-per-size	a846e976cb81	WAVE (reopened): clean; round 3 PASS; stack 2715 2716 2717 | needs-home: item 423 c (PR says No config key, which the ruling overrides)
+2716	keep	code	shoot-stitch-pinned	bf0778255670	WAVE (reopened): merge after 2715; clean; round 3 PASS
+2717	keep	code	shoot-touch-per-size	a05aaa0ef9b6	WAVE (reopened): top of stack 2715-2716-2717; merge after 2715 and 2716; clean
+2718	rebuild	prose	test-dirs-include-testing	25d2bcccab80	WAVE (reopened): conditional sentence; 2686 merged, rewrite in present tense; clean merge
+2720	rebuild	code	waiting-page-written-time-check	6695a463d414	written-time blank/non-ISO check; code merges clean, 1 decision-file conflict (Cost line); mark read-count clause "(unmeasured)"
+2721	keep	code	waiting-export-receipts	dd82d5cc29c2	WAVE (reopened): clean merge; round 3 PASS net positive; guard verdict change
+2722	rebuild	code	builder-model-pin	6d37b3260309	WAVE (reopened): conflicts in 4 files; main has step_up_reason for fix verifier; carry pin in agents/builder.md and pin_missing_problem; drop ROLE_FIX_VERIFIER_* and glossary sentence
+2723	keep	code	fan-prose-handoffs	f222d22a62af	in batch 135 (coordinator 11:45 CST Nov 13): merges, not close
+2724	keep	code	lease-remedy-form	f69cc80ae867	WAVE (reopened): clean merge; round 2 PASS net zero; PR says close 1872 as replaced | needs-home: quote only in step record and PR body; sha source unresolved
+2725	keep	code	builder-test-config-check	8d53a3a50654	WAVE (reopened): clean merge; round 3 PASS net positive; three named limits not filed (triage)
+2726	keep	code	roster-on-record-branch	c9a97ff1443e	WAVE (reopened): 10 commits; prose conflicts in rule_mechanisms.json:618 and SKILL.md:166; round 3 PASS net zero
+2727	close	code	fan-prose-debts	ea833aa0027a	superseded by 2948 (outside group, 2 conflicts with main); becomes keep if 2948 closes
+2728	keep	code	model-call-auth-check	19959195871b	WAVE (reopened): 9 commits, 21 files; one conflict file; 2841 stacks on it: merge 2728 first; not closable | needs-home: Nov 6 quote and item 541 b until 2841 merges
+2729	rebuild	code	dead-pr-wait-guard	73fdb5b6f4ee	keep guard half (dead_pr_wait_hit, shared_names, decision dead-pr-waits, test s42907); drop build half dead_pr_waits/prStates (duplicates main waits_on_closed_pulls)
+2732	keep	prose	fan-code-waiting-page	e14452cc5c19	3 notes; merges clean; land with or after 2720; note says "PR 2720" (renumber if rebuilt as new PR)
+2733	close	code	fan-code-workflows	3737e02663d5	ancestor of 2920
+2734	keep	code	lane-undo-check	6df2abd4e362	WAVE (reopened): base of stack 2734-2812-2821; clean; report-only (24 of 40 red, 5 of 10 false); round 3 PASS net zero
+2735	close	code	fan-prose-debts	21fd3ba402a6	git-checked ancestor of both 2757 and 2799 (merge-base --is-ancestor, 12:15 CST Nov 13); close stands; 2799 and 2757 are not ancestors of each other; close-now (owner pick 13:12 CST, step close-replaced-at-open, relayed by Coordinator 13:21 CST Nov 13): replacer #2757 and 2799 is open (read on GitHub); close it, keep the branch; reopen if the replacer is dropped; hold-stacked (runner 10, 13:25 CST Nov 13): open replacers #2757 and #2799 have base carry-1516-names-fix, which is #2735's head; closes after its dependents merge
+2736	keep	code	reviewed-sends-back	5029f0d41e5f	WAVE (reopened): 12 commits; two small conflict hunks in merge.py; overlaps 2845 and 2859 (duplicate review parse): second to land hand-merges; round 3 PASS net zero | needs-home: low
+2737	keep	code	fan-code-workflows	133f9bf1e9da	judge-replay corpus; merges clean; corpus cases sendmessage_state, report_guard.past_ruling may differ from main's 11-13 judges
+2740	keep	code	past-ruling-on-send	f32feca14d7b	WAVE (reopened): 22 commits, 6 conflict hunks in 4 files; round 3 PASS net positive; carries 2195 work? lane 2195 rebuild covers SEND_TOOLS and S1: check overlap
+2742	keep	code	page-pics-fill-card	0f393efad0cc	WAVE (reopened): 32 commits, 2 conflict hunks in page.test.mjs; round 3 PASS; no design-review record seen (screen change); owner asked 11:08 CST Nov 13 whether it landed
+2744	close	code	fan-prose-handoffs	61c34de78fd4	ancestor of 2753
+2747	keep	code	runner-drops-handed-lane	eeb5bccc24de	WAVE (reopened): 16 commits, 1 conflict hunk in merge.py; round 3 PASS net positive
+2748	close	code	fan-prose-unmapped-5	63bba812951b	inside 2913
+2749	rebuild	code	lane-lint-cpu-slots	eb03f0e3d975	lint CPU-slot limit wanted; conflicts merge/merge.py + test_lane_lint.py; main added run_touched_tests so slot scope must be redecided
+2750	close	code	fan-code-handoffs	89fec26ec590	ancestor of 2774 and 2824; superseded by 2824; hold-stacked (Coordinator 13:25 CST Nov 13): open PRs #2824 and #2774 use its branch draft-pr-carry as base; it closes once both merge
+2751	keep	code	fan-prose-debts	1c9a658278ee	fixes debt lane-ack-skips-every-reply; rebase: 1 text conflict in docs/decisions/questions-go-to-owner.md
+2752	keep	code	fan-prose-debts	9c9f76d45f98	MAP tsconfig alias reads; merges clean
+2753	keep	code	fan-prose-handoffs	f0d3c6b40b08	head of PowerShell write-read stack; merges clean; had round 1
+2755	keep	code	lane-session-model-check	1f4d4342c5b7	WAVE (reopened): 7 commits, clean merge; round 3 PASS net positive; conflicts with 3168 in agent-model-cap.md and guard.py: land one first
+2756	keep	code	fan-prose-handoffs	a20d6d46cd48	waiting page Answered section closed on load; merges clean
+2757	keep	code	fan-prose-debts	de6882a03d95	notes/debts must name fix + 2 record checks; superset of 2735; rebase: 2 CI file conflicts (ci-scope.sh, checks.yml)
+2758	keep	code	fan-code-guard-2	562f6e8f014b	two-worktrees-one-branch guard; merges clean
+2759	keep	prose	unknown	15e3c4e657c3	WAVE (reopened): 1 commit, clean merge; docs-only round 1 PASS (plain-push-asks.md line 29)
+2761	close	code	lane-title-slug	a0f41bcc088f	WAVE (reopened): replaced by open draft 3168 (same branch; ancestry unverified); close-now (owner pick 13:12 CST, step close-replaced-at-open, relayed by Coordinator 13:21 CST Nov 13): replacer #3168 is open (read on GitHub); close it, keep the branch; reopen if the replacer is dropped
+2762	close	code	qform-path-program-span	3381a1c296b9	WAVE (reopened): ancestor of 2763 2764 2765 2826 2892; replaced by 2826/2892
+2763	rebuild	code	silent-undo-ci-body	d36aaba905aa	WAVE (reopened): 90 commits, 8-file conflicts; carry CI event-file body, decision rewrite, delete/remove question-form fix (368be17c8, d36aaba90); only 2763 has that fix | needs-home: item 411 a (only in this chain); NOT close-now (read 14:5x CST Nov 13): #3230 (open, head 8642be932) replaces the silent-undo body part only; the question-form delete/remove fix (368be17c8, d36aaba90) and the pre-existing-needs-main-run check are in neither #3230 nor #3229; keep open until those parts have an open replacer (#2765 already closed against 2826 and 2892 for the pre-existing check)
+2764	close	code	pr-review-range-check	e4cd85e9ffbf	close-now (owner pick 13:12 CST, step close-replaced-at-open; Coordinator asked 14:48 CST Nov 13): replacer #3229 is open (read on GitHub, head 403595e03, body "Replaces #2764 and #2056"; it carries #2764's own delta, check_review_ranges; the #1969 content is in #3230); close it, keep the branch; reopen if the replacer is dropped; old reason: WAVE (reopened): 111 commits contains 2763; own delta: check_review_ranges (+94), 23 test cases, one
+2765	close	code	pre-existing-needs-main-run	ab899cc0f7fc	WAVE (reopened): replaced by open 2826 and stacked 2892
+2766	keep	code	fan-prose-small-homes	366a9b729287	stamp unreadPendingCites refusal; merges clean
+2767	keep	code	outbox-ruling-home-check	e2544172333d	WAVE (reopened): 9 commits; clean; round 3 PASS net zero
+2768	keep	code	fan-code-guard-2	4597afcb1754	archive guard ScopeStop; merges clean
+2769	keep	code	decision-watch-finds-transcript	a5c453137272	WAVE (reopened): 12 commits; clean; round 3 PASS net positive
+2770	close	code	fan-code-workflows	63e51f3107e2	ancestor of 2920
+2771	rebuild	code	record-after-each-round (+3 resume steps)	f0ffa2008fd6	READ ON GITHUB 12:2x CST Nov 13: open draft, base main (not stacked), head f0ffa2008, 37 commits, 25 files, mergeable dirty; body: carries 1678 1917 1974 2147 in stack order, closes them after it merges (coordinator picks 07:31 and 07:35 CST Nov 12); records: round 1 FAIL (haiku) at 6e27df62e, round 2 PASS (sonnet) at f0ffa2008, no lane-lint comment (builder-reported PASS, 528 s); held for lane guard-tables-per-section: the FAMILIES resume row from 2147 and 11 transcript mutation rows, so the re-cut stacks on #2801 (Coordinator 12:20 CST); no re-cut PR found by search of titles and bodies (unknown number); owner words 409 a and 412 a only in roadmap notes (needs-home); CLAUDE.md roles-resume-by-name changes by one sentence (owner sees it at merge); UPDATE Coordinator 12:28 CST Nov 13: lane fan-code-handoffs re-cuts it as resume-recut, stacked on #2801, head 0feb0c649, PR not yet open; row is rebuild, in progress; close #2771 only after the re-cut is on main
+2772	keep	prose	windows-guard-cap-stopgap	f583ae364763	WAVE (reopened): 1 commit; clean; stale cite checks.yml:1536 now 1614: fix first
+2774	keep	code	fan-code-handoffs	d08e55b9a8d5	fed-write carry; conflicts hooks/guard.py, guard_env.py, builders-cannot-edit-tests.md; merge main in; merge after 2824
+2775	keep	code	one-load-definition	1192dd9dff63	WAVE (reopened): 20 commits; 5 conflict files; sim-lease verdict change rests on owner confirmation; replaces 1369 | needs-home: 304 a and 309 a (309 a unverified in PR body)
+2777	keep	prose	unknown (notes from 2695 2666 2705 2680)	24a6684d463e	WAVE (reopened): 1 commit, 4 notes; land with or after its source PRs; line cites drift
+2778	fresh	-	fan-prose-unmapped-2	94353be46360	fresh: runner 10 (under 48 h, not reviewed)
+2779	fresh	-	records-page-ready-reads-pr-repo	2d3d938c94e8	fresh: runner 10 (under 48 h, not reviewed)
+2780	keep	code	reviewer-brief-blind	c3a7ecbfa8f6	WAVE (reopened): 45 commits; 1 conflict rule_audit.py pin; land 2771 first then drop this PR roles-resume-by-name row; replaces 1366 | needs-home: 279 a, 409 a (299 c has no quote)
+2782	keep	code	ruling-cite-in-commit	e99fc3f9936b	WAVE (reopened): 14 commits; clean; round 3 PASS net positive; replaces 2053 and 2754
+2783	close	code	fan-prose-debts	200cea832768	ancestor of 2872 (outside group, 1 conflict); becomes keep if 2872 closes
+2784	rebuild	prose	unknown (lane lane-notes-prose-fanout)	bfd9e7649243	WAVE (reopened): 2 commits, 6 notes; carry repaired-merges-docstring only; park 5 on their host PRs (2767 2769) or re-file
+2786	keep	code	replay-profile-parts	79b9975608f4	WAVE (reopened): 46 commits; heads of 2675 and 2696 are its ancestors (2675 2696 in batch 135 per Coordinator: check); round 1 PASS
+2787	keep	code	sim-lease-gaps	ae5b33fbfe60	WAVE (reopened): 59 commits; 11 conflict hunks in 5 files; round 3 PASS; covers only half of old 2061: 2061 NOT close on 2787 alone | needs-home: owner pick 336 a and the 08:38 pick (only in PR)
+2788	keep	code	ruling-skip-check	eb9bbdfc7627	WAVE (reopened): 22 commits; round 3 PASS net positive | needs-home: decision bullet only in this PR
+2789	keep	code	other-checkout-heredoc-text	f633f416f8e3	WAVE (reopened): 6 commits; clean; round 3 PASS; close 1906 as replaced; open: .txt .md .csv bodies keep main refusal
+2790	keep	code	glossary-renames-in-code	3e93bf6d5a3c	WAVE (reopened): 14 commits; conflicts in 4 files; round 2 PASS net zero
+2791	keep	code	fan-code-guard-2	d09baa344fdf	branch-slug-no-git guard; merges clean
+2792	keep	code	page-pics-fill-card	4b460f27f663	WAVE (reopened): 35 commits = 2742 plus 3: close 2742 or merge first; one conflict file; body stale; design review record unknown | needs-home: both only in PR decision
+2795	keep	code	stall-watch-quiet-lint	6bfb4fd854bb	WAVE (reopened): closed on GitHub, needs reopen; 2800 NOT a replacement (its base is closed branch carry-stall-watch-quiet-lint): merge 2795 then retarget 2800, or retarget 2800 to main and close 2795; closed on GitHub; 2800 is NOT a replacement (its base is the closed branch carry-stall-watch-quiet-lint)
+2797	keep	code	past-ruling-s1-block	0f43c646ee05	WAVE (reopened): 26 commits = 2740 plus 4: close 2740 or merge first; 5 conflict hunks; guard change; round 3 net zero | needs-home: item 445 a (rides this PR)
+2798	keep	code	builder-xctestplan-config	566cf5369604	WAVE (reopened): 22 commits = 2725 plus 3: close 2725 or merge first; clean; round 3 PASS | needs-home: orchestrator rulings only in PR
+2799	keep	code	notes-name-their-fix	c0445a2a4b04	WAVE (reopened): 3 commits on 2735 (ancestor): close 2735 or merge first; retarget to main; one conflict hunk | needs-home: all three, only in PR decision
+2800	keep	code	fan-prose-small-homes	86424f2e4c0b	stall_beat.py one home for STALL_WATCH_BEAT; merges clean
+2801	keep	code	guard-tables-per-section	66b9b1581e3c	needs main merged plus hand work: move readonly-shell-write rows into their sections
+2802	keep	prose	waiting-page-skill-text-fixes	6eb8ae069cfc	WAVE (reopened): 21 commits = 2721 plus 2699 plus 1 own; merge parents first; fixes 2 of 6 items | needs-home: rides 2721
+2803	keep	prose	stale-cites-tree-clean	a77d54fdee9c	plans folder cites (-68 STALE003); fix docs/plans/refusal-vs-rule.md line 81 first; merges clean
+2804	keep	prose	stale-cites-tree-clean	071d2bf493d1	13 decision records cites; merges clean
+2805	keep	prose	stale-cites-tree-clean	ee9ad636c439	4 debts + 2 design docs cites; merges clean
+2806	keep	prose	fan-code-handoffs	ee84a9a2bf8f	3 debts + notes; reword "open on PR #2750" to 2824/2774
+2807	rebuild	prose	stale-cites-tree-clean	3971c8ede171	janitor.json cites; one hunk conflict in skills/compliance-check/probes.md; trivial rebase
+2808	keep	code	stall-watch-quiet-lint	122b2e664825	WAVE (reopened): 21 commits, includes closed 2795 (superseded); one conflict file; round 3 PASS | needs-home: item 405 a
+2809	rebuild	prose	unknown	f2b394479f53	WAVE (reopened): notes-only, 19 notes; carry the 4 #2682 notes and 2 mistake notes; drop 13 notes that cite code not on main (2701, 2689, 2812/2821, 2841)
+2811	keep	prose	fan-prose-handoffs	997bb9270a3c	2 debts + 15 notes; merge after 2753, 2712, 2684, 2756 or reword "not yet on main" lines
+2812	keep	prose	no-undo-lane-commits	b3a6a5653373	WAVE (reopened): 3 commits on 2734; land after 2734
+2813	keep	code	fan-code-guard-2	7b840c442bfc	python -c / PowerShell call-operator reads; merges clean
+2815	keep	code	glossary-renames-in-code	25c28d5767f9	WAVE (reopened): 41 commits, conflicts in 6 files; round 3 PASS; builds same lone-lane path as 2701 (2701 looks replaced)
+2818	keep	code	merge-flow-after-anthropic	464ed817a1d9	merge-reads-ruleset step; one adjacent-line conflict pr-review-record.md; hand-merge keeps both
+2819	keep	code	merge-flow-after-anthropic	af7c78e18ef3	WAVE (reopened): 22 commits; HELD: must not merge before act 1 (stable branch, sweep fix, ruleset on stable); round 3 PASS | needs-home: docs/plans/r42-part2-design.md (commit 402613631)
+2820	keep	code	batch-build-log-kept	c730fe6febfd	HOLD, pending combined-PR build path (Coordinator 15:35 CST Nov 13: owner ruling own-767-a-combined-pr says merges, batches and lanes were never exclusive; a combined PR per step group may need the batch build, drop and freeze code; runner 10 was asked how it builds one). Do not close. The earlier close-now row (batch-only, no home on main 59da758a3) is withdrawn. Old reason follows: close-now, basis: coordinator pick 15:24 CST plus sweep, undoable; revives if the owner rules children keep batching (Coordinator 15:33 CST Nov 13; sweep by an Explore agent, sonnet). My own check, git grep -w on origin/main 59da758a3 in merge, bin, hooks, lint, .github and settings.json: these names are defined nowhere on main: batch_build, batch_build_run, batch_log_note (batch_build shows only in test docstrings, running_batch only as a test loop variable). I checked the names, not each hunk; the hunk reading is the agent's. Close it, keep the branch.; old reason: fresh: runner 10 (under 48 h, not reviewed)
+2821	keep	prose	no-undo-brief-rule-sentence	592bf895f51d	WAVE (reopened): one CLAUDE.md sentence on top of 2812; merge stack in order 2734 2812 2821; owner sees the CLAUDE.md edit at merge | flag: owner-pick attribution unverified
+2822	close	prose	notes-204-ponytail-drop	9b516c2dc47e	close-now (owner pick 13:12 CST, step close-replaced-at-open; runner 10 asked 13:38 CST Nov 13): replacer #3198 is open (read on GitHub, head f294d8878); body of #3198 says "Rebuild of #2822"; close it, keep the branch; reopen if the replacer is dropped; old reason: WAVE (reopened): carry the ponytail drop (note line plus two settings.json hunks); drop the two notes that cite 2801 files
+2823	fresh	-	outbox-notes-land	9985719e87b0	fresh: runner 10 (under 48 h, not reviewed)
+2824	keep	code	fan-code-handoffs	9cb7972829c6	draft-pr carry + heredoc fixes; one import-line conflict in hooks/guard.py; land first
+2826	rebuild	code	carry-pre-existing-needs-main-run	acd041e5e3bc	three steps in one 131-commit carry, 7 files conflict; redo as three PRs from main; lane pre-existing-needs-main-run declined (context): fresh lane; NOT close-now (read 14:5x CST Nov 13): #3230 (open, head 8642be932) replaces the silent-undo body part only; the question-form delete/remove fix (368be17c8, d36aaba90) and the pre-existing-needs-main-run check are in neither #3230 nor #3229; keep open until those parts have an open replacer (#2765 already closed against 2826 and 2892 for the pre-existing check)
+2827	keep	code	open-asks-listed-at-wake	70fa14e8dfeb	WAVE (reopened): 20 commits; 2699 is an ancestor: close 2699 as subset | needs-home: process ruling only in step note
+2828	fresh	-	ruling-parts-cite-steps	743c949b7088	fresh: runner 10 (under 48 h, not reviewed)
+2829	close	prose	page-data-one-store	5de318ce507d	close-now (owner pick 13:12 CST, step close-replaced-at-open; runner 10 asked 13:38 CST Nov 13): replacer #3212 is open (read on GitHub, head d87df76c3); body of #3212: "Replaces #2829"; #2829 holds open owner question item 730 (runner 10 13:38 CST), so the question moves to #3212 or stays on the page; close it, keep the branch; reopen if the replacer is dropped
+2831	keep	code	tier-boundaries-carry	1d52904ae56a	WAVE (reopened): 11 commits; clean; round 3 PASS net positive
+2832	fresh	-	lint-config-guard-paths	4463f44c4266	fresh: runner 10 (under 48 h, not reviewed)
+2833	close	code	fan-prose-unmapped-5	a80ddb7f5a91	inside 2913
+2836	close	code	stop-checks-one-message	f0a531b7411a	contained in 2864
+2837	keep	code	batch-build-stop-group	1fdc86c5af35	HOLD, pending combined-PR build path (Coordinator 15:35 CST Nov 13: owner ruling own-767-a-combined-pr says merges, batches and lanes were never exclusive; a combined PR per step group may need the batch build, drop and freeze code; runner 10 was asked how it builds one). Do not close. The earlier close-now row (batch-only, no home on main 59da758a3) is withdrawn. Old reason follows: close-now, basis: coordinator pick 15:24 CST plus sweep, undoable; revives if the owner rules children keep batching (Coordinator 15:33 CST Nov 13; sweep by an Explore agent, sonnet). My own check, git grep -w on origin/main 59da758a3 in merge, bin, hooks, lint, .github and settings.json: these names are defined nowhere on main: build_integration_branch, run_links, BUILD_LINKS (batch_build shows only in test docstrings, running_batch only as a test loop variable). I checked the names, not each hunk; the hunk reading is the agent's. Close it, keep the branch.; old reason: fresh: runner 10 (under 48 h, not reviewed)
+2838	keep	code	blame-on-finished-red-job	555956875967	HOLD, pending combined-PR build path (Coordinator 15:35 CST Nov 13: owner ruling own-767-a-combined-pr says merges, batches and lanes were never exclusive; a combined PR per step group may need the batch build, drop and freeze code; runner 10 was asked how it builds one). Do not close. The earlier close-now row (batch-only, no home on main 59da758a3) is withdrawn. Old reason follows: close-now, basis: coordinator pick 15:24 CST plus sweep, undoable; revives if the owner rules children keep batching (Coordinator 15:33 CST Nov 13; sweep by an Explore agent, sonnet). My own check, git grep -w on origin/main 59da758a3 in merge, bin, hooks, lint, .github and settings.json: these names are defined nowhere on main: batch_blame, stacked_remedy, blame_lines (batch_build shows only in test docstrings, running_batch only as a test loop variable). I checked the names, not each hunk; the hunk reading is the agent's. Close it, keep the branch.; old reason: fresh: runner 10 (under 48 h, not reviewed)
+2839	fresh	-	ci-wait-cap-55	8fb862ce2618	fresh: runner 10 (under 48 h, not reviewed)
+2841	keep	code	model-call-auth-check	42c5f40d52a4	WAVE (reopened): stacked on 2728: merge 2728 first then retarget 2841 to main; round 3 PASS | needs-home: both (lands on merge; pick b also in triage outbox)
+2842	keep	code	fixed-number-limits-census	2c98b332e22e	WAVE (reopened): 10 commits; clean; round 3 PASS net zero
+2844	fresh	-	ruling-challenge-passes	f1172142286f	fresh: runner 10 (under 48 h, not reviewed)
+2845	close	code	pr-state-is-on-the-pr	0df3d8f3629c	ancestor of 2869 and 2871 (siblings); close holds only while one of 2869/2871 is keep; else 2845 becomes keep. 2871 adds --lane-lint --integration, which the Nov 10 01:07 ruling rules out: ruling check before merge
+2846	keep	code	green-hook-skips-draft-run	e853edbdad59	WAVE (reopened): 2 commits; replaces closed 2843; one conflict ci-scope.sh; 3 round-3 notes unfiled
+2847	fresh	-	lane-lint-once-fail-fast	bfe0cc7a51f7	fresh: runner 10 (under 48 h, not reviewed)
+2850	fresh	-	owner-override-one-route	50a2c2c9f7b2	fresh: runner 10 (under 48 h, not reviewed)
+2851	keep	code	pass-claim-cites-verdict	682b6200b1cd	needs main merged (4 one-hunk conflicts); guard verdicts change so review owed after rebase
+2852	keep	code	claude-md-section-moves	ff4e0c12752e	merges clean; edits CLAUDE.md so owner rule-file gate applies
+2853	keep	prose	unknown	76a3f4d176c5	WAVE (reopened): 1 line in docs/debts/notes.md; clean; claim holds
+2854	fresh	-	stood-pick-needs-review	4b0ad663e184	fresh: runner 10 (under 48 h, not reviewed)
+2855	keep	code	unknown (debts are its home)	fc35375b83a6	WAVE (reopened): stacked on 2826: order 2826, 2892, then 2855 retargeted; conflicts with 2892 in report_guard.py
+2856	fresh	-	handoff-agent-write	4fd8fc80679c	fresh: runner 10 (under 48 h, not reviewed)
+2857	fresh	-	writer-lists-awaiting-threads	8817212faa63	fresh: runner 10 (under 48 h, not reviewed)
+2858	fresh	-	one-term-warn-lint	0bfbaf4eae13	fresh: runner 10 (under 48 h, not reviewed)
+2859	keep	code	review-record-parse-warning	95f1a00d61ba	needs main merged (6 hunks); check verdict change owes review
+2860	fresh	-	red-job-wakes-runner	e5da4fcbc9c1	fresh: runner 10 (under 48 h, not reviewed)
+2861	keep	prose	fixed-number-limits-census	c32222a0a56c	WAVE (reopened): 1 commit; clean; touches hooks/guard_env.py comment so NOT docs-only: needs a review record | needs-home: item 595 quote (roadmap step note only)
+2862	keep	code	stall-watch-ends-quiet-jobs	6843d4302252	WAVE (reopened): 27 commits = 11 own + 16 from open 2680 (its base); round 3 PASS net positive; one conflict docs/catalog.md (regenerate); order: merge 2680 first
+2863	keep	code	time-limits-end-hangs-only	88ed6f7e7b05	needs main merged (prose conflicts) plus re-point checks.yml comments
+2864	keep	code	stop-checks-one-message	911211b196aa	one-message Stop change + draft-carry; one conflict checks.yml (keep both suite steps); cites owner pick b on R32 part 2 (2026-11-12 13:18 CST)
+2865	keep	code	waiting-export-miss-cloud	435856d12960	cloud writer-label match in export_check; merge before 2907
+2867	keep	code	stop-checks-one-message	e38b70d87fca	WAVE (reopened): 13 commits = 8 own + 5 from open 2836 (base); two add/add hunks in checks.yml; order: merge 2836 first; appends to notes.md same hunk as 2889
+2869	fresh	-	pr-ledger-round-ages	dc2595b34563	fresh: runner 10 (under 48 h, not reviewed)
+2870	fresh	-	pick-reaches-page	8607d91f02a5	fresh: runner 10 (under 48 h, not reviewed)
+2871	fresh	-	batch-label-setter	cdbb04d40772	fresh: runner 10 (under 48 h, not reviewed)
+2872	fresh	-	sweep-lock-age	9a688d7cd4c8	fresh: runner 10 (under 48 h, not reviewed)
+2873	fresh	-	merge-subst-paren	4fa768953610	fresh: runner 10 (under 48 h, not reviewed)
+2874	keep	prose	review-rounds-rework	05dafe8f8c4b	new draft docs/decisions/review-rounds-measure.md for owner; merges clean; changes no rule
+2875	close	code	fan-code-workflows	3bc86940a228	ancestor of 2920
+2876	fresh	-	stamp-guard-send-message	aac56e806584	fresh: runner 10 (under 48 h, not reviewed)
+2877	fresh	-	msg-claims-vs-git	cd1b4adeed1f	fresh: runner 10 (under 48 h, not reviewed)
+2879	keep	code	waiting-export-miss-cloud	8be73cc8a633	stale_pages.py --lag; merges clean
+2880	fresh	-	agent-git-reset-refused	c227944472d7	fresh: runner 10 (under 48 h, not reviewed)
+2881	fresh	-	habit-is-not-a-guard	236931bb67f9	fresh: runner 10 (under 48 h, not reviewed)
+2883	fresh	-	debt-retire-red-on-birth	42db1abd32ab	fresh: runner 10 (under 48 h, not reviewed)
+2884	keep	code	fixed-number-limits-census	b9861e7c9eec	WAVE (reopened): 12 commits; clean; round 3 PASS but net negative against main as written: reader should see that | needs-home: item 595 (this PR only)
+2885	keep	code	md-midline-comment-gap	8a9834c073a2	agent terse-line check (TERSE_LINE); merges clean; owner-picked (decision agent-output-terse-line); 2714 close stands
+2886	keep	code	md-midline-comment-gap	9aec08d67c14	KEEP: owner item 712 a (page, 12:11 CST Nov 13), ruling keep-2886-spawn-check: main readonly-shell-write misses cp, sed -i and python -c; close both pair is off. Old reason: superseded by main readonly-shell-write (guard.py:4838, :6475); OWNER WORD NEEDED to close (stale-de
+2887	fresh	-	sim-boot-screen-check	ffe48c64d089	fresh: runner 10 (under 48 h, not reviewed)
+2889	keep	code	merge-flow-after-anthropic	2f50a93e228c	WAVE (reopened): 9 commits; clean; HELD: merge only once Q3 i and Q4 g are on record (page items 522-525); round 3 PASS net zero | needs-home: Q3 i and Q4 g not on record
+2890	fresh	-	mailbox-all-messages	170cc9e558f3	fresh: runner 10 (under 48 h, not reviewed)
+2892	rebuild	code	carry-pre-existing-needs-main-run	3273c15ff1ef	same carry as 2826 (question-form, silent-undo body, pre-existing check); one lane for both, split in three; lane pre-existing-needs-main-run declined (context): fresh lane; NOT close-now (read 14:5x CST Nov 13): #3230 (open, head 8642be932) replaces the silent-undo body part only; the question-form delete/remove fix (368be17c8, d36aaba90) and the pre-existing-needs-main-run check are in neither #3230 nor #3229; keep open until those parts have an open replacer (#2765 already closed against 2826 and 2892 for the pre-existing check)
+2893	fresh	-	two-drop-leaves-queue	251ede9e6342	fresh: runner 10 (under 48 h, not reviewed)
+2894	fresh	-	both-session-starts-judged	fedc42d4b3d3	fresh: runner 10 (under 48 h, not reviewed)
+2895	fresh	-	repo-typecheck-hook	99d725594ae7	fresh: runner 10 (under 48 h, not reviewed)
+2900	keep	prose	express-pass-owner-quotes	850d8e2b3ed4	decision docs-only-prs-skip-review Express pass owner-quote text (part 1); merges clean; files owner-quote wording so needs reviewer read
+2901	keep	prose	express-pass-owner-quotes	7988d652e726	WAVE (reopened): 1 sentence at agents/reviewer.md:78; depends on open 2900 (part 1): merge 2900 first; needs review record (agent-file edit) | needs-home: item 624 b (lands with 2900)
+2902	keep	code	merge-batch-split-and-pipeline	ac55fdeba755	HOLD, pending combined-PR build path (Coordinator 15:35 CST Nov 13: owner ruling own-767-a-combined-pr says merges, batches and lanes were never exclusive; a combined PR per step group may need the batch build, drop and freeze code; runner 10 was asked how it builds one). Do not close. The earlier close-now row (batch-only, no home on main 59da758a3) is withdrawn. Old reason follows: close-now, basis: coordinator pick 15:24 CST plus sweep, undoable; revives if the owner rules children keep batching (Coordinator 15:33 CST Nov 13; sweep by an Explore agent, sonnet). My own check, git grep -w on origin/main 59da758a3 in merge, bin, hooks, lint, .github and settings.json: these names are defined nowhere on main: batch_build, running_batch, heads_busy (batch_build shows only in test docstrings, running_batch only as a test loop variable). I checked the names, not each hunk; the hunk reading is the agent's. Close it, keep the branch.; old reason: fresh: runner 10 (under 48 h, not reviewed)
+2904	fresh	-	owner-health-tab	f1d8622c725c	fresh: runner 10 (under 48 h, not reviewed)
+2905	fresh	-	records-page-before-ready	e96dda0682fd	fresh: runner 10 (under 48 h, not reviewed)
+2906	fresh	-	answered-sections-by-repo	bd7f9b88f3af	fresh: runner 10 (under 48 h, not reviewed)
+2907	keep	code	waiting-export-miss-cloud	8f9d4a7c7265	check_waiting_copy_backup.py; merge after 2865; cites decision waiting-page-one-store which has no home (dangling)
+2908	keep	code	fixed-number-limits-census	fdd3512c77f2	WAVE (reopened): 3 commits, merge-tree clean; round 3 FAIL net zero, merges on green | needs-home: item 595 text (not on main)
+2909	fresh	-	batch-freeze-lane-set-enforce	8f4f8ea6c467	fresh: runner 10 (under 48 h, not reviewed)
+2910	keep	code	past-ruling-timeout	7b0802508f2b	WAVE (reopened): 5 commits, merge-tree clean; round 2 PASS
+2912	keep	code	batch-freeze-lane-set-enforce	d4bfa4057e24	WAVE (reopened): conflict in merge.py (EXPRESS_CITE next to FREEZE_CITE); 2909 is its first commit: merge 2909 first or close 2909 as subset
+2913	keep	code	fan-prose-unmapped-5	8675e90e9efd	report-sha-missing + message-ref-missing guards; merges clean with main (tests not run)
+2914	fresh	-	review-fix-check-round	15b1d5ce5843	fresh: runner 10 (under 48 h, not reviewed)
+2915	close	code	prose-tending-contract	95ce08d6f18b	ancestor of 3003
+2918	fresh	-	ask-alone-push-not-force	8e41c162ea5a	fresh: runner 10 (under 48 h, not reviewed)
+2919	fresh	-	page-usage-counters	ca41e6abe618	fresh: runner 10 (under 48 h, not reviewed)
+2920	keep	code	fan-code-workflows	e81bfdb34179	stacked superset of 2733/2770/2875; rebase: merge/merge.py both constants, lanes-run-no-full-ci-job.md carry main's sentence; owner item 463a ruling for mutation-test exception unverified
+2923	close	code	artifact-guard-matcher-names	1ac8c1e7a45a	commit 1 of 5, superseded by 2927
+2924	close	code	artifact-guard-matcher-names	9b29b68bd974	commits 1-2 of 5, superseded by 2927
+2925	close	code	artifact-guard-matcher-names	df186746935e	commits 1-3 of 5, superseded by 2927
+2926	close	code	artifact-guard-matcher-names	793d26ba0ac4	commits 1-4 of 5, superseded by 2927
+2927	keep	code	artifact-guard-matcher-names	3a5ed02c604a	top of 5-commit stack, 20h, needs rebase (conflicts guard.py, shared_names.py, settings.json); fold in 2549 gaps: Mac call without url, db_str_replace unknown keys; use main COMMENTS_TOOL
+2928	keep	code	owner-override-one-route	96416a2d6024	WAVE (reopened): stacks on open 2850 (not reopened); merge 2850 first; round 3 PASS net positive | needs-home: Q1 and 601 a (601 a attribution unverified)
+2929	fresh	-	widening-question-not-asked	d0ec648fae93	fresh: runner 10 (under 48 h, not reviewed)
+2930	fresh	-	guard-run-slow-long-command	a2e1b152e9ae	fresh: runner 10 (under 48 h, not reviewed)
+2931	fresh	-	scratchpad-commit-msg-owner	e544e9b317cc	fresh: runner 10 (under 48 h, not reviewed)
+2933	keep	code	convert-time-pinned-tests	8597d3eba7e9	fake clock for sleep; merges clean
+2937	fresh	-	lane-sim-hold-path	05326e10b405	fresh: runner 10 (under 48 h, not reviewed)
+2938	close	code	challenger-page-against	33dca4c3e5bb	inside 2987
+2939	keep	code	batch-order-by-pr-number	ddb1d8b8b945	HOLD, pending combined-PR build path (Coordinator 15:35 CST Nov 13: owner ruling own-767-a-combined-pr says merges, batches and lanes were never exclusive; a combined PR per step group may need the batch build, drop and freeze code; runner 10 was asked how it builds one). Do not close. The earlier close-now row (batch-only, no home on main 59da758a3) is withdrawn. Old reason follows: close-now, basis: coordinator pick 15:24 CST plus sweep, undoable; revives if the owner rules children keep batching (Coordinator 15:33 CST Nov 13; sweep by an Explore agent, sonnet). My own check, git grep -w on origin/main 59da758a3 in merge, bin, hooks, lint, .github and settings.json: these names are defined nowhere on main: restack, sync_batch, batch_build, batch_drop, stacked_without_base (batch_build shows only in test docstrings, running_batch only as a test loop variable). I checked the names, not each hunk; the hunk reading is the agent's. Close it, keep the branch.; old reason: fresh: runner 10 (under 48 h, not reviewed)
+2940	keep	code	review-record-fix-check-reads	664aafccd233	needs main merged plus hand-resolve merge.py; overlaps 3072 (fold into one home)
+2941	keep	code	guard-false-alarm-cull	f932b3627115	page item 630 closed as option b: this PR is the fix lane (round 3 PASS, lane-lint PASS on f932b3627); carries old branch work; 3036 closes (coordinator 11:36 CST Nov 13)
+2942	fresh	-	ci-merge-install-split	91e051e4f081	fresh: runner 10 (under 48 h, not reviewed)
+2943	keep	code	coordinator-session-board	98e847bbd507	needs main merged, 3 hunks, union of keys
+2944	fresh	-	brief-reads-owner-rulings	a86c4ea32e9f	fresh: runner 10 (under 48 h, not reviewed)
+2945	fresh	-	install-hash-skips-pycache	950ab7b0df5d	fresh: runner 10 (under 48 h, not reviewed)
+2946	fresh	-	agent-handback-skipped	fc321cea4017	fresh: runner 10 (under 48 h, not reviewed)
+2948	keep	code	express-pass-owner-quotes	205747a52cac	merge tool part 2 (--quotes-matched, kind_misfits decision check, retires debt ruling-pr-kind-unchecked); 2 trivial conflicts (merge.py review_round_model line, test_merge.py import); also supersedes 2727 (fan-prose-debts close stands)
+2949	keep	code	convert-time-pinned-tests	0a0186050db7	growth ratio; merges clean
+2950	fresh	-	orchestrator-mixed-merge-refused	dad2aa8aa8f8	fresh: runner 10 (under 48 h, not reviewed)
+2952	keep	code	convert-time-pinned-tests	a7e9f634e54e	pinned clocks; merges clean
+2953	keep	code	page-wakes-and-relays	e7c607ed6f1d	R18 item 1 only page writer watches page; merge first
+2955	rebuild	code	page-wakes-and-relays	2f738dabf875	wakes field never added to page.html itemFields; rebuild on top of 2953; UPDATE lane page-wakes-and-relays 12:27 CST Nov 13: rebuilt as stacked follow-up draft PR #3205 (base pwr-item-names-wakers-b; wakes listed in page.html itemFields and drawn; design review PASS; handed to the batch runner); close #2955 only after #3205 is on main. #3006 untouched, waits on item 713
+2956	fresh	-	guard-pr-runs-windows-shards	f4caf08ecce3	fresh: runner 10 (under 48 h, not reviewed)
+2958	keep	code	convert-time-pinned-tests	25c05532449c	CPU-time ratio; merges clean
+2959	keep	code	convert-time-pinned-tests	fbe24129ec2f	stamp watchdog; merges clean
+2960	fresh	-	notes-1796-fix-lines	0a180312895e	fresh: runner 10 (under 48 h, not reviewed)
+2962	keep	code	agent-commit-file-scope	8261779a4906	silent-undo note row-edit check (edited_notes); one test-file conflict (keep both classes); check verdict change owes review
+2965	fresh	-	page-feedback-to-template	aeecb81be46f	fresh: runner 10 (under 48 h, not reviewed)
+2967	keep	code	agent-commit-file-scope	5b9a56806c7e	brief-scope rule (agent commit/push refuses file brief does not name); merges clean; guard verdict change owes review
+2968	fresh	-	run-dir-unclosed-tail	88f9b52c2307	fresh: runner 10 (under 48 h, not reviewed)
+2970	fresh	-	ci-batch-mac-runner	92e4c76e22b3	fresh: runner 10 (under 48 h, not reviewed)
+2971	fresh	-	answers-session-write-guard	1d7e54cdf12f	fresh: runner 10 (under 48 h, not reviewed)
+2972	keep	code	busy-file-stacked-batches	193e8906a5fa	HOLD, pending combined-PR build path (Coordinator 15:35 CST Nov 13: owner ruling own-767-a-combined-pr says merges, batches and lanes were never exclusive; a combined PR per step group may need the batch build, drop and freeze code; runner 10 was asked how it builds one). Do not close. The earlier close-now row (batch-only, no home on main 59da758a3) is withdrawn. Old reason follows: close-now, basis: coordinator pick 15:24 CST plus sweep, undoable; revives if the owner rules children keep batching (Coordinator 15:33 CST Nov 13; sweep by an Explore agent, sonnet). My own check, git grep -w on origin/main 59da758a3 in merge, bin, hooks, lint, .github and settings.json: these names are defined nowhere on main: batch_build, stacked_without_base, busyFiles (batch_build shows only in test docstrings, running_batch only as a test loop variable). I checked the names, not each hunk; the hunk reading is the agent's. Close it, keep the branch.; old reason: fresh: runner 10 (under 48 h, not reviewed)
+2973	fresh	-	brief-says-owner-unread	ecaa92e6f248	fresh: runner 10 (under 48 h, not reviewed)
+2975	keep	code	convert-time-pinned-tests	264cae524616	time-pinned-ok marker; merges clean
+2976	fresh	-	filing-check-reads-page	3a5ddf4d2e5b	fresh: runner 10 (under 48 h, not reviewed)
+2977	fresh	-	glossary-same-local-cloud	bcd88602fbef	fresh: runner 10 (under 48 h, not reviewed)
+2979	fresh	-	record-before-fix-push	7d9315123134	fresh: runner 10 (under 48 h, not reviewed)
+2980	keep	code	ci-split-checks-family	472da99ece13	needs main merged, 3 checks.yml hunks; Linux split only; lane session_013NEJL2UPotZrZRQ9WLTshH adopts it (coordinator 11:38 CST Nov 13)
+2981	fresh	-	answer-kept-on-close	a91005a70a71	fresh: runner 10 (under 48 h, not reviewed)
+2982	fresh	-	page-narrow-word-breaks	6c01123efbb0	fresh: runner 10 (under 48 h, not reviewed)
+2983	fresh	-	lane-start-checks-open-pr	2ce83361f02e	fresh: runner 10 (under 48 h, not reviewed)
+2984	fresh	-	repo-protected-paths	6492c26e5963	fresh: runner 10 (under 48 h, not reviewed)
+2987	rebuild	code	challenger-page-against	5b8ca9f176ed	v2 "Against the pick" context line; main renamed item field pick->recommended (RECOMMENDED_FIELDS) so guard would never judge; rebuild reading recommended with old pick; re-point SKILL steps/tests; may land guard and page as two PRs
+2989	fresh	-	step-pick-claims-match-page	f7150831953d	fresh: runner 10 (under 48 h, not reviewed)
+2991	fresh	-	gh-get-timeout-retry	80a2e21f1419	fresh: runner 10 (under 48 h, not reviewed)
+2993	keep	prose	merge-flow-after-anthropic	ed87d763f364	files owner rulings for per-lane merge cutover (4 new records + ~16 edits); 2 mechanical conflicts; cites R42 part 2 and R55 missing on main plan; state "target, not live"; files an owner ruling so needs reviewer read
+2996	close	code	prose-tending-contract	9eab18aabb49	ancestor of 3003
+2997	keep	code	item-cite-carries-name	435d838e0f00	bare_item_cite + handoff_cite_hit guard; merges clean; no test for triage "stalled step: item 7" line (unknown)
+3001	fresh	-	records-page-guard-derived-rows	917fa5701b25	fresh: runner 10 (under 48 h, not reviewed)
+3003	keep	code	prose-tending-contract	64111cfe4345	tending runner + feedback-log hooks + move-stores plan; superset of 2915/2996; one-line rebase in ci-scope.sh shoot list; tests not run
+3004	fresh	-	ci-hygiene-once-per-batch	70e0ede78c6e	fresh: runner 10 (under 48 h, not reviewed)
+3005	fresh	-	unknown-reads-lint-linux-only	8b950b6aa13d	fresh: runner 10 (under 48 h, not reviewed)
+3006	rebuild	code	page-wakes-and-relays	cb9376c59885	R18 item 3 vs R60 conflict (chat reply form); blocked on owner/coordinator pick: "on the page, item N" only (R18) or "Page item: <id>" + option lines (R60/main)
+3007	fresh	-	review-record-merge-main-line	eeceb7c9ceef	fresh: runner 10 (under 48 h, not reviewed)
+3008	keep	code	batch-ci-merge-guard	d82fba8d5bf0	HOLD, pending combined-PR build path (Coordinator 15:35 CST Nov 13: owner ruling own-767-a-combined-pr says merges, batches and lanes were never exclusive; a combined PR per step group may need the batch build, drop and freeze code; runner 10 was asked how it builds one). Do not close. The earlier close-now row (batch-only, no home on main 59da758a3) is withdrawn. Old reason follows: close-now, basis: coordinator pick 15:24 CST plus sweep, undoable; revives if the owner rules children keep batching (Coordinator 15:33 CST Nov 13; sweep by an Explore agent, sonnet). My own check, git grep -w on origin/main 59da758a3 in merge, bin, hooks, lint, .github and settings.json: these names are defined nowhere on main: batch_running, busy_parts (batch_build shows only in test docstrings, running_batch only as a test loop variable). I checked the names, not each hunk; the hunk reading is the agent's. Close it, keep the branch.; old reason: fresh: runner 10 (under 48 h, not reviewed)
+3011	fresh	-	sim-tool-lease-check	32b283e0d512	fresh: runner 10 (under 48 h, not reviewed)
+3012	fresh	-	stall-watch-clock-pins	9e3693ea1fdc	fresh: runner 10 (under 48 h, not reviewed)
+3014	keep	code	merge-path-same-everywhere	f8e7d7e5390d	needs main merged (4 hunks by hand); guard verdict change owes round 3 net-value test
+3015	fresh	-	fetch-head-shared-race	4c26022f90e5	fresh: runner 10 (under 48 h, not reviewed)
+3018	fresh	-	auto-merge-refused	b56ad9a1464a	fresh: runner 10 (under 48 h, not reviewed)
+3019	keep	code	lane-push-frozen-in-batch	7f112970889f	push-batch-held rule; merges clean; has tests s22670
+3020	fresh	-	cloud-hooks-stale-copy	bc0b812ec521	fresh: runner 10 (under 48 h, not reviewed)
+3021	keep	code	ci-linux-windows-once	72d112d72b24	KEEP, express, lane ci-mac-once-per-batch, R61/R62 per retro CI plan (coordinator 11:38 CST Nov 13); not a subset-close into 3088
+3023	keep	prose	standing-role-model-rows	9468678779fa	needs main merged (agent-model-cap.md:10); record must say Guard or check yes
+3024	keep	code	guard-paths-agents	c7415fead496	needs main merged (pr-review-record.md:115); step guard-paths-agents-narrow waits on it
+3026	fresh	-	agent-worktree-add-in-tool-dir	369657dc746a	fresh: runner 10 (under 48 h, not reviewed)
+3028	keep	code	guard-false-alarm-cull	601424fea2f1	deletes Recovered/Handoff-gave report-line check; hunks fit main
+3029	keep	code	guard-false-alarm-cull	a516a55fd306	question-form guard cull; one small conflict in question_form.py docstring
+3030	keep	code	guard-false-alarm-cull	6ea9e087568e	builder plain test run via _test_temp.run_folder not refused
+3031	keep	code	guard-false-alarm-cull	dba9fe0879b3	check_ruling_kind reads Home from footer only
+3032	keep	code	guard-false-alarm-cull	0d6f7bfa76d4	gh-write-cloud heredoc reading + merge --head refusal; contains 3033
+3033	close	code	guard-false-alarm-cull	83c758e965ea	inside 3032
+3034	rebuild	code	guard-false-alarm-cull	d509685230df	scratchpad false alarms; main reworked scratchpad_owner_write; -C hunk and TREE_REFUSE_REASON rename still apply, finished-agent part redo
+3035	keep	code	guard-false-alarm-cull	99b05dd429b6	stays marks on 7 glossary rows
+3036	close	code	guard-false-alarm-cull	9853d78517ee	page item 630 option b: 2941 is the keeper; 3036 body says "accept three limits", which is pick c (coordinator 11:36 CST Nov 13)
+3037	keep	code	guard-false-alarm-cull	21ad144f8f7a	frozen-path read-only forms; no overlap with 3030
+3038	keep	code	page-wakes-and-relays	5a074b4104d2	relay-grant-words rule; anchors intact; independent
+3039	fresh	-	notes-fix-reverify-small	1ee95ce1d12e	fresh: runner 10 (under 48 h, not reviewed)
+3040	keep	prose	page-wakes-and-relays	3c957137d942	2 debts + note about 3038; trivial rebase of notes.md; close if 3038 closes
+3042	keep	code	ci-linux-windows-once	c877d12e5f6f	KEEP, express, lane ci-mac-once-per-batch, R61/R62 per retro CI plan (coordinator 11:38 CST Nov 13); not a subset-close into 3088
+3043	keep	code	guard-false-alarm-cull	a2f593dfc82e	debt-retire accepts wrong-refusal notes line; merge before 3056
+3047	keep	code	mutate-guard-timeout-crashed	8b74987b3987	needs main merged (one adjacent insert in mutate_guard.py)
+3050	fresh	-	git-apply-test-path-write	36cebe0502fe	fresh: runner 10 (under 48 h, not reviewed)
+3053	fresh	-	ruled-step-coordinator-queue	a04d3d9b2cb4	fresh: runner 10 (under 48 h, not reviewed)
+3056	keep	prose	guard-false-alarm-cull	37675a604e3a	records side of cull; merge after 3043, 3028, 3029; fix item 13 "Until cull-report-guard merges" at batch time; duplicates 3028 note removals
+3057	fresh	-	consultant-role-record	dc541d27682b	fresh: runner 10 (under 48 h, not reviewed)
+3058	fresh	-	child-repo-gap	419ca9c13e49	fresh: runner 10 (under 48 h, not reviewed)
+3059	fresh	-	pointer-checkout-edit	a5e5b7521b36	fresh: runner 10 (under 48 h, not reviewed)
+3061	fresh	-	decision-watch-finds-transcript	e21fcef07f0f	fresh: runner 10 (under 48 h, not reviewed)
+3063	fresh	-	ci-wait-stop-needs-checkin	ebdf7d0976c4	fresh: runner 10 (under 48 h, not reviewed)
+3065	fresh	-	local-page-publish-route	457012fbce6d	fresh: runner 10 (under 48 h, not reviewed)
+3068	fresh	-	claim-vs-main-needs-read	ed3d6c95863a	fresh: runner 10 (under 48 h, not reviewed)
+3071	fresh	-	session-start-pin-skip-log	ef3d56bad18e	fresh: runner 10 (under 48 h, not reviewed)
+3072	keep	code	review-record-lane-lint-newest	ebb50b247e0b	needs main merged (3 files); check verdict change owes review; overlaps 2940
+3073	keep	code	guards-read-origin-main-config	0153df4cb77d	needs main merged; rewrites a decision, part waits on owner ruling D14 (unknown if it exists); re-measure cost pins
+3074	fresh	-	role-model-explore-veto-offer	1875f76e0767	fresh: runner 10 (under 48 h, not reviewed)
+3076	fresh	-	inbox-skip-bash-echo	fb17ed7a820c	fresh: runner 10 (under 48 h, not reviewed)
+3084	fresh	-	consultant-role-placement	d050c33d79eb	fresh: runner 10 (under 48 h, not reviewed)
+3086	keep	prose	ios-apps-test-shapes	4ff5805759a3	Test shapes section in ios-apps SKILL.md; merges clean; merge before or with 3092
+3088	keep	code	ci-linux-windows-once	600ee184e229	R61/R62 + nightly drop; one-hunk rebase checks.yml (Git mailbox wait suite step); lint/test_windows_split.py pins may need re-shape; nightly drop should land before next cron fire (17 3 * * *)
+3090	keep	prose	ios-apps-one-build	5a73d06fba2a	needs main merged (SKILL.md Boot path bullet)
+3092	keep	code	ios-apps-test-shapes	14cfeb60012c	UITestSupport.swift.tmpl helpers + test; merges clean; new test unrun
+3100	fresh	-	session-messages-status-line	5c8239a904b8	fresh: runner 10 (under 48 h, not reviewed)
+3102	fresh	-	fix-branch-merge-main-deny-2	808f69aaf1e1	fresh: runner 10 (under 48 h, not reviewed)
+3108	keep	code	merge-idle-lanes-after-merge	aad93cd46059	needs main merged (skills/roadmap/build.py)
+3109	keep	code	push-needs-review-record	74915b66a5d8	merges clean; same step as 3102, order of the two needs a pick
+3110	keep	code	handoff-late-checkpoint	1276503fcbeb	needs main merged (precompact-handoff.md item 2 reworded; re-apply sentence)
+3111	keep	code	lane-start-settings	2a7bd5e80794	needs main merged (guard.py import line, keep both); guard verdict change owes reviewer read
+3167	keep	prose	time-pinned-p5-ruling	3a97b6e430	new: rebuilt P5 ruling (owner words 2026-11-07 13:00 CST paraphrased from #1177); round 2 PASS; lane lint running
+3175	keep	code	batch-drop-refusal-blame	91daaef60	HOLD, pending combined-PR build path (Coordinator 15:35 CST Nov 13: owner ruling own-767-a-combined-pr says merges, batches and lanes were never exclusive; a combined PR per step group may need the batch build, drop and freeze code; runner 10 was asked how it builds one). Do not close. The earlier close-now row (batch-only, no home on main 59da758a3) is withdrawn. Old reason follows: no home on main (Coordinator pick 15:25 CST Nov 13, not an owner pick; undoable; I did not check the claim): main 59da758a3 has no batch_blame, batch_drop, record_in_block or batch_start; lane measured it; no replacer PR; close it, keep the branch; reopen if the pick is withdrawn
+3177	close	code	ci-cancel-on-close	2778bc3d706e	close-now (owner pick 13:12 CST, step close-replaced-at-open; runner 10 asked 13:38 CST Nov 13): replacer #3216 is open (read on GitHub, head 8a3f89d87); body of #3216: replaces #3177, which is parked (Coordinator ruling 12:34 CST Nov 13); close it, keep the branch; reopen if the replacer is dropped
+3240	keep	code	release-check-vs-batch-head	2d6679d6ed0e	HOLD, pending combined-PR build path (Coordinator 15:35 CST Nov 13: owner ruling own-767-a-combined-pr says merges, batches and lanes were never exclusive; a combined PR per step group may need the batch build, drop and freeze code; runner 10 was asked how it builds one). Do not close. The earlier close-now row (batch-only, no home on main 59da758a3) is withdrawn. Old reason follows: no home on main (Coordinator pick 15:26 CST Nov 13, not an owner pick; undoable; I did not check the claim): main 59da758a3 merge.py:4152 reads "Nothing here builds or drops a batch"; lane session_013NEJL27Zw8otLsDBqaNN61 (archive push by the lane); no replacer PR; close it, keep the branch; reopen if the pick is withdrawn
+3260	keep	code	drain-batch-measure	644199c6d	HOLD, pending combined-PR build path (Coordinator 15:35 CST Nov 13: owner ruling own-767-a-combined-pr says merges, batches and lanes were never exclusive; a combined PR per step group may need the batch build, drop and freeze code; runner 10 was asked how it builds one). Do not close. The earlier close-now row (batch-only, no home on main 59da758a3) is withdrawn. Old reason follows: dropped as superseded (Coordinator pick 15:24 CST Nov 13, not an owner pick; I did not check the claim): superseded by per-lane merge, no batch build path on main 59da758a3, measured by lane drain-batch-measure; no replacer PR; close it, keep the branch; reopen if the pick is withdrawn
