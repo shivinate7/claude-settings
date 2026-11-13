@@ -3914,8 +3914,7 @@ class GhHalf(Env):
         self.assertIn("PUT pulls/7/merge", self.calls())
 
     def test_confirm_merges_while_another_ready_pr_has_a_required_check_pending(self):
-        # Re-pointed from the batch brake's cases. Act 4 removes the brake, so another ready pull request's pending required check holds no merge.
-        # The old batch path refused this merge and named that check: red on a11bafe09.
+        # Each ready pull request merges on its own required checks, so a pending required check on another ready pull request holds no merge.
         rc, out = self.run_merge("7", "--confirm", host=self.other_pr(runs=[], rows=[("checks", "pending", "")]))
         self.assertEqual(rc, 0, out)
         self.assertIn("PUT pulls/7/merge", self.calls())
@@ -8340,9 +8339,9 @@ def claim_pushed_line(out):
     return next((l for l in out.splitlines() if "claim" in l and "pushed" in l and "confirm" in l), "")
 
 class TwoStepConfirm(RecordsEnv):
-    """Two-step confirm (the owner's ruling, Nov 12 2026: the claim stays a commit). A confirm that must push its claim commit pushes it and
-    stops: no merge call, no wait, and one stop line that says the claim is pushed and to confirm again. The next confirm, on the claim head,
-    merges it. A confirm that needs no claim merges in one run. Each case names its cause in its first assert."""
+    """Two-step confirm. A claim is a commit on the pull request head, and the claim head's own checks must run before it merges. So a confirm
+    that must push its claim commit pushes it and stops: no merge call, no wait, and one stop line that says the claim is pushed and to confirm
+    again. The next confirm, on the claim head, merges it. A confirm that needs no claim merges in one run. Each case names its cause in its first assert."""
 
     def test_the_first_confirm_calls_no_merge_put(self):
         asked = []
@@ -15495,7 +15494,7 @@ class ReleaseCheck(ReviewEnv):
 
     def test_j_release_check_config_file_names_the_folder_the_claim_carry_reads(self):
         # Catches: --release-check reading the claim carry under the default config, since main hands release_check no config (cfgrel is None).
-        # The claim in docs/alt is refused, though --config names docs/alt, and the lint PASS on the head it stacks on carries under that config.
+        # The claim in docs/alt is refused, though --config names docs/alt, and the lint result on the head it stacks on carries under that config.
         fx, claim = self.config_folder_claim()
         self.assertNotIn("docs/alt", sh(self.co, "git", "show", "origin/main:.github/stamp.json"),
                          "scope: the default config names docs/alt, so the case below proves nothing about --config")
