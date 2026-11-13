@@ -117,6 +117,9 @@
                           .ps1 tests print `skip <test>: <reason>`. A failing test refuses, with its last output; a timeout, an
                           unloadable selector or an unreadable diff is an unknown, lifted by --lint-unknown-ok. The PASS line names
                           the run and skipped counts. Extra cost: the touched tests' own run time, bounded in all by LINT_SECONDS.
+                          A PR number also reads the draft's lane-touched-tests run at the head (Windows and macOS jobs; never a ref or commit), after the cross-measure
+                          and before the ci-job run. A failed job FAILs and names its link, never lifted. A run unfinished, or no `touched` job on the head, is an
+                          unknown that --lint-unknown-ok lifts, logged. Cost: one check-runs read per call.
                           Before any step: a lint worktree that lacks lint/check_python_floor.py or .github/workflows/checks.yml, which the head's
                           own tree holds, reads UNKNOWN (exit 1, as every lane-lint refusal) and names the file; no step runs and --lint-unknown-ok never lifts it. Cost:
                           one `git ls-tree` of the head.
@@ -242,6 +245,8 @@ LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a he
 # It reads RULE_DIRS, never a copy.
 GUARD_PATHS = stale_cites.RULE_DIRS + ("merge/", "githooks/")
 GUARD_FILES = ("settings.json",)
+# The model record is a guard path too: its round rows set the model each reviewer runs on, so a docs-only edit of them is a guard change
+# (decision agent-model-cap). guard_hits builds its path from the layout's decisions folder and the guard's file name.
 REVIEW_CITE = "(decision pr-review-record, a review record names the head it reviewed and only an open pull request takes one)"
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
 REPO_CITE = "(decision merge-confirm-repo, -C names the checkout a merge acts in, so a -C that names no folder stops the merge)"
@@ -373,9 +378,26 @@ def rate_wait(headers, n, now):
         after = reset - now if reset is not None and headers.get("x-ratelimit-remaining") == "0" else 0
     return min(math.ceil(after) if after > 0 else RATE_LADDER[min(n, len(RATE_LADDER)) - 1], RATE_LADDER[-1])  # whole seconds, rounded up
 
-def retry_net(call, pause, retries=NET_RETRIES, what="the call", now=time.time, before_wait=None):
+def net_method(args):
+    """-> the HTTP method a `gh` command sends: its LAST -X (or --method), else POST when it passes fields or --input, else GET."""
+    method, fields = None, False
+    for i, a in enumerate(args):
+        if a in ("-X", "--method") and i + 1 < len(args):
+            method = args[i + 1]
+        elif a.startswith("--method="):
+            method = a[len("--method="):]
+        elif a.startswith("-X") and len(a) > 2:
+            method = a[2:].lstrip("=")  # -XPUT or -X=PUT
+        fields = fields or a in ("-f", "-F") or a.split("=")[0] in ("--field", "--raw-field", "--input") or (a[:2] in ("-f", "-F") and len(a) > 2 and a[2] != "-")
+    return (method or ("POST" if fields else "GET")).upper()
+
+def retry_net(call, pause, retries=NET_RETRIES, what="the call", now=time.time, before_wait=None, method="GET", idempotent=False, landed=None):
     """-> (code, output, retries used). The output has no `gh api -i` header block. Runs `call` again after `pause(wait)` while it fails with a network
     error, up to `retries` times. The wait is NET_PAUSE, or on a rate limit rate_wait(). Before a rate wait it prints one line that names `what`.
+    A 5xx or network error may come after the call ran, so it is resent only when `method` is GET or HEAD, or the caller says `idempotent`
+    (a resend is harmless by design, said in a comment at the call). A rate limit refused the call before it ran, so any method retries it.
+    Any other write may have landed, so `landed()` is asked first (decision standing-merge-grant: check, then retry): True returns (0, "", retries) with no resend,
+    False resends, and None (the check could not tell) stops with the failed reply. A write with no `landed` is sent once.
     `before_wait(wait)` runs before each rate wait. It extends the merge lock past the wait, or raises NetStop: then the call stops in place of the wait."""
     n = 0
     while True:
@@ -383,8 +405,15 @@ def retry_net(call, pause, retries=NET_RETRIES, what="the call", now=time.time, 
         headers, out = split_headers(out)
         if n >= retries or not is_net(c, out):
             return c, out, n
+        rate = bool(RATE_LIMIT.search(out))
+        if not rate and not idempotent and method.upper() not in ("GET", "HEAD"):
+            did = landed() if landed else None
+            if did is None:
+                return c, out, n
+            if did:
+                return 0, "", n
         n += 1
-        if not RATE_LIMIT.search(out):
+        if not rate:
             pause(NET_PAUSE)
             continue
         wait = rate_wait(headers, n, now())
@@ -792,15 +821,15 @@ class GhLock(Lock):
         self.now, self.pause = now, pause
         self.cwd = cwd  # where `gh` runs: {owner}/{repo} in a route names the repo of this directory
 
-    def api(self, *a, once=False):
-        """The one home of every lock `gh api` call. A network error or rate limit is retried NET_RETRIES times with `self.pause`
+    def api(self, *a, once=False, idempotent=False, landed=None):
+        """The one home of every lock `gh api` call. A rate limit, or a network error on a GET, an `idempotent` call or a write whose `landed` check says it did not land, is retried NET_RETRIES times with `self.pause`
         (the ladder or GitHub's reset time on a rate limit), then the last (code, output) returns: the caller raises NetStop when is_net says so.
         Every call asks for the headers (-i), and retry_net drops the block. Once this run holds the lock, extend_for pushes the expiry past each rate wait.
         `once`: no retry and no wait at all. The extension calls and the delete of an expired lock use it: a retry could land after another run's take.
         ponytail: no retry inside `shared_deadline`, as in Host.gh. Before the lock is held, a rate wait follows the ladder: 60 + 300 + 900 s = 21 minutes per call at most, and the lock is not yet ours to extend."""
         path = next((x for x in a if x.startswith("repos/")), " ".join(a))
         retries = NET_RETRIES if _READ_DEADLINE is None and not once else 0
-        c, out, _ = retry_net(lambda: sh(["gh", "api", "-i", *a], cwd=self.cwd), self.pause, retries, f"the lock call {path}", self.now, self.extend_for)
+        c, out, _ = retry_net(lambda: sh(["gh", "api", "-i", *a], cwd=self.cwd), self.pause, retries, f"the lock call {path}", self.now, self.extend_for, net_method(a), idempotent, landed)
         return c, out
 
     def read(self, b):
@@ -830,10 +859,15 @@ class GhLock(Lock):
             raise (NetStop if is_net(c2, tree) else Stop)("cannot read the base branch " + LOCK_CITE + ": " + tree)
         now = self.now()  # read once: the text and `until` come from this one value
         msg = lock_message(ttl, now, self.holder)
-        c, sha = self.api("-X", "POST", "repos/{owner}/{repo}/git/commits", "-f", f"message={msg}", "-f", f"tree={tree}", "--jq", ".sha")
+        c, sha = self.api("-X", "POST", "repos/{owner}/{repo}/git/commits", "-f", f"message={msg}", "-f", f"tree={tree}", "--jq", ".sha", idempotent=True)  # idempotent by design: a commit object no ref names, so a resend leaves at most one orphan
         if c:
             raise (NetStop if is_net(c, sha) else Stop)("cannot make the lock commit " + LOCK_CITE + ": " + sha)
-        c, out = self.api("-X", "POST", "repos/{owner}/{repo}/git/refs", "-f", f"ref={lock_ref(b)}", "-f", f"sha={sha}")
+        def took():  # a lost reply may still have made the ref: it is ours when it names our commit, not made when it is missing, and no answer when the read fails or another run holds it
+            c3, got = self.api(f"repos/{{owner}}/{{repo}}/git/ref/{lock_ref(b)[5:]}", "--jq", ".object.sha")
+            if not c3:
+                return True if got.strip() == sha.strip() else None
+            return False if not is_net(c3, got) and ("404" in got or "Not Found" in got) else None
+        c, out = self.api("-X", "POST", "repos/{owner}/{repo}/git/refs", "-f", f"ref={lock_ref(b)}", "-f", f"sha={sha}", landed=took)
         if c:
             if is_net(c, out):
                 raise NetStop("cannot take the merge lock " + LOCK_CITE + ": " + out)
@@ -861,7 +895,7 @@ class GhLock(Lock):
 
     @staticmethod
     def gone(out):
-        """The ref is not there: a delete that finds this has nothing left to do (a retry after a lost reply lands here).
+        """The ref is not there: a delete that finds this has nothing left to do.
         A network error or rate limit is never "gone", though its text may hold "404" (a user id, a request id)."""
         return not is_net(1, out) and ("404" in out or "Not Found" in out or "does not exist" in out)
 
@@ -873,7 +907,7 @@ class GhLock(Lock):
         """-> True when it removed the lock, False when no lock was there."""
         c, out = self.api("-X", "DELETE", f"repos/{{owner}}/{{repo}}/git/{lock_ref(b)}")
         if c and is_net(c, out):
-            raise NetStop("unlock failed " + LOCK_CITE + ", still failing after the retries. Run again: " + out)
+            raise NetStop("unlock failed " + LOCK_CITE + ", still failing. Run again: " + out)
         if c and not self.gone(out):
             raise Stop("unlock failed " + LOCK_CITE + ": " + out)
         return not c
@@ -915,9 +949,9 @@ class Host:
     branch = "<branch>"  # the head branch of the last pr() read: the remedy of a "no check ran" red names it
     before_wait = None  # lock.extend_for, set by confirm once the lock is held: runs before each rate wait. No gh call has one before
 
-    def gh(self, args, cwd=None):
-        """-> (code, output). The one home of every Host `gh` call. A network error is retried NET_RETRIES times with
-        `self.pause`; after that NetStop. Any other failure returns at once. `self.net_retries` counts the retries
+    def gh(self, args, cwd=None, idempotent=False, landed=None):
+        """-> (code, output). The one home of every Host `gh` call. A network error on a GET, or on a call marked `idempotent`, is retried NET_RETRIES times with
+        `self.pause`; after that NetStop. Any other write is sent once on a 5xx or network error, unless the caller gives `landed` (retry_net checks it first); a rate limit retries any method. Any other failure returns at once. `self.net_retries` counts the retries
         of the last call. A call that passes `-i` gets the reply with its header block, for a caller that reads a header. ponytail: no retry inside `shared_deadline` (the guard's hard hook budget has no room for a pause)."""
         raw = []
 
@@ -925,7 +959,7 @@ class Host:
             c, out = sh(["gh", *args], cwd=cwd)
             raw[:] = [out]
             return c, out
-        c, out, self.net_retries = retry_net(call, self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, f"`gh {' '.join(args[:2])}`", self.now, self.before_wait)
+        c, out, self.net_retries = retry_net(call, self.pause, NET_RETRIES if _READ_DEADLINE is None else 0, f"`gh {' '.join(args[:2])}`", self.now, self.before_wait, net_method(args), idempotent, landed)
         if is_net(c, out):
             raise NetStop(f"network error from `gh {' '.join(args[:2])}`, still failing after {self.net_retries} retries. Nothing was reverted. Run again.\n{out}")
         return c, raw[0] if "-i" in args else out
@@ -933,7 +967,7 @@ class Host:
     def _repo_args(self):
         return ["-R", self.repo] if self.repo else []
 
-    def api(self, rel, *extra, method="GET", fields=None, body=None):
+    def api(self, rel, *extra, method="GET", fields=None, body=None, idempotent=False, landed=None):
         """-> (code, output) of one REST call, through Host.gh so its retries hold. The repo is Host.repo, else the repo of the working directory.
         `fields` go out as -f fields: a GET must say -X GET, or gh sends them as a POST body. A query value never goes in the route, because the
         Windows .cmd shim of gh lets cmd.exe split an argument at '&'.
@@ -944,12 +978,12 @@ class Host:
         for key, value in (fields or {}).items():
             args += ["-f", f"{key}={value}"]
         if body is None:
-            return self.gh([*args, *extra], self.cwd)
+            return self.gh([*args, *extra], self.cwd, **{k: v for k, v in (("idempotent", idempotent), ("landed", landed)) if v})
         fd, tmp = tempfile.mkstemp(prefix="merge-body-", suffix=".json")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(body, f)
-            return self.gh([*args, "--input", tmp, *extra], self.cwd)
+            return self.gh([*args, "--input", tmp, *extra], self.cwd, **{k: v for k, v in (("idempotent", idempotent), ("landed", landed)) if v})
         finally:
             with contextlib.suppress(OSError):
                 os.unlink(tmp)
@@ -1226,6 +1260,35 @@ class Host:
         for s in self.pages(f"commits/{sha}/status", "statuses"):
             rows.append({"name": s["context"], "bucket": self.STATE_BUCKET.get(s["state"], "fail"), "status": True, "link": s.get("target_url")})
         return self.buckets(rows, warn, sha)
+
+    DRAFT_TOUCHED = "touched"  # the job of lane-touched-tests.yml that runs the touched tests on Linux
+    DRAFT_TEST_JOB = re.compile(r"run \((windows|macos)")  # its Windows and macOS jobs, which the Linux-only lane lint never runs
+    DRAFT_OK = ("success", "skipped", "neutral")
+
+    def draft_run_state(self, sha):
+        """-> (state, lines): the verdict of the draft's lane-touched-tests run on the head `sha`, from ONE read of its check runs (no statuses).
+        "fail": the `touched` job or a Windows or macOS test job finished with a conclusion other than success, skipped or neutral; `lines` name each job and its link.
+        "wait": one of those jobs has not finished. "unknown": no `touched` job is on `sha`, so no run was judged for this head (a run of an older head is never read),
+        or `touched` was skipped, as a never-drafted or ready lane's is: no touched test ran, so there is no proof.
+        "pass": `touched` succeeded and every test job that ran succeeded or was skipped. Of rows that share a name (a re-run), the newest id counts: a re-run that passed clears the old failure."""
+        newest = {}
+        for r in self.pages(f"commits/{sha}/check-runs", "check_runs"):
+            name = r.get("name") or ""
+            if name == self.DRAFT_TOUCHED or self.DRAFT_TEST_JOB.match(name):
+                if name not in newest or (r.get("id") or 0) > (newest[name].get("id") or 0):
+                    newest[name] = r
+        failed = [f"{n}: {r.get('conclusion')} {r.get('html_url') or r.get('details_url') or '(no link)'}"
+                  for n, r in sorted(newest.items()) if r.get("status") == "completed" and r.get("conclusion") not in self.DRAFT_OK]
+        if failed:
+            return "fail", failed
+        waiting = [f"{n}: not finished {r.get('html_url') or r.get('details_url') or '(no link)'}" for n, r in sorted(newest.items()) if r.get("status") != "completed"]
+        if waiting:
+            return "wait", waiting
+        if self.DRAFT_TOUCHED not in newest:
+            return "unknown", [f"no `{self.DRAFT_TOUCHED}` job (lane-touched-tests) has run on {sha[:9]}"]
+        if newest[self.DRAFT_TOUCHED].get("conclusion") == "skipped":
+            return "unknown", [f"the `{self.DRAFT_TOUCHED}` job (lane-touched-tests) was skipped on {sha[:9]}, so no touched test ran: {newest[self.DRAFT_TOUCHED].get('html_url') or newest[self.DRAFT_TOUCHED].get('details_url') or '(no link)'}"]
+        return "pass", []
 
     def superseded(self, items, sha):
         """`items` ((row, bucket) pairs) less the rows of a cancelled workflow run when a newer run (larger id) of the same workflow is on `sha`. A concurrency group
@@ -1558,9 +1621,18 @@ class Host:
         state_now = p["merge_state"]
         if state_now in ("BLOCKED", "BEHIND"):
             return None, f"#{n} reads {state_now}: its base rules are not met or its branch is behind the base {GRANT_CITE}. gh's merge refuses it the same way, so no merge call was sent."
+        def merged_at_sha():  # a lost reply may still have merged: True when the PR reads merged at this run's head, False when it reads open, None when unread or merged elsewhere
+            c4, v = self.api(f"pulls/{n}")
+            try:
+                d = json.loads(v) if not c4 else None
+                if d["merged"]:
+                    return True if d["head"]["sha"] == sha else None  # merged at another head is not this run's merge: no resend
+                return False if d["state"].upper() == "OPEN" else None
+            except (ValueError, KeyError, TypeError, AttributeError):
+                return None
         lost = False
         try:
-            c, out = self.api(f"pulls/{n}/merge", method="PUT", body={"merge_method": method, "sha": sha, **({"commit_message": self.commit_message} if self.commit_message else {})})
+            c, out = self.api(f"pulls/{n}/merge", method="PUT", landed=merged_at_sha, body={"merge_method": method, "sha": sha, **({"commit_message": self.commit_message} if self.commit_message else {})})
         except NetStop as e:
             lost, c, out = True, 1, str(e)
         try:
@@ -1581,8 +1653,7 @@ class Host:
         if not c:  # exit 0 and still OPEN: not a refusal (a queued merge, or a lagging read). The claim stays.
             raise NetStop(f"the merge call of #{n} exited 0, but the pull request still reads OPEN. Nothing was reverted. Check the pull request #{n} on GitHub: "
                           f"if it merged, do the after-merge steps by hand; if it is open, run again {REFUSED_CITE}.\n{view}")
-        # A refusal reply with the PR still OPEN is proven, even when the first try lost its reply and a retry got the refusal
-        # (gh retried it): gh answered and the merge did not happen. The caller reverts the claim. Only a proven refusal reverts (standing-merge-grant).
+        # A refusal reply with the PR still OPEN is proven: gh answered and the merge did not happen. The caller reverts the claim. Only a proven refusal reverts (standing-merge-grant).
         return None, out
 
 # ------------------------------------------------------------------ git steps
@@ -2555,6 +2626,16 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
         if target.isdigit():
             cross_fails, reports, stop = cross_measure(root, head, int(target), info["body"], host, with_prs, base, fetched, why is None, is_integration_pr(info))
             fails += cross_fails
+            # one check-runs read: the draft's Windows and macOS runs, which this Linux lint never runs. A batch integration PR has no draft run of its own
+            # (a lane's run is the proof), so it reads none.
+            draft, draft_lines = ("pass", []) if is_integration_pr(info) else host.draft_run_state(head)
+            if draft == "fail":
+                fails.append(f"its draft run of lane-touched-tests failed on {head[:9]}: " + "; ".join(draft_lines))
+            elif draft != "pass" and not (fails or stop):
+                if not unknown_ok.strip():
+                    raise Liftable("\n".join([f"the draft run of lane-touched-tests on {head[:9]} is {'not finished' if draft == 'wait' else 'unknown'}, not a pass:", *draft_lines,
+                                              'Wait for it, or run again with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
+                say(f"merge: draft run of {head[:9]} is {draft}, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *draft_lines)
         if fails or stop:  # as on main, a counted FAIL or an unknown ends the run before the ci-job
             raise Stop("\n".join([*([f"the lint of {head[:9]} against {base} FAILs:", *fails] if fails else []), stop if stop else LANE_LINT_REMEDY]))
         state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes)
@@ -3355,8 +3436,24 @@ REVIEW_MODEL = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 REVIEW_LAST_ROUND = 3  # rule roles-review-cap-three: at most three rounds
 REVIEW_GRANT = r"item \d+ [a-z], owner, \d{4}-\d{2}-\d{2} \d{2}:\d{2} (?:CST|CDT)"  # the owner's grant of one round past REVIEW_LAST_ROUND
 REVIEW_SHA = r"[0-9a-f]{40}"
-REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix check is PASS or FAIL, never PARTIAL (decision hold-unsafe-after-round-3)
-REVIEW_FIX_GUARD_MODEL = "sonnet"  # every fix check runs on this model, whatever Guard or check says (owner item 444 a; decision pr-review-record)
+REVIEW_FIX_VERDICTS = REVIEW_VERDICTS[:2]  # a fix verifier is PASS or FAIL, never PARTIAL (decision hold-unsafe-after-round-3)
+REVIEW_FIX_ROW = "fix verifier"  # the round cell of a fix verifier's row in the model record's round rows (decision agent-model-cap)
+
+def review_round_model(n):
+    """-> the model word a reviewer's round `n` (a number, or REVIEW_FIX_ROW) runs: the model record's round row, read through the guard's
+    reader (hooks/guard.py role_round_table), else the guard's fallback. A round past REVIEW_LAST_ROUND reads the last round's row.
+    Reads the record once per call; the guard is imported here for the reason guard_hits gives."""
+    import guard as hook_guard
+    rounds = hook_guard.role_round_table(hook_guard.pointer_checkout())
+    return hook_guard.role_round_model(rounds, REVIEW_ROLES[0], str(min(n, REVIEW_LAST_ROUND)) if isinstance(n, int) else n)
+
+def __getattr__(name):
+    """REVIEW_FIX_GUARD_MODEL, the model every fix verifier runs (owner item 444 a; decision pr-review-record): the round row's fallback in the
+    guard, read on use so this file holds no copy and does not load the guard at import. The checks read review_round_model, which also reads the record's row."""
+    if name == "REVIEW_FIX_GUARD_MODEL":
+        import guard as hook_guard
+        return hook_guard.ROLE_ROUND_FALLBACK[(REVIEW_ROLES[0], REVIEW_FIX_ROW, "other")]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 def grant_valid(cite):
     """True when `cite` is a whole cite whose date and time are a real time; the pattern alone lets a month 99 or an hour 25 through."""
@@ -3459,8 +3556,9 @@ def review_state(rec, head):
     fix = rec.get("fix")
     if fix and fix[3] != "PASS":
         return "open", "the fix verifier failed, so the fix needs a new lane: one fresh full review at the live head, which a clean merge of main does not replace"
-    if fix and fix[2].lower() != REVIEW_FIX_GUARD_MODEL:
-        return "open", f"the fix check must run on {REVIEW_FIX_GUARD_MODEL}, not {fix[2]}"
+    fix_model = review_round_model(REVIEW_FIX_ROW) if fix else None
+    if fix and fix[2].lower() != fix_model:
+        return "open", f"the fix check must run on {fix_model}, not {fix[2]}"
     if fix and not top:
         return "open", "the fix check passed, but no round is recorded"
     final = REVIEW_LAST_ROUND + bool(rec.get("grant"))  # a Grant line makes the one round past REVIEW_LAST_ROUND the final round
@@ -4093,10 +4191,13 @@ def write_merge_role(tier):
         raise Stop(f"cannot write the merge role to {path} {ROLE_CITE}: {e}.")
 
 def guard_hits(paths):
-    """-> the sorted paths that start with a GUARD_PATHS entry or equal a GUARD_FILES entry, less each test path: a test file alone is no
-    guard change (decision hold-unsafe-after-round-3). hooks/guard.py is_test_rel is the one home of what a test path is."""
+    """-> the sorted paths that start with a GUARD_PATHS entry, or equal a GUARD_FILES entry or the model record, less each test path: a test
+    file alone is no guard change (decision hold-unsafe-after-round-3). hooks/guard.py is_test_rel is the one home of what a test path is."""
     import guard as hook_guard  # here, not at the top: it loads the whole guard set, and only the review record needs it
-    return sorted(p for p in paths if (p.startswith(GUARD_PATHS) or p in GUARD_FILES) and not hook_guard.is_test_rel(p))
+    import layout  # lint/layout.py: where the decisions folder is
+    folder = layout.path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "decisions")
+    whole = GUARD_FILES + ("/".join((folder, hook_guard.ROLE_TABLE_FILE)),)
+    return sorted(p for p in paths if (p.startswith(GUARD_PATHS) or p in whole) and not hook_guard.is_test_rel(p))
 
 def is_doc(path):
     """A doc is a .md under docs/, or the root README.md. Case is ignored and the path is not stripped, so a stray space makes it a non-doc.
@@ -4267,11 +4368,15 @@ def main(argv, host=None, lock=None, hosts=None):
             p.error("--fix-check: the reviewed head must differ from --head, or the fix diff is empty")
         # The reviewer row (decision agent-model-cap): every fix check runs Sonnet (owner item 444 a), and a later-round reviewer runs Sonnet;
         # the last round may run Opus by the owner's override. Checked here, never in parse_review, so a record posted before the rule still parses.
-        if a.fix_check and a.fix_check[2].lower() != REVIEW_FIX_GUARD_MODEL:
-            p.error(f"--fix-check: every fix check runs on {REVIEW_FIX_GUARD_MODEL}, so give {REVIEW_FIX_GUARD_MODEL} as MODEL, not {a.fix_check[2]}")
+        if a.fix_check:
+            fix_model = review_round_model(REVIEW_FIX_ROW)
+            if a.fix_check[2].lower() != fix_model:
+                p.error(f"--fix-check: every fix check runs on {fix_model}, so give {fix_model} as MODEL, not {a.fix_check[2]}")
         for n, role, model, _verdict in a.round:  # parse_review below refuses any fourth round with no --grant
-            if role == REVIEW_ROLES[0] and n >= 2 and "sonnet" not in model.lower() and not (n >= 3 and "opus" in model.lower()):
-                p.error(f"--round {n}: a reviewer's round {n} runs sonnet, not {model!r}; only round 3, or a granted round 4, may run opus (decision agent-model-cap, the reviewer row)")
+            if role == REVIEW_ROLES[0] and n >= 2:
+                want = review_round_model(n)
+                if want not in model.lower() and not (n >= 3 and "opus" in model.lower()):
+                    p.error(f"--round {n}: a reviewer's round {n} runs {want}, not {model!r}; only round 3, or a granted round 4, may run opus (decision agent-model-cap, the round rows)")
         if parse_review(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant)) is None:
             p.error("--round: the rounds must start at 1, rise by one at a time and stop at 3" if not a.grant
                     else "--round: with --grant the rounds must start at 1, rise by one at a time and end at 4")
@@ -4353,8 +4458,14 @@ def main(argv, host=None, lock=None, hosts=None):
             misfits = kind_misfits(a.kind, files)
             if misfits:
                 raise Stop(f"Kind: the diff breaks --kind {a.kind} at " + ", ".join(misfits) + ". Write the record with the kind the diff has. " + REVIEW_CITE)
+            earlier = [e for e in (parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])) if not (e and e["n"] != a.pr)]  # a record for another PR is no earlier record here, as --reviewed reads it
+            earlier_top = max((r[0] for e in earlier if e for r in e["rounds"]), default=0)
+            new_top = max((r[0] for r in a.round), default=0)
+            # a new record may not lower the top round an earlier record holds, and below REVIEW_LAST_ROUND it may not repeat that top round without a fix verifier of its own (a head moved after the last round posts rounds 1..REVIEW_LAST_ROUND again, and a granted round past it is above)
+            if earlier_top and (new_top < earlier_top or (new_top == earlier_top and new_top < REVIEW_LAST_ROUND and not a.fix_check)):
+                print(f"merge: this record restarts the review: it has the same or fewer rounds than an earlier record on this pull request, stops below round {REVIEW_LAST_ROUND}, and has no fix verifier. A new branch with a new PR is the only way out. " + REVIEW_CITE, file=sys.stderr)
+                return 2
             if a.fix_check:  # the fix diff starts from the head the newest earlier record reviewed
-                earlier = [parse_review(b) for b in h.review_comments(info.get("created") or "1970-01-01T00:00:00Z").get(a.pr, [])]
                 last = earlier[-1] if earlier else None
                 if not last or last["head"] != a.fix_check[0]:
                     ok = False

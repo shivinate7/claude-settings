@@ -716,6 +716,15 @@ add("builder-test: a node run with a backslash test path, deleted from checks.ym
     "deny", rule=BT, tool="Edit", file_path=WF, old_string=LINT + BACKSLASH_NODE, new_string=LINT,
     carries=("test-author", "Report"), **B)
 
+# bash takes no value after -k or -p, so the test path after either flag is the script: a builder that drops
+# that run drops its test.
+R3_BASH_K = "      - name: Unit\n        run: bash -k tests/test_a.sh\n"
+R3_BASH_P = "      - name: Unit\n        run: bash -p tests/test_a.sh\n"
+add("builder-test: a bash -k test run deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + R3_BASH_K, new_string=LINT, carries=("test-author", "Report"), **B)
+add("builder-test: a bash -p test run deleted from checks.yml is refused", "deny", rule=BT, tool="Edit",
+    file_path=WF, old_string=LINT + R3_BASH_P, new_string=LINT, carries=("test-author", "Report"), **B)
+
 # ---- test-path shapes: one table on the builder's early warning. Each row is one path, judged by
 # a Write, for one role (the builder). A test shape is refused, a near miss is allowed. Shapes, with
 # the incident that named each: self-test files (Banchi, 2026-10-02: `*-selftest.*`, `*_selftest.*`,
