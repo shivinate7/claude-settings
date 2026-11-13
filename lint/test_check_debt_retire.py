@@ -40,6 +40,7 @@ FAIL = "Delete the old helper. Check: `tests/test_fail.py`."
 PROSE = "Delete the old helper once nothing reads it."
 RUN_URL = "https://github.com/fixture/repo/actions/runs/42"
 ATTRIBUTION = "\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+SESSION_URL = "https://claude.ai/code/session_013NEJL2SdAA1CCG5eTFVFVr"
 NO_RETIRED = "check_debt_retire has no retired(): a Retire-run cite cannot excuse a debt close (decision debt-close-runs-retire)"
 
 
@@ -355,6 +356,17 @@ class RetireRun(Case):
         self.assertEqual(runs.urls, [RUN_URL], "the cited run was not read")
         self.assertEqual(pairs(found), [], "a green run on a descendant of the PR head did not clear the debt")
 
+    def test_r1c_a_session_url_line_after_the_attribution_does_not_hide_the_cite(self):
+        self.closed_prose()
+        plain = "Summary.\n\nRetire-run: d-prose -- %s\n\n%s\n" % (RUN_URL, ATTRIBUTION)
+        self.assertEqual(pairs(self.findings(pr_body=plain, run_state=Runs(("success", self.head)))), [],
+                         "scope: the body without the session URL line did not clear the prose debt")
+        runs = Runs(("success", self.head))
+        body = "Summary.\n\nRetire-run: d-prose -- %s\n\n%s\n\n%s\n" % (RUN_URL, ATTRIBUTION, SESSION_URL)
+        found = self.findings(pr_body=body, run_state=runs)
+        self.assertEqual(runs.urls, [RUN_URL], "a session URL line after the attribution hid the Retire-run cite")
+        self.assertEqual(pairs(found), [], "a session URL line after the attribution left the prose debt standing")
+
     def test_r2_a_cite_of_a_failing_run_is_red(self):
         self.closed_prose()
         runs = Runs(("failure", self.head))
@@ -444,6 +456,34 @@ class RetireRun(Case):
         body = "Retire-run: d-prose -- %s\n" % RUN_URL
         self.assertEqual(pairs(self.findings(pr_body=body)), [("d-prose", "unknown")], "scope")
         self.assertEqual(self.retired_of(body, None), {})
+
+
+class TemplateExcuses(unittest.TestCase):
+    """The PR template's own excuse lines. A PR body starts from the template, so a live excuse line in it would excuse a
+    path or a debt in every PR that keeps it (decision debt-close-runs-retire)."""
+
+    RETIRE_LINE = "Retire-run: <slug> -- <run URL>"  # the template's untouched placeholder lines
+    DROPS_LINE = "Drops-lines: <path> -- <reason>"
+
+    def live(self, text):
+        """The excuse keys `text` carries, read the way the checks read a PR body: Retire-run slugs, then Drops-lines paths.
+        A key that starts with `<` is an untouched placeholder, which names nothing real, so it drops out."""
+        keys = list(D.cites(text)) + list(D.undo.allowed(HERE, "HEAD..HEAD", text))
+        return [k for k in keys if not k.startswith("<")]
+
+    def template(self):
+        with open(os.path.join(HERE, "..", ".github", "pull_request_template.md"), encoding="utf-8") as f:
+            return f.read()
+
+    def test_real_template_carries_no_live_excuse(self):
+        self.assertEqual(self.live(self.template()), [], "the PR template carries a live excuse line, so a PR body that starts from it excuses something")
+
+    def test_live_excuse_lines_in_the_template_are_read(self):
+        text = self.template()
+        mutated = (text.replace(self.RETIRE_LINE, "Retire-run: a-debt -- https://example.test/run/1")
+                       .replace(self.DROPS_LINE, "Drops-lines: docs/a.md -- gone"))
+        self.assertNotEqual(mutated, text, "scope: the template has no placeholder line to replace, so nothing was mutated")
+        self.assertEqual(self.live(mutated), ["a-debt", "docs/a.md"], "the excuse read misses a live Retire-run or Drops-lines line")
 
 
 if __name__ == "__main__":

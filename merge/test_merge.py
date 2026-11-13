@@ -1592,7 +1592,35 @@ path = os.path.join("docs", "guide.md")  # a checks suite that reads one tracked
 sys.exit(1 if os.path.exists(path) and "BROKEN" in open(path, encoding="utf-8").read() else 0)
 '''
 
-class SmallBaseMove(Env):
+class ScopedRepo:
+    """The fixture for a repo whose CI is the real ci-scope.sh and a checks workflow. scoped() puts them on main, and feat then holds
+    main's tip. on() commits a file set to a branch. SmallBaseMove and ExpressPath both use these: neither copies them."""
+
+    def scoped(self, workflow=CHECKS_YML, scope=True, name="checks.yml"):
+        """Main and feat both gain the CI files, the workflow under the file name `name`; feat then holds main's tip."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
+        if scope:
+            with open(SCOPE_SCRIPT, encoding="utf-8") as f:
+                put_lf(os.path.join(o, ".github/scripts/ci-scope.sh"), f.read())
+        put(os.path.join(o, ".github/workflows", name), workflow)
+        put(os.path.join(o, "landed-dirs.txt"), "hooks\n")
+        put(os.path.join(o, "lint/check_slugs.py"), SLUG_LINT)
+        put(os.path.join(o, "hooks/test_reads_guide.py"), DOC_SUITE)
+        put(os.path.join(o, "hooks/x.py"), "X = 1\n")
+        put(os.path.join(o, "docs/shared.md"), "one\ntwo\nthree\nfour\nfive\n")
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "ci files"); sh(o, "git", "push", "-q", "origin", "main")
+        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "main"); sh(o, "git", "push", "-q", "origin", "feat")
+
+    def on(self, branch, files, start=None):
+        """Commit `files` to `branch` and push it. The branch is made from origin/`start` when given, else from origin/`branch`: a new branch needs `start`."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", branch, f"origin/{start or branch}")
+        for path, text in files.items():
+            (put_lf if path.endswith(".sh") else put)(os.path.join(o, path), text)  # bash reads a CRLF script as a bad option on Windows
+        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", f"{branch} moves"); sh(o, "git", "push", "-q", "origin", branch)
+
+class SmallBaseMove(ScopedRepo, Env):
     """Main moved, but only by paths that no CI job of the batch reads (merge-needs-current-base, step c150).
     The real ci-scope.sh and the real bin/ci-job run against a fixture workflow whose `checks` job holds one cross-file lint:
     no two docs share a slug. hooks/test_reads_guide.py is a checks suite outside --lint that reads docs/guide.md."""
@@ -1672,29 +1700,6 @@ class SmallBaseMove(Env):
             ok, why = merge.small_base_move(repo, "main", n_head)
         self.assertFalse(ok, "the batch's rename hid main's change to base.txt, so the green run stands: " + why)
         self.assertIn("main and the batch both change base.txt", why, "the batch's rename hid main's change to base.txt from the shared-path check")
-
-    def scoped(self, workflow=CHECKS_YML, scope=True, name="checks.yml"):
-        """Main and feat both gain the CI files, the workflow under the file name `name`; feat then holds main's tip."""
-        o = self.other
-        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", "main", "origin/main")
-        if scope:
-            with open(SCOPE_SCRIPT, encoding="utf-8") as f:
-                put(os.path.join(o, ".github/scripts/ci-scope.sh"), f.read())
-        put(os.path.join(o, ".github/workflows", name), workflow)
-        put(os.path.join(o, "landed-dirs.txt"), "hooks\n")
-        put(os.path.join(o, "lint/check_slugs.py"), SLUG_LINT)
-        put(os.path.join(o, "hooks/test_reads_guide.py"), DOC_SUITE)
-        put(os.path.join(o, "hooks/x.py"), "X = 1\n")
-        put(os.path.join(o, "docs/shared.md"), "one\ntwo\nthree\nfour\nfive\n")
-        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", "ci files"); sh(o, "git", "push", "-q", "origin", "main")
-        sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "main"); sh(o, "git", "push", "-q", "origin", "feat")
-
-    def on(self, branch, files):
-        o = self.other
-        sh(o, "git", "fetch", "-q", "origin"); sh(o, "git", "checkout", "-q", "-B", branch, f"origin/{branch}")
-        for path, text in files.items():
-            put(os.path.join(o, path), text)
-        sh(o, "git", "add", "-A"); sh(o, "git", "commit", "-qm", f"{branch} moves"); sh(o, "git", "push", "-q", "origin", branch)
 
     def refused(self):
         self.host.merged = False
@@ -12932,6 +12937,337 @@ class BatchBrake(Env):
         self.assertEqual(len(lines), 1, out)
         self.assertIn("#2", lines[0])
 
+class ExpressPath(ScopedRepo, Env):
+    """confirm with a bare --express: a prose-only pull request whose body names a ruling in the store (origin/roadmap's rulings) goes on
+    to the merge. Every other case refuses before anything is pushed, and the batch brake still refuses a live batch run."""
+
+    RULINGS = ("r55", "timer-allowed-when-cheaper")  # the real ids; the second has the hyphens the id pattern allows
+    FLAG_ARGV = ("7", "--confirm", "--express")
+    FAIL_PRELUDE = 'for n in code mods; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 3\n'  # for stub_scope: prints two flags off, then fails
+    SILENT_PRELUDE = "exit 0\n"  # for stub_scope: exits 0 and writes no flag
+    ALL_OFF_PRELUDE = ('for n in checks_windows checks_windows_merge checks_windows_rest checks_windows_sweep checks_macos shell_macos '
+                       'pointer_windows checks_guard code mods guard sweep shoot; do echo "$n=false" >> "$GITHUB_OUTPUT"; done; exit 0\n')  # for stub_scope: every flag off, exits 0
+
+    def setUp(self):
+        super().setUp()
+        self.scoped()  # the real ci-scope.sh and landed-dirs.txt on main; feat holds main's tip, plus its own pending record only
+
+    def store(self, ids):
+        """origin/roadmap holds rulings/<id>.json for each id. The branch is made after co's clone, so a read that does not fetch it sees no entry."""
+        self.on("roadmap", {f"roadmap/rulings/{i}.json": json.dumps({"id": i}) + "\n" for i in ids}, start="main")
+
+    def stub_scope(self, prelude, branch="feat"):
+        """ci-scope.sh is main's, with `prelude` put in after its shebang line, committed to `branch`. Only an insertion: the silent-undo
+        check reads no removed line. On main, feat then merges it: the classifier runs origin/main's copy, and a head that touches the
+        script turns every flag on through main's own arm, so the head must not diff the script against main."""
+        with open(SCOPE_SCRIPT, encoding="utf-8") as f:
+            first, rest = f.read().split("\n", 1)
+        self.on(branch, {".github/scripts/ci-scope.sh": first + "\n" + prelude + rest})
+        if branch == "main":
+            o = self.other
+            sh(o, "git", "checkout", "-q", "-B", "feat", "origin/feat"); sh(o, "git", "merge", "-q", "--no-edit", "main"); sh(o, "git", "push", "-q", "origin", "feat")
+
+    def scope_run(self, branch="feat", head_ref="", base=False):
+        """Run a ci-scope.sh against `branch` as the express check runs it: EVENT, BASE_SHA, HEAD_REF and GITHUB_OUTPUT set, in the other
+        checkout at branch. base=True runs origin/main's copy, the one the classifier reads; base=False runs the copy at branch.
+        -> (exit code, {flag: value}). This is the fixture's own proof, read before any case relies on it."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "--detach", f"origin/{branch}")
+        script = os.path.join(o, ".github/scripts/ci-scope.sh")
+        if base:
+            script = os.path.join(self.t, "base-ci-scope.sh")
+            put_lf(script, sh(o, "git", "show", "origin/main:.github/scripts/ci-scope.sh") + "\n")
+        out_file = os.path.join(self.t, "scope.out")
+        if os.path.exists(out_file):
+            os.remove(out_file)
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
+        env.update(EVENT="pull_request", BASE_SHA=sh(o, "git", "rev-parse", "origin/main"), HEAD_REF=head_ref, GITHUB_OUTPUT=out_file)
+        r = subprocess.run([merge.resolve_program("bash", env), script], cwd=o, env=env, capture_output=True, text=True, timeout=120)
+        flags = {}
+        if os.path.exists(out_file):
+            with open(out_file, encoding="utf-8") as f:
+                flags = dict(l.strip().split("=", 1) for l in f if "=" in l)
+        return r.returncode, flags
+
+    def test_scope_run_finds_bash_through_resolve_program(self):
+        """A bare `bash` on a Windows runner is the WSL stub in System32, which exits 1 on any script (decision
+        bare-bash-on-windows-can-resolve-to-the-wsl-stub): scope_run runs the program merge.resolve_program returns for bash, as the merge tool does."""
+        argvs = []
+        def fake_run(argv, *a, **k):
+            argvs.append(list(argv))
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        with unittest.mock.patch.object(merge, "resolve_program", lambda name, env=None: "/resolved/" + name), \
+             unittest.mock.patch.object(subprocess, "run", fake_run):
+            self.scope_run()
+        self.assertEqual(argvs[-1][0], "/resolved/bash", "scope_run did not run the program merge.resolve_program found for bash")
+        self.assertTrue(argvs[-1][1].endswith("ci-scope.sh"), argvs[-1])
+
+    @staticmethod
+    def turned_on(flags):
+        """The flags that are on, not counting mutation_report (it is set only for a batch branch)."""
+        return sorted(k for k, v in flags.items() if k != "mutation_report" and v != "false")
+
+    def assert_prose_only(self):
+        rc, flags = self.scope_run()
+        self.assertEqual(rc, 0, "the real ci-scope.sh exits %d on the fixture's feat" % rc)
+        self.assertTrue(flags, "the real ci-scope.sh wrote no flags for the fixture")
+        self.assertEqual(self.turned_on(flags), [], "the fixture is not prose-only: the real ci-scope.sh turns on %r" % self.turned_on(flags))
+
+    def assert_turns_on(self):
+        rc, flags = self.scope_run()
+        self.assertEqual(rc, 0, "the real ci-scope.sh exits %d on the fixture's feat" % rc)
+        self.assertTrue(self.turned_on(flags), "the real ci-scope.sh turns no job on for this fixture, so the case proves nothing: %r" % flags)
+
+    def require_express_flag(self):
+        """The scope assert, before any case relies on the flag (P7): merge's parser takes a bare --express. A parser that refuses it
+        fails here, with the last line of its own message, and the case stops before it runs."""
+        err = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(err):
+                merge.build_parser().parse_args(list(self.FLAG_ARGV))
+        except SystemExit:
+            last = (err.getvalue().strip().splitlines() or ["(no message)"])[-1]
+            self.fail("merge's parser has no --express flag, so the express path cannot run: " + last)
+
+    def record_express(self):
+        """Wrap merge.express_refusal to keep each call's return. Patched only after require_express_flag, so the name it wraps is read on a parser that takes the flag."""
+        self.require_express_flag()
+        real = merge.express_refusal
+        calls = []
+        def recording(*a, **k):
+            result = real(*a, **k)
+            calls.append(result)
+            return result
+        patch = unittest.mock.patch.object(merge, "express_refusal", recording)
+        patch.start()
+        self.addCleanup(patch.stop)
+        return calls
+
+    def run_express(self):
+        """-> (rc, out) of `merge 7 --confirm --express`, after the flag assert. Its temp files go to the run folder."""
+        self.require_express_flag()
+        with tempfiles_in_run_folder():
+            return self.run_merge(*self.FLAG_ARGV)
+
+    def assert_refused(self, rc, out, before, *markers):
+        """A refusal: rc 1, nothing pushed (the refs are as they were before the run), no merge, and each marker named in the output."""
+        self.assertEqual(rc, 1, "expected a refusal with rc 1:\n" + out)
+        self.assertEqual(self.refs(), before, "the refused run pushed to origin:\n" + out)
+        self.assertFalse(getattr(self.host, "merged", False), "the refused run merged:\n" + out)
+        for m in markers:
+            self.assertIn(m.lower(), out.lower(), "the refusal does not name %r:\n%s" % (m, out))
+
+    @staticmethod
+    def brake_text(out):
+        """The batch brake's text in a refusal: from the line that says the pull request does not merge to its base, to the end of the
+        output, less merge's closing sentence. Nothing before the brake is compared."""
+        lines = out.splitlines()
+        start = next((i for i, l in enumerate(lines) if "does not merge to" in l), None)
+        if start is None:
+            return None
+        return "\n".join(lines[start:]).split(" No override lifts", 1)[0]
+
+    def test_the_store_path_is_one_constant(self):
+        self.assertEqual(getattr(merge, "RULED_STORE_PATH", None), "roadmap/rulings/{id}.json",
+                         "merge.RULED_STORE_PATH is not the one store path the express check reads")
+
+    def test_the_parser_takes_a_bare_express_flag(self):
+        self.require_express_flag()
+        args = merge.build_parser().parse_args(list(self.FLAG_ARGV))
+        self.assertIs(args.express, True, "--express is not a bare flag: it parsed as %r" % (args.express,))
+
+    def test_express_takes_no_value(self):
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            merge.build_parser().parse_args(["7", "--confirm", "--express", "r55"])
+
+    def test_a_prose_only_pr_with_r55_merges(self):
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.assert_prose_only()
+        calls = self.record_express()
+        rc, out = self.run_express()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertEqual(calls, [None], "express_refusal should run once and return None on a pass: %r" % (calls,))
+
+    def test_a_prose_only_pr_with_a_hyphenated_ruling_merges(self):
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: timer-allowed-when-cheaper\n"
+        self.assert_prose_only()
+        calls = self.record_express()
+        rc, out = self.run_express()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertEqual(calls, [None], "express_refusal should run once and return None on a pass: %r" % (calls,))
+
+    def test_a_code_file_in_the_pr_is_refused(self):
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.on("feat", {"hooks/note.py": "X = 2\n"})
+        self.assert_turns_on()
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "hooks/note.py")
+
+    def test_an_unmapped_file_is_refused(self):
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.on("feat", {"notes.txt": "a note\n"})  # no arm of ci-scope.sh names it: the catch-all turns every job on
+        self.assert_turns_on()
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "notes.txt")
+
+    def test_a_hooks_md_file_that_a_suite_reads_is_refused(self):
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.on("feat", {"hooks/x.md": "# Note\n"})  # a .md file, but the hooks/* arm comes first and turns suites on
+        self.assert_turns_on()
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "hooks/x.md")
+
+    def test_a_plain_english_map_md_file_is_refused(self):
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.on("feat", {"skills/plain-english-map/x.md": "# Note\n"})  # a .md file the map suite reads: the mods arm
+        self.assert_turns_on()
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "skills/plain-english-map/x.md")
+
+    def test_a_missing_store_entry_is_refused(self):
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r56\n"  # the store holds r55 and the hyphenated id, not r56
+        self.assert_prose_only()
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "r56")
+
+    def test_no_roadmap_branch_is_refused(self):
+        self.host.body = "Ruling: r55\n"  # origin has no roadmap branch at all
+        self.assert_prose_only()
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "roadmap")
+
+    def test_a_store_with_no_rulings_is_refused(self):
+        self.on("roadmap", {"roadmap/README.md": "# Roadmap\n"}, start="main")  # the branch exists, and holds no ruling
+        self.host.body = "Ruling: r55\n"
+        self.assert_prose_only()
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "r55")
+
+    def test_an_invalid_ruling_line_is_refused(self):
+        self.store(self.RULINGS)
+        self.assert_prose_only()
+        bodies = {  # each body, and the express refusal's own text for it (merge.express_refusal)
+            "no Ruling line": ("", "it has none"),
+            "a Ruling line with no id": ("Ruling:\n", "reads ''"),
+            "an uppercase id": ("Ruling: R55\n", "reads 'R55'"),
+            "a path, not an id": ("Ruling: ../r55\n", "reads '../r55'"),
+            "an invalid first line, then a valid one": ("Ruling: R55\nRuling: r55\n", "reads 'R55'"),
+        }
+        for name, (body, text) in bodies.items():
+            with self.subTest(body=name):
+                self.host.body = body
+                before = self.refs()
+                rc, out = self.run_express()
+                self.assert_refused(rc, out, before, "--express needs a `Ruling: <id>` line", text)
+
+    def test_a_scope_script_that_fails_is_refused_as_unknown(self):
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope(self.FAIL_PRELUDE, branch="main")
+        rc_scope, _ = self.scope_run()
+        self.assertEqual(rc_scope, 3, "the stub scope script does not fail with exit 3: exit %d" % rc_scope)
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "unknown")
+
+    def test_a_scope_script_that_writes_nothing_is_refused_as_unknown(self):
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope(self.SILENT_PRELUDE, branch="main")
+        self.assertEqual(self.scope_run(), (0, {}), "the stub scope script does not exit 0 with no flag")
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "unknown")
+
+    def test_a_live_batch_run_under_express_refuses_with_the_plain_brake_text(self):
+        """Under --express a live batch run still refuses, with the brake text it has without the flag: the express path adds no sentence."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.assert_prose_only()  # the express check passes, so the refusal is the batch brake's
+        self.host.batch = [BATCH_BLOCKER]
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "#2")
+        self.assertIn((7, "main"), self.host.batch_calls, "the batch brake was not read, so the refusal is not the brake's:\n" + out)
+        self.assertNotIn("cancel", out.lower(), "the express brake refusal names a cancel:\n" + out)
+        plain_rc, plain_out = self.run_merge("7", "--confirm")
+        self.assertEqual(plain_rc, 1, plain_out)
+        self.assertEqual(self.brake_text(out), self.brake_text(plain_out), "the express brake text differs from the plain one:\n%s\n--- plain:\n%s" % (out, plain_out))
+
+    def test_without_express_the_batch_refusal_is_the_plain_brake(self):
+        self.host.body = "Ruling: r55\n"
+        self.host.batch = [BATCH_BLOCKER]
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("#2", out, out)
+        self.assertIn("does not merge to main", out, "the refusal without --express is not the batch brake:\n" + out)
+        self.assertNotIn("cancel", out.lower(), "the batch refusal without --express names a cancel:\n" + out)
+        self.assertFalse(getattr(self.host, "merged", False), out)
+
+    def test_without_express_a_non_prose_pr_merges_as_before(self):
+        self.on("feat", {"hooks/note.py": "X = 2\n"})
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+
+    def test_without_express_a_failing_scope_script_changes_nothing(self):
+        self.stub_scope(self.FAIL_PRELUDE)
+        rc, out = self.run_merge("7", "--confirm")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+
+    def test_the_head_scope_script_is_not_the_one_read(self):
+        """The classifier reads origin/main's ci-scope.sh. This head edits that script to write every flag off and exit 0: a HEAD: read
+        would run that copy and accept it. Main's copy refuses it for two reasons: a diff that touches ci-scope.sh turns every flag on
+        through main's own arm, and hooks/note.py turns code on. The refusal names hooks/note.py because the diff lists it."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        self.stub_scope(self.ALL_OFF_PRELUDE)  # feat's own copy: every flag off, exit 0
+        self.on("feat", {"hooks/note.py": "X = 2\n"})
+        head_rc, head_flags = self.scope_run()
+        self.assertEqual(head_rc, 0, "the head's own script does not exit 0: %d" % head_rc)
+        self.assertEqual(self.turned_on(head_flags), [], "the head's own script should say prose-only, or the case proves nothing: %r" % head_flags)
+        base_rc, base_flags = self.scope_run(base=True)
+        self.assertEqual(base_rc, 0, "main's script does not exit 0 on feat: %d" % base_rc)
+        self.assertIn("code", self.turned_on(base_flags), "main's script should turn code on for hooks/note.py: %r" % base_flags)
+        before = self.refs()
+        rc, out = self.run_express()
+        self.assert_refused(rc, out, before, "hooks/note.py")
+
+    def test_a_prose_pr_on_a_batch_head_ref_still_merges(self):
+        """A batch- head ref sets mutation_report, which is not a job: the express check ignores it, so a prose-only PR on batch-x merges."""
+        self.store(self.RULINGS)
+        self.host.body = "Ruling: r55\n"
+        sh(self.other, "git", "fetch", "-q", "origin")
+        sh(self.other, "git", "push", "-q", "origin", "origin/feat:refs/heads/batch-x")
+        self.host.branch = "batch-x"
+        rc_scope, flags = self.scope_run(branch="batch-x", head_ref="batch-x")
+        self.assertEqual(rc_scope, 0, "the real ci-scope.sh does not exit 0 on batch-x: %d" % rc_scope)
+        self.assertEqual(flags.get("mutation_report"), "true", "the batch- head ref did not set mutation_report, so the case proves nothing: %r" % flags)
+        self.assertEqual(self.turned_on(flags), [], "the batch- head ref turns a job on: %r" % flags)
+        calls = self.record_express()
+        rc, out = self.run_express()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(self.host.merged, out)
+        self.assertEqual(calls, [None], "express_refusal should run once and return None on a pass: %r" % (calls,))
+
 ROLE_SESSION = "cse_role_check_test"
 OLD_PARSER_ERRORS = ("unrecognized arguments", "invalid int value")  # what merge.py's parser says to `--role` before the writer exists
 
@@ -16067,6 +16403,8 @@ class ReleaseCheck(ReviewEnv):
 # so an entry with no example fails.
 GUARD_EXAMPLES = {"hooks/": "hooks/guard.py", "lint/": "lint/check_x.py", "bin/": "bin/merge", "actions/": "actions/stamp/stamp.mjs",
                   ".github/": ".github/workflows/checks.yml", "merge/": "merge/merge.py", "githooks/": "githooks/pre-commit", "settings.json": "settings.json"}
+# The PR template stays a guard path with no exception: CI's excuse checks read the PR bodies it seeds. Its folder form is a hit too.
+PR_TEMPLATE, PR_TEMPLATE_FORM = ".github/pull_request_template.md", ".github/PULL_REQUEST_TEMPLATE/x.md"
 
 class ReviewGuardPaths(unittest.TestCase):
     """merge.GUARD_PATHS: the rule dirs of lint/stale_cites.py, then merge/ and githooks/, folder prefixes only. merge.GUARD_FILES: settings.json,
@@ -16131,6 +16469,11 @@ class ReviewGuardHits(unittest.TestCase):
     def test_hits_are_sorted_and_only_the_guard_paths_are_kept(self):
         self.assertEqual(review_fn(self, "guard_hits")(["lint/b.py", "README.md", "hooks/a.py", "docs/x.md", "merge/m.py"]),
                          ["hooks/a.py", "lint/b.py", "merge/m.py"])
+
+    def test_pr_template_and_its_folder_form_are_both_guard_hits(self):
+        self.assertTrue(os.path.isfile(os.path.join(os.path.dirname(HERE), PR_TEMPLATE)), f"{PR_TEMPLATE} is not in the repo, so this case proves nothing")
+        self.assertEqual(review_fn(self, "guard_hits")([PR_TEMPLATE, PR_TEMPLATE_FORM]), [PR_TEMPLATE_FORM, PR_TEMPLATE],
+                         "guard_hits does not list the PR template and its folder form as guard paths")
 
 TEST_PATHS = ("hooks/test_guard.py", "merge/test_merge.py", "lint/test_stale_cites.py", "githooks/test_pre_commit.sh")
 
@@ -16209,6 +16552,11 @@ class ReviewGuardRefusal(ReviewGuardEnv):
     def test_a_hooks_markdown_file_refuses(self):
         self.host.changed = [("hooks/README.md", "modified", 0)]
         self.assert_refused(*self.run_args(*self.review_argv()), "hooks/README.md")
+
+    def test_pr_template_alone_refuses_as_a_guard_change(self):
+        # The template is a guard path (ReviewGuardHits), so a PR that touches only it and says guard no is refused
+        self.host.changed = [(PR_TEMPLATE, "modified", 0)]
+        self.assert_refused(*self.run_args(*self.review_argv()), PR_TEMPLATE)
 
     def test_docs_only_on_a_guard_path_refuses(self):
         # hooks/README.md is no doc, but the guard refuses it before the kind is checked, so the Guard reason holds

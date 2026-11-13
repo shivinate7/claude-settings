@@ -273,16 +273,21 @@ After each build the roadmap build script prints the upkeep list for the triage 
   - its `status_bucket` is `SESSION_STATUS_BUCKET_COMPLETED` or `SESSION_STATUS_BUCKET_REVIEW_READY`. A lane that is blocked, failed, working or
     has no bucket is never listed;
   - it has at least one `cs-step:` tag, and each step it names has landed. A step has landed when a
-    `Step:` trailer is on main, a `landedPulls` row proves it, or its status is `done`;
+    `Step:` trailer is on main, a `landedPulls` row proves it, or its status is `done`. A step off the record branch has landed only by its trailer;
   - no open pull holds it. A pull holds a lane when its `branch` is a step slug or `lane/<slug>`. A
     draft pull whose `head` sha is already in the default branch (`git merge-base --is-ancestor`)
     releases the lane. A ready pull always holds it. A failed git read reads as not landed;
   - no open page item holds it. An item holds a lane when its `lane` is one of the lane's steps and
     its `status` is not `closed`. An item whose `owner` is the lane's own session id holds the lane the same way.
-    The page writes `open` and `closed` only, so only `closed` releases a lane.
+    The page writes `open` and `closed` only, so only `closed` releases a lane;
+  - no step is still doing under it (its `lane` field names the session, status `doing` or `active`, not landed on main). A lane that passes the other tests reads a hold line instead.
 
-  A step id that is not on the record branch reads the lane `unknown (step <id> not on the record
-  branch; lane <session id>)`. A live file with no `items` list makes the row unknown. An `items` row with the
+  An idle lane not to archive now reads `hold (<reason>; lane <session id>)`. The reason is one of three.
+  `no cs-step tag`: the archive guard refuses such a lane. A step id that is off the record branch with no
+  `Step:` trailer on main. When the lane also carries another repo's `cs-repo:` tag, that reason ends `; also tagged <those tags>`.
+  `step <ids> still doing under this lane`: each step whose `lane` is the session, with status doing or active, not landed on main.
+  The last clears when the step's status is set to todo or done. A lane that waits (a step not done, an
+  open pull, an open item) prints no line. The row's count leaves holds out. A live file with no `items` list makes the row unknown. An `items` row with the
   wrong shape makes the row unknown. Each entry reads `<session id> (<steps>; topic <cs-topic or ->)`,
   sorted. The row reads one `unknown (<why>)` entry, never an empty list, when:
   - `--live` is missing or unreadable;
@@ -291,11 +296,12 @@ After each build the roadmap build script prints the upkeep list for the triage 
   - no live lane row of the repo carries one of the five `SESSION_STATUS_BUCKET_*` names. Archived rows
     are not counted, so only archived lanes, or no live lane rows, read an empty row;
   - main or its git log cannot be read;
+  - the record branch has no steps;
   - the repo's GitHub name cannot be read.
 
-  `merge --idle-lanes --live FILE` prints the same list for the batch runner: one line per lane, then
-  a summary line. A lane tagged `cs-archive-ready:<slug>` whose `roadmap/outbox/<slug>-handoff.md` is not on the record branch
-  ends with `HOLD: handoff <slug> is not on the record branch`. The summary then reads `N lanes to archive, M held`. N counts only the clear lanes. The held lanes count only in M. The page row lists every flagged lane, with no count of its own. An empty slug,
+  `merge --idle-lanes --live FILE` prints the same list for the batch runner: lane lines and hold lines, then
+  a summary line that gives the held count when there are holds. A lane tagged `cs-archive-ready:<slug>` whose `roadmap/outbox/<slug>-handoff.md` is not on the record branch
+  ends with `HOLD: handoff <slug> is not on the record branch`. The summary then reads `N lanes to archive, M held`. N counts only the clear lanes. M counts the hold lines and the HOLD-flagged lanes. The held lanes count only in M. The page row lists every flagged lane, with no count of its own. An empty slug,
   or one with `/` or `..`, or a handoff read that fails, reads the lane unknown. It exits 1, with no summary line, when every entry is unknown;
 - `Step:` trailers that name no step;
 - `open step waits on a closed unmerged PR`: an open step whose title, why or note waits on PR #N. A wait is a phrase in `WAIT_ON_PULL_PHRASES` in `build.py`. The word `PR` may sit before `#N`. A `#N` followed by `closed` or `merged` is history, not a wait. The row lists the step when `landedPulls` has a row for #N with `merged` false. It skips #N when `landedPulls` has a `merged` true row for #N, or when #N is an open pull. It also skips #N when the head of its `merged` false row is on main (`head_on_main`, as for the landed rows). A PR closed before the 14-day `landedPulls` window is not seen. Each entry is `<step id> (#N)`. The row reads `unknown (the live file has no landedPulls list)` when the live file has no `landedPulls` key. A live read that is unknown, such as no `--live` file, makes the row unknown too. An empty `landedPulls` list reads none. The fix is to name the step slug it waits on in the step's `blockedBy` list (owner, 2026-11-10 13:10 CST);

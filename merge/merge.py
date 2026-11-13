@@ -14,6 +14,10 @@
                           Cost per draft-step ready: one ci-job run and one worktree; the run time is unmeasured for a step subset
                           (the 3600 s lint bound applies). No new file but ci-job's own log.
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
+                          The batch runner's join (cloud) needs a lane-lint PASS for the head's sha. Only a batch integration PR skips it, when the all-jobs-passed rollup is green on that exact head:
+                          then it skips the lint and prints one `merge: lane lint skipped ...` line naming the rollup and the head's first 9 characters.
+  merge <pr> --confirm --express   go on to the merge only for a prose-only diff (main's ci-scope.sh turns on nothing) whose body has a `Ruling: <id>`
+                          line naming an entry in origin/roadmap's rulings; any other case refuses before a push. The batch brake still holds.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V] [--grant "#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT"]
@@ -77,7 +81,7 @@
                           Cost: one `pulls/N` read per PR and one read of the repo's comments since the oldest PR (every page), one fetch per
                           distinct base, one merge-tree per PR (tree objects, no ref), and a fetch of a PR head the clone lacks; no new
                           process kept, file or timer.
-  merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"] [--with PR,PR,...]
+  merge --lane-lint <pr|ref> [--base BRANCH] [--lint-unknown-ok "REASON"] [--with PR,PR,...] [--touched-tests]
                           the lint a lane passes before it hands its head to the batch runner: `bin/ci-job checks --lint
                           --base origin/<base>` in a temporary detached worktree at the head. A PR gives its head and base; a
                           commit or ref is linted against --base (default main). A PR on a base other than main also FAILs when its head lacks that base's head (never lifted). A FAIL step refuses. An unknown refuses unless
@@ -95,7 +99,8 @@
                           no PASS line and no comment. Two heads clash when `git merge-tree` of them conflicts. A clash counts only when both
                           heads merge clean with the base. A clash that comes through the base is a report line after the PASS line, and it
                           names the PR that conflicts with the base. A counted clash FAILs, naming each PR and file, with its remedy
-                          (--lint-unknown-ok never lifts it). PRs in one stack (one head holds the other) are skipped. Added cost: one `git merge-tree` of the
+                          (--lint-unknown-ok never lifts it); on a batch integration PR (a freeze block in its body, and its branch is that
+                          batch's `batch-NAME`) it is a report line instead, because the lanes rebase after the merge. A base conflict still FAILs. PRs in one stack (one head holds the other) are skipped. Added cost: one `git merge-tree` of the
                           head against main (its base), two merge-trees per other PR compared (that PR against the base, and against the head),
                           and exactly one PR-list read; no merge-tree for a stack-skipped PR, and none beyond the head's when there is no other
                           PR. (A PR-list read is one `gh api` call per 100 PRs, and the PR-list read still runs when there is no other PR. When any PR is
@@ -107,8 +112,16 @@
                           is not open or not found, and the linted PR itself are each a stop; a repeated number is read once). Missed
                           case: a PR posted under another session id is not found as this lane's, unless --with names it. A PR body
                           with no session URL has no lane PRs, so only --with finds any. A commit or ref target is measured against its base only, and is not cross-measured.
+                          --touched-tests: after the lint passes, also runs each test file the diff against the base touches, once,
+                          in that worktree, after the lint steps (any lane-lint target takes it; the batch ready route does not). HEAVY and needs-setup tests and
+                          .ps1 tests print `skip <test>: <reason>`. A failing test refuses, with its last output; a timeout, an
+                          unloadable selector or an unreadable diff is an unknown, lifted by --lint-unknown-ok. The PASS line names
+                          the run and skipped counts. Extra cost: the touched tests' own run time, bounded in all by LINT_SECONDS.
+                          Before any step: a lint worktree that lacks lint/check_python_floor.py or .github/workflows/checks.yml, which the head's
+                          own tree holds, reads UNKNOWN (exit 1, as every lane-lint refusal) and names the file; no step runs and --lint-unknown-ok never lifts it. Cost:
+                          one `git ls-tree` of the head.
   merge --idle-lanes --live FILE
-                          one line per lane the roadmap's live file shows done and safe to archive, then a summary line. Reads
+                          lane lines (a lane the roadmap's live file shows done and safe to archive) and `hold (` lines (a lane not to archive now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane; the last clears when the step's status is set to todo or done), then a summary line. A lane that waits (a step not done, an open pull, an open item) prints no line. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
                           posts nothing; any session may run it. An unreadable build or a missing --live exits 1: unknown, never empty.
   merge --batch-build NAME PR [PR ...] [--on BRANCH] [--base BRANCH]
@@ -147,7 +160,7 @@ A list read asks for each page by number (`Host.pages`), so no `gh` flag beyond 
 A cloud session runs the whole flow (c53): its proxy passes `gh api` reads, PUT pulls/N/merge and a push to refs/heads, so the lock is a
 git push there (default_lock). Its proxy refuses a ref delete: the lock is released by an expired commit, and the branch deletes print "not deleted".
 """
-import argparse, ast, collections, contextlib, datetime, fnmatch, functools, io, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
+import argparse, ast, collections, contextlib, datetime, fnmatch, functools, importlib.util, io, json, math, os, pathlib, re, shutil, posixpath, signal, socket, subprocess, sys, tempfile, threading, time, uuid
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "hooks"))
 try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
@@ -176,6 +189,9 @@ class Stop(Exception):
 
 class Liftable(Stop):
     """A refusal that a reason flag lifts. Its message names the flag, so main() does not add the no-override line."""
+
+class UnknownStop(Stop):
+    """A refusal that reads UNKNOWN: the run could not tell pass from fail. no flag lifts it. It exits 1 like every refusal: exit 2 is argparse's usage code."""
 
 class LintFail(Stop):
     """The lint of a head FAILed. `lines` are ci-job's FAIL lines, `log` its `log=` line as a list of 0 or 1: the step output that names the paths is in that log."""
@@ -226,6 +242,7 @@ RERUN_REMEDY = "gh run rerun"  # base_state names it for a cancelled run on the 
 RERUN_IN_FLIGHT = "is a re-run still going"  # base_state words an unknown re-run with it; red_base reads it back to give the re-run its own headline
 DROP_CITE = "(decision merge-deletes-batch-lanes, a batch that drops a lane by a revert of its merge does not merge)"
 BATCH_CITE = "(decision no-merge-during-batch-ci, nothing merges while another ready pull request's CI runs, and the required checks are never empty)"
+EXPRESS_CITE = "(decision owner-override, ruling R59 part 5 of 15:05 CST Nov 12, a ruled prose change skips the batch queue and runs only the checks that read its files)"
 FREEZE_CITE = BATCH_CITE  # the batch build and drop refusals cite the batch brake's decision, though the freeze decision governs them; a later change points this at the freeze decision
 DRAFT_CITE = "(decision draft-until-reviewed, every pull request opens as a draft and only the one integration PR goes ready)"
 STAMP_RUN_CITE = "(decision one-shared-record-stamp, the claim runs before the merge, on the pull request branch, in the merge tool)"
@@ -2954,7 +2971,7 @@ def is_unknown_reason(reason):
     """True when a merge_reason answer says unknown (unknown_reason wrote it), not a conflict."""
     return reason.startswith("unknown (")
 
-def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean):
+def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean, integration=False):
     """Check `head` of PR `n` against each other open PR of its lane (a body with the same session URL) and each PR in `with_prs`, with
     `git merge-tree --write-tree`. One PR-list read; for each PR compared, one merge-tree of that PR's head into origin/<base> (merge_reason) and one of
     the two heads. A PR in a stack with this head (one head holds the other) is skipped before any merge-tree: its own base is not the question.
@@ -2962,6 +2979,7 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
     -> (fails, reports, stop). fails: one text block for the clashes that count. reports: one line per clash that does not count. stop: "" or the text
     of an unknown (a read git cannot answer, a head origin does not hold); the caller raises it, with the fails above it, never as a pass.
     A clash counts only when both heads merge clean with the base: otherwise it comes through the base, and its line names the head that conflicts with it.
+    `integration` is true for a batch integration PR (is_integration_pr): a clash that would count is a report line instead, for the lane rebases after the merge.
     A PR that --with names and that is not open is a Stop here: never a pass. --lint-unknown-ok lifts none of it. A PR posted under another
     session id is found only through --with."""
     lane = set(LANE_SESSION.findall(body or ""))
@@ -3003,6 +3021,8 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
             unknown.append(f"  #{m}: the clash with this head cannot be counted, because {why}")
         elif why is not None:
             reports.append(f"{named}. Not counted: #{m}'s own head conflicts with {base}, so the clash comes through {base}. Its own lint names it.")
+        elif integration:
+            reports.append(f"{named}. Not counted: this PR is a batch integration PR, so #{m} rebases after the merge.")
         else:
             conflicts.append(named)
     fails = []
@@ -3042,7 +3062,87 @@ def ci_job_run(wt, *args, notes=None):
         return "unknown", [l.rstrip() for l in lines if l.startswith("unknown")] or [f"(no unknown line read; ci-job exit {c})"], log, True
     return "unknown", [f"ci-job exited {c}"], log, False
 
-def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
+TOUCHED_SELECTOR = ".github/scripts/touched-tests.py"  # the lint worktree's own selector, so the head's tests are chosen by the head's rules
+TOUCHED_RUNNERS = {".py": sys.executable, ".sh": "bash", ".mjs": "node", ".js": "node"}  # bash, not sh: the suites use bashisms
+TOUCHED_TAIL_LINES = 15  # last output lines a failing test shows; the whole log would bury the assertion
+
+def run_touched_tests(wt, base, head):
+    """Run the test files the diff base...head touches, inside the lint worktree `wt`, once the lint has passed. A test the selector keeps out (HEAVY, NEEDS_SETUP) or a .ps1 with no pwsh on the PATH is
+    skipped with its reason, never run and never a pass. The whole stage shares one LINT_SECONDS bound.
+    -> (run count, skip lines, fail texts, unknown lines). An unreadable diff, an unloadable selector and a timeout are unknowns, not passes."""
+    c, diff = git(wt, "diff", "--name-only", "--no-renames", "-z", f"origin/{base}...{head}")  # -z: git quotes a non-ASCII or spaced name otherwise
+    if c:
+        return 0, [], [], [f"the diff origin/{base}...{head[:9]} could not be read: {diff}"]
+    c, listed = git(wt, "ls-files", "-z")
+    if c:
+        return 0, [], [], [f"git ls-files failed in the lint worktree: {listed}"]
+    try:  # the filename has a hyphen, so no import statement names it
+        spec = importlib.util.spec_from_file_location("lint_tree_touched_tests", os.path.join(wt, *TOUCHED_SELECTOR.split("/")))
+        selector = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(selector)
+        candidates, heavy, needs_setup, reason = selector.candidates, selector.HEAVY, selector.NEEDS_SETUP, selector.reason
+    except (Exception, SystemExit) as e:  # the lane's own file: any failure to load it says nothing about the tests
+        return 0, [], [], [f"the lint worktree's {TOUCHED_SELECTOR} could not be loaded: {type(e).__name__}: {e}"]
+    tracked = set(listed.split("\0")) - {""}
+    try:
+        # a path the diff deleted or renamed away is not in the tree, so it is no test to run; the selector's own main() drops it the same way
+        tests = sorted(set().union(*(candidates(p, tracked) for p in diff.split("\0") if p and p in tracked)))
+    except Exception as e:  # the lane's selector code: a bug in it must not read as a pass or a traceback
+        return 0, [], [], [f"the selector's candidates() raised {type(e).__name__}: {e}"]
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")}
+    end = time.monotonic() + LINT_SECONDS
+    ran, skips, fails, unknowns = 0, [], [], []
+    for t in tests:
+        try:
+            why = reason(t, heavy) or reason(t, needs_setup)
+        except Exception as e:  # same: the lane's own selector code
+            unknowns.append(f"{t}: the selector's reason() raised {type(e).__name__}: {e}")
+            continue
+        ps1 = t.endswith(".ps1")
+        if not why and ps1 and not shutil.which("pwsh"):
+            why = "no pwsh on this runner"
+        if why:
+            skips.append(f"skip {t}: {why}")
+            continue
+        cmd = ["pwsh", "-NoProfile", "-File", t] if ps1 else [TOUCHED_RUNNERS.get(os.path.splitext(t)[1]), t]
+        if cmd[0] is None:
+            unknowns.append(f"{t}: no interpreter is known for this file type")
+            continue
+        left = end - time.monotonic()
+        if left <= 0:
+            unknowns.append(f"{t}: not run, the {LINT_SECONDS} s bound was spent")
+            continue
+        try:
+            c, out = sh(cmd, cwd=wt, env=env, timeout=left)
+        except subprocess.TimeoutExpired:
+            unknowns.append(f"{t}: did not finish in the {LINT_SECONDS} s bound")
+            continue
+        except OSError as e:  # the interpreter is gone or not executable: the test never ran, so it says nothing
+            unknowns.append(f"{t}: {cmd[0]} could not be started: {e}")
+            continue
+        if c:
+            fails.append("\n".join([f"FAIL {t} (exit {c}); last output:", *out.splitlines()[-TOUCHED_TAIL_LINES:]]))
+        else:
+            ran += 1
+    return ran, skips, fails, unknowns
+
+LINT_TREE_FILES = ("lint/check_python_floor.py", ".github/workflows/checks.yml")  # files the lint reads from its own tree: the floor check and the workflow that names the steps
+
+def refuse_incomplete_tree(wt, head, base):
+    """UNKNOWN, before any ci-job step runs, when the lint worktree `wt` lacks a file of LINT_TREE_FILES that the head's own git tree holds: a worktree
+    cut incomplete (the incident's lacked both), not a head that never had the file. Without it the floor step only crashes on the file and its
+    FAIL blames the lane for a worktree defect. Names each missing file; --lint-unknown-ok never lifts it (UnknownStop, not Liftable).
+    A head whose tree git cannot list is the same unknown."""
+    c, listed = git(wt, "ls-tree", "-r", "--name-only", "-z", head, "--", *LINT_TREE_FILES)
+    if c:
+        raise UnknownStop(f"the lint of {head[:9]} against {base} is unknown, not a pass: the head's tree could not be listed, so the lint worktree was not checked: {listed} {LANE_LINT_CITE}")
+    held = [p for p in listed.split("\0") if p]
+    missing = [rel for rel in held if not os.path.isfile(os.path.join(wt, *rel.split("/")))]
+    if missing:
+        raise UnknownStop("\n".join([f"the lint of {head[:9]} against {base} is unknown, not a pass: the lint worktree lacks {', '.join(missing)}, so no step ran.",
+                                     "Run again. If it keeps happening, the lint worktree made for this head is incomplete. --lint-unknown-ok does not lift this. " + LANE_LINT_REMEDY]))
+
+def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_tests=False):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
     A target of digits is a PR number: its head and base come from the PR, and a stacked PR (base other than main) whose head lacks its base's head stops first.
@@ -3053,7 +3153,9 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
     A FAIL above, and exit 1 of ci-job (a FAIL), refuse always. Exit 2 (an unknown) refuses unless `unknown_ok` is a non-blank reason; it is then logged, with no PASS line.
     A lint that ran no lint CI step is ci-job's exit 2, so it refuses as an unknown. The PASS line names the CI steps ci-job skipped, as a count and their names.
     A PASS on a pull request number posts the lane-lint comment (lint_body) naming the head it read, which `--reviewed` and the join require; a failed post
-    prints a reason line and still exits 0. A FAIL, an unknown and a ref or commit target post nothing."""
+    prints a reason line and still exits 0. A FAIL, an unknown and a ref or commit target post nothing.
+    `touched_tests` (--touched-tests): after a lint pass only, run_touched_tests runs the tests the head's diff touches in the same tree. A failing test refuses always;
+    an unknown (timeout, unloadable selector, unreadable diff) refuses unless `unknown_ok` gives a reason. The PASS line then also names the run and skipped counts."""
     if target.isdigit():
         host = host or Host(cwd=root)
         n = int(target)
@@ -3065,8 +3167,10 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
     else:
         head, base = lane_head_and_base(root, target, base)
         tmp, wt = add_worktree(root, head)
+    touched = None
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
         pin_notes, fails, reports, stop = [], [], [], ""
+        refuse_incomplete_tree(wt, head, base)
         if target.isdigit():
             refuse_unstacked_head(root, head, base)
         fetched = {}
@@ -3078,19 +3182,34 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
         if why is not None:
             fails.append(f"its head conflicts with {base}: {why}. Merge {base} into the lane with an ordinary merge commit, push, and run `merge --lane-lint` again.")
         if target.isdigit():
-            cross_fails, reports, stop = cross_measure(root, head, int(target), info["body"], host, with_prs, base, fetched, why is None)
+            cross_fails, reports, stop = cross_measure(root, head, int(target), info["body"], host, with_prs, base, fetched, why is None, is_integration_pr(info))
             fails += cross_fails
         if fails or stop:  # as on main, a counted FAIL or an unknown ends the run before the ci-job
             raise Stop("\n".join([*([f"the lint of {head[:9]} against {base} FAILs:", *fails] if fails else []), stop if stop else LANE_LINT_REMEDY]))
         state, lines, log, liftable = ci_job_run(wt, "checks", "--lint", "--base", f"origin/{base}", notes=pin_notes)
+        if state == "pass" and touched_tests:
+            touched = run_touched_tests(wt, base, head)
     finally:
         drop_worktree(root, tmp, wt)
     short = head[:9]
     report_lines = ["merge: clashes with other PRs that this lint does not count (report only):", *reports] if reports else []
+    if touched is not None:
+        ran, skips, fails, unknowns = touched
+        if skips:
+            say(*skips)
+        if fails:
+            raise Stop("\n".join([f"the touched tests of {short} against {base} FAIL:", *fails, LANE_LINT_REMEDY]))
+        if unknowns:
+            if unknown_ok.strip():
+                say(f"merge: touched tests of {short} against {base} are unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *unknowns)
+                return 0
+            raise Liftable("\n".join([f"the touched tests of {short} against {base} are unknown, not a pass:", *unknowns,
+                                      'Run it where the test can finish, or run again with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
     if state == "pass":
         named = f" ({len(lines)} CI step{'s' if len(lines) != 1 else ''} skipped: {', '.join(lines)})" if lines else ""
+        counts = f"; touched tests: {touched[0]} run, {len(touched[1])} skipped" if touched is not None else ""
         tail = "The batch runner may take this head, or join it to a batch." if target.isdigit() else "No comment is posted for a ref or commit, so this does not satisfy the join."
-        say(f"PASS: lint of {short} against {base} passes{named}. {tail}", *pin_notes, *report_lines)
+        say(f"PASS: lint of {short} against {base} passes{named}{counts}. {tail}", *pin_notes, *report_lines)
         if target.isdigit():  # a ref or commit has no pull request to carry the comment
             n = int(target)
             try:
@@ -3103,6 +3222,8 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=()):
         raise LintFail("\n".join([f"the lint of {short} against {base} FAILs:", *lines, *log, LANE_LINT_REMEDY]), lines, log)
     if liftable and unknown_ok.strip():
         say(f"merge: lint of {short} against {base} is unknown, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *lines, *log, *report_lines)
+        if touched_tests:  # the tests run only after a lint pass, so a lifted unknown must not read as if they had
+            say(f"merge: the touched tests of {short} did not run, because the lint is unknown.")
         return 0
     head_line = f"the lint of {short} against {base} is unknown, not a pass:"
     if not liftable:  # a timeout or an odd exit says nothing about any step, so no flag lifts it
@@ -3342,6 +3463,63 @@ def batch_refusal(host, n, base, head):
     return (f"#{n} does not merge to {base} while another ready PR's CI runs and that PR's head does not contain this head: " + "; ".join(blockers) + ".\n"
             f"Wait for that run to end. Its run's end, or its CI-done comment on a red run, wakes the session that watches that PR. Then run again. {BATCH_CITE}")
 
+RULED_STORE_PATH = "roadmap/rulings/{id}.json"  # on origin/roadmap: one file per ruling; --express reads one
+RULING_LINE = re.compile(r"^Ruling:[ \t]*(.*?)[ \t\r]*$", re.M)  # only the first such line counts, so a later valid one cannot rescue an invalid first
+RULING_ID = re.compile(r"[a-z0-9-]+")
+EXPRESS_PATHS_SHOWN = 8
+
+def express_refusal(root, wt, base_ref, info):
+    """--express: -> why this PR may not take the express path, else None. It needs a `Ruling: <id>` line in the body whose entry is on
+    origin/roadmap, and a diff that main's own ci-scope.sh turns no job or suite on for. The script is main's copy, read with `git show`,
+    so a PR cannot rewrite its own classifier. A read that cannot run refuses as unknown (unknown is red). Cost: one fetch, about four git
+    starts, one script run, two temp files."""
+    found = RULING_LINE.search(info.get("body") or "")
+    rid = found.group(1) if found else ""
+    if not RULING_ID.fullmatch(rid):
+        return (f"--express needs a `Ruling: <id>` line in the PR body with an id of lower-case letters, digits and hyphens; the first Ruling line "
+                f"reads {rid!r}" if found else "--express needs a `Ruling: <id>` line in the PR body, and it has none")
+    path = RULED_STORE_PATH.format(id=rid)
+    try:
+        tip = fetch_branch(root, "roadmap", EXPRESS_CITE)
+    except Stop as e:
+        return f"unknown: the ruling store cannot be read, so ruling {rid} is unproven ({str(e).removesuffix(' ' + EXPRESS_CITE)})"
+    if git(root, "cat-file", "-e", f"{tip}:{path}")[0]:
+        return f"ruling {rid} has no entry at origin/roadmap:{path}"
+    c, script = git(wt, "show", f"{base_ref}:{CI_SCOPE}")
+    c2, base_tip = git(wt, "rev-parse", base_ref)
+    jobs = re.search(r'^JOBS="([^"]*)"', script, re.M)
+    every = re.search(r'^ALL="([^"]*)"', script, re.M)
+    if c or c2 or not jobs or not every:
+        return f"unknown: {base_ref}'s {CI_SCOPE} cannot be read, so whether the diff is prose-only is unproven"
+    names = every.group(1).replace("$JOBS", jobs.group(1)).split()
+    fd, copy = tempfile.mkstemp(prefix="merge-express-", suffix=".sh")
+    os.close(fd)
+    fd, out_file = tempfile.mkstemp(prefix="merge-express-scope-")
+    os.close(fd)
+    try:
+        with open(copy, "w", encoding="utf-8", newline="\n") as f:
+            f.write(script + "\n")
+        env = {**{k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")},
+               "EVENT": "pull_request", "BASE_SHA": base_tip, "HEAD_REF": info["branch"], "GITHUB_OUTPUT": out_file}
+        c, said = sh(["bash", copy], cwd=wt, env=env, timeout=120)
+        with open(out_file, encoding="utf-8") as f:
+            flags = dict(l.strip().split("=", 1) for l in f if "=" in l)
+    except (subprocess.TimeoutExpired, OSError, ValueError) as e:
+        return f"unknown: {CI_SCOPE} could not run ({type(e).__name__}), so whether the diff is prose-only is unproven"
+    finally:
+        for p in (copy, out_file):
+            with contextlib.suppress(OSError):
+                os.remove(p)
+    missing = [n for n in names if n not in flags]
+    if c or missing:
+        return f"unknown: {CI_SCOPE} " + (f"failed (exit {c}; last line: {(said.splitlines() or ['no output'])[-1][:200]})" if c else "wrote no flag for " + ", ".join(missing)) + ", so whether the diff is prose-only is unproven"
+    on = sorted(k for k, v in flags.items() if k != "mutation_report" and v != "false")
+    if on:
+        paths = git(wt, "diff", "--name-only", "--no-renames", f"{base_tip}...HEAD")[1].splitlines()
+        shown = ", ".join(paths[:EXPRESS_PATHS_SHOWN]) + (f" and {len(paths) - EXPRESS_PATHS_SHOWN} more" if len(paths) > EXPRESS_PATHS_SHOWN else "")
+        return f"the diff is not prose-only: {base_ref}'s {CI_SCOPE} turns on {', '.join(on)} for {shown}"
+    return None
+
 def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     info = info or host.pr(n)
     refuse_bad_pr(info)  # a draft is previewed, so its silent undos show before it is marked ready
@@ -3523,7 +3701,7 @@ HEAD_MOVED = "the head of #{n} moved since the owner's yes was relayed, so that 
 
 BATCH_RUNNER_NEEDS_HEAD = "the merge needs the head the CI ran on, so pass it with the --head flag (decision auto-mode-owner-acts, the batch runner merges the head its CI ran on). Nothing was claimed or pushed."
 
-def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok="", expected_head=None, linted_head=None):
+def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok="", expected_head=None, linted_head=None, express=False):
     m = cfg.get("merge", {})
     info = info or host.pr(n)  # main read it once already, and the config came from that base. A read; the head compare after the lock covers a head that moves before the lock is ours
     base = info["base"]  # the PR's own base; read again under the lock
@@ -3542,7 +3720,7 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
         if expected_head and not relayed_head_holds(root, info["branch"], expected_head, info["head"]):  # moved between main's read and the lock: still before any claim
             raise Stop(HEAD_MOVED.format(n=n))
         if linted_head and info["head"] != linted_head:  # the lane-lint PASS names linted_head; a push since then was not linted
-            raise Stop(f"the head of #{n} moved from {linted_head[:9]} to {info['head'][:9]} after its lane-lint was read. Run `merge --lane-lint {n}` on the new head, then join again. {LANE_LINT_CITE} Nothing was claimed or pushed.")
+            raise Stop(f"the head of #{n} moved from {linted_head[:9]} to {info['head'][:9]} after {linted_head[:9]} was checked. Run `merge --lane-lint {n}` on the new head, then join again. {LANE_LINT_CITE} Nothing was claimed or pushed.")
         if info["base"] != base:
             raise Stop(f"the base of #{n} changed from {base} to {info['base']} while the lock was taken {BASE_CITE}. Nothing was claimed or pushed.")
         host.take_base = base
@@ -3550,11 +3728,17 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             return draft_step(root, cfg, n, host, info)
         host.required_names()  # an empty or unreadable list stops here, before anything is pushed
         record_lift(lifts, RED_FLAG, red_base(root, host, base, red_ok))
+        if express:  # the worktree opens early: the classifier reads the head's diff
+            tmp, wt = open_worktree(root, info, base)
+            no_express = express_refusal(root, wt, base_ref, info)
+            if no_express:
+                raise Stop(no_express + f". Nothing was claimed or pushed. {EXPRESS_CITE}")
         busy = batch_refusal(host, n, base, info["head"])
         if busy:
             raise Stop(busy + " Nothing was claimed or pushed.")
         branch = info["branch"]
-        tmp, wt = open_worktree(root, info, base)
+        if wt is None:
+            tmp, wt = open_worktree(root, info, base)
         record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"]))
         debt_check(wt, base_ref, host, info)
         record_lift(lifts, UNDO_FLAG, refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok))
@@ -4033,12 +4217,38 @@ def live_review_state(h, rec, live, main):
     state, why = review_state(rec, rec["head"])
     return state, why + "; the head is the reviewed head plus clean merges of main"
 
+def rollup_green(h, n, head):
+    """True only when the ROLLUP_JOB rows of the newest run on `head` are all a pass and no older run's row is red. The newest run is the largest id in
+    the row links (/actions/runs/<id>/): a draft run skips the rollup job and the ready run after it passes it, so both sit on one head and the newer
+    run decides. An older run's skipped, cancelled or pending row is ignored. An older run's red row (bucket "fail" or "timed out ...") still holds the
+    rollup not green, as the merge check reads it, so the skip line never prints for a head the check then refuses. A row that names no run cannot be
+    placed, so it must pass whatever the newest run says. No row, any other bucket among the deciding rows, or a failed read is False, so the caller
+    keeps its own check. Cost: the one read h.checks already makes."""
+    try:
+        rows = h.checks(n, warn=False, sha=head).get(ROLLUP_JOB) or []
+    except Stop:
+        return False
+    ids = [int(m.group(1)) if (m := RUN_URL_ID.search(link or "")) else None for _, link in rows]
+    newest = max((i for i in ids if i is not None), default=None)
+
+    def decides(bucket, i):
+        return i is None or i == newest or bucket == "fail" or bucket.startswith("timed out")
+
+    return bool(rows) and all(bucket == "pass" for (bucket, _), i in zip(rows, ids) if decides(bucket, i))
+
 def lint_check(h, n, info, root, cfgrel):
     """The batch runner's join needs a lane-lint PASS at the live head (decision lanes-run-no-full-ci-job): read from the repo's comment list, the one read the
     review record uses. No PASS that names the live head, a FAIL, an unreadable result, or a failed read is a Stop that names `merge --lane-lint <n>`; a failed read
     is `lane lint unknown`, never a pass. It runs before the lock, so nothing is claimed, pushed or merged. The caller passes info["head"] to confirm as
     linted_head, so a head pushed after this read is refused there. A PASS for an earlier head also counts when every commit since is a claim (claim_only):
-    the join's own claim push, resumed, moves the head by exactly that."""
+    the join's own claim push, resumed, moves the head by exactly that.
+    The lint is skipped only for a batch integration PR (is_integration_pr) when the all-jobs-passed rollup (ROLLUP_JOB) is green on info["head"], the sha the
+    merge takes: CI proved that head (rule roles-each-layer-proves-once). Green is the verdict of the newest run on that head, and an older run's red row still refuses (rollup_green), because a draft
+    run's skipped row stays on the head beside the ready run's pass. A lane PR keeps the need above even on a green rollup, as does a rollup that is
+    absent, red, pending or skipped in its newest run, green only on another sha, or unreadable."""
+    if is_integration_pr(info) and rollup_green(h, n, info["head"]):
+        say(f"merge: lane lint skipped for #{n}: {ROLLUP_JOB} is green on {info['head'][:9]}, so CI already proved this head.")
+        return
     try:
         lints = h.issue_comments(info.get("created") or "1970-01-01T00:00:00Z")[1]
     except Stop as e:
@@ -4425,6 +4635,15 @@ BATCH_PREFIX = "batch-"  # CI reads a batch by the head ref `batch-*` (ci-scope.
 def integration_branch(name):
     """The one home of the integration branch form: batch NAME is on `batch-NAME`."""
     return f"{BATCH_PREFIX}{name}"
+
+def is_integration_pr(info):
+    """True when PR `info` (its "branch" and "body") is a batch integration PR: its body holds a freeze block and its branch is the integration branch
+    of that block's batch name. A body parse_freeze cannot read is not one: the PR is read as a lane PR."""
+    try:
+        block = parse_freeze(info["body"])
+    except Stop:
+        return False
+    return bool(block) and info["branch"] == integration_branch(block["name"])
 
 FROZEN_ONLY_DROP = "a frozen set never changes except by --batch-drop"
 
@@ -5045,9 +5264,12 @@ def kind_misfits(kind, files):
 IDLE_BUILD = pathlib.Path(__file__).resolve().parents[1] / "skills/roadmap/build.py"  # the one home of the idle-lane rules
 
 def idle_lanes(live, repo_dir=None):
-    """merge --idle-lanes: print one line per lane to archive (a lane whose handoff is not on the record branch ends with
-    HOLD and counts only in the summary's "M held", not in "N lanes to archive"), then the summary line. Exit 1 with no summary when the
-    live file is not named or the roadmap build cannot be loaded or run, so an unread list never reads as an empty one.
+    """merge --idle-lanes: print lane lines (a lane to archive; a lane whose handoff is not on the record branch ends with
+    HOLD and counts only in the summary's "M held", not in "N lanes to archive") and `hold (` lines (a lane not to archive
+    now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane;
+    the last clears when the step's status is set to todo or done), then the summary line. A lane that waits (a step not
+    done, an open pull, an open item) prints no line. Exit 1 with no summary when the
+
     `repo_dir` is the -C checkout (None: the one the process stands in)."""
     if not live:
         print("merge: --idle-lanes needs --live FILE, the publisher's live-work file. No list was made.", file=sys.stderr)
@@ -5069,13 +5291,16 @@ def idle_lanes(live, repo_dir=None):
     except (Exception, SystemExit) as e:
         print(f"merge: the roadmap build could not read the lanes: {type(e).__name__}: {e}. No list was made.", file=sys.stderr)
         return 1
-    lanes = [x for x in entries if not x.startswith("unknown (")]
-    # An unknown entry with no lane beside it is the whole list unread: no summary, so it never reads as an empty list.
-    unread = bool(entries) and not lanes  # exit 1 then, so a caller never reads exit 0 as "no lanes"
-    held = [x for x in lanes if build.IDLE_HOLD_MARK in x]  # lanes whose handoff is not on the record branch
+    holds = [x for x in entries if x.startswith("hold (")]
+    lanes = [x for x in entries if not x.startswith("unknown (") and x not in holds]
+    handoff_held = [x for x in lanes if build.IDLE_HOLD_MARK in x]  # lanes whose handoff is not on the record branch
+    # An unknown entry with no lane or hold beside it is the whole list unread: no summary, so it never reads as an empty list.
+    unread = bool(entries) and not lanes and not holds  # exit 1 then, so a caller never reads exit 0 as "no lanes"
     if not unread:
-        count = f"{len(lanes) - len(held)} lanes to archive" + (f", {len(held)} held" if held else "")
-        entries = [*entries, f"merge: {count}. Run get_session on each alone, then archive it."]
+        held = len(holds) + len(handoff_held)
+        count = f"{len(lanes) - len(handoff_held)} lanes to archive" + (f", {held} held" if held else "")
+        tail = "Run get_session on each lane line alone, then archive it; never archive a hold line." if holds else "Run get_session on each alone, then archive it."
+        entries = [*entries, f"merge: {count}. {tail}"]
     say(*entries)
     return 1 if unread else 0
 
@@ -5086,10 +5311,12 @@ def build_parser():
     p.add_argument("pr", nargs="?", help="a pull request number; with --lane-lint, a number or a commit or ref")
     p.add_argument("-C", "--repo-dir", default=None, metavar="PATH", help="act in the checkout at PATH, not the one the process stands in; the last value wins")
     p.add_argument("--confirm", action="store_true")
+    p.add_argument("--express", action="store_true", help="with --confirm: merge a prose-only PR whose body names a ruling in origin/roadmap's store; any other PR refuses")
     p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing")
     p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
     p.add_argument("--with", dest="with_prs", default=None, metavar="PR,PR,...", help="with --lane-lint on a PR number: also check the head against each named open PR (a comma list), even one of another session")
+    p.add_argument("--touched-tests", action="store_true", help="with --lane-lint: after the lint passes, run the test files the diff touches in the lint worktree; a failing test refuses, a timeout is unknown (lifted by --lint-unknown-ok)")
     p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")
     p.add_argument("--batch-build", nargs="+", metavar=("NAME", "PR"), help="build batch-NAME and its one draft pull request from these lane PRs, or allow the same set again; stands alone; takes no lock")
     p.add_argument("--batch-drop", nargs=2, metavar=("NAME", "PR"), help="take PR, and each frozen lane that stacks on it, off batch-NAME; stands alone; takes no lock")
@@ -5172,6 +5399,8 @@ def main(argv, host=None, lock=None, hosts=None):
     if not (a.lane_lint or a.batch_build):
         if a.base:
             p.error("--base goes with --lane-lint or --batch-build")
+    if a.touched_tests and not a.lane_lint:
+        p.error("--touched-tests goes with --lane-lint")
     if a.with_prs is not None and not a.lane_lint:
         p.error("--with goes with --lane-lint")
     if not (a.lane_lint or a.ready):
@@ -5262,7 +5491,7 @@ def main(argv, host=None, lock=None, hosts=None):
                 raise Stop("not in a git checkout " + LANE_LINT_CITE)
             with release_on_signals():  # a signal ends the run through lane_lint's `finally`, which removes the worktree
                 with_prs = parse_with(a.with_prs, int(a.pr)) if a.with_prs is not None else ()  # a bad list stops before any read
-                return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok, with_prs)  # before the role check and any lock: it merges and pushes nothing
+                return lane_lint(root, a.pr, host, a.base, a.lint_unknown_ok, with_prs, a.touched_tests)  # before the role check and any lock: it merges and pushes nothing
         if a.release_check:
             try:
                 c, root = sh(["git", "rev-parse", "--show-toplevel"], cwd=a.repo_dir)  # -C names the checkout; None is the process directory's
@@ -5375,7 +5604,7 @@ def main(argv, host=None, lock=None, hosts=None):
             checked = info["head"]
         if a.confirm:
             with release_on_signals():
-                return confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok, a.head, checked) or 0
+                return confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok, a.head, checked, a.express) or 0
         return (preview(root, cfg, a.config, a.pr, h, lock, info, a.undo_check_unknown_ok)) or 0
     except Stop as e:
         print(f"merge: {e}" + ("" if isinstance(e, (Liftable, Unproven)) else " No override lifts this refusal, because this tool runs after the guard."), file=sys.stderr)
