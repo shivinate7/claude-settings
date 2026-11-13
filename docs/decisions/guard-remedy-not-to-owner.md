@@ -7,7 +7,7 @@ Question: where does a Stop refusal's remedy live when the owner sees the refusa
 - Each refusal from `lint/report_guard.py` (the Stop hook that checks each reply) opens with one owner line: one plain sentence that names the check and cites this record, `guard-remedy-not-to-owner`.
 - The steps live under that check's heading in `## Steps per check`.
 - No verdict changes. Only the text moves.
-- Scope: Stop refusals only. `hooks/question_form.py` keeps its own text, `DEPARTS_REASON` included. A Stop refusal shows only the miss that `departs_hit` names.
+- Scope: Stop refusals only. `hooks/question_form.py` keeps its own text, `DEPARTS_REASON` included. So does `hooks/call_judge.py`, a PreToolUse hook: a check that could not run prints `UNVETTED_REMEDY` with the `Unvetted:` marker, and a ruling found prints the facts-only text (coordinator pick, 2026-11-12 09:19 CST). The Stop text is unchanged. A Stop refusal shows only the miss that `departs_hit` names.
 
 ## Incident, risk and cost
 

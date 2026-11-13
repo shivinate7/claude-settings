@@ -143,6 +143,9 @@ def repo_tag_names(tag: object, slug: str) -> bool:
 DATA_TOOL = "ArtifactData"
 # The tool that reads, watches, replies to and resolves comment threads on an artifact (hooks/guard.py rule page-thread-reply).
 COMMENTS_TOOL = "ArtifactComments"
+# The two tools that send a message to another session (hooks/call_judge.py judges an owner question sent by either;
+# lint/_transcript.py reads them in a transcript).
+SEND_TOOLS = ("mcp__claude-code-remote__send_message", "SendMessage")
 
 # The folder under the config dir that holds per-hook state files.
 STATE_DIR_NAME = "state"

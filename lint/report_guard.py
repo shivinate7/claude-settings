@@ -165,9 +165,6 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-from _transcript import (  # noqa: E402
-    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender,
-    read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 import layout  # noqa: E402
 import _clause  # noqa: E402
 
@@ -233,6 +230,11 @@ def _hooks_on_path():
 
 _hooks_on_path()
 from shared_names import LANE_TAG  # noqa: E402  the one home of the lane tag, shared with hooks/guard.py
+# _transcript imports shared_names, so it loads only after _hooks_on_path has put the stamped folder first. Earlier, it
+# would bind the flat shared_names and the stamped copy would never be read.
+from _transcript import (  # noqa: E402
+    ARTIFACT_DATA, SEND_TOOLS, delivered_tool_use_ids, is_last_human, items_write, last_incoming_index, last_reply, page_read_ran, page_writer_id, peer_sender,
+    read_transcript, records_after_last_human, send_targets, tool_results, tool_uses)
 
 # guard.py owns the one shell parser this repo trusts: quote-aware segment splitting,
 # heredoc-body stripping, and `git_calls`, which resolves each `git` invocation past `sudo`
@@ -2833,16 +2835,25 @@ UNVETTED_AFTER_SENTENCE = re.compile(r"([.?!][*_)\"']*)[ \t]+(?=Unvetted:[ \t]*\
 LIST_ITEM = re.compile(r"^[ ]{0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)")
 
 
-def prose_questions(text):
-    """The reply's own prose lines that hold a sentence ending in `?`, outside fenced code, indented code and code
-    spans. A blockquote line counts. Indented code opens after a blank line or another code line, as in CommonMark;
-    inside a list an indented line is list text, never code."""
-    found, fenced, code_ok, in_list = [], False, True, False
-    for line in text.splitlines():
+def prose_lines(text, keep=None):
+    """(line index, text) of each prose line: outside fenced code and indented code, the blockquote mark and the edge
+    spaces cut. Indented code opens after a blank line or another code line, as in CommonMark; inside a list an
+    indented line is list text, never code. A fence line that never closes opens no fence: the lines after it are
+    prose, so a question under a stray ``` is still read. `keep` is a predicate on an indented line's text: a line it
+    accepts is prose, not indented code. The one reader of what is code, for prose_questions and for the send gate
+    of hooks/call_judge.py."""
+    lines = text.splitlines()
+    fences = [i for i, line in enumerate(lines) if QUOTE_PREFIX.sub("", line, count=1).strip().startswith("```")]
+    unclosed = fences[-1] if len(fences) % 2 else None
+    fenced, code_ok, in_list = False, True, False
+    for index, line in enumerate(lines):
         inner = QUOTE_PREFIX.sub("", line, count=1)
         body = inner.strip()
         if body.startswith("```"):
-            fenced, code_ok = not fenced, True
+            if index != unclosed:
+                fenced, code_ok = not fenced, True
+            else:
+                code_ok = True
             continue
         if fenced:
             continue
@@ -2850,16 +2861,20 @@ def prose_questions(text):
             code_ok = True
             continue
         indented = bool(INDENTED_CODE.match(inner))
-        if code_ok and indented and not in_list:
+        if code_ok and indented and not in_list and not (keep and keep(body)):
             continue  # code_ok stays True: the next indented line is code too
         code_ok = False
         if LIST_ITEM.match(inner):
             in_list = True
         elif not indented:
             in_list = False
-        if SENTENCE_QUESTION.search(CODE_SPAN.sub("", body)):
-            found.append(body)
-    return found
+        yield index, body
+
+
+def prose_questions(text):
+    """The reply's own prose lines that hold a sentence ending in `?`, outside fenced code, indented code and code
+    spans. A blockquote line counts."""
+    return [body for _, body in prose_lines(text) if SENTENCE_QUESTION.search(CODE_SPAN.sub("", body))]
 
 
 def has_input_needed(text):
@@ -2891,23 +2906,30 @@ def asked_text(text):
     return "\n".join(questions + [u for u in unvetted if u not in questions])[-ASK_TEXT_MAX:]
 
 
-def cannot_run(asked, why):
+def cannot_run(asked, why, marked=None, remedy=None):
     """The Unvetted refusal for a check that could not run, or '' when the asked text carries its own
-    `Unvetted:` line. The marker is read only here, so it never skips a check that can run."""
+    `Unvetted:` line. The marker is read only here, so it never skips a check that can run. A caller that asks several
+    questions in one text passes `marked`, whether every one carries its own line. `remedy` is the refusal's text with
+    one slot for `why`: the Stop hook's facts-only UNVETTED_REASON by default, and the marker remedy from
+    hooks/call_judge.py for a PreToolUse refusal."""
     _hooks_on_path()
     import question_form
-    return "" if question_form.has_unvetted(asked) else UNVETTED_REASON % why
+    if marked is None:
+        marked = question_form.has_unvetted(asked)
+    return "" if marked else (remedy or UNVETTED_REASON) % why
 
 
-def past_ruling_problem(asked, cwd):
-    """The refusal text for asked text that a past ruling settles, or that could not be checked, else ''."""
+def past_ruling_problem(asked, cwd, marked=None, remedy=None):
+    """The refusal text for asked text that a past ruling settles, or that could not be checked, else ''. `marked`
+    and `remedy` are cannot_run's: `marked` is set by a caller whose text holds several questions or is cut before it
+    is sent here."""
     _hooks_on_path()
     import question_form
     candidates, unknown = question_form.past_rulings(asked, repo_root(cwd) or cwd or os.getcwd())
     print(question_form.unknown_line(unknown), file=sys.stderr)
     unreadable = question_form.unreadable_sources(unknown)
     if unreadable:
-        return cannot_run(asked, "; ".join(unreadable))
+        return cannot_run(asked, "; ".join(unreadable), marked, remedy)
     import call_judge  # the one home of item 8, its model and its time limit
     import decision_watch
     prompt = ("Review this text, which a session sends the owner and which asks him something:\n<<<\n" + asked
@@ -2919,13 +2941,13 @@ def past_ruling_problem(asked, cwd):
                                                  timeout=call_judge.PAST_RULING_TIMEOUT,
                                                  shape=call_judge.OK_SHAPE, effort=None)
     if error:
-        return cannot_run(asked, " ".join(str(error).split()))
+        return cannot_run(asked, " ".join(str(error).split()), marked, remedy)
     if verdict.get("ok") is not False:
         return ""
     reason = verdict.get("reason")
     reason = reason.strip() if isinstance(reason, str) and reason.strip() else "a past ruling settles this."
     if question_form.ruling_cite(reason, question_form.candidate_ids(candidates), strict=True) != "cited":
-        return cannot_run(asked, "the review cited a record that was not in the list")
+        return cannot_run(asked, "the review cited a record that was not in the list", marked, remedy)
     if session_wording(reason):
         # The judge's reason holds an order to the session. The owner reads it in chat, so only the ruling id stays.
         cited = [i for i in question_form.candidate_ids(candidates) if i in reason or i.split("/", 1)[-1] in reason]
