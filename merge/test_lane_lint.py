@@ -2691,8 +2691,9 @@ class LaneLintRepoDir(tm.RepoDirRuns, LaneFixture):
 class DraftRun(LaneFixture):
     """`merge --lane-lint <pr>` reads the draft's touched-tests run at the lane's live head (decision lanes-run-no-full-ci-job; workflow
     lane-touched-tests.yml). A failed `run (windows-latest)` or `run (macos-latest)` row refuses the lane and names its link. A row not yet
-    finished, or no touched row on the head, is unknown: refused, and lifted only by --lint-unknown-ok. A run on an older head is never read
-    for the live one. A ref or commit target reads nothing. Each case scripts the rows of each head in self.host.draft_rows (FakeHost's
+    finished, or no touched row on the head, is unknown: refused, and lifted only by --lint-unknown-ok. A pull request that reads dirty (mergeable
+    CONFLICTING, or merge state DIRTY) with no touched row on its head is a FAIL that names the conflict with main: GitHub starts no run on it, so no
+    reason lifts it. A run on an older head is never read for the live one. A ref or commit target reads nothing. Each case scripts the rows of each head in self.host.draft_rows (FakeHost's
     default is a pass, so the other cases keep their lane). The cases read the scripted rows through the real Host judge (tm.DraftRunReads)."""
 
     def run_case(self, rows, *argv):
@@ -2773,6 +2774,113 @@ class DraftRun(LaneFixture):
                 rc, out = self.run_case(rows, "--lane-lint", "7", "--lint-unknown-ok", "no touched row yet")
                 self.assertEqual(rc, 0, "a reason did not lift %s (exit %s):\n%s" % (label, rc, out))
 
+    def dirty_read(self, mergeable, merge_state):
+        """Scripts the own pull request's read as GitHub gives a PR that conflicts with its base: pr() answers `mergeable` and `merge_state` for
+        PR 7 (FakeHost answers its own `mergeable` and CLEAN). -> the list that each read of PR 7 is appended to."""
+        reads, real = [], self.host.pr
+
+        def pr(n):
+            info = real(n)
+            if n == self.host.own_number:
+                reads.append(n)
+                info = {**info, "mergeable": mergeable, "merge_state": merge_state}
+            return info
+
+        self.host.pr = pr
+        return reads
+
+    def conflict_line(self, text, head):
+        """The line of `text` that names the conflict with main and the head's short sha, or None."""
+        for line in text.splitlines():
+            if "PR conflicts with main: merge main in" in line and head[:9] in line:
+                return line
+        return None
+
+    def dirty_run(self, head_rows, mergeable, merge_state, label, *argv):
+        """Runs the lane's lint with `argv` on a PR that reads `mergeable` and `merge_state`, whose head has `head_rows`. The scope is asserted
+        first: the lint read the own pull request and the live head's draft runs. -> (head, rc, output)."""
+        self.use_ci_job(PASSING, 0)
+        head = self.head("feat")
+        reads = self.dirty_read(mergeable, merge_state)
+        if os.path.exists(self.log):
+            os.remove(self.log)
+        rc, out = self.run_case({head: head_rows}, "--lane-lint", "7", *argv)
+        self.assertEqual(reads, [7], "the lint did not read the own pull request (%s):\n%s" % (label, out))
+        self.assertEqual(tm.check_run_reads(self.host.draft_reads), [head], "the lint did not read the live head's draft runs (%s):\n%s" % (label, out))
+        return head, rc, out
+
+    def refused_as_a_conflict(self, head_rows, mergeable, merge_state, label):
+        """A dirty PR whose head has `head_rows` and no touched row: a FAIL that names the conflict with main and the head's short sha. The lint never runs."""
+        head, rc, out = self.dirty_run(head_rows, mergeable, merge_state, label)
+        self.assertEqual(rc, 1, "a dirty pull request (%s) did not refuse the lane (exit %s):\n%s" % (label, rc, out))
+        self.assertIn("FAILs:", out, "a dirty pull request (%s) was not read as a FAIL:\n%s" % (label, out))
+        self.assertIsNotNone(self.conflict_line(out, head), "the refusal does not name the conflict with main and %s (%s):\n%s" % (head[:9], label, out))
+        self.assertNotIn("is unknown, not a pass", out, "a dirty pull request (%s) was read as unknown:\n%s" % (label, out))
+        self.assertEqual(pass_lines(out), [], "a dirty pull request (%s) printed a PASS line:\n%s" % (label, out))
+        self.assertEqual(self.lint_calls(), [], "the lint ran past a conflict with main (%s):\n%s" % (label, out))
+
+    def reason_does_not_lift(self, head_rows, mergeable, merge_state, label):
+        """--lint-unknown-ok does not lift a dirty PR whose head has no touched row: the run still FAILs on the conflict, and the lint never runs."""
+        head, rc, out = self.dirty_run(head_rows, mergeable, merge_state, label, "--lint-unknown-ok", "the conflict is being fixed")
+        self.assertEqual(rc, 1, "--lint-unknown-ok lifted a conflict with main (%s, exit %s):\n%s" % (label, rc, out))
+        self.assertIsNotNone(self.conflict_line(out, head), "the run lifted by a reason does not name the conflict with main (%s):\n%s" % (label, out))
+        self.assertEqual(self.lint_calls(), [], "the lint ran after a reason was given for a conflict with main (%s):\n%s" % (label, out))
+
+    def unknown_and_lifted_by_a_reason(self, head_rows, mergeable, merge_state, label):
+        """A PR that does not read dirty (`mergeable`, `merge_state`), whose head has `head_rows` and no touched row, or a skipped one: refused as
+        unknown, and --lint-unknown-ok lifts it. No conflict line appears either way."""
+        self.use_ci_job(PASSING, 0)
+        head = self.head("feat")
+        reads = self.dirty_read(mergeable, merge_state)
+        rc, out = self.run_case({head: head_rows}, "--lane-lint", "7")
+        self.assertEqual(reads, [7], "the lint did not read the own pull request (%s):\n%s" % (label, out))
+        self.assertEqual(tm.check_run_reads(self.host.draft_reads), [head], "the lint did not read the live head's draft runs (%s):\n%s" % (label, out))
+        self.assertEqual(rc, 1, "%s did not refuse the lane (exit %s):\n%s" % (label, rc, out))
+        self.assertIn("is unknown, not a pass", out, "%s is not read as unknown:\n%s" % (label, out))
+        self.assertIn("--lint-unknown-ok", out, "%s cannot be lifted by name:\n%s" % (label, out))
+        self.assertIsNone(self.conflict_line(out, head), "%s names a conflict with main that the PR does not show:\n%s" % (label, out))
+        self.assertEqual(self.lint_calls(), [], "the lint ran past %s:\n%s" % (label, out))
+        rc, out = self.run_case({head: head_rows}, "--lane-lint", "7", "--lint-unknown-ok", "no touched row yet")
+        self.assertEqual(rc, 0, "a reason did not lift %s (exit %s):\n%s" % (label, rc, out))
+        self.assertIsNone(self.conflict_line(out, head), "the run lifted by a reason names a conflict with main that the PR does not show (%s):\n%s" % (label, out))
+
+    def test_a_dirty_pr_with_no_check_rows_on_its_head_fails_on_the_conflict_with_main(self):
+        self.refused_as_a_conflict([], "CONFLICTING", "DIRTY", "mergeable CONFLICTING, no check rows")
+
+    def test_a_dirty_pr_with_a_windows_row_and_no_touched_row_fails_on_the_conflict_with_main(self):
+        self.refused_as_a_conflict([tm.draft_row("run (windows-latest)", job=2)], "CONFLICTING", "DIRTY", "mergeable CONFLICTING, a windows row and no touched row")
+
+    def test_a_pr_whose_merge_state_reads_dirty_alone_fails_on_the_conflict_with_main(self):
+        self.refused_as_a_conflict([], "MERGEABLE", "DIRTY", "merge state DIRTY, mergeable MERGEABLE, no check rows")
+
+    def test_a_reason_does_not_lift_a_dirty_pr_with_no_touched_row(self):
+        cases = (([], "CONFLICTING", "DIRTY", "mergeable CONFLICTING, no check rows"),
+                 ([tm.draft_row("run (windows-latest)", job=2)], "CONFLICTING", "DIRTY", "mergeable CONFLICTING, a windows row and no touched row"),
+                 ([], "MERGEABLE", "DIRTY", "merge state DIRTY, mergeable MERGEABLE, no check rows"))
+        for head_rows, mergeable, merge_state, label in cases:
+            with self.subTest(case=label):
+                self.reason_does_not_lift(head_rows, mergeable, merge_state, label)
+
+    def test_a_clean_pr_with_no_touched_row_still_reads_unknown_and_a_reason_lifts_it(self):  # control: green on the old code
+        self.unknown_and_lifted_by_a_reason([], "MERGEABLE", "CLEAN", "a clean PR with no touched row")
+
+    def test_a_pr_github_is_still_checking_with_no_touched_row_still_reads_unknown_and_a_reason_lifts_it(self):  # control: green on the old code
+        self.unknown_and_lifted_by_a_reason([], "UNKNOWN", "UNKNOWN", "a PR whose mergeable is null, with no touched row")
+
+    def test_a_dirty_pr_whose_touched_job_was_skipped_keeps_todays_unknown_text(self):  # control: green on the old code; a skipped row names its own cause
+        self.unknown_and_lifted_by_a_reason([tm.draft_row("touched", "skipped")], "CONFLICTING", "DIRTY", "a dirty PR whose touched job was skipped")
+
+    def test_a_dirty_pr_whose_touched_job_passed_still_passes(self):  # control: green on the old code
+        self.use_ci_job(PASSING, 0)
+        head = self.head("feat")
+        reads = self.dirty_read("CONFLICTING", "DIRTY")
+        rc, out = self.run_case({head: [tm.draft_row("touched")]}, "--lane-lint", "7")
+        self.assertEqual(reads, [7], "the lint did not read the own pull request:\n" + out)
+        self.assertEqual(tm.check_run_reads(self.host.draft_reads), [head], "the lint did not read the live head's draft runs:\n" + out)
+        self.assertEqual(rc, 0, "a dirty PR whose touched job passed was refused (exit %s):\n%s" % (rc, out))
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        self.assertIsNone(self.conflict_line(out, head), "a dirty PR whose touched job passed names a conflict with main:\n" + out)
+
     def stale_head_case(self, old_rows):
         """The lane's head moves after its draft run was judged: the old head has `old_rows`, the live head has none. -> (rc, output)."""
         self.use_ci_job(PASSING, 0)
@@ -2802,14 +2910,28 @@ class DraftRun(LaneFixture):
         self.assertEqual(self.host.draft_reads, [], "a ref target read the draft's runs:\n" + out)
         self.assertEqual(rc, 0, "a ref target refused on a failed draft run it does not read (exit %s):\n%s" % (rc, out))
 
-    def real_host_run(self, rows, *argv):
+    def real_host_run(self, rows, *argv, pr_raw=None):
         """-> (rc, output) of merge with the real Host, which reads the head's check runs through the gh shim. The shim answers `rows` for every
-        read, so a head of more than one page serves the same rows on each page. Run outside the cloud, as LintPostsPassComment runs its real-host cases."""
+        read, so a head of more than one page serves the same rows on each page. `pr_raw` is the raw fields of the pull request read (None: its
+        clean default). Run outside the cloud, as LintPostsPassComment runs its real-host cases."""
         tm.install_gh_shim(self)
-        tm.GhHalf.set(self, checks_seq=[rows])
+        tm.GhHalf.set(self, checks_seq=[rows], pr_raw=pr_raw)
         with self.cloud(CLAUDE_CODE_REMOTE=None):
             rc, out = self.run_merge(*argv, host=merge.Host())
         return rc, out
+
+    def test_a_real_host_dirty_pr_whose_head_has_two_pages_of_check_rows_and_no_touched_row_fails_on_the_conflict(self):  # the full-size state
+        head = self.head("feat")
+        rows = [("lint-%d" % k, "pass", "") for k in range(101)]  # two pages, and no touched row on either
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.real_host_run(rows, "--lane-lint", "7", pr_raw={"mergeable": False, "mergeable_state": "dirty"})
+        calls = tm.GhHalf.calls(self).splitlines()
+        self.assertTrue(any(line.startswith(f"GET commits/{head}/check-runs") and "page=2" in line for line in calls),
+                        "the lint did not read page 2 of the live head's check runs:\n" + "\n".join(calls))
+        self.assertEqual(rc, 1, "a dirty PR with no touched row on two pages did not refuse the lane (exit %s):\n%s" % (rc, out))
+        self.assertIsNotNone(self.conflict_line(out, head), "the refusal does not name the conflict with main and %s:\n%s" % (head[:9], out))
+        self.assertNotIn("is unknown, not a pass", out, "a dirty PR with no touched row on two pages was read as unknown:\n" + out)
+        self.assertEqual(self.lint_calls(), [], "the lint ran past a conflict with main:\n" + out)
 
     def test_a_real_host_reads_a_failed_windows_run_on_page_two_of_the_head_rows(self):
         head = self.head("feat")
