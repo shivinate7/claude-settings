@@ -422,7 +422,7 @@ COMMAND_VERB = re.compile(_RUN_VERB + r"[^.\n]{0,40}\bcommands?\b(?!\s+below)"
 # Four more bash forms are read on the text with strings, comments and here-strings blanked out
 # (_ps_bash_form), so PowerShell text that only looks like one passes: a pipe to a Unix-only program
 # (PowerShell has `Sort-Object`, `Tee-Object` and `more`, so those are left out; `jq` and `less` are in), a leading `NAME=value`
-# before a command (a `}` ends the value, so a hashtable's `b=2}` is none, unless it closes a `${...}` expansion, nested
+# before a command (a value that opens `{` + space + letter is a scriptblock, so a hashtable's `E={ Get-Date }` is none; a `}` ends the value, so `b=2}` is none, unless it closes a `${...}` expansion, nested
 # one deep as in `${A:-${B}}`; each expansion holds no other `{` or `;`, so a failed read backtracks in linear time), a `[ ... ]` or `[[ ... ]]` test after a statement start or `if`, and a backslash that ends a line
 # after a space with a line after it (a `C:\repo\` path ends in no space before its backslash, and a
 # lone backslash argument ends the text: `cd \`, and a `cd \` line before a line with no flag is a path).
@@ -430,7 +430,7 @@ COMMAND_SHELLS = ("powershell", "mac")
 PS_BASH_OPERATOR = re.compile(r"&&|\|\||<<|/dev/null|(?:^|;)\s*export\s", re.M)
 PS_BASH_FORMS = re.compile(
     r"\|[ \t]*(?:head|tail|grep|xargs|sed|awk|cut|wc|uniq|tr|tac|jq|less)(?![\w-])"
-    r"|(?:^|;)[ \t]*[A-Za-z_][A-Za-z0-9_]*=(?:\$\{(?:\$\{[^{}\s;]*\}|[^{}\s;])*\}|[^\s;}])*[ \t]+[A-Za-z./]"
+    r"|(?:^|;)[ \t]*[A-Za-z_][A-Za-z0-9_]*=(?!\{[ \t]+[A-Za-z])(?:\$\{(?:\$\{[^{}\s;]*\}|[^{}\s;])*\}|[^\s;}])*[ \t]+[A-Za-z./]"
     r"|(?:^|[;(]|\b(?:if|elif|while|until)\b)[ \t]*(?:\[[ \t]+[^\]\n]*[ \t]\]|\[\[[ \t]+[^\]\n]*[ \t]\]\])",
     re.M | re.I)
 # A backslash that ends a line after a space, with a line after it. When the backslash is the line's only
