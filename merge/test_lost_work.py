@@ -267,6 +267,12 @@ class LostWorkRows(LostWorkFixture):
         self.assertIn(("b", owner_of("b-archived")), rows, "no state-b row for #7 that names the coordinator, the owner of an archived lane: %r" % rows)
         self.assertNotIn(("b", "session_a"), rows, "the state-b row for #7 names the archived session, not the coordinator: %r" % rows)
 
+    def test_b_open_record_with_no_footer_names_the_coordinator(self):
+        self.pr(7, record="open", at=30, session=None)  # no session in the footer: no lane to tell, so the coordinator owns the row
+        self.publish()
+        rows = rows_for(self.block(self.host()), 7)
+        self.assertEqual(rows, [("b", "coordinator")], "no state-b row for #7, whose body has no session footer, that names the coordinator: %r" % rows)
+
     # State c: no review record, and the lane idle over 12 h.
 
     def test_c_no_record_and_lane_idle_past_twelve_hours_lists_a_row(self):
@@ -284,6 +290,24 @@ class LostWorkRows(LostWorkFixture):
         self.publish()
         lines = self.block(self.host())
         self.assertEqual(rows_for(lines, 7), [], "a row for #7 at 719 minutes idle, under the twelve-hour line: %r" % lines)
+
+    def test_c_stale_record_counts_as_no_record(self):
+        self.pr(7, record="done", at=60)
+        self.lane("session_a", status=IDLE, bucket=roadmap.BUCKET_COMPLETED)
+        self.thread(7, minutes=781)
+        self.publish()
+        control = [state for state, _owner in rows_for(self.block(self.host()), 7)]
+        self.assertNotIn("c", control, "control: #7 with a current done record gets a state-c row: %r" % control)
+        # The pull request head moves: the done record names the old head, so it is stale and counts as no record.
+        old = self.heads[7]
+        sha = self.commit_on(old, None, "newer")
+        roadmap.git(self.repo, "push", "-q", str(self.bare), "%s:refs/pull/7/head" % sha)
+        self.heads[7] = sha
+        pull = next(p for p in self.pulls if p["number"] == 7)
+        pull["head"] = {**pull["head"], "sha": sha}
+        self.checks[sha] = self.checks[old]
+        rows = [state for state, _owner in rows_for(self.block(self.host()), 7)]
+        self.assertIn("c", rows, "no state-c row for #7, whose done record names an older head, so it counts as no record: %r" % rows)
 
     # State d: the lane is archived and the pull request is open.
 
@@ -346,6 +370,12 @@ class LostWorkRows(LostWorkFixture):
         self.publish(read_at=roadmap.iso_ago(120))
         rows = rows_for(self.block(self.host()), 7)
         self.assertEqual([state for state, _why in rows], ["unknown"], "a stale live file gives #7 no unknown row: %r" % rows)
+
+    def test_footer_session_absent_from_the_live_lanes_gives_an_unknown_row(self):
+        self.pr(7, record="done", at=60, session="session_nowhere")  # no lane row for session_nowhere: the footer names a lane the read does not hold
+        self.publish()
+        rows = rows_for(self.block(self.host()), 7)
+        self.assertEqual([state for state, _why in rows], ["unknown"], "no unknown row for #7, whose footer session is absent from the live lanes: %r" % rows)
 
     # Cost, empty and full-size states.
 
@@ -415,6 +445,34 @@ class LostWorkRows(LostWorkFixture):
         lines = self.block(self.host())
         self.assertEqual(len(branch_rows(lines, BRANCH)), 1, "control: no state-f row for %s, ahead of main with no pull request: %r" % (BRANCH, lines))
         self.assertEqual(branch_rows(lines, "claude/merged-last-week"), [], "a state-f row for a branch at main, which is not ahead: %r" % lines)
+
+    def test_f_branch_with_an_archive_copy_lists_no_row(self):
+        filed = self.commit_on(self.main, {"docs/plans/filed.md": "filed\n"})
+        self.push_branch("claude/filed", filed)
+        self.push_branch("archive/claude/filed", filed)  # the work was filed away under archive/
+        self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))
+        self.publish()
+        lines = self.block(self.host())
+        self.assertEqual(len(branch_rows(lines, BRANCH)), 1, "control: no state-f row for %s, ahead of main with no pull request: %r" % (BRANCH, lines))
+        self.assertEqual(branch_rows(lines, "claude/filed"), [], "a state-f row for claude/filed, which has an archive/claude/filed copy: %r" % lines)
+
+    def test_f_branch_whose_tip_an_open_pr_holds_lists_no_row(self):
+        held = self.commit_on(self.main, {"docs/held.md": "h\n"})
+        self.push_branch("claude/under-a-pr", held)
+        self.pr(7, parent=held, head_ref="claude/other-name", record=None, session=None)  # open pull request #7 holds the branch's tip, under another head ref
+        self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))
+        self.publish()
+        lines = self.block(self.host())
+        self.assertEqual(len(branch_rows(lines, BRANCH)), 1, "control: no state-f row for %s, ahead of main with no pull request: %r" % (BRANCH, lines))
+        self.assertEqual(branch_rows(lines, "claude/under-a-pr"), [], "a state-f row for claude/under-a-pr, whose tip open pull request #7 holds: %r" % lines)
+
+    def test_f_incident_branch_still_lists_beside_the_archive_and_pr_filters(self):
+        # The control for the two skips above: the incident branch lists while an archive/ branch and an open pull request are in the same run.
+        self.pr(7, record=None, session=None)
+        self.push_branch(BRANCH, self.commit_on(self.main, {BRANCH_FILE: BRANCH_TEXT}))
+        self.push_branch("archive/claude/other", self.commit_on(self.main, {"docs/o.md": "o\n"}))
+        self.publish()
+        self.assertEqual(len(branch_rows(self.block(self.host()), BRANCH)), 1, "no state-f row for %s beside an archive/ branch and an open pull request" % BRANCH)
 
     def test_f_main_and_integration_branches_are_never_listed(self):
         self.branches.append({"name": "main"})
@@ -658,6 +716,19 @@ class LostWorkLedger(LostWorkFixture):
         except SystemExit:
             parsed = None
         self.assertIsNotNone(parsed, "merge's command line refuses `merge --reviewed --live FILE --ledger --out FILE --verdicts FILE`")
+
+    def test_a_failed_lane_send_in_the_ledger_exits_one_and_writes_no_out(self):
+        self.pr(7, record="open", at=30, session="session_b")  # its lane is told by mail, and the send fails
+        self.lane("session_b")
+        self.publish()
+        out = pathlib.Path(self.tmp.name) / "lost-prs.json"
+        argv = ["--reviewed", "--live", str(self.live), "--ledger", "--out", str(out), "--verdicts", str(self.verdict_file())]
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            rc = merge.main(argv, host=self.host(mail_result=NO_ROUTE))
+        self.assertIn("was not sent", stderr.getvalue(), "scope: the failed lane send prints no line naming it: %r" % stderr.getvalue())
+        self.assertEqual(rc, 1, "a failed lane send in --ledger exits %r, not 1: %s" % (rc, stderr.getvalue()))
+        self.assertFalse(out.exists(), "--ledger wrote %s though a lane send failed" % out)
 
 
 if __name__ == "__main__":
