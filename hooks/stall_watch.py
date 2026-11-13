@@ -4,7 +4,8 @@
 Modes:
 - --hook: Before a background Bash command, wraps it so a watcher reports a stall after
   300 seconds with no new output, no growth of a log the command names, and no CPU time in a
-  process under the job. The job keeps running. The hook never refuses a command.
+  process under the job. The job keeps running. The hook never refuses a command. For a background call
+  with an agent_id in the payload (17 lowercase hex), it puts the agent marker ahead of the wrapper.
 - --stop: At Stop, lists each open background job whose output file did not change for
   the quiet age.
 
@@ -39,6 +40,16 @@ Hook: stall_watch.py --hook
   or inside `{ }`. Then the hook leaves F out of `--also` and passes `--unwatched F`. The STALL report names it.
   A list that ends in `&` runs in a background subshell, so its cd does not move the main shell.
   Cost: one append per heartbeat by the tool, and one read of BEAT on each 0.2 s loop pass in the watcher.
+
+  Agent marker: for a background Bash call whose payload has a valid agent_id, the wrapper above gets
+  `export CLAUDE_AGENT_ID=<id>` and a newline in front, so each process the job execs holds the marker
+  (name: proc_env.AGENT_TAG_NAME; read by proc_env.entry_value). That export line is the one addition.
+  The job's `( )` subshell is a fork, so it holds no marker; its exec'd children do. A foreground call is
+  never rewritten, with or without agent_id: Claude Code checks permission rules on a hook's rewritten
+  input, so a rewrite would change what the rules see. A foreground agent call is unmarked. With no or
+  a malformed agent_id the output is as before. Windows is unchanged and unmarked (reads as unmarked,
+  which keeps a tree). Cost: no new process start, no file written; one string prepend per background
+  agent Bash call, inside the hook process that already runs per Bash call.
 
   The original stays unquoted, as top-level shell code, so a settings deny rule still sees it.
   STALL_WATCH_QUIET overrides the default quiet time (for tests and proofs only).
@@ -103,6 +114,10 @@ try:
     import _nowindow  # the one home of a no-window child start (hooks/_nowindow.py)
 except ImportError:  # a hook never dies for a missing helper (it lands a moment after the hook in an install)
     _nowindow = subprocess
+try:
+    from proc_env import AGENT_TAG_NAME  # the one home of the agent marker's name
+except ImportError:  # without it the hook cannot mark an agent call: it leaves the call unmarked
+    AGENT_TAG_NAME = None
 try:
     from guard_stream import until_note  # the one parser of the `until:` note
 except ImportError:  # the Stop check is a recovery control: it runs without notes, never dies
@@ -624,17 +639,33 @@ def eof_backslash_literal():
         return False
 
 
+AGENT_ID = re.compile(r"[0-9a-f]{17}")  # an agent_id as the payload carries it
+
+
+def agent_export(call):
+    """The agent marker line, `export CLAUDE_AGENT_ID=<id>` and a newline, for a call whose payload has a valid
+    agent_id, else ""."""
+    agent_id = call.get("agent_id")
+    if AGENT_TAG_NAME and isinstance(agent_id, str) and AGENT_ID.fullmatch(agent_id):
+        return "export %s=%s\n" % (AGENT_TAG_NAME, agent_id)
+    return ""
+
+
 def hook():
     # ponytail: posix only. The rewrite needs `&`, `$!` and `wait`, and Windows has no harness
-    # shell that matches. Returning nothing leaves a Windows background call unchanged.
+    # shell that matches. Returning nothing leaves a Windows call unchanged, unmarked: a process
+    # that reads unmarked keeps its tree (fail-safe).
     if os.name != "posix":
         return 0
     try:
         call = json.load(sys.stdin)
         inp = call["tool_input"]
-        if call.get("tool_name") != "Bash" or inp.get("run_in_background") is not True:
+        if call.get("tool_name") != "Bash":
             return 0
         original = inp["command"]
+        if inp.get("run_in_background") is not True:
+            return 0  # a foreground call is never rewritten: permission rules would see the rewrite
+        prefix = agent_export(call)
     except Exception:
         return 0
     quiet = os.environ.get("STALL_WATCH_QUIET") or str(DEFAULT_QUIET)
@@ -668,7 +699,7 @@ def hook():
         + q(log) + " 8< " + q(beat)
     )
     print(json.dumps({"hookSpecificOutput": {
-        "hookEventName": "PreToolUse", "updatedInput": dict(inp, command=wrapped)}}))
+        "hookEventName": "PreToolUse", "updatedInput": dict(inp, command=prefix + wrapped)}}))
     return 0
 
 
@@ -807,7 +838,7 @@ def stopped_ids(content):
     return [m.group(1)] if m else []
 
 
-AGENT_ID = re.compile(r"[\w-]+\Z")
+TRANSCRIPT_AGENT_ID = re.compile(r"[\w-]+\Z")  # an id safe to put in a transcript file name
 TAIL_BYTES = 64 * 1024  # the first read of an agent transcript's end; it doubles to hold the last record
 TAIL_MAX = 32 * 1024 * 1024
 AGENT_REMEDY = "Stop it, then resume it by name, or send a fresh reviewer the prior report."
@@ -818,7 +849,7 @@ def agent_transcripts(session, agent, output):
     (<dir>/<stem>/subagents/agent-<id>.jsonl), then the launch's outputFile. An id with a separator
     has no path beside the session."""
     paths = []
-    if AGENT_ID.match(agent):
+    if TRANSCRIPT_AGENT_ID.match(agent):
         paths.append(own_session.agent_transcript_path(session, agent))
     if output and output not in paths:
         paths.append(output)

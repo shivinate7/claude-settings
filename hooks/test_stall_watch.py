@@ -191,15 +191,19 @@ def module_or_fail():
         raise Fail(f"{MODULE} is missing")
 
 
-def hook(command, os_name=None, quiet="2"):
-    """Run the hook on one background Bash call, with STALL_WATCH_QUIET set to quiet. Return (rc, stdout, stderr)."""
+def hook(command, os_name=None, quiet="2", agent_id=None, background=True):
+    """Run the hook on one Bash call, with STALL_WATCH_QUIET set to quiet. Return (rc, stdout, stderr).
+    agent_id, when not None, is sent as the payload's top-level agent_id, whatever its type, so a
+    malformed value can be sent too."""
     module_or_fail()
     payload = {
         "session_id": "test-stall-watch",
         "hook_event_name": "PreToolUse",
         "tool_name": "Bash",
-        "tool_input": {"command": command, "description": "test", "run_in_background": True},
+        "tool_input": {"command": command, "description": "test", "run_in_background": background},
     }
+    if agent_id is not None:
+        payload["agent_id"] = agent_id
     # TMPDIR makes the hook name its log under SCRATCH (case 7b): a stalled job's log is never
     # removed by the wrapper, so the run's cleanup must remove it. Every caller goes through here.
     env = dict(os.environ, STALL_WATCH_QUIET=quiet, TMPDIR=SCRATCH)
@@ -216,9 +220,9 @@ def hook(command, os_name=None, quiet="2"):
     return proc.returncode, proc.stdout.decode("utf-8", "replace"), proc.stderr.decode("utf-8", "replace")
 
 
-def rewrite(command, quiet="2"):
-    """Return (rewritten command, hookSpecificOutput) for a background call, or raise Fail."""
-    rc, out, err = hook(command, quiet=quiet)
+def rewrite(command, quiet="2", agent_id=None, background=True):
+    """Return (rewritten command, hookSpecificOutput) for a call, or raise Fail."""
+    rc, out, err = hook(command, quiet=quiet, agent_id=agent_id, background=background)
     if rc != 0:
         raise Fail(f"hook exit {rc}: {err.strip()[:200]}")
     try:
@@ -1506,6 +1510,172 @@ def table_parity_and_exit_codes():
         except Exception as e:
             found = [str(e)]
         problems += ["%s: %s" % (label, p) for p in found]
+    return problems
+
+
+# The agent marker. A valid agent_id is 17 lowercase hex. A background agent call's command gets
+# `export CLAUDE_AGENT_ID=<id>` ahead of its wrapper, so every process the job starts holds the tag in
+# its exec-time environment. A foreground call is not rewritten.
+AGENT_TAG = "CLAUDE_AGENT_ID"
+AGENT_ID = "3f9c1e7a0b2d4e6f8"
+WRAP_BASE = re.compile(r"stall-watch-[0-9a-f]{32}")
+MALFORMED_AGENT_IDS = (
+    "3F9C1E7A0B2D4E6F8",    # uppercase
+    "3f9c1e7a0b2d4e6f",     # 16 characters
+    "3f9c1e7a0b2d4e6f80",   # 18 characters
+    "3f9c1e7a0b2d4e6fz",    # not hex
+    "",                     # empty
+    1234567890123456,       # a number
+    "3f9c1e7a0b2d4e6f;",    # a shell separator
+    "3f9c1e7a0b2d4e6 f",    # a space
+    "3f9c1e7a0b2d4e6f\n",   # a trailing newline, which a `$` anchor would pass
+    "3f9c1e7a$(id)",        # a command substitution
+    ["3f9c1e7a0b2d4e6f8"],  # a list
+)
+
+
+def export_line(agent_id):
+    return "export %s=%s\n" % (AGENT_TAG, agent_id)
+
+
+def updated_command(out):
+    """The updatedInput command in a hook's stdout, or None when the hook gave no updatedInput."""
+    if not out.strip():
+        return None
+    try:
+        cmd = json.loads(out)["hookSpecificOutput"]["updatedInput"]["command"]
+    except (ValueError, KeyError, TypeError):
+        return None
+    return cmd if isinstance(cmd, str) else None
+
+
+def same_wrapper(a, b):
+    """True when two rewrites differ only in their scratch base name, which holds a fresh uuid per call."""
+    return WRAP_BASE.sub("stall-watch-UUID", a) == WRAP_BASE.sub("stall-watch-UUID", b)
+
+
+@posix_case
+def agent_foreground_call_gets_no_output():
+    """12a. a foreground call with agent_id gets no output, as one without agent_id does: the original runs as typed"""
+    orig = "echo agent-fg"
+    rc, out, err = hook(orig, agent_id=AGENT_ID, background=False)
+    problems = expect(rc == 0, f"hook exit {rc}, want 0: {err.strip()[:200]}")
+    problems += expect(out == "", f"foreground agent call: output {out[:120]!r}, want none")
+    rc_plain, out_plain, _err = hook(orig, background=False)
+    return problems + expect(rc_plain == 0 and out_plain == "",
+                             f"foreground call without agent_id: output {out_plain[:120]!r}, want none")
+
+
+@posix_case
+def agent_background_call_gets_export_prefix():
+    """12b. a background call with agent_id: its command is the export line, then today's wrapper"""
+    orig = "echo agent-bg"
+    plain = updated_command(hook(orig)[1])
+    if plain is None or "--watch-pid" not in plain:  # scope: the call without agent_id gets the watch wrapper
+        return ["scope: the call without agent_id is not rewritten into the watch wrapper"]
+    cmd = updated_command(hook(orig, agent_id=AGENT_ID)[1])
+    if cmd is None:
+        return ["background agent call: no hookSpecificOutput.updatedInput.command"]
+    prefix = export_line(AGENT_ID)
+    if not cmd.startswith(prefix):
+        return ["background agent call: command does not begin with the export line"]
+    return expect(same_wrapper(cmd[len(prefix):], plain),
+                  "background agent call: the rest is not today's wrapper")
+
+
+@posix_case
+def no_agent_id_call_is_unchanged():
+    """12c. a call without agent_id: a foreground call gets no output, and a background command names no tag"""
+    orig = "echo agent-none"
+    rc, out, _err = hook(orig, background=False)
+    problems = expect(rc == 0 and out == "",
+                      f"foreground call without agent_id: exit {rc}, output {out[:120]!r}, want none")
+    cmd = updated_command(hook(orig)[1])
+    if cmd is None:
+        return problems + ["background call without agent_id: no updatedInput"]
+    return problems + expect(AGENT_TAG not in cmd, "background call without agent_id: the command names the tag")
+
+
+@posix_case
+def malformed_agent_id_is_ignored():
+    """12d. a malformed agent_id changes nothing: a foreground call gets no output, and a background call
+    gets the wrapper of a call without agent_id"""
+    orig = "echo agent-bad"
+    plain = updated_command(hook(orig)[1])
+    if plain is None:
+        return ["scope: the call without agent_id is not rewritten into the watch wrapper"]
+    problems = []
+    for bad in MALFORMED_AGENT_IDS:
+        rc, out, _err = hook(orig, agent_id=bad, background=False)
+        found = expect(rc == 0 and out == "", f"agent_id {bad!r}, foreground: output {out[:120]!r}, want none")
+        cmd = updated_command(hook(orig, agent_id=bad)[1])
+        if cmd is None:
+            found += [f"agent_id {bad!r}, background: no updatedInput"]
+        else:
+            found += expect(same_wrapper(cmd, plain),
+                            f"agent_id {bad!r}, background: the command differs from the wrapper without agent_id")
+        problems += found
+    return problems
+
+
+@posix_case
+def agent_foreground_child_holds_no_tag_on_linux():
+    """12e. live: a foreground agent call gets no rewrite, so the harness runs the original as it is, and the
+    child it starts holds no CLAUDE_AGENT_ID"""
+    if not sys.platform.startswith("linux"):
+        raise Skip("Linux only: the child's environment is read from /proc")
+    d = new_dir()
+    pidfile = os.path.join(d, "child.pid")
+    orig = "sleep 30 & echo $! > " + shlex.quote(pidfile)
+    out = hook(orig, agent_id=AGENT_ID, background=False)[1]
+    if out.strip():
+        return ["foreground agent call: the hook rewrote the command (%r), want no output" % out[:120]]
+    env = {k: v for k, v in job_env().items() if k != AGENT_TAG}  # nothing in the environment names the tag
+    with open(os.path.join(d, "bash.out"), "wb") as out_f:
+        run = subprocess.run(["bash", "-c", orig], stdin=subprocess.DEVNULL, stdout=out_f,
+                             stderr=subprocess.STDOUT, env=env, timeout=20)
+    if run.returncode != 0:
+        return [f"original command exit {run.returncode}, want 0"]
+    try:
+        with open(pidfile) as f:
+            pid = int(f.read().strip())
+    except (OSError, ValueError):
+        return ["the original command wrote no child pid"]
+    PIDS.add(pid)
+    problems = expect(pid_alive(pid), f"child pid {pid} is not alive")
+    if problems:
+        return problems
+    with open("/proc/%d/environ" % pid, "rb") as f:
+        entries = f.read().split(b"\0")
+    kill_all([pid])
+    return expect(not any(entry.startswith((AGENT_TAG + "=").encode()) for entry in entries),
+                  "foreground agent call: its child holds CLAUDE_AGENT_ID")
+
+
+# The Bash hook commands in settings.json when the agent marker landed: the guard, the stall watch and the
+# simulator boot record. The count is the cost: a call starts no process the stall watch entry does not.
+PRE_TOOL_USE_BASH_HOOKS = 3
+
+
+def matches_bash(matcher):
+    """True when a PreToolUse matcher covers the Bash tool: empty or `*` covers every tool, else a regex."""
+    return not matcher or matcher == "*" or re.fullmatch(matcher, "Bash") is not None
+
+
+@case
+def settings_add_no_bash_hook_process():
+    """13. settings.json PreToolUse keeps the same Bash hook commands, one of them stall_watch --hook, and no
+    command names a marker: the marker rides the stall watch entry, so a call starts no process of its own"""
+    with open(os.path.join(os.path.dirname(HERE), "settings.json"), encoding="utf-8") as f:
+        groups = json.load(f)["hooks"]["PreToolUse"]
+    bash = [h.get("command", "") for g in groups if matches_bash(g.get("matcher", "")) for h in g.get("hooks", [])]
+    every = [h.get("command", "") for g in groups for h in g.get("hooks", [])]
+    problems = expect(len(bash) == PRE_TOOL_USE_BASH_HOOKS,
+                      f"{len(bash)} Bash hook commands, want {PRE_TOOL_USE_BASH_HOOKS}")
+    stall = [c for c in bash if "stall_watch.py" in c and "--hook" in c]
+    problems += expect(len(stall) == 1, f"{len(stall)} Bash hook commands run stall_watch.py --hook, want 1")
+    named = [c[:80] for c in every if re.search("mark", c, re.I)]
+    problems += expect(not named, f"a PreToolUse command names a marker: {named}")
     return problems
 
 
