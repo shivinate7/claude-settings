@@ -287,12 +287,13 @@ After each build the roadmap build script prints the upkeep list for the triage 
   - no step is still doing under it (its `lane` field names the session, status `doing` or `active`, not landed on main). A lane that passes the other tests reads a hold line instead.
 
   A lane whose only holders are stale drafts reads `joint (close #<n> ...; archive archive/<branch> ...; archive lane
-  <session id>)`, and the row counts it. A stale draft is a draft over 12 h old at `readAt`, not held, with no review log,
-  a full 40-hex `head` sha (a draft with none, or a short one, gives no joint line) not in the default branch, on no
-  branch another live lane's row holds, and no doing step named in its branch or title. Any step still doing under the
-  lane, even one a merged pull marks landed, holds the joint line, and so does an open pull on a `lane/<slug>-*` branch
-  (the archive guard counts it as the lane's own). The lane's session row needs `idle_since` (ISO time with a zone) over 12 h before `readAt` and
-  `unarchived_epoch` the JSON int 0 (not false, 0.0 or text). One open pull whose title or branch holds the word
+  <session id>)`, and the row counts it. A stale draft meets every test in this list. It is over 12 h old at `readAt`,
+  not held, and has no review log. Its `head` is a full 40-hex sha not in the default branch (a draft with none, or a
+  short one, gives no joint line). Its branch is not one that another live lane's row holds. No doing step is named in
+  its branch or title. Any step still doing under the lane holds the joint line, even one a merged pull marks landed.
+  So does an open pull on a `lane/<slug>-*` branch (the archive guard counts it as the lane's own). The lane's session
+  row needs `idle_since` (ISO time with a zone) over 12 h before `readAt`. It also needs `unarchived_epoch` as the JSON
+  int 0 (not false, 0.0 or text). One open pull whose title or branch holds the word
   `records` stops every joint line. The batch runner pushes each branch to `archive/<branch>`, closes each draft, then
   archives the lane. The joint pass reads rows already loaded: no process, file or log of its own.
 
