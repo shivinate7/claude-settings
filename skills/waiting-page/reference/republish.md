@@ -26,7 +26,9 @@ is main's `page.html` with the live `designData` and roadmap blocks kept, never 
    `held item <n>: ...` (exit 4): fix that item, check again. `checks unknown: ...` (exit 3), or no page file (exit 2):
    a check that cannot read its input fails, never passes (owner ruling, item 276 a): say the line in the reply,
    and republish nothing until a check passes. `checks pass` (exit 0): go on.
-   `behind`: republish `<out>` to the same URL with the capabilities `db` and `{comments: {}}`.
+   `behind`: publish with the `Artifact` tool: action publish, `url` the page's URL, `file_path` `<out>`,
+   `capabilities` `db` and `{comments: {}}`. A cloud session and a local session do the same. The mockup
+   pictures ride inside `<out>` (`designData`), so no file-output tool and no `files` map are needed.
    `<out>` is main's page with the live `designData` and roadmap blocks kept, byte for byte
    (`--write` calls `splice.carry`). A live page with no roadmap block keeps the template's empty one.
    When you also add a design, do it in

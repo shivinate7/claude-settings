@@ -53,7 +53,7 @@ The guard runs `check_designs.mjs` on the published page at each item write that
    - The viewer lists every option's designs at every width, in option order. Its label reads
      "<option title> (<width name>)", with "N of M", Prev, Next and "Open full size". Prev and Next
      wrap at the ends. A width with no name reads `Phone`.
-5. Run the `--check` of "Keep the page on main's code", step 4, on the built page. Then republish it to the same URL with the same capabilities. Whether the database stays
+5. Run the `--check` of "Keep the page on main's code", step 4, on the built page. Then republish it to the same URL with the same capabilities, as "Keep the page on main's code", step 4, says. Whether the database stays
    is unmeasured until the step 4 live check of "Update a repo's pages".
    A republish replaces the whole page, so run this step in one session at a time. A second session
    that read the page earlier would overwrite the first one's mockups. A lane never does this step:
