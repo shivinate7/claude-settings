@@ -54,7 +54,7 @@ or unreadable, `git` unavailable or failing, or the model subprocess failing, ti
 answering something that is not the JSON verdict it was asked for: each of these ends the
 run with a `systemMessage` that names UNKNOWN and why, and exit 0. This hook only ever
 reports, so nothing here ever refuses the turn. The incident cap never touches this branch:
-an UNKNOWN read is never cached and always reported again.
+an UNKNOWN read is never cached and always reported again, except a lost transcript, said once per session (step decision-watch-finds-transcript).
 
 THE CONFIG REPORT. The same Stop run also prints the config report: the project config files,
 merges into main and unreadable subjects of this turn. It is a separate section with its own
@@ -484,7 +484,7 @@ def _load_seen(session_id):
 
 def find_transcript(path, session_id):
     """Return the transcript's path, or None. The given path wins. A path that fails is read
-    again after the usual spellings are undone (`~`, backslashes, a Git Bash `/c/` drive). Then
+    again after the usual spellings are undone (`~`, backslashes). Then
     the session id finds `projects/*/<id>.jsonl` in the config dir and in ~/.claude, so a
     Windows path, a second config dir or a folder name cut short still resolves. An id that
     is not a plain name matches nothing."""
