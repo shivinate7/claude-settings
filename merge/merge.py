@@ -2271,6 +2271,11 @@ def hit_suites(root, paths, skip):
 
 _SMALL_MOVES = {}  # (worktree, head, base tip) -> the verdict, so the read after the wait does not repeat a proof it already holds
 
+def flags_on(flags, *skip):
+    """-> the sorted names of ci-scope.sh's flags that are on, less `skip` and the lint_* flags. Both callers (the small move and --express)
+    run `ci-job checks --lint` on the merge, which runs every lint, so a lint flag on loses no check and is not a job turned on."""
+    return sorted(k for k, v in flags.items() if k not in skip and not k.startswith("lint_") and v != "false")
+
 def small_base_move(wt, base_ref, sha, before_run=None):
     """-> (True, why the green run on sha stands) or (False, why not), for a sha that lacks the base tip T. A read that
     could not run gives a `why` of UnreadText: no finding, so no refusal.
@@ -2332,7 +2337,7 @@ def small_base_move(wt, base_ref, sha, before_run=None):
         c, out = sh(["bash", CI_SCOPE], cwd=wt, env=env, timeout=120)
         with open(out_file, encoding="utf-8") as f:
             flags = dict(l.strip().split("=", 1) for l in f if "=" in l)
-        on = sorted(k for k, v in flags.items() if v != "false")
+        on = flags_on(flags)
         if on or not flags:
             return False, f"{CI_SCOPE} turns on " + (", ".join(on) if flags else "every job (it gave no answer)") + " for main's paths"
         if c:
@@ -3580,9 +3585,10 @@ def express_refusal(root, wt, base_ref, info):
     c2, base_tip = git(wt, "rev-parse", base_ref)
     jobs = re.search(r'^JOBS="([^"]*)"', script, re.M)
     every = re.search(r'^ALL="([^"]*)"', script, re.M)
-    if c or c2 or not jobs or not every:
+    lints = re.search(r'^LINTS="([^"]*)"', script, re.M)
+    if c or c2 or not jobs or not every or ("$LINTS" in every.group(1) and not lints):
         return f"unknown: {base_ref}'s {CI_SCOPE} cannot be read, so whether the diff is prose-only is unproven"
-    names = every.group(1).replace("$JOBS", jobs.group(1)).split()
+    names = every.group(1).replace("$JOBS", jobs.group(1)).replace("$LINTS", lints.group(1) if lints else "").split()
     fd, copy = tempfile.mkstemp(prefix="merge-express-", suffix=".sh")
     os.close(fd)
     fd, out_file = tempfile.mkstemp(prefix="merge-express-scope-")
@@ -3604,7 +3610,7 @@ def express_refusal(root, wt, base_ref, info):
     missing = [n for n in names if n not in flags]
     if c or missing:
         return f"unknown: {CI_SCOPE} " + (f"failed (exit {c}; last line: {(said.splitlines() or ['no output'])[-1][:200]})" if c else "wrote no flag for " + ", ".join(missing)) + ", so whether the diff is prose-only is unproven"
-    on = sorted(k for k, v in flags.items() if k != "mutation_report" and v != "false")
+    on = flags_on(flags, "mutation_report")
     if on:
         paths = git(wt, "diff", "--name-only", "--no-renames", f"{base_tip}...HEAD")[1].splitlines()
         shown = ", ".join(paths[:EXPRESS_PATHS_SHOWN]) + (f" and {len(paths) - EXPRESS_PATHS_SHOWN} more" if len(paths) > EXPRESS_PATHS_SHOWN else "")
