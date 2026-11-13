@@ -862,22 +862,21 @@ class Selector(unittest.TestCase):
                          "a backslash-joined run line did not resolve its command to node --test")
 
     # Item 4: a chain before the test path is not a command word. The run line exits 1, naming its line.
-    def chained_line_exits_1(self, run):
-        """A checks.yml whose one windows run line is `run`, with a test changed. Exit 1, no output, the line named."""
-        a = "lint/test_a.py"
+    def run_line_exits_1(self, run, a="lint/test_a.py"):
+        """A checks.yml whose one windows run line is `run`, with test `a` changed. Exit 1, no output, the line named."""
         text = ("name: fixture checks\non: pull_request\njobs:\n  windows:\n    runs-on: windows-latest\n"
                 f"    steps:\n      - run: {run}\n")
         stderr = self.exits_1(with_checks({a: "old\n"}, text), {a: "new\n"})
-        self.assertIn(f"line {self.line_of(text, run)}", stderr, f"the exit does not name the chained run line: {stderr}")
+        self.assertIn(f"line {self.line_of(text, run)}", stderr, f"the exit does not name the run line: {stderr}")
 
     def test_a_chain_and_before_the_test_path_exits_1_naming_its_line(self):
-        self.chained_line_exits_1("python3 lint/gen.py && python3 lint/test_a.py")
+        self.run_line_exits_1("python3 lint/gen.py && python3 lint/test_a.py")
 
     def test_a_chain_semicolon_before_the_test_path_exits_1_naming_its_line(self):
-        self.chained_line_exits_1("python3 lint/gen.py; python3 lint/test_a.py")
+        self.run_line_exits_1("python3 lint/gen.py; python3 lint/test_a.py")
 
     def test_a_chain_pipe_before_the_test_path_exits_1_naming_its_line(self):
-        self.chained_line_exits_1("python3 lint/gen.py | python3 lint/test_a.py")
+        self.run_line_exits_1("python3 lint/gen.py | python3 lint/test_a.py")
 
     # Item 4 control: a chain after the test path leaves the command word as the path's own command.
     def test_a_chain_after_the_test_path_still_resolves_the_command(self):
@@ -934,6 +933,61 @@ class Selector(unittest.TestCase):
         self.assertEqual(windows, [a], "a backtick-continued powershell run line did not list its test on Windows")
         self.assertEqual(self.commands_of(outputs, "commands_windows"), {a: "python"},
                          "a backtick-continued powershell run line did not resolve its command to python")
+
+    # An interpreter named by its absolute path reads as that interpreter: the basename is the command word.
+    def run_line_in_both_jobs(self, a, run):
+        """A checks.yml whose windows and macos jobs each run `run`, with test `a` changed. -> outputs, exit 0 checked."""
+        text = ("name: fixture checks\non: pull_request\njobs:\n"
+                "  windows:\n    runs-on: windows-latest\n    steps:\n"
+                f"      - run: {run}\n"
+                "  macos:\n    runs-on: macos-latest\n    steps:\n"
+                f"      - run: {run}\n")
+        outputs, _ = self.run_outputs(with_checks({a: "old\n"}, text), {a: "new\n"})
+        return outputs
+
+    def test_a_bin_bash_run_line_reads_as_bash_on_the_windows_and_macos_jobs(self):
+        a = "lint/test_x.sh"
+        outputs = self.run_line_in_both_jobs(a, "/bin/bash lint/test_x.sh")
+        windows, macos = self.os_lists(outputs)
+        self.assertEqual(windows, [a], "files_windows does not list the test the Windows job runs by /bin/bash")
+        self.assertEqual(macos, [a], "files_macos does not list the test the macOS job runs by /bin/bash")
+        self.assertEqual(self.commands_of(outputs, "commands_windows"), {a: "bash"},
+                         "commands_windows does not read /bin/bash as bash")
+        self.assertEqual(self.commands_of(outputs, "commands_macos"), {a: "bash"},
+                         "commands_macos does not read /bin/bash as bash")
+
+    def test_a_usr_bin_python3_run_line_reads_as_python3_on_the_windows_and_macos_jobs(self):
+        a = "lint/test_x.py"
+        outputs = self.run_line_in_both_jobs(a, "/usr/bin/python3 lint/test_x.py")
+        windows, macos = self.os_lists(outputs)
+        self.assertEqual(windows, [a], "files_windows does not list the test the Windows job runs by /usr/bin/python3")
+        self.assertEqual(macos, [a], "files_macos does not list the test the macOS job runs by /usr/bin/python3")
+        self.assertEqual(self.commands_of(outputs, "commands_windows"), {a: "python3"},
+                         "commands_windows does not read /usr/bin/python3 as python3")
+        self.assertEqual(self.commands_of(outputs, "commands_macos"), {a: "python3"},
+                         "commands_macos does not read /usr/bin/python3 as python3")
+
+    # Controls: a path that names no interpreter, or a basename that only starts with one, still exits 1 naming its line.
+    def test_an_absolute_path_that_is_not_an_interpreter_exits_1_naming_its_line(self):
+        self.run_line_exits_1("/tmp/evil lint/test_x.sh", a="lint/test_x.sh")
+
+    def test_an_absolute_bashx_basename_exits_1_naming_its_line(self):
+        self.run_line_exits_1("/bin/bashx lint/test_x.sh", a="lint/test_x.sh")
+
+    # The real checks.yml at HEAD, the full-size state. Its shell-macos job runs the duo-fold harness by /bin/bash, so
+    # touching that test must read the line, not fail on it.
+    def test_the_real_checks_yml_at_head_reads_the_shell_macos_bin_bash_line(self):
+        a = "lint/test_duo_fold.sh"
+        with open(os.path.join(HERE, "..", ".github", "workflows", "checks.yml"), encoding="utf-8") as f:
+            real_lines = [line.strip() for line in f.read().splitlines()]
+        self.assertIn("run: /bin/bash lint/test_duo_fold.sh", real_lines,
+                      "the real checks.yml runs no test by /bin/bash, so this case probes nothing")
+        outputs, _ = self.run_outputs({a: "old\n"}, {a: "new\n"})
+        windows, macos = self.os_lists(outputs)
+        self.assertEqual(windows, [], "files_windows lists the duo-fold test, which no Windows job runs")
+        self.assertEqual(macos, [a], "files_macos does not list the duo-fold test the shell-macos job runs")
+        self.assertEqual(self.commands_of(outputs, "commands_macos"), {a: "bash"},
+                         "commands_macos does not read the shell-macos job's /bin/bash line as bash")
 
 
 if __name__ == "__main__":
