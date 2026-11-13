@@ -45,6 +45,11 @@ FILES_MARKER = "<coordinator names the files>"
 CHECK_MARKER = "<coordinator names the check that proves done>"
 PARAPHRASE = "(paraphrase, no owner quote)"
 FULL = 30  # the full-size store: one step with this many rulings
+PASTED_LINES = 40  # a pasted file body in a step note: the brief never carries it
+PATH_IN_NOTE = "skills/project-ops/scripts/brief_from_step.py"  # a path in a note: Files keeps it
+SECTIONS = ["Task", "Files", "Rulings", "Failure classes", "Done-check", "Report cap"]  # after Grant and Lane brief
+RESTATED = ["Standing rules for this agent", "Co-Authored-By", "git stash", "Never run git",
+            "A fix round is a fresh isolated spawn"]  # what the agent already loads: the brief never restates it
 
 Q_OPEN = "Coordinator ruling, 2026-11-08 07:16 CST: the brief is built from the step, never hand-written."
 Q_CLOSED = "Owner: one brief template, filled by the tool and never a second copy."
@@ -116,9 +121,34 @@ def section(text, heading):
     return m.group(1) if m else None
 
 
-def template_has(*patterns):
-    """True when one sentence of the template matches every pattern."""
-    return has_sentence(sentences(read_template()), *patterns)
+def headings(text):
+    """The `## ` headings of a brief or a template, in order."""
+    return re.findall(r"^## (.+?)\s*$", text, re.M)
+
+
+def two_rulings():
+    return {
+        "open-one": fixture.entry("open-one", step=SLUG, quote=Q_OPEN, at=AT_OPEN, source=SRC_OPEN),
+        "closed-one": fixture.entry("closed-one", step=SLUG, quote=Q_CLOSED, at=AT_CLOSED, source=SRC_CLOSED,
+                                    status="closed"),
+    }
+
+
+def note_with_block():
+    """A step note that names one path and pastes a 40-line file body in a code fence."""
+    body = "\n".join("    value_%02d = compute(%d)" % (n, n) for n in range(PASTED_LINES))
+    return "Coordinator note: edit %s only.\n\n```python\n%s\n```\n" % (PATH_IN_NOTE, body)
+
+
+def template_tail():
+    """The template from its Failure classes heading to the end: the lines that name the process."""
+    m = re.search(r"^## Failure classes", read_template(), re.M)
+    return read_template()[m.start():] if m else ""
+
+
+def tail_has(*patterns):
+    """True when one sentence of the template's tail matches every pattern."""
+    return has_sentence(sentences(template_tail()), *patterns)
 
 
 class BriefCase(unittest.TestCase):
@@ -240,9 +270,7 @@ class StepFields(BriefCase):
         self.assertIsNotNone(task, "the brief has no ## Task section")
         self.assertIn(TITLE, task, "the step title is not in Task")
         self.assertIn(WHY, task, "the step's why is not in Task")
-        sources = section(out, "Sources")
-        self.assertIsNotNone(sources, "the brief has no ## Sources section")
-        self.assertIn(SOURCE, sources, "the step's source is not in Sources")
+        self.assertIn(SOURCE, out, "the step's source is not in the brief")
 
     def test_files_and_done_check_are_markers_the_tool_does_not_invent(self):
         step = step_doc()
@@ -292,30 +320,74 @@ class Cli(BriefCase):
         self.assertIn("no-such-step", done.stdout + done.stderr, "the message does not name the unknown slug")
 
 
+class FixedLayout(BriefCase):
+
+    def test_section_headings_are_the_fixed_list_in_order_for_any_step(self):
+        cases = [
+            ("bare", step_doc(), None),
+            ("pasted-note", step_doc(note=note_with_block()), None),
+            ("with-rulings", step_doc(title="A longer title, " * 3, why=WHY * 2), two_rulings()),
+        ]
+        for label, step, rulings in cases:
+            out = self.build(self.make_repo(step=step, rulings=rulings))
+            self.assertEqual(headings(out), SECTIONS,
+                             "the brief's headings are not the fixed list in order, for step %s" % label)
+
+    def test_files_holds_the_path_and_no_pasted_block_reaches_the_output(self):
+        out = self.build(self.make_repo(step=step_doc(note=note_with_block())))
+        files = section(out, "Files")
+        self.assertIsNotNone(files, "the brief has no ## Files section")
+        self.assertIn(PATH_IN_NOTE, files, "the path the note names is not in Files")
+        self.assertNotIn("```", out, "a code fence from the step note reaches the output")
+        leaked = [n for n in range(PASTED_LINES) if "value_%02d" % n in out]
+        self.assertEqual(leaked, [], "%d of %d lines of the pasted block reach the output"
+                         % (len(leaked), PASTED_LINES))
+
+    def test_output_restates_nothing_the_agent_already_loads(self):
+        out = self.build(self.make_repo(step=step_doc(), rulings=two_rulings()))
+        for phrase in RESTATED:
+            self.assertNotIn(phrase, out, "the brief restates %r, which the agent already loads" % phrase)
+
+    def test_two_ruling_brief_is_at_most_sixty_percent_of_the_template_words(self):
+        out = self.build(self.make_repo(step=step_doc(), rulings=two_rulings()))
+        template_words = len(read_template().split())
+        out_words = len(out.split())
+        self.assertLessEqual(out_words, 0.6 * template_words,
+                             "the brief has %d words, over 60%% of the template's %d words"
+                             % (out_words, template_words))
+
+
 class TemplateTail(unittest.TestCase):
     """The template's tail, read as text. These cases need no module: the template is the old code's."""
 
+    def test_template_keeps_the_section_headings_in_order(self):
+        self.assertEqual(headings(read_template()), SECTIONS,
+                         "the template's section headings are not the fixed list in order")
+        lines = read_template().splitlines()
+        self.assertTrue(lines and lines[0].startswith("Grant:"), "the template does not open with the Grant line")
+        self.assertTrue(any(line.startswith("Lane brief:") for line in lines), "the template has no Lane brief line")
+
     def test_red_first_line_is_in_the_template(self):
-        self.assertTrue(template_has(r"\bred first\b"), "the template has no sentence that says red first")
+        self.assertTrue(tail_has(r"\bred first\b"), "the template's tail has no sentence that says red first")
 
     def test_round_one_review_cites_ruling_r9(self):
-        self.assertTrue(template_has(r"\bround[- ]1\b", r"\bR9\b"),
+        self.assertTrue(tail_has(r"\bround[- ]1\b", r"\bR9\b"),
                         "the template has no round-1 review sentence that cites ruling R9")
 
     def test_round_one_review_has_no_round_three(self):
-        self.assertTrue(template_has(r"\bround 3\b", NEGATION), "the template does not say there is no round 3")
+        self.assertTrue(tail_has(r"\bround 3\b", NEGATION), "the template does not say there is no round 3")
 
     def test_hand_in_is_a_draft_pr_to_the_batch_runner(self):
-        self.assertTrue(template_has(r"\bdraft\b", r"\bPR\b", r"\bbatch runner\b"),
+        self.assertTrue(tail_has(r"\bdraft\b", r"\bPR\b", r"\bbatch runner\b"),
                         "the template has no sentence that hands in a draft PR to the batch runner")
 
     def test_questions_go_to_triage(self):
-        self.assertTrue(template_has(r"\bquestions?\b", r"\btriage\b"),
+        self.assertTrue(tail_has(r"\bquestions?\b", r"\btriage\b"),
                         "the template does not send questions to triage")
 
     def test_report_cap_in_lines_is_named(self):
         # Already in the template on the base commit: a guard that the rewritten template keeps the cap.
-        self.assertTrue(template_has(r"\bcap\b", r"\blines\b"), "the template does not cap the report in lines")
+        self.assertTrue(tail_has(r"\bcap\b", r"\blines\b"), "the template does not cap the report in lines")
 
 
 if __name__ == "__main__":
