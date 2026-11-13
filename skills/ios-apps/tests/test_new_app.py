@@ -42,6 +42,7 @@ EXPECTED = [
     "native/TallyKit/Sources/TallyKit/Tokens.swift",
     "native/TallyKit/Tests/TallyKitTests/GreetingTests.swift",
     "native/TallyUITests/LaunchTests.swift",
+    "native/TallyUITests/UITestSupport.swift",
     "native/project.yml",
     "tokens/tokens.json",
     "tools/gen-tokens.py",
@@ -108,6 +109,16 @@ class Starter(unittest.TestCase):
         self.assertNotIn(".v5", package)
         self.assertIn("import Testing", files["native/TallyKit/Tests/TallyKitTests/GreetingTests.swift"])
         self.assertIn("import XCTest", files["native/TallyUITests/LaunchTests.swift"])
+
+    def test_ui_tests_follow_the_test_shapes(self):
+        files = self.made()
+        support = files["native/TallyUITests/UITestSupport.swift"]
+        self.assertIn("func tapCentre", support)
+        self.assertRegex(support, r"\.frame")
+        self.assertRegex(support, r"coordinate\(withNormalizedOffset")
+        for path in ("native/TallyUITests/LaunchTests.swift", "native/TallyUITests/UITestSupport.swift"):
+            self.assertNotRegex(files[path], r"sleep\(|Thread\.|Date\(|DispatchTime|CFAbsoluteTime", path)
+        self.assertIn("waitForExistence", files["native/TallyUITests/LaunchTests.swift"] + support)
 
     def test_make_targets(self):
         make = targets(self.made()["Makefile"])
