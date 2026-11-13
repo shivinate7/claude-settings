@@ -1,0 +1,14 @@
+{
+ "id": "mistake-guard-filing-target",
+ "title": "Where does the hook's judge file a mistake's missing guard to triage?",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "R67 express lane, 12:54 CST Nov 13: R16 says the judge files the missing guard to triage, but report_guard.py has no filing target.",
+ "source": "lane session_013NEJL3fTMNnVHbgiss5Vcp, 12:54 CST Nov 13",
+ "note": "Todo. Ruling R16 (owner 16:25 CST Nov 10): \"the HOOK/judge files it not the session itself\". No record names where triage reads it. Roadmap-branch writes belong to triage only (roadmap-one-writer), so a hook cannot push there. Options for the coordinator: a message to the triage session, the mailbox after the cutover (ruling mailbox-replaces-send-message), or a file under a path triage reads on each wake. A log needs a named reader (root CLAUDE.md): name triage.",
+ "updatedAt": "2026-11-13T12:55:29-06:00"
+}
