@@ -2,11 +2,12 @@
 """Cases for the guard cull's readings of lint/report_guard.py (roadmap step guard-false-alarm-cull; decision
 cull-guard-wrong-refusals).
 
-- The Recovered check goes (owner-delegate DELETE ruling, coordinator 11:22 CST, 2026-11-12). After a compaction,
-  a report with no Recovered or Handoff gave line passes, and so does a Recovered item that names no source.
-  The handoff-unread guard is a different guard (hooks/guard.py) and is not touched here.
-- A review PASS inside a statistic is not a review claim (retrospective session, 15:39 CST, 2026-11-10). A claim
-  with no pull request still refuses on a lane, and that control stays.
+- The Recovered check is removed. After a compaction, a report with no Recovered or Handoff line passes, and so
+  does a Recovered item that names no source. These cases pin that reading, so a return of the refusal fails here
+  (decision cull-guard-wrong-refusals). The handoff-unread guard is a different guard (hooks/guard.py) and is not
+  touched here.
+- A review PASS inside a statistic is not a review claim. A claim with no pull request still refuses on a lane,
+  and that control stays.
 - A review PASS that names a round, a reviewer or a pull request is a claim, even with a count word beside it. The
   statistic check must not read it as a count. A pull request named before the count, or in another clause, counts too.
 - A reviewers word on a line does not make a PASS in another clause of that line a review claim.
