@@ -1898,15 +1898,6 @@ WALK_SUITES = {
                              "lint/test_settings_matcher.py"],
     "hooks/guard_mask_script.py": [],
     "hooks/guard_argv.py": [],
-    # hooks/guard.py: the walk of the tracked tree, minus the whole hooks/test_guard.py and GUARD_MODULE_DROPPED_SUITES (slow
-    # or unusable suites, timed in step mutation-tests-for-cost).
-    "hooks/guard.py": [
-        "hooks/test_agent_brief.py", "hooks/test_call_judge.py", "hooks/test_config_watch.py",
-        "hooks/test_guard_load_os.py", "hooks/test_precompact_handoff.py", "hooks/test_probe.py",
-        "hooks/test_question_form.py", "hooks/test_question_form_option_labels.py", "hooks/test_shared_names.py",
-        "janitor/test_install_launchd.py", "janitor/test_install_schtasks.py", "janitor/test_session_end_sweep.py",
-        "lint/test_ci_scope.py", "lint/test_now_central.py", "lint/test_rule_audit.py",
-        "lint/test_settings_matcher.py"],
 }
 
 
@@ -1978,6 +1969,14 @@ class GuardModuleFamilyTests(unittest.TestCase):
         self.assertTrue(reason.strip(), "guard_core.py's exemption has a blank reason")
         self.assertNotIn("hooks/guard_core.py", guard_table(), "guard_core.py is exempt, not a family row")
 
+    def test_guard_py_is_exempt_with_a_reason_that_names_the_unparse_and_has_no_row(self):
+        """Every family reaches hooks/guard.py, as every family reaches guard_core.py, so a family row would be a guess. Three
+        suites assert on guard.py's own text, which the report's ast.unparse copy changes (step mutation-tests-for-cost)."""
+        reason = guard_exempt().get("hooks/guard.py")
+        self.assertIsInstance(reason, str, "GUARD_MODULE_EXEMPT must name hooks/guard.py with a reason")
+        self.assertIn("unparse", reason, "the reason names why three suites cannot be used on guard.py")
+        self.assertNotIn("hooks/guard.py", guard_table(), "guard.py is exempt, not a family row")
+
     def test_every_row_is_a_non_empty_list(self):
         table = guard_table()
         self.assertIn("hooks/guard_kill.py", table, "GUARD_MODULE_FAMILIES has no row for hooks/guard_kill.py")
@@ -2032,23 +2031,6 @@ class GuardModuleFamilyTests(unittest.TestCase):
                 self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
                 self.assertNotIn("hooks/test_guard.py", out.splitlines(),
                                  "%s prints the whole hooks/test_guard.py, which takes minutes per mutant" % module)
-
-    def test_tests_for_guard_py_runs_family_slices_and_never_the_two_whole_slow_suites(self):
-        """hooks/guard.py: the whole hooks/test_guard.py and merge/test_merge.py time out at 180 s on the clean source, so
-        no mutant starts inside the 300 s budget (step mutation-tests-for-cost, 6 runs, 0 of 10 mutants ran)."""
-        target = "hooks/guard.py"
-        self.assertNotIn(target, dict(mutate_guard.REPORT_TARGETS), "the fixture: %s is no REPORT_TARGETS row" % target)
-        code, out, err = run_cli(["--tests-for", target])
-        self.assertEqual(code, 0, "exit %d\n%s%s" % (code, out, err))
-        printed = out.splitlines()
-        self.assertIn(target, guard_table(), "hooks/guard.py needs a GUARD_MODULE_FAMILIES row")
-        self.assertNotIn("hooks/test_guard.py", printed, "the whole hooks/test_guard.py takes minutes per mutant")
-        self.assertNotIn("merge/test_merge.py", printed, "the whole merge/test_merge.py takes minutes per mutant")
-        self.assertTrue([line for line in printed if line.startswith("hooks/test_guard.py::")],
-                        "hooks/guard.py prints at least one hooks/test_guard.py::<family> line")
-        for name in ("hooks/test_guard_beat.py", "lint/test_report_guard.py", "hooks/test_checks_never_raise.py",
-                     "lint/test_layout.py", "hooks/test_wrappers.py", "lint/test_report_guard_stamped.py"):
-            self.assertNotIn(name, printed, "%s is slow or unusable on the unparsed copy: its control run spends the budget" % name)
 
     def test_a_suite_that_loads_a_table_module_inside_a_function_is_kept(self):
         """lint/test_hook_catalog.py imports guard_merge inside a test method, so the import walk finds it only

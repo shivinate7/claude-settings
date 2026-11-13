@@ -3613,23 +3613,13 @@ GUARD_MODULE_FAMILIES = {
     "hooks/guard_merge.py": ["merge"],
     "hooks/guard_mask_script.py": ["mask-script"],
     "hooks/guard_argv.py": ["argv"],
-    # hooks/guard.py holds the rules that no guard_<x>.py module owns. A mutant of it meets the four quick families that read them
-    # (14 to 37 s each). `paths` (104 s) and `diff` (41 s) are left out for their time.
-    "hooks/guard.py": ["write", "model-cap", "cite", "hook-bypass"],
-}
-# Suites a row's module never runs, so the clean-source control of every suite fits the 300 s budget with time left for
-# mutants (step mutation-tests-for-cost: 0 of 10 mutants ran in 6 runs of the walk's 26 suites and in 3 runs with 30; the
-# 30 suites take 905 s one after another). Dropped for guard.py: merge/test_merge.py (times out at 180 s); the walk suites of
-# 42 to 144 s (test_guard_beat 144, test_report_guard 107, test_checks_never_raise 71, test_sweep 59, test_stale_cites 42);
-# and the three that read not green on the unparsed copy the report mutates (test_layout, test_wrappers and
-# test_report_guard_stamped assert on guard.py's own text, which the unparse changes).
-GUARD_MODULE_DROPPED_SUITES = {
-    "hooks/guard.py": ["merge/test_merge.py", "hooks/test_guard_beat.py", "lint/test_report_guard.py",
-                       "hooks/test_checks_never_raise.py", "janitor/test_sweep.py", "lint/test_stale_cites.py",
-                       "lint/test_layout.py", "hooks/test_wrappers.py", "lint/test_report_guard_stamped.py"],
 }
 GUARD_MODULE_EXEMPT = {
     "hooks/guard_core.py": "shared by every family, so a mutant of it needs the whole test_guard.py, which takes minutes",
+    "hooks/guard.py": "every family reaches it, so a mutant of it needs the whole test_guard.py, which takes minutes, so its mutation "
+                      "report does not fit the 300 s budget (0 of 10 mutants ran in 6 runs); hooks/test_wrappers.py, "
+                      "lint/test_layout.py and lint/test_report_guard_stamped.py assert on its own text, which the report's "
+                      "ast.unparse copy drops comments from, so they read not green on the clean copy",
 }
 # The gold standard: the guard's own suite against the same mechanical mutants, so the comparison is
 # one engine to one engine. The hand-written MUTATIONS above kill 100% by construction (any survivor
@@ -4396,7 +4386,7 @@ def tests_for_main(argv) -> int:
     names its basename in a path expression it copies, opens or runs (`_load_profile`). A guard section file
     (`_guard_section_sources`) that loads the module prints `hooks/test_guard.py`, its runner, in place of itself. A file
     with a row in GUARD_MODULE_FAMILIES prints that union with its `hooks/test_guard.py::<family>` lines, minus the plain
-    whole `hooks/test_guard.py` and each suite of GUARD_MODULE_DROPPED_SUITES for it. A suite that cannot be read or parsed is skipped, unless it sits beside the file. It is the
+    whole `hooks/test_guard.py`. A suite that cannot be read or parsed is skipped, unless it sits beside the file. It is the
     `select` command of the `claude_settings` profile. A file with no suite prints nothing."""
     import argparse
     parser = argparse.ArgumentParser(prog="mutate_guard.py --tests-for")
@@ -4420,7 +4410,6 @@ def tests_for_main(argv) -> int:
             # The whole `hooks/test_guard.py` loads every guard module and takes minutes per mutant, so only its families run.
             names.discard("hooks/test_guard.py")
             names.update("hooks/test_guard.py::%s" % family for family in GUARD_MODULE_FAMILIES[path])
-            names.difference_update(GUARD_MODULE_DROPPED_SUITES.get(path, ()))
     for name in sorted(names):
         print(name)
     return 0
