@@ -10,7 +10,7 @@
  "why": "Owner ask with pick 493 a, carried on step page-feedback-to-template; that lane (14:55 CST Nov 12) built only the page-form route (#2965) and left the plan open.",
  "source": "owner, item 493 a; lane page-feedback-to-template 14:55 CST Nov 12",
  "note": "Read-only sweep of each repo's outbox; propose the gather route (end state: the session mailbox) as a plan, then the mechanism. Plan before build; the owner reads the plan. Lane started 14:59 CST Nov 12 (coordinator): plan lane (Explore sweep, Plan agent, refuter; plan lands under docs/plans; it sends triage the PR and a summary for the owner's page). Lane 15:24 CST Nov 12: plan PR #2974 (draft, head 55ebbdd07) handed to the batch runner; plan docs/plans/outbox-aggregate-plan.md. The refuter cut the sweep to the 11 repos the Nov 10 sweep (833b0c472) missed and dropped a per-wake poll. Owner questions to raise: what \"outbox\" covers (the folder only, or every child home holding a claude-settings item); the clearing route (each child's triage clears, recommended, or a one-time override push). Owner act: access to the 11 unswept repos. Unknown: whether the 29 Nov 10 items left their child homes. Triage 16:01 CST Nov 12: plan PR #2974 (draft) on the page as items 658 outbox-scope (a every child home recommended), 659 outbox-clearing-route (a child triage clears recommended; override push the fallback) and 660 outbox-repo-access (task: attach the 11 unswept repos read-only). Act 1 waits on 660; acts 3-4 wait on 658 and 659.",
- "updatedAt": "2026-11-13T11:10:51-06:00",
+ "updatedAt": "2026-11-13T11:12:48-06:00",
  "order": -290,
  "pr": "#2974"
 }
