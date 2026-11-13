@@ -12,7 +12,7 @@ Feedback given in any session reaches the repo it is about, not only the session
 The repo's inbox is its triage session (project-ops operating model, Filing). There is no new
 store: cloud sessions share no `~/.claude`, so a file under it would not reach them.
 
-Triage's outbox is a separate store: `roadmap/outbox/` on the record branch (skill `project-ops`). It is not the store for rulings not yet on main (decision `ruled-store-one-home`). See decision `outbox-ruling-home-check`.
+Triage's outbox is a separate store: `roadmap/outbox/` on the record branch (skill `project-ops`). Whether it stays the place for rulings is open. See decision `outbox-ruling-home-check`.
 
 - **Capture.** The UserPromptSubmit hook appends each owner message verbatim, with its Central time,
   to `~/.claude/handoffs/<session_id>.inbox.md`. The file is outside git. A note typed on a

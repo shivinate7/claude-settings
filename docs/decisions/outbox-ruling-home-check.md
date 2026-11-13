@@ -7,8 +7,8 @@ whether the ruling's home on main holds its words.
 
 - The outbox is `roadmap/outbox/<session-slug>.md` on the record branch, one file per session (skill
   `project-ops`). It is not the feedback log (term `feedback log` in GLOSSARY.md).
-- Rulings not yet on main are kept in one store, not in the outbox: decision `ruled-store-one-home`
-  (its ruling paragraph). The check reads the outbox for now, as R6 says.
+- Whether the outbox stays the place for rulings is open. No pick yet. Decision `ruled-store-one-home`
+  keeps the owner's rulings not yet on main in one store.
 
 Owner, 2026-11-10 15:22 CST, restart plan R6: "yes but it's tbd if an outbox is the right spot right?
 but for rn it only make senses that it is read".
