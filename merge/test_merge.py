@@ -346,6 +346,15 @@ class RepoDirRuns:
             os.chdir(here)
         return rc, out.getvalue() + err.getvalue(), seen
 
+    def confirm_from(self, cwd, argv):
+        """A --confirm through the two-step confirm: the first run pushes the claim and stops, the second run merges it. -> (rc, output, seen)
+        of the last run, with the output of both."""
+        rc, out, seen = self.run_from(cwd, argv)
+        if rc == 0 and claim_pushed_line(out):
+            rc, second, seen = self.run_from(cwd, argv)
+            out += second
+        return rc, out, seen
+
     def spellings(self, *tail):
         """The named checkout in each spelling argparse takes, each followed by `tail`."""
         b = self.b_co
@@ -431,17 +440,20 @@ class Env(unittest.TestCase):
         self.claim_push_fires_on_claim()
 
     def claim_push_fires_on_claim(self):
-        """Patch merge.git so that the claim push of a run fires the host's on_claim hook, once per run, right after the push succeeds.
-        A hook that moves the rival, the base, or a tree runs there, after the claim and before the merge's own reads, whether or not the
-        merge waits on a check. Each push is the real git call; a case that patches merge.git captures this wrapper as its real call."""
+        """Patch merge.git so that the claim push of a run marks the claim fired, once per run, right after the push succeeds. The flag is
+        set on every claim push, so run_merge takes the second step of a two-step confirm for every case. The host's on_claim hook runs
+        there only when a case sets it: a hook that moves the rival, the base, or a tree runs after the claim and before the merge's own
+        reads, whether or not the merge waits on a check. Each push is the real git call; a case that patches merge.git captures this
+        wrapper as its real call."""
         real = merge.git
         def git(cwd, *a, **k):
             c, out = real(cwd, *a, **k)
             host = getattr(self, "host", None)
-            if (not c and a[:2] == ("push", "-q") and not self.claim_fired[0] and getattr(host, "on_claim", None)
+            if (not c and a[:2] == ("push", "-q") and not self.claim_fired[0]
                     and f"HEAD:refs/heads/{getattr(host, 'branch', None)}" in a):
                 self.claim_fired[0] = True
-                host.on_claim()
+                if getattr(host, "on_claim", None):
+                    host.on_claim()
             return c, out
         patch = unittest.mock.patch.object(merge, "git", git)
         patch.start()
@@ -497,11 +509,19 @@ class Env(unittest.TestCase):
         prior = os.getcwd()
         os.chdir(cwd or self.co)
         seam = {"hosts": hosts} if hosts is not None and "hosts" in inspect.signature(merge.main).parameters else {}
+        target = host or self.host
+        o0, e0, r0 = len(out.getvalue()), len(err.getvalue()), len(getattr(target, "reads", []))
         try:
             with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                return merge.main(list(args), host=host or self.host, lock=lock or self.lock, **seam)
+                return merge.main(list(args), host=target, lock=lock or self.lock, **seam)
         finally:
             os.chdir(prior)
+            self.run_texts.append(out.getvalue()[o0:] + err.getvalue()[e0:])  # this run's own output, one entry per run
+            self.run_reads.append(list(getattr(target, "reads", []))[r0:])  # this run's own host reads, when the host keeps them
+
+    def per_run_count(self, needle):
+        """How many times `needle` appears in each run's output, in run order: the claim run, then the merge run."""
+        return [t.count(needle) for t in self.run_texts]
 
     def run_merge(self, *args, host=None, lock=None, stdout=None, stderr=None, hosts=None, cwd=None):
         """-> (rc, stdout + stderr). Pass a StringIO as stderr to read the error stream on its own afterwards. `hosts` is the --root seam, one
@@ -512,6 +532,7 @@ class Env(unittest.TestCase):
         run_merge_once is the single run, for the cases that pin the first step."""
         out, err = stdout or io.StringIO(), stderr or io.StringIO()
         two_step = "--confirm" in args and not getattr(host or self.host, "draft", False)  # read before the run: a ready step clears the draft flag
+        self.run_texts, self.run_reads = [], []
         rc = self.run_once(args, out, err, host, lock, hosts, cwd, keep_claim=False)
         if two_step and rc == 0 and self.claim_fired[0] and not getattr(host or self.host, "merged", False):
             rc = self.run_once(args, out, err, host, lock, hosts, cwd, keep_claim=True)
@@ -520,6 +541,7 @@ class Env(unittest.TestCase):
     def run_merge_once(self, *args, host=None, lock=None, stdout=None, stderr=None, hosts=None, cwd=None):
         """-> (rc, stdout + stderr) of one run of merge: no second step. A confirm that pushes a claim stops here."""
         out, err = stdout or io.StringIO(), stderr or io.StringIO()
+        self.run_texts, self.run_reads = [], []
         rc = self.run_once(args, out, err, host, lock, hosts, cwd, keep_claim=False)
         return rc, out.getvalue() + err.getvalue()
 
@@ -801,8 +823,8 @@ class Flow(Env):
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
         self.assertEqual(methods, ["merge"])  # the default method
-        filled = [l for l in out.splitlines() if ".github/stamp.json" in l and "method" in l]
-        self.assertEqual(len(filled), 1, out)  # one line names the filled field
+        filled = [[l for l in t.splitlines() if ".github/stamp.json" in l and "method" in l] for t in self.run_texts]
+        self.assertEqual([len(f) for f in filled], [1, 1], out)  # one line per run names the filled field
 
 
 def without_usage(text):
@@ -2569,11 +2591,12 @@ class CutLanes(Env):
         c110: the same read runs first for the dropped-lane check, which refuses a failed read. fail_from=1 lets that first
         read pass, so the cleanup's own read is the one that fails."""
         lane_batch(self, "lane1", "lane2")
-        real, n = merge.sh, [0]
+        real, n = merge.sh, {}
         def broken(args, *a, **k):
             if "log" in args and any("%x01" in a for a in args):  # read_lanes' one git log: merges and reverts
-                n[0] += 1
-                if n[0] > fail_from:
+                run = len(self.run_texts)  # the reads count again in each run: fail_from applies per run
+                n[run] = n.get(run, 0) + 1
+                if n[run] > fail_from:
                     if isinstance(effect, BaseException):
                         raise effect
                     return effect
@@ -2643,11 +2666,12 @@ class CutLanes(Env):
     @contextlib.contextmanager
     def first_lane_log_fails(self):
         """Only the first git log that reads the batch's merge commits fails: the dropped-lane check's read. Later reads answer."""
-        real, n = merge.sh, [0]
+        real, n = merge.sh, {}
         def first_fails(args, *a, **k):
             if "log" in args and any("%x01" in a for a in args):
-                n[0] += 1
-                if n[0] == 1:
+                run = len(self.run_texts)  # each run's first read fails, as a run of its own would see it
+                n[run] = n.get(run, 0) + 1
+                if n[run] == 1:
                     return 128, "fatal: bad revision"
             return real(args, *a, **k)
         with unittest.mock.patch.object(merge, "sh", first_fails):
@@ -3336,7 +3360,7 @@ class RerunAfterRevert(Env):
         self.host.refuse = None
         rc, out = self.run_merge("7", "--confirm")
         self.assertEqual(rc, 0, out)
-        self.assertNotIn("resumed", out)
+        self.assertNotIn("resumed", self.run_texts[0], "the rerun's claim run resumed a claim instead of claiming the number again")  # the merge run resumes its own claim
         self.assertIn("Record-claim: D-002 pushed", out)  # the same number, no branch reset
         self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
         # the claim, its revert, and the claim again: three commits on top of the feature commit
@@ -4452,18 +4476,20 @@ class GhHalf(Env):
         self.assertIn("commit_message", fields[0], "the dropped-lane lift is written into the merge commit message")
         self.assertEqual(set(fields[0]["commit_message"].splitlines()), {"Reason flag: --undo-check-unknown-ok: octopus read it"})
 
-    def test_a_silent_undo_read_after_the_wait_lifted_by_the_reason_flag_is_written_into_the_merge_commit_message(self):
-        # the first silent-undo read passes. The read in prove(), after the wait, cannot read the history, and the flag lifts it.
-        # Only that read lifts, so its line is the one the merge call must carry.
+    def test_a_silent_undo_read_the_merge_run_lifts_by_the_reason_flag_is_written_into_the_merge_commit_message(self):
+        # The claim run reads the history and stops. The merge run's first read cannot read the history, and the flag lifts it. The
+        # merge run's read after the wait is the memo, not a second read, so this first read is the one that lifts: its line is the one the
+        # merge call must carry.
         reason = "history read by hand after the wait"
-        with UnknownOverride.unreadable_after_the_claim(self):
+        with UnknownOverride.unreadable_read(self, run=1, read=1):
             rc, out = self.run_merge("7", "--confirm", "--undo-check-unknown-ok", reason, host=self.gh_host())
         self.assertEqual(rc, 0, out)
-        self.assertIn("pushed to feat", out, "the claim moved the head, so the read after the wait scans again and is not the memo")
-        self.assertEqual(out.count(f"--undo-check-unknown-ok, reason: {reason}"), 1, "the lift is logged once, by the read after the wait")
+        self.assertIn("pushed to feat", out, "the claim run stopped at its claim")
+        # the merge run calls undo_check twice; the memo keeps the Unknown, so both calls say the lift. The commit message holds it once.
+        self.assertEqual(self.per_run_count(f"--undo-check-unknown-ok, reason: {reason}"), [0, 2], "the lift is logged by the merge run's two undo_check calls")
         fields = self.gh_state("merge_fields") or []
         self.assertEqual(len(fields), 1, "the merge call was sent once, so the fields below are its")
-        self.assertIn("commit_message", fields[0], "the lift of the read after the wait is written into the merge commit message")
+        self.assertIn("commit_message", fields[0], "the lift of the merge run's read is written into the merge commit message")
         self.assertEqual(set(fields[0]["commit_message"].splitlines()), {f"Reason flag: --undo-check-unknown-ok: {reason}"})
 
     def test_open_heads_lists_the_open_pr_heads_past_ghs_default_of_30(self):
@@ -5691,7 +5717,8 @@ class GhHalf(Env):
         # KNOWN LIMIT, not a goal: the head is read once, before the claim and the merge call. A required check that turns red after that
         # read is not seen again, so the merge call still goes out. Whether GitHub refuses that PUT for the merging identity is unproven
         # here: this fixture's PUT always succeeds, so the case proves only what the tool sends.
-        self.set(checks_seq=[[("checks", "pass", "")], [("checks", "fail", "https://x/checks")]])
+        # The claim run reads the head's checks once and the merge run reads them once more: both see pass. The red is for a read after that.
+        self.set(checks_seq=[[("checks", "pass", "")], [("checks", "pass", "")], [("checks", "fail", "https://x/checks")]])
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
         self.assertIn(MERGE_CALL, self.calls())
@@ -7255,13 +7282,16 @@ class UndoMemo(Env):
         import check_silent_undo as undo
         real_check, real_undo = undo.check, merge.undo_check
         scans, undos = [], []
+        self.scan_runs, self.undo_runs = [], []  # the run index (0 for the first run) of each scan and each undo read
 
         def spy_check(*a, **k):
             scans.append(a[1])
+            self.scan_runs.append(len(self.run_texts))
             return real_check(*a, **k)
 
         def spy_undo(wt, base_ref, unknown_ok="", pr_body="", run_state=None, retire_head=None):
             undos.append(base_ref)
+            self.undo_runs.append(len(self.run_texts))
             return real_undo(wt, base_ref, unknown_ok, pr_body, run_state, retire_head)
         with unittest.mock.patch.object(undo, "check", spy_check), unittest.mock.patch.object(merge, "undo_check", spy_undo):
             res = fn()
@@ -7316,8 +7346,10 @@ class UndoMemo(Env):
         (rc, out), scans, undos = self.counted(lambda: self.run_merge("7", "--confirm"))
         self.assertEqual(rc, 0, out)
         self.assertIn("pushed to feat", out)
-        self.assertEqual(undos, 2, out)
-        self.assertEqual(scans, 2, "scans %d, undo reads %d\n%s" % (scans, undos, out))
+        # per run: the claim run reads twice and scans twice, because the claim moved the head; the merge run reads twice and scans once,
+        # its second read reusing the first scan (the memo is per run)
+        self.assertEqual([self.undo_runs.count(i) for i in range(len(self.run_texts))], [2, 2], "undo reads per run, scans %d\n%s" % (scans, out))
+        self.assertEqual([self.scan_runs.count(i) for i in range(len(self.run_texts))], [2, 1], "scans per run, undo reads %d\n%s" % (undos, out))
 
 
 class MemoKeyRead(Env):
@@ -7392,15 +7424,21 @@ class UnknownOverride(Env):
         self.assertEqual(got, "octopus read it")
 
     def unreadable_after_the_claim(self):
-        """The first silent-undo read passes. The second, which prove() runs after the claim push, cannot read the history."""
+        """The claim run's second silent-undo read, which prove() runs after the claim push, cannot read the history. Every other read passes."""
+        return self.unreadable_read(run=0, read=2)
+
+    def unreadable_read(self, run, read):
+        """The silent-undo check raises Unknown on read number `read` (1-based) of run number `run` (0 for the claim run). Reads are
+        counted per run, and every other read passes. A run's later undo_check reuses the memo of an Unknown, so it makes no second check call."""
         sys.path.insert(0, os.path.join(HERE, "..", "lint"))
         import check_silent_undo as undo
-        real, calls = undo.check, []
+        real, calls = undo.check, {}
         def first_then_boom(*a, **k):
-            calls.append(1)
-            if len(calls) == 1:
-                return real(*a, **k)
-            raise undo.Unknown("git is older than 2.38")
+            r = len(self.run_texts)
+            calls[r] = calls.get(r, 0) + 1
+            if r == run and calls[r] == read:
+                raise undo.Unknown("git is older than 2.38")
+            return real(*a, **k)
         return unittest.mock.patch.object(undo, "check", first_then_boom)
 
     def test_unknown_refuses_and_names_the_flag(self):
@@ -8383,7 +8421,9 @@ class SilentWait(Env):
         def go():
             try:
                 with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-                    result["rc"] = merge.main(["7", "--confirm"], host=host, lock=self.lock)
+                    first = merge.main(["7", "--confirm"], host=host, lock=self.lock)  # the claim step: pushes the claim and stops
+                    claimed = claim_pushed_line(out.getvalue() + err.getvalue())
+                    result["rc"] = merge.main(["7", "--confirm"], host=host, lock=self.lock) if first == 0 and claimed else first  # the merge step
             except BaseException as e:  # a crash in the thread must fail the test, not vanish
                 result["error"] = repr(e)
 
@@ -9299,9 +9339,12 @@ class RecordsRebuild(RecordsEnv):
         self.on("feat", {"debts/gap-one.md": DEBT_TEXT})
         lock = merge.GitLock(self.co, now=lambda: self.now, pause=lambda s: None)
         real_acquire, real_ready, seen = lock.acquire, self.host.ready, []
+        drafted = []
         def acquire(*a, **k):
             token = real_acquire(*a, **k)
-            self.host.draft = True  # main's read saw a ready PR; the read under the lock sees a draft
+            if not drafted:  # main's read saw a ready PR; the read under the lock of the claim run sees a draft
+                drafted.append(True)
+                self.host.draft = True
             return token
         def ready(n):
             seen.append(self.host.before_wait)
@@ -9310,10 +9353,11 @@ class RecordsRebuild(RecordsEnv):
         self.host.ready = ready
         rc, out = self.run_merge("7", "--confirm", lock=lock)
         self.assertEqual(rc, 0, out)
-        self.assertEqual(self.host.readies, [7], out)
+        self.assertEqual(self.host.readies, [7], out)  # the draft step readies once: the merge run's head is ready already
         self.assertEqual(seen, [lock.extend_for], "the draft step's ready call did not run under the lock's extend_for")
         self.assertFalse(self.lock_ref(), "the lock was not released")
-        self.assertFalse(getattr(self.host, "merged", False), out)
+        self.assertEqual(len(self.run_texts), 2, out)  # the claim run stops; the merge run merges the claim
+        self.assertTrue(getattr(self.host, "merged", False), out)
 
     def test_the_draft_preview_hints_the_push_when_the_head_holds_the_base_tip(self):
         self.kinds_off()
@@ -10936,7 +10980,7 @@ class StampDeadlineFloor(Env):
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {55}, out)
-        self.assertEqual(out.count(fix_line(55)), 1, out)
+        self.assertEqual(self.per_run_count(fix_line(55)), [1, 1], out)  # one line per run: the claim run and the merge run
 
     def test_a_deadline_at_the_largest_cap_plus_five_takes_itself_and_names_nothing(self):
         push_base(self, {".github/stamp.json": merge_stamp_text(55), ".github/workflows/checks.yml": CHECKS_WORKFLOW})
@@ -10951,14 +10995,14 @@ class StampDeadlineFloor(Env):
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {65}, "the traps (99, 120, 130, step cap 90) must not raise the floor")
-        self.assertEqual(out.count(fix_line(65)), 1, out)
+        self.assertEqual(self.per_run_count(fix_line(65)), [1, 1], out)  # one line per run: the claim run and the merge run
 
     def test_a_provisional_sixty_minute_cap_sets_the_floor_at_sixty_five(self):
         push_base(self, {".github/stamp.json": merge_stamp_text(55), ".github/workflows/checks.yml": PROVISIONAL_WORKFLOW})
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {65}, out)
-        self.assertEqual(out.count(fix_line(65)), 1, out)
+        self.assertEqual(self.per_run_count(fix_line(65)), [1, 1], out)  # one line per run: the claim run and the merge run
 
     def test_a_repo_with_no_workflow_has_no_floor(self):
         push_base(self, {".github/stamp.json": merge_stamp_text(5)})
@@ -11098,14 +11142,14 @@ class CapReviewFloor(Env):
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {360}, out)
-        self.assertEqual(out.count(fix_line(360)), 1, out)
+        self.assertEqual(self.per_run_count(fix_line(360)), [1, 1], out)  # one line per run: the claim run and the merge run
 
     def test_f5_a_double_quoted_cap_sets_the_floor_like_a_plain_cap(self):
         push_base(self, {".github/stamp.json": merge_stamp_text(54), ".github/workflows/checks.yml": cap_workflow('"50"')})
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {55}, out)
-        self.assertEqual(out.count(fix_line(55)), 1, out)
+        self.assertEqual(self.per_run_count(fix_line(55)), [1, 1], out)  # one line per run: the claim run and the merge run
 
     def test_f5_an_expression_cap_sets_no_floor(self):
         push_base(self, {".github/stamp.json": merge_stamp_text(5), ".github/workflows/checks.yml": cap_workflow("${{ inputs.cap }}")})
@@ -11119,7 +11163,7 @@ class CapReviewFloor(Env):
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {55}, out)
-        self.assertEqual(out.count(fix_line(55)), 1, out)
+        self.assertEqual(self.per_run_count(fix_line(55)), [1, 1], out)  # one line per run: the claim run and the merge run
 
 
 class DuplicateJobIds(Env):
@@ -11131,7 +11175,7 @@ class DuplicateJobIds(Env):
         rc, out, waits = confirmed_wait(self)
         self.assertEqual(rc, 0, out)
         self.assertEqual(set(waits), {105}, out)
-        self.assertEqual(out.count(fix_line(105)), 1, out)
+        self.assertEqual(self.per_run_count(fix_line(105)), [1, 1], out)  # one line per run: the claim run and the merge run
 
     def test_f8_the_warning_keeps_the_larger_of_two_caps_for_one_job_id(self):
         push_base(self, {".github/workflows/a.yml": cap_workflow("100"), ".github/workflows/b.yml": cap_workflow("10")})
@@ -11626,8 +11670,8 @@ class RedMainBrake(Env):
         rc, out, _ = self.go([main_run(1081, "success", event="workflow_dispatch"), main_run(1080, "failure", event="schedule")],
                              {1080: [main_job("checks", "failure", 20)], 1081: [main_job("checks", "success", 20)]})
         self.merged(rc, out)
-        self.assertEqual(self.host.reads.count("actions/runs/1080/jobs"), 1)
-        self.assertEqual(self.host.reads.count("actions/runs/1081/jobs"), 1)
+        self.assertEqual([r.count("actions/runs/1080/jobs") for r in self.run_reads], [1, 1], "the red run's jobs: one read in each run")
+        self.assertEqual([r.count("actions/runs/1081/jobs") for r in self.run_reads], [1, 1], "the green run's jobs: one read in each run")
 
     def test_a_red_run_with_no_candidate_reads_no_other_jobs(self):
         rc, out, before = self.go([main_run(1091, "failure", event="schedule")], {1091: [main_job("checks", "failure", 20)]})
@@ -11663,7 +11707,7 @@ class RedMainBrake(Env):
     def test_a_green_latest_run_reads_no_jobs_and_merges(self):
         rc, out, _ = self.go([main_run(908, "success"), main_run(907, "failure")], {})
         self.merged(rc, out)
-        self.assertEqual(self.host.reads.count("actions/runs"), 1)
+        self.assertEqual([r.count("actions/runs") for r in self.run_reads], [1, 1], "the latest-run list: one read in each run")
         self.assertFalse([r for r in self.host.reads if r.endswith("/jobs")], "a green run needs no jobs read")
 
     def test_the_reason_flag_lifts_the_check_and_logs_its_reason(self):
@@ -12457,7 +12501,7 @@ class ExpressPath(ScopedRepo, Env):
         rc, out = self.run_express()
         self.assertEqual(rc, 0, out)
         self.assertTrue(self.host.merged, out)
-        self.assertEqual(calls, [None], "express_refusal should run once and return None on a pass: %r" % (calls,))
+        self.assertEqual(calls, [None, None], "express_refusal should run once per run (the claim run, the merge run) and return None on a pass: %r" % (calls,))
 
     def test_a_prose_only_pr_with_a_hyphenated_ruling_merges(self):
         self.store(self.RULINGS)
@@ -12467,7 +12511,7 @@ class ExpressPath(ScopedRepo, Env):
         rc, out = self.run_express()
         self.assertEqual(rc, 0, out)
         self.assertTrue(self.host.merged, out)
-        self.assertEqual(calls, [None], "express_refusal should run once and return None on a pass: %r" % (calls,))
+        self.assertEqual(calls, [None, None], "express_refusal should run once per run (the claim run, the merge run) and return None on a pass: %r" % (calls,))
 
     def test_a_code_file_in_the_pr_is_refused(self):
         self.store(self.RULINGS)
@@ -12619,7 +12663,7 @@ class ExpressPath(ScopedRepo, Env):
         rc, out = self.run_express()
         self.assertEqual(rc, 0, out)
         self.assertTrue(self.host.merged, out)
-        self.assertEqual(calls, [None], "express_refusal should run once and return None on a pass: %r" % (calls,))
+        self.assertEqual(calls, [None, None], "express_refusal should run once per run (the claim run, the merge run) and return None on a pass: %r" % (calls,))
 
 ROLE_SESSION = "cse_role_check_test"
 OLD_PARSER_ERRORS = ("unrecognized arguments", "invalid int value")  # what merge.py's parser says to `--role` before the writer exists
@@ -13155,13 +13199,13 @@ class RepoDirFlag(RepoDirRuns, Env):
         self.assertNotIn("merge #7", self.main_subjects(self.co), "the merge landed in the process directory's checkout")
 
     def test_a_confirm_with_repo_dir_merges_in_the_named_checkout(self):
-        self.assert_merged_in_named(*self.run_from(self.co, ["--repo-dir", self.b_co, "7", "--confirm"])[:2])
+        self.assert_merged_in_named(*self.confirm_from(self.co, ["--repo-dir", self.b_co, "7", "--confirm"])[:2])
 
     def test_a_confirm_with_repo_dir_equals_merges_in_the_named_checkout(self):
-        self.assert_merged_in_named(*self.run_from(self.co, ["--repo-dir=" + self.b_co, "7", "--confirm"])[:2])
+        self.assert_merged_in_named(*self.confirm_from(self.co, ["--repo-dir=" + self.b_co, "7", "--confirm"])[:2])
 
     def test_a_confirm_with_c_merges_in_the_named_checkout(self):
-        self.assert_merged_in_named(*self.run_from(self.co, ["-C", self.b_co, "7", "--confirm"])[:2])
+        self.assert_merged_in_named(*self.confirm_from(self.co, ["-C", self.b_co, "7", "--confirm"])[:2])
 
     def test_c_alone_with_reviewed_reads_the_named_checkout(self):
         """A control for the --root refusal: -C with --reviewed and no --root is not refused, and main takes the named checkout as the root it
@@ -18416,7 +18460,10 @@ if __name__ == "__main__":
                 return None, "slept"
         install_model_guard()
         os.chdir(sys.argv[2])
-        sys.exit(merge.main(["7", "--confirm"], host=Sleep(sys.argv[2], None), lock=merge.GitLock(sys.argv[2])))
+        host, lock = Sleep(sys.argv[2], None), merge.GitLock(sys.argv[2])
+        if merge.main(["7", "--confirm"], host=host, lock=lock):  # the first confirm pushes the claim and stops
+            sys.exit(1)
+        sys.exit(merge.main(["7", "--confirm"], host=host, lock=lock))  # the second confirm merges the claim: its merge call sleeps
     if len(sys.argv) == 3 and sys.argv[1] == "--child":
         # A run that dies without cleanup: os._exit at the merge call after the claim push, so no `finally` runs.
         class Die(FakeHost):
@@ -18424,7 +18471,10 @@ if __name__ == "__main__":
                 os._exit(9)
         install_model_guard()
         os.chdir(sys.argv[2])
-        sys.exit(merge.main(["7", "--confirm"], host=Die(sys.argv[2], None), lock=merge.GitLock(sys.argv[2])))
+        host, lock = Die(sys.argv[2], None), merge.GitLock(sys.argv[2])
+        if merge.main(["7", "--confirm"], host=host, lock=lock):  # the first confirm pushes the claim and stops
+            sys.exit(1)
+        sys.exit(merge.main(["7", "--confirm"], host=host, lock=lock))  # the second confirm merges the claim: its merge call dies
     class Slicer(unittest.TestLoader):
         def loadTestsFromModule(self, *a, **k):
             suite = select_shard(select_tests(super().loadTestsFromModule(*a, **k), os.environ.get("MERGE_TESTS", "")),
