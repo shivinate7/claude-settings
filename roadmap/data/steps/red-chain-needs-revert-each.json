@@ -1,0 +1,14 @@
+{
+ "id": "red-chain-needs-revert-each",
+ "title": "Spec gap: a chain of red runs needs a revert for each, so reverting the first breaking commit does not lift the chain",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Merges stay blocked after a revert if an older red run still stands, and no test says so.",
+ "source": "Coordinator 16:13 CST Nov 13, from lane red-main-owner-two-picks (session_013NEJL3KFBPuQT45U4xo8mE): a spec gap with no test; the lane's read, unchecked by triage.",
+ "note": "Filed 16:14 CST Nov 13. Under ruling own-745-b-resume-at-revert merges resume when the revert merges. A chain of red runs needs a revert for each, so reverting the breaking commit does not lift a chain: the rule and the merge tool say nothing, and no test covers it. A lane writes the rule line and a red case first (a chain of two red runs, one revert, still blocked; two reverts, resumes). A guard change: test-author, builder, reviewer. Relations: red-main-owner-two-picks (the lane that found it), revert-clear-masks-older-break (a note on #3268), merge-red-main-latest-run. Past rulings checked: own-745-b-resume-at-revert does not say. Not started.",
+ "updatedAt": "2026-11-13T16:14:14-06:00"
+}
