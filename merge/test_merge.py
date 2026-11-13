@@ -16970,6 +16970,11 @@ class RunState(Env):
         self.assertEqual(lines, [self.STATE + "all green"], text)
         self.assertEqual(rc, 0, text)
 
+    def test_a_neutral_rollup_beside_green_jobs_reads_all_green(self):
+        rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A), ("test", "success", RUN_T_B), ("all-jobs-passed", "neutral", RUN_T_B)))
+        self.assertEqual(lines, [self.STATE + "all green"], text)  # neutral is clear for the rollup, as for any other job
+        self.assertEqual(rc, 0, text)
+
     def test_a_draft_run_with_every_job_and_the_rollup_skipped_reads_all_green(self):
         rc, lines, text, _ = self.read(run_rows(("scope", "skipped", RUN_T_A), ("lint", "skipped", RUN_T_A), ("all-jobs-passed", "skipped", RUN_T_A)))
         self.assertEqual(lines, [self.STATE + "all green"], text)  # a draft's rollup is skipped, and a skipped rollup is clear
@@ -17020,6 +17025,13 @@ class RunState(Env):
                 self.assert_unknown(rc, lines, text)  # one unknown line and exit 1: no state line, though e2e has not finished
                 self.assertIn(f"job test ended {conclusion}", lines[0], text)  # it names the job and its conclusion
 
+    def test_a_red_job_beside_an_odd_conclusion_reads_red_and_names_the_red_job(self):
+        for conclusion in ("action_required", "stale", "startup_failure"):
+            with self.subTest(conclusion=conclusion):
+                rc, lines, text, _ = self.read(run_rows(("lint", "failure", RUN_T_B), ("test", conclusion, RUN_T_A), ("all-jobs-passed", "success", RUN_T_C)))
+                self.assertEqual(lines, [self.STATE + "red", self.FIRST + "lint (failure) ended 15:40 CST"], text)  # the odd row ends first, so a state that read it would name it
+                self.assertEqual(rc, 0, text)
+
     def test_a_red_fan_in_beside_a_running_job_reads_red_and_names_no_first_red(self):
         rc, lines, text, _ = self.read(run_rows(("all-jobs-passed", "failure", RUN_T_B), ("x", None, None)))
         self.assertEqual(lines, [self.STATE + "red", self.FIRST + "none named (all-jobs-passed failed)"], text)  # red beats running
@@ -17053,6 +17065,13 @@ class RunState(Env):
             with self.subTest(completed_at=bad):
                 rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A), ("test", "failure", bad)))
                 self.assert_unknown(rc, lines, text)
+
+    def test_a_red_fan_in_with_an_unreadable_end_time_reads_red_and_names_no_first_red(self):
+        for bad in (None, "not-a-time"):
+            with self.subTest(completed_at=bad):
+                rc, lines, text, _ = self.read(run_rows(("lint", "success", RUN_T_A), ("test", "success", RUN_T_A), ("all-jobs-passed", "failure", bad)))
+                self.assertEqual(lines, [self.STATE + "red", self.FIRST + "none named (all-jobs-passed failed)"], text)  # a fan-in's end time is never read; a red job with the same end time is unknown (the case above)
+                self.assertEqual(rc, 0, text)
 
     # Reads that fail: unknown, exit 1, never a clear state
 
