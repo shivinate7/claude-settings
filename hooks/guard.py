@@ -99,8 +99,19 @@ Shell tools (Bash, PowerShell), in judge_shell order:
   merge-roots-cover    deny. A batch runner's `merge --reviewed --root` whose OWNER/NAME roots are not exactly
                        the repos its own get_session record (read from the transcript) tags cs-repo; the reason
                        names each missing and extra repo. No readable own record refuses too, and so does a
-                       record read before the turn's last user or cross-session message. A local session (no
-                       cloud session id) and a non-runner record pass.
+                       record read before the turn's last user or cross-session message. A bare `merge
+                       --reviewed` (no `--root`) reads the newest own record, with no turn bound, and is refused
+                       only for a batch runner with two or more cs-repo tags; the reason says to pass one
+                       `--root OWNER/NAME=DIR` per tag and names each. No record, an unreadable one, one tag, a
+                       non-runner and a local session (no cloud session id) pass. The bare branch fails open on a
+                       read error, since a lane's read listing must never be refused. The merge tool is read as
+                       `merge`, `bin/merge`, the script run by its path (`merge/merge.py`, `./merge/merge.py`, an
+                       absolute path, `merge/launch.py`; its folder must be named `merge`), or any
+                       `python*` word or `py`/`py -3` on it, python options `-X` and `-W` skipping their value.
+                       After `cd merge`, `merge.py`, `./merge.py` and `python3 [./]merge.py` all count, and so
+                       does launch.py. It is read inside
+                       the wrappers inner_commands unwraps (`nested_script`, `ssh_remote_script` and
+                       `wrapped_commands` in guard_core.py), with the script's heredoc bodies dropped.
   roadmap-one-writer   deny. A `git push`, also one inside `bash -c`, `sh -c` or `eval`, whose destination is
                        the checkout's record branch (lint/layout.py record_branch) or `roadmap`, except a
                        dry run, unless the session's own get_session record (read

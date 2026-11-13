@@ -808,12 +808,35 @@ ROLE_REASON = (
 )
 
 
+def _python_script(rest):
+    """(script, index after it) of a python call's arguments, else (None, 0). An option that takes a value (-X, -W) skips
+    that value; any other option is one word. `-c` and `-m` are not skipped: the word after one is read as the script, so
+    a `-c` string is never a merge script. A glued value (`-Xdev`) is one word already."""
+    at = 0
+    while at < len(rest):
+        word = rest[at]
+        if not word.startswith("-"):
+            return word, at + 1
+        at += 2 if word in _PYTHON_VALUE_FLAGS else 1
+    return None, 0
+
+
+def _script_folder(path: str, cd) -> str:
+    """The folder a merge script runs from: its own folder, or the folder of `cd` when the path names none (`merge.py`)
+    or only `.` (`./merge.py`)."""
+    folder = os.path.dirname(path.replace("\\", "/"))
+    return (cd or "").replace("\\", "/").rstrip("/") if folder in ("", ".") else folder
+
+
 def merge_args_of(segment: str, cd=None):
     """Return the arguments after the command word when the segment runs the merge tool, else None.
 
-    The command word is the shim (`merge`, `~/.claude/bin/merge`, `bin/merge`) or python on
-    `merge/merge.py` or `merge/launch.py`; for python, the arguments follow the script. A script named with no
-    folder runs from the folder of `cd`, the last cd target of the segments before this one (see merge_calls).
+    The command word is the shim (`merge`, `~/.claude/bin/merge`, `bin/merge`), the script itself run by its path
+    (`merge/merge.py`, `./merge/merge.py`, an absolute path, `merge/launch.py`), or python (any `python*` word such as
+    `pythonw` or `python3.13t`, or the `py` launcher) on such a script; for python, the arguments follow the script.
+    A merge.py or launch.py counts when its folder is named `merge`. A script named with no folder or with `.`
+    (`merge.py`, `./merge.py`) runs from the folder of `cd`, the last cd target of the segments before this one (see
+    merge_calls): after `cd merge`, `merge.py`, `./merge.py` and `python3 [./]merge.py` all count, launch.py the same.
     """
     tokens = segment_tokens(segment)
     if not tokens:
@@ -823,21 +846,23 @@ def merge_args_of(segment: str, cd=None):
         return None
     word = basename(tokens[index])
     rest = tokens[index + 1:]
-    if word.startswith("python"):
-        script = next((t for t in rest if not t.startswith("-")), None)
+    if word in ("merge.py", "launch.py"):
+        return rest if basename(_script_folder(tokens[index], cd)) == "merge" else None
+    if word.startswith("python") or word == "py":
+        script, after = _python_script(rest)
         if script is None:
             return None
-        folder = os.path.dirname(script.replace("\\", "/")) or (cd or "").replace("\\", "/").rstrip("/")
-        if basename(script) not in ("merge.py", "launch.py") or basename(folder) != "merge":
+        if basename(script) not in ("merge.py", "launch.py") or basename(_script_folder(script, cd)) != "merge":
             return None
-        return rest[rest.index(script) + 1:]
+        return rest[after:]
     return rest if word == "merge" else None
 
 
-def merge_calls(stripped: str):
-    """Yield (segment, arguments) for each segment of the command that runs the merge tool. The last `cd` target of the
-    segments before a segment is its folder (guard_core's `_segment_cd_target`, the reader the push and delete rules use)."""
-    cd = None
+def merge_calls(stripped: str, cd=None):
+    """Yield (segment, arguments) for each segment of the command that runs the merge tool, and for each one inside a
+    script the segment hands on (`bash -c`, `sh -c`: the one reader of those wrappers is inner_commands). The last `cd`
+    target of the segments before a segment is its folder (guard_core's `_segment_cd_target`, the reader the push and
+    delete rules use); a script starts in its segment's folder."""
     for segment in split_segments(stripped):
         if not segment.strip():
             continue
@@ -845,6 +870,9 @@ def merge_calls(stripped: str):
         if rest is not None:
             yield segment, rest
         tokens = segment_tokens(segment)
+        if tokens:
+            for text in inner_commands(tokens):
+                yield from merge_calls(text, cd)
         target = _segment_cd_target(tokens) if tokens else None
         if target is not None:
             cd = target
@@ -935,13 +963,51 @@ def _root_names(rest):
     return names
 
 
+def _own_repo_tags(tags):
+    """The OWNER/NAME of each well-formed cs-repo tag in the own record's tags."""
+    from shared_names import REPO_TAG
+    return [t[len(REPO_TAG):] for t in tags
+            if isinstance(t, str) and t.startswith(REPO_TAG) and _ROOT_REPO_NAME.fullmatch(t[len(REPO_TAG):])]
+
+
+def _bare_roots_hit(transcript: str) -> str:
+    """The reason detail when the newest own record (no turn bound) shows a batch runner with two or more cs-repo tags,
+    else ''. No record, an unreadable one, one repo tag, a non-runner and a local session all allow: a lane runs the
+    bare listing, and a missing record is no proof of a runner."""
+    from override import remote_session_id
+    own_id = remote_session_id()
+    if not own_id or not transcript:
+        return ""
+    tags = _own_get_session_tags(transcript, own_id)
+    if not isinstance(tags, (list, tuple)) or ROLE_TAG_PREFIX + "batch-runner" not in tags:
+        return ""
+    tagged = _own_repo_tags(tags)
+    if len(tagged) < 2:
+        return ""
+    return ("A bare `merge --reviewed` drops every root: pass one --root OWNER/NAME=DIR per tag. Tagged: "
+            + ", ".join(tagged) + ".")
+
+
 def merge_roots_hit(stripped: str, transcript: str) -> str:
-    """Return the reason detail when a segment runs `merge --reviewed` with `--root` and the roots do not equal the repos
-    the own get_session record tags cs-repo, else ''. Only a batch runner's record is compared; a record that is not one's
-    allows. No readable own record gives ROOTS_REMEDY. A call with no `--root`, or with no `--reviewed`, is not this rule's.
-    Fails closed inside the clause, like role_proof_hit: the guard-wide crash path fails open."""
+    """Return the reason detail when a segment runs `merge --reviewed` and either its `--root`s do not equal the repos the
+    own get_session record tags cs-repo, or it has no `--root` and the newest own record shows a batch runner with two or
+    more such tags, else ''. Only a batch runner's record is compared; a record that is not one's allows. For a call with
+    `--root`, no readable own record, or one read before the turn's last incoming message, gives ROOTS_REMEDY. A call with
+    no `--reviewed` is not this rule's. The calls are read by merge_calls (after `cd merge`, `merge.py`, `./merge.py`
+    and `python3 [./]merge.py` count, launch.py the same), so a call inside a wrapper inner_commands
+    unwraps counts: what `nested_script`, `ssh_remote_script` and `wrapped_commands` (guard_core.py) read.
+    The `--root` branch fails closed, like role_proof_hit: the guard-wide crash path fails open. The bare branch fails
+    open on a read error, as it does on a missing record: a lane's read listing (a bare `--reviewed`) must never be refused."""
     for _, rest in merge_calls(stripped):
-        if "--reviewed" not in rest or not any(a == "--root" or a.startswith("--root=") for a in rest):
+        if "--reviewed" not in rest:
+            continue
+        if not any(a == "--root" or a.startswith("--root=") for a in rest):
+            try:  # cost: one transcript read, only on a bare --reviewed call
+                detail = _bare_roots_hit(transcript)
+            except Exception:
+                continue  # a bare call allows without a readable record, so a read error allows too
+            if detail:
+                return detail
             continue
         try:  # cost: one transcript read, only on a --reviewed call with --root
             from override import remote_session_id
@@ -955,8 +1021,7 @@ def merge_roots_hit(stripped: str, transcript: str) -> str:
                 return ROOTS_REMEDY
             if ROLE_TAG_PREFIX + "batch-runner" not in tags:
                 continue
-            tagged = [t[len(REPO_TAG):] for t in tags
-                      if isinstance(t, str) and t.startswith(REPO_TAG) and _ROOT_REPO_NAME.fullmatch(t[len(REPO_TAG):])]
+            tagged = _own_repo_tags(tags)
             missing = [t for t in tagged if not any(repo_tag_names(REPO_TAG + t, n) for n in names)]
             extra = [n or "(empty)" for n in names if not n or not any(repo_tag_names(tag, n) for tag in tags)]
         except Exception:

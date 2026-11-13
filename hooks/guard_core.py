@@ -1858,11 +1858,13 @@ def bare_words(segment: str):
 def inner_commands(tokens):
     """Every command text one segment hands on, for a rule that judges the command word: what a
     shell, `eval` or `ssh` gets (nested_script, ssh_remote_script) and what a runner starts
-    (wrapped_commands), at each command in the segment. The one reader of these wrappers."""
+    (wrapped_commands), at each command in the segment. The one reader of these wrappers. Each text comes with its
+    heredoc bodies dropped (strip_heredoc_bodies, which keeps a body a shell or interpreter runs), so text a
+    wrapped `cat <<EOF` writes is data, as it is at the top level."""
     found = [nested_script(tokens), ssh_remote_script(tokens)]
     for at in command_indexes(tokens):
         found.extend(wrapped_commands(tokens, at))
-    return [text for text in found if text]
+    return [type(text)(strip_heredoc_bodies(text)) for text in found if text]   # keep a script type (PosixScript...)
 
 
 def _command_starts(tokens):
