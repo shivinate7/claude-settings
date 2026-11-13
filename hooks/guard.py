@@ -1100,14 +1100,14 @@ WORKTREE_HAND_MADE_REASON = (
 def hand_made_worktree_reason(payload, primary: str = "") -> str:
     """The one reason for a hand-made worktree. A call with a valid `agent_id` also learns the one tree it
     may make by hand: its own red-run checkout, named by its absolute path under `primary`, since
-    EnterWorktree may be refused for a subagent and a relative path would nest inside the agent's home.
+    EnterWorktree may be refused for an agent and a relative path would nest inside the agent's home.
     Any other call, or one with no primary, gets `WORKTREE_HAND_MADE_REASON` unchanged. The reason never
     names a sibling's id or a refused tree."""
     agent_id = payload.get("agent_id") if isinstance(payload, dict) else None
     if not primary or not isinstance(agent_id, str) or not AGENT_ID.match(agent_id):
         return WORKTREE_HAND_MADE_REASON
     own = os.path.join(primary, ".claude", "worktrees", "agent-" + agent_id + "-red").replace("\\", "/")
-    return (WORKTREE_HAND_MADE_REASON + " One exception to that stop: EnterWorktree may be refused for a subagent, "
+    return (WORKTREE_HAND_MADE_REASON + " One exception to that stop: EnterWorktree may be refused for an agent, "
             "and your own red-run checkout is the one tree you make by hand. Make it with "
             "`git worktree add --detach <path> <sha>`, where <path> is written out in full as `" + own + "`.")
 
