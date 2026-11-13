@@ -2165,6 +2165,23 @@ def after_merge(root, cmds):
         ok = ok and not c
     return ok
 
+REFRESH_REPO = "shivinate7-claude-settings"  # mail.repo_slug form of shivinate7/claude-settings
+
+def refresh_mail(root, sha):
+    """Mail the new main sha to every cloud session (decision session-messages, "Refresh mail"). Only a merge in
+    REFRESH_REPO sends: the install pulls that repo's main. Never fails the merge."""
+    if os.environ.get("MAILBOX_REPO"):
+        try:
+            import mail  # hooks/mail.py, on sys.path from the top of this file
+            slug = mail.repo_slug(root)
+            if not slug:
+                raise mail.MailError("no origin url")
+            if slug != REFRESH_REPO:
+                return
+            mail.send_refresh(dict(os.environ), slug, sha)
+        except Exception as e:
+            say("merge: refresh mail was not sent: " + " ".join(str(e).split())[:160])
+
 # ------------------------------------------------------------------ the flow
 
 MERGE_DEFAULTS = {"method": "merge", "deadlineMinutes": 45, "requiredChecks": "protection", "afterMerge": []}
@@ -3456,6 +3473,8 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             say(f"merge: the merge landed. The local {base} did not move: {e}")
             ok = False
         ok = after_merge(root, m.get("afterMerge", [])) and ok
+        if base == cfg["defaultBranch"]:
+            refresh_mail(root, commit)
         if m.get("deleteBranch"):  # the pull request's own branch only: a branch its head merged is another lane's, and stays
             cut_branch(root, branch, sha)
         judge = prose_judge_plan(wt, sha, plan_base, names if c == 0 else None, n)  # report-only: the merge has landed, whatever it says; the model calls wait for the lock's release. Last, so an interrupt in the tree read leaves the ff, afterMerge and the cuts done. `wt` is detached, so no cut removes it

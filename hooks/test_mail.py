@@ -87,9 +87,12 @@ import importlib.util
 import io
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -106,10 +109,10 @@ ROOT = _test_temp.run_folder()
 MAIL_CLI = os.path.join(REPO, "bin", "mail")
 MAIL_HOOK = os.path.join(REPO, "hooks", "mail.py")
 REFUSED = "refs/heads/mail"
-SCRUBBED = ("CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "MAILBOX_REPO", "MAILBOX_CACHE",
-            "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+SCRUBBED = ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_REMOTE_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "MAILBOX_REPO",
+            "MAILBOX_CACHE", "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
             "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_SSH", "GIT_SSH_COMMAND", "CLAUDE_CODE_EXECPATH", "AI_AGENT",
-            "MAILBOX_HOLD_OFF")
+            "MAILBOX_HOLD_OFF", "MAILBOX_REFRESH_COMMAND")
 IDENTITY = {"GIT_AUTHOR_NAME": "Mail Test", "GIT_AUTHOR_EMAIL": "mail-test@example.invalid",
             "GIT_COMMITTER_NAME": "Mail Test", "GIT_COMMITTER_EMAIL": "mail-test@example.invalid"}
 # A second machine's identity. Two takers with one identity and one address can build byte-identical
@@ -117,6 +120,12 @@ IDENTITY = {"GIT_AUTHOR_NAME": "Mail Test", "GIT_AUTHOR_EMAIL": "mail-test@examp
 OTHER_IDENTITY = {"GIT_AUTHOR_NAME": "Mail Other", "GIT_AUTHOR_EMAIL": "mail-other@example.invalid",
                   "GIT_COMMITTER_NAME": "Mail Other", "GIT_COMMITTER_EMAIL": "mail-other@example.invalid"}
 UNKNOWN = "mail unknown: "
+# The refresh notice of a repo whose origin is ORIGIN (decision merge-mail-refreshes-sessions): its path and its body.
+REFRESH_PATH = "mail/refresh/acme-widgets/main.md"
+SHA_A, SHA_B = "a" * 40, "b" * 40
+# The prompt hook's time: the git bounds of one moved turn (TurnBound pins them at 10 s or less), then the install's bound,
+# then this margin. settings.json's UserPromptSubmit timeout must cover all three (PromptHookTimeout).
+GIT_BOUNDS, PROMPT_MARGIN = 10, 5
 # Git's author and committer dates and the Taken-by stamp are pinned, so two takers in one case build one commit.
 SAME_SECOND = {"GIT_AUTHOR_DATE": "1800000000 +0000", "GIT_COMMITTER_DATE": "1800000000 +0000"}
 PINNED_STAMP = "2026-01-01T00:00:00Z"
@@ -127,6 +136,10 @@ PC_BASE = "pc/box-one/acme-widgets"
 # The one skip reason of every case that needs the stand-in git. Windows CreateProcess runs no extensionless file.
 NT_NO_STUB = ("the stand-in git is an extensionless script, which Windows CreateProcess never runs, "
               "so git is not intercepted on Windows")
+# The skip reason of the cases that send POSIX signals and run a shell-script install fake. Windows has no SIGTERM or
+# killpg, and CreateProcess never runs a shell script.
+NT_NO_POSIX_SIGNALS = ("POSIX signals and shell fakes: SIGTERM and killpg do not exist on Windows, and CreateProcess "
+                       "never runs a shell-script fake")
 # The stand-in git. @PYTHON@, @CONF@ and @REAL@ are filled in by Machine.install_stub.
 STUB = """#!@PYTHON@
 import json, os, subprocess, sys
@@ -312,6 +325,27 @@ class Store:
         update = ["update-ref", REFUSED, commit] + ([tip] if tip is not None else [])
         git(self.path, update, self.env)
 
+    def publish(self, path, text, removes=()):
+        """Land one plain file at path, with no message header, as one commit on the tip, with fixture plumbing. An
+        existing file at path is replaced. Each path in removes is deleted in the same commit. A refresh notice lands this
+        way, so a receiver case needs no sender code."""
+        tip = self.tip()
+        index = os.path.join(self.path, "publish.index")
+        env = dict(self.env, GIT_INDEX_FILE=index)
+        if os.path.exists(index):
+            os.remove(index)
+        git(self.path, ["read-tree", tip] if tip is not None else ["read-tree", "--empty"], env)
+        blob = git(self.path, ["hash-object", "-w", "--stdin"], self.env, input_text=text.encode("utf-8")).strip()
+        git(self.path, ["update-index", "--add", "--cacheinfo", "100644,%s,%s" % (blob, path)], env)
+        for gone in removes:
+            git(self.path, ["update-index", "--force-remove", gone], env)
+        tree = git(self.path, ["write-tree"], env).strip()
+        commit_args = ["commit-tree", tree, "-m", "publish %s" % path]
+        if tip is not None:
+            commit_args += ["-p", tip]
+        commit = git(self.path, commit_args, self.env).strip()
+        git(self.path, ["update-ref", REFUSED, commit] + ([tip] if tip is not None else []), self.env)
+
 
 class Machine:
     """One machine: its own home, its own cache, and a scratch checkout as its working directory."""
@@ -468,6 +502,56 @@ def read_lines(path):
         return handle.read().splitlines()
 
 
+def fake_installer(case, name, fail_until=None, hang_for=None, term=None):
+    """The install stand-in of a cloud refresh: an executable that appends one `ran` line to its log on each run. With
+    fail_until, it exits 3 with a stderr line until that file exists. With hang_for, it writes its pid to <script>.pid,
+    sleeps hang_for seconds, then logs `done`: a run killed at its bound logs `ran` and never `done`. With term, it writes
+    its pid to <script>.pid, traps TERM and loops on a short sleep, as an install with an EXIT trap does. On TERM, "exit"
+    writes <script>.term and exits 0; "ignore" writes <script>.term and keeps looping, so only a KILL ends it. Returns
+    (command path, log path). POSIX only, so a case that runs it skips on Windows with NT_NO_STUB, or with
+    NT_NO_POSIX_SIGNALS in InstallStop."""
+    script = os.path.join(case, name)
+    log = os.path.join(case, name + ".log")
+    lines = ["#!/bin/sh", "printf 'ran\\n' >> %s" % shlex.quote(log)]
+    if hang_for is not None:
+        lines += ["printf '%%s\\n' $$ > %s" % shlex.quote(script + ".pid"), "sleep %d" % hang_for,
+                  "printf 'done\\n' >> %s" % shlex.quote(log)]
+    if term is not None:
+        on_term = 'printf term >> "$MARK"; exit 0' if term == "exit" else 'printf term >> "$MARK"'
+        lines += ["MARK=%s" % shlex.quote(script + ".term"), "printf '%%s\\n' $$ > %s" % shlex.quote(script + ".pid"),
+                  "trap '%s' TERM" % on_term, "while :; do sleep 0.1; done"]
+    if fail_until:
+        lines.append("if [ ! -e %s ]; then echo 'fake install broke' >&2; exit 3; fi" % shlex.quote(fail_until))
+    lines.append("exit 0")
+    with open(script, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write("\n".join(lines) + "\n")
+    os.chmod(script, 0o755)
+    return script, log
+
+
+@contextlib.contextmanager
+def recorded_children():
+    """Every child that the no-window wrapper starts inside the block, in start order, so a case can ask whether it ran on."""
+    children = []
+    real = MAIL_MODULE._nowindow.Popen
+
+    def record(*args, **kwargs):
+        child = real(*args, **kwargs)
+        children.append(child)
+        return child
+
+    with mock.patch.object(MAIL_MODULE._nowindow, "Popen", record):
+        yield children
+
+
+def reap(children):
+    """Kills and reaps each child still running, so a case that fails part-way leaves no install behind."""
+    for child in children:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+
+
 def git_subcommand(argv):
     """The git subcommand in an argv, past the options git takes before it (-c NAME=VALUE, -C DIR, ...)."""
     rest = list(argv[1:])
@@ -560,6 +644,13 @@ class MailCase(unittest.TestCase):
                 prompt_env=True, identity=None):
         return Machine(self.case, name, store.url, session, push_to=push_to, trace=trace, origin=origin,
                        stub=stub, prompt_env=prompt_env, identity=identity)
+
+    def cloud_machine(self, store, name, session, script):
+        """A cloud session's machine: CLAUDE_CODE_REMOTE true, a checkout whose origin is ORIGIN, and the install stand-in
+        named by MAILBOX_REFRESH_COMMAND."""
+        machine = self.machine(name, store, session=session, origin=ORIGIN)
+        machine.env.update({"CLAUDE_CODE_REMOTE": "true", "MAILBOX_REFRESH_COMMAND": script})
+        return machine
 
     def body(self, marker):
         self.counter += 1
@@ -1537,6 +1628,318 @@ class MailboxOff(MailCase):
         read = run_cli(receiver, "read", "0123456789ab")
         self.assertEqual(read.returncode, 2,
                          "MAILBOX_REPO unset: mail read exited %d, not 2: %s" % (read.returncode, combined(read)))
+
+
+@unittest.skipIf(os.name == "nt", NT_NO_STUB)
+class RefreshNotice(MailCase):
+    """A batch merge mails one refresh notice: `mail/refresh/<owner>-<repo>/main.md` on the mail ref, whose body is
+    `main moved to <sha>` (decision merge-mail-refreshes-sessions). A cloud session (CLAUDE_CODE_REMOTE=true) whose turn
+    start sees the ref move reads it, runs the install once per new sha, and prints `main moved to <sha>; refreshed`.
+    A failure prints a `mail unknown:` line, never a traceback. A local session ignores the notice. The install command
+    is MAILBOX_REFRESH_COMMAND: run with no arguments and no shell, so the sha is never in a command."""
+
+    def test_cloud_moved_turn_runs_the_install_once_and_says_refreshed(self):
+        store = self.store()
+        script, log = fake_installer(self.case, "install")
+        store.publish(REFRESH_PATH, "main moved to %s\n" % SHA_A)
+        receiver = self.cloud_machine(store, "b", "sess-b", script)
+        lines = turn(receiver)
+        self.assertIn("main moved to %s; refreshed" % SHA_A, lines,
+                      "a cloud session that saw a new main sha printed no 'refreshed' line: %r" % lines)
+        self.assertEqual(len(read_lines(log)), 1,
+                         "the install ran %d times for one new sha, expected once" % len(read_lines(log)))
+
+    def test_a_second_turn_with_no_new_merge_runs_no_install_and_no_fetch(self):
+        store = self.store()
+        script, log = fake_installer(self.case, "install")
+        store.publish(REFRESH_PATH, "main moved to %s\n" % SHA_A)
+        receiver = self.cloud_machine(store, "b", "sess-b", script)
+        turn(receiver)
+        self.assertEqual(len(read_lines(log)), 1,
+                         "control: the first turn ran %d installs, expected 1" % len(read_lines(log)))
+        with Starts() as again:
+            lines = turn(receiver)
+        self.assertEqual(len(read_lines(log)), 1,
+                         "a turn with no new merge ran the install again: %d runs" % len(read_lines(log)))
+        ran = [git_subcommand(args) for args in again.git_starts()]
+        self.assertEqual(ran, ["ls-remote"], "a turn with no new merge ran git %r, expected only the tip check" % ran)
+        self.assertFalse(any("refreshed" in line for line in lines), "a turn with no new merge said refreshed: %r" % lines)
+
+    def test_a_move_that_keeps_the_installed_sha_runs_no_install(self):
+        store = self.store()
+        script, log = fake_installer(self.case, "install")
+        store.publish(REFRESH_PATH, "main moved to %s\n" % SHA_A)
+        receiver = self.cloud_machine(store, "b", "sess-b", script)
+        turn(receiver)
+        self.assertEqual(len(read_lines(log)), 1,
+                         "control: the first turn ran %d installs, expected 1" % len(read_lines(log)))
+        store.seed("cloud/sess-c", "0a1b2c3d4e01", "inform", "cloud/sess-a", "Body marker: other mail\n")
+        lines = turn(receiver)
+        self.assertEqual(len(read_lines(log)), 1,
+                         "the tip moved for other mail and the install ran again: %d runs" % len(read_lines(log)))
+        self.assertFalse(any("refreshed" in line for line in lines), "a move for the same sha said refreshed: %r" % lines)
+
+    def test_a_new_sha_runs_the_install_again_and_names_the_new_sha(self):
+        store = self.store()
+        script, log = fake_installer(self.case, "install")
+        store.publish(REFRESH_PATH, "main moved to %s\n" % SHA_A)
+        receiver = self.cloud_machine(store, "b", "sess-b", script)
+        turn(receiver)
+        self.assertEqual(len(read_lines(log)), 1,
+                         "control: the first turn ran %d installs, expected 1" % len(read_lines(log)))
+        store.publish(REFRESH_PATH, "main moved to %s\n" % SHA_B)
+        lines = turn(receiver)
+        self.assertIn("main moved to %s; refreshed" % SHA_B, lines,
+                      "a new main sha printed no 'refreshed' line for that sha: %r" % lines)
+        self.assertEqual(len(read_lines(log)), 2,
+                         "a new main sha ran the install %d times in all, expected 2" % len(read_lines(log)))
+
+    def test_a_local_session_ignores_the_notice_while_a_cloud_session_refreshes(self):
+        store = self.store()
+        cloud_script, cloud_log = fake_installer(self.case, "install-cloud")
+        local_script, local_log = fake_installer(self.case, "install-local")
+        store.publish(REFRESH_PATH, "main moved to %s\n" % SHA_A)
+        cloud = self.cloud_machine(store, "b", "sess-b", cloud_script)
+        local = self.machine("a", store, origin=ORIGIN)
+        local.env["MAILBOX_REFRESH_COMMAND"] = local_script
+        cloud_lines = turn(cloud)
+        self.assertIn("main moved to %s; refreshed" % SHA_A, cloud_lines,
+                      "control: the cloud session printed no 'refreshed' line: %r" % cloud_lines)
+        local_lines = turn(local, session_id="sess-a")
+        self.assertEqual(read_lines(local_log), [],
+                         "a local session ran the install for the notice: %d runs" % len(read_lines(local_log)))
+        self.assertFalse(any("refreshed" in line for line in local_lines),
+                         "a local session said refreshed: %r" % local_lines)
+
+    def test_a_notice_with_a_bad_sha_is_never_run_and_prints_mail_unknown(self):
+        store = self.store()
+        script, log = fake_installer(self.case, "install")
+        marker = os.path.join(self.case, "injected-marker")
+        receiver = self.cloud_machine(store, "b", "sess-b", script)
+        for body in ("main moved to not-a-sha\n", "main moved to $(touch %s)\n" % shlex.quote(marker)):
+            store.publish(REFRESH_PATH, body)
+            lines = turn(receiver)
+            self.assertEqual(read_lines(log), [], "a notice with a bad sha ran the install: body %r" % body)
+            self.assertFalse(os.path.exists(marker), "a notice's text ran in a shell: body %r" % body)
+            self.assertTrue(any(line.startswith(UNKNOWN) for line in lines),
+                            "a notice with a bad sha printed no 'mail unknown' line: body %r, lines %r" % (body, lines))
+
+    def test_a_failing_install_prints_refresh_failed_and_the_next_move_retries(self):
+        store = self.store()
+        flag = os.path.join(self.case, "install-works")
+        script, log = fake_installer(self.case, "install", fail_until=flag)
+        store.publish(REFRESH_PATH, "main moved to %s\n" % SHA_A)
+        receiver = self.cloud_machine(store, "b", "sess-b", script)
+        lines = turn(receiver)
+        self.assertEqual(len(read_lines(log)), 1,
+                         "control: the failing install ran %d times, expected 1" % len(read_lines(log)))
+        self.assertTrue(any(line.startswith(UNKNOWN + "refresh failed: ") for line in lines),
+                        "a failed install printed no 'mail unknown: refresh failed:' line: %r" % lines)
+        self.assertFalse(any("refreshed" in line for line in lines), "a failed install printed 'refreshed': %r" % lines)
+        open(flag, "w").close()
+        store.seed("cloud/sess-c", "0a1b2c3d4e02", "inform", "cloud/sess-a", "Body marker: move\n")
+        lines = turn(receiver)
+        self.assertEqual(len(read_lines(log)), 2,
+                         "a move after a failed install did not retry the install: %d runs" % len(read_lines(log)))
+        self.assertIn("main moved to %s; refreshed" % SHA_A, lines,
+                      "the retried install printed no 'refreshed' line: %r" % lines)
+
+    def test_a_hung_install_is_killed_at_the_bound_and_the_turn_says_refresh_failed(self):
+        store = self.store()
+        store.publish(REFRESH_PATH, "main moved to %s\n" % SHA_A)
+        fast, fast_log = fake_installer(self.case, "install-fast")
+        hung, hung_log = fake_installer(self.case, "install-hung", hang_for=5)
+        with mock.patch.object(MAIL_MODULE, "REFRESH_BOUND", 2):
+            control = self.cloud_machine(store, "c", "sess-c", fast)
+            control_lines = turn(control)
+            self.assertIn("main moved to %s; refreshed" % SHA_A, control_lines,
+                          "control: an install that ends within the bound printed no 'refreshed' line: %r" % control_lines)
+            receiver = self.cloud_machine(store, "b", "sess-b", hung)
+            lines = turn(receiver)
+        self.assertTrue(os.path.exists(hung + ".pid"),
+                        "control: the hung install never started, so there was nothing to kill: %r" % lines)
+        self.assertNotIn("done", read_lines(hung_log),
+                         "the hung install ran to its end past the bound, so the turn waited for it: log %r"
+                         % read_lines(hung_log))
+        with open(hung + ".pid", encoding="utf-8") as handle:
+            pid = int(handle.read().strip())
+        with self.assertRaises(ProcessLookupError, msg="the hung install's process outlived the turn: pid %d" % pid):
+            os.kill(pid, 0)
+        self.assertIn(UNKNOWN + "refresh failed: the install ran past 2 s", lines,
+                      "a hung install printed no 'refresh failed' line for the bound: %r" % lines)
+        installed = MAIL_MODULE.read_installed(receiver.env)
+        self.assertEqual(installed, {}, "a hung install wrote its sha as installed: %r" % installed)
+
+    def test_the_refresh_path_starts_only_the_install_and_no_timer_or_sleep(self):
+        store = self.store()
+        script, log = fake_installer(self.case, "install")
+        store.publish(REFRESH_PATH, "main moved to %s\n" % SHA_A)
+        receiver = self.cloud_machine(store, "b", "sess-b", script)
+        sleeps, threads = [], threading.active_count()
+        with Starts() as moved, mock.patch.object(time, "sleep", side_effect=sleeps.append):
+            lines = turn(receiver)
+        self.assertEqual(len(read_lines(log)), 1, "control: the install did not run: %r" % lines)
+        others = [args for args in moved.argv if program_name(args) != "git"]
+        self.assertEqual(len(others), 1,
+                         "the refresh path started %d processes that are not git, expected only the install" % len(others))
+        self.assertIsInstance(others[0], list, "the install was started from a shell string, not an argv list: %r" % (others[0],))
+        self.assertEqual(sleeps, [], "the refresh path slept: %r" % sleeps)
+        self.assertLessEqual(threading.active_count(), threads, "the refresh path started a thread")
+
+    def test_a_moved_cloud_turn_with_a_notice_keeps_its_git_bounds_within_ten_seconds(self):
+        store = self.store()
+        script, log = fake_installer(self.case, "install")
+        store.publish(REFRESH_PATH, "main moved to %s\n" % SHA_A)
+        receiver = self.cloud_machine(store, "b", "sess-b", script)
+        with Starts() as moved:
+            lines = turn(receiver)
+        self.assertIn("main moved to %s; refreshed" % SHA_A, lines, "control: the moved cloud turn printed no 'refreshed' line")
+        self.assertTrue(moved.git_starts(), "control: the moved cloud turn started no git")
+        self.assertNotIn(None, moved.git_bounds(), "a git start in the cloud turn has no timeout: %r" % moved.git_bounds())
+        total = sum(moved.git_bounds())
+        self.assertLessEqual(total, 10, "the moved cloud turn's git timeouts %r sum to %s s, over the 10 s bound"
+                             % (moved.git_bounds(), total))
+
+    def test_unset_mailbox_repo_gives_no_refresh_line_and_runs_no_install(self):
+        store = self.store()
+        script, log = fake_installer(self.case, "install")
+        store.publish(REFRESH_PATH, "main moved to %s\n" % SHA_A)
+        receiver = self.cloud_machine(store, "b", "sess-b", script)
+        control = turn(receiver)
+        self.assertIn("main moved to %s; refreshed" % SHA_A, control,
+                      "control: with MAILBOX_REPO set the cloud turn printed no 'refreshed' line: %r" % control)
+        del receiver.env["MAILBOX_REPO"]
+        store.publish(REFRESH_PATH, "main moved to %s\n" % SHA_B)
+        lines = turn(receiver)
+        self.assertEqual(lines, [], "MAILBOX_REPO unset: a turn start printed lines: %r" % lines)
+        self.assertEqual(len(read_lines(log)), 1,
+                         "MAILBOX_REPO unset: the install ran again: %d runs" % len(read_lines(log)))
+
+    def test_a_failed_refresh_is_retried_at_the_next_prompt_without_a_ref_move(self):
+        store = self.store()
+        flag = os.path.join(self.case, "install-works-later")
+        script, log = fake_installer(self.case, "install", fail_until=flag)
+        store.publish(REFRESH_PATH, "main moved to %s\n" % SHA_A)
+        receiver = self.cloud_machine(store, "b", "sess-b", script)
+        lines = turn(receiver)
+        self.assertEqual(len(read_lines(log)), 1,
+                         "control: the failing install ran %d times, expected 1" % len(read_lines(log)))
+        self.assertTrue(any(line.startswith(UNKNOWN + "refresh failed: ") for line in lines),
+                        "control: a failed install printed no 'refresh failed' line: %r" % lines)
+        open(flag, "w").close()
+        lines = turn(receiver)
+        self.assertEqual(len(read_lines(log)), 2,
+                         "a prompt with no ref move did not retry the failed install: %d runs" % len(read_lines(log)))
+        self.assertIn("main moved to %s; refreshed" % SHA_A, lines,
+                      "the prompt's retried install printed no 'refreshed' line: %r" % lines)
+
+    def test_a_cut_refresh_is_retried_at_the_next_prompt_without_a_ref_move(self):
+        store = self.store()
+        store.publish(REFRESH_PATH, "main moved to %s\n" % SHA_A)
+        hung, _ = fake_installer(self.case, "install-hung", hang_for=5)
+        fast, fast_log = fake_installer(self.case, "install-fast")
+        receiver = self.cloud_machine(store, "b", "sess-b", hung)
+        with mock.patch.object(MAIL_MODULE, "REFRESH_BOUND", 2):
+            lines = turn(receiver)
+            self.assertTrue(any(line.startswith(UNKNOWN + "refresh failed: the install ran past 2 s") for line in lines),
+                            "control: a cut install printed no 'ran past 2 s' line: %r" % lines)
+            receiver.env["MAILBOX_REFRESH_COMMAND"] = fast
+            lines = turn(receiver)
+        self.assertEqual(len(read_lines(fast_log)), 1,
+                         "a prompt with no ref move did not retry the cut install: %d runs" % len(read_lines(fast_log)))
+        self.assertIn("main moved to %s; refreshed" % SHA_A, lines,
+                      "the prompt's retried install printed no 'refreshed' line: %r" % lines)
+
+    def test_a_notice_whose_sha_is_not_forty_lowercase_hex_is_never_run(self):
+        store = self.store()
+        script, log = fake_installer(self.case, "install")
+        receiver = self.cloud_machine(store, "b", "sess-b", script)
+        for sha in ("a" * 41, "a" * 64):
+            store.publish(REFRESH_PATH, "main moved to %s\n" % sha)
+            lines = turn(receiver)
+            self.assertEqual(read_lines(log), [], "a notice with a %d-character sha ran the install" % len(sha))
+            self.assertTrue(any(line.startswith(UNKNOWN) for line in lines),
+                            "a notice with a %d-character sha printed no 'mail unknown' line: %r" % (len(sha), lines))
+
+    def test_send_refresh_refuses_a_sha_that_is_not_forty_lowercase_hex(self):
+        store = self.store()
+        store.publish("mail/other/keep.md", "Body marker: keep\n")  # a tip to compare after each refusal
+        sender = self.machine("merge", store)
+        before = store.tip()
+        for sha in ("a" * 41, "a" * 64):
+            try:
+                MAIL_MODULE.send_refresh(sender.env, "acme-widgets", sha)
+            except MAIL_MODULE.MailError:
+                pass
+            else:
+                self.fail("send_refresh sent a %d-character sha as a refresh notice" % len(sha))
+            self.assertEqual(store.tip(), before, "a refused %d-character sha moved the mail ref" % len(sha))
+
+
+@unittest.skipIf(os.name == "nt", NT_NO_POSIX_SIGNALS)
+class InstallStop(MailCase):
+    """A refresh install that runs past its bound is stopped with SIGTERM first, so its EXIT trap can release its lock, and
+    with SIGKILL only after a grace. The stop runs on every exit from the wait, so a caller that raises mid-wait leaves no
+    install running (decision session-messages, "Refresh mail"; hooks/mail.py run_install)."""
+
+    def cut_install(self, script, bound=1):
+        """run_install under a `bound`-second bound: (the children it started, whether it raised MailError)."""
+        env = dict(scrubbed_environ(), MAILBOX_REFRESH_COMMAND=script)
+        with recorded_children() as children, mock.patch.object(MAIL_MODULE, "REFRESH_BOUND", bound):
+            self.addCleanup(reap, children)
+            try:
+                MAIL_MODULE.run_install(env)
+            except MAIL_MODULE.MailError:
+                return children, True
+        return children, False
+
+    def test_a_cut_install_gets_sigterm_first_so_its_exit_trap_runs(self):
+        script, _ = fake_installer(self.case, "install-trap", term="exit")
+        children, cut = self.cut_install(script)
+        self.assertEqual(len(children), 1, "control: the install did not start: %d children" % len(children))
+        self.assertTrue(cut, "control: an install past its bound was not reported as a MailError")
+        self.assertTrue(os.path.exists(script + ".term"),
+                        "a cut install got no SIGTERM, so its EXIT trap never ran")
+
+    def test_an_install_that_ignores_sigterm_is_killed_after_the_grace(self):
+        script, _ = fake_installer(self.case, "install-ignores", term="ignore")
+        children, cut = self.cut_install(script)
+        self.assertEqual(len(children), 1, "control: the install did not start: %d children" % len(children))
+        self.assertTrue(cut, "control: an install past its bound was not reported as a MailError")
+        self.assertTrue(os.path.exists(script + ".term"),
+                        "a cut install got no SIGTERM before the KILL, so the stop was not TERM first")
+        self.assertIsNotNone(children[0].poll(),
+                             "a cut install that ignores SIGTERM is still running after the stop: pid %d" % children[0].pid)
+
+    def test_the_install_is_stopped_when_the_caller_raises_mid_wait(self):
+        script, _ = fake_installer(self.case, "install-raises", term="exit")
+        env = dict(scrubbed_environ(), MAILBOX_REFRESH_COMMAND=script)
+        with recorded_children() as children, \
+                mock.patch.object(MAIL_MODULE, "_wait_bounded", side_effect=RuntimeError("the caller raised mid-wait")):
+            self.addCleanup(reap, children)
+            with self.assertRaises(RuntimeError):
+                MAIL_MODULE.run_install(env)
+        self.assertEqual(len(children), 1, "control: the install did not start: %d children" % len(children))
+        self.assertIsNotNone(children[0].poll(),
+                             "the caller raised mid-wait and the install is still running: pid %d" % children[0].pid)
+
+
+class PromptHookTimeout(unittest.TestCase):
+    """The prompt hook that starts a turn must outlast its git bounds, the refresh install's bound and the margin, so a cut
+    refresh never outlives the hook's timeout in settings.json (decision session-messages, "Refresh mail")."""
+
+    def test_the_refresh_bound_fits_the_prompt_hook_timeout_with_the_git_bounds_and_a_margin(self):
+        with open(os.path.join(REPO, "settings.json"), encoding="utf-8") as handle:
+            settings = json.load(handle)
+        hooks = [hook for group in settings.get("hooks", {}).get("UserPromptSubmit", []) for hook in group.get("hooks", [])
+                 if "local_time" in hook.get("command", "")]
+        self.assertEqual(len(hooks), 1, "settings.json has %d UserPromptSubmit hooks that run the turn start, expected one"
+                         % len(hooks))
+        timeout = hooks[0].get("timeout")
+        self.assertIsNotNone(timeout, "the turn-start prompt hook in settings.json has no timeout")
+        need = GIT_BOUNDS + MAIL_MODULE.REFRESH_BOUND + PROMPT_MARGIN
+        self.assertLessEqual(need, timeout, "a turn start can run %d s (%d s of git, the install's %d s bound, a %d s margin), "
+                             "past the prompt hook's %s s timeout" % (need, GIT_BOUNDS, MAIL_MODULE.REFRESH_BOUND, PROMPT_MARGIN, timeout))
 
 
 class SettingsDefault(unittest.TestCase):

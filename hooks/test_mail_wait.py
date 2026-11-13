@@ -41,6 +41,7 @@ import re
 import signal
 import subprocess
 import sys
+import threading
 import unittest
 from collections import Counter
 from unittest import mock
@@ -1300,6 +1301,138 @@ class WakeCost(WaitCase):
         text = read_text(os.path.join(REPO, RECORD_REL)) or ""
         self.assertIsNotNone(re.search(r"wake adds one `git show`[^\n]*`git log`", text),
                              "the record's wake cost does not name one git show and one git log")
+
+
+# The refresh mail's cost line, in the decision's "Refresh mail cost:" form (decision merge-mail-refreshes-sessions).
+# The per-merge clause is taken whole and parsed by stated_per_merge.
+REFRESH_COST = (r"Refresh mail cost: processes (\d+) long-lived; timers (\d+); per merge: ([^;]+); "
+                r"per session: (\d+) install per new sha; files written (\d+) \(last-installed sha\)")
+REFRESH_SHAS = ["%040x" % number for number in (1, 2, 3)]  # three merges, so three new shas
+
+
+def stated_per_merge(clause):
+    """(total, breakdown) that a per-merge clause states. The total is the numbers outside its parentheses. The breakdown
+    is the leading number of each comma-separated item inside them, or None when the clause has no parentheses."""
+    groups = re.findall(r"\(([^)]*)\)", clause)
+    total = sum(int(number) for number in re.findall(r"\d+", re.sub(r"\([^)]*\)", "", clause)))
+    if not groups:
+        return total, None
+    items = [item.strip() for group in groups for item in group.split(",")]
+    leads = [re.match(r"(\d+)\s", item) for item in items]
+    return total, sum(int(lead.group(1)) for lead in leads if lead)
+
+
+@unittest.skipIf(os.name == "nt", test_mail.NT_NO_STUB)
+class RefreshWait(WaitCase):
+    """`mail wait` on a cloud session refreshes when the ref moves on a new main sha, as a turn start does, and prints the
+    same line. A refresh is not mail, so the wait keeps waiting to its deadline (decision merge-mail-refreshes-sessions)."""
+
+    def cloud_waiter(self):
+        store = self.store()
+        store.seed(OTHER, "0a1b2c3d4e00", "inform", SENDER, "Body marker: elsewhere\n")
+        script, log = test_mail.fake_installer(self.case, "wait-install")
+        return store, self.cloud_machine(store, "b", "sess-b", script), log
+
+    def test_a_moved_ref_with_a_new_sha_refreshes_inside_the_wait_and_the_wait_keeps_waiting(self):
+        store, waiter, log = self.cloud_waiter()
+
+        def land(fake):
+            if len(fake.sleeps) == 2:  # after the poll at 30 s, before the next sleep
+                store.publish(test_mail.REFRESH_PATH, "main moved to %s\n" % test_mail.SHA_A)
+
+        code, text = run_wait(waiter.env, FakeTime(hook=land), Procs(), max_seconds=600)
+        self.assertEqual(len(test_mail.read_lines(log)), 1,
+                         "a wait that saw a new main sha ran the install %d times, expected 1"
+                         % len(test_mail.read_lines(log)))
+        self.assertIn("main moved to %s; refreshed" % test_mail.SHA_A, text.splitlines(),
+                      "the wait printed no 'refreshed' line for the new sha: %r" % text)
+        self.assert_ended_quiet(code, text)
+
+    def test_a_move_for_an_installed_sha_runs_no_install_in_the_wait(self):
+        store, waiter, log = self.cloud_waiter()
+        store.publish(test_mail.REFRESH_PATH, "main moved to %s\n" % test_mail.SHA_A)
+        turn(waiter)
+        self.assertEqual(len(test_mail.read_lines(log)), 1,
+                         "control: the turn start ran %d installs, expected 1" % len(test_mail.read_lines(log)))
+
+        def land(fake):
+            if len(fake.sleeps) == 2:
+                store.seed(OTHER, "0a1b2c3d4e03", "inform", SENDER, "Body marker: other\n")
+
+        code, text = run_wait(waiter.env, FakeTime(hook=land), Procs(), max_seconds=600)
+        self.assertEqual(len(test_mail.read_lines(log)), 1,
+                         "a wait that saw a move for an installed sha ran the install again: %d runs"
+                         % len(test_mail.read_lines(log)))
+        self.assert_ended_quiet(code, text)
+
+
+@unittest.skipIf(os.name == "nt", test_mail.NT_NO_STUB)
+class RefreshCost(MailCase):
+    """The refresh mail's cost. One simulated run: three merges each send one notice, and two cloud sessions each start a
+    turn after each merge. Every number on the decision's "Refresh mail cost:" line is counted here."""
+
+    def simulate(self):
+        store = self.store()
+        store.seed("cloud/sess-c", "0a1b2c3d4e10", "inform", "cloud/sess-a", "Body marker: open\n")  # a live store: each merge fetches
+        sender = self.machine("merge", store, origin=test_mail.ORIGIN)
+        send = named_route(self, "send_refresh", "hooks/mail.py send_refresh(env, repo_slug, sha) is not built")
+        receivers, scripts, logs = {}, {}, {}
+        for name, session in (("b", "sess-b"), ("c", "sess-d")):
+            scripts[name], logs[name] = test_mail.fake_installer(self.case, "install-" + name)
+            receivers[name] = self.cloud_machine(store, name, session, scripts[name])
+        sends, started = [], []
+        real_start = threading.Thread.start
+
+        def counted(thread):
+            started.append(thread)
+            return real_start(thread)
+
+        with mock.patch.object(threading.Thread, "start", counted), Starts() as total:
+            for sha in REFRESH_SHAS:
+                first = len(total.argv)
+                send(sender.env, "acme-widgets", sha)
+                sends.append(total.argv[first:])
+                for name in sorted(receivers):
+                    turn(receivers[name])
+        # Every git start of a send counts: each Popen the send makes, whatever its subcommand.
+        per_merge = {len(git_names(argv)) for argv in sends}
+        others =[args for args in total.argv if program_name(args) != "git" and args[0] not in scripts.values()]
+        # The top-level files the refresh leaves in a cache, less what a moved turn already writes: the cache's own config
+        # and HEAD, the FETCH_HEAD that git fetch writes, and the listing file. What is left is the refresh's own file.
+        files = {}
+        for name in receivers:
+            cache = receivers[name].cache
+            files[name] = [entry for entry in os.listdir(cache) if os.path.isfile(os.path.join(cache, entry))
+                           and entry not in ("config", "HEAD", "FETCH_HEAD") and not entry.startswith("listing-")] \
+                if os.path.isdir(cache) else []
+        return {"per_merge": per_merge, "ran": git_names(sends[0]), "timers": len(started), "others": others,
+                "installs": {name: len(test_mail.read_lines(logs[name])) for name in receivers},
+                "files": {name: len(found) for name, found in files.items()}}
+
+    def test_the_decision_states_the_measured_refresh_cost(self):
+        text = read_text(os.path.join(REPO, RECORD_REL)) or ""
+        found = re.search(REFRESH_COST, text)
+        self.assertIsNotNone(found, "%s has no 'Refresh mail cost:' line, so the refresh mail's cost is not written down"
+                             % RECORD_REL)
+        m = self.simulate()
+        self.assertEqual(len(m["per_merge"]), 1, "the three merges ran %r git starts, not one count" % sorted(m["per_merge"]))
+        processes, timers, clause, per_sha, files = found.groups()
+        stated, breakdown = stated_per_merge(clause)
+        actual = next(iter(m["per_merge"]))
+        self.assertEqual(stated, actual, "the record says %d git processes per merge, the stand-in started %d in each merge: %r"
+                         % (stated, actual, m["ran"]))
+        if breakdown is not None:
+            self.assertEqual(breakdown, stated, "the record's per-merge items sum to %d, not its total %d: %r"
+                             % (breakdown, stated, clause))
+        self.assertEqual(int(processes), len(m["others"]), "the record says processes %s, the stand-in started %d processes "
+                         "that are not git or an install" % (processes, len(m["others"])))
+        self.assertEqual(int(timers), m["timers"], "the record says timers %s, the stand-in started %d threads"
+                         % (timers, m["timers"]))
+        self.assertEqual({count / len(REFRESH_SHAS) for count in m["installs"].values()}, {int(per_sha)},
+                         "the record says %s install per new sha per session, the stand-in ran %r installs for %d shas"
+                         % (per_sha, sorted(m["installs"].values()), len(REFRESH_SHAS)))
+        self.assertEqual(set(m["files"].values()), {int(files)}, "the record says files written %s per session, the stand-in "
+                         "wrote %r" % (files, sorted(m["files"].values())))
 
 
 if __name__ == "__main__":
