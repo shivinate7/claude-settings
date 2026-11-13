@@ -1,0 +1,14 @@
+{
+ "id": "hand-made-worktree-vs-red-run",
+ "title": "The hand-made-worktree guard blocks the red-run protocol's own checkout; decide a sanctioned route",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A test-author following the red-run protocol is refused and used git archive copies, which do not prove the red on a real checkout.",
+ "source": "Coordinator 17:04 CST Nov 13, from lane brief-from-step (session_013NEJL3zemFrPdTzdnwhpVi; PRs #3261, #3262); the lane's measures, unchecked by the coordinator and by triage.",
+ "note": "Filed 17:05 CST Nov 13. Decide a sanctioned route, for example EnterWorktree on an old sha (the coordinator's guess, unverified). A lane reads the guard record first; do not route around the refusal. Folds step worktree-guard-refuses-red-run-checkout (filed 17:05 CST from the same lane; same fact). A guard or protocol change: test-author red case first, builder, reviewer. Past rulings not checked. Not started.",
+ "updatedAt": "2026-11-13T17:05:15-06:00"
+}

@@ -1,0 +1,14 @@
+{
+ "id": "spawn-guard-marker-any-line",
+ "title": "The agent-spawn guard counts a marker on any line of a brief, so a pasted template block lifts a builder to Opus and falsely refuses a haiku reviewer",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "A lane pasting the template's \"Agent spawn brief head\" block whole changes the model it gets, and a haiku reviewer is refused for a marker it did not mean.",
+ "source": "Coordinator 17:04 CST Nov 13, from lane brief-from-step (session_013NEJL3zemFrPdTzdnwhpVi; PRs #3261, #3262); the lane's measures, unchecked by the coordinator and by triage.",
+ "note": "Filed 17:05 CST Nov 13. Lane measured it (PR #3261 final reviewer). Decide: the guard reads line 1 only, or it skips fenced blocks. A lane reads the guard first. A guard verdict changes, so `Guard or check: yes`. Same family as step reviewer-round-1-model-vs-marker. The lane fences the template block itself in #3261 (first line only, ruling own-r3-reviewer-sonnet-high). NOTE, not a step: marker `Docs only: yes` has no reader. Debt note spawn-guard-marker-any-line exists in the repo. Past rulings not checked. Not started.",
+ "updatedAt": "2026-11-13T17:05:15-06:00"
+}
