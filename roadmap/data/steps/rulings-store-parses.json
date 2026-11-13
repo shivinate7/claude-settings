@@ -1,10 +1,10 @@
 {
  "id": "rulings-store-parses",
  "title": "Each file in the rulings store must parse as JSON before it is committed",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL1YzMWkueTVQqze8yW",
  "owner": "triage",
  "blockedBy": [],
  "why": "roadmap/rulings/mac-runner-token-scope.json held unescaped quotes from triage's commit b9713003c and did not parse, so every reader of the store either failed on it or skipped it unseen. Found 06:31 CST Nov 13 and fixed by triage.",

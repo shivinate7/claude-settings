@@ -1,10 +1,10 @@
 {
  "id": "handin-cannot-drop",
  "title": "A handed-in lane PR cannot fall off the batch runner's list",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL1uGWMgx6J2pv6wY1v",
  "owner": "triage",
  "blockedBy": [],
  "why": "Runner 10 built batches from a list it carried and ran merge --reviewed only for lanes it named, never the --root form whose 'open batch now' line lists every done PR. #2816 and #2848 read done from 03:50 CST Nov 13 and missed batches 124-130 with no reason. #2917 and #2817 read open (fix check passed, no round recorded) and nobody told the lane, which idled waiting on runner 10. #2922 is stacked on #2817. Lane archive-flow's 5 PRs waited from 20:13 CST Nov 12.",

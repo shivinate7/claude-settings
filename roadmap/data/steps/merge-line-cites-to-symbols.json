@@ -1,10 +1,10 @@
 {
  "id": "merge-line-cites-to-symbols",
  "title": "Two decisions cite merge.py by symbol, not line number",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL2HisVioZfLkeaNQpH",
  "owner": "triage",
  "blockedBy": [],
  "why": "At the batch 129 merge (main 8d7d36bd9) the merge tool's prose judge found stale merge.py line cites: decision claims-carry-backing lines 78-84 and 112, and decision lanes-run-no-full-ci-job lines 13 and 23. The cited lines no longer hold the cited code. Rule git-cite-by-id: cite ids, not paths or lines.",

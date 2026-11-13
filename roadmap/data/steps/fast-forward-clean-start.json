@@ -1,10 +1,10 @@
 {
  "id": "fast-forward-clean-start",
  "title": "A session fast-forwards its own clean checkout to main at start",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL37QY2EjAqXYiuEe3b",
  "owner": "triage",
  "blockedBy": [],
  "why": "Ruling fast-forward-clean-start (owner 21:59 CST Nov 12) had no step that builds it. Its step field pointed at grants-read-from-main, which is about the grant warning and hook timeout (Degen D14 part a).",

@@ -1,10 +1,10 @@
 {
  "id": "archive-reads-unarchived-epoch",
  "title": "Batch runner skips a lane whose get_session shows unarchived_epoch above 0",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL49BDaebsAgm3BrnCr",
  "owner": "triage",
  "blockedBy": [],
  "why": "merge --idle-lanes (#3108) holds an unarchived lane only when the live file carries unarchived_epoch on its row. The 02:26 CST file carries it on 1 of 1700 rows. Expected harm: the owner unarchives lane X, X is not on keepSessions, the report lists X, and the runner archives it again. That is the original incident.",

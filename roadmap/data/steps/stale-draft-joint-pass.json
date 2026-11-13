@@ -1,10 +1,10 @@
 {
  "id": "stale-draft-joint-pass",
  "title": "One pass closes a stale draft and archives its idle lane together",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL261ueqphUMFHXwrpt",
  "owner": "triage",
  "blockedBy": [],
  "why": "The stale-draft pass closes only drafts new to the build's list, and the idle-lanes pass keeps a lane that holds an open PR, so about 350 drafts listed since 23:41 CST Nov 12 stay open (plans/stale-drafts-2026-11-13.md, sixth pass: 352 listed, 0 closed).",

@@ -1,10 +1,10 @@
 {
  "id": "mail-read-receipt",
  "title": "The git mailbox tells a sender whether its message was read",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL1H8rtZDDYaw58WXbw",
  "owner": "triage",
  "blockedBy": [],
  "why": "Owner 09:06 CST Nov 13, relayed by the retrospective, his words: \"D20 -- i'm pretty sure read receipts exist, and anyways we're leaving anthropic's messaging system for our own right? can't we add read receipts there\". So D20 (no read receipt) is built in our own mailbox, not raised upstream.",

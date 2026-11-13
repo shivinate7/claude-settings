@@ -1,10 +1,10 @@
 {
  "id": "ruled-entry-open-too-long",
  "title": "A check flags a ruling-store entry that main has not absorbed for too long",
- "status": "ready",
+ "status": "doing",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "",
+ "lane": "session_013NEJL4L8mxLqnJZwQaAdvb",
  "owner": "triage",
  "blockedBy": [
   "ruled-store-one-home"
