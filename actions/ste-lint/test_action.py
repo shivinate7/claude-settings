@@ -17,7 +17,7 @@ Also asserts the tree-cites input: off by default, passed to the step as TREE_CI
 Also asserts an uncommitted or untracked markdown file is linted or fails bin/ste-changed, never a plain PASS, a file .gitignore
 matches is not linted, and a clean tree still passes. A non-ASCII untracked name is linted by its own name, a run with no merge
 base names it, and an uncommitted removal that a tracked doc cites fails bin/ste-changed as the committed removal fails the step.
-Also asserts a push whose HEAD is a root commit exits 0 with an unknown stale-cites line, a Markdown file that is untracked and cites
+Also asserts a push whose HEAD is a root commit exits non-zero with one ste-lint unknown line, a Markdown file that is untracked and cites
 an uncommitted removal is named unknown and never PASS, a held .git/index.lock prints one ste-lint unknown line that names the lock,
 a name with a space is linted, and a run with no merge base writes unknown to the step summary, not "No markdown changed".
 Also asserts a stat-only change (a touched tracked file, the same bytes) still fails on a committed STE001, and an untracked
@@ -25,11 +25,16 @@ markdown file that .ste-lint-exclude matches is not named unknown. A dirty tree 
 PASS, and a clean tree with a held index lock lints as main does, touched or not.
 Also asserts a root push's missing HEAD~1 is named by an ste-lint unknown line, not "no markdown changed"; a .ste-lint-exclude
 line git rejects as a pathspec is unknown, never "no markdown changed"; and a .git/index that is gone or a directory is one
-ste-lint unknown line, exit 0, and no PASS.
+ste-lint unknown line, exit 1, and no PASS.
+Also asserts the exit codes of the step's own reads (decision ci-unknown-is-red: a check that cannot read its input fails). An
+unknown read exits 1 with fail=false too, and scope all's ls-files read is checked before its list is used. fail=false mutes
+findings only, judged per stale-cites run (range, and --tree when tree-cites is on): a run that exits non-zero is zeroed only
+when its last line is `stale-cites: FAIL`. A shallow clone deepens once (git fetch --unshallow origin) before an unknown read,
+a full clone never fetches, and a linter that exits non-zero or prints bad JSON fails the step.
 Also asserts the pin note (STE_CHANGED_PIN_NOTE=1, set by ci-job on its ste-lint step): a drifted pin with a
 passing lint exits 0 with the drift on stderr, a failing lint still exits 1, and ci-job's ste-lint step reads PASS
 with `pin note` on its line, and that line holds the drift line's marker and its whole text. Without --lint (`--step`, as merge's ready checks run it), a drifted pin still FAILs."""
-import ast, atexit, contextlib, os, re, shutil, subprocess, sys, tempfile, time, uuid
+import ast, atexit, contextlib, json, os, re, shutil, subprocess, sys, tempfile, time, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "lint"))
@@ -43,7 +48,12 @@ from pin_note import ENV as PIN_NOTE_ENV, MARKER as PIN_NOTE_MARKER  # noqa: E40
 # Stdlib only: the step's `run: |` block is the lines after "      run: |", indented 8 spaces.
 text = open(os.path.join(HERE, "action.yml")).read()
 block = text.split("      run: |\n", 1)[1]
-script = "\n".join(re.sub(r"^ {8}", "", l) for l in block.split("\n")).replace("${{ github.action_path }}", HERE)
+
+
+def step_script(action_dir):
+    """The step's `run:` block, with ${{ github.action_path }} set to action_dir, the folder that holds run.sh."""
+    return "\n".join(re.sub(r"^ {8}", "", l) for l in block.split("\n")).replace("${{ github.action_path }}", action_dir)
+
 
 # /bin/bash is 3.2 on macOS: the script must survive empty arrays under set -u there.
 # Windows: a bare "bash" can resolve to WSL's System32 copy, which cannot run this script.
@@ -119,28 +129,119 @@ def make_repo(d, base, change, on_main=False):
     return work
 
 
-def run_step(d, work, env):
-    """Run the step script from a file, not `bash -c`: Windows argv quoting mangles its heredocs."""
+def run_step(d, work, env, action_dir=HERE):
+    """Run the step script from a file, not `bash -c`: Windows argv quoting mangles its heredocs. The script's run.sh
+    is the one in action_dir."""
     path = os.path.join(d, "step.sh")
     with open(path, "w", newline="\n") as f:
-        f.write(script)
+        f.write(step_script(action_dir))
     p = subprocess.run([BASH, path.replace("\\", "/")], cwd=work, env=env, capture_output=True, text=True)
     return p.returncode, p.stdout + p.stderr
 
 
-def run(scope, fail="true", base=BASE_FILES, change=default_change, on_main=False, after=None, **over):
+def step_env(d, scope, fail, **over):
+    """The step's env for a pull request into main. Its temp files go to the case folder d, which the case removes."""
+    env = dict(os.environ, TMPDIR=d, EVENT_NAME="pull_request", BASE_REF="main", DEFAULT_BRANCH="main",
+               REF_NAME="topic", SCOPE=scope, FAIL=fail, PATHS_GLOB="**/*.md", EXCLUDE="",
+               CHANGED_PATHS_GLOB="*.md", DECISIONS_DIR="", GITHUB_STEP_SUMMARY=os.path.join(d, "sum"))
+    env.update(over)
+    return env
+
+
+# Stub helpers for the exit-code cases. Each (stdout, stderr, exit code) is one run of lint/stale_cites.py, and each
+# (stdout, exit code) one run of lint/ste_lint.py. A stub names itself on stderr, so a case proves the helper ran.
+STALE_PASS = ("stale-cites: PASS\n", "", 0)
+STALE_FAIL = ("a.md:5: STALE001 names a path the range removed\nstale-cites: FAIL, 1 finding(s)\n", "", 1)
+STALE_UNKNOWN_2 = ("stale-cites: UNKNOWN, .ste-lint-exclude cannot be read\n", "", 2)
+STALE_UNKNOWN_1 = ("stale-cites: UNKNOWN, a read could not be made\n", "", 1)
+STALE_TRACEBACK = ("", "Traceback (most recent call last):\n  File \"stale_cites.py\", line 1, in <module>\n"
+                       "RuntimeError: stub crashed\n", 1)
+# The four stale-cites runs fail=false is judged on: (name, stub run, whether fail=false zeroes its exit).
+STALE_RUNS = (
+    ("exit 2 with 'stale-cites: UNKNOWN'", STALE_UNKNOWN_2, False),
+    ("exit 1 whose last line is 'stale-cites: UNKNOWN, ...'", STALE_UNKNOWN_1, False),
+    ("exit 1 with no verdict line (a traceback)", STALE_TRACEBACK, False),
+    ("exit 1 with 'stale-cites: FAIL, 1 finding(s)'", STALE_FAIL, True),
+)
+LINT_OK = (json.dumps({"files": 1, "findings": [], "summary": {"error": 0, "warning": 0}}), 0)
+LINT_STE = (json.dumps({"files": 1, "summary": {"error": 1, "warning": 0},
+                        "findings": [{"path": "a.md", "line": 5, "code": "STE001", "message": "Long sentence.",
+                                      "severity": "error"}]}), 0)
+LINT_EXIT3 = (LINT_OK[0], 3)  # valid findings JSON, then exit 3: only the exit code can fail the job
+LINT_GARBAGE = ("this is not json\n", 0)
+
+
+def stale_stub(range_run, tree_run):
+    """A lint/stale_cites.py stand-in: --range answers with range_run, --tree with tree_run, each (stdout, stderr, exit)."""
+    return ("import sys\n"
+            "out, err, code = %r if sys.argv[1] == '--range' else %r\n"
+            "sys.stdout.write(out)\n"
+            "sys.stderr.write(err)\n"
+            "sys.exit(code)\n") % (range_run, tree_run)
+
+
+def linter_stub(stdout, code):
+    """A lint/ste_lint.py stand-in: writes stdout, the JSON the step reads, and exits with code."""
+    return ("import sys\n"
+            "sys.stderr.write('ste_lint stub ran\\n')\n"
+            "sys.stdout.write(%r)\n"
+            "sys.exit(%d)\n") % (stdout, code)
+
+
+def stub_tree(d, linter=LINT_OK, stale=(STALE_PASS, STALE_PASS), real_stale=False):
+    """A scratch tree <d>/tree with a copy of this folder's run.sh at actions/ste-lint, where the step looks for its
+    helpers, and lint/ beside it. Both helpers are stubs, except that real_stale keeps the real lint/stale_cites.py
+    and the modules it imports. Returns the action folder."""
+    tree = os.path.join(d, "tree")
+    action = os.path.join(tree, "actions", "ste-lint")
+    os.makedirs(action)
+    shutil.copy2(os.path.join(HERE, "run.sh"), os.path.join(action, "run.sh"))
+    if real_stale:
+        tracked_tree.copy_tracked(tree, "lint", "hooks")
+    else:
+        write(tree, "lint/stale_cites.py", stale_stub(*stale))
+    write(tree, "lint/ste_lint.py", linter_stub(*linter))  # after copy_tracked, which copies the real linter too
+    return action
+
+
+def trace_commands(path):
+    """The git commands a run started, from its GIT_TRACE file: the args after `built-in: git`, one per line."""
+    if not os.path.isfile(path):
+        return []
+    with open(path, encoding="utf-8", errors="replace") as f:
+        return [line.split("built-in: git ", 1)[1].strip() for line in f if "built-in: git " in line]
+
+
+def shallow_of(d, work, branch):
+    """A shallow clone of `branch` (see shallow_clone.make), after the commits of `work` are pushed to it. Returns the
+    clone's path and git's error text, "" when the clone was made."""
+    git(work, "push", "-q", "origin", "HEAD:" + branch)
+    dest = os.path.join(d, "shallow")
+    return dest, shallow_clone.make(os.path.join(d, "r.git"), dest, branch, branch=branch)
+
+
+def run(scope, fail="true", base=BASE_FILES, change=default_change, on_main=False, after=None, stubs=None,
+        shallow=False, trace=None, **over):
     """Build a bare remote, commit `base` on main, branch to topic (or stay on main when
     on_main), apply `change(work)`, then run the step script. `after(work)`, when given, runs last: after the fetch,
-    just before the step. `over` overrides env vars."""
+    just before the step, and in the shallow clone when `shallow` is set. `over` overrides env vars. `stubs`, the
+    keyword arguments of stub_tree, runs the step from a tree of stub helpers. `trace`, a list, receives the git commands
+    the step started (trace_commands). Returns (exit code, output)."""
     with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:  # test-temp-standard: the run folder, never the system temp
         work = make_repo(d, base, change, on_main)
+        if shallow:
+            work, error = shallow_of(d, work, "main" if on_main else "topic")
+            if error:
+                return 127, "the shallow clone was not made: %s" % error
         if after:
             after(work)
-        env = dict(os.environ, EVENT_NAME="pull_request", BASE_REF="main", DEFAULT_BRANCH="main",
-                   REF_NAME="topic", SCOPE=scope, FAIL=fail, PATHS_GLOB="**/*.md", EXCLUDE="",
-                   CHANGED_PATHS_GLOB="*.md", DECISIONS_DIR="", GITHUB_STEP_SUMMARY=os.path.join(d, "sum"))
-        env.update(over)
-        return run_step(d, work, env)
+        env = step_env(d, scope, fail, **over)
+        if trace is not None:
+            env["GIT_TRACE"] = os.path.join(d, "git-trace.txt")
+        rc, out = run_step(d, work, env, HERE if stubs is None else stub_tree(d, **stubs))
+        if trace is not None:
+            trace.extend(trace_commands(env["GIT_TRACE"]))
+        return rc, out
 
 
 def run_command(work, extra=None, sub=None):
@@ -567,9 +668,9 @@ check("ignored control: a markdown file .gitignore matches is not linted, plain 
 
 
 # Another git process holds .git/index.lock (an agent's `git add`) while the tree is dirty. The step must not go silent:
-# one ste-lint line says unknown and names the lock, and the exit is 0, as in the no-merge-base case (decision
-# stale-cites-at-merge, rule verification-report-unknown-reads). Empty output is the bug. The lock is set in the change, so
-# the scope fact is read there (P7).
+# one ste-lint line says unknown and names the lock, and the exit is 1, with fail=false too (decision ci-unknown-is-red:
+# a check that cannot read its input fails). Empty output is the bug. The lock is set in the change, so the scope fact
+# is read there (P7).
 lock = {}
 
 
@@ -602,8 +703,12 @@ def edit_data_locked(work):
 at_base, status, rc, out = uncommitted_run(edit_data_locked)
 check("index lock scope: the lock is held, data.txt is modified and HEAD is origin/main",
       lock.get("held") is True and at_base and " M data.txt" in status, status)
-check("index lock: exits 0, as the no-merge-base case does", rc == 0, out)
+check("index lock: exits 1, since the read is unknown", rc == 1, out)
 check("index lock: one ste-lint line says unknown and names index.lock",
+      any(l.startswith("ste-lint:") and "unknown" in l and "index.lock" in l for l in out.splitlines()), out)
+rc, out = run("changed", "false", base=UNCOMMITTED_BASE, change=edit_data_locked)
+check("index lock, fail=false: exits 1, since fail=false mutes findings only", rc == 1, out)
+check("index lock, fail=false: one ste-lint line says unknown and names index.lock",
       any(l.startswith("ste-lint:") and "unknown" in l and "index.lock" in l for l in out.splitlines()), out)
 
 
@@ -762,11 +867,13 @@ else:
           str(unreadable))
     check("unreadable dirty scope: the snapshot names data.txt as unsupported", unreadable.get("snapshot_cause") is True,
           str(unreadable))
-    check("unreadable dirty: exits 0, as the other unknown reads do", rc == 0, out)
+    check("unreadable dirty: exits 1, since the snapshot failed and the read is unknown", rc == 1, out)
     check("unreadable dirty: one ste-lint line says unknown",
           any(l.startswith("ste-lint: unknown") for l in out.splitlines()), out)
     check("unreadable dirty: no ste-lint PASS verdict", "ste-lint: PASS" not in out, out)
     check("unreadable dirty: no stale-cites PASS line", "stale-cites: PASS" not in out, out)
+    rc, out = run("changed", "false", base=UNREADABLE_BASE, change=unreadable_dirty)
+    check("unreadable dirty, fail=false: exits 1, since fail=false mutes findings only", rc == 1, out)
 
 
 # A clean tree with .git/index.lock held. Touching a tracked file moves its mtime and keeps its bytes: git's content check
@@ -834,10 +941,9 @@ check("untracked excluded control: with no exclude entry, gen/x.md is named unkn
       any(l.startswith("stale-cites: unknown,") and "gen/x.md" in l for l in out.splitlines()), out)
 
 
-# No merge base. The topic branch starts a history of its own, so origin/main and HEAD share no commit. The
-# unknown-base rule (decision stale-cites-at-merge, docs/decisions/stale-cites-at-merge.md: a base that does not resolve
-# is unknown, not a finding, and the check exits 0; rule verification-report-unknown-reads) holds here too: the command
-# exits 0 and names the missing merge base as unknown. It must not print nothing and exit 1, as it does today.
+# No merge base. The topic branch starts a history of its own, so origin/main and HEAD share no commit. The read is
+# unknown, so the command and the step exit 1 and name the missing merge base, with fail=false too (decision
+# ci-unknown-is-red). A repo that is not shallow never fetches to look for the base: the step's one deepen is for clones.
 def unrelated_change(work):
     git(work, "checkout", "-q", "--orphan", "unrelated")
     git(work, "rm", "-q", "-r", "--cached", ".")  # the index only: the files stay on disk, untracked
@@ -851,17 +957,26 @@ with tempfile.TemporaryDirectory(dir=RUN_FOLDER) as d:  # test-temp-standard: th
     has_base = subprocess.run(["git", "merge-base", "origin/main", "HEAD"], cwd=work, capture_output=True).returncode == 0
     rc, out = run_command(work)
 check("no merge base scope: origin/main and HEAD share no commit", not has_base, str(has_base))
-check("no merge base (decision stale-cites-at-merge, an unknown base exits 0): the command exits 0", rc == 0, out)
-check("no merge base (decision stale-cites-at-merge, an unknown base exits 0): the output names the missing merge base",
+check("no merge base: the command exits 1, since the read is unknown", rc == 1, out)
+check("no merge base: the output names the missing merge base",
       re.search(r"merge[ -]base", out, re.I) is not None, out)
-check("no merge base (decision stale-cites-at-merge, an unknown base exits 0): the output says the result is unknown",
+check("no merge base: the output says the result is unknown",
       "unknown" in out, out)
+calls = []
+rc, out = run("changed", change=unrelated_change, trace=calls)
+check("no merge base, the step: exits 1", rc == 1, out)
+check("no merge base, the step: one ste-lint line says unknown and names the merge base",
+      any(l.startswith("ste-lint: unknown") and re.search(r"merge[ -]base", l, re.I) for l in out.splitlines()), out)
+check("no merge base, full clone: the step never runs git fetch --unshallow", not any(
+    c.startswith("fetch --unshallow") for c in calls), str(calls))
+rc, out = run("changed", "false", change=unrelated_change)
+check("no merge base, the step, fail=false: exits 1", rc == 1, out)
 
 
-# A push to the default branch whose HEAD is a root commit has no HEAD~1. The step diffs HEAD~1..HEAD, and the stale-cites
-# check reads that base as unknown: decision stale-cites-at-merge exits 0 for `<head>~1` of a root commit, as main does. The
-# output must say `stale-cites: unknown,` in lower case; `stale-cites: UNKNOWN,` with exit 2 is the bug. The tree is
-# clean and HEAD has no parent, both read inside the change (P7). The control has a second commit, so HEAD~1 exists.
+# A push to the default branch whose HEAD is a root commit has no HEAD~1. The step diffs HEAD~1..HEAD, so the read is
+# unknown and the step exits 1 with fail=false too (decision ci-unknown-is-red). The stale-cites check reads that base as
+# unknown and exits 0 on its own, so its line stays in lower case; `stale-cites: UNKNOWN,` with exit 2 is the bug. The tree
+# is clean and HEAD has no parent, both read inside the change (P7). The control has a second commit, so HEAD~1 exists.
 root = {}
 
 
@@ -876,13 +991,20 @@ def second_commit(work):
     git(work, "commit", "-qm", "second")
 
 
-rc, out = run("changed", on_main=True, change=root_commit, EVENT_NAME="push", BASE_REF="", REF_NAME="main")
+calls = []
+rc, out = run("changed", on_main=True, change=root_commit, EVENT_NAME="push", BASE_REF="", REF_NAME="main", trace=calls)
 check("root push scope: HEAD has no parent and the tree is clean",
       len(root.get("parents", [])) == 1 and root.get("status") == "", str(root))
-check("root push: exits 0, as main does (an unknown base, decision stale-cites-at-merge)", rc == 0, out)
+check("root push: exits 1, since HEAD~1 was never read (decision ci-unknown-is-red)", rc == 1, out)
 check("root push: the output says `stale-cites: unknown,` in lower case", "stale-cites: unknown," in out, out)
 check("root push: no `no markdown changed` line, since HEAD~1 was never read", "no markdown changed" not in out, out)
 check("root push: an ste-lint unknown line names the missing HEAD~1",
+      any(l.startswith("ste-lint: unknown") and "HEAD~1" in l for l in out.splitlines()), out)
+check("root push, full clone: the step never runs git fetch --unshallow", not any(
+    c.startswith("fetch --unshallow") for c in calls), str(calls))
+rc, out = run("changed", "false", on_main=True, change=root_commit, EVENT_NAME="push", BASE_REF="", REF_NAME="main")
+check("root push, fail=false: exits 1, since fail=false mutes findings only", rc == 1, out)
+check("root push, fail=false: an ste-lint unknown line names the missing HEAD~1",
       any(l.startswith("ste-lint: unknown") and "HEAD~1" in l for l in out.splitlines()), out)
 rc, out = run("changed", on_main=True, change=second_commit, EVENT_NAME="push", BASE_REF="", REF_NAME="main")
 check("root push control: with HEAD~1 present, exits 0 and says `stale-cites: PASS`",
@@ -893,7 +1015,7 @@ check("root push control: with HEAD~1 present, no ste-lint unknown line",
 
 # A changed-file read that git refuses. A .ste-lint-exclude line git rejects as a pathspec, such as ../gen/*.md (a path outside
 # the repo), fails the diff that lists the changed files. That read printed "no markdown changed" with exit 0: a false green for
-# files nobody read. The step must print one ste-lint unknown line, exit 0, and never "no markdown changed" or PASS. The valid
+# files nobody read. The step must print one ste-lint unknown line, exit 1, and never "no markdown changed" or PASS. The valid
 # exclude line is the control: the same committed STE001 fails as main does. git's rejection is read in the change (P7).
 BAD_PATHSPEC_BASE = {"a.md": "# T\n\nShort line.\n", "long-note.md": "# S\n\nShort line.\n",
                      ".ste-lint-exclude": "../gen/*.md\n"}
@@ -910,20 +1032,23 @@ def bad_pathspec_change(work):
 rc, out = run("changed", base=BAD_PATHSPEC_BASE, change=bad_pathspec_change)
 check("bad pathspec scope: git rejects the exclude line, exit non-zero, naming the path outside the repository",
       bad_pathspec.get("rc", 0) != 0 and "outside repository" in bad_pathspec.get("err", ""), str(bad_pathspec))
-check("bad pathspec: exits 0, as an unknown read does", rc == 0, out)
+check("bad pathspec: exits 1, since the read is unknown", rc == 1, out)
 check("bad pathspec: one ste-lint line says unknown",
       any(l.startswith("ste-lint: unknown") for l in out.splitlines()), out)
 check("bad pathspec: no `no markdown changed` line, since the changed files were not read",
       "no markdown changed" not in out, out)
 check("bad pathspec: no ste-lint PASS verdict", "ste-lint: PASS" not in out, out)
+rc, out = run("changed", "false", base=BAD_PATHSPEC_BASE, change=bad_pathspec_change)
+check("bad pathspec, fail=false: exits 1, since fail=false mutes findings only", rc == 1, out)
 rc, out = run("changed", base={**BAD_PATHSPEC_BASE, ".ste-lint-exclude": "gen/**\n"}, change=long_sentence("long-note.md"))
 check("bad pathspec control: a valid exclude line lints long-note.md and exits 1 on its STE001",
       rc == 1 and "long-note.md:3: STE001 " in out, out)
 
 
 # The content check of the tracked files cannot run (run.sh, the DIFF_RC branch). The copy of .git/index fails when the index
-# is gone or is a directory, so the working tree was not read. The step must print one ste-lint unknown line, exit 0, and print
-# no PASS, though a Markdown edit is uncommitted. The index is replaced after the fetch and just before the step (P7).
+# is gone or is a directory, so the working tree was not read. The step must print one ste-lint unknown line, exit 1, and print
+# no PASS, though a Markdown edit is uncommitted, with fail=false too. The index is replaced after the fetch and just before
+# the step (P7).
 index_state = {}
 
 
@@ -944,12 +1069,14 @@ for how in ("missing", "dir"):
     check("index %s scope: .git/index was a file, is now %s, and draft-note.md is modified" % (how, how),
           index_state.get("was_file") is True and index_state.get("now") == how and index_state.get("dirty") is True,
           str(index_state))
-    check("index %s: exits 0, as an unknown read does" % how, rc == 0, out)
+    check("index %s: exits 1, since the read is unknown" % how, rc == 1, out)
     check("index %s: exactly one ste-lint line says unknown" % how,
           sum(l.startswith("ste-lint: unknown") for l in out.splitlines()) == 1, out)
     check("index %s: no PASS line, from ste-lint or stale-cites" % how,
           "ste-lint: PASS" not in out and "stale-cites: PASS" not in out, out)
     check("index %s: no `no markdown changed` line" % how, "no markdown changed" not in out, out)
+    rc, out = run("changed", "false", base=UNCOMMITTED_BASE, change=edit_draft, after=index_replaced(how))
+    check("index %s, fail=false: exits 1, since fail=false mutes findings only" % how, rc == 1, out)
 
 
 # The step summary of a run with no merge base. It must say unknown, not "No markdown changed": nothing was read.
@@ -1449,13 +1576,17 @@ def action_yml():
         return f.read()
 
 
+def input_block(name):
+    """The lines of input `name` in action.yml, up to the next input or the runs block. Empty when it is not declared."""
+    head = action_yml().split("\n  %s:\n" % name, 1)
+    if len(head) < 2:
+        return ""
+    return re.split(r"\n  [\w-]+:\n|\nruns:", head[1], maxsplit=1)[0]
+
+
 def tree_cites_default():
     """The default of the tree-cites input, read from action.yml. None when the input is not declared."""
-    head = action_yml().split("\n  tree-cites:\n", 1)
-    if len(head) < 2:
-        return None
-    block = re.split(r"\n  [\w-]+:\n|\nruns:", head[1], 1)[0]
-    found = re.search(r'default: "([^"]*)"', block)
+    found = re.search(r'default: "([^"]*)"', input_block("tree-cites"))
     return found.group(1) if found else None
 
 
@@ -1475,5 +1606,189 @@ check("tree-cites on, fail=false: the finding prints and the step exits 0",
 rc, out = run("all", base=STALE_TREE_BASE, change=edit_a, TREE_CITES="true")
 check("tree-cites on, scope all: the step checks the whole tree",
       rc == 1 and "docs/old.md:3: STALE003 " in out, out)
+
+
+# The step's exit codes (decision ci-unknown-is-red: a check that cannot read its input fails, never passes). A helper's
+# verdict is judged here through the stubs above, so each case sets one run's exit code and output.
+def stub_printed(stub_run, out):
+    """True when a stub's stdout and stderr both appear in the step's output: the stub ran, and the step printed it."""
+    return "".join(stub_run[:2]).strip() in out
+
+
+def unknown_lines(out):
+    """The ste-lint lines that say unknown."""
+    return [l for l in out.splitlines() if l.startswith("ste-lint: unknown")]
+
+
+# Scope all reads git ls-files before its list is used. A pathspec git refuses is an unknown read, never "no markdown
+# changed". The glob that lists a.md is the control.
+for fail in ("true", "false"):
+    rc, out = run("all", fail, PATHS_GLOB="../*.md")
+    check("scope all, fail=%s: git ls-files refuses the glob, so the step exits 1 with one ste-lint unknown line" % fail,
+          rc == 1 and len(unknown_lines(out)) == 1, out)
+    check("scope all, fail=%s: no `no markdown changed` line, since no file was read" % fail,
+          "no markdown changed" not in out, out)
+rc, out = run("all", PATHS_GLOB="**/*.md")
+check("scope all control: the glob that lists a.md lints it, exits 0 and names no unknown read",
+      rc == 0 and "a.md:5: STE001" in out and not unknown_lines(out), out)
+
+# fail=false mutes findings only. Each stale-cites run is judged alone: a run that exits non-zero is zeroed only when its
+# last line is `stale-cites: FAIL`, so an unknown read in either run stays red.
+for name, stale_run, zero in STALE_RUNS:
+    rc, out = run("changed", "false", stubs={"stale": (stale_run, STALE_PASS)})
+    check("range stale-cites %s, fail=false: the step exits %s" % (name, "0" if zero else "non-zero"),
+          stub_printed(stale_run, out) and ((rc == 0) if zero else (rc != 0)), out)
+rc, out = run("changed", "true", stubs={"stale": (STALE_FAIL, STALE_PASS)})
+check("range stale-cites FAIL, fail=true: the step exits 1 on the finding",
+      rc == 1 and stub_printed(STALE_FAIL, out), out)
+
+
+def code_change(work):
+    write(work, "x.py", "X = 1\n", "w")
+    git(work, "add", "-A"); git(work, "commit", "-qm", "code")
+
+
+rc, out = run("changed", "false", change=code_change, stubs={"stale": (STALE_UNKNOWN_2, STALE_PASS)})
+check("code-only change, range stale-cites UNKNOWN, fail=false: no markdown changed, and the step exits non-zero",
+      rc != 0 and "no markdown changed" in out and stub_printed(STALE_UNKNOWN_2, out), out)
+
+
+def unreadable_exclude(work):
+    default_change(work)
+    os.makedirs(os.path.join(work, ".ste-lint-exclude"))  # a directory: lint/stale_cites.py cannot read it as the file
+
+
+rc, out = run("changed", "false", change=unreadable_exclude, stubs={"real_stale": True})
+check("real stale-cites on an unreadable .ste-lint-exclude, fail=false: the step exits non-zero",
+      rc != 0 and "stale-cites: UNKNOWN, .ste-lint-exclude cannot be read" in out, out)
+
+rc, out = run("changed", "false", stubs={"linter": LINT_STE})
+check("ste-lint findings, fail=false: the findings print, the verdict is PASS and the step exits 0",
+      rc == 0 and "ste_lint stub ran" in out and "ste-lint: PASS" in out and "a.md:5: STE001" in out, out)
+
+for scope in ("changed", "all"):
+    for name, tree_run, zero in STALE_RUNS:
+        rc, out = run(scope, "false", TREE_CITES="true", stubs={"stale": (STALE_PASS, tree_run)})
+        check("tree-cites, scope %s, fail=false, --tree %s: the step exits %s" % (scope, name, "0" if zero else "non-zero"),
+              stub_printed(tree_run, out) and ((rc == 0) if zero else (rc != 0)), out)
+for name, range_run, tree_run in (("range UNKNOWN, --tree FAIL", STALE_UNKNOWN_2, STALE_FAIL),
+                                  ("range FAIL, --tree UNKNOWN", STALE_FAIL, STALE_UNKNOWN_2)):
+    rc, out = run("changed", "false", TREE_CITES="true", stubs={"stale": (range_run, tree_run)})
+    check("tree-cites, fail=false, %s: the step exits non-zero, so one run's findings never hide the other's unknown read"
+          % name, stub_printed(range_run, out) and stub_printed(tree_run, out) and rc != 0, out)
+
+# set -e. A linter that exits non-zero, or prints what the split and audit scripts cannot read, fails the step in both
+# scopes, with fail true or false. Each case proves the linter ran first.
+for scope in ("changed", "all"):
+    for fail in ("true", "false"):
+        for label, linter in (("exits 3 after valid JSON", LINT_EXIT3), ("prints non-JSON", LINT_GARBAGE)):
+            rc, out = run(scope, fail, stubs={"linter": linter})
+            check("linter %s, scope %s, fail=%s: the step exits non-zero with no PASS verdict" % (label, scope, fail),
+                  "ste_lint stub ran" in out and rc != 0 and "ste-lint: PASS" not in out, out)
+
+# A stale-cites read that cannot run, with the real helper and the real base, so fail=false is the only change.
+STALE_CITES = os.path.join(ROOT, "lint", "stale_cites.py")
+STALE_UNKNOWN_BASE = {"a.md": "# T\n\nShort line.\n", "old.md": "# Old\n", "docs/keep.md": "# Keep\n"}
+
+
+def old_removed(work):
+    git(work, "rm", "-q", "old.md")
+    git(work, "commit", "-qm", "remove old.md")
+
+
+with scratch("stale-unknown") as d:
+    work = make_repo(d, STALE_UNKNOWN_BASE, old_removed)
+    blob = git_read(work, "rev-parse", "HEAD:docs/keep.md").strip()
+    loose = os.path.join(work, ".git", "objects", blob[:2], blob[2:])
+    was_loose = os.path.isfile(loose)
+    if was_loose:
+        os.chmod(loose, 0o644)  # Windows: git makes its loose objects read-only
+        os.remove(loose)
+    stale = subprocess.run([sys.executable, STALE_CITES, "--range", "origin/main...HEAD"], cwd=work,
+                           capture_output=True, text=True, env=dict(os.environ, EXCLUDE=""))
+    rc_on, out_on = run_step(d, work, step_env(d, "changed", "true"))
+    rc_off, out_off = run_step(d, work, step_env(d, "changed", "false"))
+check("stale-cites unknown fixture: the loose object of docs/keep.md was in the store and is now gone",
+      was_loose and not os.path.exists(loose), "loose object: %s" % loose)
+check("stale-cites unknown fixture: stale-cites exits 2 and says UNKNOWN on this range",
+      stale.returncode == 2 and "stale-cites: UNKNOWN" in stale.stdout, stale.stdout + stale.stderr)
+check("stale-cites unknown, fail=true: the step exits non-zero and says UNKNOWN", rc_on != 0 and "stale-cites: UNKNOWN" in out_on,
+      out_on)
+check("stale-cites unknown, fail=false: the step exits non-zero, since the read did not run",
+      rc_off != 0 and "stale-cites: UNKNOWN" in out_off, out_off)
+
+# action.yml: 'false' opts out of findings only, and an unread input or a crash still fails.
+fail_block = input_block("fail")
+check("action.yml fail input: 'false' opts out of findings only, a failed read still fails, and 'never fails' is gone",
+      "findings only" in fail_block and "still fails" in fail_block and "never fails" not in fail_block, fail_block)
+
+
+# Shallow clones. The step deepens once (git fetch --unshallow origin) when a read fails in a shallow clone, then reads
+# again. Each case reads its clone's facts before the step, so the cut history is the defect, not the fixture (P7).
+clone_facts = {}
+
+
+def record_clone_of(pin):
+    def after(work):
+        clone_facts.clear()
+        clone_facts.update(shallow_clone.facts(work, pin))
+    return after
+
+
+calls = []
+rc, out = run("changed", shallow=True, after=record_clone_of("origin/main"), trace=calls)
+check("shallow pull request scope: the clone is shallow, origin/main is present, and its merge base with HEAD is cut",
+      clone_facts.get("shallow") is True and clone_facts.get("pin_present") is True and clone_facts.get("ancestor_rc") == 1,
+      str(clone_facts))
+check("shallow pull request: the topic commit's finding fails the step after the deepen",
+      rc == 1 and "a.md:5: STE001 " in out and not unknown_lines(out), out)
+check("shallow pull request: the step runs git fetch --unshallow exactly once",
+      sum(c.startswith("fetch --unshallow") for c in calls) == 1, str(calls))
+rc, out = run("changed")
+check("shallow pull request, full clone control: the same change fails on its finding and names no unknown read",
+      rc == 1 and "a.md:5: STE001 " in out and not unknown_lines(out), out)
+
+calls = []
+push = dict(on_main=True, EVENT_NAME="push", BASE_REF="", REF_NAME="main")
+rc, out = run("changed", shallow=True, after=record_clone_of("HEAD~1"), trace=calls, **push)
+check("shallow push scope: the clone is shallow and HEAD~1 is cut from it",
+      clone_facts.get("shallow") is True and clone_facts.get("pin_present") is False, str(clone_facts))
+check("shallow push to main: the finding on the pushed commit fails the step after the deepen",
+      rc == 1 and "a.md:5: STE001 " in out and not unknown_lines(out), out)
+check("shallow push to main: the step runs git fetch --unshallow exactly once",
+      sum(c.startswith("fetch --unshallow") for c in calls) == 1, str(calls))
+rc, out = run("changed", **push)
+check("shallow push, full clone control: the same push fails on its finding and names no unknown read",
+      rc == 1 and "a.md:5: STE001 " in out and not unknown_lines(out), out)
+
+
+def orphan_other(work):
+    """Branch `other` on origin with history unrelated to main, then the topic commit on top of main."""
+    git(work, "checkout", "-q", "--orphan", "other")
+    git(work, "rm", "-rqf", ".")
+    write(work, "o.md", "# O\n")
+    git(work, "add", "o.md"); git(work, "commit", "-qm", "other: unrelated root")
+    git(work, "push", "-q", "origin", "other")
+    git(work, "checkout", "-q", "topic")
+    default_change(work)
+
+
+orphan_clone = {}
+
+
+def record_no_base(work):
+    """Whether the clone has a merge base with origin/other before the step: it must not, or the deepen is not tested."""
+    orphan_clone["no_base"] = subprocess.run(["git", "-C", work, "merge-base", "origin/other", "HEAD"],
+                                             capture_output=True).returncode != 0
+
+
+calls = []
+rc, out = run("changed", shallow=True, BASE_REF="other", change=orphan_other, after=record_no_base, trace=calls)
+check("shallow orphan base scope: the clone has no merge base with origin/other", orphan_clone.get("no_base") is True,
+      str(orphan_clone))
+check("shallow orphan base: the deepen does not join the histories, so the step exits 1 with one unknown line",
+      rc == 1 and len(unknown_lines(out)) == 1, out)
+check("shallow orphan base: git fetch --unshallow runs exactly once, not again after the second read fails",
+      sum(c.startswith("fetch --unshallow") for c in calls) == 1, str(calls))
 
 sys.exit(1 if failed else 0)
