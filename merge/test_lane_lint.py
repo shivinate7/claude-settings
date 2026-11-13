@@ -2831,6 +2831,105 @@ class DraftRun(LaneFixture):
         self.assertEqual(rc, 0, "a passed windows run on page 2 refused the lane (exit %s):\n%s" % (rc, out))
         self.assertEqual(len(pass_lines(out)), 1, out)
 
+    def test_a_skipped_touched_row_with_no_test_rows_is_unknown_and_is_lifted_only_by_a_reason(self):
+        self.use_ci_job(PASSING, 0)
+        head = self.head("feat")
+        rows = {head: [tm.draft_row("touched", "skipped")]}
+        rc, out = self.run_case(rows, "--lane-lint", "7")
+        self.assertEqual(tm.check_run_reads(self.host.draft_reads), [head], "the lint did not read the live head's draft runs:\n" + out)
+        self.assertEqual(rc, 1, "a lane whose touched job was skipped, as a ready lane's is, passed the lint with no proof a touched test ran (exit %s):\n%s" % (rc, out))
+        self.assertNotIn("FAILs:", out, "a skipped touched job was read as a failed lint:\n" + out)
+        self.assertIn("--lint-unknown-ok", out, "the refusal of a skipped touched job cannot be lifted by name:\n" + out)
+        self.assertEqual(self.lint_calls(), [], "the lint ran past a skipped touched job:\n" + out)
+        rc, out = self.run_case(rows, "--lane-lint", "7", "--lint-unknown-ok", "the skipped touched job is accepted")
+        self.assertEqual(rc, 0, "a reason did not lift a skipped touched job (exit %s):\n%s" % (rc, out))
+        self.assertIn("the skipped touched job is accepted", out, "the reason that lifted a skipped touched job is not logged:\n" + out)
+
+    def test_a_batch_integration_pr_reads_no_draft_run_and_its_queued_or_missing_touched_row_does_not_refuse_it(self):
+        self.use_ci_job(PASSING, 0)
+        head = self.head("feat")
+        branch = merge.integration_branch("nightly")
+        tm.sh(self.other, "git", "fetch", "-q", "origin")
+        tm.sh(self.other, "git", "push", "-q", "origin", "%s:refs/heads/%s" % (head, branch))
+        base = tm.sh(self.other, "git", "rev-parse", "origin/main")
+        self.host.branch, self.host.body = branch, "\n".join(merge.freeze_lines("nightly", {6: base})) + "\n"
+        self.assertTrue(merge.is_integration_pr({"branch": self.host.branch, "body": self.host.body}),
+                        "precondition: PR 7 is not a batch integration PR, so the case probes a lane PR")
+        cases = (("its touched job queued", [tm.draft_row("touched", status="queued")]), ("no rows on the head", []))
+        for label, head_rows in cases:
+            with self.subTest(case=label):
+                rc, out = self.run_case({head: head_rows}, "--lane-lint", "7")
+                self.assertEqual(self.host.draft_reads, [], "the lint read the draft runs of a batch integration PR's head (%s):\n%s" % (label, out))
+                self.assertEqual(rc, 0, "a batch integration PR with %s was refused (exit %s):\n%s" % (label, rc, out))
+                self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_a_failed_windows_or_macos_run_is_not_lifted_by_a_reason_and_is_named_as_a_failure(self):  # control: green on the old code
+        self.use_ci_job(PASSING, 0)
+        head = self.head("feat")
+        for name, job in (("run (windows-latest)", 2), ("run (macos-latest)", 3)):
+            with self.subTest(job=name):
+                rows = {head: [tm.draft_row("touched"), tm.draft_row(name, "failure", job=job)]}
+                rc, out = self.run_case(rows, "--lane-lint", "7", "--lint-unknown-ok", "the run is still going")
+                self.assertEqual(rc, 1, "a reason lifted a failed %s run (exit %s):\n%s" % (name, rc, out))
+                self.assertIn("FAILs:", out, "the refusal of a failed %s run does not read as a FAIL:\n%s" % (name, out))
+                self.assertIn(tm.job_link(tm.DRAFT_RUN, job), out, "the refusal of a failed %s run does not name its link:\n%s" % (name, out))
+                self.assertNotIn("is unknown", out, "a failed %s run was refused as unknown:\n%s" % (name, out))
+                self.assertNotIn("not finished", out, "a failed %s run was refused as unfinished:\n%s" % (name, out))
+                self.assertEqual(self.lint_calls(), [], "the lint ran past a failed %s run:\n%s" % (name, out))
+                self.assertEqual(pass_lines(out), [], "a lane with a failed %s run printed a PASS line:\n%s" % (name, out))
+
+    def test_a_rerun_of_a_test_job_is_judged_by_its_newest_row_in_either_order(self):  # control: green on the old code
+        self.use_ci_job(PASSING, 0)
+        head = self.head("feat")
+        failed_older, passed_newer = tm.draft_row("run (windows-latest)", "failure", job=2), tm.draft_row("run (windows-latest)", job=5)
+        passed_older, failed_newer = tm.draft_row("run (windows-latest)", job=2), tm.draft_row("run (windows-latest)", "failure", job=5)
+        cases = (("older failed, newer passed", (failed_older, passed_newer), 0),
+                 ("older passed, newer failed", (passed_older, failed_newer), 1))
+        for label, pair, want_rc in cases:
+            for order in (pair, pair[::-1]):  # each pair in both list orders: a mutant that takes the first listed row fails one of them
+                with self.subTest(case=label, listed=[r["id"] for r in order]):
+                    rows = {head: [tm.draft_row("touched"), *order]}
+                    rc, out = self.run_case(rows, "--lane-lint", "7")
+                    self.assertEqual(rc, want_rc, "a re-run (%s) gave exit %s, want %s:\n%s" % (label, rc, want_rc, out))
+
+
+class DraftRunJobNames(unittest.TestCase):
+    """The job names the draft judge reads (merge.Host.DRAFT_TOUCHED, merge.Host.DRAFT_TEST_JOB) match the jobs of lane-touched-tests.yml. A renamed job
+    leaves the judge no row to read, so a red run is skipped or a lane waits with no end. The workflow is read with workflow_steps, the one step parser,
+    and the selector's OS names with ast. The pin passes on today's names; its red is a mutant of a name, run on a scratch copy."""
+
+    ROOT = os.path.dirname(HERE)
+
+    def read_workflow(self):
+        with open(os.path.join(self.ROOT, ".github", "workflows", "lane-touched-tests.yml"), encoding="utf-8") as f:
+            return f.read()
+
+    def check_run_name(self, block, job):
+        """The name GitHub gives a job's check run: its `name:` line when it has one, else the job's id."""
+        m = re.search(r"^    name:[ \t]*(.*?)[ \t]*$", block, re.M)
+        return m.group(1) if m else job
+
+    def test_the_touched_job_is_the_check_run_the_judge_reads(self):
+        block = job_block(self.read_workflow(), "touched")
+        self.assertIsNotNone(block, "lane-touched-tests.yml has no `touched` job, so the judge reads no touched row")
+        self.assertEqual(self.check_run_name(block, "touched"), merge.Host.DRAFT_TOUCHED,
+                         "the touched job's check run is not named the judge's DRAFT_TOUCHED")
+
+    def test_each_windows_or_macos_test_job_the_selector_names_is_one_the_judge_matches(self):
+        block = job_block(self.read_workflow(), "run")
+        self.assertIsNotNone(block, "lane-touched-tests.yml has no `run` job, so the judge reads no test row")
+        template = self.check_run_name(block, "run")
+        self.assertIn("${{ matrix.os }}", template, "the test job's name is not built from the matrix os: %r" % template)
+        with open(os.path.join(self.ROOT, ".github", "scripts", "touched-tests.py"), encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+        oses = {n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str) and n.value.endswith("-latest")}
+        self.assertTrue({"windows-latest", "macos-latest"} <= oses, "the selector names no windows or macos matrix entry: %s" % sorted(oses))
+        for os_name in sorted(o for o in oses if not o.startswith("ubuntu")):  # the Linux lint runs ubuntu's own tests, so no row of it is read
+            shown = template.replace("${{ matrix.os }}", os_name)
+            with self.subTest(os=os_name):
+                self.assertIsNotNone(merge.Host.DRAFT_TEST_JOB.match(shown),
+                                     "the judge reads no test job named %r, so a red %s run is skipped" % (shown, os_name))
+
 
 def other_comment(cid, n=7):
     """A comment that is no lint: the filler that pushes a later comment onto the next page."""

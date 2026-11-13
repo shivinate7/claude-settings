@@ -20706,17 +20706,103 @@ class BatchDraftRuns(BatchFreeze):
         self.assertEqual(self.host.readies, [pr], "--ready with every lane green did not mark the batch PR ready once:\n" + out)
         self.assertEqual(rc, 0, "--ready with every lane green exited %s:\n%s" % (rc, out))
 
-    def unfinished_lane_setup(self):
-        """Lanes #101 and #102 in a draft batch-nightly, reset to main so --ready rebuilds and pushes it. #102's touched job is still running.
-        -> the batch's pull request number and its snapshot."""
+    def unfinished_lane_setup(self, rows_102=None):
+        """Lanes #101 and #102 in a draft batch-nightly, reset to main so --ready rebuilds and pushes it. #102's draft rows are `rows_102`
+        (default: its touched job still running). -> the batch's pull request number and its snapshot."""
         for n in (101, 102):
             self.lane(n)
         pr = self.frozen_batch("nightly", [101, 102], draft=True)
         self.drift_batch("nightly", [])
         rows = self.passing_rows(101)
-        rows[self.heads[102]] = [draft_row("touched", status="in_progress")]
+        rows[self.heads[102]] = [draft_row("touched", status="in_progress")] if rows_102 is None else rows_102
         self.script(rows)
         return pr, self.snapshot(pr)
+
+    def plain_build(self, rows_by_lane):
+        """Lanes #101, #102 and #103 built as a plain batch (no --ready), each lane's draft rows from `rows_by_lane` (a lane not named
+        passes its touched job). No ready check and no lint runs. -> (rc, output)."""
+        for n in (101, 102, 103):
+            self.lane(n)
+        self.script({self.heads[n]: rows_by_lane.get(n, [draft_row("touched")]) for n in (101, 102, 103)})
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            return self.run_batch("--batch-build", "nightly", "101", "102", "103")
+
+    def test_a_plain_build_with_a_lane_whose_touched_run_is_unfinished_builds_the_batch(self):
+        """A plain build checks only a failed run. An unfinished run is for --ready, so the plain build opens the batch's pull request."""
+        rc, out = self.plain_build({102: [draft_row("touched", status="in_progress")]})
+        self.assertIn(self.heads[102], check_run_reads(self.host.draft_reads), "the build did not read lane #102's draft runs at its head:\n" + out)
+        self.assertEqual(rc, 0, "a plain build refused lane #102 for an unfinished touched run, which only --ready checks (exit %s):\n%s" % (rc, out))
+        self.assertEqual(len(self.host.created), 1, "the plain build did not open the batch's pull request:\n" + out)
+
+    def test_a_plain_build_with_a_lane_whose_draft_rows_are_missing_builds_the_batch(self):
+        """A lane with no touched row is unknown, which only --ready checks: the plain build opens the batch's pull request."""
+        rc, out = self.plain_build({102: []})
+        self.assertIn(self.heads[102], check_run_reads(self.host.draft_reads), "the build did not read lane #102's draft runs at its head:\n" + out)
+        self.assertEqual(rc, 0, "a plain build refused lane #102 for missing draft rows, which only --ready checks (exit %s):\n%s" % (rc, out))
+        self.assertEqual(len(self.host.created), 1, "the plain build did not open the batch's pull request:\n" + out)
+
+    def test_a_plain_build_with_a_failed_lane_and_an_unfinished_one_refuses_before_any_push(self):  # control: green on the old code
+        rc, out = self.plain_build({101: [draft_row("touched"), draft_row("run (windows-latest)", "failure", job=2)],
+                                    103: [draft_row("touched", status="in_progress")]})
+        self.assertEqual(rc, 1, "a plain build with a failed lane did not refuse (exit %s):\n%s" % (rc, out))
+        self.assertIn(job_link(DRAFT_RUN, 2), out, "the refusal does not name the failed run's link:\n" + out)
+        self.assertEqual(self.pushes(), [], "the refused plain build pushed:\n" + out)
+        self.assertEqual(self.host.created, [], "the refused plain build opened a pull request:\n" + out)
+
+    def test_a_plain_build_takes_no_lint_unknown_ok_so_it_cannot_lift_an_unfinished_lane(self):  # control: green on the old code
+        for n in (101, 102):
+            self.lane(n)
+        self.script({self.heads[101]: [draft_row("touched")], self.heads[102]: [draft_row("touched", status="in_progress")]})
+        self.record_pushes()
+        with self.no_lint_or_ready_check():
+            rc, out = self.run_batch("--batch-build", "nightly", "101", "102", "--lint-unknown-ok", "the run is still going")
+        self.assertEqual(rc, 2, "a plain build took --lint-unknown-ok (exit %s):\n%s" % (rc, out))
+        self.assertEqual(self.pushes(), [], "the plain build with --lint-unknown-ok pushed:\n" + out)
+
+    def test_a_ready_with_an_unknown_lane_refuses_without_a_reason_and_names_the_flag(self):  # control: green on the old code
+        pr, snap = self.unfinished_lane_setup(rows_102=[])
+        self.record_pushes()
+        with self.no_lint_or_ready_check(ready_state="pass"):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertEqual(rc, 1, "--ready with lane #102's draft rows missing did not refuse (exit %s):\n%s" % (rc, out))
+        self.assertIn("--lint-unknown-ok", out, "the refusal of missing draft rows cannot be lifted by name:\n" + out)
+        self.assert_untouched(pr, snap, out)
+        self.assertEqual(self.host.readies, [], "the refused --ready marked the batch PR ready:\n" + out)
+
+    def test_a_ready_with_an_unknown_lane_goes_on_with_a_reason_and_the_reason_is_logged(self):  # control: green on the old code
+        pr, _ = self.unfinished_lane_setup(rows_102=[])
+        reason = "no touched run for lane 102 yet"
+        with self.no_lint_or_ready_check(ready_state="pass"):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready", "--lint-unknown-ok", reason)
+        self.assertIn(reason, out, "--lint-unknown-ok's reason is not logged for the missing draft rows:\n" + out)
+        self.assertEqual(self.host.readies, [pr], "--ready with a reason for missing draft rows did not mark the batch PR ready once:\n" + out)
+        self.assertEqual(rc, 0, "--ready with a reason for missing draft rows exited %s:\n%s" % (rc, out))
+
+    def test_a_ready_with_a_skipped_touched_row_and_no_test_rows_is_refused_without_a_reason(self):
+        """A skipped touched job, as a ready lane's is, proves no touched test ran: --ready refuses it as unknown, as it refuses missing rows."""
+        pr, snap = self.unfinished_lane_setup(rows_102=[draft_row("touched", "skipped")])
+        self.record_pushes()
+        with self.no_lint_or_ready_check(ready_state="pass"):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready")
+        self.assertEqual(rc, 1, "--ready passed lane #102, whose touched job was skipped, so no touched test ran (exit %s):\n%s" % (rc, out))
+        self.assertIn("--lint-unknown-ok", out, "the refusal of a skipped touched job cannot be lifted by name:\n" + out)
+        self.assert_untouched(pr, snap, out)
+        self.assertEqual(self.host.readies, [], "the refused --ready marked the batch PR ready:\n" + out)
+
+    def test_a_ready_with_a_failed_lane_and_a_reason_still_refuses_and_names_the_job(self):  # control: green on the old code
+        pr, snap = self.unfinished_lane_setup(rows_102=[draft_row("touched"), draft_row("run (macos-latest)", "failure", job=3)])
+        self.record_pushes()
+        with self.no_lint_or_ready_check(ready_state="pass"):
+            rc, out = self.run_batch("--batch-build", "nightly", "--ready", "--lint-unknown-ok", "the macos run is still going")
+        self.assertEqual(rc, 1, "--lint-unknown-ok lifted a failed macOS run on --ready (exit %s):\n%s" % (rc, out))
+        lane = [line for line in out.splitlines() if "#102" in line]
+        self.assertTrue(lane, "the refusal does not name lane #102:\n" + out)
+        self.assertIn("failed", "\n".join(lane), "the refusal of lane #102 does not say its run failed:\n" + out)
+        self.assertFalse(any("unknown" in line or "not finished" in line for line in lane), "a failed lane is named as unknown or unfinished:\n" + out)
+        self.assertIn(job_link(DRAFT_RUN, 3), out, "the refusal does not name the failed run's link:\n" + out)
+        self.assert_untouched(pr, snap, out)
+        self.assertEqual(self.host.readies, [], "the refused --ready marked the batch PR ready:\n" + out)
 
     def test_a_ready_with_an_unfinished_lane_is_refused_without_a_reason_and_pushes_nothing(self):
         pr, snap = self.unfinished_lane_setup()
@@ -20738,6 +20824,43 @@ class BatchDraftRuns(BatchFreeze):
         self.assertIn(reason, out, "--lint-unknown-ok's reason is not logged for the unfinished draft run:\n" + out)
         self.assertEqual(self.host.readies, [pr], "--ready with a reason did not mark the batch PR ready once:\n" + out)
         self.assertEqual(rc, 0, "--ready with a reason for an unfinished draft run exited %s:\n%s" % (rc, out))
+
+
+class DraftRunJudge(unittest.TestCase):
+    """merge.Host.draft_run_state judges one head's draft rows (decision lanes-run-no-full-ci-job; workflow lane-touched-tests.yml). A touched job
+    that was skipped, as a ready pull request's is, proves no touched test ran, so the verdict is unknown. Rows that share a name are one job's
+    runs, and the newest id decides, whatever order the rows come in. Each case scripts its rows and reads them through DraftRunReads, which runs
+    the real judge."""
+
+    SHA = "c" * 40
+
+    def judge(self, rows):
+        return DraftRunReads({self.SHA: rows}, []).draft_run_state(self.SHA)
+
+    def test_a_touched_row_skipped_with_no_test_rows_is_unknown_not_a_pass(self):
+        state, lines = self.judge([draft_row("touched", "skipped")])
+        self.assertEqual(state, "unknown", "a skipped touched job with no test rows was judged %r, a pass with no proof a touched test ran: %s" % (state, lines))
+
+    def test_a_touched_row_that_succeeded_with_no_test_rows_passes(self):  # control: green on the old code
+        state, lines = self.judge([draft_row("touched")])
+        self.assertEqual(state, "pass", "a touched job that succeeded with no test rows was judged %r: %s" % (state, lines))
+
+    def test_a_failed_older_run_and_a_passed_newer_run_of_one_job_pass_in_either_order(self):  # control: green on the old code
+        older, newer = draft_row("run (windows-latest)", "failure", job=2), draft_row("run (windows-latest)", job=5)
+        self.assertLess(older["id"], newer["id"], "precondition: the passed run is not the newer one, so the case probes nothing")
+        for rows in ([draft_row("touched"), older, newer], [draft_row("touched"), newer, older]):
+            with self.subTest(order=[r["id"] for r in rows]):
+                state, lines = self.judge(rows)
+                self.assertEqual(state, "pass", "a re-run that passed after a failed run was judged %r, not pass: %s" % (state, lines))
+
+    def test_a_passed_older_run_and_a_failed_newer_run_of_one_job_fail_in_either_order_and_name_the_newer_link(self):  # control: green on the old code
+        older, newer = draft_row("run (windows-latest)", job=2), draft_row("run (windows-latest)", "failure", job=5)
+        self.assertLess(older["id"], newer["id"], "precondition: the failed run is not the newer one, so the case probes nothing")
+        for rows in ([draft_row("touched"), older, newer], [draft_row("touched"), newer, older]):
+            with self.subTest(order=[r["id"] for r in rows]):
+                state, lines = self.judge(rows)
+                self.assertEqual(state, "fail", "a re-run that failed after a passed run was judged %r, not fail: %s" % (state, lines))
+                self.assertIn(job_link(DRAFT_RUN, 5), "\n".join(lines), "the failure does not name the newer run's link: %s" % lines)
 
 
 class TouchesHost(PullsHost):
