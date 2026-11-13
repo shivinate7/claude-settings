@@ -2,7 +2,7 @@
  "id": "child-page-fix-per-repo",
  "at": "2026-11-13T11:53:55-06:00",
  "title": "The #1779 fix is done in each child repo, by runner 11",
- "ruling": "Owner 2026-11-13 11:53 CST, item 721 a: runner 11 lanes the fix for blank Status tabs in each child repo. Data from all accounts was already exported to a branch on each child repo as plain git; the fix must reflect that.",
+ "ruling": "WITHDRAWN 12:00 CST Nov 13 (triage): item 721 misdescribed PR #1779 as child-repo work; it changes two claude-settings scripts. Reopened with new options. Owner 2026-11-13 11:53 CST, item 721 a: runner 11 lanes the fix for blank Status tabs in each child repo. Data from all accounts was already exported to a branch on each child repo as plain git; the fix must reflect that.",
  "quote": "data from all accounts was already exported to a branch on each child repo as common git",
  "source": "Artifact comment from the owner, 11:53 CST Nov 13 (page item pick-1779-child-pages, 721 a).",
  "status": "open",

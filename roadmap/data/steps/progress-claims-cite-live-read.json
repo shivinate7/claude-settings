@@ -1,7 +1,7 @@
 {
  "id": "progress-claims-cite-live-read",
  "title": "A report line that states a step's or lane's progress cites a live read made that turn",
- "status": "folded",
+ "status": "ready",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Incident 11:41 CST Nov 13 (retrospective): it told the owner step rounds-rules-one-record was \"still in progress\" from its roadmap status alone. Fact: its lane finished 19:42 CST Nov 12 and PR #2888 sat green in batch 133, unmerged. Owner 11:41 CST: \"is anyone tracking how close that step/lane is or you just fluffed pretending that lane is tstill goping\".",
  "source": "retrospective 11:43 CST Nov 13; owner 11:41 CST",
- "note": "Guard: a report or reply line that says how far a step or lane has got (in progress, nearly done, waiting) must cite a live read made that turn: get_session for a lane, PR state for a PR, the batch PR for a batch. The remedy names the read to make. Checked at Stop on the reply text only. A part of step answered-needs-source is the other home; the lane that builds it decides. False-alarm test: a line that cites its live read, or says \"unmeasured\", passes. Folded into counts-from-rest (retrospective 11:46 CST Nov 13).",
- "updatedAt": "2026-11-13T11:51:15-06:00"
+ "note": "Guard: a report or reply line that says how far a step or lane has got (in progress, nearly done, waiting) must cite a live read made that turn: get_session for a lane, PR state for a PR, the batch PR for a batch. The remedy names the read to make. Checked at Stop on the reply text only. A part of step answered-needs-source is the other home; the lane that builds it decides. False-alarm test: a line that cites its live read, or says \"unmeasured\", passes. Folded into counts-from-rest (retrospective 11:46 CST Nov 13). Unfolded (coordinator 11:59 CST Nov 13): a separate Stop guard on report text, not a test case of counts-from-rest (lane counts-from-rest: different trigger and remedy; its PR #3172 is past round 3 and goes as is). Ready, its own lane; the coordinator starts it.",
+ "updatedAt": "2026-11-13T12:00:23-06:00"
 }

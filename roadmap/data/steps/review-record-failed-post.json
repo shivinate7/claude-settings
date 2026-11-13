@@ -1,13 +1,13 @@
 {
   "title": "A failed or refused review-record post does not count as posted",
   "phase": "now",
-  "status": "todo",
+  "status": "doing",
   "order": 958,
   "owner": "lane",
   "why": "A record post that failed or was refused by a hook still counts as posted, so a builder spawn is allowed with no record on the PR.",
-  "note": "From lane record-after-each-round, round 3 reviewer (sonnet) PASS on #1678, 01:34 CST Nov 10. hooks/guard_merge.py review_record_hit (~:1709, :1625): an is_error add_issue_comment with the marker, or a cloud-refused Bash gh pr comment, counts as the posted record; `failed` (~:1693) filters only reviewer spawns. Proof: scratch transcript; builder spawn allowed. Fix: skip posts whose tool_use id is in `failed`, plus a case and a mutant. Starts after #1678 merges.",
-  "updatedAt": "2026-11-10T01:35:00-06:00",
-  "lane": "",
+  "note": "From lane record-after-each-round, round 3 reviewer (sonnet) PASS on #1678, 01:34 CST Nov 10. hooks/guard_merge.py review_record_hit (~:1709, :1625): an is_error add_issue_comment with the marker, or a cloud-refused Bash gh pr comment, counts as the posted record; `failed` (~:1693) filters only reviewer spawns. Proof: scratch transcript; builder spawn allowed. Fix: skip posts whose tool_use id is in `failed`, plus a case and a mutant. Starts after #1678 merges. Coordinator 11:58 CST Nov 13: doing, express, one lane for all three, session_013NEJL2GJYfRpFUNEkfT6QN. Incident: in the cloud `merge --review-record` printed PASS on #3138 while its gh write was refused and no comment posted; likely the cause of today's \"no record\" reads on #3141, #3146, #3136 and #2870.",
+  "updatedAt": "2026-11-13T12:00:23-06:00",
+  "lane": "session_013NEJL2GJYfRpFUNEkfT6QN",
   "blockedBy": [
     "record-after-each-round"
   ]

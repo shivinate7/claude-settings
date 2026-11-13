@@ -1,0 +1,10 @@
+{
+ "id": "coordinator-spawns-refuter",
+ "at": "2026-11-09T13:09:33-06:00",
+ "title": "A cloud coordinator may spawn a plan refuter, added in #2123",
+ "ruling": "Owner 2026-11-09 13:09 CST, page item 460 (coordinator-refuter-spawn), pick a: add the refuter in #2123. This widens the earlier ruling 111 a, which let a cloud coordinator spawn only Plan, Explore and claude-code-guide agents. #1971 lands after a fresh full round 3.",
+ "quote": "a",
+ "source": "Page copy answers/coordinator-refuter-spawn.json (at 2026-11-09T19:09:33Z, choice a); item reply routed 13:11 CST Nov 9 to step coordinator-refuter-spawn. Asked for by lane rebuild-2123, 11:5x CST Nov 13.",
+ "status": "open",
+ "step": "coordinator-refuter-spawn"
+}

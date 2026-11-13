@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Runner 10 merge-path audit (owner 11:34 and 11:36 CST Nov 13): a closed PR keeps spending runner minutes.",
  "source": "coordinator 11:46 CST Nov 13, from runner 10 audit",
- "note": "Doing, express. Lane session_013NEJL3WnhxtGWz1TAEcDVq. Owner 11:34/11:36 CST Nov 13.",
- "updatedAt": "2026-11-13T11:51:15-06:00"
+ "note": "Doing, express. Lane session_013NEJL3WnhxtGWz1TAEcDVq. Owner 11:34/11:36 CST Nov 13. Lane report 12:00 CST Nov 13: builder running. Owner grant via runner 10, 11:34/11:36 CST: CI speed is express, no fixed time targets, proof is measured (a closed PR's run shows cancelled within the next minute). Ruling recorded as one line in docs/todo.md on the lane branch. The test-author added 3 lines to checks.yml (a run step for lint/test_cancel_on_close.py, after the all-jobs-passed step), a file three other lanes edit.",
+ "updatedAt": "2026-11-13T12:00:23-06:00"
 }
