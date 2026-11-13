@@ -3033,6 +3033,106 @@ class LintPostsPassComment(CiJobStub, tm.CloudSession):
         self.assertEqual(tm.GhHalf.gh_state(self, "posted") or [], [], "the failed post was kept as a posted comment")
 
 
+class BatchLabelWrite(CiJobStub, tm.CloudSession):
+    """`merge --batch-label <pr>` adds the `batch` label to a batch's integration pull request (decision pr-ledger, coordinator 2026-11-10 01:07 CST:
+    `merge --lane-lint` stays read-only, and the label is its own write with a target check). The target is an open PR whose head branch starts with
+    `batch-`; any other PR is refused with nothing written. A failed add is a refusal, exit 1. It takes no lint, no lock and no merge role. The gh shim
+    answers pull request 7 with the head branch a case names. setUp mirrors LintPostsPassComment, which this class does not subclass, so its cases run once."""
+
+    @classmethod
+    def setUpClass(cls):
+        unittest.TestCase.setUpClass()  # not CloudSession's: it would make a second run folder
+        cls.run_dir = RUN_FOLDER
+
+    def setUp(self):
+        with unittest.mock.patch.object(tempfile, "tempdir", RUN_FOLDER):
+            super().setUp()
+        self.lock = NoLock()
+        self.init_stub()
+        tm.install_gh_shim(self)
+
+    def as_pr(self, head_ref="batch-x", state="open", **gh_state):
+        """The shim answers pull request 7 with `head_ref` and `state`; `gh_state` is GhHalf.set's keywords."""
+        sha = self.head("feat")
+        tm.sh(self.co, "git", "push", "-q", "origin", f"{sha}:refs/heads/{head_ref}")
+        tm.GhHalf.set(self, pr_raw={"head": {"ref": head_ref, "sha": sha, "label": "o:" + head_ref}, "state": state}, **gh_state)
+
+    def run_label(self, *argv, cloud=False):
+        """-> (rc, stdout and stderr together) of merge in the lane checkout, on the real Host through the shim."""
+        out, err = io.StringIO(), io.StringIO()
+        with self.cloud(**({} if cloud else {"CLAUDE_CODE_REMOTE": None})):
+            try:
+                rc = self.run_merge(*argv, host=merge.Host(), stdout=out, stderr=err)[0]
+            except SystemExit as e:
+                rc = e.code
+        return rc, out.getvalue() + err.getvalue()
+
+    def labeled(self):
+        return tm.GhHalf.gh_state(self, "labeled") or []
+
+    def test_an_open_batch_pull_request_gets_the_batch_label_by_one_rest_post(self):
+        self.as_pr()
+        rc, out = self.run_label("--batch-label", "7")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.labeled(), [{"n": 7, "labels": ["batch"]}], "no `batch` label landed on #7:\n" + out)
+        self.assertEqual([l.split()[:2] for l in tm.GhHalf.calls(self).splitlines()], [["GET", "pulls/7"], ["POST", "issues/7/labels"]],
+                         "the label write made other gh calls than one read of the PR and one label POST:\n" + tm.GhHalf.calls(self))
+        self.assertEqual(tm.GhHalf.gh_state(self, "posted") or [], [], "the label write also posted a comment:\n" + out)
+        self.assertEqual(self.lint_calls(), [], "the label write ran a lint:\n" + out)
+
+    def test_a_cloud_session_with_no_merge_role_may_run_it(self):
+        self.as_pr()
+        rc, out = self.run_label("--batch-label", "7", cloud=True)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.labeled(), [{"n": 7, "labels": ["batch"]}], out)
+
+    def test_a_lane_pull_request_is_refused_and_gets_no_label(self):
+        self.as_pr(head_ref="lane/feat")
+        rc, out = self.run_label("--batch-label", "7")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("lane/feat", out)
+        self.assertIn("batch-", out)
+        self.assertEqual(self.labeled(), [], "a lane PR got the batch label:\n" + out)
+
+    def test_a_lane_branch_that_holds_batch_after_a_prefix_is_refused(self):
+        self.as_pr(head_ref="lane/batch-x")  # a real lane branch: `batch-` sits after `lane/`, so only a prefix match refuses it
+        rc, out = self.run_label("--batch-label", "7")
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.labeled(), [], "a lane PR whose branch holds `batch-` got the batch label:\n" + out)
+
+    def test_a_closed_batch_pull_request_is_refused_and_gets_no_label(self):
+        self.as_pr(state="closed")
+        rc, out = self.run_label("--batch-label", "7")
+        self.assertEqual(rc, 1, out)
+        self.assertIn("open", out)
+        self.assertEqual(self.labeled(), [], "a closed PR got the batch label:\n" + out)
+
+    def test_a_failed_add_is_a_refusal_that_names_the_pull_request(self):
+        self.as_pr(label_fail=tm.rest_err(403, "Forbidden"))
+        rc, out = self.run_label("--batch-label", "7")
+        self.assertEqual(rc, 1, "a write that failed exited 0:\n" + out)
+        self.assertIn("#7", out)
+        self.assertEqual(self.labeled(), [], "the failed add was kept as a label")
+
+    def test_a_lane_lint_pass_on_a_batch_pull_request_adds_no_label(self):  # the 2026-11-10 ruling: --lane-lint stays read-only
+        self.as_pr(checks_seq=[[("touched", "pass", "")]])  # the draft's touched job passed: the lint's read of the head's draft run
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.run_label("--lane-lint", "7")
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(self.labeled(), [], "a lane lint wrote a label:\n" + out)
+
+    def test_the_flag_needs_one_pull_request_number_and_stands_alone(self):
+        self.as_pr()
+        alone = "--batch-label takes one pull request number and stands alone"
+        for argv, text in ((("--batch-label",), alone), (("--batch-label", self.head("feat")), "invalid int value"), (("--batch-label", "7", "--confirm"), alone),
+                           (("--batch-label", "7", "--lane-lint"), alone), (("--batch-label", "7", "--base", "main"), "--base goes with")):
+            with self.subTest(argv=argv):
+                rc, out = self.run_label(*argv)
+                self.assertEqual(rc, 2, out)
+                self.assertIn(text, out)  # old argparse also exits 2, for "unrecognized arguments", which holds none of these texts
+        self.assertEqual(self.labeled(), [])
+
+
 class LintCheckReviewed(tm.ReviewEnv):
     """`merge --reviewed` leaves a pull request not done unless a lane-lint PASS names its live head (decision lanes-run-no-full-ci-job). The
     one review record here is done, so only the lint comment decides. A PASS for an older head, a FAIL, and a PASS by a non-owner each leave
