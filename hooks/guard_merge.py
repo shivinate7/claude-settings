@@ -1947,7 +1947,7 @@ def step_pr_hit(tool: str, tool_input, transcript: str):
     None (rule lane-step-dup, part two). The call is a step call (_step_call). An open pull request in a cs-repo of the
     subject whose head is lane_head_refs(step) refuses it, and the reason names the pull request. The brief's own text
     (the message of a brief, the prompt of a create) lifts it when it says `continues #N` or `replaces #N` and N is
-    such an open pull request; any other N lifts nothing. A brief to a target that carries the step passes too. The
+    such an open pull request, whichever the list reads first; any other N lifts nothing. A brief to a target that carries the step passes too. The
     read is open_pull_rows, the one reader lane-closes-after-records uses. A failed read, a repo tag that is no
     owner/name, or a brief target with no current record is a refusal: the guard-wide crash path fails open.
     Cost: one paged gh read per cs-repo tag, for each step call."""
@@ -1965,6 +1965,7 @@ def step_pr_hit(tool: str, tool_input, transcript: str):
         module = merge_module()
         if module is None:
             raise RuntimeError("the merge tool could not be loaded")
+        first = None
         for repo in dict.fromkeys(_tag_values(subject, ARCHIVE_REPO_PREFIX)):
             if not _REPO_NAME.fullmatch(repo):
                 raise ValueError("not an owner/name repo tag")
@@ -1976,8 +1977,11 @@ def step_pr_hit(tool: str, tool_input, transcript: str):
                     if ref in lane_head_refs(step):
                         if str(row.get("number")) in taken:
                             return None
-                        return ("lane step " + step + " has open pull request " + str(row.get("number", "?")),
-                                STEP_PR_REASON % {"pr": row.get("number", "?"), "step": step})
+                        first = first or (row, step)
+        if first:
+            row, step = first
+            return ("lane step " + step + " has open pull request " + str(row.get("number", "?")),
+                    STEP_PR_REASON % {"pr": row.get("number", "?"), "step": step})
     except (Exception, SystemExit):
         return "lane step with an unreadable pull request list", STEP_PR_READ_REASON % steps[0]
     return None
