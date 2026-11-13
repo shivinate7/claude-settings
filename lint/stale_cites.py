@@ -55,7 +55,7 @@ Refuses a range that leaves a tracked Markdown line naming a name the range remo
             only when the whole tree is read. A cite of a path the range removed is STALE001's.
 A line already stale at base, for a name the range did not remove, never fires. Left out: docs/records.md,
 each file `.ste-lint-exclude` (and the EXCLUDE env of the ste-lint action) names, and a line marked
-`<!-- ste-disable-line STALE001 -->` (or STALE002, STALE003, STALE004, STALE008). Fenced blocks count as prose.
+`<!-- ste-disable-line STALE001 -->` (or STALE002, STALE003, STALE004, STALE008, STALE011). Fenced blocks count as prose.
 Each Markdown file is read as committed at head, never from the working tree.
 --tree [REV] reads every tracked Markdown file at REV (default HEAD) instead of a range, so it fires on lines no
 change touched. It is opt-in (the ste-lint input `tree-cites`). It needs no base, so a shallow clone is fine.
@@ -65,6 +65,15 @@ change touched. It is opt-in (the ste-lint input `tree-cites`). It needs no base
             no tracked top folder is no path cite, so it never fires.
   STALE004  the line anchors `path:N` or `path:N-M` on a tracked file, and N is below 1, M is below N, or the
             last number is past the file's last line. A dead path gives STALE003 only.
+  STALE011  (anchor_drift) a sentence anchors `path.py:N` or `path.py:N-M` on a tracked .py file, and also holds a
+            backticked symbol that looks like code (it has `_`, is CamelCase, or is a call form `name(...)`) which
+            that file defines: a def, a class or a module-level assignment, read with `parse_python` and the
+            `names_in` walk (`def_lines`), at the line the def, class or assignment starts on, never a decorator's.
+            It fires when no def line of the symbol is in N-3..M+3 (ANCHOR_SLACK) and no other cite of the sentence
+            holds it. A symbol the file does not define, a plain word and a file name give nothing. A sentence is
+            judged inside its own line. A sentence with a cite that is no line of its file (STALE004's) is not
+            judged, and a dead path is STALE003's. A cited .py that does not parse is one unknown line. One finding
+            a line. A range judges added lines only, so a def that moved leaves its untouched cites to --tree.
 --tree and --range are exclusive.
 
 Output: `path:line: CODE message`, then `stale-cites: PASS` or `stale-cites: FAIL`. Exit 0 pass, 1 findings,
@@ -113,7 +122,10 @@ A range whose merge-base or diff failed adds starts to tell the cause apart, an 
 three; a base with a first-parent suffix adds a `rev-list`, so five and four; the root form `HEAD~1..HEAD` five (its
 three-dot form six); a passing run adds none.
 A --tree run starts one python3, then git rev-parse, ls-tree and one cat-file --batch. It reads each tracked .md
-once, and each file a line anchor names once more, even when that file is a .md. It writes no file and prints no report.
+once, and each file a line anchor names once more, even when that file is a .md. STALE011 adds no read there: it
+reuses that read of a cited .py. In a range, STALE011 reads a cited .py's blob at head through the one `cat-file`,
+and only for an added line that has a `.py:N` anchor, a code span and a code-looking symbol: a Markdown-only range
+with such a line starts 4 (the 3 and that `cat-file`), and one with none starts 3. It writes no file and prints no report.
 """
 import argparse
 import ast
@@ -703,6 +715,18 @@ class ForeignValueReader:
         return messages
 
 
+def lines_at_base(rng, md):
+    """How often each stripped line of the page holds at base, as a Counter; None when the range left the page
+    untouched. A reader that judges added lines counts the lines it has seen against it: the nth copy of a line is
+    added when base holds fewer than n copies, so a second copy of an old line counts and a moved line does not."""
+    if md not in rng.md_base:
+        return None
+    old = rng.md_base[md]
+    blob = rng.batch.get("%s:%s" % (rng.base, old)) if old else None
+    text = blob.decode("utf-8", "replace").replace("\r\n", "\n") if blob is not None else ""
+    return collections.Counter(line.strip() for line in text.split("\n"))
+
+
 class ValueReader:
     """STALE008: a value cite `file.py: NAME = literal` that quotes what the range changed or removed, or that the
     range added wrong. A cite of a value the range did not change, on a line the range did not add, is left alone.
@@ -757,13 +781,7 @@ class ValueReader:
     def begin(self, state, md, rng):
         """Before the lines of a page: count its lines at base, so a line the range only moved is not an added one."""
         state.seen = collections.Counter()
-        if md not in rng.md_base:
-            state.fresh = None
-            return
-        old = rng.md_base[md]
-        blob = rng.batch.get("%s:%s" % (rng.base, old)) if old else None
-        text = blob.decode("utf-8", "replace").replace("\r\n", "\n") if blob is not None else ""
-        state.fresh = collections.Counter(line.strip() for line in text.split("\n"))
+        state.fresh = lines_at_base(rng, md)
 
     def tree(self, state, side, path):
         """The parsed .py at base or head: ABSENT when no tracked file has the path, None when it does not parse."""
@@ -1242,6 +1260,169 @@ def route_ids(rng, cache):
     return cache[0]
 
 
+# STALE011 (anchor_drift): a line anchors `path.py:N[-M]` and names a code-looking symbol that the file defines
+# somewhere else. One home for the judgement; the range reader and `scan_tree` both call `anchor_drift`.
+ANCHOR_SLACK = 3  # a cite holds a symbol when a def line of it is within this many lines of the cited range
+SYMBOL_SPAN = re.compile(r"([A-Za-z_]\w*)(\([^()]*\))?\Z")  # a whole code span: a name, or a call of one
+CAMEL_CASE = re.compile(r"[a-z0-9][A-Z]|[A-Z]{2,}[a-z]")
+ANCHOR_CANDIDATE = re.compile(r"\.py:\d")
+
+
+def code_symbol(span):
+    """The name a code span holds when it looks like code: it has `_`, is CamelCase, or is a call form `name(...)`.
+    A plain word, a file name and any other span give None."""
+    match = SYMBOL_SPAN.match(span)
+    if match is None:
+        return None
+    name = match.group(1)
+    return name if match.group(2) is not None or "_" in name or CAMEL_CASE.search(name) else None
+
+
+def def_lines(tree):
+    """{name: [line]}: the line each module-level def, class and assignment of a parsed module starts on (a
+    decorator's line is not the def's), and each def directly in a module-level class. The walk is `names_in`'s.
+    An import, a for or with target and a walrus bind a name there but define nothing, so they are left out."""
+    found = {}
+    flat = list(module_statements(tree.body))
+    for node in flat:
+        if isinstance(node, FUNCTIONS + (ast.ClassDef,)):
+            found.setdefault(node.name, []).append(node.lineno)
+            if isinstance(node, ast.ClassDef):
+                for member in module_statements(node.body):
+                    if isinstance(member, FUNCTIONS):
+                        found.setdefault(member.name, []).append(member.lineno)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            for target in (node.targets if isinstance(node, ast.Assign) else [node.target]):
+                for name in target_names(target):
+                    found.setdefault(name, []).append(node.lineno)
+    return found
+
+
+class AnchorFacts:
+    """What `anchor_drift` reads of a cited file, once per path. `fetch(path)` is the file's bytes, or None when no
+    tracked file has the path."""
+
+    def __init__(self, fetch):
+        self.fetch, self.facts, self.unparsed = fetch, {}, set()
+
+    def get(self, path):
+        """None when the path is no tracked file; (line count, None) when it does not parse; else
+        (line count, `def_lines`)."""
+        if path not in self.facts:
+            data = self.fetch(path)
+            if data is None:
+                self.facts[path] = None
+            else:
+                tree = parse_python(data)
+                self.facts[path] = (line_count(data), def_lines(tree) if tree is not None else None)
+        return self.facts[path]
+
+
+def code_symbols(text):
+    """[(offset, name)]: each code span of the line that holds a `code_symbol`."""
+    found = []
+    for match in CODE_SPAN.finditer(text):
+        ticks = len(match.group(1))
+        name = code_symbol(text[match.start() + ticks:match.end() - ticks].strip())
+        if name:
+            found.append((match.start(), name))
+    return found
+
+
+def anchor_drift(text, facts, folder="", symbols=None):
+    """[message]: one STALE011 message for a Markdown line, or one UnknownText, or []. A sentence of the line holds a
+    code-looking backticked symbol and anchors `path.py:N[-M]` on a tracked .py that defines the symbol, but no cite of
+    the sentence has a def line of it in N-ANCHOR_SLACK..M+ANCHOR_SLACK. A sentence is judged inside its own line, and
+    is cut at a . ! or ? that no code span, quote or comment holds. A symbol the cited file does not define is
+    silent. A sentence with a cite that is no line of its file (STALE004's) is not judged. A cite is read as STALE003
+    and STALE004 read it, from the repo root or the page's `folder`. `symbols` is `code_symbols(text)` when the
+    caller has it."""
+    if not ANCHOR_CANDIDATE.search(text) or "`" not in text:
+        return []
+    symbols = code_symbols(text) if symbols is None else symbols
+    if not symbols:
+        return []
+    ends = [m.end() for m in SENTENCE_END.finditer(blanked(text)[0])]
+    cites, unknowns = {}, []  # sentence number -> [(home, first, last)]; each unparsed file, once
+    for run in RUN_RE.finditer(text):
+        cite = run.group(0).rstrip(".-")
+        anchor = ANCHOR.match(text, run.end()) if cite == run.group(0) else None
+        if anchor is None or not cite.endswith(".py") or not FILE_CITE.match(cite) \
+                or placeholder_adjacent(text, run.start(), run.end()):
+            continue
+        home = next((c for c in (cite, posixpath.normpath(posixpath.join(folder, cite)))
+                     if not c.startswith("..") and facts.get(c) is not None), None)
+        if home is None:
+            continue  # no tracked file: STALE003's
+        if facts.get(home)[1] is None:
+            if home not in facts.unparsed:
+                facts.unparsed.add(home)
+                unknowns.append(UnknownText("%s does not parse at the revision read; its symbols were not checked" % home))
+            continue
+        first, last = int(anchor.group(1)), int(anchor.group(2) or anchor.group(1))
+        cites.setdefault(bisect.bisect_right(ends, run.start()), []).append((home, first, last))
+    for position, name in symbols:
+        sentence = cites.get(bisect.bisect_right(ends, position), [])
+        if any(first < 1 or last < first or last > facts.get(home)[0] for home, first, last in sentence):
+            continue
+        defined = [(home, first, last, facts.get(home)[1].get(name)) for home, first, last in sentence]
+        defined = [d for d in defined if d[3]]
+        if defined and not any(first - ANCHOR_SLACK <= n <= last + ANCHOR_SLACK for _, first, last, lines in defined for n in lines):
+            home, first, last, lines = defined[0]
+            return unknowns + ["%s is defined at %s:%s, not within %d lines of the cited %s:%s; update the anchor"
+                               % (name, home, ", ".join(str(n) for n in lines), ANCHOR_SLACK, home,
+                                  first if first == last else "%d-%d" % (first, last))]
+    return unknowns
+
+
+class AnchorReader:
+    """STALE011: an ADDED line that anchors `path.py:N[-M]` on the wrong line for a symbol it names (`anchor_drift`).
+    An untouched line is left alone, so a def that moved leaves its old cites to the tree read. It reads only the
+    touched pages whose added lines hold a `.py:N` anchor and a code span, and a blob (the page at base, a cited
+    file at head) only once a line of such a page names a code-looking symbol, through the one `cat-file` the run
+    opens."""
+    code = "STALE011"
+
+    class State:
+        def __init__(self, rng, pages):
+            self.rng, self.pages = rng, pages
+            self.facts = AnchorFacts(lambda path: rng.batch.get("%s:%s" % (rng.head, path)))
+            self.md, self.folder, self.fresh, self.seen = None, "", False, None  # fresh False: not counted yet
+
+    def prepare(self, rng):
+        """None when no touched page gains a line with a `.py:N` anchor in it and a backtick."""
+        pages = [md for md in sorted(rng.md_base)
+                 if any("`" in text and ANCHOR_CANDIDATE.search(text) for _, text in rng.added_lines.get(md, ()))]
+        return self.State(rng, pages) if pages else None
+
+    def needs_tree(self, state):
+        return False
+
+    def pages(self, state):
+        return state.pages
+
+    def begin(self, state, md, rng):
+        state.md, state.folder = md, posixpath.dirname(md)
+        state.seen = collections.Counter()
+        state.fresh = False  # the page's base blob is read at its first line that names a symbol, never before
+
+    def line(self, state, text, claimed):
+        if not ANCHOR_CANDIDATE.search(text):
+            return []
+        symbols = code_symbols(text)
+        if not symbols:
+            return []
+        if state.fresh is False:
+            state.fresh = lines_at_base(state.rng, state.md)
+        if state.fresh is None:
+            return []
+        key = text.strip()
+        state.seen[key] += 1
+        if state.seen[key] <= state.fresh[key]:
+            return []
+        return anchor_drift(text, state.facts, state.folder, symbols)
+
+
 # One entry per code. A reader has `code`, `prepare(rng)` (its state, or None when the range gives it nothing to
 # check) and `line(state, text, claimed)` (messages for one Markdown line; `claimed` holds the paths an earlier
 # reader already cited there). A reader with `unknown = True` reports its messages as unknown, not as findings.
@@ -1249,7 +1430,8 @@ def route_ids(rng, cache):
 # its messages are report lines, never findings. A reader may also have `needs_tree(state)` and `pages(state)`: when
 # no reader that judges needs the tree, the run reads only the pages those readers name, and only those readers.
 # `begin(state, md, rng)` is called before the lines of each page. A new check adds one entry.
-READERS = (PathReader(), NameReader(), ForeignReader(), ForeignValueReader(), ValueReader(), RouteClaimReader())
+READERS = (PathReader(), NameReader(), ForeignReader(), ForeignValueReader(), ValueReader(), AnchorReader(),
+           RouteClaimReader())
 
 
 def tracked_entries(rev, *paths):
@@ -1508,7 +1690,8 @@ def line_count(data):
 
 
 def scan_tree(rev):
-    """(found, unknowns) for every tracked Markdown line at rev: STALE003 dead path cites, STALE004 bad anchors."""
+    """(found, unknowns) for every tracked Markdown line at rev: STALE003 dead path cites, STALE004 bad anchors,
+    STALE011 anchors on the wrong line for a symbol the line names."""
     found = {}
     entries = tracked_entries(rev)
     files = {p for _, p in entries}
@@ -1520,11 +1703,22 @@ def scan_tree(rev):
     mds = markdown_files(entries, exclude_patterns("."))
     batch = BlobReader()
     regular = set(file_paths(entries))
+    unknowns = []
+    facts = AnchorFacts(lambda path: blob_of(path) if path in regular else None)
     counts = {}  # tracked file -> its line count, read once
+    pys = {}  # a tracked .py -> its bytes, kept for the anchor check, which reads it again
+
+    def blob_of(path):
+        if path not in pys:
+            data = batch.get("%s:%s" % (rev, path))
+            if not path.endswith(".py"):
+                return data
+            pys[path] = data
+        return pys[path]
 
     def lines_of(path):
         if path not in counts:
-            data = batch.get("%s:%s" % (rev, path))
+            data = blob_of(path)
             if data is None and path in regular:  # listed as a file, so a missing blob is a read that could not run
                 raise Unknown("%s is in the tree at %s but cannot be read" % (path, rev))
             counts[path] = line_count(data) if data is not None else None
@@ -1559,9 +1753,15 @@ def scan_tree(rev):
                     if total is not None and (first < 1 or last < first or last > total):
                         found.setdefault((md, number, "STALE004"), []).append(
                             "%s%s is not a line of that file, which has %d" % (home, anchor.group(0), total))
+                if "STALE011" not in off:
+                    for message in anchor_drift(line, facts, folder):
+                        if isinstance(message, UnknownText):
+                            unknowns.append("%s:%d: %s" % (md, number, message))
+                        else:
+                            found.setdefault((md, number, "STALE011"), []).append(message)
     finally:
         batch.close()
-    return found, []
+    return found, unknowns
 
 
 def main(argv):
