@@ -1,7 +1,7 @@
 ---
 name: design-reviewer
 description: Judges the built screens of a lane against the step's mockup (or, for a text-only change, main's screenshots) and the repo's design rules, at every size and theme. Gives a verdict per screen. Never edits.
-model: opus
+model: sonnet
 effort: high
 disallowedTools: Edit, Write, NotebookEdit, mcp__claude-code-remote__*
 isolation: worktree
