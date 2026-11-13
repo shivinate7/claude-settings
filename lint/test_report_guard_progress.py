@@ -2,9 +2,10 @@
 """The progress-claim check of report_guard.py (rule progress-claims-cite-live-read), run at Stop.
 
 A reply line that says how far a step, lane, batch or PR has got ("still in progress", "nearly done", "waiting on CI")
-must cite a live read made this turn, on the same line: get_session, list_events, pull_request_read,
-list_pull_requests, "live read", "REST", a PR URL, or a read stamp such as "read at 11:43 CST". "unmeasured", "not read"
-and "unknown" also pass. A bare `#n` names a PR and reads nothing. A line with no subject is no claim. A state word such
+must cite a named read made this turn, on the same line: get_session, list_events, pull_request_read,
+list_pull_requests, a REST API or REST read, or a PR URL. A read stamp such as "read at 11:43 CST" counts only beside one
+of those. "unmeasured", "not read" and "unknown" also pass. A bare "live read", a bare REST and a bare stamp are no cite.
+A bare `#n` names a PR and reads nothing. A line with no subject is no claim. A state word such
 as "merged" or "finished", with no progress phrase, is no claim either.
 
 Each case runs the Stop hook as a subprocess, as the other report_guard suites do. The Stop runner, the transcript
@@ -63,7 +64,7 @@ SUBJECT_LINES = (
 CITED = (
     (INCIDENT, "get_session at 11:43 CST: idle"),
     (LANE_NEAR, "list_events at 11:43 CST: last event idle"),
-    (LANE_NEAR, "live read at 11:43 CST: idle"),
+    (LANE_NEAR, "get_session at 11:43 CST: idle"),
     (LANE_NEAR, "REST read at 11:43 CST: idle"),
     (BATCH_WAIT, "pull_request_read on #2888: open, checks pending"),
     (BATCH_WAIT, "list_pull_requests: 1 open"),
@@ -359,6 +360,13 @@ class ProgressClaimTests(unittest.TestCase):
         self.assert_allowed("Lane 4 is nearly done (get_session read at 11:43 CST: idle).")
         self.assert_allowed("Lane 4 is nearly done (list_events read at 11:43 CST: idle).")
         self.assert_allowed("Lane 4 is nearly done (REST API read at 11:43 CST: idle).")
+
+    def test_pc_red_a_live_read_alone_is_no_cite(self):
+        # Catches: a bare "live read" beside a stamp passes, though the phrase names no read.
+        reply = "Lane 4 is nearly done (live read at 11:43 CST)."
+        self.assert_blocked(reply, reply, RULE)
+        # Control: the same stamp beside a named read passes.
+        self.assert_allowed("Lane 4 is nearly done (get_session at 11:43 CST: idle).")
 
     def test_pc_red_the_refusal_does_not_offer_a_bare_stamp(self):
         # Catches: the refusal names "read at 11:43 CST" as a read to make, so a session writes the bare stamp.
