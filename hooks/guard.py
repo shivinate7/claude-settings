@@ -5478,7 +5478,10 @@ def sim_boot_refusal(tool: str, names: list, remedies: dict = None, session: str
 def relative_write_escape(payload, tool: str, tool_input: dict, cwd: str, own: str, primary) -> str:
     """The relative target a shell write names that lands outside OWN, the agent's own checkout, else ''.
     A target resolves against the folder its segment runs in (`follow_cd`). An absolute, `~` or variable
-    target is not judged here, and an empty OWN is unknown, so both allow. A target with no `..` that lands in
+    target is not judged here, and an empty OWN is unknown, so both allow. Nor is a segment whose last absolute
+    or `~` `cd` landed outside OWN and which runs outside OWN (`skip_after_cd`): its absolute form is
+    judged by other rules. A relative `cd` after that `cd` keeps the skip until it leads back into OWN. A
+    variable, bare or `cd -` move, `popd`, and a `cd` into OWN set none. A target with no `..` that lands in
     the system temp or the session's scratchpad, and not in the primary checkout, passes (a write after
     `cd /tmp`). `mkdir` and `touch` count as
     writes in this clause alone (CREATING_COMMAND). The agent's own red-run folder passes, its root
@@ -5517,7 +5520,9 @@ def relative_write_escape(payload, tool: str, tool_input: dict, cwd: str, own: s
             if char in "()" and not quote and not (char == "(" and index and command[index - 1] in "$<>")}
     command = "".join(" " + char + " " if index in pads else char for index, char in enumerate(command))
     return _shell_write_hit(command, cwd, escapes, follow_cd=True, command_position=True,
-                            extra_verbs=CREATING_COMMAND)
+                            extra_verbs=CREATING_COMMAND,
+                            skip_after_cd=lambda anchor, at: (path_is_inside(anchor, own) is False
+                                                              and path_is_inside(at, own) is False))
 
 
 def worktree_home_hit(payload, tool: str, tool_input: dict, cwd: str) -> str:

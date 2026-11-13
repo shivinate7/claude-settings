@@ -1062,7 +1062,8 @@ def _holds_frozen(path: str, cwd: str) -> bool:
 
 
 def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
-                     command_position=False, predicate_command=False, script_data=False, extra_verbs="") -> str:
+                     command_position=False, predicate_command=False, script_data=False, extra_verbs="",
+                     skip_after_cd=None) -> str:
     """Return the path a shell command writes to that `predicate(path, cwd)` accepts, else ''.
     `holds(path, cwd)` tells a folder that holds such a path, for a linking `cp` (`_cp_link_source`).
     `follow_cd` hands `predicate` the folder a leading `cd` moved to (`dir_before_segment`), or `cwd`
@@ -1070,7 +1071,9 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
     name as a third argument (`''` when none). `script_data` reads the script of a `python -c` or a
     `node -e` as data, for a caller that reads its shell spots on its own (`shell_write_hit`).
     `extra_verbs` is a regex of more command names that count as writes (CREATING_COMMAND); it needs
-    `command_position`."""
+    `command_position`. `skip_after_cd` (needs `follow_cd`) is a function of the folder the last absolute
+    or `~` `cd` before a segment landed in (`dir_before_segment`, `origin`) and the folder the segment runs
+    in; a segment it accepts is left unjudged, as its absolute form is the caller's to judge."""
     holds = holds or (lambda path, where: _holds(path, where, predicate))
     cmd = _resolve_vars(cmd)
     ends = []
@@ -1130,11 +1133,17 @@ def _shell_write_hit(cmd: str, cwd: str, predicate, holds=None, follow_cd=False,
                 kept = scripts[number][index]
                 script.extend(_words_of(kept) if _has_quote(kept) else [kept])
         text = " ".join(shown)
-        at = (dir_before_segment(segments, number, cwd, ends) or cwd) if follow_cd else cwd
+        at, anchor = cwd, None
+        if follow_cd:
+            at, anchor = dir_before_segment(segments, number, cwd, ends, origin=True)
+            at = at or cwd
+        if anchor and skip_after_cd and skip_after_cd(anchor, at):
+            continue
         verb = _segment_command(words)[0] if predicate_command else ""
         for nested in _powershell_scripts_of(segments[number]):
             # a script pwsh, `cmd /c` or iex runs is PowerShell text: judge it by PowerShell's rules too
-            hit = _shell_write_hit(nested, at, predicate, holds, follow_cd, command_position, predicate_command)
+            hit = _shell_write_hit(nested, at, predicate, holds, follow_cd, command_position, predicate_command,
+                                   skip_after_cd=skip_after_cd)
             if hit:
                 return hit
         for word in words:

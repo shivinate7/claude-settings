@@ -1452,10 +1452,10 @@ def _close_paren(stack, known):
     After any other paren (a substitution, arithmetic), only the variables the segment left unchanged
     stay known: the snapshot is from before the segment, so restoring it would undo the segment's own
     clear."""
-    where, prev, saved, group = stack.pop()
+    where, prev, saved, group, anchor = stack.pop()
     if group:
-        return where, prev, dict(saved)
-    return where, prev, {name: value for name, value in known.items() if saved.get(name) == value}
+        return where, prev, dict(saved), anchor
+    return where, prev, {name: value for name, value in known.items() if saved.get(name) == value}, anchor
 
 
 def _read_cd_variable(known, segment: str, move: str, ran: bool) -> str:
@@ -1470,7 +1470,7 @@ def _read_cd_variable(known, segment: str, move: str, ran: bool) -> str:
     return read if isinstance(read, str) and read else move
 
 
-def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False):
+def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd_stays=False, origin=False):
     """The directory the shell is in when `segments[number]` runs, or None when it cannot be told.
 
     Walks the segments ahead of it in order, the way `_run_dir` reads them, but keeps the state a
@@ -1487,9 +1487,13 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     leaves the shell where it was, and `cd -` still goes to the folder before the last `cd` that
     worked. After `&&` the rest of that chain does not run, up to the next `;`, newline or `||`:
     a segment in it gets None, and its own `cd` moves nothing. Off by default, so a rule that
-    fails closed on an untrusted `cd` keeps doing so."""
+    fails closed on an untrusted `cd` keeps doing so. `origin` returns `(folder, anchor)` instead: `anchor`
+    is the folder the last absolute or `~` `cd` landed in, else None. A relative `cd` after it keeps it. A
+    variable `cd` (read or not), a bare `cd`, `cd -`, `popd`, a `cd` that cannot be followed, and a segment
+    the tokenizer cannot read leave none."""
     where = shell_cwd if shell_cwd and os.path.isabs(shell_cwd) else None
     prev, stack = None, []
+    anchor = None      # the folder the last absolute or `~` cd landed in (`origin`)
     known = {}         # the variables the shell holds: plain assignments that ran here (`_track_variables`)
     doubt = False      # the last cd may have failed in an `&&` chain: a segment after it may not run
     unsure = False     # the last segment may have failed or not run: an assignment after its `&&` may not run
@@ -1498,11 +1502,13 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
     for at, segment in enumerate(segments[:number + 1]):
         marks = [(index, char) for index, char, quote in walk_quotes(segment) if not quote and char in "()"]
         groups = _subshell_opens(segment, marks)
-        stack.extend((where, prev, dict(known), index in groups) for index, char in marks if char == "(")
+        stack.extend((where, prev, dict(known), index in groups, anchor) for index, char in marks if char == "(")
         closes = sum(1 for _, char in marks if char == ")")
         end = ends[at] if at < len(ends) else ""
         if at == number:
-            return None if skipping else where
+            if skipping:
+                where, anchor = None, None
+            return (where, anchor) if origin else where
         if not segment.strip():
             continue   # an operator at end of line then the newline leaves an empty part: it changes nothing
         if skipping:
@@ -1511,7 +1517,7 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
             unsure = True
             for _ in range(closes):
                 if stack:
-                    where, prev, known = _close_paren(stack, known)
+                    where, prev, known, anchor = _close_paren(stack, known)
                     skipping = False
             continue
         tokens = segment_tokens(segment)
@@ -1526,26 +1532,31 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
         assigned = _track_variables(known, segment, tokens, sure)
         doubt = doubt and end == "&&"
         if tokens is None:
-            where = None
+            where, anchor = None, None
         elif move is not None:
             old = where
-            if move is not CD_UNKNOWN and "$" in move:
+            variable = move is not CD_UNKNOWN and "$" in move
+            if variable:
                 move = _read_cd_variable(known, segment, move, sure)
             if move is CD_UNKNOWN:
-                where = None
+                where, anchor = None, None
             elif move == "-":
-                where = prev
+                where, anchor = prev, None
             elif any(mark in move for mark in "$%`"):
-                where = None
+                where, anchor = None, None
             else:
                 target = shell_abs(move or "~", where)
                 if target and os.path.isdir(target):
                     where = target
+                    if variable or not move:
+                        anchor = None
+                    elif move.startswith("~") or shell_abs(move, None) is not None:
+                        anchor = target
                 elif target and failed_cd_stays:
                     skipping = end == "&&"   # the cd failed: the shell stays, and an `&&` chain stops
                     old = prev   # a failed cd leaves the folder `cd -` goes back to alone
                 else:
-                    where = None
+                    where, anchor = None, None
             doubt = doubt or (where is None and end == "&&")
             prev = old
         # Only a plain assignment or a cd into a folder the walk trusts surely succeeds.
@@ -1553,8 +1564,8 @@ def dir_before_segment(segments, number: int, shell_cwd: str, ends=(), failed_cd
                                                   and not skipping)))
         for _ in range(closes):
             if stack:
-                where, prev, known = _close_paren(stack, known)
-    return where
+                where, prev, known, anchor = _close_paren(stack, known)
+    return (where, anchor) if origin else where
 
 
 # The value flags of a wrapper that move the program it runs into another folder first, so `env
