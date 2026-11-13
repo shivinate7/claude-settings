@@ -551,10 +551,10 @@ while True:
         _loading = "guard_core"
         import guard_core
         from guard_core import (
-            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
+            AUTHOR_ROLE, BUILDER_ROLE, DESIGNER_ROLE, GIT_WORK_TREE_RE, LOG_MAX_MATCHED, heredoc_heads, POWERSHELL_CALL, READ_ONLY_TOOLS, REDIRECTION, REFUTER_ROLE, SHELL_TOOLS,
             SILENT_WRITE_REDIRECT, WRITER_ROLE, WRITE_TOOLS, _absolute, _expanded, _force_utf8_streams,
             _resolved, _run_dir, _segment_git_c_target, _split_heredocs, agent_role, basename, cap_safe,
-            clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path_and_text,
+            clone_checkouts, command_indexes, command_root, git_calls, git_common_dir, inline_script, is_cloud, is_move_into, is_powershell, is_worktree, log_path, log_path_and_text,
             inner_commands, nested_script, norm,
             _segment_cd_target, _strip_heredoc_bodies_unconditionally, _RUNNER,
             path_is_inside, primary_checkout, record, refuse, resolve_command,
@@ -6923,7 +6923,7 @@ def coordinator_scope_hit(payload, tool: str, tool_input: dict, cwd: str) -> str
     """Rule coordinator-scope: the log detail when a cloud coordinator's own call writes a repository path that is no
     record home and not its scratchpad, else ''. The tier is read last, only for a call that writes such a path, so a
     lane's or a solo session's ordinary call reads no role file and no transcript. The detail is a log field, so a path
-    in it is shortened from its head (guard_core.log_path) after its label: a raw path would be cut from the tail by
+    in it is shortened from its head (log_path) after its label: a raw path would be cut from the tail by
     `record`, and a long temporary root would take the file name with it."""
     if tool not in WRITE_TOOLS and tool not in SHELL_TOOLS and tool not in COORDINATOR_MCP_WRITE_TOOLS:
         return ""
@@ -6932,7 +6932,7 @@ def coordinator_scope_hit(payload, tool: str, tool_input: dict, cwd: str) -> str
     session_id = session_id_of(payload)
 
     def detail(label: str, path: str) -> str:
-        return label + guard_core.log_path(path, guard_core.LOG_MAX_MATCHED - len(label))
+        return label + log_path(path, LOG_MAX_MATCHED - len(label))
 
     def outside(word, where):
         return coordinator_path_outside(word, where, session_id)
