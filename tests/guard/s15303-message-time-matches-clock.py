@@ -336,14 +336,14 @@ mtc_set("an added exactly 20:14Z in items is allowed", "allow",
         {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:14:00Z"})
 mtc_set("an added exactly 14:14 at -06:00 in items is allowed", "allow",
         {"id": "silent-undo-edit-pass", "added": "2026-11-07T14:14:00-06:00"})
-# Passes: `added` is judged in collection items only. Answers and receipts are not judged, though 36 minutes off.
-mtc_set("an added 36 minutes ahead in answers is allowed: only collection items is judged", "allow",
-        {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:50:00Z"}, collection="answers")
+# Passes: `added` is judged in collection items only. Other collections are not judged, though 36 minutes off.
+mtc_set("an added 36 minutes ahead in a collection other than items is allowed: only collection items is judged",
+        "allow", {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:50:00Z"}, collection="groups")
 mtc_set("an added 36 minutes ahead in receipts is allowed: only collection items is judged", "allow",
         {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:50:00Z"}, collection="receipts")
-# Passes: other fields are not judged. `replied` in answers and `ruled` in items are 3 hours off, and pass.
-mtc_set("a replied 3 hours off in answers is allowed: replied is not judged", "allow",
-        {"id": "silent-undo-edit-pass", "replied": "2026-11-07T23:14:00Z"}, collection="answers")
+# Passes: other fields are not judged. `replied` in receipts and `ruled` in items are 3 hours off, and pass.
+mtc_set("a replied 3 hours off in receipts is allowed: replied is not judged", "allow",
+        {"id": "silent-undo-edit-pass", "replied": "2026-11-07T23:14:00Z"}, collection="receipts")
 mtc_set("a ruled 3 hours off in items is allowed: ruled is not judged", "allow",
         {"id": "silent-undo-edit-pass", "ruled": "2026-11-07T17:14:00Z"})
 # Passes: a time in prose, HH:MM CST inside note or why, is not a written value.
@@ -354,11 +354,11 @@ mtc_set("an added with no offset in items is allowed: a value with no offset is 
         {"id": "silent-undo-edit-pass", "added": "2026-11-07T14:30:00"})
 # Passes: an update that carries no added is not judged, the empty case of the field.
 mtc_set("an update that carries no added is allowed", "allow", {"status": "closed"}, action="update")
-# Passes: a batch of right writes, one of them in answers, is allowed.
-mtc_batch("a batch of right writes, one in answers 36 minutes off, is allowed", "allow", [
+# Passes: a batch of right writes, one of them in receipts, is allowed.
+mtc_batch("a batch of right writes, one in receipts 36 minutes off, is allowed", "allow", [
     {"op": "set", "collection": "items", "doc_id": "silent-undo-edit-pass",
      "data": {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:14:00Z"}},
-    {"op": "set", "collection": "answers", "doc_id": "silent-undo-edit-pass",
+    {"op": "set", "collection": "receipts", "doc_id": "silent-undo-edit-pass",
      "data": {"id": "silent-undo-edit-pass", "added": "2026-11-07T20:50:00Z"}}])
 # Passes: a step Write at 14:14 exact, in each form, and a step with no updatedAt at all.
 mtc_write("a roadmap step Write at 20:14Z exact is allowed", "allow", "Write", file_path=MTC_STEP,
