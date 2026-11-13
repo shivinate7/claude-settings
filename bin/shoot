@@ -7,7 +7,8 @@
 //   routes (required: "/path" strings or {name, path}; two routes with the same file name are a config error), sizes (widths, default 1440, 820, 390),
 //   themes (light and dark, the default; set through prefers-color-scheme), height (default 900),
 //   fullPage (default true), timeoutMs (per route and per route step, default 15000), simulator (an iOS simulator UDID, optional),
-//   ignoreHTTPSErrors (boolean, default false; true shoots an app with a self-signed certificate).
+//   ignoreHTTPSErrors (boolean, default false; true shoots an app with a self-signed certificate),
+//   touchWidths (a list of widths that get touch; replaces the width-under-1024 default; [] means no width gets touch; null is unset).
 // Route keys beyond name and path, both optional (a bad value is a config error):
 //   steps (the route steps): a non-empty list, run in order after the page loads and its status passes, before the screenshot.
 //     Each route step is {click: css} or {wait: css, state: "visible" | "hidden"} (state defaults to visible).
@@ -21,7 +22,18 @@
 // The simulator shot runs only when that device is already booted. This tool never boots one; not booted is a skip.
 // Playwright: the installed package only. This tool never runs `playwright install`.
 // Exit: 0 every shot passed, 1 a shot failed, 2 it could not run (usage, config, no Playwright, no browser).
-// Cost: one browser process per run, closed at exit. Two files per shot (PNG and HTML). No daemon, no watcher.
+// Touch per size: a width under 1024 (TOUCH_BELOW) gets hasTouch, so (pointer: coarse) matches; 1024 and wider has none.
+//   A repo that sets touchWidths gets touch at exactly the listed widths instead (a width listed there need not be in sizes).
+//   Chromium drops the coarse match in a full-page capture however it is asked, and a resize to content height stretches each 100vh block.
+//   So a touch shot with fullPage is stitched: one viewport screenshot per tile, scrolled to each, joined in a canvas on a second page of
+//   the same browser. Tiles cover the root element's scroll width and height. A page that scrolls its body, not its root, gets a
+//   smaller PNG than a plain full-page capture.
+//   Tiles after the first hide position:fixed elements, fixed ::before and ::after, and the images of fixed backgrounds (the colour
+//   stays), so each shows once, at its first-tile place. An element mixing fixed and scroll layers loses its scroll layers on those tiles.
+//   For the whole stitch, sticky elements sit in the flow and the root does not scroll-snap. A canvas Chromium cannot read back fails that shot.
+//   A desktop width takes the plain full-page capture.
+// Cost: one browser process per run, closed at exit. Two files per shot (PNG and HTML). A stitched shot adds one screenshot per viewport tile
+//   (columns across the scroll width times rows down the scroll height) and one extra page for the join. No daemon, no watcher.
 // Test seam: SHOOT_PLAYWRIGHT names the module to load (default playwright).
 "use strict";
 const fs = require("fs");
@@ -30,6 +42,8 @@ const path = require("path");
 const zlib = require("zlib");
 const { createRequire } = require("module");
 const { execFileSync } = require("child_process");
+
+const TOUCH_BELOW = 1024;
 
 function die(msg) { console.log("shoot: " + msg); process.exit(2); }
 
@@ -65,8 +79,11 @@ function readConfig(file) {
   if (!Array.isArray(sizes) || !sizes.length || sizes.some((w) => !Number.isInteger(w) || w < 1)) die(`config ${file}: sizes is a list of widths`);
   const themes = c.themes ?? ["light", "dark"];
   if (!Array.isArray(themes) || !themes.length || themes.some((t) => t !== "light" && t !== "dark")) die(`config ${file}: themes holds light and dark only`);
+  // A list, not a threshold: a repo's touch devices need not sit under one width. [] is valid and turns touch off at every width.
+  const touchWidths = c.touchWidths ?? null;
+  if (touchWidths !== null && (!Array.isArray(touchWidths) || touchWidths.some((w) => !Number.isInteger(w) || w < 1))) die(`config ${file}: touchWidths is a list of widths`);
   return {
-    baseUrl: c.baseUrl, routes, sizes, themes,
+    baseUrl: c.baseUrl, routes, sizes, themes, touchWidths,
     height: c.height ?? 900, fullPage: c.fullPage ?? true, timeoutMs: c.timeoutMs ?? 15000,
     simulator: c.simulator || null, ignoreHTTPSErrors: c.ignoreHTTPSErrors ?? false,
   };
@@ -147,6 +164,135 @@ function isBlank(buf) {
   return true;
 }
 
+// Runs in the page: for the whole stitch, sticky elements sit in the flow (a sticky one would otherwise jump per tile), as
+// position:relative with no offsets, not static, so an absolute child keeps the element as its containing block. A sticky element
+// always makes a stacking context and a relative one with z-index auto does not, so that gets z-index 0. The root does
+// not snap (a snap point would move a tile off its scroll offset). on false restores the inline values, each with its priority.
+function settleForStitch(on) {
+  const root = document.documentElement;
+  if (on) { if (root.__shootSnap === undefined) root.__shootSnap = root.style.scrollSnapType; root.style.scrollSnapType = "none"; }
+  else if (root.__shootSnap !== undefined) { root.style.scrollSnapType = root.__shootSnap; delete root.__shootSnap; }
+  const names = ["position", "top", "right", "bottom", "left", "z-index"];
+  const set = (el, prop, value) => {
+    if (el.__shootInline === undefined) el.__shootInline = {};
+    if (!(prop in el.__shootInline)) el.__shootInline[prop] = [el.style.getPropertyValue(prop), el.style.getPropertyPriority(prop)];
+    el.style.setProperty(prop, value, "important");
+  };
+  for (const el of document.querySelectorAll("*")) {
+    if (on) {
+      if (getComputedStyle(el).position !== "sticky") continue;
+      const auto = getComputedStyle(el).zIndex === "auto";
+      set(el, "position", "relative");
+      if (auto) set(el, "z-index", "0");
+      for (const side of ["top", "right", "bottom", "left"]) set(el, side, "auto");
+    } else if (el.__shootInline !== undefined) {
+      for (const prop of names) if (prop in el.__shootInline) el.style.setProperty(prop, ...el.__shootInline[prop]);
+      delete el.__shootInline;
+    }
+  }
+}
+
+// Runs in the page: hide (or restore) each fixed element, each fixed ::before or ::after, and the images of each fixed background
+// (the colour stays), on the element or on a pseudo-element, so a tile after the first repeats none of them. A pseudo-element has
+// no inline style, so its host carries a mark and one constructed stylesheet hides the marked ones. A constructed sheet is CSSOM,
+// so a page's style-src policy does not block it, as it would a style element. An element that mixes fixed and scroll layers
+// loses its scroll layers too.
+function hideFixed(on) {
+  const sides = ["before", "after"];
+  for (const el of document.querySelectorAll("*")) {
+    if (on) {
+      if (getComputedStyle(el).position === "fixed") {
+        if (el.__shootVis === undefined) el.__shootVis = el.style.visibility;
+        el.style.visibility = "hidden";
+      }
+      if (getComputedStyle(el).backgroundAttachment.includes("fixed")) {
+        if (el.__shootBg === undefined) el.__shootBg = [el.style.getPropertyValue("background-image"), el.style.getPropertyPriority("background-image")];
+        el.style.setProperty("background-image", "none", "important");
+      }
+      for (const s of sides) {
+        const cs = getComputedStyle(el, "::" + s);
+        if (cs.position === "fixed") el.setAttribute("data-shoot-fixed-" + s, "");
+        if (cs.backgroundAttachment.includes("fixed")) el.setAttribute("data-shoot-fixed-bg-" + s, "");
+      }
+    } else {
+      if (el.__shootVis !== undefined) { el.style.visibility = el.__shootVis; delete el.__shootVis; }
+      if (el.__shootBg !== undefined) { el.style.setProperty("background-image", ...el.__shootBg); delete el.__shootBg; }
+      for (const s of sides) { el.removeAttribute("data-shoot-fixed-" + s); el.removeAttribute("data-shoot-fixed-bg-" + s); }
+    }
+  }
+  if (document.__shootSheet) {
+    document.adoptedStyleSheets = document.adoptedStyleSheets.filter((x) => x !== document.__shootSheet);
+    delete document.__shootSheet;
+  }
+  if (on) {
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(sides.map((s) => `[data-shoot-fixed-${s}]::${s}{visibility:hidden!important}[data-shoot-fixed-bg-${s}]::${s}{background-image:none!important}`).join(""));
+    document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+    document.__shootSheet = sheet;
+  }
+}
+
+// Runs in a second page: join viewport tiles, rows of them, each tile at its scroll offset, into one PNG data URL. A tile draws
+// only the rows and columns no earlier tile covered: the last row and the last column overlap the ones before them, and their
+// hidden fixed elements must not blank what those tiles drew.
+async function joinTiles([rows, width, height]) {
+  const c = document.createElement("canvas");
+  c.width = width; c.height = height;
+  const g = c.getContext("2d");
+  let coveredY = 0;
+  for (const row of rows) {
+    let coveredX = 0, rowBottom = coveredY;
+    for (const t of row) {
+      const img = new Image();
+      img.src = "data:image/png;base64," + t.data;
+      await img.decode();
+      const sx = Math.max(0, coveredX - t.x), sy = Math.max(0, coveredY - t.y);
+      const w = img.width - sx, h = img.height - sy;
+      if (w > 0 && h > 0) g.drawImage(img, sx, sy, w, h, t.x + sx, t.y + sy, w, h);
+      coveredX = Math.max(coveredX, t.x + img.width);
+      rowBottom = Math.max(rowBottom, t.y + img.height);
+    }
+    coveredY = rowBottom;
+  }
+  return c.toDataURL("image/png");
+}
+
+// A full-page shot that keeps the page's touch emulation: viewport tiles, scrolled and joined (see the header).
+async function stitchShot(browser, page, width, height, timeout) {
+  const rows = [];
+  let full;
+  try {
+    await page.evaluate(settleForStitch, true);
+    full = await page.evaluate(() => ({ w: document.documentElement.scrollWidth, h: document.documentElement.scrollHeight }));
+    for (let y = 0; y < full.h; y += height) {
+      const row = [];
+      for (let x = 0; x < full.w; x += width) {
+        // The last row and column scroll only as far as the page allows, so each tile's real offset is read back.
+        const at = await page.evaluate(([left, top]) => {
+          window.scrollTo({ left, top, behavior: "instant" });
+          return { x: window.scrollX, y: window.scrollY };
+        }, [x, y]);
+        if (x > 0 || y > 0) await page.evaluate(hideFixed, true);
+        row.push({ ...at, data: (await page.screenshot({ timeout })).toString("base64") });
+        await page.evaluate(hideFixed, false);
+      }
+      rows.push(row);
+    }
+  } finally {
+    await page.evaluate(hideFixed, false).catch(() => {});
+    await page.evaluate(settleForStitch, false).catch(() => {});
+    await page.evaluate(() => window.scrollTo({ left: 0, top: 0, behavior: "instant" })).catch(() => {});
+  }
+  const joiner = await browser.newPage();
+  try {
+    const url = await joiner.evaluate(joinTiles, [rows, full.w, full.h]);
+    if (!url.startsWith("data:image/png;base64,")) throw new Error(`touch full-page shot: the canvas for ${full.w} x ${full.h} px could not be read`);
+    return Buffer.from(url.split(",")[1], "base64");
+  } finally {
+    await joiner.close().catch(() => {});
+  }
+}
+
 // The simulator shot. Booted state comes from `simctl list`; a device not booted is a skip.
 function simShot(udid, out) {
   let list;
@@ -175,7 +321,7 @@ async function main() {
   try {
     for (const theme of cfg.themes) {
       for (const width of cfg.sizes) {
-        const opts = { viewport: { width, height: cfg.height }, colorScheme: theme, ignoreHTTPSErrors: cfg.ignoreHTTPSErrors };
+        const opts = { viewport: { width, height: cfg.height }, colorScheme: theme, ignoreHTTPSErrors: cfg.ignoreHTTPSErrors, hasTouch: cfg.touchWidths ? cfg.touchWidths.includes(width) : width < TOUCH_BELOW };
         const ctx = await browser.newContext(opts);
         try {
           for (const r of cfg.routes) {
@@ -193,7 +339,10 @@ async function main() {
                 if (s.click !== undefined) await page.click(s.click, { timeout: cfg.timeoutMs });
                 else await page.waitForSelector(s.wait, { state: s.state || "visible", timeout: cfg.timeoutMs });
               }
-              const png = await page.screenshot({ path: path.join(out, name + ".png"), fullPage: cfg.fullPage, timeout: cfg.timeoutMs });
+              const file = path.join(out, name + ".png");
+              let png;
+              if (cfg.fullPage && opts.hasTouch) { png = await stitchShot(browser, page, width, cfg.height, cfg.timeoutMs); fs.writeFileSync(file, png); }
+              else png = await page.screenshot({ path: file, fullPage: cfg.fullPage, timeout: cfg.timeoutMs });
               if (isBlank(png)) fails.push(`${name}: blank image (one colour) at ${url}`);
               // Mark each element the browser does not show, so the probe skips it (a phone nav on a wide screen).
               // A display:contents wrapper has no box but shows its children, so it is never marked.

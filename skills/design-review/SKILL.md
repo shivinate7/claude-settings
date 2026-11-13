@@ -32,7 +32,7 @@ after round 1 gets a second design read (decision `design-agents`).
    also capture the same screens on main at every size and theme. `bin/shoot` also writes
    each rendered page as `.html`. Run `python3 ~/.claude/lint/label_once.py` on those files, and
    give its hits to Reviewer A and the design reviewer (`ux-label-once`, a label shows once).
-   Touch per size: a phone or tablet gets `hasTouch` (so `(pointer: coarse)` matches; the 44 px touch floor), a desktop gets none (a mouse; 24 px), per decision `ux-house-rules` (the UX rules for builders and reviewers) and checklist `ux-a11y-floor`. Take each touch shot as a viewport shot: a full-page or element shot drops the coarse match for that page. A touch shot proves layout under touch emulation, not a feel (`verification-green-proves-only-its-fixtures`; decision `feel-fix-waits-device-check`).
+   Touch per size: a phone or tablet gets `hasTouch` (so `(pointer: coarse)` matches; the 44 px touch floor), a desktop gets none (a mouse; 24 px), per decision `ux-house-rules` (the UX rules for builders and reviewers) and checklist `ux-a11y-floor`. `bin/shoot` sets touch below 1024 px wide, or at the widths the repo lists in `touchWidths`. It keeps touch in full-page shots (it stitches viewport tiles); an element shot or a hand-made full-page capture drops the coarse match for that page. A touch shot proves layout under touch emulation, not a feel (`verification-green-proves-only-its-fixtures`; decision `feel-fix-waits-device-check`).
 2. **Spawn two blind reviewers.** Each brief names only the changed pages, routes and
    built screenshots, plus the reviewer's own instructions below. Never give a reviewer the repo's
    design spec, tokens or design decisions.
