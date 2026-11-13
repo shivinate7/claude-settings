@@ -1,0 +1,10 @@
+{
+ "id": "own-747-role-layout",
+ "at": "2026-11-13T13:51:36-06:00",
+ "title": "Model and effort per role: the owner's layout",
+ "ruling": "Owner 13:51 CST Nov 13, typed on the page as \"none of these\" on item 747 (pick-coordinator-triage-effort): coordinator sonnet high, arbiter opus medium, consultant opus medium, triage sonnet high, lanes that change a guard or check: sonnet high, lanes that change product code or a design sonnet medium. docs lanes sonnet low, batch runner sonnet medium. This is a free-text answer to the effort question and also sets the model per role. It adds two rows his 13:41 layout lacked: docs lanes sonnet low, batch runner sonnet medium. It departs from main (decision agent-model-cap): coordinator, triage and consultant take the main model; the arbiter runs Opus high; all lanes run Sonnet medium. Open overlap: item 752 (pick-role-model-layout) asks about the coordinator on Opus until the brief judge lands; his words here read as option b there, unless he picks a on 752.",
+ "quote": "coordinator sonnet high, arbiter opus medium, consultant opus medium, triage sonnet high, lanes that change a guard or check: sonnet high, lanes that change product code or a design sonnet medium. docs lanes sonnet low, batch runner sonnet medium",
+ "source": "Page answer 13:51 CST Nov 13 on item 747, sent from the Cockpit comment thread; filed by triage 13:52 CST Nov 13.",
+ "status": "open",
+ "step": "role-gaps-from-ranking"
+}
