@@ -1,5 +1,6 @@
 #!/bin/sh
 # Prints "checkout <toplevel> on <branch>, <n> dirty files" on start, resume and compaction, after one origin fetch per checkout. It prints the grant lines first, so a killed hook still delivers them. On resume it says when the recorded worktree is gone. Names the clone to cd to when the checkout is the live pin. Also warns on: core.worktree set in the shared git config; global rules that differ from this checkout; the claude-settings clone off main or behind origin; the default branch or local main behind or off origin; more than 50 agent worktrees; a check or fetch that could not run; a waiting page or grant file that differs from main's; a disarmed or unknown SessionEnd sweep. Prints the repo's caution level, or says it is unknown.
+# At a startup start, once the origin refresh ran, it fast-forwards a clean checkout on the default branch that is behind origin and says so; a checkout that is behind but cannot move says why and changes nothing.
 # In a git tree it also patches the platform's Stop-hook script once so its unpushed nudge skips a merged branch; it says so when the patch is not applied.
 # Outside a git tree or without git, prints only the tier line. Always exits 0, nothing on stderr.
 
@@ -242,6 +243,70 @@ if [ -n "$gm_out" ]; then
   fi
 fi
 
+# Step fast-forward-clean-start: a session that starts on a stale checkout once read old files as current. At a
+# startup start only (a resume or compact start keeps what the session already read), when the refresh above ran,
+# a checkout that is behind origin/<default> and clean moves to it with `git merge --ff-only`, which can only move
+# forward and never rewrites a commit. Clean: no uncommitted or untracked file (the dirty count read at the top), no
+# merge, cherry-pick, revert or rebase in progress, no commit ahead of origin, HEAD on the default branch. A checkout
+# that is behind but not clean is left as it is and says why, one line, so the session knows its files are stale. An
+# agent worktree is another session's, so it is never moved. The live pin is skipped: merge-reinstalls-from-main owns it.
+# Up to date, or ahead only: no line (the later ahead check covers that). The default is $gm_default, the branch the
+# refresh fetched, so no second fetch runs. A merge that fails says so and leaves git's own state.
+# Cost: one git rev-list per startup start, plus one git rev-parse for the in-progress files when the checkout is
+# behind, plus (only when it moves) two git rev-parse and one git merge. All local, no network, no file written by the
+# hook; the merge writes the working tree, index and HEAD of this checkout only.
+ff_done=""
+if [ "$source" = startup ] && [ "${gm_fetch_rc:-1}" -eq 0 ] 2>/dev/null && [ -n "$gm_default" ]; then
+  ff_base=""
+  case "$toplevel" in
+    *-live-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ff_base="${toplevel%-live-*}" ;;
+    *-live) ff_base="${toplevel%-live}" ;;
+  esac
+  if [ -z "$ff_base" ] || [ ! -f "$ff_base/merge/install_from_main.sh" ]; then
+    ff_counts=$(cd "$toplevel" 2>/dev/null && git rev-list --left-right --count "HEAD...origin/$gm_default" 2>/dev/null)
+    ff_ahead=""
+    ff_behind=""
+    read -r ff_ahead ff_behind <<EOF
+$ff_counts
+EOF
+    if [ -n "$ff_behind" ] && [ "$ff_behind" -gt 0 ] 2>/dev/null; then
+      ff_reason=""
+      case "$toplevel" in
+        */.claude/worktrees/agent-*) ff_reason="another agent's worktree" ;;
+      esac
+      if [ -z "$ff_reason" ]; then
+        if [ "$branch" = "detached" ]; then
+          ff_reason="detached HEAD"
+        elif [ "$branch" != "$gm_default" ]; then
+          ff_reason="not on $gm_default"
+        else
+          ff_prog=$(cd "$toplevel" 2>/dev/null && git rev-parse --git-path MERGE_HEAD --git-path CHERRY_PICK_HEAD \
+            --git-path REVERT_HEAD --git-path rebase-merge --git-path rebase-apply 2>/dev/null \
+            | while read -r ff_p; do [ -e "$ff_p" ] && { echo 1; break; }; done)
+          if [ -n "$ff_prog" ]; then
+            ff_reason="merge or rebase in progress"
+          elif [ "$n" -gt 0 ] 2>/dev/null; then
+            ff_reason="uncommitted changes"
+          elif [ "$ff_ahead" -gt 0 ] 2>/dev/null; then
+            ff_reason="diverged"
+          fi
+        fi
+      fi
+      if [ -n "$ff_reason" ]; then
+        printf 'checkout %s: not fast-forwarded, %s\n' "$toplevel" "$ff_reason"
+      else
+        ff_old=$(cd "$toplevel" 2>/dev/null && git rev-parse --short=12 HEAD 2>/dev/null)
+        ff_new=$(cd "$toplevel" 2>/dev/null && git rev-parse --short=12 "origin/$gm_default" 2>/dev/null)
+        if (cd "$toplevel" 2>/dev/null && git merge --ff-only --quiet "origin/$gm_default" >/dev/null 2>&1); then
+          printf 'checkout %s: fast-forwarded %s %s -> %s, %s commits\n' "$toplevel" "$branch" "$ff_old" "$ff_new" "$ff_behind"
+          ff_done=1
+        else
+          printf 'checkout %s: not fast-forwarded, the merge failed\n' "$toplevel"
+        fi
+      fi
+    fi
+  fi
+fi
 
 # Decision merge-reinstalls-from-main, ruling 1: no work runs in the live pin. A cwd whose toplevel is the
 # pin says so, and names the clone to cd to. Same test as live_pin_clone in install.sh, repeated here
@@ -437,7 +502,7 @@ fi
 # the fetch never moves a local branch (it may write FETCH_HEAD and remote-tracking refs). An unknown default branch means no line.
 # When the refresh read the remote and its HEAD names another branch, the local default is stale and was not fetched,
 # so a count against it could read 0 behind on a stale ref: no line then.
-if [ -n "$default_branch" ] && [ "$branch" = "$default_branch" ] \
+if [ -n "$default_branch" ] && [ "$branch" = "$default_branch" ] && [ -z "$ff_done" ] \
    && { [ -z "$gm_remote_read" ] || [ "$gm_default" = "$default_branch" ]; } \
    && { [ -z "$d" ] || [ "$(cd "$toplevel" 2>/dev/null && pwd -P)" != "$(cd "$d" 2>/dev/null && pwd -P)" ]; }; then
   if bounded_fetch "$toplevel"; then
