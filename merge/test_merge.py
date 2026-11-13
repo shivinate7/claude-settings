@@ -15152,9 +15152,11 @@ class ReviewEnv(Env):
         """Commit on feat: its .github/workflows/checks.yml becomes `text`, or is removed when `text` is None."""
         self.commit_feat({".github/workflows/checks.yml": text})
 
-    def flags(self, *extra):
-        """The review flags, with --head set to the live head of the feature branch, then `extra`."""
-        return (*REVIEW_FLAGS, "--head", self.head(), *extra)
+    def flags(self, *extra, rounds=None):
+        """The review flags, with --head set to the live head of the feature branch, then `extra`. `rounds` (N:ROLE:MODEL:VERDICT each)
+        replaces the one PASS round that REVIEW_FLAGS ends with; argparse keeps the last --kind or --guard, so `extra` may set them."""
+        round_flags = REVIEW_FLAGS if rounds is None else (*REVIEW_FLAGS[:-2], *(f for r in rounds for f in ("--round", r)))
+        return (*round_flags, "--head", self.head(), *extra)
 
     def record_host(self, *comments, head=REVIEW_HEAD, files=None, **reads):
         """A host whose pull request 7 is at `head`, with the repo's review record comments in the order given, oldest first, and the files given
