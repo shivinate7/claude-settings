@@ -115,7 +115,9 @@ Scratch files live in one temp directory, removed at exit.
 """
 
 import atexit
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -1129,14 +1131,15 @@ def header_block(headers):
     return "\r\n".join(lines) + "\r\n\r\n"
 
 
-def watch_run_on_fakes(replies, budget, quota=None):
-    """Run watch_run(7, cwd, deadline) in process. The module's `gh` is scripted: one
+def watch_run_on_fakes(replies, budget, quota=None, repo=""):
+    """Run watch_run(7, cwd, deadline, repo) in process. The module's `gh` is scripted: one
     (rc, stdout, stderr) per call, the last repeats, or a function of the clock's time that
     returns one. Its `time` is the fake clock. Its `subprocess`
     and `shutil` are fakes that record a direct call (the old `gh run watch` path) and start nothing.
     budget: seconds from the clock's start to the deadline.
     quota: None, or a function of the clock's time giving the X-RateLimit headers a `gh api -i` call prints before its body
     (`gh run view` takes no -i, so a read without it carries no headers).
+    repo: the repo as the hook passes it, [HOST/]OWNER/REPO, or "" for the folder's.
     -> (module, exception or None, clock, gh calls [(time, args)], direct subprocess calls)."""
     spec = importlib.util.spec_from_file_location("ci_wake_under_test", MODULE)
     mod = importlib.util.module_from_spec(spec)
@@ -1191,7 +1194,7 @@ def watch_run_on_fakes(replies, budget, quota=None):
     with mock.patch.object(mod, "time", clock), mock.patch.object(mod, "gh", fake_gh), \
             mock.patch.object(mod, "subprocess", fake_subprocess), mock.patch.object(mod, "shutil", fake_shutil):
         try:
-            mod.watch_run(7, os.getcwd(), deadline)
+            mod.watch_run(7, os.getcwd(), deadline, repo=repo)
             raised = None
         except Exception as e:   # Unknown is the one the cases look for
             raised = e
@@ -1458,16 +1461,125 @@ def case_watch_run_with_the_quota_unreadable_still_ends_at_its_deadline():  # co
     check("%s: no read past the deadline" % label, clock.now <= T0 + budget + 1e-6, detail)
 
 
+@contextlib.contextmanager
+def stderr_bytes():
+    """The stderr of an in-process case, as bytes. emit writes to sys.stderr.buffer and drops any error, so a StringIO would hide
+    the line. The text layer is detached at exit, so the bytes stay readable after it."""
+    raw = io.BytesIO()
+    text = io.TextIOWrapper(raw, encoding="utf-8")
+    try:
+        with contextlib.redirect_stderr(text):
+            yield raw
+    finally:
+        text.detach()
+
+
+def quota_low_from(turn):
+    """Full until `turn` on the fake clock, then Remaining 100 of 15000 with a reset an hour on from each read."""
+    def quota(now):
+        if now < turn:
+            return {"X-RateLimit-Limit": "15000", "X-RateLimit-Remaining": "15000", "X-RateLimit-Reset": str(int(T0 + 3600))}
+        return {"X-RateLimit-Limit": "15000", "X-RateLimit-Remaining": "100", "X-RateLimit-Reset": str(int(now + 3600))}
+    return quota
+
+
+def hostname_of(argv):
+    """The host a `gh api` call names with --hostname, in either spelling gh takes, or None."""
+    for i, a in enumerate(argv):
+        if a == "--hostname" and i + 1 < len(argv):
+            return argv[i + 1]
+        if a.startswith("--hostname="):
+            return a.split("=", 1)[1]
+    return None
+
+
+QUOTA_TURN = T0 + 300         # the quota turns low at this fake time
+BACK_OFF_RUN_ENDS = T0 + 1000
+
+
+def case_watch_run_reads_at_its_own_gap_once_the_quota_turns_low():
+    """The quota is full until 300 s, then 100 of 15000 left with a reset an hour on. The reads are then on the back-off gaps:
+    90 s at 300 s, then 120 s. At a 90 s or a 120 s gap, 100 reads cover the hour, so the quota is not low: the next read comes at
+    390 s, the gap the watch is on, and not at the reset (1200 s). The gaps from 390 s stay 120 s, and no low line prints."""
+    label = "watch_run, quota low from 300 s, run completes at 1000 s"
+    with stderr_bytes() as err:
+        mod, raised, clock, calls, direct = watch_run_on_fakes(completes_at(BACK_OFF_RUN_ENDS), WATCH_BUDGET,
+                                                               quota=quota_low_from(QUOTA_TURN))
+    detail = watch_detail(raised, clock, calls, direct)
+    rel = [round(t - T0, 6) for t, _ in calls]
+    check("%s: returns, no exception" % label, raised is None, detail)
+    check("%s: a read came at the turn, 300 s" % label, 300.0 in rel, "reads at %r" % rel)
+    after = [t for t in rel if t > 300]
+    check("%s: the next read after the turn is at 390 s, the 90 s gap, not held to the reset" % label,
+          after[:1] == [390.0], "the next read after 300 s came at %r s, not 390 s" % (after[:1],))
+    check("%s: the 120 s gap is kept from 390 s to the run's end" % label,
+          [t for t in rel if 390 <= t <= 990] == [390.0, 510.0, 630.0, 750.0, 870.0, 990.0],
+          "reads from 390 s to 990 s at %r" % [t for t in rel if 390 <= t <= 990])
+    check("%s: no low line at a 90 s or 120 s gap" % label, "quota is low" not in err.getvalue().decode("utf-8"),
+          "stderr=%r" % err.getvalue().decode("utf-8")[:200])
+
+
+def case_watch_run_on_a_host_qualified_repo_names_the_host():
+    """A repo given as HOST/OWNER/REPO reaches its status read as `gh api --hostname HOST -i repos/OWNER/REPO/actions/runs/7`
+    (or any spelling gh takes for the host). The host is never a path segment of the route."""
+    label = "watch_run, repo ghe.example.com/o/r"
+    mod, raised, clock, calls, direct = watch_run_on_fakes([status_reply("completed")], WATCH_BUDGET, repo="ghe.example.com/o/r")
+    detail = watch_detail(raised, clock, calls, direct)
+    check("%s: returns, no exception" % label, raised is None and len(calls) == 1, detail)   # scope: one status read was made
+    argv = calls[0][1]
+    ok = ("repos/o/r/actions/runs/7" in argv and hostname_of(argv) == "ghe.example.com" and "-i" in argv
+          and not any("ghe.example.com/" in a for a in argv))
+    check("%s: the status read addresses repos/o/r on ghe.example.com, with -i" % label, ok,
+          "gh %s" % " ".join(argv))
+
+
+def case_watch_run_on_owner_repo_keeps_the_route():  # control: green on main
+    label = "watch_run, repo o/r"
+    mod, raised, clock, calls, direct = watch_run_on_fakes([status_reply("completed")], WATCH_BUDGET, repo="o/r")
+    detail = watch_detail(raised, clock, calls, direct)
+    check("%s: returns, no exception" % label, raised is None and len(calls) == 1, detail)
+    check("%s: the status read is gh api -i repos/o/r/actions/runs/7" % label,
+          [a for _, a in calls] == [["api", "-i", "repos/o/r/actions/runs/7"]], detail)
+
+
+def case_watch_run_prints_one_quota_line_for_its_low_spell():  # control: green on main
+    """One watch, read as low from the first read to the reset: one low line on stderr, not one per read."""
+    label = "watch_run, quota empty until 900 s, run completes at 1200 s"
+    with stderr_bytes() as err:
+        mod, raised, clock, calls, direct = watch_run_on_fakes(completes_at(RUN_ENDS), WATCH_BUDGET, quota=quota_empty_until(QUOTA_RESET))
+    detail = watch_detail(raised, clock, calls, direct)
+    lines = err.getvalue().decode("utf-8").count("quota is low")
+    check("%s: returns, no exception" % label, raised is None, detail)
+    check("%s: the low spell printed a line" % label, lines >= 1, "stderr=%r" % err.getvalue().decode("utf-8")[:200])
+    check("%s: one low line for the spell" % label, lines == 1, "%d low lines on stderr" % lines)
+
+
+def case_wait_for_prints_one_quota_line_for_a_low_spell_over_two_runs():
+    """Two runs of one head, watched one after the other while the quota stays low from the first read to 2000 s: the
+    spell prints one low line, not one for each run watched."""
+    label = "wait_for, two runs, quota empty until 2000 s"
+    runs = [run(1, "checks", "success", [job("unit", "success")]), run(2, "lint", "success", [job("lint", "success")])]
+    with stderr_bytes() as err:
+        raised, clock, calls, deadline = wait_for_on_fakes(runs, WATCH_BUDGET, ends_at={1: 500, 2: 1500},
+                                                           quota=quota_empty_until(T0 + 2000))
+    lines = err.getvalue().decode("utf-8").count("quota is low")
+    detail = wait_detail(raised, clock, calls, deadline)
+    check("%s: returns, no exception" % label, raised is None, detail)
+    check("%s: the low spell printed a line" % label, lines >= 1, "stderr=%r" % err.getvalue().decode("utf-8")[:200])
+    check("%s: one low line for the spell, over both runs" % label, lines == 1, "%d low lines on stderr" % lines)
+
+
 # wait_for, in process, on fakes: the pace and the deadline of the run lists. The module's `gh` answers
 # `run list` (by the number of the call, as the stub does), `run view` and the status read. Its `time` is the fake clock.
-def wait_for_on_fakes(runs, budget, ends_at=None, line=False):
+def wait_for_on_fakes(runs, budget, ends_at=None, line=False, quota=None):
     """Run wait_for(SHA, cwd, deadline) in process. budget: seconds from the clock's start to the
     deadline. -> (exception or None, clock, gh calls [(time, args)], deadline). shutil is a fake with
     no gh, so a read that bypasses the module's `gh()` ends as Unknown and reaches no real gh.
     ends_at: {run id: seconds from the clock's start}. Until then such a run lists and reads in progress
     with no conclusion; from then on it reads as its fixture says. line: also set clock.result (what
     wait_for returned) and clock.line (the line the hook prints for it). A run with refuse_jobs_read: its
-    `run view ... jobs` read exits 1 with HTTP 403. Its status read does not."""
+    `run view ... jobs` read exits 1 with HTTP 403. Its status read does not.
+    quota: None, or a function of the clock's time giving the X-RateLimit headers the status read prints under -i."""
     spec = importlib.util.spec_from_file_location("ci_wake_under_test", MODULE)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -1499,7 +1611,10 @@ def wait_for_on_fakes(runs, budget, ends_at=None, line=False):
         if args[:1] == ["api"] and run_id:   # the status read of watch_run, which wait_for makes for each run it judges
             hits = [r for r in runs if str(r["databaseId"]) == run_id]
             if hits:
-                return 0, json.dumps(as_of_clock(hits[0], GH.view(hits[0], False))) + "\n", ""
+                out = json.dumps(as_of_clock(hits[0], GH.view(hits[0], False))) + "\n"
+                if quota is not None and "-i" in args:
+                    out = header_block(quota(clock.now)) + out
+                return 0, out, ""
         return 1, "", "stub gh: unsupported: %s" % " ".join(args)
 
     fake_shutil = types.SimpleNamespace(which=lambda name, *a, **kw: None)
@@ -2234,6 +2349,13 @@ def main():
     case_watch_run_makes_no_read_while_the_quota_is_low()
     case_watch_run_with_the_quota_full_keeps_its_cadence()
     case_watch_run_with_the_quota_unreadable_still_ends_at_its_deadline()
+    case_watch_run_reads_at_its_own_gap_once_the_quota_turns_low()
+    case_watch_run_prints_one_quota_line_for_its_low_spell()
+    case_wait_for_prints_one_quota_line_for_a_low_spell_over_two_runs()
+
+    # The repo as HOST/OWNER/REPO: the host goes to --hostname, never into the route.
+    case_watch_run_on_a_host_qualified_repo_names_the_host()
+    case_watch_run_on_owner_repo_keeps_the_route()
 
     # A draft run that skips, then the real run.
     case_draft_run_then_real_run()
