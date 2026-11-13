@@ -153,6 +153,7 @@ class FakeHost:
         self.pulls, self.pull_list_reads = None, 0  # pulls: {number: REST row} of the other PRs a case scripts (None: the own PR only); pull_list_reads: each open_pulls call
         self.changed, self.files_error = [("README.md", "modified", 0)], None  # changed: the (path, status, additions) triples pr_files reports; files_error: raised by pr_files instead
         self.changed_files = None  # the changed_files count pr reports; None is the length of changed. The count check is the real Host's, so this fake does not check it
+        self.records, self.comments_error = None, None  # records: {PR number: [record body, ...]}, oldest first, that issue_comments serves; None: one valid record for the own PR at its live head. comments_error: raised by issue_comments instead
 
     def pr_files(self, n, changed=None):  # the (path, status, additions) triples of the pull request, as Host.pr_files reports them
         if self.files_error:
@@ -265,6 +266,15 @@ class FakeHost:
 
     def post_comment(self, n, body):  # the fake of Host.post_comment: a comment on pull request n, recorded for the case
         self.posted.append((n, body))
+
+    def issue_comments(self, since):  # the fake of Host.issue_comments: the review records by pull request, oldest first, and no lane-lint comment
+        if self.comments_error:
+            raise merge.Stop(self.comments_error)
+        if self.records is None:  # the default: the own pull request's record, at its live head, so every lane-lint case reads a record that parses
+            bodies = {self.own_number: [record_text(head=self.head_override or merge.origin_head(self.root, self.branch))]}
+        else:
+            bodies = self.records
+        return {n: [(body, "2026-10-02T00:00:00Z", None) for body in rows] for n, rows in bodies.items()}, {}
 
 MAILAUDIT_CHECK = "mailaudit-check"  # the required check a second checkout's stamp config names: a read of that config shows which checkout it came from
 

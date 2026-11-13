@@ -103,6 +103,15 @@ def pass_lines(text):
     return [line for line in text.splitlines() if line.startswith("PASS:")]
 
 
+def assert_record_refusal(test, text, n=7):
+    """The refusal of a lint whose newest review record does not read (decision pr-review-record): no PASS line, and one Stop that names
+    pull request n, says the review record does not parse or is missing, and names `merge --review-record`."""
+    test.assertEqual(pass_lines(text), [], "the lint passed beside a review record that does not read:\n" + text)
+    test.assertIn(f"#{n}", text, "the refusal does not name #%d:\n%s" % (n, text))
+    test.assertRegex(text, r"not parse|missing", "the refusal does not say the review record does not parse or is missing:\n" + text)
+    test.assertIn("merge --review-record", text, "the refusal does not name `merge --review-record`:\n" + text)
+
+
 def rollup_skip_lines(text):
     """-> the `merge:` lines that say the lane lint was skipped. One line carries the words, so a case reads its keywords off one line."""
     return [line for line in text.splitlines() if line.startswith("merge:") and re.search(r"(?i)\blint\b", line) and re.search(r"(?i)\bskip", line)]
@@ -427,6 +436,101 @@ class LaneLint(LaneFixture):
         self.use_ci_job(PASSING, 0)
         rc, out = self.lint_run("--lane-lint", "7", base="release")
         self.assertEqual(rc, 0, out)
+
+    # The review record check (decision pr-review-record): a pull request target lints only when its newest review record parses with
+    # merge.parse_review, the parser `merge --reviewed` uses, and names that pull request. A stale record passes: a lane posts its record at
+    # the head it reviewed, then pushes a fix. Every record is built by record_text, the one literal of the form.
+
+    def test_a_pr_with_no_review_record_fails_before_the_ci_job_and_posts_nothing(self):
+        self.use_ci_job(PASSING, 0)
+        for label, records in (("no comment at all", {}),
+                               ("a record on another pull request's thread", {8: [tm.record_text(n=8, head=self.head("feat"))]})):
+            with self.subTest(records=label):
+                self.host.records = records
+                rc, out = self.run_lane("--lane-lint", "7")
+                self.assertEqual(rc, 1, "a pull request with %s passed the lint:\n%s" % (label, out))
+                assert_record_refusal(self, out)
+                self.assertEqual(self.lint_calls(), [], "the ci-job ran beside a missing review record:\n" + out)
+                self.assertEqual(self.host.posted, [], "a missing review record posted a lane-lint comment:\n" + out)
+
+    def test_a_newest_review_record_that_does_not_parse_fails_even_after_an_older_good_one(self):
+        head = self.head("feat")
+        good = tm.record_text(head=head)
+        self.assertIsNotNone(merge.parse_review(good), "precondition: the older record does not parse, so the case probes nothing")
+        newest = {"no CI line": tm.record_text(head=head).replace(tm.REVIEW_CI_LINE + "\n", ""),
+                  "a Kind that is no kind": tm.record_text(head=head, kind="sometimes")}
+        self.use_ci_job(PASSING, 0)
+        for label, bad in newest.items():
+            with self.subTest(newest=label):
+                self.assertIsNone(merge.parse_review(bad), "precondition: the newest record (%s) parses, so the case probes nothing" % label)
+                self.host.records = {7: [good, bad]}
+                rc, out = self.run_lane("--lane-lint", "7")
+                self.assertEqual(rc, 1, "a newest record with %s passed the lint after an older good one:\n%s" % (label, out))
+                assert_record_refusal(self, out)
+                self.assertEqual(self.lint_calls(), [], "the ci-job ran beside a record that does not parse:\n" + out)
+                self.assertEqual(self.host.posted, [], "a record that does not parse posted a lane-lint comment:\n" + out)
+
+    def test_a_newest_review_record_that_names_another_pull_request_fails(self):
+        other = tm.record_text(n=8, head=self.head("feat"))  # parses, and names #8 on #7's thread
+        parsed = merge.parse_review(other)
+        self.assertIsNotNone(parsed, "precondition: the record does not parse, so the case probes the number and not the parser")
+        self.assertEqual(parsed["n"], 8, "precondition: the record does not name #8, so the case probes nothing")
+        self.host.records = {7: [other]}
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a record that names #8, on #7's thread, passed the lint for #7:\n" + out)
+        assert_record_refusal(self, out)
+        self.assertEqual(self.lint_calls(), [], "the ci-job ran beside a record that names another pull request:\n" + out)
+        self.assertEqual(self.host.posted, [], "a record that names another pull request posted a lane-lint comment:\n" + out)
+
+    def test_a_valid_record_at_an_older_head_passes_the_lint(self):  # stale: a lane posts its record before it pushes a fix
+        stale, pushed = self.push_lane_commit()
+        self.assertIsNotNone(merge.parse_review(tm.record_text(head=stale)), "precondition: the record does not parse, so the case probes nothing")
+        self.host.records = {7: [tm.record_text(head=stale)]}
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7", head=pushed)
+        self.assertEqual(rc, 0, "a valid record at an older head refused the lint of the pushed head:\n" + out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_an_unreadable_comment_list_stops_the_lint_and_is_never_a_pass(self):
+        self.host.comments_error = "reading issue comments from GitHub failed: HTTP 502: Bad Gateway"
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.run_lane("--lane-lint", "7")
+        self.assertEqual(rc, 1, "a comment list that could not be read passed the lint:\n" + out)
+        self.assertEqual(pass_lines(out), [], "a comment list that could not be read printed a PASS line:\n" + out)
+        self.assertEqual(self.host.posted, [], "a comment list that could not be read posted a lane-lint comment:\n" + out)
+
+    def test_a_ref_target_skips_the_review_record_check(self):
+        self.host.records = {}  # the own pull request has no record, and a commit target never reads one
+        sha = self.head("feat")
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", sha, head=sha)
+        self.assertEqual(rc, 0, "a commit target with no review record on its pull request refused the lint:\n" + out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        self.assertEqual(self.host.posted, [], "a commit target posted a lane-lint comment:\n" + out)
+
+    def test_an_integration_pr_skips_the_review_record_check(self):
+        head = self.head("feat")
+        branch = merge.integration_branch(INTEGRATION_NAME)
+        tm.sh(self.other, "git", "push", "-q", "origin", "%s:refs/heads/%s" % (head, branch))
+        self.host.branch = branch
+        self.host.body = "\n".join(merge.freeze_lines(INTEGRATION_NAME, {8: head})) + "\n"
+        self.assertTrue(merge.is_integration_pr({"branch": branch, "body": self.host.body}), "precondition: the pull request is no integration PR, so the case probes nothing")
+        self.host.records = {}  # a batch's integration pull request carries no review record of its own
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7", head=head)
+        self.assertEqual(rc, 0, "an integration pull request with no review record refused the lint:\n" + out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+
+    def test_a_valid_record_at_the_head_passes_and_posts_the_lane_lint_comment(self):  # the control
+        head = self.head("feat")
+        self.host.records = {7: [tm.record_text(head=head)]}
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lint_run("--lane-lint", "7", head=head)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(pass_lines(out)), 1, out)
+        self.assertEqual([n for n, _ in self.host.posted], [7], "the PASS did not post one lane-lint comment on #7:\n" + out)
+        self.assertIn(f"Head: {head}", self.host.posted[0][1].splitlines(), "the lane-lint comment does not name the head the lint read:\n" + self.host.posted[0][1])
 
     def stacked_pr_on_release(self):
         """PR 7 is feat, based on release, not main. release moves one commit on after feat forked from it. -> (feat sha, release sha)."""
@@ -2740,10 +2844,14 @@ class LintPostsPassComment(CiJobStub, tm.CloudSession):
         self.assertEqual(rc, 0, out)
         self.assert_pass_comment(self.posts, head, out)
 
+    def seed_record(self, head, **state):
+        """The gh shim's repo comment list holds one review record of pull request 7 at `head`, so the real Host reads a record that parses. `state` goes with it."""
+        tm.GhHalf.set(self, issue_comments=[tm.review_comment(1, 7, tm.record_text(head=head))], **state)
+
     def test_a_real_host_posts_the_pass_as_one_rest_comment_on_the_pull_request(self):
         tm.install_gh_shim(self)
-        tm.GhHalf.set(self)
         head = self.head("feat")
+        self.seed_record(head)
         self.use_ci_job(PASSING, 0)
         rc, out = self.lane("--lane-lint", "7", host=merge.Host())
         self.assertEqual(rc, 0, out)
@@ -2776,8 +2884,8 @@ class LintPostsPassComment(CiJobStub, tm.CloudSession):
 
     def test_a_failed_post_after_a_pass_prints_the_pass_and_a_reason_and_exits_zero(self):
         tm.install_gh_shim(self)
-        tm.GhHalf.set(self, post_fail=tm.rest_err(502, "Bad Gateway"))
         head = self.head("feat")
+        self.seed_record(head, post_fail=tm.rest_err(502, "Bad Gateway"))
         self.use_ci_job(PASSING, 0)
         rc, out = self.lane("--lane-lint", "7", host=merge.Host())
         self.assertEqual(rc, 0, "a PASS whose comment failed to post did not exit 0:\n" + out)
@@ -2788,6 +2896,28 @@ class LintPostsPassComment(CiJobStub, tm.CloudSession):
         for part in (LANE_LINT_MARKER, "PR: #7", f"Head: {head}", "Result: PASS"):
             self.assertIn(part, printed, "a failed post printed no `%s` line of the comment body to post by hand, after the reason:\n%s" % (part, out))
         self.assertEqual(tm.GhHalf.gh_state(self, "posted") or [], [], "the failed post was kept as a posted comment")
+
+    def test_a_real_host_whose_newest_review_record_does_not_parse_refuses_and_posts_nothing(self):
+        tm.install_gh_shim(self)
+        head = self.head("feat")
+        good = tm.review_comment(1, 7, tm.record_text(head=head))
+        bad = tm.review_comment(2, 7, tm.record_text(head=head, kind="sometimes"))
+        tm.GhHalf.set(self, issue_comments=[good, bad])  # the comment list as the real Host reads it: the older record first, the newest last
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lane("--lane-lint", "7", host=merge.Host())
+        self.assertEqual(rc, 1, "the real host's newest review record, which does not parse, passed the lint:\n" + out)
+        assert_record_refusal(self, out)
+        self.assertEqual(self.lint_calls(), [], "the ci-job ran beside a record that does not parse:\n" + out)
+        self.assertEqual(tm.GhHalf.gh_state(self, "posted") or [], [], "the refusal posted a lane-lint comment:\n" + out)
+
+    def test_a_real_host_whose_comment_list_fails_to_read_stops_the_lint_and_is_never_a_pass(self):
+        tm.install_gh_shim(self)
+        tm.GhHalf.set(self, comments_fail=tm.rest_err(500, "Server Error"))
+        self.use_ci_job(PASSING, 0)
+        rc, out = self.lane("--lane-lint", "7", host=merge.Host())
+        self.assertEqual(rc, 1, "a comment list the real host could not read passed the lint:\n" + out)
+        self.assertEqual(pass_lines(out), [], "a comment list the real host could not read printed a PASS line:\n" + out)
+        self.assertEqual(tm.GhHalf.gh_state(self, "posted") or [], [], "a comment list the real host could not read posted a lane-lint comment:\n" + out)
 
 
 class LintCheckReviewed(tm.ReviewEnv):
