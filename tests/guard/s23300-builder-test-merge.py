@@ -81,11 +81,25 @@ def _mt_open(w, lane, main, conflicted, no_ff=False):
         _require_conflict(w, rel)
 
 
-def _mt_case(name, lane, main, conflicted, resolve=(), stage=False, commit=False, files=None, no_ff=False):
+def _require_merge_names_from(where, folder, rel):
+    """Stop the suite unless git's merge-tree, run from `folder` of `where`, names the conflicted `rel` relative to that
+    folder (with `../`). A case run from the folder then takes the path merge_tree must put back to the top."""
+    want = os.path.relpath(os.path.join(where, rel), os.path.join(where, folder)).replace(os.sep, "/")
+    done = run_vcs(os.path.join(where, folder), "merge-tree", "--write-tree", "-z", "--no-messages", "HEAD", "MERGE_HEAD")
+    if done.returncode not in (0, 1) or not any(entry.endswith("\t" + want) for entry in done.stdout.split("\0")):
+        sys.exit("fixture setup failed: merge-tree in %r does not name %r from %r: %s"
+                 % (where, want, folder, (done.stdout + done.stderr).strip()))
+
+
+def _mt_case(name, lane, main, conflicted, resolve=(), stage=False, commit=False, files=None, no_ff=False,
+             folder=""):
     """A fixture: the merge `_mt_open` leaves, then each (path, text) of `resolve` written. `stage` adds the
-    tree to the index; `commit` makes the merge commit."""
+    tree to the index; `commit` makes the merge commit. `folder`, when given, is the subfolder the case runs from:
+    the fixture first checks that merge-tree names the conflicted path from there, so the case takes that path."""
     def build(w):
         _mt_open(w, lane, main, conflicted, no_ff=no_ff)
+        if folder:
+            _require_merge_names_from(w, folder, conflicted[0])
         for rel, text in resolve:
             write(os.path.join(w, rel), text)
         if stage or commit:
@@ -185,8 +199,11 @@ MT_SAME = _mt_case("mt-same-name", [(TEST_A, MT_BASE + MT_LANE), (MT_OTHER_PATH,
                    [TEST_A, MT_OTHER_PATH],
                    resolve=[(TEST_A, MT_BASE + MT_MAIN), (MT_OTHER_PATH, MT_OTHER + MT_LANE + "# main's note\n")],
                    stage=True, files={**BASE_FILES, MT_OTHER_PATH: MT_OTHER})
+# The drop reads as lost or moved: one any-of group (a tuple inside `carries` is any-of), so a reason with a word of either
+# class passes. Written as a group, not as the six words, so the form matches what the check reads.
+MT_SAME_ANY = MT_CARRY["lost"] + MT_CARRY["moved"]
 _mt_refuse("builder-refuse: a merge that drops a same-named test case from one file, which another file still holds, "
-           "is refused", MT_SAME, ("lost", "moved"), (MT_CARRY["lost"] + MT_CARRY["moved"],))
+           "is refused", MT_SAME, ("lost", "moved"), (MT_SAME_ANY,))
 
 # Case 2: a test case body that differs from both parents.
 MT_BODY = _mt_case("mt-body", MT_LANE_SIDE, MT_MAIN_SIDE, [TEST_A],
@@ -304,5 +321,94 @@ add("test-author: control, an Edit of a conflicted test file mid-merge is allowe
 # A test-author's committed merge that keeps both sides is never refused and logs nothing (control).
 LOG_CHECKS_EXTRA.append(("builder-refuse: control, a test-author's merge commit that keeps both sides' test cases is "
                          "never refused and logs nothing", author_silent_case(MT_COMMITTED, "mt-allow-committed")))
+
+
+# ---- a builder's write tool on a test path its merge conflicts (builder_merge_write_ok). The path is allowed mid-merge,
+# since the content is judged at commit, push and stop. Red on main, where every builder write to a test path is denied.
+MT_WRITE_OPEN = _mt_case("mt-write-conflicted", MT_LANE_SIDE, MT_MAIN_SIDE, [TEST_A])
+add("builder-refuse: a builder's Write of a test path its merge conflicts is allowed mid-merge", "allow", tool="Write",
+    cwd=MT_WRITE_OPEN, file_path=os.path.join(MT_WRITE_OPEN, TEST_A), content=MT_BOTH, agent_id="bld1",
+    agent_type="builder")
+add("builder-refuse: a builder's Edit of a test path its merge conflicts is allowed mid-merge", "allow", tool="Edit",
+    cwd=MT_WRITE_OPEN, file_path=os.path.join(MT_WRITE_OPEN, TEST_A), old_string=MT_BLOCK, new_string=MT_BOTH,
+    agent_id="bld1", agent_type="builder")
+add("builder-refuse: a builder's Write of a test path its merge conflicts, run from a subfolder, is allowed mid-merge",
+    "allow", tool="Write", cwd=os.path.join(MT_WRITE_OPEN, "src"), file_path=os.path.join(MT_WRITE_OPEN, TEST_A),
+    content=MT_BOTH, agent_id="bld1", agent_type="builder")
+# Controls, red only under the mutants: the Edit form of the two refusals, a clean-merged test path and a mutation test.
+add("builder-refuse: control, a builder's Edit of a test path that merged clean mid-merge is denied", "deny",
+    rule="builder-test-edit", tool="Edit", cwd=MT_WRITE_CLEAN, file_path=os.path.join(MT_WRITE_CLEAN, TEST_A),
+    old_string=MT_MAIN, new_string="def test_main_new():\n    assert 5\n", agent_id="bld1", agent_type="builder")
+add("builder-refuse: control, a builder's Edit of a conflicted mutation test is denied", "deny",
+    rule="builder-test-edit", tool="Edit", cwd=MT_MUT_WRITE, file_path=os.path.join(MT_MUT_WRITE, MT_MUT_GUARD),
+    old_string="x = 2\n", new_string="x = 4\n", agent_id="bld1", agent_type="builder")
+
+
+# ---- the merge route run from a subfolder. merge_tree names a conflicted path relative to the folder git runs in
+# (`../tests/test_a.py`), and the guard puts it back to the checkout's top. Each fixture first checks that git names it
+# so. Red on main, where the merge route is absent; red on the mutant that drops the prefix, where the deny names no class.
+MT_SUB_KEEP = _mt_case("mt-sub-keep-both", MT_LANE_SIDE, MT_MAIN_SIDE, [TEST_A], resolve=[(TEST_A, MT_BOTH)],
+                       stage=True, folder="src")
+_mt_allow("builder-refuse: a builder's open merge that keeps both sides' test cases, run from a subfolder, is allowed",
+          os.path.join(MT_SUB_KEEP, "src"))
+MT_SUB_LOST = _mt_case("mt-sub-lost", MT_LANE_SIDE, MT_MAIN_SIDE, [TEST_A], resolve=[(TEST_A, MT_BASE + MT_LANE)],
+                       stage=True, folder="src")
+_mt_refuse("builder-refuse: a merge that drops main's test case, run from a subfolder, is refused as lost",
+           os.path.join(MT_SUB_LOST, "src"), "lost", (MT_CARRY["lost"],))
+
+
+# ---- top-level call statements of a test file (merge_test_issue, `calls`). A call a parent holds stays as many times as
+# that parent holds it; a call neither parent holds is new, and a skip call is a skip. The base holds one call twice, so
+# counting a call's copies as a sum instead of a maximum refuses the keep-both row. Red on main, where the merge route is
+# absent.
+MT_DUP = "register_case('dup')\n"
+MT_CALL_BASE = MT_BASE + MT_DUP * 2
+MT_CALL_FILES = {**BASE_FILES, TEST_A: MT_CALL_BASE}
+MT_CALL_LANE = "register_case('lane')\n"
+MT_CALL_MAIN = "register_case('main')\n"
+MT_CALL_LANE_SIDE = [(TEST_A, MT_CALL_BASE + MT_LANE + MT_CALL_LANE)]
+MT_CALL_MAIN_SIDE = [(TEST_A, MT_CALL_BASE + MT_MAIN + MT_CALL_MAIN)]
+MT_CALL_BOTH = MT_CALL_BASE + MT_LANE + MT_CALL_LANE + MT_MAIN + MT_CALL_MAIN
+MT_CALL_FULL_LANE = "".join("register_case('lane_%02d')\n" % n for n in range(30))
+MT_CALL_FULL_MAIN = "".join("register_case('main_%02d')\n" % n for n in range(30))
+
+MT_CALL_KEEP = _mt_case("mt-call-keep-both", MT_CALL_LANE_SIDE, MT_CALL_MAIN_SIDE, [TEST_A],
+                        resolve=[(TEST_A, MT_CALL_BOTH)], stage=True, files=MT_CALL_FILES)
+_mt_allow("builder-refuse: a builder's open merge that keeps both sides' calls, a call held twice in the base, is allowed",
+          MT_CALL_KEEP)
+# Empty state: the base holds no call, and each side adds one.
+MT_CALL_EMPTY = _mt_case("mt-call-empty-base", [(TEST_A, MT_CALL_LANE)], [(TEST_A, MT_CALL_MAIN)], [TEST_A],
+                         resolve=[(TEST_A, MT_CALL_LANE + MT_CALL_MAIN)], stage=True, files={**BASE_FILES, TEST_A: ""})
+sh("builder-refuse: a builder's open merge into an empty test file, each side adds one call and both are kept, is "
+   "allowed at commit", COMMIT, "allow", cwd=MT_CALL_EMPTY, agent_id="bld1", agent_type="builder")
+# Full-size state: each side adds thirty calls.
+MT_CALL_FULL = _mt_case("mt-call-full", [(TEST_A, MT_CALL_BASE + MT_CALL_FULL_LANE)],
+                        [(TEST_A, MT_CALL_BASE + MT_CALL_FULL_MAIN)], [TEST_A],
+                        resolve=[(TEST_A, MT_CALL_BASE + MT_CALL_FULL_LANE + MT_CALL_FULL_MAIN)], stage=True,
+                        files=MT_CALL_FILES)
+sh("builder-refuse: a builder's open merge that keeps thirty calls from each side is allowed at commit",
+   COMMIT, "allow", cwd=MT_CALL_FULL, agent_id="bld1", agent_type="builder")
+# Lost: the merge drops main's call.
+MT_CALL_DROP = _mt_case("mt-call-drop-main", MT_CALL_LANE_SIDE, MT_CALL_MAIN_SIDE, [TEST_A],
+                        resolve=[(TEST_A, MT_CALL_BASE + MT_LANE + MT_CALL_LANE + MT_MAIN)], stage=True,
+                        files=MT_CALL_FILES)
+_mt_refuse("builder-refuse: a merge that drops main's top-level call is refused as lost", MT_CALL_DROP, "lost",
+           (MT_CARRY["lost"],))
+# Lost: the base holds a call twice, and the merge keeps it once.
+MT_CALL_ONCE = _mt_case("mt-call-held-twice", MT_CALL_LANE_SIDE, MT_CALL_MAIN_SIDE, [TEST_A],
+                        resolve=[(TEST_A, MT_BASE + MT_DUP + MT_LANE + MT_CALL_LANE + MT_MAIN + MT_CALL_MAIN)],
+                        stage=True, files=MT_CALL_FILES)
+_mt_refuse("builder-refuse: a merge that keeps a call its parents hold twice only once is refused as lost",
+           MT_CALL_ONCE, "lost", (MT_CARRY["lost"],))
+# New: the merge adds a call neither parent holds.
+MT_CALL_NEW = _mt_case("mt-call-new", MT_CALL_LANE_SIDE, MT_CALL_MAIN_SIDE, [TEST_A],
+                       resolve=[(TEST_A, MT_CALL_BOTH + "register_case('builder')\n")], stage=True, files=MT_CALL_FILES)
+_mt_refuse("builder-refuse: a merge that adds a top-level call neither parent had is refused as new", MT_CALL_NEW,
+           "new", (MT_CARRY["new"],))
+# Skip: the call it adds is a skip mark.
+MT_CALL_SKIP = _mt_case("mt-call-skip", MT_CALL_LANE_SIDE, MT_CALL_MAIN_SIDE, [TEST_A],
+                        resolve=[(TEST_A, MT_CALL_BOTH + "pytest.skip('later')\n")], stage=True, files=MT_CALL_FILES)
+_mt_refuse("builder-refuse: a merge that adds a top-level pytest.skip call is refused as a skip", MT_CALL_SKIP,
+           "skip", (MT_CARRY["skip"],))
 
 FAMILY = _MT_PRIOR_FAMILY
