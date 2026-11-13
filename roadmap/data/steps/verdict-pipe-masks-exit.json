@@ -5,7 +5,7 @@
   "order": 0.96,
   "owner": "coordinator",
   "why": "Coordinator, 13:52 CST Nov 7.",
-  "note": " Triage sweep 04:49 CST Nov 10: back to ready. Lane [ended:lane:-verdict-pipe-masks-exit] is archived or finished; no open PR (725 read), no cited PR merged, no cited commit and no slug on main. Coordinator started lane [ended:verdict-pipe-masks-exit] at 04:53 CST Nov 10. Done, coordinator 05:23 CST Nov 10: on main by a8b5cf6c6 (rule verdict-pipe; decision verdict-pipe-refused, ruling 2026-11-08 03:44 CST). The coordinator closes its lane.",
+  "note": "Triage sweep 04:49 CST Nov 10: back to ready. Lane [ended:lane:-verdict-pipe-masks-exit] is archived or finished; no open PR (725 read), no cited PR merged, no cited commit and no slug on main. Coordinator started lane [ended:verdict-pipe-masks-exit] at 04:53 CST Nov 10. Done, coordinator 05:23 CST Nov 10: on main by a8b5cf6c6 (rule verdict-pipe; decision verdict-pipe-refused, ruling 2026-11-08 03:44 CST). The coordinator closes its lane. Possible false alarm, lane bg-tail-loses-verdict 13:31 CST Nov 13: the verdict-pipe guard refused a Bash heredoc whose body only held the text \"verdict <cmd> | tail\" (a string, not a command). A builder reads the guard's record and adds a heredoc-body case.",
   "lane": "session_013NEJL1fXmMyjpN5ToK7SXQ",
-  "updatedAt": "2026-11-10T05:23:00-06:00"
+  "updatedAt": "2026-11-13T13:31:53-06:00"
 }
