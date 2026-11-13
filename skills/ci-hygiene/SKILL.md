@@ -218,40 +218,46 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     its scope flag and `|| github.event_name != 'pull_request'`, so push, nightly and dispatch runs
     start it. See `snippets.md`, section 19.
     Two jobs may share a flag. A docs-only PR skips only the steps behind a flag. A `*.md` path
-    turns no flag on (`ci-scope.sh`, the `*.md) ;;` arm). In the `checks` job, 149 of 167 steps carry
-    no scope `if:` (`checks.yml`, lines 75-667), so a docs-only PR runs them all. Run 43466545532
-    (batch 133, docs only) ran 149 of 167. Count again before you repeat this: add a flag-free step
-    and the number moves. An unreadable diff or an unmapped path runs everything.
+    outside `hooks/`, `janitor/`, `lint/`, `actions/` and the map skill turns no flag on
+    (`ci-scope.sh`, the `*.md) ;;` arm, line 90). In the `checks` job (`checks.yml`, lines 75-667),
+    149 of 167 steps have no `if:` and 5 more gate only on the event name, so 154 carry no scope
+    `if:`. A docs-only PR runs at least those 154 and skips the 13 scope-gated steps. Runner 10's
+    audit counts 149 ran in run 43466545532 (batch 133, docs only); this skill did not re-read that
+    run's step list. Count again before you repeat this: add a flag-free step and the number moves. An unreadable diff or an unmapped path runs everything.
 20. **The suites bend, not the wait** (owner, 11:34 CST Nov 13). Cut a suite's work, or run it only when
     its inputs change. Never lengthen the wait to save runner work. Set no fixed time target. Measure wall
     time before and after on the same kind of batch (owner, 11:36 CST, R37). Cost here is wall time, macOS
     slots and shared-token calls. No Actions minutes are billed (`ci-cut-in-steps.md`, line 13), so step 13
     does not apply to this repo.
-21. **Gate a suite by what it reads.** In run 43466545532 (docs only), the `code` flag was off and all
-    149 flag-free steps ran. `checks` set the wall time: 40.7 of 43.5 job minutes. A flag-free step runs
+21. **Gate a suite by what it reads.** In run 43466545532 (docs only), the `code` flag was off and
+    runner 10 counts 149 flag-free steps that ran. `checks` set the wall time: 40.7 of 43.5 job minutes. A flag-free step runs
     on every docs change. Before you add a flag to one, grep its source for the tracked docs it reads.
     `lint/test_report_guard.py` line 994 reads `agents/<role>.md`, so it needs its own path map beside
     the browser-job list in `ci-scope.sh` (lines 93-105). Keep the doc lints ungated. Keep each step's
-    name: `lint/rule_audit.py` reads names. Unmeasured: how many of the 81 flag-free suites that name a
-    `.md` path really read a doc.
-22. **Read the slot queue before you blame a job.** GitHub allows 5 macOS jobs at once. In run
-    43455790930 `checks-macos` queued 978 s. It started 1.4 min after run 43453097652's `checks-macos-b`
-    ended, and that run held 3 of 5 slots (`draft-until-reviewed.md`, line 15). List the runs that hold
+    name: `lint/rule_audit.py` reads names. Unmeasured: which flag-free suites read a tracked doc. A
+    grep of `checks.yml` finds only 3 flag-free steps that name a `.md` path (lines 456, 514, 517).
+    Runner 10's count of 81 came from suite sources and does not reproduce here.
+22. **Read the slot queue before you blame a job.** GitHub's limit is 5 macOS jobs at once on this plan type (`draft-until-reviewed.md`, line 15).
+    The account's plan is unmeasured. In run 43455790930 `checks-macos` queued 978 s. It started 1.4 min after run 43453097652's `checks-macos-b`
+    ended, and runner 10 counts that run as holding 3 of 5 slots. List the runs that hold
     slots first. Then decide where to cut.
 23. **A push run repeats a tested tree.** Batch 132's merge commit and its PR head share tree `5c450efc`
-    (run 43464896080 against PR run 43455790930). The push adds only the full Windows guard, Windows
-    merge and sweep mutation shards (`checks.yml`, lines 1527-1530 and 1607-1608). The rest repeats
-    (`test-strategy-reset.md`, line 29: a duplicate run costs time for no new verdict). Compare
-    `git rev-parse <sha>^{tree}` before you add a job to the push run. Risk: a tree that reaches main
+    (run 43464896080 against PR run 43455790930). The push adds the full Windows guard, Windows
+    merge and sweep mutation shards (`checks.yml`, lines 1527-1530 and 1607-1608), the push-only macOS
+    sweep mutation step (line 1039) and `mutation-report` (line 1505). The rest repeats
+    (`test-strategy-reset.md`, line 29: a duplicate run costs minutes for no new verdict). Compare
+    `git rev-parse <sha>^{tree}` before you add a job to the push run. Today a push turns every flag
+    on (`ci-scope.sh`, line 117). Risk, if you skip jobs on a same-tree push: a tree that reaches main
     with no PR run gets no macOS check until the nightly run.
 24. **Find the job that sets the wall time, then split it.** `checks` is one chain of 167 steps. It sets the
     wall time on a docs path and on push (42.2 min, run 43453097652). On a code PR `checks-macos` is
     longer (34.75 min, run 43455790930). A 3-job split of `checks` is projected, unmeasured. Measure it
-    before and after (step 15). 12 runners start only to skip. The rollup fails a skipped job, so a skip
-    stays at the step (step 19).
+    before and after (step 15). Runner 10's audit counts 12 runners that start only to skip
+    (0.03-0.1 min each). A static count of jobs with no job-level `if:` and every step gated gives 17.
+    The rollup fails a skipped job, so a skip stays at the step (step 19).
 25. **Build batch N+1 on batch N.** Between batch N's merge and batch N+1's ready, no CI ran: 16.7, 21.5,
     15.9, 16.1 and 9.9 min (batches 127, 129, 130, 132, 133). Draft to ready took 10.4-13.3 min. Build
-    N+1 with `--on N` (`operating-model.md`, lines 56-61; `merge.py`, lines 2299-2309). If N goes red,
+    N+1 with `--on N` (`operating-model.md` in `skills/project-ops/templates`, lines 56-61; `merge.py`, lines 5195 and 5495). If N goes red,
     rebuild N+1. Measure the gap before and after on the same kind of batch.
 26. **Do not run macOS twice on one tree.** `checks-macos` waited 13.4 min (run 43444354776) and 16.3 min
     (run 43455790930) behind the push run on main that tested the same tree (4 of 4 merges). A closed
@@ -266,8 +272,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     (`checks.yml`, lines 1566, 1588, 1651, 1675, 1699, 1723). Batch-113's PR run was green, then main's
     run was red on all 5 merge-tool shards (run 43348145389), and the next merge needed `--base-red-ok`.
     They took 14.1-24.8 min, under the PR's longest path, and no Windows job waited for a runner. Step
-    17's slice rule rests on a runner limit that holds for macOS, not Windows. macOS runs the full guard
-    suite on every PR (`checks.yml`, lines 1012 and 1251). Measure before you move a job.
+    17 names no runner limit as the reason for its slice. The 5-slot limit is for macOS (step 22).
+    On a code PR macOS runs the full guard suite (`checks.yml`, lines 1012-1013 and 1251-1252, behind
+    `code`). Measure before you move a job.
 29. **Batch more lanes per run.** Batches 127-132 carried 1, 2, 1, 1 lanes at about 65 min each. Batch-125
     carried 15. Five lanes passed lane-lint on Nov 12 (14:40 UTC) and first joined a batch on Nov 13
     (16:14). 3 of 4 red batches had 7-15 lanes, so a larger batch also fails more often. Weigh both.
@@ -281,29 +288,33 @@ On main (the record exists):
 - A test never fails on runner speed. A job runs only when a file its suites read changes. A duplicate
   run costs time for no new verdict (decision `test-strategy-reset`).
 - A draft PR skips CI (decision `draft-until-reviewed`). A merge needs a green run on the current base
-  (decision `merge-needs-current-base`). Nothing merges while a batch's CI runs (decision
-  `no-merge-during-batch-ci`).
-- Time limits (decision `ci-job-caps`): the record raises caps as a stopgap. Retro lists R3 as newer: a
-  cap only ends a hung test, and a new job's cap is its nearest sibling's runs times 1.5. R3 is not
-  on main yet, so `ci-job-caps` still governs. When R3 lands, rewrite this line.
+  (decision `merge-needs-current-base`). Nothing merges while a batch's CI runs, unless the
+  running batch's head already holds the PR's head (decision `no-merge-during-batch-ci`, line 5).
+- Time limits: decision `ci-job-caps` raises caps as a stopgap. R3 (`docs/plans/restart-plan.md`, lines
+  207-213, owner 14:09 CST Nov 10) is newer: stop on silence, a stop reads "hung" and never red, and a
+  total limit comes from measured green runs, never a stored number. Retro adds a "nearest sibling's
+  runs times 1.5" cap rule that is not in that text. R3 governs where they clash.
 
-Named in retro's list (11:46 CST Nov 13) as rulings in the restart plan, and not found on main when
-this was written. Treat each as an argument to weigh, never as law, until its record lands. Retro's R37
-wording (no fixed number without a ruling; gold is measured before and after) differs from the
-`docs/plans/restart-plan.md` R37 entry (no fixed word cap): read the plan before you cite it.
+In retro's list (11:46 CST Nov 13). R4 (`restart-plan.md`, line 273) and R26 (line 250) are on main:
 - R4: lane lint runs once, at hand-off. Batch CI runs lint first and cancels on red.
 - R26: lane checks equal batch CI. Two drops and a lane leaves the queue. No self-made reruns.
+- Item 521: prose and code share a batch when that lands both sooner (`claude-md-scope-audit.md`,
+  line 189, "Prose wave").
+
+These have no hit in `docs/` on main when this was written (the reviewer's grep). Treat each as an
+argument to weigh, never as law, until its record lands:
 - R50, R53: a red job, or any CI or merge alarm, goes to the batch runner at once.
 - R55, R65: merge-flow and CI fixes go express, and ready express lanes share one express batch.
 - R58: batch macOS jobs run on the owner's Mac runner, falling back to GitHub. R61: macOS runs once per
   batch, only where the OS differs. R62: Linux and Windows run each suite once per batch, on the batch
   PR. The push run does not re-test the PR's tree. R63: Windows full shards are dropped, held.
 - R64: update this skill now. Child repos comply when runners are free.
-- Drop the nightly schedule (owner, 22:19 CST Nov 12, step `drop-nightly-schedule`). Steps 22, 23 and
-  26 name the nightly run as a fallback: re-read them when the drop lands.
+- Drop the nightly schedule (owner, 22:19 CST Nov 12, step `drop-nightly-schedule`). Steps 17, 23 and
+  26 name the nightly run: re-read them when the drop lands.
 - R67 part 5: skip `checks` suites a docs-only change cannot affect (owner, 11:34 CST Nov 13, step
-  `ci-jobs-skip-unread`). Step 21 is the same work.
-- Item 521: prose and code share a batch when that lands both sooner.
+  `ci-jobs-skip-unread`). Step 21 is the same work. Retro's R37 reads "no fixed number without a ruling;
+  gold is measured before and after"; `restart-plan.md` line 813 retires or derives each fixed number
+  from measured runs. Step 20 follows both.
 
 ## Public repos
 
