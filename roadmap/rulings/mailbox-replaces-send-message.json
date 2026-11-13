@@ -1,0 +1,10 @@
+{
+ "id": "mailbox-replaces-send-message",
+ "at": "2026-11-13T12:26:00-06:00",
+ "title": "Sessions talk through the mailbox; send_message stays only as the doorbell",
+ "ruling": "Owner 2026-11-13 12:26 CST, relayed by the retrospective and then the coordinator (not typed to triage): end send_message and use the mailbox. Express: step mail-guards-read-send-message (now doing) and #2890 (mailbox-all-messages) go first; the 20-message trial (session-messages step 5) follows both merges; then the standing roles cut over. Proof: one day of role-to-role traffic in the mailbox, with no send_message but the doorbell. Until the cutover, triage keeps using send_message.",
+ "quote": "end send_message, use the mailbox",
+ "source": "Coordinator message to triage, 12:37 CST Nov 13, relaying the owner via the retrospective. The quote is the coordinator's wording, not verified owner text. Filed by triage.",
+ "status": "open",
+ "step": "mail-guards-read-send-message"
+}

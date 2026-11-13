@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Runner 10 merge-path audit (owner 11:34 and 11:36 CST Nov 13).",
  "source": "coordinator 11:46 CST Nov 13, from runner 10 audit",
- "note": "Doing, express. Lane session_013NEJL2UD9WQVy46Gd7bGKa. Owner 11:34/11:36 CST Nov 13.",
- "updatedAt": "2026-11-13T11:51:15-06:00"
+ "note": "Doing, express. Lane session_013NEJL2UD9WQVy46Gd7bGKa. Owner 11:34/11:36 CST Nov 13. Incident, lane ci-cancel-on-close (#3177), coordinator 12:38 CST Nov 13: round 3 takes the live head only, so a reviewer that finished at an older head (406ff566d) cannot post once a fix moves the head (2778bc3d7); the lane needed one fresh round-3 at the live head. Ruling: posted logs count, the unposted round 3 is dropped, FAIL means a new lane. Tool gap: let a round-3 record post for a reviewed head that is an ancestor of the live head with no guard-or-check change since, or say why not.",
+ "updatedAt": "2026-11-13T12:28:18-06:00"
 }
