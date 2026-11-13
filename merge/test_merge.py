@@ -16442,11 +16442,11 @@ unexpected(method + " " + rel)
 
     def assert_one_unknown_beside_a_full_block(self, out, failing, reason, other, failing_first):
         """The printed lines are four. `failing`'s block is one line, `repo <failing as given>: unknown (...)`, at its place in the order given,
-        and `other`'s block is whole: its header, its one #5 line and its batch line. Nothing else prints. `reason` is a text the reason must
-        hold, or None for any reason that is not empty."""
+        and `other`'s block is whole: its header and its one #5 line, with no batch line (the batch route is gone from --reviewed). Nothing else
+        prints. `reason` is a text the reason must hold, or None for any reason that is not empty."""
         lines = printed_review_lines(out)
-        self.assertEqual(len(lines), 4, "want one unknown line and one whole block, and nothing else:\n" + out)
-        unknown, block = (lines[0], lines[1:]) if failing_first else (lines[3], lines[:3])
+        self.assertEqual(len(lines), 3, "want one unknown line and one whole block, and nothing else:\n" + out)
+        unknown, block = (lines[0], lines[1:]) if failing_first else (lines[2], lines[:2])
         m = re.fullmatch(rf"repo {re.escape(failing)}: unknown \((.+)\)", unknown)
         self.assertTrue(m, f"the failing root's block is not `repo {failing}: unknown (...)`:\n" + out)
         self.assertTrue(m.group(1).strip(), "the unknown line gives no reason:\n" + out)
@@ -16454,7 +16454,7 @@ unexpected(method + " " + rel)
             self.assertIn(reason, m.group(1), "the unknown line does not give the reason:\n" + out)
         self.assertEqual(block[0], f"repo {other}:", out)
         self.assert_done(block, 5)
-        self.assertEqual(self.batch_numbers(block), [5], f"{other} lost its batch line:\n" + out)
+        self.assertEqual(self.batch_numbers(block), [], f"{other} names a batch line, which the batch route no longer prints:\n" + out)
 
     def test_root_needs_reviewed(self):
         # --root goes only with --reviewed: the parser refuses it anywhere else, and the usage error names the flag's refusal.
@@ -16494,18 +16494,6 @@ unexpected(method + " " + rel)
         self.assertTrue(pr_lines(blocks["o/alpha"], 7), out)
         self.assertFalse(pr_lines(blocks["o/alpha"], 5), out)
 
-    def test_a_done_pr_opens_its_batch_while_another_repo_has_one_running(self):
-        # alpha has a ready integration pull request with its CI pending and no done pull request. bravo has one done pull request and nothing
-        # running. bravo's batch opens: the running CI in alpha does not hold it.
-        hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(3, hex_head("3"))], check_rows={hex_head("3"): running()}),
-                 self.bravo: root_host("o/bravo", pulls=[batch_pull(5, hex_head("5"))], comments=[record_of(5, hex_head("5")), lint_of(5, hex_head("5"))],
-                                       check_rows={hex_head("5"): green()})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=hosts)
-        self.assertEqual(rc, 0, out + err)
-        blocks = by_repo(self, out, "o/alpha", "o/bravo")
-        self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo #5"], out)
-        self.assertEqual(blocks["o/bravo"][-1], "open batch now: o/bravo #5", "the batch line comes after the repo's own lines:\n" + out)
-        self.assertEqual(batch_lines_of(blocks["o/alpha"]), [], "alpha has no done pull request, so it gets no batch line:\n" + out)
 
     def test_a_repo_with_no_done_pr_prints_no_batch_line(self):
         # the number 5 is done in alpha and open in bravo: each block names only its own done pull requests
@@ -16517,58 +16505,36 @@ unexpected(method + " " + rel)
         rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=hosts)
         self.assertEqual(rc, 0, out + err)
         blocks = by_repo(self, out, "o/alpha", "o/bravo")
-        self.assertEqual(batch_lines_of(blocks["o/alpha"]), ["open batch now: o/alpha #5"], out)
+        self.assertEqual(batch_lines_of(blocks["o/alpha"]), [], "the batch route is gone from --reviewed, so no block names a batch:\n" + out)
         self.assertEqual(batch_lines_of(blocks["o/bravo"]), [], "bravo has no done pull request:\n" + out)
 
-    def test_a_busy_repo_builds_the_next_batch_and_an_idle_one_opens_its_own(self):
-        head5, head6, head9 = hex_head("5"), hex_head("6"), hex_head("9")
-        hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, head5), batch_pull(6, head6)], comments=[record_of(5, head5), lint_of(5, head5)],
-                                       check_rows={head5: green(), head6: running()}),
-                 self.bravo: root_host("o/bravo", pulls=[batch_pull(9, head9)], comments=[record_of(9, head9), lint_of(9, head9)], check_rows={head9: green()})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=hosts)
-        self.assertEqual(rc, 0, out + err)
-        blocks = by_repo(self, out, "o/alpha", "o/bravo")
-        self.assertEqual(batch_lines_of(blocks["o/alpha"]), ["build next batch on the running head: o/alpha #5"], out)
-        self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo #9"], out)
 
-    def test_done_prs_are_listed_in_ascending_order_and_held_or_open_ones_are_left_out(self):
-        pulls = [batch_pull(n, hex_head(c)) for n, c in ((9, "9"), (6, "6"), (5, "5"), (4, "4"))]  # out of order on purpose
-        comments = [record_of(9, hex_head("9")), record_of(6, hex_head("6"), rounds=OPEN_ROUNDS), record_of(5, hex_head("5")),
-                    record_of(4, hex_head("4"), net="negative"), lint_of(9, hex_head("9")), lint_of(5, hex_head("5"))]
-        check_rows = {hex_head("9"): green(), hex_head("5"): green()}
-        hosts = {self.bravo: root_host("o/bravo", pulls=pulls, comments=comments, check_rows=check_rows)}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.bravo, hosts=hosts)
-        self.assertEqual(rc, 0, out + err)
-        blocks = by_repo(self, out, "o/bravo")
-        self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo #5 #9"], out)
 
-    def test_every_done_pr_of_a_full_repo_is_listed(self):
-        heads = {n: format(n, "x") * 40 for n in range(1, 13)}
-        pulls = [batch_pull(n, heads[n]) for n in reversed(range(1, 13))]
-        comments = [record_of(n, heads[n]) for n in range(1, 13)] + [lint_of(n, heads[n]) for n in range(1, 13)]
-        hosts = {self.bravo: root_host("o/bravo", pulls=pulls, comments=comments, check_rows={heads[n]: green() for n in range(1, 13)})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.bravo, hosts=hosts)
-        self.assertEqual(rc, 0, out + err)
-        blocks = by_repo(self, out, "o/bravo")
-        self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo " + " ".join(f"#{n}" for n in range(1, 13))], out)
 
-    def test_a_repo_with_no_open_pull_requests_prints_its_empty_line_and_the_others_batch(self):
+    def test_a_repo_with_no_open_pull_requests_prints_its_empty_line_and_the_others_no_batch_line(self):
         hosts = {self.alpha: root_host("o/alpha"), self.bravo: self.roots_with_done()[self.bravo]}
         rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=hosts)
         self.assertEqual(rc, 0, out + err)
         blocks = by_repo(self, out, "o/alpha", "o/bravo")
         self.assertEqual(blocks["o/alpha"], ["no open pull requests."], out)
-        self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo #5"], out)
+        self.assertEqual(batch_lines_of(blocks["o/bravo"]), [], "the batch route is gone from --reviewed, so no block names a batch:\n" + out)
 
-    def test_a_draft_with_running_ci_does_not_block_the_batch(self):
-        # a draft never counts as a running batch: only a ready pull request with CI pending holds the next one
-        head5, head6 = hex_head("5"), hex_head("6")
-        hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, head5), batch_pull(6, head6, draft=True)],
-                                       comments=[record_of(5, head5), lint_of(5, head5)], check_rows={head5: green(), head6: running()})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
+
+    def test_the_reviewed_output_prints_no_batch_route_line(self):
+        """`merge --reviewed` no longer prints the batch route. Alpha has a done pull request on its base with a second one's CI running, and
+        bravo has a done pull request ready: neither `open batch now: ` nor `build next batch on the running head: ` appears in any block,
+        and the reviewed lines still print."""
+        head5, head6, head9 = hex_head("5"), hex_head("6"), hex_head("9")
+        hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, head5), batch_pull(6, head6)],
+                                       comments=[record_of(5, head5), lint_of(5, head5)], check_rows={head5: green(), head6: running()}),
+                 self.bravo: root_host("o/bravo", pulls=[batch_pull(9, head9)], comments=[record_of(9, head9), lint_of(9, head9)],
+                                       check_rows={head9: green()})}
+        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=hosts)
         self.assertEqual(rc, 0, out + err)
-        blocks = by_repo(self, out, "o/alpha")
-        self.assertEqual(batch_lines_of(blocks["o/alpha"]), ["open batch now: o/alpha #5"], out)
+        blocks = by_repo(self, out, "o/alpha", "o/bravo")  # scope first: both blocks print
+        self.assertTrue(pr_lines(blocks["o/alpha"], 5), "alpha's done pull request has no reviewed line:\n" + out)
+        self.assertNotIn("open batch now: ", out, "--reviewed still prints the removed batch route:\n" + out)
+        self.assertNotIn("build next batch on the running head: ", out, "--reviewed still prints the removed batch route:\n" + out)
 
     def test_a_failed_read_in_one_root_prints_that_root_unknown_and_the_others_in_full(self):
         argv = ("--reviewed", "--root", self.alpha, "--root", self.bravo)
@@ -16611,73 +16577,11 @@ unexpected(method + " " + rel)
                 self.assertEqual(batch_lines_of(out.splitlines()), [], out)
 
 
-    def test_a_done_pr_held_by_an_open_pr_head_is_not_named(self):
-        # #9's head holds #5's head: the compare of head 5 with head 9 reads ahead or identical, as holds_head reads it. #5 is not named.
-        # #6 is held by nothing, so it is named.
-        for status in ("ahead", "identical"):
-            for draft9 in (True, False):
-                with self.subTest(status=status, draft=draft9):
-                    hosts = self.held_hosts({(hex_head("5"), hex_head("9")): status}, draft9)
-                    rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
-                    self.assertEqual(rc, 0, out + err)
-                    block = by_repo(self, out, "o/alpha")["o/alpha"]
-                    self.assert_done(block, 5, 6)
-                    self.assertEqual(self.batch_numbers(block), [6], "a done pull request whose head an open pull request holds is named:\n" + out)
 
-    def test_a_done_draft_lane_no_open_pr_holds_is_named(self):
-        # The control for the held case: the same pull requests, with no compare that holds #5. Both done lanes are named.
-        for draft9 in (True, False):
-            with self.subTest(draft=draft9):
-                rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=self.held_hosts({}, draft9))
-                self.assertEqual(rc, 0, out + err)
-                block = by_repo(self, out, "o/alpha")["o/alpha"]
-                self.assert_done(block, 5, 6)
-                self.assertEqual(self.batch_numbers(block), [5, 6], out)
 
-    def test_a_done_pr_that_is_ready_with_ci_running_is_not_named(self):
-        # #5 is done and ready, with its CI running: it is not named. #6, a done draft with nothing running, is named.
-        pulls = [batch_pull(5, hex_head("5")), batch_pull(6, hex_head("6"), draft=True)]
-        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, hex_head("5")), record_of(6, hex_head("6")), lint_of(5, hex_head("5")), lint_of(6, hex_head("6"))],
-                                       check_rows={hex_head("5"): running(), hex_head("6"): green()})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
-        self.assertEqual(rc, 0, out + err)
-        block = by_repo(self, out, "o/alpha")["o/alpha"]
-        self.assert_done(block, 5, 6)
-        self.assertEqual(self.batch_numbers(block), [6], "a done pull request that is ready with CI running is named in the batch line:\n" + out)
 
-    def test_a_done_ready_pr_with_green_ci_is_named(self):
-        # The control for the running case: #5 ready with CI green is named, with #6.
-        pulls = [batch_pull(5, hex_head("5")), batch_pull(6, hex_head("6"), draft=True)]
-        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, hex_head("5")), record_of(6, hex_head("6")), lint_of(5, hex_head("5")), lint_of(6, hex_head("6"))],
-                                       check_rows={hex_head("5"): green(), hex_head("6"): green()})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
-        self.assertEqual(rc, 0, out + err)
-        block = by_repo(self, out, "o/alpha")["o/alpha"]
-        self.assert_done(block, 5, 6)
-        self.assertEqual(self.batch_numbers(block), [5, 6], out)
 
-    def test_a_done_pr_on_another_base_is_not_named(self):
-        # #5 is done on release, not the repo's default main: no batch line names it. #6, done on main, is named.
-        pulls = [batch_pull(5, hex_head("5"), base="release"), batch_pull(6, hex_head("6"), draft=True)]
-        hosts = {self.alpha: root_host("o/alpha", pulls=pulls, comments=[record_of(5, hex_head("5")), record_of(6, hex_head("6")), lint_of(5, hex_head("5")), lint_of(6, hex_head("6"))],
-                                       check_rows={hex_head("5"): green(), hex_head("6"): green()})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
-        self.assertEqual(rc, 0, out + err)
-        block = by_repo(self, out, "o/alpha")["o/alpha"]
-        self.assert_done(block, 5, 6)
-        self.assertEqual(self.batch_numbers(block), [6], out)
 
-    def test_a_root_names_the_batch_of_its_own_default_branch(self):
-        # The root's default branch is trunk, and its one done pull request is on trunk. Its test host names main as its base, as every test
-        # host does. The batch line still names the PR, because the root's base is its own default branch.
-        self.make_trunk_default(self.alpha)
-        hosts = {self.alpha: root_host("o/alpha", pulls=[batch_pull(5, hex_head("5"), base="trunk")],
-                                       comments=[record_of(5, hex_head("5")), lint_of(5, hex_head("5"))], check_rows={hex_head("5"): green()})}
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=hosts)
-        self.assertEqual(rc, 0, out + err)
-        block = by_repo(self, out, "o/alpha")["o/alpha"]
-        self.assert_done(block, 5)
-        self.assertEqual(self.batch_numbers(block), [5], "the batch line does not name the PR on the root's default branch trunk:\n" + out)
 
     def test_the_real_host_reads_the_config_of_its_default_branch(self):
         # No host is given, so each root gets a real Host(cwd=root), and gh names trunk as the repo's default branch. The root's config must be
@@ -16755,63 +16659,13 @@ unexpected(method + " " + rel)
         blocks = by_repo(self, out, "o/alpha", "o/bravo")
         self.assert_done(blocks["o/alpha"], 5)
         self.assertEqual(pr_lines(blocks["o/alpha"], 9), [], "alpha's block holds bravo's pull request:\n" + out)
-        self.assertEqual(batch_lines_of(blocks["o/alpha"]), ["open batch now: o/alpha #5"], out)
+        self.assertEqual(batch_lines_of(blocks["o/alpha"]), [], "the batch route is gone from --reviewed, so no block names a batch:\n" + out)
         self.assert_done(blocks["o/bravo"], 9)
         self.assertEqual(pr_lines(blocks["o/bravo"], 5), [], "bravo's block holds alpha's pull request:\n" + out)
-        self.assertEqual(batch_lines_of(blocks["o/bravo"]), ["open batch now: o/bravo #9"], out)
+        self.assertEqual(batch_lines_of(blocks["o/bravo"]), [], "the batch route is gone from --reviewed, so no block names a batch:\n" + out)
 
-    def test_a_done_pr_whose_head_the_base_holds_is_named_in_neither_batch_line(self):
-        # holds_head reads head...main: ahead or identical says main holds head 5, so #5 is already in the base, and no batch line names it. #6, a
-        # done draft that no compare holds, is still named. Both batch lines are covered: the open one, and the one built on a running head.
-        for status in ("ahead", "identical"):
-            for busy in (False, True):
-                with self.subTest(status=status, busy=busy):
-                    rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=self.base_hosts(status, busy))
-                    self.assertEqual(rc, 0, out + err)
-                    block = by_repo(self, out, "o/alpha")["o/alpha"]
-                    self.assert_done(block, 5, 6)
-                    want = "build next batch on the running head: o/alpha #6" if busy else "open batch now: o/alpha #6"
-                    self.assertEqual(batch_lines_of(block), [want], "a done pull request whose head the base holds is named in a batch line:\n" + out)
 
-    def test_a_done_pr_whose_head_the_base_does_not_hold_is_named(self):
-        # The control. No compare says main holds head 5, or the compare reads "behind" on head...main, which says head 5 is ahead of main: neither
-        # holds head 5, so #5 and #6 are both named, in either batch line.
-        for status in (None, "behind"):
-            for busy in (False, True):
-                with self.subTest(status=status, busy=busy):
-                    rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, hosts=self.base_hosts(status, busy))
-                    self.assertEqual(rc, 0, out + err)
-                    block = by_repo(self, out, "o/alpha")["o/alpha"]
-                    self.assert_done(block, 5, 6)
-                    want = "build next batch on the running head: o/alpha #5 #6" if busy else "open batch now: o/alpha #5 #6"
-                    self.assertEqual(batch_lines_of(block), [want], out)
 
-    def test_a_stop_reading_ci_for_the_batch_line_keeps_the_roots_built_lines(self):
-        # alpha's base has no branch protection, so its required checks cannot be named. The stop comes from the batch line's CI read (ready_busy):
-        # alpha keeps its lines, and its batch line says why in place of the batch line. The root is not unknown as a whole, and bravo prints in full.
-        head5, head9 = hex_head("5"), hex_head("9")
-        self.per_root_gh({
-            self.alpha: self.root_state("o/alpha", pulls=[batch_pull(5, head5)], comments=[record_of(5, head5), lint_of(5, head5)], check_rows={head5: green()},
-                                        contexts=None),
-            self.bravo: self.root_state("o/bravo", pulls=[batch_pull(9, head9)], comments=[record_of(9, head9), lint_of(9, head9)], check_rows={head9: green()}),
-        })
-        rc, out, err = self.run_roots("--reviewed", "--root", self.alpha, "--root", self.bravo, hosts=None)
-        self.assertEqual(rc, 1, out + err)
-        self.assertNotIn(f"repo {self.alpha}: unknown", out, "the root went unknown as a whole, so its built lines are lost:\n" + out)
-        lines = out.splitlines()
-        self.assertIn("repo o/alpha:", lines, out)
-        self.assertIn("repo o/bravo:", lines, out)
-        i, j = lines.index("repo o/alpha:"), lines.index("repo o/bravo:")
-        unknown = [k for k, line in enumerate(lines) if line.startswith("batch line unknown (")]
-        self.assertEqual(len(unknown), 1, "want one batch line unknown, in alpha's block:\n" + out)
-        self.assertTrue(i < unknown[0] < j, "the batch line unknown is not in alpha's block:\n" + out)
-        m = re.fullmatch(r"batch line unknown \((.+)\)", lines[unknown[0]])
-        self.assertTrue(m, "the batch line unknown is not `batch line unknown (...)`:\n" + out)
-        self.assertIn("no branch protection", m.group(1), "the batch line unknown does not give the stop's reason:\n" + out)
-        alpha = lines[i:j]
-        self.assert_done(alpha, 5)
-        self.assertEqual(batch_lines_of(alpha), [], "alpha names a batch line as well as unknown:\n" + out)
-        self.assertEqual(batch_lines_of(lines[j:]), ["open batch now: o/bravo #9"], out)
 
 
 # The report-only model judge at merge. The merge reads each governed Markdown file at head, selects a file whose line
