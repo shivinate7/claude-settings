@@ -21,7 +21,7 @@
 // The simulator shot runs only when that device is already booted. This tool never boots one; not booted is a skip.
 // Playwright: the installed package only. This tool never runs `playwright install`.
 // Exit: 0 every shot passed, 1 a shot failed, 2 it could not run (usage, config, no Playwright, no browser).
-// Touch per size: a width under 1024 (TOUCH_BELOW) gets hasTouch, so (pointer: coarse) matches; 1024 and wider has none. Owner ruling (item 423 c): a repo may list its own in touchWidths, built in the next carry (#2717).
+// Touch per size: a width under 1024 (TOUCH_BELOW) gets hasTouch, so (pointer: coarse) matches; 1024 and wider has none. No config key.
 //   Chromium drops the coarse match in a full-page capture however it is asked, and a resize to content height stretches each 100vh block.
 //   So a touch shot with fullPage is stitched: one viewport screenshot per tile, scrolled to each, joined in a canvas on a second page of
 //   the same browser. Tiles cover the root element's scroll width and height. A page that scrolls its body, not its root, gets a
