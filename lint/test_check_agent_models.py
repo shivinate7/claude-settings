@@ -239,6 +239,69 @@ class RoleListDrift(unittest.TestCase):
         self.assertEqual((code, out), (0, ""), "no drift from role_list_drift still fails the check: %r" % out)
 
 
+class RoundRowDrift(unittest.TestCase):
+    """The record's round rows are read by the guard (one home, decision agent-model-cap). A row the guard cannot read is drift:
+    the check fails and names that row. A readable row passes, and so does the real record (test_main_with_no_args_passes_on_the_real_repo)."""
+    ROLE_ROWS = "| Point | Model | Effort |\n|---|---|---|\n| reviewer | haiku | xhigh |\n| builder | sonnet | high |\n"
+    ROUND_HEAD = "| Role | Round | Model | Effort |\n|---|---|---|---|\n"
+
+    def write_fixture(self, round_row, round_table=True):
+        """A pointer folder whose record holds the role rows, the round table with `round_row` (or no round table when
+        `round_table` is false), and the lane row. Returns the folder's root."""
+        root = tempfile.mkdtemp(dir=RUN_FOLDER)
+        os.makedirs(os.path.join(root, "agents"))
+        record = os.path.join(root, RECORD_RELPATH)
+        os.makedirs(os.path.dirname(record))
+        rounds = self.ROUND_HEAD + round_row + "\n" if round_table else ""
+        with open(record, "w", encoding="utf-8") as handle:
+            handle.write(self.ROLE_ROWS + "\n" + rounds + LANE_RECORD % "medium")
+        return root
+
+    def check_fixture(self, round_row, round_table=True):
+        """The check run over write_fixture's folder: (code, stdout). The role lists are patched out, so only the round rows
+        can fail the check."""
+        root = self.write_fixture(round_row, round_table)
+        out = io.StringIO()
+        with mock.patch.object(C, "ROOT", root), contextlib.redirect_stdout(out), \
+                mock.patch.object(C._guard, "role_list_drift", lambda pointer_root: [], create=True):
+            code = C.main([])
+        return code, out.getvalue()
+
+    def assert_scope(self, root, rounds):
+        """Scope before verdict: the fixture holds the role table, and the guard reads its round table exactly when `rounds`."""
+        self.assertIsNotNone(C._guard.role_model_table(root), "the fixture holds no role table, so this case proves nothing")
+        self.assertEqual(C._guard.role_round_table(root) is not None, rounds,
+                         "the guard's round table read for this fixture is not %s, so this case proves nothing" % rounds)
+
+    def test_a_round_row_naming_a_model_the_guard_cannot_read_fails_the_check(self):
+        code, out = self.check_fixture("| reviewer | 2 | fable | high |")
+        self.assertEqual(code, 1, "a round row naming a model the guard cannot read passes the check: %r" % out)
+        self.assertTrue(names(out, "agent-model-cap.md", "fable"), "the check does not name the round row it flags: %r" % out)
+
+    def test_a_round_row_the_guard_reads_passes_the_check(self):
+        code, out = self.check_fixture("| reviewer | 2 | sonnet | high |")
+        self.assertEqual((code, out), (0, ""), "a readable round row fails the check: %r" % out)
+
+    def test_a_record_with_no_round_rows_table_fails_the_check(self):
+        # The record keeps its role table and lane row, and has no round table. The guard reads no round row from it, so the
+        # check must fail it, not pass it silently.
+        self.assert_scope(self.write_fixture("", round_table=False), rounds=False)
+        code, out = self.check_fixture("", round_table=False)
+        self.assertEqual(code, 1, "a record with no round rows table passes the check: %r" % out)
+        self.assertIn("agent-model-cap.md", out, "the check does not name the record it flags: %r" % out)
+
+    def test_a_round_table_with_no_rows_fails_the_check(self):
+        # The empty state of the round table: its header and separator, and no row. The guard reads no round row from it.
+        self.assert_scope(self.write_fixture(""), rounds=False)
+        code, out = self.check_fixture("")
+        self.assertEqual(code, 1, "a round table with no rows passes the check: %r" % out)
+        self.assertIn("agent-model-cap.md", out, "the check does not name the record it flags: %r" % out)
+
+    def test_the_real_record_round_table_holds_the_round_one_other_row(self):
+        # Control: the guard reads the real record's round table, with the reviewer's first-round other row, so the real repo's pass is a read.
+        self.assertIn(("reviewer", "1", "other"), C._guard.role_round_table(C.ROOT) or {})
+
+
 class RunFolder(unittest.TestCase):
     def test_first_request_sweeps_old_siblings_and_keeps_new_ones(self):
         # test-temp-standard: the first request of a run removes a sibling over a day old and keeps a newer one.
