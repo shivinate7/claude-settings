@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-13T03:54:00Z",
+  "context": "Goal: the compliance check ranks only real word problems.\nProblem (rule): Degen spent a lane on 70 Words hits that were all slugs, code names or correct uses, and skipping them would cut into your ruling that record names are still read.\nBased on (ruling): your pick a on 2026-10-28 and decision glossary-meets-owner-halfway: record names are still read.\nBased on (read): the probe reads every tracked file, but the check judges only added lines; that part is already filed with no call needed.\nDeparts from: main reads slugs and code names \u2014 option b skips them.\nWhy yours: option b narrows your ruling.",
+  "home": "step words-probe-skips-kept-names",
+  "id": "words-probe-skip-names",
+  "kind": "decision",
+  "n": 678,
+  "options": [
+    {
+      "gain": "Matches your ruling.",
+      "how": "The probe reports added lines only, as the check does. Already filed.",
+      "id": "keep-reading",
+      "key": "a",
+      "label": "Keep reading them; report only what the check flags (recommended)",
+      "lose": "None known."
+    },
+    {
+      "gain": "Fewer hits.",
+      "how": "The probe ignores slugs and code names.",
+      "id": "skip-names",
+      "key": "b",
+      "label": "Also skip slugs and code names",
+      "lose": "An ad-hoc word inside a slug slips by."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "pick": "a",
+  "ref": "retrospective 21:53 CST Nov 12; Degen report plans/degen-report-2026-11-12.md",
+  "repo": "shivinate7/claude-settings",
+  "short": "Words probe skips slugs and names",
+  "status": "open",
+  "title": "Should the Words probe also skip slugs and code names?",
+  "why": "It touches your ruling that record names are still read."
+}

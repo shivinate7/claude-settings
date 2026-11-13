@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-13T03:54:00Z",
+  "context": "Goal: role sessions stop reading stale settings.\nProblem (rule): your ask says to report a stale checkout and never move it, so a session can keep reading old settings.\nBased on (ruling): your ask on step grants-read-from-main, \"report, never move\".\nBased on (read): step guards-read-origin-main-config, already running, makes guards read settings from the newest main, which fixes the harm Degen hit.\nDeparts from: main only reports \"behind\" \u2014 option b moves the checkout.\nWhy yours: option b reverses your own ask.",
+  "home": "step grants-read-from-main",
+  "id": "fast-forward-clean-checkout",
+  "kind": "decision",
+  "n": 681,
+  "options": [
+    {
+      "gain": "Matches your ask.",
+      "how": "No change; the running guard fix covers the harm.",
+      "id": "report-only",
+      "key": "a",
+      "label": "Keep reporting only (recommended)",
+      "lose": "Other stale reads remain."
+    },
+    {
+      "gain": "Fresher reads everywhere.",
+      "how": "At start, a checkout with no changes and no commits of its own moves to the newest main.",
+      "id": "fast-forward",
+      "key": "b",
+      "label": "Fast-forward clean checkouts",
+      "lose": "Reverses your ask."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "pick": "a",
+  "ref": "retrospective 21:53 CST Nov 12; Degen report plans/degen-report-2026-11-12.md",
+  "repo": "shivinate7/claude-settings",
+  "short": "Fast-forward clean checkouts at start",
+  "status": "open",
+  "title": "Should a session fast-forward a clean checkout with no commits of its own to the newest main when it starts?",
+  "why": "It reverses your ask to report a stale checkout and never move it."
+}

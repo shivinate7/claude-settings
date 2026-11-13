@@ -1,0 +1,35 @@
+{
+  "added": "2026-11-13T03:54:00Z",
+  "context": "Goal: no test-author agent is started just to reword a comment.\nProblem (rule): the guard refuses every builder edit to a test file, per your ruling, so a comment fix costs a second agent.\nBased on (ruling): your ruling (decision builders-cannot-edit-tests) that builders never edit test files.\nDeparts from: main refuses every builder test edit \u2014 option a allows a diff whose only changes are comments.\nWhy yours: it opens a path in your own ruling.\nThe retrospective recommends a, and thinks the widening label may be a false alarm: a comment-only allowance would hold in every repo, not bend the guard for one.",
+  "home": "step builder-test-comment-edit",
+  "id": "builder-test-comment-edit",
+  "kind": "decision",
+  "n": 679,
+  "options": [
+    {
+      "gain": "Saves an agent per comment fix.",
+      "how": "The guard tokenizes the old and new file and allows the edit only when nothing but comments changed.",
+      "id": "comments-only",
+      "key": "a",
+      "label": "Allow comment-only diffs, proven by the language's own tokenizer",
+      "lose": "One more guard path to prove. Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo.",
+      "widens": true
+    },
+    {
+      "gain": "No new guard path.",
+      "how": "No change.",
+      "id": "keep-refusing",
+      "key": "b",
+      "label": "Keep refusing (recommended)",
+      "lose": "Extra agents for comment fixes."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "pick": "b",
+  "ref": "retrospective 21:53 CST Nov 12; Degen report plans/degen-report-2026-11-12.md",
+  "repo": "shivinate7/claude-settings",
+  "short": "Builder edits test comments only",
+  "status": "open",
+  "title": "May a builder change only the comments in a test file?",
+  "why": "It opens a path in your ruling that builders never edit tests."
+}

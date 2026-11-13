@@ -1,0 +1,14 @@
+{
+ "id": "lane-reply-past-ruling",
+ "title": "Triage's answers to lanes pass the same past-ruling check as page items",
+ "status": "ready",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Triage told the mailaudit lane (21:51 CST Nov 12) to pin four actions to a main commit, citing decision action-pins-follow-sessions, which R44 supersedes; the coordinator caught it at 21:53 CST. The past-ruling hook checks page items, not send_message answers that settle a question.",
+ "source": "triage incident 21:51-21:54 CST Nov 12 (roadmap e09dc91d6)",
+ "note": "Guard: a send_message from the page writer that settles a lane question (\"settled\", \"no owner item\") runs the past-ruling check on the rulings it cites, including later rulings and their supersedes lists, and refuses when a cited ruling is superseded. Cost: one rulings-store read per such message.",
+ "updatedAt": "2026-11-12T21:58:41-06:00"
+}

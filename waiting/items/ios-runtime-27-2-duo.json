@@ -1,0 +1,34 @@
+{
+  "added": "2026-11-13T03:54:00Z",
+  "context": "Goal: fewer simulator crashes.\nProblem (risk): iOS 27.1 simulators crash Siri and the intelligence services, and nobody has checked whether 27.2 fixes it, so trying needs a download and a new device on your Mac.\nBased on (read): step sim-lease-gaps asks you before any runtime change.\nDeparts from: main runs Duos on 27.1 \u2014 option a adds a 27.2 Duo beside the old one.\nWhy yours: it installs software and uses disk on your Mac.",
+  "home": "step sim-lease-gaps",
+  "id": "ios-runtime-27-2-duo",
+  "kind": "decision",
+  "n": 680,
+  "options": [
+    {
+      "gain": "A real test of the fix, with nothing lost.",
+      "how": "A Mac session installs the runtime and creates the device. The skill's device names move only after it proves out.",
+      "id": "install-27-2",
+      "key": "a",
+      "label": "Install 27.2 and make a new Duo beside the old (recommended)",
+      "lose": "Download time and disk on your Mac."
+    },
+    {
+      "gain": "No change on your Mac.",
+      "how": "No change.",
+      "id": "wait",
+      "key": "b",
+      "label": "Wait",
+      "lose": "The crashes go on."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "pick": "a",
+  "ref": "retrospective 21:53 CST Nov 12; Degen report plans/degen-report-2026-11-12.md",
+  "repo": "shivinate7/claude-settings",
+  "short": "iOS 27.2 runtime and a new Duo",
+  "status": "open",
+  "title": "Install the iOS 27.2 simulator runtime on your Mac and make a new Duo beside the old one?",
+  "why": "It downloads and installs on your Mac, which only you approve."
+}

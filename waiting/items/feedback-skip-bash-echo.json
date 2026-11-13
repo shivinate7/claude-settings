@@ -1,0 +1,42 @@
+{
+  "added": "2026-11-13T03:54:00Z",
+  "context": "Goal: no blocked turns for text that is not an instruction.\nProblem (rule): every echo of a command you ran, and every long paste, needs a hand-written feedback item before the turn can end.\nBased on (read): the feedback guard already skips a lone short message, but has no skip for command echoes.\nDeparts from: main logs every message \u2014 option a skips command echoes.\nWhy yours: it changes what counts as your feedback.",
+  "home": "decision owner-feedback-inbox",
+  "id": "feedback-skip-bash-echo",
+  "kind": "decision",
+  "n": 682,
+  "options": [
+    {
+      "gain": "Fewer blocked turns.",
+      "how": "The feedback guard skips a message that is only the echo of a command you ran.",
+      "id": "skip-echoes",
+      "key": "a",
+      "label": "Skip command echoes only (recommended)",
+      "lose": "None known; they are your own commands."
+    },
+    {
+      "gain": "Fewer items.",
+      "how": "As a, plus one item may cover several messages in a row.",
+      "id": "skip-and-group",
+      "key": "b",
+      "label": "Also let one item cover a run of messages",
+      "lose": "A ruling inside a run can hide."
+    },
+    {
+      "gain": "No change.",
+      "how": "No change.",
+      "id": "keep",
+      "key": "c",
+      "label": "Keep logging every message",
+      "lose": "Blocked turns go on."
+    }
+  ],
+  "owner": "retrospective (session_013NEJKz5AWFJhGvmCUoi6wQ)",
+  "pick": "a",
+  "ref": "retrospective 21:53 CST Nov 12; Degen report plans/degen-report-2026-11-12.md",
+  "repo": "shivinate7/claude-settings",
+  "short": "Feedback log skips command echoes",
+  "status": "open",
+  "title": "Should the feedback log skip the echoes of commands you ran?",
+  "why": "It changes which of your messages need a written item."
+}
