@@ -1600,14 +1600,19 @@ def archive_gate_hits(segments, ends):
         reading, closes = segments[start:stop], ends[start:stop]
         start = stop
         archives = []   # (segment number, names), in order
+        gated = []      # whether each segment's close still gates: `&&`, or the line break after one
         for number, segment in enumerate(reading):
+            # `a &&` newline `b` splits to an empty middle segment closed by the newline. The shell reads
+            # that line break as the rest of the `&&` chain, so it gates; a bare newline or `;` does not.
+            gated.append(closes[number] == ARCHIVE_GATE or (
+                closes[number] == "\n" and not segment.strip() and number > 0 and gated[number - 1]))
             for kind, names in _push_events(segment):
                 if kind == "archive":
                     archives.append((number, names))
                     continue
                 for name in sorted(names):
                     paired = [at for at, found in archives if at < number and name in found]
-                    if paired and any(closes[k] != ARCHIVE_GATE for k in range(paired[-1], number)):
+                    if paired and not all(gated[paired[-1]:number]):
                         hits.append(name + " deleted after its archive push")
     return hits
 
