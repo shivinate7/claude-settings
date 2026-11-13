@@ -574,7 +574,8 @@ def wait(env, addrs, *, clock, sleep, run_git=None, pid_alive=None, start_time=N
                     for message in fresh[:WAKE_MAX_NAMED]:
                         print(_wake_line(env, now_tip, message, run_git))
                     if len(fresh) > WAKE_MAX_NAMED:
-                        print("mail: %d more new; read: `mail read --addr %s`" % (len(fresh) - WAKE_MAX_NAMED, fresh[0]["addr"]))
+                        # Plain `mail read`: the extras may sit at either of the waiter's addresses.
+                        print("mail: %d more new; read: `mail read`" % (len(fresh) - WAKE_MAX_NAMED))
                     return 0
             except MailError:
                 continue  # a transient failure: the tip stays as it was, so the next poll tries the same move again
