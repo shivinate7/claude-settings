@@ -260,9 +260,9 @@ UNKNOWN_CITE = "(rule verification-report-unknown-reads, a read that could not r
 # The two role cites name no tier: a lane must not learn which tier may claim a merge.
 ROLE_CITE = "(decision session-tiers, a session's tier decides whether it may merge)"
 LANE_LINT_CITE = "(decision lanes-run-no-full-ci-job, a lane hands off only a head that passes `merge --lane-lint`)"
-# The paths a review record's `--guard no` refuses: the rule dirs, then the tool and the hooks, as folder prefixes. GUARD_FILES match a whole path.
+# The paths a review record's `--guard no` refuses: the rule dirs, then the tool, the hooks and the agent files (their `tools` lines), as folder prefixes. GUARD_FILES match a whole path.
 # It reads RULE_DIRS, never a copy.
-GUARD_PATHS = stale_cites.RULE_DIRS + ("merge/", "githooks/")
+GUARD_PATHS = stale_cites.RULE_DIRS + ("merge/", "githooks/", "agents/")
 GUARD_FILES = ("settings.json",)
 REVIEW_CITE = "(decision pr-review-record, a review record names the head it reviewed and only an open pull request takes one)"
 OFF_CITE = "(decision standing-merge-grant, the owner's grant for a repo decides whether a session merges there)"
