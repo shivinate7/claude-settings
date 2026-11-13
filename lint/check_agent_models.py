@@ -75,12 +75,8 @@ def haiku_model(text: str) -> str:
 
 
 def scalar(raw: str) -> str:
-    """A frontmatter value without its quotes or a trailing ` # comment`."""
-    raw = raw.strip()
-    if raw[:1] in ("'", '"'):
-        close = raw.find(raw[0], 1)
-        return raw[1:close] if close > 0 else raw[1:]
-    return re.split(r"\s#", raw, maxsplit=1)[0].strip()
+    """A frontmatter value without its quotes or a trailing ` # comment`; "" for a comment-only or null value."""
+    return _guard.frontmatter_scalar(raw)
 
 
 def pin_row_problem(text: str, table) -> str:
