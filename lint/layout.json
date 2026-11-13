@@ -86,6 +86,88 @@
       "todo": "records"
     }
   },
+  "tending": {
+    "decisions": {
+      "where": "decisions",
+      "item": "(?i)^\\s*[-*]?\\s*home:\\s*(\\S+)",
+      "still-true": "home-held",
+      "close": "none",
+      "runs-from": ["merge-check"],
+      "state": "declared"
+    },
+    "rules": {
+      "where": "rules",
+      "item": "<!-- rule:([a-z0-9-]+) -->",
+      "still-true": "cite-resolves",
+      "close": "none",
+      "runs-from": ["merge-check"],
+      "state": "declared"
+    },
+    "docs": {
+      "where": "plans",
+      "item": "^Home: (\\S+)",
+      "still-true": "home-held",
+      "close": "none",
+      "runs-from": ["merge-check"],
+      "state": "declared"
+    },
+    "debts": {
+      "where": "debt-notes",
+      "item": "^- (\\S+) ",
+      "still-true": "until-date",
+      "close": "mark",
+      "runs-from": ["merge-check", "triage-status"],
+      "state": "declared"
+    },
+    "handoffs": {
+      "where": "external:handoffs",
+      "item": "^- (\\S+) ",
+      "still-true": "home-held",
+      "close": "mark",
+      "runs-from": ["stop", "compact"],
+      "state": "declared"
+    },
+    "feedback-log": {
+      "where": "external:feedback-log",
+      "item": "^- (\\S+) \\[[a-z]+\\] -> ",
+      "still-true": "home-held",
+      "close": "mark",
+      "runs-from": ["stop"],
+      "state": "declared"
+    },
+    "roadmap": {
+      "where": "external:roadmap",
+      "item": "^- (\\S+) ",
+      "still-true": "until-date",
+      "close": "none",
+      "runs-from": ["triage-status"],
+      "state": "declared"
+    },
+    "queue": {
+      "where": "external:queue",
+      "item": "^- (\\S+) ",
+      "still-true": "home-held",
+      "close": "mark",
+      "runs-from": ["triage-status"],
+      "state": "declared"
+    },
+    "page-copies": {
+      "where": "waiting-data",
+      "item": "^- (\\S+) copy of ",
+      "still-true": "copy-matches-live",
+      "close": "none",
+      "runs-from": ["merge-check", "stop"],
+      "state": "declared"
+    },
+    "mailbox": {
+      "where": "external:mailbox",
+      "item": "^- (\\S+) ",
+      "still-true": "until-date",
+      "close": "mark",
+      "runs-from": ["stop", "triage-status"],
+      "state": "declared"
+    }
+  },
   "devices": {
     "iphone-duo-folded": {
       "name": "iPhone Duo, folded",
