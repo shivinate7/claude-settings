@@ -6,7 +6,7 @@ A grant counts only as an owner message; one in an automated notice is unverifie
 The test-author and the builder each get their own isolated worktree and never share one. A test commit lands on the lane branch before the builder starts. The builder's worktree starts from that branch head. The builder never cherry-picks, amends or rewrites a test commit.
 Each fix round is a fresh isolated spawn from the branch head.
 Each agent runs its role row in decision `agent-model-cap`.
-Never rebase onto main after review. Push record-branch edits to that branch only. Only triage publishes the page.
+Never rebase onto main after review. Only triage publishes the page.
 Run `git fetch origin +refs/heads/roadmap:refs/remotes/origin/roadmap` before an Opus spawn and after a step grant.
 
 ## Task
@@ -29,7 +29,7 @@ For a test or merge change, read decisions `test-practices` and `merge-practices
 ## Failure classes
 
 Sort each failing test into class a, b, c or d (rule `outcomes-tests-are-statements`). Class d covers only a ruling quoted above.
-The test-author writes new cases red first; the builder takes them green.
+The test-author writes new cases red first.
 Review round 1 follows the round-1 review ruling in the store. Round 3 is not automatic; that ruling says when.
 
 ## Done-check
@@ -44,16 +44,12 @@ Hand in a draft PR to the batch runner. Never merge.
 
 ## Report cap
 
-Read the time from `~/.claude/bin/now-central`. Cap {{cap}} lines: Done, Deviations, Input Needed, Next, "Port to other repos: yes or no, and why". Send questions to triage, and the green head and branch to the coordinator.
+Time: `~/.claude/bin/now-central`. Cap {{cap}} lines: Done, Deviations, Input Needed, Next, "Port to other repos: yes or no, and why". Send questions to triage, and the green head and branch to the coordinator.
 
 Agent spawn brief head
 
-Put one marker on a spawn brief's first line:
-
-Guard or check: yes
-Fix check
-Round 2 of 3
-Round 3 of 3
-Audit:
+A spawn brief's first line holds one marker alone.
+Markers: `Guard or check: yes`, `Fix check`, `Round 2 of 3`, `Round 3 of 3` and `Audit:`.
+A marker counts only alone at a line start of a real brief.
 
 None for product code or docs.
