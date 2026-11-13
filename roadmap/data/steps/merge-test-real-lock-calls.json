@@ -1,0 +1,14 @@
+{
+ "id": "merge-test-real-lock-calls",
+ "title": "merge/test_merge.py made real GitHub lock calls despite a gh stub; find the path the stub misses",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Real incident, rebuild lane #2826/#2892, coordinator 12:31 CST Nov 13: two full runs of merge/test_merge.py by the lane's test-author made real lock calls on shivinate7/claude-settings (rate-limit errors); a killed run left orphan pid 17592 (ppid 1).",
+ "source": "lane session_013NEJL22VKusY3CbN7Te35s; coordinator 12:31 CST Nov 13",
+ "note": "Todo, debt candidate (real incident). Likely cause (unconfirmed): the merge tool reaches GitHub by a path that does not use `gh` (MCP or REST), so the PATH stub misses it. Test name unknown (full file, not isolated). Fix shape: a test must fail closed when it would reach the network. The classifier refused the lane's `kill 17592` twice; the coordinator asks the owner to approve it. Runner 10 watches batch 137 for stray lock refs or comments from that run. Check the stray-lock read before closing.",
+ "updatedAt": "2026-11-13T12:25:36-06:00"
+}
