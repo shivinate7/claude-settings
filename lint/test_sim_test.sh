@@ -43,6 +43,10 @@
 #    without CMD.
 #  - TERM to the tool during the lease wait: it ends at once, not after the wait, with no boot, its queue place and the
 #    lock freed. TERM during a simctl boot: the device still comes up, so it is shut down and recorded.
+#  - Own boot only: right after `simctl boot` and its record, it runs `xcrun simctl spawn UDID launchctl disable
+#    user/foreground/LABEL` for each label in bin/sim-noise-services, beside the script: one label per line, `#` comments
+#    and blank lines allowed. A failed spawn never fails the run and prints nothing; xcodebuild still runs. The reuse path,
+#    the refusals and a failed boot run no spawn. chronod and AppIntentsLiveEntityService are never disabled.
 # The last line is the tally: passed and failed counts, then the failing case names.
 set -uo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -132,6 +136,8 @@ SH
 # verb and whether the lock folder exists (lock_simctl), so a case can check the lock across list, boot and shutdown.
 # STUB_LIST_RC makes every simctl list exit with that code. STUB_BOOT_HOLD holds a boot open: it writes $RUN/boot_started,
 # then waits (at most 20 s) for $RUN/boot_release, so a case can send a signal while the boot is in flight.
+# spawn logs its call like any verb. STUB_SPAWN_RC makes it exit with that code, after one line on stderr. Each spawn adds
+# one line to $RUN/spawn_record: `recorded` when the boot record file exists by then, else `none`.
 cat > "$stubs/xcrun" <<'SH'
 #!/bin/sh
 [ "$1" = simctl ] || exit 99
@@ -149,6 +155,8 @@ case "$1" in
   boot) cp -f "$lease" "$RUN/lease_at_boot" 2>/dev/null; [ -n "${STUB_BOOT_RC:-}" ] && exit "$STUB_BOOT_RC"
     if [ -n "${STUB_BOOT_HOLD:-}" ]; then : > "$RUN/boot_started"; n=0; while [ ! -e "$RUN/boot_release" ] && [ "$n" -lt 40 ]; do sleep 0.5; n=$((n + 1)); done; fi
     case $2 in "$STUB_PRO_UDID") name="iPhone 18 Pro" ;; *) name="iPhone Duo" ;; esac; echo "    $name ($2) (Booted) " > "$RUN/booted" ;;
+  spawn) if [ -s "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/state/sim-boots.jsonl" ]; then echo recorded >> "$RUN/spawn_record"; else echo none >> "$RUN/spawn_record"; fi
+    [ -n "${STUB_SPAWN_RC:-}" ] && { echo "xcrun stub: simctl spawn refused" >&2; exit "$STUB_SPAWN_RC"; } ;;
   shutdown) : > "$RUN/booted" ;;
 esac
 exit 0
@@ -211,7 +219,8 @@ fresh() {
     "$work/lock_alive" "$work/lock_pid_seen" "$work/lock_simctl" "$work/devices.json" \
     "$work/cmd_udid" "$work/cmd_args" "$work/cmd_lock_seen" "$work/cmd_lock_pid"
   rm -rf "$work/home/.claude" "$crashdir" "$work/sweep_root"
-  rm -f "$work/lease_at_boot" "$work/lease_at_xc" "$work/loadavg" "$work/load_reads" "$work/boot_started" "$work/boot_release"
+  rm -f "$work/lease_at_boot" "$work/lease_at_xc" "$work/loadavg" "$work/load_reads" "$work/boot_started" "$work/boot_release" \
+    "$work/spawn_record"
   /bin/mkdir -p "$crashdir" "$work/home"
 }
 # start_tool [VAR=value...]: starts the tool in its own process group, behind a hard timeout. Its stdout and stderr go
@@ -682,11 +691,19 @@ need "steps are run only" steps_are "run "
 need "no record line" test "$(record_lines)" -eq 0
 end_case "52 reuse path: the Duo it reuses gets no sim-boots.jsonl line"
 
+# copy_tool DIR: a copy of the script under test and of sim-lease in DIR/bin, with the one hook sim-lease imports in DIR/hooks,
+# so no sim_boot_record.py is there. A case that puts a file beside the copy's script uses it; the real bin/ is never touched.
+copy_tool() {
+  rm -rf "$1"
+  /bin/mkdir -p "$1/bin" "$1/hooks"
+  cp "$script" "$1/bin/sim-test"; cp "$sim_lease" "$1/bin/sim-lease"; cp "$root/hooks/_nowindow.py" "$1/hooks/"
+  chmod +x "$1/bin/sim-test" "$1/bin/sim-lease"
+}
+
 # A copy of the tool and its sim-lease, with a hooks folder that holds only what sim-lease imports: the record call finds no hook. It must print nothing, and the
 # run must still boot, test and shut down with xcodebuild's exit code.
 fresh; ps_stub; devices_json "$DUO1"
-/bin/mkdir -p "$work/nohooks/bin"; cp "$script" "$work/nohooks/bin/sim-test"; cp "$sim_lease" "$work/nohooks/bin/sim-lease"; chmod +x "$work/nohooks/bin/sim-test" "$work/nohooks/bin/sim-lease"
-/bin/mkdir -p "$work/nohooks/hooks"; cp "$root/hooks/_nowindow.py" "$work/nohooks/hooks/"
+copy_tool "$work/nohooks"
 saved_script=$script; script=$work/nohooks/bin/sim-test
 run PATH="$work/psbin:$PATH"
 script=$saved_script
@@ -1009,6 +1026,121 @@ need "steps are boot run shutdown" steps_are "boot run shutdown "
 need "no sim-test.lock.dead.* folder is left" no_dead_folder
 need "no rmdir error on stderr" no_rmdir_error
 end_case "80 dead holder's lock folder with take.out: taken over, no dead folder left, no rmdir error"
+
+# ---- Cases 81 to 87: the own-boot disable of the noise services, from bin/sim-noise-services beside the script ----
+# NOISE_LABELS is the expected list, written out here so the suite never reads the file it checks. Case 86 holds the file to it.
+NOISE_LABELS=(com.apple.assistant_cdmd com.apple.assistant_service com.apple.assistantd com.apple.corespotlightservice
+  com.apple.email.maild com.apple.hybridsearchd com.apple.icloudmailagent com.apple.intelligencetasksd com.apple.searchd
+  com.apple.siri.acousticsignature com.apple.siri.context.service com.apple.siriactionsd com.apple.siriinferenced
+  com.apple.siriknowledged com.apple.sirittsd com.apple.spotlightknowledged com.apple.spotlightknowledged.updater)
+# noise_list: the list file the tool reads, beside the script under test.
+noise_list() { echo "$(dirname "$script")/sim-noise-services"; }
+# disable_call LABEL: the one call the own-boot path makes for LABEL, on the booted Duo.
+disable_call() { echo "simctl spawn $DUO1 launchctl disable user/foreground/$1"; }
+spawn_count() { grep -c '^simctl spawn ' "$calls"; }
+no_spawn() { [[ "$(spawn_count)" -eq 0 ]]; }
+disable_once() { [[ "$(grep -Fxc "$(disable_call "$1")" "$calls")" -eq 1 ]]; }
+# spawn_window: the boot call, then every spawn call, then xcodebuild, in that order.
+spawn_window() {
+  local b first last x
+  b=$(grep -n '^simctl boot ' "$calls" | head -n 1 | cut -d: -f1)
+  first=$(grep -n '^simctl spawn ' "$calls" | head -n 1 | cut -d: -f1)
+  last=$(grep -n '^simctl spawn ' "$calls" | tail -n 1 | cut -d: -f1)
+  x=$(grep -n '^xcodebuild' "$calls" | head -n 1 | cut -d: -f1)
+  [[ -n $b && -n $first && -n $last && -n $x && $b -lt $first && $last -lt $x ]]
+}
+# spawns_after_record: spawn_record has one line per spawn, and each says the boot record was on disk at that call.
+spawns_after_record() { [[ -s $work/spawn_record ]] && ! grep -Fxq none "$work/spawn_record"; }
+no_call_names() { ! grep -Fq -- "$1" "$calls"; }
+not_in_list() { ! grep -Fq -- "$1" "$(noise_list)" 2>/dev/null; }
+not_spelled() { ! grep -Fq -- "$1" "$script"; }
+# list_is_exact: the label lines of the list file are the 17 labels, and the rest of it is comments and blank lines.
+list_is_exact() {
+  [[ "$(grep -v -e '^#' -e '^[[:space:]]*$' "$(noise_list)" 2>/dev/null | sort)" == "$(printf '%s\n' "${NOISE_LABELS[@]}" | sort)" ]]
+}
+# refused_clean: exit 1 with no boot and no xcodebuild. failed_boot_clean: a boot was tried, failed, and no xcodebuild ran.
+refused_clean() { rc_is 1 && no_boot && no_xcodebuild; }
+failed_boot_clean() { [[ $rc -ne 0 ]] && has_call "simctl boot $DUO1" && no_xcodebuild; }
+# no_spawn_output: neither stream holds the text of a refused spawn.
+no_spawn_output() { ! grep -Fq 'spawn refused' "$work/run.std" "$work/run.err"; }
+
+fresh; ps_stub; devices_json "$DUO1"; run PATH="$work/psbin:$PATH"
+need "exit code" rc_is 0
+need "steps are boot run shutdown" steps_are "boot run shutdown "
+need "exactly 17 disable calls" test "$(spawn_count)" -eq 17
+need "each call after the boot call and before xcodebuild" spawn_window
+need "each call after the boot record was written" spawns_after_record
+for label in "${NOISE_LABELS[@]}"; do
+  need "one disable call on the booted UDID, in user/foreground: $label" disable_once "$label"
+done
+end_case "81 own boot: exactly the 17 noise labels, each disabled once in user/foreground on the booted UDID, after the boot record and before xcodebuild"
+
+fresh; run
+need "17 disable calls were made" test "$(spawn_count)" -eq 17
+need "the list file exists beside the script" test -f "$(noise_list)"
+need "chronod is in no call" no_call_names chronod
+need "AppIntentsLiveEntityService is in no call" no_call_names AppIntentsLiveEntityService
+need "chronod is not in the list file" not_in_list chronod
+need "AppIntentsLiveEntityService is not in the list file" not_in_list AppIntentsLiveEntityService
+end_case "82 chronod and AppIntentsLiveEntityService: in no disable call, and not in the list file"
+
+fresh; booted "iPhone Duo" $DUO1; run
+need "exit code" rc_is 0
+need "steps are run only" steps_are "run "
+need "no disable call" no_spawn
+end_case "83 control: the reuse path makes no disable call"
+
+fresh; booted "Apple Watch Ultra 3" $THIRD; booted "iPad Pro 13-inch" $OTHER; run
+need "cap: exit 1, no boot, no xcodebuild" refused_clean
+need "cap: no disable call" no_spawn
+fresh; booted "iPhone 18 Pro" $PRO; run
+need "cross-role: exit 1, no boot, no xcodebuild" refused_clean
+need "cross-role: no disable call" no_spawn
+fresh; run STUB_LIST_RC=1
+need "list failure: exit 1, no boot, no xcodebuild" refused_clean
+need "list failure: no disable call" no_spawn
+fresh; run CI=true
+need "no-op lease: exit 1, no boot, no xcodebuild" refused_clean
+need "no-op lease: no disable call" no_spawn
+fresh; run STUB_BOOT_RC=1
+need "failed boot: exit non-zero, boot tried, no xcodebuild" failed_boot_clean
+need "failed boot: no disable call" no_spawn
+end_case "84 control: the cap, cross-role, list failure, no-op lease and a failed boot make no disable call"
+
+fresh; run STUB_SPAWN_RC=1 STUB_RC=65
+need "exit status is xcodebuild's, 65" rc_is 65
+need "steps are boot run shutdown" steps_are "boot run shutdown "
+need "no spawn text on stdout or stderr" no_spawn_output
+end_case "85 control: a failing spawn for every label leaves the exit status and xcodebuild unchanged, and prints nothing"
+
+need "the list file exists beside the script" test -f "$(noise_list)"
+need "the file holds exactly the 17 labels as its label lines" list_is_exact
+for label in "${NOISE_LABELS[@]}"; do
+  need "the list file has $label as a line" grep -Fxq -- "$label" "$(noise_list)"
+done
+for label in "${NOISE_LABELS[@]}"; do
+  need "bin/sim-test spells no label: $label" not_spelled "$label"
+done
+end_case "86 one home: the 17 labels are the lines of bin/sim-noise-services, and bin/sim-test spells none of them"
+
+# A list with a comment and a blank line makes a call for its label line only. The second run has a list of comments and
+# blank lines alone (the empty list), which makes no call.
+fresh; copy_tool "$work/noise"
+printf '%s\n' '# a comment line' '' 'com.example.noise-test' > "$work/noise/bin/sim-noise-services"
+saved_script=$script; script=$work/noise/bin/sim-test
+run
+script=$saved_script
+need "exit code" rc_is 0
+need "one disable call" test "$(spawn_count)" -eq 1
+need "that call is for the label line" has_call "$(disable_call com.example.noise-test)"
+fresh; copy_tool "$work/noise"
+printf '%s\n' '# only a comment' '' > "$work/noise/bin/sim-noise-services"
+script=$work/noise/bin/sim-test
+run
+script=$saved_script
+need "exit code, with a list of comments and blanks" rc_is 0
+need "no disable call for a list of comments and blanks" no_spawn
+end_case "87 list file with a comment and a blank line: one label makes one call; comments and blanks alone make none"
 
 echo "sim-test suite: $pass_n passed, $fail_n failed${failed:+: $failed}"
 exit $fail
