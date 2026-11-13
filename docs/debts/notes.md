@@ -2271,3 +2271,10 @@
 - select-loop-path-unfollowed: a path named by a loop variable, as in `for n in ("x.py",): open(join(HERE, n))`, is not followed.
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
+- lane-mail-marker-post-fails: a lane message that sends but whose marker comment fails to post is sent again on each run until a post lands; a duplicate was chosen over a dropped message.
+- lane-mail-unsendable-retries: a lane whose message cannot be sent is tried again on each `merge --reviewed` run and makes it exit 1 each time.
+- footer-session-last-wins: the last `claude.ai/code/session_X` URL in a PR body is read as the footer. A quoted session URL after the footer names the wrong lane. Also, `--leave 5` with `--leave 05` passes the duplicate check.
+- stale-handins-batch-rows: `stale_handins` in skills/roadmap/build.py lists a batch integration PR with a done record over 6 h old, since nothing skips a `batch-*` pull row.
+- done-lanes-batch-prefix: `done_lanes` in merge/merge.py drops any head ref starting `batch-`, not only a real integration PR. So a lane branch `batch-pace` with a done record is in no batch line, no-list build or left-out line.
+- clean-merges-cost-wording: cost wording omits this: a record that survives clean merges of main still costs one gh compare per merge commit (`clean_merges_after`), and a no-list build reads `reviewed_read` twice.
+- lane-mail-done-unmailed: lane mail covers open and bad records only. A done record with no lane lint or a stale head is neither mailed nor named left out. Only the 6 h row catches it. A lane that merges main while its record is open is mailed at each new head.

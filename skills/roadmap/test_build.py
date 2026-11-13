@@ -3168,6 +3168,157 @@ class ReadyAndDraftRows(UpkeepFixture):
         self.assertTrue(detail.startswith("unknown (") and "--live" in detail, detail)
 
 
+class HandedInRow(UpkeepFixture):
+    """The upkeep row `handed in 6 h or more, in no batch` (build.STALE_HANDIN_HOURS = 6, named by build.HANDIN_LINE). A pull row whose
+    reviewLog is true (its review log is posted), whose batched is not true (no batch integration pull holds it), and whose reviewLogAt is
+    6 h or more before the live read, lists as `#<number> (<H>h)`. A reviewLog true with no usable reviewLogAt reads
+    `unknown (#<number> has no reviewLogAt)`, unless batched is true: batched takes the pull out before that check, as held does for
+    createdAt. A non-bool batched skips the pull row. The row reads the live file's pulls, the open pull requests: a pull the file lists
+    only as landed (closed or merged) is absent. A docs-only pull counts like any other, since the live file holds no record kind. The read
+    time is whole seconds, so the 6 h boundary is exact. A pull whose newest record reads open or bad (reviewDone false) is not handed in:
+    its review log is posted, but the lane has not answered it. reviewDone is a JSON bool, like reviewLog."""
+
+    HANDIN = "handed in 6 h or more, in no batch"
+
+    def read_when(self):
+        """The live read's time: whole seconds, five minutes ago, so a case measures the 6 h boundary exactly."""
+        return datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0) - datetime.timedelta(minutes=5)
+
+    def stamp(self, when):
+        return when.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def handed(self, number, branch, **keys):
+        """An open pull row with a posted review log (reviewLog true). `keys` add to it or replace its fields."""
+        row = {"number": number, "title": "lane " + branch, "branch": branch, "reviewLog": True, "reviewDone": True}
+        row.update(keys)
+        return row
+
+    def publish_at(self, read, pulls, landed=None):
+        self.publish(read_at=self.stamp(read), sessions=[], pulls=pulls, landed=landed)
+
+    def listed(self):
+        """(count, sorted entries) of the row, from a build of the live file as published."""
+        count, detail = self.row(self.out_with_live(), self.HANDIN)
+        return count, self.entries(detail)
+
+    def hours_before(self, read, hours, minutes=0):
+        return self.stamp(read - datetime.timedelta(hours=hours, minutes=minutes))
+
+    def test_the_row_is_named_by_a_constant(self):
+        label = getattr(build, "HANDIN_LINE", None)
+        self.assertIsNotNone(label, "build has no HANDIN_LINE constant naming the row")
+        self.assertEqual(label % 6 if "%" in label else label, self.HANDIN, "HANDIN_LINE does not name the row")
+
+    def test_the_threshold_is_six_hours(self):
+        self.assertEqual(getattr(build, "STALE_HANDIN_HOURS", None), 6, "build.STALE_HANDIN_HOURS is not 6")
+
+    def test_the_row_label_states_the_boundary_as_six_hours_or_more(self):
+        # The row lists a pull handed in exactly 6 h before the read (6 h or more), so its label says "6 h or more", not "over 6 h".
+        label = getattr(build, "HANDIN_LINE", None)
+        self.assertIsNotNone(label, "build has no HANDIN_LINE constant naming the row")
+        self.assertIn("6 h or more", label, "HANDIN_LINE %r does not state the boundary the row applies: a pull at exactly 6 h is listed" % label)
+
+    def test_a_pull_handed_in_exactly_six_hours_before_the_read_is_listed(self):
+        read = self.read_when()
+        self.publish_at(read, [self.handed(1001, "six-hours", reviewLogAt=self.hours_before(read, 6)),
+                               self.handed(1002, "seven-hours", reviewLogAt=self.hours_before(read, 7))])
+        self.assertEqual(self.listed(), (2, ["#1001 (6h)", "#1002 (7h)"]), "a pull handed in exactly 6 h before the read is not listed")
+
+    def test_a_pull_handed_in_five_hours_fifty_nine_minutes_before_the_read_is_not_listed(self):
+        read = self.read_when()
+        self.publish_at(read, [self.handed(1001, "short-of-six", reviewLogAt=self.hours_before(read, 5, 59)),
+                               self.handed(1002, "seven-hours", reviewLogAt=self.hours_before(read, 7))])
+        self.assertEqual(self.listed(), (1, ["#1002 (7h)"]), "a pull handed in 5 h 59 m before the read is listed")
+
+    def test_a_batched_pull_is_not_listed(self):
+        read = self.read_when()
+        self.publish_at(read, [self.handed(1001, "batched", reviewLogAt=self.hours_before(read, 7), batched=True),
+                               self.handed(1002, "lone", reviewLogAt=self.hours_before(read, 7))])
+        self.assertEqual(self.listed(), (1, ["#1002 (7h)"]), "a pull a batch holds is listed as in no batch")
+
+    def test_batched_false_does_not_hold_a_pull_back(self):
+        read = self.read_when()
+        self.publish_at(read, [self.handed(1001, "unbatched", reviewLogAt=self.hours_before(read, 7), batched=False),
+                               self.handed(1002, "lone", reviewLogAt=self.hours_before(read, 7))])
+        self.assertEqual(self.listed(), (2, ["#1001 (7h)", "#1002 (7h)"]), "a pull with batched false is not listed")
+
+    def test_a_pull_with_no_posted_review_log_is_not_listed(self):
+        read = self.read_when()
+        self.publish_at(read, [self.handed(1001, "no-log", reviewLogAt=self.hours_before(read, 7), reviewLog=False),
+                               self.handed(1002, "lone", reviewLogAt=self.hours_before(read, 7))])
+        self.assertEqual(self.listed(), (1, ["#1002 (7h)"]), "a pull with reviewLog false is listed")
+
+    def test_a_review_log_with_no_usable_review_log_at_reads_its_entry_unknown(self):
+        read = self.read_when()
+        bad = {"missing": {}, "null": {"reviewLogAt": None}, "no zone": {"reviewLogAt": "2026-11-02T01:14:22"},
+               "not a time": {"reviewLogAt": "yesterday"}}
+        for name, keys in bad.items():
+            with self.subTest(name):
+                self.publish_at(read, [self.handed(998, "no-time", **keys),
+                                       self.handed(1000, "lone", reviewLogAt=self.hours_before(read, 7))])
+                self.assertEqual(self.listed(), (2, ["#1000 (7h)", "unknown (#998 has no reviewLogAt)"]),
+                                 "a reviewLog true with reviewLogAt %s does not read unknown" % name)
+
+    def test_a_batched_pull_with_no_review_log_at_is_not_an_unknown_entry(self):
+        # batched takes the pull out before the reviewLogAt check, as held does for createdAt. lone is the control.
+        read = self.read_when()
+        self.publish_at(read, [self.handed(998, "batched-no-time", batched=True),
+                               self.handed(1000, "lone", reviewLogAt=self.hours_before(read, 7))])
+        self.assertEqual(self.listed(), (1, ["#1000 (7h)"]), "a batched pull with no reviewLogAt reads an unknown entry")
+
+    def test_a_non_bool_batched_skips_the_pull_row(self):
+        read = self.read_when()
+        for value in ("yes", 1):
+            with self.subTest(value=value):
+                self.publish_at(read, [self.handed(1001, "odd", reviewLogAt=self.hours_before(read, 7), batched=value),
+                                       self.handed(1002, "other", reviewLogAt=self.hours_before(read, 7))])
+                count, detail = self.row(self.out_with_live(), self.HANDIN)
+                self.assertEqual((count, detail), (1, "unknown (1 pull rows skipped)"),
+                                 "a batched that is not a JSON bool does not skip its pull row")
+
+    def test_a_pull_the_live_file_lists_only_as_landed_is_absent(self):
+        read = self.read_when()
+        self.publish_at(read, [self.handed(1002, "lone", reviewLogAt=self.hours_before(read, 7))],
+                        landed=[self.pull_row(1003, "merged-lane", merged=True)])
+        self.assertEqual(self.listed(), (1, ["#1002 (7h)"]), "a landed (closed or merged) pull is listed")
+
+    def test_a_docs_only_pull_with_a_posted_review_log_is_listed_like_any_other(self):
+        read = self.read_when()
+        self.publish_at(read, [self.handed(1001, "docs-note", title="Docs: note", reviewLogAt=self.hours_before(read, 7))])
+        self.assertEqual(self.listed(), (1, ["#1001 (7h)"]), "a docs-only pull's posted review log does not count as handed in")
+
+    def test_a_pull_whose_newest_record_reads_done_is_listed(self):
+        # control: reviewDone true is the mark a handed-in pull carries
+        read = self.read_when()
+        self.publish_at(read, [self.handed(1001, "done-lane", reviewLogAt=self.hours_before(read, 7), reviewDone=True),
+                               self.handed(1002, "lone", reviewLogAt=self.hours_before(read, 7))])
+        self.assertEqual(self.listed(), (2, ["#1001 (7h)", "#1002 (7h)"]), "a pull whose newest record reads done is not listed as handed in")
+
+    def test_a_pull_whose_newest_record_is_open_or_bad_is_not_listed(self):
+        read = self.read_when()
+        self.publish_at(read, [self.handed(1001, "open-lane", reviewLogAt=self.hours_before(read, 7), reviewDone=False),
+                               self.handed(1002, "lone", reviewLogAt=self.hours_before(read, 7))])
+        self.assertEqual(self.listed(), (1, ["#1002 (7h)"]), "a pull whose newest record is open or bad is listed as handed in")
+
+    def test_a_non_bool_review_done_skips_the_pull_row(self):
+        read = self.read_when()
+        for value in ("yes", 1):
+            with self.subTest(value=value):
+                self.publish_at(read, [self.handed(1001, "odd", reviewLogAt=self.hours_before(read, 7), reviewDone=value),
+                                       self.handed(1002, "other", reviewLogAt=self.hours_before(read, 7))])
+                count, detail = self.row(self.out_with_live(), self.HANDIN)
+                self.assertEqual((count, detail), (1, "unknown (1 pull rows skipped)"),
+                                 "a reviewDone that is not a JSON bool does not skip its pull row")
+
+    def test_a_review_log_with_no_review_done_reads_its_entry_unknown(self):
+        read = self.read_when()
+        row = self.handed(998, "no-done", reviewLogAt=self.hours_before(read, 7))
+        del row["reviewDone"]  # absent, not false: the newest record's verdict is not known
+        self.publish_at(read, [row, self.handed(1002, "lone", reviewLogAt=self.hours_before(read, 7))])
+        self.assertEqual(self.listed(), (2, ["#1002 (7h)", "unknown (#998 has no reviewDone)"]),
+                         "a pull with a posted review log and no reviewDone does not read unknown")
+
+
 class DoneWithoutCheck(UpkeepFixture):
     """The upkeep row `done without check`, the last row. It reads the done steps whose updatedAt is on or after
     build.DONE_CHECK_SINCE (an ISO UTC time), and lists each whose note, why and ask (joined) fail the close check:
@@ -3181,11 +3332,11 @@ class DoneWithoutCheck(UpkeepFixture):
     NOT_SHOWN = " (not shown green on main)"
     UNREADABLE = " (updatedAt unreadable)"
     HASH_40 = "0123456789abcdef0123456789abcdef01234567"
-    # The fifteen rows before this one, in print order. The control case reads them.
+    # The sixteen rows before this one, in print order. The handed-in row sits after the draft row, the row it checks beside.
     OLD_ROWS = ["notes over %d words" % build.NOTE_WORDS, "untouched %d days in a live phase" % build.STALE_DAYS,
                 "no note in a live phase", "new in top %d with no placement line" % build.TOP,
                 "in progress with no live lane or open PR", "ready todo steps",
-                "draft PRs over %d h with no live lane" % build.STALE_DRAFT_HOURS,
+                "draft PRs over %d h with no live lane" % build.STALE_DRAFT_HOURS, HandedInRow.HANDIN,
                 "dated claims to re-check before a lane starts", "page rulings not on their step",
                 build.IDLE_LANES_LINE, "landed, waiting for a device trial", "landed, waiting for triage to close",
                 "Step trailers naming no step", "live threads naming no open step", "live file entries skipped"]
@@ -3236,8 +3387,8 @@ class DoneWithoutCheck(UpkeepFixture):
         _, out = self.build_from_main()
         self.assertEqual(list(self.summary_counts(out))[-1], self.ROW)
 
-    def test_the_fifteen_rows_before_it_keep_their_order(self):
-        # Control, green on main: the rows before this one print as they did, with or without this row.
+    def test_the_sixteen_rows_before_it_keep_their_order(self):
+        # The rows before this one print in order, the handed-in row among them.
         self.commit_steps({"bad": self.done_step(note="Shipped.")})
         _, out = self.build_from_main()
         self.assertEqual(list(self.summary_counts(out))[:len(self.OLD_ROWS)], self.OLD_ROWS)

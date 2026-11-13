@@ -26,7 +26,10 @@ A spawner is a session that starts its own agents. Each session role is a set of
   `id`, `session_status` and `tags`. The roadmap build script reads it to list steps in progress with no live lane.
   Each pull row carries `createdAt`, so the roadmap build script can list a stale draft. It also carries `held` (true when
   the batch runner's hand-in or hold list names the pull) and `reviewLog` (true when the pull has a posted review log),
-  JSON bools, omitted when false or unknown. Each item row carries
+  JSON bools, omitted when false or unknown. It carries `reviewDone` (true when the newest review log reads done, false when
+  it reads open or bad, omitted only when unknown),
+  `reviewLogAt` (when the review log was posted) and `batched` (true when an integration PR holds the pull), so the build
+  can list a stale hand-in. Each item row carries
   `lane` when the page item has one, so it can list an item whose lane is gone.
   The file also carries `landedPulls`: each pull request closed in the last 14 days whose base is the default
   branch, with `number`, `branch`, `head` and `merged`. The build marks a step landed from it when no `Step:` trailer is on main.
@@ -46,7 +49,11 @@ A spawner is a session that starts its own agents. Each session role is a set of
 - **Batch runner.** A standing session. It owns the integration batch, the CI waits, the merge
   tool runs and archiving lanes. It runs the merge tool on a machine that can run it. After the integration PR merges, it archives each lane whose topic has no queued step.
   In each wake it runs `merge --reviewed` once, with one `--root` per repo it owns (its `cs-repo:` tags), and
-  opens or builds each batch the output names in that wake. It runs each `--confirm` as a background command,
+  opens or builds each batch the output names in that wake. It builds each batch with `merge --batch-build NAME`
+  and no PR list: the tool takes the done set from the same read as the `open batch now` line, so the runner carries no list.
+  It runs `--leave N "reason"` for each done PR it leaves out, and the reason prints in the batch PR's body.
+  The tool also tells the lane of each PR whose record reads open or bad: it sends that lane one message, once for each state at each head,
+  so the lane learns without a runner turn. It runs each `--confirm` as a background command,
   so one repo's CI wait never holds another repo's hand-offs.
   It runs `merge <pr> --confirm --head <sha>` on the integration PR while it is a draft, with the head
   its CI ran on. That step rebuilds the

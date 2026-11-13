@@ -34,7 +34,12 @@
                           (live_review_state). A read or a merge-tree that cannot run, such as a commit the checkout lacks after one fetch, keeps
                           the record stale and the line says unknown; the fix verifier then refuses. Any other difference keeps today's rules.
   merge --reviewed        one line per open PR that has a review record comment, with its state (bad when the newest does not parse) and its
-                          live CI; then the PRs with no record.
+                          live CI; then the PRs with no record. An open or bad line ends with ` lane session_X`, the session in the PR body's footer
+                          (claude.ai/code/session_X), or ` lane unknown (no footer)`. The lane gets one message at cloud/session_X through bin/mail
+                          (Host.send_lane_mail), once for each state at each head: a comment on the PR (the lane-mail marker) records the send, and the
+                          next run reads it from the one comment read it already makes. A failed send prints `merge: lane mail ... was not sent: ...`,
+                          keeps every line, and exits 1. Only a session with the batch-runner role sends or posts; any other prints the same lines and
+                          `merge: lane mail not sent: no batch-runner role`. Cost: one bin/mail send and one comment post per newly told PR; no extra read.
   merge --reviewed --root DIR [--root DIR ...]
                           the same list for each repo checkout DIR, in the order given, one block each: `repo OWNER/NAME:`, that repo's lines,
                           then at most one batch line naming its done PRs on the base, ascending: `open batch now: OWNER/NAME #a #b`, or
@@ -44,8 +49,9 @@
                           missing or unreadable, prints `repo DIR: unknown (REASON)`; a failed read for the batch line keeps the root's lines
                           and prints `batch line unknown (REASON)` in its place. Either way the other roots print in full, and the run exits 1.
                           Cost: the gh calls of one --reviewed per root; when the base has a done PR, plus the CI reads of each ready PR on
-                          the base, one compare per done PR and other open PR on the base, and one compare per done PR against the base; no
-                          new process, file or timer.
+                          the base. No gh compare: one `git fetch` of refs/pull/*/head and of the base, then one git read per done PR and other
+                          open PR on the base and per done PR against the base (8 done x 12 open: 0 compares, was 96). A head the clone lacks
+                          is fetched once; a failed fetch or read prints `batch line unknown`, never clear. No new long-lived process, file or timer.
   merge --touches [--run RUN_ID|URL] [--case TEXT ...] [--file PATH ...]
                           one line per open PR that touches a named file (a changed file of that path) or holds a named case in a `+` line of its
                           patch: `#N HEADREF SHA9 draft|ready: file PATH; case TEXT`. With --run, the run's failing log lines name the cases
@@ -127,7 +133,7 @@
                           lane lines (a lane the roadmap's live file shows done and safe to archive) and `hold (` lines (a lane not to archive now: no cs-step tag, a step off the record branch with no Step trailer on main, or a step still doing under the lane; the last clears when the step's status is set to todo or done), then a summary line. A lane that waits (a step not done, an open pull, an open item) prints no line. Reads
                           skills/roadmap/build.py (the upkeep row `lanes to archive`). Takes no lock and no merge role, merges and
                           posts nothing; any session may run it. An unreadable build or a missing --live exits 1: unknown, never empty.
-  merge --batch-build NAME PR [PR ...] [--on BRANCH] [--base BRANCH]
+  merge --batch-build NAME [PR ...] [--leave PR "REASON" ...] [--on BRANCH] [--base BRANCH]
                           the batch NAME: branch batch-NAME (each lane head merged no-ff onto the base, or onto origin/BRANCH, a running
                           batch) and its one integration PR, opened as a draft. The lane heads read now are the freeze:
                           they go in the pull request body between two marker lines. A second build of NAME is allowed only for that same
@@ -141,9 +147,13 @@
                           --reviewed reads done on the base and that no lane set, open pull request or base holds: `merge: #N left out of
                           batch NAME: none|prose|conflict` (prose: docs-only; conflict: its head conflicts with the base tip). A failed read
                           prints `merge: left-out list unknown (why) <UNKNOWN_CITE>` and keeps the batch result. Added gh cost: one reviewed_read, one open-PR
-                          list read (h.batch_pr) for a missing base or lane set, then per done candidate one compare against each other open pull
-                          request on the base and one against the base. Per code candidate: one `git fetch` of the base (once per run), a
+                          list read (h.batch_pr) for a missing base or lane set, then no compare: one git read per done candidate and other open pull
+                          request on the base and one against the base (Host.holds_head). Per code candidate: one `git fetch` of the base (once per run), a
                           `git cat-file` check, a fetch of its refs/pull/N/head if the clone lacks it, and one `git merge-tree`.
+                          With no PR list, the lane set is the done set the `open batch now` line of `merge --reviewed --root` names for the base (a held,
+                          already-merged or CI-running PR is off it), so no list is carried. `--leave PR "REASON"` (repeatable) takes one done PR out of it; the reasons
+                          print in the batch PR's body after the freeze block, and a --leave of a PR not in the done set is refused before anything is
+                          pushed. A given PR list keeps its own rules, and takes no --leave. Added cost: the reads of one --reviewed and no gh compare.
   merge --batch-build NAME [PR ...] --ready [--lint-unknown-ok REASON]
                           lint the head of batch-NAME once (the lint of --lane-lint), run the repo's ready checks on it, and record the
                           head that passed (Linted:). Then it asks the host to mark the draft ready. Host.ready sends nothing, so on a
@@ -180,6 +190,7 @@ try:
 except ImportError:  # a hook loads this file; a missing helper never stops that hook
     _nowindow = subprocess
 
+MAIL_TOOL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "bin", "mail")  # the one send path of the git mailbox (decision session-messages)
 STAMP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "actions", "stamp", "stamp.mjs")
 ALARM_EVENTS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "actions", "ci-alarm", "events.json")  # the events the red-main check judges and their groups; one home, the CI alarm reads it too
 RECORDS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "lint", "hook_catalog.py")  # the records-page generator; the tool brings it, a repo adds nothing
@@ -982,6 +993,9 @@ class Host:
         self.ignore = ignore or {}  # check name -> reason, from ignore_checks()
         self.warned = set()  # (check name, link) already warned about, so a poll loop prints each line once
         self.heads_fetch = None  # (code, output) of this run's one fetch_branch_heads, made by merge_state only when a commit is missing; None before it
+        self.pull_heads_fetch = None  # (code, output) of this run's one fetch of refs/pull/*/head, made by holds_head on its first read; None before it
+        self.branches_fetched = {}  # branch -> (code, output) of its one fetch, which holds_head reads when `other` names a branch
+        self.heads_fetched = {}  # sha -> (code, output) of the one fetch of a head the clone still lacked after the pull refs
 
     commit_message = None  # set by confirm just before the merge: one line per reason flag that lifted a check. None leaves GitHub's default message
     before_wait = None  # lock.extend_for, set by confirm once the lock is held: runs before each rate wait. No gh call has one before
@@ -1178,8 +1192,10 @@ class Host:
         records is {PR number: [(body, created_at, updated_at) of each review record comment, oldest first]}: a body counts only when the review record
         marker is its whole first line. A timestamp the read did not give is None.
         lints is {PR number: [lane-lint comment bodies, oldest first]}: the lint marker is the whole first line and the author is the repo's owner.
-        A failed read is a Stop. The one home of the comment read: review_records, review_comments and the lane-lint check each take their part."""
-        records, lints = {}, {}
+        mails is {PR number: {(State, Head) of each lane-mail marker comment}}: the marker (LANE_MAIL_MARKER) is the whole first line and the author is the repo's
+        owner, as for the lint marker: the batch runner posts it as the owner, and a stranger's marker must not silence a lane's message.
+        A failed read is a Stop. The one home of the comment read: review_records, review_comments, the lane-lint check and the lane message each take their part."""
+        records, lints, mails = {}, {}, {}
         for c in self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
             body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
             first = body.splitlines()[:1]
@@ -1187,11 +1203,23 @@ class Host:
                 records.setdefault(int(m.group(1)), []).append((body, c.get("created_at"), c.get("updated_at")))
             elif m and first == [LANE_LINT_MARKER] and c.get("author_association") == LANE_LINT_AUTHOR:
                 lints.setdefault(int(m.group(1)), []).append(body)
-        return records, lints
+            elif m and first == [LANE_MAIL_MARKER] and c.get("author_association") == LANE_LINT_AUTHOR:
+                fields = dict(l.split(": ", 1) for l in body.splitlines()[1:] if ": " in l)
+                mails.setdefault(int(m.group(1)), set()).add((fields.get("State"), fields.get("Head")))
+        return records, lints, mails
 
     def review_records(self, since):
         """-> {PR number: [(body, created_at, updated_at) of each review record comment, oldest first]}: the records half of issue_comments."""
         return self.issue_comments(since)[0]
+
+    def send_lane_mail(self, addr, kind, body):
+        """Send `body` to the mailbox address `addr` as a message of kind `kind` -> (code, output). The one send is bin/mail's (decision session-messages,
+        hooks/mail.py holds its plumbing and addresses), run as a child, so its platform hold, its address and its retries apply. The message is from this
+        session's own address. A program that cannot start or a send that times out is code 1 with the reason, never a raise."""
+        try:
+            return sh([sys.executable, MAIL_TOOL, "send", "--to", addr, "--kind", kind, "--body-file", "-"], input=body)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            return 1, f"mail unknown: {' '.join(str(e).split())}"
 
     def post_comment(self, n, body):
         """Post `body` as a comment on pull request n (REST POST issues/n/comments, through gh). A failed post is a Stop."""
@@ -1262,7 +1290,7 @@ class Host:
             if head is None:
                 head = self.pr(n)["head"]
             # contained only when the busy head holds this head AND this head holds the base tip: else its run never tested the base this merge lands on
-            if not (self.holds_head(head, d["head"]["sha"]) and self.holds_head(base, head)):
+            if not (self.holds_head_gh(head, d["head"]["sha"]) and self.holds_head_gh(base, head)):
                 blockers.append(f"#{d['number']} ({d['head']['ref']}) " + "; ".join(parts))
         return blockers
 
@@ -1286,8 +1314,10 @@ class Host:
         names = self.required_names()
         return [d["number"] for d in ready if self.busy_parts(d, names, self.ignore)]
 
-    def holds_head(self, head, other):
-        """True when the commit or branch `other` contains `head`: GitHub's compare of head...other reads ahead or identical. Any failed read raises Stop."""
+    def holds_head_gh(self, head, other):
+        """True when the commit or branch `other` contains `head`: GitHub's compare of head...other reads ahead or identical. Any failed read raises Stop.
+        One gh call per read, and it never touches the clone, so the callers that must not fetch use it: the lane Stop hook (lint/report_guard.py reads
+        clean_merges_after), the batch brake of a merge, and the fix-check read. The batch line and the batch build read holds_head, which is local git."""
         c, out = self.api(f"compare/{head}...{other}")
         try:
             if c:
@@ -1295,6 +1325,41 @@ class Host:
             return json.loads(out)["status"] in ("ahead", "identical")
         except (ValueError, KeyError, TypeError) as e:
             raise Stop(f"cannot read whether {other[:9]} holds {head[:9]} {READ_CITE}: {e}")
+
+    def holds_head(self, head, other):
+        """True when the commit or branch `other` contains `head`: `git merge-base --is-ancestor head other`, so ahead or identical holds (what GitHub's
+        compare of head...other reads as ahead or identical). A branch name reads as origin's. Runs in the checkout Host.cwd names (else the working
+        directory). Cost: no gh call. One `git fetch` of refs/pull/*/head on the first read of a run, one fetch of each branch named as `other`, and
+        one fetch of a head the clone still lacks after those; then one git process per read, which is 8 done x 12 open = 0 compares, where it was 96.
+        Any failed fetch or read, a head no remote holds and a shallow clone that cuts the history raise Stop: unknown, never clear."""
+        root = self.cwd or "."
+        why = f"cannot read whether {other[:9]} holds {head[:9]} {READ_CITE}"
+        try:
+            if self.pull_heads_fetch is None:
+                self.pull_heads_fetch = git(root, "fetch", "-q", "origin", "+refs/pull/*/head:refs/remotes/origin/pull/*")
+            if self.pull_heads_fetch[0]:
+                raise Stop(f"{why}: git fetch of the pull request heads failed: {' '.join(self.pull_heads_fetch[1].split())[:300]}")
+            refs = []
+            for x in (head, other):
+                if re.fullmatch(r"[0-9a-f]{40}", x):
+                    if git(root, "cat-file", "-e", f"{x}^{{commit}}")[0]:
+                        if x not in self.heads_fetched:
+                            self.heads_fetched[x] = git(root, "fetch", "-q", "origin", x)
+                        if self.heads_fetched[x][0] or git(root, "cat-file", "-e", f"{x}^{{commit}}")[0]:
+                            raise Stop(f"{why}: the commit {x[:9]} is not in this clone and no remote gave it: {' '.join(self.heads_fetched.get(x, (0, ''))[1].split())[:300]}")
+                    refs.append(x)
+                    continue
+                if x not in self.branches_fetched:
+                    self.branches_fetched[x] = git(root, "fetch", "-q", "origin", f"+refs/heads/{x}:refs/remotes/origin/{x}")
+                if self.branches_fetched[x][0]:
+                    raise Stop(f"{why}: git fetch of {x} failed: {' '.join(self.branches_fetched[x][1].split())[:300]}")
+                refs.append(f"refs/remotes/origin/{x}")
+            got = ancestor(root, refs[0], refs[1])
+        except (OSError, subprocess.TimeoutExpired) as e:
+            raise Stop(f"{why}: {e}")
+        if got is None:
+            raise Stop(f"{why}: git could not tell (a shallow clone or a missing object)")
+        return got
 
     def commit_read(self, sha):
         """-> (parents, tree) of the commit `sha`: its parent shas in order (first parent first) and its tree sha, None when the read names none.
@@ -3003,7 +3068,7 @@ def refuse_unstacked_head(root, head, base):
         raise Stop(f"the lint of {head[:9]} FAILs: the head lacks {base}'s current head {tip[:9]}. "
                    f"Merge {base} into the lane with an ordinary merge commit, push, and run `merge --lane-lint` again. {LANE_LINT_CITE}")
 
-LANE_SESSION = re.compile(r"claude\.ai/code/(session_[A-Za-z0-9_-]+)")  # the session URL line a lane's PR body carries: the key of "same lane"
+FOOTER_SESSION = re.compile(r"claude\.ai/code/(session_[A-Za-z0-9_-]+)")  # the session URL line a lane's PR body carries: the key of "same lane"
 
 def parse_with(value, own):
     """-> the PR numbers of a --with comma list, each once, in order. A blank or non-digit item, or the linted PR's own number, is a Stop:
@@ -3063,12 +3128,12 @@ def cross_measure(root, head, n, body, host, with_prs, base, fetched, head_clean
     `integration` is true for a batch integration PR (is_integration_pr): a clash that would count is a report line instead, for the lane rebases after the merge.
     A PR that --with names and that is not open is a Stop here: never a pass. --lint-unknown-ok lifts none of it. A PR posted under another
     session id is found only through --with."""
-    lane = set(LANE_SESSION.findall(body or ""))
+    lane = set(FOOTER_SESSION.findall(body or ""))
     rows = {d["number"]: d for d in host.open_pulls() if d["number"] != n}
     for m in with_prs:
         if m not in rows:
             raise Stop(f"--with names PR #{m}, which is not an open pull request (closed, merged or not found), so its head cannot be compared: unknown, not a pass. {LANE_LINT_CITE}")
-    picked = sorted({m for m, d in rows.items() if lane & set(LANE_SESSION.findall(d.get("body") or ""))} | set(with_prs))
+    picked = sorted({m for m, d in rows.items() if lane & set(FOOTER_SESSION.findall(d.get("body") or ""))} | set(with_prs))
     if not picked:
         return [], [], ""
     c, out = fetch_branch_heads(root)
@@ -4060,6 +4125,7 @@ REVIEW_MARKER = "<!-- review-record -->"
 
 # The lane-lint comment (decision lanes-run-no-full-ci-job): `merge --lane-lint <pr>` posts it on a PASS, and `--reviewed` and the join read it. The one home of its form.
 LANE_LINT_MARKER = "<!-- lane-lint -->"
+LANE_MAIL_MARKER = "<!-- lane-mail -->"  # the first line of the comment that says the lane was sent its message for one state at one head
 LANE_LINT_AUTHOR = "OWNER"  # the check trusts the comment's author, not its text
 
 def lint_body(n, head, result="PASS"):
@@ -4279,12 +4345,12 @@ def edits_outside_conflict(root, parents, tree):
 
 def clean_merges_after(h, head, live, base=None):
     """True when every commit after `head`, up to the live head `live`, is a clean merge of main. A clean merge of main has two
-    parents, a second parent main holds (Host.holds_head, main being `base`, else the host's base), and git's clean merge of its parents as its tree
+    parents, a second parent main holds (Host.holds_head_gh, main being `base`, else the host's base), and git's clean merge of its parents as its tree
     (merge_state). The walk follows first parents from `live` and must reach `head` within
     REVIEW_MERGE_WALK commits. A commit with one parent (an empty commit too), a merge of three, a merge of a branch main lacks, an edited or conflicted merge, a
     longer walk and a head that is never reached are all False. A failed read, a commit read that names no tree, and a merge git cannot read
     (merge_state "unknown") raise Stop: unknown, never False and never True. Cost: one commit read per commit walked (each sha read once);
-    one holds_head compare and one merge_state per merge commit; and at most one fetch_branch_heads a run."""
+    one holds_head_gh compare and one merge_state per merge commit; and at most one fetch_branch_heads a run."""
     sha, read = live, {}
 
     def commit(s):
@@ -4296,7 +4362,7 @@ def clean_merges_after(h, head, live, base=None):
         if sha == head:
             return True
         parents, tree = commit(sha)
-        if len(parents) != 2 or not h.holds_head(parents[1], base or h.base):  # a one-parent commit, even an empty one, is no merge of main
+        if len(parents) != 2 or not h.holds_head_gh(parents[1], base or h.base):  # a one-parent commit, even an empty one, is no merge of main
             return False
         state, why = merge_state(h, parents, tree)
         if state == "unknown":
@@ -4374,21 +4440,29 @@ REVIEW_BATCH_OPEN = "open batch now: "  # the batch line of a --root block when 
 REVIEW_BATCH_BUILD = "build next batch on the running head: "  # ... and when one has
 REVIEW_BATCH_UNKNOWN = "batch line unknown "  # ... and when a read for the batch line stopped: the reason follows, in brackets
 
+def footer_session(body):
+    """The session id (`session_X`) in the attribution footer of a pull request body, the last one a `claude.ai/code/session_X` URL names, or None."""
+    found = FOOTER_SESSION.findall(body or "")
+    return found[-1] if found else None
+
 def reviewed_read(h):
-    """-> (lines, done, pulls): the lines of `merge --reviewed`, built before any is printed so a failed read prints none; a (number, base, kind) triple
-    for each pull request whose newest record reads done (kind is the record's Kind); and the open pull request rows. Two list reads (the open pull requests, then the
+    """-> (lines, done, pulls, tell): the lines of `merge --reviewed`, built before any is printed so a failed read prints none; a (number, base, kind) triple
+    for each pull request whose newest record reads done (kind is the record's Kind); the open pull request rows; and `tell`, one (number, state, head, why,
+    the lane's session or None, marked) entry for each pull request whose line reads open or bad (`marked` is True when a lane-mail marker comment already holds that
+    state at that head), which tell_lanes sends. An open or bad line ends with ` lane session_X`, the session in the pull request body's footer, or
+    ` lane unknown (no footer)`. Two list reads (the open pull requests, then the
     repo's comments since the oldest one) and, for each ready pull request that has a record, three `gh` calls: the check runs, the commit statuses and
     the branch protection (decision pr-review-record, the cost). The comment list pages every comment of the repo since the oldest open pull request.
     The same list holds the lane-lint comments: a done record counts as done only with a lane-lint PASS at the live head (lint_state), else its line
-    names `merge --lane-lint <n>`; no extra call. Each record's clean-merge walk judges against the host's base at entry, the repo's default branch, never the pull
+    names `merge --lane-lint <n>`; no extra call. The lane-mail markers come from that same list, so the lane message adds no read here. Each record's clean-merge walk judges against the host's base at entry, the repo's default branch, never the pull
     request's own base."""
     main = h.base
     pulls = h.pages("pulls", fields={"state": "open"})
     if not pulls:
-        return ["no open pull requests."], [], pulls
-    rows, lints = h.issue_comments(min(d["created_at"] for d in pulls))
+        return ["no open pull requests."], [], pulls, []
+    rows, lints, mails = h.issue_comments(min(d["created_at"] for d in pulls))
     records = {n: [r[0] for r in rs] for n, rs in rows.items()}  # reviewed_read needs the bodies only
-    lines, bare, done = [], [], []
+    lines, bare, done, tell = [], [], [], []
     for d in sorted(pulls, key=lambda d: d["number"]):
         n, sha, bodies = d["number"], d["head"]["sha"], records.get(d["number"])
         if not bodies:
@@ -4404,38 +4478,103 @@ def reviewed_read(h):
             else:  # a done record is not ready without the lane's lint at this head (decision lanes-run-no-full-ci-job)
                 state, why = LINT_NOT_READY[lint][0], f"{LINT_NOT_READY[lint][1]}. Run `merge --lane-lint {n}`"
         ci = "draft, no run" if d.get("draft") else h.head_state(n, sha=sha)
-        lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}; CI {ci}")
-    return lines + ([f"no record: {', '.join(bare)}"] if bare else []), done, pulls
+        lane = ""
+        if state in ("open", "bad"):
+            session = footer_session(d.get("body"))
+            lane = f" lane {session}" if session else " lane unknown (no footer)"
+            tell.append((n, state, sha, why, session, (state, sha) in mails.get(n, ())))
+        lines.append(f"#{n} {d['head']['ref']} {sha[:9]} {state}: {why}; CI {ci}{lane}")
+    return lines + ([f"no record: {', '.join(bare)}"] if bare else []), done, pulls, tell
+
+LANE_MAIL_BODY = ("#{n} {state} at {head9}: {why}\n\n"
+                  "The batch runner reads this pull request's newest review log as {state} at its live head, so no batch takes it. "
+                  "Post a review log that reads done at the live head (`merge {n} --review-record ...`, posted as a comment on #{n}), "
+                  "or say in this lane why it waits. This is the only message for this state at this head.\n")
+
+LANE_MAIL_NO_ROLE = "merge: lane mail not sent: no batch-runner role"  # `merge: ` like its sibling lane-mail lines
+
+def tell_lanes(h, tell):
+    """-> the lines for the lanes of `tell` (reviewed_read): one message to each lane whose pull request reads open or bad and was not told for that state at
+    that head, then a marker comment (LANE_MAIL_MARKER) that says so, which the next reviewed_read reads from its one comment list. The message goes through
+    Host.send_lane_mail to cloud/<the footer's session>. A pull request with no session in its footer sends nothing, and a session whose merge role is not batch-runner (read_merge_role) sends
+    nothing and posts no marker: it prints LANE_MAIL_NO_ROLE once when a message was due. A failed send prints its failure and a
+    failed marker post prints a line that the message may repeat; either one is a line that starts `merge: lane mail`, and the second value is False.
+    Cost: one bin/mail send and one comment post per newly told pull request, and nothing for one already told."""
+    lines, ok = [], True
+    todo = [t for t in tell if t[4] is not None and not t[5]]
+    if todo and read_merge_role() != "batch-runner":  # the send and the marker post are writes for the batch runner's account, as the owner's marker is the one trusted
+        return [LANE_MAIL_NO_ROLE], True
+    for n, state, head, why, session, marked in tell:
+        if session is None or marked:
+            continue
+        addr = "cloud/" + session
+        code, out = h.send_lane_mail(addr, "inform", LANE_MAIL_BODY.format(n=n, state=state, head9=head[:9], why=why))
+        if code:
+            lines.append(f"merge: lane mail for #{n} to {addr} was not sent: {' '.join(out.split())[:300]}")
+            ok = False
+            continue
+        lines.append(f"merge: lane mail for #{n} sent to {addr}: {' '.join(out.split())[:120]}")
+        try:
+            h.post_comment(n, "\n".join([LANE_MAIL_MARKER, f"PR: #{n}", f"State: {state}", f"Head: {head}", f"To: {addr}"]) + "\n")
+        except Stop as e:
+            lines.append(f"merge: lane mail for #{n} was sent, but its marker comment was not posted, so the next run sends it again: {' '.join(str(e).split())[:300]}")
+            ok = False
+    return lines, ok
 
 def reviewed_lines(h):
-    """-> the lines of `merge --reviewed` (see reviewed_read, which holds the gh cost of one repo). `--root` runs this once per root, so the
-    gh calls scale with the number of roots; no new process, file or timer."""
-    return reviewed_read(h)[0]
+    """-> (lines, ok) of `merge --reviewed` (see reviewed_read, which holds the gh cost of one repo): its lines, then the lane mail lines (tell_lanes), and
+    ok is False when a lane message or its marker failed. `--root` runs this once per root, so the gh calls scale with the number of roots; no new file or timer."""
+    lines, _done, _pulls, tell = reviewed_read(h)
+    mail, ok = tell_lanes(h, tell)
+    return lines + mail, ok
+
+def done_lanes(done, pulls, base):
+    """-> {number: kind} of the done pull requests of `done` (reviewed_read) that are open on `base` and can be a lane. An integration PR (head ref
+    BATCH_PREFIX...) reads done once its review log and lint land at its head, but it is no lane of any batch. The one home of that rule for
+    batch_candidates (the `open batch now` line of `--reviewed --root` and `--batch-build NAME` with no PR list) and left_out_lines."""
+    refs = {d["number"]: d["head"]["ref"] for d in pulls if d["base"]["ref"] == base}
+    return {n: kind for n, b, kind in done if b == base and n in refs and not refs[n].startswith(BATCH_PREFIX)}
+
+def batch_candidates(h, done, pulls, base, ignore_ref=None):
+    """-> (numbers, busy): the done pull requests of `done` (reviewed_read) on `base`, ascending, that can join a batch now, and the numbers of the ready
+    pull requests on `base` with CI running. One that another open pull request on `base` holds (Host.holds_head, drafts included: the batch would
+    merge it twice), one that `base` already holds (nothing is left to merge) and one that is ready with CI running (Host.ready_busy) are left out.
+    A pull request whose head ref is `ignore_ref` holds nothing and is no candidate: a build of batch NAME again must not read the lanes of its own batch pull
+    request as held. No integration PR is a candidate (done_lanes).
+    The one home of the done set that the `open batch now` line and `--batch-build NAME` with no PR list both read. With no done pull request on `base` it
+    reads nothing. A failed read raises Stop. Cost: Host.ready_busy's reads and one git read per candidate and other open pull request on `base`
+    (Host.holds_head), and no gh compare."""
+    heads = {d["number"]: d["head"]["sha"] for d in pulls if d["base"]["ref"] == base and d["head"]["ref"] != ignore_ref}
+    nums = sorted(n for n in done_lanes(done, pulls, base) if n in heads)
+    if not nums:
+        return [], []
+    busy = h.ready_busy(pulls, base)
+    return [n for n in nums if n not in busy and not any(h.holds_head(heads[n], sha) for m, sha in heads.items() if m != n)
+            and not h.holds_head(heads[n], base)], busy
 
 def reviewed_block(h):
     """-> (lines, ok) of one `--root` block: `repo OWNER/NAME:`, that repo's reviewed lines, then at most one batch line. The batch line names the
     done pull requests on the host's base, ascending, except one whose head another open pull request on that base holds (Host.holds_head, drafts
     included: the batch would merge it twice), one whose head the base already holds (ahead or identical: nothing is left to merge) and one that
-    is ready with CI running (Host.ready_busy). `open batch now` when no ready pull request on that base has CI running, else `build next batch on
+    is ready with CI running (Host.ready_busy), as batch_candidates reads them. `open batch now` when no ready pull request on that base has CI running, else `build next batch on
     the running head`. No pull request left, no batch line. A Stop in a read for the batch line keeps the reviewed lines, prints
     `batch line unknown (reason)` in place of the batch line, and ok is False; a Stop in reviewed_read raises. Extra cost over reviewed_read:
     only when a done pull request exists on the base, the branch protection read and each ready pull request's check runs, statuses and workflow
-    runs, then one compare per done pull request and other open pull request on the base, and one compare per done pull request against the base."""
-    lines, done, pulls = reviewed_read(h)
-    out = [f"repo {h.repo}:", *lines]
-    nums = sorted(n for n, base, _kind in done if base == h.base)
-    if not nums:
-        return out, True
+    runs, then one git read per done pull request and other open pull request on the base, and one per done pull request against the base (no gh compare;
+    Host.holds_head), after one fetch of the pull request heads. The lane messages (tell_lanes) come before the batch line: a failed send keeps every line and
+    makes ok False."""
+    lines, done, pulls, tell = reviewed_read(h)
+    mail, mail_ok = tell_lanes(h, tell)
+    out = [f"repo {h.repo}:", *lines, *mail]
+    if not any(b == h.base for _n, b, _kind in done):
+        return out, mail_ok
     try:
-        busy = h.ready_busy(pulls, h.base)
-        heads = {d["number"]: d["head"]["sha"] for d in pulls if d["base"]["ref"] == h.base}
-        nums = [n for n in nums if n not in busy and not any(h.holds_head(heads[n], sha) for m, sha in heads.items() if m != n)
-                and not h.holds_head(heads[n], h.base)]
+        nums, busy = batch_candidates(h, done, pulls, h.base)
     except Stop as e:
         return out + [f"{REVIEW_BATCH_UNKNOWN}({' '.join(str(e).split())})"], False
     if nums:
         out.append(f"{REVIEW_BATCH_BUILD if busy else REVIEW_BATCH_OPEN}{h.repo} " + " ".join(f"#{n}" for n in nums))
-    return out, True
+    return out, mail_ok
 
 LOG_PREFIX = re.compile(r"^﻿?(?:\d{4}-\d\d-\d\dT[\d:.]+Z\s+)?(?:\x1b\[[0-9;]*m)*")  # a log line's timestamp and colour codes, before its text
 FAILING_LINE = re.compile(r"(?:FAILED|FAIL|ERROR)\b[:\s]*(.*)")
@@ -4557,8 +4696,9 @@ def reviewed_roots(roots, hosts, config):
     is missing or unreadable, prints `repo ROOT: unknown (reason)` in its place, and ok is False; a stop in a read for its batch line keeps its
     lines with `batch line unknown (reason)` (reviewed_block), and ok is False; the other roots print in full. The notices a root's config read
     says are held with its block and follow it, so nothing prints until every root is read. Cost: reviewed_block's per root: the gh calls of one
-    --reviewed, plus, when the base has a done pull request, the CI reads of each ready pull request on the base, one compare per done pull
-    request and other open pull request on the base, and one compare per done pull request against the base; no new process, file or timer."""
+    --reviewed, plus, when the base has a done pull request, the CI reads of each ready pull request on the base, then no gh compare: one fetch of the pull request heads and one git read per done pull
+    request and other open pull request on the base and per done pull request against the base (Host.holds_head), 0 gh compares for 8 done x 12 open, where it was 96;
+    one bin/mail send and one comment post per newly told lane; no new long-lived process, file or timer."""
     lines, ok = [], True
     for r in roots:
         config_says, read_says = io.StringIO(), io.StringIO()  # two buffers: the config read, then the GitHub reads (a rate-limit wait says so)
@@ -5150,14 +5290,14 @@ def refuse_draft_runs(h, heads, unknown_ok="", ready=False):
 def left_out_lines(root, h, name, numbers, base):
     """-> the lines naming each pull request that `merge --reviewed` reads done on `base`, that is not in the batch's lane set `numbers` and whose
     head no other open pull request on `base` holds (a batch's draft included) and `base` does not hold: `merge: #N left out of batch NAME: REASON`,
-    ascending. REASON is prose (the newest record is docs-only: no code for a batch to carry), conflict (its head merges onto the tip of `base`
+    ascending. An integration PR is never named (done_lanes). REASON is prose (the newest record is docs-only: no code for a batch to carry), conflict (its head merges onto the tip of `base`
     with a conflict) or none. Reuses reviewed_read, Host.holds_head and merge_reason, the one home of "does this head merge cleanly onto the base"
-    (it also fetches a head the clone lacks from refs/pull/N/head). Cost over a build: reviewed_read's reads, then one compare per
-    candidate and other open pull request on `base`, one compare against `base` and one merge_reason per code candidate. An unknown
+    (it also fetches a head the clone lacks from refs/pull/N/head). Cost over a build: reviewed_read's reads, then one git read (Host.holds_head, no gh
+    compare) per candidate and other open pull request on `base` and one against `base`, and one merge_reason per code candidate. An unknown
     merge_reason raises Stop; a failed read raises its RELEASE_READ_ERRORS error."""
-    _lines, done, pulls = reviewed_read(h)
+    _lines, done, pulls, _tell = reviewed_read(h)  # the lane message is --reviewed's, never a build's
     heads = {d["number"]: d["head"]["sha"] for d in pulls if d["base"]["ref"] == base}
-    kinds = {n: kind for n, b, kind in done if b == base and n not in numbers}
+    kinds = {n: kind for n, kind in done_lanes(done, pulls, base).items() if n not in numbers}
     fetched, out = {}, []
     for n in sorted(kinds):
         if any(h.holds_head(heads[n], sha) for m, sha in heads.items() if m != n) or h.holds_head(heads[n], base):
@@ -5172,10 +5312,61 @@ def left_out_lines(root, h, name, numbers, base):
         out.append(f"merge: #{n} left out of batch {name}: {why}")
     return out
 
-def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", config=".github/stamp.json"):
-    """merge --batch-build, then the left-out lines (left_out_lines) after the result of every run that did not stop. A read error (RELEASE_READ_ERRORS) that reading them raises
+def build_done_set(h, base, leaves, name):
+    """-> (numbers, left): the lane set of `--batch-build NAME` with no PR list. `numbers` is the done set `merge --reviewed --root` names for `base` (reviewed_read
+    and batch_candidates: a held, already-merged or CI-busy pull request is off it), ascending, less each number in `leaves`. `left` is [(number, reason)]
+    for each of those, ascending. A --leave of a number not in the done set, no done pull request, or an unreadable read is a Stop before anything is pushed.
+    Cost: reviewed_read's reads and batch_candidates', once; the build's own reads follow."""
+    _lines, done, pulls, _tell = reviewed_read(h)
+    nums, _busy = batch_candidates(h, done, pulls, base, integration_branch(name))
+    strays = sorted(n for n, _why in leaves if n not in nums)
+    if strays:
+        raise Stop(f"--leave {', '.join('#%d' % n for n in strays)}: not in the done set of {base} ({', '.join('#%d' % n for n in nums) or 'none'}), so there is nothing to leave out. "
+                   f"Nothing was pushed. {FREEZE_CITE}")
+    left = sorted(leaves)
+    kept = [n for n in nums if n not in {n for n, _why in left}]
+    if not kept:
+        raise Stop(f"no done pull request on {base} is left to build a batch from (done set: {', '.join('#%d' % n for n in nums) or 'none'}). Nothing was pushed. {FREEZE_CITE}")
+    return kept, left
+
+LEFT_HEADING = "Left out by the runner:"
+
+def left_note(left):
+    """The lines for the batch pull request body, after the freeze block: each pull request the runner left out with its reason. [] when none."""
+    return ["", LEFT_HEADING, *(f"- #{n}: {' '.join(why.split())}" for n, why in left)] if left else []
+
+def left_rewrite(body, left):
+    """`body` with each (number, reason) of `left` listed under the LEFT_HEADING line, outside the freeze block: the same-set rerun's way to print its --leave
+    reasons. The heading is added at the end when the body has none, and an entry already listed is not listed twice. A new reason for a number already
+    listed replaces that number's entry, so the list holds the newest reason only. Any other text is kept."""
+    lines = body.split("\n")
+    entries = [e for e in left_note(left)[2:] if e not in lines]
+    if not entries:
+        return body
+    if LEFT_HEADING in lines:
+        start = end = lines.index(LEFT_HEADING) + 1
+        while end < len(lines) and lines[end].startswith("- #"):
+            end += 1
+        listed = lines[start:end]
+        for e in entries:
+            key = e.split(":", 1)[0] + ":"  # `- #N:`; the colon keeps #12 apart from #123
+            same = [i for i, line in enumerate(listed) if line.startswith(key)]
+            if same:
+                listed = [e if i == same[0] else line for i, line in enumerate(listed) if i not in same[1:]]
+            else:
+                listed.append(e)
+        return "\n".join(lines[:start] + listed + lines[end:])
+    tail = lines[:-1] if lines[-1] == "" else lines  # a body's final newline stays final
+    return "\n".join(tail + ["", LEFT_HEADING, *entries] + ([""] if lines[-1] == "" else []))
+
+def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", config=".github/stamp.json", leaves=()):
+    """merge --batch-build, then the left-out lines (left_out_lines) after the result of every run that did not stop. With no `numbers` and no `ready`, the lane
+    set is the done set (build_done_set), less `leaves`, and each left-out reason goes in the new pull request's body after the freeze block. A read error (RELEASE_READ_ERRORS) that reading them raises
     prints `merge: left-out list unknown (why) <UNKNOWN_CITE>` and never hides the batch's own result or its exit code. Returns what batch_build_run returns."""
-    rc = batch_build_run(root, h, name, numbers, on, base, ready, unknown_ok, config)
+    left = ()
+    if not numbers and not ready:
+        numbers, left = build_done_set(h, base or h.base, leaves, name)
+    rc = batch_build_run(root, h, name, numbers, on, base, ready, unknown_ok, config, left)
     try:
         frozen = numbers
         if ready and not numbers:  # the lane set is the frozen one, which batch_build_run read from the pull request
@@ -5191,7 +5382,7 @@ def batch_build(root, h, name, numbers, on, base, ready=False, unknown_ok="", co
         say(f"merge: left-out list unknown ({' '.join(str(e).split())}) {UNKNOWN_CITE}")
     return rc
 
-def batch_build_run(root, h, name, numbers, on, base, ready=False, unknown_ok="", config=".github/stamp.json"):
+def batch_build_run(root, h, name, numbers, on, base, ready=False, unknown_ok="", config=".github/stamp.json", left=()):
     """merge --batch-build NAME PR... [--on BRANCH] [--base BRANCH]: the integration branch and its one draft pull request, or the same set again.
     With `ready` (--ready): the batch already exists. It is checked as the same set again, with no PR list meaning its frozen set, then the one
     lint of the integration branch head runs, then the repo's ready checks, and the host is asked to mark the draft ready (Host.ready sends nothing, so
@@ -5237,7 +5428,7 @@ def batch_build_run(root, h, name, numbers, on, base, ready=False, unknown_ok=""
         stacked_without_base(root, h, base, heads, start if on else None)
         build_integration_branch(root, name, start, sorted(heads.items()))
         try:
-            pr = h.create_pr(branch, base, f"Batch {name}", "\n".join(freeze_lines(name, heads, on=(on, start) if on else None, base=None if on else start)) + "\n", draft=True)
+            pr = h.create_pr(branch, base, f"Batch {name}", "\n".join([*freeze_lines(name, heads, on=(on, start) if on else None, base=None if on else start), *left_note(left)]) + "\n", draft=True)
         except Stop as e:
             raise Stop(f"{branch} is on origin, but its pull request was not opened: {e}. Open it by hand with the frozen block, or delete the branch and run again. {FREEZE_CITE}")
         say(f"merge: batch {name} built: PR #{pr} draft, lanes {lane_list(heads)}")
@@ -5261,6 +5452,11 @@ def batch_build_run(root, h, name, numbers, on, base, ready=False, unknown_ok=""
     for n in numbers:
         if fetch_branch(root, infos[n]["branch"], FREEZE_CITE) != heads[n]:
             raise Stop(f"{infos[n]['branch']} moved while #{n} was read. Nothing was pushed. Run again. {FREEZE_CITE}")
+    if left:  # the same set again, with a --leave: the reason prints in the body as a new build prints it
+        text = left_rewrite(info["body"], left)
+        if text != info["body"]:
+            h.set_body(pr, text)
+            info = {**info, "body": text}  # the later rewrites of the block start from this body
     if ready and not info["draft"] and block["linted"] and block["linted"] == fetch_branch(root, branch, FREEZE_CITE):
         say(f"merge: batch {name}: PR #{pr} is already ready.")
         return 0
@@ -5490,7 +5686,8 @@ def build_parser():
     p.add_argument("--with", dest="with_prs", default=None, metavar="PR,PR,...", help="with --lane-lint on a PR number: also check the head against each named open PR (a comma list), even one of another session")
     p.add_argument("--touched-tests", action="store_true", help="with --lane-lint: after the lint passes, run the test files the diff touches in the lint worktree; a failing test refuses, a timeout is unknown (lifted by --lint-unknown-ok)")
     p.add_argument("--role", metavar="TIER", help="cloud only: record this session's merge role (batch-runner only)")
-    p.add_argument("--batch-build", nargs="+", metavar=("NAME", "PR"), help="build batch-NAME and its one draft pull request from these lane PRs, or allow the same set again; stands alone; takes no lock")
+    p.add_argument("--batch-build", nargs="+", metavar=("NAME", "PR"), help="build batch-NAME and its one draft pull request from these lane PRs, or allow the same set again; with no PR list, from the done set `merge --reviewed --root` names (less each --leave); stands alone; takes no lock")
+    p.add_argument("--leave", nargs=2, action="append", default=[], metavar=("PR", "REASON"), help="with --batch-build NAME and no PR list: leave done pull request PR out of the batch; REASON prints in the batch pull request's body, outside the freeze block; repeat it for each one; a PR not in the done set is refused")
     p.add_argument("--batch-drop", nargs=2, metavar=("NAME", "PR"), help="take PR, and each frozen lane that stacks on it, off batch-NAME; stands alone; takes no lock")
     p.add_argument("--on", metavar="BRANCH", help="with --batch-build: stack the batch on this running batch's head")
     p.add_argument("--ready", action="store_true", help="with --batch-build: lint the head of batch-NAME once and run the ready checks, then ask the host to mark its draft pull request ready; the PR list may be left out")
@@ -5529,6 +5726,8 @@ def main(argv, host=None, lock=None, hosts=None):
                 else "--head, --kind, --guard, --round, --fix-check and --net-value go with --review-record (--head also goes with --confirm)")
     if a.ready and not a.batch_build:
         p.error("--ready goes with --batch-build")
+    if a.leave and not a.batch_build:
+        p.error("--leave goes with --batch-build NAME and no PR list")
     if a.run is not None and a.blame is None and not a.touches:
         p.error("--run goes with --touches, or with --batch-build NAME --blame PR")
     if a.blame is not None:
@@ -5583,7 +5782,7 @@ def main(argv, host=None, lock=None, hosts=None):
     # A batch route takes only these options; any other option set (a mode flag or a modifier) means it does not stand alone.
     if batch and (any(v != p.get_default(k) for k, v in vars(a).items()
                       if k not in ("batch_build", "batch_drop", "ready", "on", "base", "lint_unknown_ok", "blame", "run",
-                                 "config", "session", "undo_check_unknown_ok", "base_red_ok"))
+                                 "config", "session", "undo_check_unknown_ok", "base_red_ok", "leave"))
                   or (a.batch_build and a.batch_drop)):
         p.error("--batch-build and --batch-drop each stand alone")
     if a.idle_lanes or a.touches or a.release_check:
@@ -5593,8 +5792,13 @@ def main(argv, host=None, lock=None, hosts=None):
         flag = "--batch-build" if a.batch_build else "--batch-drop"
         if not BATCH_NAME.fullmatch(name):
             p.error(f"{flag} NAME {name!r} must be 1 to 32 characters from a-z, 0-9 and -")
-        if not numbers and not a.ready and a.blame is None:
-            p.error("--batch-build needs at least one pull request number (PR) after NAME")
+        if a.leave and (not a.batch_build or numbers or a.ready or a.blame is not None):
+            p.error("--leave goes with --batch-build NAME and no PR list: a given PR list is the lane set, and nothing is left out of it")
+        for n_text, why in a.leave:
+            if not n_text.isdigit() or not why.strip():
+                p.error(f"--leave takes a pull request number and a reason that is not empty, not {n_text!r} {why!r}")
+        if len({n_text for n_text, _why in a.leave}) != len(a.leave):
+            p.error("--leave: a PR is named twice")
         if not all(x.isdigit() for x in numbers):
             p.error(f"{flag}: each PR is a pull request number, and these are not: {' '.join(x for x in numbers if not x.isdigit())}")
         if len(set(map(int, numbers))) != len(numbers):
@@ -5693,12 +5897,12 @@ def main(argv, host=None, lock=None, hosts=None):
         if c:
             raise Stop("not in a git checkout")
         if batch:  # stands alone: no lock, no lint, no wait
-            h = host or Host()
+            h = host or Host(cwd=root)  # holds_head reads this checkout's git
             if a.batch_drop:
                 return batch_drop(root, h, name, int(numbers[0]))
             if a.blame is not None:
                 return batch_blame(root, h, name, a.blame, a.run)
-            return batch_build(root, h, name, sorted(map(int, numbers)), a.on, a.base, a.ready, a.lint_unknown_ok, a.config)
+            return batch_build(root, h, name, sorted(map(int, numbers)), a.on, a.base, a.ready, a.lint_unknown_ok, a.config, [(int(n_text), why) for n_text, why in a.leave])
         lock = lock or default_lock(root)
         if a.unlock is not None:
             b = a.unlock
@@ -5737,7 +5941,7 @@ def main(argv, host=None, lock=None, hosts=None):
                     ok = True
                 else:  # a fix never follows a fix, but a fix after a merge of main is allowed: the earlier record reads done on its own head (a sonnet PASS Fix check line, no hold), and the head is a merge of the base into that Head
                     parents, tree = h.commit_read(a.head) if review_state(last, last["head"])[0] == "done" else ([], None)  # after a FAIL Fix check line, or any record that is not done, no merge qualifies
-                    ok = len(parents) == 2 and h.holds_head(parents[1], info["base"])
+                    ok = len(parents) == 2 and h.holds_head_gh(parents[1], info["base"])
                     if ok and parents[0] != a.fix_check[0]:  # clean merges of main may sit between the Head and the last merge: the record survives them
                         try:
                             ok = clean_merges_after(h, a.fix_check[0], parents[0], info["base"])
@@ -5772,8 +5976,9 @@ def main(argv, host=None, lock=None, hosts=None):
             if not host:
                 h.required, h.ignore = cfg["merge"]["requiredChecks"], ignore_checks(cfg)
                 h.refuse_pinned_mismatch()
-            say(*reviewed_lines(h))
-            return 0
+            lines, ok = reviewed_lines(h)
+            say(*lines)
+            return 0 if ok else 1
         if a.confirm and os.environ.get("CLAUDE_CODE_REMOTE") == "true" and cfg["merge"].get("standingGrant", True) is False:
             raise Stop("The owner's standing merge grant is off for this repo, so ask the owner to merge this PR. " + OFF_CITE)
         ignore = ignore_checks(cfg)

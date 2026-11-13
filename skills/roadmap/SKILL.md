@@ -72,23 +72,29 @@ GitHub, so the publisher reads them just before the build and passes one file:
 
     python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --live live.json --block --out FILE
 
-    {"readAt": "<ISO time of the reads>",
-     "threads"?: [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
-     "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "held"?, "reviewLog"?, "head"?, "url"?, "checks"?}],
-     "branches": [{"name", "updatedAt"?}],
-     "sessions": [{"id", "session_status", "tags", "status_bucket"?}],
-     "items": [{"n", "status", "home", "lane"?}]}
+```json
+{"readAt": "<ISO time of the reads>",
+ "threads"?: [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
+ "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "held"?, "reviewLog"?, "reviewDone"?, "reviewLogAt"?, "batched"?, "head"?, "url"?, "checks"?}],
+ "branches": [{"name", "updatedAt"?}],
+ "sessions": [{"id", "session_status", "tags", "status_bucket"?}],
+ "items": [{"n", "status", "home", "lane"?}]}
+```
 
 - `threads`: `list_threads`, every page. Leave out resolved threads. `state` is the thread state as
   listed. Add `step` only when the thread's brief names it.
 - `pulls`: the repo's open pull requests. `createdAt` is GitHub's `created_at` for the pull. It is
   optional. A missing or unreadable `createdAt` is not a wrong shape. The stale-draft row lists it as
   unknown. `head` is the pull's head commit sha, also optional: the lanes-to-archive row reads it to
-  release a lane whose draft pull is already in the default branch. `held` and `reviewLog` are optional JSON
-  bools (absent means false) that triage fills: `held` is true when the batch runner's hand-in or hold list names
-  the pull, `reviewLog` when the pull has a posted review log. The stale-draft row skips a draft with either
-  true. A present key must be a JSON bool (`null` counts as non-bool); a pull row with a non-bool value is skipped, so the
-  stale-draft, pair, unlaned and lanes-to-archive rows read unknown. `branches`: lane branches with no open pull request.
+  release a lane whose draft pull is already in the default branch. `held`, `reviewLog` and `batched` are optional JSON
+  bools (absent means false) that triage fills. `held` is true when the batch runner's hand-in or hold list names
+  the pull. `reviewLog` is true when the pull has a posted review log. `batched` is true when an integration PR
+  holds the pull. The stale-draft row skips a draft with `held` or `reviewLog` true. `reviewDone` is an optional JSON bool, true when the
+  pull's newest review log reads done. A missing `reviewDone` is not false: with `reviewLog` true it reads unknown in
+  the handed-in row. `reviewLogAt` is an optional ISO time with a zone, when the newest review log was posted. A missing
+  or zoneless one is not a wrong shape; the handed-in row reads it unknown. A present key must be a JSON bool (`null`
+  counts as non-bool); a pull row with a non-bool value is skipped, so the stale-draft, pair, unlaned, lanes-to-archive
+  and handed-in rows read unknown. `branches`: lane branches with no open pull request.
 - `landedPulls` (optional, beside the keys above): `[{"number", "branch", "head"?, "merged"?}]`, the repo's pull
   requests closed in the last 14 days whose base is the default branch, each with its head ref (`branch`), head sha
   (`head`) and GitHub's `merged` flag. Triage's live-file brief must fill it; see "A merge marks a step".
@@ -247,6 +253,12 @@ After each build the roadmap build script prints the upkeep list for the triage 
   session holds no draft. A draft whose `held` or `reviewLog` is true is skipped. Each entry is `#N (<branch or
   title>)`. A draft with no readable `createdAt` reads `unknown (#N has no createdAt)`. With no usable
   live file the row reads one `unknown (<why>)` entry;
+- handed-in pull requests, in the row `handed in 6 h or more, in no batch` (roadmap step `handin-cannot-drop`). Each
+  open pull is listed when its `reviewLog` and `reviewDone` are true, its `batched` is not true, and its `reviewLogAt`
+  is 6 h or more before `readAt`. It reads `#N (<H>h)`, with H whole hours. `batched` true leaves a pull out before the
+  other checks, and `reviewDone` false leaves it out. A pull with `reviewLog` true and no `reviewDone` reads `unknown
+  (#N has no reviewDone)`. One with no usable `reviewLogAt` reads `unknown (#N has no reviewLogAt)`. With no usable live
+  file the row reads one `unknown (<why>)` entry;
 - page rulings not on their step: each closed waiting-page item whose `home` is a step that is not
   done, where none of that step's `note`, `why` or `ask` cites the item. The `home` is trimmed, an
   optional leading `step ` (in any case) is dropped, and the rest must equal the step id exactly. A cite
