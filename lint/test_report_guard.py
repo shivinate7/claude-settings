@@ -5073,7 +5073,9 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
       main:` or `git show origin/main:`, a commit hash next to the word main, or "main screenshot" or "main's
       screenshot" with a path or URL. A source inside an inline code span counts. The list is closed: a bare "main", a
       path or file name with no line, a time, an item number and a `#<n>` PR ref are no cite.
-    - Exempt: a question line, a line inside a ``` or ~~~ fence, and a claim that sits only inside an inline code span.
+    - Exempt: a question line, a line inside a ``` or ~~~ fence, a claim that sits only inside an inline code span, and
+      the noun "regression test(s)" or "regression suite(s)" (a test count, not a claim). "No regression in the layout."
+      stays refused.
     - Scanning: a lone apostrophe or double quote opens no span or phrase, a code span pairs only within its own line,
       and a fence marker opens a fence only at the start of a line.
 
@@ -5116,6 +5118,8 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
         "The check refuses ``not worse than main`` lines.",
     )
     HYPHENED = ("The branch not-worse-than-main is ready.", "The lane regression-from-main is open.")
+    NOUN_USES = ("No regression tests were added.", "No regression suite was changed.", "Not a regression test.")
+    NOUN_TWIN = "No regression in the layout."
     CITES = (
         "The filter is not worse than main; see lint/report_guard.py:123.",
         "The filter is not worse than main; see report_guard.py:123.",
@@ -5287,6 +5291,15 @@ class MainClaimTests(StopVerdictMixin, unittest.TestCase):
         lines = ["Lane %d: %s" % (i, line) for i in range(4) for line in self.CLAIM_FORMS + self.BARE_FORMS]
         self.assert_blocked("\n".join(lines), *lines)
         self.assert_allowed("")
+
+    def test_mc_red_the_regression_test_noun_is_exempt(self):
+        # Catches: "regression test(s)" or "regression suite(s)" is read as a claim, a false alarm on a test count.
+        # The refused twin stays first, so the exemption is the only difference between the two lines.
+        with self.subTest(line=self.NOUN_TWIN):
+            self.assert_blocked(self.NOUN_TWIN, self.NOUN_TWIN)
+        for line in self.NOUN_USES:
+            with self.subTest(line=line):
+                self.assert_allowed(line)
 
     # Cost: the claim check reads the reply and nothing else. The guard opens only the transcript and its own file.
 
