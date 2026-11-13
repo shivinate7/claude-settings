@@ -2162,7 +2162,7 @@ snap_old_line='HOOK_CMD="curl -fsSL ${RAW}/install.sh | bash -s -- --cloud"'
 # snap_eval_hook LINE: the HOOK_CMD that LINE assigns, with the REPO, REF and RAW that install.sh sets (CLAUDE_SETTINGS_REF=main, as hk_envrun runs it).
 snap_eval_hook() {
   (
-    CLAUDE_SETTINGS_REF=main
+    export CLAUDE_SETTINGS_REF=main
     eval "$(grep -E '^(REPO|REF|RAW)=' "$INSTALL_SH")"
     eval "$1"
     printf '%s' "$HOOK_CMD"
