@@ -16952,6 +16952,39 @@ class ReleaseCheck(ReviewEnv):
         self.assertEqual(rc, 1, err)
         self.assert_fails_alone(line, 7, r"^unknown \(")
 
+    def test_batch_head_conflicting_batch_on_another_base_does_not_fail_the_pr(self):
+        # Control: the same clash on main FAILs #7, so the PASS the case reads below comes from the batch's base alone.
+        # Catches: the batch check reading an open batch on any base, which fails #7 for a batch that lands on another base.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        clash = self.git_commit(fx.main2, {"a.txt": "batch\n"})
+        self.push_batch(clash)
+        self.assertEqual(self.merges(fx.clean, fx.main2), (0, False), "fixture: #7 does not merge cleanly into main, so the case would test main")
+        self.assertEqual(self.merges(fx.clean, clash), (1, True), "fixture: #7 does not conflict with the batch head, so the case has no clash")
+        rc, lines, err = self.release_with_batch(fx, fx.clean, [self.open_batch(9, clash)])
+        self.assertTrue(self.line_of(lines, 7).startswith("#7 FAIL: "), "control: an open batch on main does not fail #7:\n" + err)
+        other = batch_pull(9, clash, draft=True, base="feat-base", head_ref=merge.integration_branch(self.BATCH),
+                           body=freeze_body(freeze_inner(self.BATCH, [(6, clash)])))
+        self.assertEqual((other["base"]["ref"], self.live(7, head=fx.clean)["base"]["ref"]), ("feat-base", "main"),
+                         "fixture: the batch and #7 are on one base, so the case does not test another base")
+        rc, lines, err = self.release_with_batch(fx, fx.clean, [other])
+        self.assertEqual((rc, lines), (0, ["#7 PASS"]),
+                         "release-check failed #7 on a clash with an open batch on feat-base, which #7 does not land on:\n" + err)
+
+    def test_batch_head_a_lane_of_the_open_batch_passes(self):
+        # Catches: a batch check that wants the batch head to equal the pull request's head, which fails a lane whose head sits behind the batch head.
+        fx = self.real_commits()
+        self.base_tip(fx.main2)
+        ahead = self.git_commit(fx.clean, {"z.txt": "z\n"})  # the batch head: #7's head with one commit on top
+        self.push_batch(ahead)
+        self.assertEqual(self.merges(fx.clean, fx.main2), (0, False), "fixture: #7 does not merge cleanly into main, so the case would test main")
+        self.assertTrue(self.is_ancestor(fx.clean, ahead), "fixture: the batch head does not hold #7's head, so #7 is not a lane of it")
+        self.assertEqual(self.merges(fx.clean, ahead), (0, False), "fixture: #7 does not merge cleanly into the batch head")
+        lane = batch_pull(9, ahead, draft=True, head_ref=merge.integration_branch(self.BATCH), body=freeze_body(freeze_inner(self.BATCH, [(7, fx.clean)])))
+        rc, lines, err = self.release_with_batch(fx, fx.clean, [lane])
+        self.assertEqual((rc, lines), (0, ["#7 PASS"]),
+                         "release-check failed #7, a lane of the open batch, at a batch head that holds its head:\n" + err)
+
 # The guard's changed-path check of `--review-record`. One home for its examples: GUARD_EXAMPLES holds one changed path under each folder entry
 # of merge.GUARD_PATHS and under each file entry of merge.GUARD_FILES. The cases read the entries from merge and check them against these keys,
 # so an entry with no example fails.
