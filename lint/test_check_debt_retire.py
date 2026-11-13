@@ -459,8 +459,9 @@ class RetireRun(Case):
 
 
 class WrongRefusalNote(Case):
-    """A prose debt closes on a notes line: the same change adds a line to docs/debts/notes.md that carries the debt's slug
-    and names decision cull-guard-wrong-refusals (owner ruling 2026-11-10 15:04 CST). A runnable Retire is judged by its test."""
+    """A prose debt closes on a notes line: the same change adds a line to docs/debts/notes.md that carries the debt's slug,
+    names decision cull-guard-wrong-refusals, and says `wrong refusal` (owner ruling 2026-11-10 15:04 CST). A runnable Retire
+    is judged by its test."""
 
     DECISION = "cull-guard-wrong-refusals"
     NOTE = "- d-prose: a wrong refusal by a guard. Decision: %s.\n" % DECISION
@@ -473,6 +474,10 @@ class WrongRefusalNote(Case):
     def notes(self, line):
         """The write of docs/debts/notes.md: the base's notes with `line` added at the end."""
         return {"docs/debts/notes.md": BASE["docs/debts/notes.md"] + line}
+
+    def notes_at(self, rev):
+        """docs/debts/notes.md as it reads at `rev`."""
+        return sh(self.dir, "git", "show", "%s:docs/debts/notes.md" % rev)
 
     def test_n1_a_prose_debt_closed_with_a_notes_line_naming_its_slug_and_the_decision_passes(self):
         self.close_with_note()
@@ -499,6 +504,48 @@ class WrongRefusalNote(Case):
         found = self.findings()
         self.assertEqual(self.ran(), [("test_fail.py", self.dir)], "the runnable Retire did not run in the head folder")
         self.assertEqual(pairs(found), [("d-fail", "red")], "a notes line cleared a red runnable Retire")
+
+    def test_n6_a_notes_line_already_in_the_base_does_not_close_a_prose_debt(self):
+        self.repo(debts={"d-prose": PROSE})
+        self.change(write=self.notes(self.NOTE))
+        self.base = self.head  # the notes line is in the base; the PR adds no line to it
+        self.assertIn(self.NOTE.strip(), self.notes_at(self.base), "scope: the notes line is not in the base")
+        self.change(rm=["docs/debts/d-prose.md"])
+        self.assertEqual(pairs(self.findings()), [("d-prose", "prose")], "a notes line already in the base closed a prose debt")
+
+    def test_n7_a_prose_close_with_a_red_cite_and_a_good_notes_line_is_still_refused(self):
+        self.close_with_note(self.NOTE)
+        self.assertIn(self.NOTE.strip(), self.notes_at(self.head), "scope: the notes line is not in the head")
+        runs = Runs(("failure", self.head))
+        found = self.findings(pr_body="Retire-run: d-prose -- %s\n" % RUN_URL, run_state=runs)
+        self.assertEqual(runs.urls, [RUN_URL], "scope: the red cited run was not read")
+        self.assertEqual(pairs(found), [("d-prose", "red")], "a red Retire-run cite was skipped because a notes line exists")
+
+    def test_n8_a_notes_line_for_a_slug_that_ends_in_the_debt_slug_is_refused(self):
+        # old-d-prose ends in the debt's slug: a match with no left boundary takes it, a whole slug token does not
+        line = "- old-d-prose: a wrong refusal by a guard. Decision: %s.\n" % self.DECISION
+        self.close_with_note(line)
+        self.assertIn(line.strip(), self.notes_at(self.head), "scope: the notes line is not in the head")
+        self.assertEqual(pairs(self.findings()), [("d-prose", "prose")], "a notes line for another slug cleared the prose close")
+
+    def test_n9_a_notes_line_with_the_slug_and_decision_but_not_the_words_is_refused(self):
+        line = "- d-prose: a guard stopped a right act. Decision: %s.\n" % self.DECISION
+        self.close_with_note(line)
+        self.assertIn(line.strip(), self.notes_at(self.head), "scope: the notes line is not in the head")
+        self.assertEqual(pairs(self.findings()), [("d-prose", "prose")], "a notes line without the words `wrong refusal` cleared the prose close")
+
+    def test_n10_a_notes_line_with_the_words_in_any_case_passes(self):
+        self.close_with_note("- d-prose: a Wrong Refusal by a guard. Decision: %s.\n" % self.DECISION)
+        self.assertEqual(pairs(self.findings()), [], "a notes line with `Wrong Refusal` in capitals did not clear the prose close")
+
+    def test_n11_the_prose_refusal_names_the_note_route(self):
+        self.close_with_note()
+        found = self.findings()
+        self.assertEqual(pairs(found), [("d-prose", "prose")], "scope: a prose close with no notes line was not refused as prose")
+        text = found[0].text.lower()
+        self.assertIn("note", text, "the prose refusal does not name the notes line")
+        self.assertIn("wrong refusal", text, "the prose refusal does not name the words `wrong refusal`")
+        self.assertIn(self.DECISION, text, "the prose refusal does not name decision %s" % self.DECISION)
 
 
 class TemplateExcuses(unittest.TestCase):
