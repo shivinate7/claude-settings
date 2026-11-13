@@ -14,6 +14,7 @@ A spawner is a session that starts its own agents. Each session role is a set of
   and `cs-topic`. Its whole brief is the first prompt, and it opens with the Grant line. It talks with the owner. Before a fix lane for a red CI case, it runs
   `~/.claude/bin/merge --touches --run <run id>` and reads each open PR named (decision `session-tiers`, "Who starts which session"). On a local session, the load
   brake, not a number, decides how many lanes run at once. It does not rotate (see below).
+  A ready-not-started step that holds an owner ruling is its queue: it starts that lane under `parallelism-keep-going`, with no question, whenever a lane ends or it reads the roadmap. It asks first for work in another repo. It never leaves the step as a report line, and it waits only where decision `session-tiers` ("A ready-not-started step that holds an owner ruling") says. Triage's reply naming the step is the receipt.
   It tags itself and each session it starts `cs-repo:<owner>/<name>` and `cs-build:<tier>`
   (`coordinator`, `triage`, `batch-runner`, `arbiter` or `lane`), so another coordinator can find it.
   A lane also gets `cs-topic:<topic slug>`, its one topic, and a `cs-step:<step id>` for each step it takes, so triage can see each step is live.
