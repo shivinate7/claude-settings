@@ -20791,6 +20791,60 @@ class LeftOutBatch(CloudSession):
         self.assertLeftOut(out, ["merge: left-out list unknown (reading the pull requests failed: HTTP 500)"],
                            "a failed list read is not printed as an unknown left-out list")
 
+    def mid_list_read_raises(self, err):
+        """A build of 101 and 102 with 103 and 104 done code pull requests outside the set. The merge-tree read of the second candidate (the
+        one merge_reason makes from left_out_lines) raises `err`; the first candidate's read is real. -> (rc, out, escaped, merge_tree_calls),
+        where `escaped` is the exception that left the run, or None, and `out` is what the run printed before it ended."""
+        for n in (101, 102, 103, 104):
+            self.lane(n)
+        self.done(103)
+        self.done(104)
+        sh(self.co, "git", "fetch", "-q", "origin")
+        real_git, calls = merge.git, []
+
+        def raise_on_second(cwd, *a, **kw):
+            if sys._getframe(1).f_code.co_name == "merge_reason" and a[:1] == ("merge-tree",):
+                calls.append(a)
+                if len(calls) == 2:
+                    raise err
+            return real_git(cwd, *a, **kw)
+        out, err_buf, rc, escaped = io.StringIO(), io.StringIO(), None, None
+        with unittest.mock.patch.object(merge, "git", raise_on_second):
+            try:
+                rc = self.run_merge("--batch-build", "nightly", "101", "102", stdout=out, stderr=err_buf)[0]
+            except SystemExit as e:
+                rc = e.code
+            except (OSError, subprocess.TimeoutExpired) as e:
+                escaped = e
+        return rc, out.getvalue() + err_buf.getvalue(), escaped, calls
+
+    def assert_mid_list_read_prints_one_unknown_line(self, err, reason_part, claim):
+        """Shared asserts for a left-out read that raises `err` on the second candidate: the seam was reached, no exception left the run, the
+        batch result stands with exit 0, exactly one unknown line names the reason, and no list line is printed (the first candidate's line
+        is dropped with the rest, because the list is unknown and a partial list would read as a full one)."""
+        rc, out, escaped, calls = self.mid_list_read_raises(err)
+        self.assertEqual(len(calls), 2, "%s: the second candidate's merge-tree read was reached %d times, want 2: the case did not hit its seam: %s" % (claim, len(calls), out))
+        self.assertIsNone(escaped, "%s: the read's %s escaped the batch run as a traceback instead of an unknown line: %r" % (claim, type(err).__name__, escaped))
+        self.assertIn("merge: batch nightly built", out, "%s: the batch result line is missing: %s" % (claim, out))
+        self.assertEqual(rc, 0, "%s: the exit code is %s, want the batch's 0: %s" % (claim, rc, out))
+        unknown = [l for l in out.splitlines() if l.startswith("merge: left-out list unknown (")]
+        self.assertEqual(len(unknown), 1, "%s: want exactly one left-out list unknown line, got %d: %s" % (claim, len(unknown), out))
+        self.assertIn(reason_part, unknown[0], "%s: the unknown line does not name the read's failure: %s" % (claim, unknown[0]))
+        self.assertEqual([l for l in out.splitlines() if " left out of batch " in l], [],
+                         "%s: a left out line is printed although the list is unknown: %s" % (claim, out))
+
+    def test_a_read_that_times_out_mid_list_prints_no_list_line_and_one_unknown_line(self):
+        """The left-out read's merge-tree raises TimeoutExpired on the second candidate. The batch line and exit 0 stand, one unknown line
+        names the timeout, and no list line is printed, not even the first candidate's."""
+        self.assert_mid_list_read_prints_one_unknown_line(subprocess.TimeoutExpired(["git", "merge-tree"], 30), "timed out",
+                                                          "a left-out read that times out mid-list")
+
+    def test_an_os_error_mid_list_prints_no_list_line_and_one_unknown_line(self):
+        """The left-out read's merge-tree raises OSError on the second candidate. The batch line and exit 0 stand, one unknown line names
+        the error, and no list line is printed, not even the first candidate's."""
+        self.assert_mid_list_read_prints_one_unknown_line(OSError(5, "Input/output error"), "Input/output error",
+                                                          "a left-out read that raises OSError mid-list")
+
 class TouchesHost(PullsHost):
     """The reads of `merge --touches`, scripted over PullsHost: the open pulls (`pages("pulls")`, PullsHost's list read, whose Stop is `pulls_error`),
     each open pull's changed files (`pull_files`; `files_error` maps a pull number to the Stop its read raises) and a run's failed lines
