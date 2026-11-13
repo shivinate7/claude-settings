@@ -17,7 +17,7 @@ sh("builder-test: a name bound to os.getcwd(), then a name bound to it + /tests,
    "python3 - <<'EOF'\nimport os\nROOT = os.getcwd()\nTESTS = ROOT + '/tests'\nopen(TESTS + '/x.py', 'w').write('x')\nEOF",
    "deny", rule=BT, **B)
 
-# CONTROLS. Each passes before the change and after it.
+# CONTROLS. Each pins a form the guard must allow: a refusal would be a false alarm.
 # An unknown call names no repo path, by + or in an f-string.
 sh("builder join: a name bound to an unknown call, joined to /tests/x.py by +, is allowed",
    "python3 - <<'EOF'\nd = tempfile_unknown()\nopen(d + '/tests/x.py', 'w').write('x')\nEOF", "allow", **B)

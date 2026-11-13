@@ -19,7 +19,7 @@ sh("frozen: braced default-word: CLAUDE_CONFIG_DIR set in the environment is rea
    'printf x > "${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/hooks/guard.py"', "deny", "frozen-path", cwd=NOGIT,
    env={"CLAUDE_CONFIG_DIR": CFG})
 
-# CONTROLS. Each passes before the change and after it.
+# CONTROLS. Each pins a form the guard must allow: a refusal would be a false alarm.
 # A value outside the frozen set is read, and the braced word, which is frozen, is not taken. DW_DIR, not the
 # config variable, holds the folder: the config dir stays HOME/.claude, so DW_OUTSIDE is not frozen.
 sh("frozen: braced default-word: DW_DIR set in the environment to a folder outside the frozen set, allowed",

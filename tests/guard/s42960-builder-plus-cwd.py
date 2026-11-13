@@ -24,7 +24,7 @@ sh("builder-test: a name bound to os.getcwd() + '/tests/x.py', then written, is 
    "python3 - <<'EOF'\nimport os\np = os.getcwd() + '/tests/x.py'\nopen(p, 'w').write('x')\nEOF",
    "deny", rule=BT, **B)
 
-# CONTROLS. Each passes before the change and after it.
+# CONTROLS. Each pins a form the guard must allow: a refusal would be a false alarm.
 # An unknown base, in a `+` or an f-string, names no repo path: the join is /tests/x.py, outside every repo.
 sh("builder join: an unknown base joined to /tests/x.py by + is allowed",
    "python3 - <<'EOF'\nimport os\ntmpdir = os.environ['SCRATCH']\nopen(tmpdir + '/tests/x.py', 'w').write('x')\nEOF",
