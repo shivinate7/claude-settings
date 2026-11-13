@@ -68,13 +68,14 @@ home yet, and the session board's store lives on one machine, so both read "unkn
 The Status tab's Live work line shows each open project thread's state (asking in its chat, working,
 ready for review, failed, stopped) and the open pull requests, folded to one line of counts. Its body
 lists the threads, the pull requests and the branches. The roadmap build script cannot reach project threads or
-GitHub, so the publisher reads them just before the build and passes one file. Triage writes the sessions and pulls part
-with the tracked `publish_live.py` (no network call; it reads files you saved from list_sessions, the open pulls and the
-batch runner's hold list, and sets `held` and each idle row's `idle_since`):
+GitHub, so the publisher reads them just before the build and passes one file. Triage saves each tool result into one
+folder (page files, `prev.json`, `held.txt`, `readat.txt`; the file's docstring lists them) and runs the tracked
+`publish_live.py`. It makes no network call, fails on a missing or gapped page, and writes `held` (the runner's hold
+list; a line ALL holds every pull), each idle row's `idle_since` and `unarchived_epoch` carried from `prev.json`:
 
-    python3 ~/.claude/skills/roadmap/publish_live.py --sessions S.json --pulls P.json --held H.json --out live.json
+    python3 ~/.claude/skills/roadmap/publish_live.py --dir READS --landed-since ISO
 
-Triage adds `threads`, `branches`, `items`, `landedPulls` to that file as before.
+Triage adds `threads` to that file when it has them.
 
     python3 ~/.claude/skills/roadmap/build.py --repo <checkout> --live live.json --block --out FILE
 

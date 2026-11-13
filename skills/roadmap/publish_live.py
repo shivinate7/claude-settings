@@ -1,79 +1,136 @@
 #!/usr/bin/env python3
 """Write the live file that build.py's live_work reads (skills/roadmap/SKILL.md, "Live work").
 
-    python3 publish_live.py --sessions S.json --pulls P.json --held H.json [--read-at ISO] [--out live.json]
+    python3 publish_live.py --dir READS --landed-since ISO [--out READS/live.json]
 
-Inputs are files, or "-" for stdin (one of them); the script makes no network call. Triage reads them first:
-  --sessions  list_sessions rows, every page: a JSON list, or {"sessions": [...]}.
-  --pulls     the open pull rows: [{"number", "title", "branch"?, "draft"?, "createdAt"?, "head"?, "url"?, "checks"?}].
-  --held      the pulls the batch runner's hold or hand-in list names: [N, "#N", ...].
-Output: {"readAt", "pulls", "sessions"}. Each pull gets `held` (true when named). Each session keeps id,
-session_status, tags and status_bucket; an IDLE row gets `idle_since` from its updated_at, and a row's
-`unarchived_epoch` is copied only when the input has it. It writes no `reviewLog` and no threads or items list.
+It makes no network call. Triage saves each tool result verbatim into READS first:
+  open_p<N>.json    list_pull_requests (open, base main) pages, raw arrays. Pages count 1..N with no gap.
+  closed_p<N>.json  the same tool, state closed. Adds merged_at and closed_at.
+  sess_p<N>.json    list_sessions pages, raw arrays, until has_more is false.
+  items/**/*.json   ArtifactData list of the waiting page, each doc a bare object or {"data": {...}}. Optional.
+  prev.json         the previous live file: landedPulls, keepSessions, each session's unarchived_epoch.
+  held.txt          one pull number per line, "#" comments allowed; a line ALL holds every open pull. Optional.
+  readat.txt        the ISO time, with zone, of the reads.
+A missing or gapped page list, or a row of the wrong shape, stops the run with a message and writes nothing.
+Output: {readAt, pulls, branches, sessions, items, landedPulls, keepSessions}. A pull row has `held`. A session
+row has `tags` (never absent), and `idle_since` on an IDLE row: its updated_at, which stands in for "last did
+anything". `unarchived_epoch` is carried from prev.json only (a row with none stays without the key). landedPulls
+is prev.json's rows plus the closed pulls (base main) with closed_at at or after --landed-since; the fresh read
+wins. It writes no `reviewLog` (part 2 of step stale-draft-reads-runner-holds); it pairs with the reader of
+`idle_since` and `unarchived_epoch` in draft PR 3142.
 """
 import argparse
-import datetime
 import json
 import pathlib
+import re
 import sys
 
 IDLE = "SESSION_STATUS_IDLE"
-SESSION_KEYS = ("id", "session_status", "tags", "status_bucket", "unarchived_epoch")
-PULL_KEYS = ("number", "title", "branch", "draft", "createdAt", "head", "url", "checks")
+ITEM_KEYS = ("n", "status", "home", "lane", "owner")
+
+
+class Stop(Exception):
+    """A read that cannot be trusted; its text is the message."""
 
 
 def load(path):
-    text = sys.stdin.read() if path == "-" else pathlib.Path(path).read_text(encoding="utf-8")
-    return json.loads(text)
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as err:
+        raise Stop("%s could not be read: %s" % (path.name, err))
 
 
-def held_numbers(held):
-    """The pull numbers a held list names; an entry that is neither an int nor "#N" is an error, never skipped."""
-    numbers = set()
-    for entry in held:
-        text = entry.lstrip("#") if isinstance(entry, str) else entry
-        if isinstance(text, str) and text.isdigit():
-            text = int(text)
-        if type(text) is not int:
-            raise ValueError("held entry %r is not a pull number" % (entry,))
-        numbers.add(text)
-    return numbers
+def pages(folder, stem):
+    """The rows of every <stem>_p<N>.json page, in page order. Pages must be 1..N."""
+    found = {}
+    for path in folder.glob(stem + "_p*.json"):
+        match = re.fullmatch(re.escape(stem) + r"_p(\d+)\.json", path.name)
+        if match:
+            found[int(match.group(1))] = path
+    if not found:
+        raise Stop("no %s_p<N>.json pages in %s" % (stem, folder))
+    missing = sorted(set(range(1, max(found) + 1)) - set(found))
+    if missing:
+        raise Stop("%s pages missing: %s" % (stem, ", ".join(map(str, missing))))
+    rows = []
+    for n in sorted(found):
+        page = load(found[n])
+        if not isinstance(page, list) or not all(isinstance(r, dict) for r in page):
+            raise Stop("%s is not a list of rows" % found[n].name)
+        rows.extend(page)
+    return rows
 
 
-def build(sessions, pulls, held, read_at):
-    if isinstance(sessions, dict):
-        sessions = sessions.get("sessions")
-    if not isinstance(sessions, list) or not all(isinstance(r, dict) for r in sessions):
-        raise ValueError("--sessions is not a list of session rows")
-    if not isinstance(pulls, list) or not all(isinstance(r, dict) for r in pulls):
-        raise ValueError("--pulls is not a list of pull rows")
-    if not isinstance(held, list):
-        raise ValueError("--held is not a list")
-    named = held_numbers(held)
-    out_sessions = []
-    for row in sessions:
-        kept = {k: row[k] for k in SESSION_KEYS if k in row}
-        if row.get("session_status") == IDLE and isinstance(row.get("updated_at"), str):
-            kept["idle_since"] = row["updated_at"]
-        out_sessions.append(kept)
-    out_pulls = [dict({k: row[k] for k in PULL_KEYS if k in row}, held=row.get("number") in named) for row in pulls]
-    return {"readAt": read_at, "pulls": out_pulls, "sessions": out_sessions}
+def need(row, *path):
+    """row[path[0]][path[1]]...; a missing step stops the run."""
+    value = row
+    for key in path:
+        if not isinstance(value, dict) or key not in value:
+            raise Stop("a row lacks %s: %r" % (".".join(path), row.get("number", row.get("id"))))
+        value = value[key]
+    return value
+
+
+def held_set(folder):
+    path = folder / "held.txt"
+    if not path.exists():
+        return set()
+    return {line.split("#")[0].strip() for line in path.read_text(encoding="utf-8").splitlines()} - {""}
+
+
+def build(folder, since):
+    folder = pathlib.Path(folder)
+    read_path = folder / "readat.txt"
+    read_at = read_path.read_text(encoding="utf-8").strip() if read_path.exists() else ""
+    if not read_at:
+        raise Stop("readat.txt is missing or empty")
+    prev = load(folder / "prev.json")
+    if not isinstance(prev, dict):
+        raise Stop("prev.json is not an object")
+    held = held_set(folder)
+    opens = {need(p, "number"): p for p in pages(folder, "open")}
+    pulls = [{"number": p["number"], "title": need(p, "title"), "branch": need(p, "head", "ref"),
+              "draft": bool(p.get("draft")), "createdAt": need(p, "created_at"), "head": need(p, "head", "sha"),
+              "held": "ALL" in held or str(p["number"]) in held} for p in opens.values()]
+    landed = {r["number"]: r for r in prev.get("landedPulls", [])}
+    for p in pages(folder, "closed"):
+        if need(p, "base", "ref") == "main" and p.get("closed_at") and p["closed_at"] >= since:
+            landed[p["number"]] = {"number": p["number"], "branch": need(p, "head", "ref"),
+                                   "head": need(p, "head", "sha"), "merged": bool(p.get("merged_at"))}
+    epochs = {s["id"]: s["unarchived_epoch"] for s in prev.get("sessions", []) if "unarchived_epoch" in s}
+    sessions = {}
+    for s in pages(folder, "sess"):
+        row = {"id": need(s, "id"), "session_status": need(s, "session_status"), "tags": s.get("tags") or [],
+               "status_bucket": s.get("status_bucket")}
+        if row["session_status"] == IDLE and s.get("updated_at"):
+            row["idle_since"] = s["updated_at"]
+        if row["id"] in epochs:
+            row["unarchived_epoch"] = epochs[row["id"]]
+        sessions[row["id"]] = row
+    items = []
+    for path in sorted((folder / "items").glob("**/*.json")):
+        doc = load(path)
+        if isinstance(doc, dict) and "data" in doc and "n" not in doc:
+            doc = doc["data"]
+        if not isinstance(doc, dict):
+            raise Stop("%s is not an item" % path.name)
+        items.append({k: doc[k] for k in ITEM_KEYS if k in doc})
+    return {"readAt": read_at, "pulls": pulls, "branches": [], "sessions": list(sessions.values()), "items": items,
+            "landedPulls": list(landed.values()), "keepSessions": prev.get("keepSessions", [])}
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--sessions", required=True)
-    parser.add_argument("--pulls", required=True)
-    parser.add_argument("--held", required=True)
-    parser.add_argument("--read-at", help="ISO time of the reads; default now (UTC)")
-    parser.add_argument("--out", default="live.json")
+    parser.add_argument("--dir", required=True, help="the folder of saved reads")
+    parser.add_argument("--landed-since", required=True, help="ISO time: keep closed pulls closed at or after it")
+    parser.add_argument("--out", help="default: <dir>/live.json")
     args = parser.parse_args(argv)
-    read_at = args.read_at or datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
-        result = build(load(args.sessions), load(args.pulls), load(args.held), read_at)
-    except (OSError, ValueError) as err:
+        result = build(args.dir, args.landed_since)
+    except Stop as err:
         sys.exit("publish_live: %s" % err)
-    pathlib.Path(args.out).write_text(json.dumps(result, indent=1) + "\n", encoding="utf-8")
+    out = pathlib.Path(args.out) if args.out else pathlib.Path(args.dir) / "live.json"
+    out.write_text(json.dumps(result, indent=1) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":
