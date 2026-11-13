@@ -136,6 +136,10 @@ PC_BASE = "pc/box-one/acme-widgets"
 # The one skip reason of every case that needs the stand-in git. Windows CreateProcess runs no extensionless file.
 NT_NO_STUB = ("the stand-in git is an extensionless script, which Windows CreateProcess never runs, "
               "so git is not intercepted on Windows")
+# The skip reason of the cases that send POSIX signals and run a shell-script install fake. Windows has no SIGTERM or
+# killpg, and CreateProcess never runs a shell script.
+NT_NO_POSIX_SIGNALS = ("POSIX signals and shell fakes: SIGTERM and killpg do not exist on Windows, and CreateProcess "
+                       "never runs a shell-script fake")
 # The stand-in git. @PYTHON@, @CONF@ and @REAL@ are filled in by Machine.install_stub.
 STUB = """#!@PYTHON@
 import json, os, subprocess, sys
@@ -504,7 +508,8 @@ def fake_installer(case, name, fail_until=None, hang_for=None, term=None):
     sleeps hang_for seconds, then logs `done`: a run killed at its bound logs `ran` and never `done`. With term, it writes
     its pid to <script>.pid, traps TERM and loops on a short sleep, as an install with an EXIT trap does. On TERM, "exit"
     writes <script>.term and exits 0; "ignore" writes <script>.term and keeps looping, so only a KILL ends it. Returns
-    (command path, log path). POSIX only, so a case that runs it skips on Windows with NT_NO_STUB."""
+    (command path, log path). POSIX only, so a case that runs it skips on Windows with NT_NO_STUB, or with
+    NT_NO_POSIX_SIGNALS in InstallStop."""
     script = os.path.join(case, name)
     log = os.path.join(case, name + ".log")
     lines = ["#!/bin/sh", "printf 'ran\\n' >> %s" % shlex.quote(log)]
@@ -1871,6 +1876,7 @@ class RefreshNotice(MailCase):
             self.assertEqual(store.tip(), before, "a refused %d-character sha moved the mail ref" % len(sha))
 
 
+@unittest.skipIf(os.name == "nt", NT_NO_POSIX_SIGNALS)
 class InstallStop(MailCase):
     """A refresh install that runs past its bound is stopped with SIGTERM first, so its EXIT trap can release its lock, and
     with SIGKILL only after a grace. The stop runs on every exit from the wait, so a caller that raises mid-wait leaves no
