@@ -562,7 +562,7 @@ def debt_check(wt, base_ref, host, info):
         raise Dropped(text)
 
 def say_err(*lines):
-    """say's twin for stderr. The review record's lint (lane_lint with review_record) keeps stdout for the record alone."""
+    """say's twin for stderr. The review record's lint (lane_lint with review_log) keeps stdout for the record alone."""
     print("\n".join(lines), file=sys.stderr, flush=True)
 
 def say(*lines):
@@ -3248,7 +3248,7 @@ def no_lint_job(wt):
     path, why = job_workflow(wt, job)
     return "" if path or not why.startswith("no workflow file") else f"no file in its .github/workflows holds a `{job}` job, the one job the lint runs"
 
-def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_tests=False, review_record=False, want_head=""):
+def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_tests=False, review_log=False, want_head=""):
     """The lint a lane passes before its head goes to the batch runner (decision lanes-run-no-full-ci-job): `ci-job checks --lint --base origin/<base>`
     in a temporary detached worktree at the head, removed on every exit. Takes no lock; merges and pushes nothing. -> 0 on a pass, else raises Stop.
     A target of digits is a PR number: its head and base come from the PR, and a stacked PR (base other than main) whose head lacks its base's head stops first.
@@ -3262,13 +3262,13 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     prints a reason line and still exits 0. A FAIL, an unknown and a ref or commit target post nothing.
     `touched_tests` (--touched-tests): after a lint pass only, run_touched_tests runs the tests the head's diff touches in the same tree. A failing test refuses always;
     an unknown (timeout, unloadable selector, unreadable diff) refuses unless `unknown_ok` gives a reason. The PASS line then also names the run and skipped counts.
-    `review_record` (`merge <pr> --review-record`, decision pr-review-record) is the same lint for a pull request number, run before the record prints: its
+    `review_log` (`merge <pr> --review-record`, decision pr-review-record) is the same lint for a pull request number, run before the record prints: its
     every line goes to stderr, so stdout holds the record alone; no refusal is Liftable, since the record flag takes no --lint-unknown-ok; and `want_head`, the
     head the review read, must equal the head linted, since fetch_pr_head may wait for a newer one. A PASS posts the lane-lint comment as above (one home of that proof). A head
     with no `checks` job (no_lint_job) runs no lint: one stderr line says why, nothing is posted, and the record prints."""
-    out = say_err if review_record else say
-    remedy = REVIEW_LINT_REMEDY if review_record else LANE_LINT_REMEDY
-    no_record = ", so no review record was printed:" if review_record else ":"
+    out = say_err if review_log else say
+    remedy = REVIEW_LINT_REMEDY if review_log else LANE_LINT_REMEDY
+    no_record = ", so no review record was printed:" if review_log else ":"
     if target.isdigit():
         host = host or Host(cwd=root)
         n = int(target)
@@ -3286,7 +3286,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     try:  # a SIGTERM reaches here as a SystemExit (release_on_signals in main), so this `finally` removes the tree
         pin_notes, fails, reports, stop = [], [], [], ""
         refuse_incomplete_tree(wt, head, base)
-        if review_record:
+        if review_log:
             nothing = no_lint_job(wt)
             if nothing:  # a repo that has no lint prints its record unlinted, and a skipped lint posts no PASS
                 say_err(f"merge: no lint ran on {head[:9]}: {nothing}. The record prints unlinted.")
@@ -3311,13 +3311,13 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
                 fails.append(f"its draft run of lane-touched-tests failed on {head[:9]}: " + "; ".join(draft_lines))
             elif draft != "pass" and not (fails or stop):
                 if not unknown_ok.strip():
-                    if not review_record:
+                    if not review_log:
                         wait = 'Wait for it, or run again with --lint-unknown-ok "<reason>". '
                     elif draft == "wait":
                         wait = "Wait for it, then run again. "
                     else:  # an absent or skipped touched job is no run to wait for, and the record flag takes no --lint-unknown-ok
                         wait = "A record needs a finished lane-touched-tests run on this head, as a draft gets. A skipped or absent job gives none, and no flag lifts it: push the head as a draft, let the run finish, then run again. "
-                    raise (Stop if review_record else Liftable)("\n".join([f"the draft run of lane-touched-tests on {head[:9]} is {'not finished' if draft == 'wait' else 'unknown'}, not a pass{no_record}", *draft_lines,
+                    raise (Stop if review_log else Liftable)("\n".join([f"the draft run of lane-touched-tests on {head[:9]} is {'not finished' if draft == 'wait' else 'unknown'}, not a pass{no_record}", *draft_lines,
                                                                            wait + remedy]))
                 say(f"merge: draft run of {head[:9]} is {draft}, not a pass. --lint-unknown-ok, reason: {unknown_ok.strip()}", *draft_lines)
         if fails or stop:  # as on main, a counted FAIL or an unknown ends the run before the ci-job
@@ -3364,7 +3364,7 @@ def lane_lint(root, target, host, base="", unknown_ok="", with_prs=(), touched_t
     head_line = f"the lint of {short} against {base} is unknown, not a pass{no_record}"
     if not liftable:  # a timeout or an odd exit says nothing about any step, so no flag lifts it
         raise Stop("\n".join([head_line, *lines, remedy]))
-    if review_record:  # the record flag takes no --lint-unknown-ok
+    if review_log:  # the record flag takes no --lint-unknown-ok
         raise Stop("\n".join([head_line, *lines, *log, "Run it where the missing tool is present. " + remedy]))
     raise Liftable("\n".join([head_line, *lines, *log,
                               'Run it where the missing tool is present, or run again with --lint-unknown-ok "<reason>". ' + LANE_LINT_REMEDY]))
@@ -5807,7 +5807,7 @@ def main(argv, host=None, lock=None, hosts=None):
                     print("merge: --fix-check: the reviewed head must be the Head of the newest earlier review log on this pull request, and that log must have no Fix check line. One exception, a fix after a merge of main: the log reads done with a PASS Fix check line, and the pull request head is a merge of the base into that Head with no edit beyond git's merge; a merge that conflicts may edit its conflicted paths only. A clean merge of main needs no fix verifier. " + REVIEW_CITE, file=sys.stderr)
                     return 2
             with release_on_signals():  # the last gate: after every refusal above, for every kind (docs-only too); a signal ends the run through lane_lint's `finally`
-                lane_lint(root, str(a.pr), h, review_record=True, want_head=a.head)
+                lane_lint(root, str(a.pr), h, review_log=True, want_head=a.head)
             say(review_body(a.pr, a.head, a.kind, a.guard, a.round, a.net_value, fix=a.fix_check, grant=a.grant).rstrip("\n"))
             print("merge: the review record was not posted. Post the lines above as a comment on the pull request.", file=sys.stderr)
             return 0
