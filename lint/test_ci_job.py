@@ -2353,7 +2353,7 @@ class PinnedHarness(Job):
 
     def test_lint_under_the_flag_runs_the_harness_at_the_pin(self):
         """--pinned under --lint runs a code-check pinned to a sha from that sha's tree, as the ready check does. Without the flag the
-        local copy runs. Owner ruling: the lane-lint pinned-trees item (714 b, 11:53 CST Nov 13)."""
+        local copy runs."""
         (rc0, lines0, text0), (rc, lines, text) = self.both_runs(self.code_step(self.pin_a), "--lint", "--base", "origin/main")
         self.assertIn("Code check", by_step(lines0), "scope: --lint did not select the code-check step\n" + text0)
         self.assertEqual((rc0, self.verdicts(lines0)), (1, ["FAIL"]), "precondition: without the flag the local strict copy did not FAIL\n" + text0)

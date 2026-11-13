@@ -333,7 +333,7 @@ class LaneLint(LaneFixture):
 
     def test_lane_lint_runs_ci_job_with_pinned_as_the_ready_check_does(self):
         """The lane lint's ci-job run carries --pinned, so a step pinned to a claude-settings sha runs that sha's harness. The stub logs
-        the argv it received, so this reads the run, not the code. Owner ruling: the lane-lint pinned-trees item (714 b, 11:53 CST Nov 13)."""
+        the argv it received, so this reads the run, not the code."""
         self.use_ci_job(PASSING, 0)
         rc, out = self.lint_run("--lane-lint", "7")
         self.assertEqual(rc, 0, out)
@@ -2328,7 +2328,7 @@ class BatchLintFlags(tm.Env):
 
     def test_a_pinned_sha_under_lane_lint_is_unknown_refuses_and_never_runs_the_local_copy(self):
         """A code-check pinned to a sha no clone holds reads unknown under --pinned, which the lane lint refuses (exit 1), and the local
-        copy never runs for it. Owner ruling: the lane-lint pinned-trees item (714 b, 11:53 CST Nov 13)."""
+        copy never runs for it."""
         self.pinned_code_check(BATCH_PINNED, UNFETCHABLE_PIN)
         out = io.StringIO()
         try:
