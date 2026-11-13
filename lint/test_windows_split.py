@@ -211,6 +211,8 @@ MACOS_SLICE_ENV = {"GUARD_TESTS": "macos-slice"}
 MACOS_JOBS = ("shell-macos", "checks-macos", "checks-macos-b")
 # R61 part 3: the 03:17 nightly's gate job, and the one scope output it reads (the gate's skip).
 NIGHTLY_SKIP_JOB = "nightly-skip"
+PUSH_SKIP_JOB = "push-skip"
+SCOPE_NEEDS = {NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB}  # scope's if reads each skip job's skip output, so it needs both
 # The values the gate's skip output can hold: unset (''), skip (`true`) or run (`false`). A guard predicate must give one answer for all.
 SKIP_VALUES = ("", "true", "false")
 MAC_OWN = "(needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled()"
@@ -306,11 +308,11 @@ GUARD_SLICE_ENV = {"GUARD_TESTS": "windows-slice"}
 GUARD_JOB = "checks-windows-guard"
 # A long suite splits across shard jobs: the base job, then `<base>-2` to `<base>-<n>`. The full step of each
 # carries SHARD_VAR[base]=<i>/<n> in its step env, and the n values cover 1 to n once each, so every case runs
-# once. A shard job past the first never runs on pull_request: the required check is the base job alone, so
-# the PR verdict stays in it (the slice there runs whole, with no shard value).
+# once. A shard job past the first runs on a ready pull_request and never on a draft. Its if is the draft guard, and its
+# steps carry the base job's scope condition, so a run with no flag for the base job runs no shard.
 SHARD_VAR = {"checks-windows-guard": "GUARD_SHARD", "checks-windows-merge": "MERGE_SHARD"}
 SHARD_CMD = {"checks-windows-guard": "python hooks/test_guard.py", "checks-windows-merge": "python merge/test_merge.py"}
-SHARD_JOB_IF = "${{ github.event_name != 'pull_request' }}"
+SHARD_JOB_IF = "${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}"
 
 
 def shard_base(name):
@@ -402,12 +404,12 @@ SHELL = {"sh hooks/test_install_windows.sh": "bash", "bash actions/stamp/test_ac
 # pull_request included, and on its scope flag.
 IF_PIN = {"python janitor/mutate_sweep.py":
           "${{ !cancelled() && needs.scope.outputs.sweep == 'true' }}",
-          # The full merge suite runs on every event but pull_request; the slice only on it.
+          # The full merge suite runs on every event, a ready pull_request included (R62); the slice only on pull_request.
           "python merge/test_merge.py":
-          "${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.code == 'true' }}",
+          "${{ !cancelled() && needs.scope.outputs.code == 'true' }}",
           SLICE: "${{ !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true' }}",
-          # The full guard suite runs off pull_request; the guard slice only on it (cut F).
-          GUARD_CMD: "${{ !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.code == 'true' }}",
+          # The full guard suite runs on every event, a ready pull_request included (R62); the guard slice only on pull_request (cut F).
+          GUARD_CMD: "${{ !cancelled() && needs.scope.outputs.code == 'true' }}",
           GUARD_SLICE: "${{ !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true' }}"}
 
 
@@ -415,11 +417,11 @@ FLAGS = ["checks_windows", "checks_windows_merge", "checks_windows_rest", "check
          "code", "guard", "sweep", "shoot"]
 
 
-def eval_if(expr, event, flag_value, draft=False, nightly_skip=""):
+def eval_if(expr, event, flag_value, draft=False, nightly_skip="", push_skip=""):
     """Evaluate an `if:` (a job's, a step's or a scope condition) for an event with every scope output set to flag_value and
     github.event.pull_request.draft set to draft. Reads only !cancelled(), success(), always(), &&, ||, !, parentheses,
-    == and != on github.event_name, github.event.pull_request.draft, needs.scope.outputs.* and another job's output (`gate`,
-    the value of every such output: '' when unset, as GitHub reads an output no step set)."""
+    == and != on github.event_name, github.event.pull_request.draft, needs.scope.outputs.*, and the skip output of the two
+    skip jobs (nightly_skip and push_skip: the value given, '' when unset, as GitHub reads an output no step set)."""
     e = expr.strip()
     if e.startswith("${{") and e.endswith("}}"):
         e = e[3:-2]
@@ -428,8 +430,9 @@ def eval_if(expr, event, flag_value, draft=False, nightly_skip=""):
     e = e.replace("&&", " and ").replace("||", " or ")
     e = e.replace("github.event_name", repr(event))
     e = re.sub(r"needs\.scope\.outputs\.\w+", repr(flag_value), e)
-    # Only the nightly gate's skip output is read. Any other job's output stays unread, so the reader raises on it, as before.
+    # Only the two skip jobs' skip outputs are read. Any other job's output stays unread, so the reader raises on it, as before.
     e = re.sub(rf"needs\.{re.escape(NIGHTLY_SKIP_JOB)}\.outputs\.skip\b", repr(nightly_skip), e)
+    e = re.sub(rf"needs\.{re.escape(PUSH_SKIP_JOB)}\.outputs\.skip\b", repr(push_skip), e)
     e = re.sub(r"!(?!=)", " not ", e)
     return bool(eval(e, {"__builtins__": {}}))
 
@@ -516,11 +519,9 @@ def read_scope_condition(job):
     return cands.pop() if len(cands) == 1 else None
 
 
-def step_rest(st, scope_condition, shard=False):
-    """A step's own condition E. A shard job has no scope condition, so E is its whole if. Otherwise E is what the scope condition leaves:
-    "" for the bare scope condition, None when the step lacks the scope condition."""
-    if shard:
-        return step_if(st) or ""
+def step_rest(st, scope_condition):
+    """A step's own condition E: what the scope condition leaves of the step's if. "" for the bare scope condition, None when
+    the step lacks the scope condition. Every scoped step carries it, a shard's included (R62)."""
     return scope_condition_rest(step_if(st), scope_condition)
 
 
@@ -594,6 +595,17 @@ def job_check_problems(name, job, flag=None):
     return problems + scope_condition_property_problems(name, scope_condition, flag) + scope_condition_step_problems(name, job, scope_condition)
 
 
+def scope_needs_of(text):
+    """The job names scope needs: its block list under `needs:`, else its inline value. Empty when it needs none or has no scope."""
+    m_block = re.search(r"^  scope:\s*$(.*?)(?=^  [\w-]+:\s*$|\Z)", text, re.M | re.S)
+    if not m_block:
+        return set()
+    m = re.search(r"^    needs:[ \t]*\n((?:      - [\w-]+[ \t]*\n)+)", m_block.group(1), re.M)
+    if m:
+        return set(re.findall(r"^\s+-\s+([\w-]+)\s*$", m.group(1), re.M))
+    return set(re.findall(r"[\w-]+", (all_jobs(text).get("scope") or {}).get("needs") or ""))
+
+
 def scope_problems(text):
     """A `scope` job on ubuntu with every flag as a job output; every other job passes job_check_problems
     (the lint jobs in LINT_JOBS need scope but run always)."""
@@ -604,16 +616,17 @@ def scope_problems(text):
         return ["no scope job"]
     if not (sc["os"] or "").startswith("ubuntu"):
         problems.append(f"scope runs on {sc['os']}, want ubuntu")
-    if sc["needs"] not in (None, NIGHTLY_SKIP_JOB):  # R61 part 3: scope waits on the nightly gate, and no other job
-        problems.append(f"scope has needs: {sc['needs']}, want none or {NIGHTLY_SKIP_JOB}")
+    got_needs = scope_needs_of(text)
+    if got_needs != SCOPE_NEEDS:
+        problems.append(f"scope has needs {sorted(got_needs)}, want {sorted(SCOPE_NEEDS)}")
     block = re.search(r"^  scope:\s*$(.*?)(?=^  [\w-]+:\s*$|\Z)", text, re.M | re.S).group(1)
     for f in FLAGS:
         if not re.search(rf"^      {f}:\s*\S", block, re.M):
             problems.append(f"scope job has no output {f}")
     for name, job in jobs.items():
         # ci-done is the fan-in that comments when a run ends red: it needs every job, not scope
-        # alone (actions/ci-done-comment/test_comment.py checks its needs and if). The nightly gate has its own checks.
-        if name not in ("scope", "ci-done", ALL_JOBS_PASSED_JOB, NIGHTLY_SKIP_JOB):
+        # alone (actions/ci-done-comment/test_comment.py checks its needs and if). The two skip jobs have their own checks.
+        if name not in ("scope", "ci-done", ALL_JOBS_PASSED_JOB, NIGHTLY_SKIP_JOB, PUSH_SKIP_JOB):
             problems += job_check_problems(name, job, FLAG_OF.get(name))
     return problems
 
@@ -649,7 +662,7 @@ def hardening_problems(text):
                 problems.append(f"{name}: slice env is {st['env']}, want {slice_envs[cmd]}")
             if "!cancelled()" not in (step_if(st) or ""):
                 problems.append(f"{name}: {cmd!r} if lacks !cancelled(): {step_if(st)}")
-            if cmd in IF_PIN and step_rest(st, read_scope_condition(job), bool(shard_base(name))) != unwrap(IF_PIN[cmd]):
+            if cmd in IF_PIN and step_rest(st, read_scope_condition(job)) != unwrap(IF_PIN[cmd]):
                 problems.append(f"{name}: {cmd!r} condition is not the pinned text: {step_if(st)}")
             if st.get("shell") != SHELL.get(cmd):
                 problems.append(f"{name}: {cmd!r} shell is {st.get('shell')}, want {SHELL.get(cmd)}")
@@ -1117,8 +1130,8 @@ class WindowsSplit(unittest.TestCase):
 
     def test_checker_sees_the_merge_slice_defects(self):
         scope_condition = "needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request'"
-        full_e = "!cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.code == 'true'"
-        slice_e = full_e.replace("!=", "==")
+        full_e = "!cancelled() && needs.scope.outputs.code == 'true'"
+        slice_e = "!cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true'"
 
         def doc(full=full_e, slice_=slice_e, env="windows-slice", with_full=True):
             full_step = (f"      - name: Full\n        if: ${{{{ ({scope_condition}) && {full} }}}}\n"
@@ -1571,12 +1584,12 @@ def skip_block_problems(text):
 
 
 def scope_skip_problems(text):
-    """R61 part 3: scope needs the gate, and its if skips a scheduled run exactly when the gate says skip. A skipped scope skips
-    every job through needs; an unset or failed gate reads '' and runs everything (unknown is not skip)."""
+    """R61 part 3: scope needs both skip jobs, and its if skips a scheduled run exactly when nightly-skip says skip. A skipped
+    scope skips every job through needs; an unset or failed skip job reads '' and runs everything (unknown is not skip)."""
     sc = all_jobs(text).get("scope") or {}
     problems = []
-    if sc.get("needs") != NIGHTLY_SKIP_JOB:
-        problems.append(f"scope needs {sc.get('needs')}, want {NIGHTLY_SKIP_JOB}: scope must wait on the gate")
+    if scope_needs_of(text) != SCOPE_NEEDS:
+        problems.append(f"scope needs {sorted(scope_needs_of(text))}, want {sorted(SCOPE_NEEDS)}: scope must wait on both skip jobs")
     expr = sc.get("if")
     if expr is None:
         return problems + ["scope has no if"]
@@ -1699,11 +1712,15 @@ class MacOnceByBatch(unittest.TestCase):
                 "    outputs:  # the gate's answer\n      skip: ${{ steps.decide.outputs.skip }}\n"
                 "    steps:\n      - id: gate\n        run: echo \"skip=false # not a comment\" >> \"$GITHUB_OUTPUT\"\n")
         scope = ("  scope:\n    if: ${{ always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft) "
-                 "&& needs.nightly-skip.outputs.skip != 'true' }}\n    needs: nightly-skip\n    runs-on: ubuntu-latest\n    steps:\n"
+                 "&& needs.nightly-skip.outputs.skip != 'true' && needs.push-skip.outputs.skip != 'true' }}\n"
+                 "    needs:\n      - nightly-skip\n      - push-skip\n    runs-on: ubuntu-latest\n    steps:\n"
                  "      - run: echo scope\n")
         self.assertEqual(skip_job_problems("jobs:\n" + nightly_skip), [])
         self.assertEqual(skip_block_problems("jobs:\n" + nightly_skip), [])
         self.assertEqual(scope_skip_problems("jobs:\n" + scope + nightly_skip), [])
+        # A scope that waits on nightly-skip alone is the defect this scope check names.
+        self.assertTrue(scope_skip_problems("jobs:\n" + scope.replace("    needs:\n      - nightly-skip\n      - push-skip\n",
+                                                                      "    needs:\n      - nightly-skip\n") + nightly_skip))
         # The control, with !cancelled() as the status function: it passes too.
         self.assertEqual(scope_skip_problems("jobs:\n" + scope.replace("always()", "!cancelled()") + nightly_skip), [])
         skip_bad = {
@@ -1722,8 +1739,9 @@ class MacOnceByBatch(unittest.TestCase):
             with self.subTest(defect=label):
                 self.assertTrue(skip_block_problems("jobs:\n" + text), label)
         scope_bad = {
-            "scope does not wait on the gate": scope.replace("    needs: nightly-skip\n", ""),
-            "scope ignores the gate": scope.replace(" && needs.nightly-skip.outputs.skip != 'true'", ""),
+            "scope does not wait on nightly-skip": scope.replace("      - nightly-skip\n", ""),
+            "scope does not wait on push-skip": scope.replace("      - push-skip\n", ""),
+            "scope ignores nightly-skip": scope.replace(" && needs.nightly-skip.outputs.skip != 'true'", ""),
             "a draft PR runs": scope.replace("!github.event.pull_request.draft", "true"),
             # R61 part 3 status function: without a top-level always() or !cancelled(), a skipped gate skips scope on push.
             "scope without a status function": scope.replace("always() && ", ""),
@@ -1786,6 +1804,38 @@ class SweepOnReadyPull(unittest.TestCase):
             with self.subTest(job=job):
                 self.assertEqual(step_env(st), {}, f"{label} sweep step has an env: {step_env(st)}")
                 self.assertEqual(run_lines(st), [cmd], f"{label} sweep step runs {run_lines(st)}, want {cmd}")
+
+
+class ReadyPullShards(unittest.TestCase):
+    """Owner ruling R62 on checks.yml. The Windows shards run on a ready pull_request, and the scope flags decide them: a
+    shard's steps carry its base job's scope condition. Each case reads the real file."""
+
+    def setUp(self):
+        with open(CHECKS, encoding="utf-8") as f:
+            self.text = f.read()
+
+    def test_the_scope_job_runs_on_a_ready_pull_request_and_waits_on_both_skip_outputs(self):
+        # Named failure: scope skips a ready PR, or runs a push or a scheduled run that its skip output says to skip.
+        jobs = all_jobs(self.text)
+        self.assertIn("scope", jobs, "no scope job")
+        expr = jobs["scope"]["if"]
+        self.assertIsNotNone(expr, "scope has no if")
+        self.assertTrue(eval_if(expr, "pull_request", "true"), f"scope does not run on a ready pull_request: {expr}")
+        self.assertFalse(eval_if(expr, "push", "true", push_skip="true"), f"scope runs when push-skip says skip: {expr}")
+        self.assertFalse(eval_if(expr, "schedule", "true", nightly_skip="true"), f"scope runs when nightly-skip says skip: {expr}")
+        self.assertTrue(eval_if(expr, "push", "true", push_skip=""), f"scope skips a push that push-skip leaves unset: {expr}")
+
+    def test_a_shard_job_keeps_its_base_jobs_scope_condition(self):
+        # Named failure: a shard's steps drop the base job's scope flag, so a run with no flag for the base job runs the shard.
+        jobs = windows_jobs(self.text)
+        shards = [n for n in jobs if shard_base(n)]
+        self.assertTrue(shards, "no Windows shard jobs")
+        for name in shards:
+            base = shard_base(name)
+            with self.subTest(job=name):
+                want = read_scope_condition(jobs[base])
+                self.assertIsNotNone(want, f"{base} steps carry no one scope condition")
+                self.assertEqual(read_scope_condition(jobs[name]), want, f"{name} scope condition is not {base}'s")
 
 
 class TopLevelOr(unittest.TestCase):
