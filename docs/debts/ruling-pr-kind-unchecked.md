@@ -1,0 +1,6 @@
+# A record that files an owner ruling is not checked for its Kind
+
+- **What.** The merge tool takes the lane's Kind claim. A PR that adds or edits a record that files an owner ruling, posted as `Kind: docs-only` with zero rounds, reads done with no review round. Lanes pick docs-only for prose PRs under the 2026-09-26 ruling. How often a ruling PR gets that kind is unmeasured. `merge --review-record` refuses that Kind for a diff that files a record under docs/decisions/ (merge/merge.py `decision_paths`). Still a gap: a review record posted by hand, and a ruling outside docs/decisions/.
+- **Where.** The Kind field of the review record, read by `merge/merge.py` (`review_state`). `merge --review-record` reads the diff's paths against Kind (`kind_misfits`, `decision_paths`).
+- **Decision.** `docs-only-prs-skip-review` (docs-only PRs skip the reviewer, except a record that files an owner ruling).
+- **Retire.** `merge/test_merge.py`, class `ReviewDecisionKind`, case `test_docs_only_over_a_decision_record_refuses`: a `Kind: docs-only` review record over a decision record under docs/decisions/ is refused, and a `Kind: normal` one is accepted. Closing the debt also needs the gap named in What covered.
