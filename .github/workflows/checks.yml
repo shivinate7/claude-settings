@@ -194,7 +194,6 @@ jobs:
         run: python3 hooks/test_decision_watch.py
 
       - name: Reply judge fixture suite
-        if: ${{ needs.scope.outputs.code == 'true' || github.event_name != 'pull_request' }}
         run: python3 hooks/test_reply_judge.py
 
       - name: Prose judge fixture suite
