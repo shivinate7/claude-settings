@@ -2995,40 +2995,71 @@ class LintCheckJoin(tm.CloudSession):
         as green."""
         self.refused_with_rollup("skipped", [[("checks", "pass", ""), (REQUIRED_CHECK, "skipping", "")]])
 
-    def test_an_integration_pr_whose_newest_all_jobs_passed_run_passes_clears_an_older_run_that_skipped_on_the_live_head(self):
-        """Why: a draft run skips the rollup job, and the ready run after it passes the job, so both rows sit on the live head. The newer run
-        decides: its pass proves the head, and the older skip does not hold the lane lint. The join skips the lint, and its merge line names the
-        skip, the rollup and the head. Red on the old code: rollup_green needs every rollup row to pass, so the older skip refuses the join with
-        `merge --lane-lint 7` and merges nothing."""
+    def joined_on_rollup_skip(self, seq, runs):
+        """The join of an integration PR whose live head shows the rollup rows `seq` and the workflow runs `runs`: merged, with a skip line that
+        names the rollup and the head. -> the output."""
         head = self.head("feat")
-        seq, runs = rollup_by_run([(100, "skipping"), (200, "pass")])
         with self.integration_pr():
             rc, out = self.join([], body=self.integration_body(), checks_seq=seq, runs_seq=runs)
-        self.assertEqual(rc, 0, "a join whose newest all-jobs-passed run passed was refused, not merged:\n" + out)
-        self.assertIn("PUT pulls/7/merge", tm.GhHalf.calls(self), "a join whose newest all-jobs-passed run passed did not merge #7:\n" + out)
+        self.assertEqual(rc, 0, "a join whose rollup rows name a newer pass was refused, not merged:\n" + out)
+        self.assertIn("PUT pulls/7/merge", tm.GhHalf.calls(self), "a join whose rollup rows name a newer pass did not merge #7:\n" + out)
         skips = rollup_skip_lines(out)
         self.assertTrue(skips, "the merge printed no line that says the lane lint was skipped:\n" + out)
         self.assertIn(REQUIRED_CHECK, skips[0], "the skip line does not name the all-jobs-passed rollup:\n" + out)
         self.assertIn("green", skips[0], "the skip line does not say the rollup is green:\n" + out)
         self.assertIn(head[:9], skips[0], "the skip line does not name the head it skipped:\n" + out)
+        return out
+
+    def test_an_integration_pr_whose_newest_all_jobs_passed_run_passes_clears_an_older_run_that_skipped_on_the_live_head(self):
+        """Why: a draft run skips the rollup job, and the ready run after it passes the job, so both rows sit on the live head. The newer run
+        decides: its pass proves the head, and the older skip does not hold the lane lint. The join skips the lint, and its merge line names the
+        skip, the rollup and the head. Red on the old code: rollup_green needs every rollup row to pass, so the older skip refuses the join with
+        `merge --lane-lint 7` and merges nothing."""
+        self.joined_on_rollup_skip(*rollup_by_run([(100, "skipping"), (200, "pass")]))
 
     def test_an_integration_pr_whose_newest_all_jobs_passed_run_skipped_still_needs_the_lane_lint_over_an_older_pass(self):
         """Why: the newer run decides, so a newer run that skips the rollup does not take an older run's pass. The join names `merge --lane-lint 7`
-        and merges nothing. Red under a mutant that lets any pass on the head clear the rollup."""
+        and merges nothing. Red under a mutant that lets an older run's pass clear the rollup."""
         seq, runs = rollup_by_run([(100, "pass"), (200, "skipping")])
         self.refused_with_rollup("skipped newest run beside an older pass", seq, runs_seq=runs)
 
     def test_an_integration_pr_whose_newest_all_jobs_passed_run_failed_still_needs_the_lane_lint_over_an_older_pass(self):
-        """Why: the newer run decides, so a newer run that fails the rollup does not take an older run's pass. Red under a mutant that lets any
-        pass on the head clear the rollup."""
+        """Why: the newer run decides, so a newer run that fails the rollup does not take an older run's pass.
+        Red under a mutant that lets an older run's pass clear the rollup."""
         seq, runs = rollup_by_run([(100, "pass"), (200, "fail")])
         self.refused_with_rollup("failed newest run beside an older pass", seq, runs_seq=runs)
 
     def test_an_integration_pr_whose_newest_all_jobs_passed_run_pending_still_needs_the_lane_lint_over_an_older_pass(self):
-        """Why: the newer run decides, so a newer run still pending on the rollup does not take an older run's pass. Red under a mutant that lets
-        any pass on the head clear the rollup."""
+        """Why: the newer run decides, so a newer run still pending on the rollup does not take an older run's pass.
+        Red under a mutant that lets an older run's pass clear the rollup."""
         seq, runs = rollup_by_run([(100, "pass"), (200, "pending")])
         self.refused_with_rollup("pending newest run beside an older pass", seq, runs_seq=runs)
+
+    def test_an_integration_pr_whose_older_all_jobs_passed_run_failed_still_needs_the_lane_lint_under_a_newer_pass(self):
+        """Why: an older run's red rollup row holds the rollup not green, even when a newer run passes it, because the merge gate reads the older
+        red. A skip line here would name a head the gate then refuses. The join names `merge --lane-lint 7` and merges and pushes nothing.
+        Red under a mutant that lets an older run's fail drop out of the rollup."""
+        seq, runs = rollup_by_run([(100, "fail"), (200, "pass")])
+        with self.integration_pr():
+            before = self.refs()
+            rc, out = self.join([], body=self.integration_body(), checks_seq=seq, runs_seq=runs)
+        self.assertEqual(rollup_skip_lines(out), [], "the lane lint was skipped on a head whose older run's rollup row is red:\n" + out)
+        self.assertEqual(rc, 1, "the join went ahead on a head whose older run's rollup row is red:\n" + out)
+        self.assertIn("merge --lane-lint 7", out, "the refusal does not name `merge --lane-lint 7`:\n" + out)
+        self.assertNotIn("PUT pulls/7/merge", tm.GhHalf.calls(self), "the join merged #7:\n" + out)
+        self.assertEqual(self.refs(), before, "the join pushed to origin before it refused:\n" + out)
+
+    def test_an_integration_pr_with_an_unlinked_all_jobs_passed_fail_beside_a_newer_pass_still_needs_the_lane_lint(self):
+        """Why: a rollup row that names no run cannot be placed in a newer run, so it decides whatever the newest run says, and its fail holds
+        the rollup red. Red under a mutant that leaves rows that name no run out of the decision."""
+        seq, runs = rollup_by_run([(200, "pass")])
+        self.refused_with_rollup("unlinked failed row beside a newer pass", [[*seq[0], (REQUIRED_CHECK, "fail", "")]], runs_seq=runs)
+
+    def test_an_integration_pr_whose_run_ids_differ_in_width_reads_the_newer_run_by_value_and_skips_the_lint(self):
+        """Why: a run id orders by its value, so 100 is the newer run beside 99. Read as text, 99 would be the newer run, and its skip would hold
+        the rollup. The join skips the lint and its merge line names the skip, the rollup and the head. Red under a mutant that compares run ids
+        as text."""
+        self.joined_on_rollup_skip(*rollup_by_run([(99, "skipping"), (100, "pass")]))
 
     def test_an_integration_pr_with_all_jobs_passed_rows_that_name_no_run_still_needs_every_row_to_pass(self):
         """Why: a rollup row with no run link cannot be placed in a newer run, so rows that name no run keep the all-must-pass rule: a pass beside
