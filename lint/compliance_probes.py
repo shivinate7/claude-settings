@@ -79,14 +79,17 @@ restates: a unit of the child's rule Markdown that copies the text of a claude-s
   shared words passes, a record citation included. An item names the file, the line and the record, and the
   remedy; it never prints record text. An unreadable records folder or no record makes the group unknown. A
   claude-settings checkout is n/a.
-hooks: the clone's settings.json `.hooks` against the live `$HOME/.claude/settings.json` `.hooks`, with
-  `SessionStart` dropped on both sides, since a cloud install rewrites it. The live file is always under the
-  home folder; CLAUDE_CONFIG_DIR is not read. Both sides print as key-sorted JSON, so key order is no
-  difference. A difference prints as a unified diff, each line indented two spaces, the clone as `clone`
-  (`-`) and the live file as `live` (`+`). A clone with no settings.json is n/a. A live file that is missing
-  or not JSON, or a clone file that is not JSON, makes the group unknown. For in shape and out, the first
-  line after the verdict is `  trusts: clone (<root>/settings.json); live (~/.claude/settings.json) is the copy
-  checked`: the clone is the trusted side, since install.sh writes the live file from it.
+hooks: the clone's settings.json `.hooks` against the live settings.json `.hooks`, with `SessionStart`
+  dropped on both sides, since a cloud install rewrites it. The live file is the one install.sh writes:
+  `$CLAUDE_CONFIG_DIR/settings.json` when that variable is set and not empty, else `~/.claude/settings.json`.
+  Both sides print as key-sorted JSON, so key order is no difference. A difference prints as a unified diff,
+  each line indented two spaces, the clone as `clone` (`-`) and the live file as `live` (`+`). A clone with
+  no settings.json is n/a. The group is unknown when the live file is missing, or when the live or clone
+  file cannot be read, is not UTF-8, is not JSON, is not a JSON object, or has a `hooks` that is not an
+  object. A file with no `hooks` key compares as empty hooks. For in shape and out, the first line after
+  the verdict is `  trusts: clone (<root>/settings.json); live (<live>) is the copy checked`, where <live> is
+  `~/.claude/settings.json` or `<dir>/settings.json`, the file read: the clone is the trusted side, since
+  install.sh writes the live file from it.
 scorecard: not a probe. It reads the group lines from stdin and rewrites the layout's scorecard kind file in
   the child, in place: one table, columns Group, Score, Gold standard, Gap, Source. It adds the row
   for the STE lint's gap on UI files, a known gap.
@@ -105,6 +108,7 @@ import layout  # noqa: E402  the one home of every kind's path
 import rule_audit  # noqa: E402  the one home of the live rule anchors
 import _nowindow  # noqa: E402  the one home of a no-window child start
 from ui_suffixes import UI_SUFFIXES  # noqa: E402  the files ste_lint reads as front-end copy
+from shared_names import config_dir  # noqa: E402  the one home of the live config folder
 
 # bin/shoot holds the same default; lint/test_compliance_probes.py pins the two equal.
 SHOOT_CONFIG = ".claude/shoot.json"
@@ -1142,7 +1146,9 @@ def probe_hooks(root):
     clone_text = read(root, "settings.json")
     if clone_text is None:
         raise CannotRun("clone settings.json cannot be read as UTF-8 (%s)" % clone_path)
-    live_path = os.path.join(os.path.expanduser("~"), ".claude", "settings.json")  # never CLAUDE_CONFIG_DIR
+    # The live file is the one install.sh writes: <CLAUDE_CONFIG_DIR>/settings.json, else ~/.claude/settings.json.
+    live_path = os.path.join(config_dir(), "settings.json")
+    live_name = live_path if os.environ.get("CLAUDE_CONFIG_DIR") else "~/.claude/settings.json"
     try:
         with open(live_path, encoding="utf-8") as handle:
             live_text = handle.read()
@@ -1153,7 +1159,7 @@ def probe_hooks(root):
                                      pretty(hooks_of(live_path, live_text, "live")),
                                      "clone", "live", lineterm=""))
     # The clone is the trusted copy: install.sh writes the live file from it.
-    trusts = "  trusts: clone (%s); live (~/.claude/settings.json) is the copy checked" % clone_path
+    trusts = "  trusts: clone (%s); live (%s) is the copy checked" % (clone_path, live_name)
     if not diff:
         return finish("hooks", [trusts], "in shape", 0)
     return finish("hooks", [trusts] + ["  " + line for line in diff], "out", 1)
