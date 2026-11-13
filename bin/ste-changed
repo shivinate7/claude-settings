@@ -47,8 +47,11 @@ def find_root():
 
 
 ROOT = find_root()
-# ci-job runs the pinned tree's copy of this file, which is an archive with no .git, and sets these two: the clone the pin reads
-# are made in, and the commit (the stable branch's head) whose files a pin is judged against, in place of this copy's HEAD.
+# bin/ci-job runs this file twice for a pinned ste-lint step and sets these three (it strips the caller's): STE_CHANGED_ONLY=lint in
+# the pinned tree, which is an archive with no .git and judges no pin; STE_CHANGED_ONLY=pins in its own checkout, which only judges
+# the pins, with STE_CHANGED_CLONE the clone the reads are made in and STE_CHANGED_COMPARE_TO the commit (the stable branch's head)
+# a pin is judged against, in place of this copy's HEAD. With none set, this file lints and judges as a session runs it.
+ONLY = os.environ.get("STE_CHANGED_ONLY")
 CLONE = os.environ.get("STE_CHANGED_CLONE") or ROOT
 TARGET = os.environ.get("STE_CHANGED_COMPARE_TO") or "HEAD"
 COPY = "the stable head" if os.environ.get("STE_CHANGED_COMPARE_TO") else "this copy"  # what a pin is judged against, as a line names it
@@ -139,6 +142,9 @@ def main(argv):
     if len(argv) != 1:
         sys.exit("usage: ste-changed <base>")
     base = re.sub(r"^origin/", "", argv[0])
+    note = os.environ.get(PIN_NOTE_ENV) == "1"
+    if ONLY == "pins":
+        sys.exit(3 if pin_report(note) and not note else 0)
     text = open(os.path.join(ACTION, "action.yml")).read()
     env = dict(os.environ, EVENT_NAME="pull_request", BASE_REF=base, DEFAULT_BRANCH=base,
                REF_NAME=out("rev-parse", "--abbrev-ref", "HEAD"), SCOPE="changed", FAIL="true",
@@ -148,8 +154,7 @@ def main(argv):
     run = os.path.join(ACTION, "run.sh").replace("\\", "/")
     # nowindow: the lint step prints its findings on the caller's terminal; the wrapper's no-window flag could hide that output
     rc = subprocess.run([find_bash(), run], env=env).returncode
-    note = os.environ.get(PIN_NOTE_ENV) == "1"
-    drift = pin_report(note)
+    drift = ONLY != "lint" and pin_report(note)
     sys.exit(rc or (3 if drift and not note else 0))
 
 
