@@ -65,10 +65,10 @@ paraphrase with neither word misses them. `ios-skill` asks only that the brief n
 the designer reads it. The mockup check sees only that a part is there: a page with a system font, one
 inset and two frames can still look like a web page. That taste verdict stays with the design reviewer.
 
-Cost: the hook is one python start per Agent or Task call. It writes no file but the guard.log line of
-a refusal. The Duo and `ios-skill` checks run inside that start, with one read of `lint/layout.json`, and
+Cost: the hook is one python start per Agent or Task call (unmeasured). It writes no file but the guard.log line of
+a refusal. The Duo and `ios-skill` checks run inside that start, with one read of `lint/layout.json` (unmeasured: no test counts the reads), and
 start no process. The mockup check is one python start per run, when a designer or the orchestrator runs
-it. It writes no file.
+it (unmeasured). It writes no file.
 
 Protected by `hooks/test_blind_brief.py`, with the Duo brief as the red-first fixture, class IosApps for
 the iOS rules, `lint/test_check_ios_mockup.py`, and the ios-mockup row of `lint/test_scanner_traps.mjs`.
