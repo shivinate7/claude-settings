@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Plan R9 says no round 3 after a passing round, but main's merge tool still holds a guard change for round 3 after a fix verifier (decision hold-unsafe-after-round-3, item 402 a).",
  "source": "coordinator 17:57 CST Nov 12, from lane model-table-one-home",
- "note": "Change merge/merge.py review_state so a guard change whose fix verifier passed is not held for round 3, citing R9; update decision hold-unsafe-after-round-3 to match. Tests first: red on main. Coordinator 17:59 CST Nov 12: started, express under R65 (Sonnet medium).",
- "updatedAt": "2026-11-12T17:59:33-06:00"
+ "note": "Change merge/merge.py review_state so a guard change whose fix verifier passed is not held for round 3, citing R9; update decision hold-unsafe-after-round-3 to match. Tests first: red on main. Coordinator 17:59 CST Nov 12: started, express under R65 (Sonnet medium). Corrected 18:01 CST Nov 12 (lane question 18:00 CST): the premise was wrong. Ruling R9 (correction, owner 16:07 CST Nov 10, per pick 471 a): a guard or check change that passes round 1 is done; only one fixed under a fix verifier waits for round 3. merge/merge.py review_state already does this, so merge.py stays. The lane changes only decision text that misstates R9, else closes its draft with no merge. Triage filed the step without reading roadmap/rulings/r9.json.",
+ "updatedAt": "2026-11-12T18:00:57-06:00"
 }
