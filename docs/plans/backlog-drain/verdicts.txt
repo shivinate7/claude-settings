@@ -196,7 +196,7 @@ PR	verdict	kind	step	head	reason
 2747	keep	code	runner-drops-handed-lane	eeb5bccc24de	WAVE (reopened): 16 commits, 1 conflict hunk in merge.py; round 3 PASS net positive
 2748	close	code	fan-prose-unmapped-5	63bba812951b	inside 2913
 2749	rebuild	code	lane-lint-cpu-slots	eb03f0e3d975	lint CPU-slot limit wanted; conflicts merge/merge.py + test_lane_lint.py; main added run_touched_tests so slot scope must be redecided
-2750	close	code	fan-code-handoffs	89fec26ec590	ancestor of 2774 and 2824; superseded by 2824
+2750	close	code	fan-code-handoffs	89fec26ec590	ancestor of 2774 and 2824; superseded by 2824; hold-stacked (Coordinator 13:25 CST Nov 13): open PRs #2824 and #2774 use its branch draft-pr-carry as base; it closes once both merge
 2751	keep	code	fan-prose-debts	1c9a658278ee	fixes debt lane-ack-skips-every-reply; rebase: 1 text conflict in docs/decisions/questions-go-to-owner.md
 2752	keep	code	fan-prose-debts	9c9f76d45f98	MAP tsconfig alias reads; merges clean
 2753	keep	code	fan-prose-handoffs	f0d3c6b40b08	head of PowerShell write-read stack; merges clean; had round 1
