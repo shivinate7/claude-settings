@@ -11,7 +11,10 @@ needs it, so every other job skips through needs as nightly-skip does for scope.
 
     python3 lint/test_push_skip.py
 """
+import contextlib
+import http.client
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -19,6 +22,7 @@ import subprocess
 import sys
 import unittest
 import uuid
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import _test_temp  # noqa: E402  test-temp-standard: every temp path comes from this run's folder
@@ -238,6 +242,56 @@ class ReadHeads(unittest.TestCase):
         module = load_script()
         with self.assertRaises(module.Unknown):
             module.read_heads({"PRS_JSON": "not json"})
+
+
+class LiveReadErrors(unittest.TestCase):
+    """An error from the live GitHub read, other than the script's own Unknown, writes skip=false and exits 0, so the push runs
+    everything. Each case replaces the network call (api_get in nightly-skip.py); none reaches GitHub."""
+
+    def live_decision(self, answer):
+        """main() on the live read, with `answer` standing for the network call. -> (exit code, skip lines written, printed text)."""
+        module = load_script()
+        out = os.path.join(RUN_FOLDER, "output-%s" % uuid.uuid4().hex)
+        env = {"GH_TOKEN": "t", "REPO": "owner/repo", "HEAD_SHA": SHA, "GITHUB_OUTPUT": out}
+        printed = io.StringIO()
+        crash = None
+        with mock.patch.object(module._nightly_skip(), "api_get", side_effect=answer), contextlib.redirect_stdout(printed):
+            try:
+                code = module.main(env)
+            except Exception as ex:  # a crash out of main is the named failure, not a decision
+                crash = ex
+        if crash is not None:
+            self.fail("the live read let %s out of push-skip, so no skip=false was written: %s" % (type(crash).__name__, crash))
+        skips = []
+        if os.path.isfile(out):
+            with open(out, encoding="utf-8") as f:
+                skips = [line.strip() for line in f if line.startswith("skip=")]
+        return code, skips, printed.getvalue()
+
+    # Named failure: an incomplete read escapes the read's except list, so push-skip writes no decision and the push job fails.
+    def test_an_incomplete_read_on_the_first_call_writes_skip_false_and_exits_zero(self):
+        code, skips, text = self.live_decision(http.client.IncompleteRead(b"partial"))
+        self.assertEqual(skips, ["skip=false"], "an incomplete read on the pull request list must write skip=false")
+        self.assertEqual(code, 0, "an incomplete read on the pull request list must exit 0")
+        self.assertIn("unknown", text.lower(), "an incomplete read on the pull request list must say unknown")
+
+    # Named failure: any other exception from the network call escapes the read's except list the same way.
+    def test_an_error_other_than_a_read_error_on_the_first_call_writes_skip_false_and_exits_zero(self):
+        code, skips, text = self.live_decision(RuntimeError("the read broke"))
+        self.assertEqual(skips, ["skip=false"], "an error other than Unknown from the read must write skip=false")
+        self.assertEqual(code, 0, "an error other than Unknown from the read must exit 0")
+        self.assertIn("unknown", text.lower(), "an error other than Unknown from the read must say unknown")
+
+    # Named failure: an incomplete read of the batch head's commit, after the pull request list was read, escapes the same way.
+    def test_an_incomplete_read_after_the_pull_request_list_writes_skip_false_and_exits_zero(self):
+        def answer(url, token):
+            if "/pulls?" in url:
+                return [{"head": {"ref": BATCH, "sha": HEAD}}]
+            raise http.client.IncompleteRead(b"partial")
+        code, skips, text = self.live_decision(answer)
+        self.assertEqual(skips, ["skip=false"], "an incomplete read of a batch head's commit must write skip=false")
+        self.assertEqual(code, 0, "an incomplete read of a batch head's commit must exit 0")
+        self.assertIn("unknown", text.lower(), "an incomplete read of a batch head's commit must say unknown")
 
 
 class PushSkipWiring(unittest.TestCase):
