@@ -6381,20 +6381,19 @@ class SupersededRuns(Env):
         c4, _ = host.gh(["api", f"repos/{{owner}}/{{repo}}/actions/runs?head_sha={sha}", "-X", "GET"])
         self.assertNotEqual(c4, 0)
 
-    def test_measure_block_host_runs_rows_carry_each_runs_start_and_finish(self):
-        """Host.runs returns each run with its start and its finish, which the measure block turns into CI minutes. gh names a run's finish
-        `updatedAt`, so either name counts here; the minutes are this test's own arithmetic, not a call into merge.py."""
-        import datetime  # the one read of a timestamp in this case; merge.py's own reader is not the subject
+    def test_measure_block_host_runs_maps_each_completed_runs_updatedAt_to_completedAt_and_its_minutes_sum(self):
+        """Host.runs asks gh for startedAt and updatedAt, and maps a completed run's updatedAt to completedAt, the field job_minutes reads. The
+        case reads the real Host through the gh shim, which gives no completedAt: a Host.runs that never maps it fails here. The minutes are the
+        measure's own sum over Host.runs' rows: 3 and 5 make 8, and not 0."""
         self.set(runs_seq=[[("ci", "completed", "success", 201, 7), ("lint", "completed", "success", 202, 8)]],
                  run_times={"201": ["2026-11-13T10:00:00Z", "2026-11-13T10:03:00Z"], "202": ["2026-11-13T11:00:00Z", "2026-11-13T11:05:00Z"]})
-        rows = sorted(self.gh_host().runs(self.head()), key=lambda r: r["databaseId"])
+        host, sha = self.gh_host(), self.head()
+        rows = sorted(host.runs(sha), key=lambda r: r["databaseId"])
         self.assertEqual([r["databaseId"] for r in rows], [201, 202], "Host.runs did not return the two runs of the head: %s" % rows)
-        self.assertTrue(all("startedAt" in r for r in rows), "Host.runs rows carry no startedAt, so the measure cannot read a run's start: %s" % rows)
-        finishes = [r.get("completedAt") or r.get("updatedAt") for r in rows]
-        self.assertTrue(all(finishes), "Host.runs rows carry no finish time (completedAt or updatedAt), so the measure cannot read a run's end: %s" % rows)
-        parse = lambda text: datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
-        minutes = [(parse(f) - parse(r["startedAt"])).total_seconds() / 60 for r, f in zip(rows, finishes)]
-        self.assertEqual(minutes, [3, 5], "the two runs' minutes from Host.runs rows are not 3 and 5: %s" % rows)
+        self.assertEqual([r.get("completedAt") for r in rows], ["2026-11-13T10:03:00Z", "2026-11-13T11:05:00Z"],
+                         "Host.runs does not map gh's updatedAt to completedAt for a completed run: %s" % rows)
+        self.assertEqual(merge.measure_lines(host, sha, 2, 0), [MEASURE_BEGIN, "Lanes: 2", "Drops: 0", "CI runs: 2", "CI minutes: 8", MEASURE_END],
+                         "the measure block of the two runs through Host.runs is not CI runs 2 and CI minutes 8: %s" % rows)
 
 class RestRoutes(Env):
     """c53: the merge tool reads and merges through the REST API (`gh api`), never GraphQL, which a Claude Code cloud session answers with HTTP 403
@@ -20993,6 +20992,18 @@ class BatchFreeze(CloudSession):
         self.host.merge = spy
         return seen
 
+    def record_calls(self, names):
+        """Wraps each named host method so that each call appends its name to the list returned: the order the host saw its calls in."""
+        events = []
+        for name in names:
+            real = getattr(self.host, name)
+
+            def spy(*args, _real=real, _name=name, **kw):
+                events.append(_name)
+                return _real(*args, **kw)
+            setattr(self.host, name, spy)
+        return events
+
     def test_measure_block_build_writes_all_four_numbers_outside_the_freeze_block(self):
         for n in (101, 102, 103):
             self.lane(n)
@@ -21221,6 +21232,53 @@ class BatchFreeze(CloudSession):
         # The one thread main starts is the silent-undo scan's progress line (merge.py, the scan's beat), so only that one is allowed.
         self.assertEqual([t for t in threads if "(beat)" not in t], [], "the merge started a thread that is not the scan's beat: %s" % threads)
         self.assertEqual(self.written_files() - files, set(), "the merge wrote a file that was not there before the merge")
+
+    def test_measure_block_refresh_reads_and_writes_before_the_last_batch_brake_read_and_the_merge(self):
+        """The refresh runs before the batch brake's last read before the merge call, so a retry pause in the refresh cannot widen the window
+        the brake holds. The host records its calls in order; the window is measured from the last brake read before the merge."""
+        pr = self.measure_merge(tail=measure_block(9, 9, 9, 9), runs=MEASURED_RUNS)
+        events = self.record_calls(["runs", "set_body", "batch_running", "merge"])
+        rc, out, err = self.run_args(str(pr), "--confirm")
+        self.assertEqual(rc, 0, "the merge exited %s: %s" % (rc, out + err))
+        self.assertTrue(getattr(self.host, "merged", False), "the merge did not land: " + out + err)
+        self.assertIn("runs", events, "setup: the refresh read no runs, so there is no read to order: %s" % events)
+        self.assertIn("set_body", events, "setup: the refresh wrote no body, so there is no write to order: %s" % events)
+        brakes = [i for i, e in enumerate(events) if e == "batch_running"]
+        self.assertTrue(brakes, "setup: no batch brake read ran before the merge: %s" % events)
+        last_brake = brakes[-1]
+        self.assertLess(events.index("runs"), last_brake, "the refresh's runs read came after the batch brake's last read, so a pause in the refresh widens the window: %s" % events)
+        self.assertLess(events.index("set_body"), last_brake, "the refresh's body write came after the batch brake's last read, so a pause in the refresh widens the window: %s" % events)
+        self.assertLess(last_brake, events.index("merge"), "the batch brake's last read came after the merge call: %s" % events)
+
+    def test_measure_block_refresh_keeps_an_edit_made_while_the_runs_are_read(self):
+        """The body is read after the runs read, so an edit made during that read survives: the write is built from the body as it stands then."""
+        pr = self.measure_merge(tail=measure_block(9, 9, 9, 9), runs=MEASURED_RUNS)
+        real_runs = self.host.runs
+
+        def runs_then_edit(sha):
+            rows = real_runs(sha)
+            self.host.batch_pulls[pr]["body"] += "A reviewer's note, added while the runs were read.\n"
+            return rows
+        self.host.runs = runs_then_edit
+        seen = self.merge_spy()
+        rc, out, err = self.run_args(str(pr), "--confirm")
+        self.assertEqual(rc, 0, "the merge exited %s: %s" % (rc, out + err))
+        self.assertTrue(getattr(self.host, "merged", False), "the merge did not land: " + out + err)
+        self.assertEqual(len(seen), 1, "the merge call was made %d times, not once: %s" % (len(seen), out + err))
+        at_merge = seen[0][1]
+        self.assertIn("A reviewer's note, added while the runs were read.", at_merge,
+                      "the refresh wrote back a body it read before the runs read, and reverted an edit made during that read: " + out + err)
+        self.assertEqual(measure_values(at_merge), MEASURE_AT_MERGE, "the body at the merge call does not hold the refreshed measure block: " + out + err)
+
+    def test_measure_block_a_second_refresh_after_an_unclosed_fence_appends_no_second_block(self):
+        """A frozen block followed by a fence that never closes: the first refresh's block sits inside that fence, so the reader does not see it.
+        A second refresh must not append another one: the body keeps one block after each refresh."""
+        body = freeze_body(freeze_inner("nightly", [(101, "a" * 40)])) + "```\nan example that never closes\n"
+        lines = [MEASURE_BEGIN, "Lanes: 2", "Drops: 1", "CI runs: 2", "CI minutes: 8", MEASURE_END]
+        once = merge.measure_body(body, lines)
+        twice = merge.measure_body(once, lines)
+        self.assertEqual(measure_count(once), 1, "the first refresh of a body with an unclosed fence did not write one block: %s" % once)
+        self.assertEqual(measure_count(twice), 1, "a second refresh after an unclosed fence appended a second block: %s" % twice)
 
 # `merge --touches [--run RUN_ID] [--case TEXT]... [--file PATH]...`: the open pull requests that already touch a failing case or a named file.
 # The incident's fixtures: red main run 42559512356 failed two brief-destructive-git cases, and open pull 2390 already fixes them.
