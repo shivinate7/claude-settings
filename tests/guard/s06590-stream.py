@@ -592,19 +592,20 @@ sh("detached-launch: if (( n&1 )); then echo odd; fi, a bitwise & in an arithmet
 sh("detached-launch: echo ${s//&/and}, a & in a parameter pattern, is allowed",
    "echo ${s//&/and}", "allow", cwd=NOGIT)
 
-# MERGE OPTIONS. argparse takes an exact option name, else a prefix that names one option alone (`--lane` is
-# `--lane-lint`). `--name=value` splits at the `=`. A prefix that names two options is an argparse error, and it
-# runs nothing. A merge run as a module (`-m merge.merge`) runs the merge script.
-sh("check-tail: merge --lane-l, a prefix of --lane-lint, piped to tail is refused",
-   "merge --lane-l 7 2>&1 | tail -3", "deny", "check-tail", cwd=NOGIT)
-sh("check-tail: merge --review-r, a prefix of --review-record, piped to head is refused",
-   "merge --review-r 7 | head -5", "deny", "check-tail", cwd=NOGIT)
-sh("check-tail: merge --lane, a prefix of --lane-lint, piped to tail is refused",
-   "merge --lane 7 | tail -8", "deny", "check-tail", cwd=NOGIT)
+# MERGE OPTIONS. The merge tool's parser takes an exact option name only: allow_abbrev is off in merge/merge.py
+# build_parser (decision merge-confirm-repo). A prefix such as `--lane` or `--lane=7` exits 2 and runs nothing, so
+# the guard allows it. `--name=value` splits at the `=`, so `--lane-lint=7` is the check. A merge run as a module
+# (`-m merge.merge`) runs the merge script.
+sh("check-tail: merge --lane-l, a prefix of --lane-lint, piped to tail is allowed",
+   "merge --lane-l 7 2>&1 | tail -3", "allow", cwd=NOGIT)
+sh("check-tail: merge --review-r, a prefix of --review-record, piped to head is allowed",
+   "merge --review-r 7 | head -5", "allow", cwd=NOGIT)
+sh("check-tail: merge --lane, a prefix of --lane-lint, piped to tail is allowed",
+   "merge --lane 7 | tail -8", "allow", cwd=NOGIT)
 sh("check-tail: merge --lane-lint=7 in the = form, piped to tail is refused",
    "merge --lane-lint=7 | tail -3", "deny", "check-tail", cwd=NOGIT)
-sh("check-tail: merge --lane=7, a prefix in the = form, piped to tail is refused",
-   "merge --lane=7 | tail -3", "deny", "check-tail", cwd=NOGIT)
+sh("check-tail: merge --lane=7, a prefix in the = form, piped to tail is allowed",
+   "merge --lane=7 | tail -3", "allow", cwd=NOGIT)
 sh("check-tail: merge --l, a prefix that names two options so argparse refuses it, piped to tail is allowed",
    "merge --l 7 | tail -3", "allow", cwd=NOGIT)
 sh("check-tail: python3 -m merge.merge --lane-lint piped to tail is refused",
