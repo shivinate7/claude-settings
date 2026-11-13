@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Runner 10 left #2990 out of batch 120 by omission (00:46 CST Nov 13): merge --reviewed reads it done (round 3, net value zero) and nothing holds it, but the batch was built from the coordinator's ordered list and the runner's own 21:44 CST list, which lost it. Rule building-never-drop-item-silently.",
  "source": "retrospective 00:45 CST Nov 13",
- "note": "merge --batch-build prints each PR that merge --reviewed reads done and no batch holds, with its reason (prose, conflict, held, or none). Red test first with #2990's shape. #2990 goes in the next code batch.",
- "updatedAt": "2026-11-13T00:46:40-06:00"
+ "note": "merge --batch-build prints each PR that merge --reviewed reads done and no batch holds, with its reason (prose, conflict, held, or none). Red test first with #2990's shape. #2990 goes in the next code batch. Retrospective 01:16 CST Nov 13: #2990 at new head 36f2aa824, with runner 10 for batch 122.",
+ "updatedAt": "2026-11-13T01:16:33-06:00"
 }
