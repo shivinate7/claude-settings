@@ -218,9 +218,9 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
     unreadable diff or an unmapped path runs everything.
 20. **Skip a push whose tree a PR run already proved.** The `push-skip` job runs the shared action
     `actions/push-skip`. It says skip only when the push tree equals the head tree of a merged PR
-    (a `batch-*` PR or a lone lane) whose run was full: every suite job passed and scope skipped no step.
+    (a `batch-*` PR or a lone lane) whose run passed: every suite job passed. A step that scope skipped does not stop the skip.
     A direct push, an admin merge, a tree mismatch and any read error run everything. A schedule or
-    dispatch run never skips. A narrowed PR run's push runs in full, since no nightly runs what it scoped out. Decision
+    dispatch run never skips. A suite a narrowed PR run left out is not run on main until a later change touches it. Decision
     `push-skip-on-proven-tree` (a push skips on a proven tree). See `snippets.md`, section 20.
 
 ## Public repos

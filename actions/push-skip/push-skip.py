@@ -6,14 +6,12 @@ Writes one line to $GITHUB_OUTPUT (stdout when unset): skip=true or skip=false. 
 is a visible success and scope reads its output.
 
 skip=true only when the push commit's tree equals the head tree of a pull request the push commit belongs to, and that pull request's
-run was FULL, in one of two forms:
-  1. a batch-* head (an integration pull request): its all-jobs-passed check run concluded success and so did every suite job. That
-     run is ready, and ci-scope.sh sets every scope flag on for a ready pull request from a batch-* branch, so no job or suite was
-     narrowed on the head's diff.
+run passed, in one of two forms (owner ruling own-769-a-narrowed-pr-push: after a passing PR run, narrowed or full, main runs none of
+its suites for that merge):
+  1. a batch-* head (an integration pull request): its all-jobs-passed check run concluded success and so did every suite job.
   2. any other merged pull request head (a lone lane): its newest checks run is a completed, successful pull request run in which
-     all-jobs-passed and every suite job succeeded and no step of a suite job was skipped. A pull request run narrows its suites by
-     the diff (scope flags skip steps), so a skipped step means the run was partial. The mutation-report job is exempt: its steps are
-     skipped by head ref (batch-* only), and on a push it reports nothing.
+     all-jobs-passed and every suite job succeeded. A suite step that scope skipped (a narrowed run) does not stop the skip: the
+     suites the diff left out are not re-run on main until a later change touches them.
 Anything else runs everything: a direct push, an admin merge with no green run, a tree mismatch, a red, draft, cancelled or
 in-progress run, a run of another head or workflow. A schedule or workflow_dispatch run (EVENT) never skips. Any error from the read,
 of any type, writes skip=false and says "unknown": an unknown state runs everything, never skips.
@@ -41,7 +39,6 @@ import urllib.parse
 
 BATCH_PREFIX = "batch-"
 ROLLUP = "all-jobs-passed"
-MUTATION_REPORT = "mutation-report"  # its steps skip off a batch-* head, so a skipped step there is no narrowing
 DEFAULT_WORKFLOW = ".github/workflows/checks.yml"
 PAGE = 100
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -80,7 +77,7 @@ def workflow_path(env):
 
 @functools.lru_cache(maxsize=None)
 def _suite_jobs(file):
-    """The jobs a full pull request run must have run its tests in: every job all-jobs-passed needs, except the bookkeeping jobs that
+    """The jobs a passing pull request run must have succeeded in: every job all-jobs-passed needs, except the bookkeeping jobs that
     decide, skip or fan in. Unknown when the workflow cannot be read or yields no check, since an empty list would let any run stand."""
     try:
         rules = _rules()
@@ -144,9 +141,9 @@ def suites_not_success(runs, env):
 
 
 def pull_request_run_gap(env, sha):
-    """None when the newest checks run of the pull request head `sha` is a full, green pull request run. Else the reason it proves
-    nothing. Raises Unknown on a read that cannot be judged. Full: the run, all-jobs-passed and every suite job succeeded, and no step
-    of a suite job was skipped (a scope flag skips steps). The mutation-report job's steps are exempt, as the module doc says."""
+    """None when the newest checks run of the pull request head `sha` is a green pull request run. Else the reason it proves
+    nothing. Raises Unknown on a read that cannot be judged. Green: the run, all-jobs-passed and every suite job succeeded. A step
+    that scope skipped inside a succeeded job is no gap (a narrowed run)."""
     body = get("actions/runs", {"head_sha": sha, "event": "pull_request", "per_page": str(PAGE)}, env)
     page = body.get("workflow_runs") if isinstance(body, dict) else None
     if not isinstance(page, list):
@@ -171,20 +168,14 @@ def pull_request_run_gap(env, sha):
         rows = [j for j in jobs if j.get("name") == name]
         if not rows or any((j.get("status"), j.get("conclusion")) != ("completed", "success") for j in rows):
             gaps.append("%s did not succeed" % name)
-        elif name not in (ROLLUP, MUTATION_REPORT):
-            for row in rows:
-                if not isinstance(row.get("steps"), list):
-                    gaps.append("%s has no step list" % name)
-                else:
-                    gaps += ["%s skipped step %s" % (name, s.get("name")) for s in row["steps"] if isinstance(s, dict) and s.get("conclusion") == "skipped"]
     return "; ".join(gaps) if gaps else None
 
 
 def read_heads(env):
     """The pull request heads that may cover the push: the stand-in when PRS_JSON is set, else the pull requests the push commit
     belongs to. Each record has its head's tree and its result: for a batch head, the all-jobs-passed result (not success when a
-    check did not succeed); for a merged lone-lane head whose tree is the push's tree, a success record with full_run set, kept only
-    when its run is a full pull request run. Raises Unknown on anything that is not a list of records."""
+    check did not succeed); for a merged lone-lane head whose tree is the push's tree, a success record with full_run set (the run passed), kept only
+    when its run is a green pull request run. Raises Unknown on anything that is not a list of records."""
     raw = env.get("PRS_JSON")
     if raw is not None:
         try:

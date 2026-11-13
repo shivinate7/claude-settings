@@ -12,9 +12,9 @@ The contract these cases pin. A change to any of it changes these cases first.
   commits/<head>/check-runs (a batch-* head only: its all-jobs-passed run and its suite runs); actions/runs?head_sha&event
   (the checks.yml runs of a merged pull request head that is not a batch head); actions/runs/<id>/jobs (its jobs, with steps).
 - skip=true when the push tree equals the tree of a batch-* head whose ready run passed every suite job, or of a merged pull
-  request head whose newest checks.yml run is a full green pull request run. Full means every suite job succeeded and no suite
-  step was skipped. Scope narrows a pull request run by its diff, and the mutation-report steps are skipped by head ref
-  (batch-* only), so those are the one exemption.
+  request head whose newest checks.yml run is a green pull request run: all-jobs-passed and every suite job succeeded. A suite step
+  that scope skipped does not stop the skip (owner ruling own-769-a-narrowed-pr-push: after a passing PR run, narrowed or full,
+  main runs none of its suites for that merge).
 - Any read error, unknown state or unreadable record writes skip=false and says "unknown".
 
 The stand-in PRS_JSON, a JSON list of batch heads, is read by the older cases. The live cases answer the reads through FakeGitHub,
@@ -561,11 +561,11 @@ class MergedPullRequest(LiveHead):
         self.assertIn("actions/runs", fake.reads, "push-skip never read the merged pull request's runs, so it cannot judge the exemption")
         self.assertEqual(value, "true", "a full run whose skipped steps are all mutation-report steps must give skip=true (%s)" % text.strip()[-200:])
 
-    def test_a_partial_run_whose_suite_step_was_skipped_by_scope_runs(self):
+    def test_a_narrowed_run_whose_suite_step_was_skipped_by_scope_skips(self):
         jobs = full_run_jobs({"checks-windows-rest": {"steps": [step("Run"), step("Rest tests", "skipped")]}})
         self.assertEqual(skipped_suite_steps(jobs), [("checks-windows-rest", "Rest tests")], "the fixture must skip one suite step, or it proves nothing")
-        value, _ = self.skip_on(fake=self.lane_fake([pull_request_run(1)], {1: jobs}))
-        self.assertEqual(value, "false", "a suite step skipped by scope makes the run partial, and a partial run proves nothing: skip=false")
+        value, text = self.skip_on(fake=self.lane_fake([pull_request_run(1)], {1: jobs}))
+        self.assertEqual(value, "true", "a green run with a suite step skipped by scope is a passing PR run, so main skips (%s)" % text.strip()[-200:])
 
     def test_a_draft_run_whose_suite_jobs_were_all_skipped_runs(self):
         jobs = full_run_jobs({name: {"conclusion": "skipped", "steps": []} for name in SUITE_JOBS})
@@ -643,13 +643,13 @@ class MergedPullRequest(LiveHead):
         value, _ = self.skip_on(fake=self.lane_fake(runs, jobs))
         self.assertEqual(value, "false", "a full page of runs may hide a newer run, so the read is unknown: skip=false")
 
-    def test_a_batch_head_that_passed_still_skips_beside_a_partial_merged_pull_request(self):
+    def test_a_batch_head_that_passed_still_skips_beside_a_narrowed_merged_pull_request(self):
         jobs = full_run_jobs({"checks-windows-rest": {"steps": [step("Rest tests", "skipped")]}})
-        self.assertTrue(skipped_suite_steps(jobs), "the merged pull request's run must be partial, so only the batch head can skip")
+        self.assertTrue(skipped_suite_steps(jobs), "the merged pull request's run must be partial, so the merged pull request is narrowed beside the batch head")
         fake = FakeGitHub(ready_head_runs(), pulls=[{"head": {"ref": BATCH, "sha": HEAD}}, lane_pull()],
                           trees={HEAD: TREE, LANE_HEAD: TREE}, workflow_runs=[pull_request_run(1)], jobs={1: jobs})
         value, _ = self.skip_on(fake=fake)
-        self.assertEqual(value, "true", "a green batch head with the push's tree still skips, whatever a partial merged pull request says")
+        self.assertEqual(value, "true", "a green batch head with the push's tree still skips, whatever a narrowed merged pull request says")
 
 
 class EventRefusal(LiveHead):

@@ -333,7 +333,7 @@ pull requests skips at its CI steps the same way. A skipped job fails the rollup
 ## 20. Skip a push whose tree a PR run already proved
 
 The `push-skip` job asks the shared action whether the pushed commit's tree is the head tree of a
-merged PR whose run was full. `scope` waits on the job. The suite jobs need `scope`, so a skip
+merged PR whose run passed. `scope` waits on the job. The suite jobs need `scope`, so a skip
 reaches every job through `needs`, and the run ends green.
 
 ```yaml
@@ -367,6 +367,5 @@ reaches every job through `needs`, and the run ends green.
 
 The action reads your suite jobs from your own `.github/workflows/checks.yml`: the jobs your
 `all-jobs-passed` needs, except `scope`, `push-skip` and the rollup. Set the `workflow` input when
-the file has another name. A step that scope skips in a suite job makes the PR run partial. The
-`mutation-report` job is the one exception. A partial run gives no skip, so the push runs in full.
-A `schedule` run never skips on this action. It is the check on what a PR run scoped out.
+the file has another name. A step that scope skips in a suite job does not stop the skip: a narrowed
+PR run that passed still skips the push. A `schedule` or manual run never skips on this action.

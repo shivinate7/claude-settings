@@ -117,7 +117,7 @@ pinned() { # pinned <case> <want>
 pinned green_batch true
 pinned green_lane true
 pinned skipped_suite false
-pinned skipped_step false
+pinned skipped_step true
 pinned schedule false
 pinned dispatch false
 
