@@ -1,0 +1,14 @@
+{
+ "id": "brief-matches-rulings",
+ "title": "Before a lane starts, a model-judged check reads the coordinator's brief against the governing rulings and flags one that drops or narrows a ruling",
+ "status": "todo",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Retrospective 13:36 CST Nov 13: the 12:07 \"close after merge\" brief was stricter than the owner's Nov 9 words; owner 13:33 CST asked whether any check compares briefs with what he meant. None does.",
+ "source": "retrospective 13:36 CST Nov 13, via message to triage",
+ "note": "Todo, candidate. Extends the past-ruling judge (step past-ruling-on-send) from page questions to lane briefs: read the brief beside the rulings store and the step's governing rulings, flag a brief that drops or narrows a ruling. Past rulings not checked; a ruling on the judge's scope may apply (step past-ruling-on-send). Not a rule change, so no owner word needed to queue it.",
+ "updatedAt": "2026-11-13T13:37:27-06:00"
+}
