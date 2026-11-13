@@ -215,6 +215,56 @@ mtc_refuse("a dated header 9 hours 28 minutes ahead at 07:08 is refused: a dated
            "Coordinator, 2026-11-08 16:36 CST: x", clock=MTC_MORNING)
 
 
+# ---- the header forms with no separator: a bracket, a paren, or a bare label. Each is a header stamp, the same as
+# `Coordinator, 12:53 CST:`. Main reads none of them: its header regex wants `,`, `:` or a spaced dash after the label.
+# So each 10-minutes-ahead refusal below is RED on main. Every other case here is marked STAYS GREEN: it passes on main
+# and must pass once the header form widens. The group's clock is 12:43 CST on 2026-11-13, so 12:53 is 10 minutes ahead.
+MTC_FORM_CLOCK = "2026-11-13T12:43:00-06:00"  # 12:43 CST, the clock of the 10-minutes-ahead refusals
+MTC_FORMS = (  # {t} is the stamp's time, 12:53 in every form below
+    ("bracket with a date", "[coordinator {t} CST Nov 13] hi"),
+    ("bracket", "[coordinator {t} CST] x"),
+    ("bold bracket", "**[coordinator {t} CST]** hi"),
+    ("paren", "(coordinator {t} CST) x"),
+    ("bare label", "coordinator {t} CST x"),
+    ("bare label with a date after the zone", "coordinator {t} CST Nov 13: hi"),
+)
+
+
+def mtc_form_cases():
+    """Each header form, at the clock's own minute, 1 minute ahead, 10 minutes behind, and 70 minutes ahead."""
+    for form, template in MTC_FORMS:
+        msg = template.format(t="12:53")
+        # RED on main: refused at 10 minutes ahead, and the reason prints the real time, 12:43 CST.
+        mtc_refuse("a %s header 10 minutes ahead is refused: 12:53 CST at 12:43" % form, msg,
+                   clock=MTC_FORM_CLOCK, carries=("12:43 CST",))
+        # STAYS GREEN: passes at the clock's own minute, 1 minute ahead, and behind.
+        mtc_allow("a %s header at the clock's own minute is allowed: 12:53 CST at 12:53" % form, msg,
+                  clock="2026-11-13T12:53:00-06:00")
+        mtc_allow("a %s header 1 minute ahead is allowed: 12:53 CST at 12:52" % form, msg,
+                  clock="2026-11-13T12:52:00-06:00")
+        mtc_allow("a %s header 10 minutes behind is allowed: 12:53 CST at 13:03" % form, msg,
+                  clock="2026-11-13T13:03:00-06:00")
+        # STAYS GREEN: undated and more than 60 minutes ahead, so it reads as a quote from an earlier day.
+        mtc_allow("a %s header 70 minutes ahead is allowed: undated, past the quote window" % form, msg,
+                  clock="2026-11-13T11:43:00-06:00")
+
+
+mtc_form_cases()
+
+# CONTROL, refused on main and must stay refused: the comma header, 10 minutes ahead. It differs from the bare form
+# only by its comma.
+mtc_refuse("a comma header 10 minutes ahead stays refused: Coordinator, 12:53 CST at 12:43",
+           "Coordinator, 12:53 CST: hi", clock=MTC_FORM_CLOCK, carries=("12:43 CST",))
+# STAYS GREEN, false alarms: a time in prose, not a header. Each sits 10 minutes before its own stamp, so a matcher that
+# reads the first words as a label refuses it.
+mtc_allow("a prose line, Done at 12:53 CST - see PR, 10 minutes ahead is allowed: prose, not a header",
+          "Done at 12:53 CST - see PR", clock=MTC_FORM_CLOCK)
+mtc_allow("a prose line, Deadline 15:00 CST for the merge, 10 minutes ahead is allowed: prose, not a header",
+          "Deadline 15:00 CST for the merge", clock="2026-11-13T14:50:00-06:00")
+mtc_allow("a prose line, Meet at 14:00 CST tomorrow, 10 minutes ahead is allowed: prose, not a header",
+          "Meet at 14:00 CST tomorrow", clock="2026-11-13T13:50:00-06:00")
+
+
 # ---- the written values: ArtifactData `added`, a roadmap step's `updatedAt`, a literal `updatedAt` in Bash
 # The same rule on more tools. Only these written values are judged, as ISO-8601 instants with an offset (`Z` or
 # +-HH:MM): `added` in an ArtifactData write (set, update, each write of a batch) to collection `items`; `updatedAt`
