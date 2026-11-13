@@ -1175,21 +1175,8 @@ class Host:
             raise Stop(f"reading the run {url} from GitHub failed: {e} {DEBT_CITE}")
 
     def comment_rows(self, since, seen=None):
-        """-> [{id, issue, kind, body, created, updated}] of the repo's review record and lane-lint comments updated since `since`, in the list's order
-        (created, oldest first): one list read. issue is the number from the comment's issue_url; kind is "record" when the review record marker is the whole
-        first line, or "lint" when the lane-lint marker is, and the author is the repo's owner. A timestamp the read did not give is None. `seen`, a list,
-        gets the updated_at of every comment the read returned, rows or not: the newest of them is a safe cursor. A failed read is a Stop.
-        The one home of the comment parse: issue_comments and the reviewed cursor's cache both take their rows from it."""
-        rows = []
-        for c in self.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
-            if seen is not None:
-                seen.append(c.get("updated_at"))
-            body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
-            first = body.splitlines()[:1]
-            kind = "record" if first == [REVIEW_MARKER] else "lint" if first == [LANE_LINT_MARKER] and c.get("author_association") == LANE_LINT_AUTHOR else None
-            if m and kind:
-                rows.append({"id": c.get("id"), "issue": int(m.group(1)), "kind": kind, "body": body, "created": c.get("created_at"), "updated": c.get("updated_at")})
-        return rows
+        """-> the review record and lane-lint rows updated since `since`: the module's comment_rows of this host."""
+        return comment_rows(self, since, seen)
 
     def issue_comments(self, since):
         """-> (records, lints): one list read of the repo's issue comments updated since `since` (comment_rows, grouped by comment_groups).
@@ -1197,7 +1184,7 @@ class Host:
         marker is its whole first line. A timestamp the read did not give is None.
         lints is {PR number: [lane-lint comment bodies, oldest first]}: the lint marker is the whole first line and the author is the repo's owner.
         A failed read is a Stop. The one home of the comment read: review_records, review_comments and the lane-lint check each take their part."""
-        return comment_groups(Host.comment_rows(self, since))  # unbound: a test fake borrows this method, and needs only its `pages`
+        return comment_groups(comment_rows(self, since))
 
     def review_records(self, since):
         """-> {PR number: [(body, created_at, updated_at) of each review record comment, oldest first]}: the records half of issue_comments."""
@@ -4398,6 +4385,24 @@ def iso_secs(text):
 def iso_stamp(secs):
     return datetime.datetime.fromtimestamp(secs, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+def comment_rows(h, since, seen=None):
+    """-> [{id, issue, kind, body, created, updated}] of the repo's review record and lane-lint comments updated since `since`, in the list's order
+    (created, oldest first): one list read. issue is the number from the comment's issue_url; kind is "record" when the review record marker is the whole
+    first line, or "lint" when the lane-lint marker is, and the author is the repo's owner. A timestamp the read did not give is None. `seen`, a list,
+    gets the updated_at of every comment the read returned, rows or not: the newest of them is a safe cursor. A failed read is a Stop.
+    The one home of the comment parse: issue_comments and the reviewed cursor's cache both take their rows from it. A function of the host, not only a
+    Host method: a test fake borrows issue_comments and has only `pages`."""
+    rows = []
+    for c in h.pages("issues/comments", fields={"since": since, "sort": "created", "direction": "asc"}):
+        if seen is not None:
+            seen.append(c.get("updated_at"))
+        body, m = c.get("body") or "", re.search(r"/issues/(\d+)$", c.get("issue_url") or "")
+        first = body.splitlines()[:1]
+        kind = "record" if first == [REVIEW_MARKER] else "lint" if first == [LANE_LINT_MARKER] and c.get("author_association") == LANE_LINT_AUTHOR else None
+        if m and kind:
+            rows.append({"id": c.get("id"), "issue": int(m.group(1)), "kind": kind, "body": body, "created": c.get("created_at"), "updated": c.get("updated_at")})
+    return rows
+
 def comment_groups(rows):
     """-> (records, lints) of comment_rows `rows`, in their order: records is {PR number: [(body, created, updated)]}, lints is {PR number: [body]}."""
     records, lints = {}, {}
@@ -4462,11 +4467,11 @@ def reviewed_rows(h, floor):
     warm = valid_reviewed_cache(cache) and floor_s is not None and iso_secs(cache["floor"]) <= floor_s and 0 <= now - cache["full_at"] <= REVIEWED_FULL_REREAD_SECS
     if warm:
         merged = {r["id"]: r for r in cache["rows"]}
-        merged.update({r["id"]: r for r in Host.comment_rows(h, iso_stamp(iso_secs(cache["cursor"]) - REVIEWED_OVERLAP_SECS), seen)})
+        merged.update({r["id"]: r for r in comment_rows(h, iso_stamp(iso_secs(cache["cursor"]) - REVIEWED_OVERLAP_SECS), seen)})
         rows = sorted(merged.values(), key=lambda r: (r["created"] or "", r["id"]))
         entry, newest = {"floor": cache["floor"], "full_at": cache["full_at"], "rows": rows}, [iso_secs(cache["cursor"])]
     else:
-        rows = Host.comment_rows(h, floor, seen)
+        rows = comment_rows(h, floor, seen)
         entry, newest = {"floor": floor, "full_at": now, "rows": rows}, [floor_s]
     newest += [iso_secs(u) for u in seen]
     top = max((t for t in newest if t is not None), default=None)
