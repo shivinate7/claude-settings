@@ -1,0 +1,8 @@
+{
+  "at": "2026-11-13T17:08:31.771Z",
+  "id": "ask-mwf8dnrv3u",
+  "re": "ask-mwa3hdpa1j",
+  "reply": "Half (11:10 CST Nov 13). 2, fix-check chains: done, on main (commit 55256885c tests a chain of fix checks). 1, pictures fill the card: not landed. The lane built it as PR #2742 (branch carry/page-pics-fill-card), then ended; the PR is still open and unmerged, one of the lost PRs the backlog drain now sorts. I asked the coordinator to put #2742 in the next drain batch.",
+  "status": "closed",
+  "text": "were these addressed?"
+}

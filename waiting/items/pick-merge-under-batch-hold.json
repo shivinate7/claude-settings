@@ -1,0 +1,47 @@
+{
+  "added": "2026-11-13T17:08:00Z",
+  "context": "Goal: merges stop waiting on a running batch run.\nProblem (goal): two fixes aim at the same lock; #3049 deletes it outright.\nBased on (ruling): R42 part 2 (owner 13:39 CST Nov 11) and drain-first-hold part 4 (merge-flow fixes go express).\nBased on (measured): the last 20 batch merges had main move under them 0 times, since the lock forbids it, so how often a merge would miss a batch's files cannot be read from history.\nDeparts from: main, where nothing merges while a batch runs \u2014 #3049 removes that lock, and the new lane lands only the lost design doc.",
+  "home": "step merge-under-running-batch",
+  "id": "pick-merge-under-batch-hold",
+  "kind": "decision",
+  "n": 702,
+  "options": [
+    {
+      "gain": "No second fix to a lock that #3049 removes.",
+      "how": "#3049 (lane merge-flow-after-anthropic) deletes the batch lock code and goes express. The new lane lands only the lost design doc as a prose PR, then waits.",
+      "id": "hold-behind-3049",
+      "key": "a",
+      "label": "Hold it behind #3049 (coordinator's pick)",
+      "lose": "Merges still wait for a running batch until #3049 lands."
+    },
+    {
+      "gain": "Merges stop waiting sooner.",
+      "how": "The lane builds the check that lets a merge land under a running batch when no file overlaps, ahead of #3049.",
+      "id": "build-now",
+      "key": "b",
+      "label": "Build the file-disjoint merge now",
+      "lose": "Work that #3049 throws away, and its benefit cannot be measured from history: in the last 20 batch merges main never moved under a batch."
+    }
+  ],
+  "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6)",
+  "pick": "a",
+  "ref": "coordinator 11:08 CST Nov 13",
+  "repo": "shivinate7/claude-settings",
+  "short": "Merge under batch: wait for #3049",
+  "shown": [
+    {
+      "id": "hold-behind-3049",
+      "key": "a",
+      "label": "Hold it behind #3049 (coordinator's pick)"
+    },
+    {
+      "id": "build-now",
+      "key": "b",
+      "label": "Build the file-disjoint merge now"
+    }
+  ],
+  "stands": true,
+  "status": "open",
+  "title": "Hold the merge-under-a-running-batch fix behind #3049, which removes the lock?",
+  "why": "The coordinator took this pick; it stands unless you choose b."
+}

@@ -1,0 +1,9 @@
+{
+  "at": "2026-11-13T17:06:38.138Z",
+  "choice": "c",
+  "item": "reply-hold-close",
+  "label": "C: Keep the hold and add a Close now button (Recommended)",
+  "n": 542,
+  "note": "",
+  "optionId": "hold-plus-close-button"
+}
