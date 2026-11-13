@@ -25,6 +25,7 @@
   ],
   "owner": "lane fast-forward-clean-start (session_013NEJL37QY2EjAqXYiuEe3b), PR #3141",
   "ref": "coordinator 09:55 CST Nov 13",
+  "reply": "Closed 10:01 CST Nov 13 by triage: a past ruling settles it. Step c36 (local sessions pick up merged settings, advisor ruling Oct 23) fast-forwards whichever tree holds main when it is on main with no tracked changes, as merge.py and launch.py already do. So option a stands: PR #3141 stays as built. Posted in error. Undo: reopen this item.",
   "repo": "shivinate7/claude-settings",
   "short": "Fast-forward a shared clean checkout",
   "shown": [
@@ -40,7 +41,7 @@
     }
   ],
   "stands": false,
-  "status": "open",
+  "status": "closed",
   "title": "May a session's start fast-forward a clean main checkout that another live session may share?",
   "why": "Your 21:59 CST Nov 12 answer (Q6 B) asked for the nuance to be pondered; this is that nuance, and no ruling of yours settles it."
 }
