@@ -41,7 +41,7 @@ root ask. The page draws Mark read only on a routed ask. An ask with no `home` s
 ## Message another session
 
 Draft: decision `session-messages` is open. The git mailbox is on main.
-Build step 2 (the Mac and Windows auth check) has not run.
+The Mac and Windows round trips passed (2026-11-12); the 20-message trial (build step 5) is open.
 
 Decision `session-messages` (messages between sessions) sets this.
 

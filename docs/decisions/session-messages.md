@@ -174,8 +174,8 @@ Design:
   the take alone.
 - Read. `mail read` lists the open messages under the session's own folders. `mail read [--addr <addr>] <id>`
   prints one message with its body. Without `--addr`, every folder of the session is read. Exit codes
-  for all `mail` commands: 0 ok; 1 not sent, not taken, or "mail unknown"; 2 bad use or `MAILBOX_REPO`
-  not set.
+  for all `mail` commands: 0 ok; 1 not sent, not taken, or "mail unknown"; 2 bad use, `MAILBOX_REPO`
+  not set, or the platform held.
 - Failure classes: push race (retry); offline computer (mail waits; "mail unknown"); stale clone (`ls-remote`
   each turn); auth on a Mac or Windows PC ("mail unknown: auth", no prompt); dead session (exact-address mail stays;
   repo-address mail goes to the next session in that repo; age shown); a turn with no UserPromptSubmit
