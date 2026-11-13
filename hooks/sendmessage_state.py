@@ -10,7 +10,8 @@ something that changes its work). Spec: docs/decisions/agent-model-cap.md, the t
   read of the `"ref":` lines under roadmap/rulings, in the repo of the payload's cwd: one `ref` listing, then
   one `grep` of the local ref `roadmap` and `origin/roadmap`, both when both exist; never a fetch. It refuses,
   rule `past-ruling`, when a ruling's supersedes ref names a cited decision. A ref that quotes a sentence
-  refuses only when the message shares two of its key words; a ref with no sentence refuses always. Why: a
+  refuses only when the message shares two of its key words; a bare-slug or docs-path ref with no sentence
+  refuses always, and prose that names a decision with no sentence after it refuses never. Why: a
   reply that settles a lane's question on a superseded decision sends the lane the wrong way (incident: a
   reply cited a decision a later ruling had replaced). Cost: two git processes, only for a settling message
   that cites a decision; any other message starts none. A missing store allows silently; an unreadable
@@ -82,10 +83,12 @@ REF_VALUE = re.compile(r'"ref":\s*("(?:[^"\\]|\\.)*")')  # a line may hold sever
 SETTLING = re.compile(r"\bsettled\b|\bno owner item\b|\balready (?:ruled|decided)\b|\bowner already decided\b", re.I)
 NEGATED = re.compile(r"(?:\bnot|n['\u2019]t)\s+(?:yet\s+)?$", re.I)  # right before a settling phrase: it settles nothing
 # A cited decision: `decisions/<slug>` (so also docs/decisions/<slug>.md), or `decision(s)` and a list of slugs
-# (backticks, commas, "and", "or" ok). The prose form needs a hyphen in the slug (every record slug has one), so
-# "decision made" is no cite. A slug is read whole: no prefix match.
+# (backticks ok). Any run of separators (comma, semicolon, slash, &, parentheses, "and", "or") joins two slugs, so
+# an Oxford comma (", and") keeps the list going; a sentence end or a word with no hyphen ends it. The prose form
+# needs a hyphen in the slug (every record slug has one), so "decision made" is no cite. A slug is read whole.
 CITE_PATH = re.compile(r"\bdecisions/([\w-]+)", re.I)
-CITE_WORD = re.compile(r"\bdecisions?\b:?\s*((?:`?\w+(?:-\w+)+`?(?:\s*(?:,|&|\band\b|\bor\b)\s*)?)+)", re.I)
+CITE_SEP = r"(?:\s*(?:[,;/&()]|\band\b|\bor\b)\s*)"
+CITE_WORD = re.compile(r"\bdecisions?\b:?\s*\(?\s*((?:`?\w+(?:-\w+)+`?" + CITE_SEP + r"*)+)", re.I)
 SLUG = re.compile(r"\w+(?:-\w+)+")
 # A stored ref, three shapes: `docs/decisions/<slug>.md[: "<sentence>"]`, `<slug>[: <sentence>]`, or prose that cites.
 REF_PATH = re.compile(r"\s*(?:docs/)?decisions/([\w-]+)(?:\.md)?\s*(?::\s*(.*))?$", re.S)
@@ -201,13 +204,16 @@ def settles(message):
 
 
 def ref_decisions(ref):
-    """[(slug, quoted sentence or "")] for one stored supersedes ref. A ref with no sentence retires the whole
-    decision. Prose (as in `decision <slug> (owner ...): <sentence>`) takes the text after the cite."""
+    """[(slug, quoted sentence or "")] for one stored supersedes ref. Only a bare slug, `<slug>: <sentence>` or
+    `docs/decisions/<slug>.md[: <sentence>]` may retire the whole decision (no key words in its sentence). Prose
+    (as in `decision <slug> (owner ...): <sentence>`) takes the text after the cite, and a prose cite with no key
+    words after it (as in `lint/x.py:36: '... per decision <slug>.'`) retires nothing."""
     for shape in (REF_PATH, REF_SLUG):
         match = shape.match(ref)
         if match:
             return [(match.group(1).lower(), (match.group(2) or "").strip().strip("\"'\u201c\u201d"))]
-    return [(slug, ref[end:].strip(" :()-")) for slug, end in cites(ref)]
+    prose = [(slug, ref[end:].strip(" :()-")) for slug, end in cites(ref)]
+    return [(slug, sentence) for slug, sentence in prose if key_words(sentence, slug)]
 
 
 def key_words(text, slug=""):
