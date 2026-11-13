@@ -69,7 +69,7 @@ jobs:
     needs: touched
     if: ${{ github.event.pull_request.draft && needs.touched.outputs.any == 'true' }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10   # provisional, 4 runs, slowest 4.7 min (decision ci-job-caps)
+    timeout-minutes: 30   # interim stopgap (decision ci-job-caps): macOS ended at the old 10 min cap twice, no red step (run 43493592401, 2 attempts); Windows took 7.9 min
     # One entry per system that has tests to run: the selector leaves a system out when its list is empty.
     strategy:
       fail-fast: false
