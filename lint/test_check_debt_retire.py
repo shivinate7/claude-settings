@@ -40,6 +40,7 @@ FAIL = "Delete the old helper. Check: `tests/test_fail.py`."
 PROSE = "Delete the old helper once nothing reads it."
 RUN_URL = "https://github.com/fixture/repo/actions/runs/42"
 ATTRIBUTION = "\U0001F916 Generated with [Claude Code](https://claude.com/claude-code)"
+SESSION_URL = "https://claude.ai/code/session_013NEJL2SdAA1CCG5eTFVFVr"
 NO_RETIRED = "check_debt_retire has no retired(): a Retire-run cite cannot excuse a debt close (decision debt-close-runs-retire)"
 
 
@@ -152,6 +153,99 @@ class Case(unittest.TestCase):
     def statuses(self):
         """The git status letter of each path from base to head, with rename detection on, as git pairs them."""
         return [line.split("\t")[0][0] for line in sh(self.dir, "git", "diff", "--name-status", "-M", self.base, self.head).splitlines()]
+
+
+class Isolated(Case):
+    """An isolated run (the merge tool and the CLI) gives the scratch worktree the checkout's installed packages (decision debt-close-runs-retire)."""
+
+    NEEDS_DEPS = ("import os, sys\n"
+                  "sys.exit(0 if os.path.isdir(os.path.join('node_modules', 'marker')) else 1)\n")
+
+    def deps_repo(self, nested=False):
+        retire = "Delete the helper. Check: `tests/test_deps.py`" + (" and `tests/test_deps_sub.py`." if nested else ".")
+        self.repo(debts={"d-deps": retire})
+        self.change(write={"tests/test_deps.py": self.NEEDS_DEPS, "package.json": "{}\n", ".gitignore": "node_modules/\n",
+                           **({"sub/package.json": "{}\n", "tests/test_deps_sub.py": self.NEEDS_DEPS.replace("'node_modules'", "'sub', 'node_modules'")}
+                              if nested else {})})
+        self.base = self.head
+        self.change(rm=["docs/debts/d-deps.md"])
+        for pre in ("", "sub") if nested else ("",):
+            put(os.path.join(self.dir, pre, "node_modules", "marker", "x"), "x")
+
+    def isolated(self, where=None):
+        return D.check(where or self.dir, self.base, head=self.head, isolate=True)
+
+    def fresh_worktree(self):
+        """A detached worktree of the head with no node_modules of its own: the shape the merge tool runs a Retire check in."""
+        wt = os.path.join(self.folder, "wt")
+        sh(self.dir, "git", "worktree", "add", "-q", "--detach", wt, self.head)
+        self.addCleanup(sh, self.dir, "git", "worktree", "remove", "--force", wt)
+        return wt
+
+    def test_i1_installed_packages_reach_the_scratch_worktree(self):
+        self.deps_repo()
+        self.assertEqual(pairs(self.isolated()), [], "a scratch run did not see the checkout's node_modules")
+
+    def test_i2_a_nested_package_folder_gets_its_packages_too(self):
+        self.deps_repo(nested=True)
+        self.assertEqual(pairs(self.isolated()), [], "a nested node_modules did not reach the scratch worktree")
+
+    def test_i2b_a_nested_package_folder_without_packages_is_red(self):
+        self.deps_repo(nested=True)
+        shutil.rmtree(os.path.join(self.dir, "sub", "node_modules"))
+        self.assertEqual(pairs(self.isolated()), [("d-deps", "red")], "the nested test passed without sub/node_modules")
+
+    def test_i3_a_checkout_with_no_packages_still_runs_the_test_and_it_is_red(self):
+        self.deps_repo()
+        shutil.rmtree(os.path.join(self.dir, "node_modules"))
+        self.assertEqual(pairs(self.isolated()), [("d-deps", "red")], "a test that fails with no packages stopped being red")
+
+    def test_i4_a_real_red_test_stays_red_with_packages_linked(self):
+        self.repo(debts={"d-fail": FAIL})
+        self.change(write={"package.json": "{}\n", ".gitignore": "node_modules/\n"}, rm=["docs/debts/d-fail.md"])
+        put(os.path.join(self.dir, "node_modules", "marker", "x"), "x")
+        self.assertEqual(pairs(self.isolated()), [("d-fail", "red")], "linking packages hid a failing test")
+
+    def test_i5_the_scratch_link_does_not_remove_the_checkouts_packages(self):
+        self.deps_repo()
+        self.isolated()
+        self.assertTrue(os.path.isfile(os.path.join(self.dir, "node_modules", "marker", "x")), "cleanup deleted the real node_modules")
+
+    def test_i6_a_fresh_worktree_of_an_installed_checkout_gets_the_checkouts_packages(self):
+        self.deps_repo()
+        wt = self.fresh_worktree()
+        self.assertFalse(os.path.lexists(os.path.join(wt, "node_modules")), "scope: the fresh worktree already has node_modules")
+        self.assertEqual(pairs(self.isolated(wt)), [], "a fresh worktree did not reach the installed checkout's node_modules")
+
+    def test_i6b_a_fresh_worktree_with_no_packages_anywhere_is_red(self):
+        self.deps_repo()
+        shutil.rmtree(os.path.join(self.dir, "node_modules"))
+        wt = self.fresh_worktree()
+        self.assertFalse(os.path.lexists(os.path.join(self.dir, "node_modules")), "scope: the checkout still has node_modules")
+        self.assertEqual(pairs(self.isolated(wt)), [("d-deps", "red")], "a test with no packages anywhere stopped being red")
+
+    def test_i6c_the_worktrees_own_packages_win_over_the_checkouts(self):
+        self.deps_repo()
+        wt = self.fresh_worktree()
+        os.makedirs(os.path.join(wt, "node_modules"))  # wt's own install, without the marker
+        self.assertFalse(os.path.exists(os.path.join(wt, "node_modules", "marker")), "scope: wt's own install has the marker")
+        self.assertEqual(pairs(self.isolated(wt)), [("d-deps", "red")], "the checkout's packages replaced the worktree's own")
+
+    def test_i6d_a_real_red_test_in_a_fresh_worktree_stays_red(self):
+        self.repo(debts={"d-fail": FAIL})
+        self.change(write={"package.json": "{}\n", ".gitignore": "node_modules/\n"}, rm=["docs/debts/d-fail.md"])
+        put(os.path.join(self.dir, "node_modules", "marker", "x"), "x")
+        wt = self.fresh_worktree()
+        self.assertFalse(os.path.lexists(os.path.join(wt, "node_modules")), "scope: the fresh worktree already has node_modules")
+        self.assertEqual(pairs(self.isolated(wt)), [("d-fail", "red")], "linking packages hid a failing test")
+
+    def test_i7_a_relative_checkout_path_links_the_packages(self):
+        self.deps_repo()
+        here = os.getcwd()
+        os.chdir(self.dir)
+        self.addCleanup(os.chdir, here)
+        self.assertTrue(os.path.isfile(os.path.join("node_modules", "marker", "x")), "scope: the checkout has no packages")
+        self.assertEqual(pairs(self.isolated(".")), [], "a relative checkout path linked node_modules to itself")
 
 
 class Closes(Case):
@@ -355,6 +449,17 @@ class RetireRun(Case):
         self.assertEqual(runs.urls, [RUN_URL], "the cited run was not read")
         self.assertEqual(pairs(found), [], "a green run on a descendant of the PR head did not clear the debt")
 
+    def test_r1c_a_session_url_line_after_the_attribution_does_not_hide_the_cite(self):
+        self.closed_prose()
+        plain = "Summary.\n\nRetire-run: d-prose -- %s\n\n%s\n" % (RUN_URL, ATTRIBUTION)
+        self.assertEqual(pairs(self.findings(pr_body=plain, run_state=Runs(("success", self.head)))), [],
+                         "scope: the body without the session URL line did not clear the prose debt")
+        runs = Runs(("success", self.head))
+        body = "Summary.\n\nRetire-run: d-prose -- %s\n\n%s\n\n%s\n" % (RUN_URL, ATTRIBUTION, SESSION_URL)
+        found = self.findings(pr_body=body, run_state=runs)
+        self.assertEqual(runs.urls, [RUN_URL], "a session URL line after the attribution hid the Retire-run cite")
+        self.assertEqual(pairs(found), [], "a session URL line after the attribution left the prose debt standing")
+
     def test_r2_a_cite_of_a_failing_run_is_red(self):
         self.closed_prose()
         runs = Runs(("failure", self.head))
@@ -444,6 +549,34 @@ class RetireRun(Case):
         body = "Retire-run: d-prose -- %s\n" % RUN_URL
         self.assertEqual(pairs(self.findings(pr_body=body)), [("d-prose", "unknown")], "scope")
         self.assertEqual(self.retired_of(body, None), {})
+
+
+class TemplateExcuses(unittest.TestCase):
+    """The PR template's own excuse lines. A PR body starts from the template, so a live excuse line in it would excuse a
+    path or a debt in every PR that keeps it (decision debt-close-runs-retire)."""
+
+    RETIRE_LINE = "Retire-run: <slug> -- <run URL>"  # the template's untouched placeholder lines
+    DROPS_LINE = "Drops-lines: <path> -- <reason>"
+
+    def live(self, text):
+        """The excuse keys `text` carries, read the way the checks read a PR body: Retire-run slugs, then Drops-lines paths.
+        A key that starts with `<` is an untouched placeholder, which names nothing real, so it drops out."""
+        keys = list(D.cites(text)) + list(D.undo.allowed(HERE, "HEAD..HEAD", text))
+        return [k for k in keys if not k.startswith("<")]
+
+    def template(self):
+        with open(os.path.join(HERE, "..", ".github", "pull_request_template.md"), encoding="utf-8") as f:
+            return f.read()
+
+    def test_real_template_carries_no_live_excuse(self):
+        self.assertEqual(self.live(self.template()), [], "the PR template carries a live excuse line, so a PR body that starts from it excuses something")
+
+    def test_live_excuse_lines_in_the_template_are_read(self):
+        text = self.template()
+        mutated = (text.replace(self.RETIRE_LINE, "Retire-run: a-debt -- https://example.test/run/1")
+                       .replace(self.DROPS_LINE, "Drops-lines: docs/a.md -- gone"))
+        self.assertNotEqual(mutated, text, "scope: the template has no placeholder line to replace, so nothing was mutated")
+        self.assertEqual(self.live(mutated), ["a-debt", "docs/a.md"], "the excuse read misses a live Retire-run or Drops-lines line")
 
 
 if __name__ == "__main__":
