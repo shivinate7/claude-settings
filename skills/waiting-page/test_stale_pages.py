@@ -1219,6 +1219,14 @@ class Stale(unittest.TestCase):
                 r = self.paired_run(extra_items, extra_answers, as_folder)
                 self.assert_not_named(r, item_id, case)
 
+    def assert_named_in_both_shapes(self, extra_items, extra_answers, item_id, n, case):
+        """The run read the incident's answer first (the scope), then exactly one kept-answer line names item `n` (id `item_id`), which is `case`."""
+        for as_folder in (False, True):
+            with self.subTest("folder of <id>.json files" if as_folder else "list file", case=case):
+                r = self.paired_run(extra_items, extra_answers, as_folder)
+                self.assert_kept_line(r, INCIDENT_N, INCIDENT_ID)
+                self.assert_kept_line(r, n, item_id)
+
     def test_an_open_item_with_a_kept_answer_is_not_named(self):
         self.assert_not_named_in_both_shapes([decision_item(357, "open-answer", status="open")],
                                              [("open-answer", answer_for("open-answer", 357))],
@@ -1240,6 +1248,28 @@ class Stale(unittest.TestCase):
         item = decision_item(366, "routed-answer", lane=LANE, lastAnswer={"choice": "a", "note": "x", "at": ANSWER_AT})
         self.assert_not_named_in_both_shapes([item], [("routed-answer", answer_for("routed-answer", 366))],
                                              "routed-answer", "a routed closed item (lane set, kept until the done report) with a kept answer")
+
+    # The skip in kept_answer_lines needs a non-empty string `lane` and a dict `lastAnswer`. Each case below misses one part of
+    # that, so the closed item is not routed and its kept answer is still named.
+    def test_a_closed_item_with_an_empty_lane_and_a_kept_answer_is_named(self):
+        item = decision_item(367, "empty-lane-answer", lane="", lastAnswer={"choice": "a", "note": "x", "at": ANSWER_AT})
+        self.assert_named_in_both_shapes([item], [("empty-lane-answer", answer_for("empty-lane-answer", 367))],
+                                         "empty-lane-answer", 367, "a closed item with an empty lane and a kept answer")
+
+    def test_a_closed_item_with_a_non_string_lane_and_a_kept_answer_is_named(self):
+        item = decision_item(368, "number-lane-answer", lane=5, lastAnswer={"choice": "a", "note": "x", "at": ANSWER_AT})
+        self.assert_named_in_both_shapes([item], [("number-lane-answer", answer_for("number-lane-answer", 368))],
+                                         "number-lane-answer", 368, "a closed item with a non-string lane and a kept answer")
+
+    def test_a_closed_item_with_a_lane_and_no_last_answer_and_a_kept_answer_is_named(self):
+        item = decision_item(369, "no-last-answer", lane=LANE)
+        self.assert_named_in_both_shapes([item], [("no-last-answer", answer_for("no-last-answer", 369))],
+                                         "no-last-answer", 369, "a closed item with a lane and no lastAnswer and a kept answer")
+
+    def test_a_closed_item_with_a_lane_and_a_non_dict_last_answer_and_a_kept_answer_is_named(self):
+        item = decision_item(370, "string-last-answer", lane=LANE, lastAnswer="a")
+        self.assert_named_in_both_shapes([item], [("string-last-answer", answer_for("string-last-answer", 370))],
+                                         "string-last-answer", 370, "a closed item with a lane and a non-dict lastAnswer and a kept answer")
 
     def test_a_closed_arbiter_ruling_with_an_overturn_answer_is_not_named(self):
         self.assert_not_named_in_both_shapes([decision_item(360, "ruling-answer", arbiter=True, pick="a")],
