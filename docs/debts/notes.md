@@ -2271,3 +2271,5 @@
 - select-loop-path-unfollowed: a path named by a loop variable, as in `for n in ("x.py",): open(join(HERE, n))`, is not followed.
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
+- read-back-other-pr-newest: `merge --review-record --read-back` skips a record that parses for another PR, so an older good record can win where `--reviewed` reads the newest comment and calls it bad; the merge gate still refuses.
+- read-back-edited-record: `--read-back` PASS does not check that the record was edited after posting, which `--reviewed` refuses; the PASS line says only that it parses.
