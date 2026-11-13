@@ -2271,11 +2271,6 @@ def hit_suites(root, paths, skip):
 
 _SMALL_MOVES = {}  # (worktree, head, base tip) -> the verdict, so the read after the wait does not repeat a proof it already holds
 
-def flags_on(flags, *skip):
-    """-> the sorted names of ci-scope.sh's flags that are on, less `skip` and the lint_* flags. Both callers (the small move and --express)
-    run `ci-job checks --lint` on the merge, which runs every lint, so a lint flag on loses no check and is not a job turned on."""
-    return sorted(k for k, v in flags.items() if k not in skip and not k.startswith("lint_") and v != "false")
-
 def small_base_move(wt, base_ref, sha, before_run=None):
     """-> (True, why the green run on sha stands) or (False, why not), for a sha that lacks the base tip T. A read that
     could not run gives a `why` of UnreadText: no finding, so no refusal.
@@ -2337,7 +2332,7 @@ def small_base_move(wt, base_ref, sha, before_run=None):
         c, out = sh(["bash", CI_SCOPE], cwd=wt, env=env, timeout=120)
         with open(out_file, encoding="utf-8") as f:
             flags = dict(l.strip().split("=", 1) for l in f if "=" in l)
-        on = flags_on(flags)
+        on = sorted(k for k, v in flags.items() if v != "false")
         if on or not flags:
             return False, f"{CI_SCOPE} turns on " + (", ".join(on) if flags else "every job (it gave no answer)") + " for main's paths"
         if c:
@@ -3563,6 +3558,11 @@ RULED_STORE_PATH = "roadmap/rulings/{id}.json"  # on origin/roadmap: one file pe
 RULING_LINE = re.compile(r"^Ruling:[ \t]*(.*?)[ \t\r]*$", re.M)  # only the first such line counts, so a later valid one cannot rescue an invalid first
 RULING_ID = re.compile(r"[a-z0-9-]+")
 EXPRESS_PATHS_SHOWN = 8
+
+def flags_on(flags, *skip):
+    """-> the sorted names of ci-scope.sh's flags that are on, less `skip` and the lint_* flags. A lint flag on is not a job turned on:
+    --express relies on the PR's own CI lint steps, which run every lint."""
+    return sorted(k for k, v in flags.items() if k not in skip and not k.startswith("lint_") and v != "false")
 
 def express_refusal(root, wt, base_ref, info):
     """--express: -> why this PR may not take the express path, else None. It needs a `Ruling: <id>` line in the body whose entry is on
