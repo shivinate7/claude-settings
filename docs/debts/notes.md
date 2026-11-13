@@ -2277,3 +2277,5 @@
 - select-loop-path-unfollowed: a path named by a loop variable, as in `for n in ("x.py",): open(join(HERE, n))`, is not followed.
 - select-new-guard-picks-none: a new hooks/guard_<x>.py named by no list picks 0 suites, though test_checks_never_raise.py and test_wrappers.py enumerate it.
 - select-bash-suites-never-picked: bash suites such as githooks/test_pre_commit.sh and hooks/test_*.sh are never picked; outside scope.
+- pick-reaches-page-heading-key: a heading line `Coordinator picks:` over bullets has the empty key, so one writer send of the bare heading covers later heading messages in the turn (hooks/guard_merge.py). Fix: none — rare and harmless. Decision: pick-reaches-page. Until: 2026-11-27
+- pick-reaches-page-prompt-gap: a lane start prompt from create_session can carry a pick, and only send_message is read; brief_hit judges that prompt (hooks/guard_merge.py). Fix: none — rare and harmless. Decision: pick-reaches-page. Until: 2026-11-27
