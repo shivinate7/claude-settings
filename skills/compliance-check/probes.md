@@ -215,7 +215,7 @@ of the live file. The live file is the one `install.sh` writes: `$CLAUDE_CONFIG_
 variable is set and not empty, else `~/.claude/settings.json`. `SessionStart` is dropped on
 both sides, since a cloud install rewrites it. Both sides print as key-sorted JSON, so key order is no
 difference. A difference prints as a unified diff, each line indented two spaces: `clone` is `-`, `live` is `+`.
-For in shape and out, the first line after the verdict is `  trusts: clone (<root>/settings.json); live (<live>) is the copy checked`, where `<live>` is `~/.claude/settings.json` or `<dir>/settings.json`, the file read. The clone is the trusted side, since `install.sh` writes the live file from it. A clone with no `settings.json` is n/a. The probe is `unknown` when the live file is missing, or when the live or clone file cannot be read, is not UTF-8, is not JSON, is not a JSON object, or has a `hooks` that is not an object. A file with no `hooks` key compares as empty hooks.
+For in shape and out, the first line after the verdict is `  trusts: clone (<root>/settings.json); live (<live>) is the copy checked`, where `<live>` is `~/.claude/settings.json` or `<dir>/settings.json`, the file read. The clone is the trusted side, since `install.sh` writes the live file from it. A clone with no `settings.json` is n/a. The probe is `unknown` when the live file is missing, or when either file cannot be read, is not UTF-8 or is not JSON. It is also `unknown` when either file is not a JSON object, or its `hooks` is not an object. A file with no `hooks` key compares as empty hooks.
 
 ## Copies
 
