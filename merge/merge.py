@@ -16,6 +16,8 @@
                           On a ready PR a stale records page with no claim to make or resume is refused before any push; only the draft step heals it.
                           The batch runner's join (cloud) needs a lane-lint PASS for the head's sha. Only a batch integration PR skips it, when the all-jobs-passed rollup is green on that exact head:
                           then it skips the lint and prints one `merge: lane lint skipped ...` line naming the rollup and the head's first 9 characters.
+  merge <pr> --confirm --express   go on to the merge only for a prose-only diff (main's ci-scope.sh turns on nothing) whose body has a `Ruling: <id>`
+                          line naming an entry in origin/roadmap's rulings; any other case refuses before a push. The batch brake still holds.
   merge --unlock [branch] remove the merge lock on the branch (default: the default branch). Never checks the holder. A cloud run reads the lock first and skips one already released.
   merge <pr> --review-record --head SHA --kind K --guard yes|no [--round N:ROLE:MODEL:VERDICT ...]
                           [--fix-check HEAD:reviewer:MODEL:PASS|FAIL] [--net-value V] [--grant "#PR, item N x, owner, YYYY-MM-DD HH:MM CST|CDT"]
@@ -240,6 +242,7 @@ RERUN_REMEDY = "gh run rerun"  # base_state names it for a cancelled run on the 
 RERUN_IN_FLIGHT = "is a re-run still going"  # base_state words an unknown re-run with it; red_base reads it back to give the re-run its own headline
 DROP_CITE = "(decision merge-deletes-batch-lanes, a batch that drops a lane by a revert of its merge does not merge)"
 BATCH_CITE = "(decision no-merge-during-batch-ci, nothing merges while another ready pull request's CI runs, and the required checks are never empty)"
+EXPRESS_CITE = "(decision owner-override, ruling R59 part 5 of 15:05 CST Nov 12, a ruled prose change skips the batch queue and runs only the checks that read its files)"
 FREEZE_CITE = BATCH_CITE  # the batch build and drop refusals cite the batch brake's decision, though the freeze decision governs them; a later change points this at the freeze decision
 DRAFT_CITE = "(decision draft-until-reviewed, every pull request opens as a draft and only the one integration PR goes ready)"
 STAMP_RUN_CITE = "(decision one-shared-record-stamp, the claim runs before the merge, on the pull request branch, in the merge tool)"
@@ -3460,6 +3463,63 @@ def batch_refusal(host, n, base, head):
     return (f"#{n} does not merge to {base} while another ready PR's CI runs and that PR's head does not contain this head: " + "; ".join(blockers) + ".\n"
             f"Wait for that run to end. Its run's end, or its CI-done comment on a red run, wakes the session that watches that PR. Then run again. {BATCH_CITE}")
 
+RULED_STORE_PATH = "roadmap/rulings/{id}.json"  # on origin/roadmap: one file per ruling; --express reads one
+RULING_LINE = re.compile(r"^Ruling:[ \t]*(.*?)[ \t\r]*$", re.M)  # only the first such line counts, so a later valid one cannot rescue an invalid first
+RULING_ID = re.compile(r"[a-z0-9-]+")
+EXPRESS_PATHS_SHOWN = 8
+
+def express_refusal(root, wt, base_ref, info):
+    """--express: -> why this PR may not take the express path, else None. It needs a `Ruling: <id>` line in the body whose entry is on
+    origin/roadmap, and a diff that main's own ci-scope.sh turns no job or suite on for. The script is main's copy, read with `git show`,
+    so a PR cannot rewrite its own classifier. A read that cannot run refuses as unknown (unknown is red). Cost: one fetch, about four git
+    starts, one script run, two temp files."""
+    found = RULING_LINE.search(info.get("body") or "")
+    rid = found.group(1) if found else ""
+    if not RULING_ID.fullmatch(rid):
+        return (f"--express needs a `Ruling: <id>` line in the PR body with an id of lower-case letters, digits and hyphens; the first Ruling line "
+                f"reads {rid!r}" if found else "--express needs a `Ruling: <id>` line in the PR body, and it has none")
+    path = RULED_STORE_PATH.format(id=rid)
+    try:
+        tip = fetch_branch(root, "roadmap", EXPRESS_CITE)
+    except Stop as e:
+        return f"unknown: the ruling store cannot be read, so ruling {rid} is unproven ({str(e).removesuffix(' ' + EXPRESS_CITE)})"
+    if git(root, "cat-file", "-e", f"{tip}:{path}")[0]:
+        return f"ruling {rid} has no entry at origin/roadmap:{path}"
+    c, script = git(wt, "show", f"{base_ref}:{CI_SCOPE}")
+    c2, base_tip = git(wt, "rev-parse", base_ref)
+    jobs = re.search(r'^JOBS="([^"]*)"', script, re.M)
+    every = re.search(r'^ALL="([^"]*)"', script, re.M)
+    if c or c2 or not jobs or not every:
+        return f"unknown: {base_ref}'s {CI_SCOPE} cannot be read, so whether the diff is prose-only is unproven"
+    names = every.group(1).replace("$JOBS", jobs.group(1)).split()
+    fd, copy = tempfile.mkstemp(prefix="merge-express-", suffix=".sh")
+    os.close(fd)
+    fd, out_file = tempfile.mkstemp(prefix="merge-express-scope-")
+    os.close(fd)
+    try:
+        with open(copy, "w", encoding="utf-8", newline="\n") as f:
+            f.write(script + "\n")
+        env = {**{k: v for k, v in os.environ.items() if not k.startswith("GITHUB_")},
+               "EVENT": "pull_request", "BASE_SHA": base_tip, "HEAD_REF": info["branch"], "GITHUB_OUTPUT": out_file}
+        c, said = sh(["bash", copy], cwd=wt, env=env, timeout=120)
+        with open(out_file, encoding="utf-8") as f:
+            flags = dict(l.strip().split("=", 1) for l in f if "=" in l)
+    except (subprocess.TimeoutExpired, OSError, ValueError) as e:
+        return f"unknown: {CI_SCOPE} could not run ({type(e).__name__}), so whether the diff is prose-only is unproven"
+    finally:
+        for p in (copy, out_file):
+            with contextlib.suppress(OSError):
+                os.remove(p)
+    missing = [n for n in names if n not in flags]
+    if c or missing:
+        return f"unknown: {CI_SCOPE} " + (f"failed (exit {c}; last line: {(said.splitlines() or ['no output'])[-1][:200]})" if c else "wrote no flag for " + ", ".join(missing)) + ", so whether the diff is prose-only is unproven"
+    on = sorted(k for k, v in flags.items() if k != "mutation_report" and v != "false")
+    if on:
+        paths = git(wt, "diff", "--name-only", "--no-renames", f"{base_tip}...HEAD")[1].splitlines()
+        shown = ", ".join(paths[:EXPRESS_PATHS_SHOWN]) + (f" and {len(paths) - EXPRESS_PATHS_SHOWN} more" if len(paths) > EXPRESS_PATHS_SHOWN else "")
+        return f"the diff is not prose-only: {base_ref}'s {CI_SCOPE} turns on {', '.join(on)} for {shown}"
+    return None
+
 def preview(root, cfg, cfgrel, n, host, lock, info=None, unknown_ok=""):
     info = info or host.pr(n)
     refuse_bad_pr(info)  # a draft is previewed, so its silent undos show before it is marked ready
@@ -3641,7 +3701,7 @@ HEAD_MOVED = "the head of #{n} moved since the owner's yes was relayed, so that 
 
 BATCH_RUNNER_NEEDS_HEAD = "the merge needs the head the CI ran on, so pass it with the --head flag (decision auto-mode-owner-acts, the batch runner merges the head its CI ran on). Nothing was claimed or pushed."
 
-def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok="", expected_head=None, linted_head=None):
+def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=None, red_ok="", expected_head=None, linted_head=None, express=False):
     m = cfg.get("merge", {})
     info = info or host.pr(n)  # main read it once already, and the config came from that base. A read; the head compare after the lock covers a head that moves before the lock is ours
     base = info["base"]  # the PR's own base; read again under the lock
@@ -3668,11 +3728,17 @@ def confirm(root, cfg, cfgrel, n, host, lock, unknown_ok="", session="", info=No
             return draft_step(root, cfg, n, host, info)
         host.required_names()  # an empty or unreadable list stops here, before anything is pushed
         record_lift(lifts, RED_FLAG, red_base(root, host, base, red_ok))
+        if express:  # the worktree opens early: the classifier reads the head's diff
+            tmp, wt = open_worktree(root, info, base)
+            no_express = express_refusal(root, wt, base_ref, info)
+            if no_express:
+                raise Stop(no_express + f". Nothing was claimed or pushed. {EXPRESS_CITE}")
         busy = batch_refusal(host, n, base, info["head"])
         if busy:
             raise Stop(busy + " Nothing was claimed or pushed.")
         branch = info["branch"]
-        tmp, wt = open_worktree(root, info, base)
+        if wt is None:
+            tmp, wt = open_worktree(root, info, base)
         record_lift(lifts, UNDO_FLAG, undo_check(wt, base_ref, unknown_ok, info.get("body", ""), lambda url: host.cited_run(url), info["head"]))
         debt_check(wt, base_ref, host, info)
         record_lift(lifts, UNDO_FLAG, refuse_dropped_lane(wt, base_ref, info["head"], unknown_ok))
@@ -4152,12 +4218,23 @@ def live_review_state(h, rec, live, main):
     return state, why + "; the head is the reviewed head plus clean merges of main"
 
 def rollup_green(h, n, head):
-    """True only when every ROLLUP_JOB row on `head` is a pass. No row, any other bucket, or a failed read is False, so the caller keeps its own check."""
+    """True only when the ROLLUP_JOB rows of the newest run on `head` are all a pass and no older run's row is red. The newest run is the largest id in
+    the row links (/actions/runs/<id>/): a draft run skips the rollup job and the ready run after it passes it, so both sit on one head and the newer
+    run decides. An older run's skipped, cancelled or pending row is ignored. An older run's red row (bucket "fail" or "timed out ...") still holds the
+    rollup not green, as the merge check reads it, so the skip line never prints for a head the check then refuses. A row that names no run cannot be
+    placed, so it must pass whatever the newest run says. No row, any other bucket among the deciding rows, or a failed read is False, so the caller
+    keeps its own check. Cost: the one read h.checks already makes."""
     try:
         rows = h.checks(n, warn=False, sha=head).get(ROLLUP_JOB) or []
     except Stop:
         return False
-    return bool(rows) and all(bucket == "pass" for bucket, _ in rows)
+    ids = [int(m.group(1)) if (m := RUN_URL_ID.search(link or "")) else None for _, link in rows]
+    newest = max((i for i in ids if i is not None), default=None)
+
+    def decides(bucket, i):
+        return i is None or i == newest or bucket == "fail" or bucket.startswith("timed out")
+
+    return bool(rows) and all(bucket == "pass" for (bucket, _), i in zip(rows, ids) if decides(bucket, i))
 
 def lint_check(h, n, info, root, cfgrel):
     """The batch runner's join needs a lane-lint PASS at the live head (decision lanes-run-no-full-ci-job): read from the repo's comment list, the one read the
@@ -4166,8 +4243,9 @@ def lint_check(h, n, info, root, cfgrel):
     linted_head, so a head pushed after this read is refused there. A PASS for an earlier head also counts when every commit since is a claim (claim_only):
     the join's own claim push, resumed, moves the head by exactly that.
     The lint is skipped only for a batch integration PR (is_integration_pr) when the all-jobs-passed rollup (ROLLUP_JOB) is green on info["head"], the sha the
-    merge takes: CI proved that head (rule roles-each-layer-proves-once). A lane PR keeps the need above even on a green rollup, as does a rollup that is
-    absent, red, pending or skipped, green only on another sha, or unreadable."""
+    merge takes: CI proved that head (rule roles-each-layer-proves-once). Green is the verdict of the newest run on that head, and an older run's red row still refuses (rollup_green), because a draft
+    run's skipped row stays on the head beside the ready run's pass. A lane PR keeps the need above even on a green rollup, as does a rollup that is
+    absent, red, pending or skipped in its newest run, green only on another sha, or unreadable."""
     if is_integration_pr(info) and rollup_green(h, n, info["head"]):
         say(f"merge: lane lint skipped for #{n}: {ROLLUP_JOB} is green on {info['head'][:9]}, so CI already proved this head.")
         return
@@ -5227,6 +5305,7 @@ def build_parser():
     p.add_argument("pr", nargs="?", help="a pull request number; with --lane-lint, a number or a commit or ref")
     p.add_argument("-C", "--repo-dir", default=None, metavar="PATH", help="act in the checkout at PATH, not the one the process stands in; the last value wins")
     p.add_argument("--confirm", action="store_true")
+    p.add_argument("--express", action="store_true", help="with --confirm: merge a prose-only PR whose body names a ruling in origin/roadmap's store; any other PR refuses")
     p.add_argument("--lane-lint", action="store_true", help="lint the head of a lane (PR number, commit or ref) as the batch runner's lint does; takes no lock, merges nothing")
     p.add_argument("--base", default="", metavar="BRANCH", help="with --lane-lint on a commit or ref: the base branch to lint against (default main)")
     p.add_argument("--lint-unknown-ok", default="", metavar="REASON", help="with --lane-lint: go on when a lint step is unknown (never when one FAILs); logged")
@@ -5519,7 +5598,7 @@ def main(argv, host=None, lock=None, hosts=None):
             checked = info["head"]
         if a.confirm:
             with release_on_signals():
-                return confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok, a.head, checked) or 0
+                return confirm(root, cfg, a.config, a.pr, h, lock, a.undo_check_unknown_ok, a.session, info, a.base_red_ok, a.head, checked, a.express) or 0
         return (preview(root, cfg, a.config, a.pr, h, lock, info, a.undo_check_unknown_ok)) or 0
     except Stop as e:
         print(f"merge: {e}" + ("" if isinstance(e, (Liftable, Unproven)) else " No override lifts this refusal, because this tool runs after the guard."), file=sys.stderr)
