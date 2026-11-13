@@ -20559,7 +20559,7 @@ class LeftOutHost(FakeHost):
         if rel == "pulls":
             if self.list_error:
                 raise merge.Stop(self.list_error)
-            return [batch_pull(n, merge.origin_head(self.root, p["branch"]), base=p["base"], draft=p["draft"], head_ref=p["branch"])
+            return [batch_pull(n, p.get("sha") or merge.origin_head(self.root, p["branch"]), base=p["base"], draft=p["draft"], head_ref=p["branch"])
                     for n, p in sorted(self.batch_pulls.items()) if p["state"] == "OPEN"]
         if rel == "issues/comments":
             return list(self.comments)
@@ -20597,9 +20597,24 @@ class LeftOutBatch(CloudSession):
         self.runs = {}  # the run answers read_run gives: none are scripted here, so a read of one is a failed case
         self.host.cited_run = self.read_run
 
-    def conflicting_lane(self, n):
+    def pull_ref_lane(self, n):
+        """Pull request #n whose head is on origin only as refs/pull/<n>/head, with no branch: a commit off origin/main that the clone never
+        fetches. The host reports that head as the pull request's head (its `sha`). -> the head."""
+        o = self.other
+        sh(o, "git", "fetch", "-q", "origin")
+        sh(o, "git", "checkout", "-q", "-B", f"pull-{n}", "origin/main")
+        put(os.path.join(o, "lanes", f"{n}.txt"), f"lane {n}\n")
+        sh(o, "git", "add", "-A")
+        sh(o, "git", "commit", "-q", "-m", f"lane {n}")
+        sh(o, "git", "push", "-q", "origin", f"pull-{n}:refs/pull/{n}/head")
+        self.host.add_pr(n, f"pull-{n}")
+        self.heads[n] = self.host.batch_pulls[n]["sha"] = sh(o, "git", "rev-parse", f"pull-{n}")
+        return self.heads[n]
+
+    def conflicting_lane(self, n, ref_only=False):
         """Lane PR #n: a commit on origin's main as it was before one more commit that edits shared.txt. origin's main then gets that commit, so
-        git's merge of lane #n onto main conflicts on shared.txt. -> the lane's head."""
+        git's merge of lane #n onto main conflicts on shared.txt. With `ref_only`, the head is pushed to refs/pull/<n>/head alone, as
+        pull_ref_lane does. -> the lane's head."""
         o = self.other
         sh(o, "git", "fetch", "-q", "origin")
         old = sh(o, "git", "rev-parse", "origin/main")
@@ -20612,9 +20627,11 @@ class LeftOutBatch(CloudSession):
         put(os.path.join(o, "shared.txt"), f"lane {n} side\n")
         sh(o, "git", "add", "-A")
         sh(o, "git", "commit", "-q", "-m", f"lane {n} edits shared.txt")
-        sh(o, "git", "push", "-q", "origin", f"lane-{n}")
+        sh(o, "git", "push", "-q", "origin", f"lane-{n}:refs/pull/{n}/head" if ref_only else f"lane-{n}")
         self.host.add_pr(n, f"lane-{n}")
-        self.heads[n] = self.head(f"lane-{n}")
+        self.heads[n] = sh(o, "git", "rev-parse", f"lane-{n}")
+        if ref_only:
+            self.host.batch_pulls[n]["sha"] = self.heads[n]
         return self.heads[n]
 
     def record(self, n, head=None, **fields):
@@ -20672,6 +20689,28 @@ class LeftOutBatch(CloudSession):
         self.done(103)
         rc, out = self.build("--batch-build", "nightly", "101", "102")
         self.assertLeftOut(out, ["merge: #103 left out of batch nightly: conflict"], "a done pull request that conflicts with the base is not named conflict")
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+
+    def test_a_done_pr_whose_head_the_clone_lacks_is_named_none(self):
+        """#103's head is on origin only as refs/pull/103/head, and the clone never fetched it. #103 merges clean onto the base, so it is named
+        none, and no left-out list unknown line is printed."""
+        for n in (101, 102):
+            self.lane(n)
+        self.pull_ref_lane(103)
+        self.done(103)
+        rc, out = self.build("--batch-build", "nightly", "101", "102")
+        self.assertLeftOut(out, ["merge: #103 left out of batch nightly: none"], "a done pull request whose head the clone lacks is not named none")
+        self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
+
+    def test_a_done_pr_whose_head_the_clone_lacks_and_that_conflicts_is_named_conflict(self):
+        """#103's head is on origin only as refs/pull/103/head, and the clone never fetched it. #103 conflicts with the base, so it is named
+        conflict, and no left-out list unknown line is printed."""
+        self.conflicting_lane(103, ref_only=True)
+        for n in (101, 102):
+            self.lane(n)
+        self.done(103)
+        rc, out = self.build("--batch-build", "nightly", "101", "102")
+        self.assertLeftOut(out, ["merge: #103 left out of batch nightly: conflict"], "a done pull request whose head the clone lacks and that conflicts is not named conflict")
         self.assertEqual(rc, 0, "the build exited %s: %s" % (rc, out))
 
     def test_each_left_out_pr_gets_its_own_line_in_number_order(self):
