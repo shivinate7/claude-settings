@@ -1,0 +1,11 @@
+{
+ "id": "page-newest-first",
+ "at": "2026-11-12T21:37:00-06:00",
+ "title": "The waiting page lists the newest items first",
+ "ruling": "Owner 21:37 CST Nov 12, in triage chat: \"sort the artifact by time so i can quickly answer thr newest ones\". Inside each tier of the waiting page, items sort newest first (by added time, then number), not oldest first. The tiers (holds, due, calm, stands) and the writer's rank stay. Home: skills/waiting-page/page.html sorted() byAge; step page-sort-newest-first.",
+ "quote": "sort the artifact by time so i can quickly answer thr newest ones",
+ "source": "owner chat with triage 21:37 CST Nov 12",
+ "status": "open",
+ "supersedes": [{"kind": "code", "ref": "skills/waiting-page/page.html sorted(): byAge = oldest first inside a tier"}],
+ "step": "page-sort-newest-first"
+}
