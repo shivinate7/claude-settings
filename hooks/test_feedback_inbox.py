@@ -567,6 +567,13 @@ def expect_block(name, p, named=(), unnamed=()):
         check("%s: does not name %s" % (name, n), n not in reason, reason)
 
 
+def expect_no_skipped_note(name, p):
+    """Scope of the all-read cases: every repo the home is judged in reads, so none is skipped and the block reason
+    has no "Skipped as unreadable" sentence. A reason that carries the sentence anyway fails here."""
+    reason = block_reason(p) or ""
+    check(name + ": no skipped-as-unreadable sentence", "Skipped as unreadable" not in reason, reason)
+
+
 # --------------------------------------------------------------------------- capture cases
 
 def case_verbatim_scanner_text_is_fenced():
@@ -2393,6 +2400,7 @@ def case_task_missing_step_home_blocks():
     p = homed(new_cfg(), "task-step-missing", ("- fb-0958-7 [task] -> step:no-such-step",), cwd=repo)
     expect_block("task step home: an open task homed to a step with no file on any branch blocks", p,
                  named=("fb-0958-7",))
+    expect_no_skipped_note("task step home: the repo reads, so no repo is skipped", p)
     p = homed(new_cfg(), "task-step-missing-closed", ("- fb-0958-7 [task] -> step:no-such-step [closed]",),
               cwd=repo)
     expect_block("task step home: a closed task homed to a step with no file on any branch blocks", p,
@@ -3863,8 +3871,9 @@ def case_guard_sidecar_in_no_git_folder_still_judges_the_stop_repo():
     write_file(sidecar_of(cfg, sid), plain)
     write_file(inbox_of(cfg, sid), render_block("the rule is settled\nkeep it\nthanks",
                                                 items=("- fb-9 [ruling] -> decisions/untracked.md",)))
-    expect_block("sidecar in no git folder: an untracked home in the Stop's repo blocks",
-                 guard(cfg, sid, cwd=cwd), named=("fb-9",))
+    p = guard(cfg, sid, cwd=cwd)
+    expect_block("sidecar in no git folder: an untracked home in the Stop's repo blocks", p, named=("fb-9",))
+    expect_no_skipped_note("sidecar in no git folder: the Stop's repo reads, so no repo is skipped", p)
 
 
 def unreadable_sidecar_repo():
@@ -3881,18 +3890,31 @@ def expect_unreadable_sidecar(bad):
     check("unreadable sidecar repo: git for-each-ref fails there", rc != 0, "rc=%s" % rc)
 
 
+def names_unreadable_sidecar(reason, bad, cwd):
+    """True when the block reason names the unreadable sidecar repo `bad`. The Stop's repo `cwd` is cut out first:
+    where its name starts with `bad`'s, as in the sidecar-stop case, a mention of the Stop's repo must not pass
+    as a mention of `bad`."""
+    rest = reason.replace(cwd, "").replace(os.path.realpath(cwd), "").replace(os.path.basename(cwd), "")
+    return any(name in rest for name in (bad, os.path.realpath(bad), os.path.basename(bad)))
+
+
 def case_guard_unreadable_sidecar_repo_does_not_stand_down_the_stop_repo():
     """The sidecar names a repo git cannot read, so judging its home raises _GitFailure. That error must not stand
     the whole home check down: the Stop's repo still judges the home, and an untracked home there blocks. The
     control, the same unreadable sidecar with a home tracked in the Stop's repo, passes."""
     cwd = make_repo("unreadable-sidecar-stop", tracked=("decisions/a-ruling.md",))
     bad = unreadable_sidecar_repo()
+    expect_unreadable_sidecar(bad)
     text = "the rule is settled\nkeep it\nthanks"
     cfg, sid = new_cfg(), "r-unreadable-sidecar"
     write_file(sidecar_of(cfg, sid), bad)
     write_file(inbox_of(cfg, sid), render_block(text, items=("- fb-12 [ruling] -> decisions/untracked.md",)))
-    expect_block("unreadable sidecar repo: an untracked home in the Stop's repo still blocks",
-                 guard(cfg, sid, cwd=cwd), named=("fb-12",))
+    p = guard(cfg, sid, cwd=cwd)
+    expect_block("unreadable sidecar repo: an untracked home in the Stop's repo still blocks", p, named=("fb-12",))
+    check("unreadable sidecar repo: the block reason names the sidecar repo",
+          names_unreadable_sidecar(block_reason(p) or "", bad, cwd), block_reason(p))
+    check("unreadable sidecar repo: the block reason has the skipped-as-unreadable sentence",
+          "Skipped as unreadable" in (block_reason(p) or ""), block_reason(p))
     cfg, sid = new_cfg(), "r-unreadable-sidecar-control"
     write_file(sidecar_of(cfg, sid), bad)
     write_file(inbox_of(cfg, sid), render_block(text, items=("- fb-13 [ruling] -> decisions/a-ruling.md",)))
@@ -3916,6 +3938,10 @@ def case_guard_unreadable_sidecar_repo_does_not_stand_down_a_step_home():
     p = homed(cfg, sid, ("- fb-14 [task] -> step:no-such-step",), cwd=cwd, text=text)
     expect_block("unreadable sidecar repo: a task homed to a step with no file on any branch still blocks", p,
                  named=("fb-14",))
+    check("unreadable sidecar repo: the step block reason names the sidecar repo",
+          names_unreadable_sidecar(block_reason(p) or "", bad, cwd), block_reason(p))
+    check("unreadable sidecar repo: the step block reason has the skipped-as-unreadable sentence",
+          "Skipped as unreadable" in (block_reason(p) or ""), block_reason(p))
     cfg, sid = new_cfg(), "r-unreadable-sidecar-step-control"
     write_file(sidecar_of(cfg, sid), bad)
     p = homed(cfg, sid, ("- fb-15 [task] -> step:%s" % STEP_SLUG,), cwd=cwd, text=text)
@@ -3936,6 +3962,10 @@ def case_guard_unreadable_sidecar_repo_does_not_stand_down_a_closed_note_home():
     write_file(sidecar_of(cfg, sid), bad)
     p = homed(cfg, sid, ("- fb-16 [note] -> decisions/nowhere.md [closed]",), cwd=cwd, text=text)
     expect_block("unreadable sidecar repo: a closed note homed to an untracked file still blocks", p, named=("fb-16",))
+    check("unreadable sidecar repo: the closed-note block reason names the sidecar repo",
+          names_unreadable_sidecar(block_reason(p) or "", bad, cwd), block_reason(p))
+    check("unreadable sidecar repo: the closed-note block reason has the skipped-as-unreadable sentence",
+          "Skipped as unreadable" in (block_reason(p) or ""), block_reason(p))
     cfg, sid = new_cfg(), "r-unreadable-sidecar-close-control"
     write_file(sidecar_of(cfg, sid), bad)
     p = homed(cfg, sid, ("- fb-17 [note] -> decisions/a-ruling.md [closed]",), cwd=cwd, text=text)
@@ -3996,14 +4026,17 @@ def case_one_shot_grant_reason_offers_the_once_home():
 
 
 def case_standing_grant_without_a_once_item_keeps_today_reason():
-    """Standing text with no once: item gets the reason the guard gives today. This pins that reason and does not
-    judge it."""
+    """Standing text with no once: item, and with a [note] whose home is not once:, gets the reason the guard gives
+    today. This pins that reason and does not judge it. The standing bar names a once: home only."""
     mod = guard_module()
-    blocks = mod.parse(render_block(STANDING_ONCE_TEXT))
-    out = mod.problems(blocks, "")
-    want = "the message at %s (%s) holds a grant word and has no home for it: add %s" % (
-        blocks[0]["stamp"], STANDING_ONCE_TEXT[:40], mod.GRANT_HOMES)
-    check("standing control, no once: item: the reason is today's, pinned", want in out, out)
+    for label, items in (("no once: item", ()), ("a [note] -> other item", ("- fb-0958-2 [note] -> other",))):
+        blocks = mod.parse(render_block(STANDING_ONCE_TEXT, items=items))
+        out = mod.problems(blocks, "")
+        want = "the message at %s (%s) holds a grant word and has no home for it: add %s" % (
+            blocks[0]["stamp"], STANDING_ONCE_TEXT[:40], mod.GRANT_HOMES)
+        check("standing control, %s: the reason is today's, pinned" % label, want in out, out)
+        check("standing control, %s: no standing word bars a once: home" % label,
+              not any("bars" in s for s in out), out)
 
 
 # --------------------------------------------------------------------------- page-form-to-template cases
