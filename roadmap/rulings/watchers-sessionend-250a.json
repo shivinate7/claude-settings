@@ -1,0 +1,10 @@
+{
+ "id": "watchers-sessionend-250a",
+ "at": "2026-11-04T07:00:00-06:00",
+ "title": "The SessionEnd sweep cleans one repo; machine-wide only in the daily job (item 250 a)",
+ "ruling": "Owner, page item 250 (watchers-sessionend-sweep), pick a: one repo at SessionEnd, machine-wide only in the daily job. Landed in #1240. The owner's note on 250 asks for parts of the daily job to run at session end too (see step watchers-plan-lanes). Answer time not on record.",
+ "quote": "One repo at SessionEnd; machine-wide only in the daily job",
+ "source": "Step watchers-plan-lanes note (\"item 249 picked b\", \"item 250 picked a, landed in #1240\") and the option labels of page copy waiting/items/. The page copy holds no answer file for items 249 and 250, so the answer time is not on record; `at` is the items' added date. Filed by triage.",
+ "status": "open",
+ "step": "watchers-plan-lanes"
+}

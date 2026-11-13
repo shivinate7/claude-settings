@@ -1,0 +1,10 @@
+{
+ "id": "watchers-log-reader-249b",
+ "at": "2026-11-04T07:00:00-06:00",
+ "title": "Each log gets a named reader instead of being deleted (item 249 b)",
+ "ruling": "Owner, page item 249 (watchers-unread-logs), pick b: name a reader for each log that has none; do not delete logs with no named reader. Answer time not on record.",
+ "quote": "Name a reader for each",
+ "source": "Step watchers-plan-lanes note (\"item 249 picked b\", \"item 250 picked a, landed in #1240\") and the option labels of page copy waiting/items/. The page copy holds no answer file for items 249 and 250, so the answer time is not on record; `at` is the items' added date. Filed by triage.",
+ "status": "open",
+ "step": "watchers-plan-lanes"
+}
