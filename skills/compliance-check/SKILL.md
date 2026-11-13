@@ -25,8 +25,9 @@ parent. If the line or `<dir>/.git` is missing, stop and report the audit as unk
 A `guard` or `check` rule has a mechanism in the parent. Mark that rule `parent-covered`, and
 do not probe it, only when both checks pass:
 
-- The live `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json` has the same `hooks` block as
-  `<parent>/settings.json`.
+- `$PY $P/lint/compliance_probes.py hooks $P` prints `in shape`. `out` is a finding in the
+  parent's install; `unknown` marks the rule `unknown`. The probe reads `~/.claude/settings.json`
+  only, never `CLAUDE_CONFIG_DIR`.
 - `${CLAUDE_CONFIG_DIR:-~/.claude}/guard.log` has a verdict line from the last 7 days. Run
   `lint/guard_log_report.py --days 7` from the parent to read it.
 

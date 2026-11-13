@@ -35,7 +35,7 @@ session transcripts, not a repo.
 | Parallelism | `git worktree list`; `grep -n worktrees .gitignore` | work runs in worktrees; `.claude/worktrees` is ignored |
 | Parallelism | `$PY $P/lint/compliance_probes.py lanecap .` reads each brief and plan for a lane cap (rule parallelism-no-guessed-lane-cap); read each hit in its file | exit 0. A cap the owner named passes: the probe passes a line that cites its source, `(owner, ...)` or the owner and a date, and a cap inside a pair of quotes |
 | Shared trees | `git stash list` | no output (0 entries) |
-| Shared trees | `$PY $P/lint/compliance_probes.py hooks .` prints the diff of the live `$HOME/.claude/settings.json` hooks against the clone's (Hooks, below); a clone with no `settings.json` is n/a. For in shape and out, the line after the verdict names the trusted copy: `trusts: clone (<root>/settings.json); live (~/.claude/settings.json) is the copy checked` | exit 0. The live hooks equal the clone's, less `SessionStart` |
+| Shared trees | `$PY $P/lint/compliance_probes.py hooks $P` prints the diff of the live `$HOME/.claude/settings.json` hooks against the parent clone's (Hooks, below); a clone with no `settings.json` is n/a. For in shape and out, the line after the verdict names the trusted copy: `trusts: clone (<root>/settings.json); live (~/.claude/settings.json) is the copy checked` | exit 0. The live hooks equal the clone's, less `SessionStart` |
 | Shared trees | `.claude/launch.json`, dev scripts, `git ls-files '*playwright*.config.*'`, dev server config | each checkout can set its own port and data; each `webServer` has reuse off or absent, or on (any value that can be true, such as `!process.env.CI`) with a wired `globalSetup` that refuses another checkout; port strict (`--strictPort` or `strictPort: true`); no Playwright config: n/a |
 | Git | `gh pr list --state merged --limit 20` and `git log --first-parent --no-merges --oneline -20 origin/main` | main moves only by PR |
 | Git | `gh api repos/{owner}/{repo}/branches/main/protection`, and `merge.requiredChecks` in `.github/stamp.json` | the answer is known. A 404 is a known answer: no protection. `"protection"` is the right value (decision main-branch-protection, the protection holds the one list): no comparison. When `requiredChecks` is a list, the protection's `required_status_checks.contexts` equal it, else `merge` refuses. No `stamp.json`: no comparison |
@@ -210,7 +210,7 @@ Child CI runs the same probe through the action `actions/claude-md-cites`, after
 
 ## Hooks
 
-`$PY $P/lint/compliance_probes.py hooks .` compares the `.hooks` of the clone's `settings.json` with the `.hooks`
+`$PY $P/lint/compliance_probes.py hooks $P` compares the `.hooks` of the parent clone's `settings.json` with the `.hooks`
 of `$HOME/.claude/settings.json`, the live file. It never reads `CLAUDE_CONFIG_DIR`. `SessionStart` is dropped on
 both sides, since a cloud install rewrites it. Both sides print as key-sorted JSON, so key order is no
 difference. A difference prints as a unified diff, each line indented two spaces: `clone` is `-`, `live` is `+`.

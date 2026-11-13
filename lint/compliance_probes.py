@@ -1137,7 +1137,7 @@ def hooks_of(path, text, side):
 
 def probe_hooks(root):
     clone_path = os.path.join(root, "settings.json")
-    if not os.path.exists(clone_path):
+    if not os.path.lexists(clone_path):
         return finish("hooks", [], "n/a - no settings.json in the clone", 0)
     clone_text = read(root, "settings.json")
     if clone_text is None:
