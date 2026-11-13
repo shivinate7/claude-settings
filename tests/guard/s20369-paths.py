@@ -274,9 +274,11 @@ def _build_scriptrepo():
             or os.path.getsize(os.path.join(SCRIPTREPO, "tools", "big_dist_write.py")) <= 256 * 1024
             or os.path.getsize(os.path.join(SCRIPTREPO, "tools", "big_early_test.py")) <= 256 * 1024
             # The git apply cases need each patch in place, the folder read as no file, and the missing one absent.
+            # A patch that a case's own command writes is absent before that command is read.
             or not os.path.isfile(os.path.join(SCRIPTREPO, "patches", "to_tests.patch"))
             or not os.path.isdir(os.path.join(SCRIPTREPO, "patches", "dir.patch"))
             or os.path.exists(os.path.join(SCRIPTREPO, "patches", "missing.patch"))
+            or os.path.exists(os.path.join(SCRIPTREPO, "patches", "p.patch"))
             or os.path.getsize(os.path.join(SCRIPTREPO, "patches", "over_limit.patch")) <= 256 * 1024):
         sys.exit("fixture setup failed in _build_scriptrepo: %r lacks the scripts the cases name"
                  % SCRIPTREPO)
@@ -920,6 +922,62 @@ sh("builder-test: git apply reading a heredoc patch that touches only product co
    "git apply <<EOF\n" + PATCH_PRODUCT + "EOF", "allow", **SB)
 sh("builder-test: git apply of an over-limit patch that touches only product code is allowed",
    "git apply patches/over_limit.patch", "allow", **SB)
+
+# The patches on one line, each newline written as \n, for a printf '%b' that writes them in the command.
+PATCH_NEW_TEST_ESC = PATCH_NEW_TEST.replace("\n", "\\n")
+PATCH_PRODUCT_ESC = PATCH_PRODUCT.replace("\n", "\\n")
+# [apply-same-cmd] A patch that one command writes and the same command applies. patches/p.patch does not exist when the
+# guard reads the command, so the patch's headers are read from the command text, as a heredoc's are. Each write form
+# has a product-only twin, which stays allowed.
+sh("builder-test: [apply-same-cmd red] a heredoc writes a test patch, then git apply reads it, is refused",
+   "cat > patches/p.patch <<'EOF'\n" + PATCH_NEW_TEST + "EOF\ngit apply patches/p.patch", "deny",
+   rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-same-cmd red] a tee writes a test patch, then git apply reads it, is refused",
+   "printf '%b' '" + PATCH_NEW_TEST_ESC + "' | tee patches/p.patch; git apply patches/p.patch", "deny",
+   rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-same-cmd red] a printf redirect writes a test patch, then git apply reads it, is refused",
+   "printf '%b' '" + PATCH_NEW_TEST_ESC + "' > patches/p.patch; git apply patches/p.patch", "deny",
+   rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-same-cmd control] a heredoc writes a product patch, then git apply reads it, is allowed",
+   "cat > patches/p.patch <<'EOF'\n" + PATCH_PRODUCT + "EOF\ngit apply patches/p.patch", "allow", **SB)
+sh("builder-test: [apply-same-cmd control] a tee writes a product patch, then git apply reads it, is allowed",
+   "printf '%b' '" + PATCH_PRODUCT_ESC + "' | tee patches/p.patch; git apply patches/p.patch", "allow", **SB)
+sh("builder-test: [apply-same-cmd control] a printf redirect writes a product patch, then git apply reads it, is allowed",
+   "printf '%b' '" + PATCH_PRODUCT_ESC + "' > patches/p.patch; git apply patches/p.patch", "allow", **SB)
+
+# [apply-dashdash] `--` ends git's options, so the words after it are file names. A heredoc or a here-string after it
+# names stdin, not a file, so its patch text is read as the bare form reads it. The bare here-string is a control.
+sh("builder-test: [apply-dashdash red] git apply -- reading a heredoc patch that touches a test path is refused",
+   "git apply -- <<'EOF'\n" + PATCH_NEW_TEST + "EOF", "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-dashdash red] git apply -- - reading a heredoc patch that touches a test path is refused",
+   "git apply -- - <<'EOF'\n" + PATCH_NEW_TEST + "EOF", "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-dashdash red] git apply -- reading a here-string patch that touches a test path is refused",
+   "git apply -- <<< '" + PATCH_NEW_TEST + "'", "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-dashdash control] git apply reading a here-string patch that touches a test path is refused",
+   "git apply <<< '" + PATCH_NEW_TEST + "'", "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-dashdash control] git apply -- reading a heredoc patch that touches only product code is allowed",
+   "git apply -- <<'EOF'\n" + PATCH_PRODUCT + "EOF", "allow", **SB)
+sh("builder-test: [apply-dashdash control] git apply -- - reading a heredoc patch that touches only product code is allowed",
+   "git apply -- - <<'EOF'\n" + PATCH_PRODUCT + "EOF", "allow", **SB)
+sh("builder-test: [apply-dashdash control] git apply -- reading a here-string patch that touches only product code is allowed",
+   "git apply -- <<< '" + PATCH_PRODUCT + "'", "allow", **SB)
+
+# [apply-scanner] The command is cut at its separators only outside quotes and comments. A `#`, a newline or a lone
+# quote inside a quoted string is text, so the git apply after that string is still read. Each has an echo-only twin.
+sh("builder-test: [apply-scanner red] git apply of a test patch after a # inside quotes is refused",
+   'echo "a # b"; git apply patches/to_tests.patch', "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-scanner red] git apply of a test patch after a multi-line quoted string is refused",
+   'echo "one\n# two\nthree"\ngit apply patches/to_tests.patch', "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-scanner red] git apply of a test patch after a lone quote in quoted text is refused",
+   'echo "Don\'t"; git apply patches/to_tests.patch', "deny", rule=BT, carries=("test-author",), **SB)
+sh("builder-test: [apply-scanner control] echo of a # inside quotes, then echo of a test patch, is allowed",
+   'echo "a # b"; echo patches/to_tests.patch', "allow", **SB)
+sh("builder-test: [apply-scanner control] echo of a multi-line quoted string, then echo of a test patch, is allowed",
+   'echo "one\n# two\nthree"\necho patches/to_tests.patch', "allow", **SB)
+sh("builder-test: [apply-scanner control] echo of a lone quote, then echo of a test patch, is allowed",
+   'echo "Don\'t"; echo patches/to_tests.patch', "allow", **SB)
+sh("builder-test: [apply-scanner control] a lone quote in an echo that names a git apply of a test patch is allowed",
+   'echo "Don\'t; git apply patches/to_tests.patch"', "allow", **SB)
 
 # The reads, the writes to product code, the quoted and commented text, and the recovery forms stay allowed.
 SHELL_TEST_ALLOWS = (
