@@ -746,7 +746,7 @@ def answered_problem(text):
 # Quoted text and code spans are no claim. A negator in the same clause before the claim (the answered check's
 # list) exempts it. The sentences and clauses are the parser's (lint/_clause.py, see _pre_clauses); a clause also ends at
 # a lead-in word of the parser's lists and at "which".
-# A question holds a claim only before its last clause (_claim_part); a question that opens with an auxiliary or a wh-word holds none.
+# A question of one clause holds no claim; a question of more clauses is judged whole (_claim_part).
 # Fenced blocks are skipped.
 PRE_EXISTING_RE = re.compile(r"(?<![\w-])pre[- ]?existing(?![\w-])", re.I)
 PRE_DESCRIBES_AFTER_RE = re.compile(
@@ -874,15 +874,19 @@ QUESTION_OPENER_RE = re.compile(
 
 
 def _claim_part(sentence):
-    """The part of `sentence` that can hold a claim. A sentence that does not end in `?` is all claim. A question that opens
-    with an auxiliary or a wh-word asks from its first word and holds none. Any other question holds the claim before its last
-    clause ("The lint failure is pre-existing, so should I merge anyway?"); a question of one clause holds none."""
+    """`sentence` when it can hold a claim, else "". A sentence that does not end in `?` is all claim. A question of one
+    clause asks and holds none ("Is the failure pre-existing?"). A question of more clauses is judged whole: its premise or
+    its first clause can state the claim ("Can I merge, as the failure is pre-existing?"). A lead-in word with no comma
+    ("so", "and") also splits it when an auxiliary or a wh-word opens the clause after it ("... is pre-existing so should I merge?")."""
     if not sentence.rstrip("*_)\"' ").endswith("?"):
         return sentence
-    found = _clause.clauses(sentence, [False] * len(sentence))
-    if len(found) < 2 or QUESTION_OPENER_RE.match(sentence):
-        return ""
-    return sentence[:found[-1].lead_at]
+    if len(_clause.clauses(sentence, [False] * len(sentence))) > 1:
+        return sentence
+    for m in PRE_LEAD_RE.finditer(sentence):
+        rest = sentence[m.end():]
+        if QUESTION_OPENER_RE.match(rest) and _clause.lead_opens_clause(m.group(), rest):
+            return sentence
+    return ""
 
 
 def pre_existing_problem(text, cwd=None):
