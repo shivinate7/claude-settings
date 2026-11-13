@@ -692,11 +692,13 @@ need "no record line" test "$(record_lines)" -eq 0
 end_case "52 reuse path: the Duo it reuses gets no sim-boots.jsonl line"
 
 # copy_tool DIR: a copy of the script under test and of sim-lease in DIR/bin, with the one hook sim-lease imports in DIR/hooks,
-# so no sim_boot_record.py is there. A case that puts a file beside the copy's script uses it; the real bin/ is never touched.
+# so no sim_boot_record.py is there. The list file beside the script is copied too, when it exists. A case that puts a file
+# beside the copy's script uses it; the real bin/ is never touched.
 copy_tool() {
   rm -rf "$1"
   /bin/mkdir -p "$1/bin" "$1/hooks"
   cp "$script" "$1/bin/sim-test"; cp "$sim_lease" "$1/bin/sim-lease"; cp "$root/hooks/_nowindow.py" "$1/hooks/"
+  if [ -f "$(dirname "$script")/sim-noise-services" ]; then cp "$(dirname "$script")/sim-noise-services" "$1/bin/"; fi
   chmod +x "$1/bin/sim-test" "$1/bin/sim-lease"
 }
 
@@ -1061,8 +1063,13 @@ list_is_exact() {
 # refused_clean: exit 1 with no boot and no xcodebuild. failed_boot_clean: a boot was tried, failed, and no xcodebuild ran.
 refused_clean() { rc_is 1 && no_boot && no_xcodebuild; }
 failed_boot_clean() { [[ $rc -ne 0 ]] && has_call "simctl boot $DUO1" && no_xcodebuild; }
-# no_spawn_output: neither stream holds the text of a refused spawn.
-no_spawn_output() { ! grep -Fq 'spawn refused' "$work/run.std" "$work/run.err"; }
+# no_spawn_output: neither stream names a spawn, launchctl, the domain, or a label of the list, whatever the text says.
+no_spawn_output() {
+  local l
+  grep -Eq 'spawn|launchctl|user/foreground' "$work/run.std" "$work/run.err" && return 1
+  for l in "${NOISE_LABELS[@]}"; do grep -Fq -- "$l" "$work/run.std" "$work/run.err" && return 1; done
+  return 0
+}
 
 fresh; ps_stub; devices_json "$DUO1"; run PATH="$work/psbin:$PATH"
 need "exit code" rc_is 0
@@ -1108,10 +1115,11 @@ need "failed boot: no disable call" no_spawn
 end_case "84 control: the cap, cross-role, list failure, no-op lease and a failed boot make no disable call"
 
 fresh; run STUB_SPAWN_RC=1 STUB_RC=65
+need "scope: 17 spawns ran, each refused" test "$(spawn_count)" -eq 17
 need "exit status is xcodebuild's, 65" rc_is 65
 need "steps are boot run shutdown" steps_are "boot run shutdown "
 need "no spawn text on stdout or stderr" no_spawn_output
-end_case "85 control: a failing spawn for every label leaves the exit status and xcodebuild unchanged, and prints nothing"
+end_case "85 a failing spawn for every label: all 17 are tried, and the exit status, xcodebuild and the output are unchanged"
 
 need "the list file exists beside the script" test -f "$(noise_list)"
 need "the file holds exactly the 17 labels as its label lines" list_is_exact
