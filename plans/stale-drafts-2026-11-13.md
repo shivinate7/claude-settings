@@ -331,3 +331,10 @@ List: main's build row "draft PRs over 12 h with no live lane", from live file r
 - Held, guard-cull family of step guard-false-alarm-cull (live lane session_013NEJL1zDA7EF7cqDccCwhe): #3043.
 - Held, open step and live session: #3044 (brief-names-push-target), #3047 (mutate-timeout-crashed).
 - Closed: none.
+
+## Seventh pass, after batch 130 (main 7dd44c41c, 09:29 CST Nov 13)
+
+Live file 873f59b51 (readAt 09:31:05 CST). Main's build lists 358 drafts over 12 h with no live lane; 9 are new. All 9 are held, and none is closed.
+- Open step: #3065 (local-page-publish-route), #3063 (ci-wait-stop-needs-checkin), #3061 (decision-watch-finds-transcript), #3059 (pointer-checkout-edit), #3058 (child-repo-gap), #3053 (ruled-step-coordinator-queue), #3050 (git-apply-test-path-write).
+- Holds an owner ruling: #3049 (R42 act 4, per-lane merge; plans/owner-rulings-2026-11-12.md).
+- Guard-cull family: #3056 (cull-docs-notes).
