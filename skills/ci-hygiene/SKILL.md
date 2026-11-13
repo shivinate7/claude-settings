@@ -68,6 +68,8 @@ Written for GitHub Actions. The same ideas apply to other CI systems. Commands a
    merge clean with their base (decision `lanes-run-no-full-ci-job`). A hand list of checks never stands in for that run: `bin/ci-job`
    reads its steps from the workflow, so it cannot miss one. A lane never runs a whole CI job
    (decision `lanes-run-no-full-ci-job`, a lane runs no full CI job).
+   Prose lanes and code lanes may share a batch when that lands both sooner. A prose lane that
+   describes code not yet on main never merges ahead of that code (decision `prose-batch-order`).
    **When the build starts, freeze the lane set** (decision `batch-freeze-lane-set`, a batch's lane set
    freezes at its build). A release or a drop that arrives after that goes to the next batch. It never
    triggers a rebuild. The one change after the freeze is the drop of a blamed lane, with any
