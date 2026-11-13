@@ -1098,7 +1098,7 @@ jobs:
         run: python3 janitor/test_sweep.py
 
       - name: Janitor sweep mutation test
-        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.sweep == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_macos == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.sweep == 'true' }}
         run: python3 janitor/mutate_sweep.py
 
       - name: Config watch fixture suite
@@ -1531,9 +1531,8 @@ jobs:
 
   # The guard fixture suite on Windows, split off checks-windows by cut F. Every run, a ready pull_request included (R62, owner
   # 15:55 CST Nov 12: the batch PR run carries the full guard so the push to main can skip it), runs the full suite in shards:
-  # shard 1 here, the rest in checks-windows-guard-<i>. A ready pull_request also runs the cases tagged windows (the slice step
-  # below), which the full suite already holds, so those cases run twice there (the shard switch in hooks/test_guard.py;
-  # lint/test_windows_split.py proves each case runs once).
+  # shard 1 here, the rest in checks-windows-guard-<i> (the shard switch in hooks/test_guard.py; lint/test_windows_split.py proves each
+  # case runs once).
   checks-windows-guard:
     runs-on: windows-latest
     needs: scope
@@ -1558,12 +1557,6 @@ jobs:
         if: ${{ (needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         env:
           GUARD_SHARD: 1/3
-        run: python hooks/test_guard.py
-
-      - name: Guard fixture suite (Windows slice)
-        if: ${{ (needs.scope.outputs.guard == 'true' || github.event_name != 'pull_request') && !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true' }}
-        env:
-          GUARD_TESTS: windows-slice
         run: python hooks/test_guard.py
 
   checks-windows-guard-2:
@@ -1615,11 +1608,11 @@ jobs:
         run: python hooks/test_guard.py
 
   # The merge suites on Windows. The full git-half suite runs in shards, a ready pull_request included (R62), shard 1 here and the
-  # rest in checks-windows-merge-<i> (the shard switch in merge/test_merge.py). The slice, a subset of the full suite, also runs here on pull_request.
+  # rest in checks-windows-merge-<i> (the shard switch in merge/test_merge.py).
   checks-windows-merge:
     runs-on: windows-latest
     needs: scope
-    # Push figures (the PR slice has median 2.2; PR runs carry the full suite since R62, unmeasured). 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The newest 29 completed push runs on main, latest attempt of each (run 42522167511 to run 43206612905):
+    # Push figures; a ready PR run carries the full suite since R62, unmeasured. 75 (interim, stopgap, owner 12:11 CST Nov 10; decision ci-job-caps). The newest 29 completed push runs on main, latest attempt of each (run 42522167511 to run 43206612905):
     # 29 green, median 17.6, slowest 21.2 min (run 43155288101). All 5 merge shards share cap 75. The stopgap ends with roadmap step time-pinned-tests-go.
     timeout-minutes: 75
     steps:
@@ -1643,12 +1636,6 @@ jobs:
         if: ${{ (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.code == 'true' }}
         env:
           MERGE_SHARD: 1/5
-        run: python merge/test_merge.py
-
-      - name: Merge tool git-half fixture suite (Windows slice)
-        if: ${{ (needs.scope.outputs.checks_windows_merge == 'true' || github.event_name != 'pull_request') && !cancelled() && github.event_name == 'pull_request' && needs.scope.outputs.code == 'true' }}
-        env:
-          MERGE_TESTS: windows-slice
         run: python merge/test_merge.py
 
       - name: Merge launcher fixture suite (merge.cmd)
@@ -1760,7 +1747,7 @@ jobs:
         run: python merge/test_merge.py
 
   # The janitor sweep suites, moved out of checks-windows-rest (decision ci-job-caps). Fixture suite 8.2 min slowest,
-  # mutation test 10.9 min slowest (push only), so 19.6 min with setup. Cap 75 min = 3.8x.
+  # mutation test 10.9 min slowest (on push runs; it runs in the ready PR run since R62, unmeasured), so 19.6 min with setup. Cap 75 min = 3.8x.
   checks-windows-sweep:
     runs-on: windows-latest
     needs: scope
@@ -1783,7 +1770,7 @@ jobs:
         run: python janitor/test_sweep.py
 
       - name: Janitor sweep mutation test
-        if: ${{ (needs.scope.outputs.checks_windows_sweep == 'true' || github.event_name != 'pull_request') && !cancelled() && github.event_name != 'pull_request' && needs.scope.outputs.sweep == 'true' }}
+        if: ${{ (needs.scope.outputs.checks_windows_sweep == 'true' || github.event_name != 'pull_request') && !cancelled() && needs.scope.outputs.sweep == 'true' }}
         run: python janitor/mutate_sweep.py
 
   # Split in two by R62 (step ci-linux-windows-once): the job took 30.1 to 31.7 min on the batch PR runs 43234925158 and 43288661492, and
