@@ -5277,6 +5277,46 @@ class PreExistingNeedsMainRunTests(StopVerdictMixin, unittest.TestCase):
         line = "The failure is pre-existing and should I merge?"
         self.assert_blocked(line, line, "pre-existing-needs-main-run")
 
+    def test_pe_red_comma_less_since_premise_in_a_should_question_is_refused(self):
+        # Catches: a "since" premise with no comma before a "should" question passes, as the question is exempt whole.
+        line = "Should I merge since the failure is pre-existing?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_comma_less_as_premise_in_a_can_question_is_refused(self):
+        # Catches: an "as" premise with no comma before a "can" question passes, as the question is exempt whole.
+        line = "Can I merge as the failure is pre-existing?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_comma_less_given_that_premise_in_a_should_question_is_refused(self):
+        # Catches: a "given that" premise with no comma before a "should" question passes, as the question is exempt whole.
+        line = "Should I merge anyway given that the failure is pre-existing?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_seeing_that_premise_in_a_can_question_is_refused(self):
+        # Catches: a "seeing that" premise before a "can" question passes, as the question is exempt whole.
+        line = "Can I merge seeing that the failure is pre-existing?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_leading_since_claim_before_a_should_question_is_refused(self):
+        # Catches: a "since" clause that opens the sentence and states the claim before a "should" question passes.
+        line = "Since the failure is pre-existing should I merge?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_comma_less_so_before_an_ok_question_is_refused(self):
+        # Catches: a claim joined by "so" to a question with no auxiliary opener passes, as the question is exempt whole.
+        line = "The failure is pre-existing so ok to merge?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_comma_less_and_before_an_ok_question_is_refused(self):
+        # Catches: a claim joined by "and" to a question with no auxiliary opener passes, as the question is exempt whole.
+        line = "The failure is pre-existing and ok to merge?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
+    def test_pe_red_comma_less_so_before_an_i_clause_is_refused(self):
+        # Catches: a claim joined by "so" to a question clause that opens with "I" passes, as the question is exempt whole.
+        line = "The failure is pre-existing so I can merge?"
+        self.assert_blocked(line, line, "pre-existing-needs-main-run")
+
     def test_pe_red_bare_base_ref_is_no_run_and_is_refused(self):
         # A bare "on origin/main" with no sha or run URL is not a run.
         rows = [
