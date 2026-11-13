@@ -1469,27 +1469,39 @@ class SessionStartFetchTests(GitFixtureMixin, SessionStartAgentWorktreeNoticeTes
     def ls_remote_starts(starts):
         return [start for start in starts if start.split()[0] == "ls-remote"]
 
+    @staticmethod
+    def has_refspec(start, prefix):
+        return any(token.startswith(prefix) for token in start.split())
+
     def assert_one_origin_main_fetch(self, starts, branch=None):
-        """Exactly one git fetch: quiet and untagged, origin first among its names, and refspecs for origin/main alone,
-        plus one for `branch` when origin/HEAD names another branch. It never prunes and names no wildcard. Flag order
-        is not pinned."""
+        """One refresh of origin/main, at most one roadmap fetch, and no other fetch. The refresh is the fetch whose
+        refspecs name +refs/heads/main: quiet and untagged, origin first among its names, and refspecs for origin/main
+        alone, plus one for `branch` when origin/HEAD names another branch. It never prunes and names no wildcard. Flag
+        order is not pinned."""
         fetches = self.fetch_starts(starts)
-        self.assertEqual(len(fetches), 1, "want one git fetch at session start, got %r" % starts)
-        tokens = fetches[0].split()
+        refreshes = [start for start in fetches if self.has_refspec(start, "+refs/heads/main:")]
+        roadmaps = [start for start in fetches if self.has_refspec(start, "+roadmap:")]
+        others = [start for start in fetches if start not in refreshes and start not in roadmaps]
+        self.assertEqual(len(refreshes), 1, "want one origin/main refresh fetch at session start, got %r" % starts)
+        self.assertLessEqual(len(roadmaps), 1, "want at most one roadmap fetch at session start, got %r" % roadmaps)
+        self.assertEqual(others, [], "a git fetch that is neither the origin/main refresh nor the roadmap read: %r"
+                         % others)
+        fetch = refreshes[0]
+        tokens = fetch.split()
         flags = {token for token in tokens[1:] if token.startswith("-")}
         names = [token for token in tokens[1:] if not token.startswith("-")]
-        self.assertNotIn("--prune", flags, "the fetch prunes all of origin: %r" % fetches[0])
+        self.assertNotIn("--prune", flags, "the fetch prunes all of origin: %r" % fetch)
         self.assertEqual(flags, {"--quiet", "--no-tags"},
-                         "the fetch's flags are not --quiet and --no-tags: %r" % fetches[0])
-        self.assertEqual(names[:1], ["origin"], "the fetch does not name origin first: %r" % fetches[0])
+                         "the fetch's flags are not --quiet and --no-tags: %r" % fetch)
+        self.assertEqual(names[:1], ["origin"], "the fetch does not name origin first: %r" % fetch)
         refspecs = names[1:]
         self.assertEqual([token for token in refspecs if "*" in token], [],
-                         "the fetch names a wildcard refspec: %r" % fetches[0])
+                         "the fetch names a wildcard refspec: %r" % fetch)
         want = ["+refs/heads/main:refs/remotes/origin/main"]
         if branch is not None:
             want.append("+refs/heads/%s:refs/remotes/origin/%s" % (branch, branch))
         self.assertEqual(sorted(refspecs), sorted(want),
-                         "the fetch's refspecs are not the one-ref set: %r" % fetches[0])
+                         "the fetch's refspecs are not the one-ref set: %r" % fetch)
 
     def assert_local_main_line(self, lines, behind, ahead):
         found = [line for line in lines if LOCAL_MAIN.match(line)]

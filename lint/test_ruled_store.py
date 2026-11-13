@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "hooks"))
 import _nowindow  # noqa: E402  the one home of a no-window child start (hooks/_nowindow.py)
 import _test_git  # noqa: E402,F401  test-run signing opt-out (lint/_test_git.py)
 import _test_temp  # noqa: E402  test-temp-standard: one run folder per run (lint/_test_temp.py)
+import roadmap_ref  # noqa: E402  the freshness helper (lint/roadmap_ref.py); its UNKNOWN is the note a cut fetch leaves
 
 # The store helpers. A store is the folder roadmap/rulings on origin/roadmap, one JSON file per ruling. The helpers
 # point refs with git plumbing only (hash-object, update-index on a temp index, write-tree, commit-tree, update-ref),
@@ -786,21 +787,31 @@ class StaleRefReadTests(RepoCase):
         repo = self.make_repo("cut", store=older)
         git(repo, "remote", "add", "origin", origin)
         without_fetch_head(repo)
-        real_run = subprocess.run
-        started = []
+        real_popen = _nowindow.Popen
+        waits = []
 
-        def cut(args, *rest, **kwargs):
-            if isinstance(args, (list, tuple)) and "fetch" in args:
-                started.append(kwargs.get("timeout"))
-                raise subprocess.TimeoutExpired(args, kwargs.get("timeout"))
-            return real_run(args, *rest, **kwargs)
+        class CutFetch:
+            """A fetch child whose wait times out. poll() reports it gone, so the group kill has nothing to reach."""
+            returncode = None
 
-        with mock.patch("subprocess.run", side_effect=cut):
+            def communicate(self, timeout=None):
+                waits.append(timeout)
+                raise subprocess.TimeoutExpired(["git", "fetch"], timeout)
+
+            def poll(self):
+                return 1
+
+        def cut(argv, *rest, **kwargs):
+            if isinstance(argv, (list, tuple)) and "fetch" in argv:
+                return CutFetch()
+            return real_popen(argv, *rest, **kwargs)
+
+        with mock.patch.object(_nowindow, "Popen", cut):
             lines = ruled_store.session_lines(repo)
-        self.assertEqual(started, [2.0], "the fetch was not started through subprocess with a 2.0 s timeout: %r"
-                         % started)
-        self.assertTrue(any(NOTE_LINE.search(line) for line in lines),
-                        "a cut fetch did not leave the session block saying read as of: %r" % lines)
+        self.assertEqual(waits, [2.0], "the fetch did not wait on its child with a 2.0 s timeout: %r" % waits)
+        self.assertTrue(any(roadmap_ref.UNKNOWN in line for line in lines),
+                        "a cut fetch with no roadmap fetch on record did not say read as of an unknown time: %r"
+                        % lines)
 
     def test_a_fresh_ref_is_read_without_a_fetch(self):
         older, newer = self.stale_pair()
