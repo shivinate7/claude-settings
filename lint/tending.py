@@ -16,8 +16,9 @@ tend(entry, text, root) gives one row per open item line, in order: (line index,
 "unknown", never "true" (rule verification-report-unknown-reads). A line that holds no claim the test reads is
 "unknown" too. An item already marked [closed] gets no verdict. A UTF-8 byte-order mark before a line is not part of
 the item: the line is matched without it, and a close keeps it. close(entry, text, verdicts) gives the rewritten
-text. Given tend's rows for the same text, it closes each line whose own verdict is stale. Given {id: verdict}, it
-closes each line of a stale id. The command line runs tend and close, the same route an importer calls.
+text. Given tend's rows for the same text, it closes each line whose own verdict is stale, never every line that
+shares a stale id. Given {id: verdict} it closes a stale id only when one open line holds it. The command line runs
+tend and close, the same route an importer calls.
 
 The command line reads each live store that runs from the point. At merge-check it writes nothing and exits 1 for
 each stale item, whatever the close step. At stop, compact and triage-status it closes the stale items its close
@@ -33,13 +34,14 @@ tend() and close(). Asked for by --store at a point with no text, it prints `unk
 Reuse: the home test resolves a home as hooks/ruling_home.py does (its whole-value read, `_unwrap`, the refusal of an
 absolute or leaving path) and a step home as hooks/feedback_guard.py does (STEP_HOME, STEP_PATH). It calls the
 resolver's two git reads itself, not value_resolves, because value_resolves lists the refs on each call and a run here
-lists them once. The [closed] token is feedback_guard.CLOSED_TOKEN. These modules are imported on first use, and
+lists them once. It repeats value_resolves's four path checks (absolute, ".", "..", leaving the tree) because
+value_resolves cannot take the listed refs; a change to those checks there needs the same change in _home_held. The [closed] token is feedback_guard.CLOSED_TOKEN. These modules are imported on first use, and
 importing them starts no process or thread.
 
 Cost: importing this file starts no process, thread or timer. A call point imports it in the process it already runs.
-A run reads the store files and, for home-held, one for-each-ref and one cat-file per distinct home, through
-hooks/ruling_home.py, the one home of "some ref's tree holds this file". It writes only a store file whose text
-changed, and never at merge-check.
+A run reads the store files and builds one _Reads, which for home-held starts at most one for-each-ref and one
+cat-file per distinct home, through hooks/ruling_home.py, the one home of "some ref's tree holds this file". It
+writes only a store file whose text changed, and never at merge-check.
 """
 import argparse
 import datetime
@@ -62,7 +64,7 @@ FIELDS = ("where", "item", "still-true", "close", "runs-from", "state")
 EXTERNAL = "external:"
 TRUE, STALE, UNKNOWN = "true", "stale", "unknown"
 MARK = "[closed]"
-HOME = re.compile(r"\bHome:\s*(.+?)\s*$")  # the whole rest of the line, as ruling_home.HOME_RE reads a home
+HOME = re.compile(r"\bhome:\s*(.+?)\s*$", re.I)  # the whole rest of the line, in any case, as ruling_home.HOME_RE reads a home; unlike it, found anywhere in the line, not only from its start
 BULLET = re.compile(r"\s*[-*+]\s")
 BULLET_ITEM = re.compile(r"\^?[-*+] ")  # an item regex that starts with a bullet, so a bullet line it misses has the wrong shape
 UNTIL = re.compile(r"\buntil:?\s*(\d{4}-\d{2}-\d{2})", re.I)
@@ -212,12 +214,14 @@ def _match(item, line):
     return found.group(1), lead, body, cr
 
 
-def tend(entry, text, root):
-    """[(line index, id, verdict)] for each open item line of text, in order."""
+def tend(entry, text, root, reads=None):
+    """[(line index, id, verdict)] for each open item line of text, in order. reads is the run's one _Reads, so a
+    run over several files lists the refs once; without it this call builds its own."""
     test = TESTS.get(entry["still-true"])
     if test is None:
         raise ValueError("no still-true test named %r" % (entry["still-true"],))
-    item, reads, closed, found = re.compile(entry["item"], re.M), _Reads(root), _closed(), []
+    reads = reads or _Reads(root)
+    item, closed, found = re.compile(entry["item"], re.M), _closed(), []
     for index, line in enumerate(text.split("\n")):
         hit = _match(item, line)
         if hit is not None and not closed.search(hit[2]):
@@ -245,18 +249,25 @@ def _rewrite(entry, text, wanted):
     return "\n".join(out)
 
 
-def _stale_wanted(verdicts):
-    """wanted(line index, id) for _rewrite: true for a stale line of tend's rows, or a stale id of {id: verdict}."""
+def _stale_wanted(entry, text, verdicts):
+    """wanted(line index, id) for _rewrite: true for a stale line of tend's rows. A {id: verdict} dict, which has
+    no line index, closes a stale id only when one open line holds it, so it never closes a line by its neighbour's
+    verdict."""
     if isinstance(verdicts, dict):
-        return lambda index, ident: verdicts.get(ident) == STALE
+        item, closed, count = re.compile(entry["item"], re.M), _closed(), {}
+        for line in text.split("\n"):
+            hit = _match(item, line)
+            if hit is not None and not closed.search(hit[2]):
+                count[hit[0]] = count.get(hit[0], 0) + 1
+        return lambda index, ident: verdicts.get(ident) == STALE and count.get(ident) == 1
     stale = {(index, ident) for index, ident, verdict in verdicts if verdict == STALE}
     return lambda index, ident: (index, ident) in stale
 
 
 def close(entry, text, verdicts):
-    """text with each stale item line closed the way entry["close"] says. verdicts is tend's rows for this same
-    text, which close line by line, or {id: verdict}, which closes every line of a stale id."""
-    return _rewrite(entry, text, _stale_wanted(verdicts))
+    """text with each stale item line closed the way entry["close"] says. verdicts is tend's rows for this same text,
+    or {id: verdict}, which closes only an id that one open line holds."""
+    return _rewrite(entry, text, _stale_wanted(entry, text, verdicts))
 
 
 def contract_problems(entries):
@@ -310,7 +321,7 @@ def _shape_misses(entry, text):
     return [number for number, body in enumerate(bodies, 1) if BULLET.match(body) and not item.search(body)]
 
 
-def _tend_point(store, entry, root, point):
+def _tend_point(store, entry, root, point, reads):
     """(lines to print, whether the point fails) for one live store at a call point."""
     try:
         files = store_files(entry, root)
@@ -325,7 +336,7 @@ def _tend_point(store, entry, root, point):
         except (OSError, UnicodeDecodeError) as err:
             lines.append("tending: unknown %s: %s cannot be read: %s" % (store, shown, str(err).replace("\n", " ")))
             continue
-        rows = tend(entry, text, root)
+        rows = tend(entry, text, root, reads)
         stale = [(index, ident) for index, ident, verdict in rows if verdict == STALE]
         unread = sum(1 for row in rows if row[2] == UNKNOWN)
         if unread:
@@ -365,7 +376,7 @@ def main(argv):
         print("tending: FAIL: contract: %s" % problem)
     if problems:
         return 1
-    failed = False
+    failed, reads = False, _Reads(root)
     for store, entry in entries.items():
         if args.store and store != args.store:
             continue
@@ -379,7 +390,7 @@ def main(argv):
                 print("tending: unknown %s: caller supplies text" % store)
             continue
         try:
-            lines, bad = _tend_point(store, entry, root, args.point)
+            lines, bad = _tend_point(store, entry, root, args.point, reads)
         except (layout.LayoutError, ImportError) as err:  # a bad extras file or a missing hooks/ module
             print("tending: FAIL: %s: %s" % (store, str(err).replace("\n", " ")))
             return 1
