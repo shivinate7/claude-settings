@@ -1622,7 +1622,7 @@ class Host:
         The revert clear (the one home of the rule): a red run R, one the verdict would list as red, is cleared when a commit reachable from origin/<base> other than R's head_sha carries
         `This reverts commit <R's head_sha>` (40 hex) in its message and is not net-reverted (net_reverted, the net-revert read of read_lanes). Each red run needs its own revert.
         The revert's own run does not matter while it is absent, queued or in progress; a completed red run of it is a red run of its own. It never clears a cancelled run, a re-run in flight or a
-        failed read: those stay unknown. The commits are read with git on origin/<base>, the ref base_workflows reads, once per call and only when a red run exists; a failed read is unknown.
+        failed read: those stay unknown. The revert read is one `git log` over the whole origin/<base> history (the ref base_workflows reads) per call, made only when a red run exists, so its cost grows with that history. Red runs that share one head_sha share one revert, since the revert names the head; a failed read is unknown.
         One page of runs, never every page: the base's history is long. A run that did not succeed costs one jobs read, and a clear candidate one more. A failed read is unknown."""
         try:
             if os.path.dirname(ALARM_EVENTS) not in sys.path:
@@ -3561,7 +3561,7 @@ def ignore_checks(cfg):
     return out
 
 def base_verdict(root, host, base):
-    """host.base_state over the workflow files on origin/<base>. A failed read of them is unknown."""
+    """host.base_state over the workflow files on origin/<base>. A failed read of them is unknown. It sets host.base_root to `root` first, because base_state's revert clear runs git on origin/<base> and the host's own cwd may be none."""
     try:
         flows = base_workflows(root, f"origin/{base}")
     except (Stop, subprocess.TimeoutExpired, OSError) as e:
