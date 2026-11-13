@@ -54,11 +54,13 @@ unlaned's: the branch, bare or as lane/<id>, equals a live session step. A draft
 from the pull's posted review log. A present key must be a JSON bool (`null` and text are not); absent means false. A
 pull row with a non-bool value is skipped, so the stale-draft, pair, unlaned and lanes-to-archive rows read unknown.
 
-The row HANDIN_LINE ("handed in over STALE_HANDIN_HOURS h, in no batch", step handin-cannot-drop) lists each pull row whose
-`reviewLog` is true and whose `batched` is not true (triage sets `batched` when a batch integration pull holds the
+The row HANDIN_LINE ("handed in STALE_HANDIN_HOURS h or more, in no batch", step handin-cannot-drop) lists each pull row whose
+`reviewLog` and `reviewDone` are true and whose `batched` is not true (triage sets `batched` when a batch integration pull holds the
 pull) and whose `reviewLogAt`, the time its review log was posted, is that far before the live file's readAt, as
-`#N (<H>h)`. A pull with no usable `reviewLogAt` reads "unknown (#N has no reviewLogAt)". `batched` true takes the pull out
-before that check. `batched` is a JSON bool like `held`; a pull row with a non-bool value is skipped. The row reads the
+`#N (<H>h)`. `reviewDone` is true when the pull's newest review record reads done: a pull whose record reads open or bad
+(false) is not handed in. A pull with `reviewLog` true and no `reviewDone` reads "unknown (#N has no reviewDone)". A pull with no usable
+`reviewLogAt` reads "unknown (#N has no reviewLogAt)". `batched` true takes the pull out before those checks. `batched` and
+`reviewDone` are JSON bools like `held`; a pull row with a non-bool value is skipped. The row reads the
 open pulls only and counts a docs-only pull like any other.
 
 The row "lanes to archive" (idle_lanes) lists each completed or review-ready lane session whose steps have all landed and
@@ -155,7 +157,7 @@ STALE_LIVE_MINUTES = 60
 STALE_DRAFT_HOURS = 12
 # A posted review log that no batch integration pull holds after this many hours: the batch runner's list lost it.
 STALE_HANDIN_HOURS = 6
-HANDIN_LINE = "handed in over %d h, in no batch" % STALE_HANDIN_HOURS
+HANDIN_LINE = "handed in %d h or more, in no batch" % STALE_HANDIN_HOURS
 PAIR_LINE = "todo step with an open PR"
 # Every stalled line starts with this. An unknown read prints `<STALLED_LINE>: unknown (<why>)` and exits 0.
 STALLED_LINE = "stalled step"
@@ -669,7 +671,7 @@ def live_work(path, steps, slug=None):
     """window.ROADMAP_BUILD.live: the publisher's threads, pull requests and branches, or why unknown.
 
     Shape: {"readAt": ISO, "threads"?: [{"title", "state", "lastActivity"?, "step"?, "pr"?}],
-    "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "held"?, "reviewLog"?, "reviewLogAt"?, "batched"?, "url"?, "checks"?}], "branches"?: [{"name", "updatedAt"?}],
+    "pulls": [{"number", "title", "branch"?, "draft"?, "createdAt"?, "held"?, "reviewLog"?, "reviewDone"?, "reviewLogAt"?, "batched"?, "url"?, "checks"?}], "branches"?: [{"name", "updatedAt"?}],
     "sessions"?: [{"id", "session_status", "tags"?}]} (triage copies the list_sessions rows, every page;
     list_sessions omits the tags key on a tagless session, so a missing or null tags reads as no tags).
     A file with no pulls list reads unknown, so a dropped key never shows as "none". A file with no threads list stays
@@ -697,8 +699,8 @@ def live_work(path, steps, slug=None):
     list adds one skipped entry; an absent key adds nothing. Each skipped row makes staleWhy and pullWhy read unknown.
     A pulls row's optional `held` (the batch runner's hand-in or hold list names the pull) and `reviewLog` (the
     pull carries a posted review log) are JSON bools that triage fills; a present non-bool value skips the row.
-    stale_drafts skips a draft pull whose `held` or `reviewLog` is true. `reviewLogAt` (ISO time the review log was
-    posted) and `batched` (a JSON bool: a batch integration pull holds the pull) feed stale_handins.
+    stale_drafts skips a draft pull whose `held` or `reviewLog` is true. `reviewDone` (a JSON bool: the newest review
+    record reads done), `reviewLogAt` (ISO time the review log was posted) and `batched` (a JSON bool: a batch integration pull holds the pull) feed stale_handins.
     """
     if not path:
         return {"read": "unknown (no --live file: the publisher writes it from the project threads and GitHub)"}
@@ -736,8 +738,8 @@ def live_work(path, steps, slug=None):
     pulls = keep("pull", raw.get("pulls", []),
                  lambda r: type(r.get("number")) is int and text(r, "title")
                  and (r.get("branch") is None or isinstance(r["branch"], str))
-                 # `held`, `reviewLog` and `batched` are JSON bools; text such as "true" is a wrong shape, not a guess.
-                 and all(isinstance(r.get(k), bool) for k in ("held", "reviewLog", "batched") if k in r))
+                 # `held`, `reviewLog`, `reviewDone` and `batched` are JSON bools; text such as "true" is a wrong shape, not a guess.
+                 and all(isinstance(r.get(k), bool) for k in ("held", "reviewLog", "reviewDone", "batched") if k in r))
     pulls_skipped = len(skipped) - before_pulls
     branches = keep("branch", raw.get("branches", []), lambda r: text(r, "name"))
     if not has_threads:
@@ -1233,9 +1235,9 @@ def stale_drafts(work):
 
 
 def stale_handins(work):
-    """Entries `#N (<H>h)` for each open pull whose review log was posted (reviewLog true) STALE_HANDIN_HOURS or more
-    before the live read with no batch holding it (batched not true), or one unknown entry. A batched pull is out before
-    the reviewLogAt check."""
+    """Entries `#N (<H>h)` for each open pull whose review log was posted (reviewLog true) and whose newest record reads done (reviewDone true)
+    STALE_HANDIN_HOURS or more before the live read with no batch holding it (batched not true), or one unknown entry. A batched pull is out
+    before the reviewDone and reviewLogAt checks; a pull with reviewDone false is out before the reviewLogAt check."""
     why = live_why(work)
     if why:
         return [why]
@@ -1243,6 +1245,11 @@ def stale_handins(work):
     out = []
     for p in work["pulls"]:
         if p.get("reviewLog") is not True or p.get("batched") is True:
+            continue
+        if "reviewDone" not in p:
+            out.append("unknown (#%d has no reviewDone)" % p["number"])
+            continue
+        if not p["reviewDone"]:
             continue
         at = zoned_time(p.get("reviewLogAt"))
         if at is None:
