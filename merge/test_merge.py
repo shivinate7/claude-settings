@@ -1823,8 +1823,10 @@ class SmallBaseMove(ScopedRepo, Env):
 
     def test_the_suites_a_doc_hits_come_from_the_checks_jobs(self):
         root = os.path.join(HERE, "..")
-        lints = merge.lint_steps(root, "origin/main")
-        hits = lambda path: [f for f, _ in merge.hit_suites(root, [path], lints)]
+        always = merge.lint_steps(root, "HEAD")  # the lint steps of an empty diff: ci-job diffs <base>...HEAD, so no branch diff moves this set
+        self.assertTrue(always, "the empty-diff lint plan lists no step, so the skip set tests nothing")  # scope before subject
+        self.assertNotIn("SendMessage state fixture suite", always, "a lint step that only a doc's diff turns on is in the skip set, which hides its hit")
+        hits = lambda path: [f for f, _ in merge.hit_suites(root, [path], always)]
         self.assertIn("hooks/test_sendmessage_state.py", hits("docs/decisions/agent-model-cap.md"))
         self.assertIn("skills/project-ops/tests/test_scaffold.py", hits("skills/project-ops/templates/new.md"))
         self.assertNotIn("hooks/test_sendmessage_state.py", hits("docs/guide-c150.md"))
