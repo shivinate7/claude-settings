@@ -906,6 +906,11 @@ else:
             states = {s["state"] for s in sts}
             combined = "failure" if states & {"failure", "error"} else "pending" if (not states or "pending" in states) else "success"
             print(listing(sts, "statuses", fields, flags, {"state": combined, "sha": rel.split("/")[1], "total_count": len(sts)}, rel=rel))
+    elif re.fullmatch(r"issues/comments/\d+", rel) and rel.rsplit("/", 1)[1] in state["comments"]:
+        # GET of a conversation comment: its issue_url names the pull request the comment sits on, as GitHub's does.
+        comment = rel.rsplit("/", 1)[1]
+        print(json.dumps({"id": int(comment), "body": "", "issue_url": "https://api.github.com/" + path.split("/issues/comments/")[0]
+                          + "/issues/%d" % state["comments"][comment]}))
     elif re.fullmatch(r"branches/[^/]+/protection/required_status_checks", rel):
         if state["protection"] == "absent":
             api_error(404, "Branch not protected")
@@ -942,11 +947,17 @@ else:
 def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broken=False, need=(),
                  cwd_name="", statuses=None, page_cap=100, others=(), required=("checks",), protection=None,
                  count_file=None, compares=None, repos=None, refs=(), tips=None, head_sha=None, head_ref=None,
-                 draft=False):
+                 draft=False, comments=None):
     """Put a stand-in for the pull request tool in its own folder on PATH.
 
     `count_file`, when given, is a path the stand-in appends one line to per call (the call's argv as
     JSON), before it answers. Only a case that counts calls names one; every other fake writes nothing.
+
+    `head_sha`, when given, is the sha the pull request's head reports. Without it the head reports the fixed placeholder sha
+    that the state's `pr` record starts with.
+
+    `comments`, when given, maps a conversation comment's id to the number of the pull request it sits on. The stand-in answers
+    that comment's read with its issue_url, as GitHub's does; any other comment id is a 404.
 
     `repos`, when given, maps each repo name ("owner/name") to that repo's own answers, for a case whose
     lane spans repos: `compares` (its containment reads; "missing" is a 404, "network" a refused
@@ -1020,6 +1031,7 @@ def make_fake_gh(folder, base, delay=0, delay_s=0, checks=None, runs=None, broke
         "repos": None if repos is None else dict(repos),  # None: one repo, the top-level answers; a map: see the docstring
         "refs": list(refs),  # branch names the repo holds: the matching-refs read answers the ones under its prefix
         "tips": dict(tips or {}),  # branch name -> the sha of its tip; a branch not listed is at f * 40
+        "comments": {str(k): int(v) for k, v in (comments or {}).items()},  # comment id -> the pull request number it sits on
     }
     if head_sha:  # the pull request's own head, when a case names a real commit (records-page-ready); its draft flag too
         state["pr"]["head"] = {"ref": head_ref or "feat", "sha": head_sha}

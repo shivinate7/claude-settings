@@ -71,9 +71,9 @@ def archive_counted_gh(repos=None, name="archcount"):
     return folder
 
 
-def gh_calls_taken(folder):
-    """The lines the counted fake at `folder` logged since its log was last taken. Taking the log clears it."""
-    path = os.path.join(folder, ARCHIVE_CALLS)
+def gh_calls_taken(folder, name=ARCHIVE_CALLS):
+    """The lines the counted fake at `folder` logged since its log `name` was last taken. Taking the log clears it."""
+    path = os.path.join(folder, name)
     if not os.path.exists(path):
         return []
     with open(path, encoding="utf-8") as handle:
