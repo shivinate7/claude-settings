@@ -916,12 +916,19 @@ class GitFixtureMixin:
         vcs(self.root, "init", "-q", "--bare", "-b", "main", "origin.git")
         vcs(self.primary, "remote", "add", "origin", self.origin_repo)
 
-    def advance_origin_main(self, commits=1, grants=True, files=None):
+    def advance_origin_main(self, commits=1, grants=True, files=None, remove=()):
         """Another clone pushes `commits` commits to origin's main. With `grants`, the first carries fresh grants; with
-        `files` (path to text), the first carries those files too; the rest are empty. The primary checkout does not
-        fetch them. Returns the new tip's sha."""
+        `files` (path to text) and `remove` (paths), the first carries those changes too; the rest are empty. The primary
+        checkout does not fetch them. Returns the new tip's sha."""
         other = os.path.join(self.root, "other")
         vcs(self.root, "clone", "-q", self.origin_repo, other)
+        if remove:
+            vcs(other, "rm", "-q", "--", *remove)
+            for rel in remove:
+                try:
+                    os.removedirs(os.path.dirname(os.path.join(other, *rel.split("/"))))
+                except OSError:
+                    pass
         names = []
         if grants:
             self.put(os.path.join(other, "CLAUDE.md"), GRANT_FRESH)
@@ -931,8 +938,9 @@ class GitFixtureMixin:
             self.put(os.path.join(other, *rel.split("/")), text)
             names.append(rel)
         first = 1
-        if names:
-            vcs(other, "add", "-f", "--", *names)
+        if names or remove:
+            if names:
+                vcs(other, "add", "-f", "--", *names)
             vcs(other, "commit", "-q", "-m", "fresh grants at origin" if grants else "files at origin")
             first = 2
         for number in range(first, commits + 1):
@@ -2477,6 +2485,111 @@ class SessionStartFastForwardTests(GitFixtureMixin, LivePinFixtureMixin, Session
         self.assert_stub_reached(folder, "merge")
         self.assert_one_not_ff(lines, "the merge failed")
         self.assertEqual(self.checkout_state(self.primary), before, "a failed merge changed the checkout")
+
+    def publish_checkout(self, files, patterns):
+        """Commits `files` (path to text) on the checkout's main, with a .gitignore that ignores `patterns`, and pushes
+        main, so origin and the checkout agree before origin moves on."""
+        for rel, text in files.items():
+            self.put(os.path.join(self.primary, *rel.split("/")), text)
+        self.put(os.path.join(self.primary, ".gitignore"), ".claude/\n" + "".join("%s\n" % p for p in patterns))
+        vcs(self.primary, "add", "-f", "--", ".gitignore", *files)
+        self.commit("publish the checkout's files")
+        vcs(self.primary, "push", "-q", "origin", "main")
+
+    def write_ignored(self, rel, text):
+        """A local file the checkout ignores. It is written after publish_checkout and never committed."""
+        path = os.path.join(self.primary, *rel.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        self.put(path, text)
+        return path
+
+    def assert_ignored_listed(self, rel):
+        listed = vcs(self.primary, "ls-files", "--others", "--ignored", "--exclude-standard").stdout.splitlines()
+        self.assertIn(rel, listed, "scope: %s is not an ignored local file" % rel)
+
+    def assert_tree_clean(self):
+        self.assertEqual(vcs(self.primary, "status", "--porcelain").stdout, "", "scope: the tree is not clean")
+
+    @staticmethod
+    def read_text(path):
+        with open(path, encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_an_ignored_file_that_origin_renames_a_tracked_file_onto_is_not_overwritten(self):
+        self.publish_checkout({"old.txt": "tracked text\n"}, ["ign-moved.txt"])
+        local = self.write_ignored("ign-moved.txt", "local secret\n")
+        self.assert_ignored_listed("ign-moved.txt")
+        self.assert_tree_clean()
+        fresh = self.advance_origin_main(commits=1, grants=False, files={"ign-moved.txt": "tracked text\n"},
+                                         remove=["old.txt"])
+        self.assertNotEqual(fresh, self.head_sha(), "scope: origin's main did not move past the checkout")
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup()
+        self.assert_one_not_ff(lines, "an ignored file is in the way")
+        self.assertEqual(self.checkout_state(self.primary), before, "a checkout with an ignored file in the way changed")
+        self.assertEqual(self.read_text(local), "local secret\n", "the ignored file was overwritten by the rename")
+
+    def test_an_ignored_file_where_origin_adds_a_file_under_it_is_not_overwritten(self):
+        self.publish_checkout({}, ["ign-pf"])
+        local = self.write_ignored("ign-pf", "local file\n")
+        self.assert_ignored_listed("ign-pf")
+        self.assert_tree_clean()
+        fresh = self.advance_origin_main(commits=1, grants=False, files={"ign-pf/child": "upstream child\n"})
+        self.assertNotEqual(fresh, self.head_sha(), "scope: origin's main did not move past the checkout")
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup()
+        self.assert_one_not_ff(lines, "an ignored file is in the way")
+        self.assertEqual(self.checkout_state(self.primary), before, "a checkout with an ignored file in the way changed")
+        self.assertTrue(os.path.isfile(local), "the ignored file was replaced by a directory")
+        self.assertEqual(self.read_text(local), "local file\n", "the ignored file was overwritten")
+
+    def test_an_ignored_symlink_where_origin_adds_a_file_under_it_is_not_followed_or_replaced(self):
+        self.publish_checkout({}, ["ign-ps"])
+        scratch = os.path.join(self.root, "scratch")
+        os.makedirs(scratch)
+        self.put(os.path.join(scratch, "marker.txt"), "scratch marker\n")
+        link = os.path.join(self.primary, "ign-ps")
+        self.link_to(scratch, link)
+        self.assert_ignored_listed("ign-ps")
+        self.assert_tree_clean()
+        fresh = self.advance_origin_main(commits=1, grants=False, files={"ign-ps/child": "upstream child\n"})
+        self.assertNotEqual(fresh, self.head_sha(), "scope: origin's main did not move past the checkout")
+        before = self.checkout_state(self.primary)
+        lines = self.run_startup()
+        self.assert_one_not_ff(lines, "an ignored file is in the way")
+        self.assertEqual(self.checkout_state(self.primary), before, "a checkout with an ignored symlink in the way changed")
+        self.assertTrue(os.path.islink(link), "the ignored symlink was replaced")
+        self.assertFalse(os.path.exists(os.path.join(scratch, "child")), "the move wrote into the symlink's target")
+
+    def test_a_tracked_directory_that_origin_replaces_with_a_file_still_fast_forwards(self):
+        self.publish_checkout({"tracked/f": "tracked f\n"}, [])
+        self.assertTrue(os.path.isdir(os.path.join(self.primary, "tracked")), "scope: tracked is not a directory")
+        self.assert_tree_clean()
+        fresh = self.advance_origin_main(commits=2, grants=False, files={"tracked": "now a file\n"},
+                                         remove=["tracked/f"])
+        self.assertNotEqual(fresh, self.head_sha(), "scope: origin's main did not move past the checkout")
+        lines = self.run_startup()
+        found = self.ff_lines(lines)
+        self.assertEqual(len(found), 1, "want one fast-forward line: a file that replaces a tracked directory is a move, "
+                                        "got %r" % lines)
+        self.assertEqual(self.head_sha(), fresh, "the checkout did not move to origin/main")
+        self.assertTrue(os.path.isfile(os.path.join(self.primary, "tracked")), "tracked is not the file origin added")
+
+    def test_an_ignored_directory_that_origin_adds_a_new_file_into_still_fast_forwards_and_keeps_its_files(self):
+        # Control: green on the current hook. The move adds a file that is absent, so nothing in the way.
+        self.publish_checkout({}, ["build/"])
+        kept = self.write_ignored("build/other.txt", "local other\n")
+        self.assert_ignored_listed("build/other.txt")
+        self.assertFalse(os.path.exists(os.path.join(self.primary, "build", "new.txt")), "scope: build/new.txt is present")
+        self.assert_tree_clean()
+        fresh = self.advance_origin_main(commits=2, grants=False, files={"build/new.txt": "upstream new\n"})
+        self.assertNotEqual(fresh, self.head_sha(), "scope: origin's main did not move past the checkout")
+        lines = self.run_startup()
+        found = self.ff_lines(lines)
+        self.assertEqual(len(found), 1, "want one fast-forward line for a file origin adds into an ignored directory, "
+                                        "got %r" % lines)
+        self.assertEqual(self.head_sha(), fresh, "the checkout did not move to origin/main")
+        self.assertEqual(self.read_text(kept), "local other\n", "the ignored directory's own file changed")
 
 
 if __name__ == "__main__":
