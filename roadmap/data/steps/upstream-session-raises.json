@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "D19: a Remote Control session refuses to start a session on a turn that another session started. Step refused-start-queues-turn covers only the queue rule, not the refusal itself. D20: send_message has no read receipt. Neither had a home (Degen ledger audit).",
  "source": "retrospective Degen ledger audit 06:30 CST Nov 13",
- "note": "Owner of the raise: the retrospective (mail-bound acts go through it). Done: each gap raised upstream with its repro, and the raise linked here.",
- "updatedAt": "2026-11-13T06:32:23-06:00"
+ "note": "Owner of the raise: the retrospective (mail-bound acts go through it). Done: each gap raised upstream with its repro, and the raise linked here. 06:34 CST Nov 13, retrospective: a raise to Anthropic is a message outside the org, which cannot be undone, so the owner sends it. The retrospective drafts the two texts (D19, D20) and brings them to the owner as one yes or no. Owner act: the owner; drafting: the retrospective.",
+ "updatedAt": "2026-11-13T06:34:14-06:00"
 }
