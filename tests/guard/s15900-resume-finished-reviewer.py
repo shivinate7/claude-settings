@@ -38,6 +38,12 @@ RF_WT_UNKNOWN, RF_WT_UNKNOWN_AGENT = "builder-pr35", "b4d7e2a9f1c63058"
 RF_WT_LIVE, RF_WT_LIVE_AGENT = "builder-pr36", "b6e1c8f3a9d27540"
 RF_CASE_LOWER, RF_CASE_LOWER_AGENT = "reviewer-pr37", "a7f0d5b2e8c39416"
 RF_CASE_CAP, RF_CASE_CAP_AGENT = "reviewer-pr38", "a1e6c9f4d2b87053"
+# Reviewers spawned with a plugin-prefixed role (`cs:reviewer`): one background, one foreground, one still running, and
+# a lower-case reviewer beside the background one as its control.
+RF_PREFIX_BG, RF_PREFIX_BG_AGENT = "reviewer-pr39", "a3c9e6f1b8d24705"
+RF_PREFIX_LOWER, RF_PREFIX_LOWER_AGENT = "reviewer-pr40", "a6f3b9e4a1d75038"
+RF_PREFIX_FG, RF_PREFIX_FG_AGENT = "reviewer-pr41", "a4d1f7c0e9b35826"
+RF_PREFIX_RUN, RF_PREFIX_RUN_AGENT = "reviewer-pr42", "a5e2a8d3f0c64917"
 RF_NOTICE, RF_NOTICE_AGENT = "reviewer-pr15", "a4e7b0d3c9f15862"
 RF_TASKID, RF_TASKID_AGENT = "reviewer-pr16", "a6f3d9c2e8b14750"
 RF_STOPPED, RF_STOPPED_AGENT = "reviewer-pr17", "a8e4b1d7f2c90316"
@@ -181,6 +187,20 @@ RF_WF_NOTYPE_EXTRA = {RF_WF_NOTYPE_AGENT: RF_WF_WT_KEYS}
 # holds no agent, so the target is named by no readable journal.
 RF_WF_UNREADABLE_RUN = "wf_9b2c6e4a-1f7"
 RF_WF_UNREADABLE_AGENT = "d8f0a3c6e2b91574f"
+# A run whose agentTypes are spelled three ways: `Reviewer` (capital R), `cs:reviewer` (plugin-prefixed), and `reviewer`
+# (lower case, the control). The scan agent has a plugin-prefixed non-reviewer role. The running `Reviewer` has a started
+# line, no result, and no run record, so it is still running.
+RF_WF_CASE_RUN = "wf_4a9e2c7d-5b0"
+RF_WF_CASE_CAP_AGENT, RF_WF_CASE_PREFIX_AGENT = "c3e7a1f9d5b02846a", "b8d2f6a0c4e13957b"
+RF_WF_CASE_LOWER_AGENT, RF_WF_CASE_SCAN_AGENT = "e1a5c9f3b7d20648c", "d7f0b4e8a2c61539d"
+RF_WF_CASE_RUNNING_AGENT = "a9c3e7b1f5d02486e"
+RF_WF_CASE_AGENTS = [
+    (RF_WF_CASE_CAP_AGENT, "review-cap", "Review", "Reviewer", True),
+    (RF_WF_CASE_PREFIX_AGENT, "review-prefixed", "Review", "cs:reviewer", True),
+    (RF_WF_CASE_LOWER_AGENT, "review-lower", "Review", "reviewer", True),
+    (RF_WF_CASE_SCAN_AGENT, "scan-plain", "Scan", "cs:scanner", True),
+    (RF_WF_CASE_RUNNING_AGENT, "review-cap-running", "Review", "Reviewer", False),
+]
 
 
 def rf_workflow_launch(transcript_name, run):
@@ -206,6 +226,19 @@ RF_TRANSCRIPTS = {
         rr_comment("c1", rr_record(1)),
         rf_launch("r2", "Reviewer", RF_CASE_CAP, RF_CASE_CAP_AGENT), rf_finish("r2"),
         rr_comment("c2", rr_record(2))),
+    # A plugin-prefixed reviewer finished in the background, then a lower-case reviewer finished: the lower-case one is
+    # the control. A foreground plugin-prefixed reviewer finished, and a background one that still runs.
+    "bg-prefixed-reviewer-pair-finished": rr_session(
+        rf_launch("r1", "cs:reviewer", RF_PREFIX_BG, RF_PREFIX_BG_AGENT), rf_finish("r1"),
+        rr_comment("c1", rr_record(1)),
+        rf_launch("r2", "reviewer", RF_PREFIX_LOWER, RF_PREFIX_LOWER_AGENT), rf_finish("r2"),
+        rr_comment("c2", rr_record(2))),
+    "fg-prefixed-reviewer-finished": rr_session(
+        rf_foreground("r1", "cs:reviewer", RF_PREFIX_FG, RF_PREFIX_FG_AGENT, "completed"),
+        rr_comment("c1", rr_record())),
+    "bg-prefixed-reviewer-running": rr_session(
+        rf_launch("r1", "cs:reviewer", RF_PREFIX_RUN, RF_PREFIX_RUN_AGENT),
+        rr_comment("c1", rr_record())),
     # A background reviewer that finished: its launch result, its finish notice, then the round's record.
     "bg-reviewer-finished": rr_session(rf_launch("r1", "reviewer", RF_REVIEW, RF_REVIEW_AGENT),
                                        rf_finish("r1"), rr_comment("c1", rr_record())),
@@ -324,6 +357,8 @@ RF_TRANSCRIPTS = {
     "workflow-completed": rr_session(rf_workflow_launch("workflow-completed", RF_WF_COMPLETED_RUN)),
     "workflow-norecord": rr_session(rf_workflow_launch("workflow-norecord", RF_WF_NORECORD_RUN)),
     "workflow-notype": rr_session(rf_workflow_launch("workflow-notype", RF_WF_NOTYPE_RUN)),
+    # A Workflow run whose agents are spelled `Reviewer`, `cs:reviewer`, `reviewer` and `cs:scanner` (RF_WF_CASE_RUN).
+    "workflow-case": rr_session(rf_workflow_launch("workflow-case", RF_WF_CASE_RUN)),
     # A Workflow run whose journal cannot be read (write_rf_transcripts makes its journal a folder).
     "workflow-unreadable": rr_session(rf_workflow_launch("workflow-unreadable", RF_WF_UNREADABLE_RUN)),
     # No spawn at all: the empty state.
@@ -377,6 +412,7 @@ def write_rf_transcripts():
     write_rf_run_record("workflow-completed", RF_WF_COMPLETED_RUN, "completed")
     write_rf_workflow("workflow-norecord", RF_WF_NORECORD_RUN, RF_WF_NORECORD_AGENTS)
     write_rf_workflow("workflow-notype", RF_WF_NOTYPE_RUN, RF_WF_NOTYPE_AGENTS, RF_WF_NOTYPE_EXTRA)
+    write_rf_workflow("workflow-case", RF_WF_CASE_RUN, RF_WF_CASE_AGENTS)
     # The journal is a folder, so the guard's open() fails on it, as the role transcript's `unreadable` folder does.
     os.makedirs(os.path.join(RF_DIR, "workflow-unreadable", "subagents", "workflows", RF_WF_UNREADABLE_RUN,
                              "journal.jsonl"), exist_ok=True)
@@ -547,6 +583,19 @@ rf_allow("a started-only Workflow reviewer with no run record passes: the run is
 rf_refuse("a finished Workflow agent with a worktree flag and no agentType is refused as an agent",
           {"to": RF_WF_NOTYPE_AGENT, "message": RF_MSG}, rf_path("workflow-notype"),
           carries=("this agent has finished", "fresh agent", "prior report"))
+# A finished Workflow agent whose agentType is a reviewer spelled `Reviewer`, or plugin-prefixed `cs:reviewer`, with no
+# worktree, is refused as the lower-case `reviewer` is. The lower-case one is the control in the same run, the scan
+# agent with a plugin-prefixed non-reviewer role passes, and a running `Reviewer` passes.
+rf_refuse("a finished Workflow reviewer spelled `Reviewer`, named by its journal label, with no worktree, is refused",
+          {"to": "review-cap", "message": RF_MSG}, rf_path("workflow-case"), carries=("prior report",))
+rf_refuse("a finished Workflow reviewer with the plugin-prefixed role `cs:reviewer`, with no worktree, is refused",
+          {"to": RF_WF_CASE_PREFIX_AGENT, "message": RF_MSG}, rf_path("workflow-case"), carries=("prior report",))
+rf_refuse("control: a finished Workflow reviewer spelled `reviewer` in lower case is refused in the same run",
+          {"to": RF_WF_CASE_LOWER_AGENT, "message": RF_MSG}, rf_path("workflow-case"))
+rf_allow("control: a finished Workflow agent with the plugin-prefixed non-reviewer role `cs:scanner` passes",
+         {"to": RF_WF_CASE_SCAN_AGENT, "message": RF_MSG}, rf_path("workflow-case"))
+rf_allow("control: a running Workflow reviewer spelled `Reviewer` passes: a started line, no result, no run record",
+         {"to": RF_WF_CASE_RUNNING_AGENT, "message": RF_MSG}, rf_path("workflow-case"))
 # Asked: no readable journal names the target, and a journal beside the transcript cannot be read. The control is the
 # same target on a transcript whose journals all read: nothing names it, so it passes.
 rf_ask("a Workflow agent whose journal cannot be read asks: no readable journal names it",
@@ -592,6 +641,18 @@ rf_refuse("control: a finished reviewer named in lower case is refused, beside a
 rf_refuse("a finished Reviewer spelled with a capital R, with no worktree, is refused as the lower-case one is",
           {"to": RF_CASE_CAP, "message": RF_MSG}, rf_path("bg-reviewer-case-pair-finished"),
           carries=("prior report",))
+# A plugin-prefixed reviewer, `cs:reviewer`, is a reviewer as `reviewer` is: its role is judged without the prefix. The
+# lower-case reviewer beside it is the control, and a running prefixed reviewer passes.
+rf_refuse("a finished background cs:reviewer, named by its spawn name, with no worktree, is refused",
+          {"to": RF_PREFIX_BG, "message": RF_MSG}, rf_path("bg-prefixed-reviewer-pair-finished"),
+          carries=("prior report",))
+rf_refuse("a finished foreground cs:reviewer, named by its spawn name, with no worktree, is refused",
+          {"to": RF_PREFIX_FG, "message": RF_MSG}, rf_path("fg-prefixed-reviewer-finished"),
+          carries=("prior report",))
+rf_refuse("control: a finished background reviewer spelled in lower case, beside a cs:reviewer spawn, is refused",
+          {"to": RF_PREFIX_LOWER, "message": RF_MSG}, rf_path("bg-prefixed-reviewer-pair-finished"))
+rf_allow("control: a running background cs:reviewer, named by its spawn name, passes",
+         {"to": RF_PREFIX_RUN, "message": RF_MSG}, rf_path("bg-prefixed-reviewer-running"))
 
 
 # A `to` in the `name [ref]` form, which SendMessage writes when a name is ambiguous. The ref is the first eight hex of
