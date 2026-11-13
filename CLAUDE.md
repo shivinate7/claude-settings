@@ -68,7 +68,7 @@ on the state it recovers, or it fails on the one day it is needed.<!-- rule:veri
 first. If it breaks a check, pin the newest one that passes and say why.<!-- rule:verification-newest-that-passes --> If this repo lints markdown, give every
 published number and path a checked reader.<!-- rule:verification-checked-reader-for-numbers --> Verify a claim before you
 rely on it, a document's own claims too. Report a read that could not run as unknown,
-never as clear or broken.<!-- rule:verification-report-unknown-reads -->
+never as clear or broken.<!-- rule:verification-report-unknown-reads --> Counts and states (open, closed, merged, CI status) come from the GitHub REST API, not a search. A search only finds candidates; confirm each one with REST.<!-- rule:verification-counts-from-rest -->
 
 **Tokens.** Never load a long document whole. Read one record, one section, or a
 rendered view.<!-- rule:tokens-never-load-whole-doc --> A verification command's answer is its verdict, not its stream. Get the
