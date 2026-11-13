@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 from guard_core import (
     SHELL_TOOLS, WRITE_TOOLS, _absolute, ASSIGNMENT, _git, _git_subcommand_index, _segment_git_c_target, basename, cap_safe, command_root, GIT_WORK_TREE_RE,
     dir_before_segment, inline_script, inner_commands, resolve_command, resolve_default_base, segment_tokens, split_segments,
-    is_cloud, strip_heredoc_bodies, strip_redirections,
+    is_cloud, strip_heredoc_bodies, strip_redirections, walk_quotes,
 )
 import own_session  # the one home of the own get_session read, small so report_guard imports it too
 from shared_names import BUILD_TAG, DATA_TOOL, LANE_GRANT_MARKER, LANE_TAG, TOPIC_TAG, grant_line_holds_words, is_lane_create_session, lane_head_refs, lane_tags  # the one home of the lane tags and head refs, shared with the roadmap build
@@ -371,6 +371,52 @@ def _gh_api_write(args) -> str:
     if method:
         return "api " + method if method in GH_API_WRITE_METHODS else ""
     return "api with fields" if fields else ""
+
+
+def gh_write_view(raw: str) -> str:
+    """The command text rule gh-write-cloud judges. It is `strip_heredoc_bodies(raw)`, except that a body
+    fed to a python that only reads it is data and drops: `python3 -c CODE <<EOF` when CODE hands no string to
+    a shell (`script_spots`), and `python3 script.py <<EOF`. Every other heredoc header keeps the default
+    reading, so a body that bash, node, perl, ruby, or a python script on stdin runs stays in view."""
+    stripped = strip_heredoc_bodies(raw)
+    if "<<" not in raw or stripped != raw:
+        return stripped   # no heredoc, or the default reading already dropped what it drops
+    from guard_core import _strip_heredoc_bodies_unconditionally, script_language
+    from guard_env import script_spots
+    from guard_frozen import _inline_script_at, _script_file_arg
+    saw_python = False
+    for segment in split_segments(_strip_heredoc_bodies_unconditionally(raw)):
+        if "<<" not in segment:
+            continue
+        lang = script_language(segment)
+        if not lang:
+            continue
+        tokens = segment_tokens(segment)
+        index = resolve_command(tokens) if tokens else None
+        if lang != "py" or index is None:
+            return stripped
+        found = _inline_script_at(tokens)
+        if found:
+            if script_spots(str(tokens[found[1]]), "py"):
+                return stripped   # the code runs its stdin through a shell
+        elif not isinstance(_script_file_arg(tokens, index, "py"), str):
+            return stripped   # no script file: python reads its script from the heredoc
+        saw_python = True
+    if not saw_python:
+        return stripped
+    view = strip_heredoc_bodies(raw, shells_only=True, per_body=True)
+    # An unquoted delimiter lets bash run each substitution of the body while it writes it, whatever reads the
+    # body after; the shell reading above skips an interpreter header, so those lines join the view here.
+    from guard_core import interpreter_bodies
+    from guard_env import _substitutions
+    runs = []
+    for lang, body, quote in interpreter_bodies(raw):
+        if lang == "py" and not quote and ("$(" in body or "`" in body):
+            texts, too_deep = _substitutions(body, heredoc=True)
+            if too_deep:
+                return raw   # unreadable: every line stays in view
+            runs += [text for text, _ in texts[:-1]]   # the last text is the body around them
+    return "\n".join([view] + runs)
 
 
 def gh_write_of(segment: str) -> str:
@@ -1156,12 +1202,20 @@ def role_proof_hit(stripped: str, transcript: str) -> str:
 
 # ---- merge --confirm: the checkout it acts in must be a repo the own record names (rule merge-confirm-repo)
 REPO_REASON = (
-    "merge-confirm-repo: this session's own record does not prove it may merge in the checkout this command acts in. "
+    "this session's own record does not prove it may merge in the checkout this command acts in. "
     "A merge is allowed only in a repo that a cs-repo tag of the session's own get_session record names. "
     "If that repo is this session's own: run get_session (no argument) alone in its own turn, then retry. "
     "Otherwise hand the pull request to a batch runner whose cs-repo tags name the repo "
     "(list_sessions, tag cs-build:batch-runner). "
     "(decision merge-confirm-repo, a cloud merge acts only in a repo its own record names)"
+)
+CONFIRM_HIT = "merge --confirm"  # the label of a merge --confirm the own record does not prove
+# The same refusal when --head holds a command substitution: the guard cannot read the sha, and the fault is the value, not the checkout.
+HEAD_SUBST_HIT = "merge --confirm --head substitution"
+HEAD_SUBST_REASON = (
+    "--head is filled by a command substitution ($(...) or backticks), and the guard cannot read a sha from it, so the merge is refused. "
+    "Run the command first and pass its literal 40-hex sha: `merge <n> --confirm --head <sha>`. "
+    "(decision merge-confirm-repo, a cloud merge acts only in a repo its own record names; the merge tool takes --head as a literal sha)"
 )
 
 
@@ -1218,14 +1272,51 @@ def repo_proof_hit(stripped: str, cwd: str, transcript: str) -> str:
     tokenizes once they are gone (a quote left open), the merge is denied, never skipped."""
     if not is_cloud():
         return ""
-    return "merge --confirm" if _unproved_confirm(stripped, cwd, transcript, 0) else ""
+    return _unproved_confirm(stripped, cwd, transcript, 0)
 
 
 MERGE_NEST_DEPTH = 4  # `bash -c` inside `bash -c` is followed this far; a deeper script is judged as a refusal
 
 
-def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
-    """True when a `merge --confirm` in `text` acts in a checkout the own record does not prove. `text` is the command, or a script a
+def _raw_words(segment: str):
+    """The segment's words as written, quotes and escapes kept: (text, runs) pairs, where `runs` is True when bash would run a command
+    substitution inside the word, an unquoted or double-quoted `$(` or backtick that no backslash escapes. A single-quoted one, an
+    escaped one and one inside `$'...'` are text. Quote state comes from walk_quotes, the one quote walk (an escape `\\x` is one step,
+    so the escaped character is never read as a `$` or a backtick)."""
+    words, first, runs = [], None, False
+    for at, char, quote in walk_quotes(segment):
+        if not quote and char.isspace():
+            if first is not None:
+                words.append((segment[first:at], runs))
+            first, runs = None, False
+            continue
+        if first is None:
+            first = at
+        if quote in ("", '"') and (char == "`" or (char == "$" and segment[at + 1:at + 2] == "(")):
+            runs = True
+    if first is not None:
+        words.append((segment[first:], runs))
+    return words
+
+
+def _head_is_substitution(segment: str) -> bool:
+    """True when the segment's --head value (`--head V` or `--head=V`) holds a command substitution bash would run, `$(` or a backtick,
+    bare, double-quoted or after other text. It reads the raw words, so `'$(x)'` and `\\$(x)` (literal text) say no and the refusal
+    keeps the repo remedy. A segment that does not tokenize says no too."""
+    if segment_tokens(segment) is None:
+        return False
+    words = _raw_words(segment)
+    for number, (text, runs) in enumerate(words):
+        if text.startswith("--head="):
+            if runs:
+                return True
+        elif text == "--head" and number + 1 < len(words) and words[number + 1][1]:
+            return True
+    return False
+
+
+def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> str:
+    """The label of a `merge --confirm` in `text` that acts in a checkout the own record does not prove, else ''. `text` is the command, or a script a
     segment hands on (`bash -c`, `sh -c`, `eval`: inner_commands, the one reader of those wrappers), which runs in the directory its own
     segment is in. A `)` or `&` glued to the last word ends the merge's arguments (_command_words), so a merge closing a subshell is read."""
     ends = []
@@ -1238,11 +1329,13 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
         if scripts:
             if depth >= MERGE_NEST_DEPTH:
                 if any("--confirm" in script for script in scripts):
-                    return True
+                    return CONFIRM_HIT
             else:
                 where = dir_before_segment(segments, number, cwd, ends) or ""
-                if any(_unproved_confirm(script, where, transcript, depth + 1) for script in scripts):
-                    return True
+                for script in scripts:
+                    hit = _unproved_confirm(script, where, transcript, depth + 1)
+                    if hit:
+                        return hit
         if merge_tool_args(segment) is None:
             continue
         try:
@@ -1265,9 +1358,10 @@ def _unproved_confirm(text: str, cwd: str, transcript: str, depth: int) -> bool:
                 if tags is not None and not tagged_after and any(repo_tag_names(tag, repo) for tag in tags):
                     continue
         except Exception:
-            pass
-        return True
-    return False
+            if _head_is_substitution(segment):
+                return HEAD_SUBST_HIT
+        return CONFIRM_HIT
+    return ""
 
 
 # ---- the record branch's one writer: only the triage session pushes to it (rule roadmap-one-writer)
