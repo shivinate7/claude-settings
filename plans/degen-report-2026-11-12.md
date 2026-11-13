@@ -63,6 +63,13 @@ Correction to batch 1, app section
 24. The Words check counts false alarms, so compliance-check ranks a non-problem. compliance-check listed 70 Degen Words hits besides "gate" (inbox, owner, hole, tier, entry, shape, worker) as fix #4. Lane words-lint found every one is a record slug, a code identifier, a quoted owner word or the word used in its correct sense, and changed nothing (2026-11-12 21:27 CST). A lane's worth of work bought nothing. Fix: the Words probe skips slugs, code spans and identifiers, and quoted owner text, and compliance-check ranks only hits that survive that filter.
 ```
 
+## Batch 3, word for word
+
+The owner pasted this at 23:25 CST Nov 12. It repeated items 22 to 24 word for word, so they are left out here. It adds item 25, item 26, more evidence for item 23 and a correction to batch 1 item 2.
+```
+
+```
+
 ## Ledger
 
 Classes: ruled (already ruled or fixed), step (an existing step takes it), new (a new step), owner (needs the owner's call), elsewhere (not claude-settings).
@@ -70,7 +77,7 @@ Classes: ruled (already ruled or fixed), step (an existing step takes it), new (
 | # | Finding | Class | Home | Status | Proof |
 |---|---|---|---|---|---|
 | D1 | Inbox hook misses page read-backs | step | step artifact-guard-matcher-names, PRs #2923-#2927 | in flight | none |
-| D2 | Local page republish has no pictures | step + new | step artifact-guard-matcher-names; rest: new step local-page-publish-route | partly in flight | none |
+| D2 | Local page republish has no pictures (corrected in batch 3: local sessions have the publish tools; the gap is knowing which one) | step + new | step artifact-guard-matcher-names; rest: new step local-page-publish-route, narrowed to skill waiting-page naming the tool a local session republishes with (the skill names none on main 36807ad19) | partly in flight | none |
 | D3 | No fix-check exception for merge-forced tests | ruled | decision pr-review-record:76,125,129 (owner 2026-11-10 14:07 CST) allows one more fix verifier after a conflicted merge of main; Degen merged a lane into a lane and edited after the fix check; step fix-after-fix-check holds the rest | ruled, rest on step | none |
 | D4 | No guard on box writes in read-only audits | new | new step readonly-agent-shell-write | filed, roadmap 378ff3a35 | none |
 | D5 | No check before a "not worse than main" claim | new | new step claim-vs-main-needs-read, extends #2765 | filed, roadmap 378ff3a35 | none |
@@ -92,7 +99,9 @@ Classes: ruled (already ruled or fixed), step (an existing step takes it), new (
 | D21 | Item 19: ios-apps has no test-shape standard | new | new step ios-apps-test-shapes; extends decision test-practices P1 and P5 | to file | none |
 | D22 | Item 20: the Pro lease blocks the Duo | owner + new | bin/sim-lease:185-186; owner ruling 2026-11-02 13:51 CST "The 18 Pro never runs beside a Duo"; stating the reason in sim-lease-tool.md needs no owner | ruled 21:59: no fixed sim limit, load brake only; step sim-lease-load-brake | none |
 | D23 | Item 21: builder-test-edit blocks merges with test conflicts | ruled | step merge-conflict-mixed-roles (R31); a test-author owns a merge with test conflicts (builders-cannot-edit-tests.md:36-38, item 420 a) | in flight | none |
-| D24 | Item 22: live hooks differ from the clone | new | new step live-hooks-diff-probe (lint/compliance_probes.py); skip hooks.SessionStart, which a cloud install rewrites | to file | none |
-| D25 | Item 23: third merge-forced restart (evidence for D3) | ruled | decision pr-review-record:76,125,129 (owner 2026-11-10 14:07 CST) allows one more fix verifier after a conflicted merge of main; Degen merged a lane into a lane and edited after the fix check; step fix-after-fix-check holds the rest | ruled, rest on step | none |
+| D24 | Item 22: live hooks differ from the clone | new | new step live-hooks-diff-probe (lint/compliance_probes.py); skip hooks.SessionStart, which a cloud install rewrites; batch 3 adds: compliance-check names which copy it trusts | filed | none |
+| D25 | Item 23: merge-forced restarts (evidence for D3; six restarts on Nov 12: 597 to 635 to 656; 605 to 667; 645; 674; 567) | ruled + new | decision pr-review-record:76,125,129 rules the fix check after a conflicted merge; the root cause is on main: merge/merge.py:25-28 takes a fix check only when a record was posted at the reviewed head; new step merge-tool-fix-check-no-earlier-log: accept a fix check that names the reviewed head and the fix diff | to file; rank asked of the owner | none |
 | D26 | Item 24: Words probe counts false alarms | owner + new | new step words-probe-skips-kept-names (report only what the check would flag); a blanket slug skip departs from decision glossary-meets-owner-halfway | ruled 21:59: a, keep reading names | none |
 | D27 | Correction: coordinator borrows idle lanes instead of queuing starts | ruled + new | borrowing lanes is ruled (session-tiers.md:143,179); new step refused-start-queues-turn; app half folds into D19 | to file | none |
+| D28 | Item 25: builders read the one-build rule as Mac-wide | new | skill ios-apps "Sharing the Mac" opens with "Every session on this Mac shares its builds" and the bullet says it "widens ... to every session on the Mac"; new step one-build-per-session-wording: per-session scope first, and the builder brief says another session's build does not block yours | to file | none |
+| D29 | Item 26: the iOS standard pins a runner with no iOS 27.1 SDK | new | skill ios-apps:22 pins `macos-26`; new step ios-runner-by-sdk: pin by the SDK the apps need, or name one exemption form; check runner cost first | to file | none |
