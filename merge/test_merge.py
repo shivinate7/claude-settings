@@ -4953,18 +4953,18 @@ class GhHalf(Env):
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
         self.assertNotIn("reverted on", out)
-        self.assertEqual(self.calls().count(MERGE_CALL), 2)
-        self.assertIn(STATE_READ, self.calls())  # the retry's answer is not trusted: the PR state is read
+        self.assertEqual(self.calls().count(MERGE_CALL), 1)  # the check reads MERGED at this head: no resend (retry-net-method-safe, option c)
+        self.assertIn(STATE_READ, self.calls())  # the PR state is read, and it says MERGED
         self.assertEqual(self.claims("main"), 1)
         self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
         self.assertFalse(self.lock_ref())
 
     def test_a_lost_merge_reply_then_404_reads_merged_and_carries_on(self):
-        self.set(merge_replies=[[NET_TLS, True], [NOT_FOUND, False]])  # a stale ref on the retry
+        self.set(merge_replies=[[NET_TLS, True], [NOT_FOUND, False]])  # the merge lands, its reply is lost
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
         self.assertNotIn("reverted on", out)
-        self.assertEqual(self.calls().count(MERGE_CALL), 2)
+        self.assertEqual(self.calls().count(MERGE_CALL), 1)  # the check reads MERGED: no resend
         self.assertIn(STATE_READ, self.calls())
         self.assertEqual(self.claims("main"), 1)
         self.assertIn("id: D-002", self.show("main", "docs/decisions/second.md"))
@@ -4991,11 +4991,11 @@ class GhHalf(Env):
         self.assertNotIn(MERGE_CALL, self.calls())
         self.assertEqual(self.claims("feat"), 0)  # refused before the claim push
 
-    def test_four_network_errors_on_the_merge_read_merged_and_carry_on(self):
-        self.set(merge_replies=[[NET_TLS, True], [NET_TLS, False]])  # the first merge lands, its reply and the three retries are lost
+    def test_a_network_error_on_the_merge_reads_merged_and_carries_on(self):
+        self.set(merge_replies=[[NET_TLS, True], [NET_TLS, False]])  # the first merge lands, its reply is lost
         rc, out = self.go()
         self.assertEqual(rc, 0, out)
-        self.assertEqual(self.calls().count(MERGE_CALL), 4)
+        self.assertEqual(self.calls().count(MERGE_CALL), 1)  # the check reads MERGED: no resend
         self.assertIn(STATE_READ, self.calls())
         self.assertNotIn("reverted on", out)
         self.assertEqual(self.claims("main"), 1)
@@ -5003,7 +5003,7 @@ class GhHalf(Env):
         self.assertFalse(self.lock_ref())
 
     def test_four_network_errors_on_the_merge_with_the_pr_open_stop_without_a_revert(self):
-        self.set(merge_replies=[[NET_TLS, False]])  # nothing lands: four calls, all lost
+        self.set(merge_replies=[[NET_TLS, False]])  # nothing lands: four calls, all lost, and the PR reads OPEN after each
         rc, out = self.go()
         self.assertEqual(rc, 1, out)
         self.assertEqual(self.calls().count(MERGE_CALL), 4)
@@ -5059,7 +5059,7 @@ class GhHalf(Env):
         self.lost_reply_reads_merged(NET_WSARECV)
 
     def test_a_network_error_then_a_real_not_mergeable_reply_reverts_the_claim(self):
-        self.set(merge_replies=[[NET_TLS, False], [NOT_MERGEABLE, False]])  # the retry gets a real refusal
+        self.set(merge_replies=[[NET_TLS, False], [NOT_MERGEABLE, False]])  # the PR reads OPEN, so the merge is resent and gets a real refusal
         rc, out = self.go()
         self.assertIn("reverted on feat", out)
         self.assertEqual(rc, 1, out)
@@ -5115,8 +5115,7 @@ class GhHalf(Env):
         self.required_read_fails_after_the_claim("gh: Server Error (HTTP 502)")
 
     def merge_reply_is_retried_then_stops(self, msg, rate=False):
-        """Every merge try answers `msg` and nothing lands: a network-class error, retried 3 times, then a stop. The PR reads OPEN: no revert.
-        `rate`: msg is a rate limit, and the run waits the whole ladder (see rate_waits_the_whole_ladder)."""
+        """Every merge try answers `msg` and nothing lands: a network-class error, checked (the PR reads OPEN), retried 3 times, then a stop. The PR reads OPEN: no revert. `rate`: msg is a rate limit, and the run waits the whole ladder (see rate_waits_the_whole_ladder)."""
         self.set(merge_replies=[[msg, False]])
         rc, out = self.go()
         self.assertNotIn("reverted on", out)
@@ -5128,7 +5127,7 @@ class GhHalf(Env):
         self.assertIn("Claim record numbers", self.feat_subjects())  # the claim stays
         self.assertFalse(self.lock_ref())
 
-    def test_a_merge_reply_server_error_502_is_retried_then_stops_without_a_revert(self):
+    def test_a_merge_reply_server_error_502_is_retried_after_a_check_then_stops_without_a_revert(self):  # the PR reads OPEN each time: nothing landed, so each resend is safe (retry-net-method-safe, option c)
         self.merge_reply_is_retried_then_stops(rest_err(502, "Server Error"))
 
     def fetch_fails_after_the_claim_push(self, msg):
@@ -8012,7 +8011,7 @@ class ReleaseReports(Env):
 
     def test_gh_normal_acquire_then_release_prints_no_line(self):
         S = {}
-        def api(self_, *a):
+        def api(self_, *a, **kw):
             p = a[2] if a[0] == "-X" else a[0]
             if a[:2] == ("-X", "DELETE"):
                 S.pop("ref", None); return 0, ""
@@ -8051,7 +8050,7 @@ class GhReleaseReports(unittest.TestCase):
     """GhLock.api is patched, so these run on Windows too."""
     def lock_with(self, sha_on_read, delete=(0, ""), read_fail=None):
         calls = []
-        def api(self_, *a):
+        def api(self_, *a, **kw):
             calls.append(a)
             if a[:2] == ("-X", "DELETE"):
                 return delete
@@ -8176,6 +8175,252 @@ class RateLimitLines(unittest.TestCase):
                     '[{"name":"API rate limit exceeded guard","bucket":"fail","link":""}]'):
             with self.subTest(out=out[:70]):
                 self.assertFalse(merge.is_net(1, out))
+
+class MethodSafeRetry(unittest.TestCase):
+    """retry_net on a 5xx or network error resends only a safe method: GET, or a call its caller marks idempotent by design.
+    A PUT merge that got a 502 may have landed, so it is never resent (lane retry-net-method-safe: a PUT merge went 4 times). A rate limit
+    is a refusal that ran nothing, so any method still waits and retries. The method is the LAST -X of the command.
+    A write with a `landed()` check (decision standing-merge-grant) is checked first: landed means no resend, not landed means resend, unknown means stop."""
+    ERR = "failed to get runs: HTTP 502: 502 Bad Gateway (https://api.github.com/repos/o/r/pulls/7/merge)"
+
+    def setUp(self):
+        self.pauses, self.calls = [], 0
+
+    def retry(self, reply, **kw):
+        self.calls = 0
+        def call():
+            self.calls += 1
+            return reply
+        return merge.retry_net(call, self.pauses.append, **kw)
+
+    def test_a_get_is_still_retried_on_a_502(self):
+        self.assertEqual(self.retry((1, self.ERR), method="GET"), (1, self.ERR, 3))
+        self.assertEqual(self.calls, 4)
+
+    def test_a_put_or_post_or_patch_or_delete_is_resent_0_times_on_a_502(self):
+        for method in ("PUT", "POST", "PATCH", "DELETE", "put"):
+            with self.subTest(method=method):
+                self.assertEqual(self.retry((1, self.ERR), method=method), (1, self.ERR, 0))
+                self.assertEqual(self.calls, 1)
+        self.assertEqual(self.pauses, [])
+
+    def test_a_put_that_never_says_it_is_idempotent_is_not_resent_on_a_network_error(self):
+        self.assertEqual(self.retry((1, NET_TLS), method="PUT"), (1, NET_TLS, 0))
+
+    def test_a_write_that_landed_is_not_resent_and_reads_as_done(self):
+        self.assertEqual(self.retry((1, self.ERR), method="PUT", landed=lambda: True), (0, "", 0))
+        self.assertEqual(self.calls, 1)
+
+    def test_a_write_that_did_not_land_is_resent_up_to_three_times(self):
+        self.assertEqual(self.retry((1, self.ERR), method="PUT", landed=lambda: False), (1, self.ERR, 3))
+        self.assertEqual(self.calls, 4)
+
+    def test_a_write_that_did_not_land_goes_through_on_the_next_try(self):
+        self.calls = 0
+        def call():
+            self.calls += 1
+            return (1, self.ERR) if self.calls == 1 else (0, "{}")
+        self.assertEqual(merge.retry_net(call, self.pauses.append, method="POST", landed=lambda: False), (0, "{}", 1))
+        self.assertEqual(self.pauses, [merge.NET_PAUSE])
+
+    def test_a_write_whose_check_cannot_tell_is_not_resent(self):
+        self.assertEqual(self.retry((1, self.ERR), method="PUT", landed=lambda: None), (1, self.ERR, 0))
+        self.assertEqual(self.calls, 1)
+
+    def test_a_rate_limit_never_asks_the_check(self):
+        asked = []
+        self.assertEqual(self.retry((1, R429), method="PUT", landed=lambda: asked.append(1)), (1, R429, 3))
+        self.assertEqual(asked, [])
+
+    def test_acquire_takes_the_lock_when_the_ref_post_landed_with_a_lost_reply(self):  # a resend would read "already exists" as another run's lock
+        state = {"ref": None}
+        def sh(args, cwd=None, input=None, env=None):
+            a = " ".join(args)
+            if "git/ref/heads/merge-lock/" in a:
+                return (0, state["ref"]) if state["ref"] else (1, "gh: Not Found (HTTP 404)")
+            if "git/ref/heads/main" in a:
+                return 0, "head1"
+            if "git/commits/head1" in a:
+                return 0, "tree1"
+            if "-X POST" in a and "git/commits" in a:
+                return 0, "c1"
+            if "-X POST" in a and "git/refs" in a:
+                state["ref"] = "c1"  # the ref is made, its reply is lost
+                return 1, self.ERR
+            return 1, "unhandled " + a
+        lock = merge.GhLock(now=lambda: 1000.0, pause=self.pauses.append)
+        with unittest.mock.patch.object(merge, "sh", sh):
+            self.assertEqual(lock.acquire("main", 600), "c1")
+
+    def merge_lost_reply(self, pr_reads, head="a" * 40):
+        """Host.merge with every PUT answering a 502 and the PR reads `pr_reads` (one JSON dict per read, the last repeats). -> (puts, result or the stop raised)."""
+        puts, reads = [], []
+        def pr_json(d):
+            base = {"number": 7, "head": {"sha": head, "ref": "feat"}, "base": {"ref": "main"}, "state": "open", "merged": False, "mergeable": True,
+                    "mergeable_state": "clean", "merge_commit_sha": None}
+            return json.dumps({**base, **d})
+        def sh(args, cwd=None, input=None, env=None):
+            a = " ".join(args)
+            if "-X PUT" in a:
+                puts.append(a)
+                return 1, self.ERR
+            reads.append(a)
+            r = pr_reads[min(len(reads), len(pr_reads)) - 1]
+            return (0, r) if isinstance(r, str) else (0, pr_json(r))  # a str is the raw reply
+        host = merge.Host(required=["checks"], base="main", minute=60, now=lambda: 1000.0, pause=self.pauses.append)
+        with unittest.mock.patch.object(merge, "sh", sh):
+            try:
+                got = host.merge(7, "squash", head)
+            except (merge.NetStop, merge.Stop) as e:
+                got = e
+        return len(puts), got
+
+    def test_a_merge_lost_to_a_502_that_reads_merged_at_this_head_is_sent_once_and_carries_on(self):
+        puts, got = self.merge_lost_reply([{}, {"merged": True, "state": "closed", "merge_commit_sha": "m1"}])
+        self.assertEqual((puts, got), (1, ("m1", "")))
+
+    def test_a_merge_lost_to_a_502_that_reads_merged_at_another_head_is_sent_once_and_stops(self):  # not this run's merge: a resend is the incident
+        puts, got = self.merge_lost_reply([{}, {"merged": True, "state": "closed", "merge_commit_sha": "m1", "head": {"sha": "b" * 40, "ref": "feat"}}])
+        self.assertEqual(puts, 1)
+        self.assertIsInstance(got, merge.Stop)
+        self.assertNotIsInstance(got, merge.NetStop)
+
+    def test_a_merge_lost_to_a_502_that_reads_closed_unmerged_is_sent_once_and_stops(self):
+        puts, got = self.merge_lost_reply([{}, {"state": "closed"}])
+        self.assertEqual(puts, 1)
+        self.assertIsInstance(got, merge.NetStop)
+
+    def test_a_merge_lost_to_a_502_that_reads_open_is_resent_up_to_three_times(self):
+        puts, got = self.merge_lost_reply([{}])
+        self.assertEqual(puts, 4)
+        self.assertIsInstance(got, merge.NetStop)
+
+    def test_a_merge_lost_to_a_502_whose_pr_read_is_not_json_is_sent_once(self):
+        puts, got = self.merge_lost_reply([{}, "not json"])
+        self.assertEqual(puts, 1)
+        self.assertIsInstance(got, merge.NetStop)
+
+    def test_a_merge_lost_to_a_502_whose_state_is_neither_open_nor_merged_is_sent_once(self):
+        puts, got = self.merge_lost_reply([{}, {"state": "weird"}])
+        self.assertEqual(puts, 1)
+        self.assertIsInstance(got, merge.NetStop)
+
+    def take_with_ref_reads(self, ref_reads):
+        """GhLock.acquire where the ref POST answers a 502 and the ref reads `ref_reads` (each a (code, text), the last repeats). -> (ref POSTs, result or the stop raised)."""
+        posts, reads = [], []
+        def sh(args, cwd=None, input=None, env=None):
+            a = " ".join(args)
+            if "git/ref/heads/merge-lock/" in a:
+                reads.append(a)
+                return ref_reads[min(len(reads), len(ref_reads)) - 1] if len(reads) > 1 else (1, "gh: Not Found (HTTP 404)")  # the first read is acquire's own: no lock
+            if "git/ref/heads/main" in a:
+                return 0, "head1"
+            if "git/commits/head1" in a:
+                return 0, "tree1"
+            if "-X POST" in a and "git/commits" in a:
+                return 0, "c1"
+            if "-X POST" in a and "git/refs" in a:
+                posts.append(a)
+                return (1, "gh: Reference already exists (HTTP 422)") if len(posts) > 1 else (1, self.ERR)
+            return 1, "unhandled " + a
+        lock = merge.GhLock(now=lambda: 1000.0, pause=self.pauses.append)
+        with unittest.mock.patch.object(merge, "sh", sh):
+            try:
+                got = lock.acquire("main", 600)
+            except (merge.NetStop, merge.Stop, merge.Held) as e:
+                got = e
+        return len(posts), got
+
+    def test_a_lock_ref_post_lost_to_a_502_that_reads_another_runs_sha_is_sent_once_and_never_taken(self):
+        posts, got = self.take_with_ref_reads([(0, "other-sha")])
+        self.assertEqual(posts, 1)
+        self.assertIsInstance(got, merge.NetStop)
+
+    def test_a_lock_ref_post_lost_to_a_502_whose_ref_read_is_a_5xx_with_404_text_is_sent_once(self):
+        posts, got = self.take_with_ref_reads([(1, "gh: Server Error (HTTP 502) https://api.github.com/repos/o/r/git/ref/heads/merge-lock/main/404")])
+        self.assertEqual(posts, 1)
+        self.assertIsInstance(got, merge.NetStop)
+
+    def test_a_lock_ref_post_lost_to_a_502_that_reads_no_ref_is_resent_and_a_422_is_held(self):
+        posts, got = self.take_with_ref_reads([(1, "gh: Not Found (HTTP 404)")])
+        self.assertEqual(posts, 2)
+        self.assertIsInstance(got, merge.Held)
+
+    def test_an_idempotent_call_is_resent(self):
+        self.assertEqual(self.retry((1, self.ERR), method="POST", idempotent=True), (1, self.ERR, 3))
+        self.assertEqual(self.calls, 4)
+
+    def test_a_put_is_still_retried_on_a_rate_limit_because_a_refusal_ran_nothing(self):
+        self.assertEqual(self.retry((1, R429), method="PUT"), (1, R429, 3))
+        self.assertEqual(self.calls, 4)
+        self.assertEqual(self.pauses, [60, 300, 900])
+
+    def test_the_last_x_names_the_method(self):
+        for args, want in ((["api", "r", "-X", "GET", "-X", "PUT"], "PUT"), (["api", "r", "-X", "PUT", "-X", "GET"], "GET"),
+                           (["api", "r", "-X", "put"], "PUT"), (["api", "r"], "GET"), (["run", "list"], "GET"),
+                           (["api", "r", "-f", "a=b"], "POST"), (["api", "r", "--input", "f.json"], "POST"), (["api", "r", "--method=PATCH"], "PATCH")):
+            with self.subTest(args=args):
+                self.assertEqual(merge.net_method(args), want)
+
+    def test_host_gh_sends_a_put_merge_once_on_a_502(self):
+        calls = []
+        def sh(args, cwd=None, input=None, env=None):
+            calls.append(args)
+            return 1, self.ERR
+        host = merge.Host(required=["checks"], base="main", minute=60, now=lambda: 1000.0, pause=self.pauses.append)
+        with unittest.mock.patch.object(merge, "sh", sh), self.assertRaises(merge.NetStop):
+            host.gh(["api", "repos/o/r/pulls/7/merge", "-X", "GET", "-X", "PUT"])
+        self.assertEqual(len(calls), 1)
+
+    def test_net_method_reads_the_attached_and_long_forms(self):
+        for args, want in ((["api", "r", "-XPUT"], "PUT"), (["api", "r", "-X=PATCH"], "PATCH"), (["api", "r", "--input=f.json"], "POST"),
+                           (["api", "r", "--field=a=b"], "POST"), (["api", "r", "--raw-field=a=b"], "POST"), (["api", "r", "-fa=b"], "POST"),
+                           (["api", "r", "-X", "GET", "-f", "a=b"], "GET"), (["api", "r", "-i", "--jq", ".x"], "GET")):
+            with self.subTest(args=args):
+                self.assertEqual(merge.net_method(args), want)
+
+    def test_acquire_resends_the_lock_commit_post_after_a_502(self):  # the real call in GhLock.acquire: a commit no ref names, idempotent by design
+        posts = []
+        def sh(args, cwd=None, input=None, env=None):
+            a = " ".join(args)
+            if "git/ref/heads/merge-lock/" in a:
+                return 1, "gh: Not Found (HTTP 404)"
+            if "git/ref/heads/main" in a:
+                return 0, "head1"
+            if "git/commits/head1" in a:
+                return 0, "tree1"
+            if "-X POST" in a and "git/commits" in a:
+                posts.append(a)
+                return (1, self.ERR) if len(posts) == 1 else (0, "c1")
+            if "-X POST" in a and "git/refs" in a:
+                return 0, "{}"
+            return 1, "unhandled " + a
+        lock = merge.GhLock(now=lambda: 1000.0, pause=self.pauses.append)
+        with unittest.mock.patch.object(merge, "sh", sh):
+            self.assertEqual(lock.acquire("main", 600), "c1")
+        self.assertEqual(len(posts), 2)
+
+    def test_set_body_patch_is_idempotent_and_is_resent_after_a_502(self):  # a body is set to a value: a resend writes the same value
+        seq = [(1, self.ERR), (0, "{}")]
+        calls = []
+        def sh(args, cwd=None, input=None, env=None):
+            calls.append(args)
+            return seq[min(len(calls), len(seq)) - 1]
+        host = merge.Host(required=["checks"], base="main", minute=60, now=lambda: 1000.0, pause=self.pauses.append)
+        with unittest.mock.patch.object(merge, "sh", sh):
+            host.set_body(7, "b")
+        self.assertEqual(len(calls), 2)
+
+    def test_host_gh_still_retries_a_get_on_a_502(self):
+        calls = []
+        def sh(args, cwd=None, input=None, env=None):
+            calls.append(args)
+            return 1, self.ERR
+        host = merge.Host(required=["checks"], base="main", minute=60, now=lambda: 1000.0, pause=self.pauses.append)
+        with unittest.mock.patch.object(merge, "sh", sh), self.assertRaises(merge.NetStop):
+            host.gh(["api", "repos/o/r/pulls/7", "-X", "GET"])
+        self.assertEqual(len(calls), 4)
+
 
 class RateLimitWait(unittest.TestCase):
     """retry_net and Host.gh on a rate-limited call: how many tries, and how long each wait is. The pause
