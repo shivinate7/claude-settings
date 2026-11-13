@@ -4951,6 +4951,51 @@ def case_lone_cr_in_a_grant_block_keeps_the_refused_ruling_open():
     expect_block("lone CR: the refused ruling still blocks", p, named=("fb-0960-2",), unnamed=("fb-0960-1",))
 
 
+# --------------------------------------------------------------------------- the remedy names [closed] only where a close settles the item
+
+def case_unsent_page_or_repo_refusal_does_not_name_closed():
+    """An unsent page item and an unsent repo item are refused for their sends. The refusal must not offer `[closed]` as
+    a way out: a page or repo item is not settled by the mark, so the owner's answer or message would never be sent."""
+    p = page_run(new_cfg(), "page-remedy", [("98: a", (PAGE_ITEM,))], [owner_rec("98: a"), said_rec("Noted.")])
+    reason = block_reason(p) or ""
+    check("page remedy: the unsent page item blocks", p.code == 0 and block_reason(p) is not None, p.desc())
+    check("page remedy: the refusal names the page item", "fb-0958-7" in reason, reason)
+    check("page remedy: the refusal does not name [closed] as a way out", "[closed]" not in reason, reason)
+    p = page_run(new_cfg(), "repo-remedy", [("rename", (REPO_ITEM,))], [owner_rec("rename"), said_rec("Noted.")])
+    reason = block_reason(p) or ""
+    check("repo remedy: the unsent repo item blocks", p.code == 0 and block_reason(p) is not None, p.desc())
+    check("repo remedy: the refusal names the repo item", REPO_ID in reason, reason)
+    check("repo remedy: the refusal does not name [closed] as a way out", "[closed]" not in reason, reason)
+
+
+def case_closed_page_or_repo_item_still_blocks_without_its_send():
+    """A `[closed]` mark does not clear a page or repo item: its send is the proof, and the mark skips no send. Red on
+    the old code, which skips a closed page or repo item (case_page_closed_item_is_never_checked and
+    case_repo_closed_item_is_never_checked pin that skip)."""
+    p = page_run(new_cfg(), "page-closed-unsent", [("98: a", ("- fb-0958-7 [page] -> page:98 [closed]",))],
+                 [owner_rec("98: a"), said_rec("Noted.")])
+    expect_block("closed page: a closed page item with no send still blocks", p, named=("fb-0958-7",))
+    p = page_run(new_cfg(), "repo-closed-unsent", [("rename", ("- fb-0958-21 [repo] -> repo:acme/widgets [closed]",))],
+                 [owner_rec("rename"), said_rec("Noted.")])
+    expect_block("closed repo: a closed repo item with no send still blocks", p, named=("fb-0958-21",))
+
+
+def case_standing_and_settled_ruling_refusals_still_name_closed():
+    """The control: the refusal for an open standing id and the refusal for a ruling whose home does not resolve both
+    still name `[closed]`, as the mark is the way out for those two."""
+    cfg, sid = new_cfg(), "closed-control-standing"
+    write_file(inbox_of(cfg, sid), render_block("standing id missing from the handoff",
+                                                items=("- fb-0958-4 [standing] -> handoff",)))
+    write_file(handoff_of(cfg, sid), "# Handoff\n")
+    reason = block_reason(guard(cfg, sid)) or ""
+    check("closed control: the standing refusal blocks", "fb-0958-4" in reason, reason)
+    check("closed control: the standing refusal names [closed]", "[closed]" in reason, reason)
+    p = close_run(new_cfg(), "closed-control-ruling", (UNHELD_RULING,))
+    reason = block_reason(p) or ""
+    check("closed control: the settled-ruling refusal blocks", "fb-0958-2" in reason, reason)
+    check("closed control: the settled-ruling refusal names [closed]", "[closed]" in reason, reason)
+
+
 CASES = (
     case_every_owner_message_is_captured,
     case_notices_are_never_captured,
@@ -5171,6 +5216,9 @@ CASES = (
     case_box_answer_that_cannot_be_read_is_never_silent,
     case_box_note_with_inner_quotes_is_saved_whole,
     case_close_proof_counts_only_the_session_repo,
+    case_unsent_page_or_repo_refusal_does_not_name_closed,
+    case_closed_page_or_repo_item_still_blocks_without_its_send,
+    case_standing_and_settled_ruling_refusals_still_name_closed,
     case_lone_cr_in_a_grant_block_keeps_the_refused_ruling_open,
     case_refs_are_listed_once_per_repo_not_per_item,
 )
