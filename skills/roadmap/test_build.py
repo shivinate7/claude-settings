@@ -2843,9 +2843,9 @@ class ReadyAndDraftRows(UpkeepFixture):
     """Two upkeep rows (spec part B). `ready todo steps` lists each todo step whose note has the sentence `Ready.`,
     with no live-phase filter. `draft PRs over 12 h with no live lane` lists each draft pull created more than
     12 h before the live read, when no live session names its step, and the runner's list does not name it (`held`
-    true) and no review record is posted (`reviewRecord` true). An entry reads `#<number> (<branch or title>)`,
+    true) and no review log is posted (`reviewLog` true). An entry reads `#<number> (<branch or title>)`,
     or `unknown (#<number> has no createdAt)` when its createdAt is missing or not an ISO time with a zone. A held
-    draft reads no entry at all, so its missing createdAt is not an unknown entry. A `held` or `reviewRecord` that is
+    draft reads no entry at all, so its missing createdAt is not an unknown entry. A `held` or `reviewLog` that is
     not a JSON bool makes the pull row skipped, which reads the row unknown."""
 
     READY = "ready todo steps"
@@ -2950,19 +2950,19 @@ class ReadyAndDraftRows(UpkeepFixture):
                 self.assertEqual((count, self.entries(detail)),
                                  (2, ["#1000 (lone-draft)", "unknown (#998 has no createdAt)"]))
 
-    def test_draft_with_a_posted_review_record_is_not_listed(self):
+    def test_draft_with_a_posted_review_log_is_not_listed(self):
         # The #2818 shape: lane lane-ruleset-read, not the step id, and no live session names merge-reads-ruleset.
-        # reviewRecord true is the only mark. lone-draft is the control.
+        # reviewLog true is the only mark. lone-draft is the control.
         self.commit_step("merge-reads-ruleset", status="doing")
         self.publish(sessions=[], pulls=[
-            dict(self.draft(1001, "lane-ruleset-read", self.created_before(780)), reviewRecord=True),
+            dict(self.draft(1001, "lane-ruleset-read", self.created_before(780)), reviewLog=True),
             self.draft(1002, "lone-draft", self.created_before(780))])
         count, detail = self.row(self.out_with_live(expect=(0, 1)), self.DRAFT)
         self.assertEqual((count, self.entries(detail)), (1, ["#1002 (lone-draft)"]),
-                         "a draft whose review record is posted is not listed")
+                         "a draft whose review log is posted is not listed")
 
-    def test_draft_the_runner_holds_is_not_listed_without_a_review_record(self):
-        # The same shape as the #2818 case, with held true and no review record. lone-draft is the control.
+    def test_draft_the_runner_holds_is_not_listed_without_a_review_log(self):
+        # The same shape as the #2818 case, with held true and no review log. lone-draft is the control.
         self.commit_step("merge-reads-ruleset", status="doing")
         self.publish(sessions=[], pulls=[
             dict(self.draft(1001, "lane-ruleset-read", self.created_before(780)), held=True),
@@ -2972,19 +2972,19 @@ class ReadyAndDraftRows(UpkeepFixture):
                          "a draft the runner's list names (held true) is not listed")
 
     def test_orphan_draft_and_false_flags_are_still_listed(self):
-        # The false alarm control: no key, no lane, over 12 h, so listed. held false and reviewRecord false name nothing.
+        # The false alarm control: no key, no lane, over 12 h, so listed. held false and reviewLog false name nothing.
         self.publish(sessions=[], pulls=[
             self.draft(1001, "orphan-draft", self.created_before(780)),
             dict(self.draft(1002, "held-false", self.created_before(780)), held=False),
-            dict(self.draft(1003, "review-false", self.created_before(780)), reviewRecord=False)])
+            dict(self.draft(1003, "review-false", self.created_before(780)), reviewLog=False)])
         count, detail = self.row(self.out_with_live(), self.DRAFT)
         self.assertEqual((count, self.entries(detail)),
                          (3, ["#1001 (orphan-draft)", "#1002 (held-false)", "#1003 (review-false)"]),
-                         "a draft with no mark, or with held or reviewRecord false, is listed")
+                         "a draft with no mark, or with held or reviewLog false, is listed")
 
-    def test_non_bool_held_or_review_record_skips_the_pull_row(self):
+    def test_non_bool_held_or_review_log_skips_the_pull_row(self):
         # A JSON string or number is a wrong shape. The pull row is skipped, so the row reads unknown and lists nothing.
-        for key in ("held", "reviewRecord"):
+        for key in ("held", "reviewLog"):
             for value in ("yes", 1):
                 with self.subTest(key=key, value=value):
                     self.publish(sessions=[], pulls=[
