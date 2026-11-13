@@ -1382,7 +1382,7 @@ NPM_WORKSPACE_FLAGS = {"-w", "-ws"}
 # npm 10.9.9, lib/utils/cmd-list.js: the command names and the aliases that `npm_deref` resolves. A
 # curated copy, as NPM_READ_ONLY is, because the guard cannot read npm's own at hook time.
 NPM_COMMANDS = {
-    "access", "adduser", "audit", "bugs", "cache", "ci", "completion", "config", "dedupe", "deprecate",
+    "access", "adduser", "audit", "bugs", "cache", "ci", "completion", "config", "dedupe", "deprecate",  # glossary-ok: "bugs" is npm's own subcommand name
     "diff", "dist-tag", "docs", "doctor", "edit", "exec", "explain", "explore", "find-dupes", "fund",
     "get", "help", "help-search", "hook", "init", "install", "install-ci-test", "install-test", "link",
     "ll", "login", "logout", "ls", "org", "outdated", "owner", "pack", "ping", "pkg", "prefix",
@@ -1391,7 +1391,7 @@ NPM_COMMANDS = {
     "uninstall", "unpublish", "unstar", "update", "version", "view", "whoami",
 }
 NPM_ALIASES = {
-    "author": "owner", "home": "docs", "issues": "bugs", "info": "view", "show": "view",
+    "author": "owner", "home": "docs", "issues": "bugs", "info": "view", "show": "view",  # glossary-ok: "bugs" is npm's own subcommand name
     "find": "search", "add": "install", "unlink": "uninstall", "remove": "uninstall",
     "rm": "uninstall", "r": "uninstall", "un": "uninstall", "rb": "rebuild", "list": "ls",
     "ln": "link", "create": "init", "i": "install", "it": "install-test", "cit": "install-ci-test",
@@ -1650,6 +1650,12 @@ def linked_nm_hit(segment: str, where: str) -> str:
         if subcommand and not NPM_NO_CHANGE.intersection(words) and is_link(
                 os.path.join(npm_prefix_flag(words, where) or npm_prefix(where), "node_modules")):
             return "npm " + subcommand + " in a folder whose node_modules is a link"
+        # From a member, npm installs at the root and also reifies the member's own node_modules, so a link
+        # there is written through even when the root's folder is real (npm 10.9.9 removed packages the lock
+        # lacks from the link's target). The member is the folder where the walk with workspaces off stops.
+        if subcommand and not NPM_NO_CHANGE.intersection(words) and not npm_prefix_flag(words, where) and (
+                npm_walk(where, workspaces)[1]) and is_link(os.path.join(npm_walk(where, False)[0], "node_modules")):
+            return "npm " + subcommand + " in a workspace member whose node_modules is a link"
         return ""
 
     return (_command_hit(segment, DELETE_WORDS, delete, flagged=True)
