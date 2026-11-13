@@ -1426,7 +1426,7 @@ ARCHIVE_TAGS_REASON = (
 )
 ARCHIVE_READ_REASON = (
     "the open pull requests of the lane's repo could not be read, so the guard cannot tell whether its "
-    "records have landed. This session cannot read that repo until it is attached: {acts}. (decision session-tiers, a lane closes only after its records pull request has landed)"
+    "records have landed. {remedy} (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 ARCHIVE_NO_PR_REASON = (
     "a branch of the lane is ahead of its repo's default branch and has no pull request that covers it, so closing "
@@ -1436,21 +1436,53 @@ ARCHIVE_NO_PR_REASON = (
 )
 ARCHIVE_BRANCH_READ_REASON = (
     "the lane's branches or their pull requests could not be read, so the guard cannot tell whether any work of "
-    "the lane is stranded. This session cannot read that repo until it is attached: {acts}. (decision session-tiers, a lane closes only after its records pull request has landed)"
+    "the lane is stranded. {remedy} (decision session-tiers, a lane closes only after its records pull request has landed)"
 )
 
 
-def archive_read_acts(repos) -> str:
-    """The remedy of an unreadable archive read: add_repo for each repo in `repos`, then retry. The one home of its wording."""
-    return " and ".join("add_repo " + r + " (read)" for r in repos) + ", then retry"
+_ATTACH_STATUSES = (403, 404)  # the answers of a repo this session cannot read: 403 for an unattached repo (measured), 404 for one gh cannot find
+
+
+def archive_read_remedy(repo, status) -> str:
+    """The remedy of an unreadable archive read. Only a 403 or 404 on the read of `repo` names its add_repo act; every other
+    failure (a 500, a timeout, no gh, text that is not JSON, a shape the read does not know) says to retry. The one home of the wording."""
+    if repo and status in _ATTACH_STATUSES:
+        return "This session cannot read that repo until it is attached: add_repo " + repo + " (read), then retry."
+    return "Retry once gh answers."
+
+
+_HTTP_TAIL = re.compile(r"\bHTTP (\d{3})\)?\s*\Z")  # the end of a failed `gh api` reply: "gh: <message> (HTTP 403)"
+
+
+def _http_status(out: str):
+    """The HTTP status that a failed gh reply ends with, or None."""
+    match = _HTTP_TAIL.search(out)
+    return int(match.group(1)) if match else None
+
+
+class _GhReadFailed(RuntimeError):
+    """A gh read failed. `status` is the HTTP status gh printed, None when the read failed another way (a reply that is no JSON, a shape the read does not know)."""
+
+    def __init__(self, message: str, status=None):
+        super().__init__(message)
+        self.status = status
 
 
 class _ArchiveReadFailed(Exception):
-    """A gh read of the branch arm failed in `repo`, so archive_hit can name that repo's add_repo act."""
+    """A gh read of the branch arm failed in `repo` with HTTP `status` (None when it has none), so archive_hit can word the remedy."""
 
-    def __init__(self, repo: str):
+    def __init__(self, repo: str, status=None):
         super().__init__(repo)
-        self.repo = repo
+        self.repo, self.status = repo, status
+
+
+def _read_status(module, exc):
+    """The HTTP status of a failed read, or None. A network error (NetStop, a rate limit included) has none: it is no answer about the repo."""
+    if isinstance(exc, (_ArchiveReadFailed, _GhReadFailed)):
+        return exc.status
+    if module is not None and isinstance(exc, module.Stop) and not isinstance(exc, module.NetStop):
+        return _http_status(str(exc))  # Host.pages raises a Stop whose message ends with the failed reply
+    return None
 
 
 ARCHIVE_STRANDED_MATCH = "archive of a lane with a branch that has no pull request"
@@ -1467,14 +1499,14 @@ _CONTAINED = ("behind", "identical")  # a compare of base...head where the head 
 
 
 def _read_json(host, rel: str, what: str):
-    """The parsed JSON of one REST read of `host`; a failed read or a reply that is not JSON raises RuntimeError."""
+    """The parsed JSON of one REST read of `host`; a failed read or a reply that is not JSON raises _GhReadFailed."""
     code, out = host.api(rel)
     try:
         if code:
             raise ValueError(out)
         return json.loads(out)
     except ValueError as e:
-        raise RuntimeError("the " + what + " read failed: " + str(e))
+        raise _GhReadFailed("the " + what + " read failed: " + str(e), _http_status(out) if code else None)
 
 
 def _compare_status(module, host, base: str, head: str, missing_ok: bool = False):
@@ -1488,7 +1520,7 @@ def _compare_status(module, host, base: str, head: str, missing_ok: bool = False
             raise ValueError(out)
         return str(json.loads(out)["status"])
     except (ValueError, KeyError, TypeError) as e:
-        raise RuntimeError("the compare read failed: " + str(e))
+        raise _GhReadFailed("the compare read failed: " + str(e), _http_status(out) if code else None)
 
 
 def _head_landed(module, repo: str, row) -> bool:
@@ -1633,7 +1665,7 @@ def _stranded_branch(module, ccrs, tag_repos, slugs, open_rows) -> bool:
             if any(not _covered(module, host, branch, tip, rows, pool) for branch, tip, rows in pending):
                 return True
         except (Exception, SystemExit) as exc:
-            raise _ArchiveReadFailed(repo) from exc
+            raise _ArchiveReadFailed(repo, _read_status(module, exc)) from exc
 
     return False
 
@@ -1699,7 +1731,8 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
         return "archive of a lane with no step or repo tag", ARCHIVE_TAGS_REASON
     lanes = [c for c in ccrs if isinstance(c, dict) and isinstance(c.get("tags"), list) and ARCHIVE_LANE_TAG in c["tags"]]
     reading_branches = False  # picks the reason a failed read refuses with
-    reading = list(repos)  # the repos named by an unreadable read's remedy: the repo being read, else every cs-repo tag
+    reading = None  # the repo whose read is under way, the one an unreadable read's remedy may name
+    module = None
     try:  # cost, all under one shared MERGE_READ_TIMEOUT: one paged gh REST read per cs-repo tag (one in practice), through
         # the merge tool's page reader; one compare read per open draft of the lane; per repo, one matching-refs read per
         # slug form (a paged read); and, for each branch the records name, one repo read per repo, one compare read per
@@ -1712,7 +1745,7 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
         open_rows = {}
         with module.shared_deadline(MERGE_READ_TIMEOUT):
             for repo in repos:
-                reading = [repo]
+                reading = repo
                 rows = open_rows[repo] = module.Host(repo=repo).pages("pulls", fields={"state": "open"})
                 for row in rows:
                     ref = str(row["head"]["ref"])
@@ -1721,15 +1754,15 @@ def archive_hit(tool: str, tool_input, transcript: str, agent_id=None):
                         continue
                     if slug:
                         return "archive of lane " + slug + " with open pull request " + str(row.get("number", "?")), ARCHIVE_OPEN_REASON
-            reading_branches, reading = True, list(repos)
+            reading_branches, reading = True, None
             stranded = _stranded_branch(module, lanes, repos, slugs, open_rows)
     except (Exception, SystemExit) as exc:
         if isinstance(exc, _ArchiveReadFailed):
-            reading = [exc.repo]
-        acts = archive_read_acts(reading)
+            reading = exc.repo
+        remedy = archive_read_remedy(reading, _read_status(module, exc))
         if reading_branches:
-            return "archive with an unreadable branch read", ARCHIVE_BRANCH_READ_REASON.format(acts=acts)
-        return "archive with an unreadable pull request list", ARCHIVE_READ_REASON.format(acts=acts)
+            return "archive with an unreadable branch read", ARCHIVE_BRANCH_READ_REASON.format(remedy=remedy)
+        return "archive with an unreadable pull request list", ARCHIVE_READ_REASON.format(remedy=remedy)
     if stranded:
         return ARCHIVE_STRANDED_MATCH, ARCHIVE_NO_PR_REASON
     return None
