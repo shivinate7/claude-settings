@@ -26,6 +26,7 @@
   "owner": "triage (session_013NEJKzCzoWhfP8FMCPtQU6)",
   "pick": "a",
   "ref": "review-record-family lane, coordinator 11:37 CST Nov 13",
+  "reply": "Withdrawn: coordinator 11:38 CST Nov 13 noted triage's ruling (the decision hold-unsafe-after-round-3 governs; the review-record lane builds main's line 93) and withdrew this question. You may reopen it. Undo: reopen this item.",
   "repo": "shivinate7/claude-settings",
   "short": "Round-3 FAIL: hold or net value?",
   "shown": [
@@ -41,7 +42,7 @@
     }
   ],
   "stands": true,
-  "status": "open",
+  "status": "closed",
   "title": "Does a round-3 FAIL always hold the change, or does net value decide?",
   "why": "Triage took this pick (decision governs); it stands unless you choose b."
 }

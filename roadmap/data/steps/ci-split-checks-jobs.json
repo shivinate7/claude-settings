@@ -1,7 +1,7 @@
 {
  "id": "ci-split-checks-jobs",
  "title": "Split the checks job into parallel Linux jobs, so the suites bend and not the wait",
- "status": "doing",
+ "status": "folded",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
  "lane": "session_013NEJL2UPotZrZRQ9WLTshH",
@@ -9,6 +9,6 @@
  "blockedBy": [],
  "why": "Owner 11:34 CST Nov 13 via runner 10: \"the suites bend, not the wait\". Coordinator 11:35 CST: express.",
  "source": "owner 11:34 CST Nov 13 via runner 10; coordinator 11:35 CST",
- "note": "Split `checks` into parallel Linux jobs. Express (ruling drain-first-hold, part 5, a CI fix). Lane session_013NEJL2UPotZrZRQ9WLTshH. Overlap flagged by triage 12:30 CST: step ci-split-checks-family (doing, lane session_013NEJL12ERsRGRS2aoyXgQt, R55 express) also splits checks by family; the coordinator rules which lane keeps the split and which folds in.",
- "updatedAt": "2026-11-13T11:36:37-06:00"
+ "note": "Split `checks` into parallel Linux jobs. Express (ruling drain-first-hold, part 5, a CI fix). Lane session_013NEJL2UPotZrZRQ9WLTshH. Overlap flagged by triage 12:30 CST: step ci-split-checks-family (doing, lane session_013NEJL12ERsRGRS2aoyXgQt, R55 express) also splits checks by family; the coordinator rules which lane keeps the split and which folds in. Folded into step ci-split-checks-family (coordinator 11:38 CST Nov 13): #2980 keeps the split. The coordinator's duplicate start; the step dup-check (lane-step-dup-check) would have caught it.",
+ "updatedAt": "2026-11-13T11:38:54-06:00"
 }

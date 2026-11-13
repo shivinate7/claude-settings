@@ -1,0 +1,14 @@
+{
+ "id": "debt-retire-names-test",
+ "title": "A debt record that retires names has a test (details in the lane brief)",
+ "status": "doing",
+ "repo": "shivinate7/claude-settings",
+ "phase": "next",
+ "lane": "session_013NEJKzojLxj38gMmhdAFeX",
+ "owner": "triage",
+ "blockedBy": [],
+ "why": "Coordinator 11:38 CST Nov 13: step filed doing, express; lane session_013NEJKzojLxj38gMmhdAFeX. Triage has the slug and lane only; the lane's brief holds the task text.",
+ "source": "coordinator 11:38 CST Nov 13",
+ "note": "Express. Lane session_013NEJKzojLxj38gMmhdAFeX. Triage wrote this title from the slug alone; the lane or coordinator should rewrite the title and note from the brief. Neighbour: step debt-retire-red-on-birth.",
+ "updatedAt": "2026-11-13T11:38:54-06:00"
+}
