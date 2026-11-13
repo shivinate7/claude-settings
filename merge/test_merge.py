@@ -16972,16 +16972,22 @@ class ReleaseCheck(ReviewEnv):
                          "release-check failed #7 on a clash with an open batch on feat-base, which #7 does not land on:\n" + err)
 
     def test_batch_head_a_lane_of_the_open_batch_passes(self):
+        # Control: a batch head that conflicts with #7 FAILs it, so the open batch is read and the PASS below comes from its head alone.
         # Catches: a batch check that wants the batch head to equal the pull request's head, which fails a lane whose head sits behind the batch head.
         fx = self.real_commits()
         self.base_tip(fx.main2)
+        clash = self.git_commit(fx.main2, {"a.txt": "batch\n"})
         ahead = self.git_commit(fx.clean, {"z.txt": "z\n"})  # the batch head: #7's head with one commit on top
         self.push_batch(ahead)
         self.assertEqual(self.merges(fx.clean, fx.main2), (0, False), "fixture: #7 does not merge cleanly into main, so the case would test main")
+        self.assertEqual(self.merges(fx.clean, clash), (1, True), "fixture: #7 does not conflict with the control's batch head, so the control has no clash")
         self.assertTrue(self.is_ancestor(fx.clean, ahead), "fixture: the batch head does not hold #7's head, so #7 is not a lane of it")
         self.assertEqual(self.merges(fx.clean, ahead), (0, False), "fixture: #7 does not merge cleanly into the batch head")
-        lane = batch_pull(9, ahead, draft=True, head_ref=merge.integration_branch(self.BATCH), body=freeze_body(freeze_inner(self.BATCH, [(7, fx.clean)])))
-        rc, lines, err = self.release_with_batch(fx, fx.clean, [lane])
+        body = freeze_body(freeze_inner(self.BATCH, [(7, fx.clean)]))
+        rc, lines, err = self.release_with_batch(fx, fx.clean, [batch_pull(9, clash, draft=True, head_ref=merge.integration_branch(self.BATCH), body=body)])
+        self.assertTrue(self.line_of(lines, 7).startswith("#7 FAIL: "),
+                        "control: an open batch whose head conflicts with #7 does not fail it, so the batch is not read:\n" + err)
+        rc, lines, err = self.release_with_batch(fx, fx.clean, [batch_pull(9, ahead, draft=True, head_ref=merge.integration_branch(self.BATCH), body=body)])
         self.assertEqual((rc, lines), (0, ["#7 PASS"]),
                          "release-check failed #7, a lane of the open batch, at a batch head that holds its head:\n" + err)
 
