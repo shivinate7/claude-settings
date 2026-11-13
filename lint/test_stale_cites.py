@@ -2582,7 +2582,13 @@ class RouteClaimTests(StaleCase):
         self.assertIn("hooks/guard.py", tracked, "scope: the backing that exists is tracked at head")
         self.assertNotIn("hooks/gone.py", tracked, "scope: the read backing is absent at head")
         self.assertNotIn("lint/test_gone.py", tracked, "scope: the test backing is absent at head")
-        out = self.assert_route_claims(rng, flagged)
+        self.assertIn(NOTES, touched(rng))  # scope: the range adds the three claim lines
+        # The node id names a file absent in a tracked top folder (`lint`), so STALE010 finds it on its line and the exit
+        # is 1. The two dead backings still print as STALE005 report lines.
+        rc, out = self.run_check(rng)
+        self.assertEqual(rc, 1, out)
+        self.assertEqual([(p, n, c) for p, n, c, _ in parse(out)], [(NOTES, flagged[1], "STALE010")], out)
+        self.assertEqual(stale005_lines(out, NOTES), sorted(flagged), out)
         texts = {number: text for path, number, text in stale005_hits(out) if path == NOTES}
         self.assertIn("hooks/gone.py", texts.get(flagged[0], ""), out)  # the report names the file it cannot find
         self.assertIn("lint/test_gone.py", texts.get(flagged[1], ""), out)
