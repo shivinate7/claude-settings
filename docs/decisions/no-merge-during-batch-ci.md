@@ -28,13 +28,6 @@ Not counted:
 - The push run on main after a merge.
 - A busy ready PR whose head contains this PR's head: the next batch, built on this one.
 
-Express batch (ruling R65, owner 17:09 CST Nov 12, page item 663 pick a; replaces ruling R55 part 1's "its own batch"):
-
-- An express lane is a reviewed merge-flow or CI-fix lane on the express list (ruling R55, with R67's kinds of fix). Every express lane that is ready at the batch build joins one express batch. That batch goes ahead of every other lane. One lane per batch is not required.
-- A red express lane drops out and reruns, as in a normal batch (decision `batch-freeze-lane-set`). The others merge.
-- An express lane that turns ready after the build joins the next express batch. Ruling R55 parts 2 to 4 stand (a batch already in CI is cancelled for the express batch, then merges main in and reruns).
-- The brake above still holds for the express batch.
-
 Limits:
 
 - Pressing GitHub's own Merge button is not refused by a hook.
