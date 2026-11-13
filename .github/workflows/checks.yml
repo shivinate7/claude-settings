@@ -698,12 +698,12 @@ jobs:
         run: sh hooks/test_cloud_setup.sh
 
   # The install.sh checkout-detection suite, split off checks-merge-install for wall time (step ci-merge-install-split):
-  # that job took 29.4 min in batch 103's run, this suite 13.8 of them. Same step, `if:` and own cap as before.
+  # that job took 29.4 min and this suite 13.8 of them (retrospective CI audit 14:12 CST Nov 12, in the step's why). Same step, `if:` and own cap as before.
   checks-install-checkout:
     runs-on: ubuntu-latest
     needs: scope
-    # provisional 60 (decision ci-job-caps, rule 6) until 5 green runs, then re-cap from the measured slowest run / 0.7.
-    timeout-minutes: 60 # provisional
+    # 75, the old checks-merge-install cap (interim stopgap, decision ci-job-caps). Unmeasured for this job: a draft lane PR runs no CI, so a measured cap waits for the batch run.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -720,12 +720,12 @@ jobs:
         timeout-minutes: 30
         run: sh hooks/test_install_src.sh
 
-  # The merge tool git-half fixture suite, split off checks-merge-install for wall time (step ci-merge-install-split): 10.7 min.
+  # The merge tool git-half fixture suite, split off checks-merge-install for wall time (step ci-merge-install-split): 10.7 min (same audit).
   checks-merge-git:
     runs-on: ubuntu-latest
     needs: scope
-    # provisional 60 (decision ci-job-caps, rule 6) until 5 green runs, then re-cap from the measured slowest run / 0.7.
-    timeout-minutes: 60 # provisional
+    # 75, the old checks-merge-install cap (interim stopgap, decision ci-job-caps). Unmeasured for this job: a draft lane PR runs no CI, so a measured cap waits for the batch run.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
