@@ -1918,7 +1918,7 @@ TEST_BASENAME = re.compile(
 JAVA_TEST = re.compile(r"^\w*Tests?\.java$")
 SWIFT_TEST = re.compile(r"^\w+Tests\.swift$")
 XCODE_TEST_DIR = re.compile(r"^[A-Z]\w*Tests$")
-TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support"}
+TEST_DIRS = {"tests", "test", "__tests__", "spec", "testdata", "__snapshots__", "test_support", "testing"}
 # Dependency lists only a test-author owns. A builder may add a dev dependency.
 AUTHOR_BASENAMES = {"requirements-dev.txt"}
 # The three mutation tests are test code: only a test-author edits them, since a builder that writes mutants
@@ -3540,7 +3540,7 @@ def brief_destructive_hit(tool: str, tool_input) -> str:
 def step_up_hit(tool: str, tool_input) -> str:
     """The step-up reason for a spawn whose marker and model disagree, or "". Only a line
     that starts with the marker, or the brief's first line, counts. A missing model runs the env default, which is Sonnet for a builder; a reviewer's
-    frontmatter model is haiku, so a reviewer on a later-round brief must name sonnet. A later-round reviewer that names Opus
+    frontmatter model is haiku, so a reviewer on a later-round or fix-verifier brief must name sonnet. A reviewer on either that names Opus
     passes here and is refused by the Opus ceiling (opus_spawn_hit), so the remedy names Sonnet only (decision agent-model-cap)."""
     if tool in SPAWN_TOOLS and isinstance(tool_input.get("prompt"), str):
         return step_up_reason(tool_input["prompt"], tool_input.get("subagent_type"), tool_input.get("model"))
@@ -3560,13 +3560,16 @@ def step_up_hit(tool: str, tool_input) -> str:
 
 
 def step_up_reason(prompt: str, role, model) -> str:
-    model = str(model or "").lower()
+    model = str(model or "").strip().lower()
+    role = role_key(role)
     for kind, n in brief_markers(prompt):
         kind = kind.lower()
         if role == "reviewer" and kind == "round" and n == "2" and "sonnet" not in model:
             return "Reviewer round 2 runs on Sonnet. Spawn it with model sonnet."
         if role == "reviewer" and kind == "round" and n == "3" and "sonnet" not in model and "opus" not in model:
             return "Reviewer round 3 runs on Sonnet. Spawn it with model sonnet."
+    if role == "reviewer" and ("fixcheck", None) in marker_hits(prompt) and (not model or "haiku" in model):
+        return "Reviewer fix verifier runs on Sonnet. Spawn it with model sonnet."
     if role == "builder" and builder_third_round(prompt) and "opus" not in model:
         return "Builder round 3 runs on Opus. Spawn it with model opus."
     return ""
@@ -4689,7 +4692,7 @@ def judge_shell(tool: str, raw: str, cwd: str, session_id: str = "", role: str =
 # hooks/question_form.py is the one home of the rules (`port-question`, `uniform-pick`, `press-link`,
 # `command-in-item`, `gh-login-switch`, `task-names-check`, `task-why-cited`, `owner-judge`, `question-form`, `question-departs`). This check runs them only for a
 # write to this repo's waiting page.
-from shared_names import DATA_TOOL  # noqa: E402  the one home of the tool name, shared with hooks/call_judge.py
+from shared_names import COMMENTS_TOOL, DATA_TOOL  # noqa: E402  the one home of the tool name, shared with hooks/call_judge.py
 
 
 def data_tool_judge(tool_input, cwd="", session_id=None):
@@ -4718,6 +4721,11 @@ def data_tool_hit(tool_input, cwd="", session_id=None):
 # it would drop the live page's data. A first publish, with no url, is not judged. A current page with data writes the stamp
 # (stale_pages.STAMP, main's blob sha) that hooks/session_start.sh reads back.
 PAGE_TOOL = "Artifact"
+# Rule `page-thread-reply` (decision questions-go-to-owner, "Answer on the page, not in a comment thread"). A reply into a
+# comment thread on this repo's waiting page is refused; reads, watches, resolves and other artifacts pass.
+PAGE_THREAD_REPLY_REASON = ("answer on the waiting page, not in a comment thread: rewrite the item the comment is about, "
+                            "and say in one line in the session what changed. "
+                            "(decision questions-go-to-owner, the answer goes on the page)")
 PAGE_STALE_REASON = ("this file is behind main's skills/waiting-page/page.html, so a publish would put old page code on the "
                      "waiting page. Read the live page (Artifact action read), run the waiting-page skill's "
                      "stale_pages.py with `--page <saved live page> --write <out>`, and publish <out> to the same url. "
@@ -6286,6 +6294,15 @@ def judge(payload) -> None:
             unseen = page_design_hit(item_writes, tool_input, cwd)
             if unseen:
                 refuse(tool, "deny", "page-item-design", unseen[0], unseen[1])
+        return
+
+    if tool == COMMENTS_TOOL:
+        import question_form
+        # A reply whose url names no artifact lands nowhere checkable, so it is refused wherever the repo has a waiting page.
+        if tool_input.get("action") == "reply" and (question_form.is_waiting_page(tool_input, cwd)
+                                                    or (question_form.names_no_artifact(tool_input.get("url"))
+                                                        and question_form.has_waiting_page(cwd))):
+            refuse(tool, "deny", "page-thread-reply", PAGE_THREAD_REPLY_REASON, str(tool_input.get("thread_id") or "?")[:120])
         return
 
     if tool == PAGE_TOOL:

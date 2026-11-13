@@ -28,8 +28,8 @@ The rule `scratchpad-owner` in `hooks/guard.py` refuses when an agent runs or ov
 
 ## Cost
 
-- One small sidecar write per agent write into the scratchpad. Nothing for any other call.
-- One stat and one read of the sidecar per agent write to a scratchpad file, and per scratchpad script an agent runs.
+- One small sidecar write per agent write into the scratchpad (unmeasured). Nothing for any other call.
+- One stat and one read of the sidecar per agent write to a scratchpad file, and per scratchpad script an agent runs (unmeasured).
 - No process, timer or log. The guard reads the sidecar on that call, so that call is its only reader.
 - A test proves this cost (`outcomes-mechanize-rules`), in step `scratchpad-file-ownership`.
 
