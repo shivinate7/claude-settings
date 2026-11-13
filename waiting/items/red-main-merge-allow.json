@@ -52,7 +52,7 @@
   ],
   "owner": "coordinator (session_013NEJL1gw6EdrSyvHkTUEx6), relayed to runner 10 (session_013NEJL2f1YCYsvLdpFqtWP3)",
   "ref": "coordinator 00:14 CST Nov 13; runner 10 00:15 CST Nov 13",
-  "reply": "Closed 00:18 CST Nov 13 by triage, settled by your past ruling: decision ask-commands-run-alone (2026-10-14) says a command that needs your answer is never chained onto other commands or given a redirect. Runner 10's refused merge at 23:18 CST was such a chain. Runner 10 types each red-main merge alone, which main's cloud rule already allows. #3097 stays held and red; your 23:42 CST yes to merge it stands, and it merges only once its CI is green.",
+  "reply": "Closed 00:17 CST Nov 13 by triage, settled by your past ruling: decision ask-commands-run-alone (2026-10-14) says a command that needs your answer is never chained onto other commands or given a redirect. Runner 10's refused merge at 23:18 CST was such a chain. Runner 10 types each red-main merge alone, which main's cloud rule already allows. #3097 stays held and red; your 23:42 CST yes to merge it stands, and it merges only once its CI is green.",
   "repo": "shivinate7/claude-settings",
   "short": "Red-main merges without a yes each time",
   "status": "closed",
