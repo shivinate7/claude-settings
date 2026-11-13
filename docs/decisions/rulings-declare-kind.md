@@ -12,7 +12,7 @@ task, because nothing linked the ruling to a plan. The line format is in `lint/c
 - The lint has no "not a ruling" exemption, because it cannot tell the two apart. A record with no ruling
   still carries a Kind line.
 - Old records are not checked or rewritten. Each one gets its Kind line when a later change touches it.
-  Only pull requests run the check. A push to main and the nightly run skip it, by design.
+  Only pull requests run the check. A push to main and a manual run skip it, by design.
 - The lint checks every record the pull request adds or changes, against the pull request base. A
   missing base ref reads as unknown: locally the lint exits 0, in CI it fails. A bad `--dir` or
   `records-dir` makes the lint exit non-zero and name the folder (guard-hooks-fail-closed).

@@ -60,11 +60,11 @@ jobs:
         run: python3 .github/scripts/nightly-skip.py
 
   # The push skip job (decision push-skip-on-proven-tree; R62, step ci-linux-windows-once). It says skip when the push commit's tree
-  # equals the head tree of a PR the commit belongs to (a batch-* PR, or a merged lone-lane PR) whose run was full: all-jobs-passed and
-  # every suite job succeeded, no suite step skipped by scope (the shared action actions/push-skip). That run already ran every job.
+  # equals the head tree of a PR the commit belongs to (a batch-* PR, or a merged lone-lane PR) whose run passed: all-jobs-passed and
+  # every suite job succeeded; a step scope skipped is no gap (the shared action actions/push-skip, ruling own-769-a-narrowed-pr-push).
   # Scope waits on it, so a skip reaches every job through needs and the run is a completed success: nothing is cancelled, since a
-  # cancelled run reads UNKNOWN and blocks merges. A failed read says skip=false: unknown runs everything. The nightly is the check on
-  # what a PR run scoped out. Push only; no other event runs it. Reads per push: the PR list, per head its commit, and per matching head its runs (unmeasured).
+  # cancelled run reads UNKNOWN and blocks merges. A failed read says skip=false: unknown runs everything. A suite a narrowed PR run
+  # left out is not run on main until a later change touches it. Push only; no other event runs it. Reads per push: the PR list, per head its commit, and per matching head its runs (unmeasured).
   push-skip:
     if: ${{ github.event_name == 'push' }}
     runs-on: ubuntu-latest

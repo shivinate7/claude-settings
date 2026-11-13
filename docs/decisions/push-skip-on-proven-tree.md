@@ -12,7 +12,7 @@ Owner, item 729 a (relayed by the coordinator, 2026-11-13 12:29 CST), extended b
 
 How the red-main check still sees a test-red main (`no-merge-onto-red-main`):
 
-- A skipped push run reads green only because a tested-green tree is on main. The run it rests on passed every suite on that exact tree.
+- A skipped push run reads green only because a tested-green tree is on main. The run it rests on passed on that exact tree, with the suites its diff touched.
 - A red PR run, a direct push, an admin merge, a tree mismatch and a read error all run the full suites on the push. A red suite then makes the push run red, and the check refuses merges.
 - A skipped push run clears no red nightly. It has `push-skip` success and `scope` skipped, with every suite job skipped, and a skipped job is no pass. Test: `merge/test_merge.py`, class `RedMainBrake`, `test_a_red_nightly_stays_red_under_a_newer_push_run_that_the_proven_skip_skipped`.
 
