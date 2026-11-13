@@ -1,0 +1,35 @@
+{
+  "added": "2026-11-13T00:38:00Z",
+  "context": "Goal: debts about wrong refusals become notes, as your cull decision says.\nProblem (rule): four debts cannot close, because the debt check refuses removing a debt whose Retire line names no test, while the cull decision says a note needs none.\nBased on (read): the debt check script reads each removed debt's Retire line for a test name; the cull decision moves wrong-refusal findings to notes with no test.\nDeparts from: main keeps the four debts open \u2014 closes them, either with tests or with a second accepted close path.",
+  "home": "step guard-false-alarm-cull",
+  "id": "cull-debt-close-path",
+  "kind": "decision",
+  "n": 669,
+  "options": [
+    {
+      "gain": "The debt check keeps one rule for every debt.",
+      "how": "A builder writes one small test per debt so each Retire line names it; the debt check stays as it is.",
+      "id": "add-tests",
+      "key": "a",
+      "label": "Add a test for each (recommended)",
+      "lose": "Four small tests that the cull decision would have skipped."
+    },
+    {
+      "gain": "No tests that exist only to close a debt.",
+      "how": "You rule that moving a wrong-refusal debt to the notes file closes it; the debt check learns that second path.",
+      "id": "notes-close-path",
+      "key": "b",
+      "label": "A move to notes closes it",
+      "lose": "Goes against your ruling: a repo changes to fit a shared tool, never the tool to fit a repo. The debt check gains a second way to close.",
+      "widens": true
+    }
+  ],
+  "owner": "lane guard-false-alarm-cull (session_013NEJL1y8fceJxUrwF8GxWY), via coordinator",
+  "pick": "a",
+  "ref": "coordinator 18:37 CST Nov 12",
+  "repo": "shivinate7/claude-settings",
+  "short": "Close wrong-refusal debts",
+  "status": "open",
+  "title": "How do four debts about wrong refusals close, when the debt check wants a test and the cull says a note needs none?",
+  "why": "Two of your rules disagree: the debt check and the cull decision."
+}
