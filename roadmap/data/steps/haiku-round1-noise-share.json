@@ -1,14 +1,14 @@
 {
  "id": "haiku-round1-noise-share",
  "title": "Measure how many round-1 Haiku review FAILs are noise",
- "status": "doing",
+ "status": "done",
  "repo": "shivinate7/claude-settings",
  "phase": "next",
- "lane": "session_013NEJKyibW8k2FoHU8QEkSK",
+ "lane": "",
  "owner": "triage",
  "blockedBy": [],
  "why": "Round-1 reviewers run Haiku (decision agent-model-cap, reviewer row). Haiku round 1 fails 79% of records against 38% for Sonnet, but how many of those FAILs name no real defect is unknown. Each noise FAIL costs a fix round. The owner item on moving round 1 to Sonnet waits for this number.",
  "source": "coordinator 23:25 CST Nov 12; deferred note on step rounds-rules-one-record; triage 23:23 CST",
- "note": "Read-only measurement, no product change. Sample round-1 FAIL records from the merge tool's review records (both models; only about 43 of about 3,000 round-1 records are Sonnet, so take every Sonnet one). For each FAIL, judge whether a later round or the merged diff fixed the named finding (real) or dropped it with no change (noise). Report per model: records read, FAIL rate, noise share, and the method, as a note here. Then triage posts the owner item (Sonnet round 1 for logic changes) with the numbers.",
- "updatedAt": "2026-11-12T23:25:41-06:00"
+ "note": "Read-only measurement, no product change. Sample round-1 FAIL records from the merge tool's review records (both models; only about 43 of about 3,000 round-1 records are Sonnet, so take every Sonnet one). For each FAIL, judge whether a later round or the merged diff fixed the named finding (real) or dropped it with no change (noise). Report per model: records read, FAIL rate, noise share, and the method, as a note here. Then triage posts the owner item (Sonnet round 1 for logic changes) with the numbers. Result, lane 23:28 CST Nov 12 (whole population: 4,039 review-record comments on 1,298 PRs, first round-1 line per PR). Haiku: 1,186 PRs, 990 round-1 FAIL (83%); decided by a later Head change: 365 real, 1 noise (PR 1716), 0.3% of 366 decided; 624 unknown (614 hold all rounds in one record, 10 have no later record). Sonnet: 23 PRs (not about 43), 10 FAIL (43%), 10 of 10 real (fix commits naming findings). Caveat: a Head change can come from a clean merge of main, so real may be overcounted. The data does not show Haiku round 1 is mostly noise. A finding-level read of about 20 one-record Haiku PRs would settle the unknown part. Triage 23:30 CST: done; no owner item, since the measured case for switching round 1 to Sonnet (noise) is not shown and a question to keep Haiku restates main.",
+ "updatedAt": "2026-11-12T23:30:22-06:00"
 }
